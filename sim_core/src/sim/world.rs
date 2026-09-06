@@ -35,6 +35,7 @@
 use hecs::Entity;
 
 use super::belt::BeltSegment;
+use super::economy::{Economy, EconomySnapshot};
 use super::machine::Machine;
 use super::recipe::{Recipe, RecipeRegistry};
 use super::types::{ChunkId, Fx, ItemId, RecipeId, TileCoord, chunk_of};
@@ -174,6 +175,10 @@ pub struct World {
     /// (not reallocated) at the start of every `tick()` — see `tick`'s doc
     /// comment and ARCHITECTURE.md §4's "Delta granularity" note.
     dirty: Vec<ChunkId>,
+    /// Money + the hardcoded contract's delivery state (ARCHITECTURE.md §9
+    /// milestone 5, GAMEPLAY.md §6) — see `economy` module doc for why this
+    /// lives here as a plain field rather than a new ECS component.
+    economy: Economy,
 }
 
 const BELT_LENGTH_TILES: i32 = 4;
@@ -238,11 +243,26 @@ impl World {
             stages,
             belt_speed: Fx::from_num(BELT_SPEED_TILES_PER_TICK),
             dirty: Vec::new(),
+            economy: Economy::new(),
         }
     }
 
     pub fn current_tick(&self) -> u64 {
         self.tick_count
+    }
+
+    /// Current money balance (ARCHITECTURE.md §3.9: fixed-point, never a
+    /// float, since it's shared/persisted simulation state).
+    pub fn money(&self) -> Fx {
+        self.economy.money
+    }
+
+    /// Presentation-facing money + contract-status snapshot (ARCHITECTURE.md
+    /// §4/§5) — always current, unlike `chunk_snapshot` there's no dirty-
+    /// tracking to consult first, since there's exactly one of this per
+    /// world rather than one per chunk.
+    pub fn economy_snapshot(&self) -> EconomySnapshot {
+        self.economy.snapshot()
     }
 
     fn position_of(&self, entity: Entity) -> TileCoord {
@@ -307,6 +327,12 @@ impl World {
                 self.mark_dirty(belt_tile);
             }
         }
+
+        // Contract cadence check (GAMEPLAY.md §6) — not tied to any tile/
+        // chunk, so it doesn't participate in dirty-chunk tracking; Godot
+        // reads economy state via its own always-fresh snapshot instead
+        // (see `economy_snapshot`).
+        self.economy.tick(self.tick_count);
     }
 
     /// If `belt_entity` has an item waiting at its end and `machine_entity`
@@ -511,6 +537,13 @@ impl World {
                     machine.output.remove(item, *qty);
                 }
                 drop(machine);
+                // Collected product becomes delivered stock, checked against
+                // the active contract at the next cadence boundary
+                // (GAMEPLAY.md §6) — this is the "delivery mechanism"
+                // milestone 5 adds on top of milestone 4's plain collect.
+                for (item, qty) in &held {
+                    self.economy.deposit(item, *qty);
+                }
                 self.mark_dirty(machine_tile);
             }
         }

@@ -17,10 +17,10 @@ force-loaded into every session's context.
 *(This section reflects "now" — edit it in place as things change. The Log
 below is history and should only ever be appended to.)*
 
-- **Stage:** Pre-alpha. Milestones 1 (Scaffold), 2 (Mobile export spike), 3 (Core loop proof), and 4 (First full chain) are done — a real multi-stage production chain now exists (tomato -> tomato sauce -> ketchup -> bottled ketchup -> boxed ketchup), headlessly verified end to end and driven entirely by `data/recipes.ron`, and Android export is proven working.
+- **Stage:** Pre-alpha. Milestones 1 (Scaffold), 2 (Mobile export spike), 3 (Core loop proof), 4 (First full chain), and 5 (Economy MVP) are done — a real multi-stage production chain now exists (tomato -> tomato sauce -> ketchup -> bottled ketchup -> boxed ketchup), headlessly verified end to end and driven entirely by `data/recipes.ron`, Android export is proven working, and the chain can now actually deliver finished product against a hardcoded contract to earn money.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
-- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) are being built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **Milestones 1, 2, 3, and 4 are complete and merged** — see their log entries below. Milestone 5 (Economy MVP) is dispatched and in progress. A parallel, non-milestone task — **visual polish** (voxel assets, isometric 3D camera, real-time lighting per UI_UX.md) — is also dispatched, running against the same merged main; expect a merge conflict against milestone 5's Godot-side changes when both land, to be reconciled by the coordinator. Check `orca orchestration task-list --run run_51e5cb271445 --json` for live status. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it.
+- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) are being built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **Milestones 1 through 5 are all complete and merged** — the core MVP loop (build factory → deliver → get paid) is real end to end. A parallel, non-milestone task — **visual polish** (voxel assets, isometric 3D camera, real-time lighting per UI_UX.md) — is still in progress against the same main; expect a merge conflict against milestone 5's Godot-side HUD changes when it lands, to be reconciled by the coordinator. Check `orca orchestration task-list --run run_51e5cb271445 --json` for live status. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. Milestone 6 (Fluids) is next once visual polish lands.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -36,6 +36,33 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-06 — Milestone 5: Economy MVP
+
+The loop stops being a production-chain tech demo and starts being a game:
+`sim_core::sim::World` now owns a `money` counter (fixed-point, never a
+float) and a single hardcoded contract — a fixed sauce mix (2x
+`boxed_ketchup`), a fixed delivery cadence (every 1,000 ticks), and a fixed
+payout — that the milestone-4 chain can actually deliver against. Collecting
+finished product (`CollectOutput`) now deposits it into an accumulating
+delivery buffer instead of discarding it; on each cadence boundary the
+buffer is checked against the contract's mix, and a satisfied mix pays out
+and consumes the delivered stock, while a miss just skips that window
+(no contract-loss penalty yet — GAMEPLAY.md §11's still-open question).
+Money and contract status are exposed to Godot as a JSON snapshot and
+rendered as a minimal HUD label (money + per-item progress + ticks to next
+check) — deliberately plain, not UI_UX.md's clipboard/checklist styling,
+which is later polish. Verified headlessly two ways: a `cargo test`
+integration test drives the whole chain end-to-end (spawn -> travel every
+stage -> collect -> get paid) and asserts the exact payout lands only once
+the mix is satisfied, plus `Economy`'s own unit tests cover cadence-boundary
+edge cases; and the existing gdext-boundary Godot test now also round-trips
+the new JSON snapshot. This resolves the money/contract architectural-home
+question flagged as open since the cross-doc consistency pass (see
+CLAUDE.md's decisions log and GAMEPLAY.md §9 for the actual shape used).
+Explicitly deferred, per this milestone's own scope: `contracts.ron` data
+loading, multiple concurrent contracts, and `StaffPools` — all still future
+work.
 
 ### 2026-09-06 — Milestone 4: First full chain
 

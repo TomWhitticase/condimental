@@ -4,12 +4,14 @@
 //! (ARCHITECTURE.md §7).
 
 pub mod belt;
+pub mod economy;
 pub mod inventory;
 pub mod machine;
 pub mod recipe;
 pub mod types;
 pub mod world;
 
+pub use economy::{Contract, Economy, EconomySnapshot};
 pub use recipe::{Recipe, RecipeRegistry};
 pub use types::{decode_chunk_id, encode_chunk_id};
 pub use world::{

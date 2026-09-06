@@ -117,4 +117,16 @@ impl SimBridge {
         let json = serde_json::to_string(&layout).expect("StageLayout list must serialize");
         GString::from(json.as_str())
     }
+
+    /// A JSON-serialized `sim::EconomySnapshot` — money plus the hardcoded
+    /// contract's mix/progress/cadence (ARCHITECTURE.md §9 milestone 5,
+    /// GAMEPLAY.md §6). Unlike the chunk snapshots above there's no
+    /// dirty-tracking to check first: there's exactly one economy per world,
+    /// so Godot can just call this every frame it wants to redraw the HUD.
+    #[func]
+    fn economy_snapshot_json(&self) -> GString {
+        let snapshot = self.world.economy_snapshot();
+        let json = serde_json::to_string(&snapshot).expect("EconomySnapshot must serialize");
+        GString::from(json.as_str())
+    }
 }

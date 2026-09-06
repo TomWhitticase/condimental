@@ -13,6 +13,11 @@ extends Node2D
 ## Visuals are flat placeholder textures (see placeholder_art/README.md),
 ## not the real voxel/isometric pipeline from UI_UX.md — this scene exists
 ## to prove the sim<->render wiring, not to be the final look.
+##
+## Milestone 5 (Economy MVP, ARCHITECTURE.md §9 item 5) added a minimal money
+## + contract-status HUD line, read every frame from `economy_snapshot_json`
+## — a plain Label, not UI_UX.md §5's clipboard/checklist diegetic styling
+## yet (that's later polish).
 
 const TILE_SIZE := 64
 const TICK_HZ := 30.0
@@ -23,6 +28,7 @@ var _item_sprites: Dictionary = {}
 var _stage_order: Array[String] = [] # recipe ids, in chain order — for stable HUD line ordering
 var _last_machines: Dictionary = {} # recipe id -> last machine snapshot dict
 var _machine_label: Label
+var _economy_label: Label
 var _chain_tile_width := 5 # updated once chain_layout_json is read, in _build_tilemap
 
 
@@ -93,9 +99,17 @@ func _build_ui() -> void:
 	_machine_label.position = Vector2(16, 16)
 	hud.add_child(_machine_label)
 
+	# Milestone 5 (Economy MVP, ARCHITECTURE.md §9 item 5): a minimal money +
+	# contract-status readout. Deliberately a plain Label, not UI_UX.md §5's
+	# clipboard/checklist diegetic styling — that's later visual polish, this
+	# just needs to prove money/contract state is visible end to end.
+	_economy_label = Label.new()
+	_economy_label.position = Vector2(16, 16 + 20.0 * (_stage_order.size() + 1))
+	hud.add_child(_economy_label)
+
 	var help := Label.new()
 	help.text = "SPACE: add a tomato to the start of the line    C: collect the finished product at the end"
-	help.position = Vector2(16, 16 + 20.0 * (_stage_order.size() + 2))
+	help.position = Vector2(16, 16 + 20.0 * (_stage_order.size() + 3))
 	hud.add_child(help)
 
 
@@ -108,6 +122,7 @@ func _process(delta: float) -> void:
 		_apply_dirty_chunks()
 
 	_update_machine_label()
+	_update_economy_label()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -206,6 +221,23 @@ func _update_machine_label() -> void:
 		])
 
 	_machine_label.text = "\n".join(lines)
+
+
+func _update_economy_label() -> void:
+	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
+	var money: float = float(econ["money"])
+	var mix: Array = econ["contract_mix"]
+	var progress: Array = econ["contract_progress"]
+	var mix_parts: Array[String] = []
+	for i in range(mix.size()):
+		var required_pair: Array = mix[i]
+		var have: int = int(progress[i][1])
+		mix_parts.append("%s %d/%d" % [required_pair[0], have, int(required_pair[1])])
+
+	var ticks_left: int = max(0, int(econ["next_delivery_tick"]) - sim.current_tick())
+	_economy_label.text = "Money: %.0f    Contract: %s (next check in %d ticks)" % [
+		money, ", ".join(mix_parts), ticks_left,
+	]
 
 
 func _format_counts(pairs: Array) -> String:

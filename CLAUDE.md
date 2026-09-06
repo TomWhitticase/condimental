@@ -37,11 +37,12 @@ conflict with them.
 
 ## Project structure
 
-Milestones 1 (Scaffold), 3 (Core loop proof), and 4 (First full chain) have
-landed: a Rust/gdext <-> Godot round trip, plus real simulation code — a
-multi-stage production chain (raw tomato -> tomato sauce -> ketchup ->
-bottled ketchup -> boxed ketchup) built entirely from `data/recipes.ron`.
-Current layout:
+Milestones 1 (Scaffold), 3 (Core loop proof), 4 (First full chain), and 5
+(Economy MVP) have landed: a Rust/gdext <-> Godot round trip, plus real
+simulation code — a multi-stage production chain (raw tomato -> tomato sauce
+-> ketchup -> bottled ketchup -> boxed ketchup) built entirely from
+`data/recipes.ron`, now with a money counter and a single hardcoded contract
+the chain can actually deliver against and get paid for. Current layout:
 
 ```
 sauce-factory/
@@ -69,14 +70,24 @@ sauce-factory/
       inventory.rs                  # generic slot-based Inventory (§3.2)
       belt.rs                        # BeltSegment — gap-based item storage (§3.3)
       machine.rs                      # Machine + TimedProcess (§3.2/§3.5)
+      economy.rs                       # Economy: money (Fx) + one hardcoded Contract
+                                         # (fixed mix/cadence/payout), checked against
+                                         # an accumulating delivery_buffer Inventory
+                                         # (GAMEPLAY.md §6; milestone 5, Economy MVP)
       world.rs                         # hecs::World wrapper; builds a multi-stage
                                          # production chain (one belt+machine per
-                                         # recipe, in recipes.ron order); SimBridge's
+                                         # recipe, in recipes.ron order); owns Economy
+                                         # and ticks it once per World::tick; SimBridge's
                                          # pure-logic half — tick()/dirty_chunks()/
                                          # chunk_snapshot()/issue_command()/
-                                         # query_tile()/chain_layout() (§4)
+                                         # query_tile()/chain_layout()/economy_snapshot() (§4)
     tests/core_loop.rs        # headless integration test: full-chain N-tick
                                 # conservation invariant across every stage (§6)
+    tests/economy.rs           # headless integration test: full chain collects
+                                 # against the hardcoded contract and pays out
+                                 # correctly (money increases on a satisfied mix,
+                                 # stays put on a miss) — economy.rs's own #[cfg(test)]
+                                 # covers Economy in isolation (cadence/mix edge cases)
   xtask/                   # build script (ARCHITECTURE.md §7): `cargo xtask` builds sim_core
     Cargo.toml              # and copies the compiled extension into godot_project/bin/
     src/main.rs
@@ -86,18 +97,22 @@ sauce-factory/
     main.tscn / main.gd          # interactive scene: TileMap sized to however many
                                    # stages chain_layout_json reports, item sprites
                                    # driven by SimBridge's JSON snapshots, SPACE/C
-                                   # keys drive issue_command_json (§5)
+                                   # keys drive issue_command_json, a plain Label HUD
+                                   # reads economy_snapshot_json for money/contract
+                                   # status (§5; milestone-5 minimal UI, not UI_UX.md's
+                                   # clipboard/checklist styling yet)
     placeholder_art/                # flat placeholder PNGs — NOT the UI_UX.md §2a
                                       # voxel pipeline, see its own README.md
     test_round_trip.gd          # milestone-1 headless proof script (scripts/verify-scaffold.sh)
-    test_core_loop.gd            # milestone-3/4 headless proof: real gdext JSON
-                                   # boundary, driven through the whole chain
+    test_core_loop.gd            # milestone-3/4/5 headless proof: real gdext JSON
+                                   # boundary, driven through the whole chain, incl.
+                                   # economy_snapshot_json's shape/initial state
     test_interaction.gd           # milestone-3 headless proof: keyboard input -> SimBridge
     bin/                          # gitignored: compiled extension lands here via `cargo xtask`
   scripts/
     lint-commit-msg.sh          # commit-msg hook
     verify-scaffold.sh           # milestone-1 headless verification (build + Godot cache + test script)
-    verify-core-loop.sh           # milestone-3/4 headless verification (cargo test + gdext boundary + interaction)
+    verify-core-loop.sh           # milestone-3/4/5 headless verification (cargo test + gdext boundary + interaction)
   docs/
     README.md              # docs-folder index — read this first when only skimming
     ARCHITECTURE.md          # how the game runs and is built
@@ -386,3 +401,39 @@ it's gone stale.
   one-straight-line assumption holds; multi-ingredient convergence
   (branching topology) is explicitly deferred to a later milestone, per
   `world.rs`'s own module doc.
+- 2026-09-06: Completed ARCHITECTURE.md §9 milestone 5 (Economy MVP) —
+  resolves the money/contract-state architectural-home question this log's
+  2026-09-06 "Full cross-doc consistency pass" entry flagged as open.
+  New `sim_core::sim::economy` module: a fixed-point (`Fx`) `money` counter
+  and a single hardcoded `Contract` (fixed mix/cadence/payout, named
+  constants — `CONTRACT_ITEM`/`CONTRACT_QUANTITY`/`CONTRACT_CADENCE_TICKS`/
+  `CONTRACT_PAYOUT_MONEY` — not `contracts.ron` data yet, per this
+  milestone's own deliberately-minimal scope), both owned as plain fields on
+  a new `Economy` struct rather than a new ECS component — there's exactly
+  one money counter and one active contract at this scope, so ECS
+  machinery wasn't warranted (mirrors how `World` already owns `stages` as
+  a plain `Vec`, not an ECS resource). The delivery mechanism: milestone 4's
+  `CollectOutput` command used to just discard collected product; it now
+  deposits it into `Economy`'s `delivery_buffer` (a plain `Inventory`),
+  which `Economy::tick` checks against the contract's mix once
+  `current_tick` reaches the cadence boundary — on a satisfied mix it pays
+  out and advances the boundary by the cadence; on a miss it still advances
+  the boundary (no contract-loss/reputation penalty is implemented — that's
+  GAMEPLAY.md §11's still-open question, not resolved here) rather than
+  re-checking every tick forever. Exposed to Godot as
+  `SimBridge::economy_snapshot_json`, read every frame by a new plain
+  `Label` in `main.gd` (money + per-item contract progress + ticks to next
+  check) — deliberately not UI_UX.md §5's clipboard/checklist styling yet,
+  per this milestone's "simple label/counter is enough" scope. Verified two
+  ways: a headless `cargo test` integration test
+  (`sim_core/tests/economy.rs`) drives the *whole* milestone-4 chain
+  (spawn -> travel every stage -> collect -> contract check) and asserts
+  money increases by exactly one payout once the mix is delivered, and
+  stays at zero through a cadence boundary with nothing delivered; and
+  `test_core_loop.gd` now also round-trips `economy_snapshot_json` through
+  the real `gdext`/Godot JSON boundary. `Economy` itself has its own
+  `#[cfg(test)]` unit tests for cadence-boundary edge cases (a miss that's
+  later satisfied, exact payout amount, mix-consumption on success).
+  Explicitly deferred, matching the milestone's own scope note: the full
+  `contracts.ron` schema, multiple concurrent contracts, and `StaffPools` —
+  all unchanged future work per GAMEPLAY.md §7/§9.
