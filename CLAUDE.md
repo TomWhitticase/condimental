@@ -79,6 +79,45 @@ commit to — don't improvise a different shape:
   don't let this root file grow to cover implementation-level detail that
   belongs closer to the code.
 
+## Orchestration (Orca)
+
+ARCHITECTURE.md §9's milestone list is this project's natural task DAG — use
+Orca's orchestration layer (`orca orchestration ...`, not a generic subagent
+tool) to actually build it, rather than one continuous session accumulating
+context across every milestone.
+
+- **One Run per meaningful chunk of milestone work** (e.g. "sauce-factory MVP:
+  milestones 1-5"), not one Run per tiny task.
+- **Milestones map to Tasks roughly 1:1.** Encode ARCHITECTURE.md §9's
+  dependency chain with `--deps` so the DAG mirrors the doc instead of
+  drifting from it — most of that chain is linear (scaffold → core loop →
+  first full chain → economy MVP), with the mobile-export spike as the one
+  task that branches off scaffold independently.
+- **Every worker task spec must be self-contained.** A dispatched worker
+  starts with zero conversational context — it gets the repo (CLAUDE.md and
+  the `@`-included docs load automatically) plus whatever the task spec says.
+  Name the exact milestone and doc section it's implementing; don't assume it
+  knows what "the MVP" refers to.
+- **Foundational/large milestones get a fresh top-level worktree** (`--worktree
+  new-top-level`), not `current` — main stays clean until the result is
+  reviewed and merged. Small, low-risk follow-on work can reuse `current` or a
+  child worktree.
+- **Prefer `worker-start`** (the composed create-worktree/wait/dispatch path)
+  over manual `dispatch --inject` unless a topology it doesn't express is
+  actually needed.
+- **Use `gate-create` at milestone boundaries** where a human sanity-check is
+  warranted (e.g. before merging the scaffold, before starting Economy MVP)
+  rather than auto-chaining through the whole DAG unattended — this is a
+  foundational, mostly-sequential build where an early bad assumption is
+  expensive to discover three milestones later.
+- **After every accepted `worker_done`**, decide whether it's DEVLOG-worthy
+  (see the Commit messages section above) before dispatching the next task or
+  ending the coordinating turn — don't let a completed milestone go unlogged.
+- Full ownership handoffs ("hand off this to another agent") are a different,
+  simpler tool (`orca-cli`/`orca worktree create --prompt`) — don't reach for
+  orchestration's Task/Dispatch machinery unless the work genuinely needs
+  supervision, a DAG, or a blocking ask/reply loop.
+
 ## Commit messages
 
 Conventional Commits, enforced by a local `commit-msg` hook + CI. See
@@ -191,3 +230,10 @@ it's gone stale.
   platform (added as an open question there, to resolve before milestone 10,
   not at it). Also added `.editorconfig` and extended `.gitignore` for
   Rust/Godot/asset-preview artifacts the docs already commit to producing.
+- 2026-09-06: Adopted Orca orchestration (`orca orchestration ...`) as how
+  milestone-sized work actually gets built — ARCHITECTURE.md §9's milestones
+  become a Run's Task DAG rather than one long accumulating session. See the
+  Orchestration section above for the concrete conventions (worktree-per-
+  foundational-milestone, gates at milestone boundaries, self-contained task
+  specs). First use: milestones 1-5 (scaffold through Economy MVP) dispatched
+  as a supervised DAG.
