@@ -4,13 +4,18 @@ Factorio-like automation game, themed around sauce production. Pre-alpha.
 
 @docs/ARCHITECTURE.md
 @docs/UI_UX.md
+@docs/GAMEPLAY.md
 
-The two files above are both authoritative and always apply. ARCHITECTURE.md is
+The three files above are all authoritative and always apply. ARCHITECTURE.md is
 the tech-stack/architecture plan (Rust simulation core + Godot/GDScript
 presentation via `gdext`, data-driven recipes, deterministic tick simulation).
 UI_UX.md is the visual-style and UI/UX plan (isometric voxel art, 32×32×32
 tile-scale assets, industrial sauce-factory theme, Minecraft-adjacent UI with
-clipboard/checklist motifs). Always follow both when writing code — each also
+clipboard/checklist motifs). GAMEPLAY.md is the gameplay/progression/economy
+plan (sauce-tier progression gated by equipment unlocks like refrigeration and
+acid-handling, money economy, and contracts — not a spot market — as the
+demand system, deliberately forcing a diversified factory rather than one
+optimized sauce). Always follow all three when writing code — each also
 explains *why* its choices were made, which matters when a change seems to
 conflict with them.
 
@@ -62,3 +67,36 @@ git config core.hooksPath .githooks
   sauce-factory theme, light real-time shaders/lighting ("modded Minecraft
   with shaders" reference point), and a clean Minecraft-adjacent UI built
   around diegetic clipboard/checklist widgets.
+- 2026-09-06: Added docs/GAMEPLAY.md as the authoritative gameplay/progression/
+  economy plan, kept separate from ARCHITECTURE.md (runs/built) and UI_UX.md
+  (looks/feels). Key calls: sauce progression tiers (tomato sauce → ketchup →
+  BBQ → equipment-gated categories like mayo/refrigeration and hot
+  sauce/acid-handling → elaborate aged/fermented sauces); equipment purchases
+  *are* the tech tree (no separate skill-point currency); money economy with
+  three cost axes (ingredients, equipment, staff wages); and — the central
+  design decision — sales happen via **contracts** (standing orders for a mix
+  of sauces on a recurring delivery cadence) rather than a spot market,
+  specifically so the winning strategy is a diversified factory rather than
+  spamming whichever single sauce is most profitable. See that doc for full
+  rationale, the tier table, and open questions (spot-market fallback,
+  reputation system, staff-as-mechanic vs. abstract upkeep, spoilage/corrosion
+  implementation) left for a future decision.
+- 2026-09-06: Extended docs/GAMEPLAY.md with three more firm calls: (1) sauces
+  can require other finished sauces as an ingredient (chilli mayo needs mayo +
+  hot sauce), giving the sauce list a branching dependency tree — needs no new
+  architecture, just the standard intermediate-product recipe pattern; (2)
+  sauces come in flavour variants (garlic mayo, spicy BBQ, etc.) built as a
+  base sauce plus a cheap flavour-finishing step, and contracts can name a
+  specific variant; (3) staff are explicitly **not** simulated NPCs — they're
+  an abstract resource pool with four categories (manufacturing, maintenance,
+  packaging, logistics) mapped onto the four pipeline stages a sauce passes
+  through, where running equipment consumes staff capacity the same way it
+  would consume power (understaffing stalls machines, it doesn't simulate a
+  missing person). Closest existing architectural analogue is `PowerNetwork`
+  (aggregate demand vs. capacity, no per-entity simulation) — see
+  docs/GAMEPLAY.md §7 and §9 for the proposed `StaffPools` shape.
+- 2026-09-06: Added docs/README.md as a brief docs-folder index (table of the
+  three docs + one-line pointer for each) so an agent or human can orient on
+  `docs/` without reading everything — not itself authoritative/`@`-included
+  (the three docs already are), just a map to them. Any new doc added later
+  should get a row here too, per that file's own "Adding a new doc" note.
