@@ -76,6 +76,13 @@ var _asset_classes: Dictionary = {} # asset name -> Array of class names
 var _machine_label: Label
 var _economy_label: Label
 
+var _camera: Camera3D
+var _camera_focus := Vector3.ZERO # world point the camera looks at; pan moves this
+var _camera_base_size := 1.0 # the auto-framed size at zoom level 1.0
+var _camera_size := 1.0 # current orthographic size (smaller = more zoomed in)
+var _pan_right := Vector3.RIGHT # ground-plane "screen right", derived from the fixed camera angle
+var _pan_forward := Vector3.FORWARD # ground-plane "screen up" (into the view), same derivation
+
 
 func _ready() -> void:
 	sim = SimBridge.new()
@@ -325,7 +332,10 @@ func _set_machine_running(recipe: String, running: bool) -> void:
 
 ## UI_UX.md §1: a FIXED orthographic isometric camera. No orbit, no free
 ## rotation — the voxel assets are modelled to read from fixed angles, and a
-## free camera would expose silhouettes nothing was art-directed for.
+## free camera would expose silhouettes nothing was art-directed for. Pan
+## (WASD/arrows) and zoom (scroll wheel) are explicitly allowed by that same
+## section and don't touch the angle: pan moves `_camera_focus`, zoom moves
+## `_camera_size`, orientation is always recomputed the same way.
 ##
 ## The angle used is true isometric (an equal-parts (1, 1, 1) view direction,
 ## ~35.26 degrees of elevation), not a 2:1 dimetric. UI_UX.md §9 explicitly
@@ -336,9 +346,18 @@ const CAMERA_DIRECTION := Vector3(1, 1, 1)
 ## Orthographic, so this only sets the near/far window, not apparent size.
 const CAMERA_DISTANCE := 160.0
 
+# --- Navigation (zoom + pan) -----------------------------------------------
+# UI_UX.md §1 explicitly allows smooth zoom and only forbids free rotation —
+# the fixed isometric angle itself never changes here, only `size` (zoom) and
+# `_camera_focus` (pan) do.
+const ZOOM_STEP := 0.1 # fraction of current size per scroll notch
+const ZOOM_MIN_FACTOR := 0.3 # most zoomed in, relative to the auto-framed size
+const ZOOM_MAX_FACTOR := 3.0 # most zoomed out
+const PAN_SPEED := 0.9 # fraction of the visible size crossed per second at held-key pan
+
 
 func _build_camera() -> void:
-	var focus := Vector3(
+	_camera_focus = Vector3(
 		float(_chain_tile_width - 1) * TILE * 0.5,
 		TILE * 0.35,
 		0.0
@@ -352,13 +371,82 @@ func _build_camera() -> void:
 	camera.keep_aspect = Camera3D.KEEP_WIDTH
 	camera.near = 0.5
 	camera.far = 600.0
+	add_child(camera)
+	_camera = camera
+
+	# Position/orient first (size doesn't affect orientation) so the camera's
+	# own basis exists to read the ground-plane screen axes from — right is
+	# already horizontal (up hint is world Y and the view direction isn't
+	# vertical); "screen forward" is the view direction (-basis.z) projected
+	# onto the ground. WASD/arrows pan along these, not raw world X/Z, so
+	# panning still feels like up/down/left/right on screen regardless of the
+	# fixed isometric angle.
+	_camera_size = 1.0
+	_update_camera_transform()
+	_pan_right = _camera.transform.basis.x
+	var forward := -_camera.transform.basis.z
+	_pan_forward = Vector3(forward.x, 0.0, forward.z).normalized()
+
+	_camera_base_size = _framing_size(_camera.transform.basis)
+	_camera_size = _camera_base_size
+	_update_camera_transform()
+	camera.call_deferred("make_current")
+
+
+## Repositions/reorients the camera from `_camera_focus`/`_camera_size` —
+## called once at build time and again whenever pan or zoom changes. Cheap
+## enough to call every time rather than tracking a dirty flag.
+func _update_camera_transform() -> void:
+	if _camera == null:
+		return
 	# `look_at_from_position` rather than position-then-`look_at`: the latter
 	# requires the node to already be inside the tree, which isn't guaranteed
 	# for a scene instantiated and driven manually (as the headless tests do).
-	camera.look_at_from_position(focus + CAMERA_DIRECTION.normalized() * CAMERA_DISTANCE, focus, Vector3.UP)
-	camera.size = _framing_size(camera.transform.basis)
-	add_child(camera)
-	camera.call_deferred("make_current")
+	_camera.look_at_from_position(
+		_camera_focus + CAMERA_DIRECTION.normalized() * CAMERA_DISTANCE,
+		_camera_focus,
+		Vector3.UP
+	)
+	_camera.size = _camera_size
+
+
+func _zoom_camera(factor: float) -> void:
+	var min_size := _camera_base_size * ZOOM_MIN_FACTOR
+	var max_size := _camera_base_size * ZOOM_MAX_FACTOR
+	_camera_size = clampf(_camera_size * factor, min_size, max_size)
+	_update_camera_transform()
+
+
+func _pan_camera(delta: float) -> void:
+	_apply_pan(_pan_input_direction(), delta)
+
+
+## Reads held keys only — no movement math, so this is the one part of
+## panning that can't be exercised without a live Input singleton.
+func _pan_input_direction() -> Vector3:
+	var move := Vector3.ZERO
+	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+		move += _pan_forward
+	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+		move -= _pan_forward
+	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+		move += _pan_right
+	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+		move -= _pan_right
+	return move
+
+
+## The actual movement, deliberately Input-free so it's directly testable
+## (test_camera_nav.gd calls this with an explicit direction).
+func _apply_pan(direction: Vector3, delta: float) -> void:
+	if direction == Vector3.ZERO:
+		return
+	# Scaled by current `_camera_size`, not a flat world-unit speed, so pan
+	# covers the same fraction of the visible view per second whether zoomed
+	# in or out — a flat speed would feel sluggish when zoomed out and
+	# twitchy when zoomed in.
+	_camera_focus += direction.normalized() * PAN_SPEED * _camera_size * delta
+	_update_camera_transform()
 
 
 ## Fits the orthographic frustum to the factory floor's bounding box by
@@ -537,7 +625,7 @@ func _build_ui() -> void:
 
 	var help := Label.new()
 	help.label_settings = settings
-	help.text = "SPACE: feed a tomato onto the line    C: collect the finished product"
+	help.text = "SPACE: feed a tomato onto the line    C: collect the finished product    WASD/arrows: pan    scroll: zoom"
 	rows.add_child(help)
 
 
@@ -555,9 +643,17 @@ func _process(delta: float) -> void:
 
 	_update_machine_label()
 	_update_economy_label()
+	_pan_camera(delta)
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_zoom_camera(1.0 - ZOOM_STEP)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_zoom_camera(1.0 + ZOOM_STEP)
+		return
+
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
 

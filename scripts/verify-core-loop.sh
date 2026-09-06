@@ -12,13 +12,14 @@
 #      conservation across every stage, not just one. No Godot involved.
 #   2. `cargo xtask` builds the extension and copies it into
 #      godot_project/bin/.
-#   3. Three headless Godot scripts exercise the parts cargo test can't: the
+#   3. Four headless Godot scripts exercise the parts cargo test can't: the
 #      real `gdext` boundary (JSON command/snapshot/layout wire format going
 #      through Godot's own Variant/String/JSON machinery, driven through the
 #      whole chain end to end), the interactive scene's keyboard input
-#      actually reaching SimBridge, and the visual pass's structural claims
+#      actually reaching SimBridge, the visual pass's structural claims
 #      (orthographic isometric camera, real-time lighting, imported voxel
-#      meshes, metal shinier than matte — docs/UI_UX.md §1/§2/§4).
+#      meshes, metal shinier than matte — docs/UI_UX.md §1/§2/§4), and camera
+#      pan/zoom (§1: allowed, unlike free rotation of the fixed angle).
 #
 # Usage: scripts/verify-core-loop.sh
 
@@ -98,5 +99,14 @@ if [ "$presentation_status" -ne 0 ]; then
 fi
 
 echo
-echo "PASS: milestone 3/4 core loop + full chain + visual pass verified headlessly"
-echo "      (sim_core tests + gdext boundary + interaction + 3D scene structure)."
+echo "==> godot --headless --script test_camera_nav.gd (pan/zoom, UI_UX.md §1)"
+"$godot_bin" --headless --path godot_project --script test_camera_nav.gd
+camera_nav_status=$?
+if [ "$camera_nav_status" -ne 0 ]; then
+  echo "FAIL: test_camera_nav.gd exited $camera_nav_status" >&2
+  exit "$camera_nav_status"
+fi
+
+echo
+echo "PASS: milestone 3/4 core loop + full chain + visual pass + camera nav verified headlessly"
+echo "      (sim_core tests + gdext boundary + interaction + 3D scene structure + pan/zoom)."
