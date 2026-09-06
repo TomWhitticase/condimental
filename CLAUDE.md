@@ -62,3 +62,13 @@ git config core.hooksPath .githooks
   sauce-factory theme, light real-time shaders/lighting ("modded Minecraft
   with shaders" reference point), and a clean Minecraft-adjacent UI built
   around diegetic clipboard/checklist widgets.
+- 2026-09-06: Researched and decided the voxel asset pipeline (docs/UI_UX.md
+  §2a) — driven by the constraint that assets must be creatable/editable/
+  viewable by Claude, not just a human artist. `.vox` (MagicaVoxel format) is
+  the asset format, imported into Godot via a community `.vox` plugin. Each
+  asset's actual source of truth is a small Rust generator function (not the
+  binary `.vox` itself, which is a regenerated build artifact and must never
+  be hand-edited); models are "viewed" by rendering an isometric PNG thumbnail
+  headlessly via `vengi-voxconvert` and reading that image — no GUI/computer-use
+  loop needed. Hand-sculpting in `vengi-voxedit` remains a documented escape
+  hatch for one-off assets not worth parametrizing.
