@@ -324,3 +324,23 @@ it's gone stale.
   its own README explains why) — not a UI_UX.md style decision, just this
   milestone's "prove it's rendered and interactable" bar; real voxel assets
   are UI_UX.md §2a's pipeline, not yet built.
+- 2026-09-06: Completed ARCHITECTURE.md §9 milestone 2 (Mobile export spike)
+  — see ARCHITECTURE.md §9a for the full writeup. Android export works
+  end-to-end (a validly-signed APK with `sim_core` cross-compiled via
+  `cargo-ndk` for arm64-v8a/x86_64, no source changes needed); actually
+  installing/launching it on a device or emulator is the one thing left
+  unverified, skipped this round because the dev host was too memory-
+  constrained to safely boot an emulator alongside sibling sessions. iOS
+  could not be attempted for real — the dev environment has no Xcode.app,
+  only Command Line Tools, confirmed via both `xcodebuild`/`xcrun` and a
+  Rust `aarch64-apple-ios` cross-compile that "succeeded" but linked against
+  the wrong (macOS) SDK sysroot. Per this milestone's own instruction to
+  "decide explicitly" if iOS looks broken: **iOS stays a stretch/deferred
+  platform, not a milestone-10 launch commitment**, until this spike is
+  re-run to completion on a Mac with full Xcode or Apple-hosted CI — this is
+  a genuinely open question (ARCHITECTURE.md §11), not a resolved "no."
+  Also recorded as a real, narrow upstream gap: Godot 4.6.3's Android export
+  CLI can fail validation with a *completely blank* error message when
+  `rendering/textures/vram_compression/import_etc2_astc` isn't enabled in
+  `project.godot` (confirmed by reading Godot's own export-plugin source,
+  not guessed) — now set in this project's `project.godot`.

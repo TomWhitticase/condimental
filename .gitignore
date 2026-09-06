@@ -14,3 +14,12 @@
 
 # Generated voxel-model PNG previews — regenerate on demand, not shipped (UI_UX.md §2a)
 assets/voxels/previews/
+
+# Android Gradle build template — regenerated from the export templates'
+# android_source.zip (normally via Godot's "Install Android Build Template",
+# ARCHITECTURE.md §9 milestone 2), never hand-edited. Same treatment as
+# godot_project/bin/ above.
+/godot_project/android/
+
+# Exported platform packages (.apk/.aab/.ipa) — build output, not source.
+/build/

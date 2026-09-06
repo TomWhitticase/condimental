@@ -14,3 +14,7 @@ config/name="Sauce Factory"
 config/description="Milestone 3: core loop proof - one belt, one machine, one recipe."
 run/main_scene="res://main.tscn"
 config/features=PackedStringArray("4.6")
+
+[rendering]
+
+textures/vram_compression/import_etc2_astc=true

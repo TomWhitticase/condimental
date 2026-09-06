@@ -17,10 +17,10 @@ force-loaded into every session's context.
 *(This section reflects "now" — edit it in place as things change. The Log
 below is history and should only ever be appended to.)*
 
-- **Stage:** Pre-alpha. Milestones 1 (Scaffold) and 3 (Core loop proof) are done — real simulation code now exists (one belt, one machine, one recipe), headlessly verified end to end.
+- **Stage:** Pre-alpha. Milestones 1 (Scaffold), 2 (Mobile export spike), and 3 (Core loop proof) are done — real simulation code exists (one belt, one machine, one recipe), headlessly verified end to end, and Android export is proven working.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
-- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) are being built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **Milestones 1 (Scaffold) and 3 (Core loop proof) are complete and merged** — see their log entries below. Milestone 2 (Mobile export spike) and milestone 4 (First full chain) are both dispatched and in progress. Check `orca orchestration task-list --run run_51e5cb271445 --json` for live status. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it.
+- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) are being built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **Milestones 1, 2, and 3 are complete and merged** — see their log entries below. Milestone 4 (First full chain) is dispatched and in progress. Check `orca orchestration task-list --run run_51e5cb271445 --json` for live status. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -36,6 +36,49 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-06 — Milestone 2: Mobile export spike
+
+Deliberately run early (ARCHITECTURE.md §9) so mobile-export risk surfaces
+now rather than at platform polish. Full details in ARCHITECTURE.md §9a;
+headline result: **Android works, iOS doesn't in this environment.**
+
+Android: stood up a standalone Android SDK/NDK (no Android Studio needed),
+cross-compiled the milestone-1 `sim_core` crate for `arm64-v8a`/`x86_64` via
+`cargo-ndk` with zero source changes, and got Godot's Gradle-based export to
+produce a validly-signed APK with the extension actually embedded (confirmed
+via `apksigner verify` and `unzip -l`). One real Godot gap found along the
+way: its Android export CLI can fail with a **blank** error message if
+`rendering/textures/vram_compression/import_etc2_astc` isn't set in
+`project.godot` — tracked down by reading Godot's own export-plugin source
+rather than guessing, now fixed in this project's settings. Installing and
+actually launching the APK on a device/emulator was skipped this round — the
+dev host was down to double-digit MB of free memory with sibling sessions
+running concurrently, and booting an emulator on top of that felt like the
+wrong risk to take. That's the one remaining unverified step before Android
+export counts as fully proven, not just built.
+
+iOS: could not be attempted for real. This dev environment has no Xcode.app,
+only Command Line Tools — confirmed both via `xcodebuild`/`xcrun` failing to
+find an iOS SDK at all, and via a Rust `aarch64-apple-ios` build that
+compiled without error but linked against the wrong (macOS) SDK sysroot, so
+even that partial result wasn't treated as a pass. Per this milestone's own
+instruction to decide explicitly if iOS looks broken: **it stays a
+stretch/deferred platform, not a milestone-10 launch commitment**, until
+someone re-runs this spike on a Mac with real Xcode or Apple-hosted CI —
+that's recorded as a genuinely open question (ARCHITECTURE.md §11), not a
+settled "iOS is broken."
+
+Also surfaced, unrelated to mobile export itself: late in this session the
+shared dev host (many concurrent users, physical memory nearly exhausted)
+started failing to load the project's own unmodified `sim_core` extension at
+all — even the plain milestone-1 round-trip check — with a Rust
+undefined-behavior-check panic inside `gdext`. Checksum-verified as the exact
+same binary that worked fine earlier in the session, and reproduced even in
+a clean environment, so this reads as host resource exhaustion tripping an
+optional safety check, not a project regression — but it means
+`scripts/verify-scaffold.sh` should be re-run on a calmer host before trusting
+its result if it ever fails unexpectedly like this again.
 
 ### 2026-09-06 — Milestone 3: Core loop proof
 

@@ -268,7 +268,7 @@ Not in early milestones, but §3.9's determinism work means it stays possible wi
 ## 9. Milestones
 
 1. **Scaffold** — Godot project + `gdext` hello-world binding, confirm Rust↔Godot round-trip works. Also produces the build script and `.gdextension` file from §7.
-2. **Mobile export spike** (moved early — was previously only in platform polish, at milestone 8, where the risk would surface 7 milestones too late): export the milestone-1 hello-world GDExtension to Android, and separately attempt iOS given its export path is flagged experimental upstream (§0). If iOS GDExtension export is genuinely broken at this point, decide explicitly whether iOS slips to a stretch platform rather than discovering that during platform polish.
+2. **Mobile export spike** — ✅ **done (2026-09-06). Android export works end-to-end; iOS is blocked in this dev environment and needs re-verification on real Apple hardware/CI before it can be trusted as a launch platform.** See §9a for the full writeup; the short version: Android GDExtension export via Gradle produced a validly-signed APK with the Rust extension embedded in both ABIs, cross-compiled with stock `rustup`/NDK tooling and no macOS-only tricks. iOS could not be attempted for real because this environment has no Xcode.app (only Command Line Tools) — Godot's iOS export and `rustc`'s iOS target both hard-require it, and this was confirmed two independent ways, not assumed. **Recommendation: keep iOS as a stretch/deferred platform, not a milestone-10 launch commitment, until someone re-runs this spike on a Mac with Xcode installed** — see §9a and §11.
 3. **Core loop proof** — one belt, one machine, one recipe (raw input → processed output), rendered and interactable.
 4. **First full chain** — a multi-step production chain end-to-end, driven entirely by data-driven recipes.
 5. **Economy MVP** (new — was previously missing from this list entirely, even though [docs/GAMEPLAY.md](GAMEPLAY.md) §1 defines the core loop as production *plus* this): a minimal money value and a single hardcoded contract (fixed sauce mix, fixed cadence, fixed payout) that the milestone-4 chain can actually deliver against and get paid for. Doesn't need the full `contracts.ron`/staff-pool design from GAMEPLAY.md §7/§9 yet — just enough that "build factory → make money" is true end to end, which is the point where this stops being a production-chain tech demo and starts being *this* game.
@@ -278,6 +278,49 @@ Not in early milestones, but §3.9's determinism work means it stays possible wi
 9. **Logistics expansion** — transport between multiple factory sites.
 10. **Platform polish** — mobile touch controls/export, Mac/PC packaging, UI pass. Mobile export risk should already be known from milestone 2; this is about polish, not first discovery.
 11. *(Stretch)* **Multiplayer** — lockstep networking on top of the already-deterministic core.
+
+---
+
+## 9a. Mobile export spike — findings (milestone 2, 2026-09-06)
+
+Ran against the milestone-1 scaffold, no gameplay code involved. Dev environment: macOS/arm64, Godot 4.6.3-stable (matching §1a's pin), only Xcode **Command Line Tools** installed (no Xcode.app).
+
+### Android — works
+
+1. Installed a standalone Android SDK (cmdline-tools, platform-tools, `build-tools;34.0.0`, `platforms;android-34`, NDK **27.2.12479018**) plus `rustup target add aarch64-linux-android x86_64-linux-android` and `cargo install cargo-ndk` — no Android Studio needed, everything scriptable/headless.
+2. `cargo ndk -t arm64-v8a -t x86_64 build -p sim_core` cross-compiled `sim_core` unmodified — zero source changes were needed to make the milestone-1 crate Android-buildable. Both `.so`s copied to `godot_project/bin/android/`; `sim_core.gdextension` got `android.debug.arm64`/`android.debug.x86_64` (+ release) entries alongside the existing macOS/Linux/Windows ones.
+3. Godot's **Gradle-based** Android export (required for GDExtension — the prebuilt-APK export path can't embed extra native libraries) needed several pieces of one-time local machine setup beyond what's in the repo, none of it Android-specific-obscure but all of it undocumented by Godot itself for a from-scratch headless setup:
+   - Editor Settings' `export/android/android_sdk_path` and `export/android/java_sdk_path` (both machine-local, correctly *not* repo-tracked).
+   - The Android Gradle build template extracted from the export templates' `android_source.zip` into `godot_project/android/build/` (normally done by Godot's own `--install-android-build-template`, which — see below — hung in this environment; extracting it manually and writing the `.build_version` marker Godot itself expects there worked identically).
+   - `rendering/textures/vram_compression/import_etc2_astc=true` in `project.godot`. **This is the one genuine surprise worth flagging for future sessions:** without it, export fails validation with a completely blank error message — Godot's own Android exporter has a config check (`ResourceImporterTextureSettings::should_import_etc2_astc()` in `has_valid_project_configuration`) that sets `valid = false` without ever appending anything to the error string it hands back, so the CLI just prints "due to configuration errors:" and nothing else. Confirmed by reading Godot's own `platform/android/export/export_plugin.cpp` at the 4.6.3-stable tag rather than guessing — this is a real (if narrow) upstream gap in the CLI export path's error reporting, not a mistake in this project's config.
+   - A debug keystore (any `keytool`-generated one works) — machine-local by convention, so keep it out of `export_presets.cfg`; either point Editor Settings at one or export `GODOT_ANDROID_KEYSTORE_DEBUG_{PATH,USER,PASSWORD}` at export time.
+4. **A real, undocumented headless-automation trap:** running `godot --headless --install-android-build-template` when the project's `export_presets.cfg` still has unresolved Android config errors makes the editor pop a **native blocking macOS alert dialog** — confirmed via a real on-screen window (`orca computer list-windows` found it) that never returns control even under `--headless`, because that flag doesn't suppress this particular alert path. There is no CLI flag to auto-dismiss it; the only way through in an environment with no one to click "OK" is to avoid triggering it in the first place — fix the underlying config errors first (per the bullets above), or extract the build template by hand instead of via that command, as this spike ended up doing.
+5. Result: `godot --headless --export-debug "Android" build/android/sauce-factory.apk` produced a **373 MB, validly-signed** (`apksigner verify` ✅, APK Signature Scheme v2) APK with both `lib/arm64-v8a/libsim_core.arm64-v8a.so` and `lib/x86_64/libsim_core.x86_64.so` actually embedded (`unzip -l` confirmed), package `com.saucefactory.spike`, target SDK 36.
+6. **What was *not* verified, and why:** actually installing/launching the APK on a device or emulator to confirm the extension loads and runs at runtime. This dev host is a shared multi-agent machine that was down to double-digit MB of free physical memory with other sessions' work running concurrently (one background process here was already killed for memory pressure mid-spike) — booting a full Android emulator on top of that risked destabilizing sibling sessions on the same machine, so it was deliberately skipped rather than risking a shared resource. The APK's structural/signature validity was confirmed instead (`apksigner verify`, `aapt2 dump badging`). **This is the one open item before Android export can be called fully proven, not just built** — install/launch on a real device or a properly-resourced CI runner and confirm the GDExtension actually initializes at runtime (e.g. via `adb logcat` for the `Initialize godot-rust` line this project's own scaffold already prints).
+
+### iOS — blocked, not proven broken
+
+Two independent checks both confirm the blocker is this environment, consistent with §0's flagged risk (which was about iOS being *buggy*, not *impossible* — worth distinguishing):
+
+1. `xcodebuild -showsdks` and `xcrun --sdk iphoneos --show-sdk-path` both fail outright: `xcode-select`'s active developer directory is `/Library/Developer/CommandLineTools`, and the iOS SDK is only ever shipped inside full Xcode.app, never inside standalone Command Line Tools. Godot's iOS export generates and builds an actual Xcode project (`xcodebuild`) — there is no headless-CLT-only path around this.
+2. Confirmed independently at the Rust layer too, so this isn't just "Godot's fault": `rustup target add aarch64-apple-ios` + `cargo build --target aarch64-apple-ios` **appeared to succeed** (no build error), but the linker fell back to the macOS SDK sysroot with an explicit warning (`ld: building for 'iOS', but linking in dylib ... built for 'macOS'`), and `vtool -show-build` on the resulting `.dylib` shows an internally inconsistent `LC_VERSION_MIN_IPHONEOS`/`sdk 15.5` (a macOS SDK version number) pairing. **This is exactly the kind of "looks done, isn't" result worth calling out explicitly: the build not erroring is not evidence the binary is a valid iOS artifact** — it almost certainly is not, and this was not treated as a pass.
+
+Godot's own iOS export was not attempted with a real preset run to completion — the environment gates in (1) make the outcome deterministic (it would fail at the Xcode-project-build step) and attempting it burned into a separate, apparently-unrelated instability instead (see below), so the Xcode-absence finding stands on its own two-pronged evidence above rather than on a completed (and therefore misleadingly "further along") export log.
+
+**Recommendation per this milestone's own framing (§9 item 2's "decide explicitly"): keep iOS as a stretch/deferred platform, not a committed milestone-10 launch target, until this spike is re-run to completion on a Mac with a full Xcode install** (Xcode.app, not just Command Line Tools) or on Apple-hosted CI (e.g. GitHub Actions `macos-*` runners, which ship full Xcode). That re-run should be quick — the Android half of this spike shows the `gdext`/GDExtension side of the pipeline needs no source changes for mobile, so the only unknown left for iOS is Godot's own Xcode-project-generation and code-signing path, which needs the real toolchain to observe.
+
+### An unrelated instability surfaced late in this spike, worth flagging separately
+
+Late in this session, this shared dev host (12 concurrently logged-in users, load average 6.5–8+, physical memory pinned with double-digit MB free) started failing to even load the **unmodified, checksum-verified-identical** `libsim_core.dylib` that had worked correctly across all eight-plus Android export runs earlier in the same session — every invocation (including the plain milestone-1 `scripts/verify-scaffold.sh` round-trip check, with no export involved at all) now aborts immediately with:
+
+```
+ERROR: [panic .../godot-ffi-0.5.5/src/toolbox.rs:462]
+  unsafe precondition(s) violated: hint::unreachable_unchecked must never be reached
+   at: godot_core::private::install_godot_rust_hook::{{closure}} (.../godot-core-0.5.5/src/private.rs:331)
+thread caused non-unwinding panic. aborting.
+```
+
+This reproduced identically with a fully clean environment (`env -i`) and against a byte-identical dylib (`md5` checked before/after), which rules out anything this spike changed. It looks like a resource-exhaustion-triggered trip of one of `gdext`'s optional Rust UB-check assertions (its own error text says as much: "this Undefined Behavior check is optional, and cannot be relied on for safety") rather than a real bug in `sim_core` or in this project's changes — **but it means milestone-1's own round-trip check may currently be unreliable on this specific shared host under load**, independent of anything mobile-export-related. Re-run `scripts/verify-scaffold.sh` on a less-contended machine (or this same one once load drops) before treating any future failure of it as a real regression.
 
 ---
 
@@ -319,6 +362,21 @@ GAMEPLAY.md both already have a section like this, this doc didn't.
 - Spoilage (perishables) and corrosion (acid-handling) likewise have no
   designed component yet (GAMEPLAY.md §9) — needed before their respective
   equipment tiers are implemented, not before milestone 5.
+- ~~Is iOS export via GDExtension viable, or does it need to slip to a
+  stretch platform (§0, §9 milestone 2)?~~ — **still genuinely open**, not
+  resolved, despite milestone 2 having run: see §9a. iOS could not be
+  attempted for real in the dev environment used (no Xcode.app, only Command
+  Line Tools — confirmed two independent ways, not assumed), so this remains
+  a real open question until the spike is re-run on a Mac with full Xcode or
+  on Apple-hosted CI. Current recommendation while it's open: treat iOS as
+  stretch/deferred, not a committed milestone-10 launch platform.
+- Android export is proven to *build* (§9a) but not yet proven to *run* — the
+  produced APK's structural/signature validity was confirmed, but installing
+  and launching it on a real device or emulator (to confirm the GDExtension
+  actually initializes at runtime, not just packages correctly) was
+  deliberately skipped in this spike due to host memory constraints. Should
+  be closed out before milestone 10 (Platform polish), ideally by whoever has
+  a real Android device or a properly-resourced CI runner handy.
 
 ---
 
