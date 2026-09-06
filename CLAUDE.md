@@ -37,8 +37,9 @@ conflict with them.
 
 ## Project structure
 
-Milestone 1 (ARCHITECTURE.md §9 Scaffold) has landed: a Rust/gdext <-> Godot
-round trip, no gameplay yet. Current layout:
+Milestones 1 (Scaffold) and 3 (Core loop proof) have landed: a Rust/gdext
+<-> Godot round trip, plus real simulation code — one belt, one machine, one
+recipe. Current layout:
 
 ```
 sauce-factory/
@@ -47,20 +48,45 @@ sauce-factory/
   README.md              # short public-facing pitch
   Cargo.toml             # workspace root — members: sim_core, xtask
   .cargo/config.toml      # `cargo xtask` alias
-  sim_core/               # Rust cdylib crate: the gdext binding (currently just a SimBridge stub)
-    Cargo.toml
-    src/lib.rs
+  data/                    # data-driven content (ARCHITECTURE.md §3.6) — the
+    recipes.ron              # single source of truth for recipes; sim_core embeds
+                               # this file at compile time (include_str!), never
+                               # duplicates its content in Rust code. items.ron/
+                               # machines.ron/contracts.ron land here too when they exist.
+  sim_core/               # Rust crate: pure sim core + the gdext binding
+    Cargo.toml              # crate-type = ["cdylib", "rlib"] — rlib is what lets
+                              # sim_core/tests/ link against it without Godot
+    src/lib.rs                # the ONLY file that touches `godot`/gdext (ARCHITECTURE.md §4)
+    src/sim/                   # pure Rust simulation core — no gdext dependency,
+      mod.rs                    # fully exercisable by headless `cargo test` (§7)
+      types.rs                   # Fx (fixed-point, §3.9), ItemId/RecipeId/TileCoord/ChunkId
+      recipe.rs                   # RecipeRegistry — loads + validates data/recipes.ron
+      inventory.rs                  # generic slot-based Inventory (§3.2)
+      belt.rs                        # BeltSegment — gap-based item storage (§3.3)
+      machine.rs                      # Machine + TimedProcess (§3.2/§3.5)
+      world.rs                         # hecs::World wrapper; SimBridge's pure-logic
+                                         # half — tick()/dirty_chunks()/chunk_snapshot()/
+                                         # issue_command()/query_tile() (§4)
+    tests/core_loop.rs        # headless integration test: N-tick conservation invariant (§6)
   xtask/                   # build script (ARCHITECTURE.md §7): `cargo xtask` builds sim_core
     Cargo.toml              # and copies the compiled extension into godot_project/bin/
     src/main.rs
   godot_project/             # Godot 4 project (presentation layer)
-    project.godot
+    project.godot              # run/main_scene = main.tscn
     sim_core.gdextension       # checked in; points at godot_project/bin/, which is gitignored (build output)
-    test_round_trip.gd          # headless proof script — see scripts/verify-scaffold.sh
+    main.tscn / main.gd          # milestone-3 interactive scene: TileMap + item
+                                   # sprites driven by SimBridge's JSON snapshots,
+                                   # SPACE/C keys drive issue_command_json (§5)
+    placeholder_art/                # flat placeholder PNGs — NOT the UI_UX.md §2a
+                                      # voxel pipeline, see its own README.md
+    test_round_trip.gd          # milestone-1 headless proof script (scripts/verify-scaffold.sh)
+    test_core_loop.gd            # milestone-3 headless proof: real gdext JSON boundary
+    test_interaction.gd           # milestone-3 headless proof: keyboard input -> SimBridge
     bin/                          # gitignored: compiled extension lands here via `cargo xtask`
   scripts/
     lint-commit-msg.sh          # commit-msg hook
-    verify-scaffold.sh           # headless round-trip verification (build + Godot cache + test script)
+    verify-scaffold.sh           # milestone-1 headless verification (build + Godot cache + test script)
+    verify-core-loop.sh           # milestone-3 headless verification (cargo test + gdext boundary + interaction)
   docs/
     README.md              # docs-folder index — read this first when only skimming
     ARCHITECTURE.md          # how the game runs and is built
@@ -71,6 +97,14 @@ sauce-factory/
   .github/workflows/       # CI (commit-message lint)
 ```
 
+**Data file path (resolved — was ARCHITECTURE.md §11's open question):**
+top-level `data/`, sibling to `sim_core/`/`godot_project/` — not nested under
+either, since ARCHITECTURE.md §2's own diagram has data files feed both the
+simulation *and* the UI as one shared source, and UI_UX.md's `assets/voxels/`
+already established the pattern of shared, non-Rust, non-Godot content living
+at the repo root. `items.ron`/`machines.ron`/`contracts.ron` belong here too
+when they're added.
+
 Still not yet laid out (add when the relevant milestone needs it, per the
 docs — don't improvise a different shape when the time comes):
 
@@ -78,13 +112,13 @@ docs — don't improvise a different shape when the time comes):
   UI_UX.md §2a's proposed layout — `generators/` and `palette.ron` are source
   (hand-written, committed), `models/` is a regenerated build artifact (never
   hand-edited), `previews/` is gitignored and only for visual review.
-- Data files (`items.ron`, `recipes.ron`, `machines.ron`, and eventually
-  `contracts.ron` per GAMEPLAY.md §9) — not yet pinned to a specific path;
-  decide when the first recipe/machine content is added (milestone 3) and
-  record it here once it exists.
-- The `hecs`+`rayon` ECS and any real `SimBridge` API surface (ARCHITECTURE.md
-  §3/§4) — `sim_core/` currently holds only the milestone-1 round-trip stub,
-  deliberately no simulation logic yet.
+  `godot_project/placeholder_art/` is a milestone-3 stopgap, not this.
+- `rayon`-based parallelism and the tiered active/warm/sleeping scheduler
+  (ARCHITECTURE.md §3.7/§3.8) — milestone 3's single belt+machine has no need
+  for either yet; both are milestone 8 (Scale-up) scope.
+- `preview_command`/`undo`/`redo`/the save-format command log (ARCHITECTURE.md
+  §4) — `SimBridge` only implements `tick`/`dirty_chunks`/`chunk_snapshot`/
+  `issue_command`/`query_tile` so far, deliberately narrow per that section.
 - Per ARCHITECTURE.md §10: `sim_core/` and `godot_project/` should each get
   their own `CLAUDE.md` documenting invariants specific to that module once
   there's enough in either to warrant one — don't let this root file grow to
@@ -263,3 +297,30 @@ it's gone stale.
   the gitignored `godot_project/.godot/` cache — `scripts/verify-scaffold.sh`
   automates and headlessly verifies this whole path (see its header comment
   for a known, benign Godot 4.6.3 editor-shutdown crash it works around).
+- 2026-09-06: Completed ARCHITECTURE.md §9 milestone 3 (Core loop proof) —
+  one belt, one machine, one recipe, real simulation code for the first
+  time. Resolved §11's data-file-path open question: top-level `data/`
+  (see the Project Structure section above). `sim_core/` gained a `sim/`
+  module tree (types/recipe/inventory/belt/machine/world) that is pure Rust
+  with zero `gdext` dependency; `lib.rs` is now only a thin JSON-over-`gdext`
+  translation layer, per §4's own advice to keep that boundary's surface
+  small. Two implementation decisions worth recording: (1) the belt's
+  gap-based storage (§3.3) represents inter-item gaps as *slack beyond a
+  fixed minimum item-spacing*, not raw distance — needed so a fully
+  compressed line reads as "touching," not "overlapping," and so the
+  front-item/rest-of-belt boundary can shift correctly when an item exits;
+  see `sim_core/src/sim/belt.rs`'s module doc for the full reasoning. (2)
+  the `SimBridge`↔GDScript wire format is plain JSON strings (via
+  `serde_json`), not hand-built `Dictionary`/`Array` values — chosen
+  specifically to minimize the `gdext`-specific API surface this codebase
+  touches, which is exactly what §4 flags as the least agent-friendly,
+  least training-data-backed layer in the whole stack. Recipes
+  (`data/recipes.ron`) are embedded via `include_str!` at compile time
+  rather than read from disk at runtime, so path resolution is identical
+  under `cargo test`, the Godot editor, and an exported build; revisit if
+  hot-reloading recipe content ever becomes valuable enough to justify the
+  extra complexity. The interactive Godot scene (`main.tscn`/`main.gd`)
+  uses genuinely flat placeholder textures (`godot_project/placeholder_art/`,
+  its own README explains why) — not a UI_UX.md style decision, just this
+  milestone's "prove it's rendered and interactable" bar; real voxel assets
+  are UI_UX.md §2a's pipeline, not yet built.

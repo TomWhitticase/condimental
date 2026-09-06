@@ -5,7 +5,16 @@ edition = "2024"
 publish = false
 
 [lib]
-crate-type = ["cdylib"]
+# "rlib" (in addition to the "cdylib" gdext needs) is what lets
+# `sim_core/tests/` link against this crate as a normal Rust dependency —
+# ARCHITECTURE.md §7's headless `cargo test` loop needs that, independent
+# of Godot/gdext entirely.
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 godot = "0.5.5"
+hecs = "0.11.1"
+fixed = "1"
+ron = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

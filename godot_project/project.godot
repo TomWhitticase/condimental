@@ -11,5 +11,6 @@ config_version=5
 [application]
 
 config/name="Sauce Factory"
-config/description="Milestone 1 scaffold: Rust (gdext) <-> Godot round-trip proof. No gameplay yet."
+config/description="Milestone 3: core loop proof - one belt, one machine, one recipe."
+run/main_scene="res://main.tscn"
 config/features=PackedStringArray("4.6")

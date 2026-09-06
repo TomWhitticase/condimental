@@ -1,0 +1,24 @@
+// Recipe content (ARCHITECTURE.md §3.6) — data, never hardcoded in sim_core.
+//
+// `schema_version` follows ARCHITECTURE.md §4's data-file versioning rule:
+// the loader must reject or migrate a mismatched version rather than
+// silently misreading a changed shape.
+//
+// Milestone 3 (Core loop proof) deliberately ships a single, single-input
+// recipe: the milestone's own scope is "one belt, one machine, one recipe."
+// GAMEPLAY.md §2's real tomato-sauce tier also lists salt as an ingredient;
+// a second raw input implies a second belt, which is milestone 4 (First
+// full chain) scope, not this one — don't read this file as the final
+// tomato sauce recipe.
+(
+    schema_version: 1,
+    recipes: [
+        Recipe(
+            id: "tomato_sauce",
+            inputs: [("tomato", 4)],
+            outputs: [("tomato_sauce", 1)],
+            machine: "cooker",
+            time_ticks: 180,
+        ),
+    ],
+)

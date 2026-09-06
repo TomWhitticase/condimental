@@ -17,10 +17,10 @@ force-loaded into every session's context.
 *(This section reflects "now" — edit it in place as things change. The Log
 below is history and should only ever be appended to.)*
 
-- **Stage:** Pre-alpha. Milestone 1 (Scaffold) is done — a real, headlessly-verified Rust↔Godot round trip exists, but zero gameplay/simulation code.
+- **Stage:** Pre-alpha. Milestones 1 (Scaffold) and 3 (Core loop proof) are done — real simulation code now exists (one belt, one machine, one recipe), headlessly verified end to end.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
-- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) are being built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **Milestone 1 (Scaffold) is complete** — see the 2026-09-06 "Milestone 1: Scaffold" log entry below. Milestones 2 (Mobile export spike) and 3 (Core loop proof) are next (both depend only on milestone 1). Check `orca orchestration task-list --run run_51e5cb271445 --json` for live status. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it.
+- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) are being built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **Milestones 1 (Scaffold) and 3 (Core loop proof) are complete** — see their log entries below. Milestone 2 (Mobile export spike, depends only on milestone 1) and milestone 4 (First full chain, depends on milestone 3) are next. Check `orca orchestration task-list --run run_51e5cb271445 --json` for live status. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -36,6 +36,37 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-06 — Milestone 3: Core loop proof
+
+First real simulation code: one belt, one machine, one recipe (tomato →
+tomato sauce), rendered and interactable in Godot. `sim_core/` now has a
+pure-Rust `sim/` module tree (belt/machine/recipe/inventory/world, no `gdext`
+dependency) sitting under a thin JSON-based `SimBridge` translation layer —
+`tick()`, `dirty_chunks()`/`chunk_snapshot()`, `issue_command()`,
+`query_tile()`, per ARCHITECTURE.md §4. The belt implements real gap-based
+item storage (§3.3, Factorio's FFF #176 trick), the machine runs the generic
+tick-counted `TimedProcess` pattern (§3.5), and all shared simulation state
+uses fixed-point (`fixed::I16F16`), never float, per §3.9. The recipe itself
+lives in a new top-level `data/recipes.ron` — resolving §11's data-file-path
+open question — not hardcoded in Rust.
+
+Verified in three layers, cheapest first (`scripts/verify-core-loop.sh`
+automates all three): a headless `cargo test` integration test ticks the
+belt+machine for thousands of ticks and asserts strict item conservation
+(no duplication/loss) every single tick; a headless Godot script drives the
+real `gdext` JSON command/snapshot boundary end to end (spawn 4 tomatoes →
+1 tomato sauce → collect); and a second headless Godot script simulates an
+actual keypress through the interactive scene's input handler to confirm
+the "interactable" requirement is real, not assumed. The interactive scene
+(`main.tscn`) renders via a genuine `TileMap` + moving item sprites, driven
+only by `SimBridge`'s JSON snapshots — it never touches the belt's internal
+gap array. Visuals are flat placeholder textures, explicitly not a UI_UX.md
+style decision (see `godot_project/placeholder_art/README.md`); the real
+voxel asset pipeline is still unbuilt. See CLAUDE.md's decisions log for two
+smaller implementation calls worth knowing about: the belt's gap
+representation and why the `gdext` boundary is JSON strings instead of
+`Dictionary`/`Array` values.
 
 ### 2026-09-06 — Milestone 1: Scaffold
 

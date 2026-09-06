@@ -299,10 +299,12 @@ Consolidated here for the first time during a cross-doc consistency pass —
 several of these existed only as asides earlier in the doc; UI_UX.md and
 GAMEPLAY.md both already have a section like this, this doc didn't.
 
-- Exact directory path for data files (`items.ron`, `recipes.ron`,
-  `machines.ron`, eventually `contracts.ron` per GAMEPLAY.md §9) relative to
-  the Rust/Godot project split — not yet pinned; decide at milestone 1 and
-  record it in CLAUDE.md's Project Structure section once it exists.
+- ~~Exact directory path for data files~~ — resolved at milestone 3
+  (2026-09-06): top-level `data/` (e.g. `data/recipes.ron`), sibling to
+  `sim_core/`/`godot_project/`, not nested under either — see CLAUDE.md's
+  Project Structure section and decisions log for the reasoning.
+  `items.ron`/`machines.ron`/`contracts.ron` (GAMEPLAY.md §9) belong here too
+  when they're added.
 - ~~`hecs`'s long-term maintenance activity should be re-verified before
   milestone 1 starts~~ — resolved at milestone 1 (2026-09-06): `hecs` 0.11.1
   was last published 2026-07-28, so it's still actively maintained; see §1a.
