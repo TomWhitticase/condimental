@@ -351,6 +351,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "voxgen"
+version = "0.1.0"
+dependencies = [
+ "ron",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "xtask"
 version = "0.1.0"
 

@@ -4,6 +4,15 @@
 //! resulting cdylib into `godot_project/bin/`, where `sim_core.gdextension`
 //! expects to find it. This is the whole point of a checked-in build
 //! script: nobody should have to know or hand-copy the target path.
+//!
+//! It then stages the generated voxel models (UI_UX.md §2a) from
+//! `assets/voxels/models/` into `godot_project/voxels/`, for exactly the same
+//! reason and with exactly the same treatment: Godot can only load from
+//! inside `res://`, the committed source of truth lives outside it, and
+//! neither copy should ever be made by hand. Regenerating the models
+//! themselves is a separate, explicit step (`cargo run -p voxgen`, or
+//! `scripts/build-voxels.sh` which also renders previews) — xtask only
+//! copies what is already there, so the common build stays fast.
 
 use std::env;
 use std::fs;
@@ -62,4 +71,50 @@ fn main() {
     });
 
     println!("xtask: copied {} -> {}", src.display(), dest.display());
+
+    copy_voxel_models(&root);
+}
+
+/// Mirrors `assets/voxels/models/` into `godot_project/voxels/`.
+///
+/// Deletes stale entries first: a model removed from a generator must not
+/// linger in the Godot project, or the scene would keep rendering an asset
+/// the pipeline no longer produces.
+fn copy_voxel_models(root: &Path) {
+    let src_dir = root.join("assets").join("voxels").join("models");
+    let dest_dir = root.join("godot_project").join("voxels");
+
+    if !src_dir.is_dir() {
+        eprintln!(
+            "xtask: no {} — run `cargo run -p voxgen` to generate the voxel models",
+            src_dir.display()
+        );
+        return;
+    }
+
+    if dest_dir.exists() {
+        fs::remove_dir_all(&dest_dir).expect("failed to clear godot_project/voxels");
+    }
+    fs::create_dir_all(&dest_dir).expect("failed to create godot_project/voxels");
+
+    let mut copied = 0usize;
+    let mut entries: Vec<_> = fs::read_dir(&src_dir)
+        .expect("failed to read assets/voxels/models")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .collect();
+    entries.sort();
+
+    for path in entries {
+        if !path.is_file() {
+            continue;
+        }
+        let name = path.file_name().expect("directory entry must have a name");
+        fs::copy(&path, dest_dir.join(name)).unwrap_or_else(|e| {
+            panic!("xtask: failed to copy {} into godot_project/voxels: {e}", path.display())
+        });
+        copied += 1;
+    }
+
+    println!("xtask: staged {copied} voxel asset files -> {}", dest_dir.display());
 }

@@ -11,10 +11,25 @@ config_version=5
 [application]
 
 config/name="Sauce Factory"
-config/description="Milestone 3: core loop proof - one belt, one machine, one recipe."
+config/description="Isometric voxel presentation of the data-driven production chain (UI_UX.md)."
 run/main_scene="res://main.tscn"
 config/features=PackedStringArray("4.6")
 
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+
+[editor_plugins]
+
+; Pinned .vox importer — see addons/MagicaVoxel_Importer_with_Extensions/VENDORED.md
+enabled=PackedStringArray("res://addons/MagicaVoxel_Importer_with_Extensions/plugin.cfg")
+
 [rendering]
 
+; Forward+ is what UI_UX.md §4's lighting asks for: real-time shadows, SSAO
+; and glow are all Forward+-only features. Stated explicitly rather than
+; relying on the engine default, since main.gd's WorldEnvironment configures
+; all three.
+renderer/rendering_method="forward_plus"
 textures/vram_compression/import_etc2_astc=true

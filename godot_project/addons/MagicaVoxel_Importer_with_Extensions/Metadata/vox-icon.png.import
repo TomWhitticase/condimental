@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://d71fat8iufsq"
-path="res://.godot/imported/belt_tile.png-2206c75951f7e97f17a3856f5099b710.ctex"
+uid="uid://df1pmm54vwp1p"
+path="res://.godot/imported/vox-icon.png-2e9747528d5f4e4f4677e19db42c75e7.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://placeholder_art/belt_tile.png"
-dest_files=["res://.godot/imported/belt_tile.png-2206c75951f7e97f17a3856f5099b710.ctex"]
+source_file="res://addons/MagicaVoxel_Importer_with_Extensions/Metadata/vox-icon.png"
+dest_files=["res://.godot/imported/vox-icon.png-2e9747528d5f4e4f4677e19db42c75e7.ctex"]
 
 [params]
 

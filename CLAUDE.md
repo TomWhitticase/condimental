@@ -42,15 +42,30 @@ Milestones 1 (Scaffold), 3 (Core loop proof), 4 (First full chain), and 5
 simulation code — a multi-stage production chain (raw tomato -> tomato sauce
 -> ketchup -> bottled ketchup -> boxed ketchup) built entirely from
 `data/recipes.ron`, now with a money counter and a single hardcoded contract
-the chain can actually deliver against and get paid for. Current layout:
+the chain can actually deliver against and get paid for. A visual-polish
+pass on top of that built UI_UX.md §2a's voxel asset pipeline and replaced
+the flat 2D placeholder scene with an isometric, real-time-lit 3D one.
+Current layout:
 
 ```
 sauce-factory/
   CLAUDE.md            # this file — always loaded, points at the three docs below
   CONTRIBUTING.md       # commit message convention
   README.md              # short public-facing pitch
-  Cargo.toml             # workspace root — members: sim_core, xtask
+  Cargo.toml             # workspace root — members: sim_core, xtask, assets/voxels
   .cargo/config.toml      # `cargo xtask` alias
+  assets/voxels/           # the voxel asset pipeline (UI_UX.md §2a/§2b) — a
+    Cargo.toml               # workspace member (`voxgen`) whose source IS the
+    palette.ron               # `generators/` dir. palette.ron is the single
+    generators/                # source of truth for colour AND material class
+      main.rs                   # (matte/metal/emissive); every generator
+      palette.rs                 # references it, none invent their own colours.
+      vox.rs                      # vox.rs is a hand-written MagicaVoxel encoder
+      assets.rs                    # (no crate can write what we need — §2b).
+    models/                    # generated .vox + materials.json/index.json —
+                                 # build output, COMMITTED, never hand-edited
+    previews/                   # gitignored isometric PNGs for visual review
+                                  # (incl. scene.png, a full render of the scene)
   data/                    # data-driven content (ARCHITECTURE.md §3.6) — the
     recipes.ron              # single source of truth for recipes; sim_core embeds
                                # this file at compile time (include_str!), never
@@ -88,31 +103,42 @@ sauce-factory/
                                  # correctly (money increases on a satisfied mix,
                                  # stays put on a miss) — economy.rs's own #[cfg(test)]
                                  # covers Economy in isolation (cadence/mix edge cases)
-  xtask/                   # build script (ARCHITECTURE.md §7): `cargo xtask` builds sim_core
-    Cargo.toml              # and copies the compiled extension into godot_project/bin/
-    src/main.rs
+  xtask/                   # build script (ARCHITECTURE.md §7): `cargo xtask` builds sim_core,
+    Cargo.toml              # copies the compiled extension into godot_project/bin/, and stages
+    src/main.rs               # assets/voxels/models/ into godot_project/voxels/ (both gitignored)
   godot_project/             # Godot 4 project (presentation layer)
     project.godot              # run/main_scene = main.tscn
     sim_core.gdextension       # checked in; points at godot_project/bin/, which is gitignored (build output)
-    main.tscn / main.gd          # interactive scene: TileMap sized to however many
-                                   # stages chain_layout_json reports, item sprites
-                                   # driven by SimBridge's JSON snapshots, SPACE/C
-                                   # keys drive issue_command_json, a plain Label HUD
-                                   # reads economy_snapshot_json for money/contract
-                                   # status (§5; milestone-5 minimal UI, not UI_UX.md's
+    main.tscn / main.gd          # interactive 3D scene, built entirely in code from
+                                   # chain_layout_json + chunk snapshots: voxel meshes,
+                                   # a FIXED orthographic isometric camera, real-time
+                                   # lights/shadows/SSAO/glow, SPACE/C still drive
+                                   # issue_command_json, a readout panel reads
+                                   # economy_snapshot_json for money/contract status
+                                   # (UI_UX.md §1/§2/§4, ARCH §5; not UI_UX.md §5's
                                    # clipboard/checklist styling yet)
-    placeholder_art/                # flat placeholder PNGs — NOT the UI_UX.md §2a
-                                      # voxel pipeline, see its own README.md
+    addons/                         # vendored+pinned .vox importer — see its VENDORED.md
+      MagicaVoxel_Importer_with_Extensions/
+    voxels/                          # gitignored: .vox models staged here by `cargo xtask`
     test_round_trip.gd          # milestone-1 headless proof script (scripts/verify-scaffold.sh)
     test_core_loop.gd            # milestone-3/4/5 headless proof: real gdext JSON
                                    # boundary, driven through the whole chain, incl.
                                    # economy_snapshot_json's shape/initial state
     test_interaction.gd           # milestone-3 headless proof: keyboard input -> SimBridge
+    test_presentation.gd           # headless proof of the 3D scene's structure: orthographic
+                                     # camera, lights+shadows, SSAO/glow, imported voxel
+                                     # meshes, metal shinier than matte (UI_UX.md §1/§2/§4)
+    test_screenshot.gd              # NOT headless — renders the real scene to a PNG so a
+                                      # visual change can actually be looked at
     bin/                          # gitignored: compiled extension lands here via `cargo xtask`
   scripts/
     lint-commit-msg.sh          # commit-msg hook
     verify-scaffold.sh           # milestone-1 headless verification (build + Godot cache + test script)
-    verify-core-loop.sh           # milestone-3/4/5 headless verification (cargo test + gdext boundary + interaction)
+    verify-core-loop.sh           # milestone-3/4/5 + visual-pass headless verification
+                                    # (cargo test + gdext boundary + interaction + 3D scene)
+    build-voxels.sh                # regenerate every .vox from its Rust generator, then
+                                     # render isometric review PNGs via vengi-thumbnailer
+    screenshot-scene.sh             # render main.tscn to a PNG (the one non-headless check)
   docs/
     README.md              # docs-folder index — read this first when only skimming
     ARCHITECTURE.md          # how the game runs and is built
@@ -134,11 +160,6 @@ when they're added.
 Still not yet laid out (add when the relevant milestone needs it, per the
 docs — don't improvise a different shape when the time comes):
 
-- `assets/voxels/{palette.ron, generators/, models/, previews/}` per
-  UI_UX.md §2a's proposed layout — `generators/` and `palette.ron` are source
-  (hand-written, committed), `models/` is a regenerated build artifact (never
-  hand-edited), `previews/` is gitignored and only for visual review.
-  `godot_project/placeholder_art/` is a milestone-3 stopgap, not this.
 - `rayon`-based parallelism and the tiered active/warm/sleeping scheduler
   (ARCHITECTURE.md §3.7/§3.8) — milestone 3's single belt+machine has no need
   for either yet; both are milestone 8 (Scale-up) scope.
@@ -437,3 +458,44 @@ it's gone stale.
   Explicitly deferred, matching the milestone's own scope note: the full
   `contracts.ron` schema, multiple concurrent contracts, and `StaffPools` —
   all unchanged future work per GAMEPLAY.md §7/§9.
+- 2026-09-07: Visual-polish pass — built UI_UX.md §2a's voxel asset pipeline
+  for real and replaced milestone 3/4's flat 2D placeholder scene with the
+  isometric 3D one the doc describes. Presentation-only: `sim_core`,
+  `SimBridge` and `data/` were not touched, and the scene still learns the
+  chain's shape solely from `chain_layout_json` + chunk snapshots. Decisions
+  worth not re-litigating: (1) **the `.vox` encoder is hand-written**
+  (`assets/voxels/generators/vox.rs`) — all three crates UI_UX.md §9 named
+  were re-checked and none can write a file the Godot importer accepts
+  (`vox-format` is parser-only; `vox_writer` 0.1.9 writes no scene-graph
+  chunks, which the importer starts from), so §2a's own documented fallback
+  applies; see UI_UX.md §2b. (2) **The pinned importer is
+  qbradq/Godot-MagicaVoxel-Importer-with-Extensions @ `288f1d8` (v1.2)**,
+  vendored under `godot_project/addons/` — the other candidate the doc named
+  now redirects to the same repo, so there was only ever one choice; treat a
+  bump as a reviewed decision, same rule as `gdext`. (3) **An asset is
+  emitted as one `.vox` per material class** (matte/metal/emissive) rather
+  than one file, because an imported voxel mesh carries vertex colours but a
+  single material, which cannot express UI_UX.md §4's "metals are
+  deliberately shinier" rule; Godot rebuilds one `StandardMaterial3D` per
+  class from `palette.ron`'s own numbers, exported as `materials.json`, so
+  the palette stays the only place those values are written down.
+  (4) **`palette.ron` owns material class, not just colour** — that is what
+  makes (3) a data decision instead of a per-asset Godot decision.
+  (5) **`cargo xtask` stages `assets/voxels/models/` into
+  `godot_project/voxels/`** (gitignored), exactly the treatment
+  `godot_project/bin/` already gets, because Godot can only load from inside
+  `res://` while the committed source of truth lives outside it. (6) **The
+  camera is true isometric (a `(1, 1, 1)` view direction) and fixed** — no
+  orbit, per UI_UX.md §1; §9's "2:1 vs. Sims-style dimetric" question stays
+  formally open, but it is now one constant in `main.gd` rather than nothing
+  at all. Two environment gotchas are recorded in UI_UX.md §2b so nobody
+  rediscovers them: Godot needs **two** `--import` passes on a cold cache
+  (the .vox importer is an editor plugin, registered only on the pass after
+  the first scan), and vengi's thumbnailer needs a real video driver
+  (`SDL_VIDEODRIVER=dummy` makes it fail) even though it displays nothing.
+  New verification: `godot_project/test_presentation.gd` (headless, wired
+  into `scripts/verify-core-loop.sh`) asserts the structural half of the look
+  — orthographic camera, shadow-casting lights, SSAO/glow, non-empty imported
+  meshes, metal rougher-than-matte — and `scripts/screenshot-scene.sh`
+  renders the actual scene to a PNG, which is the only non-headless check in
+  the project and deliberately so.

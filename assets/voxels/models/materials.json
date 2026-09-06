@@ -1,0 +1,17 @@
+{
+  "emissive": {
+    "metallic": 0.0,
+    "roughness": 0.55,
+    "emission_energy": 2.6
+  },
+  "matte": {
+    "metallic": 0.0,
+    "roughness": 0.95,
+    "emission_energy": 0.0
+  },
+  "metal": {
+    "metallic": 0.9,
+    "roughness": 0.18,
+    "emission_energy": 0.0
+  }
+}

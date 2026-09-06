@@ -55,19 +55,54 @@ Neither of us had prior experience with voxel-asset pipelines, so this was resea
 
 1. **Source of truth is code, not the binary model file.** Each voxel asset is a small, parameterized Rust generator function (e.g. `fn simmer_pot() -> VoxModel`), built from composable primitives (cuboid, cylinder, etc.). Rust, not a second scripting language, because it's already this project's primary language (ARCHITECTURE.md §1) — no reason to add Lua or anything else just for asset generation. A generator is plain text, fully diffable, and squarely in what an LLM agent is good at writing — this is the same "text is the interface" principle the rest of the project is built on, applied to art assets instead of code or scene files.
 2. **The `.vox` file is a generated build artifact, never hand-edited.** If a shape needs to change, the generator changes and gets re-run — a `.vox` file that's silently diverged from the generator that supposedly produced it is a bug waiting to bite the next session that regenerates it and wipes someone's manual tweak.
-3. **Viewing is a headless render step, not opening a GUI.** After generating or changing a model, render it with `vengi-voxconvert` in isometric thumbnail mode and read the resulting PNG. This is how a Claude Code session actually looks at the asset it just made and confirms it matches intent — no interactive 3D tool, and no dependency on computer-use-style GUI automation, which would be slow and imprecise for placing individual voxels anyway.
+3. **Viewing is a headless render step, not opening a GUI.** After generating or changing a model, render it to an isometric PNG thumbnail with vengi and read the resulting image (see §2b point 3 for the exact tool and flags). This is how a Claude Code session actually looks at the asset it just made and confirms it matches intent — no interactive 3D tool, and no dependency on computer-use-style GUI automation, which would be slow and imprecise for placing individual voxels anyway.
 4. **Escape hatch for genuinely hand-sculpted assets.** Not everything is worth parametrizing — a one-off detailed hero prop may just be easier for a human to sculpt directly in `vengi-voxedit`. That's fine: commit the resulting `.vox` with no generator behind it, and mark it clearly (e.g. a note next to it) as hand-authored, so nobody later goes looking for a generator that doesn't exist.
 5. **One shared, checked-in color palette**, referenced by every generator, rather than each asset inventing its own colors. This is what actually keeps the "shiny metal vs. flat everything else" material rule (§4) and the overall factory palette (§7) consistent across dozens of separately-generated assets instead of drifting per-asset.
 
-**Proposed layout** (exact paths can shift once the Godot project exists, but the shape shouldn't):
+**Layout** (proposed here originally; built exactly this way during the
+visual-polish pass, so this is now descriptive, not aspirational):
 
 ```
 assets/voxels/
+  Cargo.toml        # the `voxgen` crate — a workspace member, run with `cargo run -p voxgen`
   palette.ron       # shared color palette — every generator references this, none invent their own
   generators/        # Rust source: one generator per asset (or grouped by category)
   models/             # generated .vox files — build output; never hand-edited
   previews/            # generated PNG thumbnails for visual review — gitignored, regenerate on demand
 ```
+
+### 2b. How the pipeline actually turned out (built 2026-09-07)
+
+Everything above held up. Four things are worth writing down because they
+were only discoverable by building it:
+
+1. **No Rust crate can write the `.vox` files this pipeline needs**, so
+   `generators/vox.rs` contains a small hand-written encoder — the fallback
+   §2a already anticipated. `vox-format` is still parser-only; `vox_writer`
+   0.1.9 does write `SIZE`/`XYZI`/`RGBA` but emits **no scene-graph chunks**,
+   and the Godot importer below cannot read a file without them. The format
+   is simple enough that encoding it directly is ~150 lines with no
+   dependency risk, and it also lets us emit `MATL` material chunks.
+2. **One asset becomes one mesh per material class.** A voxel mesh imported
+   into Godot carries vertex colours but a single material, which cannot
+   satisfy §4's rule that steel is *noticeably* shinier than concrete. So
+   `voxgen` writes both a combined `name.vox` (for previews and for a human
+   opening it in an editor) and `name.<class>.vox` per material class the
+   asset uses; Godot rebuilds one `StandardMaterial3D` per class from
+   `palette.ron`'s own numbers and reassembles the asset as a node with one
+   `MeshInstance3D` per class.
+3. **Reviewing a model headlessly works, with one wrinkle**:
+   `vengi-thumbnailer -i model.vox -o out.png -s 512 --image --isometric` is
+   the incantation. `vengi-voxconvert -o out.png` is *not* — that writes one
+   PNG per Z-slice of the volume, which is not a thumbnail. And the
+   thumbnailer renders through OpenGL, so forcing `SDL_VIDEODRIVER=dummy`
+   makes it fail; it needs a real video driver even though nothing is
+   displayed. `scripts/build-voxels.sh` wraps all of this.
+4. **Godot must run `--import` twice on a cold cache.** The `.vox` importer
+   is an editor *plugin*, and a plugin is only registered on the pass after
+   the one that first scans the project — so the first import silently skips
+   every `.vox` and the second imports them all. This bites any CI setup that
+   assumes one import pass is enough.
 
 ## 3. Theme & setting
 
@@ -85,6 +120,11 @@ assets/voxels/
 - **Atmosphere**: steam and smoke particles from cooking/heating equipment, visible liquid surfaces in tanks/pipes with subtle shading/reflection — these sell the "working factory" feeling more than static geometry alone.
 
 ## 5. UI style
+
+> **Status:** none of §5 is built yet. The scene has a deliberately plain
+> dark readout panel so text stays legible over a lit 3D scene; the
+> clipboard/checklist widgets, voxel-rendered icon slots and hotbar below are
+> their own piece of work, not something to approximate half-way.
 
 - **Clean and simple, Minecraft-adjacent**: chunky panel borders, flat-shaded slot grids, a limited, consistent color palette per panel, generous hit targets. Avoid modern skeuomorphic-app UI (gradients, drop shadows everywhere, thin hairline fonts) — the UI should feel like it belongs in the same voxel world as the factory.
 - **Icons are rendered from the real assets**: item/recipe/machine icons are small isometric renders of the actual voxel models (the same asset the player sees in the world, rendered to a thumbnail), not separately-drawn 2D icon art. This keeps the UI and the world visually consistent and halves the art workload per item.
@@ -112,12 +152,23 @@ assets/voxels/
 
 ## 9. Open questions (not yet decided)
 
-- Exact camera angle: true 2:1 isometric vs. a Sims-style ~3/4 dimetric — needs a side-by-side prototype before locking in, since it affects how voxel assets get modeled.
+- Exact camera angle: true 2:1 isometric vs. a Sims-style ~3/4 dimetric — needs a side-by-side prototype before locking in, since it affects how voxel assets get modeled. **Still open, but no longer undecided in practice:** the scene currently uses a true isometric view (an equal-parts `(1, 1, 1)` view direction), chosen because it keeps voxel cubes perfectly regular on screen. It is one constant in `main.gd` (`CAMERA_DIRECTION`), so the side-by-side prototype is cheap whenever someone wants it.
 - Concrete palette values (exact hex ranges per material category), rather than the directional description in §7.
 - Specific typeface.
 - Whether player-visible characters (if any) share the 32×32×32 tile scale from §2 or use a different scale for facial/readability reasons — common in voxel games (e.g. characters are often modeled at a different fidelity than environment tiles).
-- Which Rust `.vox`-writing approach (§2a) ends up used — re-check `vox-format`, `vox_writer`, and `create_vox`'s maturity at implementation time rather than assuming today's research still holds.
-- Which specific Godot `.vox` import plugin (§2a) gets adopted — pick and pin one during milestone 1.
+- ~~Which Rust `.vox`-writing approach (§2a) ends up used~~ — **resolved
+  2026-09-07**: none of them. All three were re-checked at implementation
+  time exactly as this question asked, and none can write a file the Godot
+  importer accepts; `assets/voxels/generators/vox.rs` is a hand-written
+  encoder instead. See §2b point 1 for the specifics.
+- ~~Which specific Godot `.vox` import plugin (§2a) gets adopted~~ —
+  **resolved 2026-09-07**:
+  [qbradq/Godot-MagicaVoxel-Importer-with-Extensions](https://github.com/qbradq/Godot-MagicaVoxel-Importer-with-Extensions),
+  vendored and pinned at commit `288f1d8` (plugin v1.2) under
+  `godot_project/addons/`. The choice turned out not to be a choice: the
+  other candidate this doc named (`cschram/godot-vox-import`) now redirects
+  to that same repository, so there is one maintained Godot 4 `.vox`
+  importer, not two.
 - **Touch/mobile input is a real gap in this doc, flagged during review rather than designed here.** ARCHITECTURE.md targets PC/Mac/mobile, but §1, §5, and §6 above all implicitly assume mouse+keyboard (hover tooltips, precise clicks on hotbar slots, camera-rotation as a keypress/button). None of that transfers to touch automatically — hover has no touch equivalent, small slot grids need larger touch targets, and camera rotate/zoom need an explicit gesture mapping. Not designing this now since it's not needed until ARCHITECTURE.md milestone 10 (platform polish), but it should be resolved well before then, not discovered at that milestone.
 
 ---

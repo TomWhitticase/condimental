@@ -1,0 +1,31 @@
+{
+  "belt": [
+    "matte",
+    "metal"
+  ],
+  "floor_tile": [
+    "matte"
+  ],
+  "item_bottle": [
+    "matte"
+  ],
+  "item_box": [
+    "matte"
+  ],
+  "item_ketchup_pail": [
+    "matte",
+    "metal"
+  ],
+  "item_sauce_pail": [
+    "matte",
+    "metal"
+  ],
+  "item_tomato": [
+    "matte"
+  ],
+  "machine": [
+    "matte",
+    "metal",
+    "emissive"
+  ]
+}

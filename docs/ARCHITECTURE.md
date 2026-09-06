@@ -70,6 +70,8 @@ Pin these explicitly rather than "latest" — bump only as a deliberate, recorde
 | `gdext` (crate `godot`) | 0.5.5 |
 | Rust | edition 2024, MSRV = 1.98.1 (stable at time of pinning) |
 | `hecs` | 0.11.1 |
+| Godot `.vox` importer ([qbradq/Godot-MagicaVoxel-Importer-with-Extensions](https://github.com/qbradq/Godot-MagicaVoxel-Importer-with-Extensions)) | v1.2, commit `288f1d8` — vendored under `godot_project/addons/` |
+| `vengi` (voxel thumbnailer, dev tool only — not shipped) | 0.5.0 |
 
 Rationale: §0 already argues Bevy's churn poisons an agent's training-data reliability for it; `gdext` is comparatively niche and evolving too (see §0's `gdext` risk note), so the same discipline applies to it, not just to the thing being rejected.
 
@@ -352,9 +354,10 @@ GAMEPLAY.md both already have a section like this, this doc didn't.
   milestone 1 starts~~ — resolved at milestone 1 (2026-09-06): `hecs` 0.11.1
   was last published 2026-07-28, so it's still actively maintained; see §1a.
 - ~~The exact `gdext` version deferred to "pick and pin during milestone
-  1"~~ — resolved: `gdext` 0.5.5 against Godot 4.6.3-stable; see §1a. The
-  Godot `.vox` import plugin (UI_UX.md §2a) is still open — no voxel assets
-  exist yet, so it wasn't needed for milestone 1's round-trip proof.
+  1"~~ — resolved: `gdext` 0.5.5 against Godot 4.6.3-stable; see §1a.
+  ~~The Godot `.vox` import plugin (UI_UX.md §2a) is still open~~ — also
+  resolved (2026-09-07), during the visual-polish pass that first created
+  voxel assets: pinned in §1a, rationale in UI_UX.md §9.
 - Money and in-flight contract state (GAMEPLAY.md's economy, §6) and the
   `StaffPools` resource (GAMEPLAY.md §7) don't have a designed ECS shape yet
   — flagged in GAMEPLAY.md §9, should be resolved before ARCHITECTURE.md §9's

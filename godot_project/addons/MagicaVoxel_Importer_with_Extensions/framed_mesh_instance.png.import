@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cdnn6o5p07h3t"
-path="res://.godot/imported/item_sauce.png-f01c7985372f1f59c0073a242b1a73d8.ctex"
+uid="uid://dyppklqhpudxn"
+path="res://.godot/imported/framed_mesh_instance.png-7c64d1f870a11febd7faeb3e8c9d9e95.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://placeholder_art/item_sauce.png"
-dest_files=["res://.godot/imported/item_sauce.png-f01c7985372f1f59c0073a242b1a73d8.ctex"]
+source_file="res://addons/MagicaVoxel_Importer_with_Extensions/framed_mesh_instance.png"
+dest_files=["res://.godot/imported/framed_mesh_instance.png-7c64d1f870a11febd7faeb3e8c9d9e95.ctex"]
 
 [params]
 

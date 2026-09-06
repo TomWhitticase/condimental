@@ -1,0 +1,84 @@
+// Shared voxel colour palette (UI_UX.md §2a point 5, §4, §7).
+//
+// This file is the SINGLE source of truth for colour and material in the
+// voxel pipeline: every generator in `generators/` references a colour by
+// name here, none invent their own. That is what keeps the "shiny metal vs.
+// matte everything else" rule (UI_UX.md §4) and the neutral-industrial
+// palette (§7) consistent across separately-generated assets instead of
+// drifting per asset.
+//
+// `schema_version` follows ARCHITECTURE.md §4's data-file versioning rule.
+//
+// Palette indices are NOT written here — they are derived from this list's
+// order (entry 0 becomes MagicaVoxel palette index 1, and so on), the same
+// "file order is the data" convention data/recipes.ron already uses. Append
+// new colours at the end; reordering re-indexes every generated .vox.
+//
+// `class` names a material class, defined in `materials` below. Godot builds
+// one `StandardMaterial3D` per class from these numbers (they are exported
+// to `materials.json` alongside the models), and each asset is emitted as
+// one .vox per class it uses, so a machine's steel really can be shinier
+// than the concrete it stands on — UI_UX.md §4's deliberate metal exception.
+(
+    schema_version: 1,
+
+    materials: {
+        // Baseline: painted metal, concrete, plastic, rubber, cardboard.
+        // Flat and mostly matte, in keeping with a voxel-art look (§4).
+        "matte": (metallic: 0.0, roughness: 0.95, emission_energy: 0.0),
+        // The deliberate exception (§4): stainless tanks, housings, pipes and
+        // fittings read as noticeably shinier than everything else, which is
+        // what makes "important machinery" pop against plainer surroundings.
+        "metal": (metallic: 0.9, roughness: 0.18, emission_energy: 0.0),
+        // Status lights / indicator strips. Both an aesthetic touch and a
+        // functional readability signal (§4, §7) — these are the elements the
+        // WorldEnvironment's glow pass picks up.
+        "emissive": (metallic: 0.0, roughness: 0.55, emission_energy: 2.6),
+    },
+
+    colors: [
+        // --- floor / structure (neutral industrial base, §7) ---
+        (name: "concrete_dark",  rgb: "#43433F", class: "matte"),
+        (name: "concrete",       rgb: "#6A6A63", class: "matte"),
+        (name: "concrete_light", rgb: "#838379", class: "matte"),
+        (name: "floor_seam",     rgb: "#33332F", class: "matte"),
+        (name: "drain_grate",    rgb: "#2C2C2A", class: "matte"),
+
+        // --- belts ---
+        (name: "rubber_dark",    rgb: "#1E1E21", class: "matte"),
+        (name: "rubber",         rgb: "#2C2C31", class: "matte"),
+
+        // --- safety signage (§3: real industrial visual language) ---
+        (name: "hazard_yellow",  rgb: "#D9A21B", class: "matte"),
+        (name: "hazard_black",   rgb: "#191919", class: "matte"),
+
+        // --- metals (§4's shiny exception) ---
+        (name: "steel_dark",     rgb: "#6F7680", class: "metal"),
+        (name: "steel",          rgb: "#9BA3AC", class: "metal"),
+        (name: "steel_light",    rgb: "#C6CCD2", class: "metal"),
+        (name: "brass",          rgb: "#B98A3C", class: "metal"),
+        (name: "pipe_grey",      rgb: "#868E96", class: "metal"),
+
+        // --- painted machine housings ---
+        (name: "paint_blue",     rgb: "#2E5772", class: "matte"),
+        (name: "paint_red",      rgb: "#82372F", class: "matte"),
+
+        // --- status / alert (saturated colour reserved for meaning, §7) ---
+        (name: "status_green",   rgb: "#4AE06B", class: "emissive"),
+        (name: "status_amber",   rgb: "#FFB020", class: "emissive"),
+        (name: "status_red",     rgb: "#FF3B30", class: "emissive"),
+
+        // --- product: raw ingredient through finished, boxed goods ---
+        (name: "tomato_red",     rgb: "#C22C21", class: "matte"),
+        (name: "tomato_shadow",  rgb: "#8B1E17", class: "matte"),
+        (name: "tomato_leaf",    rgb: "#3E8C39", class: "matte"),
+        (name: "sauce_red",      rgb: "#9E2117", class: "matte"),
+        (name: "ketchup_red",    rgb: "#BE160E", class: "matte"),
+        (name: "pail_grey",      rgb: "#989EA2", class: "matte"),
+        (name: "glass_pale",     rgb: "#B4CBC5", class: "matte"),
+        (name: "cap_white",      rgb: "#E4E0D8", class: "matte"),
+        (name: "label_cream",    rgb: "#E5DCC5", class: "matte"),
+        (name: "cardboard",      rgb: "#AD8450", class: "matte"),
+        (name: "cardboard_dark", rgb: "#875F35", class: "matte"),
+    ],
+)
