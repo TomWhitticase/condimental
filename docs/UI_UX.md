@@ -106,7 +106,7 @@ assets/voxels/
 
 ## 8. What this doc does not cover
 
-- **Gameplay mechanics, recipes, progression, balance** — a game-design concern, not an aesthetics one; not yet written up anywhere.
+- **Gameplay mechanics, recipes, progression, balance** — a game-design concern, not an aesthetics one; see [docs/GAMEPLAY.md](GAMEPLAY.md).
 - **Simulation architecture, rendering pipeline, engine/tooling choices, data formats, performance** — see [docs/ARCHITECTURE.md](ARCHITECTURE.md).
 - **Audio direction (music, SFX, ambience)** — not decided yet; would warrant its own doc when it is.
 

@@ -21,16 +21,63 @@ conflict with them.
 
 ## Working conventions
 
-- Follow docs/ARCHITECTURE.md for stack/architecture decisions, and
-  docs/UI_UX.md for anything visual/UI — don't deviate (e.g. don't reach for
+- Follow docs/ARCHITECTURE.md for stack/architecture decisions, docs/UI_UX.md
+  for anything visual/UI, and docs/GAMEPLAY.md for anything about mechanics,
+  progression, or economy — don't deviate (e.g. don't reach for
   Unity/Unreal/Bevy, don't put gameplay logic in GDScript, don't hardcode
   recipes/ingredients in Rust, don't introduce flat-textured non-voxel assets
-  or a free-rotating camera) without discussing it first.
+  or a free-rotating camera, don't add a spot market alongside contracts)
+  without discussing it first.
 - This project is being built primarily by Claude Code. When a non-trivial design
-  decision gets made that isn't already covered by docs/ARCHITECTURE.md, record
-  it in the decisions log below so future sessions don't re-litigate it.
+  decision gets made that isn't already covered by one of the three docs, record
+  it in the decisions log below (and in the relevant doc itself) so future
+  sessions don't re-litigate it.
 - Prefer small, playable increments over big upfront systems — this is a game, favor "can I run it and see something" early.
 - Use plan mode for anything that touches architecture or adds a new major system; small fixes/tweaks don't need it.
+
+## Project structure
+
+Nothing beyond docs exists yet (pre-alpha, milestone 1 of ARCHITECTURE.md §9
+hasn't started). Current layout:
+
+```
+sauce-factory/
+  CLAUDE.md            # this file — always loaded, points at the three docs below
+  CONTRIBUTING.md       # commit message convention
+  README.md              # short public-facing pitch
+  docs/
+    README.md              # docs-folder index — read this first when only skimming
+    ARCHITECTURE.md          # how the game runs and is built
+    UI_UX.md                  # how the game looks and behaves
+    GAMEPLAY.md                # what the game actually is to play
+    DEVLOG.md                   # status tracker + dated log — not @-included, check/update separately
+  scripts/               # repo tooling (e.g. commit-msg lint)
+  .githooks/              # git hooks (commit-msg, pre-commit) — enable via `git config core.hooksPath .githooks`
+  .github/workflows/       # CI (commit-message lint)
+```
+
+As implementation starts, lay the repo out to match what the docs already
+commit to — don't improvise a different shape:
+
+- A Rust workspace for the simulation core (ARCHITECTURE.md §1/§7), holding
+  the ECS/`hecs`+`rayon` sim, the `SimBridge`/`gdext` interop layer, and the
+  voxel-asset generator code (UI_UX.md §2a) — likely `sim_core/` and a
+  `tools`/`xtask`-style crate for the build/asset pipeline, per
+  ARCHITECTURE.md §7's checked-in build script.
+- A Godot 4 project for presentation (ARCHITECTURE.md §1/§5) — GDScript, the
+  `.gdextension` file from §7, and the `.vox` import plugin from UI_UX.md §2a.
+- `assets/voxels/{palette.ron, generators/, models/, previews/}` per
+  UI_UX.md §2a's proposed layout — `generators/` and `palette.ron` are source
+  (hand-written, committed), `models/` is a regenerated build artifact (never
+  hand-edited), `previews/` is gitignored and only for visual review.
+- Data files (`items.ron`, `recipes.ron`, `machines.ron`, and eventually
+  `contracts.ron` per GAMEPLAY.md §9) live wherever the Godot/Rust boundary
+  expects data files to live — not yet pinned to a specific path; decide this
+  at milestone 1 and record it here once it exists.
+- Per ARCHITECTURE.md §10: once `sim_core/` and the Godot project exist, each
+  gets its own `CLAUDE.md` documenting invariants specific to that module —
+  don't let this root file grow to cover implementation-level detail that
+  belongs closer to the code.
 
 ## Commit messages
 
@@ -41,6 +88,17 @@ made here don't get rejected:
 ```
 git config core.hooksPath .githooks
 ```
+
+**Before finishing a commit, decide whether docs/DEVLOG.md needs a note.**
+This is a real step in the commit workflow, not optional housekeeping — a
+`pre-commit` hook will print a reminder if a commit doesn't touch
+`docs/DEVLOG.md`, but it never blocks the commit, because the actual judgment
+call is yours: most small commits (a wording tweak, a minor fix) genuinely
+don't need one. Add a brief, high-level entry when the commit represents a
+decision, a milestone, or otherwise-meaningful progress — see docs/DEVLOG.md's
+own "How to use this doc" for tone (short, general, not a restatement of the
+diff). Update docs/DEVLOG.md's "Current status" section in the same commit if
+it's gone stale.
 
 ## Decisions log
 
@@ -110,3 +168,15 @@ git config core.hooksPath .githooks
   `docs/` without reading everything — not itself authoritative/`@`-included
   (the three docs already are), just a map to them. Any new doc added later
   should get a row here too, per that file's own "Adding a new doc" note.
+- 2026-09-06: Fixed stale cross-references between ARCHITECTURE.md/UI_UX.md
+  (both predated GAMEPLAY.md and pointed at "separate design docs" vaguely
+  instead of naming it), and added a Project Structure section to this file
+  describing the current repo layout plus the layout implied by the docs for
+  when implementation starts.
+- 2026-09-06: Added docs/DEVLOG.md — a status tracker + dated history log,
+  explicitly *not* `@`-included (unlike the three design docs) since it grows
+  unboundedly; check it for status/history, don't expect it preloaded. Backed
+  by a non-blocking `pre-commit` reminder hook (prints a note if a commit
+  doesn't touch it, never blocks) plus the rule above this log: before
+  finishing a commit, decide whether it's meaningful enough for a brief,
+  high-level DEVLOG.md entry — most small commits aren't.

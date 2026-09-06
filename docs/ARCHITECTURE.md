@@ -4,9 +4,10 @@ A Factorio-like automation/logistics game, sauce-themed. Target platforms: PC, M
 
 This doc is about **architecture and technology choices only** — how the game
 is built, not what it plays like or looks like. Gameplay design (specific
-recipes, ingredients, mechanics) belongs in separate design docs; visual style
-and UI/UX are covered in [docs/UI_UX.md](UI_UX.md), not here. This file should
-stay useful even if the theme, feature set, or visual style changes.
+recipes, ingredients, mechanics, economy) is covered in
+[docs/GAMEPLAY.md](GAMEPLAY.md); visual style and UI/UX are covered in
+[docs/UI_UX.md](UI_UX.md). This file should stay useful even if the theme,
+feature set, or visual style changes.
 
 This doc follows the pattern established by Factorio's own architecture (deterministic tick simulation, data-oriented ECS, aggregate item representation, tiered update scheduling) and Godot's text-native, agent-friendly project structure. This file is self-contained — it includes the reasoning behind each tech choice and the sources it's based on, so it doesn't depend on any earlier conversation.
 

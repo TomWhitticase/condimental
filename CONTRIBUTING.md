@@ -49,6 +49,17 @@ BREAKING CHANGE: old JSON save files are no longer loadable.
   push/PR as a backstop, in case the local hook was skipped
   (e.g. `git commit --no-verify`).
 
+## Development log
+
+Every commit should prompt the question "does docs/DEVLOG.md need a note?" —
+not every commit needs one (see docs/DEVLOG.md's own guidance: keep it
+high-level, skip trivial changes), but the question should get asked, not
+skipped. A `pre-commit` hook (same `.githooks` setup as above) prints a
+reminder if a commit doesn't touch `docs/DEVLOG.md`; it never blocks the
+commit, since whether an entry is actually warranted is a judgment call. See
+CLAUDE.md's working conventions for the actual rule an AI agent should follow
+here.
+
 ### Why
 
 Once this settles into a real release cadence, `feat`/`fix`/`BREAKING CHANGE`
