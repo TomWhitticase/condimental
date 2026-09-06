@@ -215,7 +215,7 @@ impl SimBridge {
 
 Godot never sees internal representations (gap arrays, fluid pressure math) — only snapshots and deltas. This means the belt-compression algorithm, the fluid model, anything in §3 can be rewritten later without touching a line of GDScript.
 
-**Delta granularity (resolved — was previously unaddressed):** deltas are per-*chunk*, not per-entity. At the scale milestone 6 stress-tests for ("thousands of entities"), a per-entity `Vec<EntityDelta>` reallocated and copied across FFI every tick is the kind of thing that's invisible at milestone 2 and shows up as frame-time spikes only once the world is large — precisely because chunks (§3.1) already exist as a partitioning unit, dirty tracking reuses them instead of inventing a second granularity. `dirty_chunks()` returns a reused, cleared-not-reallocated buffer.
+**Delta granularity (resolved — was previously unaddressed):** deltas are per-*chunk*, not per-entity. At the scale milestone 8 (Scale-up) stress-tests for ("thousands of entities"), a per-entity `Vec<EntityDelta>` reallocated and copied across FFI every tick is the kind of thing that's invisible at milestone 2 and shows up as frame-time spikes only once the world is large — precisely because chunks (§3.1) already exist as a partitioning unit, dirty tracking reuses them instead of inventing a second granularity. `dirty_chunks()` returns a reused, cleared-not-reallocated buffer.
 
 **Undo/redo (resolved):** implemented Rust-side as a bounded stack of `(command, inverse_command)` pairs — not a Godot-side snapshot diff. This keeps undo consistent with the save format below (both are built out of the same command representation) and keeps Godot from needing to understand simulation internals to reverse an action.
 
@@ -269,12 +269,13 @@ Not in early milestones, but §3.9's determinism work means it stays possible wi
 2. **Mobile export spike** (moved early — was previously only in platform polish, at milestone 8, where the risk would surface 7 milestones too late): export the milestone-1 hello-world GDExtension to Android, and separately attempt iOS given its export path is flagged experimental upstream (§0). If iOS GDExtension export is genuinely broken at this point, decide explicitly whether iOS slips to a stretch platform rather than discovering that during platform polish.
 3. **Core loop proof** — one belt, one machine, one recipe (raw input → processed output), rendered and interactable.
 4. **First full chain** — a multi-step production chain end-to-end, driven entirely by data-driven recipes.
-5. **Fluids** — pipe network, a recipe requiring a liquid input.
-6. **Timed processes** — the generic tick-counted long-duration process pattern (§3.5), proven with one process end-to-end.
-7. **Scale-up** — power system, tiered update scheduler, chunk activity tracking; stress-test to thousands of entities. This is also the point at which §4's per-chunk delta design and §3.8's threading model actually get load-tested — don't wait longer than this to find out if they hold up.
-8. **Logistics expansion** — transport between multiple factory sites.
-9. **Platform polish** — mobile touch controls/export, Mac/PC packaging, UI pass. Mobile export risk should already be known from milestone 2; this is about polish, not first discovery.
-10. *(Stretch)* **Multiplayer** — lockstep networking on top of the already-deterministic core.
+5. **Economy MVP** (new — was previously missing from this list entirely, even though [docs/GAMEPLAY.md](GAMEPLAY.md) §1 defines the core loop as production *plus* this): a minimal money value and a single hardcoded contract (fixed sauce mix, fixed cadence, fixed payout) that the milestone-4 chain can actually deliver against and get paid for. Doesn't need the full `contracts.ron`/staff-pool design from GAMEPLAY.md §7/§9 yet — just enough that "build factory → make money" is true end to end, which is the point where this stops being a production-chain tech demo and starts being *this* game.
+6. **Fluids** — pipe network, a recipe requiring a liquid input.
+7. **Timed processes** — the generic tick-counted long-duration process pattern (§3.5), proven with one process end-to-end.
+8. **Scale-up** — power system, tiered update scheduler, chunk activity tracking; stress-test to thousands of entities. This is also the point at which §4's per-chunk delta design and §3.8's threading model actually get load-tested — don't wait longer than this to find out if they hold up.
+9. **Logistics expansion** — transport between multiple factory sites.
+10. **Platform polish** — mobile touch controls/export, Mac/PC packaging, UI pass. Mobile export risk should already be known from milestone 2; this is about polish, not first discovery.
+11. *(Stretch)* **Multiplayer** — lockstep networking on top of the already-deterministic core.
 
 ---
 
@@ -290,7 +291,33 @@ Not in early milestones, but §3.9's determinism work means it stays possible wi
 
 ---
 
-## 11. References
+## 11. Open questions (not yet decided)
+
+Consolidated here for the first time during a cross-doc consistency pass —
+several of these existed only as asides earlier in the doc; UI_UX.md and
+GAMEPLAY.md both already have a section like this, this doc didn't.
+
+- Exact directory path for data files (`items.ron`, `recipes.ron`,
+  `machines.ron`, eventually `contracts.ron` per GAMEPLAY.md §9) relative to
+  the Rust/Godot project split — not yet pinned; decide at milestone 1 and
+  record it in CLAUDE.md's Project Structure section once it exists.
+- `hecs`'s long-term maintenance activity (§1, §12 references) should be
+  re-verified before milestone 1 starts, not assumed from this doc's original
+  research date.
+- The exact `gdext` version and Godot `.vox` import plugin (§1a, and
+  UI_UX.md §2a) are both explicitly deferred to "pick and pin during
+  milestone 1" — not a gap, just not yet resolved.
+- Money and in-flight contract state (GAMEPLAY.md's economy, §6) and the
+  `StaffPools` resource (GAMEPLAY.md §7) don't have a designed ECS shape yet
+  — flagged in GAMEPLAY.md §9, should be resolved before ARCHITECTURE.md §9's
+  milestone 5 (Economy MVP).
+- Spoilage (perishables) and corrosion (acid-handling) likewise have no
+  designed component yet (GAMEPLAY.md §9) — needed before their respective
+  equipment tiers are implemented, not before milestone 5.
+
+---
+
+## 12. References
 
 **Factorio engineering (primary source for the simulation-architecture patterns in §3, §6):**
 - [Friday Facts #176 — Belts optimization for 0.15](https://www.factorio.com/blog/post/fff-176) — gap-based belt item storage, the "compression is permanent" invariant

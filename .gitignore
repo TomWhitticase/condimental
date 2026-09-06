@@ -2,3 +2,12 @@
 *.log
 .env
 .env.local
+
+# Rust build output (ARCHITECTURE.md §1)
+/target
+
+# Godot 4 local editor cache — never the .tscn/.tres sources themselves (ARCHITECTURE.md §5)
+.godot/
+
+# Generated voxel-model PNG previews — regenerate on demand, not shipped (UI_UX.md §2a)
+assets/voxels/previews/

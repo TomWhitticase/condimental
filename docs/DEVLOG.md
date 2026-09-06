@@ -20,8 +20,8 @@ below is history and should only ever be appended to.)*
 - **Stage:** Pre-alpha, docs-only. No game code exists yet.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
-- **Milestone progress:** none of ARCHITECTURE.md §9's milestones have started. Next up is **milestone 1 (Scaffold)** — Godot project + `gdext` hello-world binding, plus the build script and `.gdextension` file called for in §7.
-- **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §12-ish, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
+- **Milestone progress:** none of ARCHITECTURE.md §9's milestones have started. Next up is **milestone 1 (Scaffold)** — Godot project + `gdext` hello-world binding, plus the build script and `.gdextension` file called for in §7. There are now 11 milestones, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it.
+- **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
 
@@ -51,4 +51,17 @@ factory, staff as an abstract resource pool). Still no game code — the docs
 are the whole project so far. Next up: milestone 1 (scaffold) from
 ARCHITECTURE.md. For specifics, see the docs themselves, CLAUDE.md's
 decisions log, or `git log`.
+
+### 2026-09-06 — Cross-doc consistency pass
+
+Read back through all three design docs together looking for gaps and
+contradictions now that they've each been written somewhat independently.
+Found and fixed a real one: the milestone list never actually scheduled the
+economy/contracts system, even though the gameplay doc defines the core loop
+as needing it — added an "Economy MVP" milestone. Also gave the architecture
+doc an "Open questions" section (its siblings already had one) and flagged a
+couple of things that don't have a designed home yet (money/contract state,
+mobile touch input). Tightened up repo config (`.editorconfig`, a fuller
+`.gitignore`) while at it. Nothing structural changed — still docs-only,
+still pre-milestone-1.
 

@@ -180,3 +180,14 @@ it's gone stale.
   doesn't touch it, never blocks) plus the rule above this log: before
   finishing a commit, decide whether it's meaningful enough for a brief,
   high-level DEVLOG.md entry — most small commits aren't.
+- 2026-09-06: Full cross-doc consistency pass. Found and fixed a real gap: the
+  milestone list (ARCHITECTURE.md §9) never scheduled the economy/contracts
+  system at all, even though GAMEPLAY.md §1 defines the core loop as requiring
+  it — added milestone 5 "Economy MVP" (money + one hardcoded contract) right
+  after "First full chain," renumbering the rest. Also flagged that money and
+  in-flight contract state have no architectural home yet (GAMEPLAY.md §9,
+  same treatment as the existing StaffPools/spoilage callouts), and that
+  mobile/touch input is unaddressed in UI_UX.md despite mobile being a target
+  platform (added as an open question there, to resolve before milestone 10,
+  not at it). Also added `.editorconfig` and extended `.gitignore` for
+  Rust/Godot/asset-preview artifacts the docs already commit to producing.

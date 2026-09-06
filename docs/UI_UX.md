@@ -88,7 +88,7 @@ assets/voxels/
 
 - **Clean and simple, Minecraft-adjacent**: chunky panel borders, flat-shaded slot grids, a limited, consistent color palette per panel, generous hit targets. Avoid modern skeuomorphic-app UI (gradients, drop shadows everywhere, thin hairline fonts) — the UI should feel like it belongs in the same voxel world as the factory.
 - **Icons are rendered from the real assets**: item/recipe/machine icons are small isometric renders of the actual voxel models (the same asset the player sees in the world, rendered to a thumbnail), not separately-drawn 2D icon art. This keeps the UI and the world visually consistent and halves the art workload per item.
-- **Diegetic paper-and-metal widgets**: recipe lists, orders, and objectives are framed as **clipboards and checklists** — a paper texture on a metal clipboard clip, checkbox-style tick marks for completed items — rather than flat modern list UI. This is a deliberate physical/tactile framing choice that fits the industrial setting (a factory floor clipboard, not an app notification list).
+- **Diegetic paper-and-metal widgets**: recipe lists, orders, and objectives are framed as **clipboards and checklists** — a paper texture on a metal clipboard clip, checkbox-style tick marks for completed items — rather than flat modern list UI. This is a deliberate physical/tactile framing choice that fits the industrial setting (a factory floor clipboard, not an app notification list). [GAMEPLAY.md](GAMEPLAY.md) §6's contracts (a standing order for a sauce mix, delivered on a cadence) are the concrete, driving use case for this motif — a contract *is* a clipboard.
 - **Typography**: a simple, sturdy, slightly blocky sans-serif — readable at UI sizes, evokes stenciled factory signage/pixel fonts without tipping into illegible novelty pixel fonts.
 - **Layout conventions**: a Minecraft-style hotbar/quick-access strip along one screen edge; build/recipe menus as grids of voxel-rendered icon slots; hover tooltips for recipe/machine detail rather than dense always-on text.
 
@@ -118,6 +118,7 @@ assets/voxels/
 - Whether player-visible characters (if any) share the 32×32×32 tile scale from §2 or use a different scale for facial/readability reasons — common in voxel games (e.g. characters are often modeled at a different fidelity than environment tiles).
 - Which Rust `.vox`-writing approach (§2a) ends up used — re-check `vox-format`, `vox_writer`, and `create_vox`'s maturity at implementation time rather than assuming today's research still holds.
 - Which specific Godot `.vox` import plugin (§2a) gets adopted — pick and pin one during milestone 1.
+- **Touch/mobile input is a real gap in this doc, flagged during review rather than designed here.** ARCHITECTURE.md targets PC/Mac/mobile, but §1, §5, and §6 above all implicitly assume mouse+keyboard (hover tooltips, precise clicks on hotbar slots, camera-rotation as a keypress/button). None of that transfers to touch automatically — hover has no touch equivalent, small slot grids need larger touch targets, and camera rotate/zoom need an explicit gesture mapping. Not designing this now since it's not needed until ARCHITECTURE.md milestone 10 (platform polish), but it should be resolved well before then, not discovered at that milestone.
 
 ---
 
