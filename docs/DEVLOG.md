@@ -17,10 +17,10 @@ force-loaded into every session's context.
 *(This section reflects "now" — edit it in place as things change. The Log
 below is history and should only ever be appended to.)*
 
-- **Stage:** Pre-alpha, docs-only. No game code exists yet.
+- **Stage:** Pre-alpha, docs-only, but milestones 1-5 are now in flight — see below.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
-- **Milestone progress:** none of ARCHITECTURE.md §9's milestones have started. Next up is **milestone 1 (Scaffold)** — Godot project + `gdext` hello-world binding, plus the build script and `.gdextension` file called for in §7. There are now 11 milestones, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it.
+- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) are being built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. Milestone 1 is dispatched to a worker in the `milestone-1-scaffold` worktree; 2-5 are queued behind it. Check `orca orchestration task-list --run run_51e5cb271445 --json` for live status. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -64,4 +64,15 @@ couple of things that don't have a designed home yet (money/contract state,
 mobile touch input). Tightened up repo config (`.editorconfig`, a fuller
 `.gitignore`) while at it. Nothing structural changed — still docs-only,
 still pre-milestone-1.
+
+### 2026-09-06 — First code: milestones 1-5 dispatched via Orca orchestration
+
+Adopted Orca orchestration (see CLAUDE.md's Orchestration section) as how
+milestone work actually gets built, then used it for real: created a Run and
+a 5-task DAG covering milestones 1-5 (Scaffold, Mobile export spike, Core
+loop proof, First full chain, Economy MVP), dependency-chained to match
+ARCHITECTURE.md §9. Milestone 1 is dispatched to a Claude worker in a fresh
+worktree; the rest are queued behind their dependencies and will be dispatched
+as each prior milestone completes. This is the actual start of writing game
+code — everything before this was design docs only.
 
