@@ -1,0 +1,5 @@
+[alias]
+# `cargo xtask` builds sim_core and copies the compiled extension into
+# godot_project/bin/, where sim_core.gdextension expects it (ARCHITECTURE.md §7).
+# `cargo xtask --release` does the same against a release build.
+xtask = "run --package xtask --"

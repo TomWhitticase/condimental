@@ -5,7 +5,8 @@ Built with heavy use of Claude Code and Orca.
 
 ## Status
 
-🚧 Pre-alpha — design docs only, no game code yet. See [`docs/`](docs/) for the
+🚧 Pre-alpha — scaffold only (Rust↔Godot round trip proven, no gameplay yet).
+See [`docs/`](docs/) for the
 full plan: [architecture](docs/ARCHITECTURE.md) (Rust simulation core + Godot 4),
 [visual style/UI](docs/UI_UX.md) (isometric voxel art), and
 [gameplay/economy](docs/GAMEPLAY.md) (contract-driven sauce production). For

@@ -66,12 +66,14 @@ Pin these explicitly rather than "latest" — bump only as a deliberate, recorde
 
 | Dependency | Pinned to |
 |---|---|
-| Godot | 4.6.x |
-| `gdext` | latest version supporting the Godot 4.6 API level |
-| Rust | edition 2024, MSRV = latest stable at project start |
-| `hecs` | latest stable at project start |
+| Godot | 4.6.3-stable |
+| `gdext` (crate `godot`) | 0.5.5 |
+| Rust | edition 2024, MSRV = 1.98.1 (stable at time of pinning) |
+| `hecs` | 0.11.1 |
 
 Rationale: §0 already argues Bevy's churn poisons an agent's training-data reliability for it; `gdext` is comparatively niche and evolving too (see §0's `gdext` risk note), so the same discipline applies to it, not just to the thing being rejected.
+
+**How these were picked (milestone 1, 2026-09-06):** `gdext` 0.5.5 is its latest release and its default API level targets Godot 4.6 (0.5.0 made "Godot 4.6 the default"; 0.5.4 added an opt-in `api-4-7` feature that milestone 1 does not enable) — so 0.5.5 is the newest `gdext` that still matches a 4.6.x Godot pin without opting into a newer, less-tested API level. Godot 4.6.3-stable is the latest 4.6.x point release. `hecs` 0.11.1 (last published 2026-07-28) resolves §11's open question about its maintenance activity — still active as of this pinning, not abandoned. `hecs` isn't a dependency yet (milestone 1 has no simulation code), but the version is recorded now so a later milestone doesn't need to re-research it.
 
 ---
 
@@ -301,12 +303,13 @@ GAMEPLAY.md both already have a section like this, this doc didn't.
   `machines.ron`, eventually `contracts.ron` per GAMEPLAY.md §9) relative to
   the Rust/Godot project split — not yet pinned; decide at milestone 1 and
   record it in CLAUDE.md's Project Structure section once it exists.
-- `hecs`'s long-term maintenance activity (§1, §12 references) should be
-  re-verified before milestone 1 starts, not assumed from this doc's original
-  research date.
-- The exact `gdext` version and Godot `.vox` import plugin (§1a, and
-  UI_UX.md §2a) are both explicitly deferred to "pick and pin during
-  milestone 1" — not a gap, just not yet resolved.
+- ~~`hecs`'s long-term maintenance activity should be re-verified before
+  milestone 1 starts~~ — resolved at milestone 1 (2026-09-06): `hecs` 0.11.1
+  was last published 2026-07-28, so it's still actively maintained; see §1a.
+- ~~The exact `gdext` version deferred to "pick and pin during milestone
+  1"~~ — resolved: `gdext` 0.5.5 against Godot 4.6.3-stable; see §1a. The
+  Godot `.vox` import plugin (UI_UX.md §2a) is still open — no voxel assets
+  exist yet, so it wasn't needed for milestone 1's round-trip proof.
 - Money and in-flight contract state (GAMEPLAY.md's economy, §6) and the
   `StaffPools` resource (GAMEPLAY.md §7) don't have a designed ECS shape yet
   — flagged in GAMEPLAY.md §9, should be resolved before ARCHITECTURE.md §9's

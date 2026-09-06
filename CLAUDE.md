@@ -37,47 +37,58 @@ conflict with them.
 
 ## Project structure
 
-Nothing beyond docs exists yet (pre-alpha, milestone 1 of ARCHITECTURE.md §9
-hasn't started). Current layout:
+Milestone 1 (ARCHITECTURE.md §9 Scaffold) has landed: a Rust/gdext <-> Godot
+round trip, no gameplay yet. Current layout:
 
 ```
 sauce-factory/
   CLAUDE.md            # this file — always loaded, points at the three docs below
   CONTRIBUTING.md       # commit message convention
   README.md              # short public-facing pitch
+  Cargo.toml             # workspace root — members: sim_core, xtask
+  .cargo/config.toml      # `cargo xtask` alias
+  sim_core/               # Rust cdylib crate: the gdext binding (currently just a SimBridge stub)
+    Cargo.toml
+    src/lib.rs
+  xtask/                   # build script (ARCHITECTURE.md §7): `cargo xtask` builds sim_core
+    Cargo.toml              # and copies the compiled extension into godot_project/bin/
+    src/main.rs
+  godot_project/             # Godot 4 project (presentation layer)
+    project.godot
+    sim_core.gdextension       # checked in; points at godot_project/bin/, which is gitignored (build output)
+    test_round_trip.gd          # headless proof script — see scripts/verify-scaffold.sh
+    bin/                          # gitignored: compiled extension lands here via `cargo xtask`
+  scripts/
+    lint-commit-msg.sh          # commit-msg hook
+    verify-scaffold.sh           # headless round-trip verification (build + Godot cache + test script)
   docs/
     README.md              # docs-folder index — read this first when only skimming
     ARCHITECTURE.md          # how the game runs and is built
     UI_UX.md                  # how the game looks and behaves
     GAMEPLAY.md                # what the game actually is to play
     DEVLOG.md                   # status tracker + dated log — not @-included, check/update separately
-  scripts/               # repo tooling (e.g. commit-msg lint)
   .githooks/              # git hooks (commit-msg, pre-commit) — enable via `git config core.hooksPath .githooks`
   .github/workflows/       # CI (commit-message lint)
 ```
 
-As implementation starts, lay the repo out to match what the docs already
-commit to — don't improvise a different shape:
+Still not yet laid out (add when the relevant milestone needs it, per the
+docs — don't improvise a different shape when the time comes):
 
-- A Rust workspace for the simulation core (ARCHITECTURE.md §1/§7), holding
-  the ECS/`hecs`+`rayon` sim, the `SimBridge`/`gdext` interop layer, and the
-  voxel-asset generator code (UI_UX.md §2a) — likely `sim_core/` and a
-  `tools`/`xtask`-style crate for the build/asset pipeline, per
-  ARCHITECTURE.md §7's checked-in build script.
-- A Godot 4 project for presentation (ARCHITECTURE.md §1/§5) — GDScript, the
-  `.gdextension` file from §7, and the `.vox` import plugin from UI_UX.md §2a.
 - `assets/voxels/{palette.ron, generators/, models/, previews/}` per
   UI_UX.md §2a's proposed layout — `generators/` and `palette.ron` are source
   (hand-written, committed), `models/` is a regenerated build artifact (never
   hand-edited), `previews/` is gitignored and only for visual review.
 - Data files (`items.ron`, `recipes.ron`, `machines.ron`, and eventually
-  `contracts.ron` per GAMEPLAY.md §9) live wherever the Godot/Rust boundary
-  expects data files to live — not yet pinned to a specific path; decide this
-  at milestone 1 and record it here once it exists.
-- Per ARCHITECTURE.md §10: once `sim_core/` and the Godot project exist, each
-  gets its own `CLAUDE.md` documenting invariants specific to that module —
-  don't let this root file grow to cover implementation-level detail that
-  belongs closer to the code.
+  `contracts.ron` per GAMEPLAY.md §9) — not yet pinned to a specific path;
+  decide when the first recipe/machine content is added (milestone 3) and
+  record it here once it exists.
+- The `hecs`+`rayon` ECS and any real `SimBridge` API surface (ARCHITECTURE.md
+  §3/§4) — `sim_core/` currently holds only the milestone-1 round-trip stub,
+  deliberately no simulation logic yet.
+- Per ARCHITECTURE.md §10: `sim_core/` and `godot_project/` should each get
+  their own `CLAUDE.md` documenting invariants specific to that module once
+  there's enough in either to warrant one — don't let this root file grow to
+  cover implementation-level detail that belongs closer to the code.
 
 ## Orchestration (Orca)
 
@@ -237,3 +248,18 @@ it's gone stale.
   foundational-milestone, gates at milestone boundaries, self-contained task
   specs). First use: milestones 1-5 (scaffold through Economy MVP) dispatched
   as a supervised DAG.
+- 2026-09-06: Completed ARCHITECTURE.md §9 milestone 1 (Scaffold) and pinned
+  the exact versions ARCHITECTURE.md §1a left as placeholders: Godot
+  **4.6.3-stable**, `gdext` (crate `godot`) **0.5.5** — its latest release,
+  and the newest one whose *default* API level still targets Godot 4.6 (0.5.4
+  added an opt-in `api-4-7` feature that milestone 1 deliberately doesn't
+  enable, to stay matched to the 4.6.x Godot pin) — Rust **edition 2024**
+  (rustc 1.98.1 at pin time), and `hecs` **0.11.1** (recorded now though not
+  yet a dependency; last published 2026-07-28, resolving §11's "re-verify
+  maintenance activity" open question). Also decided: `cargo xtask` (not a
+  justfile) is the ARCHITECTURE.md §7 build script, so the only required repo
+  tool is `cargo` itself; and Godot's non-editor runtime won't discover a
+  `.gdextension` file without a one-time `godot --import` pass that populates
+  the gitignored `godot_project/.godot/` cache — `scripts/verify-scaffold.sh`
+  automates and headlessly verifies this whole path (see its header comment
+  for a known, benign Godot 4.6.3 editor-shutdown crash it works around).

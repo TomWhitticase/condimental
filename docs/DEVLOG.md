@@ -17,10 +17,10 @@ force-loaded into every session's context.
 *(This section reflects "now" — edit it in place as things change. The Log
 below is history and should only ever be appended to.)*
 
-- **Stage:** Pre-alpha, docs-only, but milestones 1-5 are now in flight — see below.
+- **Stage:** Pre-alpha. Milestone 1 (Scaffold) is done — a real, headlessly-verified Rust↔Godot round trip exists, but zero gameplay/simulation code.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
-- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) are being built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. Milestone 1 is dispatched to a worker in the `milestone-1-scaffold` worktree; 2-5 are queued behind it. Check `orca orchestration task-list --run run_51e5cb271445 --json` for live status. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it.
+- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) are being built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **Milestone 1 (Scaffold) is complete** — see the 2026-09-06 "Milestone 1: Scaffold" log entry below. Milestones 2 (Mobile export spike) and 3 (Core loop proof) are next (both depend only on milestone 1). Check `orca orchestration task-list --run run_51e5cb271445 --json` for live status. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -36,6 +36,35 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-06 — Milestone 1: Scaffold
+
+First real code. Set up the Rust workspace (`sim_core/` cdylib crate + an
+`xtask` build-script crate) and a Godot 4 project (`godot_project/`), wired
+together via `gdext` — a trivial `SimBridge.ping()` callable from GDScript
+proves the Rust↔Godot round trip end to end. `cargo xtask` builds and copies
+the compiled extension into place per ARCHITECTURE.md §7; `sim_core.gdextension`
+is checked in. Pinned the exact versions ARCHITECTURE.md §1a had left as
+placeholders (Godot 4.6.3-stable, `gdext` 0.5.5, Rust edition 2024, `hecs`
+0.11.1) — see CLAUDE.md's decisions log for the reasoning.
+
+Verified entirely headlessly, no editor GUI: `scripts/verify-scaffold.sh`
+builds, primes Godot's local import cache (working around a known, benign
+Godot 4.6.3 editor-shutdown crash — see the script's own comments), then runs
+`godot --headless --script test_round_trip.gd`, which calls `SimBridge.ping()`
+and asserts the known return value, exiting non-zero on failure. This is now
+the project's headless "does the interop boundary still work" check.
+
+### 2026-09-06 — Milestones 1-5 dispatched via Orca orchestration
+
+Adopted Orca orchestration (see CLAUDE.md's Orchestration section) as how
+milestone work actually gets built, then used it for real: created a Run and
+a 5-task DAG covering milestones 1-5 (Scaffold, Mobile export spike, Core
+loop proof, First full chain, Economy MVP), dependency-chained to match
+ARCHITECTURE.md §9. Milestone 1 (above) was the first task dispatched and is
+now complete; 2-5 are queued behind their dependencies and will be dispatched
+as each prior milestone completes. This is the actual start of writing game
+code — everything before this was design docs only.
 
 ### 2026-09-06 — Repo set up, full design-doc pass complete
 
@@ -64,15 +93,4 @@ couple of things that don't have a designed home yet (money/contract state,
 mobile touch input). Tightened up repo config (`.editorconfig`, a fuller
 `.gitignore`) while at it. Nothing structural changed — still docs-only,
 still pre-milestone-1.
-
-### 2026-09-06 — First code: milestones 1-5 dispatched via Orca orchestration
-
-Adopted Orca orchestration (see CLAUDE.md's Orchestration section) as how
-milestone work actually gets built, then used it for real: created a Run and
-a 5-task DAG covering milestones 1-5 (Scaffold, Mobile export spike, Core
-loop proof, First full chain, Economy MVP), dependency-chained to match
-ARCHITECTURE.md §9. Milestone 1 is dispatched to a Claude worker in a fresh
-worktree; the rest are queued behind their dependencies and will be dispatched
-as each prior milestone completes. This is the actual start of writing game
-code — everything before this was design docs only.
 

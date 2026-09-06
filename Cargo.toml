@@ -1,0 +1,3 @@
+[workspace]
+resolver = "2"
+members = ["sim_core", "xtask"]
