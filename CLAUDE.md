@@ -39,3 +39,11 @@ git config core.hooksPath .githooks
   `gdext`, data-driven content (RON/JSON). Chosen specifically to be
   agent-friendly (text-native scenes, compiler-error feedback loop, mainstream
   languages). See that doc for full rationale and sources.
+- 2026-09-06: Ran a critical review of that architecture doc specifically hunting
+  for holes, then resolved every finding into firm decisions rather than leaving
+  them open — see docs/ARCHITECTURE.md for details. Highlights: simulation state
+  is fixed-point, not float (§3.9); ECS is `hecs` + `rayon`, not `bevy_ecs`
+  (§1/§3.8); Godot/`gdext`/Rust versions are now pinned (§1a); `SimBridge` gained
+  preview/undo/save-format design (§4); a mobile-export spike moved from
+  milestone 8 to milestone 2 (§9); primary dev loop is headless `cargo test`, not
+  editor hot-reload (§7). Don't re-litigate these without good reason.
