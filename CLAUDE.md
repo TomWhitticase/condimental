@@ -1,11 +1,22 @@
 # sauce-factory
 
-Factorio-like automation game, themed around sauce production. Pre-alpha — no tech stack chosen yet.
+Factorio-like automation game, themed around sauce production. Pre-alpha.
+
+@docs/ARCHITECTURE.md
+
+The file above is the authoritative architecture/tech-stack plan (Rust simulation
+core + Godot/GDScript presentation via `gdext`, data-driven recipes, deterministic
+tick simulation). Always follow it when writing code — it also explains *why*
+each choice was made, which matters when a change seems to conflict with it.
 
 ## Working conventions
 
-- No stack decided yet. Don't assume a language/engine/framework — ask or propose options before scaffolding anything.
-- This project is being built primarily by Claude Code. When a non-trivial design decision gets made (stack, architecture, core mechanics), record it here so future sessions don't re-litigate it.
+- Follow docs/ARCHITECTURE.md for stack/architecture decisions — don't deviate
+  (e.g. don't reach for Unity/Unreal/Bevy, don't put gameplay logic in GDScript,
+  don't hardcode recipes/ingredients in Rust) without discussing it first.
+- This project is being built primarily by Claude Code. When a non-trivial design
+  decision gets made that isn't already covered by docs/ARCHITECTURE.md, record
+  it in the decisions log below so future sessions don't re-litigate it.
 - Prefer small, playable increments over big upfront systems — this is a game, favor "can I run it and see something" early.
 - Use plan mode for anything that touches architecture or adds a new major system; small fixes/tweaks don't need it.
 
@@ -23,3 +34,8 @@ git config core.hooksPath .githooks
 
 - 2026-09-06: Commit messages must follow Conventional Commits (enforced via
   git hook + CI) so history can generate release notes later. See CONTRIBUTING.md.
+- 2026-09-06: Adopted the architecture plan in docs/ARCHITECTURE.md — Rust
+  simulation core (ECS, deterministic ticks) + Godot 4/GDScript presentation via
+  `gdext`, data-driven content (RON/JSON). Chosen specifically to be
+  agent-friendly (text-native scenes, compiler-error feedback loop, mainstream
+  languages). See that doc for full rationale and sources.
