@@ -1,0 +1,44 @@
+name: Commit messages
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine commit range
+        id: range
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "range=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            before="${{ github.event.before }}"
+            if [ -z "$before" ] || [[ "$before" =~ ^0+$ ]]; then
+              # First push of the branch: only check the tip commit.
+              echo "range=${{ github.event.after }}~1..${{ github.event.after }}" >> "$GITHUB_OUTPUT"
+            else
+              echo "range=${before}..${{ github.event.after }}" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Lint each commit message in range
+        run: |
+          chmod +x scripts/lint-commit-msg.sh
+          status=0
+          for sha in $(git log --format=%H ${{ steps.range.outputs.range }}); do
+            msg_file=$(mktemp)
+            git log -1 --format=%B "$sha" > "$msg_file"
+            echo "Checking $sha:"
+            if ! scripts/lint-commit-msg.sh "$msg_file"; then
+              status=1
+            fi
+            rm -f "$msg_file"
+          done
+          exit $status
