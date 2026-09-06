@@ -1,14 +1,15 @@
-# Headless proof for milestone 3 (ARCHITECTURE.md §7, §9 item 3).
+# Headless proof for milestone 4 (ARCHITECTURE.md §7, §9 item 4).
 #
 # Run with:
 #   godot --headless --path godot_project --script test_core_loop.gd
 #
 # This is deliberately separate from sim_core's own `cargo test` suite
-# (which already proves conservation across thousands of ticks in pure
-# Rust). What this script actually exercises is the part cargo test can't:
-# the real `gdext` boundary — GDScript building/parsing the JSON
-# `issue_command_json`/`chunk_snapshot_json` wire format through Godot's
-# own Variant/String/JSON machinery, not sim_core's.
+# (which already proves conservation across the whole multi-stage chain in
+# pure Rust). What this script actually exercises is the part cargo test
+# can't: the real `gdext` boundary — GDScript building/parsing the JSON
+# `issue_command_json`/`chunk_snapshot_json`/`chain_layout_json` wire format
+# through Godot's own Variant/String/JSON machinery, not sim_core's — driven
+# through the whole chain end to end, not just one belt/machine.
 extends SceneTree
 
 
@@ -20,9 +21,15 @@ func _fail(msg: String) -> void:
 func _initialize() -> void:
 	var sim = SimBridge.new()
 
-	# Spawn all 4 tomatoes the bundled recipe needs, ticking between each
-	# so every spawn respects the belt's min-spacing (mirrors sim_core's
-	# own `try_spawn` contract — see sim_core/src/sim/belt.rs).
+	var layout: Array = JSON.parse_string(sim.chain_layout_json())
+	if layout.size() < 2:
+		_fail("expected a multi-stage chain (>=2 recipes), got %d stage(s)" % layout.size())
+		return
+	var final_recipe: String = layout[layout.size() - 1]["recipe"]
+
+	# Spawn all 4 tomatoes the first recipe needs, ticking between each so
+	# every spawn respects the belt's min-spacing (mirrors sim_core's own
+	# `try_spawn` contract — see sim_core/src/sim/belt.rs).
 	var spawned := 0
 	var attempts := 0
 	while spawned < 4 and attempts < 2000:
@@ -34,65 +41,76 @@ func _initialize() -> void:
 		sim.tick()
 
 	if spawned != 4:
-		_fail("could not get all 4 tomatoes onto the belt (spawned %d)" % spawned)
+		_fail("could not get all 4 tomatoes onto the first belt (spawned %d)" % spawned)
 		return
 
-	# Run long enough for them to reach the machine and for the recipe's
-	# full time_ticks to elapse (data/recipes.ron: time_ticks = 180).
-	for i in range(1000):
+	# Run long enough for the single resulting unit to travel every belt and
+	# clear every machine's `time_ticks` in the chain.
+	for i in range(20000):
 		sim.tick()
+		if _final_output_count(sim, final_recipe) > 0:
+			break
 
-	var snapshot = JSON.parse_string(sim.chunk_snapshot_json(0))
-	if snapshot == null:
-		_fail("chunk_snapshot_json(0) did not parse as JSON")
-		return
-
-	var machine = snapshot.get("machine")
-	if machine == null:
-		_fail("snapshot has no machine")
-		return
-
-	var output_before: Array = machine["output"]
-	var sauce_before := _count_of(output_before, "tomato_sauce")
-	if sauce_before != 1:
-		_fail("expected exactly 1 tomato_sauce in the output buffer, got %d" % sauce_before)
+	var final_output := _final_output_count(sim, final_recipe)
+	if final_output != 1:
+		_fail("expected exactly 1 unit of the final product ('%s') in output, got %d" % [final_recipe, final_output])
 		return
 
 	sim.issue_command_json(JSON.stringify({"type": "collect_output"}))
-	var after = JSON.parse_string(sim.chunk_snapshot_json(0))
-	var sauce_after := _count_of(after["machine"]["output"], "tomato_sauce")
-	if sauce_after != 0:
-		_fail("collect_output did not empty the output buffer (still %d)" % sauce_after)
+	var after := _final_output_count(sim, final_recipe)
+	if after != 0:
+		_fail("collect_output did not empty the final stage's output buffer (still %d)" % after)
 		return
 
-	# query_tile_json: confirm both the belt and machine tiles resolve to
-	# the right kind, and an empty tile resolves to nothing.
-	var belt_tile = JSON.parse_string(sim.query_tile_json(0, 0))
+	# query_tile_json: confirm the first belt and first machine tiles
+	# resolve to the right kind, and an empty tile resolves to nothing.
+	var first_belt_start: Array = layout[0]["belt_start_tile"]
+	var belt_tile = JSON.parse_string(sim.query_tile_json(int(first_belt_start[0]), int(first_belt_start[1])))
 	if belt_tile == null or belt_tile.get("kind") != "belt":
-		_fail("query_tile_json(0,0) did not report a belt tile: %s" % str(belt_tile))
+		_fail("query_tile_json did not report a belt tile at the chain start: %s" % str(belt_tile))
 		return
-	var machine_tile = JSON.parse_string(sim.query_tile_json(4, 0))
+	var first_machine_tile: Array = layout[0]["machine_tile"]
+	var machine_tile = JSON.parse_string(sim.query_tile_json(int(first_machine_tile[0]), int(first_machine_tile[1])))
 	if machine_tile == null or machine_tile.get("kind") != "machine":
-		_fail("query_tile_json(4,0) did not report a machine tile: %s" % str(machine_tile))
+		_fail("query_tile_json did not report a machine tile at the first stage: %s" % str(machine_tile))
 		return
-	if sim.query_tile_json(99, 99) != "":
+	if sim.query_tile_json(9999, 9999) != "":
 		_fail("query_tile_json on an empty tile should return an empty string")
 		return
 
-	print("CORE_LOOP_OK: 4 tomatoes -> 1 tomato_sauce, collected, tile queries correct")
+	print("CORE_LOOP_OK: 4 tomatoes travelled all %d stages -> 1 '%s', collected, tile queries correct" % [layout.size(), final_recipe])
 	quit(0)
 
 
 func _tomato_count(sim) -> int:
-	var snapshot = JSON.parse_string(sim.chunk_snapshot_json(0))
 	var total := 0
-	if snapshot.get("belt") != null:
-		for pair in snapshot["belt"]["items"]:
+	# The whole chain fits in chunk (0,0) at this milestone's scale (see
+	# sim_core/tests/core_loop.rs's equivalent note) — always read it
+	# directly rather than depending on dirty_chunk_ids, which only reports
+	# chunks touched by the *last* tick.
+	var snapshot = JSON.parse_string(sim.chunk_snapshot_json(0))
+	if snapshot == null:
+		return 0
+	for belt in snapshot.get("belts", []):
+		for pair in belt["items"]:
 			if pair[0] == "tomato":
 				total += 1
-	if snapshot.get("machine") != null:
-		total += _count_of(snapshot["machine"]["input"], "tomato")
+	for machine in snapshot.get("machines", []):
+		total += _count_of(machine["input"], "tomato")
 	return total
+
+
+func _final_output_count(sim, final_recipe: String) -> int:
+	var snapshot = JSON.parse_string(sim.chunk_snapshot_json(0))
+	if snapshot == null:
+		return 0
+	for machine in snapshot.get("machines", []):
+		if machine["recipe"] == final_recipe:
+			var total := 0
+			for pair in machine["output"]:
+				total += int(pair[1])
+			return total
+	return 0
 
 
 func _count_of(pairs: Array, item_name: String) -> int:

@@ -10,6 +10,9 @@ pub mod recipe;
 pub mod types;
 pub mod world;
 
-pub use recipe::RecipeRegistry;
+pub use recipe::{Recipe, RecipeRegistry};
 pub use types::{decode_chunk_id, encode_chunk_id};
-pub use world::{ChunkSnapshot, PlayerCommand, TileSnapshot, World, command_from_json};
+pub use world::{
+    BeltSnapshot, ChunkSnapshot, MachineSnapshot, PlayerCommand, StageLayout, TileSnapshot, World,
+    command_from_json,
+};

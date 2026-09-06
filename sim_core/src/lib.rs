@@ -32,7 +32,7 @@ fn load_bundled_recipes() -> RecipeRegistry {
 #[class(base=RefCounted, init)]
 struct SimBridge {
     base: Base<RefCounted>,
-    #[init(val = World::new(load_bundled_recipes(), "tomato_sauce".to_string()))]
+    #[init(val = World::new(load_bundled_recipes()))]
     world: World,
 }
 
@@ -103,5 +103,18 @@ impl SimBridge {
         if let Some(cmd) = sim::command_from_json(&command_json.to_string()) {
             self.world.issue_command(cmd);
         }
+    }
+
+    /// The chain's static per-stage layout (belt/machine tile positions,
+    /// which recipe each stage runs), JSON-serialized. Unlike
+    /// `chunk_snapshot_json`, this never changes at runtime — Godot calls it
+    /// once, at startup, to build a `TileMap` sized to however many stages
+    /// `data/recipes.ron` currently defines, instead of hardcoding stage
+    /// geometry client-side (ARCHITECTURE.md §4/§5).
+    #[func]
+    fn chain_layout_json(&self) -> GString {
+        let layout = self.world.chain_layout();
+        let json = serde_json::to_string(&layout).expect("StageLayout list must serialize");
+        GString::from(json.as_str())
     }
 }

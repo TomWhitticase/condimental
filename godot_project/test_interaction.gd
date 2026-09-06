@@ -16,8 +16,8 @@ func _fail(msg: String) -> void:
 func _tomato_count(sim) -> int:
 	var snapshot = JSON.parse_string(sim.chunk_snapshot_json(0))
 	var total := 0
-	if snapshot.get("belt") != null:
-		for pair in snapshot["belt"]["items"]:
+	for belt in snapshot.get("belts", []):
+		for pair in belt["items"]:
 			if pair[0] == "tomato":
 				total += 1
 	return total

@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
 # Headless proof of milestone 3 (ARCHITECTURE.md §9 item 3, "Core loop
-# proof"). Three layers, cheapest/fastest first:
+# proof") and milestone 4 (§9 item 4, "First full chain") — the same three
+# layers verify both, since milestone 4 only extended the single-belt/
+# single-machine layout into a multi-stage chain, not the verification
+# approach itself. Three layers, cheapest/fastest first:
 #
 #   1. `cargo test -p sim_core` — the real feedback loop (ARCHITECTURE.md
 #      §6/§7): unit tests per component plus an integration test that ticks
-#      the belt+machine+recipe for thousands of ticks and asserts strict
-#      item conservation. No Godot involved at all.
+#      the whole multi-stage chain (belts+machines+recipes, per
+#      data/recipes.ron) for thousands of ticks and asserts strict item
+#      conservation across every stage, not just one. No Godot involved.
 #   2. `cargo xtask` builds the extension and copies it into
 #      godot_project/bin/.
 #   3. Two headless Godot scripts exercise the parts cargo test can't: the
-#      real `gdext` boundary (JSON command/snapshot wire format going
-#      through Godot's own Variant/String/JSON machinery) and the
-#      interactive scene's keyboard input actually reaching SimBridge.
+#      real `gdext` boundary (JSON command/snapshot/layout wire format going
+#      through Godot's own Variant/String/JSON machinery, driven through the
+#      whole chain end to end) and the interactive scene's keyboard input
+#      actually reaching SimBridge.
 #
 # Usage: scripts/verify-core-loop.sh
 
@@ -64,4 +69,4 @@ if [ "$interaction_status" -ne 0 ]; then
 fi
 
 echo
-echo "PASS: milestone 3 core loop verified headlessly (sim_core tests + gdext boundary + interaction)."
+echo "PASS: milestone 3/4 core loop + full chain verified headlessly (sim_core tests + gdext boundary + interaction)."

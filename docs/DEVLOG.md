@@ -17,10 +17,10 @@ force-loaded into every session's context.
 *(This section reflects "now" — edit it in place as things change. The Log
 below is history and should only ever be appended to.)*
 
-- **Stage:** Pre-alpha. Milestones 1 (Scaffold), 2 (Mobile export spike), and 3 (Core loop proof) are done — real simulation code exists (one belt, one machine, one recipe), headlessly verified end to end, and Android export is proven working.
+- **Stage:** Pre-alpha. Milestones 1 (Scaffold), 2 (Mobile export spike), 3 (Core loop proof), and 4 (First full chain) are done — a real multi-stage production chain now exists (tomato -> tomato sauce -> ketchup -> bottled ketchup -> boxed ketchup), headlessly verified end to end and driven entirely by `data/recipes.ron`, and Android export is proven working.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
-- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) are being built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **Milestones 1, 2, and 3 are complete and merged** — see their log entries below. Milestone 4 (First full chain) is dispatched and in progress. Check `orca orchestration task-list --run run_51e5cb271445 --json` for live status. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it.
+- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) are being built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **Milestones 1, 2, 3, and 4 are complete and merged** — see their log entries below. Milestone 5 (Economy MVP) is next. Check `orca orchestration task-list --run run_51e5cb271445 --json` for live status. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -36,6 +36,32 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-06 — Milestone 4: First full chain
+
+Extended milestone 3's single belt+machine into a real multi-stage
+production chain: raw tomato -> tomato sauce -> ketchup -> bottled ketchup ->
+boxed ketchup, four sequential belt+machine stages, fully data-driven from
+`data/recipes.ron`. The core design call: `sim_core::sim::World` now builds
+one stage per recipe *in the data file's own list order*, chaining each
+stage's machine output into the next stage's belt automatically — no
+Rust code names which recipe follows which. This was proven, not just
+claimed: after building and testing a working 3-stage chain, a 4th recipe
+(`boxed_ketchup`) was appended to `data/recipes.ron` alone (verified via a
+SHA-256 hash check that no `.rs`/`.gd` file changed), and the full headless
+test suite — the Rust conservation test plus the real `gdext` JSON boundary
+through Godot — passed against the extended 4-stage chain with zero code
+changes. `sim_core/tests/core_loop.rs` now walks the whole chain generically
+(via a recursive "how many raw tomatoes is this item worth" helper) rather
+than asserting fixed counts, so it keeps working as the chain grows. The
+Godot side (`main.gd`) reads a new `chain_layout_json` call once at startup
+to build its `TileMap` sized to however many stages currently exist, instead
+of hardcoding stage geometry — keeping intact milestone 3's "Godot draws
+what the sim says exists" principle. See CLAUDE.md's decisions log for the
+`ChunkSnapshot` shape change (`belt`/`machine` singular -> `belts`/`machines`
+plural, since a chunk can now hold more than one stage) and the deliberate
+scope limit (every recipe past the first has exactly one input/output, so
+this is one straight line, not yet a branching factory).
 
 ### 2026-09-06 — Milestone 2: Mobile export spike
 

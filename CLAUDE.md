@@ -37,9 +37,11 @@ conflict with them.
 
 ## Project structure
 
-Milestones 1 (Scaffold) and 3 (Core loop proof) have landed: a Rust/gdext
-<-> Godot round trip, plus real simulation code — one belt, one machine, one
-recipe. Current layout:
+Milestones 1 (Scaffold), 3 (Core loop proof), and 4 (First full chain) have
+landed: a Rust/gdext <-> Godot round trip, plus real simulation code — a
+multi-stage production chain (raw tomato -> tomato sauce -> ketchup ->
+bottled ketchup -> boxed ketchup) built entirely from `data/recipes.ron`.
+Current layout:
 
 ```
 sauce-factory/
@@ -51,7 +53,10 @@ sauce-factory/
   data/                    # data-driven content (ARCHITECTURE.md §3.6) — the
     recipes.ron              # single source of truth for recipes; sim_core embeds
                                # this file at compile time (include_str!), never
-                               # duplicates its content in Rust code. items.ron/
+                               # duplicates its content in Rust code. Its list
+                               # order IS the production chain (World builds one
+                               # stage per recipe, in file order — see world.rs) —
+                               # adding a step is a pure edit here. items.ron/
                                # machines.ron/contracts.ron land here too when they exist.
   sim_core/               # Rust crate: pure sim core + the gdext binding
     Cargo.toml              # crate-type = ["cdylib", "rlib"] — rlib is what lets
@@ -64,29 +69,35 @@ sauce-factory/
       inventory.rs                  # generic slot-based Inventory (§3.2)
       belt.rs                        # BeltSegment — gap-based item storage (§3.3)
       machine.rs                      # Machine + TimedProcess (§3.2/§3.5)
-      world.rs                         # hecs::World wrapper; SimBridge's pure-logic
-                                         # half — tick()/dirty_chunks()/chunk_snapshot()/
-                                         # issue_command()/query_tile() (§4)
-    tests/core_loop.rs        # headless integration test: N-tick conservation invariant (§6)
+      world.rs                         # hecs::World wrapper; builds a multi-stage
+                                         # production chain (one belt+machine per
+                                         # recipe, in recipes.ron order); SimBridge's
+                                         # pure-logic half — tick()/dirty_chunks()/
+                                         # chunk_snapshot()/issue_command()/
+                                         # query_tile()/chain_layout() (§4)
+    tests/core_loop.rs        # headless integration test: full-chain N-tick
+                                # conservation invariant across every stage (§6)
   xtask/                   # build script (ARCHITECTURE.md §7): `cargo xtask` builds sim_core
     Cargo.toml              # and copies the compiled extension into godot_project/bin/
     src/main.rs
   godot_project/             # Godot 4 project (presentation layer)
     project.godot              # run/main_scene = main.tscn
     sim_core.gdextension       # checked in; points at godot_project/bin/, which is gitignored (build output)
-    main.tscn / main.gd          # milestone-3 interactive scene: TileMap + item
-                                   # sprites driven by SimBridge's JSON snapshots,
-                                   # SPACE/C keys drive issue_command_json (§5)
+    main.tscn / main.gd          # interactive scene: TileMap sized to however many
+                                   # stages chain_layout_json reports, item sprites
+                                   # driven by SimBridge's JSON snapshots, SPACE/C
+                                   # keys drive issue_command_json (§5)
     placeholder_art/                # flat placeholder PNGs — NOT the UI_UX.md §2a
                                       # voxel pipeline, see its own README.md
     test_round_trip.gd          # milestone-1 headless proof script (scripts/verify-scaffold.sh)
-    test_core_loop.gd            # milestone-3 headless proof: real gdext JSON boundary
+    test_core_loop.gd            # milestone-3/4 headless proof: real gdext JSON
+                                   # boundary, driven through the whole chain
     test_interaction.gd           # milestone-3 headless proof: keyboard input -> SimBridge
     bin/                          # gitignored: compiled extension lands here via `cargo xtask`
   scripts/
     lint-commit-msg.sh          # commit-msg hook
     verify-scaffold.sh           # milestone-1 headless verification (build + Godot cache + test script)
-    verify-core-loop.sh           # milestone-3 headless verification (cargo test + gdext boundary + interaction)
+    verify-core-loop.sh           # milestone-3/4 headless verification (cargo test + gdext boundary + interaction)
   docs/
     README.md              # docs-folder index — read this first when only skimming
     ARCHITECTURE.md          # how the game runs and is built
@@ -344,3 +355,34 @@ it's gone stale.
   `rendering/textures/vram_compression/import_etc2_astc` isn't enabled in
   `project.godot` (confirmed by reading Godot's own export-plugin source,
   not guessed) — now set in this project's `project.godot`.
+- 2026-09-06: Completed ARCHITECTURE.md §9 milestone 4 (First full chain) —
+  `sim_core::sim::World` now builds a straight-line, multi-stage production
+  chain (one `BeltSegment`+`Machine` pair per recipe) instead of milestone
+  3's fixed single-stage layout. The key design call: **chain topology is
+  derived entirely from `data/recipes.ron`'s list order**
+  (`RecipeRegistry::ordered()`), not described anywhere in Rust — `World`
+  builds stage `i` from `ordered()[i]`, chains stage `i`'s machine output
+  into stage `i + 1`'s belt, and panics at construction time
+  (`validate_chain`) if consecutive recipes don't share an item id, the same
+  way a compiler error would catch a Rust mistake. This is what makes
+  "add a processing step" a pure data-file edit, and it was verified as
+  part of this milestone, not just asserted: after the initial 3-stage chain
+  (tomato -> tomato_sauce -> ketchup -> bottled_ketchup) was working and all
+  tests passed, a 4th recipe (`boxed_ketchup`) was appended to
+  `data/recipes.ron` ALONE — confirmed via a before/after SHA-256 hash
+  comparison that zero `.rs`/`.gd` files changed — and the full headless
+  verification suite (`cargo test -p sim_core` + the real `gdext` JSON
+  boundary via `scripts/verify-core-loop.sh`) re-ran green against the
+  4-stage chain with no code changes at all. `ChunkSnapshot` also changed
+  shape from milestone 3: `belt`/`machine` (singular `Option`) became
+  `belts`/`machines` (`Vec`), since a 32x32 chunk (ARCHITECTURE.md §3.1) can
+  now hold more than one stage's entities — Godot's `main.gd` reads this
+  plurally and also now calls a new `chain_layout_json` once at startup to
+  build its `TileMap` sized to however many stages the data file currently
+  defines, rather than hardcoding stage geometry client-side (keeping intact
+  the "Godot draws what the sim says exists" principle from milestone 3).
+  This milestone's chain is still a deliberate simplification: every recipe
+  past the first has exactly one input/one output so `World`'s
+  one-straight-line assumption holds; multi-ingredient convergence
+  (branching topology) is explicitly deferred to a later milestone, per
+  `world.rs`'s own module doc.

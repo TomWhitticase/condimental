@@ -16,7 +16,7 @@ use super::types::{ItemId, RecipeId};
 /// changes in a way older data can't satisfy.
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Recipe {
     pub id: RecipeId,
     /// (item id, quantity) pairs consumed per craft.
@@ -60,10 +60,16 @@ impl std::fmt::Display for RecipeLoadError {
 impl std::error::Error for RecipeLoadError {}
 
 /// Recipes keyed by id, looked up by `Machine` (ARCHITECTURE.md §3.2) each
-/// tick it needs to check what it's making.
+/// tick it needs to check what it's making. Also preserves the data file's
+/// own list order (`ordered()`) — milestone 4's `World` treats that order as
+/// its demo production chain's stage sequence (see `world.rs`'s module doc),
+/// which is exactly what makes "add a recipe to extend the chain" a
+/// data-file-only change (ARCHITECTURE.md §3.6/§10): no Rust code encodes
+/// which recipe comes after which, the file's own ordering does.
 #[derive(Debug, Default)]
 pub struct RecipeRegistry {
-    by_id: HashMap<RecipeId, Recipe>,
+    recipes: Vec<Recipe>,
+    by_id: HashMap<RecipeId, usize>,
 }
 
 impl RecipeRegistry {
@@ -77,14 +83,24 @@ impl RecipeRegistry {
         }
         let by_id = file
             .recipes
-            .into_iter()
-            .map(|r| (r.id.clone(), r))
+            .iter()
+            .enumerate()
+            .map(|(i, r)| (r.id.clone(), i))
             .collect();
-        Ok(Self { by_id })
+        Ok(Self {
+            recipes: file.recipes,
+            by_id,
+        })
     }
 
     pub fn get(&self, id: &str) -> Option<&Recipe> {
-        self.by_id.get(id)
+        self.by_id.get(id).map(|&i| &self.recipes[i])
+    }
+
+    /// Recipes in data-file order — see the struct doc for why this order
+    /// matters, not just recipe content.
+    pub fn ordered(&self) -> &[Recipe] {
+        &self.recipes
     }
 }
 

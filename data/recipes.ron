@@ -4,12 +4,22 @@
 // the loader must reject or migrate a mismatched version rather than
 // silently misreading a changed shape.
 //
-// Milestone 3 (Core loop proof) deliberately ships a single, single-input
-// recipe: the milestone's own scope is "one belt, one machine, one recipe."
-// GAMEPLAY.md §2's real tomato-sauce tier also lists salt as an ingredient;
-// a second raw input implies a second belt, which is milestone 4 (First
-// full chain) scope, not this one — don't read this file as the final
-// tomato sauce recipe.
+// Milestone 4 (First full chain) turns this into a real multi-step
+// production line: `sim_core::sim::World` builds one belt+machine stage per
+// entry below, IN THIS FILE'S ORDER, chaining each stage's output into the
+// next stage's input (see sim_core/src/sim/world.rs's module doc). That is
+// what makes adding a processing step a pure data-file edit — appending a
+// recipe here, whose `inputs` names an item the previous recipe's `outputs`
+// produces, adds a pipeline stage with no Rust changes at all.
+//
+// The chain below is a simplified stand-in for GAMEPLAY.md §2's tier 1/2
+// tomato-sauce/ketchup progression (real ketchup also needs vinegar/sugar as
+// separate raw ingredients, and GAMEPLAY.md §4 calls out its bottling step
+// as part of the same equipment tier) — this file keeps every recipe past
+// the first to a single input/single output so `World`'s one-straight-line
+// assumption holds; multi-ingredient convergence is a later milestone's
+// branching-topology concern, not this one's. Don't read this as the final
+// tomato sauce/ketchup recipes.
 (
     schema_version: 1,
     recipes: [
@@ -19,6 +29,34 @@
             outputs: [("tomato_sauce", 1)],
             machine: "cooker",
             time_ticks: 180,
+        ),
+        Recipe(
+            id: "ketchup",
+            inputs: [("tomato_sauce", 1)],
+            outputs: [("ketchup", 1)],
+            machine: "reducer",
+            time_ticks: 120,
+        ),
+        Recipe(
+            id: "bottled_ketchup",
+            inputs: [("ketchup", 1)],
+            outputs: [("bottled_ketchup", 1)],
+            machine: "bottler",
+            time_ticks: 60,
+        ),
+        // Added AFTER the 3-stage chain above was already working end to
+        // end, purely by editing this file — no sim_core/src or
+        // godot_project/*.gd changes accompany this entry. This is
+        // milestone 4's required proof that extending the chain is a
+        // data-file-only change: `World::new` (sim_core/src/sim/world.rs)
+        // builds one stage per recipe here, in order, with no recipe id
+        // baked into Rust anywhere.
+        Recipe(
+            id: "boxed_ketchup",
+            inputs: [("bottled_ketchup", 1)],
+            outputs: [("boxed_ketchup", 1)],
+            machine: "packer",
+            time_ticks: 40,
         ),
     ],
 )
