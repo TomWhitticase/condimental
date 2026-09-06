@@ -1,6 +1,11 @@
 # Sauce Factory — Architecture Plan
 
-A Factorio-like automation/logistics game, themed around industrial sauce production (washing, chopping, cooking, blending, fermenting, bottling, shipping). Target platforms: PC, Mac, mobile.
+A Factorio-like automation/logistics game, sauce-themed. Target platforms: PC, Mac, mobile.
+
+This doc is about **architecture and technology choices only** — how the game
+is built, not what it plays like. Gameplay design (specific recipes,
+ingredients, mechanics) belongs in separate design docs; this file should stay
+useful even if the theme or feature set changes.
 
 This doc follows the pattern established by Factorio's own architecture (deterministic tick simulation, data-oriented ECS, aggregate item representation, tiered update scheduling) and Godot's text-native, agent-friendly project structure. This file is self-contained — it includes the reasoning behind each tech choice and the sources it's based on, so it doesn't depend on any earlier conversation.
 
@@ -37,10 +42,10 @@ Rust's compiler gives an unusually sharp agentic feedback loop: the LLM writes c
 
 | Layer | Tech | Role |
 |---|---|---|
-| Simulation core | **Rust**, standalone ECS crate (`hecs` or `bevy_ecs` used standalone) | Deterministic game logic: belts, machines, fluids, fermentation, power. No Godot dependency. |
+| Simulation core | **Rust**, standalone ECS crate (`hecs` or `bevy_ecs` used standalone) | Deterministic game logic: belts, machines, fluid networks, timed processes, power. No Godot dependency. |
 | Interop | **GDExtension** via `gdext` | Thin binding layer between Rust core and Godot. |
 | Presentation | **Godot 4.x**, GDScript | Rendering (TileMap), UI, input, camera, build mode, animation/interpolation. |
-| Data | **RON or JSON** files | Ingredients, recipes, machines, sauces — all data-driven, not hardcoded. |
+| Data | **RON or JSON** files | Items, recipes, machines — all content is data-driven, not hardcoded. |
 | Tests | **Rust unit/integration tests** (headless) + **GUT** (Godot) | Simulation invariants + UI smoke tests. |
 
 **Hard rule:** anything that must be deterministic or fast lives in Rust. Anything about how it looks/feels lives in Godot. The boundary between them is the `SimBridge` API described in §4.
@@ -63,12 +68,12 @@ flowchart TB
 
     subgraph Sim["Simulation Core — pure Rust, headless, deterministic"]
         World[Chunked tile world]
-        ECS[ECS: belts, machines, fluids, fermentation, power]
+        ECS[ECS: belts, machines, fluid networks, timed processes, power]
         Scheduler[Tiered update scheduler\nactive / warm / sleeping]
         Threading[Dependency-group threading]
     end
 
-    Data[(Data files: ingredients.ron, recipes.ron, machines.ron)]
+    Data[(Data files: items.ron, recipes.ron, machines.ron)]
 
     UI --> Bridge
     Input --> Bridge
@@ -94,49 +99,49 @@ Data files are the single source of truth for both the simulation (what a recipe
 | Component | Purpose |
 |---|---|
 | `Position` | Tile coordinate |
-| `BeltSegment` | Ordered belt line using **gap-based item storage** (see §3.3) — carries solid ingredients, bottles, boxes |
-| `FluidNetwork` | Connected pipe network carrying liquids (water, oil, vinegar, liquid sauce base) as a pressure/volume value, **not** individual particles |
+| `BeltSegment` | Ordered belt line using **gap-based item storage** (see §3.3) — carries solid items |
+| `FluidNetwork` | Connected pipe network carrying a liquid as a pressure/volume value, **not** individual particles |
 | `Machine` | Current recipe, progress timer, input/output buffers |
-| `Fermenter` | Tick-counted aging state (see §3.5) |
+| `TimedProcess` | Generic tick-counted long-duration process state (see §3.5) — attached to any entity that needs to represent a multi-tick process beyond a single machine cycle |
 | `PowerNode` | Producer/consumer, grouped into `PowerNetwork` |
 | `Inventory` | Generic slot-based storage (chests, machine buffers, player) |
 
-### 3.3 Solids: belts carry chopped veggies, bottles, crates
+### 3.3 Solid items on belts
 
-Directly apply Factorio's FFF #176 trick: a belt line stores **gaps between items**, not absolute item positions. Track the index of the last non-zero gap; while a line is jammed, only that boundary value changes each tick, and everything behind it is provably untouched. This is what lets a factory with thousands of tomatoes-on-belts stay cheap.
+Directly apply Factorio's FFF #176 trick: a belt line stores **gaps between items**, not absolute item positions. Track the index of the last non-zero gap; while a line is jammed, only that boundary value changes each tick, and everything behind it is provably untouched. This is what lets a factory with thousands of items on belts stay cheap.
 
-### 3.4 Liquids: oil, water, vinegar, liquid sauce base
+### 3.4 Liquids / fluid networks
 
 Model as a **connected-network pressure system** (Factorio pipes), not particles: each `FluidNetwork` has a total volume and a fluid type; flow between adjacent segments equalizes pressure each tick. Never simulate individual droplets — that was the exact mistake Factorio's own devs made with belt items early on, and fluids are the same trap at a smaller item size.
 
-### 3.5 Fermentation/aging — this game's unique mechanic
+### 3.5 Long-running / timed processes (generic pattern)
 
-Hot sauces, vinegar-based sauces, and aged condiments benefit from a fermentation step. Design it as a **tick-counted state machine** attached to a container (`Fermenter { start_tick, required_ticks, quality_curve }`), never wall-clock time:
+Some gameplay mechanics need a process to run over many ticks before producing a result (anything slower than a single machine cycle — aging, curing, growth, etc., depending on what design settles on). The architectural pattern for this, regardless of which specific mechanic uses it: a **tick-counted state machine** (`TimedProcess { start_tick, required_ticks }`) attached to a container, never wall-clock time.
 
 - **Why tick-counted, not wall-clock:** if multiplayer/lockstep is ever added (§7), any wall-clock read is an instant desync source. Counting sim ticks keeps it deterministic for free, and also means fast-forwarding/pausing the simulation behaves correctly.
-- Quality tier is a function of `(current_tick - start_tick)` vs. `required_ticks`, with early/late tolerance windows — this becomes a core progression/quality mechanic (a rushed hot sauce ferments faster but scores lower quality than a patiently aged batch).
+- Progress is a function of `(current_tick - start_tick)` vs. `required_ticks`. Any gameplay meaning layered on top of that progress value (quality, yield, etc.) is a design decision, not an architecture one — this component just guarantees the timing itself stays deterministic.
 
 ### 3.6 Recipes & content — fully data-driven
 
-`recipes.ron` example shape:
+`recipes.ron` example shape (placeholder ids — actual items/recipes are a game-design concern, not an architecture one):
 
 ```ron
 Recipe(
-    id: "marinara_basic",
-    inputs: [("tomato_chopped", 4), ("garlic_diced", 1), ("olive_oil", 0.5)],
-    outputs: [("marinara_sauce", 2)],
-    machine: "simmer_pot",
+    id: "example_recipe",
+    inputs: [("ingredient_a", 4), ("ingredient_b", 1)],
+    outputs: [("output_item", 2)],
+    machine: "processing_machine",
     time_ticks: 900,
 )
 ```
 
-New sauces, ingredients, and machines are added by editing data files, never simulation code — this keeps the Rust core stable (fewer breaking changes = better long-term agent-generated-code reliability, per the earlier Bevy-API-churn discussion) while content grows freely.
+New items, recipes, and machines are added by editing data files, never simulation code — this keeps the Rust core stable (fewer breaking changes = better long-term agent-generated-code reliability, per the earlier Bevy-API-churn discussion) while content grows freely.
 
 ### 3.7 Update scheduling (tiered)
 
 - **Active:** belts/machines currently processing something — updated every tick.
 - **Warm:** trucks/conveyor-bots in transit — updated every N ticks, position interpolated for rendering in between (Factorio's robot pattern).
-- **Sleeping:** a fully-stocked, blocked machine or an idle fermenter mid-wait — skips simulation entirely until an adjacent change wakes it (an item arrives, a recipe finishes upstream).
+- **Sleeping:** a fully-stocked, blocked machine or an idle timed-process mid-wait — skips simulation entirely until an adjacent change wakes it (an item arrives, a recipe finishes upstream).
 
 ### 3.8 Threading
 
@@ -173,7 +178,7 @@ Godot never sees internal representations (gap arrays, fluid pressure math) — 
 
 - **TileMap** for the factory floor; layers for ground, belts/pipes, buildings.
 - **Interpolation**: for anything in the "warm" tier (§3.7), tween between the last two known snapshots rather than snapping — smooth visuals independent of simulation tick rate.
-- **UI reads the same data files** as the simulation (recipes, ingredients) — the build menu is generated from `recipes.ron`, not hand-authored per recipe.
+- **UI reads the same data files** as the simulation (recipes, items) — the build menu is generated from `recipes.ron`, not hand-authored per recipe.
 - All scenes/resources kept as Godot's default **text-based `.tscn`/`.tres`** — never switch to binary scene serialization, since that's the property that makes this whole project agent-diffable.
 - Avoid Godot's visual scripting entirely; GDScript/C#/Rust text only.
 
@@ -181,8 +186,8 @@ Godot never sees internal representations (gap arrays, fluid pressure math) — 
 
 ## 6. Testing strategy
 
-- **Headless Rust integration tests** simulating N ticks against known factory layouts, asserting invariants: no item duplication/loss across a belt network, fluid volume conservation, fermentation quality curve correctness. This is the project's actual "compiler feedback loop" for gameplay logic — lean on it heavily for any AI-agent-driven changes to the simulation core.
-- **Scripted playtests**: build a known factory (e.g. "10 tomato farms → 1 marinara line"), run it headless for X ticks, assert throughput matches the theoretical recipe-chain rate.
+- **Headless Rust integration tests** simulating N ticks against known factory layouts, asserting invariants: no item duplication/loss across a belt network, fluid volume conservation, timed-process state correctness. This is the project's actual "compiler feedback loop" for gameplay logic — lean on it heavily for any AI-agent-driven changes to the simulation core.
+- **Scripted playtests**: build a known factory (e.g. "N input producers → 1 processing chain"), run it headless for X ticks, assert throughput matches the theoretical recipe-chain rate.
 - **GUT tests** in Godot for UI/menu logic only — not simulation correctness.
 
 ---
@@ -196,12 +201,12 @@ Not in early milestones, but §3.9's determinism work means it stays possible wi
 ## 8. Milestones
 
 1. **Scaffold** — Godot project + `gdext` hello-world binding, confirm Rust↔Godot round-trip works.
-2. **Core loop proof** — one belt, one machine, one recipe (e.g. raw tomato → chopped tomato), rendered and interactable.
-3. **First full chain** — basic ketchup: tomato → wash → chop → simmer → bottle → ship, with data-driven recipes.
-4. **Fluids** — pipe network, oil/water, a recipe requiring a liquid input.
-5. **Fermentation** — aging mechanic, quality tiers, a hot-sauce recipe that rewards patience.
+2. **Core loop proof** — one belt, one machine, one recipe (raw input → processed output), rendered and interactable.
+3. **First full chain** — a multi-step production chain end-to-end, driven entirely by data-driven recipes.
+4. **Fluids** — pipe network, a recipe requiring a liquid input.
+5. **Timed processes** — the generic tick-counted long-duration process pattern (§3.5), proven with one process end-to-end.
 6. **Scale-up** — power system, tiered update scheduler, chunk activity tracking; stress-test to thousands of entities.
-7. **Logistics expansion** — trucks/trains between multiple factory sites.
+7. **Logistics expansion** — transport between multiple factory sites.
 8. **Platform polish** — mobile touch controls/export, Mac/PC packaging, UI pass.
 9. *(Stretch)* **Multiplayer** — lockstep networking on top of the already-deterministic core.
 
@@ -210,7 +215,7 @@ Not in early milestones, but §3.9's determinism work means it stays possible wi
 ## 9. AI-agent development conventions for this repo
 
 - Keep the Rust simulation core covered by headless tests before merging any agent-written change to it — that's the fast, precise feedback loop this architecture is built around.
-- Content (recipes/ingredients/machines) changes should never require touching Rust — if an agent needs to modify simulation code just to add a sauce, that's a sign a data field is missing, not a reason to hardcode.
+- Content (recipes/items/machines) changes should never require touching Rust — if an agent needs to modify simulation code just to add a new item or recipe, that's a sign a data field is missing, not a reason to hardcode.
 - Keep `.tscn`/`.tres` as text; never let a "convert to binary for performance" temptation in — the diffability is worth more than the marginal load-time savings at this scale.
 - One `CLAUDE.md`-equivalent per major module (`sim_core/`, `godot_project/`) documenting the invariants that aren't obvious from the code (e.g. "belt gaps must remain non-negative," "fluid network recompute only on topology change").
 
