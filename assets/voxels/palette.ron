@@ -95,5 +95,17 @@
         // albedo tint, so one fluid model serves every fluid data/recipes.ron
         // ever names without a palette entry per liquid.
         (name: "fluid_pale",     rgb: "#E8F1EC", class: "liquid"),
+
+        // --- bulk solids in a hopper (the "Machines improvement" milestone) ---
+        // Same trick `fluid_pale` above plays, for the same reason and with
+        // one deliberate difference: near-white so `main.gd` can multiply a
+        // per-item tint over it (which raw ingredient a hopper holds is live
+        // data from data/recipes.ron, not a palette decision), but class
+        // `matte`, not `liquid` — a heap of tomatoes is not a wet surface,
+        // and giving it the liquid class's gloss would read as sauce in a
+        // tank rather than product in a bin. Appended at the END of the list,
+        // per this file's own rule: an insert re-indexes every colour after
+        // it, and `fluid_pale` was after it on the first attempt.
+        (name: "bulk_pale",      rgb: "#EDE7DE", class: "matte"),
     ],
 )

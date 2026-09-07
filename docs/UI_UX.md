@@ -157,6 +157,40 @@ were only discoverable by building it:
    use: `godot_project/main.gd`'s `_icon_for`, showing the contract's
    target item's icon next to its name in the economy readout line.
 
+8. **A machine's material split follows "food contact is stainless,
+   structure is painted or poured" (the "Machines improvement" milestone's
+   ticket 4).** The first four assets with a real machine identity — a
+   crusher, a mixer, a 2x2 cooking vat and a bulk hopper — needed a rule for
+   §4's metal exception that wasn't decided per asset, and this is it:
+   anything the product actually touches (crushing rolls, mixing vessel and
+   agitator, the vat's body and dome, the hopper's funnel and chute) is the
+   `metal` class, because in a real food plant it is stainless for exactly
+   that reason; anything that only holds those parts up (concrete plinths,
+   painted housings and skirts, hazard striping) is `matte`. The point is not
+   that steel is prettier — it is that an all-steel machine reads as flat as
+   an all-concrete one, so the matte structure is what gives the metal
+   something to pop against. Emissive stays where it already was: status
+   lamps only (§7).
+9. **Review the rendered asset, not the generator — and expect to rework
+   it.** §2a point 3 says to render and look; what building four machines
+   added is how often looking *changes the design*, not just catches a bug.
+   The crusher's rolls were originally sunk in a throat too deep for the
+   fixed isometric angle to see into (the whole reason to expose a crushing
+   mechanism is that it can be seen); the mixer's top-mounted gearbox — the
+   accurate choice — covered the agitator, so it moved to a side bracket with
+   a belt drive, which is also accurate and also legible; the cooking vat's
+   first proportions read as a sphere on a plinth. None of those are visible
+   in the generator source. Budget a rework pass per asset rather than
+   treating the first render as verification.
+10. **The full-scene render catches a class of bug no headless test can.**
+    `main.gd`'s item-id → model mapping is presentation-only with a fallback,
+    so when a milestone renamed a chain intermediate the mapping silently
+    went stale and two stages of the chain shipped *cardboard boxes* down the
+    belt where pails of sauce belonged — every structural test still passed,
+    because a box is a perfectly valid mesh. `scripts/screenshot-scene.sh`
+    is what found it. Any presentation-side lookup keyed by a content id has
+    this failure mode; the rendered scene is the only check for it.
+
 ## 3. Theme & setting
 
 **A grounded, semi-realistic 21st-century industrial food factory** — stainless steel tanks, rubber conveyor belts, PVC/steel piping, poured concrete floors, hazard-stripe signage, factory floor lighting, pallets and crates, loading docks. The tone is closer to "a real bottling/food-processing plant you could actually walk into," rendered in voxels, than a whimsical toy-factory aesthetic.

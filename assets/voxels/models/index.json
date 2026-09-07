@@ -6,6 +6,14 @@
   "floor_tile": [
     "matte"
   ],
+  "hopper": [
+    "matte",
+    "metal",
+    "emissive"
+  ],
+  "hopper_fill": [
+    "matte"
+  ],
   "item_bottle": [
     "matte"
   ],
@@ -13,6 +21,10 @@
     "matte"
   ],
   "item_ketchup_pail": [
+    "matte",
+    "metal"
+  ],
+  "item_mix_pail": [
     "matte",
     "metal"
   ],
@@ -24,6 +36,21 @@
     "matte"
   ],
   "machine": [
+    "matte",
+    "metal",
+    "emissive"
+  ],
+  "machine_cooking_vat": [
+    "matte",
+    "metal",
+    "emissive"
+  ],
+  "machine_crusher": [
+    "matte",
+    "metal",
+    "emissive"
+  ],
+  "machine_mixer": [
     "matte",
     "metal",
     "emissive"

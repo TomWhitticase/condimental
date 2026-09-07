@@ -93,13 +93,36 @@ impl VoxModel {
         z: (i32, i32),
         color: u8,
     ) -> &mut Self {
+        self.cylinder_z_inner(center, radius, z, Some(color))
+    }
+
+    /// [`Self::cylinder_z`] in reverse — the upright counterpart of
+    /// [`Self::carve_cylinder_x`], added for the mixer's open-topped
+    /// blending vessel (the "Machines improvement" milestone): the agitator
+    /// inside it is only visible if the drum is genuinely hollow, and a bore
+    /// filled with an "air" colour would still mesh as a solid plug (see
+    /// [`Self::erase`]).
+    pub fn carve_cylinder_z(&mut self, center: (i32, i32), radius: f32, z: (i32, i32)) -> &mut Self {
+        self.cylinder_z_inner(center, radius, z, None)
+    }
+
+    fn cylinder_z_inner(
+        &mut self,
+        center: (i32, i32),
+        radius: f32,
+        z: (i32, i32),
+        color: Option<u8>,
+    ) -> &mut Self {
         let r2 = radius * radius;
         let span = radius.ceil() as i32;
         for zz in z.0..=z.1 {
             for dy in -span..=span {
                 for dx in -span..=span {
                     if (dx * dx + dy * dy) as f32 <= r2 {
-                        self.set(center.0 + dx, center.1 + dy, zz, color);
+                        match color {
+                            Some(c) => self.set(center.0 + dx, center.1 + dy, zz, c),
+                            None => self.erase(center.0 + dx, center.1 + dy, zz),
+                        }
                     }
                 }
             }

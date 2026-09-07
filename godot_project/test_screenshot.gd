@@ -25,7 +25,15 @@
 # shot — otherwise there is no way to visually review it without a live
 # interactive session, the same problem --first-person solves for that mode.
 # `--hover-pipe` does the same over the fluid network's machine-inlet pipe
-# segment, for reviewing milestone 6's fluid tooltip.
+# segment, for reviewing milestone 6's fluid tooltip. `--hover-vat` parks it
+# over the FAR CORNER of the first machine whose footprint is bigger than one
+# tile — deliberately not its origin, since "hovering anywhere on a multi-tile
+# machine identifies it" is the claim the "Machines improvement" milestone
+# added, and hovering the origin would not show it. `--hover-hopper` does the
+# same over the chain's hopper.
+#
+# All four hover flags share one implementation (`_hover_over_tile`) — they
+# differ only in which tile they ask the simulation for.
 extends SceneTree
 
 ## Enough frames for shadow atlases, SSAO and glow to be resolved — a
@@ -44,6 +52,8 @@ var _populate := false
 var _first_person := false
 var _hover := false
 var _hover_pipe := false
+var _hover_vat := false
+var _hover_hopper := false
 var _main: Node
 
 
@@ -55,6 +65,8 @@ func _initialize() -> void:
 	_first_person = args.has("--first-person")
 	_hover = args.has("--hover")
 	_hover_pipe = args.has("--hover-pipe")
+	_hover_vat = args.has("--hover-vat")
+	_hover_hopper = args.has("--hover-hopper")
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 	# NOT here: in a real (non-headless) run, add_child()'s _ready() is
@@ -75,21 +87,23 @@ func _enter_first_person() -> void:
 	_main._update_fp_camera_transform()
 
 
-## Warps the real OS cursor over the first stage's machine tile, using the
-## same tile -> world -> screen math `_tile_under_screen_pos` inverts (via
-## the camera's own `unproject_position`, which needs the camera actually
-## inside the tree — see the `_ready()` timing note in `_initialize` above,
-## which is exactly why this can't run any earlier than `_process`).
-func _hover_over_first_machine() -> void:
-	var recipe_id: String = _main._stage_order[0]
-	var tile: Vector2i = _main._machine_tiles[recipe_id]
+## Warps the real OS cursor over one world tile, using the same tile ->
+## world -> screen math `_tile_under_screen_pos` inverts (via the camera's own
+## `unproject_position`, which needs the camera actually inside the tree — see
+## the `_ready()` timing note in `_initialize` above, which is exactly why
+## this can't run any earlier than `_process`). Every --hover* flag is this
+## one function plus a different way of picking the tile.
+func _hover_over_tile(tile: Vector2i) -> void:
 	var world_point: Vector3 = _main._tile_origin(tile.x, tile.y, _main.BELT_SURFACE_Y)
-	var screen_pos: Vector2 = _main._camera.unproject_position(world_point)
-	Input.warp_mouse(screen_pos)
+	Input.warp_mouse(_main._camera.unproject_position(world_point))
 
 
-## Same idea as _hover_over_first_machine, aimed at the pipe segment the
-## machine actually draws from — the one whose level visibly moves.
+func _hover_over_first_machine() -> void:
+	_hover_over_tile(_main._machine_tiles[_main._stage_order[0]])
+
+
+## Aimed at the pipe segment the machine actually draws from — the one whose
+## level visibly moves.
 func _hover_over_pipe_inlet() -> void:
 	var json: String = _main.sim.fluid_snapshot_json()
 	if json.is_empty():
@@ -97,8 +111,28 @@ func _hover_over_pipe_inlet() -> void:
 	var snapshot: Dictionary = JSON.parse_string(json)
 	var segment: Dictionary = snapshot["segments"][int(snapshot["inlet_index"])]
 	var tile_pair: Array = segment["tile"]
-	var world_point: Vector3 = _main._tile_origin(int(tile_pair[0]), int(tile_pair[1]), _main.BELT_SURFACE_Y)
-	Input.warp_mouse(_main._camera.unproject_position(world_point))
+	_hover_over_tile(Vector2i(int(tile_pair[0]), int(tile_pair[1])))
+
+
+## The far corner of the first multi-tile machine — NOT its origin, see this
+## file's header. Does nothing if the loaded content has no multi-tile kind,
+## rather than silently hovering something else.
+func _hover_over_multi_tile_machine() -> void:
+	for stage in JSON.parse_string(_main.sim.chain_layout_json()):
+		var size: Vector2i = _main._footprint_size(stage.get("machine_footprint"))
+		if size == Vector2i.ONE:
+			continue
+		var pair: Array = stage["machine_tile"]
+		_hover_over_tile(Vector2i(int(pair[0]), int(pair[1])) + size - Vector2i.ONE)
+		return
+
+
+func _hover_over_hopper() -> void:
+	var json: String = _main.sim.hopper_snapshot_json()
+	if json.is_empty():
+		return
+	var tile_pair: Array = JSON.parse_string(json)["tile"]
+	_hover_over_tile(Vector2i(int(tile_pair[0]), int(tile_pair[1])))
 
 
 func _run_chain_forward() -> void:
@@ -123,6 +157,10 @@ func _process(_delta: float) -> bool:
 		_hover_over_first_machine()
 	if _frames == 2 and _hover_pipe:
 		_hover_over_pipe_inlet()
+	if _frames == 2 and _hover_vat:
+		_hover_over_multi_tile_machine()
+	if _frames == 2 and _hover_hopper:
+		_hover_over_hopper()
 	if _frames < WARMUP_FRAMES:
 		return false
 

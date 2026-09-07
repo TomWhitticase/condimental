@@ -25,11 +25,21 @@ pub const ASSETS: &[Asset] = &[
     Asset { name: "floor_tile", build: floor_tile },
     Asset { name: "belt", build: belt },
     Asset { name: "machine", build: machine },
+    // The kinds `data/machines.ron` names that have a silhouette of their
+    // own (the "Machines improvement" milestone, ticket 4). `machine` above
+    // stays the fallback for every kind that doesn't — see `main.gd`'s
+    // MACHINE_MODELS.
+    Asset { name: "machine_crusher", build: machine_crusher },
+    Asset { name: "machine_mixer", build: machine_mixer },
+    Asset { name: "machine_cooking_vat", build: machine_cooking_vat },
+    Asset { name: "hopper", build: hopper },
+    Asset { name: "hopper_fill", build: hopper_fill },
     Asset { name: "pipe", build: pipe },
     Asset { name: "pipe_source", build: pipe_source },
     Asset { name: "pipe_fluid", build: pipe_fluid },
     Asset { name: "item_tomato", build: item_tomato },
     Asset { name: "item_sauce_pail", build: item_sauce_pail },
+    Asset { name: "item_mix_pail", build: item_mix_pail },
     Asset { name: "item_ketchup_pail", build: item_ketchup_pail },
     Asset { name: "item_bottle", build: item_bottle },
     Asset { name: "item_box", build: item_box },
@@ -216,8 +226,17 @@ pub fn item_sauce_pail(p: &Palette) -> VoxModel {
     pail(p, "pail_grey", "sauce_red", "brass")
 }
 
+/// The uncooked ketchup mix, between the mixer and the cooking vat (the
+/// "Machines improvement" milestone's ticket 2 added this stage). A third
+/// livery rather than a reuse: it sits on the belt immediately upstream of
+/// finished ketchup, so if the two shared a model the chain's longest and
+/// most visible process would look like it changed nothing.
+pub fn item_mix_pail(p: &Palette) -> VoxModel {
+    pail(p, "paint_blue", "tomato_red", "brass")
+}
+
 /// The next intermediate (ketchup) — same silhouette, different livery, so
-/// the two bulk stages stay distinguishable on the belt.
+/// the bulk stages stay distinguishable on the belt.
 pub fn item_ketchup_pail(p: &Palette) -> VoxModel {
     pail(p, "paint_red", "ketchup_red", "steel_light")
 }
@@ -397,5 +416,377 @@ pub fn pipe_fluid(p: &Palette) -> VoxModel {
     let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 1]);
     let last = TILE_VOXELS as i32 - 1;
     m.cuboid((0, last), (PIPE_BORE_Y0, PIPE_BORE_Y1), (0, 0), p.idx("fluid_pale"));
+    m
+}
+
+// ---------------------------------------------------------------------------
+// Real machines (the "Machines improvement" milestone, ticket 4)
+// ---------------------------------------------------------------------------
+//
+// `machine()` above is one generic silhouette reused for every stage, and its
+// own doc comment called distinguishing them "a follow-up." This is that
+// follow-up for the three front-end kinds ticket 2 made real (crusher, mixer,
+// cooking vat) plus ticket 3's hopper. The two downstream kinds (bottler,
+// packer) deliberately keep the generic model — this ticket is about making
+// what tickets 1-3 built *visible*, not about drawing every kind in the file.
+//
+// MATERIAL-CLASS CALL, stated once for all four rather than re-argued per
+// asset (UI_UX.md §4: matte baseline, metals the deliberate shiny
+// exception). The rule these follow is **food contact is stainless, structure
+// is painted or poured**:
+//
+//   * everything the product actually touches — crushing rolls, mixing
+//     vessel and agitator, the vat's body and dome, the hopper's funnel and
+//     discharge chute — is `metal`, because in a real food plant it is
+//     stainless for exactly that reason, and because §4 wants the machinery
+//     to be the thing that pops against the floor;
+//   * everything that only holds those parts up — concrete plinths, painted
+//     housings/skirts, hazard striping — is `matte`, which is what gives the
+//     metal something to pop *against*. An all-steel machine reads as flat
+//     as an all-concrete one.
+//   * status lamps stay `emissive`, same language `machine()` established,
+//     so every kind still reports running/idle the same way (§7).
+//
+// Each of these grows from the same footing (plinth + hazard skirt) as
+// `machine()` on purpose: they should read as members of one factory, not as
+// four unrelated props.
+
+/// Plinth, hazard skirt and painted base skirt, shared by every machine
+/// below so the family reads as one factory. `span` is the inclusive
+/// footprint the plinth covers; `skirt_top` is how high the painted base
+/// rises.
+fn machine_footing(m: &mut VoxModel, p: &Palette, span: (i32, i32), skirt_top: i32, paint: &str) {
+    let (lo, hi) = span;
+    m.cuboid((lo, hi), (lo, hi), (0, 1), p.idx("concrete_dark"));
+    // Hazard skirt around all four edges of the plinth top (UI_UX.md §3).
+    m.hazard_stripe_x((lo, hi), (lo, lo), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    m.hazard_stripe_x((lo, hi), (hi, hi), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    for y in lo..=hi {
+        let a = if (y + 2).rem_euclid(6) < 3 { p.idx("hazard_yellow") } else { p.idx("hazard_black") };
+        m.set(lo, y, 2, a);
+        m.set(hi, y, 2, a);
+    }
+
+    let (blo, bhi) = (lo + 2, hi - 2);
+    m.cuboid((blo, bhi), (blo, bhi), (2, skirt_top), p.idx(paint));
+    for (x0, x1) in [(blo, blo + 1), (bhi - 1, bhi)] {
+        for (y0, y1) in [(blo, blo + 1), (bhi - 1, bhi)] {
+            m.cuboid((x0, x1), (y0, y1), (2, skirt_top + 1), p.idx("steel_dark"));
+        }
+    }
+    // Machined rim the vessel/throat sits on.
+    m.cuboid((blo, bhi), (blo, bhi), (skirt_top + 1, skirt_top + 2), p.idx("steel"));
+}
+
+/// Control panel plus its two status lamps, on the **-Y face** — the one the
+/// fixed isometric camera looks at (see this module's header and `machine()`).
+/// `x` is the panel's span, `z` its height band.
+fn control_panel(m: &mut VoxModel, p: &Palette, x: (i32, i32), z: (i32, i32), face_y: i32) {
+    let mid = (z.0 + z.1) / 2;
+    m.cuboid(x, (face_y, face_y), z, p.idx("steel_light"));
+    m.cuboid((x.0 + 2, x.1 - 2), (face_y - 1, face_y - 1), (z.0 + 1, z.1 - 1), p.idx("hazard_black"));
+    m.cuboid((x.0 - 5, x.0 - 3), (face_y - 1, face_y), (mid - 1, mid + 1), p.idx("status_green"));
+    m.cuboid((x.1 + 3, x.1 + 5), (face_y - 1, face_y), (mid - 1, mid + 1), p.idx("status_amber"));
+}
+
+/// GAMEPLAY.md §2 tier 1's raw-ingredient prep, `data/machines.ron`'s 1x1
+/// `crusher`: tomatoes go in the open feed throat, two counter-rotating rolls
+/// crush them, paste leaves by the discharge chute on the +X (downstream)
+/// side.
+///
+/// The crushing mechanism is deliberately **exposed** — the throat is an
+/// open-topped box and the rolls sit visibly in its nip. The fixed isometric
+/// camera looks obliquely down (UI_UX.md §1/§2), so "you can see the thing
+/// that crushes" is achievable from the one angle that matters, and it is
+/// what makes this machine identifiable as a crusher rather than as another
+/// box with a tank on it.
+pub fn machine_crusher(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::tile();
+    machine_footing(&mut m, p, (1, 30), 12, "paint_blue");
+
+    // Open-topped feed throat, walls 2 voxels thick. Kept deliberately
+    // SHALLOW: the first cut ran it to z=26 and the rendered preview showed
+    // the rolls sunk in a well where the isometric angle could not see them
+    // — which defeats the whole point of exposing them.
+    m.cuboid((7, 24), (7, 24), (15, 23), p.idx("steel"));
+    m.carve_cuboid((9, 22), (9, 22), (15, 24));
+    // Flared lip so the throat reads as something you tip a crate into.
+    m.cuboid((6, 25), (6, 25), (23, 23), p.idx("steel_light"));
+    m.carve_cuboid((9, 22), (9, 22), (23, 24));
+
+    // The two crushing rolls, sitting high in the throat where they can
+    // actually be seen. Bright steel against brass so the pair reads as two
+    // counter-rotating rolls rather than as one drum — dark steel was the
+    // first choice and, in the rendered scene, sank into the throat's own
+    // shadow so only one roll was legible.
+    m.cylinder_y((13, 20), 3.2, (9, 22), p.idx("steel_light"));
+    m.cylinder_y((19, 20), 3.2, (9, 22), p.idx("brass"));
+    // Drive pulleys on the camera-facing end of each roll shaft.
+    m.cylinder_y((13, 20), 4.4, (5, 6), p.idx("steel_light"));
+    m.cylinder_y((19, 20), 4.4, (5, 6), p.idx("steel_light"));
+
+    // Drive motor and its belt guard, tucked against the -X side.
+    m.cuboid((2, 6), (10, 21), (15, 21), p.idx("steel_dark"));
+    m.cylinder_y((6, 20), 2.0, (14, 17), p.idx("brass"));
+
+    // Discharge chute, stepping down toward the belt on the +X side.
+    m.cuboid((25, 28), (11, 20), (9, 14), p.idx("steel"));
+    m.cuboid((28, 31), (11, 20), (7, 12), p.idx("steel"));
+    m.cuboid((29, 31), (10, 21), (6, 7), p.idx("steel_light"));
+
+    control_panel(&mut m, p, (11, 20), (5, 11), 2);
+    m
+}
+
+/// `data/machines.ron`'s 1x1 `mixer`: an open-topped stainless blending
+/// vessel with a visible cross-paddle agitator on a driven shaft, plus the
+/// vinegar inlet stub for the fluid run.
+///
+/// The inlet points **-Y**, which is not arbitrary: `World::new` puts the
+/// pipe run on the row immediately north of the machine it feeds, and sim +Y
+/// maps to world +Z, which the `.vox` importer reaches through vox -Y — so
+/// -Y is literally the side the pipes are on. The stub therefore lines up
+/// with the real run instead of pointing at empty floor.
+pub fn machine_mixer(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::tile();
+    machine_footing(&mut m, p, (1, 30), 8, "paint_blue");
+
+    // Vessel: a hollow open-topped drum, so the agitator inside is visible
+    // from the fixed isometric angle the same way the crusher's rolls are.
+    // Short rather than tall for that reason — the first cut ran the wall to
+    // z=26 and the rendered preview showed a closed silo, not a mixer.
+    m.cylinder_z((16, 16), 12.0, (11, 21), p.idx("steel"));
+    m.carve_cylinder_z((16, 16), 10.0, (13, 22));
+    for z in [12, 17] {
+        m.cylinder_z((16, 16), 12.4, (z, z), p.idx("steel_light"));
+    }
+
+    // Agitator: shaft plus a cross of paddles, sitting high in the vessel so
+    // the blades clear the wall line and read from above.
+    m.cylinder_z((16, 16), 1.6, (15, 26), p.idx("steel_light"));
+    m.cuboid((7, 25), (15, 17), (18, 19), p.idx("steel_light"));
+    m.cuboid((15, 17), (7, 25), (18, 19), p.idx("steel_light"));
+    // Angled blade tips, so the paddles read as blades that move product
+    // rather than as a flat plus sign.
+    m.cuboid((7, 9), (15, 17), (19, 21), p.idx("steel_dark"));
+    m.cuboid((23, 25), (15, 17), (19, 21), p.idx("steel_dark"));
+    m.cuboid((15, 17), (7, 9), (19, 21), p.idx("steel_dark"));
+    m.cuboid((15, 17), (23, 25), (19, 21), p.idx("steel_dark"));
+
+    // Belt-driven agitator: the motor sits on a bracket BESIDE the vessel,
+    // not on a lid over it. A top-mounted gearbox is what a real agitator
+    // usually has, and it was the first cut here — but it (and the gantry
+    // that replaced it) covered the opening, and this asset exists to show
+    // the agitator. A side drive with a belt up to a pulley is the version
+    // of "real" that also leaves the vessel readable.
+    m.cuboid((24, 30), (12, 21), (12, 20), p.idx("paint_blue"));
+    m.cuboid((24, 30), (12, 21), (21, 21), p.idx("steel_dark"));
+    m.cylinder_y((27, 23), 3.0, (13, 20), p.idx("steel_dark"));
+    m.cylinder_z((16, 16), 4.0, (24, 25), p.idx("brass"));
+    // Belt guard spanning motor pulley to shaft pulley.
+    m.cuboid((17, 27), (15, 18), (23, 24), p.idx("steel_dark"));
+
+    // Vinegar inlet: a stub reaching toward the pipe run in front (see doc).
+    m.cylinder_y((16, 19), 2.2, (0, 6), p.idx("pipe_grey"));
+    m.cylinder_y((16, 19), 3.0, (5, 6), p.idx("brass"));
+
+    control_panel(&mut m, p, (11, 20), (3, 7), 2);
+    m
+}
+
+/// `data/machines.ron`'s **2x2** `cooking_vat` — the milestone's big machine,
+/// and the first asset in this pipeline larger than one tile.
+///
+/// The volume is 64x64 voxels, i.e. exactly UI_UX.md §2's 32-per-tile scale
+/// times the footprint `data/machines.ron` declares, so it lands on its four
+/// tiles without any per-asset fudge: `vox::encode` puts a model's origin at
+/// its footprint centre at ground level, and `main.gd` places it at the
+/// centre of the declared footprint rectangle. Change the footprint in the
+/// data file and the model has to change with it — that is a deliberate
+/// coupling, not an oversight; a machine's size is content.
+///
+/// 48 voxels tall (1.5 tiles), which is the point of it: it holds a batch
+/// through the chain's longest process (240 ticks, `data/recipes.ron`), so it
+/// should visibly be the biggest thing on the line. It gets the details a
+/// vessel that size really has — a jacketed body, an access platform and
+/// ladder, a steam stack, a sight glass showing the sauce level.
+pub fn machine_cooking_vat(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS * 2, TILE_VOXELS * 2, 48]);
+    machine_footing(&mut m, p, (2, 61), 10, "paint_blue");
+    let c = (TILE_VOXELS as i32, TILE_VOXELS as i32); // (32, 32)
+
+    // Jacketed vessel body + insulation bands + domed head.
+    // Tall body, shallow head: the first cut paired a short barrel with a
+    // 9-voxel dome and the rendered preview read as a sphere on a plinth,
+    // not as a vat.
+    m.cylinder_z(c, 25.0, (13, 38), p.idx("steel"));
+    for z in [18, 25, 32] {
+        m.cylinder_z(c, 25.6, (z, z), p.idx("steel_light"));
+    }
+    m.ellipsoid((c.0, c.1, 38), (25.0, 25.0, 6.0), p.idx("steel_light"));
+    // Lit ring under the vessel skirt, so the vat reads as powered from any
+    // of the four snap angles rather than only from the panel side (§7).
+    m.cylinder_z(c, 25.6, (14, 14), p.idx("status_amber"));
+
+    // Agitator drive on the dome, and a steam stack off to one side.
+    m.cylinder_z(c, 5.0, (43, 44), p.idx("brass"));
+    m.cuboid((25, 38), (25, 38), (45, 47), p.idx("paint_blue"));
+    m.cylinder_z((49, 18), 3.0, (34, 47), p.idx("pipe_grey"));
+    m.cylinder_z((49, 18), 4.0, (46, 46), p.idx("steel_light"));
+
+    // Sight glass on the camera-facing side: the sauce level inside, framed
+    // in stainless. Matte `sauce_red` on purpose — it is product, not a
+    // polished surface.
+    m.cuboid((29, 36), (5, 8), (16, 34), p.idx("steel_light"));
+    m.cuboid((31, 34), (4, 6), (17, 29), p.idx("sauce_red"));
+
+    // Access platform, handrail and ladder — the industrial language
+    // UI_UX.md §3 asks for, and what actually sells the vat's size.
+    m.cuboid((14, 50), (2, 8), (30, 31), p.idx("steel_dark"));
+    m.hazard_stripe_x((14, 50), (2, 2), (30, 31), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    for x in [14, 22, 30, 38, 46, 50] {
+        m.cuboid((x, x), (2, 2), (32, 37), p.idx("steel_dark"));
+    }
+    m.cuboid((14, 50), (2, 2), (37, 37), p.idx("steel_dark"));
+    for (x0, x1) in [(18, 18), (23, 23)] {
+        m.cuboid((x0, x1), (3, 3), (3, 30), p.idx("steel_dark"));
+    }
+    for z in (5..30).step_by(4) {
+        m.cuboid((18, 23), (3, 3), (z, z), p.idx("steel_light"));
+    }
+
+    control_panel(&mut m, p, (36, 50), (4, 9), 4);
+    m
+}
+
+// ---------------------------------------------------------------------------
+// Hopper (the "Machines improvement" milestone, ticket 3's building)
+// ---------------------------------------------------------------------------
+//
+// Numbers `main.gd` mirrors to place and scale the fill body, stated in
+// voxels — the same arrangement the pipe run already uses (PIPE_BORE_*).
+// The fill only ever occupies the hopper's *straight-walled* upper section:
+// a converging funnel's cross-section changes with height, so a slab scaled
+// inside one would poke through the walls at low fill. Real bulk hoppers are
+// built exactly this way — a straight box section over a converging
+// discharge cone — so the shape that makes the visual work is also the
+// honest one.
+/// Floor of the straight section, i.e. where a fill level of 0 sits.
+const HOPPER_FILL_Z0: i32 = 21;
+/// How far a full hopper's level rises above that floor.
+const HOPPER_FILL_HEIGHT: i32 = 9;
+/// Inner half-width of the straight section; the fill body matches it.
+const HOPPER_INNER_HALF: i32 = 10;
+const HOPPER_CENTER: i32 = 16;
+
+/// `data/machines.ron`'s 1x1 `hopper` — ticket 3's raw-ingredient feeder,
+/// and deliberately **not** a bin or a crate: a wide open-topped box section
+/// over a converging funnel, narrowing to an enclosed discharge chute that
+/// steps down over the head of the first belt on the +X side. That silhouette
+/// is what says "this meters bulk product onto a line" at a glance.
+///
+/// Open-topped because the fill level has to be *seen*: the fixed isometric
+/// camera looks obliquely down (UI_UX.md §1), so the level inside reads
+/// directly, the same way the pipe run's sight opening makes its liquid
+/// readable. `hopper_fill` below is the body that sits in it.
+pub fn hopper(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::tile();
+    let c = HOPPER_CENTER;
+
+    // Plinth + hazard skirt, matching every machine's footing.
+    m.cuboid((2, 29), (2, 29), (0, 1), p.idx("concrete_dark"));
+    m.hazard_stripe_x((2, 29), (2, 2), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    m.hazard_stripe_x((2, 29), (29, 29), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+
+    // Four corner columns running the full height, with the funnel slung
+    // between them — how a real bulk hopper is actually supported, and (the
+    // reason it is drawn this way here) the arrangement that leaves the
+    // funnel's sloping faces exposed. Two earlier cuts stood the whole thing
+    // on short legs with cross-bracing, and in both renders the bracing
+    // dominated the silhouette while the funnel disappeared underneath the
+    // box entirely.
+    for (x0, x1) in [(3, 6), (25, 28)] {
+        for (y0, y1) in [(3, 6), (25, 28)] {
+            m.cuboid((x0, x1), (y0, y1), (2, 22), p.idx("steel_dark"));
+        }
+    }
+
+    // Converging discharge cone: a stack of square rings widening upward,
+    // each hollowed so product has somewhere to be. This is the half of the
+    // silhouette that says "hopper" rather than "bin", so it gets more of
+    // the height than the straight section above it does.
+    for z in 9..=20 {
+        let h = 4 + ((z - 9) * 8) / 11;
+        m.cuboid((c - h, c + h), (c - h, c + h), (z, z), p.idx("steel"));
+        m.carve_cuboid((c - h + 2, c + h - 2), (c - h + 2, c + h - 2), (z, z));
+    }
+
+    // Straight box section: walls 2 thick, open at the top. Product level
+    // only ever shows here (see HOPPER_FILL_Z0's note above).
+    let outer = HOPPER_INNER_HALF + 2;
+    m.cuboid((c - outer, c + outer), (c - outer, c + outer), (HOPPER_FILL_Z0, 30), p.idx("steel"));
+    m.carve_cuboid(
+        (c - HOPPER_INNER_HALF, c + HOPPER_INNER_HALF),
+        (c - HOPPER_INNER_HALF, c + HOPPER_INNER_HALF),
+        (HOPPER_FILL_Z0, 31),
+    );
+    // Flared loading lip, and hazard striping on the camera-facing wall.
+    m.cuboid((c - outer - 1, c + outer + 1), (c - outer - 1, c + outer + 1), (30, 30), p.idx("steel_light"));
+    m.carve_cuboid(
+        (c - HOPPER_INNER_HALF, c + HOPPER_INNER_HALF),
+        (c - HOPPER_INNER_HALF, c + HOPPER_INNER_HALF),
+        (30, 31),
+    );
+    m.hazard_stripe_x(
+        (c - outer, c + outer),
+        (c - outer, c - outer),
+        (23, 25),
+        3,
+        p.idx("hazard_yellow"),
+        p.idx("hazard_black"),
+    );
+
+    // Enclosed discharge chute, leaving the cone's throat and stepping down
+    // toward the belt (+X) to end just above its running surface, with a
+    // slide gate and a painted actuator box — the metering hardware the
+    // simulation's one-unit-per-tick unload stands for.
+    m.cuboid((15, 23), (12, 19), (11, 15), p.idx("steel"));
+    m.cuboid((23, 31), (12, 19), (10, 13), p.idx("steel"));
+    m.cuboid((28, 31), (11, 20), (9, 12), p.idx("steel_light"));
+    m.cuboid((21, 22), (10, 21), (10, 18), p.idx("steel"));
+    m.cuboid((20, 23), (10, 12), (18, 21), p.idx("paint_blue"));
+    m.cuboid((21, 22), (11, 11), (16, 18), p.idx("brass"));
+
+    // A single status lamp on the -Y face, so an empty hopper can eventually
+    // report itself the way a stalled machine does (§7).
+    m.cuboid((10, 12), (5, 6), (25, 27), p.idx("status_amber"));
+    m
+}
+
+/// The bulk product sitting in the hopper's straight section — the solid
+/// counterpart of `pipe_fluid`, and built the same way for the same reason.
+///
+/// **One voxel tall**: `main.gd` scales this node vertically to the hopper's
+/// live fill fraction, and a one-voxel slab scaled to N voxels is
+/// geometrically the same box as an N-voxel column, with none of the pivot
+/// arithmetic a taller model would need (`vox::encode` puts a model's origin
+/// at its footprint centre *at ground level*). Near-white and matte on
+/// purpose: *which* raw ingredient a hopper holds comes from
+/// `data/recipes.ron`, so Godot multiplies a per-item tint over these
+/// vertices — and unlike a fluid, a heap of product is not a wet surface, so
+/// it takes the `matte` class rather than `liquid` (see palette.ron).
+pub fn hopper_fill(p: &Palette) -> VoxModel {
+    debug_assert!(
+        HOPPER_FILL_Z0 + HOPPER_FILL_HEIGHT <= 30,
+        "a full hopper's level would rise above its loading lip"
+    );
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 1]);
+    let c = HOPPER_CENTER;
+    m.cuboid(
+        (c - HOPPER_INNER_HALF, c + HOPPER_INNER_HALF),
+        (c - HOPPER_INNER_HALF, c + HOPPER_INNER_HALF),
+        (0, 0),
+        p.idx("bulk_pale"),
+    );
     m
 }

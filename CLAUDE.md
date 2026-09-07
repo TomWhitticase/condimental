@@ -142,6 +142,11 @@ sauce-factory/
                                    # boundary, driven through the whole chain, incl.
                                    # economy_snapshot_json's shape/initial state
     test_interaction.gd           # milestone-3 headless proof: keyboard input -> SimBridge
+    test_machines.gd                # headless proof of the "Machines improvement"
+                                      # presentation: a bespoke model per machine kind, a
+                                      # multi-tile machine covering its whole footprint, the
+                                      # hopper drawn with a live product level, and hover
+                                      # resolving a NON-ORIGIN footprint tile
     test_presentation.gd           # headless proof of the 3D scene's structure: orthographic
                                      # camera, lights+shadows, SSAO/glow, imported voxel
                                      # meshes, metal shinier than matte (UI_UX.md §1/§2/§4)
@@ -542,6 +547,38 @@ it's gone stale.
   `test_fluids.gd`: **Godot exits 0 when a `--script` file fails to parse**,
   so the suite printed PASS for a test that never loaded — every headless
   Godot test now has to print its own success marker, checked by the runner.
+- 2026-09-07: "Machines improvement" epic, ticket 4 (last of four) — **the
+  presentation half**, on top of tickets 1-3. `sim_core`, `SimBridge` and
+  `data/` were not touched: every fact this ticket draws was already on the
+  JSON wire. Five calls worth not re-litigating. (1) **Which model a machine
+  gets is keyed on its `kind`, with the generic `machine` model as the
+  fallback** (`main.gd`'s `MACHINE_MODELS`) — so the three front-end kinds
+  have real silhouettes, the two downstream ones still don't, and adding a
+  kind to `data/machines.ron` never requires a Godot edit before the chain
+  will draw. (2) **A machine's node sits at its footprint's CENTRE**
+  (`_footprint_centre`), because the voxel encoder puts a model's origin at
+  its own footprint centre at ground level — which for every 1x1 kind is
+  exactly the old per-tile placement, so generalizing it moved nothing, and
+  the 2x2 cooking vat is modelled at 64x64 voxels, i.e. UI_UX.md §2's
+  32-per-tile scale times its declared footprint. A kind's model size and its
+  `machines.ron` footprint are therefore coupled on purpose: size is content.
+  (3) **The hopper's product level reuses the fluid body's mechanism** — one
+  voxel tall, scaled to a live fraction every frame, hidden below a minimum —
+  rather than inventing a second way to show "how full is this"; the only new
+  thing is `palette.ron`'s `bulk_pale`, near-white so a per-item tint can
+  multiply over it (which item a hopper holds is data), and class `matte`
+  rather than `liquid`, because a heap of tomatoes is not a wet surface.
+  (4) **Hover grew a third branch, not a third mechanism**:
+  `_machine_recipe_at_tile` became footprint-aware so any tile of a
+  multi-tile machine resolves, and `_hover_text_at_tile` gained the hopper —
+  the same shape milestone 6's pipes were added in. (5) **The material rule
+  for machine assets is "food contact is stainless, structure is painted or
+  poured"** — recorded in UI_UX.md §2b point 8 so it isn't re-argued per
+  asset. Also fixed a real, silent bug only the rendered scene could find:
+  `ITEM_MODELS` still named `tomato_sauce`, an item ticket 2 deleted, so two
+  stages of the chain had been rendering cardboard boxes instead of bulk
+  product. Its lesson is UI_UX.md §2b point 10. **This ticket completes the
+  "Machines improvement" epic.**
 - 2026-09-07: Visual-polish pass — built UI_UX.md §2a's voxel asset pipeline
   for real and replaced milestone 3/4's flat 2D placeholder scene with the
   isometric 3D one the doc describes. Presentation-only: `sim_core`,
