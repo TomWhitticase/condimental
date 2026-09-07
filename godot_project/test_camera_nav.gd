@@ -14,7 +14,15 @@
 #   * a macOS trackpad's InputEventPanGesture (not InputEventMouseButton —
 #     the two are genuinely different event types, which is why scroll-to-
 #     zoom silently didn't work on trackpads until this was added) and the
-#     +/- keys both reach `_unhandled_input` and actually zoom.
+#     +/- keys both reach `_unhandled_input` and actually zoom,
+#   * TAB toggles between ISOMETRIC (orthographic) and FIRST_PERSON
+#     (perspective) on the one shared Camera3D node,
+#   * in first-person mode, mouse-look rotates the camera and clamps pitch,
+#     while WASD movement stays purely horizontal regardless of pitch (E/Q
+#     are the only things that change height) — the Minecraft-flight rule,
+#   * click-and-drag panning (isometric) moves `_camera_focus` opposite the
+#     drag direction along the screen-relative axes, only while the right
+#     mouse button is actually held.
 #
 # `_pan_camera` itself reads the `Input` singleton to decide direction
 # (held WASD/arrows) — that part is a thin, deliberately untested read per
@@ -121,5 +129,99 @@ func _initialize() -> void:
 		_fail("KEY_EQUAL (+) should zoom in (decrease size), was %f now %f" % [size_before_plus, camera.size])
 		return
 
-	print("CAMERA_NAV_OK: zoom clamps at both ends, pan moves along screen axes, trackpad gesture and +/- keys both zoom, orientation never changes")
+	# --- Drag-pan (isometric): only while the right button is actually held --
+	var drag_start := InputEventMouseButton.new()
+	drag_start.button_index = MOUSE_BUTTON_RIGHT
+	drag_start.pressed = true
+	main._unhandled_input(drag_start)
+	if not main._iso_dragging:
+		_fail("holding the right mouse button should set _iso_dragging")
+		return
+
+	var focus_before_drag: Vector3 = main._camera_focus
+	var drag_motion := InputEventMouseMotion.new()
+	drag_motion.relative = Vector2(40.0, 0.0) # dragged right
+	main._unhandled_input(drag_motion)
+	if main._camera_focus.is_equal_approx(focus_before_drag):
+		_fail("dragging with the right button held should move _camera_focus")
+		return
+	# "Grab and drag": dragging right should move the focus opposite
+	# _pan_right (the world slides right under the cursor, following it).
+	var drag_moved: Vector3 = main._camera_focus - focus_before_drag
+	if drag_moved.normalized().dot(main._pan_right) > -0.99:
+		_fail("dragging right should move focus opposite _pan_right, moved by %s" % str(drag_moved))
+		return
+
+	var drag_end := InputEventMouseButton.new()
+	drag_end.button_index = MOUSE_BUTTON_RIGHT
+	drag_end.pressed = false
+	main._unhandled_input(drag_end)
+	if main._iso_dragging:
+		_fail("releasing the right mouse button should clear _iso_dragging")
+		return
+
+	var focus_after_release: Vector3 = main._camera_focus
+	main._unhandled_input(drag_motion) # same motion again, but button is up now
+	if not main._camera_focus.is_equal_approx(focus_after_release):
+		_fail("mouse motion without the right button held should not pan")
+		return
+
+	# --- TAB toggles ISOMETRIC <-> FIRST_PERSON on the shared Camera3D ------
+	var tab_key := InputEventKey.new()
+	tab_key.keycode = KEY_TAB
+	tab_key.pressed = true
+
+	main._unhandled_input(tab_key)
+	if main._view_mode != main.ViewMode.FIRST_PERSON:
+		_fail("TAB should switch to FIRST_PERSON")
+		return
+	if camera.projection != Camera3D.PROJECTION_PERSPECTIVE:
+		_fail("first-person mode must use a perspective camera, projection was %d" % camera.projection)
+		return
+
+	# --- First-person mouse-look: rotates and clamps pitch ------------------
+	var yaw_before: float = main._fp_yaw
+	main._apply_look(Vector2(100.0, 0.0)) # simulate the mouse moving right
+	if is_equal_approx(main._fp_yaw, yaw_before):
+		_fail("_apply_look with a nonzero X delta should change _fp_yaw")
+		return
+
+	main._fp_pitch = 0.0
+	for _i in range(2000): # far more than enough to hit the clamp
+		main._apply_look(Vector2(0.0, -1000.0)) # looking up, repeatedly
+	if not is_equal_approx(main._fp_pitch, main.FP_PITCH_LIMIT):
+		_fail("pitch should clamp at FP_PITCH_LIMIT (%f), got %f" % [main.FP_PITCH_LIMIT, main._fp_pitch])
+		return
+
+	# --- First-person movement: WASD stays horizontal regardless of pitch ---
+	# Pitch is still pinned at the clamp from above (looking almost straight
+	# up) — if movement used the tilted look direction instead of a yaw-only
+	# heading, "forward" would shoot the camera upward. It must not.
+	var fp_pos_before: Vector3 = main._fp_position
+	main._apply_fp_move(main._fp_heading_basis().z * -1.0, 1.0) # "forward" for 1 second
+	var fp_moved: Vector3 = main._fp_position - fp_pos_before
+	if not is_zero_approx(fp_moved.y):
+		_fail("forward movement must stay horizontal even while pitched up, but Y moved by %f" % fp_moved.y)
+		return
+	if is_zero_approx(fp_moved.length()):
+		_fail("_apply_fp_move with a nonzero direction should move _fp_position")
+		return
+
+	# E/Q (up/down) are the only things that change height in first-person.
+	var fp_pos_before_up: Vector3 = main._fp_position
+	main._apply_fp_move(Vector3.UP, 1.0)
+	if main._fp_position.y <= fp_pos_before_up.y:
+		_fail("_apply_fp_move(Vector3.UP, ...) should increase _fp_position.y")
+		return
+
+	# --- TAB back to ISOMETRIC restores the orthographic camera -------------
+	main._unhandled_input(tab_key)
+	if main._view_mode != main.ViewMode.ISOMETRIC:
+		_fail("TAB again should switch back to ISOMETRIC")
+		return
+	if camera.projection != Camera3D.PROJECTION_ORTHOGONAL:
+		_fail("switching back to isometric must restore the orthographic camera, projection was %d" % camera.projection)
+		return
+
+	print("CAMERA_NAV_OK: zoom clamps at both ends, pan moves along screen axes, trackpad gesture and +/- keys both zoom, drag-pan and TAB view-mode switching and first-person look/move all work, orientation never changes in isometric mode")
 	quit(0)

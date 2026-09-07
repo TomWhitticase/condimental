@@ -22,7 +22,7 @@ below is history and should only ever be appended to.)*
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
 - **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. Milestone 6 (Fluids) is next.
 - **Art/UI:** the voxel pipeline (UI_UX.md §2a/§2b) exists and is the source of every asset in the scene — Rust generators in `assets/voxels/generators/` produce `.vox` models, reviewed as isometric PNGs via `scripts/build-voxels.sh`, imported into Godot by a pinned community importer. What's *not* built is UI_UX.md §5's actual UI (clipboards, checklists, icon slots) — the scene has a plain readout panel standing in for it.
-- **Camera:** pan (WASD/arrows) and zoom (scroll wheel) are implemented; the isometric angle itself stays fixed, per UI_UX.md §1. 90° snap-rotation is still not implemented (still a nice-to-have, not required).
+- **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, E/Q up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -38,6 +38,29 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-07 — Two view modes: isometric and first-person, toggled with TAB
+
+Added a second way to look at the factory: TAB switches between the
+existing UI_UX.md §1 isometric camera (which also gained right-click-drag
+panning alongside WASD/scroll) and a new first-person "fly" camera — mouse
+look, WASD to move, E/Q for up/down (not Space/Shift, since Space already
+spawns a tomato and reusing it would fire both on one keypress). Both modes
+share the one `Camera3D` node, reconfigured rather than swapped, so "exactly
+one camera" stays true either way.
+
+First-person is explicitly not a UI_UX.md concept and not real player
+movement — there's no player entity, no gravity, no collision on the voxel
+meshes, so it's a fly-cam, not a walk-cam. Movement is yaw-only horizontal
+(pressing forward never climbs or dives just because you're looking up or
+down), the same rule Minecraft's own creative-flight controls use, verified
+headlessly by pitching the camera hard over and confirming forward movement
+still has zero vertical component. Also fixed along the way: macOS trackpad
+scroll wasn't zooming at all before this — it arrives as a different Godot
+event type (`InputEventPanGesture`) than an actual mouse wheel
+(`InputEventMouseButton`), which only the latter was handled. +/- keys now
+zoom too. `test_camera_nav.gd` covers all of it: mode switching, look/move
+math, drag-pan direction, and the trackpad/key zoom paths.
 
 ### 2026-09-07 — Camera pan and zoom
 
