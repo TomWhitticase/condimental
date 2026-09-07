@@ -22,7 +22,8 @@ below is history and should only ever be appended to.)*
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
 - **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. Milestone 6 (Fluids) is next.
 - **Art/UI:** the voxel pipeline (UI_UX.md §2a/§2b) exists and is the source of every asset in the scene — Rust generators in `assets/voxels/generators/` produce `.vox` models, reviewed as isometric PNGs via `scripts/build-voxels.sh`, imported into Godot by a pinned community importer. What's *not* built is UI_UX.md §5's actual UI (clipboards, checklists, icon slots) — the scene has a plain readout panel standing in for it.
-- **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, E/Q up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
+- **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, SPACE/SHIFT up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
+- **Lighting:** the sky is the real background (`BG_SKY`), not a flat colour — see the "empty void" DEVLOG entry below for why that matters. `scripts/screenshot-scene.sh --first-person` reviews that mode's lighting specifically.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -38,6 +39,26 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-07 — Fixed the "empty void" lighting, remapped first-person up/down
+
+Two follow-ups after actually using first-person mode. First, up/down is now
+SPACE (up) and SHIFT (down) instead of E/Q, per request — SPACE only spawns
+a tomato in isometric mode now, so there's no conflict with flying up.
+Second, and bigger: the sky was configured but never actually shown — the
+visible backdrop was a flat near-black colour, chosen specifically to avoid
+a hard horizon line behind the tightly-framed isometric camera. That reads
+as an empty void the moment first-person mode lets you look around freely,
+which is exactly what got reported. Fixed by making the sky the real
+background (`BG_SKY`), brightening it and the ambient light for a friendlier
+daytime feel while staying grounded-industrial (UI_UX.md §3/§7 — no visible
+sun disk added, to avoid the glow-streak problem that motivated the original
+choice), and separating the floor's *visual* extent from the isometric
+camera's auto-framing math, so the ground can stretch far past the chain
+without changing the default isometric zoom. `test_presentation.gd` now
+asserts the sky is actually the background, and `test_screenshot.gd` gained
+a `--first-person` flag so this mode's lighting can be reviewed as an image
+at all, not just eyeballed live.
 
 ### 2026-09-07 — Two view modes: isometric and first-person, toggled with TAB
 

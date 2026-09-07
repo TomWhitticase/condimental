@@ -85,6 +85,9 @@ func _initialize() -> void:
 	if not env.glow_enabled:
 		_fail("glow disabled — UI_UX.md §4 asks for mild bloom on emissives")
 		return
+	if env.background_mode != Environment.BG_SKY or env.sky == null:
+		_fail("background must be the sky (BG_SKY with a Sky resource), not a flat void colour — see main.gd's own note on why a flat BG_COLOR read as an empty void once first-person mode let you look around")
+		return
 
 	# --- Assets: real voxel meshes, and metal is shinier than matte -------
 	var meshes := _find_all(main, "MeshInstance3D", [])

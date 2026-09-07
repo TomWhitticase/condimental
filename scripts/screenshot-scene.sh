@@ -8,9 +8,11 @@
 # settle, writes the frame, and exits.
 #
 # Pass --populate to run the production chain forward first, so the shot
-# shows product moving along the belts instead of an idle factory.
+# shows product moving along the belts instead of an idle factory. Pass
+# --first-person to review that camera mode's lighting/skybox instead of the
+# default isometric one.
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--populate]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--populate] [--first-person]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,7 +22,6 @@ cd "$repo_root"
 # thumbnails go to — all of it is regenerable review output, none of it ships.
 out="${1:-$repo_root/assets/voxels/previews/scene.png}"
 resolution="${2:-1600x900}"
-populate="${3:-}"
 godot_bin="${GODOT_BIN:-godot}"
 
 case "$out" in
@@ -30,7 +31,7 @@ esac
 mkdir -p "$(dirname "$out")"
 
 "$godot_bin" --path godot_project --resolution "$resolution" \
-  --script test_screenshot.gd -- "$out" $populate
+  --script test_screenshot.gd -- "$out" "${@:3}"
 status=$?
 if [ ! -f "$out" ]; then
   echo "error: no screenshot written to $out (godot exited $status)" >&2

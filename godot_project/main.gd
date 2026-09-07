@@ -47,9 +47,17 @@ const BELT_SURFACE_VOXELS := 10 # top of belt's running surface
 const FLOOR_Y := FLOOR_VOXELS * VOXEL_UNIT
 const BELT_SURFACE_Y := FLOOR_Y + BELT_SURFACE_VOXELS * VOXEL_UNIT
 
-# How far the concrete floor extends past the chain, in tiles.
+# How far past the chain the ISOMETRIC camera's auto-framing considers —
+# kept small and deliberately separate from FLOOR_GROUND_MARGIN below, or a
+# bigger floor would also zoom the default isometric view out to fit it.
 const FLOOR_MARGIN_X := 2
 const FLOOR_MARGIN_Z := 2
+# How far the floor MESH actually extends past the chain — much larger than
+# the framing margin above, so flying around in first-person doesn't reveal
+# a "floating island" edge a few steps past the machines. Purely a ground
+# plane; the isometric camera never zooms out to show all of it.
+const FLOOR_GROUND_MARGIN_X := 24
+const FLOOR_GROUND_MARGIN_Z := 24
 
 const TICK_HZ := 30.0
 const VOX_DIR := "res://voxels/"
@@ -254,10 +262,10 @@ func _build_floor() -> void:
 		push_warning("floor_tile mesh missing — skipping floor")
 		return
 
-	var x_from := -FLOOR_MARGIN_X
-	var x_to := _chain_tile_width - 1 + FLOOR_MARGIN_X
-	var z_from := -FLOOR_MARGIN_Z
-	var z_to := FLOOR_MARGIN_Z
+	var x_from := -FLOOR_GROUND_MARGIN_X
+	var x_to := _chain_tile_width - 1 + FLOOR_GROUND_MARGIN_X
+	var z_from := -FLOOR_GROUND_MARGIN_Z
+	var z_to := FLOOR_GROUND_MARGIN_Z
 
 	var multimesh := MultiMesh.new()
 	multimesh.transform_format = MultiMesh.TRANSFORM_3D
@@ -393,7 +401,7 @@ const FP_FOV := 75.0
 const FP_NEAR := 0.05 # much closer than ISO_NEAR — this mode gets right up next to machines
 
 const ISO_HELP_TEXT := "SPACE: feed a tomato    C: collect product    WASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
-const FP_HELP_TEXT := "SPACE: feed a tomato    C: collect product    WASD: move    mouse: look    E/Q: up/down    TAB: isometric"
+const FP_HELP_TEXT := "C: collect product    WASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
 
 
 func _build_camera() -> void:
@@ -557,9 +565,9 @@ func _apply_look(relative: Vector2) -> void:
 
 
 ## Reads held keys only, same split as _pan_input_direction for the same
-## reason (untestable headlessly without a live Input singleton). E/Q for
-## up/down rather than Space/Shift: Space already spawns a tomato, and
-## reusing it here would fire both actions on the same keypress.
+## reason (untestable headlessly without a live Input singleton). SPACE/SHIFT
+## for up/down, Minecraft-style — SPACE only spawns a tomato in ISOMETRIC mode
+## (_unhandled_input gates that), so there's no conflict with flying up here.
 func _fp_input_direction() -> Vector3:
 	var heading := _fp_heading_basis()
 	var forward := -heading.z
@@ -573,9 +581,9 @@ func _fp_input_direction() -> Vector3:
 		move += right
 	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
 		move -= right
-	if Input.is_key_pressed(KEY_E):
+	if Input.is_key_pressed(KEY_SPACE):
 		move += Vector3.UP
-	if Input.is_key_pressed(KEY_Q):
+	if Input.is_key_pressed(KEY_SHIFT):
 		move -= Vector3.UP
 	return move
 
@@ -678,33 +686,40 @@ func _framing_size(basis: Basis) -> float:
 ## occlusion in voxel crevices, and mild bloom on emissives — the
 ## "modded Minecraft with a shader pack" reference point, not photorealism.
 ## All of it is stock Forward+ environment configuration; no custom shaders.
+##
+## The sky IS the visible backdrop (BG_SKY), not just a light source — a
+## flat near-black BG_COLOR was tried first specifically to avoid a hard
+## horizon line/sun streak behind the tightly-framed isometric view, but it
+## reads as an empty void the moment first-person mode lets you look around
+## freely, which fights UI_UX.md §3's "a real factory you could walk into,"
+## not a factory floating in nothing. A soft, bright, sun-disk-free sky (see
+## sun_angle_max below) keeps the "no distracting streak" property that
+## motivated the original choice, while actually looking like somewhere.
 func _build_environment() -> void:
 	var sky_material := ProceduralSkyMaterial.new()
-	sky_material.sky_top_color = Color(0.30, 0.38, 0.50)
-	sky_material.sky_horizon_color = Color(0.62, 0.65, 0.68)
-	sky_material.ground_horizon_color = Color(0.26, 0.25, 0.24)
-	sky_material.ground_bottom_color = Color(0.13, 0.13, 0.13)
-	# No sun disk in the sky at all. The default draws a wide soft halo, which
-	# the glow pass then smears into a visible beam — distracting, and the sky
-	# here is only a light source and a backdrop, never something to look at.
+	# A brighter, friendlier daytime sky than the original — still a
+	# believable overcast-ish industrial-zone sky (UI_UX.md §3's "grounded,
+	# not cartoonish"), just not dim enough to read as night or a void.
+	sky_material.sky_top_color = Color(0.42, 0.55, 0.72)
+	sky_material.sky_horizon_color = Color(0.78, 0.81, 0.83)
+	sky_material.ground_horizon_color = Color(0.42, 0.40, 0.37)
+	sky_material.ground_bottom_color = Color(0.24, 0.23, 0.21)
+	# Still no sun disk: the default draws a wide soft halo that the glow pass
+	# smears into a distracting beam. Brightness now comes from the sky
+	# colours and the key light below, not a visible sun.
 	sky_material.sun_angle_max = 0.0
 	var sky := Sky.new()
 	sky.sky_material = sky_material
 
 	var env := Environment.new()
-	# The sky is kept purely as a *light source* — it drives ambient and the
-	# reflections that make stainless steel read as steel — while the visible
-	# backdrop is a flat slate colour. Drawing the sky itself put a hard
-	# horizon line behind the factory and a glow-smeared sun streak across the
-	# frame, neither of which this diorama-style fixed camera wants.
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.09, 0.10, 0.12)
+	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	# Sky-derived ambient is what fills the shadowed sides of a voxel model;
 	# without it, unlit faces read as flat black and the medium looks cheap.
+	# Raised from the original 0.55 alongside the brighter sky above.
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 0.55
+	env.ambient_light_energy = 0.8
 
 	env.ssao_enabled = true
 	env.ssao_radius = 0.9
@@ -719,7 +734,9 @@ func _build_environment() -> void:
 
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	env.tonemap_white = 6.0
-	env.tonemap_exposure = 0.92
+	# Raised from 0.92 to match the brighter sky/ambient — ACES still rolls
+	# off highlights safely, so this doesn't blow out the metal specular.
+	env.tonemap_exposure = 1.05
 	# Deliberately no depth fog: it was tried, and at this camera distance it
 	# flattened the whole factory into one haze-grey value and cost more
 	# contrast than the atmosphere was worth.
@@ -883,7 +900,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 
 	var command := ""
-	if event.keycode == KEY_SPACE:
+	# SPACE only spawns in ISOMETRIC mode — in FIRST_PERSON it's "fly up"
+	# (_fp_input_direction), and a single keypress can't mean both.
+	if event.keycode == KEY_SPACE and _view_mode == ViewMode.ISOMETRIC:
 		command = JSON.stringify({"type": "spawn_item", "item": "tomato"})
 	elif event.keycode == KEY_C:
 		command = JSON.stringify({"type": "collect_output"})
