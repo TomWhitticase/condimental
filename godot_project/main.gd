@@ -1193,12 +1193,6 @@ func _update_contract_panel() -> void:
 			for u in range(boxes.size()):
 				_set_checkbox_checked(boxes[u], u < have)
 
-	# The icon shows the contract's (first, currently only) target item —
-	# UI_UX.md §5, a render of the real asset next to the text it labels.
-	_economy_icon.visible = not mix.is_empty()
-	if not mix.is_empty():
-		_economy_icon.texture = _icon_for(String(mix[0][0]))
-
 	var ticks_left: int = max(0, int(econ["next_delivery_tick"]) - sim.current_tick())
 	_contract_meta_label.text = "Next check in %d ticks" % ticks_left
 
