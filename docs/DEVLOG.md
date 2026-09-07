@@ -20,7 +20,7 @@ below is history and should only ever be appended to.)*
 - **Stage:** Pre-alpha, but the core MVP loop is real end to end and it looks like a game. Milestones 1 (Scaffold), 2 (Mobile export spike), 3 (Core loop proof), 4 (First full chain), and 5 (Economy MVP) are all done — a real multi-stage production chain (tomato -> tomato sauce -> ketchup -> bottled ketchup -> boxed ketchup) that can deliver against a hardcoded contract to earn money, headlessly verified end to end, Android export proven working. On top of that, a visual-polish pass built UI_UX.md's voxel asset pipeline and turned the flat 2D placeholder scene into an isometric, real-time-lit 3D factory.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
-- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. Milestone 6 (Fluids) is next.
+- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. Milestone 6 (Fluids) is in progress: its simulation half (pipe network, pressure equalization, a recipe requiring a liquid, the `SimBridge` fluid snapshot) has landed; the Godot presentation half — pipe voxel asset, rendering, hover info — is the second ticket of that epic.
 - **Art/UI:** the voxel pipeline (UI_UX.md §2a/§2b) exists and is the source of every asset in the scene — Rust generators in `assets/voxels/generators/` produce `.vox` models, reviewed as isometric PNGs via `scripts/build-voxels.sh`, imported into Godot by a pinned community importer. UI_UX.md §5's real UI is now landed: the money/contract readout is a diegetic clipboard panel (paper background, steel clip bar, checkbox tick marks) with a voxel-rendered icon per required item, and per-machine detail (recipe/progress/buffers) is hover-only instead of dense always-on text, working in both view modes — a screen-centre crosshair stands in for the cursor in first-person — see the log entries below.
 - **UI polish epic (done):** a Run (`run_cc6860507d36`) with 3 parallel tickets targeting UI_UX.md §5, all done and merged — hover tooltips for machines, a voxel-rendered icon pipeline, and the clipboard reskin. Check `orca orchestration task-list --run run_cc6860507d36 --json` for the DAG's final state.
 - **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, SPACE/SHIFT up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
@@ -40,6 +40,34 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-07 — Milestone 6, ticket 1: fluids in the simulation core
+
+The sim half of ARCHITECTURE.md §9 item 6 (Fluids). New
+`sim_core::sim::fluid` module implements §3.4's model literally — a
+`FluidNetwork` is a run of pipe segments each holding a *volume* of one
+fluid, with pressure (fill fraction) equalizing between adjacent segments
+every tick; there is no droplet, no per-item entity, and all state is
+fixed-point `Fx`. A recipe can now declare `fluid_inputs`, and a machine
+gates and consumes them exactly the way it already gates and consumes solid
+input: no fluid, no craft, and crucially no half-consumed solid input
+either. `data/recipes.ron` moves to `schema_version: 2` and hooks the
+ketchup stage up to vinegar, which is what GAMEPLAY.md §2's tier table
+always said ketchup needed — an existing stage gained an ingredient, the
+belt chain's shape is untouched.
+
+Two scope decisions worth not re-litigating. First, the pipe run is
+**fixed** — built once in `World::new`, an always-refilling off-map source
+at one end feeding one machine at the other — the same deliberately-minimal
+stance milestone 5 took with its single hardcoded contract; player-placed
+pipes and §3.8's union-find topology recompute stay out until placement is
+real. Second, **which** stage gets plumbed is still a pure data question:
+`World` picks whatever recipe declares `fluid_inputs` and carries whatever
+fluid it names, so no recipe id, fluid id or stage index is written down in
+Rust. Fluid state is exposed to Godot as a new `fluid_snapshot_json`
+(plus pipes in chunk snapshots and `query_tile`), polled per-frame like the
+economy snapshot rather than dirty-tracked, since fluid moves nearly every
+tick. Ticket 2 renders it.
 
 ### 2026-09-07 — First-person crosshair hover
 

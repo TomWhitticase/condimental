@@ -12,16 +12,29 @@
 // recipe here, whose `inputs` names an item the previous recipe's `outputs`
 // produces, adds a pipeline stage with no Rust changes at all.
 //
+// Milestone 6 (Fluids) bumps `schema_version` to 2 and adds the optional
+// `fluid_inputs` field: (fluid id, whole units) consumed per craft from the
+// machine's connected pipe network (ARCHITECTURE.md §3.4). It defaults to
+// empty, so every recipe that doesn't name it is unchanged — but v1 files
+// are still *rejected*, not migrated; see `CURRENT_SCHEMA_VERSION`'s doc in
+// sim_core/src/sim/recipe.rs for why. `World` builds its single fixed pipe
+// run for whichever recipe below declares `fluid_inputs`, carrying whatever
+// fluid that recipe names — so which stage is plumbed is a property of this
+// file, not of any Rust code.
+//
 // The chain below is a simplified stand-in for GAMEPLAY.md §2's tier 1/2
 // tomato-sauce/ketchup progression (real ketchup also needs vinegar/sugar as
 // separate raw ingredients, and GAMEPLAY.md §4 calls out its bottling step
 // as part of the same equipment tier) — this file keeps every recipe past
-// the first to a single input/single output so `World`'s one-straight-line
-// assumption holds; multi-ingredient convergence is a later milestone's
-// branching-topology concern, not this one's. Don't read this as the final
+// the first to a single *solid* input/single output so `World`'s
+// one-straight-line assumption holds; multi-ingredient convergence on the
+// belt side is a later milestone's branching-topology concern, not this
+// one's. (A fluid input is not belt-borne, so it adds an ingredient without
+// touching that topology at all — which is exactly why milestone 6 could
+// add one to an existing stage instead of inventing a new one.) Don't read this as the final
 // tomato sauce/ketchup recipes.
 (
-    schema_version: 1,
+    schema_version: 2,
     recipes: [
         Recipe(
             id: "tomato_sauce",
@@ -30,9 +43,18 @@
             machine: "cooker",
             time_ticks: 180,
         ),
+        // Milestone 6's fluid-requiring recipe. GAMEPLAY.md §2's tier
+        // table says ketchup is exactly where vinegar enters the sauce
+        // progression ("+ vinegar, sugar, spices"), so this is the recipe
+        // the doc already wanted to have a liquid ingredient — it needed a
+        // fluid network to express, not a new recipe. Note this stage's
+        // belt input/output are completely untouched: the chain's shape is
+        // identical to milestone 4's, this stage just now also needs
+        // something a belt can't carry.
         Recipe(
             id: "ketchup",
             inputs: [("tomato_sauce", 1)],
+            fluid_inputs: [("vinegar", 2)],
             outputs: [("ketchup", 1)],
             machine: "reducer",
             time_ticks: 120,

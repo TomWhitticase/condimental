@@ -118,6 +118,33 @@ impl SimBridge {
         GString::from(json.as_str())
     }
 
+    /// A JSON-serialized `sim::FluidSnapshot` — the pipe run's fluid type,
+    /// per-segment volume/pressure, and which machine it feeds
+    /// (ARCHITECTURE.md §9 milestone 6, §3.4). Returns an **empty string**
+    /// when the world has no pipe run at all (no recipe in
+    /// `data/recipes.ron` declares `fluid_inputs`), the same "empty string
+    /// means nothing there" convention `query_tile_json` already uses —
+    /// GDScript should check `is_empty()` before parsing.
+    ///
+    /// Read this every frame you want to redraw fluid, like
+    /// `economy_snapshot_json` and unlike `chunk_snapshot_json`: fluid
+    /// volume changes on nearly every tick and deliberately does *not*
+    /// dirty its chunk (that would defeat dirty tracking), so
+    /// `dirty_chunk_ids()` will never tell you fluid moved. Pipe
+    /// *geometry* is also carried in `chunk_snapshot_json`'s new `pipes`
+    /// array for a chunk-driven renderer; the live levels are here. The
+    /// full field-by-field shape is documented on `sim::FluidSnapshot`.
+    #[func]
+    fn fluid_snapshot_json(&self) -> GString {
+        match self.world.fluid_snapshot() {
+            Some(snapshot) => {
+                let json = serde_json::to_string(&snapshot).expect("FluidSnapshot must serialize");
+                GString::from(json.as_str())
+            }
+            None => GString::new(),
+        }
+    }
+
     /// A JSON-serialized `sim::EconomySnapshot` — money plus the hardcoded
     /// contract's mix/progress/cadence (ARCHITECTURE.md §9 milestone 5,
     /// GAMEPLAY.md §6). Unlike the chunk snapshots above there's no

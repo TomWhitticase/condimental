@@ -36,9 +36,10 @@ use hecs::Entity;
 
 use super::belt::BeltSegment;
 use super::economy::{Economy, EconomySnapshot};
+use super::fluid::{FluidNetwork, PipeSegment};
 use super::machine::Machine;
 use super::recipe::{Recipe, RecipeRegistry};
-use super::types::{ChunkId, Fx, ItemId, RecipeId, TileCoord, chunk_of};
+use super::types::{ChunkId, FluidId, Fx, ItemId, RecipeId, TileCoord, chunk_of};
 
 /// Where an entity sits in the tile grid (ARCHITECTURE.md §3.1/§3.2).
 #[derive(Debug, Clone, Copy)]
@@ -109,6 +110,11 @@ pub fn command_from_json(json: &str) -> Option<PlayerCommand> {
 pub struct ChunkSnapshot {
     pub belts: Vec<BeltSnapshot>,
     pub machines: Vec<MachineSnapshot>,
+    /// Pipe segments of the fluid network (milestone 6) whose tiles fall in
+    /// this chunk. See `PipeSnapshot` for the JSON shape, and
+    /// `World::fluid_snapshot` for why live fluid *levels* are better read
+    /// from there than from here.
+    pub pipes: Vec<PipeSnapshot>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -133,6 +139,82 @@ pub struct MachineSnapshot {
     pub output: Vec<(ItemId, u32)>,
 }
 
+/// One pipe tile, for rendering (milestone 6 — ARCHITECTURE.md §3.4).
+///
+/// JSON shape (`snake_case` field names, as serialized by `serde_json`):
+///
+/// ```json
+/// { "tile": [8, 1], "volume": 7.5, "capacity": 10.0, "pressure": 0.75, "is_source": false }
+/// ```
+///
+/// `volume`/`capacity` are in whole fluid units; `pressure` is the
+/// dimensionless fill fraction `volume / capacity`, in `[0, 1]` — the value
+/// to drive a fill-level visual from. All three are `f64` for the same
+/// reason `BeltSnapshot::items` positions are: they have already crossed
+/// out of fixed-point simulation state into presentation-only values that
+/// never feed back in (ARCHITECTURE.md §3.9). `is_source` marks the
+/// off-map supply tap, which is a different thing visually from a plain
+/// length of pipe.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PipeSnapshot {
+    pub tile: TileCoord,
+    pub volume: f64,
+    pub capacity: f64,
+    pub pressure: f64,
+    pub is_source: bool,
+}
+
+/// The whole fluid network in one snapshot — what a HUD/overlay needs
+/// without having to stitch together per-chunk pipe lists.
+///
+/// Read this the way `economy_snapshot` is read, **not** the way
+/// `chunk_snapshot` is: fluid volume changes on almost every tick, and
+/// deliberately does **not** mark its chunk dirty (see `World::tick`), so
+/// `dirty_chunks` will not tell you when fluid moved. There is exactly one
+/// network per world, so polling this each frame you want to redraw is
+/// cheap and always current — the same trade `EconomySnapshot` already
+/// makes. Chunk snapshots still carry pipes so a chunk-driven renderer can
+/// place the geometry; this is where the live state lives.
+///
+/// JSON shape — `null` when the loaded `data/recipes.ron` has no recipe
+/// with `fluid_inputs` at all (no fluid-requiring recipe, no pipe run):
+///
+/// ```json
+/// {
+///   "fluid": "vinegar",
+///   "total_volume": 27.5,
+///   "total_capacity": 40.0,
+///   "pressure": 0.6875,
+///   "segments": [ { "tile": [5, 1], "volume": 10.0, "capacity": 10.0,
+///                   "pressure": 1.0, "is_source": true }, ... ],
+///   "inlet_index": 3,
+///   "machine_tile": [8, 0],
+///   "machine_recipe": "ketchup",
+///   "units_per_craft": 2
+/// }
+/// ```
+///
+/// `segments` is in flow order, source end first; adjacent entries are
+/// physically adjacent pipes. `inlet_index` indexes into `segments` and
+/// marks the segment the machine actually draws from — that is the one
+/// whose level drops when a craft starts. `machine_tile`/`machine_recipe`
+/// identify the machine being fed (its tile is adjacent to the inlet
+/// segment's), and `units_per_craft` is how much the recipe consumes per
+/// craft.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FluidSnapshot {
+    pub fluid: FluidId,
+    pub total_volume: f64,
+    pub total_capacity: f64,
+    /// Network-wide fill fraction, `total_volume / total_capacity`.
+    pub pressure: f64,
+    pub segments: Vec<PipeSnapshot>,
+    pub inlet_index: usize,
+    pub machine_tile: TileCoord,
+    pub machine_recipe: RecipeId,
+    pub units_per_craft: u32,
+}
+
 /// What occupies a single tile, for `query_tile`.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -143,6 +225,18 @@ pub enum TileSnapshot {
     Machine {
         recipe: RecipeId,
         process: Option<(u64, u64)>,
+    },
+    /// A pipe tile (milestone 6). JSON:
+    /// `{"kind": "pipe", "fluid": "vinegar", "volume": 7.5, "capacity": 10.0,
+    ///   "pressure": 0.75, "is_source": false, "is_inlet": true}` —
+    /// enough for a hover tooltip without a second call.
+    Pipe {
+        fluid: FluidId,
+        volume: f64,
+        capacity: f64,
+        pressure: f64,
+        is_source: bool,
+        is_inlet: bool,
     },
 }
 
@@ -179,6 +273,17 @@ pub struct World {
     /// milestone 5, GAMEPLAY.md §6) — see `economy` module doc for why this
     /// lives here as a plain field rather than a new ECS component.
     economy: Economy,
+    /// Milestone 6's single fixed pipe run (ARCHITECTURE.md §9 item 6,
+    /// §3.4), or `None` when no recipe in `recipes.ron` declares
+    /// `fluid_inputs`. A plain field, not an ECS component, for exactly the
+    /// same reason `economy` is one: there is precisely one of these at
+    /// this milestone's scope, so ECS machinery would buy nothing. It also
+    /// keeps `Machine::tick`'s `&mut FluidNetwork` argument borrow-checkable
+    /// alongside a `&mut Machine` fetched out of `ecs` (disjoint fields).
+    fluid: Option<FluidNetwork>,
+    /// Index into `stages` of the machine the pipe run feeds — `Some` iff
+    /// `fluid` is.
+    fluid_stage: Option<usize>,
 }
 
 const BELT_LENGTH_TILES: i32 = 4;
@@ -192,6 +297,20 @@ const BELT_SPEED_TILES_PER_TICK: f64 = 0.02;
 const MACHINE_INPUT_CAPACITY: u32 = 8;
 const MACHINE_OUTPUT_CAPACITY: u32 = 8;
 
+/// Milestone 6's fixed pipe run (ARCHITECTURE.md §9 item 6): how many pipe
+/// tiles, including the source at one end and the machine inlet at the
+/// other. Long enough that pressure equalization is doing visible work
+/// carrying fluid down the run, short enough to stay a demo.
+const FLUID_PIPE_RUN_TILES: i32 = 4;
+/// Which tile row the pipe run occupies. The production chain sits on row
+/// 0; the pipes run parallel to it on row 1, so no pipe tile ever collides
+/// with a belt or machine tile. Deliberately inside the same 32x32 chunk as
+/// the chain (ARCHITECTURE.md §3.1) rather than a row above it at `-1`,
+/// which would spill the world across two chunks for no gain.
+const FLUID_PIPE_ROW_Y: i32 = 1;
+/// Volume one pipe tile holds, in whole fluid units.
+const PIPE_SEGMENT_CAPACITY: i32 = 10;
+
 impl World {
     /// Builds one stage per recipe in `recipes.ordered()`, in file order,
     /// laid out left to right — see the module doc for why this order (not
@@ -203,6 +322,7 @@ impl World {
             "recipes.ron must define at least one recipe for World::new to build a chain from"
         );
         validate_chain(ordered);
+        validate_fluid_scope(ordered);
 
         let mut ecs = hecs::World::new();
         let mut stages = Vec::with_capacity(ordered.len());
@@ -236,6 +356,30 @@ impl World {
             });
         }
 
+        // The fluid half of the world (milestone 6), also derived purely
+        // from `recipes.ron`: whichever recipe declares `fluid_inputs` gets
+        // a pipe run built up to its machine, carrying the fluid that
+        // recipe asks for. No fluid id, no recipe id and no stage index is
+        // written down in Rust — same data-driven rule the belt chain
+        // already follows (ARCHITECTURE.md §3.6/§10). A file with no fluid
+        // recipe simply has no pipes.
+        let fluid_stage = ordered.iter().position(|r| !r.fluid_inputs.is_empty());
+        let fluid = fluid_stage.map(|i| {
+            let machine_x = i as i32 * STAGE_SPAN_TILES + BELT_LENGTH_TILES;
+            let capacity = Fx::from_num(PIPE_SEGMENT_CAPACITY);
+            // Laid out left to right ending directly beside the machine it
+            // feeds: the source is the far end, the inlet is the tile
+            // adjacent to the machine.
+            let segments: Vec<PipeSegment> = (0..FLUID_PIPE_RUN_TILES)
+                .map(|n| {
+                    let x = machine_x - (FLUID_PIPE_RUN_TILES - 1 - n);
+                    PipeSegment::new((x, FLUID_PIPE_ROW_Y), capacity, n == 0)
+                })
+                .collect();
+            let inlet = segments.len() - 1;
+            FluidNetwork::new(ordered[i].fluid_inputs[0].0.clone(), segments, inlet)
+        });
+
         Self {
             ecs,
             recipes,
@@ -244,6 +388,8 @@ impl World {
             belt_speed: Fx::from_num(BELT_SPEED_TILES_PER_TICK),
             dirty: Vec::new(),
             economy: Economy::new(),
+            fluid,
+            fluid_stage,
         }
     }
 
@@ -263,6 +409,38 @@ impl World {
     /// world rather than one per chunk.
     pub fn economy_snapshot(&self) -> EconomySnapshot {
         self.economy.snapshot()
+    }
+
+    /// The fluid network's live state, or `None` if this world has no pipe
+    /// run (no recipe declares `fluid_inputs`). Always current, never
+    /// dirty-tracked — see [`FluidSnapshot`]'s doc for the full JSON shape
+    /// and for why presentation should poll this rather than wait for a
+    /// dirty chunk.
+    pub fn fluid_snapshot(&self) -> Option<FluidSnapshot> {
+        let fluid = self.fluid.as_ref()?;
+        let stage = self.stages[self.fluid_stage.expect("fluid_stage is Some iff fluid is")];
+        let machine = self.ecs.get::<&Machine>(stage.machine_entity).unwrap();
+        let units_per_craft = self
+            .recipes
+            .get(&machine.recipe)
+            .and_then(|r| r.fluid_inputs.first().map(|(_, units)| *units))
+            .unwrap_or(0);
+        let total_capacity = fluid.total_capacity();
+        Some(FluidSnapshot {
+            fluid: fluid.fluid.clone(),
+            total_volume: fluid.total_volume().to_num::<f64>(),
+            total_capacity: total_capacity.to_num::<f64>(),
+            pressure: if total_capacity == Fx::ZERO {
+                0.0
+            } else {
+                (fluid.total_volume() / total_capacity).to_num::<f64>()
+            },
+            segments: fluid.segments().iter().map(pipe_snapshot).collect(),
+            inlet_index: fluid.inlet_index(),
+            machine_tile: self.position_of(stage.machine_entity),
+            machine_recipe: machine.recipe.clone(),
+            units_per_craft,
+        })
     }
 
     fn position_of(&self, entity: Entity) -> TileCoord {
@@ -291,6 +469,17 @@ impl World {
         self.dirty.clear();
         self.tick_count += 1;
 
+        // Fluid first, so a machine starting a craft below sees this tick's
+        // equalized pressure rather than last tick's (ARCHITECTURE.md §3.4).
+        // Note this deliberately does NOT mark any chunk dirty: fluid moves
+        // on nearly every tick, and dirtying a chunk every tick would defeat
+        // the point of dirty tracking (§4's delta granularity). Presentation
+        // polls `fluid_snapshot` instead, exactly as it polls
+        // `economy_snapshot` — see `FluidSnapshot`'s own doc.
+        if let Some(fluid) = self.fluid.as_mut() {
+            fluid.tick();
+        }
+
         for i in 0..self.stages.len() {
             let stage = self.stages[i];
             let belt_tile = self.position_of(stage.belt_entity);
@@ -302,7 +491,15 @@ impl World {
             };
             let machine_changed = {
                 let mut machine = self.ecs.get::<&mut Machine>(stage.machine_entity).unwrap();
-                machine.tick(self.tick_count, &self.recipes)
+                // Only the one plumbed-in stage sees the network; every
+                // other machine is handed `None` and behaves exactly as it
+                // did before milestone 6.
+                let fluid = if self.fluid_stage == Some(i) {
+                    self.fluid.as_mut()
+                } else {
+                    None
+                };
+                machine.tick(self.tick_count, &self.recipes, fluid)
             };
             let transferred =
                 self.try_transfer_belt_to_machine(stage.belt_entity, stage.machine_entity);
@@ -433,6 +630,14 @@ impl World {
             }
         }
 
+        if let Some(fluid) = &self.fluid {
+            for segment in fluid.segments() {
+                if chunk_of(segment.tile) == id {
+                    snapshot.pipes.push(pipe_snapshot(segment));
+                }
+            }
+        }
+
         snapshot
     }
 
@@ -448,6 +653,14 @@ impl World {
                 self.position_of(stage.machine_entity),
             ] {
                 let chunk = chunk_of(tile);
+                if !ids.contains(&chunk) {
+                    ids.push(chunk);
+                }
+            }
+        }
+        if let Some(fluid) = &self.fluid {
+            for segment in fluid.segments() {
+                let chunk = chunk_of(segment.tile);
                 if !ids.contains(&chunk) {
                     ids.push(chunk);
                 }
@@ -499,6 +712,21 @@ impl World {
                     recipe: machine.recipe.clone(),
                     process: machine.process.map(|p| (p.start_tick, p.required_ticks)),
                 });
+            }
+        }
+
+        if let Some(fluid) = &self.fluid {
+            for (i, segment) in fluid.segments().iter().enumerate() {
+                if segment.tile == pos {
+                    return Some(TileSnapshot::Pipe {
+                        fluid: fluid.fluid.clone(),
+                        volume: segment.volume.to_num::<f64>(),
+                        capacity: segment.capacity.to_num::<f64>(),
+                        pressure: segment.pressure().to_num::<f64>(),
+                        is_source: segment.is_source,
+                        is_inlet: i == fluid.inlet_index(),
+                    });
+                }
             }
         }
 
@@ -569,6 +797,49 @@ fn validate_chain(ordered: &[Recipe]) {
              (inputs {:?}) — World builds one stage per recipe in file order, so consecutive \
              recipes must chain by a shared item id",
             prev.id, prev.outputs, next.id, next.inputs
+        );
+    }
+}
+
+fn pipe_snapshot(segment: &PipeSegment) -> PipeSnapshot {
+    PipeSnapshot {
+        tile: segment.tile,
+        volume: segment.volume.to_num::<f64>(),
+        capacity: segment.capacity.to_num::<f64>(),
+        pressure: segment.pressure().to_num::<f64>(),
+        is_source: segment.is_source,
+    }
+}
+
+/// Enforces milestone 6's deliberately narrow fluid scope, the same way
+/// `validate_chain` enforces milestone 4's: `World` builds exactly *one*
+/// fixed pipe run, feeding exactly one machine, carrying exactly one fluid.
+/// A data file that asks for more than that would otherwise get it silently
+/// ignored (a second fluid recipe's machine would simply never start, with
+/// no clue why) — so it panics at construction time instead, with the
+/// reason and what would have to change.
+fn validate_fluid_scope(ordered: &[Recipe]) {
+    let with_fluid: Vec<&Recipe> = ordered
+        .iter()
+        .filter(|r| !r.fluid_inputs.is_empty())
+        .collect();
+    assert!(
+        with_fluid.len() <= 1,
+        "recipes.ron fluid error: {} recipes declare fluid_inputs ({:?}), but milestone 6 \
+         (ARCHITECTURE.md §9 item 6) builds exactly one fixed pipe run feeding one machine — \
+         supporting a second one needs multiple FluidNetworks and a real placement description, \
+         not another hardcoded run",
+        with_fluid.len(),
+        with_fluid.iter().map(|r| &r.id).collect::<Vec<_>>()
+    );
+    if let Some(recipe) = with_fluid.first() {
+        assert_eq!(
+            recipe.fluid_inputs.len(),
+            1,
+            "recipes.ron fluid error: recipe '{}' declares {} fluid inputs, but a machine is \
+             plumbed into exactly one network at this milestone's scope",
+            recipe.id,
+            recipe.fluid_inputs.len()
         );
     }
 }

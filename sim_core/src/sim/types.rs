@@ -22,6 +22,14 @@ pub type ItemId = String;
 /// `recipes.ron`.
 pub type RecipeId = String;
 
+/// A fluid's content id (e.g. "vinegar", "water") — the exact same
+/// string-id pattern as `ItemId`, kept as its own alias because a fluid is
+/// never interchangeable with a solid item: fluids live in a
+/// `fluid::FluidNetwork` as a volume (ARCHITECTURE.md §3.4), items live in
+/// an `Inventory` or on a belt as discrete units, and no code path should
+/// be able to pass one where the other is meant without it reading wrong.
+pub type FluidId = String;
+
 /// Tile coordinate in the world grid (ARCHITECTURE.md §3.1).
 pub type TileCoord = (i32, i32);
 
