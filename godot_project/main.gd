@@ -124,9 +124,12 @@ var _icon_fallback_texture: Texture2D
 
 # Hover tooltip (docs/UI_UX.md §5: "hover tooltips for recipe/machine detail
 # rather than dense always-on text") — see _tile_under_screen_pos/
-# _update_hover_tooltip below.
+# _update_hover_tooltip below. Works in both view modes: ISOMETRIC queries
+# the live cursor position, FIRST_PERSON queries the screen centre (where
+# _crosshair is drawn), since the mouse is captured/hidden there.
 var _hover_tooltip: PanelContainer
 var _hover_label: Label
+var _crosshair: Control # visible only in FIRST_PERSON — see _set_view_mode
 
 enum ViewMode { ISOMETRIC, FIRST_PERSON }
 var _view_mode: int = ViewMode.ISOMETRIC
@@ -438,6 +441,8 @@ const FP_MOUSE_SENSITIVITY := 0.0025 # radians per pixel of relative mouse motio
 const FP_PITCH_LIMIT := deg_to_rad(89.0) # stop just short of looking straight up/down
 const FP_FOV := 75.0
 const FP_NEAR := 0.05 # much closer than ISO_NEAR — this mode gets right up next to machines
+const CROSSHAIR_SIZE := 14.0 # px, each bar's length
+const CROSSHAIR_THICKNESS := 2.0 # px, each bar's width
 
 const ISO_HELP_TEXT := "SPACE: feed a tomato    C: collect product    WASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
 const FP_HELP_TEXT := "C: collect product    WASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
@@ -646,6 +651,8 @@ func _set_view_mode(mode: int) -> void:
 	if mode == _view_mode:
 		return
 	_view_mode = mode
+	if _crosshair != null:
+		_crosshair.visible = mode == ViewMode.FIRST_PERSON
 
 	if mode == ViewMode.FIRST_PERSON:
 		_iso_dragging = false
@@ -861,6 +868,7 @@ func _build_ui() -> void:
 	# text this panel used to show — see _build_hover_tooltip/
 	# _update_hover_tooltip below.
 	_build_hover_tooltip(hud)
+	_build_crosshair(hud)
 
 
 ## The first diegetic clipboard/checklist widget (UI_UX.md §5) — reskins the
@@ -1039,6 +1047,37 @@ func _build_hover_tooltip(hud: CanvasLayer) -> void:
 	_hover_tooltip.add_child(_hover_label)
 
 
+## A small screen-centre crosshair, shown only in FIRST_PERSON (toggled in
+## _set_view_mode) — the mouse is captured/hidden there, so it's the only
+## way to see what "looking at" a machine even means, and it's what
+## _update_hover_tooltip queries against instead of a live cursor position.
+## Two thin bars rather than a Label glyph, so it stays crisp at any size
+## without depending on a font having a suitable character.
+func _build_crosshair(hud: CanvasLayer) -> void:
+	_crosshair = Control.new()
+	_crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_crosshair.visible = false
+	_crosshair.set_anchors_preset(Control.PRESET_FULL_RECT)
+	hud.add_child(_crosshair)
+
+	var bar_color := Color(0.95, 0.95, 0.90, 0.85)
+	var h_bar := ColorRect.new()
+	h_bar.color = bar_color
+	h_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h_bar.size = Vector2(CROSSHAIR_SIZE, CROSSHAIR_THICKNESS)
+	h_bar.set_anchors_preset(Control.PRESET_CENTER)
+	h_bar.position = -h_bar.size / 2.0
+	_crosshair.add_child(h_bar)
+
+	var v_bar := ColorRect.new()
+	v_bar.color = bar_color
+	v_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v_bar.size = Vector2(CROSSHAIR_THICKNESS, CROSSHAIR_SIZE)
+	v_bar.set_anchors_preset(Control.PRESET_CENTER)
+	v_bar.position = -v_bar.size / 2.0
+	_crosshair.add_child(v_bar)
+
+
 # --------------------------------------------------------------------------
 # Simulation driving / rendering
 # --------------------------------------------------------------------------
@@ -1186,11 +1225,15 @@ func _item_node_for(key: String, item_name: String) -> Node3D:
 	return node
 
 
-## Sentinel returned by `_tile_under_screen_pos` when the camera ray is
-## (degenerately) parallel to the belt-surface plane and never crosses it —
-## not reachable in practice for the fixed isometric CAMERA_DIRECTION, but
-## callers get an explicit "no tile" value rather than a Vector2i(0, 0) that
-## could also be a real tile.
+## Sentinel returned by `_tile_under_screen_pos` when the camera ray never
+## crosses the belt-surface plane in front of the camera — either it's
+## (degenerately) parallel to it (not reachable in practice for the fixed
+## isometric CAMERA_DIRECTION, but a real case once FIRST_PERSON's free-look
+## camera can point the ray dead level), or it points away from the plane
+## entirely (FIRST_PERSON looking up at the sky — the plane is still
+## "behind" the ray in that case, so the naive intersection point would be
+## a phantom tile no player could see). Callers get an explicit "no tile"
+## value rather than a Vector2i(0, 0) that could also be a real tile.
 const HOVER_NO_TILE := Vector2i(-999999, -999999)
 ## Screen-space offset from the raw cursor position to the tooltip panel's
 ## top-left corner, so the panel doesn't sit directly under (and get
@@ -1212,14 +1255,15 @@ const HOVER_TOOLTIP_OFFSET := Vector2(18.0, 18.0)
 ## reads happen here, so test_hover.gd can call it directly with an explicit
 ## screen position. This mirrors _apply_pan/_apply_look's split (see their
 ## doc comments): _update_hover_tooltip below is the thin, untested part that
-## actually reads the live mouse position.
+## actually reads the live mouse position (ISOMETRIC) or the screen centre
+## (FIRST_PERSON, where the crosshair sits — see _build_crosshair).
 ##
-## ONLY meaningful in ISOMETRIC mode (the fixed orthographic isometric
-## camera). In FIRST_PERSON the camera is a free-look perspective camera with
-## the mouse captured for looking around — "which tile is under the cursor"
-## isn't a coherent concept there. This function does not itself guard
-## against being called in that mode; _update_hover_tooltip is responsible
-## for gating on `_view_mode` before calling it.
+## Works for either camera projection — orthogonal (ISOMETRIC) or
+## perspective (FIRST_PERSON) — since project_ray_origin/project_ray_normal
+## already account for that. FIRST_PERSON's free-look does introduce a case
+## ISOMETRIC's fixed downward angle never hits: the ray pointing away from
+## the plane entirely (looking up at the sky), where a naive intersection
+## would land "behind" the camera. `t < 0` catches that.
 func _tile_under_screen_pos(screen_pos: Vector2) -> Vector2i:
 	if _camera == null:
 		return HOVER_NO_TILE
@@ -1228,6 +1272,8 @@ func _tile_under_screen_pos(screen_pos: Vector2) -> Vector2i:
 	if is_zero_approx(dir.y):
 		return HOVER_NO_TILE
 	var t := (BELT_SURFACE_Y - origin.y) / dir.y
+	if t < 0.0:
+		return HOVER_NO_TILE
 	var point := origin + dir * t
 	return Vector2i(roundi(point.x / TILE), roundi(point.z / TILE))
 
@@ -1266,32 +1312,33 @@ func _machine_hover_text(recipe_id: String) -> String:
 	]
 
 
-## The thin, live-mouse-reading half (deliberately not unit tested, same
+## The thin, live-state-reading half (deliberately not unit tested, same
 ## reasoning as _pan_input_direction/_fp_input_direction's doc comments —
 ## headless SceneTree tests can't reliably simulate live viewport mouse
-## state): reads where the cursor actually is, and drives the pure functions
-## above to decide what the tooltip should show. Never shows in
-## FIRST_PERSON — the mouse is captured there for looking around, so a
-## cursor-hover concept doesn't apply.
+## state): picks which screen point to query — the live cursor in ISOMETRIC,
+## the screen centre (where _crosshair is drawn) in FIRST_PERSON, since the
+## mouse is captured there and has no meaningful on-screen position — and
+## drives the pure functions above to decide what the tooltip should show.
 func _update_hover_tooltip() -> void:
 	if _hover_tooltip == null:
-		return
-	if _view_mode == ViewMode.FIRST_PERSON:
-		_hover_tooltip.visible = false
 		return
 	var vp := get_viewport()
 	if vp == null:
 		_hover_tooltip.visible = false
 		return
-	var mouse_pos := vp.get_mouse_position()
-	var tile := _tile_under_screen_pos(mouse_pos)
+	var query_pos: Vector2
+	if _view_mode == ViewMode.FIRST_PERSON:
+		query_pos = vp.get_visible_rect().size / 2.0
+	else:
+		query_pos = vp.get_mouse_position()
+	var tile := _tile_under_screen_pos(query_pos)
 	var recipe_id := _machine_recipe_at_tile(tile)
 	var text := _machine_hover_text(recipe_id) if recipe_id != "" else ""
 	if text == "":
 		_hover_tooltip.visible = false
 		return
 	_hover_label.text = text
-	_hover_tooltip.position = mouse_pos + HOVER_TOOLTIP_OFFSET
+	_hover_tooltip.position = query_pos + HOVER_TOOLTIP_OFFSET
 	_hover_tooltip.visible = true
 
 

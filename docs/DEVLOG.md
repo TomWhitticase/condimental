@@ -21,7 +21,7 @@ below is history and should only ever be appended to.)*
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
 - **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. Milestone 6 (Fluids) is next.
-- **Art/UI:** the voxel pipeline (UI_UX.md §2a/§2b) exists and is the source of every asset in the scene — Rust generators in `assets/voxels/generators/` produce `.vox` models, reviewed as isometric PNGs via `scripts/build-voxels.sh`, imported into Godot by a pinned community importer. UI_UX.md §5's real UI is now landed: the money/contract readout is a diegetic clipboard panel (paper background, steel clip bar, checkbox tick marks) with a voxel-rendered icon per required item, and per-machine detail (recipe/progress/buffers) is hover-only instead of dense always-on text — see the log entries below.
+- **Art/UI:** the voxel pipeline (UI_UX.md §2a/§2b) exists and is the source of every asset in the scene — Rust generators in `assets/voxels/generators/` produce `.vox` models, reviewed as isometric PNGs via `scripts/build-voxels.sh`, imported into Godot by a pinned community importer. UI_UX.md §5's real UI is now landed: the money/contract readout is a diegetic clipboard panel (paper background, steel clip bar, checkbox tick marks) with a voxel-rendered icon per required item, and per-machine detail (recipe/progress/buffers) is hover-only instead of dense always-on text, working in both view modes — a screen-centre crosshair stands in for the cursor in first-person — see the log entries below.
 - **UI polish epic (done):** a Run (`run_cc6860507d36`) with 3 parallel tickets targeting UI_UX.md §5, all done and merged — hover tooltips for machines, a voxel-rendered icon pipeline, and the clipboard reskin. Check `orca orchestration task-list --run run_cc6860507d36 --json` for the DAG's final state.
 - **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, SPACE/SHIFT up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
 - **Lighting:** the sky is the real background (`BG_SKY`), not a flat colour — see the "empty void" DEVLOG entry below for why that matters. `scripts/screenshot-scene.sh --first-person` reviews that mode's lighting specifically.
@@ -40,6 +40,25 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-07 — First-person crosshair hover
+
+Follow-up after the diegetic-UI epic landed and got a live review: hover
+tooltips only worked in ISOMETRIC mode (FIRST_PERSON unconditionally hid
+them, since the mouse is captured there and has no meaningful screen
+position). Added a small screen-centre crosshair (`_crosshair`, visible only
+in FIRST_PERSON) and pointed `_update_hover_tooltip` at the viewport centre
+instead of the live cursor whenever `_view_mode` is FIRST_PERSON — the same
+pure `_tile_under_screen_pos` math drives both, since `project_ray_origin`/
+`project_ray_normal` work identically for an orthogonal or a perspective
+camera. That did surface one real gap the fixed isometric camera never
+could: looking up at the sky in first-person points the ray away from the
+belt-surface plane, and the old math would have happily returned a phantom
+tile "behind" the camera — `_tile_under_screen_pos` now checks `t < 0` and
+returns `HOVER_NO_TILE` in that case. `test_hover.gd` gained checks for both
+the crosshair-driven resolution and the new upward-look guard, verified by
+aiming the first-person camera at a known machine tile the same way the
+existing isometric checks aim the cursor, no live Input needed.
 
 ### 2026-09-07 — Machine hover tooltips (UI_UX.md §5, one piece of the diegetic-UI epic)
 

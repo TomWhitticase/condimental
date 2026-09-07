@@ -1,5 +1,8 @@
 # Headless proof of machine hover tooltips (docs/UI_UX.md §5: "hover
-# tooltips for recipe/machine detail rather than dense always-on text").
+# tooltips for recipe/machine detail rather than dense always-on text"),
+# including the FIRST_PERSON crosshair variant added after initial review —
+# the mouse is captured/hidden there, so a screen-centre crosshair
+# (_crosshair, drawn by _build_crosshair) stands in for the cursor.
 #
 # Run with:
 #   godot --headless --path godot_project --script test_hover.gd
@@ -14,10 +17,15 @@
 #     for a hovered stage, and "" for a recipe id that isn't hovering
 #     anything (the sentinel _update_hover_tooltip checks to decide whether
 #     to show the tooltip at all),
-#   * _update_hover_tooltip (the thin, live-mouse-reading half) never shows
-#     the tooltip while `_view_mode` is FIRST_PERSON, regardless of where
-#     the mouse is — the mouse is captured there for looking around, so
-#     hover has no meaning.
+#   * the SAME _tile_under_screen_pos math also resolves correctly through a
+#     FIRST_PERSON perspective camera aimed at a known machine — proving the
+#     crosshair-driven hover works, not just the isometric cursor-driven one,
+#   * looking steeply upward in FIRST_PERSON (a ray pointing away from the
+#     belt-surface plane) resolves to HOVER_NO_TILE rather than a phantom
+#     tile behind the camera — the `t < 0` guard `_tile_under_screen_pos`
+#     added specifically for this case,
+#   * `_crosshair`'s visibility tracks `_view_mode` (shown in FIRST_PERSON,
+#     hidden in ISOMETRIC).
 #
 # `_tile_under_screen_pos` calls `Camera3D.project_ray_origin`/
 # `project_ray_normal`, which (like `unproject_position`) require the camera
@@ -144,14 +152,52 @@ func _run_checks() -> void:
 		_fail("_machine_hover_text('') (no recipe) should return empty text")
 		return
 
-	# --- The tooltip never shows in FIRST_PERSON, regardless of mouse pos ---
-	main._view_mode = main.ViewMode.FIRST_PERSON
-	main._hover_tooltip.visible = true # force true so we can see _update_hover_tooltip actually hides it
-	main._update_hover_tooltip()
-	if main._hover_tooltip.visible:
-		_fail("hover tooltip must never show in FIRST_PERSON mode")
+	# --- FIRST_PERSON: the crosshair (screen centre) resolves to a machine --
+	# it's aimed at, exactly like the isometric cursor does above. Aim by
+	# setting _fp_position/_fp_yaw/_fp_pitch directly (same fields
+	# _apply_look/_fp_camera_move drive) and deriving yaw/pitch from the
+	# desired look direction, then read back via _update_fp_camera_transform
+	# — no live Input needed, matching _tile_under_screen_pos's own
+	# Input-free contract.
+	main._set_view_mode(main.ViewMode.FIRST_PERSON)
+	if main._crosshair == null or not main._crosshair.visible:
+		_fail("crosshair should be visible in FIRST_PERSON mode")
 		return
-	main._view_mode = main.ViewMode.ISOMETRIC
 
-	print("HOVER_OK: screen-to-tile resolution finds the right machine, open floor finds none, hover text carries live recipe/progress/buffer data, tooltip stays hidden in first-person")
+	var eye: Vector3 = world_point + Vector3(main.TILE * 2.0, main.TILE * 3.0, main.TILE * 4.0)
+	main._fp_position = eye
+	var to_target: Vector3 = (world_point - eye).normalized()
+	main._fp_yaw = atan2(-to_target.x, -to_target.z)
+	main._fp_pitch = clampf(asin(clampf(to_target.y, -1.0, 1.0)), -main.FP_PITCH_LIMIT, main.FP_PITCH_LIMIT)
+	main._update_fp_camera_transform()
+
+	# A point exactly on the camera's forward axis always projects to the
+	# viewport's centre regardless of the viewport's actual (possibly
+	# headlessly-zero) size, unlike computing "screen centre" from
+	# get_visible_rect().size directly — sidesteps that flakiness entirely.
+	var crosshair_screen_pos: Vector2 = camera.unproject_position(world_point)
+	var fp_resolved_tile: Vector2i = main._tile_under_screen_pos(crosshair_screen_pos)
+	if fp_resolved_tile != machine_tile:
+		_fail("FIRST_PERSON crosshair aimed at %s's machine tile %s resolved to %s instead" % [
+			recipe_id, str(machine_tile), str(fp_resolved_tile),
+		])
+		return
+
+	# --- FIRST_PERSON: looking steeply up finds nothing (the t < 0 guard) ---
+	# Same eye position, pitched up toward the sky instead of at the machine.
+	main._fp_pitch = main.FP_PITCH_LIMIT
+	main._update_fp_camera_transform()
+	var ahead: Vector3 = eye + (-main._camera.transform.basis.z) * (main.TILE * 10.0)
+	var sky_screen_pos: Vector2 = camera.unproject_position(ahead)
+	var sky_tile: Vector2i = main._tile_under_screen_pos(sky_screen_pos)
+	if sky_tile != main.HOVER_NO_TILE:
+		_fail("looking steeply up in FIRST_PERSON should find no tile (t < 0), got %s" % str(sky_tile))
+		return
+
+	main._set_view_mode(main.ViewMode.ISOMETRIC)
+	if main._crosshair.visible:
+		_fail("crosshair should be hidden in ISOMETRIC mode")
+		return
+
+	print("HOVER_OK: screen-to-tile resolution finds the right machine in both view modes, open floor finds none, looking up in first-person finds no tile, hover text carries live recipe/progress/buffer data, crosshair visibility tracks view mode")
 	quit(0)
