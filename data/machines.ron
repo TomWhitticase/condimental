@@ -42,9 +42,30 @@
 // counterpart genuinely is bulky: a bench-scale crusher or mixer is not, a
 // cooking vat that holds a batch of sauce for a long cook very much is. See
 // each kind's own note below.
+//
+// ONE KIND HERE IS NOT A RECIPE'S MACHINE (ticket 3). Every other kind in
+// this file is named by some `Recipe.machine` in `data/recipes.ron`; the
+// `hopper` is not. It is the chain's raw-ingredient feeder — it buffers tomatoes and
+// meters them onto the first belt, it does not turn anything into anything
+// — so it has no recipe and is built as its own stage type
+// (`sim_core/src/sim/hopper.rs`), not as a `Machine`. It still lives in this
+// file because a footprint is a footprint: it is a placed building that
+// claims tiles, and nothing else should have to know a second way of
+// answering "how big is that thing."
 (
     schema_version: 1,
     machines: [
+        // The chain's raw-ingredient feeder (ticket 3) — the one kind here
+        // with no recipe behind it; see the note above. 1x1: a feed hopper
+        // sitting over the head of a single belt is a bin, not a hall, and
+        // the whole point of it is that its *buffer* is generous, not its
+        // floor space. It is placed immediately west of the first belt, so
+        // its width extends away from the chain rather than into it (see
+        // `World::with_machines`).
+        MachineKind(
+            id: "hopper",
+            footprint: Footprint(width_tiles: 1, height_tiles: 1),
+        ),
         // GAMEPLAY.md §2 tier 1's raw-ingredient prep: crushes whole
         // tomatoes into paste. 1x1 — a crusher is a hopper and a screw, the
         // physically smallest machine on the line, and it is deliberately

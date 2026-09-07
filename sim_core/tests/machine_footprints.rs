@@ -55,16 +55,24 @@ fn chain_on(kinds: &[&str]) -> RecipeRegistry {
     .expect("generated recipe text must parse")
 }
 
-/// A registry of `(id, width, height)` kinds.
+/// A registry of `(id, width, height)` kinds, plus the 1x1 `hopper` every
+/// world needs (ticket 3: `World` builds one raw-ingredient feeder for the
+/// head of the chain, and takes its footprint from the machine registry like
+/// any other placed building). Added here rather than at each call site
+/// because none of these fixtures are *about* the hopper — they are about
+/// machine geometry.
 fn kinds(entries: &[(&str, i32, i32)]) -> MachineRegistry {
-    let body: String = entries
+    let mut body: String =
+        "MachineKind(id: \"hopper\", footprint: Footprint(width_tiles: 1, height_tiles: 1)),"
+            .to_string();
+    body += &entries
         .iter()
         .map(|(id, w, h)| {
             format!(
                 "MachineKind(id: \"{id}\", footprint: Footprint(width_tiles: {w}, height_tiles: {h})),"
             )
         })
-        .collect();
+        .collect::<String>();
     MachineRegistry::from_ron_str(&format!("( schema_version: 1, machines: [{body}] )"))
         .expect("generated machine text must parse")
 }
@@ -465,9 +473,7 @@ fn a_change_to_a_straddling_machine_dirties_both_of_its_chunks() {
     let mut world = World::with_machines(chain_on(&["sprawler", "packer"]), world_kinds);
     assert_eq!(world.chain_layout()[0].machine_tile, (4, 0));
 
-    world.issue_command(PlayerCommand::SpawnItem {
-        item: "item0".to_string(),
-    });
+    world.issue_command(PlayerCommand::FillHopper { amount: 4 });
 
     let mut seen: HashSet<(i32, i32)> = HashSet::new();
     for _ in 0..400 {

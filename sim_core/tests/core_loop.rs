@@ -22,8 +22,20 @@
 //! real machines (crusher -> mixer -> cooking vat): the conservation logic
 //! below needed no edit at all, because it reads the chain out of the data
 //! file rather than naming any stage.
+//!
+//! **Ticket 3 changed how mass enters the chain**, and that *did* need edits
+//! here — deliberately, since the old behavior being tested is the behavior
+//! being removed. Raw tomatoes are no longer teleported onto stage 0's belt
+//! by a command; they are loaded into a hopper (`PlayerCommand::FillHopper`)
+//! which meters them onto the belt one unit per tick. So the conservation
+//! accounting now counts hopper contents as mass in the system (they are:
+//! the player put them there and nothing has consumed them yet), and the
+//! full-chain test fills once up front and lets the unload happen over the
+//! following ticks instead of spawning per tick.
 
-use sim_core::sim::{BeltSnapshot, MachineSnapshot, PlayerCommand, RecipeRegistry, TileSnapshot, World};
+use sim_core::sim::{
+    BeltSnapshot, MachineSnapshot, PlayerCommand, RecipeRegistry, TileSnapshot, World,
+};
 
 fn recipes() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
@@ -56,7 +68,8 @@ fn tomato_value(item: &str, recipes: &RecipeRegistry) -> u32 {
 /// Every belt/machine snapshot across the whole chain, regardless of how
 /// many chunks it spans — gathered via `World::all_chunks` rather than
 /// assuming a fixed chunk count, so this keeps working if the chain grows
-/// long enough to cross a chunk boundary.
+/// long enough to cross a chunk boundary. (Since ticket 3 it genuinely
+/// spans two chunks: the hopper sits west of x = 0, in chunk (-1, 0).)
 fn full_chain_snapshot(world: &World) -> (Vec<BeltSnapshot>, Vec<MachineSnapshot>) {
     let mut belts = Vec::new();
     let mut machines = Vec::new();
@@ -75,6 +88,14 @@ fn full_chain_snapshot(world: &World) -> (Vec<BeltSnapshot>, Vec<MachineSnapshot
 fn total_tomato_equivalent(world: &World, recipes: &RecipeRegistry) -> u32 {
     let (belts, machines) = full_chain_snapshot(world);
     let mut total = 0u32;
+
+    // Raw ingredient waiting in the hopper is mass in the system exactly the
+    // way mass in a machine's input buffer is (ticket 3) — it has been
+    // loaded but not yet consumed. Counting it is what makes conservation
+    // hold from the instant of the fill command rather than only once the
+    // hopper has finished unloading.
+    let hopper = world.hopper_snapshot();
+    total += tomato_value(&hopper.item, recipes) * hopper.quantity;
 
     for belt in &belts {
         for (item, _pos) in &belt.items {
@@ -107,14 +128,14 @@ fn total_tomato_equivalent(world: &World, recipes: &RecipeRegistry) -> u32 {
 }
 
 /// The conservation invariant this test exists to check: every tomato ever
-/// successfully spawned is accounted for exactly once, as either raw mass
-/// still somewhere in the chain (on a belt, in a buffer, or mid-craft) or
-/// already collected as the finished product — never duplicated, never
-/// silently lost, at any of the chain's several stages.
+/// successfully loaded is accounted for exactly once, as either raw mass
+/// still somewhere in the chain (in the hopper, on a belt, in a buffer, or
+/// mid-craft) or already collected as the finished product — never
+/// duplicated, never silently lost, at any of the chain's several stages.
 fn assert_conserved(
     world: &World,
     recipes: &RecipeRegistry,
-    successful_spawns: u32,
+    loaded_tomatoes: u32,
     collected_final: u32,
     final_item_value: u32,
     context: &str,
@@ -122,9 +143,9 @@ fn assert_conserved(
     let in_system = total_tomato_equivalent(world, recipes);
     let accounted = in_system + collected_final * final_item_value;
     assert_eq!(
-        accounted, successful_spawns,
+        accounted, loaded_tomatoes,
         "tomato mass not conserved at {context}: in_system={in_system}, \
-         collected_final={collected_final} (x{final_item_value} each), spawned={successful_spawns}"
+         collected_final={collected_final} (x{final_item_value} each), loaded={loaded_tomatoes}"
     );
 }
 
@@ -147,27 +168,34 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
     let final_item_value = tomato_value(&final_item, &registry);
 
     let mut world = World::new(recipes());
-    let mut successful_spawns = 0u32;
     let mut collected_final = 0u32;
 
-    for tick_i in 0..20_000u32 {
-        if successful_spawns < TOMATOES_PER_CRAFT {
-            let before = total_tomato_equivalent(&world, &registry);
-            world.issue_command(PlayerCommand::SpawnItem {
-                item: "tomato".to_string(),
-            });
-            let after = total_tomato_equivalent(&world, &registry);
-            if after > before {
-                successful_spawns += 1;
-            }
-        }
+    // Ticket 3: one fill command loads the hopper, and the hopper meters
+    // those tomatoes onto the first belt over the following ticks — nothing
+    // is teleported onto a belt any more. The load happens once, before the
+    // loop, precisely to prove the *unload* is what feeds the chain.
+    let before_fill = total_tomato_equivalent(&world, &registry);
+    world.issue_command(PlayerCommand::FillHopper {
+        amount: TOMATOES_PER_CRAFT,
+    });
+    let loaded_tomatoes = total_tomato_equivalent(&world, &registry) - before_fill;
+    assert_eq!(
+        loaded_tomatoes, TOMATOES_PER_CRAFT,
+        "an empty hopper must accept a full crafts' worth of raw ingredient"
+    );
+    assert_eq!(
+        world.hopper_snapshot().quantity,
+        TOMATOES_PER_CRAFT,
+        "the loaded tomatoes must be sitting in the hopper, not already on a belt"
+    );
 
+    for tick_i in 0..20_000u32 {
         world.tick();
 
         assert_conserved(
             &world,
             &registry,
-            successful_spawns,
+            loaded_tomatoes,
             collected_final,
             final_item_value,
             &format!("tick {tick_i}"),
@@ -191,7 +219,7 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
             assert_conserved(
                 &world,
                 &registry,
-                successful_spawns,
+                loaded_tomatoes,
                 collected_final,
                 final_item_value,
                 &format!("tick {tick_i} (post-collect)"),
@@ -201,8 +229,9 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
     }
 
     assert_eq!(
-        successful_spawns, TOMATOES_PER_CRAFT,
-        "all {TOMATOES_PER_CRAFT} tomatoes should have found room on the first belt"
+        world.hopper_snapshot().quantity,
+        0,
+        "the hopper should have unloaded all {TOMATOES_PER_CRAFT} tomatoes onto the belt"
     );
     assert_eq!(
         collected_final, 1,
@@ -233,9 +262,7 @@ fn query_tile_reflects_every_stage_belt_and_machine_position() {
     let registry = recipes();
     let ordered = registry.ordered().to_vec();
     let mut world = World::new(registry);
-    world.issue_command(PlayerCommand::SpawnItem {
-        item: "tomato".to_string(),
-    });
+    world.issue_command(PlayerCommand::FillHopper { amount: 4 });
     world.tick();
 
     let layout = world.chain_layout();
@@ -288,20 +315,23 @@ fn query_tile_reflects_every_stage_belt_and_machine_position() {
 #[test]
 fn dirty_chunks_report_touched_chunks_and_clear_between_ticks() {
     let mut world = World::new(recipes());
-    world.issue_command(PlayerCommand::SpawnItem {
-        item: "tomato".to_string(),
-    });
+    world.issue_command(PlayerCommand::FillHopper { amount: 4 });
     world.tick();
     // The whole 5-stage chain (26 tiles wide, 2 rows tall where the cooking
     // vat sits) still fits inside chunk (0,0) (ARCHITECTURE.md §3.1's 32x32
-    // chunks), so a spawn on the first belt is the only thing that changes
-    // this tick and dirties exactly that chunk — not a claim that
-    // dirty_chunks == all_chunks in general.
-    assert_eq!(world.dirty_chunks(), &[(0, 0)]);
-    assert_eq!(world.all_chunks(), vec![(0, 0)]);
+    // chunks); the hopper sits west of it at x = -1, i.e. in chunk (-1, 0).
+    // On this tick the hopper unloads its first tomato, which changes both:
+    // the belt it landed on and the hopper's own fill level.
+    assert_eq!(world.dirty_chunks(), &[(0, 0), (-1, 0)]);
+    assert_eq!(
+        world.all_chunks(),
+        vec![(0, 0), (-1, 0)],
+        "the hopper's chunk must be reported too, or a renderer never draws it"
+    );
 
     // A tick where absolutely nothing moves/changes reports no dirty
-    // chunks — every machine is idle without input, every belt is empty.
+    // chunks — every machine is idle without input, every belt is empty,
+    // and an unfilled hopper has nothing to unload.
     let mut idle_world = World::new(recipes());
     idle_world.tick();
     assert!(idle_world.dirty_chunks().is_empty());

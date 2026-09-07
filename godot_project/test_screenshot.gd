@@ -107,7 +107,7 @@ func _run_chain_forward() -> void:
 	# "fly up" in first-person), so going through the view-mode-sensitive
 	# input path would silently do nothing when --first-person is also set.
 	for i in range(POPULATE_SPAWNS):
-		_main.sim.issue_command_json(JSON.stringify({"type": "spawn_item", "item": "tomato"}))
+		_main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
 		for j in range(POPULATE_TICKS_PER_SPAWN):
 			_main.sim.tick()
 	_main._apply_dirty_chunks()

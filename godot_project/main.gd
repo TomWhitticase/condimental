@@ -1305,10 +1305,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 
 	var command := ""
-	# SPACE only spawns in ISOMETRIC mode — in FIRST_PERSON it's "fly up"
-	# (_fp_input_direction), and a single keypress can't mean both.
+	# SPACE only loads the hopper in ISOMETRIC mode — in FIRST_PERSON it's
+	# "fly up" (_fp_input_direction), and a single keypress can't mean both.
+	# Since the "Machines improvement" ticket 3 this loads raw tomatoes into
+	# the chain's hopper (clamped at its capacity); the hopper itself meters
+	# them onto the first belt, one per tick. Rendering the hopper and its
+	# fill level is ticket 4's work, not done here.
 	if event.keycode == KEY_SPACE and _view_mode == ViewMode.ISOMETRIC:
-		command = JSON.stringify({"type": "spawn_item", "item": "tomato"})
+		command = JSON.stringify({"type": "fill_hopper"})
 	elif event.keycode == KEY_C:
 		command = JSON.stringify({"type": "collect_output"})
 	else:

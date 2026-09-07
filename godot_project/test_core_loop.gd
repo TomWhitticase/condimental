@@ -27,21 +27,20 @@ func _initialize() -> void:
 		return
 	var final_recipe: String = layout[layout.size() - 1]["recipe"]
 
-	# Spawn all 4 tomatoes the first recipe needs, ticking between each so
-	# every spawn respects the belt's min-spacing (mirrors sim_core's own
-	# `try_spawn` contract — see sim_core/src/sim/belt.rs).
-	var spawned := 0
-	var attempts := 0
-	while spawned < 4 and attempts < 2000:
-		attempts += 1
-		var before := _tomato_count(sim)
-		sim.issue_command_json(JSON.stringify({"type": "spawn_item", "item": "tomato"}))
-		if _tomato_count(sim) > before:
-			spawned += 1
-		sim.tick()
-
-	if spawned != 4:
-		_fail("could not get all 4 tomatoes onto the first belt (spawned %d)" % spawned)
+	# Load the 4 tomatoes the first recipe needs into the chain's hopper
+	# ("Machines improvement" ticket 3). The hopper — not this command —
+	# meters them onto the first belt over the following ticks, one at a
+	# time, so nothing here has to respect the belt's min-spacing itself.
+	sim.issue_command_json(JSON.stringify({"type": "fill_hopper", "amount": 4}))
+	var hopper = JSON.parse_string(sim.hopper_snapshot_json())
+	if hopper == null or not hopper.has("quantity") or not hopper.has("capacity") or not hopper.has("fill"):
+		_fail("hopper_snapshot_json did not return the expected shape: %s" % str(hopper))
+		return
+	if int(hopper["quantity"]) != 4:
+		_fail("expected 4 tomatoes loaded into the hopper, got %s" % str(hopper["quantity"]))
+		return
+	if _tomato_count(sim) != 0:
+		_fail("filling the hopper must not put anything on a belt — that happens on tick")
 		return
 
 	# Run long enough for the single resulting unit to travel every belt and
@@ -103,7 +102,7 @@ func _initialize() -> void:
 		_fail("query_tile_json on an empty tile should return an empty string")
 		return
 
-	print("CORE_LOOP_OK: 4 tomatoes travelled all %d stages -> 1 '%s', collected, tile queries correct" % [layout.size(), final_recipe])
+	print("CORE_LOOP_OK: 4 tomatoes unloaded from the hopper, travelled all %d stages -> 1 '%s', collected, tile queries correct" % [layout.size(), final_recipe])
 	quit(0)
 
 

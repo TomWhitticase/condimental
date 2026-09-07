@@ -145,18 +145,27 @@ func _initialize() -> void:
 		_fail("no Floor node — the factory floor didn't build")
 		return
 
-	# --- An item spawned through the real command path gets a voxel node --
+	# --- An item fed in through the real command path gets a voxel node ----
+	# Since the "Machines improvement" ticket 3, SPACE loads the chain's
+	# hopper; the hopper unloads onto the belt on the *next* tick, so this
+	# ticks the sim a little before looking for the rendered item.
 	var key_event := InputEventKey.new()
 	key_event.keycode = KEY_SPACE
 	key_event.pressed = true
 	main._unhandled_input(key_event)
 
 	var item_nodes := 0
-	for child in main.get_children():
-		if String(child.name).begins_with("item_"):
-			item_nodes += 1
+	for i in range(10):
+		main.sim.tick()
+		main._apply_dirty_chunks()
+		item_nodes = 0
+		for child in main.get_children():
+			if String(child.name).begins_with("item_"):
+				item_nodes += 1
+		if item_nodes > 0:
+			break
 	if item_nodes < 1:
-		_fail("spawning a tomato produced no item node in the 3D scene")
+		_fail("a tomato metered out of the hopper produced no item node in the 3D scene")
 		return
 
 	print("PRESENTATION_OK: orthographic camera, %d light(s) w/ shadows, SSAO+glow, %d voxel meshes, %d stage(s), item rendered" % [

@@ -55,8 +55,13 @@ fn full_chain_delivers_against_the_contract_and_pays_out_exactly_the_contract_pa
     // run long enough for more than one unit to complete the whole chain.
     for _ in 0..500_000u32 {
         if collected < CONTRACT_QUANTITY {
-            world.issue_command(PlayerCommand::SpawnItem {
-                item: "tomato".to_string(),
+            // Ticket 3: keep the hopper topped up rather than spawning onto
+            // the belt. `FillHopper` clamps at capacity, so issuing it every
+            // tick just means "never let the feed run dry" — the hopper
+            // still meters onto the belt at one unit per tick at most, so
+            // the chain's throughput is unchanged by this.
+            world.issue_command(PlayerCommand::FillHopper {
+                amount: CONTRACT_QUANTITY * 4,
             });
         }
 

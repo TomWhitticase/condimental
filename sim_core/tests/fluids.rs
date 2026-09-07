@@ -63,19 +63,6 @@ fn two_stage_chain(vinegar_units: u32) -> RecipeRegistry {
     RecipeRegistry::from_ron_str(&text).expect("test recipe text must parse")
 }
 
-/// How many items are currently on the chain's first belt.
-fn first_belt_item_count(world: &World) -> usize {
-    let start = world.chain_layout()[0].belt_start_tile;
-    for chunk in world.all_chunks() {
-        for belt in world.chunk_snapshot(chunk).belts {
-            if belt.start_tile == start {
-                return belt.items.len();
-            }
-        }
-    }
-    0
-}
-
 /// How many units of `item` exist anywhere in the world right now — on any
 /// belt, or in any machine's input/output buffer. Counting *anywhere* (not
 /// just in the producing machine's output slot) matters: a finished item is
@@ -100,10 +87,10 @@ fn count_item_anywhere(world: &World, item: &str) -> u32 {
     total
 }
 
-/// Runs `world` for `ticks`, feeding in `tomatoes` raw tomatoes (one spawn
-/// attempt per tick until they've all found room on the first belt), and
-/// returns the most of `item` that ever existed anywhere in the world at
-/// once.
+/// Runs `world` for `ticks`, feeding in `tomatoes` raw tomatoes (loaded
+/// into the chain's hopper up front — since ticket 3 the hopper, not a
+/// command, is what puts them on the belt), and returns the most of `item`
+/// that ever existed anywhere in the world at once.
 fn run_chain(world: &mut World, tomatoes: u32, ticks: u32, item: &str) -> u32 {
     run_chain_watching_fluid(world, tomatoes, ticks, item).0
 }
@@ -121,23 +108,23 @@ fn run_chain_watching_fluid(
     ticks: u32,
     item: &str,
 ) -> (u32, Option<f64>) {
-    let mut spawned = 0;
+    // Loading the hopper is instantaneous and exact (`Hopper::fill` clamps
+    // at capacity and reports what it took); getting those tomatoes onto the
+    // belt is the hopper's own job over the following ticks, gated by belt
+    // spacing exactly as the old per-tick spawn attempts were.
+    let loaded = {
+        let before = world.hopper_snapshot().quantity;
+        world.issue_command(PlayerCommand::FillHopper { amount: tomatoes });
+        world.hopper_snapshot().quantity - before
+    };
+    assert_eq!(
+        loaded, tomatoes,
+        "the hopper must accept all {tomatoes} tomatoes this test wants to feed in"
+    );
+
     let mut seen = 0;
     let mut min_volume: Option<f64> = None;
     for tick_i in 0..ticks {
-        if spawned < tomatoes {
-            // A spawn onto a belt with no room at its start is a silent
-            // no-op (`BeltSegment::try_spawn`'s contract), so count what
-            // actually landed rather than assuming — the same care
-            // core_loop.rs takes.
-            let before = first_belt_item_count(world);
-            world.issue_command(PlayerCommand::SpawnItem {
-                item: "tomato".to_string(),
-            });
-            if first_belt_item_count(world) > before {
-                spawned += 1;
-            }
-        }
         world.tick();
         seen = seen.max(count_item_anywhere(world, item));
         if tick_i >= SETTLE_TICKS {

@@ -20,7 +20,7 @@ below is history and should only ever be appended to.)*
 - **Stage:** Pre-alpha, but the core MVP loop is real end to end and it looks like a game. Milestones 1 (Scaffold), 2 (Mobile export spike), 3 (Core loop proof), 4 (First full chain), and 5 (Economy MVP) are all done — a real multi-stage production chain (tomato -> tomato paste -> ketchup mix -> ketchup -> bottled ketchup -> boxed ketchup) that can deliver against a hardcoded contract to earn money, headlessly verified end to end, Android export proven working. On top of that, a visual-polish pass built UI_UX.md's voxel asset pipeline and turned the flat 2D placeholder scene into an isometric, real-time-lit 3D factory.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
-- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. **Milestone 6 (Fluids) is done**: its simulation half (pipe network, pressure equalization, a recipe requiring a liquid, the `SimBridge` fluid snapshot) and its presentation half (pipe/supply-tap/liquid voxel assets, a pipe run rendered from the simulation's own segment list, a liquid body whose height tracks live pressure, and pipe hover info in both view modes) have both landed, built as a 2-ticket orchestration Run (`run_2867a25ae373`, sequential: sim core then presentation). Milestone 7 (Timed processes) is next. A separate **"Machines improvement"** epic (not an ARCHITECTURE.md §9 milestone — an infrastructure/content pass requested directly) is in progress: ticket 1 landed machine footprints as data (`data/machines.ron`), generalizing the chain's layout math so a machine can occupy more than one tile, and ticket 2 spent that on real content — the chain's front end is now a crusher, a mixer and a genuinely 2x2 cooking vat. Tickets 3 (a hopper) and 4 (the Godot presentation of all this) are still to come.
+- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. **Milestone 6 (Fluids) is done**: its simulation half (pipe network, pressure equalization, a recipe requiring a liquid, the `SimBridge` fluid snapshot) and its presentation half (pipe/supply-tap/liquid voxel assets, a pipe run rendered from the simulation's own segment list, a liquid body whose height tracks live pressure, and pipe hover info in both view modes) have both landed, built as a 2-ticket orchestration Run (`run_2867a25ae373`, sequential: sim core then presentation). Milestone 7 (Timed processes) is next. A separate **"Machines improvement"** epic (not an ARCHITECTURE.md §9 milestone — an infrastructure/content pass requested directly) is in progress: ticket 1 landed machine footprints as data (`data/machines.ron`), generalizing the chain's layout math so a machine can occupy more than one tile, and ticket 2 spent that on real content — the chain's front end is now a crusher, a mixer and a genuinely 2x2 cooking vat. Ticket 3 replaced the debug "spawn a tomato onto the belt" command with a real **hopper** — a building west of the chain's head that buffers raw tomatoes and meters them onto the first belt one per tick, filled by the player (SPACE) rather than teleporting items. Ticket 4 (the Godot presentation of all this, including the hopper's fill UI) is still to come.
 - **Art/UI:** the voxel pipeline (UI_UX.md §2a/§2b) exists and is the source of every asset in the scene — including milestone 6's pipes and the liquid inside them, which added a fourth material class (`liquid`, a glossy dielectric) to `palette.ron` — Rust generators in `assets/voxels/generators/` produce `.vox` models, reviewed as isometric PNGs via `scripts/build-voxels.sh`, imported into Godot by a pinned community importer. UI_UX.md §5's real UI is now landed: the money/contract readout is a diegetic clipboard panel (paper background, steel clip bar, checkbox tick marks) with a voxel-rendered icon per required item, and per-machine detail (recipe/progress/buffers) is hover-only instead of dense always-on text, working in both view modes — a screen-centre crosshair stands in for the cursor in first-person — see the log entries below.
 - **UI polish epic (done):** a Run (`run_cc6860507d36`) with 3 parallel tickets targeting UI_UX.md §5, all done and merged — hover tooltips for machines, a voxel-rendered icon pipeline, and the clipboard reskin. Check `orca orchestration task-list --run run_cc6860507d36 --json` for the DAG's final state.
 - **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, SPACE/SHIFT up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
@@ -40,6 +40,45 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-07 — Machines improvement, ticket 3: a hopper feeds the chain
+
+The chain's raw ingredient no longer appears out of nothing. Since milestone
+3, pressing SPACE ran a command that reached straight into the first belt and
+teleported a tomato onto it — a fine "prove the belt renders" scaffold and a
+bad mechanic, because nothing in the world held the ingredient and the
+player's key-press *was* the production rate. There is now a **hopper**: a
+real building, standing immediately west of the chain's first belt, that
+holds a bounded buffer of tomatoes and meters them onto that belt one unit
+per tick, and only when the belt has room. Filling it is the player action;
+the rate is the machinery's.
+
+Three calls worth not re-litigating. (1) **The hopper is its own stage type,
+not a recipe-driven one.** `data/recipes.ron`'s list is the chain of
+*processes*, and a hopper doesn't consume-and-produce — forcing it through
+`Recipe` would have meant inventing an entry that creates matter from no
+inputs, which would lie in the data file and break the mass-conservation
+reading the tests depend on. So `recipes.ron` is untouched by this ticket;
+`data/machines.ron` gains a `hopper` kind purely for its footprint, since a
+footprint is a footprint whether or not a recipe names the kind. (2) **It is
+placed at negative x**, west of the chain's start rather than at it, so
+introducing a whole new building moved not one existing tile — the same
+discipline ticket 1 followed. The cost is that the world now spans two
+chunks (the hopper is in `(-1, 0)`, everything else in `(0, 0)`), which
+`all_chunks` reports and a renderer must honour. (3) **Capacity 64, one
+unit per tick**, both Rust constants rather than data: 64 tomatoes is 16
+crusher crafts, enough that filling buys real breathing room and little
+enough that keeping the line fed stays a decision. In practice the belt's
+own spacing rule is the binding constraint, so a full hopper feeds at exactly
+the rate the belt accepts and stops dead when the line backs up.
+
+`PlayerCommand::SpawnItem` became `FillHopper` — a rename, not a third
+command, since keeping both would leave two contradictory ways to feed the
+chain. New `hopper_snapshot_json` carries placement plus live fill, and
+hoppers also appear in `chunk_snapshot_json` and `query_tile_json`;
+`chain_layout_json` is deliberately unchanged, because it is defined as one
+object per recipe stage and the hopper is not one. Rendering the hopper and
+its fill UI is ticket 4.
 
 ### 2026-09-07 — Machines improvement, ticket 2: crusher, mixer, cooking vat
 

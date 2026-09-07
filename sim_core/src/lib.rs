@@ -108,9 +108,18 @@ impl SimBridge {
 
     /// Applies a player command, JSON-encoded per
     /// `sim::world::PlayerCommandDto` (e.g.
-    /// `{"type": "spawn_item", "item": "tomato"}` or
+    /// `{"type": "fill_hopper", "amount": 16}` or
     /// `{"type": "collect_output"}`). Malformed/invalid commands are
     /// silently ignored, same as an out-of-range command would be.
+    ///
+    /// **`fill_hopper` replaced `spawn_item`** (the "Machines improvement"
+    /// milestone's ticket 3): raw ingredient is now loaded into the chain's
+    /// hopper, which meters it onto the first belt itself, one unit per
+    /// tick, instead of the command teleporting an item onto that belt.
+    /// `amount` may be omitted (`{"type": "fill_hopper"}`) to add the
+    /// simulation's own default load; over-filling is clamped at the
+    /// hopper's capacity, never an error. Read the result through
+    /// `hopper_snapshot_json`.
     #[func]
     fn issue_command_json(&mut self, command_json: GString) {
         if let Some(cmd) = sim::command_from_json(&command_json.to_string()) {
@@ -163,6 +172,34 @@ impl SimBridge {
             }
             None => GString::new(),
         }
+    }
+
+    /// A JSON-serialized `sim::HopperSnapshot` — where the chain's raw-
+    /// ingredient hopper stands, which item it holds, and how full it is
+    /// (the "Machines improvement" milestone's ticket 3):
+    ///
+    /// ```json
+    /// {"tile": [-1, 0], "kind": "hopper",
+    ///  "footprint": {"width_tiles": 1, "height_tiles": 1},
+    ///  "item": "tomato", "quantity": 12, "capacity": 64, "fill": 0.1875,
+    ///  "belt_tile": [0, 0]}
+    /// ```
+    ///
+    /// Always returns a value (every world has exactly one hopper), so
+    /// unlike `fluid_snapshot_json` there is no empty-string case. Poll it
+    /// whenever the fill UI redraws, like `economy_snapshot_json` — though
+    /// unlike fluid, a hopper's level also dirties its chunk when it
+    /// changes, and `chunk_snapshot_json` carries the identical object in a
+    /// new `hoppers` array, so a chunk-driven renderer works too. Note the
+    /// shipped hopper sits at x = -1, i.e. in chunk (-1, 0) rather than the
+    /// (0, 0) that holds the rest of the chain. `sim::HopperSnapshot`
+    /// documents the full shape; `query_tile_json` answers with a `"hopper"`
+    /// tile carrying the same fill/capacity for hover.
+    #[func]
+    fn hopper_snapshot_json(&self) -> GString {
+        let snapshot = self.world.hopper_snapshot();
+        let json = serde_json::to_string(&snapshot).expect("HopperSnapshot must serialize");
+        GString::from(json.as_str())
     }
 
     /// A JSON-serialized `sim::EconomySnapshot` — money plus the hardcoded

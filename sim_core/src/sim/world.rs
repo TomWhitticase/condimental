@@ -39,6 +39,20 @@
 //! every stage downstream of it sits one tile further east than the old
 //! formula would have put it.
 //!
+//! **The chain is fed by a hopper, not by a command** (the same milestone's
+//! ticket 3). One [`Hopper`] stands immediately west of stage 0's belt,
+//! holds a bounded buffer of the chain's raw ingredient, and meters it onto
+//! that belt one unit per tick whenever the belt has room. It is
+//! deliberately **not** a recipe-driven stage: `recipes.ron`'s list is the
+//! chain of *processes*, and a hopper doesn't consume-and-produce anything —
+//! giving it a `Recipe` would mean inventing one that creates matter from no
+//! inputs, which would both lie in the data file and break the
+//! mass-conservation reading every test here depends on. So it is its own
+//! small stage type built alongside the recipe-driven ones, and
+//! `recipes.ron` is untouched by it. Its *placement* is west of x = 0
+//! (negative tiles) precisely so that adding it moved no existing tile —
+//! the same discipline ticket 1 followed.
+//!
 //! This is also where `SimBridge`'s pure-logic half lives (ARCHITECTURE.md
 //! §4): `tick()`, `dirty_chunks()`/`chunk_snapshot()`, `issue_command()`,
 //! `query_tile()`, `chain_layout()`. The `gdext`-facing wrapper in `lib.rs`
@@ -51,6 +65,7 @@ use hecs::Entity;
 use super::belt::BeltSegment;
 use super::economy::{Economy, EconomySnapshot};
 use super::fluid::{FluidNetwork, PipeSegment};
+use super::hopper::{HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, HOPPER_KIND, Hopper};
 use super::machine::Machine;
 use super::machines::{Footprint, MachineRegistry};
 use super::recipe::{Recipe, RecipeRegistry};
@@ -85,31 +100,56 @@ pub struct MachinePlacement {
 }
 
 /// A command the player can issue (ARCHITECTURE.md §4's `PlayerCommand`).
-/// Kept intentionally small — the chain's single entry point (spawning raw
-/// ingredient onto the first belt) and single exit point (collecting
-/// finished output from the last machine), not a full build-mode yet.
+/// Kept intentionally small — the chain's single entry point (loading raw
+/// ingredient into the hopper that feeds the first belt) and single exit
+/// point (collecting finished output from the last machine), not a full
+/// build-mode yet.
+///
+/// **`FillHopper` replaced the old `SpawnItem`** (the "Machines improvement"
+/// milestone's ticket 3), rather than being added alongside it: `SpawnItem`
+/// teleported an item straight onto stage 0's belt, which is precisely the
+/// debug behavior the hopper exists to remove, so keeping it would leave two
+/// contradictory ways to feed the chain. The variant count is unchanged —
+/// §4's advice to keep this surface narrow is why this is a rename, not a
+/// third command.
 #[derive(Debug, Clone)]
 pub enum PlayerCommand {
-    SpawnItem { item: ItemId },
+    /// Loads raw ingredient into the chain's hopper. The *item* is not a
+    /// parameter: a hopper holds exactly one item id, decided by
+    /// `data/recipes.ron` (see [`super::hopper`]), so naming an item here
+    /// could only ever name the wrong one.
+    FillHopper { amount: u32 },
     CollectOutput,
 }
 
 /// JSON wire shape for `PlayerCommand`, used only at the `gdext` boundary
-/// (`lib.rs`) — GDScript builds a `{"type": "spawn_item", "item": "tomato"}`
+/// (`lib.rs`) — GDScript builds a `{"type": "fill_hopper", "amount": 16}`
 /// dictionary, converts it to a JSON string, and this is what parses it.
 /// Kept separate from `PlayerCommand` itself so the pure sim type isn't
 /// coupled to a wire format.
+///
+/// `amount` is optional on the wire (`{"type": "fill_hopper"}` alone is
+/// valid and means [`HOPPER_FILL_AMOUNT`]), so the common "player pressed
+/// the load key" case doesn't have to restate a constant the simulation
+/// already owns.
 #[derive(Debug, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum PlayerCommandDto {
-    SpawnItem { item: ItemId },
+    FillHopper {
+        #[serde(default = "default_fill_amount")]
+        amount: u32,
+    },
     CollectOutput,
+}
+
+fn default_fill_amount() -> u32 {
+    HOPPER_FILL_AMOUNT
 }
 
 impl From<PlayerCommandDto> for PlayerCommand {
     fn from(dto: PlayerCommandDto) -> Self {
         match dto {
-            PlayerCommandDto::SpawnItem { item } => PlayerCommand::SpawnItem { item },
+            PlayerCommandDto::FillHopper { amount } => PlayerCommand::FillHopper { amount },
             PlayerCommandDto::CollectOutput => PlayerCommand::CollectOutput,
         }
     }
@@ -144,6 +184,16 @@ pub struct ChunkSnapshot {
     /// `World::fluid_snapshot` for why live fluid *levels* are better read
     /// from there than from here.
     pub pipes: Vec<PipeSnapshot>,
+    /// The chain's hopper (ticket 3), if its footprint falls in this chunk —
+    /// a `Vec` for exactly the reason `machines` is one, even though there
+    /// is only one hopper per world today. See [`HopperSnapshot`].
+    ///
+    /// Note the shipped hopper sits at a **negative** x (it is placed west of
+    /// the chain's first belt, which starts at x = 0), so it is in chunk
+    /// `(-1, 0)` while the whole rest of the chain is in `(0, 0)` — a
+    /// renderer that only ever asked for chunk `(0, 0)` will not see it.
+    /// `World::all_chunks` reports both.
+    pub hoppers: Vec<HopperSnapshot>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -228,6 +278,55 @@ pub struct PipeSnapshot {
     pub capacity: f64,
     pub pressure: f64,
     pub is_source: bool,
+}
+
+/// The chain's raw-ingredient hopper (ticket 3), for rendering and for its
+/// fill UI. The *same* struct is returned by `World::hopper_snapshot` and
+/// carried in `ChunkSnapshot::hoppers`, so a consumer only ever learns one
+/// shape.
+///
+/// JSON shape (`snake_case` field names, as serialized by `serde_json`):
+///
+/// ```json
+/// {
+///   "tile": [-1, 0],
+///   "kind": "hopper",
+///   "footprint": { "width_tiles": 1, "height_tiles": 1 },
+///   "item": "tomato",
+///   "quantity": 12,
+///   "capacity": 64,
+///   "fill": 0.1875,
+///   "belt_tile": [0, 0]
+/// }
+/// ```
+///
+/// - `tile` is the footprint's origin — its minimum-X/minimum-Y corner, the
+///   same convention every machine uses ([`super::machines`]'s module doc).
+///   The hopper is placed so its footprint ends immediately west of
+///   `belt_tile`, i.e. it grows *away* from the chain; a wider hopper would
+///   extend further west and move nothing else.
+/// - `quantity`/`capacity` are whole units of `item`. `fill` is
+///   `quantity / capacity` in `[0, 1]` — the value to drive a fill-level
+///   visual from, precomputed for the same reason `PipeSnapshot::pressure`
+///   is, and `f64` for the same reason too: it has already crossed out of
+///   fixed-point simulation state into a presentation-only value that never
+///   feeds back in (ARCHITECTURE.md §3.9).
+/// - `belt_tile` is the first tile of the belt this hopper unloads onto, so
+///   presentation can orient/animate the discharge without re-deriving the
+///   chain's head from `chain_layout_json`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HopperSnapshot {
+    pub tile: TileCoord,
+    /// Machine kind id from `data/machines.ron` — always `"hopper"` today
+    /// (see [`super::hopper::HOPPER_KIND`]), carried anyway so presentation
+    /// picks a mesh the same way it does for a machine.
+    pub kind: String,
+    pub footprint: Footprint,
+    pub item: ItemId,
+    pub quantity: u32,
+    pub capacity: u32,
+    pub fill: f64,
+    pub belt_tile: TileCoord,
 }
 
 /// The whole fluid network in one snapshot — what a HUD/overlay needs
@@ -323,6 +422,25 @@ pub enum TileSnapshot {
         is_source: bool,
         is_inlet: bool,
     },
+    /// A tile occupied by the chain's hopper (ticket 3). Like
+    /// [`TileSnapshot::Machine`], **any** tile inside the footprint resolves
+    /// to this, not only the origin. JSON:
+    ///
+    /// `{"kind": "hopper", "footprint": {"width_tiles": 1, "height_tiles": 1},
+    ///   "origin_tile": [-1, 0], "item": "tomato", "quantity": 12,
+    ///   "capacity": 64, "fill": 0.1875}`
+    ///
+    /// Enough for a hover tooltip ("Hopper — 12/64 tomato") without a second
+    /// call. There is no `machine_kind` field: unlike the `machine` variant,
+    /// this enum's own `kind` tag already *is* the kind id.
+    Hopper {
+        footprint: Footprint,
+        origin_tile: TileCoord,
+        item: ItemId,
+        quantity: u32,
+        capacity: u32,
+        fill: f64,
+    },
 }
 
 /// Static (non-per-tick) description of one pipeline stage's placement —
@@ -372,6 +490,23 @@ struct Stage {
     machine_entity: Entity,
 }
 
+/// The chain's hopper plus where it stands (ticket 3).
+///
+/// A plain field on [`World`], not an ECS entity, for exactly the reason
+/// `economy` and `fluid` are plain fields: there is precisely one of these
+/// per world at this scope, so ECS machinery would buy nothing — and it
+/// keeps `Hopper::try_unload`'s `&mut BeltSegment` argument borrow-checkable
+/// alongside the hopper itself (disjoint fields of `World`), the same trick
+/// the fluid network already relies on in `tick`.
+#[derive(Debug)]
+struct HopperStage {
+    hopper: Hopper,
+    /// Footprint origin — min-X/min-Y corner, as for any machine.
+    tile: TileCoord,
+    footprint: Footprint,
+    kind: String,
+}
+
 pub struct World {
     ecs: hecs::World,
     recipes: RecipeRegistry,
@@ -397,6 +532,10 @@ pub struct World {
     /// Index into `stages` of the machine the pipe run feeds — `Some` iff
     /// `fluid` is.
     fluid_stage: Option<usize>,
+    /// The chain's raw-ingredient feeder (ticket 3) — see [`HopperStage`].
+    /// Never optional: a chain always has exactly one raw entry point, and
+    /// since ticket 3 that entry point is a building rather than a command.
+    hopper: HopperStage,
 }
 
 const BELT_LENGTH_TILES: i32 = 4;
@@ -531,6 +670,50 @@ impl World {
             FluidNetwork::new(ordered[i].fluid_inputs[0].0.clone(), segments, inlet)
         });
 
+        // The hopper (ticket 3): the chain's raw-ingredient feeder, placed so
+        // its footprint ends on the tile immediately west of stage 0's belt.
+        // With the belt starting at x = 0 that puts a 1x1 hopper at x = -1 —
+        // deliberately outside the chain's own span, so introducing it moved
+        // no existing tile, and a wider hopper would grow further west
+        // rather than pushing the whole line east.
+        //
+        // Both of its content inputs come from data, not from here: the
+        // footprint from `data/machines.ron` (like any kind), and the item it
+        // holds from `data/recipes.ron` — the first recipe's first input is
+        // by definition the chain's raw ingredient (see `validate_chain`).
+        let hopper_footprint = machines.footprint_of(HOPPER_KIND).unwrap_or_else(|| {
+            panic!(
+                "machine content error: data/machines.ron must define the '{HOPPER_KIND}' kind — \
+                 every chain is fed by one, so its footprint has to come from the same file \
+                 every other placed building's does (known kinds: {})",
+                machines.kind_ids().join(", ")
+            )
+        });
+        let raw_item = ordered[0]
+            .inputs
+            .first()
+            .map(|(item, _)| item.clone())
+            .unwrap_or_else(|| {
+                panic!(
+                    "recipes.ron chain error: the first recipe '{}' has no inputs, so the chain \
+                     has no raw ingredient for its hopper to hold",
+                    ordered[0].id
+                )
+            });
+        let first_belt_tile = ecs
+            .get::<&Position>(stages[0].belt_entity)
+            .unwrap()
+            .tile;
+        let hopper = HopperStage {
+            hopper: Hopper::new(raw_item, HOPPER_CAPACITY),
+            tile: (
+                first_belt_tile.0 - hopper_footprint.width_tiles,
+                first_belt_tile.1,
+            ),
+            footprint: hopper_footprint,
+            kind: HOPPER_KIND.to_string(),
+        };
+
         let world = Self {
             ecs,
             recipes,
@@ -541,6 +724,7 @@ impl World {
             economy: Economy::new(),
             fluid,
             fluid_stage,
+            hopper,
         };
         world.validate_placement();
         world
@@ -574,6 +758,10 @@ impl World {
             for segment in fluid.segments() {
                 claims.push((segment.tile, "the pipe run".to_string()));
             }
+        }
+
+        for tile in self.hopper.footprint.tiles(self.hopper.tile) {
+            claims.push((tile, "the chain's hopper".to_string()));
         }
 
         assert_no_tile_conflicts(&claims);
@@ -629,6 +817,34 @@ impl World {
         })
     }
 
+    /// The chain's hopper — placement plus live fill level (ticket 3). See
+    /// [`HopperSnapshot`] for the full JSON shape.
+    ///
+    /// Read this the way `fluid_snapshot`/`economy_snapshot` are read rather
+    /// than the way `chunk_snapshot` is: there is exactly one per world, so
+    /// polling it whenever the fill UI redraws is cheap and always current.
+    /// Unlike fluid, though, a hopper's level *does* dirty its chunk when it
+    /// changes (it changes at most once per tick, not every tick), so a
+    /// purely chunk-driven renderer stays correct too — `ChunkSnapshot`
+    /// carries the identical struct.
+    pub fn hopper_snapshot(&self) -> HopperSnapshot {
+        let h = &self.hopper;
+        HopperSnapshot {
+            tile: h.tile,
+            kind: h.kind.clone(),
+            footprint: h.footprint,
+            item: h.hopper.item().clone(),
+            quantity: h.hopper.quantity(),
+            capacity: h.hopper.capacity(),
+            fill: if h.hopper.capacity() == 0 {
+                0.0
+            } else {
+                h.hopper.quantity() as f64 / h.hopper.capacity() as f64
+            },
+            belt_tile: self.position_of(self.stages[0].belt_entity),
+        }
+    }
+
     fn position_of(&self, entity: Entity) -> TileCoord {
         self.ecs.get::<&Position>(entity).unwrap().tile
     }
@@ -646,9 +862,10 @@ impl World {
         }
     }
 
-    /// Marks every chunk a machine's footprint touches, not just the one its
-    /// origin tile is in — a machine straddling a chunk boundary changes
-    /// what both chunks' snapshots contain, so both have to be re-read.
+    /// Marks every chunk a footprint touches (a machine's, or the hopper's),
+    /// not just the one its origin tile is in — a footprint straddling a
+    /// chunk boundary changes what both chunks' snapshots contain, so both
+    /// have to be re-read.
     fn mark_machine_dirty(&mut self, origin: TileCoord, footprint: Footprint) {
         for chunk in footprint_chunks(origin, footprint) {
             if !self.dirty.contains(&chunk) {
@@ -663,11 +880,12 @@ impl World {
     ///
     /// 1. Per stage: belt movement, machine process/timer, then the belt's
     ///    front item hands off to that same stage's machine input.
-    /// 2. Per adjacent pair: a finished item in stage `i`'s machine output
-    ///    hands off onto stage `i + 1`'s belt (the inter-stage conveyor
-    ///    hop) — done as a second pass so every stage's own belt/machine
-    ///    tick has already happened this tick before anything crosses a
-    ///    stage boundary.
+    /// 2. Hand-offs onto a belt, once every belt has already moved: the
+    ///    hopper meters at most one raw unit onto stage 0's belt, then a
+    ///    finished item in stage `i`'s machine output hands off onto stage
+    ///    `i + 1`'s belt (the inter-stage conveyor hop). Done as a second
+    ///    pass so every stage's own belt/machine tick has already happened
+    ///    this tick before anything crosses a stage boundary.
     pub fn tick(&mut self) {
         self.dirty.clear();
         self.tick_count += 1;
@@ -713,6 +931,26 @@ impl World {
             }
             if machine_changed || transferred {
                 self.mark_machine_dirty(machine_tile, machine_footprint);
+            }
+        }
+
+        // The hopper's unload (ticket 3) is the upstream twin of the
+        // machine-output hand-off below — both are "put one unit onto a belt
+        // that has room for it" — so it runs in the same phase, after every
+        // belt has already advanced this tick. At most one unit moves per
+        // tick, and only if `BeltSegment::try_spawn` accepts it; a backed-up
+        // line simply leaves the hopper holding its contents.
+        {
+            let first_belt = self.stages[0].belt_entity;
+            let belt_tile = self.position_of(first_belt);
+            let unloaded = {
+                let mut belt = self.ecs.get::<&mut BeltSegment>(first_belt).unwrap();
+                self.hopper.hopper.try_unload(&mut belt)
+            };
+            if unloaded {
+                let (hopper_tile, hopper_footprint) = (self.hopper.tile, self.hopper.footprint);
+                self.mark_dirty(belt_tile);
+                self.mark_machine_dirty(hopper_tile, hopper_footprint);
             }
         }
 
@@ -850,6 +1088,13 @@ impl World {
             }
         }
 
+        // Same fan-out rule (and the same de-duplication caveat) a machine
+        // gets: a hopper wide enough to straddle a chunk boundary is
+        // reported in every chunk it overlaps, always with the same origin.
+        if footprint_chunks(self.hopper.tile, self.hopper.footprint).contains(&id) {
+            snapshot.hoppers.push(self.hopper_snapshot());
+        }
+
         snapshot
     }
 
@@ -879,6 +1124,14 @@ impl World {
                 if !ids.contains(&chunk) {
                     ids.push(chunk);
                 }
+            }
+        }
+        // The hopper stands west of the chain's start, so on the shipped
+        // content it is the one thing outside chunk (0, 0) — a caller that
+        // wants "everything in the world" must get (-1, 0) from here.
+        for chunk in footprint_chunks(self.hopper.tile, self.hopper.footprint) {
+            if !ids.contains(&chunk) {
+                ids.push(chunk);
             }
         }
         ids
@@ -941,6 +1194,18 @@ impl World {
             }
         }
 
+        if self.hopper.footprint.contains(self.hopper.tile, pos) {
+            let snapshot = self.hopper_snapshot();
+            return Some(TileSnapshot::Hopper {
+                footprint: snapshot.footprint,
+                origin_tile: snapshot.tile,
+                item: snapshot.item,
+                quantity: snapshot.quantity,
+                capacity: snapshot.capacity,
+                fill: snapshot.fill,
+            });
+        }
+
         if let Some(fluid) = &self.fluid {
             for (i, segment) in fluid.segments().iter().enumerate() {
                 if segment.tile == pos {
@@ -960,23 +1225,25 @@ impl World {
     }
 
     /// Applies a player-issued command (ARCHITECTURE.md §4). Invalid/no-op
-    /// commands (e.g. spawning onto a belt with no room) are silently
+    /// commands (e.g. filling a hopper that is already full) are silently
     /// ignored, same as `BeltSegment::try_spawn`'s own contract.
-    /// `SpawnItem` always targets the chain's first belt (the raw-ingredient
+    /// `FillHopper` always targets the chain's hopper (the raw-ingredient
     /// entry point); `CollectOutput` always targets the chain's last
     /// machine (the finished-product exit point) — a single entry/exit pair
     /// per chain, matching this milestone's "one straight line" scope.
+    ///
+    /// Note what `FillHopper` deliberately does *not* do: it never touches a
+    /// belt. Getting raw ingredient onto the line is the hopper's job, one
+    /// unit per tick from `tick()`, so the player sets the *supply* and the
+    /// machinery sets the *rate* (ticket 3).
     pub fn issue_command(&mut self, cmd: PlayerCommand) {
         match cmd {
-            PlayerCommand::SpawnItem { item } => {
-                let first = self.stages[0];
-                let belt_tile = self.position_of(first.belt_entity);
-                let spawned = {
-                    let mut belt = self.ecs.get::<&mut BeltSegment>(first.belt_entity).unwrap();
-                    belt.try_spawn(item)
-                };
-                if spawned {
-                    self.mark_dirty(belt_tile);
+            PlayerCommand::FillHopper { amount } => {
+                let (hopper_tile, hopper_footprint) = (self.hopper.tile, self.hopper.footprint);
+                // Clamped at capacity, never an error — see `Hopper::fill`.
+                let added = self.hopper.hopper.fill(amount);
+                if added > 0 {
+                    self.mark_machine_dirty(hopper_tile, hopper_footprint);
                 }
             }
             PlayerCommand::CollectOutput => {

@@ -6,6 +6,7 @@
 pub mod belt;
 pub mod economy;
 pub mod fluid;
+pub mod hopper;
 pub mod inventory;
 pub mod machine;
 pub mod machines;
@@ -15,10 +16,11 @@ pub mod world;
 
 pub use economy::{Contract, Economy, EconomySnapshot};
 pub use fluid::{FluidNetwork, PipeSegment};
+pub use hopper::{HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, HOPPER_KIND, Hopper};
 pub use machines::{Footprint, MachineKind, MachineRegistry};
 pub use recipe::{Recipe, RecipeRegistry};
 pub use types::{decode_chunk_id, encode_chunk_id};
 pub use world::{
-    BeltSnapshot, ChunkSnapshot, FluidSnapshot, MachineSnapshot, PipeSnapshot, PlayerCommand,
-    StageLayout, TileSnapshot, World, command_from_json,
+    BeltSnapshot, ChunkSnapshot, FluidSnapshot, HopperSnapshot, MachineSnapshot, PipeSnapshot,
+    PlayerCommand, StageLayout, TileSnapshot, World, command_from_json,
 };

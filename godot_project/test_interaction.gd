@@ -13,14 +13,11 @@ func _fail(msg: String) -> void:
 	quit(1)
 
 
-func _tomato_count(sim) -> int:
-	var snapshot = JSON.parse_string(sim.chunk_snapshot_json(0))
-	var total := 0
-	for belt in snapshot.get("belts", []):
-		for pair in belt["items"]:
-			if pair[0] == "tomato":
-				total += 1
-	return total
+func _hopper_quantity(sim) -> int:
+	var hopper = JSON.parse_string(sim.hopper_snapshot_json())
+	if hopper == null:
+		return -1
+	return int(hopper["quantity"])
 
 
 func _initialize() -> void:
@@ -30,17 +27,21 @@ func _initialize() -> void:
 	# this headless script-mode SceneTree never runs — call it directly.
 	main._ready()
 
-	var before := _tomato_count(main.sim)
+	# Since the "Machines improvement" ticket 3, SPACE loads the chain's
+	# hopper rather than teleporting an item onto the belt — the hopper is
+	# what puts tomatoes on the belt, one per tick. So the observable effect
+	# of the keypress is the hopper's fill level rising.
+	var before := _hopper_quantity(main.sim)
 
 	var key_event := InputEventKey.new()
 	key_event.keycode = KEY_SPACE
 	key_event.pressed = true
 	main._unhandled_input(key_event)
 
-	var after := _tomato_count(main.sim)
-	if after != before + 1:
-		_fail("pressing SPACE via _unhandled_input did not spawn a tomato onto the belt (before=%d after=%d)" % [before, after])
+	var after := _hopper_quantity(main.sim)
+	if after <= before:
+		_fail("pressing SPACE via _unhandled_input did not load the hopper (before=%d after=%d)" % [before, after])
 		return
 
-	print("INTERACTION_OK: simulated SPACE keypress reached SimBridge and spawned a tomato")
+	print("INTERACTION_OK: simulated SPACE keypress reached SimBridge and loaded the hopper (%d -> %d)" % [before, after])
 	quit(0)
