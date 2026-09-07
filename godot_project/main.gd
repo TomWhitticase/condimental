@@ -350,10 +350,15 @@ const CAMERA_DISTANCE := 160.0
 # UI_UX.md §1 explicitly allows smooth zoom and only forbids free rotation —
 # the fixed isometric angle itself never changes here, only `size` (zoom) and
 # `_camera_focus` (pan) do.
-const ZOOM_STEP := 0.1 # fraction of current size per scroll notch
+const ZOOM_STEP := 0.1 # fraction of current size per scroll notch, mouse wheel or +/-
 const ZOOM_MIN_FACTOR := 0.3 # most zoomed in, relative to the auto-framed size
 const ZOOM_MAX_FACTOR := 3.0 # most zoomed out
 const PAN_SPEED := 0.9 # fraction of the visible size crossed per second at held-key pan
+# InputEventPanGesture.delta is in gesture-magnitude units, not wheel notches,
+# and arrives many times per swipe — this converts one unit of that delta
+# into a fraction of ZOOM_STEP's effect, tuned so a normal swipe feels
+# similar in speed to a few wheel notches, not a single giant jump.
+const TRACKPAD_ZOOM_SENSITIVITY := 0.01
 
 
 func _build_camera() -> void:
@@ -625,7 +630,7 @@ func _build_ui() -> void:
 
 	var help := Label.new()
 	help.label_settings = settings
-	help.text = "SPACE: feed a tomato onto the line    C: collect the finished product    WASD/arrows: pan    scroll: zoom"
+	help.text = "SPACE: feed a tomato onto the line    C: collect the finished product    WASD/arrows: pan    scroll/+-: zoom"
 	rows.add_child(help)
 
 
@@ -654,7 +659,25 @@ func _unhandled_input(event: InputEvent) -> void:
 			_zoom_camera(1.0 + ZOOM_STEP)
 		return
 
+	# A real mouse's wheel arrives as InputEventMouseButton (above). A macOS
+	# trackpad's two-finger scroll does NOT — it arrives as a continuous
+	# InputEventPanGesture instead, which is why scroll-to-zoom didn't work
+	# on trackpads until this was added. Scale by the gesture's own delta
+	# magnitude (it's continuous, not discrete notches like a wheel click),
+	# not a fixed step, so a fast swipe zooms faster than a slow one.
+	if event is InputEventPanGesture:
+		if event.delta.y != 0.0:
+			_zoom_camera(1.0 + event.delta.y * TRACKPAD_ZOOM_SENSITIVITY)
+		return
+
 	if not (event is InputEventKey and event.pressed and not event.echo):
+		return
+
+	if event.keycode == KEY_EQUAL or event.keycode == KEY_KP_ADD:
+		_zoom_camera(1.0 - ZOOM_STEP)
+		return
+	if event.keycode == KEY_MINUS or event.keycode == KEY_KP_SUBTRACT:
+		_zoom_camera(1.0 + ZOOM_STEP)
 		return
 
 	var command := ""

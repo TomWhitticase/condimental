@@ -10,7 +10,11 @@
 #   * a pan direction moves `_camera_focus` along the screen-relative pan
 #     axes (not raw world X/Z), and no direction leaves it untouched,
 #   * the camera's orientation (the fixed isometric angle itself) never
-#     changes across any of the above — only position and size do.
+#     changes across any of the above — only position and size do,
+#   * a macOS trackpad's InputEventPanGesture (not InputEventMouseButton —
+#     the two are genuinely different event types, which is why scroll-to-
+#     zoom silently didn't work on trackpads until this was added) and the
+#     +/- keys both reach `_unhandled_input` and actually zoom.
 #
 # `_pan_camera` itself reads the `Input` singleton to decide direction
 # (held WASD/arrows) — that part is a thin, deliberately untested read per
@@ -87,5 +91,35 @@ func _initialize() -> void:
 		_fail("_apply_pan(Vector3.ZERO, ...) should not move _camera_focus, but it did")
 		return
 
-	print("CAMERA_NAV_OK: zoom clamps at both ends, pan moves along screen axes, orientation never changes")
+	# --- Trackpad pan-gesture and +/- keys both reach _unhandled_input -----
+	# `_camera_size` is back to `initial_size` here (pan never touched it),
+	# comfortably inside the clamp range, so a single zoom step in either
+	# direction below is unambiguous — not fighting a clamp.
+	var pan_gesture := InputEventPanGesture.new()
+	pan_gesture.delta = Vector2(0.0, -5.0) # an upward swipe: same sense as scroll-up
+	var size_before_gesture: float = camera.size
+	main._unhandled_input(pan_gesture)
+	if camera.size >= size_before_gesture:
+		_fail("an upward InputEventPanGesture should zoom in (decrease size), was %f now %f" % [size_before_gesture, camera.size])
+		return
+
+	var minus_key := InputEventKey.new()
+	minus_key.keycode = KEY_MINUS
+	minus_key.pressed = true
+	var size_before_minus: float = camera.size
+	main._unhandled_input(minus_key)
+	if camera.size <= size_before_minus:
+		_fail("KEY_MINUS should zoom out (increase size), was %f now %f" % [size_before_minus, camera.size])
+		return
+
+	var plus_key := InputEventKey.new()
+	plus_key.keycode = KEY_EQUAL
+	plus_key.pressed = true
+	var size_before_plus: float = camera.size
+	main._unhandled_input(plus_key)
+	if camera.size >= size_before_plus:
+		_fail("KEY_EQUAL (+) should zoom in (decrease size), was %f now %f" % [size_before_plus, camera.size])
+		return
+
+	print("CAMERA_NAV_OK: zoom clamps at both ends, pan moves along screen axes, trackpad gesture and +/- keys both zoom, orientation never changes")
 	quit(0)
