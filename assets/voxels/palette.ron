@@ -34,6 +34,15 @@
         // functional readability signal (§4, §7) — these are the elements the
         // WorldEnvironment's glow pass picks up.
         "emissive": (metallic: 0.0, roughness: 0.55, emission_energy: 2.6),
+        // Fluid bodies inside pipes and tanks (milestone 6). A dielectric,
+        // so metallic stays 0, but glossier than anything else in the
+        // palette — that gloss IS UI_UX.md §4's "visible liquid surfaces in
+        // tanks/pipes with subtle shading/reflection", and it is what makes
+        // a liquid read as wet rather than as a painted block. The fluid's
+        // own hue is not here on purpose: which fluid is in a pipe is live
+        // simulation data (see main.gd's FLUID_TINTS), so the voxels are
+        // near-white and Godot tints them per fluid id.
+        "liquid": (metallic: 0.0, roughness: 0.14, emission_energy: 0.0),
     },
 
     colors: [
@@ -80,5 +89,11 @@
         (name: "label_cream",    rgb: "#E5DCC5", class: "matte"),
         (name: "cardboard",      rgb: "#AD8450", class: "matte"),
         (name: "cardboard_dark", rgb: "#875F35", class: "matte"),
+
+        // --- fluids (milestone 6) ---
+        // Deliberately near-white: main.gd multiplies this by a per-fluid
+        // albedo tint, so one fluid model serves every fluid data/recipes.ron
+        // ever names without a palette entry per liquid.
+        (name: "fluid_pale",     rgb: "#E8F1EC", class: "liquid"),
     ],
 )

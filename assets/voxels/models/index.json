@@ -27,5 +27,15 @@
     "matte",
     "metal",
     "emissive"
+  ],
+  "pipe": [
+    "metal"
+  ],
+  "pipe_fluid": [
+    "liquid"
+  ],
+  "pipe_source": [
+    "matte",
+    "metal"
   ]
 }

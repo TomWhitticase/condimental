@@ -25,6 +25,9 @@ pub const ASSETS: &[Asset] = &[
     Asset { name: "floor_tile", build: floor_tile },
     Asset { name: "belt", build: belt },
     Asset { name: "machine", build: machine },
+    Asset { name: "pipe", build: pipe },
+    Asset { name: "pipe_source", build: pipe_source },
+    Asset { name: "pipe_fluid", build: pipe_fluid },
     Asset { name: "item_tomato", build: item_tomato },
     Asset { name: "item_sauce_pail", build: item_sauce_pail },
     Asset { name: "item_ketchup_pail", build: item_ketchup_pail },
@@ -254,5 +257,145 @@ pub fn item_box(p: &Palette) -> VoxModel {
     // Shipping label.
     m.cuboid((3, 6), (2, 2), (4, 8), p.idx("label_cream"));
     m.cuboid((9, 12), (2, 2), (4, 8), p.idx("label_cream"));
+    m
+}
+
+// ---------------------------------------------------------------------------
+// Fluid pipes (milestone 6 — ARCHITECTURE.md §3.4, §9 item 6)
+// ---------------------------------------------------------------------------
+//
+// Material call, made deliberately rather than left ambiguous: this run is
+// **stainless steel, material class `metal`** (`pipe_grey`/`steel_*`/
+// `brass`), not PVC. Two reasons, both from the docs rather than taste.
+// UI_UX.md §3 lists "stainless steel tanks ... PVC/steel piping" as the
+// setting's visual language and §4 makes metals the deliberate shiny
+// exception so "important machinery pops" — a pipe run feeding a machine is
+// exactly that, and a matte plastic run would visually sink into the
+// concrete floor it stands on. And GAMEPLAY.md §2/§4 reserve non-standard
+// piping material as a *later* gate (tier 5's acid-resistant equipment), so
+// the baseline run should read as ordinary food-grade stainless.
+//
+// The pipe is hollow, with an open sight section cut through the top of its
+// middle span. That opening is what makes UI_UX.md §4's "visible liquid
+// surfaces in tanks/pipes" literally true here: the fluid body
+// (`pipe_fluid`, below) sits in the bore and is seen through it from the
+// fixed isometric angle, which looks down on the +Y (model +Z) face.
+
+/// Voxel geometry shared by every pipe tile, so a plain segment and the
+/// source tile read as one continuous run. Numbers here are mirrored by
+/// `main.gd`'s PIPE_* constants (stated in voxels, converted there) —
+/// change one, change the other.
+const PIPE_AXIS_Y: i32 = 16;
+const PIPE_AXIS_Z: i32 = 15;
+const PIPE_OUTER_R: f32 = 5.0;
+const PIPE_BORE_R: f32 = 3.2;
+/// Bore floor / ceiling in voxels, derived from the two above. The fluid
+/// body's base sits on `PIPE_BORE_Z0` and it can rise `PIPE_BORE_HEIGHT`.
+const PIPE_BORE_Z0: i32 = PIPE_AXIS_Z - 3;
+const PIPE_BORE_HEIGHT: i32 = 7;
+/// Bore half-width, in Y — the fluid body is this wide too.
+const PIPE_BORE_Y0: i32 = PIPE_AXIS_Y - 3;
+const PIPE_BORE_Y1: i32 = PIPE_AXIS_Y + 3;
+
+/// Draws the steel run itself into `m`, with its sight opening spanning
+/// `window` in X. Everything is carved *after* it is drawn: a face is only
+/// culled when its neighbour is genuinely absent, so a bore filled with an
+/// "air" colour would still mesh as a solid plug (see `VoxModel::erase`).
+fn pipe_body(m: &mut VoxModel, p: &Palette, window: (i32, i32)) {
+    let last = TILE_VOXELS as i32 - 1;
+
+    // Support trestle: two legs and a saddle bracket the pipe rests in.
+    for (x0, x1) in [(4, 7), (24, 27)] {
+        m.cuboid((x0, x1), (14, 18), (0, 9), p.idx("steel_dark"));
+        m.cuboid((x0, x1), (12, 20), (9, 10), p.idx("steel_dark"));
+    }
+
+    // The run. Full tile length, so consecutive tiles butt into one line.
+    // `steel`, not the darker `pipe_grey` the machine's exhaust stack uses:
+    // reviewed as a rendered scene, a run in the darker grey sank into the
+    // concrete instead of popping the way UI_UX.md §4 wants machinery to.
+    m.cylinder_x((PIPE_AXIS_Y, PIPE_AXIS_Z), PIPE_OUTER_R, (0, last), p.idx("steel"));
+    // Bolted flanges at the tile joins and a brass collar either side of the
+    // sight section — both wider than the run, so they read as fittings.
+    for (x0, x1) in [(0, 1), (last - 1, last)] {
+        m.cylinder_x((PIPE_AXIS_Y, PIPE_AXIS_Z), PIPE_OUTER_R + 1.0, (x0, x1), p.idx("steel_light"));
+    }
+    for (x0, x1) in [(5, 6), (25, 26)] {
+        m.cylinder_x((PIPE_AXIS_Y, PIPE_AXIS_Z), PIPE_OUTER_R + 1.0, (x0, x1), p.idx("brass"));
+    }
+
+    // Hollow it out, then cut the sight opening through the top wall,
+    // leaving the side rails standing.
+    // Cut the wall away from just above the bore floor, leaving the two
+    // side rails standing: an open inspection channel, not a slot in the
+    // top. Cutting only the top half was the first attempt and it was
+    // wrong — it hid the liquid below roughly half fill, which is exactly
+    // the state a player most needs to see (a draining pipe means a
+    // stalling machine). This way the level reads at ANY fill fraction from
+    // the fixed isometric angle, which looks obliquely down into the run.
+    let top = m.size[2] as i32 - 1;
+    let window_floor = PIPE_BORE_Z0 + 1;
+    m.carve_cylinder_x((PIPE_AXIS_Y, PIPE_AXIS_Z), PIPE_BORE_R, (0, last));
+    m.carve_cuboid(window, (PIPE_BORE_Y0, PIPE_BORE_Y1), (window_floor, top));
+}
+
+/// A plain length of pipe: one tile of the run.
+pub fn pipe(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 24]);
+    pipe_body(&mut m, p, (9, 22));
+    m
+}
+
+/// The off-map supply tap at the far end of the run (`PipeSegment::is_source`
+/// in the simulation): the same pipe, plus a stainless header vessel it
+/// feeds from. Visually distinct on purpose — UI_UX.md §7's "never encode
+/// critical state in colour alone" instinct applied to geometry: the source
+/// end should be identifiable by silhouette, not by being the tile that
+/// happens to always look full.
+pub fn pipe_source(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 32]);
+    // Sight opening shifted clear of the vessel below.
+    pipe_body(&mut m, p, (14, 27));
+
+    // Plinth + hazard skirt, matching the machine's own footing language.
+    m.cuboid((1, 13), (9, 23), (0, 1), p.idx("concrete_dark"));
+    m.hazard_stripe_x((1, 13), (9, 9), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    m.hazard_stripe_x((1, 13), (23, 23), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+
+    // Header vessel, drawn over the run so the pipe reads as leaving it.
+    m.cylinder_z((7, 16), 6.0, (2, 24), p.idx("steel"));
+    for z in [9, 17] {
+        m.cylinder_z((7, 16), 6.4, (z, z), p.idx("steel_light"));
+    }
+    m.ellipsoid((7, 16, 24), (6.0, 6.0, 4.0), p.idx("steel_light"));
+
+    // Shut-off valve on top: stem and hand wheel.
+    m.cuboid((7, 7), (16, 16), (28, 29), p.idx("steel_dark"));
+    m.cylinder_z((7, 16), 3.2, (30, 30), p.idx("brass"));
+    m
+}
+
+/// The fluid itself — one tile of liquid sitting in the bore.
+///
+/// Deliberately **one voxel tall**: `main.gd` scales this node vertically to
+/// the segment's live fill fraction, and a one-voxel slab scaled to N voxels
+/// is geometrically the same box as an N-voxel column, with none of the
+/// pivot arithmetic a taller model would need (the encoder puts a model's
+/// origin at its footprint centre *at ground level*, so a slab's base is
+/// exactly its node origin — see `vox::encode`). Near-white on purpose: the
+/// per-fluid colour is live simulation data, applied in Godot as an albedo
+/// tint over these vertices, so this one model serves every fluid
+/// `data/recipes.ron` ever names.
+pub fn pipe_fluid(p: &Palette) -> VoxModel {
+    // `main.gd` mirrors PIPE_BORE_Z0/PIPE_BORE_HEIGHT to place and scale
+    // this slab, so the one thing worth asserting here is that a full
+    // column still fits inside the run's wall rather than poking out of it.
+    debug_assert!(
+        PIPE_BORE_Z0 + PIPE_BORE_HEIGHT <= PIPE_AXIS_Z + PIPE_OUTER_R as i32,
+        "a full fluid column would rise above the pipe wall"
+    );
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 1]);
+    let last = TILE_VOXELS as i32 - 1;
+    m.cuboid((0, last), (PIPE_BORE_Y0, PIPE_BORE_Y1), (0, 0), p.idx("fluid_pale"));
     m
 }

@@ -120,7 +120,13 @@ fn main() {
             // Only the combined model is worth an icon — same rule
             // scripts/build-voxels.sh's preview loop already applies to the
             // per-material-class split files (name.matte.vox etc.).
-            !stem.ends_with(".matte") && !stem.ends_with(".metal") && !stem.ends_with(".emissive")
+            // "Has a dot in it" rather than a list of known class suffixes:
+            // asset names are plain identifiers, and the hand-listed
+            // version (".matte"/".metal"/".emissive") silently started
+            // emitting a `pipe_fluid.liquid.png` the moment a fourth
+            // material class was added in milestone 6 — exactly the drift a
+            // literal list invites.
+            !stem.contains('.')
         })
         .collect();
     entries.sort();

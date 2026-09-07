@@ -103,7 +103,34 @@ were only discoverable by building it:
    the one that first scans the project — so the first import silently skips
    every `.vox` and the second imports them all. This bites any CI setup that
    assumes one import pass is enough.
-5. **UI icons (§5) turned out to need a second, separate render pass from
+5. **A liquid is its own material class, not a recoloured matte one
+   (added 2026-09-07 with milestone 6's pipes).** `palette.ron`'s
+   `materials` table gained a fourth class, `liquid` — a dielectric like
+   matte, but far glossier (roughness 0.14) — because §4's "visible liquid
+   surfaces in tanks/pipes with subtle shading/reflection" is a *material*
+   property, and point (4) above already settled that material class is
+   palette data rather than a per-asset decision made in GDScript. What is
+   NOT in the palette is the fluid's hue: which liquid is in a pipe is live
+   simulation data, so the fluid model's voxels are near-white and
+   `main.gd` multiplies a per-fluid albedo tint over them (the same shape as
+   its existing item-id → model mapping). One consequence worth knowing:
+   the fluid model is deliberately **one voxel tall** and scaled vertically
+   to the segment's live fill fraction — the encoder puts a model's origin
+   at its footprint centre *at ground level* (see §2b point 1's encoder), so
+   a one-voxel slab's base is exactly its node origin and a fill level needs
+   no pivot arithmetic.
+6. **The pipe run is stainless steel, and it is modelled hollow with an
+   open inspection channel.** Steel rather than PVC because §3 names both
+   but §4 makes metals the deliberate shiny exception so machinery pops —
+   and because GAMEPLAY.md §2/§4 reserve non-standard piping material as a
+   *later* progression gate (tier 5's acid-resistant equipment), which the
+   baseline run shouldn't pre-empt. Hollow because the liquid has to be
+   *seen*: the first cut opened only the top half of the wall, and a
+   rendered-scene review showed that hid the level below roughly half fill
+   — exactly the state a player most needs to read (a draining pipe means a
+   stalling machine). The opening now starts just above the bore floor,
+   leaving side rails standing.
+7. **UI icons (§5) turned out to need a second, separate render pass from
    the review previews above — not a smaller copy of them (built
    2026-09-07).** The obvious-sounding shortcut was "reuse
    `previews/*.png`, just smaller": checking the actual files first (per

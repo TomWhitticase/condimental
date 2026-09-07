@@ -458,6 +458,27 @@ it's gone stale.
   Explicitly deferred, matching the milestone's own scope note: the full
   `contracts.ron` schema, multiple concurrent contracts, and `StaffPools` —
   all unchanged future work per GAMEPLAY.md §7/§9.
+- 2026-09-07: Milestone 6 (Fluids), presentation half. `sim_core` was not
+  touched: the pipe run, the liquid in it, and the pipe hover tooltip are all
+  driven from the JSON ticket 1 already exposed — geometry from
+  `fluid_snapshot_json`'s own `segments` list (not `chain_layout_json`, which
+  describes belt/machine stages only, and not `chunk_snapshot_json`, whose
+  `pipes` array only arrives for *dirty* chunks — and fluid movement
+  deliberately doesn't dirty its chunk, so a chunk-driven renderer would wait
+  forever). Three decisions worth not re-litigating: (1) **`palette.ron`
+  gained a fourth material class, `liquid`** (glossy dielectric) rather than
+  reusing `matte`, because UI_UX.md §4's "visible liquid surfaces ... with
+  subtle shading/reflection" is a material property and §2a point 5 already
+  makes material class palette data; only the per-*fluid* tint is decided in
+  GDScript, since which liquid is in a pipe is live simulation data.
+  (2) **The pipe run is stainless steel, not PVC** — see UI_UX.md §2b point 6
+  for the §4/GAMEPLAY.md-tier-5 reasoning. (3) **The fluid model is one voxel
+  tall and scaled to the live fill fraction**, which works exactly because the
+  encoder puts a model's origin at its footprint centre at ground level. Also
+  fixed a real hole in `scripts/verify-core-loop.sh` found while adding
+  `test_fluids.gd`: **Godot exits 0 when a `--script` file fails to parse**,
+  so the suite printed PASS for a test that never loaded — every headless
+  Godot test now has to print its own success marker, checked by the runner.
 - 2026-09-07: Visual-polish pass — built UI_UX.md §2a's voxel asset pipeline
   for real and replaced milestone 3/4's flat 2D placeholder scene with the
   isometric 3D one the doc describes. Presentation-only: `sim_core`,

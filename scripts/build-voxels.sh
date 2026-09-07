@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Rebuilds the voxel asset pipeline (UI_UX.md §2a) end to end:
 #
-#   1. `cargo run -p voxgen` regenerates every .vox in assets/voxels/models/
+#   1. `cargo run -p voxgen --bin voxgen` regenerates every .vox in assets/voxels/models/
 #      from the Rust generators in assets/voxels/generators/ (the actual
 #      source of truth — never hand-edit the .vox files).
 #   2. `vengi-thumbnailer` renders each *combined* model to an isometric PNG
@@ -44,8 +44,8 @@ set -uo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-echo "==> cargo run -p voxgen (regenerate assets/voxels/models/)"
-cargo run -q -p voxgen || exit 1
+echo "==> cargo run -p voxgen --bin voxgen (regenerate assets/voxels/models/)"
+cargo run -q -p voxgen --bin voxgen || exit 1
 echo
 
 thumbnailer="${VENGI_THUMBNAILER:-}"
@@ -73,7 +73,7 @@ for model in assets/voxels/models/*.vox; do
   # Only the combined models are worth reviewing; the per-material-class
   # split files (name.metal.vox etc.) are a Godot import detail.
   case "$name" in
-    *.matte|*.metal|*.emissive) continue ;;
+    *.matte|*.metal|*.emissive|*.liquid) continue ;;
   esac
   out="$previews/$name.png"
   # Only ever replace this model's own preview: scripts/screenshot-scene.sh

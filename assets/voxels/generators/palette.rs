@@ -16,6 +16,12 @@ pub enum MaterialClass {
     Matte,
     Metal,
     Emissive,
+    /// Liquid surfaces (milestone 6's fluids): a dielectric like `Matte`,
+    /// but markedly glossier — UI_UX.md §4 asks for "visible liquid
+    /// surfaces in tanks/pipes with subtle shading/reflection", which is a
+    /// material property, so it belongs here rather than as a per-asset
+    /// decision in GDScript.
+    Liquid,
 }
 
 impl MaterialClass {
@@ -24,6 +30,7 @@ impl MaterialClass {
             MaterialClass::Matte => "matte",
             MaterialClass::Metal => "metal",
             MaterialClass::Emissive => "emissive",
+            MaterialClass::Liquid => "liquid",
         }
     }
 
@@ -34,8 +41,13 @@ impl MaterialClass {
         MaterialClass::all().into_iter().find(|c| c.name() == name)
     }
 
-    pub fn all() -> [MaterialClass; 3] {
-        [MaterialClass::Matte, MaterialClass::Metal, MaterialClass::Emissive]
+    pub fn all() -> [MaterialClass; 4] {
+        [
+            MaterialClass::Matte,
+            MaterialClass::Metal,
+            MaterialClass::Emissive,
+            MaterialClass::Liquid,
+        ]
     }
 }
 

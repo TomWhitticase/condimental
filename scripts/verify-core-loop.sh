@@ -12,7 +12,7 @@
 #      conservation across every stage, not just one. No Godot involved.
 #   2. `cargo xtask` builds the extension and copies it into
 #      godot_project/bin/.
-#   3. Seven headless Godot scripts exercise the parts cargo test can't: the
+#   3. Eight headless Godot scripts exercise the parts cargo test can't: the
 #      real `gdext` boundary (JSON command/snapshot/layout wire format going
 #      through Godot's own Variant/String/JSON machinery, driven through the
 #      whole chain end to end), the interactive scene's keyboard input
@@ -22,7 +22,9 @@
 #      pan/zoom (§1: allowed, unlike free rotation of the fixed angle), and
 #      UI_UX.md §5's diegetic UI epic — the contract clipboard panel, voxel-
 #      rendered icons, and machine hover tooltips (hover, not dense
-#      always-on text).
+#      always-on text) — plus milestone 6's fluid presentation (pipe tiles
+#      rendered from the simulation's own segment list, liquid bodies scaled
+#      to live pressure, pipe hover info in both view modes).
 #
 # Usage: scripts/verify-core-loop.sh
 
@@ -75,69 +77,42 @@ fi
 echo "imported $imported_count/$vox_count voxel models"
 echo
 
-echo "==> godot --headless --script test_core_loop.gd (real gdext JSON boundary)"
-"$godot_bin" --headless --path godot_project --script test_core_loop.gd
-core_loop_status=$?
-if [ "$core_loop_status" -ne 0 ]; then
-  echo "FAIL: test_core_loop.gd exited $core_loop_status" >&2
-  exit "$core_loop_status"
-fi
-echo
+# Godot exits 0 even when a `--script` file fails to PARSE — it prints the
+# parse error and quits cleanly — so exit status alone is NOT proof a test
+# actually ran. This was found the hard way: a freshly added test_fluids.gd
+# with a type-inference error never loaded, and this script happily printed
+# PASS. Every script below therefore also has to print its own success
+# marker, and its absence is a failure.
+run_godot_script() {
+  script="$1"
+  marker="$2"
+  label="$3"
+  echo "==> godot --headless --script $script ($label)"
+  out=$("$godot_bin" --headless --path godot_project --script "$script" 2>&1)
+  status=$?
+  echo "$out"
+  if [ "$status" -ne 0 ]; then
+    echo "FAIL: $script exited $status" >&2
+    exit "$status"
+  fi
+  if ! printf '%s\n' "$out" | grep -q "$marker"; then
+    echo "FAIL: $script exited 0 but never printed '$marker' — it did not actually run" >&2
+    exit 1
+  fi
+  echo
+}
 
-echo "==> godot --headless --script test_interaction.gd (keyboard input -> SimBridge)"
-"$godot_bin" --headless --path godot_project --script test_interaction.gd
-interaction_status=$?
-if [ "$interaction_status" -ne 0 ]; then
-  echo "FAIL: test_interaction.gd exited $interaction_status" >&2
-  exit "$interaction_status"
-fi
-
-echo
-echo "==> godot --headless --script test_presentation.gd (UI_UX.md §1/§2/§4 scene structure)"
-"$godot_bin" --headless --path godot_project --script test_presentation.gd
-presentation_status=$?
-if [ "$presentation_status" -ne 0 ]; then
-  echo "FAIL: test_presentation.gd exited $presentation_status" >&2
-  exit "$presentation_status"
-fi
-
-echo
-echo "==> godot --headless --script test_camera_nav.gd (pan/zoom, UI_UX.md §1)"
-"$godot_bin" --headless --path godot_project --script test_camera_nav.gd
-camera_nav_status=$?
-if [ "$camera_nav_status" -ne 0 ]; then
-  echo "FAIL: test_camera_nav.gd exited $camera_nav_status" >&2
-  exit "$camera_nav_status"
-fi
-
-echo
-echo "==> godot --headless --script test_contract_panel.gd (contract clipboard, UI_UX.md §5)"
-"$godot_bin" --headless --path godot_project --script test_contract_panel.gd
-contract_panel_status=$?
-if [ "$contract_panel_status" -ne 0 ]; then
-  echo "FAIL: test_contract_panel.gd exited $contract_panel_status" >&2
-  exit "$contract_panel_status"
-fi
+run_godot_script test_core_loop.gd CORE_LOOP_OK "real gdext JSON boundary"
+run_godot_script test_interaction.gd INTERACTION_OK "keyboard input -> SimBridge"
+run_godot_script test_presentation.gd PRESENTATION_OK "UI_UX.md §1/§2/§4 scene structure"
+run_godot_script test_camera_nav.gd CAMERA_NAV_OK "pan/zoom, UI_UX.md §1"
+run_godot_script test_contract_panel.gd CONTRACT_PANEL_OK "contract clipboard, UI_UX.md §5"
+run_godot_script test_icons.gd ICONS_OK "_icon_for, UI_UX.md §5"
+run_godot_script test_hover.gd HOVER_OK "machine hover tooltips, UI_UX.md §5"
+run_godot_script test_fluids.gd FLUIDS_OK "pipe rendering + fluid hover, milestone 6"
 
 echo
-echo "==> godot --headless --script test_icons.gd (_icon_for, UI_UX.md §5)"
-"$godot_bin" --headless --path godot_project --script test_icons.gd
-icons_status=$?
-if [ "$icons_status" -ne 0 ]; then
-  echo "FAIL: test_icons.gd exited $icons_status" >&2
-  exit "$icons_status"
-fi
-
-echo
-echo "==> godot --headless --script test_hover.gd (machine hover tooltips, UI_UX.md §5)"
-"$godot_bin" --headless --path godot_project --script test_hover.gd
-hover_status=$?
-if [ "$hover_status" -ne 0 ]; then
-  echo "FAIL: test_hover.gd exited $hover_status" >&2
-  exit "$hover_status"
-fi
-
-echo
-echo "PASS: milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard + icons + hover"
-echo "      verified headlessly (sim_core tests + gdext boundary + interaction + 3D scene"
-echo "      structure + pan/zoom + contract panel structure + icons + hover tooltips)."
+echo "PASS: milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"
+echo "      + icons + hover + milestone 6 fluid presentation, all verified headlessly"
+echo "      (sim_core tests + gdext boundary + interaction + 3D scene structure + pan/zoom"
+echo "      + contract panel structure + icons + hover tooltips + pipe/fluid rendering)."

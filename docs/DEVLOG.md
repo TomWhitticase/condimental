@@ -20,8 +20,8 @@ below is history and should only ever be appended to.)*
 - **Stage:** Pre-alpha, but the core MVP loop is real end to end and it looks like a game. Milestones 1 (Scaffold), 2 (Mobile export spike), 3 (Core loop proof), 4 (First full chain), and 5 (Economy MVP) are all done — a real multi-stage production chain (tomato -> tomato sauce -> ketchup -> bottled ketchup -> boxed ketchup) that can deliver against a hardcoded contract to earn money, headlessly verified end to end, Android export proven working. On top of that, a visual-polish pass built UI_UX.md's voxel asset pipeline and turned the flat 2D placeholder scene into an isometric, real-time-lit 3D factory.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
-- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. Milestone 6 (Fluids) is in progress: its simulation half (pipe network, pressure equalization, a recipe requiring a liquid, the `SimBridge` fluid snapshot) has landed; the Godot presentation half — pipe voxel asset, rendering, hover info — is the second ticket of that epic.
-- **Art/UI:** the voxel pipeline (UI_UX.md §2a/§2b) exists and is the source of every asset in the scene — Rust generators in `assets/voxels/generators/` produce `.vox` models, reviewed as isometric PNGs via `scripts/build-voxels.sh`, imported into Godot by a pinned community importer. UI_UX.md §5's real UI is now landed: the money/contract readout is a diegetic clipboard panel (paper background, steel clip bar, checkbox tick marks) with a voxel-rendered icon per required item, and per-machine detail (recipe/progress/buffers) is hover-only instead of dense always-on text, working in both view modes — a screen-centre crosshair stands in for the cursor in first-person — see the log entries below.
+- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. **Milestone 6 (Fluids) is done**: its simulation half (pipe network, pressure equalization, a recipe requiring a liquid, the `SimBridge` fluid snapshot) and its presentation half (pipe/supply-tap/liquid voxel assets, a pipe run rendered from the simulation's own segment list, a liquid body whose height tracks live pressure, and pipe hover info in both view modes) have both landed.
+- **Art/UI:** the voxel pipeline (UI_UX.md §2a/§2b) exists and is the source of every asset in the scene — including milestone 6's pipes and the liquid inside them, which added a fourth material class (`liquid`, a glossy dielectric) to `palette.ron` — Rust generators in `assets/voxels/generators/` produce `.vox` models, reviewed as isometric PNGs via `scripts/build-voxels.sh`, imported into Godot by a pinned community importer. UI_UX.md §5's real UI is now landed: the money/contract readout is a diegetic clipboard panel (paper background, steel clip bar, checkbox tick marks) with a voxel-rendered icon per required item, and per-machine detail (recipe/progress/buffers) is hover-only instead of dense always-on text, working in both view modes — a screen-centre crosshair stands in for the cursor in first-person — see the log entries below.
 - **UI polish epic (done):** a Run (`run_cc6860507d36`) with 3 parallel tickets targeting UI_UX.md §5, all done and merged — hover tooltips for machines, a voxel-rendered icon pipeline, and the clipboard reskin. Check `orca orchestration task-list --run run_cc6860507d36 --json` for the DAG's final state.
 - **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, SPACE/SHIFT up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
 - **Lighting:** the sky is the real background (`BG_SKY`), not a flat colour — see the "empty void" DEVLOG entry below for why that matters. `scripts/screenshot-scene.sh --first-person` reviews that mode's lighting specifically.
@@ -40,6 +40,43 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-07 — Milestone 6, ticket 2: the pipe run you can actually see
+
+The presentation half of ARCHITECTURE.md §9 item 6, on top of ticket 1's
+simulation work below. `sim_core` was not touched at all: everything here is
+drawn from the JSON that ticket already exposed. Three new voxel assets
+(`pipe`, `pipe_source`, `pipe_fluid`) join the pipeline, and `main.gd` builds
+the run from `fluid_snapshot_json`'s own segment list — how many pipe tiles
+there are, where they sit, and which one is the supply tap are all the
+simulation's answer, never a constant in GDScript, the same rule the belt
+chain already follows.
+
+The liquid is real geometry, not a HUD number: a fluid body sits in each
+pipe's bore and is rescaled every frame to that segment's live pressure, so
+you watch the run fill from the source and watch the inlet drop when the
+machine takes a draw. That is UI_UX.md §4's "visible liquid surfaces in
+tanks/pipes" taken literally — the pipe is modelled hollow with an open
+inspection channel along its top so the level is legible from the fixed
+isometric angle at any fill, not just a full one. Two decisions worth not
+re-litigating: the run is **stainless steel** (UI_UX.md §4's shiny metal
+exception; acid-resistant piping is GAMEPLAY.md tier 5's *later* gate, so
+the baseline shouldn't pre-empt it), and palette.ron gained a fourth
+material class, `liquid` — a glossy dielectric — so the wet look stays a
+palette fact rather than a number hardcoded in GDScript. Only the per-fluid
+*tint* is decided Godot-side, because which fluid is in the pipe is live
+data.
+
+Hovering a pipe now reports its fluid, level and pressure, through the exact
+same screen-ray/plane-intersection path machines use — the tile-to-text
+lookup was generalized (`_hover_text_at_tile`) rather than given a second
+mechanism, so it worked in first-person via the crosshair with no extra
+code. New `godot_project/test_fluids.gd` (wired into
+`scripts/verify-core-loop.sh`) asserts the structural half headlessly, and
+`scripts/screenshot-scene.sh --hover-pipe` was added so the tooltip and the
+liquid could be reviewed as an actual image, which is how the sight channel's
+height got fixed — the first cut hid the liquid below half fill, which is
+exactly the state worth seeing.
 
 ### 2026-09-07 — Milestone 6, ticket 1: fluids in the simulation core
 

@@ -24,6 +24,8 @@
 # rendering, so the hover tooltip (docs/UI_UX.md §5) actually shows up in the
 # shot — otherwise there is no way to visually review it without a live
 # interactive session, the same problem --first-person solves for that mode.
+# `--hover-pipe` does the same over the fluid network's machine-inlet pipe
+# segment, for reviewing milestone 6's fluid tooltip.
 extends SceneTree
 
 ## Enough frames for shadow atlases, SSAO and glow to be resolved — a
@@ -41,6 +43,7 @@ var _out := "user://scene.png"
 var _populate := false
 var _first_person := false
 var _hover := false
+var _hover_pipe := false
 var _main: Node
 
 
@@ -51,6 +54,7 @@ func _initialize() -> void:
 	_populate = args.has("--populate")
 	_first_person = args.has("--first-person")
 	_hover = args.has("--hover")
+	_hover_pipe = args.has("--hover-pipe")
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 	# NOT here: in a real (non-headless) run, add_child()'s _ready() is
@@ -84,6 +88,19 @@ func _hover_over_first_machine() -> void:
 	Input.warp_mouse(screen_pos)
 
 
+## Same idea as _hover_over_first_machine, aimed at the pipe segment the
+## machine actually draws from — the one whose level visibly moves.
+func _hover_over_pipe_inlet() -> void:
+	var json: String = _main.sim.fluid_snapshot_json()
+	if json.is_empty():
+		return # no pipe run in this world; nothing to hover
+	var snapshot: Dictionary = JSON.parse_string(json)
+	var segment: Dictionary = snapshot["segments"][int(snapshot["inlet_index"])]
+	var tile_pair: Array = segment["tile"]
+	var world_point: Vector3 = _main._tile_origin(int(tile_pair[0]), int(tile_pair[1]), _main.BELT_SURFACE_Y)
+	Input.warp_mouse(_main._camera.unproject_position(world_point))
+
+
 func _run_chain_forward() -> void:
 	# Calls SimBridge directly rather than simulating a SPACE keypress
 	# through _unhandled_input: SPACE only spawns in ISOMETRIC mode (it's
@@ -104,6 +121,8 @@ func _process(_delta: float) -> bool:
 		_run_chain_forward()
 	if _frames == 2 and _hover:
 		_hover_over_first_machine()
+	if _frames == 2 and _hover_pipe:
+		_hover_over_pipe_inlet()
 	if _frames < WARMUP_FRAMES:
 		return false
 

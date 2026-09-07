@@ -12,7 +12,10 @@
 # --first-person to review that camera mode's lighting/skybox instead of the
 # default isometric one.
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--populate] [--first-person]
+# Pass --hover or --hover-pipe to park the cursor over the first machine, or
+# over the fluid network's machine-inlet pipe, so that tooltip is in the shot.
+#
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--populate] [--first-person] [--hover|--hover-pipe]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -107,6 +107,80 @@ impl VoxModel {
         self
     }
 
+    /// Removes a voxel, if one is there. The counterpart to [`Self::set`],
+    /// and the reason the `carve_*` primitives below exist at all: the pipe
+    /// (milestone 6) is the first asset that has to be *hollow* — a solid
+    /// cylinder with a bore taken back out of it — and with a sight opening
+    /// cut through its top wall so the fluid inside is actually visible
+    /// (UI_UX.md §4). Filling the bore with an "air-coloured" voxel instead
+    /// would be a lie the mesher can't see through: a face is only culled
+    /// when its neighbour is *absent*, so an opening has to really be empty.
+    pub fn erase(&mut self, x: i32, y: i32, z: i32) {
+        if x < 0 || y < 0 || z < 0 {
+            return;
+        }
+        self.voxels.remove(&(x as u32, y as u32, z as u32));
+    }
+
+    /// Inclusive-bounds cuboid of empty space — [`Self::cuboid`] in reverse.
+    pub fn carve_cuboid(&mut self, x: (i32, i32), y: (i32, i32), z: (i32, i32)) -> &mut Self {
+        for zz in z.0..=z.1 {
+            for yy in y.0..=y.1 {
+                for xx in x.0..=x.1 {
+                    self.erase(xx, yy, zz);
+                }
+            }
+        }
+        self
+    }
+
+    /// Solid cylinder whose axis runs along +X — a pipe run laid along the
+    /// world's +X axis, which is the direction both the belt chain and
+    /// milestone 6's pipe run travel in (see `world.rs`).
+    pub fn cylinder_x(
+        &mut self,
+        center: (i32, i32),
+        radius: f32,
+        x: (i32, i32),
+        color: u8,
+    ) -> &mut Self {
+        self.cylinder_x_inner(center, radius, x, Some(color))
+    }
+
+    /// The bore: [`Self::cylinder_x`] in reverse, leaving empty space.
+    pub fn carve_cylinder_x(
+        &mut self,
+        center: (i32, i32),
+        radius: f32,
+        x: (i32, i32),
+    ) -> &mut Self {
+        self.cylinder_x_inner(center, radius, x, None)
+    }
+
+    fn cylinder_x_inner(
+        &mut self,
+        center: (i32, i32),
+        radius: f32,
+        x: (i32, i32),
+        color: Option<u8>,
+    ) -> &mut Self {
+        let r2 = radius * radius;
+        let span = radius.ceil() as i32;
+        for xx in x.0..=x.1 {
+            for dz in -span..=span {
+                for dy in -span..=span {
+                    if (dy * dy + dz * dz) as f32 <= r2 {
+                        match color {
+                            Some(c) => self.set(xx, center.0 + dy, center.1 + dz, c),
+                            None => self.erase(xx, center.0 + dy, center.1 + dz),
+                        }
+                    }
+                }
+            }
+        }
+        self
+    }
+
     /// Solid cylinder whose axis runs along +Y (a belt roller, a cross-pipe).
     pub fn cylinder_y(
         &mut self,
@@ -322,7 +396,12 @@ pub fn encode(model: &VoxModel, palette: &Palette) -> Vec<u8> {
                 ("_weight", "1.000".into()),
                 ("_flux", format!("{:.3}", palette.material(entry.class).emission_energy)),
             ],
-            MaterialClass::Matte => vec![
+            // A liquid is written as a plain diffuse material with its own
+            // roughness: MagicaVoxel's `_glass`/`_media` types describe
+            // refractive volumes, which is not what this is (the fluid body
+            // is opaque geometry Godot tints and gloss-shades). Nothing in
+            // the Godot path reads MATL anyway — see this block's comment.
+            MaterialClass::Matte | MaterialClass::Liquid => vec![
                 ("_type", "_diffuse".into()),
                 ("_weight", "1.000".into()),
                 ("_rough", format!("{:.3}", palette.material(entry.class).roughness)),
