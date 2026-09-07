@@ -23,6 +23,7 @@ below is history and should only ever be appended to.)*
 - **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. **Milestone 6 (Fluids) is done**: its simulation half (pipe network, pressure equalization, a recipe requiring a liquid, the `SimBridge` fluid snapshot) and its presentation half (pipe/supply-tap/liquid voxel assets, a pipe run rendered from the simulation's own segment list, a liquid body whose height tracks live pressure, and pipe hover info in both view modes) have both landed, built as a 2-ticket orchestration Run (`run_2867a25ae373`, sequential: sim core then presentation). Milestone 7 (Timed processes) is next. A separate **"Machines improvement"** epic (not an ARCHITECTURE.md §9 milestone — an infrastructure/content pass requested directly) is in progress: ticket 1 landed machine footprints as data (`data/machines.ron`), generalizing the chain's layout math so a machine can occupy more than one tile, and ticket 2 spent that on real content — the chain's front end is now a crusher, a mixer and a genuinely 2x2 cooking vat. Ticket 3 replaced the debug "spawn a tomato onto the belt" command with a real **hopper** — a building west of the chain's head that buffers raw tomatoes and meters them onto the first belt one per tick, filled by the player (SPACE) rather than teleporting items. **Ticket 4 finished the epic**: the Godot presentation of all three — a bespoke voxel model per front-end machine kind, multi-tile rendering so the cooking vat actually covers its 2x2 footprint, the hopper drawn with a product level that tracks its live fill, and hover resolving any tile of a multi-tile machine as well as the hopper. **The "Machines improvement" epic is complete.**
 - **Art/UI:** the voxel pipeline (UI_UX.md §2a/§2b) exists and is the source of every asset in the scene — including milestone 6's pipes and the liquid inside them, which added a fourth material class (`liquid`, a glossy dielectric) to `palette.ron` — Rust generators in `assets/voxels/generators/` produce `.vox` models, reviewed as isometric PNGs via `scripts/build-voxels.sh`, imported into Godot by a pinned community importer. UI_UX.md §5's real UI is now landed: the money/contract readout is a diegetic clipboard panel (paper background, steel clip bar, checkbox tick marks) with a voxel-rendered icon per required item, and per-machine detail (recipe/progress/buffers) is hover-only instead of dense always-on text, working in both view modes — a screen-centre crosshair stands in for the cursor in first-person — see the log entries below.
 - **UI polish epic (done):** a Run (`run_cc6860507d36`) with 3 parallel tickets targeting UI_UX.md §5, all done and merged — hover tooltips for machines, a voxel-rendered icon pipeline, and the clipboard reskin. Check `orca orchestration task-list --run run_cc6860507d36 --json` for the DAG's final state.
+- **Visual overhaul round 2 (in progress):** a second directly-requested pass, run as a 3-ticket epic. **Ticket 1 (sim) is done:** the pipe run's always-refilling off-map source is gone, replaced by a player-loadable `FluidTank` (120 units, one tile west of the run's head) filled with a `FillFluidTank` command and drained by the same pressure-equalization pass that moves fluid along the run — so vinegar is a consumable the player manages, exactly as tomatoes already were via the hopper. New wire surface for tickets 2/3: `fluid_tank_snapshot_json`, a `fluid_tanks` chunk array, and a `"fluid_tank"` hover tile. Tickets 2 (new/redone voxel assets, including a tank model) and 3 (belt/pipe-to-machine connections) are still to come.
 - **Visual overhaul (done):** a dedicated pass on top of everything above, requested directly — see the log entry below for specifics. Root-caused and fixed the belt/pipe-to-machine seam (machine and hopper footings were inset from their own tile edges while belts and pipes already ran flush to theirs), added a dedicated connector fitting for the one pipe segment that actually feeds a machine, gave the hopper's status lamp real running/empty feedback, and made a couple of small typography fixes to the contract clipboard. Corner handling for belts/pipes stays deliberately undone — documented in `sim_core/src/sim/world.rs`'s module doc as needing a per-tile direction field in the sim's own snapshots before it's a rendering change at all, not something to speculatively half-build against a topology that doesn't exist yet. Not yet reviewed or merged.
 - **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, SPACE/SHIFT up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
 - **Lighting:** the sky is the real background (`BG_SKY`), not a flat colour — see the "empty void" DEVLOG entry below for why that matters. `scripts/screenshot-scene.sh --first-person` reviews that mode's lighting specifically.
@@ -41,6 +42,44 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-07 — Visual overhaul round 2, ticket 1: the vinegar comes from a tank the player fills
+
+Simulation-only (Rust + `data/machines.ron`), the first of three tickets in a
+second visual-overhaul epic; tickets 2 (new/redone voxel assets, including a
+tank model) and 3 (belt/pipe-to-machine connections) both build on it.
+
+Milestone 6's fluid supply was an off-map tap: one pipe segment flagged
+`is_source` that refilled itself to capacity every tick and could never run
+out. That was the smallest honest thing at the time, but the project owner's
+review of the live demo named the gap exactly — *"add a fluid equivalent of a
+hopper for the vinegar"* — because there was nothing there for a player to
+manage. There is now a **`FluidTank`**: a capped, player-loadable buffer
+standing one tile west of the pipe run's head, filled with a `FillFluidTank`
+command that mirrors `FillHopper` down to its clamping and its optional
+`amount`, and drained by the *same* per-tick pressure-equalization pass that
+already moved fluid along the run. Vinegar is a consumable now — it runs out,
+the mixer stalls, and refilling starts the line again.
+
+Two decisions worth not re-litigating. **The tank is not a pipe segment.** It
+is a placed building with a footprint in `data/machines.ron`, like the hopper,
+kept out of `FluidNetwork::segments` so the run's existing snapshot geometry
+did not change shape at all; what it shares with a segment is the flow rule,
+not the type. **It presents constant full head, not its own fill fraction.**
+It stands beside the run as a raised vessel, so it discharges downhill: a
+tank that equalized on fill fraction would keep three quarters of every
+remaining unit inside itself forever, and the player would watch the mixer
+starve while the gauge still read a quarter full. Full head also makes flow
+strictly one-way with no special case — the shared rule already clamps a
+transfer to what the donor has, so an empty tank simply moves nothing.
+
+Placement followed the hopper's precedent exactly (one tile outside the
+existing geometry, so introducing it moved no tile); capacity is 120 units,
+sized against the line the way the hopper's 64 was, which is about three and
+a half hoppers of tomatoes per fill. The tank is on the wire as
+`fluid_tank_snapshot_json`, a `fluid_tanks` array in the chunk snapshot, and a
+`"fluid_tank"` hover tile — all shaped as the fluid twin of the hopper's, so
+tickets 2/3 can drive both from one code path.
 
 ### 2026-09-07 — Visual overhaul: closing the belt/pipe/machine seams, hopper feedback, clipboard typography
 

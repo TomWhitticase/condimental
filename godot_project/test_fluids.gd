@@ -160,8 +160,11 @@ func _run_checks() -> void:
 		return
 
 	# --- Liquid height tracks live pressure -------------------------------
-	# Tick far enough for the source to push fluid down the run, so this is
-	# checked against genuinely varying levels, not a uniform initial state.
+	# Fill the tank first ("Visual overhaul round 2" ticket 1: the run has no
+	# self-refilling source any more), then tick far enough for pressure to
+	# push that fluid down the run, so this is checked against genuinely
+	# varying levels rather than a uniform initial state.
+	main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
 	for i in range(200):
 		main.sim.tick()
 	main._update_fluid_network()

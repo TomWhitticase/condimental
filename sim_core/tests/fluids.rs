@@ -3,7 +3,7 @@
 //! connected-network pressure model; §6's testing-strategy tiers).
 //!
 //! `sim_core/src/sim/fluid.rs` already unit-tests `FluidNetwork` in
-//! isolation (source refill, pressure equalization, exact volume
+//! isolation (tank fill/clamp, pressure equalization, exact volume
 //! conservation, all-or-nothing draws) and `machine.rs` unit-tests the
 //! craft-start gate. This file instead drives the *whole world* — the real
 //! belt chain plus the real pipe run — to prove the two halves are actually
@@ -14,11 +14,26 @@
 //! fields verbatim), so a rename here fails a test instead of silently
 //! breaking the scene.
 //!
+//! **The "Visual overhaul round 2" epic's ticket 1 changed where the fluid
+//! comes from**, and that needed real edits here — deliberately, since the
+//! behavior being tested is the behavior being removed. Milestone 6's supply
+//! was a pipe segment flagged `is_source` that refilled itself to capacity
+//! every tick; it is now a player-loadable [`FluidTank`] standing beside the
+//! run's head, drained by the same pressure-equalization pass that moves
+//! fluid along the run. So every test that wanted a *supplied* network now
+//! says so with a `FillFluidTank` command, an unfilled world is the natural
+//! starvation fixture, and there are new tests for the tank's own fill
+//! clamping, for the full causal chain (fill -> equalize -> craft -> drain ->
+//! stall), and for the JSON shapes tickets 2/3 consume verbatim.
+//!
 //! Everything below runs with no Godot process involved (ARCHITECTURE.md
 //! §7).
 
 use sim_core::sim::types::Fx;
-use sim_core::sim::{PlayerCommand, RecipeRegistry, TileSnapshot, World};
+use sim_core::sim::{
+    FLUID_TANK_CAPACITY, FLUID_TANK_FILL_AMOUNT, PlayerCommand, RecipeRegistry, TileSnapshot,
+    World, command_from_json,
+};
 
 fn shipped_recipes() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
@@ -87,18 +102,19 @@ fn count_item_anywhere(world: &World, item: &str) -> u32 {
     total
 }
 
-/// Runs `world` for `ticks`, feeding in `tomatoes` raw tomatoes (loaded
-/// into the chain's hopper up front — since ticket 3 the hopper, not a
-/// command, is what puts them on the belt), and returns the most of `item`
-/// that ever existed anywhere in the world at once.
+/// Runs `world` for `ticks`, feeding in `tomatoes` raw tomatoes and a full
+/// tank of fluid (both loaded up front — since ticket 3 the hopper, and
+/// since the "Visual overhaul round 2" epic's ticket 1 the tank, are what
+/// actually put those into the chain), and returns the most of `item` that
+/// ever existed anywhere in the world at once.
 fn run_chain(world: &mut World, tomatoes: u32, ticks: u32, item: &str) -> u32 {
     run_chain_watching_fluid(world, tomatoes, ticks, item).0
 }
 
-/// As `run_chain`, but also reports the lowest total fluid volume seen once
-/// the pipe run has had time to fill (`SETTLE_TICKS`). A dip below the
-/// network's capacity after that point can only be a machine drawing from
-/// it, since the source otherwise keeps the run topped up — that is how the
+/// As `run_chain`, but also reports the lowest total fluid volume seen in
+/// the *pipe run* once it has had time to fill (`SETTLE_TICKS`). A dip below
+/// the run's capacity after that point can only be a machine drawing from
+/// it, since the tank otherwise keeps the run topped up — that is how the
 /// consumption half of the mechanic is observed from outside.
 const SETTLE_TICKS: u32 = 100;
 
@@ -108,6 +124,14 @@ fn run_chain_watching_fluid(
     ticks: u32,
     item: &str,
 ) -> (u32, Option<f64>) {
+    // Fill the tank first: it is the pipe run's only supply, so without this
+    // the fluid-gated stage never starts and the chain produces nothing.
+    // `FillFluidTank` clamps at capacity, exactly as `FillHopper` does, so
+    // asking for the whole capacity is simply "fill it up".
+    world.issue_command(PlayerCommand::FillFluidTank {
+        amount: FLUID_TANK_CAPACITY,
+    });
+
     // Loading the hopper is instantaneous and exact (`Hopper::fill` clamps
     // at capacity and reports what it took); getting those tomatoes onto the
     // belt is the hopper's own job over the following ticks, gated by belt
@@ -215,10 +239,37 @@ fn the_shipped_chain_consumes_fluid_as_it_produces() {
         "the fluid recipe must consume a non-zero amount"
     );
 
+    let tank_before = world
+        .fluid_tank_snapshot()
+        .expect("a pipe run has a tank supplying it");
+    assert_eq!(tank_before.fluid, "vinegar");
+    assert_eq!(tank_before.quantity, 0.0, "a new tank starts empty");
+
     let (produced, min_volume) = run_chain_watching_fluid(&mut world, 4, 20_000, "ketchup");
     assert_eq!(
         produced, 1,
         "the shipped chain must still reach its cooked-ketchup stage"
+    );
+
+    // The tank was filled to capacity by `run_chain_watching_fluid`; what it
+    // holds now is strictly less, because the run drew from it to wet the
+    // pipes and the mixer drew from the run. This is the assertion the
+    // always-refilling source could never have supported.
+    let tank_after = world.fluid_tank_snapshot().unwrap();
+    assert_eq!(tank_after.capacity, f64::from(FLUID_TANK_CAPACITY));
+    assert!(
+        tank_after.quantity > 0.0 && tank_after.quantity < tank_after.capacity,
+        "one craft's worth of production must visibly draw the tank down without emptying it \
+         ({} of {})",
+        tank_after.quantity,
+        tank_after.capacity
+    );
+    assert!(
+        // Fixed-point tolerance: `fill` is computed as an `Fx` division and
+        // then converted, so it can differ from the f64 ratio by a ULP or
+        // two of `Fx` (~1.5e-5). That is quantization, not disagreement.
+        (tank_after.fill - tank_after.quantity / tank_after.capacity).abs() < 1e-4,
+        "`fill` must be quantity/capacity — presentation drives a level from it directly"
     );
 
     let min_volume = min_volume.expect("the run is long enough to observe the settled network");
@@ -229,7 +280,7 @@ fn the_shipped_chain_consumes_fluid_as_it_produces() {
         before.total_capacity
     );
 
-    // ...and the source keeps the run supplied afterwards, so one craft
+    // ...and the tank keeps the run supplied afterwards, so one craft
     // doesn't permanently dry out the line.
     let after = world.fluid_snapshot().unwrap();
     assert!(
@@ -262,12 +313,30 @@ fn a_chain_with_no_fluid_recipe_has_no_pipe_run_at_all() {
     world.tick();
 
     assert!(world.fluid_snapshot().is_none());
+    assert!(
+        world.fluid_tank_snapshot().is_none(),
+        "no pipe run means no tank either — there would be nothing for it to supply"
+    );
     for chunk in world.all_chunks() {
+        let snapshot = world.chunk_snapshot(chunk);
         assert!(
-            world.chunk_snapshot(chunk).pipes.is_empty(),
+            snapshot.pipes.is_empty(),
             "no fluid recipe means no pipes anywhere"
         );
+        assert!(
+            snapshot.fluid_tanks.is_empty(),
+            "...and no tank anywhere either"
+        );
     }
+
+    // And the command that would fill it is a silent no-op, per
+    // `issue_command`'s "an impossible command does nothing" contract —
+    // never a panic on the `None`.
+    world.issue_command(PlayerCommand::FillFluidTank {
+        amount: FLUID_TANK_CAPACITY,
+    });
+    world.tick();
+    assert!(world.fluid_tank_snapshot().is_none());
 }
 
 /// Pins the JSON wire shape ticket 2 (Godot presentation) consumes. If a
@@ -394,29 +463,57 @@ fn pipes_appear_in_chunk_snapshots_and_query_tile() {
 }
 
 /// The whole point of §3.4's pressure model, observed at world level: fluid
-/// enters at the source and works its way along the run over time, rather
+/// enters at the tank end and works its way along the run over time, rather
 /// than the inlet simply being declared full.
+///
+/// The "before" case is also the ticket's headline behavior change: an
+/// untouched world's pipe run is **completely empty and stays that way**.
+/// Before the tank existed, the run's first segment started full and topped
+/// itself back up every tick forever.
 #[test]
-fn the_pipe_run_fills_from_the_source_over_successive_ticks() {
+fn the_pipe_run_fills_from_the_tank_over_successive_ticks() {
+    let mut untouched = World::new(shipped_recipes());
+    for _ in 0..500 {
+        untouched.tick();
+    }
+    let dry = untouched.fluid_snapshot().unwrap();
+    assert_eq!(
+        dry.total_volume, 0.0,
+        "with nobody filling the tank the run must stay bone dry — there is no self-refilling \
+         source any more"
+    );
+    assert_eq!(
+        dry.segments[0].volume, 0.0,
+        "including the segment flagged `is_source`, which is now an ordinary pipe tile"
+    );
+    assert!(
+        dry.segments[0].is_source,
+        "the flag itself stays: it marks which tile the tank connects to"
+    );
+
     let world_at = |ticks: u32| {
         let mut world = World::new(shipped_recipes());
+        world.issue_command(PlayerCommand::FillFluidTank {
+            amount: FLUID_TANK_CAPACITY,
+        });
         for _ in 0..ticks {
             world.tick();
         }
-        world.fluid_snapshot().unwrap()
+        (world.fluid_snapshot().unwrap(), world.fluid_tank_snapshot().unwrap())
     };
 
-    let first = world_at(0);
+    let (first, first_tank) = world_at(0);
     assert_eq!(
-        first.segments[first.inlet_index].volume, 0.0,
-        "the inlet starts empty — the source has to push fluid down the run"
+        first.total_volume, 0.0,
+        "filling the tank puts nothing in the pipes until the network ticks"
     );
-    assert!(
-        first.total_volume > 0.0,
-        "the source segment itself starts full"
+    assert_eq!(
+        first_tank.quantity,
+        f64::from(FLUID_TANK_CAPACITY),
+        "...it all sits in the tank"
     );
 
-    let later = world_at(30);
+    let (later, later_tank) = world_at(30);
     assert!(
         later.segments[later.inlet_index].volume > 0.0,
         "pressure must have carried fluid to the far end of the run"
@@ -424,6 +521,12 @@ fn the_pipe_run_fills_from_the_source_over_successive_ticks() {
     assert!(
         later.total_volume > first.total_volume,
         "the run holds more fluid overall once it has filled"
+    );
+    assert!(
+        later_tank.quantity < first_tank.quantity,
+        "and every unit now in the run came out of the tank ({} -> {})",
+        first_tank.quantity,
+        later_tank.quantity
     );
 }
 
@@ -448,4 +551,326 @@ fn fluid_volume_is_fixed_point_simulation_state() {
             "snapshot volume must be an exactly-representable Fx value"
         );
     }
+}
+
+// ---------------------------------------------------------------------
+// The fluid tank (the "Visual overhaul round 2" epic's ticket 1).
+// ---------------------------------------------------------------------
+
+/// Where the tank stands, following the hopper's precedent exactly: one tile
+/// beyond the end of the geometry it feeds, so introducing it moved nothing.
+/// The shipped coordinates are written out literally rather than recomputed
+/// the way the code computes them — a test that re-derived them could not
+/// catch the derivation being wrong.
+#[test]
+fn the_tank_stands_immediately_west_of_the_pipe_runs_first_tile() {
+    let world = World::new(shipped_recipes());
+    let tank = world.fluid_tank_snapshot().expect("the shipped chain has a pipe run");
+    let fluid = world.fluid_snapshot().unwrap();
+
+    assert_eq!(tank.pipe_tile, fluid.segments[0].tile);
+    assert_eq!(
+        tank.tile,
+        (tank.pipe_tile.0 - tank.footprint.width_tiles, tank.pipe_tile.1),
+        "the tank's footprint must end on the tile immediately west of the pipe it feeds"
+    );
+    // The shipped placement: the run starts at (6, 1), so a 1x1 tank is at
+    // (5, 1) — a tile no belt, machine or pipe already claimed, which is why
+    // adding it moved nothing.
+    assert_eq!(tank.pipe_tile, (6, 1));
+    assert_eq!(tank.tile, (5, 1));
+    assert_eq!(
+        (tank.footprint.width_tiles, tank.footprint.height_tiles),
+        (1, 1)
+    );
+    assert_eq!(tank.kind, "fluid_tank");
+    assert_eq!(
+        tank.fluid, "vinegar",
+        "the held fluid comes from data/recipes.ron's fluid_inputs, not from Rust"
+    );
+    assert_eq!(tank.capacity, f64::from(FLUID_TANK_CAPACITY));
+    assert_eq!(tank.quantity, 0.0, "a new tank starts empty");
+    assert_eq!(tank.fill, 0.0);
+
+    // ...and the chain's own tiles are exactly where they were: the tank is
+    // beside the run, not in it.
+    for stage in world.chain_layout() {
+        assert!(matches!(
+            world.query_tile(stage.machine_tile),
+            Some(TileSnapshot::Machine { .. })
+        ));
+    }
+    assert!(matches!(
+        world.query_tile((6, 1)),
+        Some(TileSnapshot::Pipe { .. })
+    ));
+}
+
+#[test]
+fn filling_the_tank_past_capacity_is_clamped_not_a_panic_or_an_overflow() {
+    let mut world = World::new(shipped_recipes());
+
+    // `Fx` is a 16.16 fixed-point type, so `u32::MAX` is not even
+    // representable — clamping has to happen before any conversion.
+    world.issue_command(PlayerCommand::FillFluidTank { amount: u32::MAX });
+    let tank = world.fluid_tank_snapshot().unwrap();
+    assert_eq!(tank.quantity, f64::from(FLUID_TANK_CAPACITY));
+    assert_eq!(tank.fill, 1.0);
+
+    // ...and again on an already-full tank: still a silent no-op, with no
+    // wrap-around and nothing spilled into the pipes.
+    world.issue_command(PlayerCommand::FillFluidTank { amount: u32::MAX });
+    assert_eq!(
+        world.fluid_tank_snapshot().unwrap().quantity,
+        f64::from(FLUID_TANK_CAPACITY)
+    );
+    assert_eq!(
+        world.fluid_snapshot().unwrap().total_volume,
+        0.0,
+        "filling must never put anything in the pipes — that is the equalization pass's job, \
+         on tick"
+    );
+}
+
+#[test]
+fn a_fill_command_dirties_the_tanks_chunk_so_the_fill_ui_can_redraw() {
+    let mut world = World::new(shipped_recipes());
+    world.issue_command(PlayerCommand::FillFluidTank { amount: 1 });
+    assert_eq!(world.dirty_chunks(), &[(0, 0)]);
+}
+
+#[test]
+fn the_fill_tank_command_parses_from_json_with_or_without_an_amount() {
+    let mut world = World::new(shipped_recipes());
+    world.issue_command(
+        command_from_json(r#"{"type": "fill_fluid_tank", "amount": 3}"#).expect("must parse"),
+    );
+    assert_eq!(world.fluid_tank_snapshot().unwrap().quantity, 3.0);
+
+    // Omitting `amount` means the simulation's own default load, exactly as
+    // `fill_hopper` does, so the common "player pressed the load key" case
+    // needn't restate a constant.
+    world.issue_command(command_from_json(r#"{"type": "fill_fluid_tank"}"#).expect("must parse"));
+    assert_eq!(
+        world.fluid_tank_snapshot().unwrap().quantity,
+        f64::from(3 + FLUID_TANK_FILL_AMOUNT)
+    );
+}
+
+/// **The ticket's headline behavior, proved as a causal chain rather than as
+/// a coincidence.** Each step is asserted in order, so a failure says which
+/// link broke: fill the tank -> the equalization pass carries fluid down the
+/// run -> the mixer crafts -> tank and run both drain -> once they are dry
+/// the mixer stalls again, holding (not eating) its solid input.
+///
+/// This is the fluid twin of `hopper.rs`'s `a_jammed_belt_leaves_the_hopper_
+/// holding_its_contents`, and it is the test the old always-refilling source
+/// made impossible to write at all.
+#[test]
+fn the_tank_drains_as_the_mixer_crafts_and_the_mixer_stalls_once_it_is_dry() {
+    // A deliberately small fill, so the run can actually be drained inside a
+    // reasonable number of ticks — but larger than the pipe run's own
+    // capacity (4 x 10 = 40 units), so the tank still holds a reserve once
+    // the line is wet and that reserve is what crafting eats through.
+    const FILL: u32 = 60;
+    // The shipped chain, not a two-stage fixture: its mixer hands output
+    // downstream, so the only thing that can stop the mixer here is fluid.
+    // (A two-stage chain's last machine simply fills its own output buffer
+    // and blocks, which looks identical from outside and would prove
+    // nothing.)
+    let mut world = World::new(shipped_recipes());
+
+    // Step 1: fill the tank. Nothing is in the pipes yet.
+    world.issue_command(PlayerCommand::FillFluidTank { amount: FILL });
+    assert_eq!(world.fluid_tank_snapshot().unwrap().quantity, f64::from(FILL));
+    assert_eq!(world.fluid_snapshot().unwrap().total_volume, 0.0);
+
+    // Step 2: the equalization pass carries it down the run to the inlet.
+    for _ in 0..200 {
+        world.tick();
+    }
+    let settled = world.fluid_snapshot().unwrap();
+    assert!(
+        settled.segments[settled.inlet_index].volume > 0.0,
+        "pressure must have carried fluid all the way to the machine's inlet"
+    );
+    let tank_after_wetting = world.fluid_tank_snapshot().unwrap().quantity;
+    assert!(
+        tank_after_wetting < f64::from(FILL),
+        "wetting the line has to come out of the tank"
+    );
+    assert!(
+        tank_after_wetting > 0.0,
+        "...but a fill bigger than the run holds must leave a reserve in the tank"
+    );
+
+    // Step 3: with the hopper kept fed and finished product kept collected,
+    // the mixer crafts — and *only* fluid can stop it.
+    let mut crafts = 0;
+    let mut stalled_for = 0;
+    for _ in 0..200_000 {
+        world.issue_command(PlayerCommand::FillHopper {
+            amount: FLUID_TANK_CAPACITY,
+        });
+        world.issue_command(PlayerCommand::CollectOutput);
+        world.tick();
+        crafts = crafts.max(count_item_anywhere(&world, FLUID_GATED_RECIPE));
+        // The mixer is starved once it sits idle while holding solid input.
+        if mixer_is_starved(&world) {
+            stalled_for += 1;
+        } else {
+            stalled_for = 0;
+        }
+        if stalled_for > 2_000 {
+            break;
+        }
+    }
+    assert!(crafts > 0, "the mixer must have run at all while fluid was available");
+    assert!(
+        stalled_for > 2_000,
+        "the run must actually dry out within the tick budget, not merely be slow"
+    );
+
+    // Step 4: tank and run are both dry, and it is the *fluid* that ran out
+    // — the mixer is sitting on solid input it cannot use.
+    let tank = world.fluid_tank_snapshot().unwrap();
+    assert_eq!(
+        tank.quantity, 0.0,
+        "sustained crafting must empty the tank completely, not strand a share in it"
+    );
+    assert_eq!(tank.fill, 0.0);
+    let run = world.fluid_snapshot().unwrap();
+    assert!(
+        run.segments[run.inlet_index].volume < f64::from(run.units_per_craft),
+        "the inlet must be unable to supply another craft ({} < {})",
+        run.segments[run.inlet_index].volume,
+        run.units_per_craft
+    );
+    assert!(
+        mixer_is_starved(&world),
+        "with the fluid gone the mixer must be idle while still holding solid input — a stall, \
+         not a silent partial run"
+    );
+
+    // Step 5: and it is genuinely recoverable — refilling the tank restarts
+    // the line, which is the whole reason this is a managed resource.
+    world.issue_command(PlayerCommand::FillFluidTank {
+        amount: FLUID_TANK_CAPACITY,
+    });
+    let before = crafts;
+    for _ in 0..5_000 {
+        world.issue_command(PlayerCommand::CollectOutput);
+        world.tick();
+        crafts = crafts.max(count_item_anywhere(&world, FLUID_GATED_RECIPE));
+    }
+    assert!(
+        crafts > before || !mixer_is_starved(&world),
+        "refilling the tank must get the mixer running again"
+    );
+}
+
+/// Whether the fluid-gated stage is idle while holding solid input — i.e.
+/// stalled on fluid specifically, rather than merely having nothing to do.
+fn mixer_is_starved(world: &World) -> bool {
+    for chunk in world.all_chunks() {
+        for machine in world.chunk_snapshot(chunk).machines {
+            if machine.recipe == FLUID_GATED_RECIPE {
+                let waiting = machine
+                    .input
+                    .iter()
+                    .find(|(id, _)| id == FLUID_GATED_INPUT)
+                    .map(|(_, qty)| *qty)
+                    .unwrap_or(0);
+                return machine.process.is_none() && waiting > 0;
+            }
+        }
+    }
+    false
+}
+
+/// Pins the exact JSON wire shapes tickets 2/3 (Godot rendering + the tank's
+/// fill UI) consume verbatim — the same guarantee `hopper.rs` gives the
+/// hopper's. A rename here fails a test instead of silently breaking a scene.
+#[test]
+fn the_fluid_tank_json_shape_is_what_presentation_is_told_to_expect() {
+    let mut world = World::new(shipped_recipes());
+    world.issue_command(PlayerCommand::FillFluidTank { amount: 30 });
+
+    // fluid_tank_snapshot_json (`SimBridge`) serializes exactly this.
+    let snapshot: serde_json::Value = serde_json::from_str(
+        &serde_json::to_string(&world.fluid_tank_snapshot().unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        snapshot,
+        serde_json::json!({
+            "tile": [5, 1],
+            "kind": "fluid_tank",
+            "footprint": { "width_tiles": 1, "height_tiles": 1 },
+            "fluid": "vinegar",
+            "quantity": 30.0,
+            "capacity": 120.0,
+            "fill": 0.25,
+            "pipe_tile": [6, 1],
+        })
+    );
+
+    // chunk_snapshot_json carries the identical object under `fluid_tanks`,
+    // alongside the pre-existing belts/machines/pipes/hoppers arrays.
+    let chunk: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&world.chunk_snapshot((0, 0))).unwrap())
+            .unwrap();
+    assert_eq!(chunk["fluid_tanks"][0], snapshot);
+    for existing in ["belts", "machines", "pipes", "hoppers"] {
+        assert!(
+            chunk[existing].is_array(),
+            "the pre-existing `{existing}` array must be untouched"
+        );
+    }
+
+    // query_tile_json answers with a `fluid_tank` tile: enough for a hover
+    // tooltip without a second call.
+    let tile: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&world.query_tile((5, 1)).unwrap()).unwrap())
+            .unwrap();
+    assert_eq!(
+        tile,
+        serde_json::json!({
+            "kind": "fluid_tank",
+            "footprint": { "width_tiles": 1, "height_tiles": 1 },
+            "origin_tile": [5, 1],
+            "fluid": "vinegar",
+            "quantity": 30.0,
+            "capacity": 120.0,
+            "fill": 0.25,
+        })
+    );
+
+    // The tank is not a recipe stage, so like the hopper it is deliberately
+    // absent from chain_layout_json, which stays one object per recipe.
+    assert_eq!(
+        world.chain_layout().len(),
+        shipped_recipes().ordered().len()
+    );
+}
+
+/// The tank's volume is fixed-point simulation state too (ARCHITECTURE.md
+/// §3.9), with the presentation-facing `f64` a one-way conversion at the
+/// snapshot edge — the same guard `fluid_volume_is_fixed_point_simulation_state`
+/// gives the pipe run.
+#[test]
+fn tank_volume_is_fixed_point_simulation_state() {
+    let mut world = World::new(shipped_recipes());
+    world.issue_command(PlayerCommand::FillFluidTank {
+        amount: FLUID_TANK_CAPACITY,
+    });
+    for _ in 0..30 {
+        world.tick();
+    }
+    let quantity = world.fluid_tank_snapshot().unwrap().quantity;
+    assert_eq!(
+        Fx::from_num(quantity).to_num::<f64>(),
+        quantity,
+        "snapshot quantity must be an exactly-representable Fx value"
+    );
 }

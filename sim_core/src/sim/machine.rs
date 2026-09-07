@@ -129,7 +129,7 @@ impl Machine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sim::fluid::PipeSegment;
+    use crate::sim::fluid::{FluidTank, PipeSegment};
 
     fn registry() -> RecipeRegistry {
         RecipeRegistry::from_ron_str(
@@ -227,24 +227,34 @@ mod tests {
         .unwrap()
     }
 
+    /// A network whose tank has been filled, so the run carries fluid once
+    /// it has been ticked a few times.
     fn supplied_network() -> FluidNetwork {
         let cap = Fx::from_num(10);
-        FluidNetwork::new(
+        let mut network = FluidNetwork::new(
             "vinegar".to_string(),
             vec![
                 PipeSegment::new((0, 0), cap, true),
                 PipeSegment::new((1, 0), cap, false),
             ],
             1,
-        )
+            FluidTank::new(Fx::from_num(100)),
+        );
+        network.fill_tank(100);
+        network
     }
 
+    /// A network whose tank was never filled. Since the "Visual overhaul
+    /// round 2" epic's ticket 1 removed the self-refilling source segment,
+    /// this stays dry forever no matter how long it is ticked — which is
+    /// what makes it a fluid-starvation fixture.
     fn empty_network() -> FluidNetwork {
         let cap = Fx::from_num(10);
         FluidNetwork::new(
             "vinegar".to_string(),
             vec![PipeSegment::new((0, 0), cap, false)],
             0,
+            FluidTank::new(Fx::from_num(100)),
         )
     }
 
@@ -253,7 +263,7 @@ mod tests {
         let recipes = fluid_registry();
         let mut machine = Machine::new("ketchup".into(), 10, 10);
         machine.input.add("tomato_sauce", 10);
-        let mut network = empty_network(); // no source: stays empty forever
+        let mut network = empty_network(); // unfilled tank: stays empty forever
 
         for tick in 0..500 {
             network.tick();

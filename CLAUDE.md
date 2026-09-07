@@ -579,6 +579,41 @@ it's gone stale.
   stages of the chain had been rendering cardboard boxes instead of bulk
   product. Its lesson is UI_UX.md §2b point 10. **This ticket completes the
   "Machines improvement" epic.**
+- 2026-09-07: "Visual overhaul round 2" epic, ticket 1 — **the pipe run's
+  fluid supply is a player-loadable `FluidTank`, not an always-refilling
+  off-map tap**. Milestone 6 flagged one `PipeSegment` `is_source` and
+  refilled it to capacity every tick; the project owner's live-demo review
+  asked for "a fluid equivalent of a hopper for the vinegar," and this is it.
+  Simulation + `data/machines.ron` only (plus one line each in two headless
+  `.gd` test scripts, to issue the new fill command — no rendering change).
+  Four calls worth not re-litigating. (1) **The tank is a placed building,
+  not a pipe segment**: it has a footprint in `data/machines.ron` like the
+  hopper, and is deliberately kept out of `FluidNetwork::segments` so the
+  run's snapshot geometry did not change shape at all. What it shares with a
+  segment is the *flow rule*, not the type — `FluidNetwork::tick` runs one
+  `equalize` function over `tank <-> segments[0]` and then every adjacent
+  pipe pair, so there is one flow mechanism in the file rather than a second
+  bookkeeping path for "the tank drains." (2) **It presents constant full
+  head, not its own fill fraction.** It is a raised vessel discharging
+  downhill; equalizing on fill fraction would have a 120-unit tank feeding a
+  40-unit run keep three quarters of every remaining unit inside itself
+  forever, so the player would watch the mixer starve against a gauge reading
+  a quarter full. A *constant* maximum also makes flow strictly one-way with
+  no special case — `equalize` already clamps a transfer to what the donor
+  has, so an empty tank moves nothing; letting the value fall to zero when
+  empty inverts the difference and has the empty tank siphoning the pipes.
+  (3) **`PipeSegment::is_source` kept its name and lost its magic**: it now
+  marks only "the tile the tank connects to" (presentation keys a distinct
+  silhouette off it), the segment starts empty like every other, and it
+  drains normally — so `fluid_snapshot_json`'s shape is unchanged, but its
+  `total_volume` can now legitimately read zero. (4) **Capacity is 120 units,
+  a Rust constant**, sized against the line the way `HOPPER_CAPACITY`'s 64
+  was — roughly three and a half full hoppers of tomatoes per tank fill, so
+  vinegar is the slower-burning of the two consumables. It moves to
+  `machines.ron` when buffer sizes become per-kind content, together with the
+  hopper's, not before. Placement follows the hopper's precedent exactly:
+  one tile west of the run's first pipe tile, outside all existing geometry,
+  so introducing it moved no tile.
 - 2026-09-07: Visual-polish pass — built UI_UX.md §2a's voxel asset pipeline
   for real and replaced milestone 3/4's flat 2D placeholder scene with the
   isometric 3D one the doc describes. Presentation-only: `sim_core`,

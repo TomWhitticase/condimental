@@ -10,7 +10,7 @@
 
 use sim_core::sim::economy::{CONTRACT_CADENCE_TICKS, CONTRACT_ITEM, CONTRACT_PAYOUT_MONEY, CONTRACT_QUANTITY};
 use sim_core::sim::types::Fx;
-use sim_core::sim::{PlayerCommand, RecipeRegistry, World};
+use sim_core::sim::{FLUID_TANK_CAPACITY, PlayerCommand, RecipeRegistry, World};
 
 fn recipes() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
@@ -62,6 +62,15 @@ fn full_chain_delivers_against_the_contract_and_pays_out_exactly_the_contract_pa
             // the chain's throughput is unchanged by this.
             world.issue_command(PlayerCommand::FillHopper {
                 amount: CONTRACT_QUANTITY * 4,
+            });
+            // ...and keep the pipe run's vinegar tank topped up the same
+            // way. Since the "Visual overhaul round 2" epic's ticket 1 the
+            // tank is the run's only supply, so the fluid-gated mixing stage
+            // stalls without this — and like `FillHopper` it clamps at
+            // capacity, so issuing it every tick just means "never let the
+            // supply run dry."
+            world.issue_command(PlayerCommand::FillFluidTank {
+                amount: FLUID_TANK_CAPACITY,
             });
         }
 

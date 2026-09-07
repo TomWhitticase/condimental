@@ -43,20 +43,24 @@
 // cooking vat that holds a batch of sauce for a long cook very much is. See
 // each kind's own note below.
 //
-// ONE KIND HERE IS NOT A RECIPE'S MACHINE (ticket 3). Every other kind in
-// this file is named by some `Recipe.machine` in `data/recipes.ron`; the
-// `hopper` is not. It is the chain's raw-ingredient feeder — it buffers tomatoes and
-// meters them onto the first belt, it does not turn anything into anything
-// — so it has no recipe and is built as its own stage type
-// (`sim_core/src/sim/hopper.rs`), not as a `Machine`. It still lives in this
-// file because a footprint is a footprint: it is a placed building that
-// claims tiles, and nothing else should have to know a second way of
+// TWO KINDS HERE ARE NOT A RECIPE'S MACHINE (ticket 3, and the "Visual
+// overhaul round 2" epic's ticket 1). Every other kind in this file is named
+// by some `Recipe.machine` in `data/recipes.ron`; the `hopper` and the
+// `fluid_tank` are not. Each is a *buffer* rather than a process — the
+// hopper holds raw tomatoes and meters them onto the first belt, the fluid
+// tank holds vinegar and feeds it into the pipe run — so neither turns
+// anything into anything, neither has a recipe, and both are built as their
+// own stage types (`sim_core/src/sim/hopper.rs`,
+// `sim_core/src/sim/fluid.rs`) rather than as a `Machine`. They still live
+// in this file because a footprint is a footprint: they are placed buildings
+// that claim tiles, and nothing else should have to know a second way of
 // answering "how big is that thing."
 (
     schema_version: 1,
     machines: [
-        // The chain's raw-ingredient feeder (ticket 3) — the one kind here
-        // with no recipe behind it; see the note above. 1x1: a feed hopper
+        // The chain's raw-ingredient feeder (ticket 3) — one of the two
+        // kinds here with no recipe behind it; see the note above. 1x1: a
+        // feed hopper
         // sitting over the head of a single belt is a bin, not a hall, and
         // the whole point of it is that its *buffer* is generous, not its
         // floor space. It is placed immediately west of the first belt, so
@@ -64,6 +68,25 @@
         // `World::with_machines`).
         MachineKind(
             id: "hopper",
+            footprint: Footprint(width_tiles: 1, height_tiles: 1),
+        ),
+        // The pipe run's supply (the "Visual overhaul round 2" epic's
+        // ticket 1) — the fluid twin of the hopper above, and the other
+        // kind here with no recipe behind it. It replaced milestone 6's
+        // always-refilling off-map tap, so the vinegar the mixer needs is
+        // now something the player loads and can run out of.
+        //
+        // 1x1, for the hopper's reason and one of its own. A single
+        // stainless vessel standing at the head of a four-tile pipe run is a
+        // drum, not a tank farm, and — like the hopper — what is meant to be
+        // generous about it is its *buffer* (120 units, see
+        // `FLUID_TANK_CAPACITY`), not its floor space. It is also placed
+        // immediately west of the run's first pipe tile, so a wider tank
+        // would grow further west, away from the chain, moving nothing (see
+        // `World::with_machines`) — but there is no reason to spend the
+        // tiles.
+        MachineKind(
+            id: "fluid_tank",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
         ),
         // GAMEPLAY.md §2 tier 1's raw-ingredient prep: crushes whole

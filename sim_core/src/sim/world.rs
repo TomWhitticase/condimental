@@ -72,6 +72,20 @@
 //! (negative tiles) precisely so that adding it moved no existing tile —
 //! the same discipline ticket 1 followed.
 //!
+//! **The pipe run is fed by a tank, not by an off-map tap** (the "Visual
+//! overhaul round 2" epic's ticket 1). Milestone 6's fluid supply was a
+//! [`PipeSegment`] flagged `is_source` that refilled itself to capacity
+//! every tick — a magic tap the player could neither manage nor exhaust.
+//! It is now a [`FluidTank`]: a capped, player-loadable buffer standing one
+//! tile west of the run's first pipe tile, drained by the very same
+//! pressure-equalization pass that moves fluid along the run. That makes it
+//! the exact fluid analogue of the hopper above, down to the shape of its
+//! command ([`PlayerCommand::FillFluidTank`] beside `FillHopper`), its
+//! snapshot ([`FluidTankSnapshot`] beside [`HopperSnapshot`]) and its
+//! placement rule — one tile outside the existing geometry, so introducing
+//! it moved nothing. Like the hopper it is deliberately not a recipe-driven
+//! stage: it buffers and releases, it doesn't consume and produce.
+//!
 //! This is also where `SimBridge`'s pure-logic half lives (ARCHITECTURE.md
 //! §4): `tick()`, `dirty_chunks()`/`chunk_snapshot()`, `issue_command()`,
 //! `query_tile()`, `chain_layout()`. The `gdext`-facing wrapper in `lib.rs`
@@ -83,7 +97,10 @@ use hecs::Entity;
 
 use super::belt::BeltSegment;
 use super::economy::{Economy, EconomySnapshot};
-use super::fluid::{FluidNetwork, PipeSegment};
+use super::fluid::{
+    FLUID_TANK_CAPACITY, FLUID_TANK_FILL_AMOUNT, FLUID_TANK_KIND, FluidNetwork, FluidTank,
+    PipeSegment,
+};
 use super::hopper::{HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, HOPPER_KIND, Hopper};
 use super::machine::Machine;
 use super::machines::{Footprint, MachineRegistry};
@@ -138,6 +155,17 @@ pub enum PlayerCommand {
     /// `data/recipes.ron` (see [`super::hopper`]), so naming an item here
     /// could only ever name the wrong one.
     FillHopper { amount: u32 },
+    /// Loads fluid into the pipe run's tank, in whole fluid units (the
+    /// "Visual overhaul round 2" epic's ticket 1). Exactly `FillHopper`'s
+    /// shape for exactly its reasons: the *fluid* is not a parameter either
+    /// (a network carries one fluid type, decided by whichever recipe
+    /// declares `fluid_inputs`), and over-filling is clamped at the tank's
+    /// capacity, silently.
+    ///
+    /// A world whose `recipes.ron` declares no `fluid_inputs` has no pipe
+    /// run and therefore no tank; this command is then a no-op, per
+    /// `issue_command`'s "an impossible command does nothing" contract.
+    FillFluidTank { amount: u32 },
     CollectOutput,
 }
 
@@ -158,6 +186,13 @@ enum PlayerCommandDto {
         #[serde(default = "default_fill_amount")]
         amount: u32,
     },
+    /// `{"type": "fill_fluid_tank", "amount": 30}` — `amount` optional,
+    /// defaulting to [`FLUID_TANK_FILL_AMOUNT`], exactly as `fill_hopper`'s
+    /// does.
+    FillFluidTank {
+        #[serde(default = "default_fluid_fill_amount")]
+        amount: u32,
+    },
     CollectOutput,
 }
 
@@ -165,10 +200,17 @@ fn default_fill_amount() -> u32 {
     HOPPER_FILL_AMOUNT
 }
 
+fn default_fluid_fill_amount() -> u32 {
+    FLUID_TANK_FILL_AMOUNT
+}
+
 impl From<PlayerCommandDto> for PlayerCommand {
     fn from(dto: PlayerCommandDto) -> Self {
         match dto {
             PlayerCommandDto::FillHopper { amount } => PlayerCommand::FillHopper { amount },
+            PlayerCommandDto::FillFluidTank { amount } => {
+                PlayerCommand::FillFluidTank { amount }
+            }
             PlayerCommandDto::CollectOutput => PlayerCommand::CollectOutput,
         }
     }
@@ -213,6 +255,13 @@ pub struct ChunkSnapshot {
     /// renderer that only ever asked for chunk `(0, 0)` will not see it.
     /// `World::all_chunks` reports both.
     pub hoppers: Vec<HopperSnapshot>,
+    /// The pipe run's fluid tank (the "Visual overhaul round 2" epic's
+    /// ticket 1), if its footprint falls in this chunk — a `Vec` for exactly
+    /// the reason `hoppers` is one. Empty for every chunk when the world has
+    /// no pipe run at all (no recipe declares `fluid_inputs`), which is the
+    /// one way it differs from `hoppers`: a world always has a hopper, but
+    /// only a fluid-using world has a tank. See [`FluidTankSnapshot`].
+    pub fluid_tanks: Vec<FluidTankSnapshot>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -287,9 +336,17 @@ pub struct MachineSnapshot {
 /// to drive a fill-level visual from. All three are `f64` for the same
 /// reason `BeltSnapshot::items` positions are: they have already crossed
 /// out of fixed-point simulation state into presentation-only values that
-/// never feed back in (ARCHITECTURE.md §3.9). `is_source` marks the
-/// off-map supply tap, which is a different thing visually from a plain
-/// length of pipe.
+/// never feed back in (ARCHITECTURE.md §3.9).
+///
+/// `is_source` marks the run's **supply end — the tile the fluid tank
+/// discharges into**, which is a different thing visually from a plain
+/// length of pipe. The field name and position are unchanged, but its
+/// meaning narrowed with the "Visual overhaul round 2" epic's ticket 1: it
+/// used to mark an off-map tap that refilled itself to capacity every tick,
+/// and it now marks an ordinary pipe tile that happens to be the one the
+/// tank connects to. A renderer keying a fitting/branch off it is unaffected;
+/// anything that assumed the flagged segment is always full is not (it now
+/// starts empty and drains like any other).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PipeSnapshot {
     pub tile: TileCoord,
@@ -348,6 +405,63 @@ pub struct HopperSnapshot {
     pub belt_tile: TileCoord,
 }
 
+/// The pipe run's fluid tank (the "Visual overhaul round 2" epic's ticket
+/// 1), for rendering and for its fill UI. The *same* struct is returned by
+/// `World::fluid_tank_snapshot` and carried in `ChunkSnapshot::fluid_tanks`,
+/// so a consumer only ever learns one shape.
+///
+/// It is field-for-field the fluid twin of [`HopperSnapshot`] — deliberately,
+/// so presentation can drive both from one code path: `tile`/`kind`/
+/// `footprint`/`fill` mean exactly what they mean there, `fluid` stands
+/// where `item` does, and `pipe_tile` stands where `belt_tile` does.
+///
+/// JSON shape (`snake_case` field names, as serialized by `serde_json`):
+///
+/// ```json
+/// {
+///   "tile": [5, 1],
+///   "kind": "fluid_tank",
+///   "footprint": { "width_tiles": 1, "height_tiles": 1 },
+///   "fluid": "vinegar",
+///   "quantity": 30.0,
+///   "capacity": 120.0,
+///   "fill": 0.25,
+///   "pipe_tile": [6, 1]
+/// }
+/// ```
+///
+/// - `tile` is the footprint's origin — its minimum-X/minimum-Y corner, the
+///   same convention every machine and the hopper use ([`super::machines`]'s
+///   module doc). The tank is placed so its footprint ends immediately west
+///   of `pipe_tile`, i.e. it grows *away* from the pipe run; a wider tank
+///   would extend further west and move nothing else.
+/// - `quantity`/`capacity` are whole fluid units, and unlike
+///   `HopperSnapshot`'s they are **`f64`, not integers**: a fluid volume is
+///   continuous (pressure equalization moves partial units around), so
+///   `quantity` is routinely fractional. Both have already crossed out of
+///   fixed-point simulation state into presentation-only values that never
+///   feed back in (ARCHITECTURE.md §3.9).
+/// - `fill` is `quantity / capacity` in `[0, 1]` — the value to drive a
+///   fill-level visual from, precomputed for the same reason
+///   `PipeSnapshot::pressure` and `HopperSnapshot::fill` are.
+/// - `pipe_tile` is the first tile of the pipe run this tank discharges
+///   into (the segment flagged `is_source`), so presentation can orient the
+///   connection without re-deriving the run's head from `fluid_snapshot`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FluidTankSnapshot {
+    pub tile: TileCoord,
+    /// Machine kind id from `data/machines.ron` — always `"fluid_tank"`
+    /// today (see [`super::fluid::FLUID_TANK_KIND`]), carried anyway so
+    /// presentation picks a mesh the same way it does for a machine.
+    pub kind: String,
+    pub footprint: Footprint,
+    pub fluid: FluidId,
+    pub quantity: f64,
+    pub capacity: f64,
+    pub fill: f64,
+    pub pipe_tile: TileCoord,
+}
+
 /// The whole fluid network in one snapshot — what a HUD/overlay needs
 /// without having to stitch together per-chunk pipe lists.
 ///
@@ -378,13 +492,23 @@ pub struct HopperSnapshot {
 /// }
 /// ```
 ///
-/// `segments` is in flow order, source end first; adjacent entries are
+/// `segments` is in flow order, supply end first; adjacent entries are
 /// physically adjacent pipes. `inlet_index` indexes into `segments` and
 /// marks the segment the machine actually draws from — that is the one
 /// whose level drops when a craft starts. `machine_tile`/`machine_recipe`
 /// identify the machine being fed (its tile is adjacent to the inlet
 /// segment's), and `units_per_craft` is how much the recipe consumes per
 /// craft.
+///
+/// **`total_volume`/`total_capacity`/`pressure` describe the pipe run
+/// alone** — they do not include the [`FluidTankSnapshot`]'s contents, and
+/// did not change meaning when the "Visual overhaul round 2" epic's ticket 1
+/// replaced the off-map tap with that tank. The tank is a building with its
+/// own capacity and its own snapshot, not a length of pipe, so folding it in
+/// here would have silently changed what an existing consumer was reading.
+/// What *did* change is that these numbers can now legitimately fall to zero
+/// and stay there: an empty tank means an empty run, and a machine that
+/// stalls until the player refills it.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FluidSnapshot {
     pub fluid: FluidId,
@@ -460,6 +584,28 @@ pub enum TileSnapshot {
         capacity: u32,
         fill: f64,
     },
+    /// A tile occupied by the pipe run's fluid tank (the "Visual overhaul
+    /// round 2" epic's ticket 1). Mirrors [`TileSnapshot::Hopper`] exactly,
+    /// including that **any** tile inside the footprint resolves to it, not
+    /// only the origin. JSON:
+    ///
+    /// `{"kind": "fluid_tank", "footprint": {"width_tiles": 1, "height_tiles": 1},
+    ///   "origin_tile": [5, 1], "fluid": "vinegar", "quantity": 30.0,
+    ///   "capacity": 120.0, "fill": 0.25}`
+    ///
+    /// Enough for a hover tooltip ("Vinegar tank — 30/120") without a second
+    /// call. `quantity`/`capacity` are `f64` rather than integers for the
+    /// reason [`FluidTankSnapshot`] gives: a fluid volume is continuous. As
+    /// with the `hopper` variant there is no `machine_kind` field — this
+    /// enum's own `kind` tag already *is* the kind id.
+    FluidTank {
+        footprint: Footprint,
+        origin_tile: TileCoord,
+        fluid: FluidId,
+        quantity: f64,
+        capacity: f64,
+        fill: f64,
+    },
 }
 
 /// Static (non-per-tick) description of one pipeline stage's placement —
@@ -526,6 +672,24 @@ struct HopperStage {
     kind: String,
 }
 
+/// Where the pipe run's fluid tank stands (the "Visual overhaul round 2"
+/// epic's ticket 1).
+///
+/// Placement only: the tank's *contents* live inside the [`FluidNetwork`]
+/// (see [`FluidTank`]'s doc for why they have to, and `HopperStage` above
+/// for the pattern this otherwise copies). `Some` exactly when `World::fluid`
+/// is — a world with no fluid-requiring recipe has no run and no tank.
+#[derive(Debug)]
+struct FluidTankStage {
+    /// Footprint origin — min-X/min-Y corner, as for any machine.
+    tile: TileCoord,
+    footprint: Footprint,
+    kind: String,
+    /// The pipe tile this tank discharges into: the run's `is_source`
+    /// segment, always `segments[0]`.
+    pipe_tile: TileCoord,
+}
+
 pub struct World {
     ecs: hecs::World,
     recipes: RecipeRegistry,
@@ -555,6 +719,9 @@ pub struct World {
     /// Never optional: a chain always has exactly one raw entry point, and
     /// since ticket 3 that entry point is a building rather than a command.
     hopper: HopperStage,
+    /// Where the pipe run's tank stands — `Some` iff `fluid` is. See
+    /// [`FluidTankStage`].
+    fluid_tank: Option<FluidTankStage>,
 }
 
 const BELT_LENGTH_TILES: i32 = 4;
@@ -686,7 +853,39 @@ impl World {
                 })
                 .collect();
             let inlet = segments.len() - 1;
-            FluidNetwork::new(ordered[i].fluid_inputs[0].0.clone(), segments, inlet)
+            // The tank (the "Visual overhaul round 2" epic's ticket 1) is
+            // the run's only supply. Its capacity is a Rust constant for the
+            // same reason HOPPER_CAPACITY is (see `fluid::FLUID_TANK_CAPACITY`
+            // for how the number was picked); its footprint, like every
+            // placed building's, comes from `data/machines.ron`.
+            let tank = FluidTank::new(Fx::from_num(FLUID_TANK_CAPACITY));
+            FluidNetwork::new(ordered[i].fluid_inputs[0].0.clone(), segments, inlet, tank)
+        });
+
+        // The tank's *placement*, following the hopper's precedent exactly:
+        // its footprint ends on the tile immediately west of the run's first
+        // pipe tile, so it stands beside the run rather than in it, and
+        // introducing it moved no existing tile (the shipped run starts at
+        // x = 6, so a 1x1 tank sits at x = 5 on the run's own row). A wider
+        // tank would grow further west, away from the chain.
+        let fluid_tank = fluid.as_ref().map(|network| {
+            let tank_footprint = machines.footprint_of(FLUID_TANK_KIND).unwrap_or_else(|| {
+                panic!(
+                    "machine content error: data/machines.ron must define the \
+                     '{FLUID_TANK_KIND}' kind — a recipe declares fluid_inputs, so this world \
+                     has a pipe run, and a pipe run is supplied by a tank whose footprint has \
+                     to come from the same file every other placed building's does (known \
+                     kinds: {})",
+                    machines.kind_ids().join(", ")
+                )
+            });
+            let pipe_tile = network.segments()[0].tile;
+            FluidTankStage {
+                tile: (pipe_tile.0 - tank_footprint.width_tiles, pipe_tile.1),
+                footprint: tank_footprint,
+                kind: FLUID_TANK_KIND.to_string(),
+                pipe_tile,
+            }
         });
 
         // The hopper (ticket 3): the chain's raw-ingredient feeder, placed so
@@ -744,6 +943,7 @@ impl World {
             fluid,
             fluid_stage,
             hopper,
+            fluid_tank,
         };
         world.validate_placement();
         world
@@ -781,6 +981,12 @@ impl World {
 
         for tile in self.hopper.footprint.tiles(self.hopper.tile) {
             claims.push((tile, "the chain's hopper".to_string()));
+        }
+
+        if let Some(tank) = &self.fluid_tank {
+            for tile in tank.footprint.tiles(tank.tile) {
+                claims.push((tile, "the pipe run's fluid tank".to_string()));
+            }
         }
 
         assert_no_tile_conflicts(&claims);
@@ -862,6 +1068,43 @@ impl World {
             },
             belt_tile: self.position_of(self.stages[0].belt_entity),
         }
+    }
+
+    /// The pipe run's fluid tank — placement plus live level (the "Visual
+    /// overhaul round 2" epic's ticket 1), or `None` when this world has no
+    /// pipe run (no recipe declares `fluid_inputs`). See
+    /// [`FluidTankSnapshot`] for the full JSON shape.
+    ///
+    /// **Poll this every frame you want to redraw the tank, exactly as you
+    /// poll `fluid_snapshot` — do not wait for a dirty chunk.** The tank is
+    /// drained by the same per-tick equalization pass the pipe run is, which
+    /// deliberately does not dirty anything (see `World::tick`), so a
+    /// falling level is invisible to `dirty_chunks`. Only `FillFluidTank`
+    /// dirties the tank's chunk, since that is a discrete player action a
+    /// chunk-driven renderer would otherwise miss entirely. `ChunkSnapshot`
+    /// carries the identical struct so such a renderer can still place the
+    /// geometry; the live level is here.
+    pub fn fluid_tank_snapshot(&self) -> Option<FluidTankSnapshot> {
+        let stage = self.fluid_tank.as_ref()?;
+        let network = self
+            .fluid
+            .as_ref()
+            .expect("fluid_tank is Some iff fluid is");
+        let tank = network.tank();
+        Some(FluidTankSnapshot {
+            tile: stage.tile,
+            kind: stage.kind.clone(),
+            footprint: stage.footprint,
+            fluid: network.fluid.clone(),
+            quantity: tank.volume().to_num::<f64>(),
+            capacity: tank.capacity().to_num::<f64>(),
+            // `FluidTank::pressure` is the tank's own fill fraction, which
+            // is exactly what this field means — not its
+            // `discharge_pressure`, which is a flow-model quantity and is
+            // always 1.
+            fill: tank.pressure().to_num::<f64>(),
+            pipe_tile: stage.pipe_tile,
+        })
     }
 
     fn position_of(&self, entity: Entity) -> TileCoord {
@@ -1114,6 +1357,16 @@ impl World {
             snapshot.hoppers.push(self.hopper_snapshot());
         }
 
+        // ...and the same again for the pipe run's tank, when this world has
+        // one at all.
+        if let Some(tank) = &self.fluid_tank
+            && footprint_chunks(tank.tile, tank.footprint).contains(&id)
+        {
+            snapshot
+                .fluid_tanks
+                .push(self.fluid_tank_snapshot().expect("fluid_tank is Some here"));
+        }
+
         snapshot
     }
 
@@ -1151,6 +1404,13 @@ impl World {
         for chunk in footprint_chunks(self.hopper.tile, self.hopper.footprint) {
             if !ids.contains(&chunk) {
                 ids.push(chunk);
+            }
+        }
+        if let Some(tank) = &self.fluid_tank {
+            for chunk in footprint_chunks(tank.tile, tank.footprint) {
+                if !ids.contains(&chunk) {
+                    ids.push(chunk);
+                }
             }
         }
         ids
@@ -1225,6 +1485,22 @@ impl World {
             });
         }
 
+        if let Some(tank) = &self.fluid_tank
+            && tank.footprint.contains(tank.tile, pos)
+        {
+            let snapshot = self
+                .fluid_tank_snapshot()
+                .expect("fluid_tank is Some here");
+            return Some(TileSnapshot::FluidTank {
+                footprint: snapshot.footprint,
+                origin_tile: snapshot.tile,
+                fluid: snapshot.fluid,
+                quantity: snapshot.quantity,
+                capacity: snapshot.capacity,
+                fill: snapshot.fill,
+            });
+        }
+
         if let Some(fluid) = &self.fluid {
             for (i, segment) in fluid.segments().iter().enumerate() {
                 if segment.tile == pos {
@@ -1247,6 +1523,7 @@ impl World {
     /// commands (e.g. filling a hopper that is already full) are silently
     /// ignored, same as `BeltSegment::try_spawn`'s own contract.
     /// `FillHopper` always targets the chain's hopper (the raw-ingredient
+    /// entry point) and `FillFluidTank` the pipe run's tank (the fluid
     /// entry point); `CollectOutput` always targets the chain's last
     /// machine (the finished-product exit point) — a single entry/exit pair
     /// per chain, matching this milestone's "one straight line" scope.
@@ -1254,7 +1531,9 @@ impl World {
     /// Note what `FillHopper` deliberately does *not* do: it never touches a
     /// belt. Getting raw ingredient onto the line is the hopper's job, one
     /// unit per tick from `tick()`, so the player sets the *supply* and the
-    /// machinery sets the *rate* (ticket 3).
+    /// machinery sets the *rate* (ticket 3). `FillFluidTank` observes the
+    /// same rule one system over: it never touches a pipe, only the tank —
+    /// getting fluid down the run is the pressure-equalization pass's job.
     pub fn issue_command(&mut self, cmd: PlayerCommand) {
         match cmd {
             PlayerCommand::FillHopper { amount } => {
@@ -1263,6 +1542,21 @@ impl World {
                 let added = self.hopper.hopper.fill(amount);
                 if added > 0 {
                     self.mark_machine_dirty(hopper_tile, hopper_footprint);
+                }
+            }
+            PlayerCommand::FillFluidTank { amount } => {
+                // Clamped at capacity, never an error — see `FluidTank::fill`.
+                // A world with no pipe run has no tank, so this is simply a
+                // no-op there (the same "impossible command does nothing"
+                // rule this method already documents).
+                let added = match self.fluid.as_mut() {
+                    Some(network) => network.fill_tank(amount),
+                    None => Fx::ZERO,
+                };
+                if added > Fx::ZERO {
+                    let stage = self.fluid_tank.as_ref().expect("fluid_tank is Some here");
+                    let (tile, footprint) = (stage.tile, stage.footprint);
+                    self.mark_machine_dirty(tile, footprint);
                 }
             }
             PlayerCommand::CollectOutput => {

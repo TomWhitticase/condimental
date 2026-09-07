@@ -78,7 +78,9 @@ impl SimBridge {
     /// alongside its origin `tile` (see `sim::MachineSnapshot`). A machine
     /// whose footprint straddles a chunk boundary is reported in *every*
     /// chunk it overlaps, identically — so a caller merging several chunks'
-    /// snapshots must key machines by `tile` and de-duplicate.
+    /// snapshots must key machines by `tile` and de-duplicate. The same rule
+    /// applies to the `hoppers` and (since the "Visual overhaul round 2"
+    /// epic's ticket 1) `fluid_tanks` arrays.
     #[func]
     fn chunk_snapshot_json(&self, chunk_id: i64) -> GString {
         let snapshot = self.world.chunk_snapshot(decode_chunk_id(chunk_id));
@@ -120,6 +122,16 @@ impl SimBridge {
     /// simulation's own default load; over-filling is clamped at the
     /// hopper's capacity, never an error. Read the result through
     /// `hopper_snapshot_json`.
+    ///
+    /// **`fill_fluid_tank` is its fluid twin** (the "Visual overhaul round
+    /// 2" epic's ticket 1): `{"type": "fill_fluid_tank", "amount": 30}`, or
+    /// `{"type": "fill_fluid_tank"}` for the simulation's own default load,
+    /// adds whole fluid units to the pipe run's tank — which is the run's
+    /// only supply since that ticket removed the always-refilling off-map
+    /// tap. Over-filling is clamped at the tank's capacity, silently, and a
+    /// world with no pipe run (no recipe declares `fluid_inputs`) has no
+    /// tank, so the command simply does nothing there. Read the result
+    /// through `fluid_tank_snapshot_json`.
     #[func]
     fn issue_command_json(&mut self, command_json: GString) {
         if let Some(cmd) = sim::command_from_json(&command_json.to_string()) {
@@ -163,6 +175,18 @@ impl SimBridge {
     /// *geometry* is also carried in `chunk_snapshot_json`'s new `pipes`
     /// array for a chunk-driven renderer; the live levels are here. The
     /// full field-by-field shape is documented on `sim::FluidSnapshot`.
+    ///
+    /// **`total_volume`/`total_capacity`/`pressure` cover the pipe run
+    /// alone**, and always have — the tank that supplies it (the "Visual
+    /// overhaul round 2" epic's ticket 1) has its own
+    /// `fluid_tank_snapshot_json`. What changed with that ticket is that
+    /// these can now legitimately read zero: the run has no self-refilling
+    /// source any more, so an unfilled or exhausted tank means dry pipes and
+    /// a stalled machine, which is a state presentation should be able to
+    /// show rather than treat as a bug. `segments[i].is_source` likewise
+    /// still marks the run's supply end, but that segment is now an ordinary
+    /// pipe tile (the one the tank connects to) rather than an always-full
+    /// tap.
     #[func]
     fn fluid_snapshot_json(&self) -> GString {
         match self.world.fluid_snapshot() {
@@ -200,6 +224,55 @@ impl SimBridge {
         let snapshot = self.world.hopper_snapshot();
         let json = serde_json::to_string(&snapshot).expect("HopperSnapshot must serialize");
         GString::from(json.as_str())
+    }
+
+    /// A JSON-serialized `sim::FluidTankSnapshot` — where the pipe run's
+    /// fluid tank stands, which fluid it holds, and how full it is (the
+    /// "Visual overhaul round 2" epic's ticket 1):
+    ///
+    /// ```json
+    /// {"tile": [5, 1], "kind": "fluid_tank",
+    ///  "footprint": {"width_tiles": 1, "height_tiles": 1},
+    ///  "fluid": "vinegar", "quantity": 30.0, "capacity": 120.0,
+    ///  "fill": 0.25, "pipe_tile": [6, 1]}
+    /// ```
+    ///
+    /// Field-for-field the fluid twin of `hopper_snapshot_json`: `fluid`
+    /// stands where `item` does, `pipe_tile` where `belt_tile` does, and
+    /// `tile`/`kind`/`footprint`/`fill` mean exactly what they mean there —
+    /// so a scene can drive both from one code path. The one shape
+    /// difference: `quantity`/`capacity` are **floating-point**, not
+    /// integers, because a fluid volume is continuous (pressure
+    /// equalization moves partial units around).
+    ///
+    /// Returns an **empty string** when the world has no pipe run at all
+    /// (no recipe in `data/recipes.ron` declares `fluid_inputs`, so there is
+    /// nothing for a tank to supply) — the same "empty string means nothing
+    /// there" convention `fluid_snapshot_json` and `query_tile_json` use,
+    /// and the one way this differs from `hopper_snapshot_json`, which
+    /// always answers because every world has a hopper. GDScript should
+    /// check `is_empty()` before parsing.
+    ///
+    /// **Poll this every frame you want to redraw the tank**, like
+    /// `fluid_snapshot_json` and unlike `chunk_snapshot_json`: the tank is
+    /// drained by the same equalization pass the pipe run is, which
+    /// deliberately does not dirty its chunk, so `dirty_chunk_ids()` will
+    /// never tell you the level fell. Only a `fill_fluid_tank` command
+    /// dirties it. `chunk_snapshot_json` carries the identical object in a
+    /// new `fluid_tanks` array for a chunk-driven renderer to place the
+    /// geometry from, and `query_tile_json` answers with a `"fluid_tank"`
+    /// tile carrying the same fill/capacity for hover.
+    /// `sim::FluidTankSnapshot` documents the full shape.
+    #[func]
+    fn fluid_tank_snapshot_json(&self) -> GString {
+        match self.world.fluid_tank_snapshot() {
+            Some(snapshot) => {
+                let json =
+                    serde_json::to_string(&snapshot).expect("FluidTankSnapshot must serialize");
+                GString::from(json.as_str())
+            }
+            None => GString::new(),
+        }
     }
 
     /// A JSON-serialized `sim::EconomySnapshot` — money plus the hardcoded

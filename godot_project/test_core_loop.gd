@@ -32,6 +32,10 @@ func _initialize() -> void:
 	# meters them onto the first belt over the following ticks, one at a
 	# time, so nothing here has to respect the belt's min-spacing itself.
 	sim.issue_command_json(JSON.stringify({"type": "fill_hopper", "amount": 4}))
+	# ...and load the pipe run's vinegar tank the same way ("Visual overhaul
+	# round 2" ticket 1 replaced the always-refilling off-map source with a
+	# tank the player fills), or the fluid-gated mixing stage never runs.
+	sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
 	var hopper = JSON.parse_string(sim.hopper_snapshot_json())
 	if hopper == null or not hopper.has("quantity") or not hopper.has("capacity") or not hopper.has("fill"):
 		_fail("hopper_snapshot_json did not return the expected shape: %s" % str(hopper))

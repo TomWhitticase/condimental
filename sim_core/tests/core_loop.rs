@@ -32,9 +32,18 @@
 //! the player put them there and nothing has consumed them yet), and the
 //! full-chain test fills once up front and lets the unload happen over the
 //! following ticks instead of spawning per tick.
+//!
+//! **The "Visual overhaul round 2" epic's ticket 1 did the same to fluid**,
+//! and needed the same kind of edit: the pipe run's vinegar used to arrive
+//! from an off-map tap that refilled itself every tick, and now comes from a
+//! tank the player loads (`PlayerCommand::FillFluidTank`). So the full-chain
+//! test loads the tank once up front too. Vinegar is not counted in the
+//! tomato-equivalent accounting below — it enters the chain as a fluid, not
+//! as belt-borne mass, and leaves it dissolved in the product.
 
 use sim_core::sim::{
-    BeltSnapshot, MachineSnapshot, PlayerCommand, RecipeRegistry, TileSnapshot, World,
+    BeltSnapshot, FLUID_TANK_CAPACITY, MachineSnapshot, PlayerCommand, RecipeRegistry,
+    TileSnapshot, World,
 };
 
 fn recipes() -> RecipeRegistry {
@@ -174,6 +183,15 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
     // those tomatoes onto the first belt over the following ticks — nothing
     // is teleported onto a belt any more. The load happens once, before the
     // loop, precisely to prove the *unload* is what feeds the chain.
+    // The pipe run's tank likewise has to be loaded before the fluid-gated
+    // mixing stage can run at all (the "Visual overhaul round 2" epic's
+    // ticket 1 removed the always-refilling off-map source, so vinegar is a
+    // consumable the player supplies now). It is not a tomato and so
+    // contributes nothing to the mass accounting below.
+    world.issue_command(PlayerCommand::FillFluidTank {
+        amount: FLUID_TANK_CAPACITY,
+    });
+
     let before_fill = total_tomato_equivalent(&world, &registry);
     world.issue_command(PlayerCommand::FillHopper {
         amount: TOMATOES_PER_CRAFT,

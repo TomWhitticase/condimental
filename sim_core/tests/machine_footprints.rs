@@ -55,16 +55,21 @@ fn chain_on(kinds: &[&str]) -> RecipeRegistry {
     .expect("generated recipe text must parse")
 }
 
-/// A registry of `(id, width, height)` kinds, plus the 1x1 `hopper` every
-/// world needs (ticket 3: `World` builds one raw-ingredient feeder for the
-/// head of the chain, and takes its footprint from the machine registry like
-/// any other placed building). Added here rather than at each call site
-/// because none of these fixtures are *about* the hopper — they are about
-/// machine geometry.
+/// A registry of `(id, width, height)` kinds, plus the two 1x1 kinds every
+/// world needs from the machine registry regardless of its recipes: the
+/// `hopper` (ticket 3: `World` builds one raw-ingredient feeder at the head
+/// of the chain) and the `fluid_tank` (the "Visual overhaul round 2" epic's
+/// ticket 1: a chain with a fluid-requiring recipe gets one tank supplying
+/// its pipe run). Both take their footprint from this registry like any
+/// other placed building. Added here rather than at each call site because
+/// none of these fixtures are *about* either — they are about machine
+/// geometry.
 fn kinds(entries: &[(&str, i32, i32)]) -> MachineRegistry {
-    let mut body: String =
-        "MachineKind(id: \"hopper\", footprint: Footprint(width_tiles: 1, height_tiles: 1)),"
-            .to_string();
+    let mut body: String = concat!(
+        "MachineKind(id: \"hopper\", footprint: Footprint(width_tiles: 1, height_tiles: 1)),",
+        "MachineKind(id: \"fluid_tank\", footprint: Footprint(width_tiles: 1, height_tiles: 1)),",
+    )
+    .to_string();
     body += &entries
         .iter()
         .map(|(id, w, h)| {
