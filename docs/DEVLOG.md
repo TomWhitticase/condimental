@@ -21,8 +21,8 @@ below is history and should only ever be appended to.)*
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
 - **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. Milestone 6 (Fluids) is next.
-- **Art/UI:** the voxel pipeline (UI_UX.md §2a/§2b) exists and is the source of every asset in the scene — Rust generators in `assets/voxels/generators/` produce `.vox` models, reviewed as isometric PNGs via `scripts/build-voxels.sh`, imported into Godot by a pinned community importer. UI_UX.md §5's actual UI (hover info, clipboard styling, real icons) is now being built — see below.
-- **UI polish epic (in progress):** a new Run (`run_cc6860507d36`) with 3 parallel tickets targeting UI_UX.md §5 — hover tooltips for machines (replacing the always-on per-stage text), a voxel-rendered icon pipeline, and a diegetic clipboard reskin of the contract panel. All three touch `godot_project/main.gd`; expect merge conflicts to reconcile as each lands. Check `orca orchestration task-list --run run_cc6860507d36 --json` for live status.
+- **Art/UI:** the voxel pipeline (UI_UX.md §2a/§2b) exists and is the source of every asset in the scene — Rust generators in `assets/voxels/generators/` produce `.vox` models, reviewed as isometric PNGs via `scripts/build-voxels.sh`, imported into Godot by a pinned community importer. UI_UX.md §5's real UI is landing in pieces: the money/contract readout is now a diegetic clipboard panel (paper background, steel clip bar, checkbox tick marks) instead of a plain Label — see the log entry below. Hover tooltips and voxel-rendered icon slots are still open (parallel tickets).
+- **UI polish epic (in progress):** a new Run (`run_cc6860507d36`) with 3 parallel tickets targeting UI_UX.md §5 — hover tooltips for machines (replacing the always-on per-stage text), a voxel-rendered icon pipeline, and the clipboard reskin above (done). Check `orca orchestration task-list --run run_cc6860507d36 --json` for live status.
 - **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, SPACE/SHIFT up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
 - **Lighting:** the sky is the real background (`BG_SKY`), not a flat colour — see the "empty void" DEVLOG entry below for why that matters. `scripts/screenshot-scene.sh --first-person` reviews that mode's lighting specifically.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
@@ -53,6 +53,27 @@ icon rendering pipeline, and a clipboard-styled reskin of the contract
 panel. All three touch `main.gd`'s HUD-building code to some degree, so a
 three-way merge conflict is expected and will be reconciled by hand, the
 same way milestone 5 and the visual-polish pass were.
+
+### 2026-09-07 — Contract readout reskinned as a diegetic clipboard (UI_UX.md §5)
+
+First real piece of §5's UI style, dispatched as one of three parallel
+tickets against the same commit (hover tooltips and a voxel-icon pipeline
+being the other two — expect their merges to conflict here and get
+reconciled separately). The money/contract readout — previously one plain
+white Label folded into the generic dark HUD panel — is now its own
+`PanelContainer` ("ContractPanel"): a warm paper-cream background framed in
+steel grey, with a thick top border standing in for the clipboard's metal
+clip. The contract's mix requirement (read live from `economy_snapshot_json`,
+never hardcoded) renders as one small checkbox square per required unit,
+filling in with a saturated "done" green and a tick mark as
+`contract_progress` reaches each unit — the numeric "0/2" text stays
+alongside it, not replaced. `godot_project/test_contract_panel.gd` (wired
+into `scripts/verify-core-loop.sh`) checks this headlessly: the panel is a
+genuinely separate node from the machine-line panel, one checkbox per
+required unit exists, and a checkbox's style/tick-mark visibility actually
+flips when driven through `_set_checkbox_checked`/`_update_contract_panel`.
+Confirmed visually too, both empty and fully checked, via
+`scripts/screenshot-scene.sh`.
 
 ### 2026-09-07 — Fixed the "empty void" lighting, remapped first-person up/down
 

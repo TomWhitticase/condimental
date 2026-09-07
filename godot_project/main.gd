@@ -7,9 +7,12 @@ extends Node3D
 ## (§3/§7).
 ##
 ## Milestone 5 (Economy MVP, ARCHITECTURE.md §9 item 5) added a minimal money
-## + contract-status HUD line, read every frame from `economy_snapshot_json`
-## — folded into this scene's readout panel below, not UI_UX.md §5's
-## clipboard/checklist diegetic styling yet (that's later polish).
+## + contract-status HUD readout, read every frame from `economy_snapshot_json`.
+## It now renders as UI_UX.md §5's diegetic clipboard — a paper-toned panel
+## with checkbox-style tick marks for delivery progress, its own distinct
+## PanelContainer rather than folded into the generic dark HUD panel (see
+## `_build_contract_panel`). The rest of §5 (voxel-rendered icon slots, a
+## hotbar) is still later polish.
 ##
 ## What has NOT changed from the previous flat-2D version, deliberately: this
 ## script still learns the chain's shape entirely from `chain_layout_json`
@@ -90,8 +93,22 @@ var _lamp_running: StandardMaterial3D
 var _asset_classes: Dictionary = {} # asset name -> Array of class names
 
 var _machine_label: Label
-var _economy_label: Label
 var _help_label: Label
+
+# --- Contract clipboard (UI_UX.md §5) --------------------------------------
+# The money/contract readout used to be one plain Label folded into the
+# generic dark HUD panel above. It now lives in its own diegetic "clipboard"
+# panel (a distinct node, per this ticket) so ticket A's hover-tooltip work
+# can freely reshape or remove the machine-line panel above without ever
+# touching this one.
+var _contract_panel: PanelContainer
+var _contract_money_label: Label
+var _contract_meta_label: Label
+var _contract_progress_labels: Dictionary = {} # item id -> Label ("item n/required")
+var _contract_checklist_boxes: Dictionary = {} # item id -> Array[Panel], one per required unit
+var _checkbox_style_unchecked: StyleBoxFlat
+var _checkbox_style_checked: StyleBoxFlat
+const CONTRACT_CHECKLIST_MAX_BOXES := 12 # beyond this, fall back to one box representing "complete"
 
 enum ViewMode { ISOMETRIC, FIRST_PERSON }
 var _view_mode: int = ViewMode.ISOMETRIC
@@ -122,6 +139,7 @@ func _ready() -> void:
 	_build_camera()
 	_build_ui()
 	_seed_machine_state()
+	_update_contract_panel() # fill in real text/sizing before the first frame draws
 	_apply_dirty_chunks() # render tick 0's (empty) state immediately
 
 
@@ -813,20 +831,138 @@ func _build_ui() -> void:
 	_machine_label.label_settings = settings
 	rows.add_child(_machine_label)
 
-	# Milestone 5 (Economy MVP, ARCHITECTURE.md §9 item 5): a minimal money +
-	# contract-status readout, folded into the same readout panel as every
-	# other row rather than a separately hand-positioned Label. Deliberately
-	# plain text, not UI_UX.md §5's clipboard/checklist diegetic styling —
-	# that's later visual polish, this just needs to prove money/contract
-	# state is visible end to end.
-	_economy_label = Label.new()
-	_economy_label.label_settings = settings
-	rows.add_child(_economy_label)
-
 	_help_label = Label.new()
 	_help_label.label_settings = settings
 	_help_label.text = ISO_HELP_TEXT
 	rows.add_child(_help_label)
+
+	# UI_UX.md §5: "a contract IS a clipboard." The money/contract readout
+	# used to be a plain Label folded into the panel above (milestone 5); it
+	# now gets its own diegetic clipboard panel — paper background, a steel
+	# clip bar, checkbox-style tick marks for delivery progress.
+	_build_contract_panel(hud, settings)
+
+
+## The first diegetic clipboard/checklist widget (UI_UX.md §5) — reskins the
+## money/contract readout from a plain Label into something that actually
+## reads as "a paper texture on a metal clipboard clip." Deliberately its own
+## PanelContainer, sibling to (not nested inside) the generic HUD panel above,
+## so this stays intact regardless of what other panels come and go there.
+func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	# Paper cream background + a thick steel-toned top border standing in for
+	# "the clip" — the same technique the panel above already uses for its
+	# hazard-yellow accent rule, just recoloured and thickened. UI_UX.md §5
+	# only asks for "even just a contrasting-coloured strip along one edge,"
+	# so nothing fancier (a drawn clasp, a texture) is warranted yet.
+	var paper_style := StyleBoxFlat.new()
+	paper_style.bg_color = Color(0.87, 0.81, 0.64, 0.98) # warm off-white paper
+	paper_style.border_color = Color(0.27, 0.29, 0.32, 1.0) # steel-grey frame/clip
+	paper_style.border_width_left = 3
+	paper_style.border_width_right = 3
+	paper_style.border_width_bottom = 3
+	paper_style.border_width_top = 12 # the clip bar
+	paper_style.set_content_margin_all(12.0)
+	paper_style.content_margin_top = 18.0 # clearance under the thicker clip bar
+
+	_contract_panel = PanelContainer.new()
+	_contract_panel.name = "ContractPanel"
+	_contract_panel.add_theme_stylebox_override("panel", paper_style)
+	hud.add_child(_contract_panel)
+
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", 6)
+	_contract_panel.add_child(body)
+
+	# Dark ink on paper, not the pale-text-with-black-outline style the panel
+	# above uses — that styling exists specifically to stay legible over a
+	# lit 3D scene, which doesn't apply once text sits on an opaque paper
+	# panel. Font family and size are still the ones already established in
+	# _build_ui() (UI_UX.md §5's own "sturdy, slightly blocky" typography
+	# call), only colour/outline change for the paper background.
+	var ink_settings := LabelSettings.new()
+	ink_settings.font_size = base_settings.font_size
+	ink_settings.font_color = Color(0.16, 0.13, 0.08)
+	ink_settings.outline_size = 0
+
+	var title := Label.new()
+	title.label_settings = ink_settings
+	title.text = "CONTRACT"
+	body.add_child(title)
+
+	_contract_money_label = Label.new()
+	_contract_money_label.label_settings = ink_settings
+	body.add_child(_contract_money_label)
+
+	_checkbox_style_unchecked = StyleBoxFlat.new()
+	_checkbox_style_unchecked.bg_color = Color(0.80, 0.74, 0.57, 1.0) # a shade darker than the paper
+	_checkbox_style_unchecked.border_color = Color(0.27, 0.29, 0.32, 1.0)
+	_checkbox_style_unchecked.set_border_width_all(2)
+
+	_checkbox_style_checked = StyleBoxFlat.new()
+	_checkbox_style_checked.bg_color = Color(0.24, 0.42, 0.24, 1.0) # a muted, saturated "done" green —
+	# UI_UX.md §7: saturated colour reserved for meaning, and a completed
+	# checklist item is exactly that meaning, not decoration.
+	_checkbox_style_checked.border_color = Color(0.27, 0.29, 0.32, 1.0)
+	_checkbox_style_checked.set_border_width_all(2)
+
+	# One row per required item in the contract's mix, read live from
+	# economy_snapshot_json rather than assumed — sim_core/src/sim/economy.rs
+	# names the one hardcoded item today, but nothing here hardcodes it.
+	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
+	var mix: Array = econ.get("contract_mix", [])
+	for pair in mix:
+		var item_id: String = String(pair[0])
+		var required: int = int(pair[1])
+		_build_contract_checklist_row(body, ink_settings, item_id, required)
+
+	_contract_meta_label = Label.new()
+	_contract_meta_label.label_settings = ink_settings
+	body.add_child(_contract_meta_label)
+
+	# Anchored to the top-right corner with a fixed margin, sized to its own
+	# content — independent of however tall the machine-line panel ends up
+	# being (ticket A may shrink or remove that panel entirely).
+	_contract_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 16)
+
+
+## One checklist row: the item's numeric progress text, plus a row of small
+## checkbox squares — one per required unit, per UI_UX.md §5's "checkbox-
+## style tick marks for completed items." A contract asking for a very large
+## quantity would make a per-unit row unreadably wide, so past
+## CONTRACT_CHECKLIST_MAX_BOXES this falls back to a single box standing for
+## "fully delivered" — the minimum the ticket calls acceptable.
+func _build_contract_checklist_row(body: VBoxContainer, ink_settings: LabelSettings, item_id: String, required: int) -> void:
+	var progress_label := Label.new()
+	progress_label.label_settings = ink_settings
+	body.add_child(progress_label)
+	_contract_progress_labels[item_id] = progress_label
+
+	var checklist := HBoxContainer.new()
+	checklist.add_theme_constant_override("separation", 4)
+	body.add_child(checklist)
+
+	var box_count: int = required if required <= CONTRACT_CHECKLIST_MAX_BOXES else 1
+	var boxes: Array = []
+	for i in range(box_count):
+		var box := Panel.new()
+		box.name = "checkbox_%s_%d" % [item_id, i]
+		box.custom_minimum_size = Vector2(14, 14)
+		box.add_theme_stylebox_override("panel", _checkbox_style_unchecked)
+		box.set_meta("checked", false)
+
+		var mark := Label.new()
+		mark.name = "Mark"
+		mark.text = "✓"
+		mark.label_settings = ink_settings
+		mark.visible = false
+		mark.set_anchors_preset(Control.PRESET_FULL_RECT)
+		mark.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		mark.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		box.add_child(mark)
+
+		checklist.add_child(box)
+		boxes.append(box)
+	_contract_checklist_boxes[item_id] = boxes
 
 
 # --------------------------------------------------------------------------
@@ -842,7 +978,7 @@ func _process(delta: float) -> void:
 		_apply_dirty_chunks()
 
 	_update_machine_label()
-	_update_economy_label()
+	_update_contract_panel()
 	if _view_mode == ViewMode.ISOMETRIC:
 		_pan_camera(delta)
 	else:
@@ -999,21 +1135,58 @@ func _update_machine_label() -> void:
 	_machine_label.text = "\n".join(lines)
 
 
-func _update_economy_label() -> void:
+## Drives the contract clipboard (UI_UX.md §5) from the same
+## `economy_snapshot_json` the old plain-Label readout used — money text, the
+## per-item "n/required" numeric line, and each checklist box's checked state.
+func _update_contract_panel() -> void:
 	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
 	var money: float = float(econ["money"])
-	var mix: Array = econ["contract_mix"]
-	var progress: Array = econ["contract_progress"]
-	var mix_parts: Array[String] = []
+	_contract_money_label.text = "Money: %.0f" % money
+
+	var mix: Array = econ.get("contract_mix", [])
+	var progress: Array = econ.get("contract_progress", [])
 	for i in range(mix.size()):
-		var required_pair: Array = mix[i]
-		var have: int = int(progress[i][1])
-		mix_parts.append("%s %d/%d" % [required_pair[0], have, int(required_pair[1])])
+		var item_id: String = String(mix[i][0])
+		var required: int = int(mix[i][1])
+		var have: int = int(progress[i][1]) if i < progress.size() else 0
+
+		var progress_label: Label = _contract_progress_labels.get(item_id, null)
+		if progress_label != null:
+			progress_label.text = "%s  %d/%d" % [item_id, have, required]
+
+		var boxes: Array = _contract_checklist_boxes.get(item_id, [])
+		if boxes.size() == 1 and required > CONTRACT_CHECKLIST_MAX_BOXES:
+			# The single-box fallback (see _build_contract_checklist_row):
+			# checked only once the whole quantity is in.
+			_set_checkbox_checked(boxes[0], have >= required)
+		else:
+			for u in range(boxes.size()):
+				_set_checkbox_checked(boxes[u], u < have)
 
 	var ticks_left: int = max(0, int(econ["next_delivery_tick"]) - sim.current_tick())
-	_economy_label.text = "Money: %.0f    Contract: %s (next check in %d ticks)" % [
-		money, ", ".join(mix_parts), ticks_left,
-	]
+	_contract_meta_label.text = "Next check in %d ticks" % ticks_left
+
+	# Re-anchor every update, not just once at build time: the panel's
+	# minimum size grows once real text ("Money: 1234", "Next check in 1000
+	# ticks") replaces the empty labels it was built with, and PRESET_MINSIZE
+	# only computes offsets once, at the moment it's called — without this,
+	# the panel stays sized/positioned for its build-time (near-empty) text
+	# and later, wider text spills past its right edge.
+	_contract_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 16)
+
+
+## Swaps a checklist box's style (and its tick-mark visibility) between the
+## checked/unchecked StyleBoxFlat pair — same pattern as the machine status
+## lamps' idle/running material swap above, applied to a UI checkbox instead
+## of a 3D emissive mesh.
+func _set_checkbox_checked(box: Panel, checked: bool) -> void:
+	if bool(box.get_meta("checked", false)) == checked:
+		return
+	box.set_meta("checked", checked)
+	box.add_theme_stylebox_override("panel", _checkbox_style_checked if checked else _checkbox_style_unchecked)
+	var mark: Label = box.get_node_or_null("Mark")
+	if mark != null:
+		mark.visible = checked
 
 
 func _format_counts(pairs: Array) -> String:
