@@ -8,10 +8,23 @@
 #      in assets/voxels/previews/, which is how a Claude Code session (or a
 #      human) actually LOOKS at the asset it just generated without opening a
 #      GUI voxel editor — UI_UX.md §2a point 3.
+#   3. `cargo run -p voxgen --bin voxicons` renders a second, different kind
+#      of PNG per combined model into assets/voxels/icons/: a small (64px),
+#      transparent-background, tightly-cropped UI icon (UI_UX.md §5 — "icons
+#      are rendered from the real assets ... not separately-drawn 2D icon
+#      art"), NOT a copy of step 2's review preview. See
+#      assets/voxels/generators/icons.rs's module doc for why a preview PNG
+#      turned out to be the wrong shape for a UI icon (opaque background,
+#      padded for "look at the whole model," not "sit in a small UI slot"),
+#      confirmed by actually inspecting vengi-thumbnailer's own output and
+#      its `--jsonconfig` cvar list rather than assumed.
 #
-# Step 2 is optional: if vengi isn't installed the script still regenerates
-# the models, warns, and exits 0. Previews are gitignored review output, not
-# something the build depends on.
+# Steps 2 and 3 both need vengi-thumbnailer; step 1 doesn't. If vengi isn't
+# installed the script still regenerates the models, warns, and exits 0.
+# Previews are gitignored review output, not something the build depends on
+# — but icons ARE committed (godot_project/main.gd loads them at runtime,
+# same treatment as assets/voxels/models/), so a machine without vengi can
+# still run the game against whatever icons the last commit shipped.
 #
 # Installing vengi (macOS, matching the version this was set up with):
 #   mkdir -p ~/.local/vengi/thumbnailer.app && cd ~/.local/vengi/thumbnailer.app
@@ -73,5 +86,11 @@ for model in assets/voxels/models/*.vox; do
   fi
   echo "  $out"
 done
+
+echo
+echo "==> rendering UI icons with $thumbnailer (assets/voxels/icons/, committed — UI_UX.md §5)"
+if ! VENGI_THUMBNAILER="$thumbnailer" cargo run -q -p voxgen --bin voxicons; then
+  status=1
+fi
 
 exit "$status"

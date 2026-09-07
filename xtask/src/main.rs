@@ -6,12 +6,14 @@
 //! script: nobody should have to know or hand-copy the target path.
 //!
 //! It then stages the generated voxel models (UI_UX.md §2a) from
-//! `assets/voxels/models/` into `godot_project/voxels/`, for exactly the same
-//! reason and with exactly the same treatment: Godot can only load from
-//! inside `res://`, the committed source of truth lives outside it, and
-//! neither copy should ever be made by hand. Regenerating the models
-//! themselves is a separate, explicit step (`cargo run -p voxgen`, or
-//! `scripts/build-voxels.sh` which also renders previews) — xtask only
+//! `assets/voxels/models/` into `godot_project/voxels/`, and the generated UI
+//! icons (UI_UX.md §5) from `assets/voxels/icons/` into
+//! `godot_project/voxels/icons/`, for exactly the same reason and with
+//! exactly the same treatment: Godot can only load from inside `res://`,
+//! the committed source of truth lives outside it, and neither copy should
+//! ever be made by hand. Regenerating either is a separate, explicit step
+//! (`cargo run -p voxgen` / `cargo run -p voxgen --bin voxicons`, or
+//! `scripts/build-voxels.sh` which does both plus previews) — xtask only
 //! copies what is already there, so the common build stays fast.
 
 use std::env;
@@ -73,6 +75,7 @@ fn main() {
     println!("xtask: copied {} -> {}", src.display(), dest.display());
 
     copy_voxel_models(&root);
+    copy_voxel_icons(&root);
 }
 
 /// Mirrors `assets/voxels/models/` into `godot_project/voxels/`.
@@ -117,4 +120,58 @@ fn copy_voxel_models(root: &Path) {
     }
 
     println!("xtask: staged {copied} voxel asset files -> {}", dest_dir.display());
+}
+
+/// Mirrors `assets/voxels/icons/` into `godot_project/voxels/icons/` — same
+/// treatment and same reason as `copy_voxel_models` above: Godot can only
+/// load from inside `res://`, and this is what `main.gd`'s `_icon_for`
+/// (UI_UX.md §5) actually loads at runtime.
+///
+/// Unlike models, a missing `icons/` directory isn't a hard error: icon
+/// generation needs `vengi-thumbnailer` installed (`cargo run -p voxgen
+/// --bin voxicons`, or `scripts/build-voxels.sh`) the same way preview
+/// rendering does, so a machine that has never had `vengi` installed and
+/// hasn't pulled a commit with icons yet simply has no icons to stage —
+/// `_icon_for`'s own documented placeholder fallback covers that case at
+/// runtime, this just shouldn't fail the whole build over it.
+fn copy_voxel_icons(root: &Path) {
+    let src_dir = root.join("assets").join("voxels").join("icons");
+    let dest_dir = root.join("godot_project").join("voxels").join("icons");
+
+    if !src_dir.is_dir() {
+        eprintln!(
+            "xtask: no {} — run `cargo run -p voxgen --bin voxicons` to generate icons",
+            src_dir.display()
+        );
+        return;
+    }
+
+    if dest_dir.exists() {
+        fs::remove_dir_all(&dest_dir).expect("failed to clear godot_project/voxels/icons");
+    }
+    fs::create_dir_all(&dest_dir).expect("failed to create godot_project/voxels/icons");
+
+    let mut copied = 0usize;
+    let mut entries: Vec<_> = fs::read_dir(&src_dir)
+        .expect("failed to read assets/voxels/icons")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .collect();
+    entries.sort();
+
+    for path in entries {
+        if !path.is_file() {
+            continue;
+        }
+        let name = path.file_name().expect("directory entry must have a name");
+        fs::copy(&path, dest_dir.join(name)).unwrap_or_else(|e| {
+            panic!(
+                "xtask: failed to copy {} into godot_project/voxels/icons: {e}",
+                path.display()
+            )
+        });
+        copied += 1;
+    }
+
+    println!("xtask: staged {copied} icon files -> {}", dest_dir.display());
 }

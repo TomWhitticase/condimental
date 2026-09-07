@@ -117,6 +117,15 @@ if [ "$contract_panel_status" -ne 0 ]; then
 fi
 
 echo
-echo "PASS: milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"
+echo "==> godot --headless --script test_icons.gd (_icon_for, UI_UX.md §5)"
+"$godot_bin" --headless --path godot_project --script test_icons.gd
+icons_status=$?
+if [ "$icons_status" -ne 0 ]; then
+  echo "FAIL: test_icons.gd exited $icons_status" >&2
+  exit "$icons_status"
+fi
+
+echo
+echo "PASS: milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard + icons"
 echo "      verified headlessly (sim_core tests + gdext boundary + interaction + 3D scene"
-echo "      structure + pan/zoom + contract panel structure)."
+echo "      structure + pan/zoom + contract panel structure + icons)."

@@ -77,6 +77,13 @@ const ITEM_MODELS := {
 }
 const ITEM_MODEL_FALLBACK := "item_box"
 
+## UI icons (UI_UX.md §5): small, transparent-background renders of the same
+## voxel models above, generated offline by
+## assets/voxels/generators/icons.rs (`cargo run -p voxgen --bin voxicons`,
+## or `scripts/build-voxels.sh`) and staged here by `cargo xtask`, same
+## treatment as `res://voxels/` itself. See `_icon_for` below.
+const ICON_DIR := "res://voxels/icons/"
+
 var sim: SimBridge
 
 var _tick_accum := 0.0
@@ -105,10 +112,15 @@ var _contract_panel: PanelContainer
 var _contract_money_label: Label
 var _contract_meta_label: Label
 var _contract_progress_labels: Dictionary = {} # item id -> Label ("item n/required")
+var _contract_item_icons: Dictionary = {} # item id -> TextureRect, see _icon_for (ticket B)
 var _contract_checklist_boxes: Dictionary = {} # item id -> Array[Panel], one per required unit
 var _checkbox_style_unchecked: StyleBoxFlat
 var _checkbox_style_checked: StyleBoxFlat
 const CONTRACT_CHECKLIST_MAX_BOXES := 12 # beyond this, fall back to one box representing "complete"
+
+# --- Voxel-rendered UI icons (UI_UX.md §5) ---------------------------------
+var _icon_cache: Dictionary = {} # asset name -> Texture2D, see _icon_for
+var _icon_fallback_texture: Texture2D
 
 enum ViewMode { ISOMETRIC, FIRST_PERSON }
 var _view_mode: int = ViewMode.ISOMETRIC
@@ -932,9 +944,27 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 ## CONTRACT_CHECKLIST_MAX_BOXES this falls back to a single box standing for
 ## "fully delivered" — the minimum the ticket calls acceptable.
 func _build_contract_checklist_row(body: VBoxContainer, ink_settings: LabelSettings, item_id: String, required: int) -> void:
+	# Icon + text share a row: UI_UX.md §5's "icons are rendered from the
+	# real assets" (_icon_for, ticket B) applied to the one place this panel
+	# names a specific item.
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 6)
+	body.add_child(header)
+
+	var icon := TextureRect.new()
+	icon.custom_minimum_size = Vector2(16, 16)
+	# Without this, TextureRect's own minimum size defaults to the source
+	# texture's actual size (64x64) and wins over custom_minimum_size above —
+	# EXPAND_IGNORE_SIZE is what makes the 16x16 slot actually stick.
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.texture = _icon_for(item_id)
+	header.add_child(icon)
+	_contract_item_icons[item_id] = icon
+
 	var progress_label := Label.new()
 	progress_label.label_settings = ink_settings
-	body.add_child(progress_label)
+	header.add_child(progress_label)
 	_contract_progress_labels[item_id] = progress_label
 
 	var checklist := HBoxContainer.new()
@@ -1163,6 +1193,12 @@ func _update_contract_panel() -> void:
 			for u in range(boxes.size()):
 				_set_checkbox_checked(boxes[u], u < have)
 
+	# The icon shows the contract's (first, currently only) target item —
+	# UI_UX.md §5, a render of the real asset next to the text it labels.
+	_economy_icon.visible = not mix.is_empty()
+	if not mix.is_empty():
+		_economy_icon.texture = _icon_for(String(mix[0][0]))
+
 	var ticks_left: int = max(0, int(econ["next_delivery_tick"]) - sim.current_tick())
 	_contract_meta_label.text = "Next check in %d ticks" % ticks_left
 
@@ -1187,6 +1223,51 @@ func _set_checkbox_checked(box: Panel, checked: bool) -> void:
 	var mark: Label = box.get_node_or_null("Mark")
 	if mark != null:
 		mark.visible = checked
+
+
+## Returns a small isometric icon texture for an item id, generated offline
+## from the same real voxel model the item renders as in the world
+## (UI_UX.md §5 — "icons ... rendered from the real assets ... not
+## separately-drawn 2D icon art"; see assets/voxels/generators/icons.rs and
+## assets/voxels/README.md for how the PNG itself is produced). Resolves the
+## item id to an asset name via ITEM_MODELS, same mapping `_item_node_for`
+## already uses for the item's in-world mesh, so an icon and its in-world
+## model can never silently drift apart.
+##
+## Cached per asset name — never re-loads or re-renders on repeat calls
+## (icons are static build output, not something that changes at runtime).
+## An id with no icon, or one whose PNG isn't present on disk (e.g. `cargo
+## xtask` was never run, or vengi wasn't installed when icons/ was last
+## regenerated), still returns a real, non-null Texture2D: a plain
+## placeholder swatch, never null and never a silently-broken texture.
+func _icon_for(item_id: String) -> Texture2D:
+	var asset: String = ITEM_MODELS.get(item_id, ITEM_MODEL_FALLBACK)
+	if _icon_cache.has(asset):
+		return _icon_cache[asset]
+
+	var texture: Texture2D = null
+	var path := ICON_DIR + asset + ".png"
+	if ResourceLoader.exists(path):
+		var loaded = load(path)
+		if loaded is Texture2D:
+			texture = loaded
+
+	if texture == null:
+		texture = _fallback_icon_texture()
+
+	_icon_cache[asset] = texture
+	return texture
+
+
+## The documented fallback `_icon_for` returns when no real icon PNG could
+## be loaded. Built once and reused — a flat, muted swatch, deliberately
+## plain enough that it reads as "no icon" rather than as a broken asset.
+func _fallback_icon_texture() -> Texture2D:
+	if _icon_fallback_texture == null:
+		var img := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+		img.fill(Color(0.5, 0.5, 0.5, 0.6))
+		_icon_fallback_texture = ImageTexture.create_from_image(img)
+	return _icon_fallback_texture
 
 
 func _format_counts(pairs: Array) -> String:

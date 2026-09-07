@@ -103,6 +103,32 @@ were only discoverable by building it:
    the one that first scans the project — so the first import silently skips
    every `.vox` and the second imports them all. This bites any CI setup that
    assumes one import pass is enough.
+5. **UI icons (§5) turned out to need a second, separate render pass from
+   the review previews above — not a smaller copy of them (built
+   2026-09-07).** The obvious-sounding shortcut was "reuse
+   `previews/*.png`, just smaller": checking the actual files first (per
+   this section's own norm of verifying rather than assuming) ruled that
+   out. `vengi-thumbnailer`'s `--image` mode always fills the whole frame
+   with an opaque solid colour — confirmed by reading its `--jsonconfig`
+   cvar dump (no background/alpha/clear-colour cvar exists at all) and by
+   rendering through both `--image --isometric` and its default
+   camera-based path and getting an identically opaque result either way.
+   A preview is also deliberately padded, full-frame, and large (512px) —
+   right for "look at the whole model," wrong for "sit in an 18px UI slot
+   next to a line of text." So icon generation is a second binary,
+   `assets/voxels/generators/icons.rs` (`cargo run -p voxgen --bin
+   voxicons`), that calls the same `vengi-thumbnailer` and then does the
+   work the tool itself has no flag for: flood-fill the background to
+   transparent from the image border inward (not a flat colour-key, so a
+   future asset using a near-black *interior* colour can't be falsely
+   keyed), crop to content, and downscale onto a small (64px) square
+   canvas. This is still "extend the existing offline pipeline" (§2a option
+   (a), not the live in-engine `SubViewport` alternative that section also
+   named) — it reuses the same external tool and the same `cargo xtask`
+   staging pattern as `models/`, just as a distinct output (`assets/voxels/
+   icons/`, committed) rather than a rename of `previews/`. First concrete
+   use: `godot_project/main.gd`'s `_icon_for`, showing the contract's
+   target item's icon next to its name in the economy readout line.
 
 ## 3. Theme & setting
 
