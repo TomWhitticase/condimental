@@ -36,6 +36,7 @@ pub const ASSETS: &[Asset] = &[
     Asset { name: "hopper_fill", build: hopper_fill },
     Asset { name: "pipe", build: pipe },
     Asset { name: "pipe_source", build: pipe_source },
+    Asset { name: "pipe_inlet", build: pipe_inlet },
     Asset { name: "pipe_fluid", build: pipe_fluid },
     Asset { name: "item_tomato", build: item_tomato },
     Asset { name: "item_sauce_pail", build: item_sauce_pail },
@@ -156,16 +157,23 @@ pub fn belt(p: &Palette) -> VoxModel {
 /// for the visual pass. Distinguishing them visually is a follow-up.
 pub fn machine(p: &Palette) -> VoxModel {
     let mut m = VoxModel::tile();
+    let last = TILE_VOXELS as i32 - 1;
 
-    // Plinth.
-    m.cuboid((1, 30), (1, 30), (0, 1), p.idx("concrete_dark"));
+    // Plinth. Flush with the tile's own edges (0..last), not inset from
+    // them — a belt tile's own frame already runs edge-to-edge (see
+    // `belt()`'s doc), and a machine plinth that stopped a voxel short left
+    // a hairline seam of bare floor at every belt/pipe-to-machine junction,
+    // reading as "these don't actually connect" from the fixed isometric
+    // angle where SSAO darkens exactly that kind of step (the visual-
+    // overhaul pass's root-cause fix for the connection issue).
+    m.cuboid((0, last), (0, last), (0, 1), p.idx("concrete_dark"));
     // Hazard skirt around the plinth top edge.
-    m.hazard_stripe_x((1, 30), (1, 1), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
-    m.hazard_stripe_x((1, 30), (30, 30), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
-    for y in 1i32..=30 {
+    m.hazard_stripe_x((0, last), (0, 0), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    m.hazard_stripe_x((0, last), (last, last), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    for y in 0i32..=last {
         let a = if (y + 2).rem_euclid(6) < 3 { p.idx("hazard_yellow") } else { p.idx("hazard_black") };
-        m.set(1, y, 2, a);
-        m.set(30, y, 2, a);
+        m.set(0, y, 2, a);
+        m.set(last, y, 2, a);
     }
 
     // Painted housing with steel corner posts.
@@ -394,6 +402,43 @@ pub fn pipe_source(p: &Palette) -> VoxModel {
     m
 }
 
+/// The one pipe segment that actually feeds a machine — `FluidNetwork`'s
+/// `inlet_index` (see `world.rs`), always the run's machine-adjacent end.
+///
+/// **The connection this fixes**, found during the visual-overhaul pass: a
+/// plain `pipe` tile's solid header sits mid-tile (its bore is centred on
+/// `PIPE_AXIS_Y`, several voxels in from either edge — see `pipe_body`), so
+/// the run's last segment and the machine tile beside it left a real gap of
+/// open floor between the header's own surface and the machine's inlet
+/// nozzle, even though the two tiles are adjacent. This is the fitting that
+/// closes it: a branch T-off the header, reaching out to this tile's own
+/// edge at the SAME axis height (`PIPE_AXIS_Z`) the machine's inlet nozzle
+/// targets (see `machine_mixer`'s vinegar inlet) — no elbow needed, since
+/// both tiles sit on the floor and the header's axis height already matches
+/// the nozzle height once the two are deliberately kept in sync.
+///
+/// Which tile edge: **high local Y** (`last`), not low. `main.gd` places
+/// tiles at `(sim_x, sim_y) -> world (sim_x, sim_y) * TILE`, and the vox
+/// importer maps a model's low-Y face to the *higher*-world-Z-facing side of
+/// the tile (see `machine_mixer`'s own doc for the derivation, applied there
+/// to reach its north neighbour). The inlet pipe segment's machine neighbour
+/// sits at the *lower* sim-y (south of it — `world.rs` puts the pipe run
+/// north of the machine it feeds), so it's this tile's *high*-Y face that
+/// borders the machine, the mirror image of the mixer's own -Y-facing stub.
+pub fn pipe_inlet(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 24]);
+    pipe_body(&mut m, p, (9, 22));
+
+    let last = TILE_VOXELS as i32 - 1;
+    // Branch stub + flange, reaching from inside the header's own bore
+    // (well past its outer surface, so the two solids genuinely overlap
+    // rather than merely touching) out to the tile edge the machine sits
+    // against.
+    m.cylinder_y((16, PIPE_AXIS_Z), 2.2, (17, last), p.idx("pipe_grey"));
+    m.cylinder_y((16, PIPE_AXIS_Z), 3.0, (last - 1, last), p.idx("brass"));
+    m
+}
+
 /// The fluid itself — one tile of liquid sitting in the bore.
 ///
 /// Deliberately **one voxel tall**: `main.gd` scales this node vertically to
@@ -453,8 +498,15 @@ pub fn pipe_fluid(p: &Palette) -> VoxModel {
 
 /// Plinth, hazard skirt and painted base skirt, shared by every machine
 /// below so the family reads as one factory. `span` is the inclusive
-/// footprint the plinth covers; `skirt_top` is how high the painted base
-/// rises.
+/// footprint the plinth covers — callers pass the full tile/footprint
+/// extent (e.g. `(0, TILE_VOXELS - 1)`), not an inset one: a plinth that
+/// stops short of its own tile edge leaves a hairline gap of bare floor
+/// where a belt or pipe tile butts up against it, which is exactly the
+/// "doesn't visually connect" seam the visual-overhaul pass fixed (see
+/// `machine()`'s matching note above) — `belt()` and `pipe_body()` already
+/// run their own frames flush to the tile boundary, so machines now match
+/// them instead of being the one thing inset from it.
+/// `skirt_top` is how high the painted base rises.
 fn machine_footing(m: &mut VoxModel, p: &Palette, span: (i32, i32), skirt_top: i32, paint: &str) {
     let (lo, hi) = span;
     m.cuboid((lo, hi), (lo, hi), (0, 1), p.idx("concrete_dark"));
@@ -502,7 +554,7 @@ fn control_panel(m: &mut VoxModel, p: &Palette, x: (i32, i32), z: (i32, i32), fa
 /// box with a tank on it.
 pub fn machine_crusher(p: &Palette) -> VoxModel {
     let mut m = VoxModel::tile();
-    machine_footing(&mut m, p, (1, 30), 12, "paint_blue");
+    machine_footing(&mut m, p, (0, TILE_VOXELS as i32 - 1), 12, "paint_blue");
 
     // Open-topped feed throat, walls 2 voxels thick. Kept deliberately
     // SHALLOW: the first cut ran it to z=26 and the rendered preview showed
@@ -549,7 +601,7 @@ pub fn machine_crusher(p: &Palette) -> VoxModel {
 /// with the real run instead of pointing at empty floor.
 pub fn machine_mixer(p: &Palette) -> VoxModel {
     let mut m = VoxModel::tile();
-    machine_footing(&mut m, p, (1, 30), 8, "paint_blue");
+    machine_footing(&mut m, p, (0, TILE_VOXELS as i32 - 1), 8, "paint_blue");
 
     // Vessel: a hollow open-topped drum, so the agitator inside is visible
     // from the fixed isometric angle the same way the crusher's rolls are.
@@ -587,8 +639,14 @@ pub fn machine_mixer(p: &Palette) -> VoxModel {
     m.cuboid((17, 27), (15, 18), (23, 24), p.idx("steel_dark"));
 
     // Vinegar inlet: a stub reaching toward the pipe run in front (see doc).
-    m.cylinder_y((16, 19), 2.2, (0, 6), p.idx("pipe_grey"));
-    m.cylinder_y((16, 19), 3.0, (5, 6), p.idx("brass"));
+    // Height is PIPE_AXIS_Z exactly, not an independently-chosen number —
+    // this stub and the pipe run's own `pipe_inlet` branch (see the fluid
+    // pipes section below) are two ends of the same fitting, and the
+    // visual-overhaul pass found they'd been modelled 4 voxels apart in
+    // height, which is what actually made the mixer's supply line read as
+    // disconnected from the pipe feeding it rather than merely a tile away.
+    m.cylinder_y((16, PIPE_AXIS_Z), 2.2, (0, 8), p.idx("pipe_grey"));
+    m.cylinder_y((16, PIPE_AXIS_Z), 3.0, (6, 8), p.idx("brass"));
 
     control_panel(&mut m, p, (11, 20), (3, 7), 2);
     m
@@ -612,7 +670,7 @@ pub fn machine_mixer(p: &Palette) -> VoxModel {
 /// ladder, a steam stack, a sight glass showing the sauce level.
 pub fn machine_cooking_vat(p: &Palette) -> VoxModel {
     let mut m = VoxModel::new([TILE_VOXELS * 2, TILE_VOXELS * 2, 48]);
-    machine_footing(&mut m, p, (2, 61), 10, "paint_blue");
+    machine_footing(&mut m, p, (0, TILE_VOXELS as i32 * 2 - 1), 10, "paint_blue");
     let c = (TILE_VOXELS as i32, TILE_VOXELS as i32); // (32, 32)
 
     // Jacketed vessel body + insulation bands + domed head.
@@ -693,10 +751,15 @@ pub fn hopper(p: &Palette) -> VoxModel {
     let mut m = VoxModel::tile();
     let c = HOPPER_CENTER;
 
-    // Plinth + hazard skirt, matching every machine's footing.
-    m.cuboid((2, 29), (2, 29), (0, 1), p.idx("concrete_dark"));
-    m.hazard_stripe_x((2, 29), (2, 2), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
-    m.hazard_stripe_x((2, 29), (29, 29), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    // Plinth + hazard skirt, matching every machine's footing — flush with
+    // the tile's own edges (0..last), not inset, for the same reason
+    // `machine_footing`'s doc gives: the hopper stands directly against the
+    // first belt tile, and an inset plinth left a hairline gap of bare
+    // floor at exactly that seam (the visual-overhaul pass's fix).
+    let last = TILE_VOXELS as i32 - 1;
+    m.cuboid((0, last), (0, last), (0, 1), p.idx("concrete_dark"));
+    m.hazard_stripe_x((0, last), (0, 0), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    m.hazard_stripe_x((0, last), (last, last), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
 
     // Four corner columns running the full height, with the funnel slung
     // between them — how a real bulk hopper is actually supported, and (the

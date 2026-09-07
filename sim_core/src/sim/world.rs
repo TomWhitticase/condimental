@@ -24,6 +24,25 @@
 //! (Scale-up, Logistics expansion) needs more than one line (CLAUDE.md:
 //! "don't design for hypothetical future requirements").
 //!
+//! **Corners, specifically: still deliberately out of scope, checked
+//! explicitly during the visual-overhaul pass rather than left unexamined.**
+//! Every belt tile and every pipe tile only ever runs along +X (see
+//! `belt.rs` and `fluid.rs`'s pipe-run construction above) — there is no
+//! `direction` field anywhere in a `BeltSnapshot`/`PipeSnapshot`, so a
+//! renderer has nowhere to even learn that a tile turns. Adding a real
+//! corner would need, in order: (1) a per-tile orientation in the sim's own
+//! snapshots (the straight-line assumption this module's doc already names
+//! runs deep enough that this is a topology change, not a rendering one);
+//! (2) rotated belt/pipe voxel models or a shared rotation transform Godot
+//! applies per tile (the voxel side is comparatively cheap — `belt()` and
+//! `pipe_body()` in `assets/voxels/generators/assets.rs` already run their
+//! frames/bores flush to all four tile edges, which is what any rotation
+//! would pivot around). Building either half now, with no corner the sim
+//! ever actually places, would be untested speculative surface — exactly
+//! what CLAUDE.md's "don't design for hypothetical future requirements"
+//! warns against — so this stays documented-and-deferred rather than
+//! half-built, until a milestone actually needs a chain that turns.
+//!
 //! **Machine size is data, not a constant** (the "Machines improvement"
 //! milestone). Each stage's machine occupies a rectangle of tiles given by
 //! its kind's [`Footprint`] in `data/machines.ron`, anchored at an origin

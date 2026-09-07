@@ -23,7 +23,7 @@ below is history and should only ever be appended to.)*
 - **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. **Milestone 6 (Fluids) is done**: its simulation half (pipe network, pressure equalization, a recipe requiring a liquid, the `SimBridge` fluid snapshot) and its presentation half (pipe/supply-tap/liquid voxel assets, a pipe run rendered from the simulation's own segment list, a liquid body whose height tracks live pressure, and pipe hover info in both view modes) have both landed, built as a 2-ticket orchestration Run (`run_2867a25ae373`, sequential: sim core then presentation). Milestone 7 (Timed processes) is next. A separate **"Machines improvement"** epic (not an ARCHITECTURE.md §9 milestone — an infrastructure/content pass requested directly) is in progress: ticket 1 landed machine footprints as data (`data/machines.ron`), generalizing the chain's layout math so a machine can occupy more than one tile, and ticket 2 spent that on real content — the chain's front end is now a crusher, a mixer and a genuinely 2x2 cooking vat. Ticket 3 replaced the debug "spawn a tomato onto the belt" command with a real **hopper** — a building west of the chain's head that buffers raw tomatoes and meters them onto the first belt one per tick, filled by the player (SPACE) rather than teleporting items. **Ticket 4 finished the epic**: the Godot presentation of all three — a bespoke voxel model per front-end machine kind, multi-tile rendering so the cooking vat actually covers its 2x2 footprint, the hopper drawn with a product level that tracks its live fill, and hover resolving any tile of a multi-tile machine as well as the hopper. **The "Machines improvement" epic is complete.**
 - **Art/UI:** the voxel pipeline (UI_UX.md §2a/§2b) exists and is the source of every asset in the scene — including milestone 6's pipes and the liquid inside them, which added a fourth material class (`liquid`, a glossy dielectric) to `palette.ron` — Rust generators in `assets/voxels/generators/` produce `.vox` models, reviewed as isometric PNGs via `scripts/build-voxels.sh`, imported into Godot by a pinned community importer. UI_UX.md §5's real UI is now landed: the money/contract readout is a diegetic clipboard panel (paper background, steel clip bar, checkbox tick marks) with a voxel-rendered icon per required item, and per-machine detail (recipe/progress/buffers) is hover-only instead of dense always-on text, working in both view modes — a screen-centre crosshair stands in for the cursor in first-person — see the log entries below.
 - **UI polish epic (done):** a Run (`run_cc6860507d36`) with 3 parallel tickets targeting UI_UX.md §5, all done and merged — hover tooltips for machines, a voxel-rendered icon pipeline, and the clipboard reskin. Check `orca orchestration task-list --run run_cc6860507d36 --json` for the DAG's final state.
-- **Visual overhaul (in progress):** a dedicated pass on top of everything above, requested directly — fixing tile-to-tile connection issues (belts/pipes not visually joining adjacent tiles or machines, no corner handling yet) and further polishing UI/menus per UI_UX.md. Dispatched to a fable-model agent; not yet reviewed or merged.
+- **Visual overhaul (done):** a dedicated pass on top of everything above, requested directly — see the log entry below for specifics. Root-caused and fixed the belt/pipe-to-machine seam (machine and hopper footings were inset from their own tile edges while belts and pipes already ran flush to theirs), added a dedicated connector fitting for the one pipe segment that actually feeds a machine, gave the hopper's status lamp real running/empty feedback, and made a couple of small typography fixes to the contract clipboard. Corner handling for belts/pipes stays deliberately undone — documented in `sim_core/src/sim/world.rs`'s module doc as needing a per-tile direction field in the sim's own snapshots before it's a rendering change at all, not something to speculatively half-build against a topology that doesn't exist yet. Not yet reviewed or merged.
 - **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, SPACE/SHIFT up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
 - **Lighting:** the sky is the real background (`BG_SKY`), not a flat colour — see the "empty void" DEVLOG entry below for why that matters. `scripts/screenshot-scene.sh --first-person` reviews that mode's lighting specifically.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
@@ -41,6 +41,60 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-07 — Visual overhaul: closing the belt/pipe/machine seams, hopper feedback, clipboard typography
+
+A dedicated presentation-only pass requested directly by the project owner
+("things don't connect properly to adjacent tiles... we also need to improve
+our UI elements"), on top of everything below. `sim_core`'s only change is a
+doc comment (see the corner note below); no recipe, machine, or economy
+behaviour moved.
+
+**Root cause of the connection issue, found by actually rendering and
+zooming into the scene rather than guessing from code:** `belt()` and
+`pipe_body()` (`assets/voxels/generators/assets.rs`) have always run their
+frames/bores flush to all four edges of their own tile, but every machine's
+footing (`machine()`, the shared `machine_footing()` crusher/mixer/vat build
+on, and the hopper's own plinth) was inset 1-2 voxels from its tile's edges.
+That left a small but real, and completely consistent, seam of bare floor —
+darkened further by SSAO into a visible crease — at every single belt-to-
+machine and pipe-to-machine junction in the factory. Fixed by making every
+one of those footings flush with its tile boundary, the same rule belts and
+pipes already followed.
+
+**The pipe run itself had a second, more specific gap**: a plain `pipe`
+tile's solid header sits mid-tile, so the run's last segment (the one
+`FluidNetwork::inlet_index` actually feeds a machine from) left real open
+floor between its own bore and the mixer's inlet nozzle — and the two were
+modelled 4 voxels apart in height on top of that. New `pipe_inlet` asset (a
+branch fitting reaching to the machine-facing tile edge at the mixer's own
+inlet height) closes it; a new `test_fluids.gd` assertion checks the inlet
+segment actually renders as this distinct fitting, not a recoloured plain
+pipe.
+
+**Corners:** checked, not built. Every belt and pipe tile only ever runs
++X — there's no `direction` field in any snapshot for a renderer to even
+read — so drawing a turn needs a sim-side topology change first, not just a
+rotated asset. Documented in `world.rs`'s module doc rather than
+speculatively built against a corner nothing places yet.
+
+**UI polish**, scoped to real, specific gaps rather than a broad reskin: the
+hopper's one status lamp used to sit a fixed colour regardless of state —
+now it swaps between the same idle/running materials a machine's lamp uses
+based on whether the hopper actually holds stock, so filling it gives
+feedback beyond the level slowly rising. The contract clipboard's title and
+money figure shared the body text's exact size, so nothing on the panel told
+the eye what mattered most; both now step up in a small, consistent type
+scale.
+
+Verified the established way: `cargo test -p sim_core` and the full
+`scripts/verify-core-loop.sh` suite both green (including the new fluids
+assertion), and `scripts/screenshot-scene.sh` rendered and reviewed multiple
+times — populated isometric, hover-pipe, hover-hopper, and first-person —
+comparing tight crops of the same regions before and after the footing fix
+to confirm it actually changed the generated geometry (voxel counts moved,
+e.g. `machine_mixer` 11675 -> 12877) even where the visual delta reads as
+subtle at screenshot resolution rather than dramatic.
 
 ### 2026-09-07 — Machines improvement, ticket 4: you can see all of it now
 

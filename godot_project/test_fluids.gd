@@ -18,7 +18,10 @@
 #     and a segment with no fluid in it is hidden outright,
 #   * hovering a pipe tile resolves to fluid info text, through the exact
 #     same _tile_under_screen_pos plane-intersection path machines use, in
-#     BOTH view modes (ISOMETRIC cursor and FIRST_PERSON crosshair).
+#     BOTH view modes (ISOMETRIC cursor and FIRST_PERSON crosshair),
+#   * the inlet segment (the one that actually feeds a machine) renders as
+#     the dedicated connector fitting (PIPE_INLET_ASSET), not a plain header
+#     tile — the visual-overhaul pass's fix for the pipe-to-machine seam.
 #
 # The one-frame-before-checking dance and the "never hold your own camera
 # reference" rule below are both inherited from test_hover.gd — see that
@@ -127,6 +130,33 @@ func _run_checks() -> void:
 	var source_classes: Array = main._asset_classes.get(main.PIPE_SOURCE_ASSET, [])
 	if plain_classes.is_empty() or source_classes.is_empty():
 		_fail("voxels/index.json is missing '%s' or '%s'" % [main.PIPE_ASSET, main.PIPE_SOURCE_ASSET])
+		return
+
+	# --- The inlet segment renders as the machine-connector fitting, not a
+	# plain header tile (the visual-overhaul pass's fix for the pipe-to-
+	# machine seam — see PIPE_INLET_ASSET's doc in main.gd) ---------------
+	var inlet_classes: Array = main._asset_classes.get(main.PIPE_INLET_ASSET, [])
+	if inlet_classes.is_empty():
+		_fail("voxels/index.json is missing '%s'" % main.PIPE_INLET_ASSET)
+		return
+	var inlet_seg: int = int(snapshot["inlet_index"])
+	var inlet_pipe: Node3D = run.get_node_or_null("pipe_%d" % inlet_seg)
+	if inlet_pipe == null:
+		_fail("no rendered pipe node for the inlet segment (%d)" % inlet_seg)
+		return
+	var inlet_mesh: MeshInstance3D = inlet_pipe.get_node_or_null(String(inlet_classes[0]))
+	if inlet_mesh == null or inlet_mesh.mesh == null:
+		_fail("inlet segment %d isn't drawn as '%s' — it renders as a plain header instead of the machine connector" % [
+			inlet_seg, main.PIPE_INLET_ASSET,
+		])
+		return
+	# The inlet fitting's mesh must be a genuinely different resource from a
+	# plain segment's — otherwise this is just the same model under a name
+	# that happens to resolve, not the actual connector geometry.
+	var plain_mesh_path: String = main._mesh_for(main.PIPE_ASSET + "." + String(inlet_classes[0])).resource_path \
+		if main._mesh_for(main.PIPE_ASSET + "." + String(inlet_classes[0])) != null else ""
+	if plain_mesh_path != "" and inlet_mesh.mesh.resource_path == plain_mesh_path:
+		_fail("the inlet segment's mesh is the plain pipe's own resource — pipe_inlet.vox isn't actually distinct")
 		return
 
 	# --- Liquid height tracks live pressure -------------------------------

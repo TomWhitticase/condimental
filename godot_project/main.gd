@@ -86,6 +86,15 @@ const VOX_DIR := "res://voxels/"
 # different colour, per UI_UX.md §7's "never encode state in colour alone."
 const PIPE_ASSET := "pipe"
 const PIPE_SOURCE_ASSET := "pipe_source"
+## The visual-overhaul pass's fix for the pipe-to-machine connection gap: the
+## one segment `fluid_snapshot_json`'s `inlet_index` names (always the run's
+## machine-adjacent end, see `sim::FluidNetwork`) draws with a branch fitting
+## reaching to the tile edge the machine sits against, instead of the plain
+## `pipe` model whose solid header sits mid-tile and left open floor between
+## it and the machine's own inlet nozzle. See `assets/voxels/generators/
+## assets.rs`'s `pipe_inlet` doc for the full reasoning, including which tile
+## edge and why.
+const PIPE_INLET_ASSET := "pipe_inlet"
 const PIPE_FLUID_ASSET := "pipe_fluid"
 # Where the liquid sits inside the pipe, stated in voxels against
 # assets/voxels/generators/assets.rs's PIPE_BORE_Z0 / PIPE_BORE_HEIGHT — the
@@ -205,6 +214,14 @@ var _last_fluid: Dictionary = {} # last fluid snapshot; {} when this world has n
 var _hopper_tile := Vector2i.ZERO # footprint origin (min-X/min-Y corner)
 var _hopper_footprint := Vector2i.ONE
 var _hopper_fill_node: Node3D
+## The hopper's one status lamp (see `hopper()`'s doc), swapped between the
+## same idle/running materials a machine's lamp uses — the visual-overhaul
+## pass's answer to "does filling the hopper give feedback beyond its level
+## slowly rising": the lamp now actually reports "holds stock"/"empty" the
+## same way a machine's lamp reports running/idle, rather than sitting a
+## fixed colour regardless of state.
+var _hopper_lamp: MeshInstance3D
+var _hopper_has_stock: bool = false
 var _last_hopper: Dictionary = {} # last hopper snapshot, for the hover tooltip
 
 var _class_materials: Dictionary = {} # "matte"/"metal"/"emissive" -> StandardMaterial3D
@@ -568,6 +585,7 @@ func _build_hopper() -> void:
 		remove_child(existing)
 		existing.free()
 	_hopper_fill_node = null
+	_hopper_lamp = null
 
 	var snapshot := _read_hopper_snapshot()
 	if snapshot.is_empty():
@@ -585,6 +603,10 @@ func _build_hopper() -> void:
 	body.name = "hopper_body"
 	body.position = _footprint_centre(_hopper_tile, _hopper_footprint, FLOOR_Y)
 	root.add_child(body)
+
+	_hopper_lamp = body.get_node_or_null("emissive")
+	_hopper_has_stock = true # force the first _update_hopper call to apply
+	_set_hopper_lamp_stocked(false)
 
 	# The product level: one voxel tall, scaled every frame — see _update_hopper.
 	var fill := _asset_node(HOPPER_FILL_ASSET)
@@ -634,6 +656,18 @@ func _update_hopper() -> void:
 	_hopper_fill_node.visible = fill > HOPPER_MIN_VISIBLE_FILL
 	if _hopper_fill_node.visible:
 		_hopper_fill_node.scale.y = fill * float(HOPPER_FILL_HEIGHT_VOXELS)
+	_set_hopper_lamp_stocked(fill > HOPPER_MIN_VISIBLE_FILL)
+
+
+## Swaps the hopper's status lamp between the same idle/running materials a
+## machine's lamp uses (`_set_machine_running`'s exact pattern, applied to a
+## building that isn't a `stages` entry) — see `_hopper_lamp`'s doc for why.
+func _set_hopper_lamp_stocked(has_stock: bool) -> void:
+	if _hopper_has_stock == has_stock:
+		return
+	_hopper_has_stock = has_stock
+	if _hopper_lamp != null:
+		_hopper_lamp.set_surface_override_material(0, _lamp_running if has_stock else _lamp_idle)
 
 
 ## Builds the pipe run — one voxel model per pipe tile the SIMULATION says
@@ -676,13 +710,22 @@ func _build_fluid_network() -> void:
 	add_child(run)
 
 	var segments: Array = snapshot.get("segments", [])
+	var inlet_index := int(snapshot.get("inlet_index", -1))
 	for i in range(segments.size()):
 		var segment: Dictionary = segments[i]
 		var tile_pair: Array = segment["tile"]
 		var tile := Vector2i(int(tile_pair[0]), int(tile_pair[1]))
 		_pipe_tiles[tile] = i
 
-		var asset: String = PIPE_SOURCE_ASSET if bool(segment.get("is_source", false)) else PIPE_ASSET
+		var asset: String
+		if bool(segment.get("is_source", false)):
+			asset = PIPE_SOURCE_ASSET
+		elif i == inlet_index:
+			# The one segment actually feeding a machine — see PIPE_INLET_ASSET's
+			# doc for why it needs its own model rather than the plain one.
+			asset = PIPE_INLET_ASSET
+		else:
+			asset = PIPE_ASSET
 		var pipe := _asset_node(asset)
 		pipe.name = "pipe_%d" % i
 		pipe.position = _tile_origin(tile.x, tile.y, FLOOR_Y)
@@ -1270,13 +1313,30 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	ink_settings.font_color = Color(0.16, 0.13, 0.08)
 	ink_settings.outline_size = 0
 
+	# A small type-scale hierarchy on the clipboard, added during the visual-
+	# overhaul pass: the title and the money figure used to share the exact
+	# body text size, so nothing on the panel told the eye what mattered most
+	# — a real UI_UX.md §5 polish gap ("typography/readability issues"), not
+	# just an aesthetic nicety. Same ink colour and family throughout, only
+	# size steps up, so it still reads as one consistent clipboard rather
+	# than mixed styles.
+	var title_settings := LabelSettings.new()
+	title_settings.font_size = base_settings.font_size + 2
+	title_settings.font_color = ink_settings.font_color
+	title_settings.outline_size = 0
+
+	var money_settings := LabelSettings.new()
+	money_settings.font_size = base_settings.font_size + 6
+	money_settings.font_color = ink_settings.font_color
+	money_settings.outline_size = 0
+
 	var title := Label.new()
-	title.label_settings = ink_settings
+	title.label_settings = title_settings
 	title.text = "CONTRACT"
 	body.add_child(title)
 
 	_contract_money_label = Label.new()
-	_contract_money_label.label_settings = ink_settings
+	_contract_money_label.label_settings = money_settings
 	body.add_child(_contract_money_label)
 
 	_checkbox_style_unchecked = StyleBoxFlat.new()
