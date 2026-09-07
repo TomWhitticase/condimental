@@ -19,11 +19,23 @@
 //! *one* straight chain, and each recipe (besides the first) is assumed to
 //! consume exactly one unit of the previous stage's single output item.
 //! Branching/multiple independent chains will need an explicit topology
-//! description in data (e.g. a future `machines.ron` placement list) rather
-//! than "one stage per recipe in file order" — flagged here rather than
-//! solved now, since nothing before milestone 8/9 (Scale-up, Logistics
-//! expansion) needs more than one line (CLAUDE.md: "don't design for
-//! hypothetical future requirements").
+//! description in data rather than "one stage per recipe in file order" —
+//! flagged here rather than solved now, since nothing before milestone 8/9
+//! (Scale-up, Logistics expansion) needs more than one line (CLAUDE.md:
+//! "don't design for hypothetical future requirements").
+//!
+//! **Machine size is data, not a constant** (the "Machines improvement"
+//! milestone). Each stage's machine occupies a rectangle of tiles given by
+//! its kind's [`Footprint`] in `data/machines.ron`, anchored at an origin
+//! tile that is the rectangle's minimum-X/minimum-Y corner and also the tile
+//! the stage's belt feeds into — see [`super::machines`]'s module doc, which
+//! is the single statement of that convention. The chain is laid out by
+//! *accumulating* those widths (belt tiles, then this machine's full width,
+//! then the next stage begins immediately after), not by multiplying a fixed
+//! per-stage span, so making a kind wider pushes every downstream stage east
+//! by exactly the extra tiles. With every shipped kind at 1x1 the arithmetic
+//! reduces to the old fixed span exactly, which is why introducing it moved
+//! no existing tile.
 //!
 //! This is also where `SimBridge`'s pure-logic half lives (ARCHITECTURE.md
 //! §4): `tick()`, `dirty_chunks()`/`chunk_snapshot()`, `issue_command()`,
@@ -38,6 +50,7 @@ use super::belt::BeltSegment;
 use super::economy::{Economy, EconomySnapshot};
 use super::fluid::{FluidNetwork, PipeSegment};
 use super::machine::Machine;
+use super::machines::{Footprint, MachineRegistry};
 use super::recipe::{Recipe, RecipeRegistry};
 use super::types::{ChunkId, FluidId, Fx, ItemId, RecipeId, TileCoord, chunk_of};
 
@@ -53,6 +66,20 @@ pub struct Position {
 #[derive(Debug, Clone, Copy)]
 pub struct BeltSpan {
     pub length_tiles: i32,
+}
+
+/// Which machine kind an entity is, and how many tiles it therefore covers
+/// (the "Machines improvement" milestone). Both come straight from
+/// `data/machines.ron` — this component is where a stage's entry in that
+/// file lands in the ECS, so nothing has to re-look-it-up by recipe id.
+///
+/// The entity's `Position` is the footprint's **origin**: its minimum-X,
+/// minimum-Y corner, and the tile its belt feeds into. See
+/// [`super::machines`]'s module doc for the full convention.
+#[derive(Debug, Clone)]
+pub struct MachinePlacement {
+    pub kind: String,
+    pub footprint: Footprint,
 }
 
 /// A command the player can issue (ARCHITECTURE.md §4's `PlayerCommand`).
@@ -128,9 +155,46 @@ pub struct BeltSnapshot {
     pub items: Vec<(ItemId, f64)>,
 }
 
+/// One machine, for rendering.
+///
+/// JSON shape (`snake_case`, as serialized by `serde_json`):
+///
+/// ```json
+/// {
+///   "tile": [4, 0],
+///   "kind": "cooker",
+///   "footprint": { "width_tiles": 1, "height_tiles": 1 },
+///   "recipe": "tomato_sauce",
+///   "process": [120, 180],
+///   "input": [["tomato", 2]],
+///   "output": [["tomato_sauce", 1]]
+/// }
+/// ```
+///
+/// `kind`/`footprint` are new in the "Machines improvement" milestone.
+/// **`tile` is the footprint's origin — its minimum-X, minimum-Y corner, and
+/// the tile the belt feeds into** (see [`super::machines`]'s module doc); the
+/// machine covers `x in [tile.x, tile.x + width_tiles)`, `y in [tile.y,
+/// tile.y + height_tiles)`. A renderer that placed a mesh at `tile` and
+/// assumed one tile of extent stays correct for every 1x1 kind and only
+/// needs the footprint to size or centre a larger one.
+///
+/// **Chunk-boundary caveat:** a machine whose footprint straddles a chunk
+/// boundary (ARCHITECTURE.md §3.1's 32x32 chunks) appears in the snapshot of
+/// *every* chunk it overlaps, each time with identical contents — including
+/// the same origin `tile`, which may lie outside the chunk being asked
+/// about. That is deliberate: it means a renderer that only loads visible
+/// chunks still learns about a machine whose origin is off-screen. The cost
+/// is that a consumer stitching several chunk snapshots together must key
+/// machines by `tile` and de-duplicate, not blindly concatenate.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct MachineSnapshot {
+    /// The footprint's origin tile — see this type's doc.
     pub tile: TileCoord,
+    /// Machine kind id from `data/machines.ron` (e.g. "cooker").
+    pub kind: String,
+    /// How many tiles this machine covers, anchored at `tile`.
+    pub footprint: Footprint,
     pub recipe: RecipeId,
     /// (start_tick, required_ticks) — Godot derives progress from this plus
     /// the current tick count rather than needing a snapshot every tick.
@@ -222,7 +286,26 @@ pub enum TileSnapshot {
     Belt {
         items_here: Vec<ItemId>,
     },
+    /// A tile occupied by a machine. **Any** tile inside the machine's
+    /// footprint resolves to this, not only its origin — which is what makes
+    /// hovering a multi-tile machine work anywhere on it.
+    ///
+    /// JSON:
+    /// `{"kind": "machine", "machine_kind": "cooker",
+    ///   "footprint": {"width_tiles": 1, "height_tiles": 1},
+    ///   "origin_tile": [4, 0], "recipe": "tomato_sauce",
+    ///   "process": [120, 180]}`
+    ///
+    /// `origin_tile` is the footprint's minimum-X/minimum-Y corner (see
+    /// [`super::machines`]'s module doc), so a caller that hovered a
+    /// non-origin tile can still identify *which* machine it hit and where
+    /// that machine actually starts. `machine_kind` is spelled out rather
+    /// than reusing `kind`, which this enum already spends on its own
+    /// variant tag.
     Machine {
+        machine_kind: String,
+        footprint: Footprint,
+        origin_tile: TileCoord,
         recipe: RecipeId,
         process: Option<(u64, u64)>,
     },
@@ -245,12 +328,40 @@ pub enum TileSnapshot {
 /// stages `recipes.ron` currently defines, instead of hardcoding stage
 /// geometry client-side (mirrors the same "Godot draws what the sim says
 /// exists" principle `chunk_snapshot` already follows for dynamic state).
+///
+/// JSON shape (`snake_case`, one object per stage in chain order):
+///
+/// ```json
+/// {
+///   "recipe": "tomato_sauce",
+///   "belt_start_tile": [0, 0],
+///   "belt_length_tiles": 4,
+///   "machine_tile": [4, 0],
+///   "machine_kind": "cooker",
+///   "machine_footprint": { "width_tiles": 1, "height_tiles": 1 }
+/// }
+/// ```
+///
+/// `machine_kind`/`machine_footprint` are new in the "Machines improvement"
+/// milestone; every field that existed before is unchanged in both name and
+/// meaning, so an existing consumer keeps working untouched.
+/// **`machine_tile` is the footprint's origin** — its minimum-X/minimum-Y
+/// corner, and the tile the belt feeds into (see [`super::machines`]'s module
+/// doc). The machine covers `x in [machine_tile.x, machine_tile.x +
+/// width_tiles)`, `y in [machine_tile.y, machine_tile.y + height_tiles)`, and
+/// the next stage's `belt_start_tile` is the tile immediately east of that
+/// rectangle.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct StageLayout {
     pub recipe: RecipeId,
     pub belt_start_tile: TileCoord,
     pub belt_length_tiles: i32,
+    /// Origin tile of this stage's machine — see this type's doc.
     pub machine_tile: TileCoord,
+    /// Machine kind id from `data/machines.ron` (e.g. "cooker").
+    pub machine_kind: String,
+    /// How many tiles that machine covers, anchored at `machine_tile`.
+    pub machine_footprint: Footprint,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -287,11 +398,6 @@ pub struct World {
 }
 
 const BELT_LENGTH_TILES: i32 = 4;
-/// Tile x-offset between one stage's belt start and the next — belt tiles,
-/// then one tile for the machine, then the next stage begins immediately
-/// after (matches milestone 3's original single-stage numbers exactly when
-/// there's only one stage).
-const STAGE_SPAN_TILES: i32 = BELT_LENGTH_TILES + 1;
 const ITEM_MIN_SPACING_TILES: f64 = 0.25;
 const BELT_SPEED_TILES_PER_TICK: f64 = 0.02;
 const MACHINE_INPUT_CAPACITY: u32 = 8;
@@ -302,20 +408,29 @@ const MACHINE_OUTPUT_CAPACITY: u32 = 8;
 /// other. Long enough that pressure equalization is doing visible work
 /// carrying fluid down the run, short enough to stay a demo.
 const FLUID_PIPE_RUN_TILES: i32 = 4;
-/// Which tile row the pipe run occupies. The production chain sits on row
-/// 0; the pipes run parallel to it on row 1, so no pipe tile ever collides
-/// with a belt or machine tile. Deliberately inside the same 32x32 chunk as
-/// the chain (ARCHITECTURE.md §3.1) rather than a row above it at `-1`,
-/// which would spill the world across two chunks for no gain.
-const FLUID_PIPE_ROW_Y: i32 = 1;
+/// Which tile row the production chain itself sits on. Every belt tile and
+/// every machine footprint's *origin* row is this; a machine taller than one
+/// tile grows northward from here.
+const CHAIN_ROW_Y: i32 = 0;
 /// Volume one pipe tile holds, in whole fluid units.
 const PIPE_SEGMENT_CAPACITY: i32 = 10;
 
 impl World {
     /// Builds one stage per recipe in `recipes.ordered()`, in file order,
     /// laid out left to right — see the module doc for why this order (not
-    /// any Rust-side description) is what defines the chain.
+    /// any Rust-side description) is what defines the chain. Machine sizes
+    /// come from the shipped `data/machines.ron`; use
+    /// [`World::with_machines`] to supply a different set.
     pub fn new(recipes: RecipeRegistry) -> Self {
+        Self::with_machines(recipes, MachineRegistry::bundled())
+    }
+
+    /// [`World::new`], but with an explicit machine-kind registry instead of
+    /// the bundled `data/machines.ron`. This is the seam that lets a test
+    /// exercise a footprint no shipped kind has (every shipped kind is 1x1,
+    /// so the width math would otherwise be unobservable) without inventing
+    /// fake content in the real data file.
+    pub fn with_machines(recipes: RecipeRegistry, machines: MachineRegistry) -> Self {
         let ordered = recipes.ordered();
         assert!(
             !ordered.is_empty(),
@@ -323,16 +438,35 @@ impl World {
         );
         validate_chain(ordered);
         validate_fluid_scope(ordered);
+        // Every recipe's machine kind must exist in machines.ron before any
+        // layout arithmetic runs — a missing kind has no footprint, and
+        // guessing one (1x1) would silently mis-place the entire rest of the
+        // chain. Same construction-time-panic rule as `validate_chain`.
+        if let Err(e) = machines.validate_covers(&recipes) {
+            panic!("machine content error: {e}");
+        }
 
         let mut ecs = hecs::World::new();
         let mut stages = Vec::with_capacity(ordered.len());
 
-        for (i, recipe) in ordered.iter().enumerate() {
-            let stage_start_x = i as i32 * STAGE_SPAN_TILES;
+        // Stage placement accumulates each machine's own width rather than
+        // multiplying a fixed per-stage span: belt tiles, then this stage's
+        // machine footprint, then the next stage starts on the very next
+        // tile. With every kind 1x1 this reproduces the old
+        // `i * (BELT_LENGTH_TILES + 1)` exactly.
+        let mut next_stage_x = 0;
+        for recipe in ordered.iter() {
+            let footprint = machines
+                .footprint_of(&recipe.machine)
+                .expect("validate_covers ran above, so every kind is known");
+
+            let belt_start_x = next_stage_x;
+            let machine_origin_x = belt_start_x + BELT_LENGTH_TILES;
+            next_stage_x = machine_origin_x + footprint.width_tiles;
 
             let belt_entity = ecs.spawn((
                 Position {
-                    tile: (stage_start_x, 0),
+                    tile: (belt_start_x, CHAIN_ROW_Y),
                 },
                 BeltSpan {
                     length_tiles: BELT_LENGTH_TILES,
@@ -344,8 +478,14 @@ impl World {
             ));
 
             let machine_entity = ecs.spawn((
+                // The origin tile: the footprint's min-X/min-Y corner, and
+                // the tile this stage's belt feeds into.
                 Position {
-                    tile: (stage_start_x + BELT_LENGTH_TILES, 0),
+                    tile: (machine_origin_x, CHAIN_ROW_Y),
+                },
+                MachinePlacement {
+                    kind: recipe.machine.clone(),
+                    footprint,
                 },
                 Machine::new(recipe.id.clone(), MACHINE_INPUT_CAPACITY, MACHINE_OUTPUT_CAPACITY),
             ));
@@ -365,22 +505,31 @@ impl World {
         // recipe simply has no pipes.
         let fluid_stage = ordered.iter().position(|r| !r.fluid_inputs.is_empty());
         let fluid = fluid_stage.map(|i| {
-            let machine_x = i as i32 * STAGE_SPAN_TILES + BELT_LENGTH_TILES;
+            let machine_entity = stages[i].machine_entity;
+            let machine_origin = ecs.get::<&Position>(machine_entity).unwrap().tile;
+            let machine_footprint = ecs.get::<&MachinePlacement>(machine_entity).unwrap().footprint;
+            // The pipe run sits on the row immediately *north* of the
+            // machine it feeds, so its inlet is always edge-adjacent to that
+            // machine's footprint no matter how tall the machine is. For a
+            // 1x1 machine on row 0 that is row 1 — exactly where milestone
+            // 6 put it — and for a taller one it rises with the machine
+            // instead of being buried inside it.
+            let pipe_row_y = machine_origin.1 + machine_footprint.height_tiles;
             let capacity = Fx::from_num(PIPE_SEGMENT_CAPACITY);
             // Laid out left to right ending directly beside the machine it
             // feeds: the source is the far end, the inlet is the tile
             // adjacent to the machine.
             let segments: Vec<PipeSegment> = (0..FLUID_PIPE_RUN_TILES)
                 .map(|n| {
-                    let x = machine_x - (FLUID_PIPE_RUN_TILES - 1 - n);
-                    PipeSegment::new((x, FLUID_PIPE_ROW_Y), capacity, n == 0)
+                    let x = machine_origin.0 - (FLUID_PIPE_RUN_TILES - 1 - n);
+                    PipeSegment::new((x, pipe_row_y), capacity, n == 0)
                 })
                 .collect();
             let inlet = segments.len() - 1;
             FluidNetwork::new(ordered[i].fluid_inputs[0].0.clone(), segments, inlet)
         });
 
-        Self {
+        let world = Self {
             ecs,
             recipes,
             tick_count: 0,
@@ -390,7 +539,42 @@ impl World {
             economy: Economy::new(),
             fluid,
             fluid_stage,
+        };
+        world.validate_placement();
+        world
+    }
+
+    /// Construction-time check that the laid-out world is physically
+    /// coherent: no machine footprint overlaps another machine, a belt tile,
+    /// or a pipe tile. With the accumulate-widths layout above this can't
+    /// happen for the shipped content, but a future change to the layout
+    /// rule or the pipe run would otherwise fail as a subtly wrong render
+    /// rather than an error — so it panics here, at construction, the same
+    /// way `validate_chain` does for a broken recipe chain.
+    fn validate_placement(&self) {
+        let mut claims: Vec<(TileCoord, String)> = Vec::new();
+
+        for (i, stage) in self.stages.iter().enumerate() {
+            let belt_tile = self.position_of(stage.belt_entity);
+            let span = self.ecs.get::<&BeltSpan>(stage.belt_entity).unwrap();
+            for dx in 0..span.length_tiles {
+                claims.push(((belt_tile.0 + dx, belt_tile.1), format!("stage {i}'s belt")));
+            }
+
+            let placement = self.placement_of(stage.machine_entity);
+            let origin = self.position_of(stage.machine_entity);
+            for tile in placement.footprint.tiles(origin) {
+                claims.push((tile, format!("stage {i}'s '{}' machine", placement.kind)));
+            }
         }
+
+        if let Some(fluid) = &self.fluid {
+            for segment in fluid.segments() {
+                claims.push((segment.tile, "the pipe run".to_string()));
+            }
+        }
+
+        assert_no_tile_conflicts(&claims);
     }
 
     pub fn current_tick(&self) -> u64 {
@@ -447,10 +631,27 @@ impl World {
         self.ecs.get::<&Position>(entity).unwrap().tile
     }
 
+    /// A machine entity's kind + footprint (`data/machines.ron`), cloned out
+    /// of the ECS so the caller isn't holding a borrow on `self.ecs`.
+    fn placement_of(&self, entity: Entity) -> MachinePlacement {
+        (*self.ecs.get::<&MachinePlacement>(entity).unwrap()).clone()
+    }
+
     fn mark_dirty(&mut self, tile: TileCoord) {
         let chunk = chunk_of(tile);
         if !self.dirty.contains(&chunk) {
             self.dirty.push(chunk);
+        }
+    }
+
+    /// Marks every chunk a machine's footprint touches, not just the one its
+    /// origin tile is in — a machine straddling a chunk boundary changes
+    /// what both chunks' snapshots contain, so both have to be re-read.
+    fn mark_machine_dirty(&mut self, origin: TileCoord, footprint: Footprint) {
+        for chunk in footprint_chunks(origin, footprint) {
+            if !self.dirty.contains(&chunk) {
+                self.dirty.push(chunk);
+            }
         }
     }
 
@@ -484,6 +685,7 @@ impl World {
             let stage = self.stages[i];
             let belt_tile = self.position_of(stage.belt_entity);
             let machine_tile = self.position_of(stage.machine_entity);
+            let machine_footprint = self.placement_of(stage.machine_entity).footprint;
 
             let belt_changed = {
                 let mut belt = self.ecs.get::<&mut BeltSegment>(stage.belt_entity).unwrap();
@@ -508,7 +710,7 @@ impl World {
                 self.mark_dirty(belt_tile);
             }
             if machine_changed || transferred {
-                self.mark_dirty(machine_tile);
+                self.mark_machine_dirty(machine_tile, machine_footprint);
             }
         }
 
@@ -516,11 +718,12 @@ impl World {
             let from_machine = self.stages[i].machine_entity;
             let to_belt = self.stages[i + 1].belt_entity;
             let machine_tile = self.position_of(from_machine);
+            let machine_footprint = self.placement_of(from_machine).footprint;
             let belt_tile = self.position_of(to_belt);
 
             let transferred = self.try_transfer_machine_output_to_belt(from_machine, to_belt);
             if transferred {
-                self.mark_dirty(machine_tile);
+                self.mark_machine_dirty(machine_tile, machine_footprint);
                 self.mark_dirty(belt_tile);
             }
         }
@@ -617,11 +820,18 @@ impl World {
                 });
             }
 
+            // A machine is reported for every chunk its footprint overlaps,
+            // not only the chunk holding its origin tile — see
+            // `MachineSnapshot`'s doc for the de-duplication that implies
+            // for a consumer stitching several chunks together.
             let machine_tile = self.position_of(stage.machine_entity);
-            if chunk_of(machine_tile) == id {
+            let placement = self.placement_of(stage.machine_entity);
+            if footprint_chunks(machine_tile, placement.footprint).contains(&id) {
                 let machine = self.ecs.get::<&Machine>(stage.machine_entity).unwrap();
                 snapshot.machines.push(MachineSnapshot {
                     tile: machine_tile,
+                    kind: placement.kind,
+                    footprint: placement.footprint,
                     recipe: machine.recipe.clone(),
                     process: machine.process.map(|p| (p.start_tick, p.required_ticks)),
                     input: machine.input.iter().cloned().collect(),
@@ -648,11 +858,14 @@ impl World {
     pub fn all_chunks(&self) -> Vec<ChunkId> {
         let mut ids = Vec::new();
         for stage in &self.stages {
-            for tile in [
-                self.position_of(stage.belt_entity),
+            let mut chunks = vec![chunk_of(self.position_of(stage.belt_entity))];
+            // Every chunk the machine's footprint reaches, so a wide machine
+            // straddling a boundary doesn't leave the far chunk unlisted.
+            chunks.extend(footprint_chunks(
                 self.position_of(stage.machine_entity),
-            ] {
-                let chunk = chunk_of(tile);
+                self.placement_of(stage.machine_entity).footprint,
+            ));
+            for chunk in chunks {
                 if !ids.contains(&chunk) {
                     ids.push(chunk);
                 }
@@ -679,17 +892,24 @@ impl World {
                 let belt_tile = self.position_of(stage.belt_entity);
                 let span = self.ecs.get::<&BeltSpan>(stage.belt_entity).unwrap();
                 let machine_tile = self.position_of(stage.machine_entity);
+                let placement = self.placement_of(stage.machine_entity);
                 let recipe = self.ecs.get::<&Machine>(stage.machine_entity).unwrap().recipe.clone();
                 StageLayout {
                     recipe,
                     belt_start_tile: belt_tile,
                     belt_length_tiles: span.length_tiles,
                     machine_tile,
+                    machine_kind: placement.kind,
+                    machine_footprint: placement.footprint,
                 }
             })
             .collect()
     }
 
+    /// What occupies `pos`, if anything (ARCHITECTURE.md §4). A machine
+    /// resolves from **any** tile in its footprint, not just its origin —
+    /// see [`TileSnapshot::Machine`] for the shape that returns and why a
+    /// hover system needs it.
     pub fn query_tile(&self, pos: TileCoord) -> Option<TileSnapshot> {
         for stage in &self.stages {
             let belt_tile = self.position_of(stage.belt_entity);
@@ -706,9 +926,13 @@ impl World {
             }
 
             let machine_tile = self.position_of(stage.machine_entity);
-            if pos == machine_tile {
+            let placement = self.placement_of(stage.machine_entity);
+            if placement.footprint.contains(machine_tile, pos) {
                 let machine = self.ecs.get::<&Machine>(stage.machine_entity).unwrap();
                 return Some(TileSnapshot::Machine {
+                    machine_kind: placement.kind,
+                    footprint: placement.footprint,
+                    origin_tile: machine_tile,
                     recipe: machine.recipe.clone(),
                     process: machine.process.map(|p| (p.start_tick, p.required_ticks)),
                 });
@@ -756,6 +980,7 @@ impl World {
             PlayerCommand::CollectOutput => {
                 let last = *self.stages.last().unwrap();
                 let machine_tile = self.position_of(last.machine_entity);
+                let machine_footprint = self.placement_of(last.machine_entity).footprint;
                 let mut machine = self.ecs.get::<&mut Machine>(last.machine_entity).unwrap();
                 let held: Vec<(ItemId, u32)> = machine.output.iter().cloned().collect();
                 if held.is_empty() {
@@ -772,7 +997,7 @@ impl World {
                 for (item, qty) in &held {
                     self.economy.deposit(item, *qty);
                 }
-                self.mark_dirty(machine_tile);
+                self.mark_machine_dirty(machine_tile, machine_footprint);
             }
         }
     }
@@ -799,6 +1024,56 @@ fn validate_chain(ordered: &[Recipe]) {
             prev.id, prev.outputs, next.id, next.inputs
         );
     }
+}
+
+/// Panics if two `(tile, description)` claims name the same tile, naming
+/// both claimants. Split out of `World::validate_placement` so the rule can
+/// be tested against a deliberately-broken layout: the accumulate-widths
+/// arithmetic in `World::with_machines` makes a real conflict unreachable
+/// today, which is precisely why the check needs its own test rather than
+/// relying on some data file eventually tripping it.
+fn assert_no_tile_conflicts(claims: &[(TileCoord, String)]) {
+    for (i, (tile, what)) in claims.iter().enumerate() {
+        if let Some((_, other)) = claims[..i].iter().find(|(t, _)| t == tile) {
+            panic!(
+                "world layout error: tile {tile:?} is claimed by both {other} and {what} — \
+                 a machine footprint (data/machines.ron) must not overlap another stage, \
+                 its own chain's belts, or the pipe run"
+            );
+        }
+    }
+}
+
+/// Every chunk (ARCHITECTURE.md §3.1's 32x32 grid) a machine footprint
+/// placed at `origin` overlaps, in a deterministic row-major order with the
+/// origin's own chunk first.
+///
+/// A footprint smaller than a chunk usually yields exactly one id; a
+/// footprint straddling a chunk boundary yields two or four. This is the one
+/// place that fan-out is computed, so dirty tracking, `all_chunks` and
+/// `chunk_snapshot` cannot disagree about which chunks a machine belongs to.
+/// The multi-chunk case is *handled*, not rejected — see
+/// [`MachineSnapshot`]'s doc for what that means for a consumer.
+fn footprint_chunks(origin: TileCoord, footprint: Footprint) -> Vec<ChunkId> {
+    let far = (
+        origin.0 + footprint.width_tiles - 1,
+        origin.1 + footprint.height_tiles - 1,
+    );
+    let (min_cx, min_cy) = chunk_of(origin);
+    let (max_cx, max_cy) = chunk_of(far);
+    debug_assert!(min_cx <= max_cx && min_cy <= max_cy, "footprint extents must be positive");
+    let mut chunks = Vec::with_capacity(
+        (((max_cx - min_cx + 1) as i64) * ((max_cy - min_cy + 1) as i64)) as usize,
+    );
+    for cy in min_cy..=max_cy {
+        for cx in min_cx..=max_cx {
+            chunks.push((cx, cy));
+        }
+    }
+    // The origin is the footprint's min-X/min-Y corner, so row-major from
+    // the minimum chunk already puts the origin's own chunk first.
+    debug_assert_eq!(chunks[0], chunk_of(origin));
+    chunks
 }
 
 fn pipe_snapshot(segment: &PipeSegment) -> PipeSnapshot {
@@ -841,5 +1116,77 @@ fn validate_fluid_scope(ordered: &[Recipe]) {
             recipe.id,
             recipe.fluid_inputs.len()
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn footprint_chunks_is_one_chunk_when_the_footprint_fits_inside_one() {
+        assert_eq!(
+            footprint_chunks((4, 0), Footprint::ONE_BY_ONE),
+            vec![(0, 0)]
+        );
+        assert_eq!(
+            footprint_chunks(
+                (29, 0),
+                Footprint {
+                    width_tiles: 3,
+                    height_tiles: 1
+                }
+            ),
+            vec![(0, 0)],
+            "29..=31 is still inside chunk 0 — the boundary is at x = 32"
+        );
+    }
+
+    #[test]
+    fn footprint_chunks_fans_out_across_a_straddled_boundary() {
+        // 30..=33 crosses x = 32; 30..=33 x 31..=32 crosses both axes.
+        assert_eq!(
+            footprint_chunks(
+                (30, 0),
+                Footprint {
+                    width_tiles: 4,
+                    height_tiles: 1
+                }
+            ),
+            vec![(0, 0), (1, 0)]
+        );
+        assert_eq!(
+            footprint_chunks(
+                (30, 31),
+                Footprint {
+                    width_tiles: 4,
+                    height_tiles: 2
+                }
+            ),
+            vec![(0, 0), (1, 0), (0, 1), (1, 1)],
+            "row-major, origin's own chunk first"
+        );
+    }
+
+    /// The real layout math can't produce an overlap (see
+    /// `assert_no_tile_conflicts`'s doc), so the rule is checked directly
+    /// against a hand-built conflicting claim list.
+    #[test]
+    #[should_panic(expected = "claimed by both")]
+    fn overlapping_tile_claims_panic_with_both_claimants_named() {
+        assert_no_tile_conflicts(&[
+            ((4, 0), "stage 0's 'cooker' machine".to_string()),
+            ((5, 0), "stage 1's belt".to_string()),
+            ((4, 0), "the pipe run".to_string()),
+        ]);
+    }
+
+    #[test]
+    fn non_overlapping_tile_claims_are_accepted() {
+        assert_no_tile_conflicts(&[
+            ((4, 0), "stage 0's 'cooker' machine".to_string()),
+            ((4, 1), "the pipe run".to_string()),
+            ((5, 0), "stage 1's belt".to_string()),
+        ]);
     }
 }

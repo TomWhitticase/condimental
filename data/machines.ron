@@ -1,0 +1,69 @@
+// Machine-kind content (ARCHITECTURE.md §3.6) — data, never hardcoded in
+// sim_core. This is the `machines.ron` CLAUDE.md's Project Structure section
+// has been anticipating ("items.ron/machines.ron/contracts.ron land here too
+// when they exist"); the "Machines improvement" milestone's ticket 1 is what
+// finally adds it.
+//
+// `schema_version` follows ARCHITECTURE.md §4's data-file versioning rule:
+// the loader (`sim_core::sim::machines::MachineRegistry`) rejects a
+// mismatched version rather than silently misreading a changed shape, the
+// same way `recipes.ron`'s loader does.
+//
+// WHAT THIS FILE IS FOR. Every `Recipe.machine` string in
+// `data/recipes.ron` names a kind defined here, and the loader errors
+// clearly if it names one that isn't (see `MachineRegistry::validate_covers`
+// — a typo'd kind is caught at construction time, not as "a stage silently
+// never renders"). Right now a kind carries exactly one property, its tile
+// footprint, because that is what `World`'s chain layout needs in order to
+// stop assuming every machine is one tile wide. Per-kind staff/power draw
+// (GAMEPLAY.md §7), build cost (GAMEPLAY.md §4/§5), and required-equipment
+// tier all belong in this file too when those systems land — add fields
+// here, don't invent a second machine data file.
+//
+// FOOTPRINT, AND WHERE ITS ORIGIN IS. `footprint` is measured in world
+// tiles: `width_tiles` along +X (the direction the production chain runs),
+// `height_tiles` along +Y. A machine occupies the rectangle
+// `x in [origin.x, origin.x + width_tiles)`, `y in [origin.y, origin.y +
+// height_tiles)` — i.e. **the origin tile is the footprint's minimum-X,
+// minimum-Y corner**, which is also the tile its stage's belt feeds into
+// (the belt runs west to east along the origin's own row and ends on the
+// tile immediately west of it). See `sim_core/src/sim/machines.rs`'s module
+// doc for the full statement of that convention; it is what lets
+// presentation place a multi-tile machine unambiguously from a single
+// origin tile plus these two numbers.
+//
+// EVERY KIND BELOW IS 1x1, ON PURPOSE. The ticket that added this file is a
+// pure refactor: generalizing the layout math without changing a single
+// existing tile coordinate. A kind here becoming larger than 1x1 is a
+// content change (a later ticket's job) and will visibly move every
+// downstream stage's tiles — which is exactly the mechanism working.
+(
+    schema_version: 1,
+    machines: [
+        // GAMEPLAY.md §2 tier 1's "basic cooker/kettle" — the chain's first
+        // stage, raw tomato -> tomato sauce.
+        MachineKind(
+            id: "cooker",
+            footprint: Footprint(width_tiles: 1, height_tiles: 1),
+        ),
+        // Tier 2's reduction/thickening step. This is the one stage plumbed
+        // into a fluid network (its recipe declares `fluid_inputs`), so its
+        // footprint height also decides which row the pipe run occupies —
+        // see `World::new` in sim_core/src/sim/world.rs.
+        MachineKind(
+            id: "reducer",
+            footprint: Footprint(width_tiles: 1, height_tiles: 1),
+        ),
+        // Tier 2's bottling & sealing line.
+        MachineKind(
+            id: "bottler",
+            footprint: Footprint(width_tiles: 1, height_tiles: 1),
+        ),
+        // Packing finished bottles into boxes — the stage milestone 4 added
+        // as its proof that extending the chain is a data-file-only edit.
+        MachineKind(
+            id: "packer",
+            footprint: Footprint(width_tiles: 1, height_tiles: 1),
+        ),
+    ],
+)

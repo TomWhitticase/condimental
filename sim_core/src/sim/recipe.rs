@@ -58,9 +58,10 @@ pub struct Recipe {
     pub fluid_inputs: Vec<(FluidId, u32)>,
     /// (item id, quantity) pairs produced per craft.
     pub outputs: Vec<(ItemId, u32)>,
-    /// The machine kind this recipe runs on (e.g. "cooker"). Not yet
-    /// validated against a `machines.ron` — that file doesn't exist yet
-    /// (see CLAUDE.md's Project Structure section).
+    /// The machine kind this recipe runs on (e.g. "cooker"). Must name an
+    /// entry in `data/machines.ron` — [`super::machines::MachineRegistry::validate_covers`]
+    /// checks that at world-construction time, and that entry is what says
+    /// how many tiles the machine occupies.
     pub machine: String,
     /// How long a single craft takes, in sim ticks (ARCHITECTURE.md §3.5's
     /// tick-counted `TimedProcess`, never wall-clock time).

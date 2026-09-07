@@ -73,6 +73,12 @@ impl SimBridge {
     /// id. Godot never sees the belt's gap array or the machine's raw
     /// `TimedProcess` — only this rendering-facing snapshot
     /// (ARCHITECTURE.md §4/§5).
+    ///
+    /// Each entry of the `machines` array carries `kind` and `footprint`
+    /// alongside its origin `tile` (see `sim::MachineSnapshot`). A machine
+    /// whose footprint straddles a chunk boundary is reported in *every*
+    /// chunk it overlaps, identically — so a caller merging several chunks'
+    /// snapshots must key machines by `tile` and de-duplicate.
     #[func]
     fn chunk_snapshot_json(&self, chunk_id: i64) -> GString {
         let snapshot = self.world.chunk_snapshot(decode_chunk_id(chunk_id));
@@ -82,6 +88,13 @@ impl SimBridge {
 
     /// A JSON-serialized `sim::TileSnapshot`, or an empty string if the
     /// tile is unoccupied.
+    ///
+    /// A machine resolves from **any** tile inside its footprint, not only
+    /// its origin — the returned `machine` variant carries `machine_kind`,
+    /// `footprint` (`{"width_tiles", "height_tiles"}`) and `origin_tile`, so
+    /// a hover on the far corner of a multi-tile machine still identifies
+    /// which machine it hit and where that machine starts. See
+    /// `sim::TileSnapshot` for the field-by-field shape.
     #[func]
     fn query_tile_json(&self, x: i32, y: i32) -> GString {
         match self.world.query_tile((x, y)) {
@@ -111,6 +124,13 @@ impl SimBridge {
     /// once, at startup, to build a `TileMap` sized to however many stages
     /// `data/recipes.ron` currently defines, instead of hardcoding stage
     /// geometry client-side (ARCHITECTURE.md §4/§5).
+    ///
+    /// Each stage also reports `machine_kind` and `machine_footprint`
+    /// (`{"width_tiles", "height_tiles"}`) from `data/machines.ron`:
+    /// `machine_tile` is the footprint's minimum-X/minimum-Y **origin**
+    /// corner — the tile the belt feeds into — and the machine covers
+    /// `width_tiles` x `height_tiles` tiles growing east and north from it.
+    /// `sim::StageLayout` documents the full shape.
     #[func]
     fn chain_layout_json(&self) -> GString {
         let layout = self.world.chain_layout();

@@ -8,12 +8,14 @@ pub mod economy;
 pub mod fluid;
 pub mod inventory;
 pub mod machine;
+pub mod machines;
 pub mod recipe;
 pub mod types;
 pub mod world;
 
 pub use economy::{Contract, Economy, EconomySnapshot};
 pub use fluid::{FluidNetwork, PipeSegment};
+pub use machines::{Footprint, MachineKind, MachineRegistry};
 pub use recipe::{Recipe, RecipeRegistry};
 pub use types::{decode_chunk_id, encode_chunk_id};
 pub use world::{

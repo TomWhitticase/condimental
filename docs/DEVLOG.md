@@ -20,7 +20,7 @@ below is history and should only ever be appended to.)*
 - **Stage:** Pre-alpha, but the core MVP loop is real end to end and it looks like a game. Milestones 1 (Scaffold), 2 (Mobile export spike), 3 (Core loop proof), 4 (First full chain), and 5 (Economy MVP) are all done — a real multi-stage production chain (tomato -> tomato sauce -> ketchup -> bottled ketchup -> boxed ketchup) that can deliver against a hardcoded contract to earn money, headlessly verified end to end, Android export proven working. On top of that, a visual-polish pass built UI_UX.md's voxel asset pipeline and turned the flat 2D placeholder scene into an isometric, real-time-lit 3D factory.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
-- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. **Milestone 6 (Fluids) is done**: its simulation half (pipe network, pressure equalization, a recipe requiring a liquid, the `SimBridge` fluid snapshot) and its presentation half (pipe/supply-tap/liquid voxel assets, a pipe run rendered from the simulation's own segment list, a liquid body whose height tracks live pressure, and pipe hover info in both view modes) have both landed, built as a 2-ticket orchestration Run (`run_2867a25ae373`, sequential: sim core then presentation). Milestone 7 (Timed processes) is next.
+- **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. **Milestone 6 (Fluids) is done**: its simulation half (pipe network, pressure equalization, a recipe requiring a liquid, the `SimBridge` fluid snapshot) and its presentation half (pipe/supply-tap/liquid voxel assets, a pipe run rendered from the simulation's own segment list, a liquid body whose height tracks live pressure, and pipe hover info in both view modes) have both landed, built as a 2-ticket orchestration Run (`run_2867a25ae373`, sequential: sim core then presentation). Milestone 7 (Timed processes) is next. A separate **"Machines improvement"** epic (not an ARCHITECTURE.md §9 milestone — an infrastructure/content pass requested directly) is in progress: ticket 1 landed machine footprints as data (`data/machines.ron`), generalizing the chain's layout math so a machine can occupy more than one tile; tickets 2-4 build on it.
 - **Art/UI:** the voxel pipeline (UI_UX.md §2a/§2b) exists and is the source of every asset in the scene — including milestone 6's pipes and the liquid inside them, which added a fourth material class (`liquid`, a glossy dielectric) to `palette.ron` — Rust generators in `assets/voxels/generators/` produce `.vox` models, reviewed as isometric PNGs via `scripts/build-voxels.sh`, imported into Godot by a pinned community importer. UI_UX.md §5's real UI is now landed: the money/contract readout is a diegetic clipboard panel (paper background, steel clip bar, checkbox tick marks) with a voxel-rendered icon per required item, and per-machine detail (recipe/progress/buffers) is hover-only instead of dense always-on text, working in both view modes — a screen-centre crosshair stands in for the cursor in first-person — see the log entries below.
 - **UI polish epic (done):** a Run (`run_cc6860507d36`) with 3 parallel tickets targeting UI_UX.md §5, all done and merged — hover tooltips for machines, a voxel-rendered icon pipeline, and the clipboard reskin. Check `orca orchestration task-list --run run_cc6860507d36 --json` for the DAG's final state.
 - **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, SPACE/SHIFT up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
@@ -40,6 +40,41 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-07 — Machines improvement, ticket 1: a machine can be bigger than one tile
+
+Infrastructure, not content. Until now `World` hardcoded that every machine
+occupies exactly one tile, so a stage's width was the constant
+`BELT_LENGTH_TILES + 1` and stage `i` always started at `i * 5`. Machine size
+is now **data**: a new `data/machines.ron` (the file CLAUDE.md's Project
+Structure section has been anticipating alongside `recipes.ron`) maps each
+machine kind to a tile footprint, loaded and validated by a new
+`sim_core::sim::machines` module built the same way `recipe.rs` is —
+`schema_version` checked, degenerate footprints and duplicate ids rejected,
+and a recipe naming a kind the file doesn't define reported as a clear error
+instead of a stage that silently never appears.
+
+The chain now lays itself out by *accumulating* each stage's own machine
+width rather than multiplying a fixed span, so a wider machine pushes
+everything downstream east by exactly its extra tiles. A footprint's origin
+is its minimum-X/minimum-Y corner, which is also the tile its belt feeds
+into — stated once in `machines.rs`'s module doc and referenced everywhere
+else, so a later renderer never has to guess which corner a coordinate
+means. `chain_layout_json`, `chunk_snapshot_json` and `query_tile_json` all
+carry the footprint now, and crucially `query_tile` resolves a machine from
+*any* tile it covers, not just its origin — that is what the hover system
+needs before a multi-tile machine can exist. A footprint straddling a 32x32
+chunk boundary is handled rather than rejected: the machine belongs to every
+chunk it overlaps, so a renderer loading only visible chunks still finds it.
+
+The point of the ticket was to change nothing visible. Every shipped kind
+(cooker, reducer, bottler, packer) declares 1x1, and a new test asserts the
+four-stage chain's tile coordinates against literals copied from the old
+formula rather than recomputed from the new code — plus tests that drive
+genuinely 2- and 3-wide machines, since "every real kind is 1x1" would
+otherwise make a width bug unobservable. The whole existing suite passes
+untouched, Godot side included. Tickets 2-4 of this milestone are what
+actually make a machine bigger.
 
 ### 2026-09-07 — Milestone 6, ticket 2: the pipe run you can actually see
 

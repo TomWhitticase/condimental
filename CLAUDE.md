@@ -72,8 +72,14 @@ sauce-factory/
                                # duplicates its content in Rust code. Its list
                                # order IS the production chain (World builds one
                                # stage per recipe, in file order — see world.rs) —
-                               # adding a step is a pure edit here. items.ron/
-                               # machines.ron/contracts.ron land here too when they exist.
+                               # adding a step is a pure edit here.
+    machines.ron             # machine kinds: each `Recipe.machine` id -> a tile
+                               # footprint (width_tiles, height_tiles). Loaded by
+                               # sim/machines.rs, which errors if a recipe names a
+                               # kind that isn't here or a footprint is degenerate.
+                               # Per-kind staff/power draw and build cost belong
+                               # here too when those land — not a second file.
+                               # items.ron/contracts.ron land here when they exist.
   sim_core/               # Rust crate: pure sim core + the gdext binding
     Cargo.toml              # crate-type = ["cdylib", "rlib"] — rlib is what lets
                               # sim_core/tests/ link against it without Godot
@@ -85,6 +91,10 @@ sauce-factory/
       inventory.rs                  # generic slot-based Inventory (§3.2)
       belt.rs                        # BeltSegment — gap-based item storage (§3.3)
       machine.rs                      # Machine + TimedProcess (§3.2/§3.5)
+      machines.rs                      # MachineRegistry — loads + validates
+                                         # data/machines.ron; owns the footprint
+                                         # origin convention (min-X/min-Y corner,
+                                         # = the tile the belt feeds into)
       economy.rs                       # Economy: money (Fx) + one hardcoded Contract
                                          # (fixed mix/cadence/payout), checked against
                                          # an accumulating delivery_buffer Inventory
@@ -98,6 +108,12 @@ sauce-factory/
                                          # query_tile()/chain_layout()/economy_snapshot() (§4)
     tests/core_loop.rs        # headless integration test: full-chain N-tick
                                 # conservation invariant across every stage (§6)
+    tests/machine_footprints.rs # headless integration test: footprint-aware chain
+                                 # layout — asserts the shipped 4-stage chain's tiles
+                                 # are byte-identical to the pre-footprint formula,
+                                 # and drives test-only 2-/3-wide machines for the
+                                 # width math, multi-tile query_tile and the
+                                 # chunk-boundary case
     tests/economy.rs           # headless integration test: full chain collects
                                  # against the hardcoded contract and pays out
                                  # correctly (money increases on a satisfied mix,
@@ -458,6 +474,26 @@ it's gone stale.
   Explicitly deferred, matching the milestone's own scope note: the full
   `contracts.ron` schema, multiple concurrent contracts, and `StaffPools` —
   all unchanged future work per GAMEPLAY.md §7/§9.
+- 2026-09-07: "Machines improvement" epic, ticket 1 — **a machine's tile
+  footprint is data, in a new `data/machines.ron`**, and `World`'s chain
+  layout accumulates each stage's own machine width instead of multiplying a
+  fixed `STAGE_SPAN_TILES` constant. Three calls worth not re-litigating.
+  (1) **The footprint origin is its minimum-X/minimum-Y corner, which is
+  also the tile the stage's belt feeds into** — a machine grows east/north
+  from there, so widening a kind never moves its input side and only pushes
+  downstream stages along. Stated once in `sim_core/src/sim/machines.rs`'s
+  module doc; every other layer (layout, `query_tile`, snapshots, and
+  eventually the renderer) refers to that rather than restating it.
+  (2) **A footprint straddling a 32x32 chunk boundary is handled, not
+  rejected**: the machine is reported in *every* chunk it overlaps, with the
+  same origin tile each time, so a renderer loading only visible chunks
+  still learns about a machine whose origin is off-screen — the cost being
+  that a consumer stitching chunks together must de-duplicate by `tile`.
+  (3) **`World::new` keeps its one-argument signature** and loads the
+  bundled `machines.ron` itself (the `include_str!` lives in `sim/`, not
+  `lib.rs`, unlike `recipes.ron`), with `World::with_machines` as the seam
+  tests use to exercise a footprint no shipped kind has — every shipped kind
+  is 1x1, deliberately, so this ticket moved zero existing tiles.
 - 2026-09-07: Milestone 6 (Fluids), presentation half. `sim_core` was not
   touched: the pipe run, the liquid in it, and the pipe hover tooltip are all
   driven from the JSON ticket 1 already exposed — geometry from
