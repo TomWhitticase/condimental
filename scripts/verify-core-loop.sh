@@ -12,14 +12,17 @@
 #      conservation across every stage, not just one. No Godot involved.
 #   2. `cargo xtask` builds the extension and copies it into
 #      godot_project/bin/.
-#   3. Four headless Godot scripts exercise the parts cargo test can't: the
+#   3. Seven headless Godot scripts exercise the parts cargo test can't: the
 #      real `gdext` boundary (JSON command/snapshot/layout wire format going
 #      through Godot's own Variant/String/JSON machinery, driven through the
 #      whole chain end to end), the interactive scene's keyboard input
 #      actually reaching SimBridge, the visual pass's structural claims
 #      (orthographic isometric camera, real-time lighting, imported voxel
-#      meshes, metal shinier than matte — docs/UI_UX.md §1/§2/§4), and camera
-#      pan/zoom (§1: allowed, unlike free rotation of the fixed angle).
+#      meshes, metal shinier than matte — docs/UI_UX.md §1/§2/§4), camera
+#      pan/zoom (§1: allowed, unlike free rotation of the fixed angle), and
+#      UI_UX.md §5's diegetic UI epic — the contract clipboard panel, voxel-
+#      rendered icons, and machine hover tooltips (hover, not dense
+#      always-on text).
 #
 # Usage: scripts/verify-core-loop.sh
 
@@ -126,6 +129,15 @@ if [ "$icons_status" -ne 0 ]; then
 fi
 
 echo
-echo "PASS: milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard + icons"
+echo "==> godot --headless --script test_hover.gd (machine hover tooltips, UI_UX.md §5)"
+"$godot_bin" --headless --path godot_project --script test_hover.gd
+hover_status=$?
+if [ "$hover_status" -ne 0 ]; then
+  echo "FAIL: test_hover.gd exited $hover_status" >&2
+  exit "$hover_status"
+fi
+
+echo
+echo "PASS: milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard + icons + hover"
 echo "      verified headlessly (sim_core tests + gdext boundary + interaction + 3D scene"
-echo "      structure + pan/zoom + contract panel structure + icons)."
+echo "      structure + pan/zoom + contract panel structure + icons + hover tooltips)."

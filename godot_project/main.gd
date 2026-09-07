@@ -88,6 +88,7 @@ var sim: SimBridge
 
 var _tick_accum := 0.0
 var _stage_order: Array[String] = [] # recipe ids, in chain order
+var _machine_tiles: Dictionary = {} # recipe id -> Vector2i machine tile, for hover lookups
 var _last_machines: Dictionary = {} # recipe id -> last machine snapshot dict
 var _machine_lamps: Dictionary = {} # recipe id -> MeshInstance3D (emissive mesh)
 var _machine_running: Dictionary = {} # recipe id -> bool, to avoid redundant swaps
@@ -99,7 +100,6 @@ var _lamp_idle: StandardMaterial3D
 var _lamp_running: StandardMaterial3D
 var _asset_classes: Dictionary = {} # asset name -> Array of class names
 
-var _machine_label: Label
 var _help_label: Label
 
 # --- Contract clipboard (UI_UX.md §5) --------------------------------------
@@ -121,6 +121,12 @@ const CONTRACT_CHECKLIST_MAX_BOXES := 12 # beyond this, fall back to one box rep
 # --- Voxel-rendered UI icons (UI_UX.md §5) ---------------------------------
 var _icon_cache: Dictionary = {} # asset name -> Texture2D, see _icon_for
 var _icon_fallback_texture: Texture2D
+
+# Hover tooltip (docs/UI_UX.md §5: "hover tooltips for recipe/machine detail
+# rather than dense always-on text") — see _tile_under_screen_pos/
+# _update_hover_tooltip below.
+var _hover_tooltip: PanelContainer
+var _hover_label: Label
 
 enum ViewMode { ISOMETRIC, FIRST_PERSON }
 var _view_mode: int = ViewMode.ISOMETRIC
@@ -276,7 +282,10 @@ func _tile_origin(tx: int, ty: int, height: float) -> Vector3:
 func _read_chain_layout() -> void:
 	var layout: Array = JSON.parse_string(sim.chain_layout_json())
 	for stage in layout:
-		_stage_order.append(stage["recipe"])
+		var recipe: String = stage["recipe"]
+		_stage_order.append(recipe)
+		var machine_tile: Array = stage["machine_tile"]
+		_machine_tiles[recipe] = Vector2i(int(machine_tile[0]), int(machine_tile[1]))
 	if layout.size() > 0:
 		var last_machine_tile: Array = layout[layout.size() - 1]["machine_tile"]
 		_chain_tile_width = int(last_machine_tile[0]) + 1
@@ -350,13 +359,14 @@ func _build_chain() -> void:
 			_set_machine_running(recipe, false)
 
 
-## Fills the readout before the first item ever moves.
+## Fills `_last_machines` (what the hover tooltip reads, see
+## _machine_hover_text) before the first item ever moves.
 ##
 ## `dirty_chunk_ids` only reports chunks something *changed* in, so an idle
-## factory produces no snapshots at all and the HUD would sit blank until the
-## player pressed a key. This asks the simulation directly, via SimBridge's
-## existing `query_tile_json`, rather than inventing a default state Godot
-## has no business knowing.
+## factory produces no snapshots at all and hovering a machine would show
+## nothing until the player pressed a key. This asks the simulation directly,
+## via SimBridge's existing `query_tile_json`, rather than inventing a
+## default state Godot has no business knowing.
 func _seed_machine_state() -> void:
 	var layout: Array = JSON.parse_string(sim.chain_layout_json())
 	for stage in layout:
@@ -372,7 +382,6 @@ func _seed_machine_state() -> void:
 			"input": [],
 			"output": [],
 		}
-	_update_machine_label()
 
 
 func _set_machine_running(recipe: String, running: bool) -> void:
@@ -827,8 +836,6 @@ func _build_ui() -> void:
 	panel.position = Vector2(16, 16)
 	hud.add_child(panel)
 
-	# A container, not hand-placed labels: the readout has one line per stage
-	# in data/recipes.ron, so its height is not something to hardcode.
 	var rows := VBoxContainer.new()
 	rows.add_theme_constant_override("separation", 4)
 	panel.add_child(rows)
@@ -838,10 +845,6 @@ func _build_ui() -> void:
 	settings.font_color = Color(0.92, 0.93, 0.94)
 	settings.outline_size = 4
 	settings.outline_color = Color(0, 0, 0, 0.85)
-
-	_machine_label = Label.new()
-	_machine_label.label_settings = settings
-	rows.add_child(_machine_label)
 
 	_help_label = Label.new()
 	_help_label.label_settings = settings
@@ -853,6 +856,11 @@ func _build_ui() -> void:
 	# now gets its own diegetic clipboard panel — paper background, a steel
 	# clip bar, checkbox-style tick marks for delivery progress.
 	_build_contract_panel(hud, settings)
+
+	# The hover tooltip (docs/UI_UX.md §5): replaces the always-on per-machine
+	# text this panel used to show — see _build_hover_tooltip/
+	# _update_hover_tooltip below.
+	_build_hover_tooltip(hud)
 
 
 ## The first diegetic clipboard/checklist widget (UI_UX.md §5) — reskins the
@@ -995,6 +1003,42 @@ func _build_contract_checklist_row(body: VBoxContainer, ink_settings: LabelSetti
 	_contract_checklist_boxes[item_id] = boxes
 
 
+func _build_hover_tooltip(hud: CanvasLayer) -> void:
+	# The hover tooltip (docs/UI_UX.md §5): a small, separately-positioned
+	# panel that follows the cursor and shows one stage's recipe/progress/
+	# input/output — the info the always-on panel used to show for every
+	# stage at once, now on-demand only. A simple readable panel, not this
+	# section's clipboard/checklist diegetic styling — that visual pass is
+	# separate work; this just needs to be legible near the cursor.
+	var hover_style := StyleBoxFlat.new()
+	hover_style.bg_color = Color(0.10, 0.09, 0.06, 0.92)
+	hover_style.border_color = Color(0.85, 0.63, 0.11, 0.95)
+	hover_style.set_border_width_all(2)
+	hover_style.set_content_margin_all(8.0)
+
+	_hover_tooltip = PanelContainer.new()
+	_hover_tooltip.add_theme_stylebox_override("panel", hover_style)
+	_hover_tooltip.visible = false
+	# Ignore mouse events itself, or the panel following the cursor would
+	# constantly steal hover from whatever's under it (including, absurdly,
+	# itself — every frame's "am I hovering a machine" check reads the raw
+	# viewport mouse position, not anything mouse-event-driven, so this only
+	# matters for a hypothetical future clickable HUD element underneath).
+	_hover_tooltip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(_hover_tooltip)
+
+	var hover_settings := LabelSettings.new()
+	hover_settings.font_size = 14
+	hover_settings.font_color = Color(0.95, 0.95, 0.90)
+	hover_settings.outline_size = 3
+	hover_settings.outline_color = Color(0, 0, 0, 0.85)
+
+	_hover_label = Label.new()
+	_hover_label.label_settings = hover_settings
+	_hover_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hover_tooltip.add_child(_hover_label)
+
+
 # --------------------------------------------------------------------------
 # Simulation driving / rendering
 # --------------------------------------------------------------------------
@@ -1007,8 +1051,8 @@ func _process(delta: float) -> void:
 		sim.tick()
 		_apply_dirty_chunks()
 
-	_update_machine_label()
 	_update_contract_panel()
+	_update_hover_tooltip()
 	if _view_mode == ViewMode.ISOMETRIC:
 		_pan_camera(delta)
 	else:
@@ -1142,27 +1186,113 @@ func _item_node_for(key: String, item_name: String) -> Node3D:
 	return node
 
 
-func _update_machine_label() -> void:
-	var lines: Array[String] = []
-	for recipe_id in _stage_order:
-		if not _last_machines.has(recipe_id):
-			continue
-		var machine: Dictionary = _last_machines[recipe_id]
-		var process = machine.get("process")
-		var progress_text := "idle"
-		if process != null:
-			var elapsed: int = sim.current_tick() - int(process[0])
-			var required: int = int(process[1])
-			var pct: float = clamp(float(elapsed) / float(required), 0.0, 1.0) * 100.0
-			progress_text = "%.0f%%" % pct
-		lines.append("%s — %s | in: %s | out: %s" % [
-			recipe_id,
-			progress_text,
-			_format_counts(machine["input"]),
-			_format_counts(machine["output"]),
-		])
+## Sentinel returned by `_tile_under_screen_pos` when the camera ray is
+## (degenerately) parallel to the belt-surface plane and never crosses it —
+## not reachable in practice for the fixed isometric CAMERA_DIRECTION, but
+## callers get an explicit "no tile" value rather than a Vector2i(0, 0) that
+## could also be a real tile.
+const HOVER_NO_TILE := Vector2i(-999999, -999999)
+## Screen-space offset from the raw cursor position to the tooltip panel's
+## top-left corner, so the panel doesn't sit directly under (and get
+## re-hidden by chasing) the cursor itself.
+const HOVER_TOOLTIP_OFFSET := Vector2(18.0, 18.0)
 
-	_machine_label.text = "\n".join(lines)
+
+## Resolves a screen-space position to the world tile beneath it: casts the
+## camera's ray for that screen position (per its CURRENT transform/
+## projection — `project_ray_origin`/`project_ray_normal` are pure and
+## deterministic given that, not physics-engine-dependent) and intersects it
+## with the horizontal plane at belt-surface height (BELT_SURFACE_Y).
+## Machines sit directly on that plane at a known tile position (see
+## _machine_tiles), so plane intersection alone is enough to pick one out —
+## no physics engine involved, matching this project's zero physics
+## dependency elsewhere (ARCHITECTURE.md's headless-testability philosophy).
+##
+## Pure and deterministic given the camera's current state — no Input/mouse
+## reads happen here, so test_hover.gd can call it directly with an explicit
+## screen position. This mirrors _apply_pan/_apply_look's split (see their
+## doc comments): _update_hover_tooltip below is the thin, untested part that
+## actually reads the live mouse position.
+##
+## ONLY meaningful in ISOMETRIC mode (the fixed orthographic isometric
+## camera). In FIRST_PERSON the camera is a free-look perspective camera with
+## the mouse captured for looking around — "which tile is under the cursor"
+## isn't a coherent concept there. This function does not itself guard
+## against being called in that mode; _update_hover_tooltip is responsible
+## for gating on `_view_mode` before calling it.
+func _tile_under_screen_pos(screen_pos: Vector2) -> Vector2i:
+	if _camera == null:
+		return HOVER_NO_TILE
+	var origin := _camera.project_ray_origin(screen_pos)
+	var dir := _camera.project_ray_normal(screen_pos)
+	if is_zero_approx(dir.y):
+		return HOVER_NO_TILE
+	var t := (BELT_SURFACE_Y - origin.y) / dir.y
+	var point := origin + dir * t
+	return Vector2i(roundi(point.x / TILE), roundi(point.z / TILE))
+
+
+## Whichever stage's machine sits on `tile` (see _machine_tiles, populated
+## once in _read_chain_layout from chain_layout_json), or "" if none does.
+## Pure dictionary lookup — no Input/mouse reads, directly testable.
+func _machine_recipe_at_tile(tile: Vector2i) -> String:
+	for recipe_id in _machine_tiles.keys():
+		if _machine_tiles[recipe_id] == tile:
+			return String(recipe_id)
+	return ""
+
+
+## The recipe/progress/input/output text for one stage's machine — the same
+## per-stage data the always-on panel used to show for every stage at once
+## (removed; see docs/UI_UX.md §5's "hover tooltips ... rather than dense
+## always-on text") formatted for a single stage, shown only on hover.
+## Pure given `_last_machines`/`sim.current_tick()` — no Input reads.
+func _machine_hover_text(recipe_id: String) -> String:
+	if not _last_machines.has(recipe_id):
+		return ""
+	var machine: Dictionary = _last_machines[recipe_id]
+	var process = machine.get("process")
+	var progress_text := "idle"
+	if process != null:
+		var elapsed: int = sim.current_tick() - int(process[0])
+		var required: int = int(process[1])
+		var pct: float = clamp(float(elapsed) / float(required), 0.0, 1.0) * 100.0
+		progress_text = "%.0f%%" % pct
+	return "%s\n%s\nin: %s\nout: %s" % [
+		recipe_id,
+		progress_text,
+		_format_counts(machine["input"]),
+		_format_counts(machine["output"]),
+	]
+
+
+## The thin, live-mouse-reading half (deliberately not unit tested, same
+## reasoning as _pan_input_direction/_fp_input_direction's doc comments —
+## headless SceneTree tests can't reliably simulate live viewport mouse
+## state): reads where the cursor actually is, and drives the pure functions
+## above to decide what the tooltip should show. Never shows in
+## FIRST_PERSON — the mouse is captured there for looking around, so a
+## cursor-hover concept doesn't apply.
+func _update_hover_tooltip() -> void:
+	if _hover_tooltip == null:
+		return
+	if _view_mode == ViewMode.FIRST_PERSON:
+		_hover_tooltip.visible = false
+		return
+	var vp := get_viewport()
+	if vp == null:
+		_hover_tooltip.visible = false
+		return
+	var mouse_pos := vp.get_mouse_position()
+	var tile := _tile_under_screen_pos(mouse_pos)
+	var recipe_id := _machine_recipe_at_tile(tile)
+	var text := _machine_hover_text(recipe_id) if recipe_id != "" else ""
+	if text == "":
+		_hover_tooltip.visible = false
+		return
+	_hover_label.text = text
+	_hover_tooltip.position = mouse_pos + HOVER_TOOLTIP_OFFSET
+	_hover_tooltip.visible = true
 
 
 ## Drives the contract clipboard (UI_UX.md §5) from the same

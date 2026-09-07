@@ -19,6 +19,11 @@
 # (looking slightly up, from height, so the sky/ground extent is actually in
 # frame) — the only way to visually review that mode's lighting/skybox
 # without a live interactive session.
+#
+# `--hover` warps the OS cursor over the first stage's machine before
+# rendering, so the hover tooltip (docs/UI_UX.md §5) actually shows up in the
+# shot — otherwise there is no way to visually review it without a live
+# interactive session, the same problem --first-person solves for that mode.
 extends SceneTree
 
 ## Enough frames for shadow atlases, SSAO and glow to be resolved — a
@@ -35,6 +40,7 @@ var _frames := 0
 var _out := "user://scene.png"
 var _populate := false
 var _first_person := false
+var _hover := false
 var _main: Node
 
 
@@ -44,6 +50,7 @@ func _initialize() -> void:
 		_out = args[0]
 	_populate = args.has("--populate")
 	_first_person = args.has("--first-person")
+	_hover = args.has("--hover")
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 	# NOT here: in a real (non-headless) run, add_child()'s _ready() is
@@ -64,6 +71,19 @@ func _enter_first_person() -> void:
 	_main._update_fp_camera_transform()
 
 
+## Warps the real OS cursor over the first stage's machine tile, using the
+## same tile -> world -> screen math `_tile_under_screen_pos` inverts (via
+## the camera's own `unproject_position`, which needs the camera actually
+## inside the tree — see the `_ready()` timing note in `_initialize` above,
+## which is exactly why this can't run any earlier than `_process`).
+func _hover_over_first_machine() -> void:
+	var recipe_id: String = _main._stage_order[0]
+	var tile: Vector2i = _main._machine_tiles[recipe_id]
+	var world_point: Vector3 = _main._tile_origin(tile.x, tile.y, _main.BELT_SURFACE_Y)
+	var screen_pos: Vector2 = _main._camera.unproject_position(world_point)
+	Input.warp_mouse(screen_pos)
+
+
 func _run_chain_forward() -> void:
 	# Calls SimBridge directly rather than simulating a SPACE keypress
 	# through _unhandled_input: SPACE only spawns in ISOMETRIC mode (it's
@@ -82,6 +102,8 @@ func _process(_delta: float) -> bool:
 		_enter_first_person()
 	if _frames == 2 and _populate:
 		_run_chain_forward()
+	if _frames == 2 and _hover:
+		_hover_over_first_machine()
 	if _frames < WARMUP_FRAMES:
 		return false
 

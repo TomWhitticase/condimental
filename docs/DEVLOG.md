@@ -21,8 +21,8 @@ below is history and should only ever be appended to.)*
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
 - **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. Milestone 6 (Fluids) is next.
-- **Art/UI:** the voxel pipeline (UI_UX.md §2a/§2b) exists and is the source of every asset in the scene — Rust generators in `assets/voxels/generators/` produce `.vox` models, reviewed as isometric PNGs via `scripts/build-voxels.sh`, imported into Godot by a pinned community importer. UI_UX.md §5's real UI is landing in pieces: the money/contract readout is now a diegetic clipboard panel (paper background, steel clip bar, checkbox tick marks) with a voxel-rendered icon per required item, both instead of a plain Label — see the log entries below. Hover tooltips are still open (parallel ticket, done but not yet merged).
-- **UI polish epic (in progress):** a new Run (`run_cc6860507d36`) with 3 parallel tickets targeting UI_UX.md §5 — hover tooltips for machines (replacing the always-on per-stage text, done but not yet merged), a voxel-rendered icon pipeline (done, merged), and the clipboard reskin above (done, merged). Check `orca orchestration task-list --run run_cc6860507d36 --json` for live status.
+- **Art/UI:** the voxel pipeline (UI_UX.md §2a/§2b) exists and is the source of every asset in the scene — Rust generators in `assets/voxels/generators/` produce `.vox` models, reviewed as isometric PNGs via `scripts/build-voxels.sh`, imported into Godot by a pinned community importer. UI_UX.md §5's real UI is now landed: the money/contract readout is a diegetic clipboard panel (paper background, steel clip bar, checkbox tick marks) with a voxel-rendered icon per required item, and per-machine detail (recipe/progress/buffers) is hover-only instead of dense always-on text — see the log entries below.
+- **UI polish epic (done):** a Run (`run_cc6860507d36`) with 3 parallel tickets targeting UI_UX.md §5, all done and merged — hover tooltips for machines, a voxel-rendered icon pipeline, and the clipboard reskin. Check `orca orchestration task-list --run run_cc6860507d36 --json` for the DAG's final state.
 - **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, SPACE/SHIFT up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
 - **Lighting:** the sky is the real background (`BG_SKY`), not a flat colour — see the "empty void" DEVLOG entry below for why that matters. `scripts/screenshot-scene.sh --first-person` reviews that mode's lighting specifically.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
@@ -40,6 +40,45 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-07 — Machine hover tooltips (UI_UX.md §5, one piece of the diegetic-UI epic)
+
+Ticket A of the three-ticket parallel push below. Per-stage recipe/progress/
+input/output detail used to sit as always-on text in the HUD panel;
+UI_UX.md §5 explicitly calls for that as a hover tooltip instead. The
+always-on panel is now gone entirely — hovering a machine in ISOMETRIC mode
+shows a small panel near the cursor with that machine's live data, and the
+tooltip never appears in FIRST_PERSON (the mouse is captured there for
+looking around, so "hover" has no meaning).
+
+Follows this file's established pure-function/thin-Input-wrapper split
+(`_apply_pan`/`_pan_input_direction` etc.): `_tile_under_screen_pos` casts
+the camera's ray for an explicit screen position and intersects it with the
+belt-surface plane — no physics engine, matching this project's zero physics
+dependency elsewhere — and is directly unit-testable; `_update_hover_tooltip`
+is the thin, untested half that reads the live mouse position each frame.
+New `godot_project/test_hover.gd`, wired into `scripts/verify-core-loop.sh`.
+Also gave `test_screenshot.gd` a `--hover` flag (warps the cursor over a
+known machine before rendering) so the tooltip could actually be reviewed as
+an image, not just asserted headlessly — confirmed visually as well as via
+the new test. Merged last of the three tickets, on top of the icon and
+clipboard panel work below — reconciling meant deleting the old
+`_machine_label`/`_economy_label` HUD code entirely (both superseded, by the
+hover tooltip and the clipboard panel respectively) and factoring the hover
+tooltip's construction into its own `_build_hover_tooltip()` alongside
+`_build_contract_panel()`.
+
+Worth flagging for whoever next touches the headless Godot test scripts: all
+of them (not just the new one) call `main._ready()` manually right after
+`root.add_child(main)`, but in a `--script`-mode SceneTree that add_child
+*also* schedules the engine's own automatic `_ready()` call, deferred to the
+first processed frame — so `_ready()` actually runs twice, silently building
+two of everything under `main`. Harmless everywhere it's currently used
+(every rebuild is deterministic and only `main`'s own fields get read
+afterward), but it broke a naively-cached `Camera3D` reference while writing
+this ticket's test — see test_hover.gd's own header comment for the full
+story. Not fixed here; a pre-existing harness quirk shared by every existing
+test in this family.
 
 ### 2026-09-07 — UI polish epic dispatched: hover info + diegetic clipboard UI
 
