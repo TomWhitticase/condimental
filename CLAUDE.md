@@ -39,9 +39,10 @@ conflict with them.
 
 Milestones 1 (Scaffold), 3 (Core loop proof), 4 (First full chain), and 5
 (Economy MVP) have landed: a Rust/gdext <-> Godot round trip, plus real
-simulation code — a multi-stage production chain (raw tomato -> tomato sauce
--> ketchup -> bottled ketchup -> boxed ketchup) built entirely from
-`data/recipes.ron`, now with a money counter and a single hardcoded contract
+simulation code — a multi-stage production chain (raw tomato -> tomato paste
+-> ketchup mix -> ketchup -> bottled ketchup -> boxed ketchup, run by a
+crusher, a mixer, a 2x2 cooking vat, a bottler and a packer) built entirely
+from `data/recipes.ron`, now with a money counter and a single hardcoded contract
 the chain can actually deliver against and get paid for. A visual-polish
 pass on top of that built UI_UX.md §2a's voxel asset pipeline and replaced
 the flat 2D placeholder scene with an isometric, real-time-lit 3D one.
@@ -494,6 +495,32 @@ it's gone stale.
   `lib.rs`, unlike `recipes.ron`), with `World::with_machines` as the seam
   tests use to exercise a footprint no shipped kind has — every shipped kind
   is 1x1, deliberately, so this ticket moved zero existing tiles.
+- 2026-09-07: "Machines improvement" epic, ticket 2 — **the chain's
+  abstract two-step front end is now three real machines**: a `crusher`
+  (tomato -> tomato_paste, 60 ticks), a `mixer` (tomato_paste + 2 vinegar ->
+  ketchup_mix, 90 ticks) and a `cooking_vat` (ketchup_mix -> ketchup, 240
+  ticks), replacing the old `cooker`/`reducer` pair and their `tomato_sauce`
+  intermediate. Pure content: no `sim_core` logic changed, the chain is still
+  one straight line, and the two downstream stages (bottler, packer) are
+  untouched. Four calls worth not re-litigating. (1) **The cooking vat is
+  2x2** — the first shipped kind bigger than one tile, and deliberately the
+  *only* one: a crusher and an in-line blender are small machines, a batch vat
+  running the chain's longest process is not, so size tracks what the machine
+  actually does. 2x2 rather than 2x1 because it is the smallest footprint that
+  exercises ticket 1's mechanism in both axes (width shifts every downstream
+  stage east by one tile; height claims a second row) — anything bigger would
+  dwarf the belts feeding it. (2) **Process times track the work**: crushing
+  is the quickest step, the cook is 4x it, so the line has a real bottleneck
+  and the biggest machine is visibly the slow one. (3) **The fluid
+  requirement moved from the cooked stage to the mixing stage**, which is
+  where a real line adds vinegar; this needed no Rust change at all, because
+  `World` builds its pipe run for "whichever recipe declares `fluid_inputs`"
+  — moving the declaration re-plumbed the run, which is the data-driven
+  property doing exactly what it promised. (4) **Neither `schema_version` was
+  bumped** (recipes stays v2, machines stays v1): both files' *shapes* are
+  unchanged — only their content is — and ARCHITECTURE.md §4's versioning
+  rule is about a changed schema, not changed content. Bumping on content
+  would make the version meaningless as a compatibility signal.
 - 2026-09-07: Milestone 6 (Fluids), presentation half. `sim_core` was not
   touched: the pipe run, the liquid in it, and the pipe hover tooltip are all
   driven from the JSON ticket 1 already exposed — geometry from

@@ -7,16 +7,17 @@
 //! isolation (schema version, degenerate footprints, duplicate ids, unknown
 //! kinds). This file instead drives the real `World` two ways:
 //!
-//! 1. **The no-op proof.** Every shipped machine kind is 1x1, so the shipped
-//!    chain's tile layout must be *byte-for-byte* what it was before
-//!    footprints existed. The expected coordinates below are written out
-//!    literally, from the pre-change `i * (BELT_LENGTH_TILES + 1)` formula,
-//!    rather than recomputed from the new code — a test that derived them
-//!    the same way the code does could not catch the code being wrong.
+//! 1. **The shipped-layout proof.** Ticket 2 made the shipped content use
+//!    the mechanism for real: the cooking vat is 2x2, so the chain's tiles
+//!    are no longer what a fixed one-tile-per-machine span would produce.
+//!    The expected coordinates below are written out literally, computed by
+//!    hand from the footprint rule rather than recomputed from the code —
+//!    a test that derived them the same way the code does could not catch
+//!    the code being wrong.
 //! 2. **The mechanism proof.** A test-only registry with genuinely wide
 //!    kinds, so the width math, the "next belt starts after the whole
 //!    footprint" rule, multi-tile `query_tile` resolution, and the
-//!    chunk-boundary case are all actually observed rather than assumed.
+//!    chunk-boundary case are all observed at sizes no shipped kind has.
 //!
 //! It also pins the exact JSON field names ticket 4's Godot hover/render
 //! work will consume, the way `fluids.rs` pins `fluid_snapshot_json`'s.
@@ -69,23 +70,31 @@ fn kinds(entries: &[(&str, i32, i32)]) -> MachineRegistry {
 }
 
 // ---------------------------------------------------------------------
-// 1. The no-op proof: shipped content's layout must not have moved.
+// 1. The shipped-layout proof: where ticket 2's content actually lands.
 // ---------------------------------------------------------------------
 
-/// The shipped chain's tile layout, written out literally as it was before
-/// footprints existed (`belt_start_x = i * 5`, `machine_x = belt_start_x +
-/// 4`, everything on row 0). If a change to the layout math moves any of
-/// these, that is a content/behavior change, not a refactor — which is
-/// exactly what this ticket promised not to do.
-const EXPECTED_SHIPPED_LAYOUT: [((i32, i32), i32, (i32, i32)); 4] = [
-    ((0, 0), 4, (4, 0)),
-    ((5, 0), 4, (9, 0)),
-    ((10, 0), 4, (14, 0)),
-    ((15, 0), 4, (19, 0)),
+/// The shipped chain's tile layout, as `(recipe, machine kind, belt start,
+/// belt length, machine origin, footprint w x h)` per stage, worked out by
+/// hand from the footprint rule (`data/machines.ron`'s header): a stage's
+/// belt is 4 tiles, its machine's origin is the tile immediately after the
+/// belt, and the next stage begins immediately after the machine's *whole*
+/// width.
+///
+/// So: crusher 1 wide at x=4 (next stage at 5), mixer 1 wide at x=9 (next at
+/// 10), **cooking vat 2 wide at x=14, covering 14 and 15** (next at 16, one
+/// further east than a 1x1 would have put it), bottler at x=20, packer at
+/// x=25. Every stage's *origin* is on row 0; the vat is the one machine that
+/// also claims row 1.
+const EXPECTED_SHIPPED_LAYOUT: [(&str, &str, (i32, i32), i32, (i32, i32), (i32, i32)); 5] = [
+    ("tomato_paste", "crusher", (0, 0), 4, (4, 0), (1, 1)),
+    ("ketchup_mix", "mixer", (5, 0), 4, (9, 0), (1, 1)),
+    ("ketchup", "cooking_vat", (10, 0), 4, (14, 0), (2, 2)),
+    ("bottled_ketchup", "bottler", (16, 0), 4, (20, 0), (1, 1)),
+    ("boxed_ketchup", "packer", (21, 0), 4, (25, 0), (1, 1)),
 ];
 
 #[test]
-fn the_shipped_chains_tile_layout_is_unchanged_by_footprints() {
+fn the_shipped_chains_tile_layout_is_what_the_footprint_rule_says() {
     let world = World::new(shipped_recipes());
     let layout = world.chain_layout();
 
@@ -96,20 +105,114 @@ fn the_shipped_chains_tile_layout_is_unchanged_by_footprints() {
          EXPECTED_SHIPPED_LAYOUT, but note this test exists to catch it happening by accident"
     );
     for (stage, expected) in layout.iter().zip(EXPECTED_SHIPPED_LAYOUT) {
-        let (belt_start, belt_len, machine_tile) = expected;
-        assert_eq!(
-            (stage.belt_start_tile, stage.belt_length_tiles, stage.machine_tile),
-            (belt_start, belt_len, machine_tile),
-            "stage '{}' moved",
-            stage.recipe
-        );
+        let (recipe, kind, belt_start, belt_len, machine_tile, footprint) = expected;
         assert_eq!(
             (
-                stage.machine_footprint.width_tiles,
-                stage.machine_footprint.height_tiles
+                stage.recipe.as_str(),
+                stage.machine_kind.as_str(),
+                stage.belt_start_tile,
+                stage.belt_length_tiles,
+                stage.machine_tile,
+                (
+                    stage.machine_footprint.width_tiles,
+                    stage.machine_footprint.height_tiles
+                ),
             ),
-            (1, 1),
-            "every shipped machine kind must still be 1x1 for the layout above to hold"
+            (recipe, kind, belt_start, belt_len, machine_tile, footprint),
+            "stage '{}' is not where the footprint rule puts it",
+            stage.recipe
+        );
+    }
+}
+
+/// The payoff of ticket 1's accumulate-widths layout, observed on *shipped*
+/// content rather than a fixture: the 2-wide cooking vat pushes everything
+/// downstream of it one tile east of where a one-tile-per-machine span would
+/// have placed it, and nothing upstream of it moves at all.
+#[test]
+fn the_cooking_vats_extra_width_shifts_only_what_is_downstream_of_it() {
+    let world = World::new(shipped_recipes());
+    let layout = world.chain_layout();
+
+    // A fixed 5-tile-per-stage span (4 belt tiles + a 1-tile machine) is what
+    // every stage would sit at if machine width were still assumed to be 1.
+    for (i, stage) in layout.iter().enumerate() {
+        let fixed_span_start = (i as i32) * 5;
+        if i <= 2 {
+            assert_eq!(
+                stage.belt_start_tile.0, fixed_span_start,
+                "stage {i} is at or before the vat, so its own tiles must not have moved"
+            );
+        } else {
+            assert_eq!(
+                stage.belt_start_tile.0,
+                fixed_span_start + 1,
+                "stage {i} is downstream of the 2-wide vat, so it must sit exactly one tile \
+                 further east than a fixed one-tile-per-machine span would put it"
+            );
+        }
+    }
+}
+
+/// Hovering a big machine has to work anywhere on it, not just on the corner
+/// the belt feeds — checked here against the real shipped cooking vat, at
+/// every one of the four tiles it occupies.
+#[test]
+fn every_tile_of_the_shipped_cooking_vat_resolves_to_the_cooking_vat() {
+    let world = World::new(shipped_recipes());
+    let stage = world
+        .chain_layout()
+        .into_iter()
+        .find(|s| s.machine_kind == "cooking_vat")
+        .expect("the shipped chain has a cooking vat");
+    let origin = stage.machine_tile;
+    assert_eq!(origin, (14, 0));
+    assert_eq!(
+        (
+            stage.machine_footprint.width_tiles,
+            stage.machine_footprint.height_tiles
+        ),
+        (2, 2)
+    );
+
+    for tile in [(14, 0), (15, 0), (14, 1), (15, 1)] {
+        match world.query_tile(tile) {
+            Some(TileSnapshot::Machine {
+                ref machine_kind,
+                footprint,
+                origin_tile,
+                ref recipe,
+                ..
+            }) => {
+                assert_eq!(machine_kind, "cooking_vat", "at {tile:?}");
+                assert_eq!(origin_tile, origin, "at {tile:?}");
+                assert_eq!(recipe, "ketchup", "at {tile:?}");
+                assert_eq!(
+                    (footprint.width_tiles, footprint.height_tiles),
+                    (2, 2),
+                    "at {tile:?}"
+                );
+            }
+            other => panic!("expected the cooking vat at {tile:?}, got {other:?}"),
+        }
+    }
+
+    // Immediately outside it on every side: the belt tile west of the origin
+    // belongs to the vat's own stage, the tile east of it starts the
+    // bottler's belt, and the row above the vat is empty (the pipe run is
+    // further west, beside the mixer).
+    assert!(matches!(
+        world.query_tile((13, 0)),
+        Some(TileSnapshot::Belt { .. })
+    ));
+    assert!(matches!(
+        world.query_tile((16, 0)),
+        Some(TileSnapshot::Belt { .. })
+    ));
+    for tile in [(14, 2), (15, 2), (13, 1), (16, 1), (14, -1)] {
+        assert!(
+            world.query_tile(tile).is_none(),
+            "{tile:?} is outside the vat's footprint and must be empty"
         );
     }
 }
@@ -127,15 +230,28 @@ fn every_shipped_stage_reports_the_machine_kind_its_recipe_names() {
 /// The pipe run's position is derived from the fluid-fed machine's footprint
 /// (the row immediately north of it) rather than a constant, so this pins
 /// that the 1x1 case still lands exactly where milestone 6 put it: row 1,
-/// four tiles ending beside the reducer at x = 9.
+/// four tiles ending beside the fluid-fed machine at x = 9. Ticket 2 moved
+/// the fluid requirement from the old `ketchup`/reducer stage onto the new
+/// `ketchup_mix`/mixer stage — which happens to sit at the same x, so the run
+/// itself did not move, but it is now feeding a different machine entirely.
 #[test]
-fn the_shipped_pipe_run_is_unchanged_by_footprints() {
+fn the_shipped_pipe_run_feeds_the_mixer() {
     let world = World::new(shipped_recipes());
     let fluid = world.fluid_snapshot().expect("shipped chain has a pipe run");
     let tiles: Vec<(i32, i32)> = fluid.segments.iter().map(|s| s.tile).collect();
     assert_eq!(tiles, vec![(6, 1), (7, 1), (8, 1), (9, 1)]);
     assert_eq!(fluid.machine_tile, (9, 0));
     assert_eq!(fluid.inlet_index, 3);
+    assert_eq!(fluid.machine_recipe, "ketchup_mix");
+
+    // ...and the machine at that tile really is the mixer, not some other
+    // stage that merely shares the coordinate.
+    match world.query_tile(fluid.machine_tile) {
+        Some(TileSnapshot::Machine { machine_kind, .. }) => {
+            assert_eq!(machine_kind, "mixer")
+        }
+        other => panic!("expected the mixer at the pipe run's machine tile, got {other:?}"),
+    }
 }
 
 // ---------------------------------------------------------------------

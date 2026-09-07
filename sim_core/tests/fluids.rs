@@ -29,24 +29,32 @@ fn shipped_recipes() -> RecipeRegistry {
 /// vinegar per craft. Everything else about the two chains compared below
 /// is identical, so any behavioral difference is attributable to the fluid
 /// requirement and nothing else.
+///
+/// Deliberately shaped like the shipped chain's own front end (the
+/// "Machines improvement" ticket 2 restructure): a crusher makes paste, and
+/// the *mixer* is the fluid-gated stage. Both kinds are real entries in
+/// `data/machines.ron`, since `World::new` uses the bundled registry.
+const FLUID_GATED_RECIPE: &str = "ketchup_mix";
+const FLUID_GATED_INPUT: &str = "tomato_paste";
+
 fn two_stage_chain(vinegar_units: u32) -> RecipeRegistry {
     let text = format!(
         r#"(
             schema_version: 2,
             recipes: [
                 Recipe(
-                    id: "tomato_sauce",
+                    id: "tomato_paste",
                     inputs: [("tomato", 4)],
-                    outputs: [("tomato_sauce", 1)],
-                    machine: "cooker",
+                    outputs: [("tomato_paste", 1)],
+                    machine: "crusher",
                     time_ticks: 20,
                 ),
                 Recipe(
-                    id: "ketchup",
-                    inputs: [("tomato_sauce", 1)],
+                    id: "ketchup_mix",
+                    inputs: [("tomato_paste", 1)],
                     fluid_inputs: [("vinegar", {vinegar_units})],
-                    outputs: [("ketchup", 1)],
-                    machine: "reducer",
+                    outputs: [("ketchup_mix", 1)],
+                    machine: "mixer",
                     time_ticks: 20,
                 ),
             ],
@@ -156,32 +164,32 @@ fn a_stage_stalls_without_its_fluid_and_runs_once_the_fluid_is_available() {
     // input, which is exactly the "stalls, doesn't run degraded" case
     // (GAMEPLAY.md §7).
     let mut starved = World::new(two_stage_chain(1000));
-    let starved_output = run_chain(&mut starved, 4, 3_000, "ketchup");
+    let starved_output = run_chain(&mut starved, 4, 3_000, FLUID_GATED_RECIPE);
     assert_eq!(
         starved_output, 0,
         "a machine whose fluid requirement can never be met must never complete a craft"
     );
 
     // ...and it must not have quietly eaten its solid input while stalled.
-    let mut sauce_waiting = 0;
+    let mut paste_waiting = 0;
     for chunk in starved.all_chunks() {
         for machine in starved.chunk_snapshot(chunk).machines {
-            if machine.recipe == "ketchup" {
+            if machine.recipe == FLUID_GATED_RECIPE {
                 assert!(
                     machine.process.is_none(),
                     "a fluid-starved machine must be idle, not mid-craft"
                 );
-                sauce_waiting = machine
+                paste_waiting = machine
                     .input
                     .iter()
-                    .find(|(id, _)| id == "tomato_sauce")
+                    .find(|(id, _)| id == FLUID_GATED_INPUT)
                     .map(|(_, qty)| *qty)
                     .unwrap_or(0);
             }
         }
     }
     assert!(
-        sauce_waiting > 0,
+        paste_waiting > 0,
         "the stalled stage should be sitting on unconsumed solid input — otherwise this test \
          proved nothing about the fluid gate (it would just be an empty chain)"
     );
@@ -189,7 +197,7 @@ fn a_stage_stalls_without_its_fluid_and_runs_once_the_fluid_is_available() {
     // Same chain, same everything, a fluid requirement the pipe run can
     // actually meet.
     let mut supplied = World::new(two_stage_chain(2));
-    let supplied_output = run_chain(&mut supplied, 4, 3_000, "ketchup");
+    let supplied_output = run_chain(&mut supplied, 4, 3_000, FLUID_GATED_RECIPE);
     assert_eq!(
         supplied_output, 1,
         "with fluid available the identical chain must produce its output"
@@ -197,9 +205,12 @@ fn a_stage_stalls_without_its_fluid_and_runs_once_the_fluid_is_available() {
 }
 
 /// The shipped chain (`data/recipes.ron`) still runs end to end now that
-/// its ketchup stage needs vinegar — i.e. the pipe run `World` builds
+/// its *mixing* stage needs vinegar — i.e. the pipe run `World` builds
 /// really does deliver fluid to the machine that asked for it, and the
-/// network really is being drawn from.
+/// network really is being drawn from. Watching `ketchup` (the cooking
+/// vat's output, one stage *past* the fluid gate) rather than the mix
+/// itself is deliberate: nothing downstream of the mixer can exist unless
+/// the mixer actually got its vinegar.
 #[test]
 fn the_shipped_chain_consumes_fluid_as_it_produces() {
     let mut world = World::new(shipped_recipes());
@@ -207,13 +218,21 @@ fn the_shipped_chain_consumes_fluid_as_it_produces() {
         .fluid_snapshot()
         .expect("data/recipes.ron declares a fluid recipe, so a pipe run must exist");
     assert_eq!(before.fluid, "vinegar");
+    assert_eq!(
+        before.machine_recipe, FLUID_GATED_RECIPE,
+        "ticket 2 moved the fluid requirement onto the mixing stage — the pipe run must \
+         follow the data file, not a hardcoded stage"
+    );
     assert!(
         before.units_per_craft > 0,
         "the fluid recipe must consume a non-zero amount"
     );
 
     let (produced, min_volume) = run_chain_watching_fluid(&mut world, 4, 20_000, "ketchup");
-    assert_eq!(produced, 1, "the shipped chain must still reach its ketchup stage");
+    assert_eq!(
+        produced, 1,
+        "the shipped chain must still reach its cooked-ketchup stage"
+    );
 
     let min_volume = min_volume.expect("the run is long enough to observe the settled network");
     assert!(
@@ -242,10 +261,10 @@ fn a_chain_with_no_fluid_recipe_has_no_pipe_run_at_all() {
             schema_version: 2,
             recipes: [
                 Recipe(
-                    id: "tomato_sauce",
+                    id: "tomato_paste",
                     inputs: [("tomato", 4)],
-                    outputs: [("tomato_sauce", 1)],
-                    machine: "cooker",
+                    outputs: [("tomato_paste", 1)],
+                    machine: "crusher",
                     time_ticks: 20,
                 ),
             ],
@@ -331,7 +350,7 @@ fn fluid_snapshot_json_has_the_documented_shape() {
         1,
         "the inlet segment must sit directly beside the machine it feeds"
     );
-    assert_eq!(snapshot.machine_recipe, "ketchup");
+    assert_eq!(snapshot.machine_recipe, FLUID_GATED_RECIPE);
 }
 
 /// Pipes are reachable through the two existing per-location APIs too, so a

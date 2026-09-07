@@ -38,7 +38,7 @@ pub struct Recipe {
     /// (fluid id, whole fluid units) consumed per craft from the machine's
     /// connected `fluid::FluidNetwork` — the liquid half of a recipe's
     /// ingredient list (ARCHITECTURE.md §9 milestone 6, GAMEPLAY.md §2's
-    /// tier table, e.g. ketchup needing vinegar).
+    /// tier table, e.g. the ketchup mix needing vinegar).
     ///
     /// Defaults to empty, so every pre-milestone-6 recipe is unchanged and
     /// adding a fluid requirement stays a pure data-file edit
@@ -58,7 +58,7 @@ pub struct Recipe {
     pub fluid_inputs: Vec<(FluidId, u32)>,
     /// (item id, quantity) pairs produced per craft.
     pub outputs: Vec<(ItemId, u32)>,
-    /// The machine kind this recipe runs on (e.g. "cooker"). Must name an
+    /// The machine kind this recipe runs on (e.g. "crusher"). Must name an
     /// entry in `data/machines.ron` — [`super::machines::MachineRegistry::validate_covers`]
     /// checks that at world-construction time, and that entry is what says
     /// how many tiles the machine occupies.

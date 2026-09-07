@@ -98,7 +98,7 @@ impl Footprint {
 #[derive(Debug, Clone, Deserialize)]
 pub struct MachineKind {
     /// Content id, matching the `machine` field of a `Recipe` in
-    /// `data/recipes.ron` (e.g. "cooker").
+    /// `data/recipes.ron` (e.g. "crusher").
     pub id: String,
     pub footprint: Footprint,
 }
@@ -324,7 +324,7 @@ mod tests {
     }
 
     #[test]
-    fn the_bundled_file_loads_and_defines_every_shipped_kind_as_one_by_one() {
+    fn the_bundled_file_defines_every_shipped_kind_with_a_usable_footprint() {
         let registry = MachineRegistry::bundled();
         let recipes = RecipeRegistry::from_ron_str(include_str!("../../../data/recipes.ron"))
             .expect("bundled recipes must parse");
@@ -332,14 +332,38 @@ mod tests {
             .validate_covers(&recipes)
             .expect("every shipped recipe's machine kind must be defined");
         for recipe in recipes.ordered() {
-            assert_eq!(
-                registry.footprint_of(&recipe.machine),
-                Some(Footprint::ONE_BY_ONE),
-                "kind '{}' must still be 1x1 — this ticket is a pure refactor; a larger \
-                 footprint is a deliberate content change that moves downstream tiles",
+            let footprint = registry
+                .footprint_of(&recipe.machine)
+                .expect("validate_covers passed, so every kind resolves");
+            assert!(
+                footprint.width_tiles >= 1 && footprint.height_tiles >= 1,
+                "kind '{}' has a degenerate footprint {footprint:?}",
                 recipe.machine
             );
         }
+    }
+
+    /// Ticket 1 shipped every kind as 1x1 so that generalizing the layout
+    /// math moved no tile; ticket 2 is the content change that made one kind
+    /// genuinely bigger. This asserts that the *mechanism* has a real user in
+    /// shipped content — without it, every width/height code path would only
+    /// ever be exercised by test-only fixtures.
+    #[test]
+    fn the_shipped_content_actually_uses_a_multi_tile_footprint() {
+        let registry = MachineRegistry::bundled();
+        let recipes = RecipeRegistry::from_ron_str(include_str!("../../../data/recipes.ron"))
+            .expect("bundled recipes must parse");
+        let biggest = recipes
+            .ordered()
+            .iter()
+            .filter_map(|r| registry.footprint_of(&r.machine))
+            .max_by_key(|f| f.width_tiles * f.height_tiles)
+            .expect("the shipped chain has at least one stage");
+        assert!(
+            biggest != Footprint::ONE_BY_ONE,
+            "no shipped machine kind is larger than one tile — the footprint mechanism would \
+             then have no real content behind it (the cooking vat is meant to be 2x2)"
+        );
     }
 
     #[test]

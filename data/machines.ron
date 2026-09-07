@@ -32,27 +32,57 @@
 // presentation place a multi-tile machine unambiguously from a single
 // origin tile plus these two numbers.
 //
-// EVERY KIND BELOW IS 1x1, ON PURPOSE. The ticket that added this file is a
-// pure refactor: generalizing the layout math without changing a single
-// existing tile coordinate. A kind here becoming larger than 1x1 is a
-// content change (a later ticket's job) and will visibly move every
-// downstream stage's tiles — which is exactly the mechanism working.
+// SIZES ARE A DELIBERATE CONTENT CHOICE (ticket 2). Ticket 1 shipped every
+// kind as 1x1 so that generalizing the layout math moved no tile at all;
+// ticket 2 is the content change that ticket 1 existed to enable. The chain
+// front end is now three thematically real machines — a crusher, a mixer and
+// a cooking vat — and **the cooking vat is 2x2**, the first kind in the game
+// that is bigger than one tile. Size here is meant to read as "this machine
+// is a serious piece of equipment," so a kind only grows when its real-world
+// counterpart genuinely is bulky: a bench-scale crusher or mixer is not, a
+// cooking vat that holds a batch of sauce for a long cook very much is. See
+// each kind's own note below.
 (
     schema_version: 1,
     machines: [
-        // GAMEPLAY.md §2 tier 1's "basic cooker/kettle" — the chain's first
-        // stage, raw tomato -> tomato sauce.
+        // GAMEPLAY.md §2 tier 1's raw-ingredient prep: crushes whole
+        // tomatoes into paste. 1x1 — a crusher is a hopper and a screw, the
+        // physically smallest machine on the line, and it is deliberately
+        // NOT the milestone's "big machine" example.
         MachineKind(
-            id: "cooker",
+            id: "crusher",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
         ),
-        // Tier 2's reduction/thickening step. This is the one stage plumbed
-        // into a fluid network (its recipe declares `fluid_inputs`), so its
-        // footprint height also decides which row the pipe run occupies —
-        // see `World::new` in sim_core/src/sim/world.rs.
+        // Blends tomato paste with vinegar into an uncooked ketchup mix.
+        // This is the one stage plumbed into a fluid network (its recipe is
+        // the only one declaring `fluid_inputs`), so its footprint *height*
+        // also decides which row the pipe run occupies — the run sits on the
+        // row immediately north of the machine it feeds, see `World::new` in
+        // sim_core/src/sim/world.rs. Kept 1x1: an in-line blender is a small
+        // unit, and keeping it one tile tall also keeps the pipe run on row
+        // 1, exactly where milestone 6 first put it.
         MachineKind(
-            id: "reducer",
+            id: "mixer",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
+        ),
+        // GAMEPLAY.md §2 tier 1/2's cooker/kettle, grown up: a batch vat
+        // that cooks the mix down into finished ketchup. **This is the
+        // milestone's big machine, and the only kind that is not 1x1.**
+        //
+        // 2x2, not 2x1, for two reasons. Thematically, a vat is the one
+        // machine on this line whose bulk is the point — it holds a whole
+        // batch through the chain's longest process (240 ticks, four times
+        // the crush), so "it takes up real floor space and it is worth it"
+        // is exactly the read we want. Mechanically, 2x2 is the smallest
+        // footprint that exercises ticket 1's mechanism in *both* axes:
+        // width pushes every downstream stage east by one extra tile, and
+        // height means the machine claims a second row, which a
+        // width-only 2x1 would never test outside a synthetic fixture.
+        // Bigger than that (a 3x3, say) would dwarf the belts feeding it
+        // and start to look absurd rather than substantial.
+        MachineKind(
+            id: "cooking_vat",
+            footprint: Footprint(width_tiles: 2, height_tiles: 2),
         ),
         // Tier 2's bottling & sealing line.
         MachineKind(

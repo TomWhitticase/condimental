@@ -16,6 +16,12 @@
 //! exactly what lets this same test file keep passing, unmodified, after
 //! this milestone's data-file-only chain extension (see this crate's
 //! CLAUDE.md/DEVLOG entry for that verification).
+//!
+//! That property held again through the "Machines improvement" ticket 2
+//! content change, which re-split the chain's two-stage front end into three
+//! real machines (crusher -> mixer -> cooking vat): the conservation logic
+//! below needed no edit at all, because it reads the chain out of the data
+//! file rather than naming any stage.
 
 use sim_core::sim::{BeltSnapshot, MachineSnapshot, PlayerCommand, RecipeRegistry, TileSnapshot, World};
 
@@ -126,9 +132,14 @@ fn assert_conserved(
 fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
     let registry = recipes();
     let ordered = registry.ordered();
-    assert!(
-        ordered.len() >= 2,
-        "milestone 4 requires a multi-step chain, got {} recipe(s)",
+    // Five solid stages since ticket 2 split the front end into crusher ->
+    // mixer -> cooking vat: mass has to survive two more hand-offs than it
+    // did when this was a four-stage chain.
+    assert_eq!(
+        ordered.len(),
+        5,
+        "expected the shipped 5-stage chain (crusher, mixer, cooking vat, bottler, packer), \
+         got {} recipe(s) — if a stage was added or removed deliberately, update this",
         ordered.len()
     );
     let final_recipe = ordered.last().unwrap().clone();
@@ -232,14 +243,42 @@ fn query_tile_reflects_every_stage_belt_and_machine_position() {
 
     for (stage, recipe) in layout.iter().zip(ordered.iter()) {
         assert_eq!(stage.recipe, recipe.id, "stage order must follow recipes.ron order");
+        assert_eq!(
+            stage.machine_kind, recipe.machine,
+            "each stage must run on the machine kind its recipe names"
+        );
 
-        match world.query_tile(stage.belt_start_tile) {
-            Some(TileSnapshot::Belt { .. }) => {}
-            other => panic!("expected belt at {:?}, got {other:?}", stage.belt_start_tile),
+        for dx in 0..stage.belt_length_tiles {
+            let tile = (stage.belt_start_tile.0 + dx, stage.belt_start_tile.1);
+            match world.query_tile(tile) {
+                Some(TileSnapshot::Belt { .. }) => {}
+                other => panic!("expected belt at {tile:?}, got {other:?}"),
+            }
         }
-        match world.query_tile(stage.machine_tile) {
-            Some(TileSnapshot::Machine { recipe: found, .. }) => assert_eq!(found, recipe.id),
-            other => panic!("expected machine at {:?}, got {other:?}", stage.machine_tile),
+
+        // Every tile the machine covers, not just its origin — with the
+        // cooking vat now genuinely 2x2 (data/machines.ron), this loop walks
+        // four real tiles for that stage and one for each of the others.
+        for dy in 0..stage.machine_footprint.height_tiles {
+            for dx in 0..stage.machine_footprint.width_tiles {
+                let tile = (stage.machine_tile.0 + dx, stage.machine_tile.1 + dy);
+                match world.query_tile(tile) {
+                    Some(TileSnapshot::Machine {
+                        recipe: found,
+                        origin_tile,
+                        machine_kind,
+                        ..
+                    }) => {
+                        assert_eq!(found, recipe.id, "at {tile:?}");
+                        assert_eq!(machine_kind, recipe.machine, "at {tile:?}");
+                        assert_eq!(
+                            origin_tile, stage.machine_tile,
+                            "every tile of a machine must report the same origin ({tile:?})"
+                        );
+                    }
+                    other => panic!("expected machine at {tile:?}, got {other:?}"),
+                }
+            }
         }
     }
 
@@ -253,10 +292,11 @@ fn dirty_chunks_report_touched_chunks_and_clear_between_ticks() {
         item: "tomato".to_string(),
     });
     world.tick();
-    // The whole 3-stage chain (15 tiles wide) still fits inside chunk (0,0)
-    // (ARCHITECTURE.md §3.1's 32x32 chunks), so a spawn on the first belt is
-    // the only thing that changes this tick and dirties exactly that chunk
-    // — not a claim that dirty_chunks == all_chunks in general.
+    // The whole 5-stage chain (26 tiles wide, 2 rows tall where the cooking
+    // vat sits) still fits inside chunk (0,0) (ARCHITECTURE.md §3.1's 32x32
+    // chunks), so a spawn on the first belt is the only thing that changes
+    // this tick and dirties exactly that chunk — not a claim that
+    // dirty_chunks == all_chunks in general.
     assert_eq!(world.dirty_chunks(), &[(0, 0)]);
     assert_eq!(world.all_chunks(), vec![(0, 0)]);
 

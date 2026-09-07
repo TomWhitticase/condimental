@@ -23,41 +23,72 @@
 // file, not of any Rust code.
 //
 // The chain below is a simplified stand-in for GAMEPLAY.md §2's tier 1/2
-// tomato-sauce/ketchup progression (real ketchup also needs vinegar/sugar as
-// separate raw ingredients, and GAMEPLAY.md §4 calls out its bottling step
+// tomato-sauce/ketchup progression (real ketchup also needs sugar and spices
+// as separate raw ingredients, and GAMEPLAY.md §4 calls out its bottling step
 // as part of the same equipment tier) — this file keeps every recipe past
 // the first to a single *solid* input/single output so `World`'s
 // one-straight-line assumption holds; multi-ingredient convergence on the
 // belt side is a later milestone's branching-topology concern, not this
 // one's. (A fluid input is not belt-borne, so it adds an ingredient without
 // touching that topology at all — which is exactly why milestone 6 could
-// add one to an existing stage instead of inventing a new one.) Don't read this as the final
-// tomato sauce/ketchup recipes.
+// add one to an existing stage instead of inventing a new one.) Don't read
+// this as the final ketchup recipe.
+//
+// THE FRONT END IS THREE REAL MACHINES (the "Machines improvement"
+// milestone's ticket 2). It used to be two abstract steps — a "cooker"
+// turning tomatoes straight into tomato sauce, then a "reducer" turning that
+// into ketchup — which described a process nobody would recognize from a
+// real plant. It is now the three steps a ketchup line actually has: crush,
+// mix, cook. That is a pure content change: the chain is still one straight
+// line, still one stage per entry in file order, and `sim_core` needed no
+// code change to grow from four stages to five. The downstream
+// bottling/boxing stages below are untouched.
+//
+// PROCESS TIMES follow the work each machine does, so the line has a visible
+// bottleneck rather than five interchangeable stages: crushing is mechanical
+// and quick (60 ticks = 1s at ARCHITECTURE.md §3.9's 60 ticks/sec), blending
+// a little slower (90), and the cook-down is by far the longest step (240) —
+// which is precisely why the cooking vat is also the biggest machine on the
+// line (`data/machines.ron`).
 (
     schema_version: 2,
     recipes: [
+        // Crush: whole tomatoes in, paste out. The chain's raw-ingredient
+        // entry point, so this is the one recipe consuming an item nothing
+        // else produces.
         Recipe(
-            id: "tomato_sauce",
+            id: "tomato_paste",
             inputs: [("tomato", 4)],
-            outputs: [("tomato_sauce", 1)],
-            machine: "cooker",
-            time_ticks: 180,
+            outputs: [("tomato_paste", 1)],
+            machine: "crusher",
+            time_ticks: 60,
         ),
-        // Milestone 6's fluid-requiring recipe. GAMEPLAY.md §2's tier
-        // table says ketchup is exactly where vinegar enters the sauce
-        // progression ("+ vinegar, sugar, spices"), so this is the recipe
-        // the doc already wanted to have a liquid ingredient — it needed a
-        // fluid network to express, not a new recipe. Note this stage's
-        // belt input/output are completely untouched: the chain's shape is
-        // identical to milestone 4's, this stage just now also needs
-        // something a belt can't carry.
+        // Mix: paste plus vinegar makes an uncooked ketchup mix. This is
+        // milestone 6's fluid-requiring recipe, and mixing is where it
+        // belongs — GAMEPLAY.md §2's tier table has vinegar entering at
+        // ketchup ("+ vinegar, sugar, spices"), and a real line adds it in
+        // the blend, not in the cook. `World` builds its one pipe run for
+        // whichever recipe in this file declares `fluid_inputs`, so moving
+        // the fluid requirement from the old `ketchup` recipe to this one
+        // re-plumbed the pipe run with no Rust change at all — that is the
+        // data-driven property working, not a coincidence.
+        Recipe(
+            id: "ketchup_mix",
+            inputs: [("tomato_paste", 1)],
+            fluid_inputs: [("vinegar", 2)],
+            outputs: [("ketchup_mix", 1)],
+            machine: "mixer",
+            time_ticks: 90,
+        ),
+        // Cook: the long batch reduction that turns the mix into finished
+        // ketchup. The slowest step in the chain and the reason the cooking
+        // vat is a 2x2 machine.
         Recipe(
             id: "ketchup",
-            inputs: [("tomato_sauce", 1)],
-            fluid_inputs: [("vinegar", 2)],
+            inputs: [("ketchup_mix", 1)],
             outputs: [("ketchup", 1)],
-            machine: "reducer",
-            time_ticks: 120,
+            machine: "cooking_vat",
+            time_ticks: 240,
         ),
         Recipe(
             id: "bottled_ketchup",

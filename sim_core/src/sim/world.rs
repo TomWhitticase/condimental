@@ -33,9 +33,11 @@
 //! *accumulating* those widths (belt tiles, then this machine's full width,
 //! then the next stage begins immediately after), not by multiplying a fixed
 //! per-stage span, so making a kind wider pushes every downstream stage east
-//! by exactly the extra tiles. With every shipped kind at 1x1 the arithmetic
-//! reduces to the old fixed span exactly, which is why introducing it moved
-//! no existing tile.
+//! by exactly the extra tiles. Ticket 1 introduced the arithmetic with every
+//! kind still 1x1 (where it reduces to the old fixed span exactly, moving no
+//! tile); ticket 2 gave it a real user — the shipped `cooking_vat` is 2x2, so
+//! every stage downstream of it sits one tile further east than the old
+//! formula would have put it.
 //!
 //! This is also where `SimBridge`'s pure-logic half lives (ARCHITECTURE.md
 //! §4): `tick()`, `dirty_chunks()`/`chunk_snapshot()`, `issue_command()`,
@@ -161,13 +163,13 @@ pub struct BeltSnapshot {
 ///
 /// ```json
 /// {
-///   "tile": [4, 0],
-///   "kind": "cooker",
-///   "footprint": { "width_tiles": 1, "height_tiles": 1 },
-///   "recipe": "tomato_sauce",
-///   "process": [120, 180],
-///   "input": [["tomato", 2]],
-///   "output": [["tomato_sauce", 1]]
+///   "tile": [14, 0],
+///   "kind": "cooking_vat",
+///   "footprint": { "width_tiles": 2, "height_tiles": 2 },
+///   "recipe": "ketchup",
+///   "process": [120, 240],
+///   "input": [["ketchup_mix", 1]],
+///   "output": [["ketchup", 1]]
 /// }
 /// ```
 ///
@@ -191,7 +193,7 @@ pub struct BeltSnapshot {
 pub struct MachineSnapshot {
     /// The footprint's origin tile — see this type's doc.
     pub tile: TileCoord,
-    /// Machine kind id from `data/machines.ron` (e.g. "cooker").
+    /// Machine kind id from `data/machines.ron` (e.g. "crusher").
     pub kind: String,
     /// How many tiles this machine covers, anchored at `tile`.
     pub footprint: Footprint,
@@ -253,7 +255,7 @@ pub struct PipeSnapshot {
 ///                   "pressure": 1.0, "is_source": true }, ... ],
 ///   "inlet_index": 3,
 ///   "machine_tile": [8, 0],
-///   "machine_recipe": "ketchup",
+///   "machine_recipe": "ketchup_mix",
 ///   "units_per_craft": 2
 /// }
 /// ```
@@ -291,10 +293,10 @@ pub enum TileSnapshot {
     /// hovering a multi-tile machine work anywhere on it.
     ///
     /// JSON:
-    /// `{"kind": "machine", "machine_kind": "cooker",
-    ///   "footprint": {"width_tiles": 1, "height_tiles": 1},
-    ///   "origin_tile": [4, 0], "recipe": "tomato_sauce",
-    ///   "process": [120, 180]}`
+    /// `{"kind": "machine", "machine_kind": "cooking_vat",
+    ///   "footprint": {"width_tiles": 2, "height_tiles": 2},
+    ///   "origin_tile": [14, 0], "recipe": "ketchup",
+    ///   "process": [120, 240]}`
     ///
     /// `origin_tile` is the footprint's minimum-X/minimum-Y corner (see
     /// [`super::machines`]'s module doc), so a caller that hovered a
@@ -333,11 +335,11 @@ pub enum TileSnapshot {
 ///
 /// ```json
 /// {
-///   "recipe": "tomato_sauce",
+///   "recipe": "tomato_paste",
 ///   "belt_start_tile": [0, 0],
 ///   "belt_length_tiles": 4,
 ///   "machine_tile": [4, 0],
-///   "machine_kind": "cooker",
+///   "machine_kind": "crusher",
 ///   "machine_footprint": { "width_tiles": 1, "height_tiles": 1 }
 /// }
 /// ```
@@ -358,7 +360,7 @@ pub struct StageLayout {
     pub belt_length_tiles: i32,
     /// Origin tile of this stage's machine — see this type's doc.
     pub machine_tile: TileCoord,
-    /// Machine kind id from `data/machines.ron` (e.g. "cooker").
+    /// Machine kind id from `data/machines.ron` (e.g. "crusher").
     pub machine_kind: String,
     /// How many tiles that machine covers, anchored at `machine_tile`.
     pub machine_footprint: Footprint,
@@ -1175,7 +1177,7 @@ mod tests {
     #[should_panic(expected = "claimed by both")]
     fn overlapping_tile_claims_panic_with_both_claimants_named() {
         assert_no_tile_conflicts(&[
-            ((4, 0), "stage 0's 'cooker' machine".to_string()),
+            ((4, 0), "stage 0's 'crusher' machine".to_string()),
             ((5, 0), "stage 1's belt".to_string()),
             ((4, 0), "the pipe run".to_string()),
         ]);
@@ -1184,7 +1186,7 @@ mod tests {
     #[test]
     fn non_overlapping_tile_claims_are_accepted() {
         assert_no_tile_conflicts(&[
-            ((4, 0), "stage 0's 'cooker' machine".to_string()),
+            ((4, 0), "stage 0's 'crusher' machine".to_string()),
             ((4, 1), "the pipe run".to_string()),
             ((5, 0), "stage 1's belt".to_string()),
         ]);
