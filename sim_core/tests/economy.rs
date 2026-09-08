@@ -206,13 +206,27 @@ fn several_contracts_settle_independently_against_one_real_chain() {
     let registry = recipes();
     let final_item = registry.ordered().last().unwrap().id.clone();
 
+    // Cadences chosen relative to milestone 7's aging-rack-bottlenecked
+    // throughput (roughly one unit per ~2600 ticks in steady state, an
+    // order of magnitude slower than when this test was first written,
+    // since one unit's farm-to-final-product latency now includes the
+    // aging rack's 2400-tick hold — see timed_processes.rs). Both cadences
+    // must stay comfortably longer than that per-unit production interval:
+    // if a cadence were shorter than the production interval (as the
+    // pre-milestone-7 values of 900/3000 now are), that contract would
+    // check for stock more often than new stock arrives and would drain
+    // the shared pool the instant anything lands in it, permanently
+    // starving the other contract rather than the two settling on their
+    // own independent schedules, which is the actual thing under test.
+    let quick_cadence: u64 = 6_000;
+    let slow_cadence: u64 = 15_000;
     let board = format!(
         r#"(
             schema_version: 1,
             contracts: [
-                Contract(id: "quick", name: "Quick", mix: [("{final_item}", 1)], cadence_ticks: 900, payout: 10),
-                Contract(id: "slow", name: "Slow", mix: [("{final_item}", 2)], cadence_ticks: 3000, payout: 35),
-                Contract(id: "impossible", name: "Impossible", mix: [("ketchup", 5)], cadence_ticks: 900, payout: 999),
+                Contract(id: "quick", name: "Quick", mix: [("{final_item}", 1)], cadence_ticks: {quick_cadence}, payout: 10),
+                Contract(id: "slow", name: "Slow", mix: [("{final_item}", 2)], cadence_ticks: {slow_cadence}, payout: 35),
+                Contract(id: "impossible", name: "Impossible", mix: [("ketchup", 5)], cadence_ticks: {quick_cadence}, payout: 999),
             ],
         )"#
     );
@@ -222,13 +236,24 @@ fn several_contracts_settle_independently_against_one_real_chain() {
         ContractRegistry::from_ron_str(&board).expect("fixture board must load"),
     );
 
-    // Collect a generous amount so scarcity isn't what's under test here —
-    // independent cadences are.
-    let collected = run_until_collected(&mut world, &final_item, 8);
-    assert!(collected >= 8, "expected 8 units, collected {collected}");
-
-    while world.current_tick() < 3100 {
+    // Run the chain continuously (never stop feeding, never stop
+    // collecting) through exactly one slow-cadence window — the slow
+    // contract's very first boundary. Production ramps up for the first
+    // ~3000 ticks (the aging rack's own hold plus every stage upstream and
+    // downstream of it) and then settles into steady state well before
+    // that boundary, so by the time it's checked the pool has had time to
+    // build past both contracts' requirements even after the quick
+    // contract's own two checks (at one and two quick-cadences in) have
+    // each taken their share.
+    while world.current_tick() < slow_cadence {
+        world.issue_command(PlayerCommand::FillHopper { amount: 32 });
+        world.issue_command(PlayerCommand::FillFluidTank {
+            amount: FLUID_TANK_CAPACITY,
+        });
         world.tick();
+        if final_output_count(&world, &final_item) > 0 {
+            world.issue_command(PlayerCommand::CollectOutput);
+        }
     }
 
     let econ = world.economy();
@@ -238,18 +263,20 @@ fn several_contracts_settle_independently_against_one_real_chain() {
 
     assert!(
         quick.deliveries_made >= 2,
-        "a 900-tick contract should have settled several times by tick 3100, got {}",
+        "a {quick_cadence}-tick contract should have settled several times by tick {}, got {}",
+        world.current_tick(),
         quick.deliveries_made
     );
     assert_eq!(
         slow.deliveries_made, 1,
-        "a 3000-tick contract should have settled exactly once by tick 3100"
+        "a {slow_cadence}-tick contract should have settled exactly once by tick {}",
+        world.current_tick()
     );
     assert_eq!(
         impossible.deliveries_made, 0,
         "a contract asking for an item the delivery mechanism never produces must never pay"
     );
-    assert!(impossible.deliveries_missed >= 3);
+    assert!(impossible.deliveries_missed >= 2);
 
     // 'impossible' pays 999; if it had ever paid, this would be nowhere near.
     let expected = Fx::from_num(quick.deliveries_made * 10 + slow.deliveries_made * 35);

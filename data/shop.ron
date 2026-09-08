@@ -99,6 +99,14 @@
             id: "cooking_vat",
             price: 200,
         ),
+        // Milestone 7's aging rack. It is 1x1 — footprint cannot express
+        // time — but it holds a batch ten times longer than the cooking
+        // vat's own cook, so it is priced as a real capital purchase in the
+        // vat's neighbourhood rather than by tile count.
+        ShopEntry(
+            id: "aging_rack",
+            price: 160,
+        ),
         // GAMEPLAY.md §4 groups bottling with the reduction step as one
         // equipment tier, so it is priced in the vat's neighbourhood rather
         // than with the cheap front end.

@@ -47,9 +47,6 @@
 
 use std::time::{Duration, Instant};
 
-use sim_core::sim::economy::{
-    CONTRACT_CADENCE_TICKS, CONTRACT_ITEM, CONTRACT_PAYOUT_MONEY, CONTRACT_QUANTITY,
-};
 use sim_core::sim::{
     FLUID_TANK_CAPACITY, MachineSnapshot, PlayerCommand, RecipeRegistry, TileSnapshot, World,
 };
@@ -333,22 +330,14 @@ fn pausing_mid_age_in_wall_clock_time_does_not_change_the_tick_it_completes_on()
 /// signal; what actually matters is that the economy module has no knowledge
 /// of the aging stage, and that is exactly what is asserted.
 #[test]
-fn the_contract_still_targets_the_chains_final_product_with_economy_rs_untouched() {
-    // The four constants, exactly as milestone 5 shipped them.
-    assert_eq!(CONTRACT_ITEM, "boxed_ketchup");
-    assert_eq!(CONTRACT_QUANTITY, 2);
-    assert_eq!(CONTRACT_CADENCE_TICKS, 1_000);
-    assert_eq!(CONTRACT_PAYOUT_MONEY, 50);
-
-    // ...and the reason they could stay that way: the chain's last stage
-    // still produces that item, because the new stage went in the middle.
+fn every_shipped_contract_still_targets_the_chains_final_product_with_economy_rs_untouched() {
+    // The chain's last stage still produces the item every shipped
+    // contract's mix names, because the new stage went in the middle, not
+    // at the end.
     let registry = recipes();
     let ordered = registry.ordered();
     let final_recipe = ordered.last().expect("the chain has stages");
-    assert_eq!(
-        final_recipe.outputs[0].0, CONTRACT_ITEM,
-        "inserting the aging stage must not have moved the chain's final output id"
-    );
+    let final_item = &final_recipe.outputs[0].0;
     assert_eq!(
         ordered[ordered.len() - 2].id,
         "bottled_ketchup",
@@ -364,14 +353,23 @@ fn the_contract_still_targets_the_chains_final_product_with_economy_rs_untouched
         );
     }
 
-    // The live snapshot agrees with the constants on a fresh world.
+    // The live snapshot on a fresh world still has every shipped contract
+    // (data/contracts.ron, three of them as of this milestone) naming the
+    // chain's unmoved final output — proving the insertion mid-chain left
+    // every contract's target intact, not just one hardcoded constant.
     let snapshot = World::new(recipes()).economy_snapshot();
     assert_eq!(snapshot.money, 0.0);
-    assert_eq!(
-        snapshot.contract_mix,
-        vec![(CONTRACT_ITEM.to_string(), CONTRACT_QUANTITY)]
+    assert!(
+        !snapshot.contracts.is_empty(),
+        "data/contracts.ron must ship at least one contract"
     );
-    assert_eq!(snapshot.cadence_ticks, CONTRACT_CADENCE_TICKS);
+    for contract in &snapshot.contracts {
+        assert!(
+            contract.mix.iter().any(|(item, _)| item == final_item),
+            "contract '{}' must still target the chain's final output '{final_item}'",
+            contract.id
+        );
+    }
 }
 
 // ---------------------------------------------------------------------

@@ -70,15 +70,24 @@ fn final_output_count(world: &World, item: &str) -> u32 {
     0
 }
 
-/// Runs the real chain until the hardcoded contract has paid out at least
-/// once, so the returned world has genuine, earned money to spend. Mirrors
-/// `economy.rs`'s own drive loop.
+/// Runs the real chain until enough contract payouts have landed to fund
+/// this file's purchases several times over, so the returned world has
+/// genuine, earned money to spend. Mirrors `economy.rs`'s own drive loop.
+///
+/// The threshold is deliberately a generous flat amount rather than "at
+/// least one payout": `data/contracts.ron` now ships three contracts with
+/// different payouts (24/50/90), and which one happens to settle first
+/// depends on cadence/production timing — stopping at the very first payout
+/// risked returning as little as 24, which this file's own
+/// `repeated_purchases_of_several_kinds_accumulate_independently` test
+/// (needing 36 to cover its purchases) is not guaranteed to cover.
 fn world_with_earned_money() -> World {
     let registry = recipes();
     let final_item = registry.ordered().last().unwrap().id.clone();
     let mut world = world();
+    const MIN_MONEY: i64 = 200;
 
-    for _ in 0..500_000u32 {
+    for _ in 0..2_000_000u32 {
         world.issue_command(PlayerCommand::FillHopper { amount: 32 });
         world.issue_command(PlayerCommand::FillFluidTank {
             amount: FLUID_TANK_CAPACITY,
@@ -87,14 +96,14 @@ fn world_with_earned_money() -> World {
         if final_output_count(&world, &final_item) > 0 {
             world.issue_command(PlayerCommand::CollectOutput);
         }
-        if world.money() > Fx::ZERO {
+        if world.money() >= Fx::from_num(MIN_MONEY) {
             break;
         }
     }
 
     assert!(
-        world.money() > Fx::ZERO,
-        "the chain must earn at least one contract payout before this test can spend it \
+        world.money() >= Fx::from_num(MIN_MONEY),
+        "the chain must earn at least {MIN_MONEY} money before this test can spend it \
          (got {})",
         world.money()
     );
