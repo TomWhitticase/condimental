@@ -78,6 +78,7 @@ func _run_checks() -> void:
 	# A tank, four pipe tiles and the one machine whose recipe declares
 	# `fluid_inputs`, which is what a starting balance can afford.
 	Layouts.build_fluid_run(main.sim)
+	Layouts.stock_larder(main.sim)
 	main._rebuild_world()
 	main._update_fluid_network()
 

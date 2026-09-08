@@ -152,8 +152,11 @@ func _run_checks() -> void:
 	if not main._ghost_blocked_tiles("belt", Vector2i(7, 7), "east").is_empty():
 		_fail("open ground should not be blocked")
 		return
+	# `item` is required now that the chain has two raw solids — a hopper
+	# placed without one is a silent refusal, and this fixture would then be
+	# asserting that an empty tile reads blocked.
 	main.sim.issue_command_json(JSON.stringify({
-		"type": "place", "kind": "hopper", "tile": [7, 7], "direction": "east",
+		"type": "place", "kind": "hopper", "tile": [7, 7], "direction": "east", "item": "tomato",
 	}))
 	main._rebuild_world()
 	if main._ghost_blocked_tiles("belt", Vector2i(7, 7), "east").size() != 1:

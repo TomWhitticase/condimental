@@ -127,24 +127,19 @@
         (name: "liquid_mix",     rgb: "#AF3B27", class: "liquid"),
         (name: "liquid_ketchup", rgb: "#C4190E", class: "liquid"),
 
-        // --- oak, for the aging rack's casks (ARCHITECTURE.md §9
-        // milestone 7's machine) ---
-        // The one FOOD-CONTACT surface in this factory that is deliberately
-        // not stainless, and therefore the one deliberate exception to
-        // UI_UX.md §2b point 8's "food contact is stainless, structure is
-        // painted or poured" rule. A barrel is not made of wood because
-        // nobody had steel; the oak is doing the work — it is the process,
-        // which is exactly what the machine that holds it exists to depict
-        // (GAMEPLAY.md §2 tier 6, "barrel-aged"). Don't "fix" these to
-        // steel later.
-        //
-        // Matte, and warmer/redder than `cardboard` (#AD8450, the packer's
-        // case stock) on purpose: those are the factory's only two large
-        // warm surfaces, they sit two stages apart on the same line, and
-        // they have to stay tellable apart at scene scale. Shape does most
-        // of that work — a round hooped cask against a folded flat case —
-        // and hue does the rest.
-        (name: "oak",            rgb: "#7A4A28", class: "matte"),
-        (name: "oak_dark",       rgb: "#563117", class: "matte"),
+        // --- sugar, the chain's second raw ingredient (the chain-rework
+        // epic) ---
+        // A paper sack of refined sugar: the kraft-paper body and the
+        // white crystal spilling from its top. `sack_kraft` is a pale,
+        // desaturated paper rather than another brown — it sits on the same
+        // belt as `cardboard` two stages downstream, and the packer's cases
+        // are the factory's one large warm surface, so a second brown
+        // shipping-coloured object on the line would be the exact
+        // tellable-apart problem UI_UX.md §2b point 14 records about the
+        // barrels. `sugar_white` is the crystal itself, and is what
+        // `main.gd` tints a sugar hopper's product heap with.
+        (name: "sack_kraft",     rgb: "#C9B48E", class: "matte"),
+        (name: "sugar_white",    rgb: "#F2F0E8", class: "matte"),
+
     ],
 )

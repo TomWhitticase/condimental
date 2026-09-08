@@ -52,11 +52,6 @@ pub const ASSETS: &[Asset] = &[
     // every kind in `data/machines.ron` now has a silhouette of its own.
     Asset { name: "machine_bottler", build: machine_bottler },
     Asset { name: "machine_packer", build: machine_packer },
-    // ARCHITECTURE.md §9 milestone 7's machine, and the live bar that reads
-    // its progress — a `<model>` + `<model>_fill`-shaped pair, exactly like
-    // the hopper's and the tank's (see `aging_rack_gauge`).
-    Asset { name: "machine_aging_rack", build: machine_aging_rack },
-    Asset { name: "aging_rack_gauge", build: aging_rack_gauge },
     // The chain's exit (the delivery-dock ticket): the tile finished cases
     // leave the world through. Not a processing kind — see `machine_dock`.
     Asset { name: "machine_dock", build: machine_dock },
@@ -72,6 +67,12 @@ pub const ASSETS: &[Asset] = &[
     Asset { name: "pipe_inlet", build: pipe_inlet },
     Asset { name: "pipe_fluid", build: pipe_fluid },
     Asset { name: "item_tomato", build: item_tomato },
+    // The chain's second raw ingredient (the chain-rework epic). It needed a
+    // model of its own for UI_UX.md §2b point 12's reason: `main.gd`'s
+    // ITEM_MODELS falls back to a shipping box, so a new item id with no
+    // entry ships bulk produce down the belt in sealed cardboard and every
+    // structural test still passes.
+    Asset { name: "item_sugar", build: item_sugar },
     Asset { name: "item_paste_pail", build: item_paste_pail },
     Asset { name: "item_mix_pail", build: item_mix_pail },
     Asset { name: "item_ketchup_pail", build: item_ketchup_pail },
@@ -279,9 +280,9 @@ fn belt_body(m: &mut VoxModel, p: &Palette) {
 // through. So both output directions are cut into the table as **arrow
 // grooves** and the live asset ([`splitter_arrow`]) fills one of them flush,
 // emissive — the fifth use of the "one flat slab, positioned by main.gd from
-// live data" mechanism `pipe_fluid`, `hopper_fill`, `fluid_tank_fill` and
-// `aging_rack_gauge` already share, and the first that carries a DIRECTION
-// rather than a level.
+// live data" mechanism `pipe_fluid`, `hopper_fill` and `fluid_tank_fill`
+// already share, and the first that carries a DIRECTION rather than a
+// level.
 //
 // The dark groove is not decoration either: it is what makes the readout a
 // pair of positions rather than a colour (UI_UX.md §7). An empty groove and a
@@ -480,9 +481,8 @@ pub fn machine_splitter(p: &Palette) -> VoxModel {
 }
 
 /// The lit arrow standing in one of the splitter's two deck grooves — the
-/// live half of the readout, and the fifth asset built to the same
-/// one-flat-slab pattern (`pipe_fluid`, `hopper_fill`, `fluid_tank_fill`,
-/// `aging_rack_gauge`).
+/// live half of the readout, and the fourth asset built to the same
+/// one-flat-slab pattern (`pipe_fluid`, `hopper_fill`, `fluid_tank_fill`).
 ///
 /// **One voxel tall, and authored in the STRAIGHT position only.** `main.gd`
 /// turns this node a further quarter turn clockwise to show the branch —
@@ -492,9 +492,9 @@ pub fn machine_splitter(p: &Palette) -> VoxModel {
 /// turn. One asset, one rotation, and no second arrow that could end up
 /// pointing somewhere the simulation does not.
 ///
-/// `status_amber`, and therefore the `emissive` class, for
-/// `aging_rack_gauge`'s reason: this is a status readout, which is what
-/// UI_UX.md §7 reserves saturated colour for, and a deck inlay that did not
+/// `status_amber`, and therefore the `emissive` class, for the reason
+/// UI_UX.md §7 gives: this is a status readout, which is what that section
+/// reserves saturated colour for, and a deck inlay that did not
 /// emit would be a dark shape on a dark shape at scene scale.
 pub fn splitter_arrow(p: &Palette) -> VoxModel {
     let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 1]);
@@ -595,6 +595,37 @@ pub fn item_tomato(p: &Palette) -> VoxModel {
         m.set(8 + dx, 8 + dy, 10, p.idx("tomato_leaf"));
     }
     m.cuboid((8, 8), (8, 8), (11, 12), p.idx("tomato_leaf"));
+    m
+}
+
+/// One sack of refined sugar — the second thing a hopper can hold since the
+/// chain rework gave the mixer a second solid ingredient.
+///
+/// A **sack**, not a heap or a crystal, because at half-tile scale on a
+/// moving belt an item is read by silhouette alone and a heap of white
+/// grains is a shapeless blob beside `item_tomato`'s round red one. A
+/// slumped paper sack with a folded top and a spill of crystal at its mouth
+/// is instantly a bulk dry ingredient, and it is what sugar actually arrives
+/// in. The sack is widest at its base and narrows toward the fold, so it
+/// reads as full and soft rather than as a box.
+pub fn item_sugar(p: &Palette) -> VoxModel {
+    let mut m = item_volume();
+    // Slumped body: a bulging ellipsoid sitting flat on the belt, so the
+    // sack reads as soft and full. The first cut stacked three cuboids
+    // stepping inward and rendered as a ziggurat — a stepped block is what
+    // a sack is not.
+    m.ellipsoid((8, 8, 4), (5.5, 4.5, 5.0), p.idx("sack_kraft"));
+    m.cuboid((4, 11), (5, 10), (0, 1), p.idx("sack_kraft"));
+    // The gathered fold at the top, pinched to a ridge along X.
+    m.cuboid((5, 10), (7, 8), (9, 10), p.idx("sack_kraft"));
+    m.cuboid((5, 10), (7, 8), (11, 11), p.idx("cardboard_dark"));
+    // Crystal spilling out of the mouth, and a scatter of it on the base —
+    // the one bright thing on the item, and what says "sugar" rather than
+    // "flour" or "salt" at a glance is really the pairing of the two.
+    m.cuboid((6, 9), (7, 8), (12, 12), p.idx("sugar_white"));
+    for (x, y) in [(2, 6), (13, 9), (7, 3), (11, 12)] {
+        m.set(x, y, 0, p.idx("sugar_white"));
+    }
     m
 }
 
@@ -1014,26 +1045,44 @@ pub fn pipe_fluid(p: &Palette) -> VoxModel {
 /// them instead of being the one thing inset from it.
 /// `skirt_top` is how high the painted base rises.
 fn machine_footing(m: &mut VoxModel, p: &Palette, span: (i32, i32), skirt_top: i32, paint: &str) {
-    let (lo, hi) = span;
-    m.cuboid((lo, hi), (lo, hi), (0, 1), p.idx("concrete_dark"));
+    machine_footing_rect(m, p, span, span, skirt_top, paint);
+}
+
+/// [`machine_footing`] for a footprint that is not square — the mixer, which
+/// is `data/machines.ron`'s only oblong kind (1x2) since the chain rework
+/// gave it a second solid ingredient and therefore a second inlet tile.
+/// `machine_footing` is this with both spans equal, so the square kinds read
+/// exactly as they did.
+fn machine_footing_rect(
+    m: &mut VoxModel,
+    p: &Palette,
+    x_span: (i32, i32),
+    y_span: (i32, i32),
+    skirt_top: i32,
+    paint: &str,
+) {
+    let (xlo, xhi) = x_span;
+    let (ylo, yhi) = y_span;
+    m.cuboid((xlo, xhi), (ylo, yhi), (0, 1), p.idx("concrete_dark"));
     // Hazard skirt around all four edges of the plinth top (UI_UX.md §3).
-    m.hazard_stripe_x((lo, hi), (lo, lo), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
-    m.hazard_stripe_x((lo, hi), (hi, hi), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
-    for y in lo..=hi {
+    m.hazard_stripe_x((xlo, xhi), (ylo, ylo), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    m.hazard_stripe_x((xlo, xhi), (yhi, yhi), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    for y in ylo..=yhi {
         let a = if (y + 2).rem_euclid(6) < 3 { p.idx("hazard_yellow") } else { p.idx("hazard_black") };
-        m.set(lo, y, 2, a);
-        m.set(hi, y, 2, a);
+        m.set(xlo, y, 2, a);
+        m.set(xhi, y, 2, a);
     }
 
-    let (blo, bhi) = (lo + 2, hi - 2);
-    m.cuboid((blo, bhi), (blo, bhi), (2, skirt_top), p.idx(paint));
-    for (x0, x1) in [(blo, blo + 1), (bhi - 1, bhi)] {
-        for (y0, y1) in [(blo, blo + 1), (bhi - 1, bhi)] {
+    let (bxlo, bxhi) = (xlo + 2, xhi - 2);
+    let (bylo, byhi) = (ylo + 2, yhi - 2);
+    m.cuboid((bxlo, bxhi), (bylo, byhi), (2, skirt_top), p.idx(paint));
+    for (x0, x1) in [(bxlo, bxlo + 1), (bxhi - 1, bxhi)] {
+        for (y0, y1) in [(bylo, bylo + 1), (byhi - 1, byhi)] {
             m.cuboid((x0, x1), (y0, y1), (2, skirt_top + 1), p.idx("steel_dark"));
         }
     }
     // Machined rim the vessel/throat sits on.
-    m.cuboid((blo, bhi), (blo, bhi), (skirt_top + 1, skirt_top + 2), p.idx("steel"));
+    m.cuboid((bxlo, bxhi), (bylo, byhi), (skirt_top + 1, skirt_top + 2), p.idx("steel"));
 }
 
 /// Control panel plus its two status lamps, on the **-Y face** — the one the
@@ -1221,6 +1270,65 @@ fn machine_outfeed(m: &mut VoxModel, p: &Palette, lane: (i32, i32), last: i32) {
     m.cuboid((last - 2, last), (l0 - 1, l1 + 1), (head - 1, head - 1), p.idx("brass"));
 }
 
+/// The **fluid** half of a junction: a nozzle standing off one of the
+/// machine's X faces at the pipe run's own axis height, so a pipe tile
+/// butting against it reads as plumbed into the machine rather than parked
+/// beside it.
+///
+/// This is the chain rework's junction piece, and it exists because that
+/// change gave three machines a face that a belt no longer meets. The mixer
+/// discharges liquid east, the cooking vat is fed and drained entirely by
+/// pipe (no belt touches it at all), and the bottler is where the liquid
+/// becomes a bottle again — so where those faces used to carry
+/// [`machine_infeed`]'s hood or [`machine_outfeed`]'s doorway, a belt-shaped
+/// opening would now be a mouth with no conveyor in front of it.
+///
+/// **It is deliberately the same fitting on both sides, and the same one
+/// `pipe_inlet`'s branch already carries**: bright steel at radius 3 with a
+/// brass flange sitting exactly on the tile boundary. That pairing is what
+/// the "Visual overhaul round 2" epic's ticket 3 found actually reads as one
+/// spool piece crossing a tile boundary rather than as two stubs a voxel
+/// apart — see `pipe_inlet`'s doc for the full argument. A plain `pipe`
+/// tile's bore is already open at both of its X faces at exactly
+/// `PIPE_AXIS_Z`, so nothing is needed on the pipe's side of these
+/// junctions: the machine's nozzle meets an open bore.
+///
+/// `lane_y` is the nozzle's centre in this model's own Y coordinates — for a
+/// 1x1 machine, `PIPE_AXIS_Y`; for the 1x2 mixer, the middle of whichever
+/// half the pipe's row maps to. `face` is `Face::LowX` for an inlet on the
+/// -X edge or `Face::HighX` for a discharge on +X.
+///
+/// Unlike a belt junction there is no camera asymmetry to design around: a
+/// nozzle is a solid protruding object, not an opening, so it reads from the
+/// +X side dead-on and from the -X side by the silhouette it breaks out of
+/// the machine's own skirt. That is the whole reason the fluid junctions
+/// need one piece where the belt junctions needed two.
+enum Face {
+    LowX,
+    HighX,
+}
+
+fn machine_fluid_port(m: &mut VoxModel, p: &Palette, lane_y: i32, face: Face, last_x: i32) {
+    // How far the nozzle reaches back INTO the machine: far enough to
+    // genuinely overlap whatever shell it comes out of rather than merely
+    // touching it, which is the same rule `pipe_inlet`'s branch follows.
+    const REACH: i32 = 10;
+    let (span, flange) = match face {
+        Face::LowX => ((0, REACH), (0, 1)),
+        Face::HighX => ((last_x - REACH, last_x), (last_x - 1, last_x)),
+    };
+    m.cylinder_x((lane_y, PIPE_AXIS_Z), 3.0, span, p.idx("steel_light"));
+    m.cylinder_x((lane_y, PIPE_AXIS_Z), 4.0, flange, p.idx("brass"));
+    // A gusset under the nozzle, so it visibly lands on the machine instead
+    // of floating off its side — the mixer's original vinegar stub needed
+    // exactly this and it is the same shape here.
+    let gusset = match face {
+        Face::LowX => (2, REACH - 2),
+        Face::HighX => (last_x - REACH + 2, last_x - 2),
+    };
+    m.cuboid(gusset, (lane_y - 1, lane_y + 1), (9, PIPE_AXIS_Z - 3), p.idx("steel_dark"));
+}
+
 /// GAMEPLAY.md §2 tier 1's raw-ingredient prep, `data/machines.ron`'s 1x1
 /// `crusher`: tomatoes are tipped into the open feed pocket in the top of
 /// the frame, two counter-rotating rolls crush them in the nip, and paste
@@ -1319,74 +1427,149 @@ pub fn machine_crusher(p: &Palette) -> VoxModel {
     m
 }
 
-/// `data/machines.ron`'s 1x1 `mixer`: an open-topped stainless blending
-/// vessel with a visible cross-paddle agitator on a driven shaft, plus the
-/// vinegar inlet stub for the fluid run.
+/// `data/machines.ron`'s **1x2** `mixer` — a horizontal ribbon blender.
 ///
-/// The inlet points **-Y**, which is not arbitrary: `World::new` puts the
-/// pipe run on the row immediately north of the machine it feeds, and sim +Y
-/// maps to world +Z, which the `.vox` importer reaches through vox -Y — so
-/// -Y is literally the side the pipes are on. The stub therefore lines up
-/// with the real run instead of pointing at empty floor.
+/// **Redesigned, and the footprint is why.** The chain rework gave the
+/// mixer's recipe a second solid ingredient (sugar beside tomato paste), and
+/// `data/machines.ron`'s own header states the rule that follows: a machine
+/// accepts solid input on every tile of the edge opposite the way it points,
+/// so a machine consuming N solid ingredients needs an inlet face at least N
+/// tiles long or the two lanes merge onto one belt and deadlock. The mixer
+/// is therefore 1 tile wide and 2 tiles deep, and this model is 32x64
+/// voxels — UI_UX.md §2's 32-per-tile scale times the footprint the data
+/// file declares, the same coupling `machine_cooking_vat` documents. A
+/// machine's size is content; change the footprint and the model changes
+/// with it.
+///
+/// **A horizontal drum lying along +Y, not the old upright vessel.** The
+/// obvious move was to keep the 1x1 drum and stretch the plinth under it,
+/// and it is wrong twice over: a round vessel centred in a 1x2 footprint
+/// leaves half the machine as bare deck, and — worse — it puts solid shell
+/// across exactly the two -X bands where the two feed chutes have to come
+/// in. A ribbon blender is what a real plant uses to fold a dry ingredient
+/// into a wet one, its natural shape is a long horizontal trough, and that
+/// shape is *made of* the extra tile rather than merely tolerating it. It
+/// also reads unmistakably as two tiles deep at scene scale, which an
+/// upright vessel on a long plinth does not.
+///
+/// The agitator stays visible, which was the whole point of the previous
+/// design: the drum's crown is cut away over a long sight window, so the
+/// ribbon screw inside is seen from above exactly as the crusher's rolls
+/// are. That is `pipe_body`'s own sight-window trick, for its reason — a
+/// fully open trough stops reading as a vessel.
+///
+/// **Three junctions, and each is on the face the simulation actually uses.**
+/// Two belt infeeds on -X, one per tile of the inlet face (the model's two
+/// local-Y halves — the vox importer maps low local Y to high world Z, so
+/// the ORIGIN row, sim-y = 0, is the *upper* half; see
+/// `machine_cooking_vat`). One fluid discharge nozzle on +X at the origin
+/// row, because a fluid output leaves by the face the machine points at
+/// (`sim_core/src/sim/world.rs`'s module doc) and `sim::reference_chain`
+/// lays that run east of the origin tile. And the vinegar inlet stub still
+/// points -Y, i.e. north, off the sim-y = 1 half — which is where the
+/// reference chain's tank run now sits, one row north of the whole
+/// footprint.
+///
+/// There is deliberately **no belt outfeed**: this machine's only output is
+/// a liquid now, so a discharge doorway would be a chute product never comes
+/// out of.
 pub fn machine_mixer(p: &Palette) -> VoxModel {
-    let mut m = VoxModel::tile();
-    machine_footing(&mut m, p, (0, TILE_VOXELS as i32 - 1), 8, "paint_blue");
+    let tile = TILE_VOXELS as i32;
+    let last_x = tile - 1;
+    let last_y = tile * 2 - 1;
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS * 2, 30]);
+    machine_footing_rect(&mut m, p, (0, last_x), (0, last_y), 8, "paint_blue");
 
-    // Vessel: a hollow open-topped drum, so the agitator inside is visible
-    // from the fixed isometric angle the same way the crusher's rolls are.
-    // Short rather than tall for that reason — the first cut ran the wall to
-    // z=26 and the rendered preview showed a closed silo, not a mixer.
-    m.cylinder_z((16, 16), 12.0, (11, 21), p.idx("steel"));
-    m.carve_cylinder_z((16, 16), 10.0, (13, 22));
-    for z in [12, 17] {
-        m.cylinder_z((16, 16), 12.4, (z, z), p.idx("steel_light"));
+    // The two lanes, in this model's own Y. `BELT_LANE` is the sim-y = 1
+    // (low local Y) half; the origin row is a tile further up.
+    let near_lane = BELT_LANE;
+    let origin_lane = (BELT_LANE.0 + tile, BELT_LANE.1 + tile);
+    // Centre of the origin row, which is where the discharge nozzle and the
+    // pipe tile east of it meet.
+    let origin_mid = tile + PIPE_AXIS_Y;
+
+    // The drum: a horizontal cylinder running the machine's whole length,
+    // its axis at x = 17 so its west wall stands clear of the two feed
+    // housings (which reach x = 8) and its east wall reaches far enough to
+    // carry the discharge nozzle.
+    const DRUM_X: i32 = 17;
+    const DRUM_Z: i32 = 18;
+    m.cylinder_y((DRUM_X, DRUM_Z), 11.0, (5, last_y - 5), p.idx("steel"));
+    // Bands, the same seam language every other vessel on the line carries.
+    for y in [9, 26, 37, 54] {
+        m.cylinder_y((DRUM_X, DRUM_Z), 11.6, (y, y), p.idx("steel_light"));
+    }
+    // Dished ends, so the drum is a vessel rather than a length of duct.
+    for (y, r) in [(4, 9.0f32), (3, 6.5), (last_y - 4, 9.0), (last_y - 3, 6.5)] {
+        m.cylinder_y((DRUM_X, DRUM_Z), r, (y, y), p.idx("steel_light"));
     }
 
-    // Agitator: shaft plus a cross of paddles, sitting high in the vessel so
-    // the blades clear the wall line and read from above.
-    m.cylinder_z((16, 16), 1.6, (15, 26), p.idx("steel_light"));
-    m.cuboid((7, 25), (15, 17), (18, 19), p.idx("steel_light"));
-    m.cuboid((15, 17), (7, 25), (18, 19), p.idx("steel_light"));
-    // Angled blade tips, so the paddles read as blades that move product
-    // rather than as a flat plus sign.
-    m.cuboid((7, 9), (15, 17), (19, 21), p.idx("steel_dark"));
-    m.cuboid((23, 25), (15, 17), (19, 21), p.idx("steel_dark"));
-    m.cuboid((15, 17), (7, 9), (19, 21), p.idx("steel_dark"));
-    m.cuboid((15, 17), (23, 25), (19, 21), p.idx("steel_dark"));
+    // Hollow it, then cut the sight window through the crown — `pipe_body`'s
+    // trick, for `pipe_body`'s reason: an open trough reads as a gutter, a
+    // framed window reads as a vessel you can see into.
+    m.carve_cylinder_y((DRUM_X, DRUM_Z), 9.0, (5, last_y - 5));
+    // A SHORT window, not a long one. The first cut ran it two thirds of the
+    // drum's length and the rendered factory showed the ribbon flights along
+    // almost the whole vessel — which at scene scale reads as corrugation, a
+    // ribbed duct, rather than as a closed drum you can see into. Half a
+    // tile is enough to show the agitator turning and leaves the drum's own
+    // round back to read along, exactly the trade `pipe_body` records about
+    // the pipe run's sight glass.
+    m.carve_cuboid((DRUM_X - 5, DRUM_X + 5), (24, last_y - 24), (DRUM_Z + 1, 29));
 
-    // Belt-driven agitator: the motor sits on a bracket BESIDE the vessel,
-    // not on a lid over it. A top-mounted gearbox is what a real agitator
-    // usually has, and it was the first cut here — but it (and the gantry
-    // that replaced it) covered the opening, and this asset exists to show
-    // the agitator. A side drive with a belt up to a pulley is the version
-    // of "real" that also leaves the vessel readable.
-    m.cuboid((24, 30), (12, 21), (12, 20), p.idx("paint_blue"));
-    m.cuboid((24, 30), (12, 21), (21, 21), p.idx("steel_dark"));
-    m.cylinder_y((27, 23), 3.0, (13, 20), p.idx("steel_dark"));
-    m.cylinder_z((16, 16), 4.0, (24, 25), p.idx("brass"));
-    // Belt guard spanning motor pulley to shaft pulley.
-    m.cuboid((17, 27), (15, 18), (23, 24), p.idx("steel_dark"));
+    // Ribbon agitator: a shaft down the drum's axis with a helical ribbon
+    // wound round it, drawn as a run of short chords stepping in angle. This
+    // is the part the window exists to show, so it sits high in the drum
+    // where the sight line reaches it.
+    m.cylinder_y((DRUM_X, DRUM_Z), 1.8, (4, last_y - 4), p.idx("steel_light"));
+    for y in 8..=(last_y - 8) {
+        // One full turn every 16 voxels; the ribbon is two opposed flights.
+        let phase = (y as f32) * std::f32::consts::TAU / 16.0;
+        for half in [0.0f32, std::f32::consts::PI] {
+            let a = phase + half;
+            let dx = (a.cos() * 7.0).round() as i32;
+            let dz = (a.sin() * 7.0).round() as i32;
+            m.cuboid(
+                (DRUM_X + dx - 1, DRUM_X + dx + 1),
+                (y, y),
+                (DRUM_Z + dz - 1, DRUM_Z + dz + 1),
+                p.idx("steel_dark"),
+            );
+        }
+    }
 
-    // Vinegar inlet: a stub reaching toward the pipe run in front (see doc).
-    // Height is PIPE_AXIS_Z exactly, not an independently-chosen number —
-    // this stub and the pipe run's own `pipe_inlet` branch (see the fluid
-    // pipes section below) are two ends of the same fitting, and the
-    // visual-overhaul pass found they'd been modelled 4 voxels apart in
-    // height, which is what actually made the mixer's supply line read as
-    // disconnected from the pipe feeding it rather than merely a tile away.
-    // Deliberately the same diameter and the same bright steel as the
-    // `pipe_inlet` branch it meets, with a brass flange right at the tile
-    // boundary: the two halves are one spool piece split across two tiles,
-    // and the pair only reads as a connection if they match. The first
-    // version was a 2-voxel `pipe_grey` nub against a dark blue skirt and
-    // rendered as a lump.
-    m.cylinder_y((16, PIPE_AXIS_Z), 3.0, (0, 9), p.idx("steel_light"));
-    m.cylinder_y((16, PIPE_AXIS_Z), 4.0, (0, 1), p.idx("brass"));
-    // Gusset under the stub, so it visibly lands on the machine.
-    m.cuboid((15, 17), (2, 7), (9, PIPE_AXIS_Z - 3), p.idx("steel_dark"));
+    // Drive end: a motor and gearbox on the far (+Y) end of the shaft.
+    // Far, not near, and that is the camera again: `control_panel`'s own doc
+    // records that low local Y is the face this camera looks at, so a drive
+    // that bulky on the near end would stand between the viewer and the
+    // sight window this machine is identified by.
+    m.cuboid((11, 23), (last_y - 7, last_y - 1), (10, 22), p.idx("paint_blue"));
+    m.cuboid((11, 23), (last_y - 7, last_y - 1), (23, 23), p.idx("steel_dark"));
+    m.cylinder_y((DRUM_X, DRUM_Z), 4.0, (last_y - 8, last_y - 6), p.idx("brass"));
 
-    machine_infeed(&mut m, p, BELT_LANE);
-    machine_outfeed(&mut m, p, BELT_LANE, TILE_VOXELS as i32 - 1);
+    // Vinegar inlet: the stub reaching north off the sim-y = 1 half, toward
+    // the pipe run the reference chain lays one row north of the footprint.
+    // Height is PIPE_AXIS_Z exactly, matching `pipe_inlet`'s branch — the
+    // two are one spool piece split across a tile boundary, and the pair
+    // only reads as a connection because they are the same diameter, the
+    // same bright steel and carry their brass flange at the same boundary.
+    m.cylinder_y((DRUM_X - 1, PIPE_AXIS_Z), 3.0, (0, 9), p.idx("steel_light"));
+    m.cylinder_y((DRUM_X - 1, PIPE_AXIS_Z), 4.0, (0, 1), p.idx("brass"));
+    m.cuboid((DRUM_X - 2, DRUM_X), (2, 7), (9, PIPE_AXIS_Z - 3), p.idx("steel_dark"));
+
+    // The two feed chutes: a hooded transfer housing per inlet tile, then a
+    // short throat from each up into the drum's crown, so what arrives on
+    // either belt visibly goes somewhere.
+    machine_infeed(&mut m, p, near_lane);
+    machine_infeed(&mut m, p, origin_lane);
+    for lane in [near_lane, origin_lane] {
+        let mid = (lane.0 + lane.1) / 2;
+        m.cuboid((6, 10), (mid - 3, mid + 3), (BELT_SURFACE_Z, 24), p.idx("steel_light"));
+        m.cuboid((10, DRUM_X - 6), (mid - 2, mid + 2), (22, 24), p.idx("steel_light"));
+    }
+
+    // The liquid discharge, on the outlet face at the origin row.
+    machine_fluid_port(&mut m, p, origin_mid, Face::HighX, last_x);
 
     control_panel(&mut m, p, (11, 20), (3, 7), 2);
     m
@@ -1408,6 +1591,11 @@ pub fn machine_mixer(p: &Palette) -> VoxModel {
 /// should visibly be the biggest thing on the line. It gets the details a
 /// vessel that size really has — a jacketed body, an access platform and
 /// ladder, a steam stack, a sight glass showing the sauce level.
+///
+/// **Since the chain rework it is the one machine on the line with no belt
+/// junction at all**: liquid mix arrives by pipe and finished ketchup leaves
+/// by pipe, so both of its X faces carry [`machine_fluid_port`] nozzles
+/// where they used to carry a charging gallery and a discharge doorway.
 pub fn machine_cooking_vat(p: &Palette) -> VoxModel {
     let mut m = VoxModel::new([TILE_VOXELS * 2, TILE_VOXELS * 2, 48]);
     machine_footing(&mut m, p, (0, TILE_VOXELS as i32 * 2 - 1), 10, "paint_blue");
@@ -1453,32 +1641,25 @@ pub fn machine_cooking_vat(p: &Palette) -> VoxModel {
         m.cuboid((18, 23), (3, 3), (z, z), p.idx("steel_light"));
     }
 
-    // The junction hardware, and the one place in the factory where the
-    // standard piece needed a second thought.
+    // The junction hardware — and since the chain rework, **no belt touches
+    // this machine at all**.
     //
-    // The belt's row is the vat's sim-y = 0 tile, which is the model's UPPER
+    // Its recipe takes a fluid and makes a fluid (`data/recipes.ron`), so
+    // the charging gallery this face used to carry is gone: a covered
+    // belt-width hood with no conveyor in front of it is a mouth product
+    // never arrives at, which is the same class of lie as a gauge reading a
+    // level the mechanism does not have. What replaces it is a pipe nozzle
+    // on each X face at the run's own axis height.
+    //
+    // Both sit on the vat's **sim-y = 0 row**, which is the model's UPPER
     // local-Y half (the importer maps low local Y to high world Z — the same
-    // derivation `machine_mixer`'s inlet stub uses). That half is the vat's
-    // FAR half from the fixed camera, and the vat is the only machine big
-    // enough for that to matter: a sight line out of an infeed window there
-    // has to cross the whole footprint toward the camera, and the vat's own
-    // 25-voxel shell stands in the way for every height the window could
-    // occupy. The first cut put a belt-width housing on that corner and it
-    // rendered as nothing at all — correct geometry, invisible.
-    //
-    // So the vat's infeed is a **charging gallery across its whole -X face**
-    // rather than a belt-width hood: same piece, wider lane. The belt still
-    // hands over at its own row, and the gallery's window carries on to the
-    // camera-facing corner, where nothing occludes it — which is where a
-    // player actually sees product go in. A wide covered charging face is
-    // also what a vat this size really has; the shape that solves the camera
-    // is the honest one, the same way the hopper's box-over-cone was.
-    //
-    // The outfeed needs none of this: it is on +X, which the camera looks
-    // straight at, and the shell stops well short of that edge.
-    let belt_lane = (BELT_LANE.0 + TILE_VOXELS as i32, BELT_LANE.1 + TILE_VOXELS as i32);
-    machine_infeed(&mut m, p, (BELT_LANE.0, belt_lane.1));
-    machine_outfeed(&mut m, p, belt_lane, TILE_VOXELS as i32 * 2 - 1);
+    // derivation `machine_mixer` uses), because that is the row
+    // `sim::reference_chain` lays both runs along: the mix arrives from the
+    // mixer to the west and the cooked ketchup leaves east to the bottler.
+    let pipe_lane_mid = TILE_VOXELS as i32 + PIPE_AXIS_Y;
+    let last = TILE_VOXELS as i32 * 2 - 1;
+    machine_fluid_port(&mut m, p, pipe_lane_mid, Face::LowX, last);
+    machine_fluid_port(&mut m, p, pipe_lane_mid, Face::HighX, last);
 
     control_panel(&mut m, p, (36, 50), (4, 9), 4);
     m
@@ -1538,7 +1719,14 @@ pub fn machine_bottler(p: &Palette) -> VoxModel {
     m.cylinder_z((24, 16), 3.2, (22, 24), p.idx("brass"));
     m.cylinder_z((24, 16), 1.4, (20, 22), p.idx("steel_dark"));
 
-    machine_infeed(&mut m, p, BELT_LANE);
+    // The chain rework made this the stage where the product stops being a
+    // fluid: liquid ketchup is drawn from the pipe run touching this machine
+    // and bottles leave on the belt off its outlet face. So the -X face
+    // carries a pipe nozzle where it used to carry a belt hood, and only the
+    // +X face is still a conveyor junction. It is the only machine in the
+    // factory with one of each, which is exactly what "the piped middle of
+    // the chain rejoins the conveyor here" looks like.
+    machine_fluid_port(&mut m, p, PIPE_AXIS_Y, Face::LowX, TILE_VOXELS as i32 - 1);
     machine_outfeed(&mut m, p, BELT_LANE, TILE_VOXELS as i32 - 1);
 
     control_panel(&mut m, p, (11, 20), (3, 7), 2);
@@ -1602,189 +1790,6 @@ pub fn machine_packer(p: &Palette) -> VoxModel {
     machine_outfeed(&mut m, p, BELT_LANE, TILE_VOXELS as i32 - 1);
 
     control_panel(&mut m, p, (5, 14), (3, 7), 2);
-    m
-}
-
-// ---------------------------------------------------------------------------
-// Aging rack (ARCHITECTURE.md §9 milestone 7, "Timed processes")
-// ---------------------------------------------------------------------------
-//
-// Numbers `main.gd` mirrors to place and scale the maturation gauge's bar,
-// stated in voxels — the same arrangement the pipe run (PIPE_BORE_*), the
-// hopper (HOPPER_FILL_*) and the tank (TANK_FILL_*) already use. Change one,
-// change both.
-/// Bottom of the gauge slot, i.e. where a progress of 0 sits.
-const GAUGE_Z0: i32 = 11;
-/// How far a full bar rises above that floor. One voxel short of the slot's
-/// own height, so a finished batch reads as a full bar inside a frame rather
-/// than as a bar that has burst out of it.
-const GAUGE_HEIGHT: i32 = 21;
-/// The slot's inner span. The bar model is exactly this cross-section, so it
-/// sits flush in the recess instead of hovering in front of it.
-const GAUGE_X: (i32, i32) = (27, 29);
-const GAUGE_Y: (i32, i32) = (0, 1);
-/// The gauge post itself: the rack's camera-near corner upright, thickened
-/// to carry the readout. High X and low Y is the one corner of a tile that
-/// both visible faces meet at (see the junction section's camera
-/// derivation), so it is the corner a glanceable readout belongs on.
-const GAUGE_POST_X: (i32, i32) = (26, 30);
-const GAUGE_POST_Y: (i32, i32) = (0, 4);
-
-/// `data/machines.ron`'s 1x1 `aging_rack` — ARCHITECTURE.md §9 milestone 7's
-/// machine: four oak casks resting on a stainless rack, with a maturation
-/// gauge on the corner post.
-///
-/// **The silhouette decision, which is the whole ticket.** Every other
-/// machine on this line is *driven* — the crusher has flywheels, the mixer an
-/// agitator, the bottler a gantry, the packer a taping head — and each of
-/// them is identified by its mechanism. This machine has no mechanism at
-/// all, deliberately: what makes it different from every stage around it is
-/// that it does nothing but hold a batch while 2400 ticks pass
-/// (`data/recipes.ron`) — over a minute of real time at the rate `main.gd`
-/// actually ticks, and ten times the longest process on the line. A rack
-/// is the honest shape for that, and "the one machine with no moving part"
-/// is also, at scene scale, a genuinely distinct read.
-///
-/// **Why casks, and why upright.** GAMEPLAY.md §2's tier 6 names
-/// "barrel-aged" outright, and a hooped cask is a silhouette nothing else in
-/// this factory has. They stand on end rather than lying in a cradle because
-/// of the camera (UI_UX.md §1, the (1, 1, 1) view direction): a cask lying on
-/// its side presents a round head to the camera but recedes into the tile as
-/// a long ridge, and four of them read as corrugation; standing, each is a
-/// separate round-topped object with its own visible head and bung, and four
-/// of those read as *four things resting* — which is the point.
-///
-/// **Material.** The rack, deck and gauge post are stainless per UI_UX.md
-/// §2b point 8; the casks are oak, which is that rule's one deliberate
-/// exception, argued at `palette.ron`'s `oak` entry rather than here.
-pub fn machine_aging_rack(p: &Palette) -> VoxModel {
-    // Taller than a tile, like the cooking vat: `data/machines.ron` explains
-    // that this kind stays 1x1 because its cost is TIME, not floor space —
-    // "height in voxels is free, height in tiles is not."
-    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 38]);
-    machine_footing(&mut m, p, (0, TILE_VOXELS as i32 - 1), 7, "paint_blue");
-
-    // Stainless deck the casks stand on, with a raised lip on the
-    // camera-facing edge so it reads as a tray rather than as a painted band.
-    m.cuboid((8, 27), (1, 30), (10, 11), p.idx("steel"));
-    m.cuboid((8, 27), (1, 1), (12, 12), p.idx("steel_light"));
-
-    // Four casks in a 2x2. Each is a stack of discs: a narrow chime at top
-    // and bottom, a belly in the middle. Hoops are full discs rather than
-    // rings on purpose — only the outer surface is ever visible, so a disc
-    // costs nothing and needs no ring primitive.
-    for cx in [13, 22] {
-        for cy in [10, 21] {
-            for (z0, z1, r, wood) in [
-                (12, 13, 3.4, "oak_dark"),
-                (14, 15, 3.9, "oak"),
-                (16, 24, 4.2, "oak"),
-                (25, 26, 3.9, "oak"),
-                (27, 28, 3.4, "oak_dark"),
-            ] {
-                m.cylinder_z((cx, cy), r, (z0, z1), p.idx(wood));
-            }
-            for (z, r) in [(14, 4.0), (18, 4.35), (23, 4.35), (27, 3.5)] {
-                m.cylinder_z((cx, cy), r, (z, z), p.idx("steel_dark"));
-            }
-            // Head and bung: what says "sealed and left alone" from above,
-            // which is the only angle this camera really sees a cask's top
-            // from.
-            m.cylinder_z((cx, cy), 3.2, (29, 29), p.idx("oak_dark"));
-            m.cuboid((cx - 1, cx + 1), (cy - 1, cy + 1), (29, 30), p.idx("brass"));
-        }
-    }
-
-    // The rack cage: legs and a top rectangle of beams. The legs stand in the
-    // two Y bands the casks do NOT occupy, which is also what keeps them
-    // clear of the infeed housing's camera-facing window (carved at y = 5..6
-    // — a leg there would be sliced in half by it).
-    //
-    // Three legs, not four: the camera-near corner's leg is the gauge post
-    // below, which stands in exactly that spot and is taller. Drawing both
-    // put two uprights within two voxels of each other and the rendered
-    // close-up read as a picket fence across the machine's front, with the
-    // readout lost among them.
-    //
-    // `steel`, not `steel_dark`: a vertical face on a metal catches almost
-    // no light at this fixed camera angle, so the first cut's dark legs
-    // rendered as black bars and became the machine's loudest feature —
-    // louder than the casks they exist to hold.
-    for (x0, x1, y0, y1) in [(9, 10, 2, 3), (9, 10, 28, 29), (25, 26, 28, 29)] {
-        m.cuboid((x0, x1), (y0, y1), (8, 34), p.idx("steel"));
-    }
-    for (y0, y1) in [(2, 3), (28, 29)] {
-        m.cuboid((9, 26), (y0, y1), (33, 34), p.idx("steel"));
-    }
-    for (x0, x1) in [(9, 10), (25, 26)] {
-        m.cuboid((x0, x1), (2, 29), (33, 34), p.idx("steel"));
-    }
-
-    // --- the maturation gauge ------------------------------------------
-    // A recessed slot in the corner post, with a bar that grows up it. See
-    // GAUGE_Z0 above and `aging_rack_gauge` below for the moving half.
-    m.cuboid(GAUGE_POST_X, GAUGE_POST_Y, (8, 36), p.idx("steel_light"));
-    // GENUINELY carved, not painted: a face is only culled when its
-    // neighbour is absent (see `VoxModel::erase`), so a slot filled with a
-    // dark colour would mesh flat and the bar would appear to be stuck to a
-    // wall rather than sitting in a channel.
-    m.carve_cuboid(GAUGE_X, GAUGE_Y, (GAUGE_Z0, GAUGE_Z0 + GAUGE_HEIGHT));
-    // Back of the slot, black, so an empty gauge reads as an EMPTY SLOT and
-    // not merely as "the amber one is off" — UI_UX.md §7 forbids state in
-    // colour alone, and an unlit bar is exactly that failure mode.
-    m.cuboid(GAUGE_X, (2, 2), (GAUGE_Z0, GAUGE_Z0 + GAUGE_HEIGHT), p.idx("hazard_black"));
-    // The finish line, at the head of the scale: the one part of this
-    // readout that is lit whether or not a batch is in. The gauge sits on a
-    // face the fixed camera can only ever see UNLIT (every vertical face
-    // pointing this way is away from the key light), so an empty slot is a
-    // black stripe on a dark column and the scale's extent is invisible —
-    // the player would have no idea how far the bar still has to travel.
-    // A green line does not encode state in colour alone; it is a position,
-    // and what it says is "when the amber reaches here, the batch is out."
-    m.cuboid(GAUGE_X, (0, 1), (GAUGE_Z0 + GAUGE_HEIGHT + 1, GAUGE_Z0 + GAUGE_HEIGHT + 1), p.idx("status_green"));
-    // Graduations down both sides of the slot, on the camera-facing face:
-    // brass, the same accent every "product passes through here" fitting in
-    // this factory already carries, and the thing that makes a bar read as a
-    // measurement rather than as a light.
-    for i in 0..=4 {
-        let z = GAUGE_Z0 + (GAUGE_HEIGHT * i) / 4;
-        for x in [GAUGE_POST_X.0, GAUGE_POST_X.1] {
-            m.cuboid((x, x), (0, 0), (z, z), p.idx("brass"));
-        }
-    }
-    // Weather hood over the head of the gauge, and a bracket at its foot.
-    m.cuboid((25, 31), (0, 5), (36, 36), p.idx("steel"));
-    m.cuboid((25, 31), (0, 5), (8, 9), p.idx("steel_dark"));
-
-    machine_infeed(&mut m, p, BELT_LANE);
-    machine_outfeed(&mut m, p, BELT_LANE, TILE_VOXELS as i32 - 1);
-
-    control_panel(&mut m, p, (11, 20), (3, 7), 2);
-    m
-}
-
-/// The bar standing in the aging rack's gauge — the live half of the
-/// readout, and the fourth asset built to this same one-voxel-slab pattern
-/// (`pipe_fluid`, `hopper_fill`, `fluid_tank_fill`).
-///
-/// **One voxel tall**: `main.gd` scales this node vertically to the
-/// machine's live process fraction, and a one-voxel slab scaled to N voxels
-/// is geometrically the same box as an N-voxel column with none of the pivot
-/// arithmetic (`vox::encode` puts a model's origin at its footprint centre
-/// *at ground level*).
-///
-/// `status_amber`, and therefore the `emissive` class: this is a status
-/// readout, which is exactly what UI_UX.md §7 reserves saturated colour for,
-/// and emissive is what lets it be read at a glance across a lit factory
-/// floor — the whole point of giving this process a passive indicator rather
-/// than leaving it to the hover tooltip. Unlike the fill bodies above it
-/// carries its own hue rather than a near-white one Godot tints: what a
-/// hopper holds is content, but "how far through" is one universal quantity
-/// with no per-machine colour to look up.
-pub fn aging_rack_gauge(p: &Palette) -> VoxModel {
-    const { assert!(GAUGE_Z0 + GAUGE_HEIGHT <= 32, "a full bar would rise past the gauge slot") };
-    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 1]);
-    m.cuboid(GAUGE_X, GAUGE_Y, (0, 0), p.idx("status_amber"));
     m
 }
 
@@ -2107,8 +2112,7 @@ pub const DOCK_DECK_Z: i32 = BELT_SURFACE_Z;
 /// **Why a raised platform with a despatch door, rather than another housing
 /// with a mechanism on top.** Every processing kind on this line is
 /// identified by the machinery that does its work — flywheels, an agitator,
-/// a filling gantry, a taping head — and the aging rack by the deliberate
-/// absence of one (UI_UX.md §2b point 15). A dock does no work at all: it is
+/// a filling gantry, a taping head. A dock does no work at all: it is
 /// a *place*, the one tile in the world that is not equipment. So it is
 /// drawn as architecture — a poured platform at trailer-bed height, its edge
 /// striped, with a despatch opening and a canopy behind it — which is both
@@ -2262,44 +2266,106 @@ mod tests {
         Palette::load()
     }
 
-    /// Every kind's (model, lane, last-X) triple, so a new machine kind added
-    /// to `ASSETS` without junction hardware fails here rather than shipping
-    /// a wall for a belt to vanish into.
+    /// Every kind's junction geometry, so a new machine kind added to
+    /// `ASSETS` without the hardware its recipe implies fails here rather
+    /// than shipping a wall for product to vanish into.
+    ///
+    /// **Which faces a kind has is decided by its recipe, not by a habit**,
+    /// and the chain rework is what made that distinction real: a solid
+    /// input arrives on a belt and needs [`machine_infeed`]'s hood, a solid
+    /// output leaves on a belt through [`machine_outfeed`]'s doorway, and a
+    /// fluid on either side needs [`machine_fluid_port`]'s nozzle instead.
+    /// Three machines changed sides in that ticket — the mixer's output, the
+    /// vat's input *and* output, and the bottler's input all became fluids —
+    /// so the tests below assert per-face rather than "every machine has a
+    /// belt on both ends", which is what they used to say and is no longer
+    /// true of half the line.
     struct Junctions {
         name: &'static str,
         model: VoxModel,
-        /// Where the belt actually meets this machine, in ITS coordinates.
-        belt_lane: (i32, i32),
-        /// The span the infeed housing covers, which is wider than the belt
-        /// lane for the cooking vat (see its doc for why).
-        housing_lane: (i32, i32),
+        /// Belt lanes on the **-X** face, in this model's own Y — one per
+        /// tile of the inlet face that a belt actually feeds. Empty for a
+        /// machine fed entirely by pipe.
+        belt_inlets: Vec<(i32, i32)>,
+        /// The span each infeed housing covers, which is wider than the belt
+        /// lane for a machine that needs one (see the vat's history).
+        housing_lanes: Vec<(i32, i32)>,
+        /// The belt lane on the **+X** face, or `None` for a machine whose
+        /// output is a fluid or which has no output at all.
+        belt_outlet: Option<(i32, i32)>,
+        /// Pipe nozzle centres, in this model's own Y, per face.
+        fluid_in: Option<i32>,
+        fluid_out: Option<i32>,
         last_x: i32,
     }
 
     fn machines(p: &Palette) -> Vec<Junctions> {
-        let tile_last = TILE_VOXELS as i32 - 1;
-        let vat_lane = (BELT_LANE.0 + TILE_VOXELS as i32, BELT_LANE.1 + TILE_VOXELS as i32);
-        let one_tile = |name, model| Junctions {
+        let tile = TILE_VOXELS as i32;
+        let tile_last = tile - 1;
+        let far_lane = (BELT_LANE.0 + tile, BELT_LANE.1 + tile);
+        // A plain belt-in / belt-out one-tile machine, which is what the
+        // crusher, the packer and the generic housing still are.
+        let belt_both = |name, model| Junctions {
             name,
             model,
-            belt_lane: BELT_LANE,
-            housing_lane: BELT_LANE,
+            belt_inlets: vec![BELT_LANE],
+            housing_lanes: vec![BELT_LANE],
+            belt_outlet: Some(BELT_LANE),
+            fluid_in: None,
+            fluid_out: None,
             last_x: tile_last,
         };
         vec![
-            one_tile("machine", machine(p)),
-            one_tile("machine_crusher", machine_crusher(p)),
-            one_tile("machine_mixer", machine_mixer(p)),
-            one_tile("machine_bottler", machine_bottler(p)),
-            one_tile("machine_packer", machine_packer(p)),
-            one_tile("machine_aging_rack", machine_aging_rack(p)),
-            one_tile("machine_dock", machine_dock(p)),
+            belt_both("machine", machine(p)),
+            belt_both("machine_crusher", machine_crusher(p)),
+            belt_both("machine_packer", machine_packer(p)),
+            // Two belts in (one per inlet tile), a pipe out: the shape
+            // `data/machines.ron`'s "an inlet face is as long as the
+            // footprint" rule produces.
+            Junctions {
+                name: "machine_mixer",
+                model: machine_mixer(p),
+                belt_inlets: vec![BELT_LANE, far_lane],
+                housing_lanes: vec![BELT_LANE, far_lane],
+                belt_outlet: None,
+                fluid_in: None,
+                fluid_out: Some(tile + PIPE_AXIS_Y),
+                last_x: tile_last,
+            },
+            // Pipe in, pipe out, no belt anywhere: the one machine on the
+            // line a conveyor never touches.
             Junctions {
                 name: "machine_cooking_vat",
                 model: machine_cooking_vat(p),
-                belt_lane: vat_lane,
-                housing_lane: (BELT_LANE.0, vat_lane.1),
-                last_x: TILE_VOXELS as i32 * 2 - 1,
+                belt_inlets: vec![],
+                housing_lanes: vec![],
+                belt_outlet: None,
+                fluid_in: Some(tile + PIPE_AXIS_Y),
+                fluid_out: Some(tile + PIPE_AXIS_Y),
+                last_x: tile * 2 - 1,
+            },
+            // Pipe in, belt out — where the piped middle rejoins the line.
+            Junctions {
+                name: "machine_bottler",
+                model: machine_bottler(p),
+                belt_inlets: vec![],
+                housing_lanes: vec![],
+                belt_outlet: Some(BELT_LANE),
+                fluid_in: Some(PIPE_AXIS_Y),
+                fluid_out: None,
+                last_x: tile_last,
+            },
+            // The end of the line: a belt in and nothing out, because
+            // product leaves the world here (`sim_core::sim::dock`).
+            Junctions {
+                name: "machine_dock",
+                model: machine_dock(p),
+                belt_inlets: vec![BELT_LANE],
+                housing_lanes: vec![BELT_LANE],
+                belt_outlet: None,
+                fluid_in: None,
+                fluid_out: None,
+                last_x: tile_last,
             },
         ]
     }
@@ -2364,53 +2430,97 @@ mod tests {
         assert_eq!(lit, straight, "the lit arrow does not match the groove cut for it");
     }
 
-    /// The one building at the end of the line that takes product in and
-    /// hands none on: nothing is downstream of the delivery dock, because
-    /// product leaves the world there (`sim_core::sim::dock`). Everything
-    /// else must have an outfeed — including the packer, which used to be
-    /// on this list and lost its place the moment the delivery-dock ticket
-    /// laid a real belt past it.
-    ///
-    /// The dock is *skipped* rather than checked with the rule inverted:
-    /// its +X face is a platform edge, so the air above it is open by
-    /// design, and a "there is no doorway here" assertion would read that
-    /// open air as a doorway. What the dock's own face has to satisfy is
-    /// checked by `the_docks_deck_is_solid_out_to_the_platform_edge`.
-    const NO_OUTFEED: &[&str] = &["machine_dock"];
-
     #[test]
-    fn every_machine_has_an_open_inlet_at_the_belt_lane() {
+    fn every_belt_fed_face_has_an_open_inlet_at_the_belt_lane() {
         let p = palette();
         for j in machines(&p) {
-            let mid = (j.belt_lane.0 + j.belt_lane.1) / 2;
-            assert!(
-                !j.model.filled(0, mid, BELT_SURFACE_Z + 2),
-                "{}: the -X face is solid at the belt's lane and height — a belt \
-                 feeding it would run into a wall",
-                j.name
-            );
-            assert!(
-                j.model.filled(0, j.housing_lane.0 - 2, BELT_SURFACE_Z + 2),
-                "{}: the inlet housing has no side frame, so its opening has no edge",
-                j.name
-            );
+            for (lane, housing) in j.belt_inlets.iter().zip(&j.housing_lanes) {
+                let mid = (lane.0 + lane.1) / 2;
+                assert!(
+                    !j.model.filled(0, mid, BELT_SURFACE_Z + 2),
+                    "{}: the -X face is solid at the belt lane centred on {mid} — a belt \
+                     feeding it would run into a wall",
+                    j.name
+                );
+                assert!(
+                    j.model.filled(0, housing.0 - 2, BELT_SURFACE_Z + 2),
+                    "{}: the inlet housing has no side frame, so its opening has no edge",
+                    j.name
+                );
+            }
         }
     }
 
+    /// Nothing is downstream of the delivery dock (product leaves the world
+    /// there, `sim_core::sim::dock`) and nothing is downstream of the mixer
+    /// or the vat on a *belt* — their outputs are fluids since the chain
+    /// rework. So this checks the face each kind actually discharges solids
+    /// through, and skips the ones that discharge none.
     #[test]
-    fn every_machine_but_the_last_has_an_open_outlet_at_the_belt_lane() {
+    fn every_belt_fed_face_has_an_open_outlet_at_the_belt_lane() {
         let p = palette();
         for j in machines(&p) {
-            let mid = (j.belt_lane.0 + j.belt_lane.1) / 2;
-            if NO_OUTFEED.contains(&j.name) {
-                continue;
-            }
+            let Some(lane) = j.belt_outlet else { continue };
+            let mid = (lane.0 + lane.1) / 2;
             assert!(
                 !j.model.filled(j.last_x, mid, BELT_SURFACE_Z + 2),
                 "{}: the +X face is solid at the belt's lane and height — product \
                  would appear on the belt out of nowhere",
                 j.name
             );
+        }
+    }
+
+    /// The chain rework's own junctions, and the check that stops the two
+    /// kinds of junction being confused for each other. A pipe meets a
+    /// machine at `PIPE_AXIS_Z`, six voxels above the belt's running
+    /// surface, so a hood built for a belt is not a connection for a pipe —
+    /// and a machine that no longer takes a belt on a face must not still be
+    /// advertising a mouth there, which is the same "gauge describing a
+    /// mechanism it does not have" failure the fluid tank refused.
+    #[test]
+    fn every_piped_face_carries_a_nozzle_and_no_belt_mouth() {
+        let p = palette();
+        for j in machines(&p) {
+            for (face_x, lane) in [(0, j.fluid_in), (j.last_x, j.fluid_out)] {
+                let Some(mid) = lane else { continue };
+                assert!(
+                    j.model.filled(face_x, mid, PIPE_AXIS_Z),
+                    "{}: no fluid nozzle reaching the tile edge at x = {face_x}, so the pipe \
+                     beside it would butt against a blank wall",
+                    j.name
+                );
+                // The brass flange sits ON the boundary, which is what makes
+                // the machine's half and the pipe's half read as one fitting
+                // rather than as two stubs a voxel apart (`pipe_inlet`).
+                assert!(
+                    j.model.filled(face_x, mid, PIPE_AXIS_Z + 4),
+                    "{}: the nozzle at x = {face_x} has no flange on the tile boundary",
+                    j.name
+                );
+            }
+            if j.fluid_in.is_some() {
+                assert!(
+                    j.belt_inlets.is_empty(),
+                    "{}: claims both a pipe inlet and a belt inlet on its -X face",
+                    j.name
+                );
+                // And no infeed APRON either. That is the honest inverse
+                // of `junction_surfaces_sit_exactly_at_the_belts_running_height`:
+                // a machine's own body never reaches its tile edge above the
+                // plinth, so "is the face solid" says nothing, but a plate
+                // at the belt's running surface is drawn by exactly one
+                // thing (`machine_infeed`) and its presence would mean this
+                // machine is still advertising a conveyor hand-over it can
+                // no longer receive.
+                let mid = (BELT_LANE.0 + BELT_LANE.1) / 2;
+                assert!(
+                    !j.model.filled(0, mid, BELT_SURFACE_Z),
+                    "{}: its -X face still carries a belt infeed apron, but nothing \
+                     hands product to it on a belt any more",
+                    j.name
+                );
+            }
         }
     }
 
@@ -2426,13 +2536,16 @@ mod tests {
         assert!(!belt.filled(0, 16, BELT_SURFACE_Z + 1), "BELT_SURFACE_Z is not the belt's TOP");
 
         for j in machines(&p) {
-            let mid = (j.belt_lane.0 + j.belt_lane.1) / 2;
-            assert!(
-                j.model.filled(0, mid, BELT_SURFACE_Z),
-                "{}: no infeed apron at the belt's own surface height",
-                j.name
-            );
-            if !NO_OUTFEED.contains(&j.name) {
+            for lane in &j.belt_inlets {
+                let mid = (lane.0 + lane.1) / 2;
+                assert!(
+                    j.model.filled(0, mid, BELT_SURFACE_Z),
+                    "{}: no infeed apron at the belt's own surface height",
+                    j.name
+                );
+            }
+            if let Some(lane) = j.belt_outlet {
+                let mid = (lane.0 + lane.1) / 2;
                 assert!(
                     j.model.filled(j.last_x, mid, BELT_SURFACE_Z),
                     "{}: no discharge lip at the belt's own surface height",
@@ -2460,44 +2573,6 @@ mod tests {
         // ... and neither dresses the end it does NOT meet a machine at.
         assert!(!inlet.filled(0, BELT_LANE.0 - 1, BELT_SURFACE_Z + 1), "belt_inlet dressed its upstream end");
         assert!(!outlet.filled(last, BELT_LANE.0 - 1, BELT_SURFACE_Z + 1), "belt_outlet dressed its downstream end");
-    }
-
-    /// The aging rack's maturation gauge (ARCHITECTURE.md §9 milestone 7).
-    /// Same class of check as the junctions above and for the same reason: a
-    /// slot painted dark meshes flat, so the bar would read as a sticker on
-    /// a wall rather than as a level in a channel — a distinction no
-    /// screenshot at scene scale can settle. Also pins the bar model to the
-    /// slot it is supposed to sit in, since the two are separate models that
-    /// only line up because `vox::encode` centres both on the same footprint.
-    #[test]
-    fn the_aging_racks_gauge_slot_is_genuinely_open_and_its_bar_fits_it() {
-        let p = palette();
-        let rack = machine_aging_rack(&p);
-        let bar = aging_rack_gauge(&p);
-        let mid_x = (GAUGE_X.0 + GAUGE_X.1) / 2;
-
-        for z in [GAUGE_Z0, GAUGE_Z0 + GAUGE_HEIGHT] {
-            assert!(
-                !rack.filled(mid_x, GAUGE_Y.0, z),
-                "the gauge slot is filled at z = {z} — a painted slot is not a slot"
-            );
-        }
-        // ...and it is a slot, not a hole through the post: the black back
-        // wall is what an empty gauge shows.
-        assert!(
-            rack.filled(mid_x, GAUGE_Y.1 + 1, GAUGE_Z0 + 1),
-            "the gauge slot has no back wall, so an empty gauge would show straight through"
-        );
-        // The bar occupies exactly the slot's cross-section, one voxel tall.
-        assert!(bar.filled(mid_x, GAUGE_Y.0, 0), "the gauge bar misses the slot");
-        assert!(!bar.filled(mid_x, GAUGE_Y.1 + 1, 0), "the gauge bar is deeper than the slot");
-        assert!(!bar.filled(GAUGE_X.1 + 1, GAUGE_Y.0, 0), "the gauge bar is wider than the slot");
-        // The slot has a head above a full bar, so the bar reads as filling
-        // a frame rather than as running off the top of the post.
-        assert!(
-            rack.filled(mid_x, GAUGE_Y.0, GAUGE_Z0 + GAUGE_HEIGHT + 2),
-            "the gauge slot is open above a full bar's head"
-        );
     }
 
     /// The delivery dock's own face, which the belt-junction rules above

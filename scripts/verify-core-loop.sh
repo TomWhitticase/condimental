@@ -37,11 +37,11 @@
 #      keys 1-9/0 selecting a slot into placement mode with no menu open,
 #      pressing the same key again to deselect, empty sockets showing no
 #      count, and buying still a separate verb), and
-#      milestone 7's aging rack (a bespoke model at the tile the simulation
-#      reports, and a progress gauge whose bar tracks a 2400-tick process
-#      recomputed from the live tick rather than from a chunk snapshot —
-#      which is the only way a process that dirties nothing for a minute at
-#      a time can be shown moving at all), and the delivery dock that now ends
+#      the chain rework's own presentation (the 1x2 mixer with a belt lane per
+#      solid ingredient, the two machine-to-machine pipe runs that replaced
+#      the belts through the middle of the line, the hopper's contents chosen
+#      at placement time, and the ingredient market that stock is bought in),
+#      and the delivery dock that now ends
 #      the line (its own bespoke model at the tile the simulation reports, the
 #      one belt in the world that belongs to no stage drawn from its snapshot,
 #      the goods on its deck following the economy's shared delivery pool, its
@@ -59,8 +59,8 @@
 # purchase/place commands (godot_project/test_layouts.gd). Those fixtures stay
 # small on purpose — a nine-tile line proves a wire format and a scene graph
 # exactly as well as a forty-tile one, and much faster — not because of what a
-# starting balance can afford: `sim::STARTING_MONEY` is 3000 against a 1,087
-# bill for the shipped six-stage line since the inventory-hotbar ticket, so
+# starting balance can afford: `sim::STARTING_MONEY` is 3000 against a ~1,200
+# bill for the shipped line since the inventory-hotbar ticket, so
 # `test_layouts.gd`'s `build_reference_line` can and does build the whole
 # thing. Full-chain BEHAVIOUR stays asserted where it always was, in
 # `cargo test -p sim_core` against `sim::reference_chain`.
@@ -162,17 +162,18 @@ run_godot_script test_machines.gd MACHINES_OK "per-kind machine models, multi-ti
 run_godot_script test_connections.gd CONNECTIONS_OK "belt/pipe-to-machine junctions, visual overhaul round 2"
 run_godot_script test_shop_menu.gd SHOP_MENU_OK "build menu grid + purchases, UI_UX.md §5"
 run_godot_script test_hotbar.gd HOTBAR_OK "always-visible hotbar, number-key selection, UI_UX.md §5"
-run_godot_script test_timed_processes.gd TIMED_PROCESSES_OK "aging rack + live progress gauge, milestone 7"
+run_godot_script test_chain_rework.gd CHAIN_REWORK_OK "1x2 mixer, piped middle, hopper contents, ingredient market"
 run_godot_script test_placement.gd PLACEMENT_OK "empty world, ghost, rotation, place/remove — Real Placement ticket 2"
 run_godot_script test_splitters.gd SPLITTERS_OK "splitter model, next-output arrow, items crossing, hover — Epic B ticket 2"
 
 echo
 echo "PASS: real placement + milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"
 echo "      + icons + hover + milestone 6 fluid presentation + machine footprints/hopper"
-echo "      + belt/pipe junctions + the build menu + the inventory hotbar + milestone 7's aging rack and its"
-echo "      progress gauge + the delivery dock that ends the line, all verified"
+echo "      + belt/pipe junctions + the build menu + the inventory hotbar + the chain rework's"
+echo "      piped middle, 1x2 mixer, hopper-contents choice and ingredient market"
+echo "      + the delivery dock that ends the line, all verified"
 echo "      headlessly (sim_core tests"
 echo "      + gdext boundary + interaction + 3D scene structure + pan/zoom + contract panel"
 echo "      structure + icons + hover tooltips + pipe/fluid rendering + per-kind machine"
 echo "      models and the hopper's fill + shop slots/affordability/purchases + the"
-echo "      rack's live progress bar + the dock's model/belt/deck stock/hover)."
+echo "      market's crates and the larder + the dock's model/belt/deck stock/hover)."

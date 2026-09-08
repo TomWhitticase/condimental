@@ -5,7 +5,7 @@
 #
 # This is deliberately separate from sim_core's own `cargo test` suite, which
 # already proves conservation, contract payouts and fluid consumption across
-# the whole six-stage chain in pure Rust (against `sim::reference_chain`).
+# the whole shipped chain in pure Rust (against `sim::reference_chain`).
 # What this script exercises is the part cargo test can't: GDScript building
 # and parsing the JSON `issue_command_json` / `world_layout_json` /
 # `chunk_snapshot_json` / `query_tile_json` wire format through Godot's own
@@ -48,7 +48,7 @@ func _initialize() -> void:
 			return
 	var shop: Dictionary = JSON.parse_string(sim.shop_snapshot_json())
 	# STARTING_MONEY is 3000 since the inventory-hotbar ticket, and the
-	# shipped six-stage line costs 1,087 — so a fresh balance has to be enough
+	# shipped line costs about 1,200 — so a fresh balance has to be enough
 	# to buy a whole factory, not just a first belt. The exact relationship is
 	# pinned in `sim_core/tests/shop.rs` against the chain's own dynamically
 	# priced bill; what is checked here is that the wire reports a real
@@ -128,6 +128,10 @@ func _initialize() -> void:
 		return
 
 	# --- The built line actually runs. --------------------------------------
+	# Raw ingredients cost money since the chain rework, and `fill_hopper`
+	# draws from bought stock — so a line that is never stocked produces
+	# nothing at all, silently. Buying first is what a player does too.
+	Layouts.stock(sim, "tomato", 4)
 	sim.issue_command_json(JSON.stringify({"type": "fill_hopper", "amount": 4}))
 	var hoppers: Array = JSON.parse_string(sim.hopper_snapshots_json())
 	if hoppers.size() != 1 or int(hoppers[0]["quantity"]) != 4:

@@ -49,6 +49,7 @@ func _initialize() -> void:
 	# The world starts empty (the "Real Placement" epic), so the test builds
 	# the factory it then asserts is rendered. See test_layouts.gd.
 	Layouts.build_demo_line(main.sim)
+	Layouts.stock_larder(main.sim)
 	main._rebuild_world()
 
 	# --- Camera: fixed and orthographic (UI_UX.md §1) ---------------------

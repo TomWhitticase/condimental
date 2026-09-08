@@ -224,13 +224,39 @@ impl VoxModel {
         y: (i32, i32),
         color: u8,
     ) -> &mut Self {
+        self.cylinder_y_inner(center, radius, y, Some(color))
+    }
+
+    /// The bore: [`Self::cylinder_y`] in reverse, leaving empty space — the
+    /// Y-axis twin of [`Self::carve_cylinder_x`], added for the mixer's
+    /// horizontal ribbon drum, which lies along +Y because its footprint
+    /// does.
+    pub fn carve_cylinder_y(
+        &mut self,
+        center: (i32, i32),
+        radius: f32,
+        y: (i32, i32),
+    ) -> &mut Self {
+        self.cylinder_y_inner(center, radius, y, None)
+    }
+
+    fn cylinder_y_inner(
+        &mut self,
+        center: (i32, i32),
+        radius: f32,
+        y: (i32, i32),
+        color: Option<u8>,
+    ) -> &mut Self {
         let r2 = radius * radius;
         let span = radius.ceil() as i32;
         for yy in y.0..=y.1 {
             for dz in -span..=span {
                 for dx in -span..=span {
                     if (dx * dx + dz * dz) as f32 <= r2 {
-                        self.set(center.0 + dx, yy, center.1 + dz, color);
+                        match color {
+                            Some(c) => self.set(center.0 + dx, yy, center.1 + dz, c),
+                            None => self.erase(center.0 + dx, yy, center.1 + dz),
+                        }
                     }
                 }
             }

@@ -16,14 +16,14 @@
 # with a pipe run heading SOUTH beside it. Three of the four facings on belts
 # and the fourth on the pipes, which makes it the right subject for reviewing
 # per-tile rotation and the junction art's east-only fallback in one frame.
-# Pass --fixture <machines|fluids|vat|rack|splitter|chain|demo> for a different one:
+# Pass --fixture <machines|fluids|vat|splitter|chain|demo> for a different one:
 # `machines` (a hopper, a machine and a dock), `fluids` (a tank, a pipe run
-# and the machine tapping it), `vat` (the 2x2 cooking vat alone), `rack` (the
-# aging rack alone), `splitter` (a line that FORKS — one splitter with both
-# outputs built and a second with only its straight one, so the next-output
-# arrow's two behaviours are in one frame) or `chain` (THE WHOLE SHIPPED
-# SIX-STAGE LINE — 1,087 of a new game's 3,000 balance, bought and placed like
-# anything else).
+# and the machine tapping it), `vat` (the 2x2 cooking vat alone), `splitter`
+# (a line that FORKS — one splitter with both outputs built and a second with
+# only its straight one, so the next-output arrow's two behaviours are in one
+# frame) or `chain` (THE WHOLE SHIPPED LINE — about 1,200 of a new game's
+# 3,000 balance, bought and placed like anything else, with its piped middle
+# and its two hoppers).
 #
 # Pass --contracts to build that full line and then run it until the contract
 # board is genuinely mixed (some deliveries made, some missed, goods on the
@@ -55,7 +55,18 @@
 # non-origin tile: "any tile of a multi-tile machine identifies it" is the
 # claim, and hovering the origin would not show it.)
 #
-# Pass --shop to open the build menu (docs/UI_UX.md §5) before the shot.
+# Pass --shop to open the build menu (docs/UI_UX.md §5) before the shot, or
+# --market to open the ingredient market — the stock half of the shop, where
+# raw ingredients are bought (the chain-rework epic).
+#
+# Pass --no-hud to hide the HUD entirely. Closeups are for reviewing whether
+# a belt or a pipe actually meets a machine, and the contract clipboard and
+# the hotbar cover the top-right and the bottom of the frame — which is where
+# a junction lands about half the time.
+#
+# Pass --contents N alongside --ghost hopper to press Q N times first, so the
+# hopper ghost is photographed holding the SECOND raw ingredient rather than
+# the first. That is the only way to see the contents key doing anything.
 #
 # Pass --closeup TX,TY[,SIZE] to aim the isometric camera at one simulation
 # tile and zoom right in (SIZE is the orthographic width in world units;
@@ -66,7 +77,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--contracts] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--shop] [--stock] [--hotbar N] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--contracts] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--shop] [--market] [--no-hud] [--stock] [--hotbar N] [--contents N] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

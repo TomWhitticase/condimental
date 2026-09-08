@@ -36,6 +36,10 @@ func _initialize() -> void:
 	# is only meaningful once there IS one, which is itself the change this
 	# epic made.
 	Layouts.build_minimal(main.sim)
+	# Nothing enters the factory that was not paid for since the chain rework:
+	# SPACE loads a hopper FROM STOCK, so an unstocked world answers the
+	# keypress by doing nothing at all.
+	Layouts.stock_larder(main.sim)
 	main._rebuild_world()
 
 	# Since the "Machines improvement" ticket 3, SPACE loads the chain's

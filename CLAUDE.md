@@ -272,6 +272,17 @@ sauce-factory/
                                        # line proves a wire format as well as a forty-tile
                                        # one); `build_reference_line` builds the whole shipped
                                        # six-stage chain, which a 3000 starting balance affords
+    test_chain_rework.gd            # headless proof of the chain rework's presentation
+                                      # (Epic A ticket 2), replacing test_timed_processes.gd
+                                      # which went with the aging rack: the rack gone from
+                                      # every mapping, a hopper placed WITH ITS CONTENTS
+                                      # CHOSEN (and the same click refused without them), Q
+                                      # cycling them, the ingredient market buying crates and
+                                      # the larder following, the 1x2 mixer covering both
+                                      # tiles and hovering from either, and the two
+                                      # machine-to-machine pipe runs carrying the right fluid
+                                      # on the PLAIN tile while the tank-fed run keeps the
+                                      # branch fitting
     test_screenshot.gd              # NOT headless — renders the real scene to a PNG so a
                                       # visual change can actually be looked at
     bin/                          # gitignored: compiled extension lands here via `cargo xtask`
@@ -375,6 +386,122 @@ diff). Update docs/DEVLOG.md's "Current status" section in the same commit if
 it's gone stale.
 
 ## Decisions log
+
+- 2026-09-08: **The chain rework, ticket 2 of 2 (the Godot/assets half;
+  `sim_core/src/sim/` touched in exactly one place, see (1)) — the piped
+  middle, drawn, and the hopper finally placeable.** Ticket 1 left `main`
+  failing its own headless suite AND, less visibly, **unplayable from a cold
+  start**: `main.gd`'s `_confirm_build` sent a `place` command with no `item`
+  field, which a world with two raw solids refuses silently, so clicking to
+  place a hopper did nothing at all and said nothing. Seven calls worth not
+  re-litigating.
+
+  (1) **A hopper's contents are a property of the PLACEMENT, cycled with Q —
+  not a second catalog entry.** The obvious alternative was to list
+  "Hopper — Tomato" and "Hopper — Sugar" as separate build-menu/hotbar slots,
+  and it fails on the hotbar's own recorded contract: fixed slots in
+  `data/shop.ron` order, so slot 5 is still the crusher after the last
+  crusher is placed. One entry per raw ingredient renumbers every slot after
+  the hopper the day a third ingredient ships — the exact property fixed
+  slots exist to protect — and it would put two menu entries in front of one
+  `hopper` kind with one owned count, so both would print the same "Owned N"
+  and neither would be about that entry. So the hopper keeps one slot, one
+  price and one owned count; **Q** cycles what the ghost in hand will be
+  loaded with, the placement prompt names it in the kind's own name
+  ("✔ PLACE Hopper — Sugar"), and the ghost carries a `hopper_fill` slab
+  tinted with the item so the choice is visible as well as written (UI_UX.md
+  §7 — the word is the primary signal, the colour reinforces it). Putting the
+  decision on the ghost also puts it where the player is already looking
+  rather than back in a modal grid. **The one sim change** is what makes it
+  generalize: `IngredientsSnapshot` gained `hopper_items`, which is
+  `World::raw_items` verbatim — the same set `Place` validates against —
+  because `ingredients_snapshot_json`'s `entries` list prices fluids too and
+  an id's price says nothing about whether it is a solid. A third raw
+  ingredient therefore appears in the market, in the larder and in the Q
+  cycle from `data/` alone.
+
+  (2) **Buying stock is its own panel on M, and the reason is height before
+  it is taxonomy.** The build menu is twelve catalog slots and was already
+  re-centred above the hotbar to stop it burying its own footer; a second
+  section inside it would push it off a 720-line viewport. It is also an
+  honest split — `shop.ron` sells buildings you place and can pick back up,
+  `ingredients.ron` sells stock a machine eats and never returns, which is
+  the same argument those are two files for. Everything about the panel
+  mirrors the build menu deliberately (same plate, same slot styling, same
+  icons, money repeated at the top) so it reads as the other half of one shop
+  rather than a different screen — which is what `ingredients_snapshot_json`
+  being field-for-field `shop_snapshot_json` was for. **One click buys a
+  crate of ten**, not one: the crusher eats four tomatoes a craft and a
+  hopper holds sixty-four, so buying by ones would be sixteen clicks to fill
+  one bin. One gesture, one meaning, printed on the slot.
+
+  (3) **A permanent larder strip above the hotbar, because two controls now
+  fail silently.** `SPACE` and `V` load a hopper and a tank *from bought
+  stock*, and with none they do nothing and say nothing — so the number that
+  explains why is on screen permanently, in the one place the player already
+  reads for "what am I carrying". An ingredient at zero reads **"none"** in
+  words rather than a grey `0`, per §7. It is a readout, not a control; it
+  names the key that buys.
+
+  (4) **The mixer is a horizontal ribbon blender now, and the footprint is
+  why.** Its recipe gained sugar, so `data/machines.ron` made it 1x2, and the
+  model had to become 32x64 — UI_UX.md §2's tile scale times the declared
+  footprint, the coupling `machine_cooking_vat` already documents. Keeping
+  the old upright drum and stretching the plinth under it fails twice: half
+  the machine becomes bare deck, and the vessel sits across exactly the two
+  -X bands where the two feed chutes have to come in. A trough lying along
+  +Y is *made of* the extra tile instead of tolerating it, is what a real
+  plant folds a dry ingredient into a wet one with, and reads unmistakably as
+  two tiles deep. The agitator stays visible through a short crown window —
+  `pipe_body`'s sight-glass trick, and for its reason: the first cut ran the
+  window two thirds of the drum and the rendered factory showed ribbon
+  flights along nearly the whole vessel, which at scene scale reads as
+  corrugation rather than as a drum you can see into.
+
+  (5) **A fluid junction is ONE piece where a belt junction needed two**, and
+  that falls out of the camera rule UI_UX.md §2b point 11 established. A belt
+  opening is a hole, so it is invisible on the -X face and needs a hooded
+  housing cut open on the camera-facing side; a pipe junction is a **solid
+  protruding nozzle**, which reads from +X dead-on and from -X by the
+  silhouette it breaks out of the machine's skirt. So `machine_fluid_port` is
+  one helper used on both faces, bright steel at radius 3 with a brass flange
+  sitting exactly on the tile boundary — the same fitting `pipe_inlet`'s
+  branch already carries, because that pairing is what was found to read as
+  one spool piece crossing a boundary. Nothing was needed on the pipe's side:
+  a plain `pipe` tile's bore is already open at both X faces at
+  `PIPE_AXIS_Z`. **The vat's charging gallery and discharge doorway are
+  deleted rather than left as scenery** — a covered belt-width mouth with no
+  conveyor in front of it is a fitting describing a mechanism the machine
+  does not have, which is the failure the fluid tank's constant head and the
+  dock's absent fill gauge both refused.
+
+  (6) **`pipe_inlet` stays authored for one arrangement, and the other falls
+  back to the plain tile.** Its T-off reaches out of the tile's south edge
+  and its blind flange caps the +X end, which is right for a run lying north
+  of the machine it feeds (the tank-fed vinegar run) and wrong for a
+  machine-to-machine run lying west-to-east — there the branch would point at
+  bare floor and the blind flange would cap the very end the machine draws
+  through. So `_rebuild_world` now applies that asset only when the tapping
+  machine is actually south-adjacent. This is the same known, tested,
+  accepted fallback the belt's east-only junction variants take (UI_UX.md §2b
+  point 18), and a four-directional pipe-fitting pass is the same art ticket.
+
+  (7) **Sugar needed a model of its own, and that is UI_UX.md §2b point 12
+  for the third time.** `ITEM_MODELS` falls back to a shipping box, so a new
+  item id with no entry ships bulk produce down the belt in sealed cardboard
+  with every structural test passing. `item_sugar` is a slumped paper sack
+  with a folded top and crystal spilling out of it — a *sack* rather than a
+  heap, because at half-tile scale on a moving belt an item is read by
+  silhouette alone and a pile of white grains is a shapeless blob beside
+  `item_tomato`'s round red one. **Flagged, not fixed:** `ITEM_MODELS` still
+  maps `ketchup_mix` and `ketchup`, which are fluids now and therefore
+  unreachable; the entries are kept deliberately, since an unreachable
+  correct mapping costs nothing and a missing one costs a rendered frame. One
+  thing added in passing: `scripts/screenshot-scene.sh --no-hud`, because the
+  contract clipboard and the hotbar between them cover the top-right and the
+  bottom of a closeup, which is where a junction lands about half the time —
+  reviewing "does this pipe meet this machine" kept coming down to whether
+  the subject happened to miss a panel.
 
 - 2026-09-08: **Epic B, ticket 2 of 2 (the Godot/assets half; `sim_core/` and
   `data/` deliberately untouched) — the fork, drawn.** Ticket 1 left `main`

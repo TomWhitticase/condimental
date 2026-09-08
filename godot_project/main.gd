@@ -155,6 +155,15 @@ const FLUID_END_CAP_TRIM := 2.0 / float(VOXELS_PER_TILE)
 ## voxel model is near-white so this multiplies cleanly over it.
 const FLUID_TINTS := {
 	"vinegar": Color(0.87, 0.75, 0.31),
+	# The two fluids the chain rework put in the pipes: the mixer's uncooked
+	# blend and the vat's finished ketchup. They are deliberately a shade
+	# apart rather than one red — the two runs stand a few tiles from each
+	# other on the same row, and the whole point of piping the middle of the
+	# chain is that the player can see the product change as it goes down the
+	# line. These match `palette.ron`'s own `liquid_mix` and `liquid_ketchup`
+	# (the pails' colours) so a fluid keeps its identity wherever it appears.
+	"ketchup_mix": Color(0.69, 0.23, 0.15),
+	"ketchup": Color(0.77, 0.10, 0.05),
 }
 const FLUID_TINT_FALLBACK := Color(0.60, 0.79, 0.86)
 
@@ -205,7 +214,6 @@ const MACHINE_MODELS := {
 	"cooking_vat": "machine_cooking_vat",
 	"bottler": "machine_bottler",
 	"packer": "machine_packer",
-	"aging_rack": "machine_aging_rack",
 	# Epic B's conveyor splitter. It is not a processing machine at all — it
 	# has no recipe, it is priced with the belts and it carries product at
 	# belt speed — but it has a footprint in `data/machines.ron` like every
@@ -223,37 +231,41 @@ const MACHINE_MODEL_FALLBACK := "machine"
 ## Which machine kinds draw a live PROGRESS GAUGE beside their model, and
 ## which asset that gauge's moving bar is (ARCHITECTURE.md §9 milestone 7).
 ##
-## Keyed on kind, like MACHINE_MODELS, and deliberately sparse: a gauge is
-## not a thing every machine should have. The crusher's whole process is 60
-## ticks — one second — so a bar tracking it would be a flicker, and five
-## flickering bars along the line would be noise rather than information.
-## The aging rack's is 2400 ticks (data/recipes.ron), forty seconds, which
-## is long enough that the interesting question about it is not "is it
-## running" (its status lamp already answers that) but "how far through is
-## it" — and that question deserves an answer a player gets by GLANCING,
-## not by parking a cursor on the machine and reading a tooltip. That is the
-## whole reason this mapping exists: the milestone is about a process at a
-## qualitatively different timescale, and a timescale you have to hover to
-## perceive has not really been presented.
+## Keyed on kind, like MACHINE_MODELS, and deliberately sparse — **empty, as
+## the shipped content now stands.** A gauge is not a thing every machine
+## should have: the crusher's whole process is 60 ticks, one second, so a bar
+## tracking it would be a flicker, and five flickering bars along the line
+## would be noise rather than information. The rule this table encodes is
+## that a gauge earns its place when a process runs long enough that "how far
+## through is it" stops being answerable by the status lamp — which is a
+## question of TIMESCALE, not of importance.
+##
+## Its one entry was milestone 7's `aging_rack`, a 2400-tick stage. The chain
+## rework deleted that stage outright (ageing is not a mechanic this game
+## wants), and the entry went with it rather than being left pointing at a
+## kind `data/machines.ron` no longer defines. The MECHANISM is deliberately
+## kept: `_update_machine_gauge` still works, the geometry constants below
+## still describe a slot, and a future long process becomes one line here
+## plus one `<kind>_gauge` asset. The longest process on the line today is
+## the cooking vat's 240 ticks — four seconds — which is under the bar.
 ##
 ## A kind with no entry here simply has no gauge — the same deliberate
 ## fall-through MACHINE_MODELS documents, so pricing or shipping a new kind
 ## never requires a Godot edit first.
-const MACHINE_PROGRESS_GAUGES := {
-	"aging_rack": "aging_rack_gauge",
-}
+const MACHINE_PROGRESS_GAUGES := {}
 
-## The gauge's slot geometry, mirroring assets/voxels/generators/assets.rs's
-## GAUGE_Z0 / GAUGE_HEIGHT — stated in voxels, the same arrangement (and the
-## same change-one-change-both warning) the pipe bore, the hopper fill and
-## the tank fill already carry.
+## The gauge's slot geometry — stated in voxels, the same arrangement (and
+## the same change-one-change-both warning) the pipe bore, the hopper fill
+## and the tank fill already carry. The asset side of that pairing went with
+## the aging rack; these numbers are what a replacement `<kind>_gauge` has to
+## be cut against, so they are kept rather than deleted with it.
 const MACHINE_GAUGE_FLOOR_VOXELS := 11
 const MACHINE_GAUGE_HEIGHT_VOXELS := 21
 const MACHINE_GAUGE_FLOOR_Y := FLOOR_Y + MACHINE_GAUGE_FLOOR_VOXELS * VOXEL_UNIT
 ## Below this fraction the bar is hidden outright rather than drawn as a
 ## sub-voxel sliver — the same call FLUID_MIN_VISIBLE_PRESSURE,
 ## HOPPER_MIN_VISIBLE_FILL and FLUID_TANK_MIN_VISIBLE_FILL all make. An idle
-## rack therefore shows an empty black slot, which is a SHAPE difference
+## machine therefore shows an empty black slot, which is a SHAPE difference
 ## rather than a colour one (UI_UX.md §7).
 const MACHINE_GAUGE_MIN_VISIBLE := 0.01
 
@@ -370,11 +382,13 @@ const DOCK_STOCK_OFFSETS := [
 const DOCK_STOCK_SLOTS := 2
 
 ## Presentation-only tint per raw-ingredient item id, the same shape as
-## FLUID_TINTS: *which* item a hopper holds is simulation data (the first
-## recipe's first input, see sim_core/src/sim/hopper.rs), so the model's
-## voxels are near-white and this multiplies over them.
+## FLUID_TINTS: *which* item a hopper holds is simulation data — the player
+## chooses it when they place the hopper (see `_hopper_item_choices`), so a
+## world can hold several hoppers full of different things — and the model's
+## voxels are near-white so this multiplies over them.
 const HOPPER_FILL_TINTS := {
 	"tomato": Color(0.76, 0.17, 0.13),
+	"sugar": Color(0.95, 0.94, 0.90),
 }
 const HOPPER_FILL_TINT_FALLBACK := Color(0.72, 0.66, 0.56)
 
@@ -391,7 +405,15 @@ const HOPPER_FILL_TINT_FALLBACK := Color(0.72, 0.66, 0.56)
 ## ticket's rendered-scene review caught it.
 const ITEM_MODELS := {
 	"tomato": "item_tomato",
+	"sugar": "item_sugar",
 	"tomato_paste": "item_paste_pail",
+	# `ketchup_mix` and `ketchup` are FLUIDS since the chain rework, so
+	# nothing carries them on a belt any more and these two keys are
+	# currently unreachable. They are kept, with their models, because the
+	# ids still exist and a stage that put either back on a conveyor would
+	# otherwise ship pails of sauce as sealed cardboard boxes — which is
+	# exactly the silent failure the doc above records. An unreachable
+	# correct entry costs nothing; a missing one costs a rendered frame.
 	"ketchup_mix": "item_mix_pail",
 	"ketchup": "item_ketchup_pail",
 	"bottled_ketchup": "item_bottle",
@@ -429,7 +451,7 @@ var _tick_accum := 0.0
 
 # --- Everything the player has placed (the "Real Placement" epic, ticket 2)-
 # This scene used to learn its shape ONCE, from `chain_layout_json`, because
-# `World::new` built a fixed six-stage chain at construction and nothing
+# `World::new` built a fixed multi-stage chain at construction and nothing
 # could ever move it. Ticket 1 deleted that: a world now starts EMPTY and
 # every belt tile, pipe tile, machine and building in it is something the
 # player bought and put down, facing a direction they chose.
@@ -511,6 +533,41 @@ var _ghost_reason := "" # "", "blocked", "none_owned", "nothing_here"
 var _owned_counts: Dictionary = {} # kind -> owned count, repolled while building
 var _placement_prompt: PanelContainer
 var _placement_label: Label
+
+# --- What a hopper being placed will hold (the chain-rework epic) ----------
+## The chain has more than one raw solid ingredient now (tomato AND sugar),
+## and a hopper holds exactly one item id — so `PlayerCommand::Place`'s
+## `item` field stopped being inferable and became REQUIRED. Until this
+## ticket `_confirm_build` sent no `item` at all, which the simulation
+## answers with a silent refusal: placing a hopper did nothing whatsoever,
+## with no message, from the first minute of a new game.
+##
+## THE CHOICE IS MADE IN PLACEMENT MODE, not in the catalog. The obvious
+## alternative was to list "Hopper — Tomato" and "Hopper — Sugar" as separate
+## build-menu/hotbar entries, and it is wrong for a specific reason: the
+## hotbar's own contract is FIXED SLOTS in `data/shop.ron` order, so that
+## slot 5 is still the crusher after the last crusher is placed. Splitting
+## one catalog entry into one slot per raw ingredient renumbers every slot
+## after the hopper the day a third ingredient ships — which is exactly the
+## property the strip exists to protect — and it would put two entries in the
+## menu that buy the same `hopper` kind out of one owned count, so their
+## "Owned N" lines would both read the same number and neither would be
+## about that entry.
+##
+## So the hopper keeps one slot, one price and one owned count, and what it
+## will be loaded with is a property of THIS PLACEMENT, cycled with **Q**
+## while the ghost is up. That also puts the decision where the player is
+## already looking (the ghost, the prompt beside it) rather than back in a
+## modal grid, and it generalizes with no Godot edit: the list comes from
+## `ingredients_snapshot_json`'s `hopper_items`, which is the simulation's
+## own `World::raw_items` — the same set `Place` validates against.
+var _hopper_items: Array = [] # item ids a hopper may legally hold, from the sim
+var _hopper_item_index := 0
+## The ghost's product body — a `hopper_fill` slab tinted with the chosen
+## item, so the ghost previews WHAT the hopper will hold as well as where it
+## goes. Colour alone would not be enough (UI_UX.md §7); the prompt names the
+## item in words beside it, and this is the reinforcement.
+var _ghost_fill: Node3D
 
 var _class_materials: Dictionary = {} # "matte"/"metal"/"emissive" -> StandardMaterial3D
 var _lamp_idle: StandardMaterial3D
@@ -680,6 +737,51 @@ var _hotbar_tooltip: PanelContainer
 var _hotbar_tooltip_name: Label
 var _hotbar_tooltip_body: Label
 var _hotbar_tooltip_index := -1
+
+# --- The ingredient market (the chain-rework epic) -------------------------
+## Raw ingredients cost money now (GAMEPLAY.md §5's first cost axis), and
+## `fill_hopper`/`fill_fluid_tank` draw from bought stock — so without a way
+## to buy any, a new game is unplayable: SPACE and V silently do nothing and
+## the factory never starts. This is that way.
+##
+## IT IS A SEPARATE PANEL FROM THE BUILD MENU, on **M**, and that is a size
+## decision before it is a design one: the build menu is already twelve
+## catalog slots tall and had to be re-centred above the hotbar to stop it
+## burying its own footer, so a second section inside it would push it off a
+## 720-line viewport. It is also an honest split — the build menu sells
+## *buildings you place and can pick back up*, this sells *stock a machine
+## eats and never returns*, which is the same distinction `data/shop.ron` and
+## `data/ingredients.ron` are two files for.
+##
+## Everything about it mirrors the build menu deliberately (same plate, same
+## slot styling, same icons, money repeated at the top) so it reads as the
+## other half of one shop rather than as a different screen — which is what
+## `ingredients_snapshot_json` being field-for-field `shop_snapshot_json` was
+## for.
+var _market_panel: PanelContainer
+var _market_money_label: Label
+## One dictionary per ingredient, in `data/ingredients.ron` order:
+## {id, button, icon, price_label, owned_label}.
+var _market_slots: Array = []
+var _market_open := false
+## How many units one click buys. TEN, not one: the crusher eats four
+## tomatoes per craft and a hopper holds sixty-four, so buying by ones would
+## be sixteen clicks to fill one bin and the panel would be a chore rather
+## than a shop. A crate is also the unit stock actually arrives in. It is
+## printed on the slot, so the gesture means one thing.
+const MARKET_CRATE := 10
+
+## The larder: a one-line strip above the hotbar showing how much of each raw
+## ingredient the player is carrying. It exists because of a specific silent
+## failure — SPACE and V load a hopper and a tank FROM STOCK, and with no
+## stock they do nothing at all and say nothing — so the number that explains
+## why is on screen permanently, right next to the hotbar the player already
+## reads for "what am I carrying". It is a readout, not a control; buying
+## happens in the market panel it names.
+var _larder_panel: PanelContainer
+var _larder_row: HBoxContainer
+var _larder_entries: Dictionary = {} # item id -> Label
+var _larder_hint: Label
 
 # Hover tooltip (docs/UI_UX.md §5: "hover tooltips for recipe/machine detail
 # rather than dense always-on text") — see _tile_under_screen_pos/
@@ -1243,7 +1345,27 @@ func _rebuild_world() -> void:
 			# A tapped tile that a tank also feeds keeps the supply fitting:
 			# the tank connection is the more distinctive silhouette, and the
 			# same tile being both is only reachable on a one-tile run.
-			if _pipe_roles.get(_tile_key(tap_tile), PIPE_ASSET) == PIPE_ASSET:
+			if _pipe_roles.get(_tile_key(tap_tile), PIPE_ASSET) != PIPE_ASSET:
+				continue
+			# **And only when the branch would actually point at the machine.**
+			# `pipe_inlet`'s T-off reaches out of this tile's SOUTH edge (see
+			# its own doc for the vox-Y derivation) and caps the run's +X end
+			# with a blind flange, so it is authored for exactly one
+			# arrangement: the run lying on the row north of the machine it
+			# feeds, which is how a tank supplies the mixer.
+			#
+			# The chain rework created the other arrangement — machine-to-
+			# machine runs lying WEST-to-EAST between two machines — and there
+			# the branch would stick out at bare floor while the blind flange
+			# capped the very end the machine draws through. So those tiles
+			# fall back to the plain `pipe`, which is not a compromise: a
+			# plain tile's bore is already open at both X faces at exactly
+			# `PIPE_AXIS_Z`, and the machine's own `machine_fluid_port`
+			# nozzle meets it there. This is the same known, tested fallback
+			# the belt's east-only junction variants take (UI_UX.md §2b point
+			# 18), and a four-directional pipe-fitting pass is the same art
+			# ticket.
+			if _is_building_tile(tap_tile + Vector2i(0, -1)):
 				_pipe_roles[_tile_key(tap_tile)] = PIPE_INLET_ASSET
 
 	# Cleared and rebuilt together, never appended to: `_ready()` genuinely
@@ -1736,10 +1858,10 @@ func _fluid_body_for(network_index: int, segment_index: int, segment: Dictionary
 ## `process` = `[start_tick, required_ticks]` pair plus the simulation's
 ## current tick — NOT from a per-tick snapshot, and that distinction matters
 ## here more than anywhere else in this file: a machine only dirties its
-## chunk when its state actually changes, so during the aging rack's
-## 2400-tick wait no snapshot arrives at all. Recomputing from
-## `current_tick()` every frame is what makes a long process animate smoothly
-## rather than jump when it ends. Pure, so it is directly testable.
+## chunk when its state actually changes, so through the whole of a process
+## no snapshot arrives at all. Recomputing from `current_tick()` every frame
+## is what makes a long process animate smoothly rather than jump when it
+## ends. Pure, so it is directly testable.
 func _machine_progress(origin_key: String) -> float:
 	if not _machine_states.has(origin_key):
 		return -1.0
@@ -1848,8 +1970,8 @@ const CROSSHAIR_THICKNESS := 2.0 # px, each bar's width
 ## being clipped behind the contract clipboard in the top-right corner — the
 ## kind of thing only a rendered frame shows (UI_UX.md §2b point 12). The
 ## build controls lead, because they are what the player does most.
-const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate    X: remove mode    ESC: close    E: build menu (buy)\nSPACE: load hoppers    V: load tanks    WASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
-const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate    X: remove mode    ESC: close    E: build menu (buy)\nV: load tanks    WASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
+const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate    Q: hopper contents    X: remove mode    ESC: close\nE: build menu    M: ingredient market    SPACE: load hoppers    V: load tanks    WASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
+const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate    Q: hopper contents    X: remove mode    ESC: close\nE: build menu    M: ingredient market    V: load tanks    WASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
 
 
 ## The tile box the isometric camera frames at startup: whatever is placed,
@@ -2296,6 +2418,7 @@ func _build_ui() -> void:
 	# UI_UX.md §5's other named widget: "build/recipe menus as grids of
 	# voxel-rendered icon slots." Hidden until E is pressed.
 	_build_shop_menu(hud, settings)
+	_build_ingredient_market(hud, settings)
 
 	# UI_UX.md §5's LAST unbuilt named widget: "a Minecraft-style hotbar/
 	# quick-access strip along one screen edge." Always visible, unlike the
@@ -2998,17 +3121,394 @@ func _set_shop_menu_open(open: bool) -> void:
 
 
 ## The crosshair stands in for the cursor in first-person — so it belongs on
-## screen in exactly the case where there is no real cursor. With the build
-## menu up the mouse is handed back (above), and leaving the crosshair drawn
-## would park a stray mark on top of a menu slot.
+## screen in exactly the case where there is no real cursor. With either shop
+## panel up the mouse is handed back (above), and leaving the crosshair drawn
+## would park a stray mark on top of a slot.
 func _update_crosshair_visibility() -> void:
 	if _crosshair == null:
 		return
-	_crosshair.visible = _view_mode == ViewMode.FIRST_PERSON and not _shop_open
+	_crosshair.visible = _view_mode == ViewMode.FIRST_PERSON and not _shop_open and not _market_open
 
 
 func _toggle_shop_menu() -> void:
 	_set_shop_menu_open(not _shop_open)
+
+
+# --------------------------------------------------------------------------
+# The ingredient market and the larder (the chain-rework epic)
+# --------------------------------------------------------------------------
+
+## Repolls `ingredients_snapshot_json`. Two things come off it: the stock
+## counts the larder prints, and `hopper_items` — the list of ids a hopper
+## may legally be placed holding, which is the simulation's own
+## `World::raw_items` rather than anything decided here. A third raw
+## ingredient therefore needs no Godot edit at all: it appears in the market,
+## in the larder and in the hopper's Q cycle from the data file alone.
+func _ingredients_snapshot() -> Dictionary:
+	var parsed = JSON.parse_string(sim.ingredients_snapshot_json())
+	return parsed if parsed is Dictionary else {}
+
+
+func _refresh_hopper_items() -> void:
+	var snapshot := _ingredients_snapshot()
+	var items: Array = snapshot.get("hopper_items", [])
+	_hopper_items = items.duplicate()
+	if _hopper_items.is_empty():
+		_hopper_item_index = 0
+	else:
+		_hopper_item_index = clampi(_hopper_item_index, 0, _hopper_items.size() - 1)
+
+
+## What the hopper currently being placed will hold, or "" when the kind in
+## hand is not a hopper (or the world has no raw solids at all, which is a
+## world with no recipes and cannot happen with shipped content).
+func _selected_hopper_item() -> String:
+	if _build_kind != HOPPER_KIND or _hopper_items.is_empty():
+		return ""
+	return String(_hopper_items[_hopper_item_index])
+
+
+## **Q** while a hopper is in hand: the next raw ingredient in the cycle.
+## Deliberately a cycle rather than a submenu — there are two ids today and
+## a handful ever, and a modal list to pick between two things is more UI
+## than the decision deserves. The name flyout announces the new choice, so
+## the key is discoverable by pressing it.
+func _cycle_hopper_item() -> void:
+	if _build_kind != HOPPER_KIND or _hopper_items.size() < 2:
+		return
+	_hopper_item_index = (_hopper_item_index + 1) % _hopper_items.size()
+	_update_ghost_fill()
+	_show_hotbar_flyout("Hopper — %s" % _item_display_name(_selected_hopper_item()))
+
+
+## "tomato_paste" -> "Tomato Paste". Item ids are content, exactly as kind ids
+## are, so this is `_kind_display_name`'s twin rather than a hand-written
+## label table a new ingredient would silently miss.
+func _item_display_name(item_id: String) -> String:
+	return _kind_display_name(item_id)
+
+
+## Builds the market panel. Same shape as `_build_shop_menu`, one row of
+## slots instead of a grid — there are three ingredients and a row of three
+## is shorter and no less readable than a grid of three would be.
+func _build_ingredient_market(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.06, 0.06, 0.07, 0.94)
+	panel_style.border_color = Color(0.85, 0.63, 0.11, 0.95)
+	panel_style.border_width_top = 4
+	panel_style.border_width_left = 2
+	panel_style.border_width_right = 2
+	panel_style.border_width_bottom = 2
+	panel_style.set_content_margin_all(16.0)
+
+	# Cleared, never appended to: `_ready()` genuinely runs twice under the
+	# headless `--script` harness (see `_rebuild_world`'s note and
+	# test_hover.gd's header), and a second pass would otherwise leave the
+	# array holding two slots per ingredient — half of them pointing at
+	# buttons in an orphaned HUD layer.
+	_market_slots.clear()
+
+	_market_panel = PanelContainer.new()
+	_market_panel.name = "IngredientMarket"
+	_market_panel.add_theme_stylebox_override("panel", panel_style)
+	_market_panel.visible = false
+	hud.add_child(_market_panel)
+
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", 10)
+	_market_panel.add_child(body)
+
+	var title_settings := LabelSettings.new()
+	title_settings.font_size = base_settings.font_size + 4
+	title_settings.font_color = base_settings.font_color
+	title_settings.outline_size = base_settings.outline_size
+	title_settings.outline_color = base_settings.outline_color
+
+	var title := Label.new()
+	title.label_settings = title_settings
+	title.text = "INGREDIENT MARKET"
+	body.add_child(title)
+
+	var money_settings := LabelSettings.new()
+	money_settings.font_size = base_settings.font_size + 6
+	money_settings.font_color = Color(0.98, 0.85, 0.42)
+	money_settings.outline_size = base_settings.outline_size
+	money_settings.outline_color = base_settings.outline_color
+
+	_market_money_label = Label.new()
+	_market_money_label.label_settings = money_settings
+	body.add_child(_market_money_label)
+
+	var row := HBoxContainer.new()
+	row.name = "MarketRow"
+	row.add_theme_constant_override("separation", 8)
+	body.add_child(row)
+
+	for entry in _ingredients_snapshot().get("entries", []):
+		_build_market_slot(row, base_settings, _market_slots.size(), String(entry.get("id", "")))
+
+	var footer := Label.new()
+	footer.label_settings = base_settings
+	footer.text = "click a crate to buy %d    then SPACE loads a hopper and V loads a tank    M/ESC: close" % MARKET_CRATE
+	body.add_child(footer)
+
+	_position_market_panel()
+
+
+## Centred in the space above the hotbar, for `_position_shop_menu`'s reason
+## and by the same arithmetic: a panel tall enough to reach the strip buries
+## its own footer under it.
+func _position_market_panel() -> void:
+	if _market_panel == null:
+		return
+	_market_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
+	var vp := get_viewport()
+	if vp == null:
+		return
+	var reserved := HOTBAR_SLOT_SIZE.y * HOTBAR_SELECTED_SCALE + HOTBAR_BOTTOM_MARGIN * 3.0
+	if _hotbar_root != null and _hotbar_root.size.y > 0.0:
+		reserved = _hotbar_root.size.y + HOTBAR_BOTTOM_MARGIN * 2.0
+	var bounds := vp.get_visible_rect().size
+	var panel_size := _market_panel.get_combined_minimum_size()
+	_market_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
+
+
+func _build_market_slot(row: HBoxContainer, base_settings: LabelSettings, index: int, item_id: String) -> void:
+	var button := Button.new()
+	button.name = "MarketSlot_%s" % item_id
+	button.custom_minimum_size = SHOP_SLOT_SIZE
+	button.focus_mode = Control.FOCUS_NONE
+	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+		button.add_theme_stylebox_override(state, _shop_slot_style(state))
+	button.pressed.connect(_buy_ingredient_slot.bind(index))
+	row.add_child(button)
+
+	var column := VBoxContainer.new()
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_theme_constant_override("separation", 2)
+	column.set_anchors_preset(Control.PRESET_FULL_RECT)
+	column.offset_left = 8
+	column.offset_right = -8
+	column.offset_top = 8
+	column.offset_bottom = -8
+	button.add_child(column)
+
+	var icon := TextureRect.new()
+	icon.name = "Icon"
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.custom_minimum_size = SHOP_ICON_SIZE
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	# The item's OWN model, through the same ITEM_MODELS table the belt draws
+	# with — so a crate of tomatoes in the market is the tomato that runs
+	# down the line, which is UI_UX.md §5's "icons are rendered from the real
+	# assets" rule doing its job. A fluid has no item model and falls through
+	# to the pipe, which is what it arrives in.
+	icon.texture = _icon_for_asset(_market_asset_for(item_id))
+	column.add_child(icon)
+
+	var name_label := Label.new()
+	name_label.name = "ItemName"
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	name_label.label_settings = base_settings
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	name_label.text = _item_display_name(item_id)
+	column.add_child(name_label)
+
+	var price_settings := LabelSettings.new()
+	price_settings.font_size = base_settings.font_size
+	price_settings.font_color = base_settings.font_color
+	price_settings.outline_size = base_settings.outline_size
+	price_settings.outline_color = base_settings.outline_color
+
+	var price_label := Label.new()
+	price_label.name = "Price"
+	price_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	price_label.label_settings = price_settings
+	price_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	price_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	column.add_child(price_label)
+
+	var owned_settings := LabelSettings.new()
+	owned_settings.font_size = base_settings.font_size - 2
+	owned_settings.font_color = Color(0.66, 0.68, 0.72)
+	owned_settings.outline_size = base_settings.outline_size
+	owned_settings.outline_color = base_settings.outline_color
+
+	var owned_label := Label.new()
+	owned_label.name = "Stock"
+	owned_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	owned_label.label_settings = owned_settings
+	owned_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	owned_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	column.add_child(owned_label)
+
+	_market_slots.append({
+		"id": item_id,
+		"button": button,
+		"icon": icon,
+		"price_label": price_label,
+		"owned_label": owned_label,
+	})
+
+
+## Which voxel model's icon stands for an ingredient. `ITEM_MODELS` for a
+## solid; a fluid has no item model at all, so it borrows the pipe it
+## travels in — which is also how the player will actually handle it.
+func _market_asset_for(item_id: String) -> String:
+	if ITEM_MODELS.has(item_id):
+		return ITEM_MODELS[item_id]
+	return PIPE_ASSET
+
+
+func _update_ingredient_market() -> void:
+	if _market_panel == null:
+		return
+	var snapshot := _ingredients_snapshot()
+	var entries: Array = snapshot.get("entries", [])
+	_market_money_label.text = "Money: %.0f" % float(snapshot.get("money", 0.0))
+	_position_market_panel()
+
+	for index in range(_market_slots.size()):
+		if index >= entries.size():
+			break
+		var slot: Dictionary = _market_slots[index]
+		var entry: Dictionary = entries[index]
+		var unit_price: float = float(entry.get("price", 0.0))
+		var crate_price := unit_price * float(MARKET_CRATE)
+		var affordable: bool = float(snapshot.get("money", 0.0)) >= crate_price
+		# The three never-colour-alone signals the build menu already uses:
+		# a "✗" on the price, a dimmed icon, and a disabled (recessed) slot.
+		slot["price_label"].text = "Buy %d  ·  %.0f" % [MARKET_CRATE, crate_price]
+		if not affordable:
+			slot["price_label"].text += "  ✗"
+		slot["price_label"].label_settings.font_color = (
+			Color(0.92, 0.93, 0.94) if affordable else Color(0.55, 0.50, 0.48)
+		)
+		slot["icon"].modulate = Color.WHITE if affordable else Color(0.42, 0.42, 0.45, 0.75)
+		slot["button"].disabled = not affordable
+		slot["owned_label"].text = "In stock %d  ·  %.0f each" % [int(entry.get("owned", 0)), unit_price]
+
+
+## Buys one crate. An unaffordable or unknown purchase is a silent no-op in
+## the simulation (`BuyIngredient`, like `Purchase`), so the only thing to do
+## afterwards is re-read either way.
+func _buy_ingredient_slot(index: int) -> void:
+	if index < 0 or index >= _market_slots.size():
+		return
+	sim.issue_command_json(JSON.stringify({
+		"type": "buy_ingredient",
+		"item": String(_market_slots[index]["id"]),
+		"quantity": MARKET_CRATE,
+	}))
+	_update_ingredient_market()
+
+
+func _set_market_open(open: bool) -> void:
+	if _market_panel == null or open == _market_open:
+		return
+	_market_open = open
+	_market_panel.visible = open
+	if open:
+		_update_ingredient_market()
+	if _view_mode == ViewMode.FIRST_PERSON:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
+	_update_crosshair_visibility()
+
+
+func _toggle_market() -> void:
+	_set_market_open(not _market_open)
+
+
+## The larder strip: one chip per raw ingredient, above the hotbar. Built
+## from the same snapshot the market sells from, so it lists whatever
+## `data/ingredients.ron` prices with no list of its own.
+func _build_larder(parent: VBoxContainer, base_settings: LabelSettings) -> void:
+	var plate := StyleBoxFlat.new()
+	plate.bg_color = Color(0.06, 0.06, 0.07, 0.93)
+	plate.border_color = Color(0.85, 0.63, 0.11, 0.95)
+	plate.border_width_top = 2
+	plate.set_content_margin_all(6.0)
+
+	_larder_entries.clear() # `_ready` runs twice headlessly — see `_build_ingredient_market`
+
+	_larder_panel = PanelContainer.new()
+	_larder_panel.name = "Larder"
+	_larder_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_larder_panel.add_theme_stylebox_override("panel", plate)
+	parent.add_child(_larder_panel)
+
+	_larder_row = HBoxContainer.new()
+	_larder_row.name = "LarderRow"
+	_larder_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_larder_row.add_theme_constant_override("separation", 14)
+	_larder_panel.add_child(_larder_row)
+
+	var label_settings := LabelSettings.new()
+	label_settings.font_size = base_settings.font_size - 1
+	label_settings.font_color = Color(0.92, 0.93, 0.94)
+	label_settings.outline_size = base_settings.outline_size
+	label_settings.outline_color = base_settings.outline_color
+
+	for entry in _ingredients_snapshot().get("entries", []):
+		var item_id := String(entry.get("id", ""))
+		var chip := HBoxContainer.new()
+		chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		chip.add_theme_constant_override("separation", 5)
+		_larder_row.add_child(chip)
+
+		var icon := TextureRect.new()
+		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		icon.custom_minimum_size = Vector2(20, 20)
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.texture = _icon_for_asset(_market_asset_for(item_id))
+		chip.add_child(icon)
+
+		var count := Label.new()
+		count.name = "Larder_%s" % item_id
+		count.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		count.label_settings = label_settings
+		chip.add_child(count)
+		_larder_entries[item_id] = count
+
+	var hint_settings := LabelSettings.new()
+	hint_settings.font_size = base_settings.font_size - 2
+	hint_settings.font_color = Color(0.66, 0.68, 0.72)
+	hint_settings.outline_size = base_settings.outline_size
+	hint_settings.outline_color = base_settings.outline_color
+
+	_larder_hint = Label.new()
+	_larder_hint.name = "LarderHint"
+	_larder_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_larder_hint.label_settings = hint_settings
+	_larder_hint.text = "M: market"
+	_larder_row.add_child(_larder_hint)
+
+
+## Repolled every frame, like the hotbar beside it: a stock count that moved
+## because a hopper was loaded has to move here in the same frame, or the one
+## number that explains why SPACE did nothing is stale exactly when it
+## matters.
+func _update_larder() -> void:
+	if _larder_entries.is_empty():
+		return
+	for entry in _ingredients_snapshot().get("entries", []):
+		var item_id := String(entry.get("id", ""))
+		if not _larder_entries.has(item_id):
+			continue
+		var owned := int(entry.get("owned", 0))
+		var label: Label = _larder_entries[item_id]
+		label.text = "%d" % owned
+		# Out of stock is a real state with a consequence (SPACE and V will
+		# do nothing), so it is called out in words rather than left as a
+		# grey zero — colour alone would not carry it (UI_UX.md §7).
+		if owned == 0:
+			label.text = "none"
+		label.label_settings.font_color = (
+			Color(0.92, 0.93, 0.94) if owned > 0 else Color(0.90, 0.52, 0.42)
+		)
 
 
 # --------------------------------------------------------------------------
@@ -3054,6 +3554,11 @@ func _build_hotbar(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_hotbar_root.alignment = BoxContainer.ALIGNMENT_CENTER
 	_hotbar_root.add_theme_constant_override("separation", 6)
 	hud.add_child(_hotbar_root)
+
+	# The larder sits at the TOP of the strip's column, above the name
+	# flyout: the flyout has to stay directly over the slots it names, and
+	# the larder is a standing readout rather than something that appears.
+	_build_larder(_hotbar_root, base_settings)
 
 	var flyout_settings := LabelSettings.new()
 	flyout_settings.font_size = base_settings.font_size + 3
@@ -3575,10 +4080,19 @@ func _enter_build_mode(kind: String) -> void:
 	_build_kind = kind
 	_build_direction = "east"
 	_set_shop_menu_open(false)
+	_set_market_open(false)
+	# A hopper carries a choice as well as a facing, so the legal choices are
+	# repolled on entry (the list is the simulation's, and content can change
+	# it) and the previous pick is kept where it is still legal — a player
+	# laying two sugar hoppers should not have to press Q twice.
+	_refresh_hopper_items()
 	# The name flyout fires here rather than in `_select_hotbar_slot`, so
 	# every route into placement mode announces what is now in hand — the
 	# hotbar key, a hotbar click, and the build menu's right-click alike.
-	_show_hotbar_flyout("%s  ×%d" % [_kind_display_name(kind), _owned_of(kind)])
+	var held := "%s  ×%d" % [_kind_display_name(kind), _owned_of(kind)]
+	if kind == HOPPER_KIND and _selected_hopper_item() != "":
+		held = "Hopper — %s  ×%d" % [_item_display_name(_selected_hopper_item()), _owned_of(kind)]
+	_show_hotbar_flyout(held)
 	_rebuild_ghost_body()
 	_update_ghost()
 	_update_hotbar()
@@ -3640,6 +4154,7 @@ func _exit_build_mode() -> void:
 ## driven by where the cursor is, and the name flyout fades on its own timer.
 func _close_all_overlays() -> void:
 	_set_shop_menu_open(false)
+	_set_market_open(false)
 	_exit_build_mode()
 
 
@@ -3690,12 +4205,25 @@ func _confirm_build() -> void:
 		return
 	if _build_kind == "" or not _ghost_valid:
 		return
-	_issue_world_command({
+	var command := {
 		"type": "place",
 		"kind": _build_kind,
 		"tile": [tile.x, tile.y],
 		"direction": _build_direction,
-	})
+	}
+	# **A hopper says what it will hold.** `PlayerCommand::Place`'s `item` is
+	# optional only while the world has exactly one raw solid to infer from,
+	# and the shipped chain has had two since the chain rework — so omitting
+	# it (which this function did until then) is a silent refusal, and
+	# placing a hopper did nothing at all. Sent for the hopper and no other
+	# kind, because the field is ignored elsewhere and a command carrying a
+	# field that means nothing invites the next reader to think it does.
+	if _build_kind == HOPPER_KIND:
+		var item := _selected_hopper_item()
+		if item == "":
+			return
+		command["item"] = item
+	_issue_world_command(command)
 	# Placing spends one owned unit. Running out ends the mode rather than
 	# leaving a ghost that can no longer be built — the prompt would read
 	# "✗ NONE OWNED" forever, which is a dead end rather than feedback.
@@ -3790,16 +4318,56 @@ func _rebuild_ghost_body(asset_override := "") -> void:
 		if child is MeshInstance3D:
 			child.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_ghost_root.add_child(body)
+	# A hopper ghost also previews its CONTENTS — see `_update_ghost_fill`.
+	_update_ghost_fill()
 
 
 func _clear_ghost_body() -> void:
 	if _ghost_root == null:
 		return
-	var body := _ghost_root.get_node_or_null("ghost_body")
-	if body != null:
-		_ghost_root.remove_child(body)
-		body.free()
+	for child_name in ["ghost_body", "ghost_fill"]:
+		var body := _ghost_root.get_node_or_null(child_name)
+		if body != null:
+			_ghost_root.remove_child(body)
+			body.free()
 	_ghost_asset = ""
+	_ghost_fill = null
+
+
+## The hopper ghost's product body: a `hopper_fill` slab, tinted with the
+## chosen ingredient, sitting in the ghost the way a real hopper's does.
+##
+## This is what makes the Q choice VISIBLE rather than merely announced. The
+## prompt names the item in words (which is the half UI_UX.md §7 requires on
+## its own), and this is the half that answers "what am I about to build" at
+## a glance — a hopper of tomatoes and a hopper of sugar are two different
+## buildings, and looking identical until placed is how a player ends up with
+## two of the wrong one.
+##
+## It is the same one-voxel-slab mechanism the live hopper, the tank, the
+## pipe and the splitter arrow already share, at a fixed nearly-full level: a
+## ghost has no fill fraction, and an empty one would draw nothing at all.
+func _update_ghost_fill() -> void:
+	if _ghost_root == null:
+		return
+	if _ghost_fill != null:
+		_ghost_root.remove_child(_ghost_fill)
+		_ghost_fill.free()
+		_ghost_fill = null
+	var item := _selected_hopper_item()
+	if item == "":
+		return
+	var node := _asset_node(HOPPER_FILL_ASSET)
+	node.name = "ghost_fill"
+	node.position = Vector3(0.0, HOPPER_FILL_FLOOR_Y, 0.0)
+	node.scale.y = 0.8 * float(HOPPER_FILL_HEIGHT_VOXELS)
+	var tint: Color = HOPPER_FILL_TINTS.get(item, HOPPER_FILL_TINT_FALLBACK)
+	for child in node.get_children():
+		if child is MeshInstance3D:
+			child.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			child.set_surface_override_material(0, _ghost_material(tint))
+	_ghost_root.add_child(node)
+	_ghost_fill = node
 
 
 ## Per-frame: where the ghost stands, whether the click would succeed, and
@@ -3907,13 +4475,25 @@ func _placement_prompt_text() -> String:
 		return ""
 	var kind_name := _kind_display_name(_build_kind)
 	var owned := _owned_of(_build_kind)
+	# A hopper's contents are part of what is about to be built, so they are
+	# in the NAME rather than tucked into the hint line: "✔ PLACE Hopper" and
+	# "✔ PLACE Hopper — Sugar" are two different claims about the click.
+	var contents := _selected_hopper_item()
+	if contents != "":
+		kind_name = "%s — %s" % [kind_name, _item_display_name(contents)]
+	# The key that changes it is only advertised when there is more than one
+	# thing to change it to. In a world with a single raw ingredient the
+	# choice does not exist and a hint about it would be noise.
+	var contents_hint := "    Q: contents" if _hopper_items.size() > 1 and _build_kind == HOPPER_KIND else ""
 	match _ghost_reason:
 		"none_owned":
 			return "✗ NONE OWNED  %s\nbuy one in the build menu (E)\nESC: cancel" % kind_name
 		"blocked":
-			return "✗ BLOCKED  %s  ·  facing %s\nsomething is already there\nR: rotate    ESC: cancel" % [kind_name, _build_direction]
-	return "✔ PLACE  %s  ·  facing %s\nclick to build    %d left to place\nR: rotate    ESC: cancel" % [
-		kind_name, _build_direction, owned
+			return "✗ BLOCKED  %s  ·  facing %s\nsomething is already there\nR: rotate%s    ESC: cancel" % [
+				kind_name, _build_direction, contents_hint
+			]
+	return "✔ PLACE  %s  ·  facing %s\nclick to build    %d left to place\nR: rotate%s    ESC: cancel" % [
+		kind_name, _build_direction, owned, contents_hint
 	]
 
 
@@ -4049,6 +4629,9 @@ func _process(delta: float) -> void:
 	_refresh_buffers()
 	_update_machine_gauges()
 	_update_hotbar()
+	_update_larder()
+	if _market_open:
+		_update_ingredient_market()
 	_update_ghost()
 	_update_hover_tooltip()
 	if _view_mode == ViewMode.ISOMETRIC:
@@ -4069,7 +4652,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		# "so a future click-to-build has nothing to fight with". It does
 		# nothing outside build mode, so nothing that used to work changed.
 		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed \
-				and _in_build_mode() and not _shop_open:
+				and _in_build_mode() and not _shop_open and not _market_open:
 			_confirm_build()
 			return
 		# Right-drag panning (isometric only) — right button, not left, which
@@ -4099,10 +4682,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		if _view_mode == ViewMode.ISOMETRIC:
 			if _iso_dragging:
 				_apply_drag_pan(event.relative)
-		elif not _shop_open:
-			# With the build menu up in first-person the mouse is visible and
-			# is being used to click slots — swinging the camera with it too
-			# would make the menu unusable.
+		elif not _shop_open and not _market_open:
+			# With either shop panel up in first-person the mouse is visible
+			# and is being used to click slots — swinging the camera with it
+			# too would make the panel unusable.
 			_apply_look(event.relative)
 		return
 
@@ -4125,7 +4708,32 @@ func _unhandled_input(event: InputEvent) -> void:
 		# would leave two answers to "what does a click do".
 		if not _shop_open:
 			_exit_build_mode()
+			# And the two shop panels are mutually exclusive, for the same
+			# reason: one modal screen at a time, so ESC and a second press
+			# of either key always leave the player somewhere definite.
+			_set_market_open(false)
 		_toggle_shop_menu()
+		return
+
+	# M opens the INGREDIENT MARKET — the stock half of the shop, where raw
+	# tomatoes, sugar and vinegar are bought. Its own key rather than a
+	# section of the build menu because that menu is already as tall as the
+	# space above the hotbar allows; see `_market_panel`'s doc. Handled in
+	# both view modes, like E, and for E's reason.
+	if event.keycode == KEY_M:
+		if not _market_open:
+			_exit_build_mode()
+			_set_shop_menu_open(false)
+		_toggle_market()
+		return
+
+	# Q cycles what a hopper in hand will be loaded with. It does nothing
+	# with anything else in hand, which is deliberate: this is not a general
+	# "cycle variant" key looking for a second use, it is the hopper's one
+	# extra decision (`_hopper_items`) and it is advertised in the placement
+	# prompt exactly while that decision exists.
+	if event.keycode == KEY_Q:
+		_cycle_hopper_item()
 		return
 
 	# ESC closes whatever is open — see `_close_all_overlays`.
@@ -4454,13 +5062,13 @@ func _machine_hover_text(origin_key: String, kind: String, direction: String) ->
 		var required: int = int(process[1])
 		var elapsed: int = clampi(sim.current_tick() - int(process[0]), 0, required)
 		var pct: float = (float(elapsed) / float(required)) * 100.0 if required > 0 else 100.0
-		# The percentage ALONE stopped being enough at milestone 7's
-		# timescale. A 60-tick crush is over before a player finishes reading
-		# it, so "40%" is all it can usefully say; the aging rack's 2400-tick
-		# wait is forty real seconds, and "40%" of a number the player has
-		# never been told is not an answer to the question they are actually
-		# asking, which is "how long until this is done". So the remaining
-		# time is spelled out beside it, in seconds — the unit the player
+		# The percentage ALONE is not enough once a process runs longer than
+		# a glance. A 60-tick crush is over before a player finishes reading
+		# it, so "40%" is all it can usefully say; the vat's 240-tick cook is
+		# four real seconds, and "40%" of a number the player has never been
+		# told is not an answer to the question they are actually asking,
+		# which is "how long until this is done". So the remaining time is
+		# spelled out beside it, in seconds — the unit the player
 		# experiences — rather than in ticks, which are an implementation
 		# detail of ARCHITECTURE.md §3.9's fixed timestep.
 		progress_text = "%.0f%%  ·  %s left" % [pct, _format_remaining(required - elapsed)]

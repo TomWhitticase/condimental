@@ -15,7 +15,7 @@
 # contains nothing at all, so most flags below begin by BUILDING something.
 # What they can build is bounded by `sim::STARTING_MONEY`, which the
 # inventory-hotbar ticket raised from 200 to 3000 — comfortably more than the
-# shipped six-stage line's 1,087 — so `--fixture chain` and `--contracts`
+# shipped line's ~1,200 — so `--fixture chain` and `--contracts`
 # can build and run the real line again. See test_layouts.gd's header.
 #
 # `--build` puts down the demo line (test_layouts.gd's `build_demo_line`): a
@@ -27,10 +27,9 @@
 #
 # `--fixture <name>` picks a different one: `machines` (hopper, machine and
 # dock, i.e. one of each sort of building), `fluids` (a tank, a pipe run and
-# the machine that taps it), `vat` (the 2x2 cooking vat, alone), `rack` (the
-# aging rack, alone) or `chain` (THE WHOLE SHIPPED SIX-STAGE LINE, bought and
-# placed out of a new game's own balance — test_layouts.gd's
-# `build_reference_line`).
+# the machine that taps it), `vat` (the 2x2 cooking vat, alone), `splitter` (a
+# line that forks) or `chain` (THE WHOLE SHIPPED LINE, bought and placed out
+# of a new game's own balance — test_layouts.gd's `build_reference_line`).
 #
 # `--contracts` builds that full line and then runs it until the contract
 # board is in a genuinely mixed state — some deliveries made, some missed,
@@ -111,6 +110,20 @@ var _hover_tank := false
 var _hover_dock := false
 var _hover_splitter := false
 var _shop := false
+## `--market` opens the ingredient market, and `--contents N` presses Q N
+## times on whatever ghost is up — the only way to photograph a hopper about
+## to be placed holding something other than the first raw ingredient, which
+## is the whole point of that key.
+var _market := false
+var _contents := 0
+## `--no-hud` hides the whole HUD layer. It exists for `--closeup`: the
+## contract clipboard and the hotbar between them cover the top-right and the
+## bottom of the frame, which is exactly where a junction lands about half
+## the time — so reviewing "does this pipe actually meet this machine", the
+## thing closeups are FOR, kept coming down to whether the subject happened
+## to miss a panel. The HUD has its own screenshots (--shop, --market,
+## --hover-*); a junction shot does not need it in frame.
+var _no_hud := false
 var _contracts := false
 var _hotbar_key := ""
 var _stock := false
@@ -121,9 +134,9 @@ var _stock := false
 ## on the board — which against the shipped contracts (asks of 2, 3 and 1 out
 ## of one shared pool) reads as one docket satisfied and the rest part-filled:
 ## the checkbox mechanic and the shared-pool competition in a single frame.
-## A MINIMUM dock count rather than an exact one, because the aging rack holds
-## a batch for 2400 ticks while the contracts check every 1000/1500/2500, so
-## the pool is drained about as fast as the line can fill it.
+## A MINIMUM dock count rather than an exact one, because the contracts check
+## every 1000/1500/2500 ticks and drain the pool about as fast as the line can
+## fill it.
 const CONTRACTS_REVIEW_DOCK_UNITS := 1
 const CONTRACTS_REVIEW_TICK_LIMIT := 20000
 var _ghost_kind := ""
@@ -153,6 +166,9 @@ func _initialize() -> void:
 	_hover_dock = args.has("--hover-dock")
 	_hover_splitter = args.has("--hover-splitter")
 	_shop = args.has("--shop")
+	_market = args.has("--market")
+	_no_hud = args.has("--no-hud")
+	_contents = int(_string_arg(args, "--contents")) if _string_arg(args, "--contents") != "" else 0
 	_contracts = args.has("--contracts")
 	if _contracts:
 		_fixture = "chain"
@@ -195,14 +211,16 @@ func _build_fixture() -> void:
 			Layouts.build_fluid_run(_main.sim)
 		"vat":
 			Layouts.build_multi_tile(_main.sim)
-		"rack":
-			Layouts.build_aging_rack(_main.sim)
 		"splitter":
 			Layouts.build_splitter_line(_main.sim)
 		"chain":
 			Layouts.build_reference_line(_main.sim)
 		_:
 			Layouts.build_demo_line(_main.sim)
+	# Every fixture is stocked, whether or not this run will tick: a
+	# screenshot of a factory with an empty larder is a screenshot of a
+	# factory that cannot start, and the larder strip would say so.
+	Layouts.stock_larder(_main.sim)
 	_main._rebuild_world()
 	_main._refresh_owned_counts()
 	_reframe()
@@ -534,6 +552,16 @@ func _process(_delta: float) -> bool:
 		_enter_remove_mode()
 	if _frames == 2 and _shop:
 		_open_shop_menu()
+	if _frames == 2 and _no_hud:
+		var hud := _main.get_node_or_null("HUD")
+		if hud != null:
+			hud.visible = false
+	if _frames == 2 and _market:
+		_main._set_market_open(true)
+	if _frames == 2 and _contents > 0:
+		for _i in range(_contents):
+			_main._cycle_hopper_item()
+		_main._update_ghost()
 	if _frames == 2 and _contracts:
 		_run_contract_cycles()
 	if _frames == 2 and _stock:

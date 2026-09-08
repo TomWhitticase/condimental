@@ -1281,7 +1281,7 @@ impl World {
     /// The raw-ingredient market plus the stock the player owns and their
     /// money, in one object — see [`IngredientsSnapshot`].
     pub fn ingredients_snapshot(&self) -> IngredientsSnapshot {
-        self.ingredients.snapshot(self.economy.money)
+        self.ingredients.snapshot(self.economy.money, &self.raw_items)
     }
 
     /// How many units of a raw ingredient the player owns and has **not**

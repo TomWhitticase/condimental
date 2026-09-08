@@ -1,7 +1,4 @@
 {
-  "aging_rack_gauge": [
-    "emissive"
-  ],
   "belt": [
     "matte",
     "metal"
@@ -54,15 +51,13 @@
     "metal",
     "liquid"
   ],
+  "item_sugar": [
+    "matte"
+  ],
   "item_tomato": [
     "matte"
   ],
   "machine": [
-    "matte",
-    "metal",
-    "emissive"
-  ],
-  "machine_aging_rack": [
     "matte",
     "metal",
     "emissive"

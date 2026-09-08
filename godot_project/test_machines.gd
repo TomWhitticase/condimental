@@ -96,6 +96,7 @@ func _world_aabb(node: Node3D) -> AABB:
 
 func _run_checks() -> void:
 	Layouts.build_machines_fixture(main.sim)
+	Layouts.stock_larder(main.sim)
 	main._rebuild_world()
 	Layouts.build_multi_tile(vat_scene.sim)
 	vat_scene._rebuild_world()

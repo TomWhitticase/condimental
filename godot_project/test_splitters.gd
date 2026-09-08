@@ -95,6 +95,7 @@ func _tick_until(budget: int, predicate: Callable) -> bool:
 
 func _run_checks() -> void:
 	Layouts.build_splitter_line(main.sim)
+	Layouts.stock_larder(main.sim)
 	main._rebuild_world()
 
 	# --- a bespoke model, at the tile the simulation reports ---------------

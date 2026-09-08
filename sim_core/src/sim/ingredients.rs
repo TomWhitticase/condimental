@@ -383,9 +383,17 @@ impl Ingredients {
     }
 
     /// The presentation snapshot — see [`IngredientsSnapshot`].
-    pub fn snapshot(&self, money: Fx) -> IngredientsSnapshot {
+    ///
+    /// `hopper_items` is passed in rather than derived here because it is a
+    /// property of the WORLD's recipe set, not of the catalog: an ingredient
+    /// is priced whether it is a solid or a fluid, and only a solid can go
+    /// in a hopper. [`super::world::World::ingredients_snapshot`] hands over
+    /// its own [`super::world::World::raw_items`], which is the single
+    /// definition of that set.
+    pub fn snapshot(&self, money: Fx, hopper_items: &[String]) -> IngredientsSnapshot {
         IngredientsSnapshot {
             money: money.to_num::<f64>(),
+            hopper_items: hopper_items.to_vec(),
             entries: self
                 .catalog
                 .entries()
@@ -408,14 +416,25 @@ impl Ingredients {
 ///
 /// ```json
 /// {"money": 2913.0,
+///  "hopper_items": ["tomato", "sugar"],
 ///  "entries": [
 ///    {"id": "tomato", "price": 1.0, "owned": 40, "affordable": true},
 ///    {"id": "sugar", "price": 3.0, "owned": 0, "affordable": true}
 ///  ]}
 /// ```
+///
+/// `hopper_items` is `entries` minus the fluids: the ids a hopper may
+/// legally be placed holding (see [`super::world::PlayerCommand::Place`]'s
+/// `item` field). It is on the wire because presentation genuinely cannot
+/// work it out — an id's price says nothing about whether it is a solid —
+/// and because the alternative is a Godot-side list of literals that a
+/// third raw ingredient would silently make wrong. Its order is
+/// `data/recipes.ron`'s own order of first appearance, so a UI cycling
+/// through it presents them in the order the production line uses them.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct IngredientsSnapshot {
     pub money: f64,
+    pub hopper_items: Vec<String>,
     pub entries: Vec<IngredientSnapshot>,
 }
 
@@ -569,8 +588,13 @@ mod tests {
     fn the_snapshot_reports_every_priced_ingredient_including_unowned_ones() {
         let mut ingredients = Ingredients::new(IngredientCatalog::from_ron_str(EXAMPLE).unwrap());
         ingredients.owned.add("tomato", 12);
-        let snapshot = ingredients.snapshot(Fx::from_num(2));
+        let hopper_items = ["tomato".to_string(), "sugar".to_string()];
+        let snapshot = ingredients.snapshot(Fx::from_num(2), &hopper_items);
         assert_eq!(snapshot.entries.len(), 2);
+        assert_eq!(
+            snapshot.hopper_items, hopper_items,
+            "the hopper-legal ids are reported verbatim, not re-derived from the catalog"
+        );
         assert_eq!(snapshot.entries[0].id, "tomato");
         assert_eq!(snapshot.entries[0].owned, 12);
         assert!(snapshot.entries[0].affordable);
