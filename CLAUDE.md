@@ -614,6 +614,47 @@ it's gone stale.
   hopper's, not before. Placement follows the hopper's precedent exactly:
   one tile west of the run's first pipe tile, outside all existing geometry,
   so introducing it moved no tile.
+- 2026-09-08: "Visual overhaul round 2" epic, ticket 3 (last of three) —
+  **belt/pipe-to-machine junctions**. Presentation-only; `sim_core` gained a
+  doc-comment clarification and nothing else, and `data/` was untouched.
+  The project owner's live-demo review: *"a conveyor belt going into a mixer
+  seems to just go straight into the side there is no connecting so it looks
+  like items just disappear into the wall"* — the previous pass's flush
+  footings had closed a floor-level crease but a flush wall is still a wall.
+  Five calls worth not re-litigating. (1) **The camera decides the design,
+  and it is asymmetric.** With a fixed `(1, 1, 1)` view direction the only
+  vertical faces ever visible are the +X and +Z-world ones, so a machine's
+  outlet face is camera-facing and its inlet face can *never* be seen —
+  cutting an inlet doorway, the ticket's literal instruction, would have
+  been invisible. Outlets are therefore real doorways carved through the +X
+  wall; inlets are hooded transfer housings whose *camera-facing side* is cut
+  away instead. Full derivation in UI_UX.md §2b point 11. (2) **An opening
+  has to be genuinely empty, and that is what the new `cargo test -p voxgen`
+  suite asserts** — a mouth painted dark meshes as a flat rectangle and
+  renders as a decal, a distinction no screenshot at scene scale can show,
+  so it is checked voxel by voxel in `assets.rs`'s own tests rather than left
+  to the eye. (3) **The belt gained two junction-adjacent variants**
+  (`belt_inlet`/`belt_outlet`), chosen per tile from `chain_layout_json`
+  alone: whether the neighbour along that stage's *derived* travel direction
+  is covered by a machine footprint (or by the hopper, which discharges the
+  same way). This is the buildable half of "assets should look different
+  depending on their orientation and what's around them" — what a tile is
+  *next to* is on the wire; which way it *points* still is not, so the
+  variants are +X-only and `_belt_asset_for` falls back to the plain model
+  otherwise. The corner limitation in `world.rs`'s module doc is unchanged
+  and was re-stated, not weakened. (4) **The 2x2 cooking vat needed the
+  standard piece widened, not a bespoke one**: its belt row is its far row,
+  so its own shell occludes a belt-width inlet completely — the fix is a
+  charging gallery across its whole -X face, which is the same helper called
+  with a wider lane and is also what a vat that size really has. (5) **The
+  simulation's per-frame tick catch-up is now clamped** (`MAX_TICKS_PER_FRAME`):
+  it was unbounded, so one slow frame silently fast-forwarded the factory and
+  two identical screenshot runs photographed visibly different states, which
+  makes a rendered scene useless as a before/after check. Two runs are now
+  byte-identical. Also fixed while in there: the pipe run's downstream end was
+  an open bore (it "just stopped"), and `pipe_source`'s inlet flange had been
+  silently plugging the bore the tank discharges through.
+
 - 2026-09-07: Visual-polish pass — built UI_UX.md §2a's voxel asset pipeline
   for real and replaced milestone 3/4's flat 2D placeholder scene with the
   isometric 3D one the doc describes. Presentation-only: `sim_core`,

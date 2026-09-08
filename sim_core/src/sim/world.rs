@@ -43,6 +43,20 @@
 //! warns against — so this stays documented-and-deferred rather than
 //! half-built, until a milestone actually needs a chain that turns.
 //!
+//! The "Visual overhaul round 2" epic's ticket 3 did NOT change any of the
+//! above, and one clarification keeps it accurate. That ticket gave the belt
+//! two junction-adjacent variants (`belt_inlet`/`belt_outlet`) which the
+//! renderer picks per tile — but it picks them from what a tile is NEXT TO
+//! (whether the neighbouring tile along that stage's own travel direction is
+//! covered by a machine footprint, all of which is already on the wire in
+//! `chain_layout()`), never from which way a tile POINTS, because that is
+//! still not a thing any snapshot carries. Those two variants are authored
+//! for a +X run only, exactly like every belt model before them, and
+//! `main.gd`'s `_belt_asset_for` falls back to the plain tile for any other
+//! direction rather than drawing a wrong-facing end cap. So point (2) above
+//! now covers three belt models rather than one; the cost of a rotation went
+//! up slightly, and the blocker is unchanged and still point (1).
+//!
 //! **Machine size is data, not a constant** (the "Machines improvement"
 //! milestone). Each stage's machine occupies a rectangle of tiles given by
 //! its kind's [`Footprint`] in `data/machines.ron`, anchored at an origin

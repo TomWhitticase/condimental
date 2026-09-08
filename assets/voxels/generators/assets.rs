@@ -24,6 +24,11 @@ pub struct Asset {
 pub const ASSETS: &[Asset] = &[
     Asset { name: "floor_tile", build: floor_tile },
     Asset { name: "belt", build: belt },
+    // The two junction-adjacent belt variants (the "Visual overhaul round 2"
+    // epic's ticket 3). `main.gd` picks between these three per tile from the
+    // simulation's own layout — see `belt_inlet`'s doc.
+    Asset { name: "belt_inlet", build: belt_inlet },
+    Asset { name: "belt_outlet", build: belt_outlet },
     Asset { name: "machine", build: machine },
     // The kinds `data/machines.ron` names that have a silhouette of their
     // own (the "Machines improvement" milestone, ticket 4). `machine` above
@@ -119,7 +124,79 @@ pub fn floor_tile(p: &Palette) -> VoxModel {
 /// The metal/matte split here is the point of UI_UX.md §4 in miniature — the
 /// frame and rollers catch the light, the belt rubber does not.
 pub fn belt(p: &Palette) -> VoxModel {
-    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 12]);
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 16]);
+    belt_body(&mut m, p);
+    m
+}
+
+/// The tile immediately **upstream of a machine** — the last belt tile before
+/// product is handed over. Distinct from a plain middle tile on purpose: this
+/// is the concrete, buildable half of the project owner's *"assets should
+/// look different depending on their orientation and what's around them"*,
+/// and a belt tile that hands off to a machine genuinely is different kit
+/// from one in the middle of a run.
+///
+/// Which tile this is comes from the simulation's own layout, never from a
+/// hardcoded "the front is -X": `main.gd` asks whether the next tile ALONG
+/// THE STAGE'S OWN TRAVEL DIRECTION (derived from `chain_layout_json`'s
+/// `belt_start_tile` -> `machine_tile`) is covered by a machine footprint.
+/// The model itself is authored for a +X run only, which is the one
+/// direction the simulation ever produces — see `sim_core/src/sim/world.rs`'s
+/// corner note, and `main.gd`'s `_belt_asset_for`, which falls back to the
+/// plain tile rather than drawing a wrong-facing end cap if that ever
+/// changes.
+///
+/// What it adds: guide rails converging toward the machine, and a bright
+/// dead-plate running out to the tile edge at exactly the height of the
+/// machine's own infeed apron ([`BELT_SURFACE_Z`]), so the two are one
+/// continuous surface across the boundary instead of two things that stop
+/// near each other.
+pub fn belt_inlet(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 16]);
+    belt_body(&mut m, p);
+    let last = TILE_VOXELS as i32 - 1;
+    let (l0, l1) = BELT_LANE;
+
+    // Transition dead-plate: no rollers under it, flush to the tile edge and
+    // exactly level with the machine's infeed apron.
+    m.cuboid((22, last), (l0, l1), (BELT_SURFACE_Z, BELT_SURFACE_Z), p.idx("steel_light"));
+    // Low guide kerbs along it. Deliberately LOW: the first version stood a
+    // full hazard-striped portal frame here, and rendered next to the
+    // machine's own infeed housing it made the junction two portals deep and
+    // a jumble of dark bars. The machine end frames the junction; the belt
+    // end should only hand over to it.
+    for y in [l0 - 1, l1 + 1] {
+        m.cuboid((22, last), (y, y), (BELT_SURFACE_Z, BELT_SURFACE_Z + 1), p.idx("steel_light"));
+    }
+    m
+}
+
+/// The tile immediately **downstream of a machine** (or of the hopper) — the
+/// belt tile a discharge lands on. The mirror of [`belt_inlet`], picked the
+/// same data-driven way.
+///
+/// What it adds: a receiving apron at the tile edge under the machine's
+/// discharge lip, and taller splash guards along the first stretch, which is
+/// the stretch a real line guards because that is where product drops rather
+/// than travels.
+pub fn belt_outlet(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 16]);
+    belt_body(&mut m, p);
+    let (l0, l1) = BELT_LANE;
+
+    // Receiving plate under the machine's discharge lip, then low splash
+    // guards along the stretch product lands on rather than travels along.
+    // Kept as quiet as `belt_inlet`'s kerbs, and for the same reason.
+    m.cuboid((0, 8), (l0, l1), (BELT_SURFACE_Z, BELT_SURFACE_Z), p.idx("steel_light"));
+    for y in [l0 - 1, l1 + 1] {
+        m.cuboid((0, 8), (y, y), (BELT_SURFACE_Z, BELT_SURFACE_Z + 2), p.idx("steel_light"));
+    }
+    m
+}
+
+/// The conveyor itself, shared by all three belt assets above so a run reads
+/// as one line whatever variant a given tile draws.
+fn belt_body(m: &mut VoxModel, p: &Palette) {
     let last = TILE_VOXELS as i32 - 1;
 
     // Legs.
@@ -151,7 +228,6 @@ pub fn belt(p: &Palette) -> VoxModel {
             m.cuboid((x, x), (7, 24), (9, 9), p.idx("rubber_dark"));
         }
     }
-    m
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +296,14 @@ pub fn machine(p: &Palette) -> VoxModel {
     // A thin lit strip under the vessel rim, so the machine reads as
     // powered from any of the four snap angles, not just the front.
     m.cylinder_z((16, 16), 10.0, (16, 16), p.idx("status_amber"));
+
+    // The fallback kind gets the junction hardware too (see the "Junctions"
+    // section): a machine kind added to `data/machines.ron` with no bespoke
+    // model must still show a belt where its product goes in and comes out,
+    // or the fallback would reintroduce the exact "items vanish into a wall"
+    // problem this ticket exists to remove.
+    machine_infeed(&mut m, p, BELT_LANE);
+    machine_outfeed(&mut m, p, BELT_LANE, last);
     m
 }
 
@@ -493,20 +577,36 @@ pub fn pipe(p: &Palette) -> VoxModel {
 pub fn pipe_source(p: &Palette) -> VoxModel {
     let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 32]);
     // Window shifted downstream so the valve doesn't stand over it.
-    pipe_body(&mut m, p, (18, 25));
+    pipe_body(&mut m, p, (22, 29));
 
     // Heavy inlet flange facing the tank, wider than a plain tile join so
-    // the supply end is identifiable from any of the four snap angles.
-    m.cylinder_x((PIPE_AXIS_Y, PIPE_AXIS_Z), PIPE_OUTER_R + 2.0, (0, 2), p.idx("steel"));
+    // the supply end is identifiable from any of the four snap angles — and,
+    // since the "Visual overhaul round 2" epic's ticket 3, in the palette's
+    // brightest metal: this is one half of the tank-to-run joint (the tank's
+    // discharge spout is the other), and the pair was previously dark grey
+    // hardware on a dark grey shell in the one place a player needs to see
+    // that the tank is actually plumbed into the line.
+    m.cylinder_x((PIPE_AXIS_Y, PIPE_AXIS_Z), PIPE_OUTER_R + 2.0, (0, 2), p.idx("steel_light"));
+    m.cylinder_x((PIPE_AXIS_Y, PIPE_AXIS_Z), PIPE_OUTER_R + 1.2, (3, 4), p.idx("brass"));
+    // Re-open the bore those two rings just plugged. `pipe_body` carves the
+    // bore before returning, so anything drawn afterwards fills it back in —
+    // and this end is the one the tank actually discharges THROUGH, so a
+    // solid plug here is both wrong and something the liquid body (which
+    // spans the whole tile) would poke out of. Found by the junction tests
+    // at the bottom of this file, not by eye.
+    m.carve_cylinder_x((PIPE_AXIS_Y, PIPE_AXIS_Z), PIPE_BORE_R, (0, 4));
 
     // Isolation valve: a bonnet straddling the run, a stem, and a brass
     // hand wheel — the one thing on this tile a player would reach for, and
-    // the only place brass survives on the run (see `pipe_body`'s doc).
-    m.cuboid((7, 12), (12, 19), (PIPE_AXIS_Z, 22), p.idx("steel_dark"));
-    m.cuboid((8, 11), (13, 18), (23, 24), p.idx("steel_light"));
-    m.cuboid((9, 10), (15, 16), (25, 27), p.idx("steel_dark"));
-    m.cylinder_z((9, 16), 4.0, (28, 28), p.idx("brass"));
-    m.carve_cylinder_z((9, 16), 2.0, (28, 28));
+    // the only place brass survives on the run's own hardware (see
+    // `pipe_body`'s doc). Moved to mid-tile in ticket 3: it used to stand at
+    // x = 7..12, i.e. directly over the tank joint, so the one fitting that
+    // says "the tank feeds this run" was photographed behind a valve body.
+    m.cuboid((13, 18), (12, 19), (PIPE_AXIS_Z, 22), p.idx("steel_dark"));
+    m.cuboid((14, 17), (13, 18), (23, 24), p.idx("steel_light"));
+    m.cuboid((15, 16), (15, 16), (25, 27), p.idx("steel_dark"));
+    m.cylinder_z((15, 16), 4.0, (28, 28), p.idx("brass"));
+    m.carve_cylinder_z((15, 16), 2.0, (28, 28));
     m
 }
 
@@ -542,8 +642,32 @@ pub fn pipe_inlet(p: &Palette) -> VoxModel {
     // (well past its outer surface, so the two solids genuinely overlap
     // rather than merely touching) out to the tile edge the machine sits
     // against.
-    m.cylinder_y((16, PIPE_AXIS_Z), 2.2, (17, last), p.idx("pipe_grey"));
-    m.cylinder_y((16, PIPE_AXIS_Z), 3.0, (last - 1, last), p.idx("brass"));
+    //
+    // **Sized and coloured to match `machine_mixer`'s stub exactly** (the
+    // "Visual overhaul round 2" epic's ticket 3). The first version was a
+    // 2.2-radius `pipe_grey` stub meeting a 2.2-radius `pipe_grey` stub, and
+    // rendering the junction showed the pair as an indistinct dark lump
+    // between a bright pipe and a blue machine skirt rather than as one
+    // spool piece crossing a tile boundary. Bright steel with a brass flange
+    // right on the boundary is what makes the two halves read as one
+    // fitting; the flange sits at the boundary on BOTH sides, so the joint
+    // shows a single brass collar rather than two rings a voxel apart.
+    m.cylinder_y((16, PIPE_AXIS_Z), 3.0, (16, last), p.idx("steel_light"));
+    m.cylinder_y((16, PIPE_AXIS_Z), 4.0, (last - 1, last), p.idx("brass"));
+
+    // **A blind flange closing the run's downstream end.** The run used to
+    // simply stop: `pipe_body` bores every tile through from x = 0 to x = 31,
+    // so the last segment's +X face was an open, unterminated tube mouth —
+    // camera-facing, and one of the most obviously wrong things in the whole
+    // factory once a close-up was actually rendered. A pipe run ends in a
+    // blank flange, so this one does.
+    // Bright plate with a brass ring on it, NOT plain `steel`: the end face
+    // is a vertical surface the camera looks straight at and the key light
+    // does not reach, so the first cut rendered as an unreadable black stump
+    // capping the run — the same lesson `pipe_body` records about the tube
+    // itself.
+    m.cylinder_x((PIPE_AXIS_Y, PIPE_AXIS_Z), PIPE_OUTER_R + 1.0, (last - 1, last), p.idx("steel_light"));
+    m.cylinder_x((PIPE_AXIS_Y, PIPE_AXIS_Z), PIPE_BORE_R + 0.5, (last, last), p.idx("brass"));
     m
 }
 
@@ -649,6 +773,180 @@ fn control_panel(m: &mut VoxModel, p: &Palette, x: (i32, i32), z: (i32, i32), fa
     m.cuboid((x.1 + 3, x.1 + 5), (face_y - 1, face_y), (mid - 1, mid + 1), p.idx("status_amber"));
 }
 
+// ---------------------------------------------------------------------------
+// Junctions: where a belt actually meets a machine
+// ---------------------------------------------------------------------------
+//
+// The "Visual overhaul round 2" epic's ticket 3. The project owner's live-demo
+// review: *"a conveyor belt going into a mixer seems to just go straight into
+// the side there is no connecting so it looks like items just disappear into
+// the wall"*. The previous pass had already made every footing flush with its
+// tile edge, which closed a floor-level crease — but a flush wall is still a
+// wall. Nothing on any machine said "product enters HERE", so an item ran to
+// the end of its belt and was swallowed by a blank painted skirt.
+//
+// **The geometric fact that decides the whole design, established by
+// rendering the junctions rather than reasoning from the generator.** The
+// shipped camera is fixed isometric with view direction `(1, 1, 1)`
+// (`main.gd`'s CAMERA_DIRECTION, UI_UX.md §1), so the only vertical faces it
+// can ever see are those whose normal points +X or +Z-world. The chain runs
+// +X, so:
+//
+//   * a machine's OUTLET face (+X) is dead-on camera-facing — a doorway cut
+//     into it reads immediately, and that is exactly what `machine_outfeed`
+//     below cuts;
+//   * a machine's INLET face (-X) points *directly away from the camera* and
+//     can never be seen at all. Carving a mouth into it — the obvious move —
+//     would be invisible in the only view the game ships.
+//
+// Worse, an inlet channel sunk into the machine's -X edge can't be saved by
+// making it open-topped either: the escape ray from inside such a channel
+// travels `(+x, -y, +z)` in vox space, i.e. up and *over the machine's own
+// body*, so for anything as tall as the mixer's drum or the vat's shell the
+// machine occludes its own inlet. That was checked against real geometry
+// before any of this was drawn.
+//
+// So the inlet is built as a **transfer housing with an open camera-facing
+// side**: a hooded steel enclosure standing on the machine's -X edge,
+// straddling the belt lane, whose near (vox low-Y, world +Z) wall is cut away
+// over a band so the camera looks straight in at a bright apron floor running
+// the belt's line and, at the end of it, a black inlet mouth into the machine.
+// The item still disappears at the tile boundary — the simulation collects it
+// there, and nothing here changes that — but it now disappears *into a piece
+// of equipment built to swallow it*, with the path visible, which is what the
+// complaint was actually about.
+//
+// The belt's own half of each junction is `belt_inlet`/`belt_outlet` (see the
+// conveyor section above): the last belt tile before a machine and the first
+// one after it are genuinely different pieces of kit from a middle tile, and
+// now look it. `main.gd` picks them from the layout the simulation reports,
+// never from a hardcoded "the front is -X".
+
+/// The belt's running lane in voxels, mirrored from [`belt`] — the Y span its
+/// rubber surface occupies. Every junction piece on both sides of a tile
+/// boundary is built against this one number, which is what makes a belt's
+/// line continue into a machine instead of merely stopping near it.
+pub const BELT_LANE: (i32, i32) = (7, 24);
+/// Top voxel of that running surface, likewise mirrored from [`belt`]. An
+/// apron drawn at this Z is exactly level with the belt beside it.
+pub const BELT_SURFACE_Z: i32 = 9;
+/// How far into the machine the infeed housing reaches, and how far back
+/// from its +X edge the outfeed doorway is cut. Eight voxels is a quarter of
+/// a tile: deep enough to read as a structure, shallow enough that it never
+/// eats the silhouette the machine is identified by (the mixer's drum starts
+/// at x = 4, the vat's shell is inset further still).
+const JUNCTION_DEPTH: i32 = 8;
+/// Roof height of the infeed housing. Low enough to read as a hood over a
+/// transfer point rather than as a room: the first cut ran it to 21 and the
+/// rendered junction was a big empty portal.
+const JUNCTION_ROOF_Z: i32 = 18;
+
+/// The infeed half of a junction: a hooded transfer housing on the machine's
+/// **-X** edge, spanning `lane`, with its camera-facing side open so the
+/// product path inside is visible. See this section's header for why an open
+/// side rather than an open mouth or an open top.
+///
+/// `lane` is the belt lane in this model's own Y coordinates. For a 1x1
+/// machine that is [`BELT_LANE`] unchanged; for a multi-tile machine the
+/// caller offsets it to whichever half of the model the belt's row maps to
+/// (the vox importer maps low local Y to high world Z, so a 2x2 machine's
+/// sim-y = 0 row is its *upper* local-Y half — see [`machine_cooking_vat`]).
+fn machine_infeed(m: &mut VoxModel, p: &Palette, lane: (i32, i32)) {
+    let (l0, l1) = lane;
+    let d = JUNCTION_DEPTH;
+    let floor = BELT_SURFACE_Z;
+    let roof = JUNCTION_ROOF_Z;
+
+    // Housing shell, then hollowed. Drawn solid first and carved after, per
+    // the rule the pipes already follow: a face is only culled when its
+    // neighbour is genuinely absent, so an "opening" has to really be empty
+    // (see `VoxModel::erase`). Carving through whatever the machine itself
+    // had here is deliberate — this housing IS the machine's inlet, not a
+    // box parked next to one.
+    m.cuboid((0, d), (l0 - 2, l1 + 2), (floor, roof), p.idx("steel_light"));
+    m.carve_cuboid((0, d - 1), (l0, l1), (floor + 1, roof - 2));
+
+    // The camera-facing side, cut away from just above the apron to just
+    // under the roof. This window is the whole reason the piece is shaped
+    // this way: the machine's -X mouth can never be seen (this section's
+    // header derives that), so the product path is shown from the side
+    // instead.
+    m.carve_cuboid((0, d - 1), (l0 - 2, l0 - 1), (floor + 1, roof - 2));
+
+    // What the window shows: **darkness, framed by bright steel, with a
+    // brass threshold at the lip**. Getting this right took three renders
+    // and one piece of geometry worth writing down. A sight line entering
+    // this window travels `(-x, +y, -z)` in vox space, so everything it can
+    // reach is the channel FLOOR between the sill and about ten voxels in —
+    // never the far wall, and never the back of the channel. Painting a dark
+    // mouth at the inner end therefore did nothing at all, and a bright
+    // apron (the second cut) filled the whole opening with pale metal, so
+    // the finished piece read as an empty portal frame with a lit box behind
+    // it. The floor is what is seen, so the floor is what has to be black.
+    m.cuboid((0, d - 1), (l0, l1), (floor, floor), p.idx("hazard_black"));
+    m.cuboid((0, d - 1), (l1 + 1, l1 + 2), (floor + 1, roof - 2), p.idx("hazard_black"));
+    m.cuboid((d - 2, d), (l0, l1), (floor, roof - 2), p.idx("hazard_black"));
+    // Brass threshold on the lip, where the belt's dead-plate hands over —
+    // the one bright thing inside the opening, and the same accent every
+    // other "product passes through here" fitting in the factory carries.
+    m.cuboid((0, 1), (l0, l1), (floor, floor), p.idx("brass"));
+
+    // Window head: one yellow band, because a covered nip point on a real
+    // line is marked, and because it separates the housing's bright roof
+    // from its bright wall. NOT a full hazard stripe — a stripe is half
+    // black, and black on the piece's only camera-facing edge turned the
+    // whole hood into a dark bar in the first render.
+    m.cuboid((0, d), (l0 - 2, l0 - 2), (roof - 1, roof - 1), p.idx("hazard_yellow"));
+    // Corner posts either side of the window (the window carve above cuts
+    // through the near wall, so these are redrawn after it): the roof has to
+    // visibly stand on something.
+    for x in [0, d] {
+        m.cuboid((x, x), (l0 - 2, l0 - 2), (floor, roof), p.idx("steel_dark"));
+    }
+}
+
+/// The outfeed half: a discharge housing standing proud of the machine's
+/// **+X** face — the one vertical face the fixed isometric camera looks
+/// straight at — with a real mouth carved through it and a lip reaching the
+/// tile edge, so the belt starts under a chute instead of against a blank
+/// painted slab.
+///
+/// This one can be a plain doorway precisely because of the camera geometry
+/// in this section's header: an opening on +X is dead-on visible, so it
+/// needs no side window and no trick. It protrudes rather than being sunk
+/// deep into the machine so it never eats the silhouette the machine is
+/// identified by — the mixer's belt-driven agitator and the bottler's gantry
+/// both live within a few voxels of that face.
+///
+/// `lane` as in [`machine_infeed`]; `last` is the model's highest X index
+/// (31 for a one-tile machine, 63 for the 2x2 vat).
+fn machine_outfeed(m: &mut VoxModel, p: &Palette, lane: (i32, i32), last: i32) {
+    let (l0, l1) = lane;
+    let floor = BELT_SURFACE_Z;
+    let head = floor + 8;
+
+    // Housing, then the mouth carved through it. `steel_light` for the same
+    // reason the infeed's is: the opening reads by contrast against the
+    // frame, so the frame has to be the palette's brightest metal and the
+    // hole has to be genuinely black.
+    m.cuboid((last - 3, last), (l0 - 2, l1 + 2), (floor, head), p.idx("steel_light"));
+    m.carve_cuboid((last - 2, last), (l0, l1), (floor + 1, head - 2));
+    // The back of the mouth. Its normal is +X, i.e. straight at the camera,
+    // which is what turns a cut-out silhouette into a hole with depth.
+    m.cuboid((last - 3, last - 3), (l0, l1), (floor, head - 2), p.idx("hazard_black"));
+
+    // Discharge lip, level with the belt beside it and running out to the
+    // tile edge so there is nothing between the two.
+    m.cuboid((last - 3, last), (l0, l1), (floor, floor), p.idx("steel_light"));
+    // A brass band across the head of the opening — the same accent
+    // `pipe_source`'s hand wheel and `pipe_inlet`'s branch flange carry, and
+    // for the same reason: it marks a fitting product actually passes
+    // through. A hazard stripe was tried here first and rendered as a dark
+    // bar, because half a stripe is black and this edge is the only part of
+    // the piece the camera looks straight at.
+    m.cuboid((last - 2, last), (l0 - 1, l1 + 1), (head - 1, head - 1), p.idx("brass"));
+}
+
 /// GAMEPLAY.md §2 tier 1's raw-ingredient prep, `data/machines.ron`'s 1x1
 /// `crusher`: tomatoes are tipped into the open feed pocket in the top of
 /// the frame, two counter-rotating rolls crush them in the nip, and paste
@@ -725,17 +1023,23 @@ pub fn machine_crusher(p: &Palette) -> VoxModel {
     }
     m.cuboid((5, 27), (3, 5), (23, 24), p.idx("steel_light"));
 
-    // Drive motor tucked against the -X side, belted up to the near
-    // flywheel.
-    m.cuboid((0, 4), (9, 22), (10, 18), p.idx("paint_blue"));
-    m.cuboid((0, 4), (9, 22), (19, 19), p.idx("steel_light"));
-    m.cylinder_y((2, 14), 2.4, (4, 8), p.idx("brass"));
+    // Drive motor. It used to sit against the -X side across the whole belt
+    // lane (x 0..4, y 9..22) — i.e. exactly where the belt arrives, so the
+    // first junction in the factory was a conveyor running into the side of
+    // a motor. It now stands on the far (+Y) shoulder, clear of the lane, so
+    // the infeed housing below has somewhere to be.
+    m.cuboid((0, 5), (25, 30), (10, 19), p.idx("paint_blue"));
+    m.cuboid((0, 5), (25, 30), (20, 20), p.idx("steel_light"));
+    m.cylinder_y((3, 15), 2.4, (23, 25), p.idx("brass"));
 
-    // Discharge chute, stepping down toward the belt on the +X side and
-    // ending flush with the tile edge, just above the belt's surface.
-    m.cuboid((26, 29), (11, 20), (9, 13), p.idx("steel"));
-    m.cuboid((29, 31), (10, 21), (7, 11), p.idx("steel"));
-    m.cuboid((29, 31), (9, 22), (6, 7), p.idx("steel_light"));
+    // The junction hardware, shared with every other machine (see the
+    // "Junctions" section): product enters through the hooded transfer
+    // housing on -X and leaves through a real doorway on +X. The old
+    // hand-built stepped chute this replaces was the only outfeed in the
+    // factory, and it was a different shape from nothing at all — which is
+    // what every other machine had.
+    machine_infeed(&mut m, p, BELT_LANE);
+    machine_outfeed(&mut m, p, BELT_LANE, TILE_VOXELS as i32 - 1);
 
     control_panel(&mut m, p, (11, 20), (3, 6), 1);
     m
@@ -796,8 +1100,19 @@ pub fn machine_mixer(p: &Palette) -> VoxModel {
     // visual-overhaul pass found they'd been modelled 4 voxels apart in
     // height, which is what actually made the mixer's supply line read as
     // disconnected from the pipe feeding it rather than merely a tile away.
-    m.cylinder_y((16, PIPE_AXIS_Z), 2.2, (0, 8), p.idx("pipe_grey"));
-    m.cylinder_y((16, PIPE_AXIS_Z), 3.0, (6, 8), p.idx("brass"));
+    // Deliberately the same diameter and the same bright steel as the
+    // `pipe_inlet` branch it meets, with a brass flange right at the tile
+    // boundary: the two halves are one spool piece split across two tiles,
+    // and the pair only reads as a connection if they match. The first
+    // version was a 2-voxel `pipe_grey` nub against a dark blue skirt and
+    // rendered as a lump.
+    m.cylinder_y((16, PIPE_AXIS_Z), 3.0, (0, 9), p.idx("steel_light"));
+    m.cylinder_y((16, PIPE_AXIS_Z), 4.0, (0, 1), p.idx("brass"));
+    // Gusset under the stub, so it visibly lands on the machine.
+    m.cuboid((15, 17), (2, 7), (9, PIPE_AXIS_Z - 3), p.idx("steel_dark"));
+
+    machine_infeed(&mut m, p, BELT_LANE);
+    machine_outfeed(&mut m, p, BELT_LANE, TILE_VOXELS as i32 - 1);
 
     control_panel(&mut m, p, (11, 20), (3, 7), 2);
     m
@@ -864,6 +1179,33 @@ pub fn machine_cooking_vat(p: &Palette) -> VoxModel {
         m.cuboid((18, 23), (3, 3), (z, z), p.idx("steel_light"));
     }
 
+    // The junction hardware, and the one place in the factory where the
+    // standard piece needed a second thought.
+    //
+    // The belt's row is the vat's sim-y = 0 tile, which is the model's UPPER
+    // local-Y half (the importer maps low local Y to high world Z — the same
+    // derivation `machine_mixer`'s inlet stub uses). That half is the vat's
+    // FAR half from the fixed camera, and the vat is the only machine big
+    // enough for that to matter: a sight line out of an infeed window there
+    // has to cross the whole footprint toward the camera, and the vat's own
+    // 25-voxel shell stands in the way for every height the window could
+    // occupy. The first cut put a belt-width housing on that corner and it
+    // rendered as nothing at all — correct geometry, invisible.
+    //
+    // So the vat's infeed is a **charging gallery across its whole -X face**
+    // rather than a belt-width hood: same piece, wider lane. The belt still
+    // hands over at its own row, and the gallery's window carries on to the
+    // camera-facing corner, where nothing occludes it — which is where a
+    // player actually sees product go in. A wide covered charging face is
+    // also what a vat this size really has; the shape that solves the camera
+    // is the honest one, the same way the hopper's box-over-cone was.
+    //
+    // The outfeed needs none of this: it is on +X, which the camera looks
+    // straight at, and the shell stops well short of that edge.
+    let belt_lane = (BELT_LANE.0 + TILE_VOXELS as i32, BELT_LANE.1 + TILE_VOXELS as i32);
+    machine_infeed(&mut m, p, (BELT_LANE.0, belt_lane.1));
+    machine_outfeed(&mut m, p, belt_lane, TILE_VOXELS as i32 * 2 - 1);
+
     control_panel(&mut m, p, (36, 50), (4, 9), 4);
     m
 }
@@ -922,6 +1264,9 @@ pub fn machine_bottler(p: &Palette) -> VoxModel {
     m.cylinder_z((24, 16), 3.2, (22, 24), p.idx("brass"));
     m.cylinder_z((24, 16), 1.4, (20, 22), p.idx("steel_dark"));
 
+    machine_infeed(&mut m, p, BELT_LANE);
+    machine_outfeed(&mut m, p, BELT_LANE, TILE_VOXELS as i32 - 1);
+
     control_panel(&mut m, p, (11, 20), (3, 7), 2);
     m
 }
@@ -969,6 +1314,12 @@ pub fn machine_packer(p: &Palette) -> VoxModel {
     m.cuboid((16, 28), (18, 26), (26, 27), p.idx("steel_light"));
     m.cylinder_y((19, 24), 3.0, (19, 25), p.idx("brass"));
     m.cuboid((16, 18), (18, 25), (22, 24), p.idx("steel_dark"));
+
+    // Infeed only. The packer is the chain's last stage — `chain_layout_json`
+    // puts no belt downstream of it and the player collects finished cases
+    // from it — so a discharge doorway would open onto bare floor and
+    // promise a conveyor that does not exist.
+    machine_infeed(&mut m, p, BELT_LANE);
 
     control_panel(&mut m, p, (5, 14), (3, 7), 2);
     m
@@ -1082,8 +1433,15 @@ pub fn fluid_tank(p: &Palette) -> VoxModel {
     // Discharge on +X at the pipe run's own axis height (see this
     // function's doc), reaching the tile edge so it meets `pipe_source`'s
     // inlet flange rather than stopping short of it.
-    m.cylinder_x((c, PIPE_AXIS_Z), 2.4, (22, last), p.idx("pipe_grey"));
-    m.cylinder_x((c, PIPE_AXIS_Z), 3.2, (last - 1, last), p.idx("brass"));
+    // Bright, and thick enough to see: ticket 3 found this spout rendering
+    // as dark grey on the tank's own dark shell, so the one piece of
+    // hardware that says "this vessel feeds the run" was invisible at scene
+    // scale. It now matches `pipe_source`'s inlet flange in both metal and
+    // diameter, and the two brass collars meet on the tile boundary.
+    m.cylinder_x((c, PIPE_AXIS_Z), 3.0, (20, last), p.idx("steel_light"));
+    m.cylinder_x((c, PIPE_AXIS_Z), 4.2, (last - 1, last), p.idx("brass"));
+    // Gusset under the spout, so it lands on the vessel rather than floating.
+    m.cuboid((22, last), (c - 1, c + 1), (PIPE_AXIS_Z - 6, PIPE_AXIS_Z - 3), p.idx("steel_dark"));
 
     // Fill point on top: a man-way and a short vent stack, which is how a
     // player's "load the tank" action reads as a physical thing.
@@ -1262,4 +1620,208 @@ pub fn hopper_fill(p: &Palette) -> VoxModel {
         p.idx("bulk_pale"),
     );
     m
+}
+
+// ---------------------------------------------------------------------------
+// Junction tests (the "Visual overhaul round 2" epic's ticket 3)
+// ---------------------------------------------------------------------------
+//
+// These assert the ONE thing about this ticket a headless check can actually
+// prove: that every machine has a real, EMPTY opening where its belt meets
+// it, at the belt's own lane and height. "Real" is the load-bearing word —
+// an inlet painted dark is not an inlet, because a voxel face is only culled
+// when its neighbour is genuinely absent (see `VoxModel::erase`), so a
+// coloured-in mouth meshes as a flat rectangle and renders as a decal. That
+// distinction is invisible to a screenshot at scene scale and is exactly the
+// kind of thing that would rot silently, so it is checked here rather than
+// left to the eye.
+//
+// What these CANNOT check is whether the opening reads to a player — that
+// needs `scripts/screenshot-scene.sh` and someone looking, which is how the
+// design in this file was arrived at in the first place.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn palette() -> Palette {
+        Palette::load()
+    }
+
+    /// Every kind's (model, lane, last-X) triple, so a new machine kind added
+    /// to `ASSETS` without junction hardware fails here rather than shipping
+    /// a wall for a belt to vanish into.
+    struct Junctions {
+        name: &'static str,
+        model: VoxModel,
+        /// Where the belt actually meets this machine, in ITS coordinates.
+        belt_lane: (i32, i32),
+        /// The span the infeed housing covers, which is wider than the belt
+        /// lane for the cooking vat (see its doc for why).
+        housing_lane: (i32, i32),
+        last_x: i32,
+    }
+
+    fn machines(p: &Palette) -> Vec<Junctions> {
+        let tile_last = TILE_VOXELS as i32 - 1;
+        let vat_lane = (BELT_LANE.0 + TILE_VOXELS as i32, BELT_LANE.1 + TILE_VOXELS as i32);
+        let one_tile = |name, model| Junctions {
+            name,
+            model,
+            belt_lane: BELT_LANE,
+            housing_lane: BELT_LANE,
+            last_x: tile_last,
+        };
+        vec![
+            one_tile("machine", machine(p)),
+            one_tile("machine_crusher", machine_crusher(p)),
+            one_tile("machine_mixer", machine_mixer(p)),
+            one_tile("machine_bottler", machine_bottler(p)),
+            one_tile("machine_packer", machine_packer(p)),
+            Junctions {
+                name: "machine_cooking_vat",
+                model: machine_cooking_vat(p),
+                belt_lane: vat_lane,
+                housing_lane: (BELT_LANE.0, vat_lane.1),
+                last_x: TILE_VOXELS as i32 * 2 - 1,
+            },
+        ]
+    }
+
+    /// The chain's last stage takes product in but hands none on — the player
+    /// collects from it — so it deliberately has no outfeed (see
+    /// `machine_packer`). Everything else must have one.
+    const NO_OUTFEED: &[&str] = &["machine_packer"];
+
+    #[test]
+    fn every_machine_has_an_open_inlet_at_the_belt_lane() {
+        let p = palette();
+        for j in machines(&p) {
+            let mid = (j.belt_lane.0 + j.belt_lane.1) / 2;
+            assert!(
+                !j.model.filled(0, mid, BELT_SURFACE_Z + 2),
+                "{}: the -X face is solid at the belt's lane and height — a belt \
+                 feeding it would run into a wall",
+                j.name
+            );
+            assert!(
+                j.model.filled(0, j.housing_lane.0 - 2, BELT_SURFACE_Z + 2),
+                "{}: the inlet housing has no side frame, so its opening has no edge",
+                j.name
+            );
+        }
+    }
+
+    #[test]
+    fn every_machine_but_the_last_has_an_open_outlet_at_the_belt_lane() {
+        let p = palette();
+        for j in machines(&p) {
+            let mid = (j.belt_lane.0 + j.belt_lane.1) / 2;
+            if NO_OUTFEED.contains(&j.name) {
+                assert!(
+                    !j.model.filled(j.last_x, mid, BELT_SURFACE_Z),
+                    "{}: has no downstream belt, so it should NOT have a discharge lip \
+                     handing product to one",
+                    j.name
+                );
+                continue;
+            }
+            assert!(
+                !j.model.filled(j.last_x, mid, BELT_SURFACE_Z + 2),
+                "{}: the +X face is solid at the belt's lane and height — product \
+                 would appear on the belt out of nowhere",
+                j.name
+            );
+        }
+    }
+
+    /// The lip and apron are what make a junction continuous rather than two
+    /// pieces that stop near each other, so their height is checked against
+    /// `belt()`'s own running surface rather than against a number typed in
+    /// twice.
+    #[test]
+    fn junction_surfaces_sit_exactly_at_the_belts_running_height() {
+        let p = palette();
+        let belt = belt(&p);
+        assert!(belt.filled(0, 16, BELT_SURFACE_Z), "BELT_SURFACE_Z is not the belt's top voxel");
+        assert!(!belt.filled(0, 16, BELT_SURFACE_Z + 1), "BELT_SURFACE_Z is not the belt's TOP");
+
+        for j in machines(&p) {
+            let mid = (j.belt_lane.0 + j.belt_lane.1) / 2;
+            assert!(
+                j.model.filled(0, mid, BELT_SURFACE_Z),
+                "{}: no infeed apron at the belt's own surface height",
+                j.name
+            );
+            if !NO_OUTFEED.contains(&j.name) {
+                assert!(
+                    j.model.filled(j.last_x, mid, BELT_SURFACE_Z),
+                    "{}: no discharge lip at the belt's own surface height",
+                    j.name
+                );
+            }
+        }
+    }
+
+    /// The junction-adjacent belt tiles must differ from a plain one, and
+    /// differ at the END that faces the machine — `main.gd` picks between
+    /// them per tile, so two identical models would make that choice a lie.
+    #[test]
+    fn belt_variants_differ_from_a_plain_tile_at_the_end_that_meets_a_machine() {
+        let p = palette();
+        let (plain, inlet, outlet) = (belt(&p), belt_inlet(&p), belt_outlet(&p));
+        let last = TILE_VOXELS as i32 - 1;
+        let mid = (BELT_LANE.0 + BELT_LANE.1) / 2;
+
+        assert!(inlet.voxels.len() > plain.voxels.len(), "belt_inlet adds nothing");
+        assert!(outlet.voxels.len() > plain.voxels.len(), "belt_outlet adds nothing");
+        // The hand-over plate reaches the shared tile edge on the machine side.
+        assert!(inlet.filled(last, mid, BELT_SURFACE_Z), "belt_inlet's dead-plate stops short");
+        assert!(outlet.filled(0, mid, BELT_SURFACE_Z), "belt_outlet's receiving plate stops short");
+        // ... and neither dresses the end it does NOT meet a machine at.
+        assert!(!inlet.filled(0, BELT_LANE.0 - 1, BELT_SURFACE_Z + 1), "belt_inlet dressed its upstream end");
+        assert!(!outlet.filled(last, BELT_LANE.0 - 1, BELT_SURFACE_Z + 1), "belt_outlet dressed its downstream end");
+    }
+
+    /// The pipe run's two ends. Its downstream end is closed by a blind
+    /// flange (it used to be an open bore, which is what the run "just
+    /// stopping in mid-air" actually was), and its supply end is not.
+    #[test]
+    fn the_pipe_runs_downstream_end_is_capped_and_its_supply_end_is_not() {
+        let p = palette();
+        let last = TILE_VOXELS as i32 - 1;
+        assert!(
+            !pipe(&p).filled(last, PIPE_AXIS_Y, PIPE_AXIS_Z),
+            "a mid-run pipe tile must stay bored through, or segments cannot join"
+        );
+        assert!(
+            pipe_inlet(&p).filled(last, PIPE_AXIS_Y, PIPE_AXIS_Z),
+            "the run's downstream end is still an open bore"
+        );
+        assert!(
+            !pipe_source(&p).filled(0, PIPE_AXIS_Y, PIPE_AXIS_Z),
+            "the supply end must stay open — the tank discharges into it"
+        );
+    }
+
+    /// The tank/pipe and pipe/mixer joints are each one fitting split across
+    /// a tile boundary, so both halves have to reach their shared edge at the
+    /// same axis. This is the check that would have caught the four-voxel
+    /// height mismatch the previous visual pass found by eye.
+    #[test]
+    fn fluid_joints_meet_at_the_tile_boundary_on_a_shared_axis() {
+        let p = palette();
+        let last = TILE_VOXELS as i32 - 1;
+        assert!(
+            fluid_tank(&p).filled(last, TANK_CENTER, PIPE_AXIS_Z),
+            "the tank's discharge does not reach the tile edge the run starts at"
+        );
+        assert!(
+            pipe_inlet(&p).filled(16, last, PIPE_AXIS_Z),
+            "the run's branch does not reach the tile edge the machine sits against"
+        );
+        assert!(
+            machine_mixer(&p).filled(16, 0, PIPE_AXIS_Z),
+            "the mixer's inlet stub does not reach the tile edge the run sits against"
+        );
+    }
 }

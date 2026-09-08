@@ -182,7 +182,33 @@ were only discoverable by building it:
    first proportions read as a sphere on a plinth. None of those are visible
    in the generator source. Budget a rework pass per asset rather than
    treating the first render as verification.
-10. **The full-scene render catches a class of bug no headless test can.**
+11. **Only two of a machine's four vertical faces can ever be seen, and
+    that decides how a junction is drawn (the "Visual overhaul round 2"
+    epic's ticket 3).** §1's camera is fixed at a `(1, 1, 1)` view
+    direction, so the only vertical faces with any pixels on screen are the
+    ones facing +X and +Z-world. The production chain runs +X, which means a
+    machine's OUTLET face is dead-on camera-facing and its INLET face points
+    directly away — carving an inlet doorway into it, the obvious move, is
+    invisible in the only view the game ships. Nor can an inlet be saved by
+    sinking an open-topped channel into that edge: the sight line out of one
+    travels up and over the machine's own body, so anything as tall as a
+    mixing drum occludes its own inlet. The resolution is asymmetric on
+    purpose — **an outlet is a doorway on the +X face; an inlet is a hooded
+    transfer housing whose CAMERA-FACING SIDE is cut away**, so the product
+    path is shown from the side rather than through a mouth that cannot be
+    seen. Both read by value contrast (palette-brightest frame, genuinely
+    black opening, one brass threshold) rather than by detail, because at
+    scene scale a junction is a dozen pixels; a mid-grey interior renders as
+    an empty portal and a hazard stripe across the one camera-facing edge
+    renders as a dark bar, both of which were built and rejected on the
+    render. Corollary worth knowing before drawing any new junction: a
+    machine big enough to stand between its own inlet and the camera (the
+    2x2 cooking vat) needs its opening widened along the face until it
+    reaches an unoccluded corner, and a *neighbouring building* can hide a
+    correct junction outright — the vinegar tank stands one tile diagonally
+    in front of the crusher's discharge and does exactly that.
+
+12. **The full-scene render catches a class of bug no headless test can.**
     `main.gd`'s item-id → model mapping is presentation-only with a fallback,
     so when a milestone renamed a chain intermediate the mapping silently
     went stale and two stages of the chain shipped *cardboard boxes* down the

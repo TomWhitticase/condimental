@@ -35,6 +35,15 @@
 #
 # All five hover flags share one implementation (`_hover_over_tile`) — they
 # differ only in which tile they ask the simulation for.
+#
+# `--closeup TX,TY[,SIZE]` re-aims the ISOMETRIC camera at one simulation
+# tile and zooms it right in (SIZE is the orthographic width in world units,
+# default CLOSEUP_SIZE). The whole-factory shot above is the right frame for
+# "does the line read", and the wrong one for "does this belt actually meet
+# this machine" — a junction is about four voxels of detail and at 1600x900
+# the full chain gives it about six pixels. Every belt/pipe-to-machine
+# connection in the "Visual overhaul round 2" epic's ticket 3 was diagnosed
+# and re-checked through this flag, one junction at a time.
 extends SceneTree
 
 ## Enough frames for shadow atlases, SSAO and glow to be resolved — a
@@ -56,6 +65,11 @@ var _hover_pipe := false
 var _hover_vat := false
 var _hover_hopper := false
 var _hover_tank := false
+## `--closeup` target tile and orthographic width; `_closeup` gates both.
+const CLOSEUP_SIZE := 9.0
+var _closeup := false
+var _closeup_tile := Vector2.ZERO
+var _closeup_size := CLOSEUP_SIZE
 var _main: Node
 
 
@@ -70,6 +84,7 @@ func _initialize() -> void:
 	_hover_vat = args.has("--hover-vat")
 	_hover_hopper = args.has("--hover-hopper")
 	_hover_tank = args.has("--hover-tank")
+	_parse_closeup(args)
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 	# NOT here: in a real (non-headless) run, add_child()'s _ready() is
@@ -78,6 +93,39 @@ func _initialize() -> void:
 	# exist yet at this point. Anything that touches it has to wait for
 	# _process()'s first frame instead. (Learned the hard way: this used to
 	# live here and crashed with "base object of type Nil".)
+
+
+## `--closeup TX,TY[,SIZE]` — the argument is one comma-separated token so
+## it survives the `--` passthrough without an argument-order convention.
+func _parse_closeup(args: Array) -> void:
+	for i in range(args.size()):
+		if String(args[i]) != "--closeup":
+			continue
+		if i + 1 >= args.size():
+			return
+		var parts: PackedStringArray = String(args[i + 1]).split(",")
+		if parts.size() < 2:
+			return
+		_closeup = true
+		# Fractional on purpose: a junction sits ON a tile boundary, so the
+		# frame worth photographing is usually "half a tile past the belt".
+		_closeup_tile = Vector2(float(parts[0]), float(parts[1]))
+		if parts.size() >= 3:
+			_closeup_size = float(parts[2])
+		return
+
+
+## Aims the isometric camera at one tile, close in. Deliberately writes
+## `_camera_focus`/`_camera_size` and calls the scene's own
+## `_update_camera_transform` rather than posing the Camera3D directly, so
+## what this photographs is the same camera the game uses (UI_UX.md §1's
+## fixed angle included) at a zoom the player could also reach.
+func _enter_closeup() -> void:
+	_main._camera_focus = Vector3(
+		_closeup_tile.x * _main.TILE, _main.TILE * 0.35, _closeup_tile.y * _main.TILE
+	)
+	_main._camera_size = _closeup_size
+	_main._update_camera_transform()
 
 
 func _enter_first_person() -> void:
@@ -181,6 +229,8 @@ func _process(_delta: float) -> bool:
 		_hover_over_hopper()
 	if _frames == 2 and _hover_tank:
 		_hover_over_fluid_tank()
+	if _frames == 2 and _closeup:
+		_enter_closeup()
 	if _frames < WARMUP_FRAMES:
 		return false
 

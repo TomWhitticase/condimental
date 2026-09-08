@@ -145,6 +145,18 @@ impl VoxModel {
         self.voxels.remove(&(x as u32, y as u32, z as u32));
     }
 
+    /// Is there a voxel at `(x, y, z)`? Reads the same map [`Self::set`]
+    /// writes, so a test can assert an *absence* — which is the only way to
+    /// check that a carved opening (a machine's inlet mouth, a pipe's bore)
+    /// is genuinely open rather than filled with a dark colour that merely
+    /// looks like a hole. See `assets.rs`'s connection tests.
+    pub fn filled(&self, x: i32, y: i32, z: i32) -> bool {
+        if x < 0 || y < 0 || z < 0 {
+            return false;
+        }
+        self.voxels.contains_key(&(x as u32, y as u32, z as u32))
+    }
+
     /// Inclusive-bounds cuboid of empty space — [`Self::cuboid`] in reverse.
     pub fn carve_cuboid(&mut self, x: (i32, i32), y: (i32, i32), z: (i32, i32)) -> &mut Self {
         for zz in z.0..=z.1 {

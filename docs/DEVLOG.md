@@ -23,7 +23,7 @@ below is history and should only ever be appended to.)*
 - **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. **Milestone 6 (Fluids) is done**: its simulation half (pipe network, pressure equalization, a recipe requiring a liquid, the `SimBridge` fluid snapshot) and its presentation half (pipe/supply-tap/liquid voxel assets, a pipe run rendered from the simulation's own segment list, a liquid body whose height tracks live pressure, and pipe hover info in both view modes) have both landed, built as a 2-ticket orchestration Run (`run_2867a25ae373`, sequential: sim core then presentation). Milestone 7 (Timed processes) is next. A separate **"Machines improvement"** epic (not an ARCHITECTURE.md §9 milestone — an infrastructure/content pass requested directly) is in progress: ticket 1 landed machine footprints as data (`data/machines.ron`), generalizing the chain's layout math so a machine can occupy more than one tile, and ticket 2 spent that on real content — the chain's front end is now a crusher, a mixer and a genuinely 2x2 cooking vat. Ticket 3 replaced the debug "spawn a tomato onto the belt" command with a real **hopper** — a building west of the chain's head that buffers raw tomatoes and meters them onto the first belt one per tick, filled by the player (SPACE) rather than teleporting items. **Ticket 4 finished the epic**: the Godot presentation of all three — a bespoke voxel model per front-end machine kind, multi-tile rendering so the cooking vat actually covers its 2x2 footprint, the hopper drawn with a product level that tracks its live fill, and hover resolving any tile of a multi-tile machine as well as the hopper. **The "Machines improvement" epic is complete.**
 - **Art/UI:** the voxel pipeline (UI_UX.md §2a/§2b) exists and is the source of every asset in the scene — including milestone 6's pipes and the liquid inside them, which added a fourth material class (`liquid`, a glossy dielectric) to `palette.ron` — Rust generators in `assets/voxels/generators/` produce `.vox` models, reviewed as isometric PNGs via `scripts/build-voxels.sh`, imported into Godot by a pinned community importer. UI_UX.md §5's real UI is now landed: the money/contract readout is a diegetic clipboard panel (paper background, steel clip bar, checkbox tick marks) with a voxel-rendered icon per required item, and per-machine detail (recipe/progress/buffers) is hover-only instead of dense always-on text, working in both view modes — a screen-centre crosshair stands in for the cursor in first-person — see the log entries below.
 - **UI polish epic (done):** a Run (`run_cc6860507d36`) with 3 parallel tickets targeting UI_UX.md §5, all done and merged — hover tooltips for machines, a voxel-rendered icon pipeline, and the clipboard reskin. Check `orca orchestration task-list --run run_cc6860507d36 --json` for the DAG's final state.
-- **Visual overhaul round 2 (in progress):** a second directly-requested pass, run as a 3-ticket epic. **Ticket 1 (sim) is done:** the pipe run's always-refilling off-map source is gone, replaced by a player-loadable `FluidTank` (120 units, one tile west of the run's head) filled with a `FillFluidTank` command and drained by the same pressure-equalization pass that moves fluid along the run — so vinegar is a consumable the player manages, exactly as tomatoes already were via the hopper. New wire surface for tickets 2/3: `fluid_tank_snapshot_json`, a `fluid_tanks` chunk array, and a `"fluid_tank"` hover tile. **Ticket 2 (assets) is done:** every machine kind in `data/machines.ron` now has a model of its own (the bottler and packer were still generic boxes), ticket 1's tank is drawn with a live level gauge and is loadable with a new **V** key, the pipe run and the crusher were redesigned, and the three bulk stages travel the belt as visibly *liquid* product. Ticket 3 (belt/pipe-to-machine connections) is still to come.
+- **Visual overhaul round 2 (in progress):** a second directly-requested pass, run as a 3-ticket epic. **Ticket 1 (sim) is done:** the pipe run's always-refilling off-map source is gone, replaced by a player-loadable `FluidTank` (120 units, one tile west of the run's head) filled with a `FillFluidTank` command and drained by the same pressure-equalization pass that moves fluid along the run — so vinegar is a consumable the player manages, exactly as tomatoes already were via the hopper. New wire surface for tickets 2/3: `fluid_tank_snapshot_json`, a `fluid_tanks` chunk array, and a `"fluid_tank"` hover tile. **Ticket 2 (assets) is done:** every machine kind in `data/machines.ron` now has a model of its own (the bottler and packer were still generic boxes), ticket 1's tank is drawn with a live level gauge and is loadable with a new **V** key, the pipe run and the crusher were redesigned, and the three bulk stages travel the belt as visibly *liquid* product. **Ticket 3 (belt/pipe-to-machine connections) is done, and the epic with it:** every machine now has real, carved inlet and outlet openings sized and placed from the simulation's own layout, the belt has two junction-adjacent variants picked per tile from that same layout, the pipe run's downstream end is terminated instead of stopping in mid-air, and `scripts/screenshot-scene.sh` grew a `--closeup` flag so a single junction can actually be looked at.
 - **Visual overhaul (done):** a dedicated pass on top of everything above, requested directly — see the log entry below for specifics. Root-caused and fixed the belt/pipe-to-machine seam (machine and hopper footings were inset from their own tile edges while belts and pipes already ran flush to theirs), added a dedicated connector fitting for the one pipe segment that actually feeds a machine, gave the hopper's status lamp real running/empty feedback, and made a couple of small typography fixes to the contract clipboard. Corner handling for belts/pipes stays deliberately undone — documented in `sim_core/src/sim/world.rs`'s module doc as needing a per-tile direction field in the sim's own snapshots before it's a rendering change at all, not something to speculatively half-build against a topology that doesn't exist yet. Not yet reviewed or merged.
 - **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, SPACE/SHIFT up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
 - **Lighting:** the sky is the real background (`BG_SKY`), not a flat colour — see the "empty void" DEVLOG entry below for why that matters. `scripts/screenshot-scene.sh --first-person` reviews that mode's lighting specifically.
@@ -42,6 +42,62 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-08 — Visual overhaul round 2, ticket 3: the belts and pipes now go somewhere
+
+Presentation-only, and the last ticket of the epic. `sim_core` gained one
+doc-comment clarification and nothing else; `data/` was untouched. It answers
+the sharpest complaint from the project owner's live-demo review — *"a
+conveyor belt going into a mixer seems to just go straight into the side
+there is no connecting so it looks like items just disappear into the wall"*
+— which the previous pass's flush-footing fix had not: that closed a
+floor-level crease, and a flush wall is still a wall.
+
+**The finding that decided everything came from rendering the junctions one
+at a time, and it contradicts the obvious fix.** The camera is fixed at a
+`(1, 1, 1)` view direction, so the only vertical faces it can ever see are
+the ones facing +X and +Z. The chain runs +X — which means a machine's
+*outlet* face is dead-on camera-facing, and its *inlet* face points directly
+away and can never be seen at all. Carving an inlet doorway, the thing this
+ticket was written to ask for, would have been invisible. So the two halves
+of a junction are deliberately different pieces: an outlet is a real doorway
+cut through the +X wall with a lip reaching the tile edge, and an inlet is a
+hooded transfer housing whose *camera-facing side* is cut away, showing a
+brass threshold at the lip and darkness beyond it. Both read by value
+contrast rather than by detail, because at scene scale a junction is a dozen
+pixels — a pale interior renders as an empty portal and a hazard stripe on
+the one camera-facing edge renders as a dark bar, and both were built,
+rendered and thrown away before the current version.
+
+**The belt has two junction-adjacent variants now**, and which tile gets one
+is derived from the layout the simulation already publishes: whether the
+neighbour along that stage's own travel direction is covered by a machine
+footprint, or by the hopper, which discharges the same way. That is the
+buildable half of *"assets should look different depending on their
+orientation and what's around them"* — what a tile is next to is on the wire;
+which way it points still is not, so the variants are authored for a +X run
+and the renderer falls back to the plain tile for anything else. The corner
+limitation in `world.rs` is unchanged, and was re-stated there rather than
+quietly weakened.
+
+Three things turned up on the way. The pipe run's downstream end was an open
+bore — the run literally stopped in mid-air — and its supply end was
+*plugged*, because the flange drawn for the tank joint filled back in the
+hole the tank discharges through. And the per-frame tick catch-up was
+unbounded, so one slow frame silently fast-forwarded the whole factory:
+two identical screenshot runs photographed visibly different states, which
+makes a rendered scene useless as a before/after check. Clamped; two runs are
+now byte-identical, which is the property this kind of review depends on.
+
+Verified the way this project verifies visual work, plus one new layer. The
+generators now have tests of their own (`cargo test -p voxgen`) asserting
+that each machine's opening is a genuinely *empty* volume at the belt's own
+lane and height — a mouth painted dark meshes as a flat rectangle and renders
+as a decal, and no screenshot at scene scale can tell the difference. A new
+headless `test_connections.gd` checks that the per-tile belt choice really
+comes from the layout. Then the part that actually decided the design:
+close-up renders of all twelve junctions in the factory, iterated through
+five rounds of look-change-look.
 
 ### 2026-09-08 — Visual overhaul round 2, ticket 2: every machine has a face, and the sauce is liquid
 

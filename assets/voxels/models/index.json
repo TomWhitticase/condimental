@@ -3,6 +3,14 @@
     "matte",
     "metal"
   ],
+  "belt_inlet": [
+    "matte",
+    "metal"
+  ],
+  "belt_outlet": [
+    "matte",
+    "metal"
+  ],
   "floor_tile": [
     "matte"
   ],

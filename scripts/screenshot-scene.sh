@@ -20,7 +20,17 @@
 # multi-tile machine identifies it" is what the "Machines improvement"
 # milestone added, and hovering the origin would not show it.)
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--populate] [--first-person] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank]
+# Pass --closeup TX,TY[,SIZE] to aim the isometric camera at one simulation
+# tile and zoom right in (SIZE is the orthographic width in world units;
+# fractional tile coordinates are allowed, because a junction sits ON a tile
+# boundary). The whole-factory shot is the right frame for "does the line
+# read" and the wrong one for "does this belt actually meet this machine" —
+# every belt/pipe-to-machine junction in the "Visual overhaul round 2" epic's
+# ticket 3 was diagnosed and re-checked one at a time through this flag, e.g.
+#
+#   scripts/screenshot-scene.sh out.png 1100x800 --populate --closeup 8.4,0.3,10
+#
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--populate] [--first-person] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

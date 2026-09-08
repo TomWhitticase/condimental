@@ -78,6 +78,19 @@ const FLOOR_GROUND_MARGIN_X := 24
 const FLOOR_GROUND_MARGIN_Z := 24
 
 const TICK_HZ := 30.0
+## Never advance more than this many simulation ticks in one frame, and drop
+## whatever backlog is left rather than paying it back later.
+##
+## Found while reviewing this ticket's junctions: the catch-up loop in
+## `_process` was unbounded, so one slow frame — a cold shader cache on the
+## first frames of a run is the reliable one — silently fast-forwarded the
+## factory by however many ticks that frame was worth. Two identical
+## screenshot runs of the same populate sequence photographed visibly
+## different factories (one with a jammed first belt, one with it drained),
+## which makes a rendered scene useless as a before/after check. It is also
+## just wrong on its own terms: a rendering hitch should cost you frames, not
+## silently run the simulation forward while nothing is drawn.
+const MAX_TICKS_PER_FRAME := 8
 const VOX_DIR := "res://voxels/"
 
 # --- Fluid pipes (milestone 6, ARCHITECTURE.md §3.4/§9 item 6) -------------
@@ -108,6 +121,10 @@ const PIPE_BORE_FLOOR_Y := FLOOR_Y + PIPE_BORE_FLOOR_VOXELS * VOXEL_UNIT
 ## Below this fill fraction the liquid body is hidden outright rather than
 ## drawn as a sub-voxel sliver that would z-fight the bore floor.
 const FLUID_MIN_VISIBLE_PRESSURE := 0.02
+## Fraction of a tile the liquid body is shortened by on the run's closed
+## downstream end, mirroring the two-voxel blind flange `pipe_inlet` draws
+## there (2 / 32). See `_build_fluid_network`.
+const FLUID_END_CAP_TRIM := 2.0 / float(VOXELS_PER_TILE)
 
 ## Presentation-only tint per fluid id, exactly like ITEM_MODELS above: the
 ## fluid ids themselves come from data/recipes.ron, and a fluid with no entry
@@ -117,6 +134,31 @@ const FLUID_TINTS := {
 	"vinegar": Color(0.87, 0.75, 0.31),
 }
 const FLUID_TINT_FALLBACK := Color(0.60, 0.79, 0.86)
+
+## --- Belt variants at a junction (the "Visual overhaul round 2" epic's
+## ticket 3) ---------------------------------------------------------------
+##
+## Three models draw a belt tile, and which one a tile gets is decided from
+## the simulation's own layout, never from a hardcoded "the chain runs +X":
+## a tile whose NEXT tile along its stage's travel direction is covered by a
+## machine footprint is that machine's hand-over tile and draws `belt_inlet`;
+## a tile whose PREVIOUS tile is a machine (or the hopper) catches a
+## discharge and draws `belt_outlet`; everything else is a plain `belt`.
+## See `_belt_asset_for`, and `assets/voxels/generators/assets.rs`'s
+## `belt_inlet` for what actually differs about the models.
+##
+## This is the buildable half of the project owner's "assets should look
+## different depending on their orientation and what's around them": what a
+## belt tile is NEXT TO is context the renderer already has on the wire.
+## What a belt tile POINTS AT is not — every tile the simulation places runs
+## +X and no snapshot carries a direction field, which is why the variants
+## are authored for a +X run only and `_belt_asset_for` falls back to the
+## plain tile for any other direction rather than drawing a wrong-facing end
+## cap. See `sim_core/src/sim/world.rs`'s corner note for the full statement
+## of that limitation; nothing here changes it.
+const BELT_ASSET := "belt"
+const BELT_INLET_ASSET := "belt_inlet"
+const BELT_OUTLET_ASSET := "belt_outlet"
 
 # --- Machines & the hopper (the "Machines improvement" milestone) ----------
 ## Which voxel model draws each machine KIND from `data/machines.ron`.
@@ -304,6 +346,11 @@ var _crosshair: Control # visible only in FIRST_PERSON — see _set_view_mode
 
 enum ViewMode { ISOMETRIC, FIRST_PERSON }
 var _view_mode: int = ViewMode.ISOMETRIC
+
+## tile (as a "x,y" key) -> which of the three belt models it drew with.
+## Recorded so `test_connections.gd` can assert the data-derived choice
+## without a framebuffer.
+var _belt_assets: Dictionary = {}
 
 var _camera: Camera3D
 
@@ -543,6 +590,55 @@ func _build_floor() -> void:
 	add_child(node)
 
 
+## Every tile any machine footprint covers, plus the hopper's own tile, as a
+## set keyed "x,y". This is what a belt tile asks "what is next to me?"
+##
+## The hopper belongs in here even though it is not a machine: it discharges
+## onto the head of stage 0's belt exactly the way a machine discharges onto
+## the next stage's, so that belt tile is an outlet tile by the same rule
+## rather than by a special case. Its tile comes from `hopper_snapshot_json`,
+## not from an assumption about where the chain starts.
+func _machine_occupied_tiles(layout: Array) -> Dictionary:
+	var occupied := {}
+	for stage in layout:
+		var pair: Array = stage["machine_tile"]
+		var origin := Vector2i(int(pair[0]), int(pair[1]))
+		var size := _footprint_size(stage.get("machine_footprint"))
+		for dy in range(size.y):
+			for dx in range(size.x):
+				occupied["%d,%d" % [origin.x + dx, origin.y + dy]] = true
+	var hopper := _read_hopper_snapshot()
+	if hopper.has("tile"):
+		var tile: Array = hopper["tile"]
+		occupied["%d,%d" % [int(tile[0]), int(tile[1])]] = true
+	return occupied
+
+
+## Which way a stage's belt travels, derived from the two tiles the layout
+## already reports: it starts at `belt_start_tile` and ends against
+## `machine_tile`, so the sign of the difference IS the direction. Deriving
+## it rather than assuming +X is the point — nothing here would need editing
+## if the simulation ever laid a stage out along another axis, it would just
+## fall through to the plain belt model (see `_belt_asset_for`).
+func _belt_direction(start_tile: Vector2i, machine_tile: Vector2i) -> Vector2i:
+	return Vector2i(signi(machine_tile.x - start_tile.x), signi(machine_tile.y - start_tile.y))
+
+
+## Which of the three belt models this tile draws with. See BELT_ASSET's doc
+## for the rule and for why a non-+X direction deliberately gets the plain
+## model.
+func _belt_asset_for(tile: Vector2i, direction: Vector2i, occupied: Dictionary) -> String:
+	if direction != Vector2i(1, 0):
+		return BELT_ASSET
+	var ahead := tile + direction
+	if occupied.has("%d,%d" % [ahead.x, ahead.y]):
+		return BELT_INLET_ASSET
+	var behind := tile - direction
+	if occupied.has("%d,%d" % [behind.x, behind.y]):
+		return BELT_OUTLET_ASSET
+	return BELT_ASSET
+
+
 ## One belt run + one machine per stage, placed exactly where the simulation
 ## says they are. Re-read from `chain_layout_json` every time rather than
 ## cached in the scene, so appending a recipe to data/recipes.ron still
@@ -552,15 +648,25 @@ func _build_chain() -> void:
 	var stages := Node3D.new()
 	stages.name = "Chain"
 	add_child(stages)
+	# Cleared, not appended to: `_ready()` genuinely runs twice under the
+	# headless `--script` SceneTree harness (see test_hover.gd's header).
+	_belt_assets.clear()
 
+	var occupied := _machine_occupied_tiles(layout)
 	for stage in layout:
 		var recipe: String = stage["recipe"]
 		var start: Array = stage["belt_start_tile"]
 		var length: int = int(stage["belt_length_tiles"])
+		var start_tile := Vector2i(int(start[0]), int(start[1]))
+		var machine_pair: Array = stage["machine_tile"]
+		var direction := _belt_direction(start_tile, Vector2i(int(machine_pair[0]), int(machine_pair[1])))
 		for i in range(length):
-			var belt := _asset_node("belt")
+			var tile := start_tile + direction * i
+			var asset := _belt_asset_for(tile, direction, occupied)
+			_belt_assets["%d,%d" % [tile.x, tile.y]] = asset
+			var belt := _asset_node(asset)
 			belt.name = "belt_%s_%d" % [recipe, i]
-			belt.position = _tile_origin(int(start[0]) + i, int(start[1]), FLOOR_Y)
+			belt.position = _tile_origin(tile.x, tile.y, FLOOR_Y)
 			stages.add_child(belt)
 
 		# Which model, and where it sits, both come from the simulation's own
@@ -881,6 +987,18 @@ func _build_fluid_network() -> void:
 		var fluid := _asset_node(PIPE_FLUID_ASSET)
 		fluid.name = "fluid_%d" % i
 		fluid.position = _tile_origin(tile.x, tile.y, PIPE_BORE_FLOOR_Y)
+		if i == inlet_index:
+			# The run's downstream end is CLOSED (`pipe_inlet` draws a blind
+			# flange there — see its generator doc), and the liquid model
+			# spans its whole tile because every other segment butts into the
+			# next one. Left full length it pushed straight through that
+			# flange and the end of the run rendered as an open, liquid-
+			# filled cut pipe, which was exactly the "nothing terminates
+			# anything" reading this ticket exists to remove. Trim it back by
+			# the flange's own thickness, anchored so the trim comes off the
+			# downstream end only.
+			fluid.scale.x = 1.0 - FLUID_END_CAP_TRIM
+			fluid.position.x -= 0.5 * FLUID_END_CAP_TRIM * TILE
 		# The liquid is the one thing in the scene whose colour is live data,
 		# so it gets its own material rather than the shared class one.
 		for child in fluid.get_children():
@@ -1650,10 +1768,17 @@ func _build_crosshair(hud: CanvasLayer) -> void:
 func _process(delta: float) -> void:
 	_tick_accum += delta
 	var tick_interval := 1.0 / TICK_HZ
-	while _tick_accum >= tick_interval:
+	var budget := MAX_TICKS_PER_FRAME
+	while _tick_accum >= tick_interval and budget > 0:
 		_tick_accum -= tick_interval
+		budget -= 1
 		sim.tick()
 		_apply_dirty_chunks()
+	if _tick_accum >= tick_interval:
+		# Backlog beyond the budget is discarded, not carried (see
+		# MAX_TICKS_PER_FRAME): carrying it would only move the burst to the
+		# next frame.
+		_tick_accum = 0.0
 
 	_update_contract_panel()
 	_update_fluid_network()

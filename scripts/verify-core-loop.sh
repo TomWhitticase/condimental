@@ -12,7 +12,7 @@
 #      conservation across every stage, not just one. No Godot involved.
 #   2. `cargo xtask` builds the extension and copies it into
 #      godot_project/bin/.
-#   3. Nine headless Godot scripts exercise the parts cargo test can't: the
+#   3. Ten headless Godot scripts exercise the parts cargo test can't: the
 #      real `gdext` boundary (JSON command/snapshot/layout wire format going
 #      through Godot's own Variant/String/JSON machinery, driven through the
 #      whole chain end to end), the interactive scene's keyboard input
@@ -45,6 +45,15 @@ fi
 
 echo "==> cargo test -p sim_core (headless, no Godot — ARCHITECTURE.md §7)"
 cargo test -p sim_core || exit 1
+echo
+
+# The voxel generators have tests of their own since the "Visual overhaul
+# round 2" epic's ticket 3: a machine's inlet/outlet has to be a genuinely
+# EMPTY opening, and a mesh (or a screenshot) cannot tell a carved hole from
+# a rectangle painted black — only the voxel volume can. See
+# assets/voxels/generators/assets.rs's "Junction tests" section.
+echo "==> cargo test -p voxgen (voxel geometry: machine inlets/outlets are real openings)"
+cargo test -p voxgen || exit 1
 echo
 
 echo "==> cargo xtask (build sim_core, copy extension into godot_project/bin/)"
@@ -115,6 +124,7 @@ run_godot_script test_icons.gd ICONS_OK "_icon_for, UI_UX.md §5"
 run_godot_script test_hover.gd HOVER_OK "machine hover tooltips, UI_UX.md §5"
 run_godot_script test_fluids.gd FLUIDS_OK "pipe rendering + fluid hover, milestone 6"
 run_godot_script test_machines.gd MACHINES_OK "per-kind machine models, multi-tile footprints, hopper fill"
+run_godot_script test_connections.gd CONNECTIONS_OK "belt/pipe-to-machine junctions, visual overhaul round 2"
 
 echo
 echo "PASS: milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"
