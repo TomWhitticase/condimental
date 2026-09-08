@@ -28,8 +28,8 @@
 use sim_core::sim::machines::MachineRegistry;
 use sim_core::sim::types::{Fx, TileCoord};
 use sim_core::sim::{
-    ContractRegistry, Direction, PlayerCommand, RecipeRegistry, SPLITTER_KIND, Side, TileSnapshot,
-    World, command_from_json,
+    ContractRegistry, Direction, HOPPER_CAPACITY, PlayerCommand, RecipeRegistry, SPLITTER_KIND,
+    Side, TileSnapshot, World, command_from_json,
 };
 
 /// A one-stage recipe file: four tomatoes into one paste, on the crusher.
@@ -40,7 +40,7 @@ use sim_core::sim::{
 fn one_stage() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(
         r#"(
-            schema_version: 2,
+            schema_version: 3,
             recipes: [
                 Recipe(
                     id: "tomato_paste",
@@ -74,6 +74,7 @@ fn build(world: &mut World, kind: &str, tile: TileCoord, direction: Direction) {
         kind: kind.to_string(),
         tile,
         direction,
+        item: None,
     });
     assert!(
         world.query_tile(tile).is_some(),
@@ -140,6 +141,14 @@ impl Junction {
         build(&mut world, SPLITTER_KIND, (0, 0), Direction::East);
         let straight = build_belt_run(&mut world, (1, 0), Direction::East, straight_tiles);
         let branch = build_belt_run(&mut world, (0, -1), Direction::South, branch_tiles);
+        // Ingredients cost money since the chain-rework epic (`FillHopper`
+        // now draws from bought stock rather than conjuring it) — buy
+        // comfortably more than this fixture will ever fill, so the hopper
+        // fill below is limited by `tomatoes`/hopper capacity, not by stock.
+        world.issue_command(PlayerCommand::BuyIngredient {
+            item: "tomato".to_string(),
+            quantity: tomatoes.max(HOPPER_CAPACITY),
+        });
         world.issue_command(PlayerCommand::FillHopper {
             amount: tomatoes,
             tile: None,
@@ -294,6 +303,10 @@ fn a_splitter_feeds_a_machine_and_a_dock_the_way_a_belt_does() {
     build(&mut world, "crusher", (1, 0), Direction::East);
     // Branch (clockwise from east = south): a dock.
     build(&mut world, "dock", (0, -1), Direction::East);
+    world.issue_command(PlayerCommand::BuyIngredient {
+        item: "tomato".to_string(),
+        quantity: 16,
+    });
     world.issue_command(PlayerCommand::FillHopper {
         amount: 16,
         tile: None,
@@ -412,6 +425,7 @@ fn placing_a_splitter_follows_every_other_kinds_rules() {
         kind: SPLITTER_KIND.to_string(),
         tile: (0, 0),
         direction: Direction::East,
+        item: None,
     });
     assert!(world.query_tile((0, 0)).is_none());
     assert_eq!(world.placement_count(), 0);
@@ -427,6 +441,7 @@ fn placing_a_splitter_follows_every_other_kinds_rules() {
         kind: SPLITTER_KIND.to_string(),
         tile: (0, 0),
         direction: Direction::East,
+        item: None,
     });
     assert_eq!(world.owned_count(SPLITTER_KIND), 1);
     assert_eq!(world.placement_count(), 1);
@@ -437,6 +452,7 @@ fn placing_a_splitter_follows_every_other_kinds_rules() {
         kind: SPLITTER_KIND.to_string(),
         tile: (0, 0),
         direction: Direction::North,
+        item: None,
     });
     assert_eq!(world.owned_count(SPLITTER_KIND), 1);
     assert_eq!(world.placement_count(), 1);
@@ -458,6 +474,7 @@ fn placing_a_splitter_follows_every_other_kinds_rules() {
         kind: "belt".to_string(),
         tile: (0, 0),
         direction: Direction::East,
+        item: None,
     });
     assert_eq!(world.owned_count("belt"), 1);
 
@@ -596,6 +613,10 @@ fn splitters_compose_into_a_four_way_split() {
     let b = build_belt_run(&mut world, (1, -1), Direction::South, 3);
     let c = build_belt_run(&mut world, (0, -1), Direction::South, 3);
 
+    world.issue_command(PlayerCommand::BuyIngredient {
+        item: "tomato".to_string(),
+        quantity: 12,
+    });
     world.issue_command(PlayerCommand::FillHopper {
         amount: 12,
         tile: None,
