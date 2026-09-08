@@ -13,27 +13,31 @@ pub mod inventory;
 pub mod machine;
 pub mod machines;
 pub mod recipe;
+pub mod reference;
 pub mod shop;
 pub mod types;
 pub mod world;
 
 pub use contracts::{Contract, ContractRegistry};
 pub use dock::{DOCK_CAPACITY, DOCK_KIND, Dock};
-pub use economy::{ActiveContract, ContractSnapshot, Economy, EconomySnapshot};
+pub use economy::{
+    ActiveContract, ContractSnapshot, Economy, EconomySnapshot, STARTING_MONEY,
+};
 pub use fluid::{
     FLUID_TANK_CAPACITY, FLUID_TANK_FILL_AMOUNT, FLUID_TANK_KIND, FluidNetwork, FluidTank,
-    PipeSegment,
+    FluidTap, PipeSegment,
 };
 pub use hopper::{HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, HOPPER_KIND, Hopper};
 pub use machines::{Footprint, MachineKind, MachineRegistry};
 pub use recipe::{Recipe, RecipeRegistry};
+pub use reference::{reference_chain, reference_chain_with};
 pub use shop::{
     DEFAULT_PURCHASE_QUANTITY, OwnedEquipment, Shop, ShopCatalog, ShopEntry, ShopEntrySnapshot,
     ShopSnapshot,
 };
-pub use types::{decode_chunk_id, encode_chunk_id};
+pub use types::{Direction, decode_chunk_id, encode_chunk_id};
 pub use world::{
-    BeltSnapshot, ChunkSnapshot, DockSnapshot, FluidSnapshot, FluidTankSnapshot, HopperSnapshot,
-    MachineSnapshot, PipeSnapshot, PlayerCommand, StageLayout, TileSnapshot, World,
-    command_from_json,
+    BELT_KIND, BeltSnapshot, ChunkSnapshot, DockSnapshot, FluidSnapshot, FluidTankSnapshot,
+    FluidTapSnapshot, HopperSnapshot, MachineSnapshot, PIPE_KIND, PipeSnapshot, PlacementSnapshot,
+    PlayerCommand, TileSnapshot, World, command_from_json,
 };

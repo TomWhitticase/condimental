@@ -49,6 +49,7 @@ use std::time::{Duration, Instant};
 
 use sim_core::sim::{
     FLUID_TANK_CAPACITY, MachineSnapshot, PlayerCommand, RecipeRegistry, TileSnapshot, World,
+    reference_chain,
 };
 
 /// The milestone's stage, by the two ids `data/recipes.ron` and
@@ -71,11 +72,12 @@ fn recipes() -> RecipeRegistry {
 /// makes them comparable: no per-tick commands means no way for the two runs
 /// to diverge except through the thing under test.
 fn loaded_world() -> World {
-    let mut world = World::new(recipes());
+    let mut world = reference_chain(recipes());
     world.issue_command(PlayerCommand::FillFluidTank {
         amount: FLUID_TANK_CAPACITY,
+        tile: None,
     });
-    world.issue_command(PlayerCommand::FillHopper { amount: 4 });
+    world.issue_command(PlayerCommand::FillHopper { amount: 4, tile: None });
     world
 }
 
@@ -357,7 +359,7 @@ fn every_shipped_contract_still_targets_the_chains_final_product_with_economy_rs
     // (data/contracts.ron, three of them as of this milestone) naming the
     // chain's unmoved final output — proving the insertion mid-chain left
     // every contract's target intact, not just one hardcoded constant.
-    let snapshot = World::new(recipes()).economy_snapshot();
+    let snapshot = reference_chain(recipes()).economy_snapshot();
     assert_eq!(snapshot.money, 0.0);
     assert!(
         !snapshot.contracts.is_empty(),
@@ -395,12 +397,12 @@ fn the_racks_progress_is_readable_through_the_unchanged_snapshot_surface() {
     assert_eq!(snapshot.process, Some((start_tick, required_ticks)));
 
     // Via query_tile (what a hover tooltip uses), on the rack's own tile.
-    let stage = world
-        .chain_layout()
+    let placement = world
+        .world_layout()
         .into_iter()
-        .find(|s| s.recipe == AGING_RECIPE)
-        .expect("the aging stage must appear in chain_layout");
-    match world.query_tile(stage.machine_tile) {
+        .find(|p| p.recipe.as_deref() == Some(AGING_RECIPE))
+        .expect("the aging rack must appear in world_layout");
+    match world.query_tile(placement.tile) {
         Some(TileSnapshot::Machine {
             machine_kind,
             recipe,
@@ -411,7 +413,7 @@ fn the_racks_progress_is_readable_through_the_unchanged_snapshot_surface() {
             assert_eq!(recipe, AGING_RECIPE);
             assert_eq!(process, Some((start_tick, required_ticks)));
         }
-        other => panic!("expected the aging rack at {:?}, got {other:?}", stage.machine_tile),
+        other => panic!("expected the aging rack at {:?}, got {other:?}", placement.tile),
     }
 
     // Progress is derivable from what is already on the wire — no field

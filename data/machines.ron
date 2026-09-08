@@ -43,6 +43,19 @@
 // cooking vat that holds a batch of sauce for a long cook very much is. See
 // each kind's own note below.
 //
+// EVERY KIND HERE IS PLACED BY THE PLAYER (the "Real Placement" epic). A
+// footprint used to describe where `World` would *build* something; it now
+// describes what a player claims when they put one down, and it rotates:
+// facing north or south swaps `width_tiles` and `height_tiles` on the grid,
+// anchored at the same origin corner. See `sim_core/src/sim/machines.rs`'s
+// module doc for the full rotation convention, and note the consequence for
+// content — no kind in this file is oblong, so no shipped kind changes shape
+// when turned (the 2x2 vat is square). That is a content fact, not a limit.
+//
+// A kind also has to be priced in `data/shop.ron` to be placeable at all, and
+// the loader enforces that: adding a kind here without a price there is an
+// error, not a thing the player can never build.
+//
 // THREE KINDS HERE ARE NOT A RECIPE'S MACHINE (ticket 3, the "Visual
 // overhaul round 2" epic's ticket 1, and the delivery-dock ticket). Every
 // other kind in this file is named by some `Recipe.machine` in
@@ -58,21 +71,22 @@
 // footprint: they are placed buildings that claim tiles, and nothing else
 // should have to know a second way of answering "how big is that thing."
 //
-// ORDER IN THIS FILE IS NOT THE CHAIN. The two feed-end buffers are listed
-// first and the dock last, which happens to read like the line's order, but
-// `World` builds the chain from `data/recipes.ron`'s order and places these
-// three relative to it — see `sim_core/src/sim/world.rs`.
+// ORDER IN THIS FILE IS NOT THE CHAIN, and since the "Real Placement" epic
+// nothing else is either: there is no chain in the simulation at all, only
+// placements and the adjacency between them. `data/recipes.ron`'s order
+// still describes one production line — it is what `sim::reference_chain`
+// (the test fixture that rebuilds the old shipped layout out of purchase and
+// placement commands) lays out, and what the raw-ingredient rule reads — but
+// `World` no longer builds anything from it.
 (
     schema_version: 1,
     machines: [
         // The chain's raw-ingredient feeder (ticket 3) — one of the three
         // kinds here with no recipe behind it; see the note above. 1x1: a
-        // feed hopper
-        // sitting over the head of a single belt is a bin, not a hall, and
-        // the whole point of it is that its *buffer* is generous, not its
-        // floor space. It is placed immediately west of the first belt, so
-        // its width extends away from the chain rather than into it (see
-        // `World::with_machines`).
+        // feed hopper sitting over the head of a single belt is a bin, not a
+        // hall, and the whole point of it is that its *buffer* is generous,
+        // not its floor space. Where it stands is now the player's decision;
+        // it discharges onto whatever belt is off the face it points at.
         MachineKind(
             id: "hopper",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
@@ -87,11 +101,9 @@
         // stainless vessel standing at the head of a four-tile pipe run is a
         // drum, not a tank farm, and — like the hopper — what is meant to be
         // generous about it is its *buffer* (120 units, see
-        // `FLUID_TANK_CAPACITY`), not its floor space. It is also placed
-        // immediately west of the run's first pipe tile, so a wider tank
-        // would grow further west, away from the chain, moving nothing (see
-        // `World::with_machines`) — but there is no reason to spend the
-        // tiles.
+        // `FLUID_TANK_CAPACITY`), not its floor space. It discharges into
+        // whichever pipe tile is off the face it points at, wherever the
+        // player stands it.
         MachineKind(
             id: "fluid_tank",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
@@ -107,9 +119,9 @@
         // Blends tomato paste with vinegar into an uncooked ketchup mix.
         // This is the one stage plumbed into a fluid network (its recipe is
         // the only one declaring `fluid_inputs`), so its footprint *height*
-        // also decides which row the pipe run occupies — the run sits on the
-        // row immediately north of the machine it feeds, see `World::new` in
-        // sim_core/src/sim/world.rs. Kept 1x1: an in-line blender is a small
+        // also decides where a pipe run can reach it: a machine taps any pipe
+        // tile orthogonally adjacent to any tile of its footprint, whatever
+        // either is facing. Kept 1x1: an in-line blender is a small
         // unit, and keeping it one tile tall also keeps the pipe run on row
         // 1, exactly where milestone 6 first put it.
         MachineKind(

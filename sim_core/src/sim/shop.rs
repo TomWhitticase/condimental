@@ -302,6 +302,30 @@ impl OwnedEquipment {
         *slot = slot.saturating_add(quantity);
     }
 
+    /// Debits **exactly one** of `kind`, returning whether there was one to
+    /// debit (the "Real Placement" epic's ticket 1: placing something spends
+    /// it out of this ledger, and removing it credits one back through
+    /// [`Self::add`]).
+    ///
+    /// All-or-nothing and silent about failure, like every other refusal in
+    /// this crate: an unowned kind leaves the ledger byte-identical, and
+    /// `World` turns that into the same no-op an unaffordable purchase gets.
+    /// A count that falls to zero is erased rather than left as an explicit
+    /// zero, so [`Self::iter`] never reports a kind the player has none of.
+    pub fn take_one(&mut self, kind: &str) -> bool {
+        let Some(slot) = self.counts.get_mut(kind) else {
+            return false;
+        };
+        if *slot == 0 {
+            return false;
+        }
+        *slot -= 1;
+        if *slot == 0 {
+            self.counts.remove(kind);
+        }
+        true
+    }
+
     /// Every owned kind and its count, in sorted-by-kind order. Only kinds
     /// actually bought appear; use [`Self::count`] for a specific one.
     pub fn iter(&self) -> impl Iterator<Item = (&str, u32)> {

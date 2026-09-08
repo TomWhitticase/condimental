@@ -102,7 +102,9 @@ sauce-factory/
     src/lib.rs                # the ONLY file that touches `godot`/gdext (ARCHITECTURE.md §4)
     src/sim/                   # pure Rust simulation core — no gdext dependency,
       mod.rs                    # fully exercisable by headless `cargo test` (§7)
-      types.rs                   # Fx (fixed-point, §3.9), ItemId/RecipeId/TileCoord/ChunkId
+      types.rs                   # Fx (fixed-point, §3.9), ItemId/RecipeId/TileCoord/
+                                   # ChunkId, and Direction (four-way; East = +X is the
+                                   # facing that reproduces every pre-placement layout)
       recipe.rs                   # RecipeRegistry — loads + validates data/recipes.ron
       inventory.rs                  # generic slot-based Inventory (§3.2)
       belt.rs                        # BeltSegment — gap-based item storage (§3.3)
@@ -110,7 +112,11 @@ sauce-factory/
       machines.rs                      # MachineRegistry — loads + validates
                                          # data/machines.ron; owns the footprint
                                          # origin convention (min-X/min-Y corner,
-                                         # = the tile the belt feeds into)
+                                         # = the tile the belt feeds into) AND the
+                                         # rotation convention (a quarter turn swaps
+                                         # the extents around that same corner; the
+                                         # edge on the facing side is the outlet, the
+                                         # opposite edge the inlet, the flanks neither)
       shop.rs                          # ShopCatalog (loads/validates data/shop.ron) +
                                          # OwnedEquipment (per-kind owned counts) +
                                          # Shop, which pairs them. Money is NOT here —
@@ -132,15 +138,33 @@ sauce-factory/
                                          # a delivered unit is consumed by the contract
                                          # that takes it, never credited to two
                                          # (GAMEPLAY.md §6)
-      world.rs                         # hecs::World wrapper; builds a multi-stage
-                                         # production chain (one belt+machine per
-                                         # recipe, in recipes.ron order); owns Economy
-                                         # and ticks it once per World::tick; SimBridge's
+      world.rs                         # hecs::World of PLACED things (the "Real
+                                         # Placement" epic): World::new builds NOTHING —
+                                         # every belt tile, pipe tile, machine and
+                                         # building is a Place command spending owned
+                                         # inventory, and Remove/Rotate undo and turn it.
+                                         # Flow is derived from adjacency and recomputed
+                                         # only on Place/Remove/Rotate (ARCH §3.8), never
+                                         # per tick. Owns Economy/Shop; SimBridge's
                                          # pure-logic half — tick()/dirty_chunks()/
-                                         # chunk_snapshot()/issue_command()/
-                                         # query_tile()/chain_layout()/economy_snapshot() (§4)
+                                         # chunk_snapshot()/issue_command()/query_tile()/
+                                         # world_layout()/economy_snapshot() (§4)
+      reference.rs                     # sim::reference_chain — the pre-placement shipped
+                                         # layout, rebuilt out of nothing but Purchase +
+                                         # Place commands. Both the fixture every
+                                         # integration test builds its world from AND the
+                                         # proof placement reaches every configuration
+                                         # the fixed chain used to guarantee
     tests/core_loop.rs        # headless integration test: full-chain N-tick
-                                # conservation invariant across every stage (§6)
+                                # conservation invariant across every stage (§6),
+                                # against a world built by reference_chain
+    tests/placement.rs        # headless integration test for the "Real Placement"
+                                # epic: an empty new world, Place/Remove/Rotate
+                                # round-trips and refusals, collision on both Place
+                                # and Rotate, conservation through a player-assembled
+                                # line that TURNS A CORNER and one that runs west,
+                                # several hoppers/docks/pipe networks, and the
+                                # place/remove/rotate JSON wire form
     tests/machine_footprints.rs # headless integration test: footprint-aware chain
                                  # layout — asserts the shipped 4-stage chain's tiles
                                  # are byte-identical to the pre-footprint formula,
@@ -340,6 +364,108 @@ it's gone stale.
   waited for the pool to hold *exactly* two units, a state the aging rack's
   throughput makes essentially unreachable, so it silently ran its whole tick
   limit and photographed an empty dock; it is a minimum now.
+
+- 2026-09-08: **"Real Placement" epic, ticket 1 of 2 (the sim half;
+  `godot_project/` deliberately untouched) — the world starts empty, and
+  everything in it is placed by the player.** The largest single change the
+  project has had, and the one that makes GAMEPLAY.md §4's "equipment
+  purchases *are* the tech tree" a statement about the simulation rather
+  than an intention. `World::new` used to build a complete factory from
+  `data/recipes.ron`'s file order — one belt-and-machine stage per recipe
+  west to east, a hopper at the head, a tank beside the pipe run, a dock at
+  the tail, every stage linked to the next by index at construction. It now
+  builds an empty grid and `economy.rs`'s new `STARTING_MONEY`; three new
+  commands (`Place`/`Remove`/`Rotate`) do the rest. Nine calls worth not
+  re-litigating.
+
+  (1) **`Direction::East` is the regression anchor, and everything is
+  measured against it.** `sim::types::Direction` is four-way (`East` = `+X`,
+  the way the chain always ran; `North` = `+Y`, the way a footprint always
+  grew), and an east-facing world reproduces every pre-placement behaviour
+  tile for tile. That is not a claim, it is a test fixture:
+  `sim::reference_chain` rebuilds the entire shipped six-stage line out of
+  nothing but `Purchase` + `Place` commands, every existing integration test
+  now builds its world from it, and `machine_footprints.rs` still pins the
+  same literal coordinates it always did (crusher at x = 4, vat at 14,
+  packer at 30, dock at 35). The fixture is simultaneously the proof that
+  placement can reach every configuration the game already guaranteed.
+
+  (2) **A rotated footprint is anchored at the same origin corner, and a
+  quarter turn swaps the extents.** Stated once in `machines.rs`'s module
+  doc, which already owned the origin convention. `direction` is *the side
+  product leaves by*: the rectangle edge on that side is the outlet face,
+  the opposite edge is the inlet face, and the two flanks are neither — a
+  belt pointing into a machine's side does nothing, which is what makes
+  rotating a machine a decision with a visible consequence. No shipped kind
+  is oblong (the 2x2 vat is square), so the extent-swap is exercised by
+  deliberately oblong test kinds, exactly as ticket 1 of the "Machines
+  improvement" epic exercised widths no shipped kind had.
+
+  (3) **Fluids connect by touching, not by facing.** A machine taps any pipe
+  tile orthogonally adjacent to any tile of its footprint, and pipe-to-pipe
+  flow is undirected. Not a shortcut: the shipped mixer has always been fed
+  from the row *above* it — neither its inlet face nor its outlet — because
+  a pressure network is not a conveyor (ARCHITECTURE.md §3.4), and
+  face-gating a fluid inlet would have broken the one plumbing arrangement
+  the game has. A pipe tile's `direction` is therefore presentation-only.
+
+  (4) **Topology is recomputed on `Place`/`Remove`/`Rotate` and never per
+  tick** — ARCHITECTURE.md §3.8's union-find rule made real for the first
+  time. It is a full single-threaded rebuild rather than an incremental
+  union-find, because at this scale rebuilding a few hundred tiles is
+  cheaper than the bookkeeping an incremental structure needs and cannot
+  drift out of sync with the occupancy grid. `rayon` and per-network
+  threading stay milestone 8's scope, deliberately unbuilt. Pipe *volumes*
+  are carried across a rebuild by tile, so joining two runs does not spill
+  them.
+
+  (5) **A belt is one tile now**, bought and placed one at a time (which is
+  what `shop.ron`'s "priced per tile" always said). Travel time is
+  unchanged — a tile is one unit long at the same speed, so four tiles is
+  still 200 ticks — and the belt-to-belt hop spawns onto the receiving belt
+  *before* taking from the sending one, which is what makes a refused hop
+  leave the item where it was rather than annihilating it.
+
+  (6) **The hopper, the fluid tank and the dock are ordinary placeable
+  kinds, and a world may hold any number of each.** Allowing several is the
+  absence of an invented restriction rather than a feature: nothing in the
+  simulation ever assumed exactly one, so forbidding a second would have
+  been new code enforcing a rule no design doc states. Several docks still
+  ship into the one shared delivery pool, so "what is on the dock" remains
+  exactly one number. `FillHopper`/`FillFluidTank` gained an optional
+  `tile` naming which one to load; omitting it loads them all, which is what
+  a one-hopper world always did on a keypress.
+
+  (7) **A placed machine runs the one recipe its kind names**, from a
+  kind → recipe map built at construction. `data/recipes.ron` has always
+  been 1:1 on that, and two recipes on one kind is now a construction-time
+  panic rather than a silent pick — a recipe-selection mechanic is out of
+  scope. One knock-on: test fixtures that invented machine kinds
+  (`"cooker"`, `"sprawler"`) now use real, shop-priced kind ids with
+  fabricated footprints, because a machine has to be *buyable* to be
+  placeable.
+
+  (8) **Removing something destroys what it held** — items on the belt,
+  fluid in the pipe, a batch mid-craft. That is the honest reading of
+  picking a thing up; pretending otherwise needs an inventory to put the
+  spillage in, which nobody has asked for. Mass conservation therefore holds
+  across any run in which nothing loaded is removed, which is what the tests
+  asserting it actually do. Rotating, by contrast, keeps everything: no
+  belt gap array, pipe volume or `TimedProcess` has an absolute-direction
+  dependency, so a turn is pure geometry.
+
+  (9) **The wire format broke in several places, all of them ticket 2's to
+  consume.** `chain_layout_json` is gone, replaced by `world_layout_json`
+  (every placement, with `kind`/`tile`/`direction`/`footprint`/`occupies`/
+  `recipe`) — there is no chain and no stage left to report. The hopper,
+  tank, dock and fluid snapshots return **arrays** instead of single
+  objects; a `BeltSnapshot` is one tile (`tile` + `direction`, no
+  `start_tile`/`length_tiles`); a `FluidSnapshot`'s inline machine fields
+  became a `taps` array plus `tank_tiles`, and its `segments` are in tile
+  order rather than flow order; and every belt, pipe, machine, hopper, tank
+  and dock on the wire carries a `direction` string
+  (`"north"`/`"east"`/`"south"`/`"west"`). `godot_project/` was not touched,
+  so the scene needs ticket 2 before it runs again.
 
 - 2026-09-08: **The chain has a real end: a delivery dock** (GAMEPLAY.md
   §6/§9's long-flagged "a real delivery-dock tile is future polish"; ticket 1

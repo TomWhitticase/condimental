@@ -25,8 +25,17 @@
 
 use sim_core::sim::types::Fx;
 use sim_core::sim::{
-    ContractRegistry, FLUID_TANK_CAPACITY, MachineRegistry, PlayerCommand, RecipeRegistry, World,
+    ContractRegistry, DockSnapshot, FLUID_TANK_CAPACITY, MachineRegistry, PlayerCommand,
+    RecipeRegistry, World, reference_chain, reference_chain_with,
 };
+
+/// The reference chain's one dock — where every delivery this file measures
+/// comes from.
+fn the_dock(world: &World) -> DockSnapshot {
+    let mut docks = world.dock_snapshots();
+    assert_eq!(docks.len(), 1, "the reference chain places one dock");
+    docks.remove(0)
+}
 
 fn recipes() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
@@ -60,7 +69,7 @@ fn single_contract_world() -> World {
         c.cadence_ticks,
         c.payout.to_num::<u32>(),
     );
-    World::with_content(
+    reference_chain_with(
         recipes(),
         MachineRegistry::bundled(),
         ContractRegistry::from_ron_str(&text).expect("re-serialized shipped contract must load"),
@@ -76,29 +85,31 @@ fn single_contract_world() -> World {
 /// consumables; the dock does the rest by itself, every tick.
 fn run_until_shipped(world: &mut World, target: u32) -> u32 {
     for _ in 0..500_000u32 {
-        if world.dock_snapshot().shipped_total < target {
+        if the_dock(&world).shipped_total < target {
             // Keep the hopper topped up. `FillHopper` clamps at capacity, so
             // issuing it every tick just means "never let the feed run dry"
             // — the hopper still meters onto the belt at one unit per tick
             // at most, so the chain's throughput is unchanged by this.
             world.issue_command(PlayerCommand::FillHopper {
                 amount: target.saturating_mul(4).max(4),
+                tile: None,
             });
             // ...and keep the pipe run's vinegar tank topped up the same
             // way, since it is the run's only supply and the fluid-gated
             // mixing stage stalls without it.
             world.issue_command(PlayerCommand::FillFluidTank {
                 amount: FLUID_TANK_CAPACITY,
+                tile: None,
             });
         }
 
         world.tick();
 
-        if world.dock_snapshot().shipped_total >= target {
+        if the_dock(&world).shipped_total >= target {
             break;
         }
     }
-    world.dock_snapshot().shipped_total
+    the_dock(&world).shipped_total
 }
 
 #[test]
@@ -152,7 +163,7 @@ fn full_chain_delivers_against_a_contract_and_pays_out_exactly_that_contracts_pa
 
 #[test]
 fn money_stays_zero_through_a_cadence_boundary_with_nothing_delivered() {
-    let mut world = World::new(recipes());
+    let mut world = reference_chain(recipes());
     let longest = world
         .economy()
         .contracts
@@ -217,7 +228,7 @@ fn several_contracts_settle_independently_against_one_real_chain() {
             ],
         )"#
     );
-    let mut world = World::with_content(
+    let mut world = reference_chain_with(
         recipes(),
         MachineRegistry::bundled(),
         ContractRegistry::from_ron_str(&board).expect("fixture board must load"),
@@ -233,14 +244,15 @@ fn several_contracts_settle_independently_against_one_real_chain() {
     // contract's own two checks (at one and two quick-cadences in) have
     // each taken their share.
     while world.current_tick() < slow_cadence {
-        world.issue_command(PlayerCommand::FillHopper { amount: 32 });
+        world.issue_command(PlayerCommand::FillHopper { amount: 32, tile: None });
         world.issue_command(PlayerCommand::FillFluidTank {
             amount: FLUID_TANK_CAPACITY,
+            tile: None,
         });
         world.tick();
     }
     assert!(
-        world.dock_snapshot().shipped_total > 0,
+        the_dock(&world).shipped_total > 0,
         "the dock must have shipped product on its own for either contract to settle"
     );
 
@@ -296,7 +308,7 @@ fn one_delivered_unit_pays_one_contract_not_every_contract_that_wants_it() {
             ],
         )"#
     );
-    let mut world = World::with_content(
+    let mut world = reference_chain_with(
         recipes(),
         MachineRegistry::bundled(),
         ContractRegistry::from_ron_str(&board).expect("fixture board must load"),
@@ -331,7 +343,7 @@ fn one_delivered_unit_pays_one_contract_not_every_contract_that_wants_it() {
 /// Ticket 2's contract cards are built against.
 #[test]
 fn the_economy_snapshot_reports_one_entry_per_shipped_contract() {
-    let world = World::new(recipes());
+    let world = reference_chain(recipes());
     let snapshot = world.economy_snapshot();
     let board = contracts();
 

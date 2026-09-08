@@ -10,9 +10,9 @@
 //! balance. This file drives the real `World` instead, to prove the three
 //! things only the whole system can show:
 //!
-//! 1. **The loop actually closes.** Money earned by delivering against the
-//!    hardcoded contract is the same money a purchase spends — one currency,
-//!    per GAMEPLAY.md §1, not a shop with its own wallet.
+//! 1. **The loop actually closes.** Money earned by delivering against a
+//!    contract is the same money a purchase spends — one currency, per
+//!    GAMEPLAY.md §1, not a shop with its own wallet.
 //! 2. **A refused purchase is a true no-op.** An unaffordable or unknown
 //!    kind leaves money *and* every owned count exactly as they were; there
 //!    is no partially-applied transaction.
@@ -21,17 +21,19 @@
 //!    `fluids.rs` pin theirs — a rename here fails a test instead of
 //!    silently breaking the UI.
 //!
-//! Note what is deliberately *not* asserted anywhere: that buying something
-//! changes the factory floor. Nothing consumes an owned count yet — the
-//! shipped chain is still built unconditionally at tick 0 — and wiring
-//! placement to spend this inventory is a later epic. See `sim::shop`'s
-//! module doc.
+//! **What changed with the "Real Placement" epic:** an owned count is real
+//! inventory now, not a ledger of past purchases — `Place` spends one and
+//! `Remove` credits one back — and this file's worlds are built by
+//! `sim::reference_chain`, i.e. by issuing exactly the `Purchase` commands
+//! this file is about. Spending inventory on placement is covered in
+//! `placement.rs`; what is asserted here is still the money half.
 
 use sim_core::sim::types::Fx;
 use sim_core::sim::{
     FLUID_TANK_CAPACITY, MachineRegistry, PlayerCommand, RecipeRegistry, ShopCatalog, World,
-    command_from_json,
+    command_from_json, reference_chain,
 };
+
 
 fn recipes() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
@@ -39,7 +41,7 @@ fn recipes() -> RecipeRegistry {
 }
 
 fn world() -> World {
-    World::new(recipes())
+    reference_chain(recipes())
 }
 
 /// The unit price of a kind, straight from the shipped catalog — so this
@@ -71,9 +73,10 @@ fn world_with_earned_money() -> World {
     const MIN_MONEY: i64 = 200;
 
     for _ in 0..2_000_000u32 {
-        world.issue_command(PlayerCommand::FillHopper { amount: 32 });
+        world.issue_command(PlayerCommand::FillHopper { amount: 32, tile: None });
         world.issue_command(PlayerCommand::FillFluidTank {
             amount: FLUID_TANK_CAPACITY,
+            tile: None,
         });
         world.tick();
         if world.money() >= Fx::from_num(MIN_MONEY) {
@@ -98,7 +101,11 @@ fn contract_earnings_buy_equipment_and_the_owned_count_goes_up() {
     let before = world.money();
     let price = price_of("belt");
 
-    assert_eq!(world.owned_count("belt"), 0, "a fresh world owns nothing");
+    assert_eq!(
+        world.owned_count("belt"),
+        0,
+        "a reference-chain world has placed everything it bought"
+    );
 
     world.issue_command(PlayerCommand::Purchase {
         kind: "belt".to_string(),
@@ -145,8 +152,8 @@ fn repeated_purchases_of_several_kinds_accumulate_independently() {
 /// purchase — money gone, nothing owned, or the reverse.
 #[test]
 fn an_unaffordable_purchase_changes_neither_money_nor_inventory() {
-    // A fresh world has zero money and the cooking vat is the most
-    // expensive kind in the catalog, so this can never succeed.
+    // A reference-chain world has spent its whole bill, and the cooking vat
+    // is the most expensive kind in the catalog, so this can never succeed.
     let mut world = world();
     assert_eq!(world.money(), Fx::ZERO);
 
@@ -343,27 +350,86 @@ fn the_shipped_catalog_prices_every_placeable_kind() {
     }
 }
 
-/// This ticket is purely additive: it must not change how the chain is
-/// built, only add a parallel system beside it.
+/// The state a reference-chain world starts in, which is what every other
+/// test in this file measures from: a whole factory standing, **nothing
+/// owned and nothing in the bank**.
+///
+/// That combination is deliberate and is worth reading as a statement about
+/// the fixture rather than about the game. `sim::reference_chain` prices its
+/// own bill out of `data/shop.ron`, starts with exactly that much money and
+/// spends every unit of it placing the line — so the wallet and the
+/// unplaced-inventory ledger both land on zero, and a test measuring
+/// earnings starts from a clean baseline. A *new game* is the opposite
+/// shape: `sim::STARTING_MONEY` in the bank and an empty floor.
 #[test]
-fn a_fresh_world_owns_nothing_and_the_chain_exists_anyway() {
+fn a_reference_chain_world_owns_nothing_and_has_spent_everything() {
     let world = world();
     let snapshot = world.shop_snapshot();
 
     assert_eq!(snapshot.money, 0.0);
     assert!(
         snapshot.entries.iter().all(|e| e.owned == 0),
-        "nothing is pre-owned"
+        "every purchased unit was placed, so nothing is left unplaced"
     );
     assert!(
         snapshot.entries.iter().all(|e| !e.affordable),
         "nothing is affordable at zero money"
     );
-    // ...and yet the whole production chain is already standing, because
-    // nothing consumes an owned count yet.
+    // ...and the whole production chain is standing, built entirely out of
+    // Purchase + Place commands.
     assert_eq!(
-        world.chain_layout().len(),
+        world
+            .world_layout()
+            .iter()
+            .filter(|p| p.recipe.is_some())
+            .count(),
         recipes().ordered().len(),
-        "the shipped chain is still built unconditionally at tick 0"
+        "one placed machine per recipe, put there by the same commands a player uses"
+    );
+}
+
+/// The other side of that coin: a **fresh** world (what `World::new` builds,
+/// and what a new game is) owns nothing, has `STARTING_MONEY`, and contains
+/// nothing at all. This is the assertion the "Real Placement" epic exists to
+/// make true — before it, a fresh world arrived with a complete factory in
+/// it that no purchase had paid for.
+#[test]
+fn a_fresh_world_is_empty_and_holds_only_starting_money() {
+    let world = World::new(recipes());
+    assert_eq!(world.placement_count(), 0, "a new game starts with a bare floor");
+    assert!(world.all_chunks().is_empty());
+    assert_eq!(
+        world.money(),
+        Fx::from_num(sim_core::sim::STARTING_MONEY),
+        "and with exactly the documented starting balance"
+    );
+    let snapshot = world.shop_snapshot();
+    assert!(snapshot.entries.iter().all(|e| e.owned == 0));
+    // Enough to make a first move with — a hopper, a machine and some belt —
+    // and nothing like enough for the whole line (see `STARTING_MONEY`).
+    let affordable: Vec<&str> = snapshot
+        .entries
+        .iter()
+        .filter(|e| e.affordable)
+        .map(|e| e.kind.as_str())
+        .collect();
+    for kind in ["belt", "pipe", "hopper", "crusher"] {
+        assert!(
+            affordable.contains(&kind),
+            "a new game must be able to afford a {kind}: {affordable:?}"
+        );
+    }
+    // ...and nothing like enough for a factory. Priced off the shipped
+    // catalog rather than restated, so a balancing pass moves this test's
+    // expectations with it instead of breaking them.
+    let one_of_each_machine: Fx = ["hopper", "crusher", "mixer", "cooking_vat"]
+        .iter()
+        .map(|kind| price_of(kind))
+        .fold(Fx::ZERO, |acc, price| acc + price);
+    assert!(
+        one_of_each_machine > world.money() * Fx::from_num(2),
+        "starting money must be a first move, not a factory: {} vs a {one_of_each_machine} \
+         front end alone",
+        world.money()
     );
 }

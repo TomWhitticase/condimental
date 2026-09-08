@@ -24,8 +24,68 @@
 
 use std::collections::HashSet;
 
-use sim_core::sim::machines::MachineRegistry;
-use sim_core::sim::{PlayerCommand, RecipeRegistry, TileSnapshot, World};
+use sim_core::sim::machines::{Footprint, MachineRegistry};
+use sim_core::sim::{
+    ContractRegistry, FluidSnapshot, PlayerCommand, RecipeRegistry, TileSnapshot, World,
+    reference_chain, reference_chain_with,
+};
+
+/// The world's one fluid network, or `None` when no pipe is placed. A world
+/// can hold several since the "Real Placement" epic; the reference chain
+/// lays one.
+fn the_network(world: &World) -> Option<FluidSnapshot> {
+    let mut networks = world.fluid_snapshots();
+    assert!(networks.len() <= 1, "the reference chain lays one pipe run");
+    networks.pop()
+}
+
+/// A "stage" as this file talks about one: a machine plus the run of belt
+/// tiles feeding it.
+///
+/// **This is derived by the test now, not reported by the simulation.** The
+/// "Real Placement" epic deleted `chain_layout` — there is no chain and no
+/// stage in the sim any more, only placements — so this file reconstructs
+/// the concept from `world_layout` in order to keep asserting exactly what
+/// it always asserted about the shipped geometry. Walking west from a
+/// machine's origin over contiguous belt tiles is also a stronger check than
+/// the old one: it fails if the belts feeding a machine are missing, not
+/// just if they are in the wrong place.
+#[derive(Debug, Clone)]
+struct StageView {
+    recipe: String,
+    machine_kind: String,
+    machine_tile: (i32, i32),
+    machine_footprint: Footprint,
+    belt_start_tile: (i32, i32),
+    belt_length_tiles: i32,
+}
+
+fn stages(world: &World) -> Vec<StageView> {
+    let layout = world.world_layout();
+    let mut stages: Vec<StageView> = layout
+        .iter()
+        .filter(|p| p.recipe.is_some())
+        .map(|p| {
+            let mut belt_length_tiles = 0;
+            while matches!(
+                world.query_tile((p.tile.0 - belt_length_tiles - 1, p.tile.1)),
+                Some(TileSnapshot::Belt { .. })
+            ) {
+                belt_length_tiles += 1;
+            }
+            StageView {
+                recipe: p.recipe.clone().unwrap(),
+                machine_kind: p.kind.clone(),
+                machine_tile: p.tile,
+                machine_footprint: p.footprint,
+                belt_start_tile: (p.tile.0 - belt_length_tiles, p.tile.1),
+                belt_length_tiles,
+            }
+        })
+        .collect();
+    stages.sort_by_key(|s| s.machine_tile.0);
+    stages
+}
 
 fn shipped_recipes() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
@@ -56,15 +116,19 @@ fn chain_on(kinds: &[&str]) -> RecipeRegistry {
 }
 
 /// A registry of `(id, width, height)` kinds, plus the three 1x1 kinds every
-/// world needs from the machine registry regardless of its recipes: the
-/// `hopper` (ticket 3: `World` builds one raw-ingredient feeder at the head
-/// of the chain), the `fluid_tank` (the "Visual overhaul round 2" epic's
-/// ticket 1: a chain with a fluid-requiring recipe gets one tank supplying
-/// its pipe run), and the `dock` (the delivery-dock ticket: every chain ends
-/// in one, fed by one more belt past the last machine). All three take their
-/// footprint from this registry like any other placed building. Added here
-/// rather than at each call site because none of these fixtures are *about*
-/// any of them — they are about machine geometry.
+/// reference chain needs regardless of its recipes: the `hopper`, the
+/// `fluid_tank` (only used when a recipe declares `fluid_inputs`) and the
+/// `dock`. All three take their footprint from this registry like any other
+/// placed building. Added here rather than at each call site because none of
+/// these fixtures are *about* any of them — they are about machine geometry.
+///
+/// **The `id`s these fixtures use are real kind ids** (`crusher`,
+/// `cooking_vat`, ...) with fabricated *footprints*, which is a change the
+/// "Real Placement" epic forced and is worth understanding: a machine is now
+/// something the player buys and places, so it has to be priced in
+/// `data/shop.ron`, and an invented kind like the old `"cooker"` is not.
+/// Fabricating the footprint is still exactly what these fixtures need —
+/// no shipped kind is 3 wide or 30 wide — and the recipes remain synthetic.
 fn kinds(entries: &[(&str, i32, i32)]) -> MachineRegistry {
     let mut body: String = concat!(
         "MachineKind(id: \"hopper\", footprint: Footprint(width_tiles: 1, height_tiles: 1)),",
@@ -120,8 +184,8 @@ const EXPECTED_SHIPPED_LAYOUT: [(&str, &str, (i32, i32), i32, (i32, i32), (i32, 
 
 #[test]
 fn the_shipped_chains_tile_layout_is_what_the_footprint_rule_says() {
-    let world = World::new(shipped_recipes());
-    let layout = world.chain_layout();
+    let world = reference_chain(shipped_recipes());
+    let layout = stages(&world);
 
     assert_eq!(
         layout.len(),
@@ -156,8 +220,8 @@ fn the_shipped_chains_tile_layout_is_what_the_footprint_rule_says() {
 /// have placed it, and nothing upstream of it moves at all.
 #[test]
 fn the_cooking_vats_extra_width_shifts_only_what_is_downstream_of_it() {
-    let world = World::new(shipped_recipes());
-    let layout = world.chain_layout();
+    let world = reference_chain(shipped_recipes());
+    let layout = stages(&world);
 
     // A fixed 5-tile-per-stage span (4 belt tiles + a 1-tile machine) is what
     // every stage would sit at if machine width were still assumed to be 1.
@@ -184,9 +248,8 @@ fn the_cooking_vats_extra_width_shifts_only_what_is_downstream_of_it() {
 /// every one of the four tiles it occupies.
 #[test]
 fn every_tile_of_the_shipped_cooking_vat_resolves_to_the_cooking_vat() {
-    let world = World::new(shipped_recipes());
-    let stage = world
-        .chain_layout()
+    let world = reference_chain(shipped_recipes());
+    let stage = stages(&world)
         .into_iter()
         .find(|s| s.machine_kind == "cooking_vat")
         .expect("the shipped chain has a cooking vat");
@@ -245,8 +308,8 @@ fn every_tile_of_the_shipped_cooking_vat_resolves_to_the_cooking_vat() {
 #[test]
 fn every_shipped_stage_reports_the_machine_kind_its_recipe_names() {
     let recipes = shipped_recipes();
-    let world = World::new(shipped_recipes());
-    for (stage, recipe) in world.chain_layout().iter().zip(recipes.ordered()) {
+    let world = reference_chain(shipped_recipes());
+    for (stage, recipe) in stages(&world).iter().zip(recipes.ordered()) {
         assert_eq!(stage.recipe, recipe.id);
         assert_eq!(stage.machine_kind, recipe.machine);
     }
@@ -261,17 +324,18 @@ fn every_shipped_stage_reports_the_machine_kind_its_recipe_names() {
 /// itself did not move, but it is now feeding a different machine entirely.
 #[test]
 fn the_shipped_pipe_run_feeds_the_mixer() {
-    let world = World::new(shipped_recipes());
-    let fluid = world.fluid_snapshot().expect("shipped chain has a pipe run");
+    let world = reference_chain(shipped_recipes());
+    let fluid = the_network(&world).expect("shipped chain has a pipe run");
     let tiles: Vec<(i32, i32)> = fluid.segments.iter().map(|s| s.tile).collect();
     assert_eq!(tiles, vec![(6, 1), (7, 1), (8, 1), (9, 1)]);
-    assert_eq!(fluid.machine_tile, (9, 0));
-    assert_eq!(fluid.inlet_index, 3);
-    assert_eq!(fluid.machine_recipe, "ketchup_mix");
+    let tap = fluid.taps.first().expect("a machine taps the run");
+    assert_eq!(tap.machine_tile, (9, 0));
+    assert_eq!(tap.segment_index, 3);
+    assert_eq!(tap.machine_recipe, "ketchup_mix");
 
     // ...and the machine at that tile really is the mixer, not some other
     // stage that merely shares the coordinate.
-    match world.query_tile(fluid.machine_tile) {
+    match world.query_tile(tap.machine_tile) {
         Some(TileSnapshot::Machine { machine_kind, .. }) => {
             assert_eq!(machine_kind, "mixer")
         }
@@ -286,11 +350,12 @@ fn the_shipped_pipe_run_feeds_the_mixer() {
 #[test]
 fn a_wide_machine_pushes_every_downstream_stage_east_by_its_extra_width() {
     // Stage 1's machine is 3 wide; stages 0 and 2 are ordinary 1x1s.
-    let world = World::with_machines(
-        chain_on(&["cooker", "crusher", "packer"]),
-        kinds(&[("cooker", 1, 1), ("crusher", 3, 2), ("packer", 1, 1)]),
+    let world = reference_chain_with(
+        chain_on(&["bottler", "crusher", "packer"]),
+        kinds(&[("bottler", 1, 1), ("crusher", 3, 2), ("packer", 1, 1)]),
+        ContractRegistry::bundled(),
     );
-    let layout = world.chain_layout();
+    let layout = stages(&world);
 
     // Stage 0 is untouched — a machine's size only affects what comes after
     // it, because the origin is the belt-facing corner.
@@ -313,11 +378,12 @@ fn a_wide_machine_pushes_every_downstream_stage_east_by_its_extra_width() {
 
 #[test]
 fn query_tile_resolves_a_machine_from_every_tile_of_its_footprint() {
-    let world = World::with_machines(
-        chain_on(&["cooker", "crusher", "packer"]),
-        kinds(&[("cooker", 1, 1), ("crusher", 3, 2), ("packer", 1, 1)]),
+    let world = reference_chain_with(
+        chain_on(&["bottler", "crusher", "packer"]),
+        kinds(&[("bottler", 1, 1), ("crusher", 3, 2), ("packer", 1, 1)]),
+        ContractRegistry::bundled(),
     );
-    let origin = world.chain_layout()[1].machine_tile;
+    let origin = stages(&world)[1].machine_tile;
     assert_eq!(origin, (9, 0));
 
     // All 3x2 = 6 tiles must resolve to the same machine, reporting the same
@@ -365,9 +431,10 @@ fn query_tile_resolves_a_machine_from_every_tile_of_its_footprint() {
 
 #[test]
 fn a_wide_machine_reports_its_footprint_in_chunk_snapshots() {
-    let world = World::with_machines(
-        chain_on(&["cooker", "crusher"]),
-        kinds(&[("cooker", 1, 1), ("crusher", 3, 2)]),
+    let world = reference_chain_with(
+        chain_on(&["bottler", "crusher"]),
+        kinds(&[("bottler", 1, 1), ("crusher", 3, 2)]),
+        ContractRegistry::bundled(),
     );
     let machines: Vec<_> = world
         .all_chunks()
@@ -397,7 +464,7 @@ fn the_pipe_run_clears_a_tall_fluid_fed_machine_instead_of_overlapping_it() {
                     id: "tomato_sauce",
                     inputs: [("tomato", 1)],
                     outputs: [("tomato_sauce", 1)],
-                    machine: "cooker",
+                    machine: "bottler",
                     time_ticks: 10,
                 ),
                 Recipe(
@@ -405,7 +472,7 @@ fn the_pipe_run_clears_a_tall_fluid_fed_machine_instead_of_overlapping_it() {
                     inputs: [("tomato_sauce", 1)],
                     fluid_inputs: [("vinegar", 1)],
                     outputs: [("ketchup", 1)],
-                    machine: "vat",
+                    machine: "cooking_vat",
                     time_ticks: 10,
                 ),
             ],
@@ -414,9 +481,9 @@ fn the_pipe_run_clears_a_tall_fluid_fed_machine_instead_of_overlapping_it() {
     .unwrap();
     // The vat is 2x3: it occupies rows 0, 1 and 2, so the pipe run has to
     // rise to row 3 to stay adjacent-but-not-overlapping.
-    let world = World::with_machines(recipes, kinds(&[("cooker", 1, 1), ("vat", 2, 3)]));
-    let fluid = world.fluid_snapshot().expect("this chain has a pipe run");
-    assert_eq!(fluid.machine_tile, (9, 0));
+    let world = reference_chain_with(recipes, kinds(&[("bottler", 1, 1), ("cooking_vat", 2, 3)]), ContractRegistry::bundled());
+    let fluid = the_network(&world).expect("this chain has a pipe run");
+    assert_eq!(fluid.taps[0].machine_tile, (9, 0));
     assert_eq!(
         fluid.segments.iter().map(|s| s.tile).collect::<Vec<_>>(),
         vec![(6, 3), (7, 3), (8, 3), (9, 3)],
@@ -442,11 +509,19 @@ fn the_pipe_run_clears_a_tall_fluid_fed_machine_instead_of_overlapping_it() {
 fn a_machine_straddling_a_chunk_boundary_appears_in_both_chunks() {
     // Five 1x1 stages put stage 5's machine origin at x = 29; a 5-wide
     // machine there covers 29..=33, crossing the x = 32 chunk boundary.
-    let world = World::with_machines(
-        chain_on(&["cooker", "cooker", "cooker", "cooker", "cooker", "sprawler"]),
-        kinds(&[("cooker", 1, 1), ("sprawler", 5, 1)]),
+    let world = reference_chain_with(
+        chain_on(&["bottler", "crusher", "mixer", "packer", "cooking_vat", "aging_rack"]),
+        kinds(&[
+            ("bottler", 1, 1),
+            ("crusher", 1, 1),
+            ("mixer", 1, 1),
+            ("packer", 1, 1),
+            ("cooking_vat", 1, 1),
+            ("aging_rack", 5, 1),
+        ]),
+        ContractRegistry::bundled(),
     );
-    let last = world.chain_layout().last().unwrap().clone();
+    let last = stages(&world).last().unwrap().clone();
     assert_eq!(last.machine_tile, (29, 0));
     assert_eq!(last.machine_footprint.width_tiles, 5);
 
@@ -459,7 +534,7 @@ fn a_machine_straddling_a_chunk_boundary_appears_in_both_chunks() {
 
     for chunk in [(0, 0), (1, 0)] {
         let snapshot = world.chunk_snapshot(chunk);
-        let found = snapshot.machines.iter().find(|m| m.kind == "sprawler");
+        let found = snapshot.machines.iter().find(|m| m.kind == "aging_rack");
         let found = found
             .unwrap_or_else(|| panic!("chunk {chunk:?} must report the straddling machine"));
         // Identical in both, including an origin tile that is outside chunk
@@ -497,11 +572,11 @@ fn a_change_to_a_straddling_machine_dirties_both_of_its_chunks() {
     // boundary; putting it first means it starts working within a few
     // hundred ticks of a single spawned item, which is what makes the dirty
     // marking observable without driving the whole chain.
-    let world_kinds = kinds(&[("sprawler", 30, 1), ("packer", 1, 1)]);
-    let mut world = World::with_machines(chain_on(&["sprawler", "packer"]), world_kinds);
-    assert_eq!(world.chain_layout()[0].machine_tile, (4, 0));
+    let world_kinds = kinds(&[("aging_rack", 30, 1), ("packer", 1, 1)]);
+    let mut world = reference_chain_with(chain_on(&["aging_rack", "packer"]), world_kinds, ContractRegistry::bundled());
+    assert_eq!(stages(&world)[0].machine_tile, (4, 0));
 
-    world.issue_command(PlayerCommand::FillHopper { amount: 4 });
+    world.issue_command(PlayerCommand::FillHopper { amount: 4, tile: None });
 
     let mut seen: HashSet<(i32, i32)> = HashSet::new();
     for _ in 0..400 {
@@ -524,9 +599,10 @@ fn a_change_to_a_straddling_machine_dirties_both_of_its_chunks() {
 fn building_a_world_whose_recipe_names_an_undefined_kind_fails_loudly() {
     // "fermenter" exists in no registry here — construction must stop, not
     // guess a 1x1 footprint and silently mis-place the rest of the chain.
-    World::with_machines(
-        chain_on(&["cooker", "fermenter"]),
-        kinds(&[("cooker", 1, 1)]),
+    reference_chain_with(
+        chain_on(&["bottler", "fermenter"]),
+        kinds(&[("bottler", 1, 1)]),
+        ContractRegistry::bundled(),
     );
 }
 
@@ -535,26 +611,46 @@ fn building_a_world_whose_recipe_names_an_undefined_kind_fails_loudly() {
 /// the same guarantee `fluids.rs` gives `fluid_snapshot_json`.
 #[test]
 fn the_footprint_json_shape_is_what_presentation_is_told_to_expect() {
-    let world = World::with_machines(
-        chain_on(&["cooker", "crusher"]),
-        kinds(&[("cooker", 1, 1), ("crusher", 3, 2)]),
+    let world = reference_chain_with(
+        chain_on(&["bottler", "crusher"]),
+        kinds(&[("bottler", 1, 1), ("crusher", 3, 2)]),
+        ContractRegistry::bundled(),
     );
 
-    // chain_layout_json: one object per stage.
+    // world_layout_json (which replaced chain_layout_json): one object per
+    // placement, machines and belts alike.
     let layout: serde_json::Value =
-        serde_json::from_str(&serde_json::to_string(&world.chain_layout()).unwrap()).unwrap();
-    let stage = &layout[1];
-    assert_eq!(stage["machine_tile"], serde_json::json!([9, 0]));
-    assert_eq!(stage["machine_kind"], "crusher");
+        serde_json::from_str(&serde_json::to_string(&world.world_layout()).unwrap()).unwrap();
+    let machine = layout
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["kind"] == "crusher")
+        .expect("the crusher is a placement");
+    assert_eq!(machine["tile"], serde_json::json!([9, 0]));
+    assert_eq!(machine["direction"], "east");
     assert_eq!(
-        stage["machine_footprint"],
+        machine["footprint"],
         serde_json::json!({ "width_tiles": 3, "height_tiles": 2 })
     );
-    // Pre-existing fields must be untouched, so an existing consumer keeps
-    // working with no changes at all.
-    assert_eq!(stage["belt_start_tile"], serde_json::json!([5, 0]));
-    assert_eq!(stage["belt_length_tiles"], 4);
-    assert_eq!(stage["recipe"], "item2");
+    assert_eq!(machine["recipe"], "item2");
+    assert_eq!(
+        machine["occupies"],
+        serde_json::json!([[9, 0], [10, 0], [11, 0], [9, 1], [10, 1], [11, 1]]),
+        "`occupies` is the rotated rectangle, spelled out so a renderer needn't re-derive it"
+    );
+    // The belts feeding it are placements in their own right now, each one
+    // tile — there is no `belt_start_tile`/`belt_length_tiles` anywhere.
+    for x in 5..=8 {
+        let belt = layout
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["kind"] == "belt" && p["tile"] == serde_json::json!([x, 0]))
+            .unwrap_or_else(|| panic!("a belt tile must stand at ({x}, 0)"));
+        assert_eq!(belt["direction"], "east");
+        assert!(belt["recipe"].is_null(), "a belt runs no recipe");
+    }
 
     // chunk_snapshot_json's machines array.
     let snapshot: serde_json::Value =
@@ -567,6 +663,7 @@ fn the_footprint_json_shape_is_what_presentation_is_told_to_expect() {
         .find(|m| m["kind"] == "crusher")
         .expect("crusher present");
     assert_eq!(machine["tile"], serde_json::json!([9, 0]));
+    assert_eq!(machine["direction"], "east");
     assert_eq!(
         machine["footprint"],
         serde_json::json!({ "width_tiles": 3, "height_tiles": 2 })
@@ -579,6 +676,7 @@ fn the_footprint_json_shape_is_what_presentation_is_told_to_expect() {
             .unwrap();
     assert_eq!(tile["kind"], "machine");
     assert_eq!(tile["machine_kind"], "crusher");
+    assert_eq!(tile["direction"], "east");
     assert_eq!(tile["origin_tile"], serde_json::json!([9, 0]));
     assert_eq!(
         tile["footprint"],

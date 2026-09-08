@@ -32,10 +32,56 @@
 //! 2. A single `TileCoord` plus these two numbers is a complete, unambiguous
 //!    placement. Nothing anywhere needs to know a machine's centre, and no
 //!    layer has to guess which corner a coordinate refers to.
+//!
+//! # Rotation: the same convention, plus a facing (the "Real Placement" epic)
+//!
+//! Until this epic every building faced the same way, because `World` laid
+//! the chain out itself and the chain ran west to east. Now the player
+//! places and rotates things, so a placement is `(origin, footprint,
+//! direction)` and this module owns what those three mean together. It is
+//! stated once, here, and every other layer — collision, adjacency, chunk
+//! snapshots, `query_tile`, and the Godot renderer — refers to it:
+//!
+//! **1. The occupied rectangle is *always* anchored at `origin` as its
+//! minimum-X/minimum-Y corner, whatever the direction.** Rotation never
+//! moves the anchor; it only changes the rectangle's shape and which of its
+//! edges is the inlet. This is what keeps every placement one tile plus two
+//! numbers, and it is why [`Footprint::rotated`] is the whole of the
+//! geometry.
+//!
+//! **2. A quarter turn swaps the extents.** At [`Direction::East`] or
+//! `West` a kind occupies `width_tiles` x `height_tiles`; at `North` or
+//! `South` it occupies `height_tiles` x `width_tiles`, because the machine's
+//! own width now lies along the world's Y axis. A 1x1 kind is therefore
+//! rotation-invariant in shape (though not in facing), and the shipped
+//! content has exactly one kind for which this is observable — the 2x2
+//! cooking vat is *square*, so in fact no shipped kind changes shape when
+//! turned. That is content, not a limit: the mechanism is exercised by
+//! deliberately oblong test kinds, exactly the way ticket 1 of the
+//! "Machines improvement" epic exercised widths no shipped kind had.
+//!
+//! **3. `direction` is the side product LEAVES by.** The rectangle edge on
+//! the direction's side is the **outlet face**
+//! ([`Footprint::outlet_tiles`]); the edge opposite it is the **inlet
+//! face** ([`Footprint::inlet_tiles`]) — the tiles a belt has to point into
+//! to feed this machine. For `East` that is the old convention verbatim:
+//! the inlet face is the minimum-X column (the origin's own column, "the
+//! tile the stage's belt feeds into") and the outlet face is the
+//! maximum-X column, so an east-facing world reproduces the pre-placement
+//! chain tile for tile.
+//!
+//! **4. The two side faces are neither.** A belt pointing into a machine's
+//! flank does not feed it, and a machine never discharges sideways. That is
+//! a deliberate simplification, not an oversight: it is what makes "which
+//! way is this machine facing" a decision the player can actually see the
+//! consequences of, and it costs nothing today (no kind has more than one
+//! input or output stream).
 
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+
+use super::types::{Direction, TileCoord};
 
 /// The schema version this build of sim_core understands. Bump this and
 /// reject/migrate on mismatch (ARCHITECTURE.md §4) whenever [`MachineKind`]'s
@@ -84,6 +130,11 @@ impl Footprint {
     /// Every tile this footprint covers when placed at `origin`, in
     /// row-major order (all of row `origin.y` west to east, then the next
     /// row north). Deterministic order, per ARCHITECTURE.md §3.9.
+    ///
+    /// This is the **unrotated** rectangle — the shape a kind has facing
+    /// [`Direction::East`]. Anything the player placed should go through
+    /// [`Footprint::tiles_facing`] instead, which is this applied to
+    /// [`Footprint::rotated`].
     pub fn tiles(&self, origin: (i32, i32)) -> Vec<(i32, i32)> {
         let mut tiles = Vec::with_capacity((self.width_tiles * self.height_tiles) as usize);
         for dy in 0..self.height_tiles {
@@ -92,6 +143,92 @@ impl Footprint {
             }
         }
         tiles
+    }
+
+    /// This footprint as it actually sits on the grid when facing `dir`: the
+    /// extents swap on a quarter turn, and are unchanged on a half turn.
+    /// See this module's doc, point 2 — this function *is* the whole of the
+    /// rotation geometry, and every other rotation-aware helper below is
+    /// written in terms of it.
+    ///
+    /// `East` (and `West`) return `self` unchanged, which is what makes an
+    /// east-facing world byte-identical to the pre-placement chain.
+    pub fn rotated(&self, dir: Direction) -> Footprint {
+        if dir.is_horizontal() {
+            *self
+        } else {
+            Footprint {
+                width_tiles: self.height_tiles,
+                height_tiles: self.width_tiles,
+            }
+        }
+    }
+
+    /// Every tile this footprint covers when placed at `origin` facing
+    /// `dir` — the rotation-aware [`Footprint::tiles`], and the single
+    /// definition of "which tiles does this placement claim" that collision
+    /// checking, chunk fan-out and `query_tile` all use.
+    pub fn tiles_facing(&self, origin: TileCoord, dir: Direction) -> Vec<TileCoord> {
+        self.rotated(dir).tiles(origin)
+    }
+
+    /// Whether `tile` falls inside this footprint placed at `origin` facing
+    /// `dir` — the rotation-aware [`Footprint::contains`].
+    pub fn contains_facing(&self, origin: TileCoord, dir: Direction, tile: TileCoord) -> bool {
+        self.rotated(dir).contains(origin, tile)
+    }
+
+    /// The tiles of this placement's **outlet face**: the rectangle edge on
+    /// `dir`'s side, which is the side product leaves by (module doc, point
+    /// 3). Deterministic order, minimum coordinate first.
+    ///
+    /// For a 1x1 placement this is always the single tile itself, whatever
+    /// the direction — which is why a belt tile, a hopper and a dock all
+    /// work out of the same two functions a multi-tile machine does.
+    pub fn outlet_tiles(&self, origin: TileCoord, dir: Direction) -> Vec<TileCoord> {
+        self.edge_tiles(origin, dir, dir)
+    }
+
+    /// The tiles of this placement's **inlet face**: the rectangle edge
+    /// opposite `dir`, which is the face a belt has to point into to feed
+    /// this machine (module doc, point 3). Deterministic order, minimum
+    /// coordinate first.
+    pub fn inlet_tiles(&self, origin: TileCoord, dir: Direction) -> Vec<TileCoord> {
+        self.edge_tiles(origin, dir, dir.opposite())
+    }
+
+    /// The tiles immediately *outside* the outlet face — where a receiving
+    /// belt has to stand for this placement to discharge onto it.
+    pub fn outlet_neighbours(&self, origin: TileCoord, dir: Direction) -> Vec<TileCoord> {
+        self.outlet_tiles(origin, dir)
+            .into_iter()
+            .map(|tile| dir.step(tile))
+            .collect()
+    }
+
+    /// The tiles immediately *outside* the inlet face — where a feeding
+    /// belt has to stand, pointing at this placement.
+    pub fn inlet_neighbours(&self, origin: TileCoord, dir: Direction) -> Vec<TileCoord> {
+        let back = dir.opposite();
+        self.inlet_tiles(origin, dir)
+            .into_iter()
+            .map(|tile| back.step(tile))
+            .collect()
+    }
+
+    /// The tiles of the rectangle's `edge` side, once placed at `origin`
+    /// facing `dir`. Split out so the inlet and the outlet are provably the
+    /// same computation on opposite sides rather than two hand-written
+    /// cases that could drift apart.
+    fn edge_tiles(&self, origin: TileCoord, dir: Direction, edge: Direction) -> Vec<TileCoord> {
+        let rect = self.rotated(dir);
+        let (w, h) = (rect.width_tiles, rect.height_tiles);
+        match edge {
+            Direction::East => (0..h).map(|dy| (origin.0 + w - 1, origin.1 + dy)).collect(),
+            Direction::West => (0..h).map(|dy| (origin.0, origin.1 + dy)).collect(),
+            Direction::North => (0..w).map(|dx| (origin.0 + dx, origin.1 + h - 1)).collect(),
+            Direction::South => (0..w).map(|dx| (origin.0 + dx, origin.1)).collect(),
+        }
     }
 }
 
@@ -279,6 +416,122 @@ impl MachineRegistry {
 mod tests {
     use super::*;
     use crate::sim::recipe::RecipeRegistry;
+
+    /// The east-facing case must be the old, pre-rotation geometry exactly —
+    /// this is the regression anchor the whole "Real Placement" epic rests
+    /// on (see [`Direction`]'s own doc).
+    #[test]
+    fn facing_east_is_the_unrotated_footprint_verbatim() {
+        let fp = Footprint {
+            width_tiles: 3,
+            height_tiles: 2,
+        };
+        assert_eq!(fp.rotated(Direction::East), fp);
+        assert_eq!(fp.tiles_facing((4, 0), Direction::East), fp.tiles((4, 0)));
+        // The inlet is the origin's own column and the outlet the far one —
+        // "the origin is the tile the stage's belt feeds into", verbatim.
+        assert_eq!(fp.inlet_tiles((4, 0), Direction::East), vec![(4, 0), (4, 1)]);
+        assert_eq!(fp.outlet_tiles((4, 0), Direction::East), vec![(6, 0), (6, 1)]);
+        assert_eq!(
+            fp.inlet_neighbours((4, 0), Direction::East),
+            vec![(3, 0), (3, 1)]
+        );
+        assert_eq!(
+            fp.outlet_neighbours((4, 0), Direction::East),
+            vec![(7, 0), (7, 1)]
+        );
+    }
+
+    /// A quarter turn swaps the extents and keeps the anchor; a half turn
+    /// keeps the shape and only swaps which edge is the inlet.
+    #[test]
+    fn a_quarter_turn_swaps_the_extents_around_the_same_anchor() {
+        let fp = Footprint {
+            width_tiles: 3,
+            height_tiles: 2,
+        };
+        assert_eq!(
+            fp.rotated(Direction::North),
+            Footprint {
+                width_tiles: 2,
+                height_tiles: 3
+            }
+        );
+        assert_eq!(fp.rotated(Direction::South), fp.rotated(Direction::North));
+        assert_eq!(fp.rotated(Direction::West), fp);
+
+        let tiles = fp.tiles_facing((4, 0), Direction::North);
+        assert_eq!(tiles.len(), 6);
+        assert_eq!(
+            tiles,
+            vec![(4, 0), (5, 0), (4, 1), (5, 1), (4, 2), (5, 2)],
+            "the anchor is still the min-X/min-Y corner"
+        );
+        // Facing north, the outlet is the top row and the inlet the bottom.
+        assert_eq!(fp.outlet_tiles((4, 0), Direction::North), vec![(4, 2), (5, 2)]);
+        assert_eq!(fp.inlet_tiles((4, 0), Direction::North), vec![(4, 0), (5, 0)]);
+        assert_eq!(
+            fp.outlet_neighbours((4, 0), Direction::North),
+            vec![(4, 3), (5, 3)]
+        );
+        assert_eq!(
+            fp.inlet_neighbours((4, 0), Direction::North),
+            vec![(4, -1), (5, -1)]
+        );
+    }
+
+    /// A half turn is where the inlet and outlet swap ends without the
+    /// rectangle moving at all — the case a "rotation is just a mesh
+    /// transform" reading would get wrong.
+    #[test]
+    fn a_half_turn_swaps_the_faces_without_moving_a_tile() {
+        let fp = Footprint {
+            width_tiles: 3,
+            height_tiles: 2,
+        };
+        assert_eq!(
+            fp.tiles_facing((4, 0), Direction::West),
+            fp.tiles_facing((4, 0), Direction::East)
+        );
+        assert_eq!(
+            fp.inlet_tiles((4, 0), Direction::West),
+            fp.outlet_tiles((4, 0), Direction::East)
+        );
+        assert_eq!(
+            fp.outlet_tiles((4, 0), Direction::West),
+            fp.inlet_tiles((4, 0), Direction::East)
+        );
+    }
+
+    /// A 1x1 placement — every belt tile, every pipe tile, the hopper, the
+    /// tank and the dock — has one tile that is simultaneously its whole
+    /// body, its inlet face and its outlet face, whichever way it faces.
+    #[test]
+    fn a_one_by_one_placement_is_its_own_inlet_and_outlet_in_every_direction() {
+        let fp = Footprint::ONE_BY_ONE;
+        for dir in Direction::ALL {
+            assert_eq!(fp.tiles_facing((2, 3), dir), vec![(2, 3)]);
+            assert_eq!(fp.inlet_tiles((2, 3), dir), vec![(2, 3)]);
+            assert_eq!(fp.outlet_tiles((2, 3), dir), vec![(2, 3)]);
+            assert_eq!(fp.outlet_neighbours((2, 3), dir), vec![dir.step((2, 3))]);
+            assert_eq!(
+                fp.inlet_neighbours((2, 3), dir),
+                vec![dir.opposite().step((2, 3))]
+            );
+        }
+    }
+
+    #[test]
+    fn contains_facing_follows_the_rotated_rectangle() {
+        let fp = Footprint {
+            width_tiles: 3,
+            height_tiles: 1,
+        };
+        assert!(fp.contains_facing((0, 0), Direction::East, (2, 0)));
+        assert!(!fp.contains_facing((0, 0), Direction::East, (0, 2)));
+        assert!(fp.contains_facing((0, 0), Direction::North, (0, 2)));
+        assert!(!fp.contains_facing((0, 0), Direction::North, (2, 0)));
+    }
 
     const EXAMPLE: &str = r#"(
         schema_version: 1,

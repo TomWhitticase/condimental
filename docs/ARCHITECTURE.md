@@ -172,6 +172,8 @@ New items, recipes, and machines are added by editing data files, never simulati
 
 ### 3.8 Threading
 
+**Status (2026-09-08):** the "compute connected components once per topology change, not every tick" half of this section is now real — for fluid networks and for belt/machine hand-off links alike — and is the only half that is. `World::recompute_topology` (`sim_core/src/sim/world.rs`) rebuilds the occupancy grid, every hand-off link and every pipe network's connected component whenever a `Place`, `Remove` or `Rotate` command changes what is adjacent to what, and never from `tick`. It is a full single-threaded rebuild rather than an incremental union-find, deliberately: at this project's scale rebuilding a few hundred tiles is cheaper than the bookkeeping an incremental structure needs, and it cannot drift out of sync with the grid the way an incremental one could. The trade flips around milestone 8's "thousands of entities," and that one function is what changes when it does. Everything below — `rayon`, per-network threading, boundary entities — remains unbuilt.
+
 Partition by **connected network**, not by entity type. Concurrency primitive: **`rayon`**, used to run independent partitions across a thread pool — not a hand-rolled thread-per-network model.
 
 - All belt-reader passes (read-only) run in parallel freely.
@@ -358,10 +360,18 @@ GAMEPLAY.md both already have a section like this, this doc didn't.
   ~~The Godot `.vox` import plugin (UI_UX.md §2a) is still open~~ — also
   resolved (2026-09-07), during the visual-polish pass that first created
   voxel assets: pinned in §1a, rationale in UI_UX.md §9.
-- Money and in-flight contract state (GAMEPLAY.md's economy, §6) and the
-  `StaffPools` resource (GAMEPLAY.md §7) don't have a designed ECS shape yet
-  — flagged in GAMEPLAY.md §9, should be resolved before ARCHITECTURE.md §9's
-  milestone 5 (Economy MVP).
+- ~~Money and in-flight contract state (GAMEPLAY.md's economy, §6)~~ —
+  resolved at milestone 5; see GAMEPLAY.md §9. The `StaffPools` resource
+  (GAMEPLAY.md §7) still has no designed ECS shape.
+- ~~Per-tile orientation: nothing in the simulation or on the wire carried a
+  direction, so a belt/pipe run could not turn a corner and a renderer had
+  nowhere to learn that a tile does~~ — **resolved 2026-09-08** by the "Real
+  Placement" epic's ticket 1. `sim::types::Direction` is a real four-way type
+  on every placement, `Footprint` rotates around the same origin corner, and
+  every belt/pipe/machine/building snapshot carries a `direction`. What
+  remains open is only the *presentation* half `world.rs`'s old note also
+  named: rotated voxel models, or one shared per-tile rotation transform
+  applied in Godot (that epic's ticket 2).
 - Spoilage (perishables) and corrosion (acid-handling) likewise have no
   designed component yet (GAMEPLAY.md §9) — needed before their respective
   equipment tiers are implemented, not before milestone 5.

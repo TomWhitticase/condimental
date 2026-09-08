@@ -82,9 +82,11 @@ impl SimBridge {
     /// applies to the `hoppers`, `fluid_tanks` and (since the delivery-dock
     /// ticket) `docks` arrays.
     ///
-    /// **The shipped world spans three chunks since the delivery-dock
-    /// ticket**, not two: the hopper is in (-1, 0), most of the chain is in
-    /// (0, 0), and the dock at x = 35 is in (1, 0).
+    /// **A fresh world is empty**, so every array here is `[]` until the
+    /// player places something. Each `belts` entry is now one *tile* with a
+    /// `direction`, not a multi-tile run (`start_tile`/`length_tiles` are
+    /// gone), and machines, hoppers, tanks, pipes and docks all carry a
+    /// `direction` too.
     #[func]
     fn chunk_snapshot_json(&self, chunk_id: i64) -> GString {
         let snapshot = self.world.chunk_snapshot(decode_chunk_id(chunk_id));
@@ -99,8 +101,13 @@ impl SimBridge {
     /// its origin — the returned `machine` variant carries `machine_kind`,
     /// `footprint` (`{"width_tiles", "height_tiles"}`) and `origin_tile`, so
     /// a hover on the far corner of a multi-tile machine still identifies
-    /// which machine it hit and where that machine starts. See
-    /// `sim::TileSnapshot` for the field-by-field shape.
+    /// which machine it hit and where that machine starts. That is also the
+    /// tile to pass to `remove`/`rotate`: they resolve it the same way.
+    ///
+    /// **Every variant now carries a `direction`** (`"north"`/`"east"`/
+    /// `"south"`/`"west"`), and `footprint` is the kind's *declared*
+    /// rectangle — at `"north"`/`"south"` its two extents swap on the grid.
+    /// See `sim::TileSnapshot` for the field-by-field shape.
     #[func]
     fn query_tile_json(&self, x: i32, y: i32) -> GString {
         match self.world.query_tile((x, y)) {
@@ -113,41 +120,54 @@ impl SimBridge {
     }
 
     /// Applies a player command, JSON-encoded per
-    /// `sim::world::PlayerCommandDto` (e.g.
-    /// `{"type": "fill_hopper", "amount": 16}` or
-    /// `{"type": "purchase", "kind": "belt"}`). Malformed/invalid commands
-    /// are silently ignored, same as an out-of-range command would be.
+    /// `sim::world::PlayerCommandDto`. Malformed/invalid commands are
+    /// silently ignored — and so is every *valid but impossible* one, which
+    /// is this simulation's universal contract: nothing ever half-applies.
     ///
-    /// **`collect_output` NO LONGER EXISTS — this is a breaking wire-format
-    /// change** (the delivery-dock ticket). It used to drain the last
-    /// machine's output buffer into the economy's shared delivery pool on a
-    /// keypress. The chain now ends in a real loading dock which does that
-    /// every tick by itself (see `dock_snapshot_json`), so there is nothing
-    /// for a command to do and keeping it would leave two ways to sell the
-    /// same box. Sending `{"type": "collect_output"}` is now simply a
-    /// no-op — it fails to parse and is ignored like any other malformed
-    /// command, so a stale caller does not crash — but it is dead code:
-    /// `main.gd`'s **C** keybind and the `"C: collect product"` fragment of
-    /// its `ISO_HELP_TEXT`/`FP_HELP_TEXT` legends should both be removed.
+    /// **Three commands are new in the "Real Placement" epic**, and they are
+    /// what a build mode is made of:
     ///
-    /// **`fill_hopper` replaced `spawn_item`** (the "Machines improvement"
-    /// milestone's ticket 3): raw ingredient is now loaded into the chain's
-    /// hopper, which meters it onto the first belt itself, one unit per
-    /// tick, instead of the command teleporting an item onto that belt.
-    /// `amount` may be omitted (`{"type": "fill_hopper"}`) to add the
-    /// simulation's own default load; over-filling is clamped at the
-    /// hopper's capacity, never an error. Read the result through
-    /// `hopper_snapshot_json`.
+    /// - `{"type": "place", "kind": "crusher", "tile": [4, 0],
+    ///   "direction": "east"}` — puts one **owned** unit of `kind` down with
+    ///   its footprint's minimum-X/minimum-Y corner on `tile`. It spends
+    ///   inventory, not money (the money went at `purchase` time), so
+    ///   `shop_snapshot_json`'s `owned` count for that kind drops by one.
+    ///   `direction` is optional and defaults to `"east"`. It does nothing
+    ///   at all when the player owns none of that kind, when the kind is not
+    ///   buildable, or when the rotated footprint would overlap any
+    ///   already-occupied tile.
+    /// - `{"type": "remove", "tile": [4, 0]}` — picks up whatever occupies
+    ///   `tile` and credits one back to that kind's owned count. **Any tile
+    ///   of a multi-tile footprint works** and the whole thing goes, the
+    ///   same "point at the machine, not at its corner" rule
+    ///   `query_tile_json` follows. What it was holding — items on a belt,
+    ///   fluid in a pipe, a batch mid-craft — is destroyed with it.
+    /// - `{"type": "rotate", "tile": [4, 0]}` — turns it 90° clockwise in
+    ///   place (east -> south -> west -> north). Any tile of the footprint
+    ///   works; a no-op if the rotated footprint would collide with a
+    ///   *different* placement. Contents are untouched: rotating a belt does
+    ///   not spill it and rotating a machine does not restart its craft.
     ///
-    /// **`fill_fluid_tank` is its fluid twin** (the "Visual overhaul round
-    /// 2" epic's ticket 1): `{"type": "fill_fluid_tank", "amount": 30}`, or
-    /// `{"type": "fill_fluid_tank"}` for the simulation's own default load,
-    /// adds whole fluid units to the pipe run's tank — which is the run's
-    /// only supply since that ticket removed the always-refilling off-map
-    /// tap. Over-filling is clamped at the tank's capacity, silently, and a
-    /// world with no pipe run (no recipe declares `fluid_inputs`) has no
-    /// tank, so the command simply does nothing there. Read the result
-    /// through `fluid_tank_snapshot_json`.
+    /// Directions are the four strings `"north"`, `"east"`, `"south"`,
+    /// `"west"`, everywhere one is read or written. **`"east"` is `+X` and
+    /// `"north"` is `+Y`**, and east-facing is what reproduces the layout
+    /// the game had before placement existed.
+    ///
+    /// `{"type": "purchase", "kind": "belt", "quantity": 4}` is unchanged
+    /// (`quantity` optional, defaulting to 1) but now means something
+    /// concrete: what it credits is what `place` spends.
+    ///
+    /// **`fill_hopper` and `fill_fluid_tank` gained an optional `tile`**
+    /// naming *which* building to load, since a world may hold several of
+    /// each: `{"type": "fill_hopper", "amount": 16, "tile": [-1, 0]}`.
+    /// Omitting it fills every hopper (or every tank) in the world, which is
+    /// what the pre-placement one-hopper world always did on a keypress — so
+    /// the old wire form still behaves identically. `amount` is still
+    /// optional too, and over-filling is still clamped, silently.
+    ///
+    /// **`collect_output` and `spawn_item` do not exist** and have not for
+    /// two tickets: product leaves the factory through a dock building and
+    /// arrives through a hopper. Sending either is a silent no-op.
     #[func]
     fn issue_command_json(&mut self, command_json: GString) {
         if let Some(cmd) = sim::command_from_json(&command_json.to_string()) {
@@ -155,183 +175,176 @@ impl SimBridge {
         }
     }
 
-    /// The chain's static per-stage layout (belt/machine tile positions,
-    /// which recipe each stage runs), JSON-serialized. Unlike
-    /// `chunk_snapshot_json`, this never changes at runtime — Godot calls it
-    /// once, at startup, to build a `TileMap` sized to however many stages
-    /// `data/recipes.ron` currently defines, instead of hardcoding stage
-    /// geometry client-side (ARCHITECTURE.md §4/§5).
+    /// Everything currently placed in the world, JSON-serialized as an
+    /// array of `sim::PlacementSnapshot` — kind, origin tile, facing,
+    /// declared footprint, the tiles it actually occupies once rotated, and
+    /// (for a machine) the recipe it runs.
     ///
-    /// Each stage also reports `machine_kind` and `machine_footprint`
-    /// (`{"width_tiles", "height_tiles"}`) from `data/machines.ron`:
-    /// `machine_tile` is the footprint's minimum-X/minimum-Y **origin**
-    /// corner — the tile the belt feeds into — and the machine covers
-    /// `width_tiles` x `height_tiles` tiles growing east and north from it.
-    /// `sim::StageLayout` documents the full shape.
+    /// **This replaces `chain_layout_json`, and is a breaking change.** That
+    /// call reported an ordered list of belt-plus-machine *stages*, because
+    /// the world was a fixed chain built from `data/recipes.ron`'s file
+    /// order. Since the "Real Placement" epic there is no chain and no
+    /// stage: the player places every belt tile, machine and building
+    /// individually, so what a renderer needs is "what is on the floor,
+    /// where, facing which way, how big" — for everything, not only the
+    /// recipe-driven half.
+    ///
+    /// ```json
+    /// [
+    ///   {"kind": "hopper", "tile": [-1, 0], "direction": "east",
+    ///    "footprint": {"width_tiles": 1, "height_tiles": 1},
+    ///    "occupies": [[-1, 0]], "recipe": null},
+    ///   {"kind": "belt", "tile": [0, 0], "direction": "east",
+    ///    "footprint": {"width_tiles": 1, "height_tiles": 1},
+    ///    "occupies": [[0, 0]], "recipe": null},
+    ///   {"kind": "cooking_vat", "tile": [14, 0], "direction": "east",
+    ///    "footprint": {"width_tiles": 2, "height_tiles": 2},
+    ///    "occupies": [[14, 0], [15, 0], [14, 1], [15, 1]], "recipe": "ketchup"}
+    /// ]
+    /// ```
+    ///
+    /// **Unlike `chain_layout_json` this is not static** — call it again
+    /// after any `place`, `remove` or `rotate` command, and it is empty for
+    /// a fresh world, which now contains nothing at all.
     #[func]
-    fn chain_layout_json(&self) -> GString {
-        let layout = self.world.chain_layout();
-        let json = serde_json::to_string(&layout).expect("StageLayout list must serialize");
+    fn world_layout_json(&self) -> GString {
+        let layout = self.world.world_layout();
+        let json = serde_json::to_string(&layout).expect("world layout must serialize");
         GString::from(json.as_str())
     }
 
-    /// A JSON-serialized `sim::FluidSnapshot` — the pipe run's fluid type,
-    /// per-segment volume/pressure, and which machine it feeds
-    /// (ARCHITECTURE.md §9 milestone 6, §3.4). Returns an **empty string**
-    /// when the world has no pipe run at all (no recipe in
-    /// `data/recipes.ron` declares `fluid_inputs`), the same "empty string
-    /// means nothing there" convention `query_tile_json` already uses —
-    /// GDScript should check `is_empty()` before parsing.
+    /// Every fluid network in the world, JSON-serialized as an **array** of
+    /// `sim::FluidSnapshot` — each one's fluid, per-segment volume/pressure,
+    /// which machines tap it and which tanks feed it (ARCHITECTURE.md §9
+    /// milestone 6, §3.4). Empty (`[]`) when no pipe is placed.
+    ///
+    /// **Breaking change from `fluid_snapshot_json`**, which returned one
+    /// object or an empty string: a world used to have at most one hardcoded
+    /// pipe run, and now has one network per connected component of placed
+    /// pipe. Per-network the shape also changed — `machine_tile`/
+    /// `machine_recipe`/`units_per_craft`/`inlet_index` became a `taps`
+    /// array (a component may be tapped by several machines or none),
+    /// `tank_tiles` is new, `fluid` is nullable, each segment carries a
+    /// `direction`, and **`segments` is in tile order, not flow order**
+    /// (adjacency is no longer "consecutive entries" — a run can turn).
+    ///
+    /// ```json
+    /// [{"fluid": "vinegar", "total_volume": 27.5, "total_capacity": 40.0,
+    ///   "pressure": 0.6875,
+    ///   "segments": [{"tile": [6, 1], "direction": "east", "volume": 10.0,
+    ///                 "capacity": 10.0, "pressure": 1.0, "is_source": true}],
+    ///   "taps": [{"machine_tile": [9, 0], "machine_recipe": "ketchup_mix",
+    ///             "units_per_craft": 2, "segment_index": 3}],
+    ///   "tank_tiles": [[5, 1]]}]
+    /// ```
     ///
     /// Read this every frame you want to redraw fluid, like
-    /// `economy_snapshot_json` and unlike `chunk_snapshot_json`: fluid
-    /// volume changes on nearly every tick and deliberately does *not*
-    /// dirty its chunk (that would defeat dirty tracking), so
-    /// `dirty_chunk_ids()` will never tell you fluid moved. Pipe
-    /// *geometry* is also carried in `chunk_snapshot_json`'s new `pipes`
-    /// array for a chunk-driven renderer; the live levels are here. The
-    /// full field-by-field shape is documented on `sim::FluidSnapshot`.
-    ///
-    /// **`total_volume`/`total_capacity`/`pressure` cover the pipe run
-    /// alone**, and always have — the tank that supplies it (the "Visual
-    /// overhaul round 2" epic's ticket 1) has its own
-    /// `fluid_tank_snapshot_json`. What changed with that ticket is that
-    /// these can now legitimately read zero: the run has no self-refilling
-    /// source any more, so an unfilled or exhausted tank means dry pipes and
-    /// a stalled machine, which is a state presentation should be able to
-    /// show rather than treat as a bug. `segments[i].is_source` likewise
-    /// still marks the run's supply end, but that segment is now an ordinary
-    /// pipe tile (the one the tank connects to) rather than an always-full
-    /// tap.
+    /// `economy_snapshot_json` and unlike `chunk_snapshot_json`: fluid volume
+    /// changes on nearly every tick and deliberately does *not* dirty its
+    /// chunk, so `dirty_chunk_ids()` will never tell you fluid moved. Pipe
+    /// *geometry* is also carried in `chunk_snapshot_json`'s `pipes` array
+    /// for a chunk-driven renderer; the live levels are here.
     #[func]
-    fn fluid_snapshot_json(&self) -> GString {
-        match self.world.fluid_snapshot() {
-            Some(snapshot) => {
-                let json = serde_json::to_string(&snapshot).expect("FluidSnapshot must serialize");
-                GString::from(json.as_str())
-            }
-            None => GString::new(),
-        }
-    }
-
-    /// A JSON-serialized `sim::HopperSnapshot` — where the chain's raw-
-    /// ingredient hopper stands, which item it holds, and how full it is
-    /// (the "Machines improvement" milestone's ticket 3):
-    ///
-    /// ```json
-    /// {"tile": [-1, 0], "kind": "hopper",
-    ///  "footprint": {"width_tiles": 1, "height_tiles": 1},
-    ///  "item": "tomato", "quantity": 12, "capacity": 64, "fill": 0.1875,
-    ///  "belt_tile": [0, 0]}
-    /// ```
-    ///
-    /// Always returns a value (every world has exactly one hopper), so
-    /// unlike `fluid_snapshot_json` there is no empty-string case. Poll it
-    /// whenever the fill UI redraws, like `economy_snapshot_json` — though
-    /// unlike fluid, a hopper's level also dirties its chunk when it
-    /// changes, and `chunk_snapshot_json` carries the identical object in a
-    /// new `hoppers` array, so a chunk-driven renderer works too. Note the
-    /// shipped hopper sits at x = -1, i.e. in chunk (-1, 0) rather than the
-    /// (0, 0) that holds the rest of the chain. `sim::HopperSnapshot`
-    /// documents the full shape; `query_tile_json` answers with a `"hopper"`
-    /// tile carrying the same fill/capacity for hover.
-    #[func]
-    fn hopper_snapshot_json(&self) -> GString {
-        let snapshot = self.world.hopper_snapshot();
-        let json = serde_json::to_string(&snapshot).expect("HopperSnapshot must serialize");
+    fn fluid_snapshots_json(&self) -> GString {
+        let snapshots = self.world.fluid_snapshots();
+        let json = serde_json::to_string(&snapshots).expect("FluidSnapshot list must serialize");
         GString::from(json.as_str())
     }
 
-    /// A JSON-serialized `sim::FluidTankSnapshot` — where the pipe run's
-    /// fluid tank stands, which fluid it holds, and how full it is (the
-    /// "Visual overhaul round 2" epic's ticket 1):
+    /// Every raw-ingredient hopper in the world, JSON-serialized as an
+    /// **array** of `sim::HopperSnapshot` — where each stands, which way it
+    /// faces, what it holds and how full it is:
     ///
     /// ```json
-    /// {"tile": [5, 1], "kind": "fluid_tank",
-    ///  "footprint": {"width_tiles": 1, "height_tiles": 1},
-    ///  "fluid": "vinegar", "quantity": 30.0, "capacity": 120.0,
-    ///  "fill": 0.25, "pipe_tile": [6, 1]}
+    /// [{"tile": [-1, 0], "kind": "hopper", "direction": "east",
+    ///   "footprint": {"width_tiles": 1, "height_tiles": 1},
+    ///   "item": "tomato", "quantity": 12, "capacity": 64, "fill": 0.1875,
+    ///   "belt_tile": [0, 0]}]
     /// ```
     ///
-    /// Field-for-field the fluid twin of `hopper_snapshot_json`: `fluid`
-    /// stands where `item` does, `pipe_tile` where `belt_tile` does, and
-    /// `tile`/`kind`/`footprint`/`fill` mean exactly what they mean there —
-    /// so a scene can drive both from one code path. The one shape
-    /// difference: `quantity`/`capacity` are **floating-point**, not
-    /// integers, because a fluid volume is continuous (pressure
-    /// equalization moves partial units around).
+    /// **Breaking change from `hopper_snapshot_json`**, which returned one
+    /// object and always had one to return. A hopper is now an ordinary
+    /// placed building, so a world may have none (a fresh one does) or
+    /// several, each filled and unloading independently. `direction` is new,
+    /// and **`belt_tile` is nullable** — it is whichever belt this hopper
+    /// currently discharges onto, and a hopper facing empty ground has none.
     ///
-    /// Returns an **empty string** when the world has no pipe run at all
-    /// (no recipe in `data/recipes.ron` declares `fluid_inputs`, so there is
-    /// nothing for a tank to supply) — the same "empty string means nothing
-    /// there" convention `fluid_snapshot_json` and `query_tile_json` use,
-    /// and the one way this differs from `hopper_snapshot_json`, which
-    /// always answers because every world has a hopper. GDScript should
-    /// check `is_empty()` before parsing.
-    ///
-    /// **Poll this every frame you want to redraw the tank**, like
-    /// `fluid_snapshot_json` and unlike `chunk_snapshot_json`: the tank is
-    /// drained by the same equalization pass the pipe run is, which
-    /// deliberately does not dirty its chunk, so `dirty_chunk_ids()` will
-    /// never tell you the level fell. Only a `fill_fluid_tank` command
-    /// dirties it. `chunk_snapshot_json` carries the identical object in a
-    /// new `fluid_tanks` array for a chunk-driven renderer to place the
-    /// geometry from, and `query_tile_json` answers with a `"fluid_tank"`
-    /// tile carrying the same fill/capacity for hover.
-    /// `sim::FluidTankSnapshot` documents the full shape.
+    /// Poll it whenever the fill UI redraws, like `economy_snapshot_json` —
+    /// though unlike fluid, a hopper's level also dirties its chunk when it
+    /// changes, and `chunk_snapshot_json` carries the identical objects in
+    /// its `hoppers` array, so a chunk-driven renderer works too.
+    /// `query_tile_json` answers with a `"hopper"` tile carrying the same
+    /// fill/capacity for hover.
     #[func]
-    fn fluid_tank_snapshot_json(&self) -> GString {
-        match self.world.fluid_tank_snapshot() {
-            Some(snapshot) => {
-                let json =
-                    serde_json::to_string(&snapshot).expect("FluidTankSnapshot must serialize");
-                GString::from(json.as_str())
-            }
-            None => GString::new(),
-        }
+    fn hopper_snapshots_json(&self) -> GString {
+        let snapshots = self.world.hopper_snapshots();
+        let json = serde_json::to_string(&snapshots).expect("HopperSnapshot list must serialize");
+        GString::from(json.as_str())
     }
 
-    /// A JSON-serialized `sim::DockSnapshot` — where the chain's delivery
-    /// dock stands, which belt runs into it, and how much it has shipped
-    /// (the delivery-dock ticket):
+    /// Every fluid tank in the world, JSON-serialized as an **array** of
+    /// `sim::FluidTankSnapshot`:
     ///
     /// ```json
-    /// {"tile": [35, 0], "kind": "dock",
-    ///  "footprint": {"width_tiles": 1, "height_tiles": 1},
-    ///  "belt_start_tile": [31, 0], "belt_length_tiles": 4,
-    ///  "contents": [], "capacity_per_item": 32, "shipped_total": 37}
+    /// [{"tile": [5, 1], "kind": "fluid_tank", "direction": "east",
+    ///   "footprint": {"width_tiles": 1, "height_tiles": 1},
+    ///   "fluid": "vinegar", "quantity": 30.0, "capacity": 120.0,
+    ///   "fill": 0.25, "pipe_tile": [6, 1]}]
     /// ```
     ///
-    /// The exit-end counterpart of `hopper_snapshot_json`, and it always
-    /// returns a value for the same reason (every world has exactly one
-    /// dock) — there is no empty-string case. Two shape differences from the
-    /// hopper's are deliberate:
+    /// Field-for-field the fluid twin of `hopper_snapshots_json`: `fluid`
+    /// stands where `item` does and `pipe_tile` where `belt_tile` does, so a
+    /// scene can drive both from one code path. Two shape differences:
+    /// `quantity`/`capacity` are **floating-point** (a fluid volume is
+    /// continuous), and **`fluid` is nullable** — a tank's fluid is decided
+    /// by whichever machine taps the network it discharges into, so a tank
+    /// connected to nothing reports `null`.
     ///
-    /// 1. **No `fill` field.** The dock ships everything it receives into
-    ///    the shared delivery pool in the same tick, so its own level is
-    ///    always zero between ticks and `contents` is normally `[]`. **Draw
-    ///    a pallet stack from `economy_snapshot_json`'s `delivery_stock`
-    ///    instead** — that is the one shared "what's on the dock" figure
-    ///    every contract settles against.
-    /// 2. **`contents` is a list**, not one item plus a count: a hopper
-    ///    holds one item id fixed by `data/recipes.ron`, a dock accepts
-    ///    whatever the line delivers.
-    ///
-    /// `shipped_total` is the line's cumulative lifetime output, and is the
-    /// number worth putting on a hover ("Loading dock — 37 shipped").
-    /// `belt_start_tile`/`belt_length_tiles` describe the one belt in the
-    /// world that appears in no `chain_layout_json` stage (it runs from the
-    /// last machine to a building rather than to another stage), so a scene
-    /// can draw it without hunting through chunk snapshots.
-    ///
-    /// `chunk_snapshot_json` carries the identical object in a new `docks`
-    /// array for a chunk-driven renderer, and `query_tile_json` answers with
-    /// a `"dock"` tile carrying the same `contents`/`shipped_total` for
-    /// hover. `sim::DockSnapshot` documents the full shape.
+    /// **Poll this every frame you want to redraw a tank**, like
+    /// `fluid_snapshots_json`: a tank is drained by the same equalization
+    /// pass the pipes are, which deliberately does not dirty its chunk, so
+    /// `dirty_chunk_ids()` will never tell you the level fell. Only a
+    /// `fill_fluid_tank` command dirties it.
     #[func]
-    fn dock_snapshot_json(&self) -> GString {
-        let snapshot = self.world.dock_snapshot();
-        let json = serde_json::to_string(&snapshot).expect("DockSnapshot must serialize");
+    fn fluid_tank_snapshots_json(&self) -> GString {
+        let snapshots = self.world.fluid_tank_snapshots();
+        let json =
+            serde_json::to_string(&snapshots).expect("FluidTankSnapshot list must serialize");
+        GString::from(json.as_str())
+    }
+
+    /// Every delivery dock in the world, JSON-serialized as an **array** of
+    /// `sim::DockSnapshot`:
+    ///
+    /// ```json
+    /// [{"tile": [35, 0], "kind": "dock", "direction": "east",
+    ///   "footprint": {"width_tiles": 1, "height_tiles": 1},
+    ///   "belt_tile": [34, 0], "contents": [], "capacity_per_item": 32,
+    ///   "shipped_total": 37}]
+    /// ```
+    ///
+    /// The exit-end counterpart of `hopper_snapshots_json`, and an array for
+    /// the same reason: a dock is an ordinary placed building now, so a
+    /// world may have none or several — and several docks all ship into the
+    /// one shared delivery pool, so "what is waiting to be sold" is still
+    /// exactly one number. Two shape notes that have not changed:
+    ///
+    /// 1. **No `fill` field.** A dock ships everything it receives into the
+    ///    shared pool in the same tick, so its own level is always zero
+    ///    between ticks and `contents` is normally `[]`. **Draw a pallet
+    ///    stack from `economy_snapshot_json`'s `delivery_stock` instead.**
+    /// 2. **`contents` is a list**, not one item plus a count: a dock
+    ///    accepts whatever the line delivers.
+    ///
+    /// **`belt_tile` replaces `belt_start_tile`/`belt_length_tiles`**: a dock
+    /// no longer owns a belt (it used to be built with one), so what is
+    /// reported is simply which belt tile currently feeds it, or `null`.
+    /// `shipped_total` is that dock's own lifetime output — the number worth
+    /// putting on a hover ("Loading dock — 37 shipped").
+    #[func]
+    fn dock_snapshots_json(&self) -> GString {
+        let snapshots = self.world.dock_snapshots();
+        let json = serde_json::to_string(&snapshots).expect("DockSnapshot list must serialize");
         GString::from(json.as_str())
     }
 
@@ -438,11 +451,13 @@ impl SimBridge {
     /// other command has); re-read this snapshot to see the result either
     /// way.
     ///
-    /// **What `owned` does not mean yet:** nothing in the simulation
-    /// consumes an owned count. The shipped chain is still built
-    /// unconditionally at tick 0 whether or not anything was bought, so a
-    /// count here is a purchase ledger, not a statement about what is on the
-    /// factory floor. Spending it on real placement is a later epic.
+    /// **What `owned` means, as of the "Real Placement" epic:** how many of
+    /// that kind the player has bought and **not yet placed**. It is real
+    /// inventory now, not a ledger of past purchases — `place` spends one
+    /// and `remove` credits one back — so a build menu should offer to place
+    /// a kind exactly when `owned > 0`, and offer to buy one when it isn't.
+    /// A world starts with nothing placed and nothing owned, and
+    /// `sim::STARTING_MONEY` in the bank.
     #[func]
     fn shop_snapshot_json(&self) -> GString {
         let snapshot = self.world.shop_snapshot();

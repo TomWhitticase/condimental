@@ -13,16 +13,17 @@
 // This file is the "money buys equipment" half of that sentence made
 // concrete — a catalog of every buildable kind together with its price in
 // the same money `Economy` already counts. Buying a kind credits one to the
-// player's owned count of it; nothing more yet.
+// player's owned count of it, and placing one spends it.
 //
-// WHAT IT IS *NOT* FOR YET ("Shop & Inventory" epic, ticket 1 of 2). Today
-// every machine in the chain still exists unconditionally from tick 0 —
-// `World::new` builds the whole fixed line whether or not anything has been
-// purchased. This ticket is deliberately additive: the shop, the prices and
-// the owned counts are real and fully simulated, but nothing consumes an
-// owned count yet. A later epic rewires placement to actually spend this
-// inventory; until then a purchase is a real money transaction whose result
-// is a number in `shop_snapshot_json`, not a machine appearing on the floor.
+// WHAT AN OWNED COUNT MEANS (updated by the "Real Placement" epic). When
+// this file first landed, buying something credited a count nothing read:
+// the whole production line existed unconditionally from tick 0 whether or
+// not anything had been purchased. That is no longer true. `World::new` now
+// builds *nothing*, and every belt tile, pipe tile, machine and building in
+// a world is something a `purchase` paid for and a `place` put down — so an
+// owned count is unplaced inventory, `place` spends one and `remove` credits
+// one back. GAMEPLAY.md §4's "equipment purchases *are* the tech tree" is a
+// statement about the simulation now, not an intention.
 //
 // KIND IDS. An `id` here is a *buildable kind* id, which is a superset of
 // `data/machines.ron`'s machine kinds: every kind that file defines appears
@@ -46,9 +47,14 @@
 //      runs the chain's longest process is the most expensive thing here;
 //      the crusher, the simplest machine on the line, is the cheapest.
 //   3. Everything is scaled against the one economic number that already
-//      exists: `economy.rs`'s hardcoded contract pays 50 per delivery. So a
-//      belt tile is small change, a mid-chain machine is a couple of
+//      exists: the shipped board's middle contract pays 50 per delivery. So
+//      a belt tile is small change, a mid-chain machine is a couple of
 //      deliveries, and the cooking vat is a genuine save-up.
+//   4. A new game starts with `economy.rs`'s STARTING_MONEY (200), which
+//      against these prices buys a hopper, a first machine and a handful of
+//      belt — a first move, deliberately not a factory. The two numbers are
+//      balanced against each other, so changing prices here means revisiting
+//      that constant.
 //
 // Order matters only for presentation: the loader preserves this file's
 // order and `shop_snapshot_json` reports the catalog in it, so this is the

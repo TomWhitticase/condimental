@@ -64,9 +64,24 @@
 //! as belt-borne mass, and leaves it dissolved in the product.
 
 use sim_core::sim::{
-    BeltSnapshot, FLUID_TANK_CAPACITY, MachineSnapshot, PlayerCommand, RecipeRegistry,
-    TileSnapshot, World,
+    BeltSnapshot, DockSnapshot, FLUID_TANK_CAPACITY, HopperSnapshot, MachineSnapshot,
+    PlayerCommand, RecipeRegistry, TileSnapshot, World, reference_chain,
 };
+
+/// The reference chain's one hopper and one dock. Several of each are a real
+/// supported thing since the "Real Placement" epic (`placement.rs` covers
+/// that); this file's accounting is about the shipped single-line factory.
+fn the_hopper(world: &World) -> HopperSnapshot {
+    let mut hoppers = world.hopper_snapshots();
+    assert_eq!(hoppers.len(), 1, "the reference chain places one hopper");
+    hoppers.remove(0)
+}
+
+fn the_dock(world: &World) -> DockSnapshot {
+    let mut docks = world.dock_snapshots();
+    assert_eq!(docks.len(), 1, "the reference chain places one dock");
+    docks.remove(0)
+}
 
 fn recipes() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
@@ -128,7 +143,7 @@ fn total_tomato_equivalent(world: &World, recipes: &RecipeRegistry) -> u32 {
     // doc), but counting it is what makes this accounting independent of
     // that decision: if the drain were ever gated, mass parked on the dock
     // would still be accounted for rather than reading as a leak.
-    for (item, qty) in &world.dock_snapshot().contents {
+    for (item, qty) in &the_dock(world).contents {
         total += tomato_value(item, recipes) * qty;
     }
 
@@ -137,7 +152,7 @@ fn total_tomato_equivalent(world: &World, recipes: &RecipeRegistry) -> u32 {
     // loaded but not yet consumed. Counting it is what makes conservation
     // hold from the instant of the fill command rather than only once the
     // hopper has finished unloading.
-    let hopper = world.hopper_snapshot();
+    let hopper = the_hopper(world);
     total += tomato_value(&hopper.item, recipes) * hopper.quantity;
 
     for belt in &belts {
@@ -216,7 +231,7 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
     let final_item = final_recipe.outputs[0].0.clone();
     let final_item_value = tomato_value(&final_item, &registry);
 
-    let mut world = World::new(recipes());
+    let mut world = reference_chain(recipes());
 
     // Ticket 3: one fill command loads the hopper, and the hopper meters
     // those tomatoes onto the first belt over the following ticks — nothing
@@ -229,11 +244,13 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
     // contributes nothing to the mass accounting below.
     world.issue_command(PlayerCommand::FillFluidTank {
         amount: FLUID_TANK_CAPACITY,
+        tile: None,
     });
 
     let before_fill = total_tomato_equivalent(&world, &registry);
     world.issue_command(PlayerCommand::FillHopper {
         amount: TOMATOES_PER_CRAFT,
+        tile: None,
     });
     let loaded_tomatoes = total_tomato_equivalent(&world, &registry) - before_fill;
     assert_eq!(
@@ -241,7 +258,7 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
         "an empty hopper must accept a full crafts' worth of raw ingredient"
     );
     assert_eq!(
-        world.hopper_snapshot().quantity,
+        the_hopper(&world).quantity,
         TOMATOES_PER_CRAFT,
         "the loaded tomatoes must be sitting in the hopper, not already on a belt"
     );
@@ -254,7 +271,7 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
     for tick_i in 0..20_000u32 {
         world.tick();
 
-        shipped = world.dock_snapshot().shipped_total;
+        shipped = the_dock(&world).shipped_total;
         assert_conserved(
             &world,
             &registry,
@@ -270,7 +287,7 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
     }
 
     assert_eq!(
-        world.hopper_snapshot().quantity,
+        the_hopper(&world).quantity,
         0,
         "the hopper should have unloaded all {TOMATOES_PER_CRAFT} tomatoes onto the belt"
     );
@@ -289,7 +306,7 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
         "the shipped box must be in the shared delivery pool, not held on the dock"
     );
     assert!(
-        world.dock_snapshot().contents.is_empty(),
+        the_dock(&world).contents.is_empty(),
         "the dock is a pass-through: it must be empty again the tick it shipped"
     );
     assert_eq!(
@@ -304,12 +321,12 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
 /// manufacturing a delivery out of an empty buffer.
 #[test]
 fn an_unfed_chain_ships_nothing_and_the_dock_stays_empty() {
-    let mut world = World::new(recipes());
+    let mut world = reference_chain(recipes());
     for _ in 0..500 {
         world.tick();
     }
 
-    let dock = world.dock_snapshot();
+    let dock = the_dock(&world);
     assert_eq!(dock.shipped_total, 0, "nothing was ever produced to ship");
     assert!(dock.contents.is_empty());
     assert!(
@@ -346,50 +363,62 @@ fn the_removed_collect_output_command_no_longer_parses() {
 fn query_tile_reflects_every_stage_belt_and_machine_position() {
     let registry = recipes();
     let ordered = registry.ordered().to_vec();
-    let mut world = World::new(registry);
-    world.issue_command(PlayerCommand::FillHopper { amount: 4 });
+    let mut world = reference_chain(registry);
+    world.issue_command(PlayerCommand::FillHopper { amount: 4, tile: None });
     world.tick();
 
-    let layout = world.chain_layout();
-    assert_eq!(layout.len(), ordered.len(), "one stage per recipe in the data file");
+    // `world_layout` replaced `chain_layout`: it reports every placement, so
+    // the machines are found by filtering rather than by stage index. They
+    // still come out in recipes.ron order because that is the order the
+    // reference chain lays them out in, west to east.
+    let layout = world.world_layout();
+    let machines: Vec<_> = layout.iter().filter(|p| p.recipe.is_some()).collect();
+    assert_eq!(
+        machines.len(),
+        ordered.len(),
+        "one machine per recipe in the data file"
+    );
 
-    for (stage, recipe) in layout.iter().zip(ordered.iter()) {
-        assert_eq!(stage.recipe, recipe.id, "stage order must follow recipes.ron order");
+    for (placement, recipe) in machines.iter().zip(ordered.iter()) {
         assert_eq!(
-            stage.machine_kind, recipe.machine,
-            "each stage must run on the machine kind its recipe names"
+            placement.recipe.as_deref(),
+            Some(recipe.id.as_str()),
+            "machine order must follow recipes.ron order"
+        );
+        assert_eq!(
+            placement.kind, recipe.machine,
+            "each machine must run the recipe its kind names"
         );
 
-        for dx in 0..stage.belt_length_tiles {
-            let tile = (stage.belt_start_tile.0 + dx, stage.belt_start_tile.1);
+        // Every tile the machine covers, not just its origin — with the
+        // cooking vat genuinely 2x2 (data/machines.ron), this loop walks
+        // four real tiles for that stage and one for each of the others.
+        for &tile in &placement.occupies {
             match world.query_tile(tile) {
-                Some(TileSnapshot::Belt { .. }) => {}
-                other => panic!("expected belt at {tile:?}, got {other:?}"),
+                Some(TileSnapshot::Machine {
+                    recipe: found,
+                    origin_tile,
+                    machine_kind,
+                    ..
+                }) => {
+                    assert_eq!(found, recipe.id, "at {tile:?}");
+                    assert_eq!(machine_kind, recipe.machine, "at {tile:?}");
+                    assert_eq!(
+                        origin_tile, placement.tile,
+                        "every tile of a machine must report the same origin ({tile:?})"
+                    );
+                }
+                other => panic!("expected machine at {tile:?}, got {other:?}"),
             }
         }
 
-        // Every tile the machine covers, not just its origin — with the
-        // cooking vat now genuinely 2x2 (data/machines.ron), this loop walks
-        // four real tiles for that stage and one for each of the others.
-        for dy in 0..stage.machine_footprint.height_tiles {
-            for dx in 0..stage.machine_footprint.width_tiles {
-                let tile = (stage.machine_tile.0 + dx, stage.machine_tile.1 + dy);
-                match world.query_tile(tile) {
-                    Some(TileSnapshot::Machine {
-                        recipe: found,
-                        origin_tile,
-                        machine_kind,
-                        ..
-                    }) => {
-                        assert_eq!(found, recipe.id, "at {tile:?}");
-                        assert_eq!(machine_kind, recipe.machine, "at {tile:?}");
-                        assert_eq!(
-                            origin_tile, stage.machine_tile,
-                            "every tile of a machine must report the same origin ({tile:?})"
-                        );
-                    }
-                    other => panic!("expected machine at {tile:?}, got {other:?}"),
-                }
+        // The four belt tiles feeding it — one placement each now, where the
+        // pre-placement chain built a single four-tile segment.
+        for dx in 1..=4 {
+            let tile = (placement.tile.0 - dx, placement.tile.1);
+            match world.query_tile(tile) {
+                Some(TileSnapshot::Belt { .. }) => {}
+                other => panic!("expected belt at {tile:?}, got {other:?}"),
             }
         }
     }
@@ -399,8 +428,8 @@ fn query_tile_reflects_every_stage_belt_and_machine_position() {
 
 #[test]
 fn dirty_chunks_report_touched_chunks_and_clear_between_ticks() {
-    let mut world = World::new(recipes());
-    world.issue_command(PlayerCommand::FillHopper { amount: 4 });
+    let mut world = reference_chain(recipes());
+    world.issue_command(PlayerCommand::FillHopper { amount: 4, tile: None });
     world.tick();
     // The six recipe-driven stages run x = 0..30 and still fit inside chunk
     // (0,0) (ARCHITECTURE.md §3.1's 32x32 chunks); the hopper sits west of
@@ -409,13 +438,17 @@ fn dirty_chunks_report_touched_chunks_and_clear_between_ticks() {
     // hopper's own fill level. Nothing at the dock end has moved yet, so
     // its chunk is NOT dirty — dirty tracking is per-tick, unlike
     // `all_chunks`.
-    assert_eq!(world.dirty_chunks(), &[(0, 0), (-1, 0)]);
+    // The order is the order the tick's passes touch them, which is
+    // deterministic (every pass walks a tile-ordered list) — the hopper's
+    // own chunk is marked when it unloads, then the belt's when the tomato
+    // lands.
+    assert_eq!(world.dirty_chunks(), &[(-1, 0), (0, 0)]);
     // `all_chunks` is the whole world, and since the delivery-dock ticket
     // that is three chunks: the dock stands at x = 35, past the x = 32
     // boundary, and its inbound belt straddles it.
     assert_eq!(
         world.all_chunks(),
-        vec![(0, 0), (-1, 0), (1, 0)],
+        vec![(-1, 0), (0, 0), (1, 0)],
         "the hopper's chunk and the dock's chunk must both be reported, or a renderer \
          never draws either end of the line"
     );
@@ -423,7 +456,10 @@ fn dirty_chunks_report_touched_chunks_and_clear_between_ticks() {
     // A tick where absolutely nothing moves/changes reports no dirty
     // chunks — every machine is idle without input, every belt is empty,
     // and an unfilled hopper has nothing to unload.
-    let mut idle_world = World::new(recipes());
+    let mut idle_world = reference_chain(recipes());
+    // The first tick clears the dirt left by *building* the chain — placing
+    // anything dirties its chunks, and the fixture places forty-odd things.
+    idle_world.tick();
     idle_world.tick();
     assert!(idle_world.dirty_chunks().is_empty());
 }

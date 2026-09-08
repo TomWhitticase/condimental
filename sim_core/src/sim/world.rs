@@ -1,277 +1,354 @@
-//! The simulation `World`: an `hecs::World` (ARCHITECTURE.md §1/§3.8) tying
-//! together belt/machine/recipe content into milestone 4's "first full
-//! chain" (ARCHITECTURE.md §9 item 4) — a straight-line production line of
-//! `N` `(BeltSegment -> Machine)` stages, one per recipe in `recipes.ron`.
+//! The simulation `World`: an `hecs::World` (ARCHITECTURE.md §1/§3.8) of
+//! **placed** things — belts, pipes, machines and buffer buildings the
+//! player bought and put down — plus the topology derived from where they
+//! happen to stand.
 //!
-//! **Chain topology is derived entirely from `recipes.ron`'s list order**
-//! (`RecipeRegistry::ordered`), not from any Rust-side layout description:
-//! stage `i` runs `ordered()[i]`, its belt feeds its machine, and its
-//! machine's finished output is handed to stage `i + 1`'s belt. This is what
-//! makes "add a processing step" a pure data-file edit (ARCHITECTURE.md
-//! §3.6/§10, CLAUDE.md's project convention) — appending a `Recipe` to the
-//! file whose input item matches the previous entry's output item adds a
-//! pipeline stage with zero Rust changes. `validate_chain` below enforces
-//! that linkage at construction time (a clear panic, not a silently-stuck
-//! item) exactly the way a compile error would for a Rust mistake.
+//! # What the "Real Placement" epic changed, and why
 //!
-//! This is a deliberately narrow milestone-4 assumption, not a general
-//! factory-layout engine: every recipe in the file is assumed to belong to
-//! *one* straight chain, and each recipe (besides the first) is assumed to
-//! consume exactly one unit of the previous stage's single output item.
-//! Branching/multiple independent chains will need an explicit topology
-//! description in data rather than "one stage per recipe in file order" —
-//! flagged here rather than solved now, since nothing before milestone 8/9
-//! (Scale-up, Logistics expansion) needs more than one line (CLAUDE.md:
-//! "don't design for hypothetical future requirements").
+//! Until this epic `World::new` *built a factory*. It read
+//! `data/recipes.ron`'s list order, laid one `(belt -> machine)` stage per
+//! recipe west to east, stood a hopper at the head, a tank beside the pipe
+//! run and a dock at the tail, and linked every stage to the next by index
+//! at construction time. Everything existed unconditionally from tick 0, in
+//! exactly one arrangement, facing exactly one way. The player could fill
+//! the two buffers and buy equipment whose owned count nothing ever read
+//! (the "Shop & Inventory" epic's ticket 1 built that ledger and said, in
+//! as many words, that wiring it to real placement was a later epic).
 //!
-//! **Corners, specifically: still deliberately out of scope, checked
-//! explicitly during the visual-overhaul pass rather than left unexamined.**
-//! Every belt tile and every pipe tile only ever runs along +X (see
-//! `belt.rs` and `fluid.rs`'s pipe-run construction above) — there is no
-//! `direction` field anywhere in a `BeltSnapshot`/`PipeSnapshot`, so a
-//! renderer has nowhere to even learn that a tile turns. Adding a real
-//! corner would need, in order: (1) a per-tile orientation in the sim's own
-//! snapshots (the straight-line assumption this module's doc already names
-//! runs deep enough that this is a topology change, not a rendering one);
-//! (2) rotated belt/pipe voxel models or a shared rotation transform Godot
-//! applies per tile (the voxel side is comparatively cheap — `belt()` and
-//! `pipe_body()` in `assets/voxels/generators/assets.rs` already run their
-//! frames/bores flush to all four tile edges, which is what any rotation
-//! would pivot around). Building either half now, with no corner the sim
-//! ever actually places, would be untested speculative surface — exactly
-//! what CLAUDE.md's "don't design for hypothetical future requirements"
-//! warns against — so this stays documented-and-deferred rather than
-//! half-built, until a milestone actually needs a chain that turns.
+//! **This is that wiring. `World::new` now builds nothing at all:** an empty
+//! grid, an empty adjacency graph, and [`Economy::money`] seeded from
+//! [`STARTING_MONEY`]. Everything in a world is something a
+//! [`PlayerCommand::Purchase`] paid for and a [`PlayerCommand::Place`] put
+//! down, and both [`PlayerCommand::Rotate`] and [`PlayerCommand::Remove`]
+//! can change it afterwards. GAMEPLAY.md §4's "equipment purchases *are*
+//! the tech tree" is a real statement about the simulation for the first
+//! time.
 //!
-//! The "Visual overhaul round 2" epic's ticket 3 did NOT change any of the
-//! above, and one clarification keeps it accurate. That ticket gave the belt
-//! two junction-adjacent variants (`belt_inlet`/`belt_outlet`) which the
-//! renderer picks per tile — but it picks them from what a tile is NEXT TO
-//! (whether the neighbouring tile along that stage's own travel direction is
-//! covered by a machine footprint, all of which is already on the wire in
-//! `chain_layout()`), never from which way a tile POINTS, because that is
-//! still not a thing any snapshot carries. Those two variants are authored
-//! for a +X run only, exactly like every belt model before them, and
-//! `main.gd`'s `_belt_asset_for` falls back to the plain tile for any other
-//! direction rather than drawing a wrong-facing end cap. So point (2) above
-//! now covers three belt models rather than one; the cost of a rotation went
-//! up slightly, and the blocker is unchanged and still point (1).
+//! Three things follow from that, and they are the whole of this module's
+//! new shape:
 //!
-//! **Machine size is data, not a constant** (the "Machines improvement"
-//! milestone). Each stage's machine occupies a rectangle of tiles given by
-//! its kind's [`Footprint`] in `data/machines.ron`, anchored at an origin
-//! tile that is the rectangle's minimum-X/minimum-Y corner and also the tile
-//! the stage's belt feeds into — see [`super::machines`]'s module doc, which
-//! is the single statement of that convention. The chain is laid out by
-//! *accumulating* those widths (belt tiles, then this machine's full width,
-//! then the next stage begins immediately after), not by multiplying a fixed
-//! per-stage span, so making a kind wider pushes every downstream stage east
-//! by exactly the extra tiles. Ticket 1 introduced the arithmetic with every
-//! kind still 1x1 (where it reduces to the old fixed span exactly, moving no
-//! tile); ticket 2 gave it a real user — the shipped `cooking_vat` is 2x2, so
-//! every stage downstream of it sits one tile further east than the old
-//! formula would have put it.
+//! **1. Flow is derived from adjacency, not from a list.** There is no
+//! `stages: Vec<Stage>` any more, and no chain order. A belt tile carries
+//! items toward the tile its own [`Direction`] points at, and what happens
+//! there depends entirely on what is standing there: another belt, a
+//! machine's inlet face, a dock, or nothing. A machine discharges onto
+//! whatever belt is adjacent to its outlet face. `recipes.ron`'s file order
+//! still *describes* a chain — [`validate_chain`] still enforces that, since
+//! it is what makes the shipped content a coherent line and what
+//! [`super::reference::reference_chain`] builds — but nothing in the
+//! simulation reads it as geometry any more.
 //!
-//! **The chain is fed by a hopper, not by a command** (the same milestone's
-//! ticket 3). One [`Hopper`] stands immediately west of stage 0's belt,
-//! holds a bounded buffer of the chain's raw ingredient, and meters it onto
-//! that belt one unit per tick whenever the belt has room. It is
-//! deliberately **not** a recipe-driven stage: `recipes.ron`'s list is the
-//! chain of *processes*, and a hopper doesn't consume-and-produce anything —
-//! giving it a `Recipe` would mean inventing one that creates matter from no
-//! inputs, which would both lie in the data file and break the
-//! mass-conservation reading every test here depends on. So it is its own
-//! small stage type built alongside the recipe-driven ones, and
-//! `recipes.ron` is untouched by it. Its *placement* is west of x = 0
-//! (negative tiles) precisely so that adding it moved no existing tile —
-//! the same discipline ticket 1 followed.
+//! **2. Topology is recomputed on a topology change, and never per tick**
+//! (ARCHITECTURE.md §3.8's union-find rule, made real for the first time —
+//! see [`World::recompute_topology`]). `Place`, `Remove` and `Rotate` are
+//! the only three things that can change what is adjacent to what, so they
+//! are the only three that pay for the recompute. Item movement inside a
+//! tick still uses the exact same [`BeltSegment`]/[`Machine`]/
+//! [`FluidNetwork`] mechanics it always did; only how a pair of them is
+//! *linked* changed. The recompute is a single-threaded pass — `rayon`
+//! parallelism and multi-network partitioning stay ARCHITECTURE.md §9
+//! milestone 8's scope, deliberately not half-built here.
 //!
-//! **The chain is emptied by a dock, not by a command** (the delivery-dock
-//! ticket), which is the same argument as the hopper's run at the other end
-//! of the line. Until this ticket there was nothing at all downstream of the
-//! last machine: `PlayerCommand::CollectOutput` reached into that machine's
-//! own `output` buffer and deposited the contents into [`Economy`]'s shared
-//! delivery pool, so finished boxes left the factory floor on a keypress
-//! without ever travelling anywhere. Now the last machine hands its output
-//! onto one more ordinary [`BeltSegment`] exactly the way every inter-stage
-//! hop already works, that belt runs into a [`Dock`] standing immediately
-//! east of it, and the dock ships whatever it receives into the pool every
-//! tick by itself. `CollectOutput` is **gone**, not kept alongside — see
-//! [`PlayerCommand`]. Like the hopper and the tank the dock is deliberately
-//! not a recipe-driven stage (it buffers and forwards, it doesn't consume
-//! and produce), and unlike them it is placed to the *east*, so it is the
-//! one of the three that extends the chain's own span: the shipped line now
-//! reaches x = 35 and therefore genuinely spans chunks (0, 0) and (1, 0)
-//! alongside the hopper's (-1, 0).
+//! **3. The hopper, the fluid tank and the dock are ordinary placeable
+//! kinds.** All three used to be `Option`-less fields constructed once at a
+//! fixed relative position. They are now placed, rotated and removed like
+//! anything else, and a world may hold **zero, one or several of each** —
+//! each filling, discharging or shipping independently. That is not a
+//! feature anyone asked for so much as the absence of an invented
+//! restriction: nothing in the simulation ever assumed exactly one, so
+//! forbidding a second would have been new code enforcing a rule no design
+//! document states (CLAUDE.md: don't design for hypothetical requirements).
+//! A second dock is simply a second place boxes leave the factory; both
+//! ship into [`Economy`]'s one shared pool, which is where "how much is on
+//! the dock" has always been one number.
 //!
-//! **The pipe run is fed by a tank, not by an off-map tap** (the "Visual
-//! overhaul round 2" epic's ticket 1). Milestone 6's fluid supply was a
-//! [`PipeSegment`] flagged `is_source` that refilled itself to capacity
-//! every tick — a magic tap the player could neither manage nor exhaust.
-//! It is now a [`FluidTank`]: a capped, player-loadable buffer standing one
-//! tile west of the run's first pipe tile, drained by the very same
-//! pressure-equalization pass that moves fluid along the run. That makes it
-//! the exact fluid analogue of the hopper above, down to the shape of its
-//! command ([`PlayerCommand::FillFluidTank`] beside `FillHopper`), its
-//! snapshot ([`FluidTankSnapshot`] beside [`HopperSnapshot`]) and its
-//! placement rule — one tile outside the existing geometry, so introducing
-//! it moved nothing. Like the hopper it is deliberately not a recipe-driven
-//! stage: it buffers and releases, it doesn't consume and produce.
+//! # The conventions this module depends on
+//!
+//! [`super::machines`]'s module doc owns the placement geometry — origin
+//! corner, how a footprint rotates, and which edge is the inlet face and
+//! which the outlet. [`Direction`]'s own doc owns the axis convention
+//! (`East` is `+X`, `North` is `+Y`) and the fact that **`East` reproduces
+//! every pre-placement behaviour exactly**, which is what makes
+//! [`super::reference::reference_chain`] a genuine regression anchor: it
+//! builds the old fixed layout, tile for tile, out of nothing but purchase
+//! and placement commands.
+//!
+//! Two adjacency rules are decided *here*, because they are about linking
+//! rather than geometry:
+//!
+//! - **Solids respect faces.** A belt feeds a machine only if the tile it
+//!   points into is on that machine's inlet face, and a machine discharges
+//!   only onto a belt standing off its outlet face. A belt pointing into a
+//!   machine's flank does nothing. This is what makes rotating a machine a
+//!   decision with a visible consequence.
+//! - **Fluids connect by touching.** A fluid-consuming machine taps any pipe
+//!   tile orthogonally adjacent to any tile of its footprint, whatever
+//!   either is facing, and pipe-to-pipe flow is undirected (see
+//!   [`super::fluid`]'s module doc). That is not a shortcut: the shipped
+//!   mixer has always been fed from the row *above* it — neither its inlet
+//!   face nor its outlet — because a pressure network is not a conveyor, and
+//!   requiring a fluid inlet to face the right way would break the one
+//!   plumbing arrangement the game has always had.
+//!
+//! # Corners, finally
+//!
+//! This module's doc used to carry a long note explaining that corners were
+//! out of scope because "there is no `direction` field anywhere in a
+//! `BeltSnapshot`/`PipeSnapshot`, so a renderer has nowhere to even learn
+//! that a tile turns," and that fixing it was "a topology change, not a
+//! rendering one." That is exactly what this ticket did. Every belt tile,
+//! pipe tile, machine and building now carries a real [`Direction`] on the
+//! wire, a belt run may turn as often as the player likes, and the sim
+//! links a corner the same way it links a straight — by asking what is in
+//! the tile a belt points at. What is *not* done here is the other half
+//! that note named: rotated voxel models. Ticket 2 (presentation) owns that.
 //!
 //! This is also where `SimBridge`'s pure-logic half lives (ARCHITECTURE.md
 //! §4): `tick()`, `dirty_chunks()`/`chunk_snapshot()`, `issue_command()`,
-//! `query_tile()`, `chain_layout()`. The `gdext`-facing wrapper in `lib.rs`
+//! `query_tile()`, `world_layout()`. The `gdext`-facing wrapper in `lib.rs`
 //! is a thin translation layer on top of this — nothing here depends on
 //! Godot, so it is fully exercisable from headless `cargo test`
 //! (ARCHITECTURE.md §7).
+
+use std::collections::{BTreeMap, HashMap};
 
 use hecs::Entity;
 
 use super::belt::BeltSegment;
 use super::contracts::ContractRegistry;
 use super::dock::{DOCK_CAPACITY, DOCK_KIND, Dock};
-use super::economy::{Economy, EconomySnapshot};
+use super::economy::{Economy, EconomySnapshot, STARTING_MONEY};
 use super::fluid::{
     FLUID_TANK_CAPACITY, FLUID_TANK_FILL_AMOUNT, FLUID_TANK_KIND, FluidNetwork, FluidTank,
-    PipeSegment,
+    FluidTap, PipeSegment,
 };
 use super::hopper::{HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, HOPPER_KIND, Hopper};
 use super::machine::Machine;
 use super::machines::{Footprint, MachineRegistry};
 use super::recipe::{Recipe, RecipeRegistry};
 use super::shop::{DEFAULT_PURCHASE_QUANTITY, Shop, ShopSnapshot};
-use super::types::{ChunkId, FluidId, Fx, ItemId, RecipeId, TileCoord, chunk_of};
+use super::types::{ChunkId, Direction, FluidId, Fx, ItemId, RecipeId, TileCoord, chunk_of};
 
-/// Where an entity sits in the tile grid (ARCHITECTURE.md §3.1/§3.2).
+/// The buildable-kind id (`data/shop.ron`) of one tile of conveyor.
+///
+/// Spelled out in Rust for the reason [`HOPPER_KIND`] and [`DOCK_KIND`] are,
+/// with one difference worth noting: a belt is not in `data/machines.ron` at
+/// all, because it is not a machine (that file's own header, and
+/// `shop.ron`'s). Its footprint is therefore not content — it is one tile,
+/// always, which is what "priced per tile" in the shop catalog means.
+pub const BELT_KIND: &str = "belt";
+
+/// The buildable-kind id of one tile of pipe — [`BELT_KIND`]'s fluid twin,
+/// and not a machine either.
+pub const PIPE_KIND: &str = "pipe";
+
+/// Where an entity sits in the tile grid (ARCHITECTURE.md §3.1/§3.2). Always
+/// the placement's **origin**: its minimum-X/minimum-Y corner, whatever it
+/// is facing (see [`super::machines`]'s module doc).
 #[derive(Debug, Clone, Copy)]
 pub struct Position {
     pub tile: TileCoord,
 }
 
-/// How many tiles a belt spans, laid out horizontally starting at its
-/// entity's `Position`. Each stage still gets one straight segment;
-/// corners/branches are a later milestone's concern.
-#[derive(Debug, Clone, Copy)]
-pub struct BeltSpan {
-    pub length_tiles: i32,
-}
-
-/// Which machine kind an entity is, and how many tiles it therefore covers
-/// (the "Machines improvement" milestone). Both come straight from
-/// `data/machines.ron` — this component is where a stage's entry in that
-/// file lands in the ECS, so nothing has to re-look-it-up by recipe id.
+/// What a placed entity is, how much room it takes and which way it faces —
+/// the three facts every placement has, whether it is a machine, a belt
+/// tile, or a dock.
 ///
-/// The entity's `Position` is the footprint's **origin**: its minimum-X,
-/// minimum-Y corner, and the tile its belt feeds into. See
-/// [`super::machines`]'s module doc for the full convention.
+/// `footprint` is the kind's **declared** (unrotated) footprint, straight
+/// out of `data/machines.ron` — the rectangle it actually occupies is
+/// `footprint.rotated(direction)` anchored at the entity's [`Position`].
+/// Both are reported on the wire so presentation never has to re-derive
+/// either.
 #[derive(Debug, Clone)]
-pub struct MachinePlacement {
+pub struct Placement {
     pub kind: String,
     pub footprint: Footprint,
+    pub direction: Direction,
+}
+
+impl Placement {
+    /// Every tile this placement claims.
+    pub fn tiles(&self, origin: TileCoord) -> Vec<TileCoord> {
+        self.footprint.tiles_facing(origin, self.direction)
+    }
+}
+
+/// A placed tile of pipe. The fluid it holds is **not** here — it lives in
+/// whichever [`FluidNetwork`] this tile currently belongs to, because
+/// pressure is a property of a connected run rather than of one fitting
+/// (ARCHITECTURE.md §3.4). What is here is the only thing a pipe tile owns
+/// on its own: how much it can hold.
+#[derive(Debug, Clone, Copy)]
+struct PipeTile {
+    capacity: Fx,
 }
 
 /// A command the player can issue (ARCHITECTURE.md §4's `PlayerCommand`).
-/// Kept intentionally small — supplying the chain's two consumables and
-/// buying equipment, not a full build-mode yet.
 ///
-/// **`FillHopper` replaced the old `SpawnItem`** (the "Machines improvement"
-/// milestone's ticket 3), rather than being added alongside it: `SpawnItem`
-/// teleported an item straight onto stage 0's belt, which is precisely the
-/// debug behavior the hopper exists to remove, so keeping it would leave two
-/// contradictory ways to feed the chain. The variant count was unchanged —
-/// §4's advice to keep this surface narrow is why that was a rename, not a
-/// third command.
+/// **Three of these are new in the "Real Placement" epic** — [`Place`],
+/// [`Remove`] and [`Rotate`] — and they are what turned the two that came
+/// before them into something worth having: `Purchase` credited a count
+/// nothing read, and the two fill commands supplied buildings the world
+/// created for free.
 ///
-/// **`CollectOutput` is GONE, and nothing replaced it** (the delivery-dock
-/// ticket) — this is a breaking change to the JSON wire format, not a
-/// rename. It used to drain the last machine's `output` buffer straight into
-/// [`Economy`]'s shared delivery pool on a keypress. The chain now ends in a
-/// real [`Dock`] that does exactly that every tick, automatically, so the
-/// command has nothing left to do; keeping it would leave two ways to sell
-/// the same box, one of which teleports. A GDScript caller sending
-/// `{"type": "collect_output"}` now gets `command_from_json` returning
-/// `None`, i.e. the same silent no-op any malformed command already gets —
-/// so a stale caller does not crash, it simply stops doing anything, and
-/// `main.gd`'s **C** keybind and its "C: collect product" legend entry
-/// should be removed.
+/// [`Place`]: PlayerCommand::Place
+/// [`Remove`]: PlayerCommand::Remove
+/// [`Rotate`]: PlayerCommand::Rotate
+///
+/// Every variant follows the same rule, which is this crate's universal one:
+/// **an impossible command is a silent, total no-op.** Filling a full
+/// hopper, buying what you cannot afford, placing what you do not own or
+/// where it will not fit, rotating into a collision, removing an empty tile
+/// — all leave the world byte-identical rather than erroring. Presentation
+/// decides what to say about it, using `shop_snapshot_json` and
+/// `world_layout_json` to avoid offering the impossible action in the first
+/// place.
 #[derive(Debug, Clone)]
 pub enum PlayerCommand {
-    /// Loads raw ingredient into the chain's hopper. The *item* is not a
-    /// parameter: a hopper holds exactly one item id, decided by
-    /// `data/recipes.ron` (see [`super::hopper`]), so naming an item here
-    /// could only ever name the wrong one.
-    FillHopper { amount: u32 },
-    /// Loads fluid into the pipe run's tank, in whole fluid units (the
-    /// "Visual overhaul round 2" epic's ticket 1). Exactly `FillHopper`'s
-    /// shape for exactly its reasons: the *fluid* is not a parameter either
-    /// (a network carries one fluid type, decided by whichever recipe
-    /// declares `fluid_inputs`), and over-filling is clamped at the tank's
-    /// capacity, silently.
+    /// Loads raw ingredient into a hopper. The *item* is not a parameter: a
+    /// hopper holds exactly one item id, decided by `data/recipes.ron` (see
+    /// [`super::hopper`]), so naming an item here could only ever name the
+    /// wrong one.
     ///
-    /// A world whose `recipes.ron` declares no `fluid_inputs` has no pipe
-    /// run and therefore no tank; this command is then a no-op, per
-    /// `issue_command`'s "an impossible command does nothing" contract.
-    FillFluidTank { amount: u32 },
+    /// `tile` names **which** hopper (any tile of its footprint, like every
+    /// other tile-addressed command here). `None` means *every* hopper in
+    /// the world, each clamped at its own capacity — which is what a world
+    /// with one hopper has always done on a keypress, and which is why the
+    /// pre-placement wire format still works unchanged. A world with no
+    /// hopper at all, or a `tile` holding something else, is a no-op.
+    FillHopper {
+        amount: u32,
+        tile: Option<TileCoord>,
+    },
+    /// Loads fluid into a tank, in whole fluid units. Exactly
+    /// [`PlayerCommand::FillHopper`]'s shape for exactly its reasons,
+    /// including `tile`: the *fluid* is not a parameter (a network carries
+    /// the fluid its tapping machine's recipe names), and over-filling is
+    /// clamped at the tank's capacity, silently.
+    FillFluidTank {
+        amount: u32,
+        tile: Option<TileCoord>,
+    },
     /// Buys `quantity` of a buildable kind from the shop (the "Shop &
     /// Inventory" epic's ticket 1): debits `quantity * price` from
-    /// `Economy::money` and credits `quantity` to the player's owned count
+    /// [`Economy::money`] and credits `quantity` to the player's owned count
     /// of that kind (`sim::shop::OwnedEquipment`).
     ///
-    /// Unlike `FillHopper`/`FillFluidTank`, the *thing* IS a parameter
-    /// here, and has to be: those two each have exactly one possible target
-    /// per world (one hopper, one tank), whereas the whole point of a shop
-    /// is choosing between kinds. The id is a `data/shop.ron` kind id.
-    ///
-    /// **All or nothing, and silent about failure** — the rule every other
-    /// command in this enum already follows (`FillHopper` past capacity,
-    /// `FillFluidTank` in a world with no pipe run). An unknown kind, a zero
-    /// quantity, or a total the
-    /// player can't afford leaves money *and* the owned count exactly as
-    /// they were; nothing is ever partially applied. Presentation decides
-    /// what to say about that, using `shop_snapshot_json`'s `affordable`
-    /// flag to avoid offering the purchase in the first place.
+    /// **All or nothing, and silent about failure.** An unknown kind, a zero
+    /// quantity, or a total the player can't afford leaves money *and* the
+    /// owned count exactly as they were; nothing is ever partially applied.
     Purchase { kind: String, quantity: u32 },
+    /// Puts one owned unit of `kind` on the floor at `tile`, facing
+    /// `direction` (the "Real Placement" epic).
+    ///
+    /// **It spends inventory, not money** — the money went at
+    /// [`PlayerCommand::Purchase`] time. One owned unit becomes one thing on
+    /// the floor, and [`PlayerCommand::Remove`] gives it back, so the two
+    /// ledgers (what you own, what you have placed) always add up to what
+    /// you bought.
+    ///
+    /// A silent no-op, changing nothing at all, when: the player owns none
+    /// of `kind`; `kind` is not a buildable kind at all; `kind` is a machine
+    /// kind no recipe runs on (there is nothing to construct); or the
+    /// rotated footprint would overlap **any** already-claimed tile — belt,
+    /// pipe, machine or building. Overlap is checked against the whole
+    /// rotated rectangle, not just `tile`.
+    ///
+    /// `tile` is the footprint's origin — its minimum-X/minimum-Y corner —
+    /// exactly as it is everywhere else in this crate. Placing succeeds or
+    /// fails as a unit; there is no partial placement.
+    Place {
+        kind: String,
+        tile: TileCoord,
+        direction: Direction,
+    },
+    /// Picks up whatever occupies `tile` and credits one back to the
+    /// player's owned count of its kind.
+    ///
+    /// **Any tile of a multi-tile footprint works**, and the whole thing is
+    /// removed — the same "hover anywhere on it" rule
+    /// [`World::query_tile`] follows, for the same reason: the player is
+    /// pointing at a machine, not at one of its corners. An empty tile is a
+    /// silent no-op.
+    ///
+    /// **What it holds is destroyed, deliberately.** Items on a removed belt
+    /// tile, fluid in a removed pipe, a batch mid-craft in a removed machine
+    /// and a removed hopper's contents all go with it. That is the honest
+    /// reading of picking a thing up, and pretending otherwise would need an
+    /// inventory to put the spillage in — which is a mechanic nobody has
+    /// asked for. It does mean a mass-conservation invariant only holds
+    /// across a run in which nothing loaded is removed, which is what the
+    /// tests that assert one actually do.
+    Remove { tile: TileCoord },
+    /// Turns whatever occupies `tile` 90° clockwise in place (see
+    /// [`Direction::rotate_cw`]).
+    ///
+    /// Any tile of a multi-tile footprint works, like [`Self::Remove`]. A
+    /// silent no-op on an empty tile, or when the *rotated* footprint would
+    /// collide with something else — a 3x1 machine turned into a 1x3 claims
+    /// tiles it did not before, and it may not take them from a neighbour.
+    /// The thing being rotated is of course allowed to overlap its own old
+    /// tiles.
+    ///
+    /// **What it holds is untouched.** A belt's gap array, a pipe's volume,
+    /// a machine's buffers and its running [`super::machine::TimedProcess`]
+    /// all carry on: none of them has any absolute-direction dependency, so
+    /// turning a belt is a pure geometry change and turning a machine
+    /// mid-craft does not restart the craft.
+    Rotate { tile: TileCoord },
 }
 
-/// JSON wire shape for `PlayerCommand`, used only at the `gdext` boundary
-/// (`lib.rs`) — GDScript builds a `{"type": "fill_hopper", "amount": 16}`
-/// dictionary, converts it to a JSON string, and this is what parses it.
-/// Kept separate from `PlayerCommand` itself so the pure sim type isn't
-/// coupled to a wire format.
+/// JSON wire shape for [`PlayerCommand`], used only at the `gdext` boundary
+/// (`lib.rs`) — GDScript builds a `{"type": "place", "kind": "belt",
+/// "tile": [3, 0], "direction": "east"}` dictionary, converts it to a JSON
+/// string, and this is what parses it. Kept separate from `PlayerCommand`
+/// itself so the pure sim type isn't coupled to a wire format.
 ///
-/// **`{"type": "collect_output"}` is no longer a valid command** (the
-/// delivery-dock ticket removed it — see [`PlayerCommand`]); it now fails to
-/// deserialize and `command_from_json` returns `None`, which
-/// `issue_command_json` already treats as a silent no-op.
-///
-/// `amount` is optional on the wire (`{"type": "fill_hopper"}` alone is
-/// valid and means [`HOPPER_FILL_AMOUNT`]), so the common "player pressed
-/// the load key" case doesn't have to restate a constant the simulation
-/// already owns.
+/// Optional fields follow one rule: a field is optional when the simulation
+/// already owns a sensible answer, and required when only the player can
+/// know it. So `amount`/`quantity` default (to the simulation's own fill
+/// amount and to one), `direction` defaults to [`Direction::East`] — the
+/// facing that reproduces every pre-placement behaviour — and `kind` and
+/// `tile` are required, because there is no sensible default for *what* to
+/// build or *where*.
 #[derive(Debug, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum PlayerCommandDto {
+    /// `{"type": "fill_hopper", "amount": 16, "tile": [-1, 0]}` — both
+    /// optional. Omitting `tile` fills every hopper in the world.
     FillHopper {
         #[serde(default = "default_fill_amount")]
         amount: u32,
+        #[serde(default)]
+        tile: Option<TileCoord>,
     },
-    /// `{"type": "fill_fluid_tank", "amount": 30}` — `amount` optional,
-    /// defaulting to [`FLUID_TANK_FILL_AMOUNT`], exactly as `fill_hopper`'s
-    /// does.
+    /// `{"type": "fill_fluid_tank", "amount": 30, "tile": [5, 1]}` — both
+    /// optional, exactly as `fill_hopper`'s are.
     FillFluidTank {
         #[serde(default = "default_fluid_fill_amount")]
         amount: u32,
+        #[serde(default)]
+        tile: Option<TileCoord>,
     },
     /// `{"type": "purchase", "kind": "belt", "quantity": 4}` — `quantity`
-    /// optional, defaulting to [`DEFAULT_PURCHASE_QUANTITY`] (one), the same
-    /// "the player clicked the button once" convenience `fill_hopper`'s
-    /// optional `amount` provides. `kind` is required: there is no sensible
-    /// default for *what to buy*.
+    /// optional, defaulting to [`DEFAULT_PURCHASE_QUANTITY`] (one).
     Purchase {
         kind: String,
         #[serde(default = "default_purchase_quantity")]
         quantity: u32,
     },
+    /// `{"type": "place", "kind": "crusher", "tile": [4, 0],
+    /// "direction": "east"}` — `direction` optional, defaulting to `"east"`.
+    Place {
+        kind: String,
+        tile: TileCoord,
+        #[serde(default)]
+        direction: Direction,
+    },
+    /// `{"type": "remove", "tile": [4, 0]}`.
+    Remove { tile: TileCoord },
+    /// `{"type": "rotate", "tile": [4, 0]}`.
+    Rotate { tile: TileCoord },
 }
 
 fn default_fill_amount() -> u32 {
@@ -289,18 +366,31 @@ fn default_purchase_quantity() -> u32 {
 impl From<PlayerCommandDto> for PlayerCommand {
     fn from(dto: PlayerCommandDto) -> Self {
         match dto {
-            PlayerCommandDto::FillHopper { amount } => PlayerCommand::FillHopper { amount },
-            PlayerCommandDto::FillFluidTank { amount } => {
-                PlayerCommand::FillFluidTank { amount }
+            PlayerCommandDto::FillHopper { amount, tile } => {
+                PlayerCommand::FillHopper { amount, tile }
+            }
+            PlayerCommandDto::FillFluidTank { amount, tile } => {
+                PlayerCommand::FillFluidTank { amount, tile }
             }
             PlayerCommandDto::Purchase { kind, quantity } => {
                 PlayerCommand::Purchase { kind, quantity }
             }
+            PlayerCommandDto::Place {
+                kind,
+                tile,
+                direction,
+            } => PlayerCommand::Place {
+                kind,
+                tile,
+                direction,
+            },
+            PlayerCommandDto::Remove { tile } => PlayerCommand::Remove { tile },
+            PlayerCommandDto::Rotate { tile } => PlayerCommand::Rotate { tile },
         }
     }
 }
 
-/// Parses a JSON-encoded `PlayerCommand` (see `PlayerCommandDto`). Returns
+/// Parses a JSON-encoded [`PlayerCommand`] (see `PlayerCommandDto`). Returns
 /// `None` on malformed input rather than erroring — an invalid command from
 /// Godot is treated the same as a no-op command per `issue_command`'s own
 /// contract.
@@ -315,58 +405,45 @@ pub fn command_from_json(json: &str) -> Option<PlayerCommand> {
 /// wants this; Godot never sees a belt's internal gap array or a machine's
 /// raw `TimedProcess` (ARCHITECTURE.md §4/§5).
 ///
-/// Plural since milestone 4: a chunk can hold more than one stage's belt or
-/// machine (32x32-tile chunks, ARCHITECTURE.md §3.1, comfortably fit several
-/// 5-tile stages), so this is a `Vec` of whichever stages' entities fall in
-/// the requested chunk, not a single optional pair like milestone 3's
-/// fixed one-belt-one-machine layout.
+/// Every array here can now be empty *and* can hold several entries: a
+/// freshly-started world has nothing in any of them, and a player may place
+/// as many hoppers, tanks or docks as they own (see this module's doc).
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct ChunkSnapshot {
     pub belts: Vec<BeltSnapshot>,
     pub machines: Vec<MachineSnapshot>,
-    /// Pipe segments of the fluid network (milestone 6) whose tiles fall in
-    /// this chunk. See `PipeSnapshot` for the JSON shape, and
-    /// `World::fluid_snapshot` for why live fluid *levels* are better read
-    /// from there than from here.
     pub pipes: Vec<PipeSnapshot>,
-    /// The chain's hopper (ticket 3), if its footprint falls in this chunk —
-    /// a `Vec` for exactly the reason `machines` is one, even though there
-    /// is only one hopper per world today. See [`HopperSnapshot`].
-    ///
-    /// Note the shipped hopper sits at a **negative** x (it is placed west of
-    /// the chain's first belt, which starts at x = 0), so it is in chunk
-    /// `(-1, 0)` while the whole rest of the chain is in `(0, 0)` — a
-    /// renderer that only ever asked for chunk `(0, 0)` will not see it.
-    /// `World::all_chunks` reports both.
     pub hoppers: Vec<HopperSnapshot>,
-    /// The pipe run's fluid tank (the "Visual overhaul round 2" epic's
-    /// ticket 1), if its footprint falls in this chunk — a `Vec` for exactly
-    /// the reason `hoppers` is one. Empty for every chunk when the world has
-    /// no pipe run at all (no recipe declares `fluid_inputs`), which is the
-    /// one way it differs from `hoppers`: a world always has a hopper, but
-    /// only a fluid-using world has a tank. See [`FluidTankSnapshot`].
     pub fluid_tanks: Vec<FluidTankSnapshot>,
-    /// The chain's delivery dock (the delivery-dock ticket), if its
-    /// footprint falls in this chunk — a `Vec` for exactly the reason
-    /// `hoppers` is one, and never empty across the whole world for the same
-    /// reason: every chain has exactly one dock, at its tail. See
-    /// [`DockSnapshot`].
-    ///
-    /// Note the shipped dock sits at x = 35, i.e. in chunk **(1, 0)**, while
-    /// most of the chain is in (0, 0) and the hopper is in (-1, 0) — the
-    /// shipped world is a three-chunk world since this ticket.
-    /// `World::all_chunks` reports all three.
     pub docks: Vec<DockSnapshot>,
 }
 
+/// One belt **tile**, for rendering.
+///
+/// JSON shape (`snake_case`, as serialized by `serde_json`):
+///
+/// ```json
+/// { "tile": [3, 0], "direction": "east",
+///   "items": [["tomato", 0.62]] }
+/// ```
+///
+/// **This shape is a breaking change from the pre-placement one**, which was
+/// `{"start_tile", "length_tiles", "items"}`. A belt used to be a
+/// multi-tile *segment* laid down by the chain builder — four tiles at a
+/// time — because nothing could place one. A belt is now exactly one tile,
+/// bought and placed one at a time and priced per tile in `data/shop.ron`,
+/// so `start_tile` became `tile`, `length_tiles` is gone (it would always be
+/// 1), and `direction` is new and load-bearing: it is which way this tile
+/// carries, and therefore which neighbour it hands off to.
+///
+/// An item's position is its distance from this tile's start, in tiles, so
+/// it is always in `[0, 1]`. `f64` is fine here — it has already crossed
+/// from fixed-point simulation state into a presentation-only value that
+/// never feeds back in (ARCHITECTURE.md §3.9).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct BeltSnapshot {
-    pub start_tile: TileCoord,
-    pub length_tiles: i32,
-    /// (item id, distance from belt start in tiles). `f64` is fine here —
-    /// this has already crossed from fixed-point simulation state into a
-    /// presentation-only value that never feeds back in (ARCHITECTURE.md
-    /// §3.9).
+    pub tile: TileCoord,
+    pub direction: Direction,
     pub items: Vec<(ItemId, f64)>,
 }
 
@@ -378,6 +455,7 @@ pub struct BeltSnapshot {
 /// {
 ///   "tile": [14, 0],
 ///   "kind": "cooking_vat",
+///   "direction": "east",
 ///   "footprint": { "width_tiles": 2, "height_tiles": 2 },
 ///   "recipe": "ketchup",
 ///   "process": [120, 240],
@@ -386,13 +464,13 @@ pub struct BeltSnapshot {
 /// }
 /// ```
 ///
-/// `kind`/`footprint` are new in the "Machines improvement" milestone.
-/// **`tile` is the footprint's origin — its minimum-X, minimum-Y corner, and
-/// the tile the belt feeds into** (see [`super::machines`]'s module doc); the
-/// machine covers `x in [tile.x, tile.x + width_tiles)`, `y in [tile.y,
-/// tile.y + height_tiles)`. A renderer that placed a mesh at `tile` and
-/// assumed one tile of extent stays correct for every 1x1 kind and only
-/// needs the footprint to size or centre a larger one.
+/// **`tile` is the footprint's origin — its minimum-X/minimum-Y corner**
+/// (see [`super::machines`]'s module doc), and `footprint` is the kind's
+/// **declared** rectangle. `direction` (new in the "Real Placement" epic) is
+/// what turns those into the tiles actually covered: at `"north"`/`"south"`
+/// the two extents swap, so a renderer must apply the rotation rather than
+/// reading `footprint` literally. It is also which face the machine
+/// discharges from.
 ///
 /// **Chunk-boundary caveat:** a machine whose footprint straddles a chunk
 /// boundary (ARCHITECTURE.md §3.1's 32x32 chunks) appears in the snapshot of
@@ -404,11 +482,9 @@ pub struct BeltSnapshot {
 /// machines by `tile` and de-duplicate, not blindly concatenate.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct MachineSnapshot {
-    /// The footprint's origin tile — see this type's doc.
     pub tile: TileCoord,
-    /// Machine kind id from `data/machines.ron` (e.g. "crusher").
     pub kind: String,
-    /// How many tiles this machine covers, anchored at `tile`.
+    pub direction: Direction,
     pub footprint: Footprint,
     pub recipe: RecipeId,
     /// (start_tick, required_ticks) — Godot derives progress from this plus
@@ -420,328 +496,260 @@ pub struct MachineSnapshot {
 
 /// One pipe tile, for rendering (milestone 6 — ARCHITECTURE.md §3.4).
 ///
-/// JSON shape (`snake_case` field names, as serialized by `serde_json`):
-///
 /// ```json
-/// { "tile": [8, 1], "volume": 7.5, "capacity": 10.0, "pressure": 0.75, "is_source": false }
+/// { "tile": [8, 1], "direction": "east", "volume": 7.5, "capacity": 10.0,
+///   "pressure": 0.75, "is_source": false }
 /// ```
 ///
 /// `volume`/`capacity` are in whole fluid units; `pressure` is the
 /// dimensionless fill fraction `volume / capacity`, in `[0, 1]` — the value
 /// to drive a fill-level visual from. All three are `f64` for the same
-/// reason `BeltSnapshot::items` positions are: they have already crossed
-/// out of fixed-point simulation state into presentation-only values that
-/// never feed back in (ARCHITECTURE.md §3.9).
+/// reason `BeltSnapshot`'s positions are.
 ///
-/// `is_source` marks the run's **supply end — the tile the fluid tank
-/// discharges into**, which is a different thing visually from a plain
-/// length of pipe. The field name and position are unchanged, but its
-/// meaning narrowed with the "Visual overhaul round 2" epic's ticket 1: it
-/// used to mark an off-map tap that refilled itself to capacity every tick,
-/// and it now marks an ordinary pipe tile that happens to be the one the
-/// tank connects to. A renderer keying a fitting/branch off it is unaffected;
-/// anything that assumed the flagged segment is always full is not (it now
-/// starts empty and drains like any other).
+/// `direction` (new in the "Real Placement" epic) is the rotation the player
+/// gave this tile. **It is presentation only** — fluid flow is undirected
+/// (see [`super::fluid`]'s module doc), so unlike a belt's direction it does
+/// not decide where anything goes.
+///
+/// `is_source` marks a tile some fluid tank discharges into. Since
+/// placement it is derived from where tanks actually stand, so it moves when
+/// the player moves a tank, and a run with no tank has none at all.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PipeSnapshot {
     pub tile: TileCoord,
+    pub direction: Direction,
     pub volume: f64,
     pub capacity: f64,
     pub pressure: f64,
     pub is_source: bool,
 }
 
-/// The chain's raw-ingredient hopper (ticket 3), for rendering and for its
-/// fill UI. The *same* struct is returned by `World::hopper_snapshot` and
-/// carried in `ChunkSnapshot::hoppers`, so a consumer only ever learns one
-/// shape.
-///
-/// JSON shape (`snake_case` field names, as serialized by `serde_json`):
+/// One raw-ingredient hopper — placement plus live fill level. The *same*
+/// struct is returned by [`World::hopper_snapshots`] and carried in
+/// [`ChunkSnapshot::hoppers`], so a consumer only ever learns one shape.
 ///
 /// ```json
 /// {
-///   "tile": [-1, 0],
-///   "kind": "hopper",
+///   "tile": [-1, 0], "kind": "hopper", "direction": "east",
 ///   "footprint": { "width_tiles": 1, "height_tiles": 1 },
-///   "item": "tomato",
-///   "quantity": 12,
-///   "capacity": 64,
-///   "fill": 0.1875,
+///   "item": "tomato", "quantity": 12, "capacity": 64, "fill": 0.1875,
 ///   "belt_tile": [0, 0]
 /// }
 /// ```
 ///
-/// - `tile` is the footprint's origin — its minimum-X/minimum-Y corner, the
-///   same convention every machine uses ([`super::machines`]'s module doc).
-///   The hopper is placed so its footprint ends immediately west of
-///   `belt_tile`, i.e. it grows *away* from the chain; a wider hopper would
-///   extend further west and move nothing else.
-/// - `quantity`/`capacity` are whole units of `item`. `fill` is
-///   `quantity / capacity` in `[0, 1]` — the value to drive a fill-level
-///   visual from, precomputed for the same reason `PipeSnapshot::pressure`
-///   is, and `f64` for the same reason too: it has already crossed out of
-///   fixed-point simulation state into a presentation-only value that never
-///   feeds back in (ARCHITECTURE.md §3.9).
-/// - `belt_tile` is the first tile of the belt this hopper unloads onto, so
-///   presentation can orient/animate the discharge without re-deriving the
-///   chain's head from `chain_layout_json`.
+/// - `tile` is the footprint's origin, `direction` the way it discharges.
+/// - `fill` is `quantity / capacity` in `[0, 1]`, precomputed for the same
+///   reason `PipeSnapshot::pressure` is.
+/// - **`belt_tile` is now nullable.** It is the belt this hopper currently
+///   unloads onto — the tile off its outlet face — and it is `null` when
+///   there is no belt there, which is a perfectly ordinary state for a
+///   hopper the player has just put down. Before placement a hopper was
+///   built attached to the chain's first belt and this could not be absent.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct HopperSnapshot {
     pub tile: TileCoord,
-    /// Machine kind id from `data/machines.ron` — always `"hopper"` today
-    /// (see [`super::hopper::HOPPER_KIND`]), carried anyway so presentation
-    /// picks a mesh the same way it does for a machine.
     pub kind: String,
+    pub direction: Direction,
     pub footprint: Footprint,
     pub item: ItemId,
     pub quantity: u32,
     pub capacity: u32,
     pub fill: f64,
-    pub belt_tile: TileCoord,
+    pub belt_tile: Option<TileCoord>,
 }
 
-/// The pipe run's fluid tank (the "Visual overhaul round 2" epic's ticket
-/// 1), for rendering and for its fill UI. The *same* struct is returned by
-/// `World::fluid_tank_snapshot` and carried in `ChunkSnapshot::fluid_tanks`,
-/// so a consumer only ever learns one shape.
-///
-/// It is field-for-field the fluid twin of [`HopperSnapshot`] — deliberately,
-/// so presentation can drive both from one code path: `tile`/`kind`/
-/// `footprint`/`fill` mean exactly what they mean there, `fluid` stands
-/// where `item` does, and `pipe_tile` stands where `belt_tile` does.
-///
-/// JSON shape (`snake_case` field names, as serialized by `serde_json`):
+/// One fluid tank — placement plus live level. Field-for-field the fluid
+/// twin of [`HopperSnapshot`], deliberately, so presentation can drive both
+/// from one code path: `fluid` stands where `item` does and `pipe_tile`
+/// where `belt_tile` does.
 ///
 /// ```json
 /// {
-///   "tile": [5, 1],
-///   "kind": "fluid_tank",
+///   "tile": [5, 1], "kind": "fluid_tank", "direction": "east",
 ///   "footprint": { "width_tiles": 1, "height_tiles": 1 },
-///   "fluid": "vinegar",
-///   "quantity": 30.0,
-///   "capacity": 120.0,
-///   "fill": 0.25,
-///   "pipe_tile": [6, 1]
+///   "fluid": "vinegar", "quantity": 30.0, "capacity": 120.0,
+///   "fill": 0.25, "pipe_tile": [6, 1]
 /// }
 /// ```
 ///
-/// - `tile` is the footprint's origin — its minimum-X/minimum-Y corner, the
-///   same convention every machine and the hopper use ([`super::machines`]'s
-///   module doc). The tank is placed so its footprint ends immediately west
-///   of `pipe_tile`, i.e. it grows *away* from the pipe run; a wider tank
-///   would extend further west and move nothing else.
-/// - `quantity`/`capacity` are whole fluid units, and unlike
-///   `HopperSnapshot`'s they are **`f64`, not integers**: a fluid volume is
-///   continuous (pressure equalization moves partial units around), so
-///   `quantity` is routinely fractional. Both have already crossed out of
-///   fixed-point simulation state into presentation-only values that never
-///   feed back in (ARCHITECTURE.md §3.9).
-/// - `fill` is `quantity / capacity` in `[0, 1]` — the value to drive a
-///   fill-level visual from, precomputed for the same reason
-///   `PipeSnapshot::pressure` and `HopperSnapshot::fill` are.
-/// - `pipe_tile` is the first tile of the pipe run this tank discharges
-///   into (the segment flagged `is_source`), so presentation can orient the
-///   connection without re-deriving the run's head from `fluid_snapshot`.
+/// - `quantity`/`capacity` are **floating-point**, unlike the hopper's: a
+///   fluid volume is continuous (pressure equalization moves partial units
+///   around).
+/// - **`fluid` is nullable**, and is the fluid of the network this tank
+///   discharges into — which is decided by whichever machine taps that
+///   network (see [`super::fluid`]). A tank connected to nothing, or to a
+///   run no machine taps, reports `null`: it holds volume, and nothing has
+///   yet said what that volume is.
+/// - **`pipe_tile` is nullable** for [`HopperSnapshot::belt_tile`]'s reason:
+///   it is the pipe tile off this tank's outlet face, and there may not be
+///   one.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FluidTankSnapshot {
     pub tile: TileCoord,
-    /// Machine kind id from `data/machines.ron` — always `"fluid_tank"`
-    /// today (see [`super::fluid::FLUID_TANK_KIND`]), carried anyway so
-    /// presentation picks a mesh the same way it does for a machine.
     pub kind: String,
+    pub direction: Direction,
     pub footprint: Footprint,
-    pub fluid: FluidId,
+    pub fluid: Option<FluidId>,
     pub quantity: f64,
     pub capacity: f64,
     pub fill: f64,
-    pub pipe_tile: TileCoord,
+    pub pipe_tile: Option<TileCoord>,
 }
 
-/// The chain's delivery dock (the delivery-dock ticket), for rendering and
-/// for hover. The *same* struct is returned by `World::dock_snapshot` and
-/// carried in `ChunkSnapshot::docks`, so a consumer only ever learns one
-/// shape.
-///
-/// It is the exit-end counterpart of [`HopperSnapshot`], and its `tile` /
-/// `kind` / `footprint` fields mean exactly what they mean there. Two
-/// differences are deliberate and worth reading before building a visual
-/// from this:
-///
-/// 1. **There is no `fill` field**, unlike [`HopperSnapshot`] and
-///    [`FluidTankSnapshot`]. The dock is a pass-through: it ships everything
-///    it receives into the economy's shared delivery pool in the same tick,
-///    so its own level is always zero between ticks and a fill-level visual
-///    driven from it would always read empty. **The number to draw a pallet
-///    stack from is `EconomySnapshot::delivery_stock`** — the one shared
-///    "what's on the dock" figure every contract settles against. See
-///    [`super::dock`]'s module doc for why there is deliberately only one
-///    such number.
-/// 2. **`contents` is a list, not one item and a count.** A hopper holds one
-///    item id fixed by `recipes.ron`; a dock accepts whatever the line
-///    delivers to it. On the shipped chain that is always `boxed_ketchup`,
-///    and always an empty list between ticks (see above).
-///
-/// `shipped_total` is the cumulative count of units this dock has put into
-/// the pool since tick 0 — the line's lifetime output, and the one number
-/// about the building itself that is worth showing ("Loading dock — 37
-/// shipped").
-///
-/// JSON shape (`snake_case` field names, as serialized by `serde_json`):
+/// One delivery dock — placement, what is on it, and how much it has
+/// shipped. The exit-end counterpart of [`HopperSnapshot`].
 ///
 /// ```json
 /// {
-///   "tile": [35, 0],
-///   "kind": "dock",
+///   "tile": [35, 0], "kind": "dock", "direction": "east",
 ///   "footprint": { "width_tiles": 1, "height_tiles": 1 },
-///   "belt_start_tile": [31, 0],
-///   "belt_length_tiles": 4,
-///   "contents": [],
-///   "capacity_per_item": 32,
+///   "belt_tile": [34, 0], "contents": [], "capacity_per_item": 32,
 ///   "shipped_total": 37
 /// }
 /// ```
 ///
-/// `belt_start_tile`/`belt_length_tiles` describe the belt that feeds this
-/// dock — the one belt in the world that belongs to no `StageLayout`,
-/// because it runs from the last machine to a building rather than to
-/// another stage. They are carried here so presentation can draw that belt
-/// from `chain_layout_json` + this call without hunting for it in chunk
-/// snapshots (a chunk snapshot does report it, but keyed on the chunk
-/// holding its *start* tile, and on the shipped content that belt straddles
-/// the x = 32 chunk boundary).
+/// Two things about it are unchanged by placement and worth re-reading:
+///
+/// 1. **There is no `fill` field.** The dock is a pass-through: it ships
+///    everything it receives into the economy's shared delivery pool in the
+///    same tick, so its own level is always zero between ticks. **The number
+///    to draw a pallet stack from is `EconomySnapshot::delivery_stock`** —
+///    the one shared "what's on the dock" figure every contract settles
+///    against, and still one number however many docks the player builds.
+/// 2. **`contents` is a list**, not one item and a count: a dock accepts
+///    whatever the line delivers to it.
+///
+/// `shipped_total` is this dock's own cumulative output since it was placed.
+/// **`belt_tile` replaces the old `belt_start_tile`/`belt_length_tiles`
+/// pair**: a dock no longer owns a belt (it used to be built with one), so
+/// what is reported is simply which belt tile currently feeds it, if any.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DockSnapshot {
     pub tile: TileCoord,
-    /// Machine kind id from `data/machines.ron` — always `"dock"` today
-    /// (see [`super::dock::DOCK_KIND`]), carried anyway so presentation
-    /// picks a mesh the same way it does for a machine.
     pub kind: String,
+    pub direction: Direction,
     pub footprint: Footprint,
-    /// First tile of the belt that runs into this dock.
-    pub belt_start_tile: TileCoord,
-    pub belt_length_tiles: i32,
-    /// What is standing on the dock right now — empty between ticks, see
-    /// this type's doc.
+    /// The belt tile that currently hands product to this dock, if any.
+    pub belt_tile: Option<TileCoord>,
     pub contents: Vec<(ItemId, u32)>,
     pub capacity_per_item: u32,
     pub shipped_total: u32,
 }
 
-/// The whole fluid network in one snapshot — what a HUD/overlay needs
+/// One machine's tap into a fluid network, for presentation.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FluidTapSnapshot {
+    /// Origin tile of the machine drawing from this network.
+    pub machine_tile: TileCoord,
+    pub machine_recipe: RecipeId,
+    /// How much the recipe consumes per craft.
+    pub units_per_craft: u32,
+    /// Index into the network's `segments` of the tile this machine draws
+    /// from — the one whose level drops when a craft starts.
+    pub segment_index: usize,
+}
+
+/// One whole fluid network in one snapshot — what a HUD/overlay needs
 /// without having to stitch together per-chunk pipe lists.
 ///
 /// Read this the way `economy_snapshot` is read, **not** the way
-/// `chunk_snapshot` is: fluid volume changes on almost every tick, and
-/// deliberately does **not** mark its chunk dirty (see `World::tick`), so
-/// `dirty_chunks` will not tell you when fluid moved. There is exactly one
-/// network per world, so polling this each frame you want to redraw is
-/// cheap and always current — the same trade `EconomySnapshot` already
-/// makes. Chunk snapshots still carry pipes so a chunk-driven renderer can
-/// place the geometry; this is where the live state lives.
-///
-/// JSON shape — `null` when the loaded `data/recipes.ron` has no recipe
-/// with `fluid_inputs` at all (no fluid-requiring recipe, no pipe run):
+/// `chunk_snapshot` is: fluid volume changes on almost every tick and
+/// deliberately does **not** mark its chunk dirty (see [`World::tick`]), so
+/// `dirty_chunks` will not tell you when fluid moved. Chunk snapshots still
+/// carry pipes so a chunk-driven renderer can place the geometry; this is
+/// where the live state lives.
 ///
 /// ```json
 /// {
 ///   "fluid": "vinegar",
-///   "total_volume": 27.5,
-///   "total_capacity": 40.0,
-///   "pressure": 0.6875,
-///   "segments": [ { "tile": [5, 1], "volume": 10.0, "capacity": 10.0,
-///                   "pressure": 1.0, "is_source": true }, ... ],
-///   "inlet_index": 3,
-///   "machine_tile": [8, 0],
-///   "machine_recipe": "ketchup_mix",
-///   "units_per_craft": 2
+///   "total_volume": 27.5, "total_capacity": 40.0, "pressure": 0.6875,
+///   "segments": [ { "tile": [5, 1], "direction": "east", "volume": 10.0,
+///                   "capacity": 10.0, "pressure": 1.0, "is_source": true } ],
+///   "taps": [ { "machine_tile": [9, 0], "machine_recipe": "ketchup_mix",
+///               "units_per_craft": 2, "segment_index": 3 } ],
+///   "tank_tiles": [[5, 1]]
 /// }
 /// ```
 ///
-/// `segments` is in flow order, supply end first; adjacent entries are
-/// physically adjacent pipes. `inlet_index` indexes into `segments` and
-/// marks the segment the machine actually draws from — that is the one
-/// whose level drops when a craft starts. `machine_tile`/`machine_recipe`
-/// identify the machine being fed (its tile is adjacent to the inlet
-/// segment's), and `units_per_craft` is how much the recipe consumes per
-/// craft.
+/// **This shape is a breaking change from the pre-placement one.** There
+/// used to be exactly one network per world, so its snapshot named its one
+/// machine inline (`machine_tile`/`machine_recipe`/`units_per_craft`) and
+/// its one inlet (`inlet_index`), and `segments` was in flow order because
+/// the run was a straight line built by the chain builder. Now there is one
+/// of these per connected component of placed pipe, a component may be any
+/// shape and may be tapped by several machines or none, so: `taps` is an
+/// array (possibly empty), `tank_tiles` names the tanks feeding it (possibly
+/// none), `fluid` is nullable, and **`segments` is in tile order, not flow
+/// order** — adjacency is not "consecutive entries" any more, and a
+/// consumer that needs it should read it off the tiles.
 ///
-/// **`total_volume`/`total_capacity`/`pressure` describe the pipe run
-/// alone** — they do not include the [`FluidTankSnapshot`]'s contents, and
-/// did not change meaning when the "Visual overhaul round 2" epic's ticket 1
-/// replaced the off-map tap with that tank. The tank is a building with its
-/// own capacity and its own snapshot, not a length of pipe, so folding it in
-/// here would have silently changed what an existing consumer was reading.
-/// What *did* change is that these numbers can now legitimately fall to zero
-/// and stay there: an empty tank means an empty run, and a machine that
-/// stalls until the player refills it.
+/// `total_volume`/`total_capacity`/`pressure` describe the **pipes alone**,
+/// as they always have: a tank is a building with its own snapshot, not a
+/// length of pipe.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FluidSnapshot {
-    pub fluid: FluidId,
+    pub fluid: Option<FluidId>,
     pub total_volume: f64,
     pub total_capacity: f64,
     /// Network-wide fill fraction, `total_volume / total_capacity`.
     pub pressure: f64,
     pub segments: Vec<PipeSnapshot>,
-    pub inlet_index: usize,
-    pub machine_tile: TileCoord,
-    pub machine_recipe: RecipeId,
-    pub units_per_craft: u32,
+    pub taps: Vec<FluidTapSnapshot>,
+    pub tank_tiles: Vec<TileCoord>,
 }
 
-/// What occupies a single tile, for `query_tile`.
+/// What occupies a single tile, for [`World::query_tile`].
+///
+/// Every variant gained a `direction` in the "Real Placement" epic, and
+/// multi-tile things still resolve from **any** tile of their footprint, not
+/// only the origin — which is what makes hovering, rotating and removing a
+/// big machine work anywhere on it.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TileSnapshot {
+    /// `{"kind": "belt", "direction": "east", "items_here": ["tomato"]}` —
+    /// one tile, so `items_here` is simply everything on it.
     Belt {
+        direction: Direction,
         items_here: Vec<ItemId>,
     },
-    /// A tile occupied by a machine. **Any** tile inside the machine's
-    /// footprint resolves to this, not only its origin — which is what makes
-    /// hovering a multi-tile machine work anywhere on it.
-    ///
-    /// JSON:
     /// `{"kind": "machine", "machine_kind": "cooking_vat",
+    ///   "direction": "east",
     ///   "footprint": {"width_tiles": 2, "height_tiles": 2},
     ///   "origin_tile": [14, 0], "recipe": "ketchup",
     ///   "process": [120, 240]}`
     ///
-    /// `origin_tile` is the footprint's minimum-X/minimum-Y corner (see
-    /// [`super::machines`]'s module doc), so a caller that hovered a
-    /// non-origin tile can still identify *which* machine it hit and where
-    /// that machine actually starts. `machine_kind` is spelled out rather
-    /// than reusing `kind`, which this enum already spends on its own
-    /// variant tag.
+    /// `machine_kind` is spelled out rather than reusing `kind`, which this
+    /// enum already spends on its own variant tag.
     Machine {
         machine_kind: String,
+        direction: Direction,
         footprint: Footprint,
         origin_tile: TileCoord,
         recipe: RecipeId,
         process: Option<(u64, u64)>,
     },
-    /// A pipe tile (milestone 6). JSON:
-    /// `{"kind": "pipe", "fluid": "vinegar", "volume": 7.5, "capacity": 10.0,
-    ///   "pressure": 0.75, "is_source": false, "is_inlet": true}` —
-    /// enough for a hover tooltip without a second call.
+    /// `{"kind": "pipe", "direction": "east", "fluid": "vinegar",
+    ///   "volume": 7.5, "capacity": 10.0, "pressure": 0.75,
+    ///   "is_source": false, "is_inlet": true}` — enough for a hover tooltip
+    /// without a second call. `is_inlet` is whether some machine taps this
+    /// exact tile.
     Pipe {
-        fluid: FluidId,
+        direction: Direction,
+        fluid: Option<FluidId>,
         volume: f64,
         capacity: f64,
         pressure: f64,
         is_source: bool,
         is_inlet: bool,
     },
-    /// A tile occupied by the chain's hopper (ticket 3). Like
-    /// [`TileSnapshot::Machine`], **any** tile inside the footprint resolves
-    /// to this, not only the origin. JSON:
-    ///
-    /// `{"kind": "hopper", "footprint": {"width_tiles": 1, "height_tiles": 1},
-    ///   "origin_tile": [-1, 0], "item": "tomato", "quantity": 12,
-    ///   "capacity": 64, "fill": 0.1875}`
-    ///
-    /// Enough for a hover tooltip ("Hopper — 12/64 tomato") without a second
-    /// call. There is no `machine_kind` field: unlike the `machine` variant,
-    /// this enum's own `kind` tag already *is* the kind id.
+    /// `{"kind": "hopper", "direction": "east",
+    ///   "footprint": {...}, "origin_tile": [-1, 0], "item": "tomato",
+    ///   "quantity": 12, "capacity": 64, "fill": 0.1875}` — enough for a
+    /// hover tooltip ("Hopper — 12/64 tomato"). There is no `machine_kind`
+    /// field: this enum's own `kind` tag already *is* the kind id.
     Hopper {
+        direction: Direction,
         footprint: Footprint,
         origin_tile: TileCoord,
         item: ItemId,
@@ -749,44 +757,26 @@ pub enum TileSnapshot {
         capacity: u32,
         fill: f64,
     },
-    /// A tile occupied by the pipe run's fluid tank (the "Visual overhaul
-    /// round 2" epic's ticket 1). Mirrors [`TileSnapshot::Hopper`] exactly,
-    /// including that **any** tile inside the footprint resolves to it, not
-    /// only the origin. JSON:
-    ///
-    /// `{"kind": "fluid_tank", "footprint": {"width_tiles": 1, "height_tiles": 1},
+    /// `{"kind": "fluid_tank", "direction": "east", "footprint": {...},
     ///   "origin_tile": [5, 1], "fluid": "vinegar", "quantity": 30.0,
-    ///   "capacity": 120.0, "fill": 0.25}`
-    ///
-    /// Enough for a hover tooltip ("Vinegar tank — 30/120") without a second
-    /// call. `quantity`/`capacity` are `f64` rather than integers for the
-    /// reason [`FluidTankSnapshot`] gives: a fluid volume is continuous. As
-    /// with the `hopper` variant there is no `machine_kind` field — this
-    /// enum's own `kind` tag already *is* the kind id.
+    ///   "capacity": 120.0, "fill": 0.25}`. `fluid` is nullable for
+    /// [`FluidTankSnapshot`]'s reason.
     FluidTank {
+        direction: Direction,
         footprint: Footprint,
         origin_tile: TileCoord,
-        fluid: FluidId,
+        fluid: Option<FluidId>,
         quantity: f64,
         capacity: f64,
         fill: f64,
     },
-    /// A tile occupied by the chain's delivery dock (the delivery-dock
-    /// ticket). Mirrors [`TileSnapshot::Hopper`] at the other end of the
-    /// line, including that **any** tile inside the footprint resolves to
-    /// it, not only the origin. JSON:
-    ///
-    /// `{"kind": "dock", "footprint": {"width_tiles": 1, "height_tiles": 1},
+    /// `{"kind": "dock", "direction": "east", "footprint": {...},
     ///   "origin_tile": [35, 0], "contents": [], "capacity_per_item": 32,
-    ///   "shipped_total": 37}`
-    ///
-    /// Enough for a hover tooltip ("Loading dock — 37 shipped") without a
-    /// second call. There is deliberately no `fill` here and `contents` is
-    /// normally empty — see [`DockSnapshot`] for why, and for which number
-    /// a "what's waiting to be sold" readout should actually use. As with
-    /// the `hopper` variant there is no `machine_kind` field: this enum's
-    /// own `kind` tag already *is* the kind id.
+    ///   "shipped_total": 37}` — enough for a hover tooltip ("Loading dock —
+    /// 37 shipped"). There is deliberately no `fill` here and `contents` is
+    /// normally empty; see [`DockSnapshot`].
     Dock {
+        direction: Direction,
         footprint: Footprint,
         origin_tile: TileCoord,
         contents: Vec<(ItemId, u32)>,
@@ -795,516 +785,255 @@ pub enum TileSnapshot {
     },
 }
 
-/// Static (non-per-tick) description of one pipeline stage's placement —
-/// enough for Godot to build its `TileMap` generically from however many
-/// stages `recipes.ron` currently defines, instead of hardcoding stage
-/// geometry client-side (mirrors the same "Godot draws what the sim says
-/// exists" principle `chunk_snapshot` already follows for dynamic state).
+/// One placed thing, statically described — the unit
+/// [`World::world_layout`] reports.
 ///
-/// JSON shape (`snake_case`, one object per stage in chain order):
+/// **This replaces `StageLayout`, and `world_layout` replaces
+/// `chain_layout`** (a breaking change for presentation). A stage was a
+/// belt-plus-machine pair in a fixed chain, and neither of those concepts
+/// survives placement: there is no chain, there is no stage, and a belt is
+/// no longer owned by the machine downstream of it. What a renderer
+/// actually needs — and all it ever used `chain_layout` for — is "what is
+/// on the floor, where, facing which way, and how big is it," which is what
+/// this is, for every placement in the world rather than only the
+/// recipe-driven ones.
 ///
 /// ```json
 /// {
-///   "recipe": "tomato_paste",
-///   "belt_start_tile": [0, 0],
-///   "belt_length_tiles": 4,
-///   "machine_tile": [4, 0],
-///   "machine_kind": "crusher",
-///   "machine_footprint": { "width_tiles": 1, "height_tiles": 1 }
+///   "kind": "cooking_vat",
+///   "tile": [14, 0],
+///   "direction": "east",
+///   "footprint": { "width_tiles": 2, "height_tiles": 2 },
+///   "occupies": [[14, 0], [15, 0], [14, 1], [15, 1]],
+///   "recipe": "ketchup"
 /// }
 /// ```
 ///
-/// `machine_kind`/`machine_footprint` are new in the "Machines improvement"
-/// milestone; every field that existed before is unchanged in both name and
-/// meaning, so an existing consumer keeps working untouched.
-/// **`machine_tile` is the footprint's origin** — its minimum-X/minimum-Y
-/// corner, and the tile the belt feeds into (see [`super::machines`]'s module
-/// doc). The machine covers `x in [machine_tile.x, machine_tile.x +
-/// width_tiles)`, `y in [machine_tile.y, machine_tile.y + height_tiles)`, and
-/// the next stage's `belt_start_tile` is the tile immediately east of that
-/// rectangle.
+/// `footprint` is the kind's **declared** rectangle and `occupies` is what
+/// it actually covers once rotated — both are given so a consumer can pick
+/// whichever it needs without re-deriving the rotation rule. `recipe` is
+/// `null` for everything that runs none: belts, pipes, hoppers, tanks and
+/// docks.
+///
+/// Unlike `chain_layout`, **this is not static for the life of the world** —
+/// it changes whenever the player places, rotates or removes something. Call
+/// it again after issuing any of those three commands (and after a
+/// `dirty_chunks` report, if the renderer is chunk-driven).
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct StageLayout {
-    pub recipe: RecipeId,
-    pub belt_start_tile: TileCoord,
-    pub belt_length_tiles: i32,
-    /// Origin tile of this stage's machine — see this type's doc.
-    pub machine_tile: TileCoord,
-    /// Machine kind id from `data/machines.ron` (e.g. "crusher").
-    pub machine_kind: String,
-    /// How many tiles that machine covers, anchored at `machine_tile`.
-    pub machine_footprint: Footprint,
+pub struct PlacementSnapshot {
+    pub kind: String,
+    pub tile: TileCoord,
+    pub direction: Direction,
+    pub footprint: Footprint,
+    pub occupies: Vec<TileCoord>,
+    pub recipe: Option<RecipeId>,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct Stage {
-    belt_entity: Entity,
-    machine_entity: Entity,
+/// What kind of thing a placed entity is — the one component every
+/// placement carries besides [`Position`] and [`Placement`], so the
+/// topology pass can classify a tile's owner without probing for each
+/// possible body type in turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BodyKind {
+    Belt,
+    Pipe,
+    Machine,
+    Hopper,
+    FluidTank,
+    Dock,
 }
 
-/// The chain's hopper plus where it stands (ticket 3).
+/// Everything derived from *where things stand*, rebuilt whenever that
+/// changes and never otherwise (ARCHITECTURE.md §3.8's "once per topology
+/// change, not every tick").
 ///
-/// A plain field on [`World`], not an ECS entity, for exactly the reason
-/// `economy` and `fluid` are plain fields: there is precisely one of these
-/// per world at this scope, so ECS machinery would buy nothing — and it
-/// keeps `Hopper::try_unload`'s `&mut BeltSegment` argument borrow-checkable
-/// alongside the hopper itself (disjoint fields of `World`), the same trick
-/// the fluid network already relies on in `tick`.
-#[derive(Debug)]
-struct HopperStage {
-    hopper: Hopper,
-    /// Footprint origin — min-X/min-Y corner, as for any machine.
-    tile: TileCoord,
-    footprint: Footprint,
-    kind: String,
-}
-
-/// Where the pipe run's fluid tank stands (the "Visual overhaul round 2"
-/// epic's ticket 1).
-///
-/// Placement only: the tank's *contents* live inside the [`FluidNetwork`]
-/// (see [`FluidTank`]'s doc for why they have to, and `HopperStage` above
-/// for the pattern this otherwise copies). `Some` exactly when `World::fluid`
-/// is — a world with no fluid-requiring recipe has no run and no tank.
-#[derive(Debug)]
-struct FluidTankStage {
-    /// Footprint origin — min-X/min-Y corner, as for any machine.
-    tile: TileCoord,
-    footprint: Footprint,
-    kind: String,
-    /// The pipe tile this tank discharges into: the run's `is_source`
-    /// segment, always `segments[0]`.
-    pipe_tile: TileCoord,
-}
-
-/// The chain's delivery dock, the belt that feeds it, and where both stand
-/// (the delivery-dock ticket).
-///
-/// A plain field on [`World`] rather than an ECS entity, for `HopperStage`'s
-/// reason: exactly one per world. It differs from `HopperStage` in owning a
-/// belt entity too — the dock is fed by a real [`BeltSegment`], laid out and
-/// ticked exactly like every inter-stage belt, and that belt lives in the
-/// ECS with the same `Position`/`BeltSpan`/`BeltSegment` components so
-/// snapshot and query code treats it uniformly. It is *not* a [`Stage`],
-/// because a stage is a belt plus a recipe-driven machine and a dock runs no
-/// recipe.
-#[derive(Debug)]
-struct DockStage {
-    dock: Dock,
-    /// The belt running from the last machine into this dock.
-    belt_entity: Entity,
-    /// Footprint origin — min-X/min-Y corner, as for any machine.
-    tile: TileCoord,
-    footprint: Footprint,
-    kind: String,
+/// Every list here is in a deterministic order — placements sorted by origin
+/// tile, links in the order of their source placement — because tick order
+/// is simulation behaviour and ARCHITECTURE.md §3.9 requires it to be
+/// reproducible. Nothing in this struct is ever iterated out of a `HashMap`.
+#[derive(Debug, Default)]
+struct Topology {
+    /// Every occupied tile and the entity claiming it. A multi-tile
+    /// placement appears once per tile it covers, all mapping to the same
+    /// entity — which is what makes "any tile of it works" true for
+    /// `query_tile`, `Remove` and `Rotate` alike.
+    grid: BTreeMap<TileCoord, Entity>,
+    /// Every placement, in tile order — the order `world_layout` reports and
+    /// `all_chunks` walks.
+    all: Vec<Entity>,
+    belts: Vec<Entity>,
+    pipes: Vec<Entity>,
+    machines: Vec<Entity>,
+    hoppers: Vec<Entity>,
+    tanks: Vec<Entity>,
+    docks: Vec<Entity>,
+    /// A belt hands off to the belt it points at.
+    belt_to_belt: Vec<(Entity, Entity)>,
+    /// A belt hands off into a machine's inlet face, or into a dock.
+    belt_to_sink: Vec<(Entity, Entity)>,
+    /// A machine or hopper discharges onto the belt off its outlet face.
+    source_to_belt: Vec<(Entity, Entity)>,
+    /// One per connected component of placed pipe.
+    networks: Vec<FluidNetwork>,
+    /// Which network and which segment each pipe tile is, so a tile query
+    /// doesn't have to search every network.
+    pipe_index: BTreeMap<TileCoord, (usize, usize)>,
+    /// `(machine, network index, segment index)` for every fluid-consuming
+    /// machine that touches a pipe.
+    machine_taps: Vec<(Entity, usize, usize)>,
+    /// `(tank, network index, segment index)` for every tank discharging
+    /// into a pipe.
+    tank_discharges: Vec<(Entity, usize, usize)>,
 }
 
 pub struct World {
     ecs: hecs::World,
     recipes: RecipeRegistry,
+    machines: MachineRegistry,
+    /// Which recipe a machine *kind* runs — the 1:1 inverse of
+    /// `Recipe.machine`, built once at construction. A placed machine runs
+    /// this and nothing else: choosing a recipe per machine is a mechanic
+    /// nobody has asked for, and `data/recipes.ron` has always had exactly
+    /// one recipe per kind (construction panics if that stops being true,
+    /// rather than silently picking one).
+    recipe_for_kind: HashMap<String, RecipeId>,
+    /// The chain's raw ingredient — the first recipe's first input — which
+    /// is what any hopper the player places will hold. `None` for a recipe
+    /// file whose first recipe has no inputs, in which case a hopper cannot
+    /// be placed at all (rather than the world refusing to be built).
+    raw_item: Option<ItemId>,
     tick_count: u64,
-    stages: Vec<Stage>,
     belt_speed: Fx,
     /// Chunks touched since the start of the current `tick()` call. Cleared
     /// (not reallocated) at the start of every `tick()` — see `tick`'s doc
-    /// comment and ARCHITECTURE.md §4's "Delta granularity" note.
+    /// comment and ARCHITECTURE.md §4's "Delta granularity" note. A
+    /// `Place`/`Remove`/`Rotate` between ticks accumulates into it too.
     dirty: Vec<ChunkId>,
-    /// Money + every active contract's delivery state, loaded from
-    /// `data/contracts.ron` (GAMEPLAY.md §6/§9) — see `economy` module doc for why this
-    /// lives here as a plain field rather than a new ECS component.
+    /// Money + every active contract's delivery state (GAMEPLAY.md §6/§9).
     economy: Economy,
-    /// Milestone 6's single fixed pipe run (ARCHITECTURE.md §9 item 6,
-    /// §3.4), or `None` when no recipe in `recipes.ron` declares
-    /// `fluid_inputs`. A plain field, not an ECS component, for exactly the
-    /// same reason `economy` is one: there is precisely one of these at
-    /// this milestone's scope, so ECS machinery would buy nothing. It also
-    /// keeps `Machine::tick`'s `&mut FluidNetwork` argument borrow-checkable
-    /// alongside a `&mut Machine` fetched out of `ecs` (disjoint fields).
-    fluid: Option<FluidNetwork>,
-    /// Index into `stages` of the machine the pipe run feeds — `Some` iff
-    /// `fluid` is.
-    fluid_stage: Option<usize>,
-    /// The chain's raw-ingredient feeder (ticket 3) — see [`HopperStage`].
-    /// Never optional: a chain always has exactly one raw entry point, and
-    /// since ticket 3 that entry point is a building rather than a command.
-    hopper: HopperStage,
-    /// Where the pipe run's tank stands — `Some` iff `fluid` is. See
-    /// [`FluidTankStage`].
-    fluid_tank: Option<FluidTankStage>,
-    /// The chain's finished-product exit (the delivery-dock ticket) — see
-    /// [`DockStage`]. Never optional, for [`HopperStage`]'s reason: a chain
-    /// always has exactly one exit, and since this ticket that exit is a
-    /// building rather than a command.
-    dock: DockStage,
-    /// What the player can buy and what they own of it (the "Shop &
-    /// Inventory" epic's ticket 1) — a plain field for the same reason
-    /// `economy` and `fluid` are: exactly one per world. Note nothing in
-    /// `World`'s construction reads it yet; the shipped chain is still built
-    /// unconditionally, and spending owned equipment on placement is a later
-    /// epic. See [`super::shop`]'s module doc.
+    /// What the player can buy and what they own of it. Since this epic an
+    /// owned count is real inventory: `Place` spends one and `Remove`
+    /// credits one back.
     shop: Shop,
+    topology: Topology,
 }
 
-const BELT_LENGTH_TILES: i32 = 4;
-const ITEM_MIN_SPACING_TILES: f64 = 0.25;
+/// How far an item advances along a belt tile per tick. Unchanged from the
+/// pre-placement chain — a tile is one unit long, so an item still crosses
+/// one tile in 50 ticks and a four-tile run in 200, exactly as it did when
+/// that run was a single four-tile `BeltSegment`.
 const BELT_SPEED_TILES_PER_TICK: f64 = 0.02;
+/// One placed belt tile is one unit of belt. (`belt.rs` requires
+/// `speed <= min_spacing`, which the two constants above and below satisfy.)
+const BELT_TILE_LENGTH: f64 = 1.0;
+const ITEM_MIN_SPACING_TILES: f64 = 0.25;
 const MACHINE_INPUT_CAPACITY: u32 = 8;
 const MACHINE_OUTPUT_CAPACITY: u32 = 8;
-
-/// Milestone 6's fixed pipe run (ARCHITECTURE.md §9 item 6): how many pipe
-/// tiles, including the source at one end and the machine inlet at the
-/// other. Long enough that pressure equalization is doing visible work
-/// carrying fluid down the run, short enough to stay a demo.
-const FLUID_PIPE_RUN_TILES: i32 = 4;
-/// Which tile row the production chain itself sits on. Every belt tile and
-/// every machine footprint's *origin* row is this; a machine taller than one
-/// tile grows northward from here.
-const CHAIN_ROW_Y: i32 = 0;
 /// Volume one pipe tile holds, in whole fluid units.
 const PIPE_SEGMENT_CAPACITY: i32 = 10;
 
 impl World {
-    /// Builds one stage per recipe in `recipes.ordered()`, in file order,
-    /// laid out left to right — see the module doc for why this order (not
-    /// any Rust-side description) is what defines the chain. Machine sizes
-    /// come from the shipped `data/machines.ron` and the contract board from
-    /// the shipped `data/contracts.ron`; use [`World::with_machines`] or
-    /// [`World::with_content`] to supply a different set of either.
+    /// An **empty** world: no belts, no machines, no buildings, and
+    /// [`STARTING_MONEY`] in the bank. Everything in a factory is something
+    /// the player buys ([`PlayerCommand::Purchase`]) and places
+    /// ([`PlayerCommand::Place`]) — see this module's doc for why that
+    /// replaced the fixed recipe-order chain.
+    ///
+    /// Machine sizes come from the shipped `data/machines.ron` and the
+    /// contract board from the shipped `data/contracts.ron`; use
+    /// [`World::with_machines`] or [`World::with_content`] to supply a
+    /// different set of either.
     pub fn new(recipes: RecipeRegistry) -> Self {
         Self::with_machines(recipes, MachineRegistry::bundled())
     }
 
     /// [`World::new`], but with an explicit machine-kind registry instead of
     /// the bundled `data/machines.ron`. This is the seam that lets a test
-    /// exercise a footprint no shipped kind has (every shipped kind is 1x1,
-    /// so the width math would otherwise be unobservable) without inventing
-    /// fake content in the real data file.
+    /// exercise a footprint no shipped kind has — every shipped kind is 1x1
+    /// or square, so rotation's extent-swap would otherwise be unobservable
+    /// on real content.
     pub fn with_machines(recipes: RecipeRegistry, machines: MachineRegistry) -> Self {
         Self::with_content(recipes, machines, ContractRegistry::bundled())
     }
 
     /// [`World::with_machines`], but with an explicit contract board instead
     /// of the bundled `data/contracts.ron` — the seam a test uses to drive
-    /// cadences and mixes the shipped content doesn't have, without
-    /// inventing fake content in the real data file. Same rule as
-    /// `with_machines`: the shipped file stays the thing the game actually
-    /// runs on.
+    /// cadences and mixes the shipped content doesn't have.
     pub fn with_content(
         recipes: RecipeRegistry,
         machines: MachineRegistry,
         contracts: ContractRegistry,
     ) -> Self {
+        Self::with_content_and_money(
+            recipes,
+            machines,
+            contracts,
+            Fx::from_num(STARTING_MONEY),
+        )
+    }
+
+    /// [`World::with_content`], but starting from a chosen balance instead
+    /// of [`STARTING_MONEY`].
+    ///
+    /// The seam [`super::reference::reference_chain`] uses to buy a whole
+    /// factory in one go, and where a loaded save will restore its balance.
+    /// Deliberately a constructor argument rather than a "give me money"
+    /// method: money only ever moves through [`Economy::try_spend`] and a
+    /// contract payout once a world exists, and adding a second way in would
+    /// be a cheat surface on the real API.
+    pub fn with_content_and_money(
+        recipes: RecipeRegistry,
+        machines: MachineRegistry,
+        contracts: ContractRegistry,
+        money: Fx,
+    ) -> Self {
         let ordered = recipes.ordered();
         assert!(
             !ordered.is_empty(),
-            "recipes.ron must define at least one recipe for World::new to build a chain from"
+            "recipes.ron must define at least one recipe"
         );
+        // Still enforced, though nothing lays out a chain any more: it is
+        // what makes the shipped file a coherent production line, what
+        // `reference_chain` builds against, and what makes "the first
+        // recipe's first input is the raw ingredient" true.
         validate_chain(ordered);
         validate_fluid_scope(ordered);
-        // Every recipe's machine kind must exist in machines.ron before any
-        // layout arithmetic runs — a missing kind has no footprint, and
-        // guessing one (1x1) would silently mis-place the entire rest of the
-        // chain. Same construction-time-panic rule as `validate_chain`.
+        // Every recipe's machine kind must exist in machines.ron — a
+        // missing kind has no footprint, so a machine of that kind could
+        // never be placed and its recipe would be silently unreachable.
+        // Same construction-time-panic rule as `validate_chain`.
         if let Err(e) = machines.validate_covers(&recipes) {
             panic!("machine content error: {e}");
         }
-        // Deliberately NOT validated here: whether every contract asks for
-        // something this chain can produce. A missing machine kind (above)
-        // has no footprint, so the layout arithmetic below would be silently
-        // wrong — that has to be a construction-time panic. An unsatisfiable
-        // contract is different in kind: the world is perfectly coherent, one
-        // contract simply never pays, which is exactly the state a
-        // deliberately-out-of-reach contract will legitimately be in once
-        // GAMEPLAY.md §6's tier gating lands. Panicking on it would also make
-        // it impossible to build a `World` from a synthetic recipe set
-        // against the shipped board, which several tests do. The shipped
-        // files are instead checked against each other by
-        // `ContractRegistry::validate_producible`, called from
-        // `contracts.rs`'s own bundled-content test.
 
-        let mut ecs = hecs::World::new();
-        let mut stages = Vec::with_capacity(ordered.len());
-
-        // Stage placement accumulates each machine's own width rather than
-        // multiplying a fixed per-stage span: belt tiles, then this stage's
-        // machine footprint, then the next stage starts on the very next
-        // tile. With every kind 1x1 this reproduces the old
-        // `i * (BELT_LENGTH_TILES + 1)` exactly.
-        let mut next_stage_x = 0;
-        for recipe in ordered.iter() {
-            let footprint = machines
-                .footprint_of(&recipe.machine)
-                .expect("validate_covers ran above, so every kind is known");
-
-            let belt_start_x = next_stage_x;
-            let machine_origin_x = belt_start_x + BELT_LENGTH_TILES;
-            next_stage_x = machine_origin_x + footprint.width_tiles;
-
-            let belt_entity = ecs.spawn((
-                Position {
-                    tile: (belt_start_x, CHAIN_ROW_Y),
-                },
-                BeltSpan {
-                    length_tiles: BELT_LENGTH_TILES,
-                },
-                BeltSegment::new(
-                    Fx::from_num(BELT_LENGTH_TILES),
-                    Fx::from_num(ITEM_MIN_SPACING_TILES),
-                ),
-            ));
-
-            let machine_entity = ecs.spawn((
-                // The origin tile: the footprint's min-X/min-Y corner, and
-                // the tile this stage's belt feeds into.
-                Position {
-                    tile: (machine_origin_x, CHAIN_ROW_Y),
-                },
-                MachinePlacement {
-                    kind: recipe.machine.clone(),
-                    footprint,
-                },
-                Machine::new(recipe.id.clone(), MACHINE_INPUT_CAPACITY, MACHINE_OUTPUT_CAPACITY),
-            ));
-
-            stages.push(Stage {
-                belt_entity,
-                machine_entity,
-            });
-        }
-
-        // The fluid half of the world (milestone 6), also derived purely
-        // from `recipes.ron`: whichever recipe declares `fluid_inputs` gets
-        // a pipe run built up to its machine, carrying the fluid that
-        // recipe asks for. No fluid id, no recipe id and no stage index is
-        // written down in Rust — same data-driven rule the belt chain
-        // already follows (ARCHITECTURE.md §3.6/§10). A file with no fluid
-        // recipe simply has no pipes.
-        let fluid_stage = ordered.iter().position(|r| !r.fluid_inputs.is_empty());
-        let fluid = fluid_stage.map(|i| {
-            let machine_entity = stages[i].machine_entity;
-            let machine_origin = ecs.get::<&Position>(machine_entity).unwrap().tile;
-            let machine_footprint = ecs.get::<&MachinePlacement>(machine_entity).unwrap().footprint;
-            // The pipe run sits on the row immediately *north* of the
-            // machine it feeds, so its inlet is always edge-adjacent to that
-            // machine's footprint no matter how tall the machine is. For a
-            // 1x1 machine on row 0 that is row 1 — exactly where milestone
-            // 6 put it — and for a taller one it rises with the machine
-            // instead of being buried inside it.
-            let pipe_row_y = machine_origin.1 + machine_footprint.height_tiles;
-            let capacity = Fx::from_num(PIPE_SEGMENT_CAPACITY);
-            // Laid out left to right ending directly beside the machine it
-            // feeds: the source is the far end, the inlet is the tile
-            // adjacent to the machine.
-            let segments: Vec<PipeSegment> = (0..FLUID_PIPE_RUN_TILES)
-                .map(|n| {
-                    let x = machine_origin.0 - (FLUID_PIPE_RUN_TILES - 1 - n);
-                    PipeSegment::new((x, pipe_row_y), capacity, n == 0)
-                })
-                .collect();
-            let inlet = segments.len() - 1;
-            // The tank (the "Visual overhaul round 2" epic's ticket 1) is
-            // the run's only supply. Its capacity is a Rust constant for the
-            // same reason HOPPER_CAPACITY is (see `fluid::FLUID_TANK_CAPACITY`
-            // for how the number was picked); its footprint, like every
-            // placed building's, comes from `data/machines.ron`.
-            let tank = FluidTank::new(Fx::from_num(FLUID_TANK_CAPACITY));
-            FluidNetwork::new(ordered[i].fluid_inputs[0].0.clone(), segments, inlet, tank)
-        });
-
-        // The tank's *placement*, following the hopper's precedent exactly:
-        // its footprint ends on the tile immediately west of the run's first
-        // pipe tile, so it stands beside the run rather than in it, and
-        // introducing it moved no existing tile (the shipped run starts at
-        // x = 6, so a 1x1 tank sits at x = 5 on the run's own row). A wider
-        // tank would grow further west, away from the chain.
-        let fluid_tank = fluid.as_ref().map(|network| {
-            let tank_footprint = machines.footprint_of(FLUID_TANK_KIND).unwrap_or_else(|| {
+        let mut recipe_for_kind: HashMap<String, RecipeId> = HashMap::new();
+        for recipe in ordered {
+            if let Some(existing) = recipe_for_kind.get(&recipe.machine) {
                 panic!(
-                    "machine content error: data/machines.ron must define the \
-                     '{FLUID_TANK_KIND}' kind — a recipe declares fluid_inputs, so this world \
-                     has a pipe run, and a pipe run is supplied by a tank whose footprint has \
-                     to come from the same file every other placed building's does (known \
-                     kinds: {})",
-                    machines.kind_ids().join(", ")
-                )
-            });
-            let pipe_tile = network.segments()[0].tile;
-            FluidTankStage {
-                tile: (pipe_tile.0 - tank_footprint.width_tiles, pipe_tile.1),
-                footprint: tank_footprint,
-                kind: FLUID_TANK_KIND.to_string(),
-                pipe_tile,
+                    "recipes.ron content error: machine kind '{}' runs both '{existing}' and \
+                     '{}' — a placed machine runs the one recipe its kind names (world.rs's \
+                     `recipe_for_kind`), so two recipes on one kind would need a \
+                     recipe-selection mechanic that does not exist",
+                    recipe.machine, recipe.id
+                );
             }
-        });
+            recipe_for_kind.insert(recipe.machine.clone(), recipe.id.clone());
+        }
+        let raw_item = ordered[0].inputs.first().map(|(item, _)| item.clone());
 
-        // The hopper (ticket 3): the chain's raw-ingredient feeder, placed so
-        // its footprint ends on the tile immediately west of stage 0's belt.
-        // With the belt starting at x = 0 that puts a 1x1 hopper at x = -1 —
-        // deliberately outside the chain's own span, so introducing it moved
-        // no existing tile, and a wider hopper would grow further west
-        // rather than pushing the whole line east.
-        //
-        // Both of its content inputs come from data, not from here: the
-        // footprint from `data/machines.ron` (like any kind), and the item it
-        // holds from `data/recipes.ron` — the first recipe's first input is
-        // by definition the chain's raw ingredient (see `validate_chain`).
-        let hopper_footprint = machines.footprint_of(HOPPER_KIND).unwrap_or_else(|| {
-            panic!(
-                "machine content error: data/machines.ron must define the '{HOPPER_KIND}' kind — \
-                 every chain is fed by one, so its footprint has to come from the same file \
-                 every other placed building's does (known kinds: {})",
-                machines.kind_ids().join(", ")
-            )
-        });
-        let raw_item = ordered[0]
-            .inputs
-            .first()
-            .map(|(item, _)| item.clone())
-            .unwrap_or_else(|| {
-                panic!(
-                    "recipes.ron chain error: the first recipe '{}' has no inputs, so the chain \
-                     has no raw ingredient for its hopper to hold",
-                    ordered[0].id
-                )
-            });
-        let first_belt_tile = ecs
-            .get::<&Position>(stages[0].belt_entity)
-            .unwrap()
-            .tile;
-        let hopper = HopperStage {
-            hopper: Hopper::new(raw_item, HOPPER_CAPACITY),
-            tile: (
-                first_belt_tile.0 - hopper_footprint.width_tiles,
-                first_belt_tile.1,
-            ),
-            footprint: hopper_footprint,
-            kind: HOPPER_KIND.to_string(),
-        };
-
-        // The dock (the delivery-dock ticket): the chain's finished-product
-        // exit, and the mirror image of the hopper above. Unlike the hopper
-        // and the tank — both of which are placed *outside* the chain's span
-        // so that introducing them moved no tile — the dock genuinely
-        // extends the line eastward, because that is where the end of a
-        // conveyor is. It gets one ordinary belt (same length, same speed,
-        // same min-spacing as every inter-stage belt) starting on the very
-        // next tile after the last machine, and stands immediately east of
-        // that belt's last tile.
-        //
-        // On the shipped content that puts the belt at x = 31..34 and the
-        // dock at x = 35, so the chain now crosses the x = 32 chunk boundary
-        // (ARCHITECTURE.md §3.1) — handled, not avoided: `all_chunks`
-        // reports (1, 0) and `chunk_snapshot` reports a footprint in every
-        // chunk it overlaps. See `data/machines.ron`'s note on the kind.
-        let dock_footprint = machines.footprint_of(DOCK_KIND).unwrap_or_else(|| {
-            panic!(
-                "machine content error: data/machines.ron must define the '{DOCK_KIND}' kind —                  every chain ends in one, so its footprint has to come from the same file                  every other placed building's does (known kinds: {})",
-                machines.kind_ids().join(", ")
-            )
-        });
-        let dock_belt_start_x = next_stage_x;
-        let dock_belt_entity = ecs.spawn((
-            Position {
-                tile: (dock_belt_start_x, CHAIN_ROW_Y),
-            },
-            BeltSpan {
-                length_tiles: BELT_LENGTH_TILES,
-            },
-            BeltSegment::new(
-                Fx::from_num(BELT_LENGTH_TILES),
-                Fx::from_num(ITEM_MIN_SPACING_TILES),
-            ),
-        ));
-        let dock = DockStage {
-            dock: Dock::new(DOCK_CAPACITY),
-            belt_entity: dock_belt_entity,
-            tile: (dock_belt_start_x + BELT_LENGTH_TILES, CHAIN_ROW_Y),
-            footprint: dock_footprint,
-            kind: DOCK_KIND.to_string(),
-        };
-
-        let world = Self {
-            ecs,
+        Self {
+            ecs: hecs::World::new(),
             recipes,
+            machines,
+            recipe_for_kind,
+            raw_item,
             tick_count: 0,
-            stages,
             belt_speed: Fx::from_num(BELT_SPEED_TILES_PER_TICK),
             dirty: Vec::new(),
-            economy: Economy::new(&contracts),
-            fluid,
-            fluid_stage,
-            hopper,
-            fluid_tank,
-            dock,
-            // The bundled `data/shop.ron`, owning nothing. Deliberately not
-            // parameterized alongside `machines` the way `with_machines`
-            // parameterizes footprints: no layout arithmetic reads a price,
-            // so a test never needs a fake catalog to observe placement, and
-            // one that wants a different catalog can build a `Shop`
-            // directly (`sim::shop`'s own tests do).
+            economy: Economy::with_money(&contracts, money),
             shop: Shop::bundled(),
-        };
-        world.validate_placement();
-        world
-    }
-
-    /// Construction-time check that the laid-out world is physically
-    /// coherent: no machine footprint overlaps another machine, a belt tile,
-    /// or a pipe tile. With the accumulate-widths layout above this can't
-    /// happen for the shipped content, but a future change to the layout
-    /// rule or the pipe run would otherwise fail as a subtly wrong render
-    /// rather than an error — so it panics here, at construction, the same
-    /// way `validate_chain` does for a broken recipe chain.
-    fn validate_placement(&self) {
-        let mut claims: Vec<(TileCoord, String)> = Vec::new();
-
-        for (i, stage) in self.stages.iter().enumerate() {
-            let belt_tile = self.position_of(stage.belt_entity);
-            let span = self.ecs.get::<&BeltSpan>(stage.belt_entity).unwrap();
-            for dx in 0..span.length_tiles {
-                claims.push(((belt_tile.0 + dx, belt_tile.1), format!("stage {i}'s belt")));
-            }
-
-            let placement = self.placement_of(stage.machine_entity);
-            let origin = self.position_of(stage.machine_entity);
-            for tile in placement.footprint.tiles(origin) {
-                claims.push((tile, format!("stage {i}'s '{}' machine", placement.kind)));
-            }
+            topology: Topology::default(),
         }
-
-        if let Some(fluid) = &self.fluid {
-            for segment in fluid.segments() {
-                claims.push((segment.tile, "the pipe run".to_string()));
-            }
-        }
-
-        for tile in self.hopper.footprint.tiles(self.hopper.tile) {
-            claims.push((tile, "the chain's hopper".to_string()));
-        }
-
-        if let Some(tank) = &self.fluid_tank {
-            for tile in tank.footprint.tiles(tank.tile) {
-                claims.push((tile, "the pipe run's fluid tank".to_string()));
-            }
-        }
-
-        let dock_belt_tile = self.position_of(self.dock.belt_entity);
-        let dock_belt_span = self
-            .ecs
-            .get::<&BeltSpan>(self.dock.belt_entity)
-            .unwrap()
-            .length_tiles;
-        for dx in 0..dock_belt_span {
-            claims.push((
-                (dock_belt_tile.0 + dx, dock_belt_tile.1),
-                "the delivery dock's belt".to_string(),
-            ));
-        }
-        for tile in self.dock.footprint.tiles(self.dock.tile) {
-            claims.push((tile, "the delivery dock".to_string()));
-        }
-
-        assert_no_tile_conflicts(&claims);
     }
 
     pub fn current_tick(&self) -> u64 {
@@ -1325,148 +1054,450 @@ impl World {
     }
 
     /// Presentation-facing money + contract-status snapshot (ARCHITECTURE.md
-    /// §4/§5) — always current, unlike `chunk_snapshot` there's no dirty-
-    /// tracking to consult first, since there's exactly one of this per
-    /// world rather than one per chunk.
+    /// §4/§5) — always current, unlike `chunk_snapshot` there's no
+    /// dirty-tracking to consult first.
     pub fn economy_snapshot(&self) -> EconomySnapshot {
         self.economy.snapshot()
     }
 
-    /// The fluid network's live state, or `None` if this world has no pipe
-    /// run (no recipe declares `fluid_inputs`). Always current, never
-    /// dirty-tracked — see [`FluidSnapshot`]'s doc for the full JSON shape
-    /// and for why presentation should poll this rather than wait for a
-    /// dirty chunk.
-    pub fn fluid_snapshot(&self) -> Option<FluidSnapshot> {
-        let fluid = self.fluid.as_ref()?;
-        let stage = self.stages[self.fluid_stage.expect("fluid_stage is Some iff fluid is")];
-        let machine = self.ecs.get::<&Machine>(stage.machine_entity).unwrap();
-        let units_per_craft = self
-            .recipes
-            .get(&machine.recipe)
-            .and_then(|r| r.fluid_inputs.first().map(|(_, units)| *units))
-            .unwrap_or(0);
-        let total_capacity = fluid.total_capacity();
-        Some(FluidSnapshot {
-            fluid: fluid.fluid.clone(),
-            total_volume: fluid.total_volume().to_num::<f64>(),
-            total_capacity: total_capacity.to_num::<f64>(),
-            pressure: if total_capacity == Fx::ZERO {
-                0.0
-            } else {
-                (fluid.total_volume() / total_capacity).to_num::<f64>()
-            },
-            segments: fluid.segments().iter().map(pipe_snapshot).collect(),
-            inlet_index: fluid.inlet_index(),
-            machine_tile: self.position_of(stage.machine_entity),
-            machine_recipe: machine.recipe.clone(),
-            units_per_craft,
-        })
+    /// The shop catalog, the player's owned counts and their current money
+    /// in one object — see [`ShopSnapshot`] for the exact JSON shape.
+    pub fn shop_snapshot(&self) -> ShopSnapshot {
+        self.shop.snapshot(self.economy.money)
     }
 
-    /// The chain's hopper — placement plus live fill level (ticket 3). See
-    /// [`HopperSnapshot`] for the full JSON shape.
-    ///
-    /// Read this the way `fluid_snapshot`/`economy_snapshot` are read rather
-    /// than the way `chunk_snapshot` is: there is exactly one per world, so
-    /// polling it whenever the fill UI redraws is cheap and always current.
-    /// Unlike fluid, though, a hopper's level *does* dirty its chunk when it
-    /// changes (it changes at most once per tick, not every tick), so a
-    /// purely chunk-driven renderer stays correct too — `ChunkSnapshot`
-    /// carries the identical struct.
-    pub fn hopper_snapshot(&self) -> HopperSnapshot {
-        let h = &self.hopper;
-        HopperSnapshot {
-            tile: h.tile,
-            kind: h.kind.clone(),
-            footprint: h.footprint,
-            item: h.hopper.item().clone(),
-            quantity: h.hopper.quantity(),
-            capacity: h.hopper.capacity(),
-            fill: if h.hopper.capacity() == 0 {
-                0.0
-            } else {
-                h.hopper.quantity() as f64 / h.hopper.capacity() as f64
-            },
-            belt_tile: self.position_of(self.stages[0].belt_entity),
+    /// How many of `kind` the player owns and has **not** placed. A thin
+    /// read-only accessor for tests and for a build menu that wants one
+    /// number; presentation should use [`Self::shop_snapshot`], which
+    /// answers for every kind at once.
+    pub fn owned_count(&self, kind: &str) -> u32 {
+        self.shop.owned.count(kind)
+    }
+
+    /// How many placements exist in the world at all — the cheap "is
+    /// anything built yet" question a fresh world answers with zero.
+    pub fn placement_count(&self) -> usize {
+        self.topology.all.len()
+    }
+
+    // -----------------------------------------------------------------
+    // Placement
+    // -----------------------------------------------------------------
+
+    /// The footprint a kind is placed with: `data/machines.ron`'s for
+    /// anything that file defines, one tile for the belt and the pipe, which
+    /// are infrastructure rather than machines (see [`BELT_KIND`]) — and
+    /// `None` for a kind that is neither, which is what makes an unknown
+    /// kind an unplaceable one.
+    fn footprint_for(&self, kind: &str) -> Option<Footprint> {
+        if kind == BELT_KIND || kind == PIPE_KIND {
+            return Some(Footprint::ONE_BY_ONE);
+        }
+        self.machines.footprint_of(kind)
+    }
+
+    /// Whether `kind` is something this world knows how to construct at all
+    /// — a buildable kind in the shop catalog, with a footprint, and (for a
+    /// machine) a recipe to run.
+    fn can_construct(&self, kind: &str) -> bool {
+        if self.shop.catalog.get(kind).is_none() || self.footprint_for(kind).is_none() {
+            return false;
+        }
+        match kind {
+            BELT_KIND | PIPE_KIND | DOCK_KIND | FLUID_TANK_KIND => true,
+            HOPPER_KIND => self.raw_item.is_some(),
+            other => self.recipe_for_kind.contains_key(other),
         }
     }
 
-    /// The pipe run's fluid tank — placement plus live level (the "Visual
-    /// overhaul round 2" epic's ticket 1), or `None` when this world has no
-    /// pipe run (no recipe declares `fluid_inputs`). See
-    /// [`FluidTankSnapshot`] for the full JSON shape.
-    ///
-    /// **Poll this every frame you want to redraw the tank, exactly as you
-    /// poll `fluid_snapshot` — do not wait for a dirty chunk.** The tank is
-    /// drained by the same per-tick equalization pass the pipe run is, which
-    /// deliberately does not dirty anything (see `World::tick`), so a
-    /// falling level is invisible to `dirty_chunks`. Only `FillFluidTank`
-    /// dirties the tank's chunk, since that is a discrete player action a
-    /// chunk-driven renderer would otherwise miss entirely. `ChunkSnapshot`
-    /// carries the identical struct so such a renderer can still place the
-    /// geometry; the live level is here.
-    pub fn fluid_tank_snapshot(&self) -> Option<FluidTankSnapshot> {
-        let stage = self.fluid_tank.as_ref()?;
-        let network = self
-            .fluid
-            .as_ref()
-            .expect("fluid_tank is Some iff fluid is");
-        let tank = network.tank();
-        Some(FluidTankSnapshot {
-            tile: stage.tile,
-            kind: stage.kind.clone(),
-            footprint: stage.footprint,
-            fluid: network.fluid.clone(),
-            quantity: tank.volume().to_num::<f64>(),
-            capacity: tank.capacity().to_num::<f64>(),
-            // `FluidTank::pressure` is the tank's own fill fraction, which
-            // is exactly what this field means — not its
-            // `discharge_pressure`, which is a flow-model quantity and is
-            // always 1.
-            fill: tank.pressure().to_num::<f64>(),
-            pipe_tile: stage.pipe_tile,
-        })
+    /// Places one owned unit of `kind`, returning whether it happened. See
+    /// [`PlayerCommand::Place`] for the refusal rules — every one of them
+    /// leaves the world byte-identical.
+    fn try_place(&mut self, kind: &str, tile: TileCoord, direction: Direction) -> bool {
+        if self.shop.owned.count(kind) == 0 || !self.can_construct(kind) {
+            return false;
+        }
+        let footprint = self
+            .footprint_for(kind)
+            .expect("can_construct checked the footprint exists");
+        let tiles = footprint.tiles_facing(tile, direction);
+        if tiles.iter().any(|t| self.topology.grid.contains_key(t)) {
+            return false;
+        }
+
+        let placement = Placement {
+            kind: kind.to_string(),
+            footprint,
+            direction,
+        };
+        let position = Position { tile };
+        let entity = match kind {
+            BELT_KIND => self.ecs.spawn((
+                position,
+                placement,
+                BodyKind::Belt,
+                BeltSegment::new(
+                    Fx::from_num(BELT_TILE_LENGTH),
+                    Fx::from_num(ITEM_MIN_SPACING_TILES),
+                ),
+            )),
+            PIPE_KIND => self.ecs.spawn((
+                position,
+                placement,
+                BodyKind::Pipe,
+                PipeTile {
+                    capacity: Fx::from_num(PIPE_SEGMENT_CAPACITY),
+                },
+            )),
+            HOPPER_KIND => {
+                let item = self
+                    .raw_item
+                    .clone()
+                    .expect("can_construct checked the chain has a raw ingredient");
+                self.ecs.spawn((
+                    position,
+                    placement,
+                    BodyKind::Hopper,
+                    Hopper::new(item, HOPPER_CAPACITY),
+                ))
+            }
+            FLUID_TANK_KIND => self.ecs.spawn((
+                position,
+                placement,
+                BodyKind::FluidTank,
+                FluidTank::new(Fx::from_num(FLUID_TANK_CAPACITY)),
+            )),
+            DOCK_KIND => self.ecs.spawn((
+                position,
+                placement,
+                BodyKind::Dock,
+                Dock::new(DOCK_CAPACITY),
+            )),
+            machine_kind => {
+                let recipe = self.recipe_for_kind[machine_kind].clone();
+                self.ecs.spawn((
+                    position,
+                    placement,
+                    BodyKind::Machine,
+                    Machine::new(recipe, MACHINE_INPUT_CAPACITY, MACHINE_OUTPUT_CAPACITY),
+                ))
+            }
+        };
+        debug_assert!(self.ecs.contains(entity));
+
+        let taken = self.shop.owned.take_one(kind);
+        debug_assert!(taken, "owned count was checked above");
+        self.recompute_topology();
+        self.mark_tiles_dirty(&tiles);
+        true
     }
 
-    /// The chain's delivery dock — placement, what is on it, and how much it
-    /// has shipped in total (the delivery-dock ticket). See [`DockSnapshot`]
-    /// for the full JSON shape and, importantly, for why `contents` is
-    /// normally empty and there is no `fill` field.
+    /// Removes whatever occupies `tile`, crediting one back to the owned
+    /// count of its kind. See [`PlayerCommand::Remove`].
+    fn try_remove(&mut self, tile: TileCoord) -> bool {
+        let Some(&entity) = self.topology.grid.get(&tile) else {
+            return false;
+        };
+        let placement = self.placement_of(entity);
+        let origin = self.position_of(entity);
+        let tiles = placement.tiles(origin);
+        self.ecs
+            .despawn(entity)
+            .expect("the grid only ever names live entities");
+        self.shop.owned.add(&placement.kind, 1);
+        self.recompute_topology();
+        self.mark_tiles_dirty(&tiles);
+        true
+    }
+
+    /// Turns whatever occupies `tile` 90° clockwise in place. See
+    /// [`PlayerCommand::Rotate`].
+    fn try_rotate(&mut self, tile: TileCoord) -> bool {
+        let Some(&entity) = self.topology.grid.get(&tile) else {
+            return false;
+        };
+        let placement = self.placement_of(entity);
+        let origin = self.position_of(entity);
+        let old_tiles = placement.tiles(origin);
+        let turned = placement.direction.rotate_cw();
+        let new_tiles = placement.footprint.tiles_facing(origin, turned);
+        // Its own tiles are its own to reclaim; anybody else's are not.
+        let blocked = new_tiles.iter().any(|t| {
+            self.topology
+                .grid
+                .get(t)
+                .is_some_and(|&occupant| occupant != entity)
+        });
+        if blocked {
+            return false;
+        }
+        self.ecs
+            .get::<&mut Placement>(entity)
+            .expect("a placed entity always has a Placement")
+            .direction = turned;
+        self.recompute_topology();
+        self.mark_tiles_dirty(&old_tiles);
+        self.mark_tiles_dirty(&new_tiles);
+        true
+    }
+
+    // -----------------------------------------------------------------
+    // Topology
+    // -----------------------------------------------------------------
+
+    /// Rebuilds everything derived from where things stand: the occupancy
+    /// grid, the ordered per-kind entity lists, the hand-off links, and the
+    /// fluid networks.
     ///
-    /// Always returns a value (every world has exactly one dock), like
-    /// `hopper_snapshot`. Read it the way `hopper_snapshot` is read: there is
-    /// one per world, so polling it when the HUD redraws is cheap and always
-    /// current — and, like the hopper's, its changes *do* dirty its chunk
-    /// (at most once per shipped box, not every tick), so a chunk-driven
-    /// renderer stays correct too. `ChunkSnapshot` carries the identical
-    /// struct.
-    pub fn dock_snapshot(&self) -> DockSnapshot {
-        let d = &self.dock;
-        DockSnapshot {
-            tile: d.tile,
-            kind: d.kind.clone(),
-            footprint: d.footprint,
-            belt_start_tile: self.position_of(d.belt_entity),
-            belt_length_tiles: self
+    /// **Called only from `Place`, `Remove` and `Rotate`** — the three
+    /// commands that can change what is adjacent to what — and never from
+    /// [`Self::tick`]. That is ARCHITECTURE.md §3.8's rule ("compute
+    /// connected-component grouping via union-find, once per topology
+    /// change ... not every tick") applied at the scale this project
+    /// actually has: a full rebuild of a few hundred tiles is cheaper than
+    /// the bookkeeping an incremental union-find would need, and it cannot
+    /// drift out of sync with the grid the way an incremental one could.
+    /// When a world gets big enough for that trade to flip (milestone 8's
+    /// "thousands of entities"), this one function is what changes.
+    ///
+    /// Fluid *volumes* are carried across the rebuild by tile, so a
+    /// topology change never spills the run; a pipe that is removed takes
+    /// its contents with it, which is [`PlayerCommand::Remove`]'s documented
+    /// behaviour.
+    fn recompute_topology(&mut self) {
+        let carried_volumes: BTreeMap<TileCoord, Fx> = self
+            .topology
+            .networks
+            .iter()
+            .flat_map(|n| n.segments())
+            .map(|s| (s.tile, s.volume))
+            .collect();
+
+        let mut placements: Vec<(TileCoord, u32, Entity, BodyKind)> = self
+            .ecs
+            .iter()
+            .filter_map(|entity_ref| {
+                let position = entity_ref.get::<&Position>()?;
+                let body = entity_ref.get::<&BodyKind>()?;
+                Some((
+                    position.tile,
+                    entity_ref.entity().id(),
+                    entity_ref.entity(),
+                    *body,
+                ))
+            })
+            .collect();
+        // Deterministic order: by origin tile, then by entity id for the
+        // (impossible today, but cheap to guarantee) tie.
+        placements.sort_by_key(|&(tile, id, _, _)| (tile.1, tile.0, id));
+
+        let mut topology = Topology::default();
+        for &(_, _, entity, body) in &placements {
+            topology.all.push(entity);
+            match body {
+                BodyKind::Belt => topology.belts.push(entity),
+                BodyKind::Pipe => topology.pipes.push(entity),
+                BodyKind::Machine => topology.machines.push(entity),
+                BodyKind::Hopper => topology.hoppers.push(entity),
+                BodyKind::FluidTank => topology.tanks.push(entity),
+                BodyKind::Dock => topology.docks.push(entity),
+            }
+            let placement = self.placement_of(entity);
+            let origin = self.position_of(entity);
+            for tile in placement.tiles(origin) {
+                let previous = topology.grid.insert(tile, entity);
+                debug_assert!(
+                    previous.is_none(),
+                    "two placements claim tile {tile:?} — Place/Rotate must have refused one"
+                );
+            }
+        }
+
+        let body_of = |entity: Entity| -> BodyKind {
+            *self
                 .ecs
-                .get::<&BeltSpan>(d.belt_entity)
-                .unwrap()
-                .length_tiles,
-            contents: d.dock.contents().cloned().collect(),
-            capacity_per_item: d.dock.capacity_per_item(),
-            shipped_total: d.dock.shipped_total(),
+                .get::<&BodyKind>(entity)
+                .expect("every placement carries a BodyKind")
+        };
+
+        // --- solid hand-offs: a belt hands to whatever it points at, and a
+        // machine/hopper discharges onto whatever belt is off its outlet
+        // face. Faces matter here (see this module's doc).
+        for &belt in &topology.belts {
+            let placement = self.placement_of(belt);
+            let target = placement.direction.step(self.position_of(belt));
+            let Some(&occupant) = topology.grid.get(&target) else {
+                continue;
+            };
+            match body_of(occupant) {
+                BodyKind::Belt => topology.belt_to_belt.push((belt, occupant)),
+                BodyKind::Machine | BodyKind::Dock => {
+                    let sink = self.placement_of(occupant);
+                    let sink_origin = self.position_of(occupant);
+                    if sink
+                        .footprint
+                        .inlet_tiles(sink_origin, sink.direction)
+                        .contains(&target)
+                    {
+                        topology.belt_to_sink.push((belt, occupant));
+                    }
+                }
+                _ => {}
+            }
         }
+        for &source in topology.machines.iter().chain(topology.hoppers.iter()) {
+            let placement = self.placement_of(source);
+            let origin = self.position_of(source);
+            // The first belt off the outlet face, in the face's own
+            // deterministic order. A machine hands over one unit per tick,
+            // so a second belt against the same face would need a
+            // round-robin rule nobody has asked for.
+            let outlet_belt = placement
+                .footprint
+                .outlet_neighbours(origin, placement.direction)
+                .into_iter()
+                .filter_map(|tile| topology.grid.get(&tile).copied())
+                .find(|&occupant| body_of(occupant) == BodyKind::Belt);
+            if let Some(belt) = outlet_belt {
+                topology.source_to_belt.push((source, belt));
+            }
+        }
+
+        // --- fluid networks: one per connected component of pipe tiles,
+        // adjacency undirected (see `fluid.rs`'s module doc).
+        let pipe_tiles: BTreeMap<TileCoord, (Entity, Fx, Direction)> = topology
+            .pipes
+            .iter()
+            .map(|&entity| {
+                let placement = self.placement_of(entity);
+                let capacity = self
+                    .ecs
+                    .get::<&PipeTile>(entity)
+                    .expect("a pipe placement carries a PipeTile")
+                    .capacity;
+                (self.position_of(entity), (entity, capacity, placement.direction))
+            })
+            .collect();
+        let mut unvisited: Vec<TileCoord> = pipe_tiles.keys().copied().collect();
+        unvisited.reverse(); // pop() then yields ascending tile order
+        let mut seen: BTreeMap<TileCoord, ()> = BTreeMap::new();
+        while let Some(start) = unvisited.pop() {
+            if seen.contains_key(&start) {
+                continue;
+            }
+            // Breadth-first over the component, then sorted — so a
+            // network's segment order is its tile order regardless of which
+            // tile happened to be found first.
+            let mut component: Vec<TileCoord> = Vec::new();
+            let mut frontier = vec![start];
+            seen.insert(start, ());
+            while let Some(tile) = frontier.pop() {
+                component.push(tile);
+                for dir in Direction::ALL {
+                    let next = dir.step(tile);
+                    if pipe_tiles.contains_key(&next) && seen.insert(next, ()).is_none() {
+                        frontier.push(next);
+                    }
+                }
+            }
+            component.sort_by_key(|&(x, y)| (y, x));
+
+            let index_of: BTreeMap<TileCoord, usize> = component
+                .iter()
+                .enumerate()
+                .map(|(i, &tile)| (tile, i))
+                .collect();
+            let segments: Vec<PipeSegment> = component
+                .iter()
+                .map(|&tile| {
+                    let (_, capacity, direction) = pipe_tiles[&tile];
+                    let mut segment = PipeSegment::new(tile, direction, capacity);
+                    segment.volume = carried_volumes.get(&tile).copied().unwrap_or(Fx::ZERO);
+                    segment
+                })
+                .collect();
+            // Each adjacency once: only look east and north, so `(i, j)`
+            // never appears alongside `(j, i)`.
+            let mut links = Vec::new();
+            for (i, &tile) in component.iter().enumerate() {
+                for dir in [Direction::East, Direction::North] {
+                    if let Some(&j) = index_of.get(&dir.step(tile)) {
+                        links.push((i, j));
+                    }
+                }
+            }
+            let network_index = topology.networks.len();
+            for (segment_index, &tile) in component.iter().enumerate() {
+                topology
+                    .pipe_index
+                    .insert(tile, (network_index, segment_index));
+            }
+            topology.networks.push(FluidNetwork::new(None, segments, links));
+        }
+
+        // --- who taps what. A machine touching a pipe taps it (fluids
+        // connect by touching, not by facing — this module's doc), and the
+        // first fluid-consuming machine to reach a network is what decides
+        // the fluid that network carries.
+        for &machine in &topology.machines {
+            let placement = self.placement_of(machine);
+            let origin = self.position_of(machine);
+            let Some(recipe) = self
+                .ecs
+                .get::<&Machine>(machine)
+                .ok()
+                .and_then(|m| self.recipes.get(&m.recipe).cloned())
+            else {
+                continue;
+            };
+            let Some((fluid_id, _)) = recipe.fluid_inputs.first().cloned() else {
+                continue;
+            };
+            let tap = placement
+                .tiles(origin)
+                .into_iter()
+                .flat_map(|tile| Direction::ALL.map(|dir| dir.step(tile)))
+                .find_map(|neighbour| topology.pipe_index.get(&neighbour).copied());
+            let Some((network, segment)) = tap else {
+                continue;
+            };
+            if topology.networks[network].fluid.is_none() {
+                topology.networks[network].fluid = Some(fluid_id);
+            }
+            topology.machine_taps.push((machine, network, segment));
+        }
+        for &tank in &topology.tanks {
+            let placement = self.placement_of(tank);
+            let origin = self.position_of(tank);
+            let discharge = placement
+                .footprint
+                .outlet_neighbours(origin, placement.direction)
+                .into_iter()
+                .find_map(|tile| topology.pipe_index.get(&tile).copied());
+            if let Some((network, segment)) = discharge {
+                topology.networks[network].mark_source(segment);
+                topology.tank_discharges.push((tank, network, segment));
+            }
+        }
+
+        self.topology = topology;
     }
 
     fn position_of(&self, entity: Entity) -> TileCoord {
-        self.ecs.get::<&Position>(entity).unwrap().tile
+        self.ecs
+            .get::<&Position>(entity)
+            .expect("a placed entity always has a Position")
+            .tile
     }
 
-    /// A machine entity's kind + footprint (`data/machines.ron`), cloned out
-    /// of the ECS so the caller isn't holding a borrow on `self.ecs`.
-    fn placement_of(&self, entity: Entity) -> MachinePlacement {
-        (*self.ecs.get::<&MachinePlacement>(entity).unwrap()).clone()
+    /// A placed entity's kind + footprint + facing, cloned out of the ECS so
+    /// the caller isn't holding a borrow on `self.ecs`.
+    fn placement_of(&self, entity: Entity) -> Placement {
+        (*self
+            .ecs
+            .get::<&Placement>(entity)
+            .expect("a placed entity always has a Placement"))
+        .clone()
     }
 
     fn mark_dirty(&mut self, tile: TileCoord) {
@@ -1476,600 +1507,339 @@ impl World {
         }
     }
 
-    /// Marks every chunk a footprint touches (a machine's, or the hopper's),
-    /// not just the one its origin tile is in — a footprint straddling a
-    /// chunk boundary changes what both chunks' snapshots contain, so both
-    /// have to be re-read.
-    fn mark_machine_dirty(&mut self, origin: TileCoord, footprint: Footprint) {
-        for chunk in footprint_chunks(origin, footprint) {
+    fn mark_tiles_dirty(&mut self, tiles: &[TileCoord]) {
+        for &tile in tiles {
+            self.mark_dirty(tile);
+        }
+    }
+
+    /// Marks every chunk a placement touches, not just the one its origin
+    /// tile is in — a footprint straddling a chunk boundary changes what
+    /// both chunks' snapshots contain, so both have to be re-read.
+    fn mark_placement_dirty(&mut self, entity: Entity) {
+        let placement = self.placement_of(entity);
+        let origin = self.position_of(entity);
+        for chunk in footprint_chunks(origin, placement.footprint.rotated(placement.direction)) {
             if !self.dirty.contains(&chunk) {
                 self.dirty.push(chunk);
             }
         }
     }
+}
 
+impl World {
     /// Advances the simulation by exactly one tick (ARCHITECTURE.md §3.9:
-    /// fixed timestep, no wall-clock reads). Two passes over the chain, in
-    /// stage order, so behavior stays deterministic:
+    /// fixed timestep, no wall-clock reads).
     ///
-    /// 1. Per stage: belt movement, machine process/timer, then the belt's
-    ///    front item hands off to that same stage's machine input. The
-    ///    dock's own belt moves in this pass too, and the dock takes at most
-    ///    one arrived unit off its end and ships it into [`Economy`]'s
-    ///    shared delivery pool — the automatic replacement for the removed
-    ///    `CollectOutput` command.
-    /// 2. Hand-offs onto a belt, once every belt has already moved: the
-    ///    hopper meters at most one raw unit onto stage 0's belt, then a
-    ///    finished item in stage `i`'s machine output hands off onto stage
-    ///    `i + 1`'s belt (the inter-stage conveyor hop), and finally the
-    ///    LAST machine hands off onto the dock's belt by exactly the same
-    ///    call. Done as a second pass so every stage's own belt/machine tick
-    ///    has already happened this tick before anything crosses a stage
-    ///    boundary.
+    /// The passes, in order — every one of them walking a list the topology
+    /// pass built in tile order, so the whole tick is deterministic:
+    ///
+    /// 1. **Fluid.** Every tank discharges into the pipe it faces, then
+    ///    every network equalizes across its own links. First, so a machine
+    ///    starting a craft below sees this tick's pressure rather than last
+    ///    tick's (ARCHITECTURE.md §3.4). Deliberately marks **no** chunk
+    ///    dirty: fluid moves on nearly every tick, and dirtying a chunk
+    ///    every tick would defeat the point of dirty tracking (§4's delta
+    ///    granularity). Presentation polls `fluid_snapshots` instead.
+    /// 2. **Belts move**, each by one tick's travel.
+    /// 3. **Machines run** — start a craft, or deposit a finished one.
+    /// 4. **Consumers pull** off a belt's end: into a machine's input
+    ///    buffer, or onto a dock.
+    /// 5. **Producers push** onto a belt's start: a hopper meters one raw
+    ///    unit, a machine hands over one finished unit, and a belt hands its
+    ///    front item to the belt ahead of it. All after every belt has
+    ///    already moved this tick, so nothing crosses two tiles in one tick.
+    /// 6. **Docks ship** whatever they took in step 4 into [`Economy`]'s
+    ///    shared delivery pool — in the same tick it arrived, because a dock
+    ///    is a pass-through (see [`super::dock`]) and the pool is what
+    ///    contracts settle against below.
+    /// 7. **Contracts settle**, one cadence check per active contract.
+    ///
+    /// Steps 4 and 5 are the same two phases the fixed chain always had
+    /// ("belt to machine, then everything onto a belt"); what changed is
+    /// that the pairs come from adjacency rather than from a stage index.
     pub fn tick(&mut self) {
         self.dirty.clear();
         self.tick_count += 1;
 
-        // Fluid first, so a machine starting a craft below sees this tick's
-        // equalized pressure rather than last tick's (ARCHITECTURE.md §3.4).
-        // Note this deliberately does NOT mark any chunk dirty: fluid moves
-        // on nearly every tick, and dirtying a chunk every tick would defeat
-        // the point of dirty tracking (§4's delta granularity). Presentation
-        // polls `fluid_snapshot` instead, exactly as it polls
-        // `economy_snapshot` — see `FluidSnapshot`'s own doc.
-        if let Some(fluid) = self.fluid.as_mut() {
-            fluid.tick();
+        // 1. Fluid.
+        let tank_discharges = std::mem::take(&mut self.topology.tank_discharges);
+        for &(tank, network, segment) in &tank_discharges {
+            if let Ok(mut tank_body) = self.ecs.get::<&mut FluidTank>(tank) {
+                self.topology.networks[network].discharge_from_tank(&mut tank_body, segment);
+            }
+        }
+        self.topology.tank_discharges = tank_discharges;
+        for network in &mut self.topology.networks {
+            network.tick();
         }
 
-        for i in 0..self.stages.len() {
-            let stage = self.stages[i];
-            let belt_tile = self.position_of(stage.belt_entity);
-            let machine_tile = self.position_of(stage.machine_entity);
-            let machine_footprint = self.placement_of(stage.machine_entity).footprint;
-
-            let belt_changed = {
-                let mut belt = self.ecs.get::<&mut BeltSegment>(stage.belt_entity).unwrap();
-                belt.tick(self.belt_speed)
+        // 2. Belts.
+        let belts = std::mem::take(&mut self.topology.belts);
+        for &belt in &belts {
+            let moved = {
+                let mut segment = self
+                    .ecs
+                    .get::<&mut BeltSegment>(belt)
+                    .expect("a belt placement carries a BeltSegment");
+                segment.tick(self.belt_speed)
             };
-            let machine_changed = {
-                let mut machine = self.ecs.get::<&mut Machine>(stage.machine_entity).unwrap();
-                // Only the one plumbed-in stage sees the network; every
-                // other machine is handed `None` and behaves exactly as it
-                // did before milestone 6.
-                let fluid = if self.fluid_stage == Some(i) {
-                    self.fluid.as_mut()
-                } else {
-                    None
-                };
-                machine.tick(self.tick_count, &self.recipes, fluid)
+            if moved {
+                let tile = self.position_of(belt);
+                self.mark_dirty(tile);
+            }
+        }
+
+        // 3. Machines.
+        let machines = std::mem::take(&mut self.topology.machines);
+        let taps = std::mem::take(&mut self.topology.machine_taps);
+        for &machine in &machines {
+            let tapped = taps
+                .iter()
+                .find(|&&(entity, _, _)| entity == machine)
+                .map(|&(_, network, inlet)| (network, inlet));
+            let changed = {
+                let mut body = self
+                    .ecs
+                    .get::<&mut Machine>(machine)
+                    .expect("a machine placement carries a Machine");
+                let tap = tapped.map(|(network, inlet)| FluidTap {
+                    network: &mut self.topology.networks[network],
+                    inlet,
+                });
+                body.tick(self.tick_count, &self.recipes, tap)
             };
-            let transferred =
-                self.try_transfer_belt_to_machine(stage.belt_entity, stage.machine_entity);
-
-            if belt_changed || transferred {
-                self.mark_dirty(belt_tile);
-            }
-            if machine_changed || transferred {
-                self.mark_machine_dirty(machine_tile, machine_footprint);
+            if changed {
+                self.mark_placement_dirty(machine);
             }
         }
+        self.topology.machine_taps = taps;
 
-        // The dock's belt is ticked in the same phase every other belt is,
-        // and the dock takes off its end exactly the way a machine takes off
-        // a stage belt's end — so the exit hop obeys the same ordering rule
-        // as every hop before it. Shipping runs immediately after the
-        // absorb, in the same tick, because the dock is a pass-through (see
-        // `sim::dock`'s module doc): a box that reaches the dock on tick N is
-        // in the delivery pool on tick N, in time for `economy.tick` at the
-        // bottom of this function to settle a contract against it.
-        {
-            let dock_belt = self.dock.belt_entity;
-            let belt_tile = self.position_of(dock_belt);
-            let belt_changed = {
-                let mut belt = self.ecs.get::<&mut BeltSegment>(dock_belt).unwrap();
-                belt.tick(self.belt_speed)
+        // 4. Consumers pull off a belt's end.
+        let belt_to_sink = std::mem::take(&mut self.topology.belt_to_sink);
+        for &(belt, sink) in &belt_to_sink {
+            let moved = match self.body_kind(sink) {
+                Some(BodyKind::Machine) => self.try_transfer_belt_to_machine(belt, sink),
+                Some(BodyKind::Dock) => self.try_absorb_belt_into_dock(belt, sink),
+                _ => false,
             };
-            let absorbed = {
-                let mut belt = self.ecs.get::<&mut BeltSegment>(dock_belt).unwrap();
-                self.dock.dock.try_absorb(&mut belt)
+            if moved {
+                let tile = self.position_of(belt);
+                self.mark_dirty(tile);
+                self.mark_placement_dirty(sink);
+            }
+        }
+        self.topology.belt_to_sink = belt_to_sink;
+
+        // 5. Producers push onto a belt's start.
+        let source_to_belt = std::mem::take(&mut self.topology.source_to_belt);
+        for &(source, belt) in &source_to_belt {
+            let moved = match self.body_kind(source) {
+                Some(BodyKind::Machine) => self.try_transfer_machine_output_to_belt(source, belt),
+                Some(BodyKind::Hopper) => self.try_unload_hopper_onto_belt(source, belt),
+                _ => false,
             };
-            let shipped = self.dock.dock.ship_into(&mut self.economy);
-
-            if belt_changed || absorbed {
-                self.mark_dirty(belt_tile);
-            }
-            if absorbed || shipped > 0 {
-                // The dock's own snapshot changed (`shipped_total` at least),
-                // so a chunk-driven renderer has to re-read it. This is at
-                // most once per box, not once per tick, so it does not defeat
-                // dirty tracking the way fluid movement would.
-                let (dock_tile, dock_footprint) = (self.dock.tile, self.dock.footprint);
-                self.mark_machine_dirty(dock_tile, dock_footprint);
+            if moved {
+                self.mark_placement_dirty(source);
+                let tile = self.position_of(belt);
+                self.mark_dirty(tile);
             }
         }
+        self.topology.source_to_belt = source_to_belt;
 
-        // The hopper's unload (ticket 3) is the upstream twin of the
-        // machine-output hand-off below — both are "put one unit onto a belt
-        // that has room for it" — so it runs in the same phase, after every
-        // belt has already advanced this tick. At most one unit moves per
-        // tick, and only if `BeltSegment::try_spawn` accepts it; a backed-up
-        // line simply leaves the hopper holding its contents.
-        {
-            let first_belt = self.stages[0].belt_entity;
-            let belt_tile = self.position_of(first_belt);
-            let unloaded = {
-                let mut belt = self.ecs.get::<&mut BeltSegment>(first_belt).unwrap();
-                self.hopper.hopper.try_unload(&mut belt)
+        let belt_to_belt = std::mem::take(&mut self.topology.belt_to_belt);
+        for &(from, to) in &belt_to_belt {
+            if self.try_transfer_belt_to_belt(from, to) {
+                let (from_tile, to_tile) = (self.position_of(from), self.position_of(to));
+                self.mark_dirty(from_tile);
+                self.mark_dirty(to_tile);
+            }
+        }
+        self.topology.belt_to_belt = belt_to_belt;
+
+        // 6. Docks ship.
+        let docks = std::mem::take(&mut self.topology.docks);
+        for &dock in &docks {
+            let shipped = {
+                let mut body = self
+                    .ecs
+                    .get::<&mut Dock>(dock)
+                    .expect("a dock placement carries a Dock");
+                body.ship_into(&mut self.economy)
             };
-            if unloaded {
-                let (hopper_tile, hopper_footprint) = (self.hopper.tile, self.hopper.footprint);
-                self.mark_dirty(belt_tile);
-                self.mark_machine_dirty(hopper_tile, hopper_footprint);
+            if shipped > 0 {
+                // The dock's own snapshot changed (`shipped_total` at
+                // least), so a chunk-driven renderer has to re-read it. At
+                // most once per box, not once per tick, so it does not
+                // defeat dirty tracking the way fluid movement would.
+                self.mark_placement_dirty(dock);
             }
         }
+        self.topology.docks = docks;
+        self.topology.belts = belts;
+        self.topology.machines = machines;
 
-        for i in 0..self.stages.len().saturating_sub(1) {
-            let from_machine = self.stages[i].machine_entity;
-            let to_belt = self.stages[i + 1].belt_entity;
-            let machine_tile = self.position_of(from_machine);
-            let machine_footprint = self.placement_of(from_machine).footprint;
-            let belt_tile = self.position_of(to_belt);
-
-            let transferred = self.try_transfer_machine_output_to_belt(from_machine, to_belt);
-            if transferred {
-                self.mark_machine_dirty(machine_tile, machine_footprint);
-                self.mark_dirty(belt_tile);
-            }
-        }
-
-        // ...and the same hop once more, from the LAST machine onto the
-        // dock's belt. Deliberately the same call, not a special case: the
-        // chain's exit is now an ordinary conveyor hand-off, which is the
-        // whole point of replacing `CollectOutput` with a building.
-        {
-            let from_machine = self.stages.last().unwrap().machine_entity;
-            let to_belt = self.dock.belt_entity;
-            let machine_tile = self.position_of(from_machine);
-            let machine_footprint = self.placement_of(from_machine).footprint;
-            let belt_tile = self.position_of(to_belt);
-
-            if self.try_transfer_machine_output_to_belt(from_machine, to_belt) {
-                self.mark_machine_dirty(machine_tile, machine_footprint);
-                self.mark_dirty(belt_tile);
-            }
-        }
-
-        // Contract cadence checks, one per active contract, each on its
-        // own boundary (GAMEPLAY.md §6) — not tied to any tile/
-        // chunk, so it doesn't participate in dirty-chunk tracking; Godot
-        // reads economy state via its own always-fresh snapshot instead
-        // (see `economy_snapshot`).
+        // 7. Contracts. Not tied to any tile, so it doesn't participate in
+        // dirty-chunk tracking; Godot reads economy state via its own
+        // always-fresh snapshot instead.
         self.economy.tick(self.tick_count);
     }
 
-    /// If `belt_entity` has an item waiting at its end and `machine_entity`
-    /// has room for it, moves it across the interop-invisible boundary
-    /// between the two components. Returns whether a transfer happened.
-    fn try_transfer_belt_to_machine(&mut self, belt_entity: Entity, machine_entity: Entity) -> bool {
+    fn body_kind(&self, entity: Entity) -> Option<BodyKind> {
+        self.ecs.get::<&BodyKind>(entity).ok().map(|body| *body)
+    }
+
+    /// If `belt` has an item waiting at its end and `machine` has room for
+    /// it, moves it across the interop-invisible boundary between the two
+    /// components. Returns whether a transfer happened.
+    fn try_transfer_belt_to_machine(&mut self, belt: Entity, machine: Entity) -> bool {
         let ready_item = {
-            let belt = self.ecs.get::<&BeltSegment>(belt_entity).unwrap();
-            belt.front_ready().cloned()
+            let segment = self.ecs.get::<&BeltSegment>(belt).unwrap();
+            segment.front_ready().cloned()
         };
         let Some(item_id) = ready_item else {
             return false;
         };
-
         let has_room = {
-            let machine = self.ecs.get::<&Machine>(machine_entity).unwrap();
-            machine.input.has_room_for(&item_id, 1)
+            let body = self.ecs.get::<&Machine>(machine).unwrap();
+            body.input.has_room_for(&item_id, 1)
         };
         if !has_room {
             return false;
         }
-
         let taken = {
-            let mut belt = self.ecs.get::<&mut BeltSegment>(belt_entity).unwrap();
-            belt.take_front_if_at_end()
+            let mut segment = self.ecs.get::<&mut BeltSegment>(belt).unwrap();
+            segment.take_front_if_at_end()
         };
         let Some(taken) = taken else {
             return false;
         };
-        let mut machine = self.ecs.get::<&mut Machine>(machine_entity).unwrap();
-        machine.input.add(&taken.item, 1);
+        let mut body = self.ecs.get::<&mut Machine>(machine).unwrap();
+        body.input.add(&taken.item, 1);
         true
     }
 
-    /// If `machine_entity` is holding a finished item and `belt_entity` has
-    /// room to accept a new item at its start, hands one unit across —
-    /// the inter-stage conveyor hop from one stage's machine to the next
-    /// stage's belt. Returns whether a transfer happened.
-    fn try_transfer_machine_output_to_belt(&mut self, machine_entity: Entity, belt_entity: Entity) -> bool {
+    /// If `machine` is holding a finished item and `belt` has room to accept
+    /// one at its start, hands one unit across. Returns whether a transfer
+    /// happened.
+    fn try_transfer_machine_output_to_belt(&mut self, machine: Entity, belt: Entity) -> bool {
         let ready_item = {
-            let machine = self.ecs.get::<&Machine>(machine_entity).unwrap();
-            machine.output.iter().find(|(_, qty)| *qty > 0).map(|(id, _)| id.clone())
+            let body = self.ecs.get::<&Machine>(machine).unwrap();
+            body.output
+                .iter()
+                .find(|(_, qty)| *qty > 0)
+                .map(|(id, _)| id.clone())
         };
         let Some(item_id) = ready_item else {
             return false;
         };
-
         let spawned = {
-            let mut belt = self.ecs.get::<&mut BeltSegment>(belt_entity).unwrap();
-            belt.try_spawn(item_id.clone())
+            let mut segment = self.ecs.get::<&mut BeltSegment>(belt).unwrap();
+            segment.try_spawn(item_id.clone())
         };
         if !spawned {
             return false;
         }
-
-        let mut machine = self.ecs.get::<&mut Machine>(machine_entity).unwrap();
-        machine.output.remove(&item_id, 1);
+        let mut body = self.ecs.get::<&mut Machine>(machine).unwrap();
+        body.output.remove(&item_id, 1);
         true
     }
 
-    /// Chunks touched since the start of the current `tick()` call
-    /// (ARCHITECTURE.md §4). Godot only needs to re-read chunks that both
-    /// changed AND are currently visible.
-    pub fn dirty_chunks(&self) -> &[ChunkId] {
-        &self.dirty
+    /// Hands the item at `from`'s end to `to`'s start — the belt-to-belt
+    /// hop, which is new with placement (a belt used to be a whole
+    /// multi-tile run, so there was nothing to hop between).
+    ///
+    /// Spawn first, then take: [`BeltSegment::try_spawn`] is both the room
+    /// check and the commit, so committing it before removing the item is
+    /// what makes a refused hop leave the item exactly where it was rather
+    /// than annihilating it. That ordering is the same one
+    /// [`Self::try_transfer_machine_output_to_belt`] has always used, and it
+    /// is what the mass-conservation tests actually check.
+    fn try_transfer_belt_to_belt(&mut self, from: Entity, to: Entity) -> bool {
+        debug_assert_ne!(from, to, "a belt cannot point at itself");
+        let ready_item = {
+            let segment = self.ecs.get::<&BeltSegment>(from).unwrap();
+            segment.front_ready().cloned()
+        };
+        let Some(item_id) = ready_item else {
+            return false;
+        };
+        let spawned = {
+            let mut segment = self.ecs.get::<&mut BeltSegment>(to).unwrap();
+            segment.try_spawn(item_id)
+        };
+        if !spawned {
+            return false;
+        }
+        let mut segment = self.ecs.get::<&mut BeltSegment>(from).unwrap();
+        let taken = segment.take_front_if_at_end();
+        debug_assert!(
+            taken.is_some(),
+            "the item was ready one statement ago and nothing else can have moved it"
+        );
+        true
     }
 
-    pub fn chunk_snapshot(&self, id: ChunkId) -> ChunkSnapshot {
-        let mut snapshot = ChunkSnapshot::default();
-
-        for stage in &self.stages {
-            let belt_tile = self.position_of(stage.belt_entity);
-            if chunk_of(belt_tile) == id {
-                let belt = self.ecs.get::<&BeltSegment>(stage.belt_entity).unwrap();
-                let span = self.ecs.get::<&BeltSpan>(stage.belt_entity).unwrap();
-                let items = belt
-                    .snapshot_positions()
-                    .into_iter()
-                    .map(|(item, pos)| (item, pos.to_num::<f64>()))
-                    .collect();
-                snapshot.belts.push(BeltSnapshot {
-                    start_tile: belt_tile,
-                    length_tiles: span.length_tiles,
-                    items,
-                });
-            }
-
-            // A machine is reported for every chunk its footprint overlaps,
-            // not only the chunk holding its origin tile — see
-            // `MachineSnapshot`'s doc for the de-duplication that implies
-            // for a consumer stitching several chunks together.
-            let machine_tile = self.position_of(stage.machine_entity);
-            let placement = self.placement_of(stage.machine_entity);
-            if footprint_chunks(machine_tile, placement.footprint).contains(&id) {
-                let machine = self.ecs.get::<&Machine>(stage.machine_entity).unwrap();
-                snapshot.machines.push(MachineSnapshot {
-                    tile: machine_tile,
-                    kind: placement.kind,
-                    footprint: placement.footprint,
-                    recipe: machine.recipe.clone(),
-                    process: machine.process.map(|p| (p.start_tick, p.required_ticks)),
-                    input: machine.input.iter().cloned().collect(),
-                    output: machine.output.iter().cloned().collect(),
-                });
-            }
-        }
-
-        if let Some(fluid) = &self.fluid {
-            for segment in fluid.segments() {
-                if chunk_of(segment.tile) == id {
-                    snapshot.pipes.push(pipe_snapshot(segment));
-                }
-            }
-        }
-
-        // Same fan-out rule (and the same de-duplication caveat) a machine
-        // gets: a hopper wide enough to straddle a chunk boundary is
-        // reported in every chunk it overlaps, always with the same origin.
-        if footprint_chunks(self.hopper.tile, self.hopper.footprint).contains(&id) {
-            snapshot.hoppers.push(self.hopper_snapshot());
-        }
-
-        // ...and the same again for the pipe run's tank, when this world has
-        // one at all.
-        if let Some(tank) = &self.fluid_tank
-            && footprint_chunks(tank.tile, tank.footprint).contains(&id)
-        {
-            snapshot
-                .fluid_tanks
-                .push(self.fluid_tank_snapshot().expect("fluid_tank is Some here"));
-        }
-
-        // The dock's own belt, reported like every stage belt: keyed on the
-        // chunk holding its START tile, which on the shipped content is
-        // (0, 0) even though the belt itself runs into (1, 0). That is the
-        // pre-existing rule for belts (unlike machines, which fan out across
-        // every chunk they overlap) and it is left alone rather than changed
-        // here — `DockSnapshot` carries this belt's geometry directly, so
-        // presentation never has to reconstruct it from chunk snapshots.
-        let dock_belt_tile = self.position_of(self.dock.belt_entity);
-        if chunk_of(dock_belt_tile) == id {
-            let belt = self.ecs.get::<&BeltSegment>(self.dock.belt_entity).unwrap();
-            let span = self.ecs.get::<&BeltSpan>(self.dock.belt_entity).unwrap();
-            snapshot.belts.push(BeltSnapshot {
-                start_tile: dock_belt_tile,
-                length_tiles: span.length_tiles,
-                items: belt
-                    .snapshot_positions()
-                    .into_iter()
-                    .map(|(item, pos)| (item, pos.to_num::<f64>()))
-                    .collect(),
-            });
-        }
-
-        // ...and the dock building itself, with the hopper's fan-out rule.
-        if footprint_chunks(self.dock.tile, self.dock.footprint).contains(&id) {
-            snapshot.docks.push(self.dock_snapshot());
-        }
-
-        snapshot
+    fn try_unload_hopper_onto_belt(&mut self, hopper: Entity, belt: Entity) -> bool {
+        let mut body = self.ecs.get::<&mut Hopper>(hopper).unwrap();
+        let mut segment = self.ecs.get::<&mut BeltSegment>(belt).unwrap();
+        body.try_unload(&mut segment)
     }
 
-    /// All chunk ids any current stage's belt or machine occupies. Not part
-    /// of `SimBridge`'s surface (Godot only ever needs `dirty_chunks`) —
-    /// this exists so tooling/tests can get a complete view of the whole
-    /// chain without hardcoding how many chunks it happens to span.
-    pub fn all_chunks(&self) -> Vec<ChunkId> {
-        let mut ids = Vec::new();
-        for stage in &self.stages {
-            let mut chunks = vec![chunk_of(self.position_of(stage.belt_entity))];
-            // Every chunk the machine's footprint reaches, so a wide machine
-            // straddling a boundary doesn't leave the far chunk unlisted.
-            chunks.extend(footprint_chunks(
-                self.position_of(stage.machine_entity),
-                self.placement_of(stage.machine_entity).footprint,
-            ));
-            for chunk in chunks {
-                if !ids.contains(&chunk) {
-                    ids.push(chunk);
-                }
-            }
-        }
-        if let Some(fluid) = &self.fluid {
-            for segment in fluid.segments() {
-                let chunk = chunk_of(segment.tile);
-                if !ids.contains(&chunk) {
-                    ids.push(chunk);
-                }
-            }
-        }
-        // The hopper stands west of the chain's start, so on the shipped
-        // content it is the one thing outside chunk (0, 0) — a caller that
-        // wants "everything in the world" must get (-1, 0) from here.
-        for chunk in footprint_chunks(self.hopper.tile, self.hopper.footprint) {
-            if !ids.contains(&chunk) {
-                ids.push(chunk);
-            }
-        }
-        if let Some(tank) = &self.fluid_tank {
-            for chunk in footprint_chunks(tank.tile, tank.footprint) {
-                if !ids.contains(&chunk) {
-                    ids.push(chunk);
-                }
-            }
-        }
-        // The dock stands east of the chain's end, so on the shipped content
-        // it is the reason chunk (1, 0) exists at all — a caller that wants
-        // "everything in the world" must get it from here, exactly as it must
-        // get the hopper's (-1, 0). Its belt is included by span rather than
-        // by start tile, because that belt genuinely straddles the boundary.
-        let dock_belt_tile = self.position_of(self.dock.belt_entity);
-        let dock_belt_span = self
-            .ecs
-            .get::<&BeltSpan>(self.dock.belt_entity)
-            .unwrap()
-            .length_tiles;
-        let dock_chunks = footprint_chunks(
-            dock_belt_tile,
-            Footprint {
-                width_tiles: dock_belt_span,
-                height_tiles: 1,
-            },
-        )
-        .into_iter()
-        .chain(footprint_chunks(self.dock.tile, self.dock.footprint));
-        for chunk in dock_chunks {
-            if !ids.contains(&chunk) {
-                ids.push(chunk);
-            }
-        }
-        ids
-    }
-
-    /// Static layout of every stage in the chain, in order — see
-    /// `StageLayout`'s doc for why Godot needs this rather than hardcoding
-    /// stage geometry itself.
-    pub fn chain_layout(&self) -> Vec<StageLayout> {
-        self.stages
-            .iter()
-            .map(|stage| {
-                let belt_tile = self.position_of(stage.belt_entity);
-                let span = self.ecs.get::<&BeltSpan>(stage.belt_entity).unwrap();
-                let machine_tile = self.position_of(stage.machine_entity);
-                let placement = self.placement_of(stage.machine_entity);
-                let recipe = self.ecs.get::<&Machine>(stage.machine_entity).unwrap().recipe.clone();
-                StageLayout {
-                    recipe,
-                    belt_start_tile: belt_tile,
-                    belt_length_tiles: span.length_tiles,
-                    machine_tile,
-                    machine_kind: placement.kind,
-                    machine_footprint: placement.footprint,
-                }
-            })
-            .collect()
-    }
-
-    /// What occupies `pos`, if anything (ARCHITECTURE.md §4). A machine
-    /// resolves from **any** tile in its footprint, not just its origin —
-    /// see [`TileSnapshot::Machine`] for the shape that returns and why a
-    /// hover system needs it.
-    pub fn query_tile(&self, pos: TileCoord) -> Option<TileSnapshot> {
-        for stage in &self.stages {
-            let belt_tile = self.position_of(stage.belt_entity);
-            let span = self.ecs.get::<&BeltSpan>(stage.belt_entity).unwrap();
-            if pos.1 == belt_tile.1 && pos.0 >= belt_tile.0 && pos.0 < belt_tile.0 + span.length_tiles {
-                let belt = self.ecs.get::<&BeltSegment>(stage.belt_entity).unwrap();
-                let items_here = belt
-                    .snapshot_positions()
-                    .into_iter()
-                    .filter(|(_, dist)| dist.floor() == Fx::from_num(pos.0 - belt_tile.0))
-                    .map(|(item, _)| item)
-                    .collect();
-                return Some(TileSnapshot::Belt { items_here });
-            }
-
-            let machine_tile = self.position_of(stage.machine_entity);
-            let placement = self.placement_of(stage.machine_entity);
-            if placement.footprint.contains(machine_tile, pos) {
-                let machine = self.ecs.get::<&Machine>(stage.machine_entity).unwrap();
-                return Some(TileSnapshot::Machine {
-                    machine_kind: placement.kind,
-                    footprint: placement.footprint,
-                    origin_tile: machine_tile,
-                    recipe: machine.recipe.clone(),
-                    process: machine.process.map(|p| (p.start_tick, p.required_ticks)),
-                });
-            }
-        }
-
-        // The dock's belt, resolved exactly like a stage belt.
-        {
-            let belt_tile = self.position_of(self.dock.belt_entity);
-            let span = self
-                .ecs
-                .get::<&BeltSpan>(self.dock.belt_entity)
-                .unwrap()
-                .length_tiles;
-            if pos.1 == belt_tile.1 && pos.0 >= belt_tile.0 && pos.0 < belt_tile.0 + span {
-                let belt = self.ecs.get::<&BeltSegment>(self.dock.belt_entity).unwrap();
-                let items_here = belt
-                    .snapshot_positions()
-                    .into_iter()
-                    .filter(|(_, dist)| dist.floor() == Fx::from_num(pos.0 - belt_tile.0))
-                    .map(|(item, _)| item)
-                    .collect();
-                return Some(TileSnapshot::Belt { items_here });
-            }
-        }
-
-        if self.dock.footprint.contains(self.dock.tile, pos) {
-            let snapshot = self.dock_snapshot();
-            return Some(TileSnapshot::Dock {
-                footprint: snapshot.footprint,
-                origin_tile: snapshot.tile,
-                contents: snapshot.contents,
-                capacity_per_item: snapshot.capacity_per_item,
-                shipped_total: snapshot.shipped_total,
-            });
-        }
-
-        if self.hopper.footprint.contains(self.hopper.tile, pos) {
-            let snapshot = self.hopper_snapshot();
-            return Some(TileSnapshot::Hopper {
-                footprint: snapshot.footprint,
-                origin_tile: snapshot.tile,
-                item: snapshot.item,
-                quantity: snapshot.quantity,
-                capacity: snapshot.capacity,
-                fill: snapshot.fill,
-            });
-        }
-
-        if let Some(tank) = &self.fluid_tank
-            && tank.footprint.contains(tank.tile, pos)
-        {
-            let snapshot = self
-                .fluid_tank_snapshot()
-                .expect("fluid_tank is Some here");
-            return Some(TileSnapshot::FluidTank {
-                footprint: snapshot.footprint,
-                origin_tile: snapshot.tile,
-                fluid: snapshot.fluid,
-                quantity: snapshot.quantity,
-                capacity: snapshot.capacity,
-                fill: snapshot.fill,
-            });
-        }
-
-        if let Some(fluid) = &self.fluid {
-            for (i, segment) in fluid.segments().iter().enumerate() {
-                if segment.tile == pos {
-                    return Some(TileSnapshot::Pipe {
-                        fluid: fluid.fluid.clone(),
-                        volume: segment.volume.to_num::<f64>(),
-                        capacity: segment.capacity.to_num::<f64>(),
-                        pressure: segment.pressure().to_num::<f64>(),
-                        is_source: segment.is_source,
-                        is_inlet: i == fluid.inlet_index(),
-                    });
-                }
-            }
-        }
-
-        None
+    fn try_absorb_belt_into_dock(&mut self, belt: Entity, dock: Entity) -> bool {
+        let mut body = self.ecs.get::<&mut Dock>(dock).unwrap();
+        let mut segment = self.ecs.get::<&mut BeltSegment>(belt).unwrap();
+        body.try_absorb(&mut segment)
     }
 
     /// Applies a player-issued command (ARCHITECTURE.md §4). Invalid/no-op
-    /// commands (e.g. filling a hopper that is already full) are silently
-    /// ignored, same as `BeltSegment::try_spawn`'s own contract.
-    /// `FillHopper` always targets the chain's hopper (the raw-ingredient
-    /// entry point) and `FillFluidTank` the pipe run's tank (the fluid entry
-    /// point) — one of each per chain, matching this milestone's "one
-    /// straight line" scope. **There is no exit command any more:** the
-    /// finished-product exit is the [`Dock`] at the chain's tail, which ships
-    /// into [`Economy`] every tick from [`Self::tick`] with no player action
-    /// at all (the delivery-dock ticket removed `CollectOutput`).
+    /// commands are silently ignored — see [`PlayerCommand`] for the full
+    /// list of refusals, every one of which leaves the world byte-identical.
     ///
-    /// Note what `FillHopper` deliberately does *not* do: it never touches a
-    /// belt. Getting raw ingredient onto the line is the hopper's job, one
-    /// unit per tick from `tick()`, so the player sets the *supply* and the
-    /// machinery sets the *rate* (ticket 3). `FillFluidTank` observes the
-    /// same rule one system over: it never touches a pipe, only the tank —
-    /// getting fluid down the run is the pressure-equalization pass's job.
+    /// Note what the two fill commands deliberately do *not* do: they never
+    /// touch a belt or a pipe. Getting raw ingredient onto the line is a
+    /// hopper's job, one unit per tick from [`Self::tick`]; getting fluid
+    /// down a run is the pressure-equalization pass's. The player sets the
+    /// *supply*, the machinery sets the *rate*.
     pub fn issue_command(&mut self, cmd: PlayerCommand) {
         match cmd {
-            PlayerCommand::FillHopper { amount } => {
-                let (hopper_tile, hopper_footprint) = (self.hopper.tile, self.hopper.footprint);
-                // Clamped at capacity, never an error — see `Hopper::fill`.
-                let added = self.hopper.hopper.fill(amount);
-                if added > 0 {
-                    self.mark_machine_dirty(hopper_tile, hopper_footprint);
+            PlayerCommand::FillHopper { amount, tile } => {
+                let hoppers = self.targets(&self.topology.hoppers.clone(), tile);
+                for hopper in hoppers {
+                    // Clamped at capacity, never an error — see `Hopper::fill`.
+                    let added = {
+                        let mut body = self.ecs.get::<&mut Hopper>(hopper).unwrap();
+                        body.fill(amount)
+                    };
+                    if added > 0 {
+                        self.mark_placement_dirty(hopper);
+                    }
                 }
             }
-            PlayerCommand::FillFluidTank { amount } => {
-                // Clamped at capacity, never an error — see `FluidTank::fill`.
-                // A world with no pipe run has no tank, so this is simply a
-                // no-op there (the same "impossible command does nothing"
-                // rule this method already documents).
-                let added = match self.fluid.as_mut() {
-                    Some(network) => network.fill_tank(amount),
-                    None => Fx::ZERO,
-                };
-                if added > Fx::ZERO {
-                    let stage = self.fluid_tank.as_ref().expect("fluid_tank is Some here");
-                    let (tile, footprint) = (stage.tile, stage.footprint);
-                    self.mark_machine_dirty(tile, footprint);
+            PlayerCommand::FillFluidTank { amount, tile } => {
+                let tanks = self.targets(&self.topology.tanks.clone(), tile);
+                for tank in tanks {
+                    // Clamped at capacity, never an error — see `FluidTank::fill`.
+                    let added = {
+                        let mut body = self.ecs.get::<&mut FluidTank>(tank).unwrap();
+                        body.fill(amount)
+                    };
+                    if added > Fx::ZERO {
+                        self.mark_placement_dirty(tank);
+                    }
                 }
             }
             PlayerCommand::Purchase { kind, quantity } => {
                 // Priced first, then paid for, then credited — and every
-                // step that can fail does so before anything has changed,
-                // so an unknown kind, a zero quantity, an unrepresentable
-                // total (see `Shop::cost_of`) or simply not enough money all
-                // leave the world byte-identical. `Economy::try_spend` is
-                // itself all-or-nothing for the same reason.
+                // step that can fail does so before anything has changed, so
+                // an unknown kind, a zero quantity, an unrepresentable total
+                // (see `Shop::cost_of`) or simply not enough money all leave
+                // the world byte-identical. `Economy::try_spend` is itself
+                // all-or-nothing for the same reason.
                 //
                 // No chunk is marked dirty: a purchase changes money and an
-                // owned count, neither of which is a tile. Presentation
-                // learns about it by polling `shop_snapshot_json`, the same
-                // way it already polls `economy_snapshot_json` (there is one
-                // shop per world, so there is nothing to dirty-track). When
-                // a later epic makes an owned machine actually placeable,
-                // *placement* is what will dirty a chunk — buying it still
-                // won't.
+                // owned count, neither of which is a tile. *Placing* what was
+                // bought is what dirties a chunk.
                 let Some(cost) = self.shop.cost_of(&kind, quantity) else {
                     return;
                 };
@@ -2078,32 +1848,447 @@ impl World {
                 }
                 self.shop.owned.add(&kind, quantity);
             }
+            PlayerCommand::Place {
+                kind,
+                tile,
+                direction,
+            } => {
+                self.try_place(&kind, tile, direction);
+            }
+            PlayerCommand::Remove { tile } => {
+                self.try_remove(tile);
+            }
+            PlayerCommand::Rotate { tile } => {
+                self.try_rotate(tile);
+            }
         }
     }
 
-    /// The shop catalog, the player's owned counts and their current money
-    /// in one object — see [`ShopSnapshot`] for the exact JSON shape.
-    /// Always available (every world has a shop), never dirty-tracked, for
-    /// the same reason [`Self::economy_snapshot`] is: there is exactly one
-    /// per world, so presentation just polls it when the build menu redraws.
-    pub fn shop_snapshot(&self) -> ShopSnapshot {
-        self.shop.snapshot(self.economy.money)
-    }
-
-    /// How many of `kind` the player owns. A thin read-only accessor for
-    /// tests and for any future placement code; presentation should use
-    /// [`Self::shop_snapshot`], which answers for every kind at once.
-    pub fn owned_count(&self, kind: &str) -> u32 {
-        self.shop.owned.count(kind)
+    /// Which of `candidates` a tile-addressed command applies to: the one
+    /// whose footprint covers `tile`, or — when no tile was given — all of
+    /// them. See [`PlayerCommand::FillHopper`] for why "all of them" is the
+    /// default.
+    fn targets(&self, candidates: &[Entity], tile: Option<TileCoord>) -> Vec<Entity> {
+        match tile {
+            None => candidates.to_vec(),
+            Some(tile) => match self.topology.grid.get(&tile) {
+                Some(&entity) if candidates.contains(&entity) => vec![entity],
+                _ => Vec::new(),
+            },
+        }
     }
 }
 
-/// Enforces the module doc's chain-linkage assumption: recipe `i + 1` must
-/// consume (as one of its inputs) an item that recipe `i` produces. A clear
-/// panic here — at chain-construction time, before any tick runs — is the
-/// data-file equivalent of a compiler error: it catches a data-entry mistake
-/// (typo'd item id, recipes added out of order) immediately, instead of the
-/// symptom being "a machine three stages down silently never starts."
+impl World {
+    // -----------------------------------------------------------------
+    // Snapshots and queries
+    // -----------------------------------------------------------------
+
+    /// Chunks touched since the start of the current `tick()` call
+    /// (ARCHITECTURE.md §4), plus any touched by a `Place`/`Remove`/`Rotate`
+    /// issued since. Godot only needs to re-read chunks that both changed
+    /// AND are currently visible.
+    pub fn dirty_chunks(&self) -> &[ChunkId] {
+        &self.dirty
+    }
+
+    /// Every chunk anything currently placed occupies, in a deterministic
+    /// order. Not part of `SimBridge`'s surface (Godot only ever needs
+    /// `dirty_chunks`) — this exists so tooling/tests can get a complete
+    /// view of the whole world without hardcoding how many chunks it spans.
+    /// Empty for a fresh world, which now contains nothing.
+    pub fn all_chunks(&self) -> Vec<ChunkId> {
+        let mut ids = Vec::new();
+        for &tile in self.topology.grid.keys() {
+            let chunk = chunk_of(tile);
+            if !ids.contains(&chunk) {
+                ids.push(chunk);
+            }
+        }
+        ids
+    }
+
+    pub fn chunk_snapshot(&self, id: ChunkId) -> ChunkSnapshot {
+        let mut snapshot = ChunkSnapshot::default();
+        for &belt in &self.topology.belts {
+            let tile = self.position_of(belt);
+            if chunk_of(tile) == id {
+                snapshot.belts.push(self.belt_snapshot(belt));
+            }
+        }
+        // Anything with a footprint is reported for every chunk it
+        // overlaps, not only the chunk holding its origin tile — see
+        // `MachineSnapshot`'s doc for the de-duplication that implies for a
+        // consumer stitching several chunks together.
+        for &machine in &self.topology.machines {
+            if self.overlaps_chunk(machine, id) {
+                snapshot.machines.push(self.machine_snapshot(machine));
+            }
+        }
+        for (&tile, &(network, segment)) in &self.topology.pipe_index {
+            if chunk_of(tile) == id {
+                snapshot
+                    .pipes
+                    .push(pipe_snapshot(&self.topology.networks[network].segments()[segment]));
+            }
+        }
+        for &hopper in &self.topology.hoppers {
+            if self.overlaps_chunk(hopper, id) {
+                snapshot.hoppers.push(self.hopper_snapshot(hopper));
+            }
+        }
+        for &tank in &self.topology.tanks {
+            if self.overlaps_chunk(tank, id) {
+                snapshot.fluid_tanks.push(self.fluid_tank_snapshot(tank));
+            }
+        }
+        for &dock in &self.topology.docks {
+            if self.overlaps_chunk(dock, id) {
+                snapshot.docks.push(self.dock_snapshot(dock));
+            }
+        }
+        snapshot
+    }
+
+    fn overlaps_chunk(&self, entity: Entity, id: ChunkId) -> bool {
+        let placement = self.placement_of(entity);
+        let origin = self.position_of(entity);
+        footprint_chunks(origin, placement.footprint.rotated(placement.direction)).contains(&id)
+    }
+
+    /// Everything currently placed, in tile order — see
+    /// [`PlacementSnapshot`], and note this **replaces `chain_layout`**.
+    pub fn world_layout(&self) -> Vec<PlacementSnapshot> {
+        self.topology
+            .all
+            .iter()
+            .map(|&entity| {
+                let placement = self.placement_of(entity);
+                let origin = self.position_of(entity);
+                PlacementSnapshot {
+                    recipe: self
+                        .ecs
+                        .get::<&Machine>(entity)
+                        .ok()
+                        .map(|machine| machine.recipe.clone()),
+                    occupies: placement.tiles(origin),
+                    kind: placement.kind,
+                    tile: origin,
+                    direction: placement.direction,
+                    footprint: placement.footprint,
+                }
+            })
+            .collect()
+    }
+
+    /// Every raw-ingredient hopper in the world, in tile order — placement
+    /// plus live fill level. Empty in a world with none, several in a world
+    /// with several (see this module's doc).
+    ///
+    /// Read this the way `economy_snapshot` is read rather than the way
+    /// `chunk_snapshot` is: polling it whenever the fill UI redraws is cheap
+    /// and always current. Unlike fluid, a hopper's level *does* dirty its
+    /// chunk when it changes (at most once per tick, not every tick), so a
+    /// purely chunk-driven renderer stays correct too — `ChunkSnapshot`
+    /// carries the identical struct.
+    pub fn hopper_snapshots(&self) -> Vec<HopperSnapshot> {
+        self.topology
+            .hoppers
+            .iter()
+            .map(|&hopper| self.hopper_snapshot(hopper))
+            .collect()
+    }
+
+    /// Every fluid tank in the world, in tile order — placement plus live
+    /// level.
+    ///
+    /// **Poll this every frame you want to redraw a tank — do not wait for a
+    /// dirty chunk.** A tank is drained by the same per-tick equalization
+    /// pass the pipes are, which deliberately does not dirty anything, so a
+    /// falling level is invisible to `dirty_chunks`. Only `FillFluidTank`
+    /// dirties it, since that is a discrete player action a chunk-driven
+    /// renderer would otherwise miss entirely.
+    pub fn fluid_tank_snapshots(&self) -> Vec<FluidTankSnapshot> {
+        self.topology
+            .tanks
+            .iter()
+            .map(|&tank| self.fluid_tank_snapshot(tank))
+            .collect()
+    }
+
+    /// Every delivery dock in the world, in tile order. See
+    /// [`DockSnapshot`] for why `contents` is normally empty and there is no
+    /// `fill` field.
+    pub fn dock_snapshots(&self) -> Vec<DockSnapshot> {
+        self.topology
+            .docks
+            .iter()
+            .map(|&dock| self.dock_snapshot(dock))
+            .collect()
+    }
+
+    /// Every fluid network in the world, in the order the topology pass
+    /// found them (which is the tile order of their first segment). Empty
+    /// when no pipe is placed. See [`FluidSnapshot`] — and note this
+    /// returns a **list** now, where the pre-placement world had at most one.
+    pub fn fluid_snapshots(&self) -> Vec<FluidSnapshot> {
+        self.topology
+            .networks
+            .iter()
+            .enumerate()
+            .map(|(index, network)| {
+                let total_capacity = network.total_capacity();
+                FluidSnapshot {
+                    fluid: network.fluid.clone(),
+                    total_volume: network.total_volume().to_num::<f64>(),
+                    total_capacity: total_capacity.to_num::<f64>(),
+                    pressure: if total_capacity == Fx::ZERO {
+                        0.0
+                    } else {
+                        (network.total_volume() / total_capacity).to_num::<f64>()
+                    },
+                    segments: network.segments().iter().map(pipe_snapshot).collect(),
+                    taps: self
+                        .topology
+                        .machine_taps
+                        .iter()
+                        .filter(|&&(_, net, _)| net == index)
+                        .filter_map(|&(machine, _, segment)| {
+                            let body = self.ecs.get::<&Machine>(machine).ok()?;
+                            let units_per_craft = self
+                                .recipes
+                                .get(&body.recipe)
+                                .and_then(|r| r.fluid_inputs.first().map(|(_, units)| *units))
+                                .unwrap_or(0);
+                            Some(FluidTapSnapshot {
+                                machine_tile: self.position_of(machine),
+                                machine_recipe: body.recipe.clone(),
+                                units_per_craft,
+                                segment_index: segment,
+                            })
+                        })
+                        .collect(),
+                    tank_tiles: self
+                        .topology
+                        .tank_discharges
+                        .iter()
+                        .filter(|&&(_, net, _)| net == index)
+                        .map(|&(tank, _, _)| self.position_of(tank))
+                        .collect(),
+                }
+            })
+            .collect()
+    }
+
+    fn belt_snapshot(&self, belt: Entity) -> BeltSnapshot {
+        let segment = self.ecs.get::<&BeltSegment>(belt).unwrap();
+        BeltSnapshot {
+            tile: self.position_of(belt),
+            direction: self.placement_of(belt).direction,
+            items: segment
+                .snapshot_positions()
+                .into_iter()
+                .map(|(item, pos)| (item, pos.to_num::<f64>()))
+                .collect(),
+        }
+    }
+
+    fn machine_snapshot(&self, machine: Entity) -> MachineSnapshot {
+        let placement = self.placement_of(machine);
+        let body = self.ecs.get::<&Machine>(machine).unwrap();
+        MachineSnapshot {
+            tile: self.position_of(machine),
+            kind: placement.kind,
+            direction: placement.direction,
+            footprint: placement.footprint,
+            recipe: body.recipe.clone(),
+            process: body.process.map(|p| (p.start_tick, p.required_ticks)),
+            input: body.input.iter().cloned().collect(),
+            output: body.output.iter().cloned().collect(),
+        }
+    }
+
+    fn hopper_snapshot(&self, hopper: Entity) -> HopperSnapshot {
+        let placement = self.placement_of(hopper);
+        let body = self.ecs.get::<&Hopper>(hopper).unwrap();
+        HopperSnapshot {
+            tile: self.position_of(hopper),
+            kind: placement.kind,
+            direction: placement.direction,
+            footprint: placement.footprint,
+            item: body.item().clone(),
+            quantity: body.quantity(),
+            capacity: body.capacity(),
+            fill: if body.capacity() == 0 {
+                0.0
+            } else {
+                body.quantity() as f64 / body.capacity() as f64
+            },
+            belt_tile: self.outbound_belt_tile(hopper),
+        }
+    }
+
+    fn fluid_tank_snapshot(&self, tank: Entity) -> FluidTankSnapshot {
+        let placement = self.placement_of(tank);
+        let body = self.ecs.get::<&FluidTank>(tank).unwrap();
+        let discharge = self
+            .topology
+            .tank_discharges
+            .iter()
+            .find(|&&(entity, _, _)| entity == tank)
+            .map(|&(_, network, segment)| (network, segment));
+        FluidTankSnapshot {
+            tile: self.position_of(tank),
+            kind: placement.kind,
+            direction: placement.direction,
+            footprint: placement.footprint,
+            fluid: discharge.and_then(|(network, _)| self.topology.networks[network].fluid.clone()),
+            quantity: body.volume().to_num::<f64>(),
+            capacity: body.capacity().to_num::<f64>(),
+            // `FluidTank::pressure` is the tank's own fill fraction, which is
+            // exactly what this field means — not its `discharge_pressure`,
+            // which is a flow-model quantity and is always 1.
+            fill: body.pressure().to_num::<f64>(),
+            pipe_tile: discharge
+                .map(|(network, segment)| self.topology.networks[network].segments()[segment].tile),
+        }
+    }
+
+    fn dock_snapshot(&self, dock: Entity) -> DockSnapshot {
+        let placement = self.placement_of(dock);
+        let body = self.ecs.get::<&Dock>(dock).unwrap();
+        DockSnapshot {
+            tile: self.position_of(dock),
+            kind: placement.kind,
+            direction: placement.direction,
+            footprint: placement.footprint,
+            belt_tile: self.inbound_belt_tile(dock),
+            contents: body.contents().cloned().collect(),
+            capacity_per_item: body.capacity_per_item(),
+            shipped_total: body.shipped_total(),
+        }
+    }
+
+    /// The tile of the belt this placement currently discharges onto, if
+    /// any — read off the topology's own links rather than re-derived, so it
+    /// can never disagree with what the simulation actually does.
+    fn outbound_belt_tile(&self, source: Entity) -> Option<TileCoord> {
+        self.topology
+            .source_to_belt
+            .iter()
+            .find(|&&(entity, _)| entity == source)
+            .map(|&(_, belt)| self.position_of(belt))
+    }
+
+    /// The tile of the belt currently feeding this placement, if any.
+    fn inbound_belt_tile(&self, sink: Entity) -> Option<TileCoord> {
+        self.topology
+            .belt_to_sink
+            .iter()
+            .find(|&&(_, entity)| entity == sink)
+            .map(|&(belt, _)| self.position_of(belt))
+    }
+
+    /// What occupies `pos`, if anything (ARCHITECTURE.md §4). A multi-tile
+    /// placement resolves from **any** tile of its footprint, not just its
+    /// origin — see [`TileSnapshot`].
+    pub fn query_tile(&self, pos: TileCoord) -> Option<TileSnapshot> {
+        let &entity = self.topology.grid.get(&pos)?;
+        let placement = self.placement_of(entity);
+        let origin = self.position_of(entity);
+        let snapshot = match self.body_kind(entity)? {
+            BodyKind::Belt => {
+                let segment = self.ecs.get::<&BeltSegment>(entity).unwrap();
+                TileSnapshot::Belt {
+                    direction: placement.direction,
+                    items_here: segment
+                        .snapshot_positions()
+                        .into_iter()
+                        .map(|(item, _)| item)
+                        .collect(),
+                }
+            }
+            BodyKind::Machine => {
+                let body = self.ecs.get::<&Machine>(entity).unwrap();
+                TileSnapshot::Machine {
+                    machine_kind: placement.kind,
+                    direction: placement.direction,
+                    footprint: placement.footprint,
+                    origin_tile: origin,
+                    recipe: body.recipe.clone(),
+                    process: body.process.map(|p| (p.start_tick, p.required_ticks)),
+                }
+            }
+            BodyKind::Pipe => {
+                let &(network_index, segment_index) = self.topology.pipe_index.get(&pos)?;
+                let network = &self.topology.networks[network_index];
+                let segment = &network.segments()[segment_index];
+                TileSnapshot::Pipe {
+                    direction: placement.direction,
+                    fluid: network.fluid.clone(),
+                    volume: segment.volume.to_num::<f64>(),
+                    capacity: segment.capacity.to_num::<f64>(),
+                    pressure: segment.pressure().to_num::<f64>(),
+                    is_source: segment.is_source,
+                    is_inlet: self
+                        .topology
+                        .machine_taps
+                        .iter()
+                        .any(|&(_, net, seg)| net == network_index && seg == segment_index),
+                }
+            }
+            BodyKind::Hopper => {
+                let snapshot = self.hopper_snapshot(entity);
+                TileSnapshot::Hopper {
+                    direction: snapshot.direction,
+                    footprint: snapshot.footprint,
+                    origin_tile: snapshot.tile,
+                    item: snapshot.item,
+                    quantity: snapshot.quantity,
+                    capacity: snapshot.capacity,
+                    fill: snapshot.fill,
+                }
+            }
+            BodyKind::FluidTank => {
+                let snapshot = self.fluid_tank_snapshot(entity);
+                TileSnapshot::FluidTank {
+                    direction: snapshot.direction,
+                    footprint: snapshot.footprint,
+                    origin_tile: snapshot.tile,
+                    fluid: snapshot.fluid,
+                    quantity: snapshot.quantity,
+                    capacity: snapshot.capacity,
+                    fill: snapshot.fill,
+                }
+            }
+            BodyKind::Dock => {
+                let snapshot = self.dock_snapshot(entity);
+                TileSnapshot::Dock {
+                    direction: snapshot.direction,
+                    footprint: snapshot.footprint,
+                    origin_tile: snapshot.tile,
+                    contents: snapshot.contents,
+                    capacity_per_item: snapshot.capacity_per_item,
+                    shipped_total: snapshot.shipped_total,
+                }
+            }
+        };
+        Some(snapshot)
+    }
+}
+
+/// Enforces the chain-linkage assumption `data/recipes.ron` is written
+/// under: recipe `i + 1` must consume (as one of its inputs) an item that
+/// recipe `i` produces. A clear panic here — at construction time, before
+/// any tick runs — is the data-file equivalent of a compiler error.
+///
+/// **`World` no longer lays a chain out from that order** (the "Real
+/// Placement" epic — the player does), so this is no longer load-bearing for
+/// geometry. It is kept because it is still load-bearing for *content*: the
+/// file describes one production line, "the first recipe's first input is
+/// the chain's raw ingredient" (which is what a placed hopper holds) is only
+/// true if it does, and [`super::reference::reference_chain`] builds that
+/// line in that order.
 fn validate_chain(ordered: &[Recipe]) {
     for pair in ordered.windows(2) {
         let (prev, next) = (&pair[0], &pair[1]);
@@ -2114,40 +2299,22 @@ fn validate_chain(ordered: &[Recipe]) {
         assert!(
             links,
             "recipes.ron chain error: recipe '{}' (output {:?}) does not feed recipe '{}' \
-             (inputs {:?}) — World builds one stage per recipe in file order, so consecutive \
-             recipes must chain by a shared item id",
+             (inputs {:?}) — the file describes one production line, so consecutive recipes \
+             must chain by a shared item id",
             prev.id, prev.outputs, next.id, next.inputs
         );
     }
 }
 
-/// Panics if two `(tile, description)` claims name the same tile, naming
-/// both claimants. Split out of `World::validate_placement` so the rule can
-/// be tested against a deliberately-broken layout: the accumulate-widths
-/// arithmetic in `World::with_machines` makes a real conflict unreachable
-/// today, which is precisely why the check needs its own test rather than
-/// relying on some data file eventually tripping it.
-fn assert_no_tile_conflicts(claims: &[(TileCoord, String)]) {
-    for (i, (tile, what)) in claims.iter().enumerate() {
-        if let Some((_, other)) = claims[..i].iter().find(|(t, _)| t == tile) {
-            panic!(
-                "world layout error: tile {tile:?} is claimed by both {other} and {what} — \
-                 a machine footprint (data/machines.ron) must not overlap another stage, \
-                 its own chain's belts, or the pipe run"
-            );
-        }
-    }
-}
-
-/// Every chunk (ARCHITECTURE.md §3.1's 32x32 grid) a machine footprint
+/// Every chunk (ARCHITECTURE.md §3.1's 32x32 grid) a **rotated** footprint
 /// placed at `origin` overlaps, in a deterministic row-major order with the
 /// origin's own chunk first.
 ///
-/// A footprint smaller than a chunk usually yields exactly one id; a
-/// footprint straddling a chunk boundary yields two or four. This is the one
-/// place that fan-out is computed, so dirty tracking, `all_chunks` and
-/// `chunk_snapshot` cannot disagree about which chunks a machine belongs to.
-/// The multi-chunk case is *handled*, not rejected — see
+/// Callers pass `footprint.rotated(direction)`: this function is pure
+/// rectangle arithmetic and deliberately knows nothing about facing, so
+/// there is exactly one place the rotation rule is applied
+/// ([`Footprint::rotated`]) and exactly one place the chunk fan-out is
+/// computed (here). The multi-chunk case is *handled*, not rejected — see
 /// [`MachineSnapshot`]'s doc for what that means for a consumer.
 fn footprint_chunks(origin: TileCoord, footprint: Footprint) -> Vec<ChunkId> {
     let far = (
@@ -2156,7 +2323,10 @@ fn footprint_chunks(origin: TileCoord, footprint: Footprint) -> Vec<ChunkId> {
     );
     let (min_cx, min_cy) = chunk_of(origin);
     let (max_cx, max_cy) = chunk_of(far);
-    debug_assert!(min_cx <= max_cx && min_cy <= max_cy, "footprint extents must be positive");
+    debug_assert!(
+        min_cx <= max_cx && min_cy <= max_cy,
+        "footprint extents must be positive"
+    );
     let mut chunks = Vec::with_capacity(
         (((max_cx - min_cx + 1) as i64) * ((max_cy - min_cy + 1) as i64)) as usize,
     );
@@ -2165,8 +2335,6 @@ fn footprint_chunks(origin: TileCoord, footprint: Footprint) -> Vec<ChunkId> {
             chunks.push((cx, cy));
         }
     }
-    // The origin is the footprint's min-X/min-Y corner, so row-major from
-    // the minimum chunk already puts the origin's own chunk first.
     debug_assert_eq!(chunks[0], chunk_of(origin));
     chunks
 }
@@ -2174,6 +2342,7 @@ fn footprint_chunks(origin: TileCoord, footprint: Footprint) -> Vec<ChunkId> {
 fn pipe_snapshot(segment: &PipeSegment) -> PipeSnapshot {
     PipeSnapshot {
         tile: segment.tile,
+        direction: segment.direction,
         volume: segment.volume.to_num::<f64>(),
         capacity: segment.capacity.to_num::<f64>(),
         pressure: segment.pressure().to_num::<f64>(),
@@ -2181,207 +2350,24 @@ fn pipe_snapshot(segment: &PipeSegment) -> PipeSnapshot {
     }
 }
 
-/// Enforces milestone 6's deliberately narrow fluid scope, the same way
-/// `validate_chain` enforces milestone 4's: `World` builds exactly *one*
-/// fixed pipe run, feeding exactly one machine, carrying exactly one fluid.
-/// A data file that asks for more than that would otherwise get it silently
-/// ignored (a second fluid recipe's machine would simply never start, with
-/// no clue why) — so it panics at construction time instead, with the
-/// reason and what would have to change.
+/// Enforces the one fluid assumption that survived placement: a machine is
+/// plumbed into exactly **one** network, so a recipe may declare at most one
+/// fluid input. A data file asking for two would otherwise get the second
+/// silently ignored, with the machine simply never starting and no clue why.
+///
+/// What this *stopped* enforcing is the milestone-6 restriction that a whole
+/// recipe file could contain at most one fluid-using recipe. That existed
+/// because `World` built one hardcoded pipe run; a world now holds one
+/// network per connected component of placed pipe, so several fluid recipes
+/// are simply several runs the player may or may not have built.
 fn validate_fluid_scope(ordered: &[Recipe]) {
-    let with_fluid: Vec<&Recipe> = ordered
-        .iter()
-        .filter(|r| !r.fluid_inputs.is_empty())
-        .collect();
-    assert!(
-        with_fluid.len() <= 1,
-        "recipes.ron fluid error: {} recipes declare fluid_inputs ({:?}), but milestone 6 \
-         (ARCHITECTURE.md §9 item 6) builds exactly one fixed pipe run feeding one machine — \
-         supporting a second one needs multiple FluidNetworks and a real placement description, \
-         not another hardcoded run",
-        with_fluid.len(),
-        with_fluid.iter().map(|r| &r.id).collect::<Vec<_>>()
-    );
-    if let Some(recipe) = with_fluid.first() {
-        assert_eq!(
-            recipe.fluid_inputs.len(),
-            1,
-            "recipes.ron fluid error: recipe '{}' declares {} fluid inputs, but a machine is \
-             plumbed into exactly one network at this milestone's scope",
+    for recipe in ordered {
+        assert!(
+            recipe.fluid_inputs.len() <= 1,
+            "recipes.ron fluid error: recipe '{}' declares {} fluid inputs, but a machine taps \
+             exactly one network",
             recipe.id,
             recipe.fluid_inputs.len()
-        );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn footprint_chunks_is_one_chunk_when_the_footprint_fits_inside_one() {
-        assert_eq!(
-            footprint_chunks((4, 0), Footprint::ONE_BY_ONE),
-            vec![(0, 0)]
-        );
-        assert_eq!(
-            footprint_chunks(
-                (29, 0),
-                Footprint {
-                    width_tiles: 3,
-                    height_tiles: 1
-                }
-            ),
-            vec![(0, 0)],
-            "29..=31 is still inside chunk 0 — the boundary is at x = 32"
-        );
-    }
-
-    #[test]
-    fn footprint_chunks_fans_out_across_a_straddled_boundary() {
-        // 30..=33 crosses x = 32; 30..=33 x 31..=32 crosses both axes.
-        assert_eq!(
-            footprint_chunks(
-                (30, 0),
-                Footprint {
-                    width_tiles: 4,
-                    height_tiles: 1
-                }
-            ),
-            vec![(0, 0), (1, 0)]
-        );
-        assert_eq!(
-            footprint_chunks(
-                (30, 31),
-                Footprint {
-                    width_tiles: 4,
-                    height_tiles: 2
-                }
-            ),
-            vec![(0, 0), (1, 0), (0, 1), (1, 1)],
-            "row-major, origin's own chunk first"
-        );
-    }
-
-    /// The real layout math can't produce an overlap (see
-    /// `assert_no_tile_conflicts`'s doc), so the rule is checked directly
-    /// against a hand-built conflicting claim list.
-    #[test]
-    #[should_panic(expected = "claimed by both")]
-    fn overlapping_tile_claims_panic_with_both_claimants_named() {
-        assert_no_tile_conflicts(&[
-            ((4, 0), "stage 0's 'crusher' machine".to_string()),
-            ((5, 0), "stage 1's belt".to_string()),
-            ((4, 0), "the pipe run".to_string()),
-        ]);
-    }
-
-    #[test]
-    fn non_overlapping_tile_claims_are_accepted() {
-        assert_no_tile_conflicts(&[
-            ((4, 0), "stage 0's 'crusher' machine".to_string()),
-            ((4, 1), "the pipe run".to_string()),
-            ((5, 0), "stage 1's belt".to_string()),
-        ]);
-    }
-
-    /// A world with a chosen amount of money, so a purchase can be exercised
-    /// without first driving the whole chain through a contract delivery.
-    /// Only reachable from inside this module — `economy` is private, which
-    /// is exactly why `tests/shop.rs` earns its money the real way instead.
-    fn world_with_money(money: u32) -> World {
-        let recipes = RecipeRegistry::from_ron_str(include_str!("../../../data/recipes.ron"))
-            .expect("bundled recipes must parse");
-        let mut world = World::new(recipes);
-        world.economy.money = Fx::from_num(money);
-        world
-    }
-
-    #[test]
-    fn a_purchase_debits_money_and_credits_the_owned_count() {
-        let mut world = world_with_money(500);
-        let price = world.shop.catalog.get("crusher").unwrap().price_money();
-
-        world.issue_command(PlayerCommand::Purchase {
-            kind: "crusher".to_string(),
-            quantity: 2,
-        });
-
-        assert_eq!(
-            world.economy.money,
-            Fx::from_num(500) - price * Fx::from_num(2)
-        );
-        assert_eq!(world.owned_count("crusher"), 2);
-    }
-
-    #[test]
-    fn a_purchase_costing_exactly_the_balance_succeeds_and_leaves_nothing() {
-        let mut world = world_with_money(0);
-        let price = world.shop.catalog.get("belt").unwrap().price_money();
-        world.economy.money = price;
-
-        world.issue_command(PlayerCommand::Purchase {
-            kind: "belt".to_string(),
-            quantity: 1,
-        });
-
-        assert_eq!(world.economy.money, Fx::ZERO);
-        assert_eq!(world.owned_count("belt"), 1);
-    }
-
-    /// Money must never go negative, and a refused purchase must leave
-    /// *both* halves of the transaction untouched.
-    #[test]
-    fn a_purchase_one_unit_over_the_balance_spends_nothing() {
-        let mut world = world_with_money(0);
-        let price = world.shop.catalog.get("belt").unwrap().price_money();
-        world.economy.money = price - Fx::from_num(1);
-        let before = world.economy.money;
-
-        world.issue_command(PlayerCommand::Purchase {
-            kind: "belt".to_string(),
-            quantity: 1,
-        });
-
-        assert_eq!(world.economy.money, before);
-        assert_eq!(world.owned_count("belt"), 0);
-    }
-
-    /// An absurd quantity overflows what `Fx` can represent; `Shop::cost_of`
-    /// refuses to price it rather than saturating into something that might
-    /// look affordable to a rich player.
-    #[test]
-    fn an_unrepresentable_total_is_refused_rather_than_saturated() {
-        let mut world = world_with_money(30_000);
-        let before = world.economy.money;
-
-        world.issue_command(PlayerCommand::Purchase {
-            kind: "belt".to_string(),
-            quantity: u32::MAX,
-        });
-
-        assert_eq!(world.economy.money, before);
-        assert_eq!(world.owned_count("belt"), 0);
-    }
-
-    /// A purchase touches money and a count, neither of which is a tile —
-    /// so it must not dirty a chunk. Presentation polls
-    /// `shop_snapshot_json` instead, and this is what keeps that documented
-    /// contract honest.
-    #[test]
-    fn a_purchase_dirties_no_chunk() {
-        let mut world = world_with_money(500);
-        world.tick();
-        world.dirty.clear();
-
-        world.issue_command(PlayerCommand::Purchase {
-            kind: "belt".to_string(),
-            quantity: 1,
-        });
-
-        assert!(
-            world.dirty.is_empty(),
-            "buying equipment changes no tile, so no chunk may be marked dirty"
         );
     }
 }

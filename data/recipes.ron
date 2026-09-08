@@ -4,13 +4,29 @@
 // the loader must reject or migrate a mismatched version rather than
 // silently misreading a changed shape.
 //
-// Milestone 4 (First full chain) turns this into a real multi-step
-// production line: `sim_core::sim::World` builds one belt+machine stage per
-// entry below, IN THIS FILE'S ORDER, chaining each stage's output into the
-// next stage's input (see sim_core/src/sim/world.rs's module doc). That is
-// what makes adding a processing step a pure data-file edit — appending a
-// recipe here, whose `inputs` names an item the previous recipe's `outputs`
-// produces, adds a pipeline stage with no Rust changes at all.
+// Milestone 4 (First full chain) turned this into a real multi-step
+// production line: one belt+machine stage per entry below, IN THIS FILE'S
+// ORDER, each stage's output chaining into the next stage's input.
+//
+// **WHAT THAT ORDER MEANS SINCE THE "REAL PLACEMENT" EPIC.** `World` no
+// longer builds anything from it: the player places every belt tile and
+// machine, and flow is derived from what ends up adjacent to what. So this
+// file's order is no longer *geometry* — but it is still the production
+// line as **content**, and three things read it. (1) `validate_chain` still
+// enforces that consecutive entries chain by a shared item id, so a typo'd
+// item is still a construction-time error rather than a machine that
+// silently never starts. (2) The first recipe's first input is by
+// definition the chain's raw ingredient, which is what any hopper the
+// player places holds. (3) `sim::reference_chain` — the test fixture that
+// rebuilds the pre-placement shipped layout out of ordinary purchase and
+// placement commands — lays the line out in exactly this order. Adding a
+// processing step is therefore still a pure data-file edit; what changed is
+// that the player, not `World`, decides where the new machine stands.
+//
+// One rule this order now also implies: **a machine kind runs exactly one
+// recipe.** A placed machine runs whichever recipe names its `machine`
+// kind, so two recipes on one kind is a construction-time panic rather than
+// a silent pick (there is no recipe-selection mechanic, deliberately).
 //
 // Milestone 6 (Fluids) bumps `schema_version` to 2 and adds the optional
 // `fluid_inputs` field: (fluid id, whole units) consumed per craft from the
@@ -20,7 +36,10 @@
 // sim_core/src/sim/recipe.rs for why. `World` builds its single fixed pipe
 // run for whichever recipe below declares `fluid_inputs`, carrying whatever
 // fluid that recipe names — so which stage is plumbed is a property of this
-// file, not of any Rust code.
+// file, not of any Rust code. (Since the "Real Placement" epic, *where* the
+// pipes are is the player's business: a machine taps any pipe tile adjacent
+// to its footprint, and the network takes its fluid from the recipe of
+// whichever machine taps it.)
 //
 // The chain below is a simplified stand-in for GAMEPLAY.md §2's tier 1/2
 // tomato-sauce/ketchup progression (real ketchup also needs sugar and spices
@@ -159,9 +178,9 @@
         // end, purely by editing this file — no sim_core/src or
         // godot_project/*.gd changes accompany this entry. This is
         // milestone 4's required proof that extending the chain is a
-        // data-file-only change: `World::new` (sim_core/src/sim/world.rs)
-        // builds one stage per recipe here, in order, with no recipe id
-        // baked into Rust anywhere.
+        // data-file-only change — no recipe id is baked into Rust anywhere,
+        // then or now (see this file's header for what "in order" means
+        // since placement became the player's job).
         Recipe(
             id: "boxed_ketchup",
             inputs: [("bottled_ketchup", 1)],

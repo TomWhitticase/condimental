@@ -177,11 +177,37 @@ Everything in this doc should be **content**, not simulation code, per [ARCHITEC
   contract delivery credits, via `Economy::try_spend` (all-or-nothing, so a
   refused purchase changes nothing at all). Exposed to Godot as
   `SimBridge::shop_snapshot_json` (catalog + owned counts + money in one
-  object). **Still deliberately deferred:** nothing consumes an owned count
-  yet — the production chain is still built unconditionally — so buying is
-  currently a real money transaction with no effect on the factory floor;
-  real placement/rotation/pickup is a following epic. Prices are placeholders
-  per §10, not a balancing pass.
+  object). **No longer deferred (2026-09-08, the "Real Placement" epic's
+  ticket 1):** an owned count is unplaced inventory now. `World::new` builds
+  nothing at all, a new game starts with `economy.rs`'s `STARTING_MONEY` (200
+  — a placeholder sized to buy a hopper, one machine and a handful of belt,
+  i.e. §8's "start small", deliberately not a factory), and every belt tile,
+  pipe tile, machine and building in a world is something a `Purchase` paid
+  for and a `Place` put down. `Place` spends one owned unit and `Remove`
+  credits one back, so what you own plus what you have placed always equals
+  what you bought; `Rotate` turns a placement 90° clockwise. All three leave
+  money alone — it moved at purchase time, which is what keeps §1's single
+  currency single. Prices, and the starting balance they are measured
+  against, are still placeholders per §10.
+
+- **Where things stand, and which way they face, is the player's decision
+  (the same epic).** A machine accepts input on the face opposite the way it
+  points and discharges on the face it points at; a belt carries toward the
+  way it faces and hands off to whatever is standing there; a fluid
+  connection is made by touching rather than by facing, because a pressure
+  network is not a conveyor. Flow is therefore derived from what is adjacent
+  to what, recomputed only when something is placed, removed or rotated — so
+  a production line can turn corners, run in any of the four directions, and
+  take shapes the old fixed west-to-east chain could not express. The hopper,
+  the fluid tank and the delivery dock became ordinary placeable kinds in the
+  same change, and a world may hold **any number of each**: several fill
+  points, several delivery points, all still settling against the one shared
+  delivery pool this section's allocation rule describes (a second dock is
+  another door out of the factory, not a second ledger). `data/recipes.ron`'s
+  file order no longer describes any geometry — it describes the production
+  line as *content*, which is what makes "the first recipe's first input is
+  the raw ingredient a hopper holds" true, and `sim::reference_chain` is a
+  test fixture that lays that line out using ordinary placement commands.
 - **Money and active-contract state's architectural home (resolved at milestone 5, 2026-09-06):** both live as plain fields on a new `sim_core::sim::economy::Economy` struct, owned directly by `World` and advanced once per tick — not a new ECS component/entity, since milestone 5 has exactly one money counter and one active contract (no per-entity multiplicity to justify ECS machinery yet). `money` is a single fixed-point (`Fx`) counter, per ARCHITECTURE.md §3.9. The one hardcoded `Contract` (fixed mix/cadence/payout, named constants in `economy.rs`) is checked against an accumulating `delivery_buffer` `Inventory` at its cadence boundary (`Economy::tick`), which is where `World::issue_command(PlayerCommand::CollectOutput)` then deposited collected product instead of discarding it — this was milestone 5's "delivery mechanism." (**Superseded 2026-09-08 by the delivery dock**, two bullets up: that command no longer exists and the pool is filled by a building at the chain's tail instead. The pool itself, and everything about how contracts settle against it, is unchanged.) Exposed to Godot as a `SimBridge::economy_snapshot_json` JSON snapshot (money, contract mix, per-item progress, cadence), same pattern as the existing chunk/tile/layout snapshots. **Superseded in part on 2026-09-08:** `contracts.ron` data-file loading and multiple concurrent contracts have since landed — `Economy` now holds a `Vec<ActiveContract>` (each with its own cadence clock and delivery counters) plus one shared `delivery_buffer`, and `economy_snapshot_json` returns an array of contracts rather than one inline. The `Economy`-as-a-plain-field-on-`World` call above was unaffected and still stands: several contracts are a `Vec` inside the one struct, not a reason for ECS machinery. **Still explicitly deferred:** contract-loss/reputation penalties on a missed cadence window (a miss today just skips that window's payout and keeps the contract active — see this doc's own open question below), and the `StaffPools` resource — all future work, per GAMEPLAY.md §6/§9's original fuller design and the milestone-5 task's own scope note.
 
 ---

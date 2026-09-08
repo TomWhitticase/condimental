@@ -8,9 +8,12 @@
 //! blocked-belt case). This file drives the real `World` instead, to prove
 //! the three things only the whole system can show:
 //!
-//! 1. **Placement.** The hopper stands immediately west of stage 0's belt,
-//!    on tiles that existed in no earlier milestone — so introducing it
-//!    moved nothing (the same discipline ticket 1 followed for footprints).
+//! 1. **Placement.** The hopper stands immediately west of the first belt
+//!    it feeds. Since the "Real Placement" epic that is where
+//!    `sim::reference_chain` *puts* it rather than where `World::new` built
+//!    it — the assertions are unchanged, which is the point: an east-facing
+//!    player-placed hopper lands on exactly the tile the fixed chain used
+//!    to hardcode.
 //! 2. **Metering.** `World::tick` unloads at most one unit, only when the
 //!    belt has room, so the *machinery* sets the feed rate and the player
 //!    only sets the supply. A jammed line leaves the hopper holding.
@@ -23,8 +26,8 @@
 //! in `core_loop.rs`, which counts hopper contents as mass in the system.
 
 use sim_core::sim::{
-    HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, PlayerCommand, RecipeRegistry, World,
-    command_from_json,
+    Direction, HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, HopperSnapshot, PlayerCommand, RecipeRegistry, World,
+    command_from_json, reference_chain,
 };
 
 fn recipes() -> RecipeRegistry {
@@ -33,15 +36,40 @@ fn recipes() -> RecipeRegistry {
 }
 
 fn world() -> World {
-    World::new(recipes())
+    reference_chain(recipes())
 }
 
-/// How many items are on the chain's first belt right now.
+/// The world's one hopper. The reference chain places exactly one, so a
+/// test that wants "the hopper" says so here rather than indexing an array
+/// at every call site — several hoppers are a real supported thing now (see
+/// `placement.rs`), just not a thing this file is about.
+fn the_hopper(world: &World) -> HopperSnapshot {
+    let mut hoppers = world.hopper_snapshots();
+    assert_eq!(hoppers.len(), 1, "the reference chain places one hopper");
+    hoppers.remove(0)
+}
+
+/// How many items are on every belt in the world right now. Since the "Real
+/// Placement" epic a belt is one *tile*, so what used to be one four-tile
+/// `BeltSegment` is four separate snapshots — an accounting test has to add
+/// them all up.
+fn all_belt_item_count(world: &World) -> u32 {
+    world
+        .all_chunks()
+        .into_iter()
+        .flat_map(|chunk| world.chunk_snapshot(chunk).belts)
+        .map(|belt| belt.items.len() as u32)
+        .sum()
+}
+
+/// How many items are on the belt tile the hopper discharges onto right now.
 fn first_belt_item_count(world: &World) -> usize {
-    let start = world.chain_layout()[0].belt_start_tile;
+    let Some(start) = the_hopper(world).belt_tile else {
+        return 0;
+    };
     for chunk in world.all_chunks() {
         for belt in world.chunk_snapshot(chunk).belts {
-            if belt.start_tile == start {
+            if belt.tile == start {
                 return belt.items.len();
             }
         }
@@ -56,10 +84,9 @@ fn first_belt_item_count(world: &World) -> usize {
 #[test]
 fn the_hopper_stands_immediately_west_of_the_chains_first_belt() {
     let world = world();
-    let hopper = world.hopper_snapshot();
-    let first_belt = world.chain_layout()[0].belt_start_tile;
+    let hopper = the_hopper(&world);
+    let first_belt = hopper.belt_tile.expect("the hopper discharges onto a belt");
 
-    assert_eq!(hopper.belt_tile, first_belt);
     assert_eq!(
         hopper.tile,
         (first_belt.0 - hopper.footprint.width_tiles, first_belt.1),
@@ -77,6 +104,12 @@ fn the_hopper_stands_immediately_west_of_the_chains_first_belt() {
         (1, 1)
     );
     assert_eq!(hopper.kind, "hopper");
+    assert_eq!(
+        hopper.direction,
+        Direction::East,
+        "the reference chain faces everything east — the facing that reproduces the \
+         pre-placement layout exactly"
+    );
     assert_eq!(
         hopper.item, "tomato",
         "the held item comes from data/recipes.ron's first recipe's input, not from Rust"
@@ -114,14 +147,14 @@ fn the_hoppers_chunk_is_reported_alongside_the_chains() {
 fn filling_past_capacity_is_clamped_not_a_panic_or_an_overflow() {
     let mut world = world();
 
-    world.issue_command(PlayerCommand::FillHopper { amount: u32::MAX });
-    assert_eq!(world.hopper_snapshot().quantity, HOPPER_CAPACITY);
-    assert_eq!(world.hopper_snapshot().fill, 1.0);
+    world.issue_command(PlayerCommand::FillHopper { amount: u32::MAX, tile: None });
+    assert_eq!(the_hopper(&world).quantity, HOPPER_CAPACITY);
+    assert_eq!(the_hopper(&world).fill, 1.0);
 
     // ...and again on an already-full hopper: still a silent no-op, with no
     // wrap-around and nothing spilled onto the belt.
-    world.issue_command(PlayerCommand::FillHopper { amount: u32::MAX });
-    assert_eq!(world.hopper_snapshot().quantity, HOPPER_CAPACITY);
+    world.issue_command(PlayerCommand::FillHopper { amount: u32::MAX, tile: None });
+    assert_eq!(the_hopper(&world).quantity, HOPPER_CAPACITY);
     assert_eq!(
         first_belt_item_count(&world),
         0,
@@ -132,7 +165,11 @@ fn filling_past_capacity_is_clamped_not_a_panic_or_an_overflow() {
 #[test]
 fn a_fill_command_dirties_the_hoppers_chunk_so_the_fill_ui_can_redraw() {
     let mut world = world();
-    world.issue_command(PlayerCommand::FillHopper { amount: 1 });
+    // One tick first, to clear the dirt from *building* the chain: placing
+    // something dirties its chunks too, and the fixture places forty-odd
+    // things before this test starts.
+    world.tick();
+    world.issue_command(PlayerCommand::FillHopper { amount: 1, tile: None });
     assert_eq!(world.dirty_chunks(), &[(-1, 0)]);
 }
 
@@ -141,11 +178,11 @@ fn a_fill_command_dirties_the_hoppers_chunk_so_the_fill_ui_can_redraw() {
 #[test]
 fn the_hopper_unloads_exactly_one_unit_at_a_time_gated_by_the_belt() {
     let mut world = world();
-    world.issue_command(PlayerCommand::FillHopper { amount: 10 });
+    world.issue_command(PlayerCommand::FillHopper { amount: 10, tile: None });
 
     world.tick();
     assert_eq!(
-        world.hopper_snapshot().quantity,
+        the_hopper(&world).quantity,
         9,
         "exactly one unit leaves the hopper on a tick, never the whole buffer"
     );
@@ -155,7 +192,7 @@ fn the_hopper_unloads_exactly_one_unit_at_a_time_gated_by_the_belt() {
     // is no room at its start yet — so the hopper must simply hold.
     world.tick();
     assert_eq!(
-        world.hopper_snapshot().quantity,
+        the_hopper(&world).quantity,
         9,
         "a belt with no room at its start must not accept a second unit"
     );
@@ -165,7 +202,7 @@ fn the_hopper_unloads_exactly_one_unit_at_a_time_gated_by_the_belt() {
     for _ in 0..2_000 {
         world.tick();
     }
-    assert_eq!(world.hopper_snapshot().quantity, 0);
+    assert_eq!(the_hopper(&world).quantity, 0);
 }
 
 /// The stall case, at world level: nothing downstream ever consumes, so the
@@ -192,21 +229,22 @@ fn a_jammed_belt_leaves_the_hopper_holding_its_contents() {
         )"#,
     )
     .expect("test recipe text must parse");
-    let mut world = World::new(jammed);
+    let mut world = reference_chain(jammed);
     world.issue_command(PlayerCommand::FillHopper {
         amount: HOPPER_CAPACITY,
+        tile: None,
     });
 
     for _ in 0..20_000 {
         world.tick();
     }
 
-    let held = world.hopper_snapshot().quantity;
+    let held = the_hopper(&world).quantity;
     assert!(
         held > 0,
         "a backed-up line must leave raw ingredient in the hopper, not consume it into nothing"
     );
-    let on_belt = first_belt_item_count(&world) as u32;
+    let on_belt = all_belt_item_count(&world);
     let in_machine = {
         let mut n = 0;
         for chunk in world.all_chunks() {
@@ -236,16 +274,18 @@ fn a_jammed_belt_leaves_the_hopper_holding_its_contents() {
 #[test]
 fn the_hopper_json_shape_is_what_presentation_is_told_to_expect() {
     let mut world = world();
-    world.issue_command(PlayerCommand::FillHopper { amount: 16 });
+    world.issue_command(PlayerCommand::FillHopper { amount: 16, tile: None });
 
-    // hopper_snapshot_json (`SimBridge`) serializes exactly this.
+    // hopper_snapshots_json (`SimBridge`) serializes an array of exactly
+    // these.
     let snapshot: serde_json::Value =
-        serde_json::from_str(&serde_json::to_string(&world.hopper_snapshot()).unwrap()).unwrap();
+        serde_json::from_str(&serde_json::to_string(&the_hopper(&world)).unwrap()).unwrap();
     assert_eq!(
         snapshot,
         serde_json::json!({
             "tile": [-1, 0],
             "kind": "hopper",
+            "direction": "east",
             "footprint": { "width_tiles": 1, "height_tiles": 1 },
             "item": "tomato",
             "quantity": 16,
@@ -278,6 +318,7 @@ fn the_hopper_json_shape_is_what_presentation_is_told_to_expect() {
         tile,
         serde_json::json!({
             "kind": "hopper",
+            "direction": "east",
             "footprint": { "width_tiles": 1, "height_tiles": 1 },
             "origin_tile": [-1, 0],
             "item": "tomato",
@@ -287,11 +328,21 @@ fn the_hopper_json_shape_is_what_presentation_is_told_to_expect() {
         })
     );
 
-    // The hopper is not a recipe stage, so it is deliberately absent from
-    // chain_layout_json — which stays one object per recipe, unchanged.
-    let layout = world.chain_layout();
-    assert_eq!(layout.len(), recipes().ordered().len());
-    assert_eq!(layout[0].belt_start_tile, (0, 0));
+    // world_layout_json (which replaced chain_layout_json) reports the
+    // hopper like any other placement — it is a placed building, not a
+    // recipe stage, and the new layout call makes no distinction.
+    let layout = world.world_layout();
+    let entry = layout
+        .iter()
+        .find(|p| p.kind == "hopper")
+        .expect("the hopper is a placement like any other");
+    assert_eq!(entry.tile, (-1, 0));
+    assert_eq!(entry.direction, Direction::East);
+    assert_eq!(entry.occupies, vec![(-1, 0)]);
+    assert!(
+        entry.recipe.is_none(),
+        "a hopper buffers, it does not run a recipe"
+    );
 }
 
 #[test]
@@ -300,12 +351,12 @@ fn the_fill_command_parses_from_json_with_or_without_an_amount() {
     world.issue_command(
         command_from_json(r#"{"type": "fill_hopper", "amount": 3}"#).expect("must parse"),
     );
-    assert_eq!(world.hopper_snapshot().quantity, 3);
+    assert_eq!(the_hopper(&world).quantity, 3);
 
     // Omitting `amount` means the simulation's own default load, so the
     // common "player pressed the load key" case needn't restate a constant.
     world.issue_command(command_from_json(r#"{"type": "fill_hopper"}"#).expect("must parse"));
-    assert_eq!(world.hopper_snapshot().quantity, 3 + HOPPER_FILL_AMOUNT);
+    assert_eq!(the_hopper(&world).quantity, 3 + HOPPER_FILL_AMOUNT);
 
     // The removed debug command is now simply unknown — an unparseable
     // command is a no-op, per `command_from_json`'s contract, so an

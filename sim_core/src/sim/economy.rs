@@ -6,7 +6,7 @@
 //! contract state don't have a designed ECS shape yet"): the answer turned
 //! out to be a plain [`Economy`] struct (not a new ECS component) owned
 //! directly by `World` and advanced once per tick alongside every other
-//! system, the same way `World` owns its `stages` today. Several concurrent
+//! system, the same way `World` owns its shop and its topology. Several concurrent
 //! contracts did not change that call: they are a `Vec` inside the one
 //! `Economy`, not a `Vec` of entities — nothing about a contract has a
 //! position, a footprint, or a component-wise update, which is what ECS
@@ -60,6 +60,40 @@
 use super::contracts::{Contract, ContractRegistry};
 use super::inventory::Inventory;
 use super::types::{Fx, ItemId};
+
+/// What a new game starts with in the bank (the "Real Placement" epic's
+/// ticket 1).
+///
+/// This constant only became necessary when `World::new` stopped building a
+/// factory: before it, the world arrived complete and free, and starting
+/// money could honestly be zero because there was nothing to spend it on.
+/// Now the world starts **empty** and everything in it is something the
+/// player bought and placed, so a fresh world needs enough to make a first
+/// move with.
+///
+/// **200, and it is a placeholder** — GAMEPLAY.md §10 puts exact numeric
+/// balance ("ingredient costs, contract payouts, equipment prices") in a
+/// later pass, and `data/shop.ron`'s own header says the same about the
+/// prices this is measured against. What the number *does* encode, against
+/// today's catalog, is the shape GAMEPLAY.md §8's walkthrough describes —
+/// "start with a basic cooker and one small contract", not with a factory:
+///
+/// - It buys a hopper (40), a crusher (75) and seventeen belt tiles (85):
+///   a raw feed, one processing machine and a line to run between them.
+/// - It does **not** buy the reference chain, which costs a little over
+///   1000 all told — so the shipped six-stage line is something a player
+///   works up to through contract deliveries, which is the loop GAMEPLAY.md
+///   §1 describes.
+/// - It is a bit over two payouts of the shipped board's middle contract
+///   (50), so the first expansion is a handful of deliveries away rather
+///   than a grind.
+///
+/// It lives here, beside the contract bookkeeping, because this is the file
+/// that owns economic state — the same reason the Economy MVP's contract
+/// constants lived here before contracts became data. It is applied by
+/// `World`'s constructors (through [`Economy::with_money`]), not by
+/// [`Economy::new`], which starts an empty ledger at zero.
+pub const STARTING_MONEY: u32 = 200;
 
 /// One contract plus the bookkeeping that is *this world's* rather than the
 /// content's: when it is next checked, and how it has done so far.
@@ -168,9 +202,23 @@ pub struct ContractSnapshot {
 impl Economy {
     /// Builds the live economy from loaded contract content. The registry's
     /// order is preserved, because it is the scarcity tiebreak.
+    /// Starts at **zero** money — an `Economy` is a ledger, and an empty
+    /// ledger is the honest default. A new *game* starts at
+    /// [`STARTING_MONEY`], which `World` applies through
+    /// [`Economy::with_money`]; keeping that decision one layer up is what
+    /// lets a test build an economy in isolation without a starting balance
+    /// appearing in its arithmetic.
     pub fn new(contracts: &ContractRegistry) -> Self {
+        Self::with_money(contracts, Fx::ZERO)
+    }
+
+    /// [`Economy::new`], but starting from a chosen balance instead of
+    /// [`STARTING_MONEY`]. The seam a test fixture uses to start rich (see
+    /// [`super::reference::reference_chain`], which buys a whole factory) or
+    /// deliberately broke, and where a loaded save will restore its balance.
+    pub fn with_money(contracts: &ContractRegistry, money: Fx) -> Self {
         Self {
-            money: Fx::from_num(0),
+            money,
             contracts: contracts
                 .ordered()
                 .iter()

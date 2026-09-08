@@ -1,7 +1,7 @@
 //! `Machine` (ARCHITECTURE.md §3.2) and the generic `TimedProcess` pattern
 //! (§3.5) it uses to run a recipe over many ticks.
 
-use super::fluid::FluidNetwork;
+use super::fluid::FluidTap;
 use super::inventory::Inventory;
 use super::recipe::RecipeRegistry;
 use super::types::{Fx, RecipeId};
@@ -47,8 +47,11 @@ impl Machine {
     /// Godot can derive progress itself from `start_tick`/`required_ticks`
     /// plus the current tick count, without a new snapshot every tick.
     ///
-    /// `fluid` is the network this machine is plumbed into, if any
-    /// (milestone 6 — ARCHITECTURE.md §9 item 6/§3.4). A recipe with
+    /// `fluid` is this machine's tap into a pipe network, if it has one
+    /// (milestone 6 — ARCHITECTURE.md §9 item 6/§3.4; a [`FluidTap`] is the
+    /// network plus the one segment this machine touches, since the "Real
+    /// Placement" epic made which segment that is a placement question). A
+    /// recipe with
     /// `fluid_inputs` treats it exactly the way it treats its solid
     /// `inputs`: enough of the right fluid must be available *before* a
     /// craft starts, and starting consumes it. A machine that can't get
@@ -62,7 +65,7 @@ impl Machine {
         &mut self,
         current_tick: u64,
         recipes: &RecipeRegistry,
-        fluid: Option<&mut FluidNetwork>,
+        fluid: Option<FluidTap<'_>>,
     ) -> bool {
         let mut changed = false;
         let Some(recipe) = recipes.get(&self.recipe) else {
@@ -77,19 +80,19 @@ impl Machine {
             // Checked before anything is consumed, so a fluid shortage can
             // never leave the machine having eaten its solid input.
             let has_fluids = match &fluid {
-                Some(network) => recipe
+                Some(tap) => recipe
                     .fluid_inputs
                     .iter()
-                    .all(|(id, units)| network.can_supply(id, Fx::from_num(*units))),
+                    .all(|(id, units)| tap.can_supply(id, Fx::from_num(*units))),
                 None => recipe.fluid_inputs.is_empty(),
             };
             if has_inputs && has_fluids {
                 for (item, qty) in &recipe.inputs {
                     self.input.remove(item, *qty);
                 }
-                if let Some(network) = fluid {
+                if let Some(mut tap) = fluid {
                     for (id, units) in &recipe.fluid_inputs {
-                        let drawn = network.draw(id, Fx::from_num(*units));
+                        let drawn = tap.draw(id, Fx::from_num(*units));
                         debug_assert!(
                             drawn,
                             "fluid availability was checked immediately above, so this draw                              cannot fail without something having mutated the network in between"
@@ -129,7 +132,8 @@ impl Machine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sim::fluid::{FluidTank, PipeSegment};
+    use crate::sim::fluid::{FluidNetwork, FluidTank, PipeSegment};
+    use crate::sim::types::Direction;
 
     fn registry() -> RecipeRegistry {
         RecipeRegistry::from_ron_str(
@@ -229,19 +233,26 @@ mod tests {
 
     /// A network whose tank has been filled, so the run carries fluid once
     /// it has been ticked a few times.
-    fn supplied_network() -> FluidNetwork {
+    /// A two-tile run with a full tank already discharged into it, and the
+    /// machine tapping the far tile — the shape `World` derives for a
+    /// fluid-fed machine.
+    fn supplied_network() -> (FluidNetwork, FluidTank) {
         let cap = Fx::from_num(10);
         let mut network = FluidNetwork::new(
-            "vinegar".to_string(),
+            Some("vinegar".to_string()),
             vec![
-                PipeSegment::new((0, 0), cap, true),
-                PipeSegment::new((1, 0), cap, false),
+                PipeSegment::new((0, 0), Direction::East, cap),
+                PipeSegment::new((1, 0), Direction::East, cap),
             ],
-            1,
-            FluidTank::new(Fx::from_num(100)),
+            vec![(0, 1)],
         );
-        network.fill_tank(100);
-        network
+        let mut tank = FluidTank::new(Fx::from_num(100));
+        tank.fill(100);
+        for _ in 0..10 {
+            network.discharge_from_tank(&mut tank, 0);
+            network.tick();
+        }
+        (network, tank)
     }
 
     /// A network whose tank was never filled. Since the "Visual overhaul
@@ -251,11 +262,14 @@ mod tests {
     fn empty_network() -> FluidNetwork {
         let cap = Fx::from_num(10);
         FluidNetwork::new(
-            "vinegar".to_string(),
-            vec![PipeSegment::new((0, 0), cap, false)],
-            0,
-            FluidTank::new(Fx::from_num(100)),
+            Some("vinegar".to_string()),
+            vec![PipeSegment::new((0, 0), Direction::East, cap)],
+            vec![],
         )
+    }
+
+    fn tap(network: &mut FluidNetwork, inlet: usize) -> FluidTap<'_> {
+        FluidTap { network, inlet }
     }
 
     #[test]
@@ -267,7 +281,7 @@ mod tests {
 
         for tick in 0..500 {
             network.tick();
-            machine.tick(tick, &recipes, Some(&mut network));
+            machine.tick(tick, &recipes, Some(tap(&mut network, 0)));
         }
 
         assert!(machine.process.is_none(), "must never start a craft without its fluid");
@@ -298,23 +312,21 @@ mod tests {
         let recipes = fluid_registry();
         let mut machine = Machine::new("ketchup".into(), 10, 10);
         machine.input.add("tomato_sauce", 1);
-        let mut network = supplied_network();
-        for _ in 0..10 {
-            network.tick(); // let the run fill from its source
-        }
-        let before = network.inlet().volume;
+        let (mut network, mut tank) = supplied_network();
+        let before = network.segments()[1].volume;
 
-        machine.tick(0, &recipes, Some(&mut network));
+        machine.tick(0, &recipes, Some(tap(&mut network, 1)));
         assert!(machine.process.is_some(), "craft must start once fluid is available");
         assert_eq!(
-            network.inlet().volume,
+            network.segments()[1].volume,
             before - Fx::from_num(2),
             "starting a craft must consume exactly the recipe's fluid quantity"
         );
 
         for tick in 1..=10 {
+            network.discharge_from_tank(&mut tank, 0);
             network.tick();
-            machine.tick(tick, &recipes, Some(&mut network));
+            machine.tick(tick, &recipes, Some(tap(&mut network, 1)));
         }
         assert_eq!(machine.output.count("ketchup"), 1);
     }
@@ -324,12 +336,13 @@ mod tests {
         let recipes = fluid_registry();
         let mut machine = Machine::new("ketchup".into(), 10, 10);
         machine.input.add("tomato_sauce", 10);
-        let mut network = supplied_network();
-        network.fluid = "water".to_string();
+        let (mut network, mut tank) = supplied_network();
+        network.fluid = Some("water".to_string());
 
         for tick in 0..500 {
+            network.discharge_from_tank(&mut tank, 0);
             network.tick();
-            machine.tick(tick, &recipes, Some(&mut network));
+            machine.tick(tick, &recipes, Some(tap(&mut network, 1)));
         }
 
         assert!(machine.process.is_none(), "vinegar recipe must not run on a water pipe");

@@ -26,18 +26,41 @@
 //! `world.rs`), feeding *one* machine. Specifically NOT in scope, and
 //! deliberately not half-built here:
 //!
-//! - **Player-placeable pipes.** Placement is a much later milestone
-//!   (ARCHITECTURE.md §9 items 8/9); nothing here assumes the topology can
-//!   ever change after construction.
-//! - **Union-find topology recomputation (§3.8).** That machinery exists
-//!   to re-derive connected components *when a pipe is placed or removed*.
-//!   With a fixed topology there is nothing to recompute, so adjacency is
-//!   simply "consecutive indices in `segments`" — one `Vec`, no graph.
-//! - **Multiple fluids / multiple networks.** One network, one fluid type.
 //! - **Fluid *outputs*.** Recipes can consume a fluid (see
 //!   `recipe::Recipe::fluid_inputs`); producing one back into a network is
 //!   future work, so the only thing that can add volume to the system is the
-//!   player filling the tank ([`FluidTank::fill`]).
+//!   player filling a tank ([`FluidTank::fill`]).
+//! - **Choosing what a pipe carries.** A network's fluid is still decided by
+//!   content, not by the player: it is whatever the recipe of the
+//!   fluid-consuming machine tapping it names. A network nothing taps
+//!   carries `None` and can supply nobody — a length of pipe with fluid in
+//!   it and no customer.
+//!
+//! **What the "Real Placement" epic changed here.** Two further exclusions
+//! this list used to carry are now real behaviour instead:
+//!
+//! - **Pipes are player-placed**, so the topology changes at runtime. A
+//!   network is therefore no longer a `Vec` whose adjacency is "consecutive
+//!   indices": it is a genuine graph — `links` holds the adjacent index
+//!   pairs, derived from tile adjacency when the world's topology changes
+//!   and never again (ARCHITECTURE.md §3.8's "once per topology change, not
+//!   every tick"). Flow is **undirected**: a pipe tile's `direction` is what
+//!   it looks like, not which way fluid goes, because §3.4's model is a
+//!   pressure system and pressure does not care which way a fitting was
+//!   turned.
+//! - **There can be several networks**, one per connected component of pipe
+//!   tiles, each with its own fluid and its own tank(s). `World` owns the
+//!   list and rebuilds it on a topology change.
+//!
+//! **The tank is no longer owned by the network**, which is the other
+//! consequence of a topology that can change. A network is *derived* — it is
+//! rebuilt from scratch whenever a pipe is placed, removed or rotated — and a
+//! player's tank full of vinegar must not be rebuilt away, so the tank lives
+//! on its own placed entity in `world.rs` and the network merely knows which
+//! segment it discharges into ([`FluidNetwork::discharge_from_tank`]). Pipe
+//! *volumes* do survive a recompute, carried across by tile; a pipe that is
+//! removed spills what it held, which is the honest reading of picking a
+//! pipe up.
 //!
 //! **Where the fluid comes from (the "Visual overhaul round 2" epic's ticket
 //! 1).** Milestone 6 shipped the smallest thing that wasn't a lie about
@@ -54,17 +77,17 @@
 //! different *kind* of thing (a placed building with a footprint, like the
 //! hopper, rather than a tile of pipe), and keeping it out of `segments`
 //! keeps the pipe run's snapshot geometry exactly what it always was. What
-//! it *does* share with a segment is the flow rule: `tick` equalizes
-//! tank <-> `segments[0]` with the identical pressure-difference formula it
-//! then applies to every adjacent pipe pair, so there is one flow mechanism
-//! in this file, not two.
+//! it *does* share with a segment is the flow rule:
+//! [`FluidNetwork::discharge_from_tank`] and [`FluidNetwork::tick`] both run
+//! the identical pressure-difference formula ([`equalize`]), so there is one
+//! flow mechanism in this file, not two.
 //!
 //! All volume state is `Fx` fixed-point (ARCHITECTURE.md §3.9) — no `f32`/
 //! `f64` appears anywhere in this file. Floats only appear one layer out,
 //! in `world.rs`'s presentation snapshots, the same one-way conversion
 //! `BeltSnapshot` already makes.
 
-use super::types::{Fx, FluidId, TileCoord};
+use super::types::{Direction, Fx, FluidId, TileCoord};
 
 /// Fraction of the pressure difference that moves between two adjacent
 /// segments per tick. `0.5` equalizes a pair in a single tick when their
@@ -84,30 +107,35 @@ pub struct PipeSegment {
     pub volume: Fx,
     /// Maximum `volume` this segment can hold.
     pub capacity: Fx,
-    /// **The run's supply end: the segment the [`FluidTank`] discharges
-    /// into.** The name is unchanged from milestone 6 (presentation keys a
-    /// different silhouette off it, and renaming it would break that for no
-    /// gain), but its *meaning* changed with the "Visual overhaul round 2"
-    /// epic's ticket 1: it used to mark an off-map tap that refilled itself
-    /// to `capacity` every tick and could never run out. It no longer
-    /// refills, and it drains exactly like any other pipe tile — the flag
-    /// now says only "the tank is on the other side of this tile," which is
-    /// what a renderer actually needs it for. Every segment, this one
-    /// included, starts empty; the run filling up is something the player
-    /// causes by filling the tank.
+    /// **A supply end: a tile some [`FluidTank`] discharges into.** The name
+    /// is unchanged from milestone 6 (presentation keys a different
+    /// silhouette off it, and renaming it would break that for no gain), but
+    /// its meaning has narrowed twice. The "Visual overhaul round 2" epic's
+    /// ticket 1 stopped it meaning "an off-map tap that refills itself" and
+    /// made it mean "the tank is on the other side of this tile"; the "Real
+    /// Placement" epic made it *derived* — the topology pass sets it on
+    /// whichever tile a placed tank happens to face, so it moves when the
+    /// player moves the tank, and a run with no tank has none at all.
     pub is_source: bool,
+    /// Which way this pipe tile was placed. Presentation only: flow is
+    /// undirected (see the module doc), so nothing in this file reads it —
+    /// it is carried here so a snapshot can report the rotation the player
+    /// chose without a second lookup.
+    pub direction: Direction,
 }
 
 impl PipeSegment {
-    pub fn new(tile: TileCoord, capacity: Fx, is_source: bool) -> Self {
+    /// A new, **empty** segment facing `direction` — the pipe filling up is
+    /// observable behaviour driven by a tank, not an initial-state fiction.
+    /// `is_source` is not an argument because it is not a property of the
+    /// pipe: the topology pass sets it from whether a tank faces this tile.
+    pub fn new(tile: TileCoord, direction: Direction, capacity: Fx) -> Self {
         Self {
             tile,
-            // Every segment starts empty, the supply end included: the pipe
-            // run filling up is observable behavior driven by the tank, not
-            // an initial-state fiction.
             volume: Fx::ZERO,
             capacity,
-            is_source,
+            is_source: false,
+            direction,
         }
     }
 
@@ -290,88 +318,88 @@ impl FluidTank {
 }
 
 /// A connected group of pipe segments carrying one fluid type
-/// (ARCHITECTURE.md §3.2's `FluidNetwork`). Adjacency is "consecutive
-/// indices in `segments`" — see the module doc for why a fixed topology
-/// needs no graph/union-find machinery at this milestone.
+/// (ARCHITECTURE.md §3.2's `FluidNetwork`).
+///
+/// **Derived, never authored.** Since the "Real Placement" epic a network is
+/// rebuilt by `world.rs` from whatever pipe tiles are currently placed, every
+/// time the world's topology changes — so nothing outside this file should
+/// hold on to one across a `Place`/`Remove`/`Rotate`. What survives a rebuild
+/// is the per-tile *volume* (carried across by tile) and the tanks (which are
+/// placed entities of their own, not part of a network).
 #[derive(Debug, Clone)]
 pub struct FluidNetwork {
-    pub fluid: FluidId,
+    /// What this network carries, or `None` when nothing taps it.
+    ///
+    /// Decided by content rather than by the player: it is the fluid named
+    /// by the recipe of a fluid-consuming machine adjacent to one of these
+    /// segments (`world.rs` picks it when it derives the network). A
+    /// `None` network still holds volume — a player can fill a tank into a
+    /// pipe run that feeds nothing — it simply cannot supply anybody, since
+    /// [`FluidNetwork::can_supply_at`] compares against a named fluid and
+    /// an unnamed network matches nothing.
+    pub fluid: Option<FluidId>,
     segments: Vec<PipeSegment>,
-    /// Which segment a machine taps. A machine draws from *this segment
-    /// only*, not from the network total — which is what makes the
-    /// equalization pass load-bearing rather than cosmetic: drain the
-    /// inlet and the machine stalls until pressure carries more fluid down
-    /// the run from the tank.
-    inlet_index: usize,
-    /// The network's only supply (ticket 1). Owned here, rather than beside
-    /// the network in `world.rs`, because `tick` has to equalize it against
-    /// `segments[0]` — the tank and the run are one hydraulic system, and
-    /// splitting them would mean either a second flow mechanism or a
-    /// borrow-checker fight for no benefit. Its *placement* (tile, footprint,
-    /// kind) lives in `world.rs` alongside the hopper's, since that is world
-    /// layout rather than fluid dynamics.
-    tank: FluidTank,
+    /// Adjacent index pairs, `(a, b)` with `a < b`, in a deterministic
+    /// order — the graph edges of this connected component. Computed once
+    /// per topology change (ARCHITECTURE.md §3.8), never per tick.
+    links: Vec<(usize, usize)>,
 }
 
 impl FluidNetwork {
-    /// Panics if `segments` is empty or `inlet_index` is out of range —
+    /// Panics if `segments` is empty or a link indexes out of range — the
     /// same "clear panic at construction time, not a silently-stuck
-    /// simulation" stance `world::validate_chain` takes.
-    pub fn new(
-        fluid: FluidId,
-        segments: Vec<PipeSegment>,
-        inlet_index: usize,
-        tank: FluidTank,
-    ) -> Self {
+    /// simulation" stance the rest of this crate takes. Both are internal
+    /// invariants of the topology pass in `world.rs`, not player input.
+    pub fn new(fluid: Option<FluidId>, segments: Vec<PipeSegment>, links: Vec<(usize, usize)>) -> Self {
         assert!(
             !segments.is_empty(),
             "a FluidNetwork must have at least one pipe segment"
         );
-        assert!(
-            inlet_index < segments.len(),
-            "FluidNetwork inlet_index {inlet_index} is out of range for {} segment(s)",
-            segments.len()
-        );
+        for &(a, b) in &links {
+            assert!(
+                a < segments.len() && b < segments.len(),
+                "FluidNetwork link ({a}, {b}) is out of range for {} segment(s)",
+                segments.len()
+            );
+        }
         Self {
             fluid,
             segments,
-            inlet_index,
-            tank,
+            links,
         }
-    }
-
-    pub fn tank(&self) -> &FluidTank {
-        &self.tank
-    }
-
-    /// Loads the tank — see [`FluidTank::fill`] for the clamping contract.
-    /// Routed through the network rather than exposing the tank mutably so
-    /// there is one way in, matching how `World` only ever fills the hopper
-    /// through `Hopper::fill`.
-    pub fn fill_tank(&mut self, amount: u32) -> Fx {
-        self.tank.fill(amount)
     }
 
     pub fn segments(&self) -> &[PipeSegment] {
         &self.segments
     }
 
-    pub fn inlet_index(&self) -> usize {
-        self.inlet_index
+    pub fn links(&self) -> &[(usize, usize)] {
+        &self.links
     }
 
-    pub fn inlet(&self) -> &PipeSegment {
-        &self.segments[self.inlet_index]
+    /// Flags the segment at `index` as a supply end — a tile some tank
+    /// discharges into. Called by the topology pass in `world.rs` once per
+    /// rebuild; see [`PipeSegment::is_source`] for what a renderer does
+    /// with it.
+    pub fn mark_source(&mut self, index: usize) {
+        if let Some(segment) = self.segments.get_mut(index) {
+            segment.is_source = true;
+        }
     }
 
-    /// Total volume held across the whole **pipe run** — §3.4's "each
+    /// Which segment sits on `tile`, if any — how `world.rs` turns a tile
+    /// (a tank's discharge target, a machine's tap) into an index into this
+    /// network.
+    pub fn index_of_tile(&self, tile: TileCoord) -> Option<usize> {
+        self.segments.iter().position(|s| s.tile == tile)
+    }
+
+    /// Total volume held across this network's pipes — §3.4's "each
     /// `FluidNetwork` has a total volume and a fluid type."
     ///
-    /// Deliberately excludes the tank: the tank is a building with its own
-    /// capacity and its own snapshot, not a length of pipe, and folding it
-    /// in here would silently change what every existing consumer of
-    /// `FluidSnapshot::total_volume`/`pressure` was reading. Ask the tank
-    /// for the tank's contents ([`FluidNetwork::tank`]).
+    /// Deliberately excludes any tank feeding it: a tank is a building with
+    /// its own capacity and its own snapshot, not a length of pipe. Ask the
+    /// tank for the tank's contents.
     pub fn total_volume(&self) -> Fx {
         self.segments.iter().fold(Fx::ZERO, |acc, s| acc + s.volume)
     }
@@ -382,85 +410,93 @@ impl FluidNetwork {
             .fold(Fx::ZERO, |acc, s| acc + s.capacity)
     }
 
-    /// Whether the inlet segment can currently supply `amount` of `fluid`.
-    /// Wrong fluid type is a hard "no," never an implicit conversion.
-    pub fn can_supply(&self, fluid: &str, amount: Fx) -> bool {
-        self.fluid == fluid && self.inlet().volume >= amount
+    /// Whether the segment at `index` can currently supply `amount` of
+    /// `fluid`. Wrong fluid type — including an untapped network's `None` —
+    /// is a hard "no", never an implicit conversion.
+    ///
+    /// Indexed rather than network-wide because a machine draws from the
+    /// **one segment it is adjacent to**, which is what makes the
+    /// equalization pass load-bearing rather than cosmetic: drain that tile
+    /// and the machine stalls until pressure carries more fluid to it.
+    pub fn can_supply_at(&self, index: usize, fluid: &str, amount: Fx) -> bool {
+        self.fluid.as_deref() == Some(fluid)
+            && self
+                .segments
+                .get(index)
+                .is_some_and(|segment| segment.volume >= amount)
     }
 
-    /// Removes `amount` of `fluid` from the inlet segment, or returns
+    /// Removes `amount` of `fluid` from the segment at `index`, or returns
     /// `false` and changes nothing. All-or-nothing on purpose: a machine
-    /// must not start a craft on a partial fluid charge, exactly as it
-    /// must not start on partial solid input.
-    pub fn draw(&mut self, fluid: &str, amount: Fx) -> bool {
-        if !self.can_supply(fluid, amount) {
+    /// must not start a craft on a partial fluid charge, exactly as it must
+    /// not start on partial solid input.
+    pub fn draw_at(&mut self, index: usize, fluid: &str, amount: Fx) -> bool {
+        if !self.can_supply_at(index, fluid, amount) {
             return false;
         }
-        self.segments[self.inlet_index].volume -= amount;
+        self.segments[index].volume -= amount;
         true
     }
 
-    /// Advances the network one tick: equalize the tank against the run's
-    /// supply segment, then equalize pressure across each adjacent pipe
-    /// pair. Returns whether any volume actually moved (used the same way
-    /// `Machine::tick`'s return value is — "did anything a viewer would
-    /// notice change").
+    /// Equalizes `tank` against the segment at `into` — the tank half of the
+    /// per-tick pass, run by `world.rs` immediately before [`Self::tick`]
+    /// because the tank is a placed entity this network does not own.
     ///
-    /// **The tank is just the first participant in the same pass.** Ticket 1
-    /// deleted the old per-tick source refill; there is now exactly one flow
-    /// rule in this file ([`equalize`]), applied first to
-    /// `tank <-> segments[0]` and then to every `segments[i] <->
-    /// segments[i + 1]`. That is what makes "the machine's consumption
-    /// drains the tank" fall out of the model instead of needing its own
-    /// bookkeeping: a draw at the inlet lowers that segment's pressure,
-    /// which pulls from its neighbour, which pulls from the tank.
-    ///
-    /// The tank enters that rule with its
+    /// The tank enters the shared flow rule with its
     /// [`discharge_pressure`](FluidTank::discharge_pressure) rather than its
     /// fill fraction — it is a raised vessel, see that method for why. The
-    /// rule itself is symmetric and unchanged; the asymmetry is entirely in
-    /// what pressure each side presents.
+    /// rule itself ([`equalize`]) is symmetric and unchanged; the asymmetry
+    /// is entirely in what pressure each side presents.
+    pub fn discharge_from_tank(&mut self, tank: &mut FluidTank, into: usize) -> bool {
+        let Some(head) = self.segments.get_mut(into) else {
+            return false;
+        };
+        let rate = flow_rate();
+        let tank_pressure = tank.discharge_pressure();
+        let tank_capacity = tank.capacity;
+        let head_pressure = head.pressure();
+        equalize(
+            Side {
+                volume: &mut tank.volume,
+                pressure: tank_pressure,
+                capacity: tank_capacity,
+            },
+            Side {
+                volume: &mut head.volume,
+                pressure: head_pressure,
+                capacity: head.capacity,
+            },
+            rate,
+        )
+    }
+
+    /// Advances the network one tick: equalize pressure across every
+    /// adjacent pipe pair. Returns whether any volume actually moved (used
+    /// the same way `Machine::tick`'s return value is — "did anything a
+    /// viewer would notice change").
     ///
-    /// The pass is sequential (each pair sees the results of the pair before
-    /// it), which makes flow travel a full run in one tick in the pass
-    /// direction. That is order-dependent by construction, and the order is
-    /// fixed (tank first, then `0..len-1`, always) — so it is deterministic,
-    /// which is the property ARCHITECTURE.md §3.9 actually requires. Volume
-    /// is conserved exactly: every transfer is clamped to what the donor has
-    /// and what the receiver has room for and applied as a paired
-    /// subtract/add, so nothing is created or destroyed here. Since ticket 1
-    /// the *only* source in the whole system is [`FluidTank::fill`], and the
-    /// only sink is [`FluidNetwork::draw`].
+    /// The pass is sequential (each pair sees the result of the pair before
+    /// it) and its order is fixed — `links` is built in a deterministic
+    /// order by the topology pass and never reordered — so it is
+    /// deterministic, which is the property ARCHITECTURE.md §3.9 actually
+    /// requires. Volume is conserved exactly: every transfer is clamped to
+    /// what the donor has and what the receiver has room for and applied as
+    /// a paired subtract/add, so nothing is created or destroyed here. The
+    /// only source in the whole system is [`FluidTank::fill`] (reaching the
+    /// pipes through [`Self::discharge_from_tank`]), and the only sink is
+    /// [`Self::draw_at`].
     pub fn tick(&mut self) -> bool {
-        let rate = Fx::from_num(FLOW_RATE_NUMERATOR) / Fx::from_num(FLOW_RATE_DENOMINATOR);
+        let rate = flow_rate();
         let mut changed = false;
-
-        {
-            let tank_pressure = self.tank.discharge_pressure();
-            let tank_capacity = self.tank.capacity;
-            let head = &mut self.segments[0];
-            let head_pressure = head.pressure();
-            changed |= equalize(
-                Side {
-                    volume: &mut self.tank.volume,
-                    pressure: tank_pressure,
-                    capacity: tank_capacity,
-                },
-                Side {
-                    volume: &mut head.volume,
-                    pressure: head_pressure,
-                    capacity: head.capacity,
-                },
-                rate,
-            );
-        }
-
-        for i in 0..self.segments.len().saturating_sub(1) {
-            let (left, right) = self.segments.split_at_mut(i + 1);
-            let a = &mut left[i];
+        for k in 0..self.links.len() {
+            let (i, j) = self.links[k];
+            debug_assert!(i != j, "a pipe tile cannot be adjacent to itself");
+            let (lo, hi) = if i < j { (i, j) } else { (j, i) };
+            let (left, right) = self.segments.split_at_mut(hi);
+            let a = &mut left[lo];
             let b = &mut right[0];
             let (a_pressure, b_pressure) = (a.pressure(), b.pressure());
-            changed |= equalize(
+            let moved = equalize(
                 Side {
                     volume: &mut a.volume,
                     pressure: a_pressure,
@@ -473,10 +509,38 @@ impl FluidNetwork {
                 },
                 rate,
             );
+            changed |= moved;
         }
-
         changed
     }
+}
+
+/// The one machine-facing view of a network: which network, and which
+/// segment that machine is plumbed into.
+///
+/// It exists because a machine draws from the single pipe tile it touches
+/// rather than from a network total (see [`FluidNetwork::can_supply_at`]),
+/// and because [`super::machine::Machine::tick`] should not have to be told
+/// that fact twice. `world.rs` builds one per fluid-consuming machine when
+/// it derives the topology.
+pub struct FluidTap<'a> {
+    pub network: &'a mut FluidNetwork,
+    /// Index into `network.segments()` of the tile this machine touches.
+    pub inlet: usize,
+}
+
+impl FluidTap<'_> {
+    pub fn can_supply(&self, fluid: &str, amount: Fx) -> bool {
+        self.network.can_supply_at(self.inlet, fluid, amount)
+    }
+
+    pub fn draw(&mut self, fluid: &str, amount: Fx) -> bool {
+        self.network.draw_at(self.inlet, fluid, amount)
+    }
+}
+
+fn flow_rate() -> Fx {
+    Fx::from_num(FLOW_RATE_NUMERATOR) / Fx::from_num(FLOW_RATE_DENOMINATOR)
 }
 
 /// One side of a transfer: a mutable volume, the pressure that holder
@@ -539,6 +603,7 @@ fn equalize(a: Side, b: Side, rate: Fx) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sim::types::Direction;
 
     fn cap() -> Fx {
         Fx::from_num(10)
@@ -548,26 +613,84 @@ mod tests {
         Fx::from_num(FLUID_TANK_CAPACITY)
     }
 
-    /// A supply segment at index 0 followed by `pipes` plain segments, fed
-    /// by a tank; the last segment is the inlet — the same shape `World`
-    /// builds.
-    fn run(pipes: usize) -> FluidNetwork {
-        let mut segments = vec![PipeSegment::new((0, 0), cap(), true)];
-        for i in 0..pipes {
-            segments.push(PipeSegment::new((i as i32 + 1, 0), cap(), false));
-        }
-        let inlet = segments.len() - 1;
-        FluidNetwork::new(
-            "vinegar".to_string(),
-            segments,
-            inlet,
-            FluidTank::new(tank_cap()),
-        )
+    /// A tank plus the straight run it feeds, held together — the shape
+    /// `world.rs`'s topology pass derives from a tank placed at the head of
+    /// a line of pipe tiles.
+    ///
+    /// It exists because the "Real Placement" epic moved the tank *out* of
+    /// [`FluidNetwork`] (a network is rebuilt whenever the player places a
+    /// pipe, and a tank full of vinegar must not be rebuilt away), so a test
+    /// about "the tank and its run" now has to hold both halves itself. Its
+    /// methods keep the shape the old API had, which is why every assertion
+    /// below is unchanged.
+    struct Run {
+        net: FluidNetwork,
+        tank: FluidTank,
+        inlet: usize,
     }
 
-    /// A network with no tank contents and hand-set segment volumes, for
-    /// testing the pipe-to-pipe half of the pass in isolation.
-    fn sourceless(volumes: &[i32]) -> FluidNetwork {
+    impl Run {
+        /// One tick of the pair, in the order `World::tick` runs it: the
+        /// tank discharges into the run's head, then the run equalizes.
+        fn tick(&mut self) -> bool {
+            let discharged = self.net.discharge_from_tank(&mut self.tank, 0);
+            let flowed = self.net.tick();
+            discharged || flowed
+        }
+
+        fn fill_tank(&mut self, amount: u32) -> Fx {
+            self.tank.fill(amount)
+        }
+
+        fn tank(&self) -> &FluidTank {
+            &self.tank
+        }
+
+        /// The segment a machine would tap: the far end of the run.
+        fn inlet(&self) -> &PipeSegment {
+            &self.net.segments()[self.inlet]
+        }
+
+        fn draw(&mut self, fluid: &str, amount: Fx) -> bool {
+            self.net.draw_at(self.inlet, fluid, amount)
+        }
+
+        fn total_volume(&self) -> Fx {
+            self.net.total_volume()
+        }
+
+        fn total_capacity(&self) -> Fx {
+            self.net.total_capacity()
+        }
+
+        fn segments(&self) -> &[PipeSegment] {
+            self.net.segments()
+        }
+    }
+
+    /// A straight run of `pipes + 1` segments fed by a full-size tank at
+    /// index 0; the last segment is the inlet.
+    fn run(pipes: usize) -> Run {
+        let mut segments = vec![PipeSegment::new((0, 0), Direction::East, cap())];
+        for i in 0..pipes {
+            segments.push(PipeSegment::new((i as i32 + 1, 0), Direction::East, cap()));
+        }
+        let inlet = segments.len() - 1;
+        let links = (0..segments.len() - 1).map(|i| (i, i + 1)).collect();
+        let mut net = FluidNetwork::new(Some("vinegar".to_string()), segments, links);
+        net.mark_source(0);
+        Run {
+            net,
+            tank: FluidTank::new(tank_cap()),
+            inlet,
+        }
+    }
+
+    /// A run with hand-set segment volumes and a zero-capacity tank, for
+    /// testing the pipe-to-pipe half of the pass in isolation: a tank that
+    /// can neither give nor take drops out of the pass entirely, which is
+    /// exactly what "no source" means here.
+    fn sourceless(volumes: &[i32]) -> Run {
         let segments: Vec<PipeSegment> = volumes
             .iter()
             .enumerate()
@@ -576,17 +699,16 @@ mod tests {
                 volume: Fx::from_num(*v),
                 capacity: cap(),
                 is_source: false,
+                direction: Direction::East,
             })
             .collect();
         let inlet = segments.len() - 1;
-        // A zero-capacity tank can neither give nor take, so it drops out of
-        // the pass entirely — which is exactly what "no source" means here.
-        FluidNetwork::new(
-            "vinegar".to_string(),
-            segments,
+        let links = (0..segments.len() - 1).map(|i| (i, i + 1)).collect();
+        Run {
+            net: FluidNetwork::new(Some("vinegar".to_string()), segments, links),
+            tank: FluidTank::new(Fx::ZERO),
             inlet,
-            FluidTank::new(Fx::ZERO),
-        )
+        }
     }
 
     // -----------------------------------------------------------------
