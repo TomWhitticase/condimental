@@ -1,71 +1,99 @@
-//! Economy MVP (ARCHITECTURE.md §9 milestone 5; GAMEPLAY.md §1's core loop,
-//! §6's contracts-as-demand-system, §9's implied data/systems).
-//!
-//! Deliberately minimal, per the milestone description: a single hardcoded
-//! [`Contract`] (fixed sauce mix, fixed cadence, fixed payout) and a
-//! fixed-point `money` counter — **not** GAMEPLAY.md §6/§9's full
-//! `contracts.ron`/multi-contract/staff-pool design. That generalization
-//! (data-file-loaded contracts, several concurrent contracts, reputation/
-//! contract-loss on a miss) is explicitly future work; this module only
-//! needs to prove "build factory -> deliver -> get paid" end to end.
+//! Money and the in-flight state of every active contract (GAMEPLAY.md §1's
+//! core loop, §5's economy, §6's contracts-as-demand-system).
 //!
 //! **This resolves the open architectural-home question both
 //! ARCHITECTURE.md §11 and GAMEPLAY.md §9 flagged** ("money and in-flight
 //! contract state don't have a designed ECS shape yet"): the answer turned
-//! out to be a plain `Economy` struct (not a new ECS component) owned
+//! out to be a plain [`Economy`] struct (not a new ECS component) owned
 //! directly by `World` and advanced once per tick alongside every other
-//! system, the same way `World` owns its `stages` today. A full ECS
-//! component wasn't warranted because there is exactly one of each thing
-//! (one money counter, one active contract) at this milestone's scope —
-//! see `World::tick`'s call to `Economy::tick` and `World::economy_snapshot`
-//! for how this plugs into the rest of the sim.
+//! system, the same way `World` owns its `stages` today. Several concurrent
+//! contracts did not change that call: they are a `Vec` inside the one
+//! `Economy`, not a `Vec` of entities — nothing about a contract has a
+//! position, a footprint, or a component-wise update, which is what ECS
+//! machinery would buy.
+//!
+//! # What changed from the Economy MVP
+//!
+//! Milestone 5 shipped exactly ONE contract, hardcoded in Rust from four
+//! named constants, with its own delivery buffer. Its own scope note said
+//! the generalization was deferred; this module is that generalization.
+//! Contracts are now content ([`super::contracts`], loaded from
+//! `data/contracts.ron`) and several run at once, each with its own mix,
+//! its own cadence, and its own independently-tracked next-delivery tick.
+//! That is what makes GAMEPLAY.md §6's central design pressure exist at
+//! all: with one contract there is nothing to diversify *between*.
+//!
+//! # The delivery-allocation rule (decided here — GAMEPLAY.md left it open)
+//!
+//! **There is ONE shared pool of collected-but-undelivered stock. At its
+//! own cadence boundary a contract is satisfied only if the pool holds its
+//! full mix, and on payout it CONSUMES that mix from the pool. Goods are
+//! never credited to two contracts at once.**
+//!
+//! The alternative considered — give every contract its own buffer and
+//! credit one delivered unit to every contract that wants that item — is
+//! simpler to write and wrong for this game. It duplicates goods: adding a
+//! second contract for an item the factory already makes would double
+//! income at zero production cost, so the optimal play becomes "stack as
+//! many contracts as possible onto one product line," which is the exact
+//! strategy GAMEPLAY.md §6 rejects a spot market in order to prevent. One
+//! physical box of ketchup can be shipped to one customer; modelling that
+//! is what makes throughput scarce, and scarce throughput is what makes a
+//! second production line worth building.
+//!
+//! Two consequences fall out of that rule and are worth naming:
+//!
+//! 1. **Contracts compete, so ties need an order.** When several fall due
+//!    on the same tick and stock is short, they are filled in
+//!    `contracts.ron` file order — a deterministic tiebreak
+//!    (ARCHITECTURE.md §3.9), documented in that file too. A player-set
+//!    priority is the natural upgrade, and is the same open question
+//!    GAMEPLAY.md §11 already has for staff allocation; there is no
+//!    priority UI yet, so file order is the honest placeholder rather than
+//!    an invented answer.
+//! 2. **Undelivered stock is never destroyed.** A missed window leaves the
+//!    pool untouched, so what was delivered still counts toward the next
+//!    window (of that contract or any other). A miss costs that window's
+//!    payout and nothing more — contract loss and reputation penalties are
+//!    GAMEPLAY.md §11's explicitly open question, not decided here.
 
+use super::contracts::{Contract, ContractRegistry};
 use super::inventory::Inventory;
 use super::types::{Fx, ItemId};
 
-/// Which finished item the hardcoded contract wants — `data/recipes.ron`'s
-/// final-stage output at milestone 4's scope. Named so a future
-/// `contracts.ron` migration has one obvious place to read this milestone's
-/// values from, instead of a magic string buried in `Contract::hardcoded`.
-pub const CONTRACT_ITEM: &str = "boxed_ketchup";
-/// How many units of `CONTRACT_ITEM` must be delivered per cadence window.
-pub const CONTRACT_QUANTITY: u32 = 2;
-/// Delivery cadence, in sim ticks (ARCHITECTURE.md §3.9: tick-counted, never
-/// wall-clock) — GAMEPLAY.md §6's "recurring delivery cadence."
-pub const CONTRACT_CADENCE_TICKS: u64 = 1_000;
-/// Payout per successful delivery, in whole money units. Kept as a plain
-/// integer here (not a `Fx` constant) purely because `Fx::from_num` isn't a
-/// `const fn` in the `fixed` crate version this project pins — the actual
-/// fixed-point value is constructed once in `Contract::hardcoded`.
-pub const CONTRACT_PAYOUT_MONEY: u32 = 50;
-
-/// A standing agreement: a fixed item mix, delivered on a recurring cadence,
-/// for a fixed payout per successful delivery (GAMEPLAY.md §6). Milestone 5
-/// hardcodes exactly one of these directly in Rust, per the milestone's own
-/// scope note ("doesn't need the full contracts.ron ... design yet") — a
-/// later milestone generalizes this into data loaded from `contracts.ron`
-/// plus several concurrently-active contracts (GAMEPLAY.md §9).
+/// One contract plus the bookkeeping that is *this world's* rather than the
+/// content's: when it is next checked, and how it has done so far.
+///
+/// The split matters — [`Contract`] is loaded from `data/contracts.ron` and
+/// is immutable content; everything else here is live simulation state.
 #[derive(Debug, Clone)]
-pub struct Contract {
-    /// (item id, quantity) pairs required per delivery — GAMEPLAY.md §6's
-    /// "mix," collapsed to a single item at this milestone's scope since
-    /// `data/recipes.ron`'s chain only has one sellable final product so far.
-    pub mix: Vec<(ItemId, u32)>,
-    pub cadence_ticks: u64,
-    pub payout: Fx,
+pub struct ActiveContract {
+    pub contract: Contract,
+    /// Absolute tick at which this contract's mix is next checked. Each
+    /// contract advances its own, independently of every other — that is
+    /// what lets one fall due while another has 900 ticks still to run.
+    pub next_delivery_tick: u64,
+    /// How many cadence windows this contract has been paid for.
+    pub deliveries_made: u32,
+    /// How many cadence windows passed with the mix unsatisfied. Counted
+    /// but not yet acted on: GAMEPLAY.md §11 has not decided what a miss
+    /// costs beyond the payout, so this is the number that mechanic will
+    /// read when it lands, and presentation can already show it.
+    pub deliveries_missed: u32,
 }
 
-impl Contract {
-    fn hardcoded() -> Self {
+impl ActiveContract {
+    fn new(contract: Contract) -> Self {
         Self {
-            mix: vec![(CONTRACT_ITEM.to_string(), CONTRACT_QUANTITY)],
-            cadence_ticks: CONTRACT_CADENCE_TICKS,
-            payout: Fx::from_num(CONTRACT_PAYOUT_MONEY),
+            next_delivery_tick: contract.cadence_ticks,
+            contract,
+            deliveries_made: 0,
+            deliveries_missed: 0,
         }
     }
 }
 
-/// Money plus the single active contract's delivery state. Owned directly by
+/// Money plus every active contract's delivery state. Owned directly by
 /// `World` (see this module's doc for why no new ECS component was needed)
 /// and advanced once per tick via [`Economy::tick`].
 #[derive(Debug)]
@@ -73,21 +101,27 @@ pub struct Economy {
     /// Fixed-point money counter (ARCHITECTURE.md §3.9 — shared, persisted
     /// simulation state, so never a float).
     pub money: Fx,
-    pub contract: Contract,
-    /// Delivered product waiting to be checked against the contract at the
-    /// next cadence tick — GAMEPLAY.md §6's "accumulating output buffer."
-    /// Filled by `World::issue_command(PlayerCommand::CollectOutput)` (the
-    /// chain's existing exit point) rather than a separate delivery
-    /// building/entity, per this milestone's minimal scope — a real
-    /// delivery-dock tile is future polish, not required to prove the loop.
+    /// Every contract currently running, in `contracts.ron` file order,
+    /// which is also the priority order under scarcity (module doc).
+    pub contracts: Vec<ActiveContract>,
+    /// The ONE shared pool of delivered-but-not-yet-shipped product that
+    /// every contract draws from (module doc's allocation rule). Filled by
+    /// `World::issue_command(PlayerCommand::CollectOutput)` — the chain's
+    /// existing exit point — rather than a separate delivery
+    /// building/entity; a real delivery-dock tile is future polish, not
+    /// required for the loop to work.
     pub delivery_buffer: Inventory,
-    /// Absolute tick at which the contract's mix is next checked.
-    pub next_delivery_tick: u64,
 }
 
 /// A presentation-facing snapshot of economy state (ARCHITECTURE.md §4/§5) —
-/// what Godot needs to render a money counter and basic contract status,
-/// never the internal `Inventory` representation.
+/// what Godot needs to render a money counter and a contract clipboard per
+/// active contract, never the internal `Inventory` representation.
+///
+/// **Shape changed when contracts became data.** It used to carry one
+/// contract inline (`contract_mix` / `contract_progress` / `cadence_ticks` /
+/// `next_delivery_tick` as top-level fields). Those are gone; per-contract
+/// fields now live in [`ContractSnapshot`] inside the `contracts` array.
+/// `money` is unchanged and is still a single value.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct EconomySnapshot {
     /// `f64` is fine here — same rule as `BeltSnapshot`'s item positions:
@@ -95,27 +129,64 @@ pub struct EconomySnapshot {
     /// presentation-only value that never feeds back in (ARCHITECTURE.md
     /// §3.9).
     pub money: f64,
-    pub contract_mix: Vec<(ItemId, u32)>,
-    pub contract_progress: Vec<(ItemId, u32)>,
+    /// The whole shared delivery pool, `(item id, quantity)`, non-zero
+    /// entries only. This is the raw stock on hand — the number a UI should
+    /// show for "what's on the dock," as opposed to a contract's own
+    /// clamped `progress`.
+    pub delivery_stock: Vec<(ItemId, u32)>,
+    /// Every active contract, in priority order.
+    pub contracts: Vec<ContractSnapshot>,
+}
+
+/// One active contract, as presentation sees it.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ContractSnapshot {
+    /// Stable content id — the right key for a UI to track a card by.
+    pub id: String,
+    /// Player-facing title from `contracts.ron`.
+    pub name: String,
+    /// What this contract requires per delivery, `(item id, quantity)`.
+    pub mix: Vec<(ItemId, u32)>,
+    /// How much of each mix line the shared pool can currently cover,
+    /// **clamped to the required quantity** — so a checklist reads "2/2"
+    /// rather than "7/2" when stock exceeds the ask. Same item order as
+    /// `mix`, so the two zip positionally.
+    pub progress: Vec<(ItemId, u32)>,
     pub cadence_ticks: u64,
     pub next_delivery_tick: u64,
+    /// Payout per satisfied delivery. `f64` for the same presentation-only
+    /// reason as `money`.
+    pub payout: f64,
+    pub deliveries_made: u32,
+    pub deliveries_missed: u32,
 }
 
 impl Economy {
-    pub fn new() -> Self {
-        let contract = Contract::hardcoded();
+    /// Builds the live economy from loaded contract content. The registry's
+    /// order is preserved, because it is the scarcity tiebreak.
+    pub fn new(contracts: &ContractRegistry) -> Self {
         Self {
             money: Fx::from_num(0),
-            next_delivery_tick: contract.cadence_ticks,
+            contracts: contracts
+                .ordered()
+                .iter()
+                .cloned()
+                .map(ActiveContract::new)
+                .collect(),
             // Unbounded per-item capacity: this is an accumulating ledger of
-            // "delivered, awaiting the next contract check," not a
+            // "delivered, awaiting a contract check," not a
             // physical-space-limited buffer like a machine's input/output.
             delivery_buffer: Inventory::new(u32::MAX),
-            contract,
         }
     }
 
-    /// Adds finished product into the delivery buffer — called from
+    /// The shipped `data/contracts.ron`. Convenience for tests and for
+    /// `World`, which has no reason to hold a registry after construction.
+    pub fn bundled() -> Self {
+        Self::new(&ContractRegistry::bundled())
+    }
+
+    /// Adds finished product into the shared delivery pool — called from
     /// `World::issue_command`'s `CollectOutput` handler.
     pub fn deposit(&mut self, item: &str, qty: u32) {
         self.delivery_buffer.add(item, qty);
@@ -141,54 +212,82 @@ impl Economy {
         true
     }
 
-    /// Checks the contract at its cadence boundary. Once `current_tick`
-    /// reaches `next_delivery_tick`, tests whether the delivery buffer holds
-    /// the full required mix:
+    /// Advances every active contract's own cadence clock and settles any
+    /// that fall due on `current_tick`. For each such contract:
     ///
-    /// - **Satisfied:** consumes the mix from the buffer, pays out, advances
-    ///   `next_delivery_tick` by the cadence, returns `true`.
-    /// - **Not satisfied:** a missed delivery — no money changes hands, but
-    ///   the cadence still advances rather than re-checking every tick
-    ///   forever (contract loss/reputation penalties for a miss are
-    ///   GAMEPLAY.md §11's explicitly deferred open question, not this
-    ///   milestone's scope). Returns `false`.
+    /// - **Satisfied** (the shared pool holds its full mix): consumes the
+    ///   mix from the pool, pays out, advances that contract's
+    ///   `next_delivery_tick` by its own cadence.
+    /// - **Not satisfied:** a missed window — no money changes hands and
+    ///   nothing is consumed, but the cadence still advances rather than
+    ///   re-checking every tick forever.
     ///
-    /// Returns `false` without touching `next_delivery_tick` if the cadence
-    /// boundary hasn't arrived yet.
-    pub fn tick(&mut self, current_tick: u64) -> bool {
-        if current_tick < self.next_delivery_tick {
-            return false;
-        }
-        self.next_delivery_tick += self.contract.cadence_ticks;
+    /// Contracts are settled in priority order (module doc), so when two
+    /// fall due together and stock covers only one, the earlier-listed one
+    /// takes it. Returns the indices of the contracts that were paid, in
+    /// that same order — empty when nothing fell due or nothing was
+    /// satisfiable.
+    pub fn tick(&mut self, current_tick: u64) -> Vec<usize> {
+        let mut paid = Vec::new();
+        for i in 0..self.contracts.len() {
+            if current_tick < self.contracts[i].next_delivery_tick {
+                continue;
+            }
+            self.contracts[i].next_delivery_tick += self.contracts[i].contract.cadence_ticks;
 
-        let satisfied = self
-            .contract
-            .mix
-            .iter()
-            .all(|(item, qty)| self.delivery_buffer.has_at_least(item, *qty));
-        if !satisfied {
-            return false;
-        }
+            let satisfied = self.contracts[i]
+                .contract
+                .mix
+                .iter()
+                .all(|(item, qty)| self.delivery_buffer.has_at_least(item, *qty));
+            if !satisfied {
+                self.contracts[i].deliveries_missed += 1;
+                continue;
+            }
 
-        for (item, qty) in &self.contract.mix {
-            self.delivery_buffer.remove(item, *qty);
+            for (item, qty) in &self.contracts[i].contract.mix {
+                self.delivery_buffer.remove(item, *qty);
+            }
+            self.money += self.contracts[i].contract.payout;
+            self.contracts[i].deliveries_made += 1;
+            paid.push(i);
         }
-        self.money += self.contract.payout;
-        true
+        paid
+    }
+
+    /// The active contract with the given content id, if any — the lookup
+    /// tests and future command handling ("deliver to *this* contract")
+    /// want, without exposing the `Vec`'s indices as an API.
+    pub fn contract(&self, id: &str) -> Option<&ActiveContract> {
+        self.contracts.iter().find(|c| c.contract.id == id)
     }
 
     pub fn snapshot(&self) -> EconomySnapshot {
         EconomySnapshot {
             money: self.money.to_num::<f64>(),
-            contract_mix: self.contract.mix.clone(),
-            contract_progress: self
-                .contract
-                .mix
+            delivery_stock: self.delivery_buffer.iter().cloned().collect(),
+            contracts: self
+                .contracts
                 .iter()
-                .map(|(item, _)| (item.clone(), self.delivery_buffer.count(item)))
+                .map(|active| ContractSnapshot {
+                    id: active.contract.id.clone(),
+                    name: active.contract.name.clone(),
+                    mix: active.contract.mix.clone(),
+                    progress: active
+                        .contract
+                        .mix
+                        .iter()
+                        .map(|(item, required)| {
+                            (item.clone(), self.delivery_buffer.count(item).min(*required))
+                        })
+                        .collect(),
+                    cadence_ticks: active.contract.cadence_ticks,
+                    next_delivery_tick: active.next_delivery_tick,
+                    payout: active.contract.payout.to_num::<f64>(),
+                    deliveries_made: active.deliveries_made,
+                    deliveries_missed: active.deliveries_missed,
+                })
                 .collect(),
-            cadence_ticks: self.contract.cadence_ticks,
-            next_delivery_tick: self.next_delivery_tick,
         }
     }
 }
@@ -197,57 +296,213 @@ impl Economy {
 mod tests {
     use super::*;
 
+    /// Two contracts on deliberately different cadences, both wanting the
+    /// same item, plus a third wanting something the fixture never
+    /// delivers. Written inline rather than read from `contracts.ron` so
+    /// these unit tests keep testing `Economy`'s behaviour rather than the
+    /// current balance of shipped content.
+    const FIXTURE: &str = r#"(
+        schema_version: 1,
+        contracts: [
+            Contract(id: "fast", name: "Fast", mix: [("boxed_ketchup", 2)], cadence_ticks: 100, payout: 50),
+            Contract(id: "slow", name: "Slow", mix: [("boxed_ketchup", 3)], cadence_ticks: 250, payout: 90),
+            Contract(id: "impossible", name: "Impossible", mix: [("chilli_mayo", 1)], cadence_ticks: 100, payout: 500),
+        ],
+    )"#;
+
+    fn fixture() -> Economy {
+        Economy::new(&ContractRegistry::from_ron_str(FIXTURE).expect("fixture must load"))
+    }
+
+    #[test]
+    fn each_contract_starts_with_its_own_first_boundary_at_its_own_cadence() {
+        let econ = fixture();
+        assert_eq!(econ.contract("fast").unwrap().next_delivery_tick, 100);
+        assert_eq!(econ.contract("slow").unwrap().next_delivery_tick, 250);
+    }
+
     #[test]
     fn does_not_pay_out_before_the_cadence_boundary_arrives() {
-        let mut econ = Economy::new();
-        econ.deposit(CONTRACT_ITEM, CONTRACT_QUANTITY);
-        // One tick short of the boundary: mix is fully stocked, but the
-        // cadence hasn't elapsed yet, so nothing should happen.
-        let paid = econ.tick(econ.next_delivery_tick - 1);
-        assert!(!paid);
+        let mut econ = fixture();
+        econ.deposit("boxed_ketchup", 10);
+        assert!(econ.tick(99).is_empty());
         assert_eq!(econ.money, Fx::from_num(0));
     }
 
     #[test]
-    fn pays_out_exactly_the_contract_payout_when_mix_is_satisfied_at_the_boundary() {
-        let mut econ = Economy::new();
-        econ.deposit(CONTRACT_ITEM, CONTRACT_QUANTITY);
-        let boundary = econ.next_delivery_tick;
+    fn a_contract_pays_out_exactly_its_own_payout_and_consumes_exactly_its_own_mix() {
+        let mut econ = fixture();
+        econ.deposit("boxed_ketchup", 5);
 
-        let paid = econ.tick(boundary);
+        // t=100: only "fast" is due ("slow" runs to 250).
+        let paid = econ.tick(100);
 
-        assert!(paid);
-        assert_eq!(econ.money, Fx::from_num(CONTRACT_PAYOUT_MONEY));
-        assert_eq!(econ.delivery_buffer.count(CONTRACT_ITEM), 0, "the mix must be consumed on payout");
-        assert_eq!(econ.next_delivery_tick, boundary + CONTRACT_CADENCE_TICKS, "cadence must advance");
+        assert_eq!(paid, vec![0], "only the 100-tick contract should have settled");
+        assert_eq!(econ.money, Fx::from_num(50));
+        assert_eq!(
+            econ.delivery_buffer.count("boxed_ketchup"),
+            3,
+            "exactly the paid contract's mix must leave the shared pool"
+        );
+        assert_eq!(econ.contract("fast").unwrap().next_delivery_tick, 200);
+        assert_eq!(
+            econ.contract("slow").unwrap().next_delivery_tick,
+            250,
+            "an untouched contract's own cadence must not move"
+        );
+        assert_eq!(econ.contract("fast").unwrap().deliveries_made, 1);
     }
 
     #[test]
-    fn does_not_pay_out_when_the_delivered_mix_falls_short_at_the_boundary() {
-        let mut econ = Economy::new();
-        econ.deposit(CONTRACT_ITEM, CONTRACT_QUANTITY - 1); // short by one unit
-        let boundary = econ.next_delivery_tick;
+    fn one_contract_hitting_its_boundary_while_another_has_not_pays_only_the_due_one() {
+        let mut econ = fixture();
+        econ.deposit("boxed_ketchup", 100); // plenty for anyone
 
-        let paid = econ.tick(boundary);
+        for t in [100u64, 200] {
+            econ.tick(t);
+        }
+        assert_eq!(
+            econ.money,
+            Fx::from_num(100),
+            "two 'fast' windows and no 'slow' window should have paid"
+        );
+        assert_eq!(econ.contract("slow").unwrap().deliveries_made, 0);
 
-        assert!(!paid);
-        assert_eq!(econ.money, Fx::from_num(0));
-        // A miss doesn't destroy what was delivered — it just wasn't enough
-        // yet; it should still count toward the next cadence window.
-        assert_eq!(econ.delivery_buffer.count(CONTRACT_ITEM), CONTRACT_QUANTITY - 1);
-        assert_eq!(econ.next_delivery_tick, boundary + CONTRACT_CADENCE_TICKS, "cadence must still advance on a miss");
+        econ.tick(250);
+        assert_eq!(
+            econ.money,
+            Fx::from_num(190),
+            "'slow' now falls due and adds its own, different payout"
+        );
+        assert_eq!(econ.contract("slow").unwrap().deliveries_made, 1);
+    }
+
+    /// The documented allocation rule, stated as a test: one delivered unit
+    /// is spent, not credited twice. Both contracts are due at t=500 and
+    /// stock covers only the first — the second must go unpaid.
+    #[test]
+    fn delivered_stock_is_consumed_not_credited_to_every_matching_contract() {
+        let mut econ = fixture();
+        econ.deposit("boxed_ketchup", 2); // enough for "fast" alone
+
+        // Settled in one call at t=500, which is past both contracts' first
+        // boundaries — so both are due on the same tick, competing for the
+        // same two boxes.
+        econ.tick(500);
+
+        assert_eq!(
+            econ.money,
+            Fx::from_num(50),
+            "only 'fast' could be filled from two boxes — 'slow' must not be paid from the \
+             same stock"
+        );
+        assert_eq!(econ.delivery_buffer.count("boxed_ketchup"), 0);
+        assert_eq!(econ.contract("fast").unwrap().deliveries_made, 1);
+        assert_eq!(econ.contract("slow").unwrap().deliveries_made, 0);
+        assert!(econ.contract("slow").unwrap().deliveries_missed >= 1);
+    }
+
+    /// The other half of the same rule: with enough stock for both, both
+    /// are paid — so the test above is showing scarcity, not a bug where a
+    /// second contract can never settle on a shared boundary.
+    #[test]
+    fn two_contracts_due_together_both_settle_when_stock_covers_both() {
+        let mut econ = fixture();
+        econ.deposit("boxed_ketchup", 5); // 2 for "fast" + 3 for "slow"
+
+        econ.tick(500);
+
+        assert_eq!(
+            econ.money,
+            Fx::from_num(140),
+            "both contracts should have settled at the shared boundary"
+        );
+        assert_eq!(econ.delivery_buffer.count("boxed_ketchup"), 0);
+        assert_eq!(econ.contract("slow").unwrap().deliveries_made, 1);
+    }
+
+    #[test]
+    fn a_contract_that_is_never_satisfiable_never_pays_while_the_others_still_do() {
+        let mut econ = fixture();
+        econ.deposit("boxed_ketchup", 1000);
+
+        for t in 1..=1000u64 {
+            econ.tick(t);
+        }
+
+        let impossible = econ.contract("impossible").unwrap();
+        assert_eq!(impossible.deliveries_made, 0);
+        assert_eq!(
+            impossible.deliveries_missed, 10,
+            "a 100-tick contract must have missed every one of its ten windows"
+        );
+        assert!(
+            econ.contract("fast").unwrap().deliveries_made > 0,
+            "an unsatisfiable contract must not stall the ones that can be filled"
+        );
     }
 
     #[test]
     fn a_missed_delivery_can_still_pay_out_once_enough_accumulates_by_a_later_boundary() {
-        let mut econ = Economy::new();
-        econ.deposit(CONTRACT_ITEM, CONTRACT_QUANTITY - 1);
-        let first_boundary = econ.next_delivery_tick;
-        assert!(!econ.tick(first_boundary));
+        let mut econ = fixture();
+        econ.deposit("boxed_ketchup", 1); // short by one for "fast"
+        assert!(econ.tick(100).is_empty());
+        assert_eq!(econ.money, Fx::from_num(0));
+        assert_eq!(
+            econ.delivery_buffer.count("boxed_ketchup"),
+            1,
+            "a miss must not destroy what was delivered"
+        );
+        assert_eq!(econ.contract("fast").unwrap().deliveries_missed, 1);
 
-        econ.deposit(CONTRACT_ITEM, 1); // the missing unit arrives later
-        let second_boundary = econ.next_delivery_tick;
-        assert!(econ.tick(second_boundary));
-        assert_eq!(econ.money, Fx::from_num(CONTRACT_PAYOUT_MONEY));
+        econ.deposit("boxed_ketchup", 1); // the missing unit arrives later
+        assert_eq!(econ.tick(200), vec![0]);
+        assert_eq!(econ.money, Fx::from_num(50));
+    }
+
+    #[test]
+    fn snapshot_reports_one_entry_per_contract_with_progress_clamped_to_the_ask() {
+        let mut econ = fixture();
+        econ.deposit("boxed_ketchup", 7); // more than any single mix wants
+
+        let snap = econ.snapshot();
+        assert_eq!(snap.contracts.len(), 3);
+        assert_eq!(snap.delivery_stock, vec![("boxed_ketchup".to_string(), 7)]);
+
+        let fast = &snap.contracts[0];
+        assert_eq!(fast.id, "fast");
+        assert_eq!(fast.name, "Fast");
+        assert_eq!(fast.mix, vec![("boxed_ketchup".to_string(), 2)]);
+        assert_eq!(
+            fast.progress,
+            vec![("boxed_ketchup".to_string(), 2)],
+            "progress must be clamped to the required quantity, not the raw stock"
+        );
+        assert_eq!(fast.cadence_ticks, 100);
+        assert_eq!(fast.next_delivery_tick, 100);
+        assert_eq!(fast.payout, 50.0);
+
+        let impossible = &snap.contracts[2];
+        assert_eq!(
+            impossible.progress,
+            vec![("chilli_mayo".to_string(), 0)],
+            "an item with no stock reads zero, and still appears in progress"
+        );
+    }
+
+    #[test]
+    fn the_bundled_contracts_build_a_working_economy() {
+        let econ = Economy::bundled();
+        assert!(
+            econ.contracts.len() >= 2,
+            "shipped content must have several concurrent contracts"
+        );
+        assert_eq!(econ.money, Fx::from_num(0));
+        for active in &econ.contracts {
+            assert_eq!(
+                active.next_delivery_tick, active.contract.cadence_ticks,
+                "each contract's first window ends one cadence in"
+            );
+        }
     }
 }

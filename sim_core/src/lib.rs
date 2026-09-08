@@ -275,11 +275,53 @@ impl SimBridge {
         }
     }
 
-    /// A JSON-serialized `sim::EconomySnapshot` — money plus the hardcoded
-    /// contract's mix/progress/cadence (ARCHITECTURE.md §9 milestone 5,
-    /// GAMEPLAY.md §6). Unlike the chunk snapshots above there's no
-    /// dirty-tracking to check first: there's exactly one economy per world,
-    /// so Godot can just call this every frame it wants to redraw the HUD.
+    /// A JSON-serialized `sim::EconomySnapshot` — money, the shared delivery
+    /// pool, and an ARRAY of every active contract (GAMEPLAY.md §6/§9).
+    /// Unlike the chunk snapshots above there's no dirty-tracking to check
+    /// first: there's exactly one economy per world, so Godot can just call
+    /// this every frame it wants to redraw the HUD.
+    ///
+    /// **This shape is a BREAKING CHANGE from the Economy MVP's**, made when
+    /// contracts became `data/contracts.ron` content and several started
+    /// running at once. It was:
+    ///
+    /// ```json
+    /// { "money": 0.0, "contract_mix": [["boxed_ketchup", 2]],
+    ///   "contract_progress": [["boxed_ketchup", 0]],
+    ///   "cadence_ticks": 1000, "next_delivery_tick": 1000 }
+    /// ```
+    ///
+    /// and is now:
+    ///
+    /// ```json
+    /// {
+    ///   "money": 0.0,
+    ///   "delivery_stock": [["boxed_ketchup", 3]],
+    ///   "contracts": [
+    ///     {
+    ///       "id": "corner_shop",
+    ///       "name": "Corner Shop Standing Order",
+    ///       "mix": [["boxed_ketchup", 2]],
+    ///       "progress": [["boxed_ketchup", 2]],
+    ///       "cadence_ticks": 1000,
+    ///       "next_delivery_tick": 1000,
+    ///       "payout": 50.0,
+    ///       "deliveries_made": 0,
+    ///       "deliveries_missed": 0
+    ///     }
+    ///   ]
+    /// }
+    /// ```
+    ///
+    /// The four old top-level contract fields are gone: their per-contract
+    /// equivalents live inside each `contracts` entry (`contract_mix` ->
+    /// `mix`, `contract_progress` -> `progress`). `money` is unchanged and
+    /// is still a single value. `progress` is clamped to the mix's required
+    /// quantity — a checklist reads "2/2", never "7/2"; the unclamped pool
+    /// is `delivery_stock`. `contracts` is in `contracts.ron` file order,
+    /// which is also the priority order when two contracts fall due
+    /// together and stock covers only one (see `sim::economy`'s module doc
+    /// for the full allocation rule).
     #[func]
     fn economy_snapshot_json(&self) -> GString {
         let snapshot = self.world.economy_snapshot();

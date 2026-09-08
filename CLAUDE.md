@@ -80,7 +80,7 @@ sauce-factory/
                                # kind that isn't here or a footprint is degenerate.
                                # Per-kind staff/power draw and build cost belong
                                # here too when those land — not a second file.
-                               # items.ron/contracts.ron land here when they exist.
+                               # items.ron lands here when it exists.
     shop.ron                 # what the player can BUY and what it costs — one
                                # entry per buildable kind (every machines.ron kind
                                # PLUS the belt and pipe tiles, which are
@@ -90,6 +90,11 @@ sauce-factory/
                                # version, a duplicate kind, a price below 1, or a
                                # machine kind it doesn't price. Prices are
                                # placeholders (GAMEPLAY.md §10).
+    contracts.ron            # the contract board (GAMEPLAY.md §6/§9): id, name,
+                               # item-mix, cadence in ticks, payout. Loaded by
+                               # sim/contracts.rs, which rejects a bad schema
+                               # version or a degenerate contract. List order is
+                               # priority when two contracts compete for stock.
   sim_core/               # Rust crate: pure sim core + the gdext binding
     Cargo.toml              # crate-type = ["cdylib", "rlib"] — rlib is what lets
                               # sim_core/tests/ link against it without Godot
@@ -110,10 +115,14 @@ sauce-factory/
                                          # Shop, which pairs them. Money is NOT here —
                                          # it stays on Economy, since GAMEPLAY.md §1
                                          # allows exactly one currency
-      economy.rs                       # Economy: money (Fx) + one hardcoded Contract
-                                         # (fixed mix/cadence/payout), checked against
-                                         # an accumulating delivery_buffer Inventory
-                                         # (GAMEPLAY.md §6; milestone 5, Economy MVP)
+      contracts.rs                     # ContractRegistry — loads + validates
+                                         # data/contracts.ron; owns the Contract type
+      economy.rs                       # Economy: money (Fx) + a Vec<ActiveContract>,
+                                         # each with its OWN cadence clock, all drawing
+                                         # from ONE shared delivery_buffer Inventory —
+                                         # a delivered unit is consumed by the contract
+                                         # that takes it, never credited to two
+                                         # (GAMEPLAY.md §6)
       world.rs                         # hecs::World wrapper; builds a multi-stage
                                          # production chain (one belt+machine per
                                          # recipe, in recipes.ron order); owns Economy
@@ -196,8 +205,7 @@ top-level `data/`, sibling to `sim_core/`/`godot_project/` — not nested under
 either, since ARCHITECTURE.md §2's own diagram has data files feed both the
 simulation *and* the UI as one shared source, and UI_UX.md's `assets/voxels/`
 already established the pattern of shared, non-Rust, non-Godot content living
-at the repo root. `items.ron`/`machines.ron`/`contracts.ron` belong here too
-when they're added.
+at the repo root. `items.ron` belongs here too when it's added.
 
 Still not yet laid out (add when the relevant milestone needs it, per the
 docs — don't improvise a different shape when the time comes):
@@ -274,6 +282,51 @@ diff). Update docs/DEVLOG.md's "Current status" section in the same commit if
 it's gone stale.
 
 ## Decisions log
+
+- 2026-09-08: **Contracts are data, and several run at once** (GAMEPLAY.md
+  §6/§9; ticket 1 of 2, the sim half — `godot_project/` deliberately
+  untouched). Milestone 5's Economy MVP had exactly one `Contract`,
+  hardcoded in Rust from four named constants; the design pressure
+  GAMEPLAY.md §6 argues contracts exist *for* therefore did not exist, since
+  with one contract there is nothing to diversify between. Now: a new
+  `data/contracts.ron` (schema_version 1) with three seeded contracts, a new
+  `sim_core::sim::contracts` module loading/validating it the way
+  `recipe.rs`/`machines.rs` already do, and `Economy` holding a
+  `Vec<ActiveContract>` each with its own cadence clock. Five calls worth not
+  re-litigating. (1) **The delivery-allocation rule, which GAMEPLAY.md had
+  left open: ONE shared pool of collected stock, and a settling contract
+  CONSUMES its mix from it — goods are never credited to two contracts at
+  once.** The alternative (credit every contract that wants the item)
+  duplicates goods, so stacking contracts onto one product line would double
+  income for free — the exact "build only the best sauce" strategy §6 rejects
+  a spot market to prevent. Contracts competing for one line's throughput is
+  the point, not a side effect. (2) **`contracts.ron` file order is the
+  scarcity tiebreak**, stated in the file itself: when two contracts fall due
+  on the same tick and stock covers one, the earlier-listed wins. A
+  player-set priority is the natural upgrade and is the same open question
+  GAMEPLAY.md §11 already has for staff; file order is the honest placeholder
+  rather than an invented answer. (3) **No `penalty` field yet.** GAMEPLAY.md
+  §9 lists penalty terms as part of this file's eventual shape, but §11 has
+  not decided what a miss costs — a field nothing reads would answer that
+  question in data by accident. A miss costs that window's payout, increments
+  a `deliveries_missed` counter, and nothing else. (4) **The
+  contracts-vs-recipes cross-check does NOT panic at `World` construction**,
+  unlike `machines.rs`'s `validate_covers`. A missing machine kind has no
+  footprint, so the layout would be silently wrong; an unsatisfiable contract
+  leaves the world coherent and merely never pays — which is the legitimate
+  state a deliberately-out-of-reach contract will be in once §6's tier gating
+  lands. It is a shipped-files-against-each-other check run from
+  `contracts.rs`'s own test instead. (5) **`economy_snapshot_json` is a
+  breaking shape change**: the four top-level contract fields
+  (`contract_mix`/`contract_progress`/`cadence_ticks`/`next_delivery_tick`)
+  are replaced by a `contracts` array plus a `delivery_stock` pool; `money`
+  is unchanged. Per-contract `progress` is clamped to the ask (a checklist
+  reads 2/2, never 7/2); the unclamped pool is `delivery_stock`. Every
+  shipped contract targets `boxed_ketchup` and that is a content limit, not a
+  shape limit — the multi-item mix is implemented and tested, but the chain
+  makes one sellable product and `CollectOutput` only drains its final stage,
+  so any other target would be permanently unsatisfiable. Real mix diversity
+  needs a second sauce line.
 
 - 2026-09-06: Commit messages must follow Conventional Commits (enforced via
   git hook + CI) so history can generate release notes later. See CONTRIBUTING.md.

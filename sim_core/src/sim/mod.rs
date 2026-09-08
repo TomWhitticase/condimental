@@ -4,6 +4,7 @@
 //! (ARCHITECTURE.md §7).
 
 pub mod belt;
+pub mod contracts;
 pub mod economy;
 pub mod fluid;
 pub mod hopper;
@@ -15,7 +16,8 @@ pub mod shop;
 pub mod types;
 pub mod world;
 
-pub use economy::{Contract, Economy, EconomySnapshot};
+pub use contracts::{Contract, ContractRegistry};
+pub use economy::{ActiveContract, ContractSnapshot, Economy, EconomySnapshot};
 pub use fluid::{
     FLUID_TANK_CAPACITY, FLUID_TANK_FILL_AMOUNT, FLUID_TANK_KIND, FluidNetwork, FluidTank,
     PipeSegment,

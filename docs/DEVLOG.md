@@ -17,7 +17,7 @@ force-loaded into every session's context.
 *(This section reflects "now" — edit it in place as things change. The Log
 below is history and should only ever be appended to.)*
 
-- **Stage:** Pre-alpha, but the core MVP loop is real end to end and it looks like a game. Milestones 1 (Scaffold), 2 (Mobile export spike), 3 (Core loop proof), 4 (First full chain), and 5 (Economy MVP) are all done — a real multi-stage production chain (tomato -> tomato paste -> ketchup mix -> ketchup -> bottled ketchup -> boxed ketchup) that can deliver against a hardcoded contract to earn money, headlessly verified end to end, Android export proven working. On top of that, a visual-polish pass built UI_UX.md's voxel asset pipeline and turned the flat 2D placeholder scene into an isometric, real-time-lit 3D factory.
+- **Stage:** Pre-alpha, but the core MVP loop is real end to end and it looks like a game. Milestones 1 (Scaffold), 2 (Mobile export spike), 3 (Core loop proof), 4 (First full chain), and 5 (Economy MVP) are all done — a real multi-stage production chain (tomato -> tomato paste -> ketchup mix -> ketchup -> bottled ketchup -> boxed ketchup) that can deliver against several concurrent, data-driven contracts to earn money, headlessly verified end to end, Android export proven working. On top of that, a visual-polish pass built UI_UX.md's voxel asset pipeline and turned the flat 2D placeholder scene into an isometric, real-time-lit 3D factory.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
 - **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. **Milestone 6 (Fluids) is done**: its simulation half (pipe network, pressure equalization, a recipe requiring a liquid, the `SimBridge` fluid snapshot) and its presentation half (pipe/supply-tap/liquid voxel assets, a pipe run rendered from the simulation's own segment list, a liquid body whose height tracks live pressure, and pipe hover info in both view modes) have both landed, built as a 2-ticket orchestration Run (`run_2867a25ae373`, sequential: sim core then presentation). Milestone 7 (Timed processes) is next. A separate **"Machines improvement"** epic (not an ARCHITECTURE.md §9 milestone — an infrastructure/content pass requested directly) is in progress: ticket 1 landed machine footprints as data (`data/machines.ron`), generalizing the chain's layout math so a machine can occupy more than one tile, and ticket 2 spent that on real content — the chain's front end is now a crusher, a mixer and a genuinely 2x2 cooking vat. Ticket 3 replaced the debug "spawn a tomato onto the belt" command with a real **hopper** — a building west of the chain's head that buffers raw tomatoes and meters them onto the first belt one per tick, filled by the player (SPACE) rather than teleporting items. **Ticket 4 finished the epic**: the Godot presentation of all three — a bespoke voxel model per front-end machine kind, multi-tile rendering so the cooking vat actually covers its 2x2 footprint, the hopper drawn with a product level that tracks its live fill, and hover resolving any tile of a multi-tile machine as well as the hopper. **The "Machines improvement" epic is complete.** A further **"Shop & Inventory"** epic (also requested directly, and a deliberate priority shift toward a real build-your-own-factory game) has started: **ticket 1** landed the economy half — `data/shop.ron` prices every buildable kind, `sim::shop` loads/validates it, the player owns a per-kind count, and a `Purchase` command spends contract money on it, all exposed as `shop_snapshot_json`. **Ticket 2 finished the epic**: a real build menu (**B**), a grid of voxel-rendered icon slots built entirely from `shop_snapshot_json`, where clicking a slot — or pressing its number key — buys one, and what you can't afford is disabled, dimmed and marked. **The "Shop & Inventory" epic is complete.** Nothing consumes an owned count yet: the shipped chain is still built unconditionally, so buying is a purchase ledger, and a following epic (real placement/rotation/pickup) is what makes a purchase visible on the floor.
@@ -27,6 +27,7 @@ below is history and should only ever be appended to.)*
 - **Visual overhaul, first attempt (superseded by round 2 above):** closed a floor-level seam between machine/hopper footings and belt/pipe edges, added a connector fitting for the fluid-fed stage, gave the hopper's status lamp real feedback, and fixed some contract-clipboard typography — real fixes, but not the one the player actually flagged, which is what round 2 above addressed.
 - **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, SPACE/SHIFT up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
 - **Lighting:** the sky is the real background (`BG_SKY`), not a flat colour — see the "empty void" DEVLOG entry below for why that matters. `scripts/screenshot-scene.sh --first-person` reviews that mode's lighting specifically.
+- **Contracts (sim half done, presentation pending):** contracts are now `data/contracts.ron` content and three run concurrently, each with its own mix/cadence/payout, all drawing from one shared pool of delivered stock (a box pays one contract, never two). `economy_snapshot_json` now returns an array of contracts — a breaking change the Godot clipboard panel has not yet been updated for, which is the follow-up ticket.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -110,6 +111,41 @@ and moved no existing tile — the whole pre-existing test suite passes
 untouched. The one cross-file invariant worth knowing about: adding a machine
 kind to `data/machines.ron` without pricing it in `data/shop.ron` is now a
 test failure, not a thing the player can never buy.
+
+### 2026-09-08 — Contracts are content, and there are three of them
+
+Simulation and data only (Rust + `data/`); `godot_project/` deliberately
+untouched, and this is ticket 1 of 2 — the presentation half (contract cards
+for a board rather than a single clipboard) is its own ticket. Closes
+GAMEPLAY.md §9's long-standing "contracts need their own data file"
+(`contracts.ron`) and the multi-contract half of §6.
+
+Milestone 5's Economy MVP shipped exactly **one** contract, hardcoded in Rust
+from four named constants. That was honest for a milestone whose only job was
+"prove build factory -> get paid," but it meant the game's central design
+pressure — GAMEPLAY.md §6's whole argument for contracts over a spot market —
+did not exist: with one contract there is nothing to diversify *between*.
+Contracts are now content in `data/contracts.ron` (schema_version 1, loaded
+and validated by a new `sim/contracts.rs` alongside `recipe.rs`/`machines.rs`),
+three of them ship, and each runs its own mix, its own cadence and its own
+independently-tracked next-delivery tick.
+
+**The decision worth not re-litigating is how a delivered box is allocated,
+which GAMEPLAY.md left open.** There is one shared pool of collected stock;
+a contract that settles *consumes* its mix from it, and goods are never
+credited to two contracts at once. The tempting alternative — credit every
+contract that wants the item — duplicates goods, so stacking contracts onto
+one product line would double income for free, which is the exact strategy
+the contract system exists to prevent. Contracts therefore compete for one
+line's throughput, and file order is the (documented, deterministic)
+tiebreak until a player-set priority exists. The shipped three are balanced
+just inside the chain's real throughput, so a factory kept fed serves all
+three and one left to run dry starts missing windows.
+
+`economy_snapshot_json` changed shape as a result — the four top-level
+contract fields are gone, replaced by a `contracts` array plus a
+`delivery_stock` pool; `money` is unchanged. That breaks the existing Godot
+clipboard panel, which is exactly what ticket 2 is for.
 
 ### 2026-09-08 — Visual overhaul round 2, ticket 3: the belts and pipes now go somewhere
 

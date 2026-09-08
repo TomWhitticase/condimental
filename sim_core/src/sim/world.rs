@@ -110,6 +110,7 @@
 use hecs::Entity;
 
 use super::belt::BeltSegment;
+use super::contracts::ContractRegistry;
 use super::economy::{Economy, EconomySnapshot};
 use super::fluid::{
     FLUID_TANK_CAPACITY, FLUID_TANK_FILL_AMOUNT, FLUID_TANK_KIND, FluidNetwork, FluidTank,
@@ -751,8 +752,8 @@ pub struct World {
     /// (not reallocated) at the start of every `tick()` — see `tick`'s doc
     /// comment and ARCHITECTURE.md §4's "Delta granularity" note.
     dirty: Vec<ChunkId>,
-    /// Money + the hardcoded contract's delivery state (ARCHITECTURE.md §9
-    /// milestone 5, GAMEPLAY.md §6) — see `economy` module doc for why this
+    /// Money + every active contract's delivery state, loaded from
+    /// `data/contracts.ron` (GAMEPLAY.md §6/§9) — see `economy` module doc for why this
     /// lives here as a plain field rather than a new ECS component.
     economy: Economy,
     /// Milestone 6's single fixed pipe run (ARCHITECTURE.md §9 item 6,
@@ -804,8 +805,9 @@ impl World {
     /// Builds one stage per recipe in `recipes.ordered()`, in file order,
     /// laid out left to right — see the module doc for why this order (not
     /// any Rust-side description) is what defines the chain. Machine sizes
-    /// come from the shipped `data/machines.ron`; use
-    /// [`World::with_machines`] to supply a different set.
+    /// come from the shipped `data/machines.ron` and the contract board from
+    /// the shipped `data/contracts.ron`; use [`World::with_machines`] or
+    /// [`World::with_content`] to supply a different set of either.
     pub fn new(recipes: RecipeRegistry) -> Self {
         Self::with_machines(recipes, MachineRegistry::bundled())
     }
@@ -816,6 +818,20 @@ impl World {
     /// so the width math would otherwise be unobservable) without inventing
     /// fake content in the real data file.
     pub fn with_machines(recipes: RecipeRegistry, machines: MachineRegistry) -> Self {
+        Self::with_content(recipes, machines, ContractRegistry::bundled())
+    }
+
+    /// [`World::with_machines`], but with an explicit contract board instead
+    /// of the bundled `data/contracts.ron` — the seam a test uses to drive
+    /// cadences and mixes the shipped content doesn't have, without
+    /// inventing fake content in the real data file. Same rule as
+    /// `with_machines`: the shipped file stays the thing the game actually
+    /// runs on.
+    pub fn with_content(
+        recipes: RecipeRegistry,
+        machines: MachineRegistry,
+        contracts: ContractRegistry,
+    ) -> Self {
         let ordered = recipes.ordered();
         assert!(
             !ordered.is_empty(),
@@ -830,6 +846,19 @@ impl World {
         if let Err(e) = machines.validate_covers(&recipes) {
             panic!("machine content error: {e}");
         }
+        // Deliberately NOT validated here: whether every contract asks for
+        // something this chain can produce. A missing machine kind (above)
+        // has no footprint, so the layout arithmetic below would be silently
+        // wrong — that has to be a construction-time panic. An unsatisfiable
+        // contract is different in kind: the world is perfectly coherent, one
+        // contract simply never pays, which is exactly the state a
+        // deliberately-out-of-reach contract will legitimately be in once
+        // GAMEPLAY.md §6's tier gating lands. Panicking on it would also make
+        // it impossible to build a `World` from a synthetic recipe set
+        // against the shipped board, which several tests do. The shipped
+        // files are instead checked against each other by
+        // `ContractRegistry::validate_producible`, called from
+        // `contracts.rs`'s own bundled-content test.
 
         let mut ecs = hecs::World::new();
         let mut stages = Vec::with_capacity(ordered.len());
@@ -997,7 +1026,7 @@ impl World {
             stages,
             belt_speed: Fx::from_num(BELT_SPEED_TILES_PER_TICK),
             dirty: Vec::new(),
-            economy: Economy::new(),
+            economy: Economy::new(&contracts),
             fluid,
             fluid_stage,
             hopper,
@@ -1065,6 +1094,13 @@ impl World {
     /// float, since it's shared/persisted simulation state).
     pub fn money(&self) -> Fx {
         self.economy.money
+    }
+
+    /// The live economy — money, the shared delivery pool, and every active
+    /// contract's own cadence state. Read-only; contracts advance through
+    /// [`World::tick`], never by a caller poking at them.
+    pub fn economy(&self) -> &Economy {
+        &self.economy
     }
 
     /// Presentation-facing money + contract-status snapshot (ARCHITECTURE.md
@@ -1295,7 +1331,8 @@ impl World {
             }
         }
 
-        // Contract cadence check (GAMEPLAY.md §6) — not tied to any tile/
+        // Contract cadence checks, one per active contract, each on its
+        // own boundary (GAMEPLAY.md §6) — not tied to any tile/
         // chunk, so it doesn't participate in dirty-chunk tracking; Godot
         // reads economy state via its own always-fresh snapshot instead
         // (see `economy_snapshot`).
@@ -1637,10 +1674,12 @@ impl World {
                     machine.output.remove(item, *qty);
                 }
                 drop(machine);
-                // Collected product becomes delivered stock, checked against
-                // the active contract at the next cadence boundary
-                // (GAMEPLAY.md §6) — this is the "delivery mechanism"
-                // milestone 5 adds on top of milestone 4's plain collect.
+                // Collected product becomes delivered stock in the ONE
+                // shared pool every active contract draws from, checked
+                // against each contract at its own cadence boundary
+                // (GAMEPLAY.md §6; see `economy.rs`'s module doc for the
+                // allocation rule — stock is consumed by the contract that
+                // gets it, never credited to two at once).
                 for (item, qty) in &held {
                     self.economy.deposit(item, *qty);
                 }
