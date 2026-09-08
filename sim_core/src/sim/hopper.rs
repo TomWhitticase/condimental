@@ -113,6 +113,20 @@ impl Hopper {
         self.quantity == 0
     }
 
+    /// Switches which item this hopper holds, discarding whatever it
+    /// currently has — a hopper is single-item by design (this module's own
+    /// doc), so there is no "half tomato, half sugar" state to preserve.
+    /// This is the same honest reading `World::try_remove` already gives
+    /// picking a building up ("what it holds is lost"), applied to changing
+    /// a placed hopper's mind instead of removing it outright: the
+    /// alternative, refusing to retarget a non-empty hopper, would leave a
+    /// player with no way to switch a full tomato hopper to sugar short of
+    /// removing and re-placing it, for no real benefit over just clearing it.
+    pub fn retarget(&mut self, item: ItemId) {
+        self.item = item;
+        self.quantity = 0;
+    }
+
     /// Adds up to `amount` units, **clamped at capacity**, and returns how
     /// many were actually added (0 when already full).
     ///

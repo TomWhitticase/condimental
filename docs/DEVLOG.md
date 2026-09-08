@@ -50,6 +50,34 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-08 — A placed hopper can change its mind
+
+A real gap surfaced by actually playing the demo after the chain-rework epic
+landed: a hopper's contents are chosen at placement time (Q, while the ghost
+follows the cursor), but nothing let a player change an *already-placed*
+hopper's item afterward — a tomato hopper stayed a tomato hopper forever, with
+no discoverable path to a sugar one short of picking it up and re-placing
+while remembering to press Q during that one brief window.
+
+Fixed with a new `PlayerCommand::CycleHopperItem { tile }`, deliberately
+shaped like `Rotate` rather than `Place`'s explicit-item form: no target to
+name, just "advance to the next raw item, wrapping around" — the set of legal
+values is small, fixed, and the simulation's own (`World::raw_items`), so the
+player doesn't need to name one. [`Hopper::retarget`] clears whatever the
+hopper held on a switch, the same honest "what it holds is lost" rule
+`Remove` already has — there's no half-tomato-half-sugar state to preserve.
+On the Godot side, **Q now works exactly the way R already does**: it cycles
+the ghost's choice while placing, and — outside placement mode — cycles
+whatever hopper is under the cursor, in place, no pickup required. The hover
+tooltip gained a "Q: change contents" line, shown only when there's more than
+one raw item to change it to.
+
+`sim_core/tests/hopper.rs` gained five new tests (cycling switches the item
+and clears contents; a full lap through every raw item returns to the start;
+an empty or non-hopper tile refuses quietly; a single-raw-item world is a
+true no-op that keeps its contents; the wire form parses) — 205 tests green.
+Full `scripts/verify-core-loop.sh` green.
+
 ### 2026-09-08 — The chain rework, ticket 2 of 2: the piped middle, drawn
 
 The presentation half of Epic A. Ticket 1 changed what the factory *is* —

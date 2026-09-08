@@ -3181,6 +3181,34 @@ func _cycle_hopper_item() -> void:
 	_show_hotbar_flyout("Hopper — %s" % _item_display_name(_selected_hopper_item()))
 
 
+## `_cycle_hopper_item`'s twin for a hopper that is already on the floor,
+## the same way `_rotate_under_cursor` is `_rotate_ghost`'s: without this, a
+## hopper placed as tomato (or defaulted to it before a second raw item
+## existed) had NO way to become a sugar hopper short of picking it up and
+## placing a new one — and remembering to press Q *during* that brief
+## placement window is not something a player who already has a hopper down
+## has any reason to expect. `_issue_world_command` reruns `_refresh_buffers`
+## as part of its normal per-command redraw, so the hopper's own hover
+## tooltip already reads the new item on the next frame — no flyout needed,
+## mirroring how a rotate-in-place gives no separate confirmation either.
+func _cycle_hopper_under_cursor() -> void:
+	var tile := _ghost_target_tile()
+	if tile == HOVER_NO_TILE:
+		return
+	var placement := _placement_at_tile(tile)
+	if placement.is_empty() or String(placement.get("kind", "")) != HOPPER_KIND:
+		return
+	# The sim already no-ops a cycle with fewer than two raw items, but
+	# checking here too avoids a pointless round trip and world rebuild for
+	# a keypress that can only ever do nothing — `_refresh_hopper_items` is
+	# cheap (one JSON parse) and keeps `_hopper_items` current the same way
+	# `_hopper_hover_text` already relies on it being.
+	_refresh_hopper_items()
+	if _hopper_items.size() < 2:
+		return
+	_issue_world_command({"type": "cycle_hopper_item", "tile": [tile.x, tile.y]})
+
+
 ## "tomato_paste" -> "Tomato Paste". Item ids are content, exactly as kind ids
 ## are, so this is `_kind_display_name`'s twin rather than a hand-written
 ## label table a new ingredient would silently miss.
@@ -4727,13 +4755,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		_toggle_market()
 		return
 
-	# Q cycles what a hopper in hand will be loaded with. It does nothing
-	# with anything else in hand, which is deliberate: this is not a general
-	# "cycle variant" key looking for a second use, it is the hopper's one
-	# extra decision (`_hopper_items`) and it is advertised in the placement
-	# prompt exactly while that decision exists.
+	# Q cycles a hopper's contents: the ghost's while placing, and — outside
+	# placement mode, mirroring R's own dual-mode shape exactly — whatever
+	# hopper is under the cursor, in place. It does nothing with anything
+	# else in hand or under the cursor, which is deliberate: this is not a
+	# general "cycle variant" key looking for a second use, it is the
+	# hopper's one extra decision (`_hopper_items`) and it is advertised in
+	# the placement prompt exactly while that decision exists.
 	if event.keycode == KEY_Q:
-		_cycle_hopper_item()
+		if _build_kind == HOPPER_KIND:
+			_cycle_hopper_item()
+		else:
+			_cycle_hopper_under_cursor()
 		return
 
 	# ESC closes whatever is open — see `_close_all_overlays`.
@@ -5135,16 +5168,29 @@ func _pipe_hover_text(tile: Vector2i, direction: String) -> String:
 ## since placement — whether it is actually discharging onto anything. A
 ## hopper facing bare ground reports `belt_tile: null`, which is an ordinary
 ## state now and exactly the mistake a player wants told about.
+##
+## The "Q: change contents" line only appears when there is more than one
+## raw item to change it TO — same restraint the placement prompt's own
+## `contents_hint` already applies, for the same reason: a hint about a
+## choice that does not exist is noise, not help. `_hopper_items` is only
+## ever populated on entering placement mode (`_enter_build_mode`), so a
+## player who hovers an existing hopper without having placed one this
+## session would see a stale empty list — refreshed here instead, scoped to
+## exactly when it is needed rather than every frame regardless of what is
+## under the cursor.
 func _hopper_hover_text(origin_key: String, direction: String) -> String:
 	var snapshot: Dictionary = _hopper_states.get(origin_key, {})
 	if snapshot.is_empty():
 		return "hopper\nfacing %s" % direction
-	return "hopper  ·  facing %s\n%s\n%d / %d units\n%s" % [
+	_refresh_hopper_items()
+	var contents_hint := "\nQ: change contents" if _hopper_items.size() > 1 else ""
+	return "hopper  ·  facing %s\n%s\n%d / %d units\n%s%s" % [
 		direction,
 		String(snapshot.get("item", "raw ingredient")),
 		int(snapshot.get("quantity", 0)),
 		int(snapshot.get("capacity", 0)),
 		"unloading onto a belt" if snapshot.get("belt_tile") != null else "no belt in front of it",
+		contents_hint,
 	]
 
 

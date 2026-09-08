@@ -377,6 +377,21 @@ pub enum PlayerCommand {
     /// turning a belt is a pure geometry change and turning a machine
     /// mid-craft does not restart the craft.
     Rotate { tile: TileCoord },
+    /// Switches the hopper at `tile` to the next raw item in
+    /// [`World::raw_items`]'s order, wrapping around — the same "no explicit
+    /// target, just advance" shape [`Self::Rotate`] already has, and for the
+    /// same reason: the set of legal values is small, fixed, and owned by
+    /// the simulation, so the player does not need to name one.
+    ///
+    /// This is what fixes the gap [`Self::Place`]'s own doc names: an
+    /// already-placed hopper had no way to change its mind short of
+    /// [`Self::Remove`] and re-placing while choosing again, which is not
+    /// discoverable once the initial choice is made (or defaulted, in a
+    /// world with only one raw item at the time of placing). A silent no-op
+    /// on an empty tile, on a tile that is not a hopper, or in a world with
+    /// fewer than two raw items (there is nothing to cycle *to*). See
+    /// [`super::hopper::Hopper::retarget`] for what happens to its contents.
+    CycleHopperItem { tile: TileCoord },
 }
 
 /// JSON wire shape for [`PlayerCommand`], used only at the `gdext` boundary
@@ -442,6 +457,8 @@ enum PlayerCommandDto {
     Remove { tile: TileCoord },
     /// `{"type": "rotate", "tile": [4, 0]}`.
     Rotate { tile: TileCoord },
+    /// `{"type": "cycle_hopper_item", "tile": [-1, 0]}`.
+    CycleHopperItem { tile: TileCoord },
 }
 
 fn default_fill_amount() -> u32 {
@@ -488,6 +505,9 @@ impl From<PlayerCommandDto> for PlayerCommand {
             },
             PlayerCommandDto::Remove { tile } => PlayerCommand::Remove { tile },
             PlayerCommandDto::Rotate { tile } => PlayerCommand::Rotate { tile },
+            PlayerCommandDto::CycleHopperItem { tile } => {
+                PlayerCommand::CycleHopperItem { tile }
+            }
         }
     }
 }
@@ -2361,7 +2381,36 @@ impl World {
             PlayerCommand::Rotate { tile } => {
                 self.try_rotate(tile);
             }
+            PlayerCommand::CycleHopperItem { tile } => {
+                self.try_cycle_hopper_item(tile);
+            }
         }
+    }
+
+    /// [`PlayerCommand::CycleHopperItem`]. Silent no-op on an empty tile, a
+    /// tile that is not a hopper, or a world with fewer than two raw items —
+    /// mirrors `try_rotate`'s "resolve from any footprint tile, refuse
+    /// quietly otherwise" shape exactly.
+    fn try_cycle_hopper_item(&mut self, tile: TileCoord) -> bool {
+        if self.raw_items.len() < 2 {
+            return false;
+        }
+        let Some(&entity) = self.topology.grid.get(&tile) else {
+            return false;
+        };
+        let Ok(mut hopper) = self.ecs.get::<&mut Hopper>(entity) else {
+            return false;
+        };
+        let current_index = self
+            .raw_items
+            .iter()
+            .position(|item| item == hopper.item())
+            .unwrap_or(0);
+        let next = self.raw_items[(current_index + 1) % self.raw_items.len()].clone();
+        hopper.retarget(next);
+        drop(hopper);
+        self.mark_placement_dirty(entity);
+        true
     }
 
     /// Which of `candidates` a tile-addressed command applies to: the one
