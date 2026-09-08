@@ -181,6 +181,40 @@ func _run_checks() -> void:
 		_fail("no plain belt tiles left — the variants would be meaningless")
 		return
 
+	# --- the DOCK's belt, which belongs to no stage -----------------------
+	# The delivery-dock ticket laid one more belt past the last machine, into
+	# the dock. It is not in `chain_layout_json` (nothing in recipes.ron names
+	# the dock), so the loop above never sees it — and it is exactly the run
+	# whose two ends are the ticket's own junctions: its head sits against the
+	# packer, which therefore had to grow an outfeed it never had, and its
+	# tail sits against the dock, which is only picked up if
+	# `_machine_occupied_tiles` was taught about the dock.
+	var dock: Dictionary = JSON.parse_string(main.sim.dock_snapshot_json())
+	if dock.is_empty():
+		_fail("dock_snapshot_json returned nothing — every world has a dock")
+		return
+	var dock_start_pair: Array = dock["belt_start_tile"]
+	var dock_start := Vector2i(int(dock_start_pair[0]), int(dock_start_pair[1]))
+	var dock_len := int(dock["belt_length_tiles"])
+	if dock_len < 2:
+		_fail("the dock's belt is %d tile(s) long — too short to have two distinct ends" % dock_len)
+		return
+	var head_key := "%d,%d" % [dock_start.x, dock_start.y]
+	var tail := dock_start + Vector2i(dock_len - 1, 0)
+	var tail_key := "%d,%d" % [tail.x, tail.y]
+	if not main._belt_assets.has(head_key) or not main._belt_assets.has(tail_key):
+		_fail("the dock's belt was not drawn (head %s, tail %s)" % [head_key, tail_key])
+		return
+	if String(main._belt_assets[head_key]) != main.BELT_OUTLET_ASSET:
+		_fail("the dock belt's head sits against the last machine but drew '%s'" % str(main._belt_assets[head_key]))
+		return
+	if String(main._belt_assets[tail_key]) != main.BELT_INLET_ASSET:
+		_fail("the dock belt's tail sits against the dock but drew '%s'" % str(main._belt_assets[tail_key]))
+		return
+	if not occupied.has("%d,%d" % [dock_start.x + dock_len, dock_start.y]):
+		_fail("_machine_occupied_tiles doesn't cover the dock's own tile")
+		return
+
 	# --- a direction the variants are NOT authored for stays plain --------
 	# `world.rs`'s corner note: nothing in the simulation ever lays a belt
 	# along another axis, and no rotated model exists, so the renderer must

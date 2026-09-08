@@ -37,7 +37,12 @@
 #      reports, and a progress gauge whose bar tracks a 2400-tick process
 #      recomputed from the live tick rather than from a chunk snapshot —
 #      which is the only way a process that dirties nothing for a minute at
-#      a time can be shown moving at all).
+#      a time can be shown moving at all), and the delivery dock that now ends
+#      the line (its own bespoke model at the tile the simulation reports, the
+#      one belt in the world that belongs to no stage drawn from its snapshot,
+#      the goods on its deck following the economy's shared delivery pool, its
+#      own hover branch — and the removed **C** collect-product control being
+#      gone from both the legend and the key handler).
 #
 # Usage: scripts/verify-core-loop.sh
 
@@ -141,8 +146,9 @@ echo
 echo "PASS: milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"
 echo "      + icons + hover + milestone 6 fluid presentation + machine footprints/hopper"
 echo "      + belt/pipe junctions + the build menu + milestone 7's aging rack and its"
-echo "      progress gauge, all verified headlessly (sim_core tests"
+echo "      progress gauge + the delivery dock that ends the line, all verified"
+echo "      headlessly (sim_core tests"
 echo "      + gdext boundary + interaction + 3D scene structure + pan/zoom + contract panel"
 echo "      structure + icons + hover tooltips + pipe/fluid rendering + per-kind machine"
 echo "      models and the hopper's fill + shop slots/affordability/purchases + the"
-echo "      rack's live progress bar)."
+echo "      rack's live progress bar + the dock's model/belt/deck stock/hover)."

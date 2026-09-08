@@ -30,18 +30,20 @@
 # tile — deliberately not its origin, since "hovering anywhere on a multi-tile
 # machine identifies it" is the claim the "Machines improvement" milestone
 # added, and hovering the origin would not show it. `--hover-hopper` does the
-# same over the chain's hopper, and `--hover-tank` over the pipe run's fluid
-# tank (the "Visual overhaul round 2" epic's building).
+# same over the chain's hopper, `--hover-tank` over the pipe run's fluid
+# tank (the "Visual overhaul round 2" epic's building), and `--hover-dock`
+# over the delivery dock at the end of the line.
 #
-# All five hover flags share one implementation (`_hover_over_tile`) — they
+# All the hover flags share one implementation (`_hover_over_tile`) — they
 # differ only in which tile they ask the simulation for.
 #
 # `--contracts` runs the chain forward far enough to cross several contract
 # cadence boundaries WITH deliveries collected, so the contract clipboard is
 # photographed with its dockets in genuinely different states — one satisfied,
 # one part-filled, one that has been missed — rather than the three identical
-# 0/N checklists an idle or merely `--populate`d factory gives (`--populate`
-# never issues `collect_output`, so nothing ever reaches the delivery pool).
+# 0/N checklists an idle factory gives. (`--populate` alone now does reach the
+# delivery pool, since the delivery dock ships without being asked, but it
+# stops long before a cadence boundary.)
 # CONTRACTS_REVIEW_TICKS is tuned against the shipped `data/contracts.ron`
 # cadences for exactly that spread; see its own comment.
 #
@@ -89,12 +91,20 @@ const POPULATE_TICKS_PER_SPAWN := 10
 ## than for a fixed number of ticks: a tick count drifts with any change to
 ## the chain's throughput or the shipped cadences and quietly goes back to
 ## photographing three identical checklists. The state waited for is a dock
-## holding exactly CONTRACTS_REVIEW_DOCK_UNITS, with at least one delivery
+## holding at least CONTRACTS_REVIEW_DOCK_UNITS, with at least one delivery
 ## and at least one miss on the board — against the shipped contracts (asks
-## of 2, 3 and 1 from one shared pool) that reads as one docket satisfied,
-## one part-filled and one satisfied-but-already-missed, which is both the
-## checkbox mechanic and the shared-pool competition in a single frame.
-const CONTRACTS_REVIEW_DOCK_UNITS := 2
+## of 2, 3 and 1 from one shared pool) that reads as one docket satisfied and
+## the rest part-filled, which is both the checkbox mechanic and the
+## shared-pool competition in a single frame, plus goods actually standing on
+## the dock's deck.
+##
+## A MINIMUM rather than an exact count, and one rather than two: the aging
+## rack (ARCHITECTURE.md §9 milestone 7) holds a batch for 2400 ticks while
+## the three contracts check every 1000/1500/2500, so the pool is drained
+## about as fast as the line can fill it and an exact "exactly two waiting"
+## is a state this content essentially never sits in — the loop ran its full
+## limit and photographed an empty dock instead.
+const CONTRACTS_REVIEW_DOCK_UNITS := 1
 const CONTRACTS_REVIEW_TICK_LIMIT := 20000
 
 var _frames := 0
@@ -106,6 +116,7 @@ var _hover_pipe := false
 var _hover_vat := false
 var _hover_hopper := false
 var _hover_tank := false
+var _hover_dock := false
 var _shop := false
 var _contracts := false
 var _aging := false
@@ -134,6 +145,7 @@ func _initialize() -> void:
 	_hover_vat = args.has("--hover-vat")
 	_hover_hopper = args.has("--hover-hopper")
 	_hover_tank = args.has("--hover-tank")
+	_hover_dock = args.has("--hover-dock")
 	_shop = args.has("--shop")
 	_contracts = args.has("--contracts")
 	_aging = args.has("--aging")
@@ -248,6 +260,18 @@ func _hover_over_fluid_tank() -> void:
 	_hover_over_tile(Vector2i(int(tile_pair[0]), int(tile_pair[1])))
 
 
+## The delivery dock's own tooltip (the delivery-dock ticket) — worth its own
+## flag for the reason `--hover-tank` has one: the dock is the only building
+## whose tooltip reports a number that lives somewhere else entirely (the
+## economy's shared pool), so what it prints can only be reviewed by looking.
+func _hover_over_dock() -> void:
+	var json: String = _main.sim.dock_snapshot_json()
+	if json.is_empty():
+		return
+	var tile_pair: Array = JSON.parse_string(json)["tile"]
+	_hover_over_tile(Vector2i(int(tile_pair[0]), int(tile_pair[1])))
+
+
 func _run_chain_forward() -> void:
 	# Calls SimBridge directly rather than simulating a SPACE keypress
 	# through _unhandled_input: SPACE only spawns in ISOMETRIC mode (it's
@@ -269,8 +293,8 @@ func _run_chain_forward() -> void:
 
 ## Ticks the real chain until the hardcoded contract pays out at least once,
 ## so `--shop` photographs a menu with some slots affordable and some not.
-## `collect_output` every tick is a documented no-op on an empty machine, so
-## this needs no chunk inspection — same drive loop test_shop_menu.gd uses.
+## Nothing has to be collected: since the delivery-dock ticket the chain
+## ships into the pool by itself — same drive loop test_shop_menu.gd uses.
 const SHOP_EARN_TICK_LIMIT := 20000
 
 
@@ -279,22 +303,20 @@ func _earn_contract_money() -> void:
 		_main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
 		_main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
 		_main.sim.tick()
-		_main.sim.issue_command_json(JSON.stringify({"type": "collect_output"}))
 		if float(JSON.parse_string(_main.sim.shop_snapshot_json())["money"]) > 0.0:
 			break
 	_main._apply_dirty_chunks()
 
 
-## Drives the real chain, with deliveries collected, across several contract
-## cadence boundaries. Same command path as _run_chain_forward — the only
-## addition is `collect_output`, which is what actually puts product in the
-## shared delivery pool the contracts draw from.
+## Drives the real chain across several contract cadence boundaries. Exactly
+## the same command path as _run_chain_forward now — what puts product in the
+## shared delivery pool the contracts draw from is the delivery dock at the
+## end of the line, not a command issued from here.
 func _run_contract_cycles() -> void:
 	for i in range(CONTRACTS_REVIEW_TICK_LIMIT):
 		_main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
 		_main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
 		_main.sim.tick()
-		_main.sim.issue_command_json(JSON.stringify({"type": "collect_output"}))
 		if _contract_board_is_mixed():
 			break
 	_main._apply_dirty_chunks()
@@ -306,7 +328,7 @@ func _contract_board_is_mixed() -> bool:
 	var stock := 0
 	for pair in econ.get("delivery_stock", []):
 		stock += int(pair[1])
-	if stock != CONTRACTS_REVIEW_DOCK_UNITS:
+	if stock < CONTRACTS_REVIEW_DOCK_UNITS:
 		return false
 	var made := 0
 	var missed := 0
@@ -338,7 +360,6 @@ func _age_a_batch() -> void:
 		_main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
 		_main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
 		_main.sim.tick()
-		_main.sim.issue_command_json(JSON.stringify({"type": "collect_output"}))
 		_main._apply_dirty_chunks()
 		if _main._machine_progress(gauged) >= AGING_TARGET_FRACTION:
 			break
@@ -363,6 +384,11 @@ func _process(_delta: float) -> bool:
 		_enter_first_person()
 	if _frames == 2 and _populate:
 		_run_chain_forward()
+	# The closeup is applied BEFORE any hover flag: a hover warps the OS cursor
+	# to where a tile currently projects on screen, so re-aiming the camera
+	# afterwards would leave the cursor pointing at whatever moved under it.
+	if _frames == 2 and _closeup:
+		_enter_closeup()
 	if _frames == 2 and _hover:
 		_hover_over_first_machine()
 	if _frames == 2 and _hover_pipe:
@@ -373,6 +399,8 @@ func _process(_delta: float) -> bool:
 		_hover_over_hopper()
 	if _frames == 2 and _hover_tank:
 		_hover_over_fluid_tank()
+	if _frames == 2 and _hover_dock:
+		_hover_over_dock()
 	if _frames == 2 and _contracts:
 		_run_contract_cycles()
 	if _frames == 2 and _aging:
@@ -381,8 +409,6 @@ func _process(_delta: float) -> bool:
 		_hover_over_aging_rack()
 	if _frames == 2 and _shop:
 		_open_shop_menu()
-	if _frames == 2 and _closeup:
-		_enter_closeup()
 	if _frames < WARMUP_FRAMES:
 		return false
 

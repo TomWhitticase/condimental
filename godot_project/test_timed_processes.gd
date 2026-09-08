@@ -63,8 +63,9 @@ func _meshes(node: Node, out: Array) -> Array:
 	return out
 
 
-## Drives the real chain — both consumables loaded, `collect_output` every
-## tick — until the gauged stage's machine actually has a process running,
+## Drives the real chain — both consumables loaded, and the delivery dock
+## clearing the far end by itself — until the gauged stage's machine actually
+## has a process running,
 ## applying dirty chunks as the scene itself does. Returns the tick it
 ## started on, or -1 if the chain never got that far.
 func _run_until_gauged_stage_is_working(recipe: String, limit: int) -> int:
@@ -72,7 +73,6 @@ func _run_until_gauged_stage_is_working(recipe: String, limit: int) -> int:
 		main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
 		main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
 		main.sim.tick()
-		main.sim.issue_command_json(JSON.stringify({"type": "collect_output"}))
 		main._apply_dirty_chunks()
 		if main._machine_progress(recipe) >= 0.0:
 			return int(main.sim.current_tick())

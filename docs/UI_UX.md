@@ -274,6 +274,55 @@ were only discoverable by building it:
     separate round-topped object with a visible head and bung, and four of
     those read as four things resting.
 
+16. **The one building that is a place rather than a machine, and the
+    occlusion rule that decided its layout (the delivery-dock ticket).**
+    Every other kind on the line is equipment; the delivery dock is
+    architecture — a poured platform at trailer-bed height with a striped
+    edge, rubber bumpers, a despatch door under a canopy — because that is
+    what it *is* (GAMEPLAY.md §6's "somewhere product is sent to be sold"),
+    and because it is the only silhouette on the line that could not be
+    mistaken for another housing with a mechanism on top.
+
+    Point 11 established which faces this camera can see. What building the
+    dock added is the **corollary about depth**, which matters far more for a
+    building with an open floor than for a machine that is solid: a sight
+    line leaving any point travels `(+x, -y, +z)` in model space, so anything
+    at HIGH x and LOW y stands in front of everything behind it. The obvious
+    design — a truck bay carved into the +X face, dead-on to the camera —
+    was built first and reads beautifully on its own, and it walls off the
+    entire deck, because every deck voxel's sight line has to pass through
+    those last few columns on its way out. The tall structure therefore went
+    to the FAR (high-y) side, where its own -Y face is still square to the
+    camera and it occludes nothing, and the near half of the deck was left
+    clear for the goods that stand on it. **Rule of thumb for the next
+    building with something inside it: put the height at high y, put the
+    content at low y.**
+
+    Two smaller things came off the render and not off the generator. The
+    platform was `concrete_dark` for its whole mass on the first cut, which
+    is right for a floor slab's seam and wrong for a block this size — it
+    read as a black pit with a lit rail round it. And the canopy stood two
+    voxels clear of the wall on thin posts, which at scene scale is not read
+    as a gap, it is read as a white shelf floating in front of a blue wall;
+    it is integral with the wall's head now.
+
+17. **What stands on the dock is drawn from the pool, not from the dock —
+    and it is capped at two.** The dock's own buffer is a pass-through that
+    empties every tick (`sim_core::sim::dock`), so a fill gauge driven from
+    it would read zero forever: the same gauge-lies-about-the-mechanism
+    failure the fluid tank refused when it chose constant head over its own
+    fill fraction. The number that is real is the economy's shared
+    `delivery_stock`, which is what the contract clipboard already labels ON
+    THE DOCK, so the deck stands one case per unit of *that* — each drawn
+    with the item's own model, through the same `ITEM_MODELS` table the belt
+    uses, so what waits on the dock looks like what arrived on it.
+
+    The cap is two because the deck is one tile and a case is a third of it:
+    a rendered four-slot version buried the transfer housing, the despatch
+    door and the canopy under a wall of cardboard. This is a glance-readable
+    "goods are waiting", not a readout — the exact figure is on the clipboard
+    and in the dock's own hover, neither of which is capped.
+
 ## 3. Theme & setting
 
 **A grounded, semi-realistic 21st-century industrial food factory** — stainless steel tanks, rubber conveyor belts, PVC/steel piping, poured concrete floors, hazard-stripe signage, factory floor lighting, pallets and crates, loading docks. The tone is closer to "a real bottling/food-processing plant you could actually walk into," rendered in voxels, than a whimsical toy-factory aesthetic.

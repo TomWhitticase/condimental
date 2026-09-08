@@ -13,10 +13,10 @@
 # default isometric one.
 #
 # Pass one of --hover / --hover-pipe / --hover-vat / --hover-hopper /
-# --hover-tank / --hover-aging to park the cursor over the first machine, the fluid network's
-# machine-inlet pipe, the FAR CORNER of the multi-tile cooking vat, the
-# chain's hopper, or the pipe run's fluid tank, so that tooltip is in the
-# shot. (--hover-vat deliberately picks a non-origin tile: "any tile of a
+# --hover-tank / --hover-aging / --hover-dock to park the cursor over the first machine, the
+# fluid network's machine-inlet pipe, the FAR CORNER of the multi-tile cooking
+# vat, the chain's hopper, the pipe run's fluid tank, the aging rack, or the
+# delivery dock at the end of the line, so that tooltip is in the shot. (--hover-vat deliberately picks a non-origin tile: "any tile of a
 # multi-tile machine identifies it" is what the "Machines improvement"
 # milestone added, and hovering the origin would not show it.)
 #
@@ -46,7 +46,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --populate --closeup 8.4,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--populate] [--contracts] [--first-person] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-aging] [--aging] [--shop] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--populate] [--contracts] [--first-person] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-aging|--hover-dock] [--aging] [--shop] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

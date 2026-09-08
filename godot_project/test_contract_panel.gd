@@ -266,13 +266,15 @@ func _countdowns(main) -> Array:
 
 ## Runs the real chain until something lands in the shared delivery pool,
 ## exactly the way test_shop_menu.gd earns money: real commands, real ticks.
+## Only the two loading commands are issued — the delivery dock ships into
+## the pool by itself every tick (the delivery-dock ticket removed
+## `collect_output`).
 ## Returns the item id delivered, or "" if nothing arrived.
 func _run_until_delivery(main) -> String:
 	for i in range(20000):
 		main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
 		main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
 		main.sim.tick()
-		main.sim.issue_command_json(JSON.stringify({"type": "collect_output"}))
 		var stock: Array = JSON.parse_string(main.sim.economy_snapshot_json()).get("delivery_stock", [])
 		if not stock.is_empty():
 			return String(stock[0][0])

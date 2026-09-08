@@ -43,5 +43,27 @@ func _initialize() -> void:
 		_fail("pressing SPACE via _unhandled_input did not load the hopper (before=%d after=%d)" % [before, after])
 		return
 
-	print("INTERACTION_OK: simulated SPACE keypress reached SimBridge and loaded the hopper (%d -> %d)" % [before, after])
+	# C is GONE (the delivery-dock ticket). `PlayerCommand::CollectOutput` no
+	# longer exists sim-side, so the key was removed here rather than left to
+	# send a command `issue_command_json` would silently drop — a control that
+	# quietly does nothing is worse than no control. Both halves are checked:
+	# the legend no longer advertises it, and the key genuinely does nothing.
+	for legend in [main.ISO_HELP_TEXT, main.FP_HELP_TEXT]:
+		if legend.to_lower().contains("collect"):
+			_fail("the control legend still offers the removed collect-product control: %s" % legend)
+			return
+	var econ_before: String = main.sim.economy_snapshot_json()
+	var dock_before: String = main.sim.dock_snapshot_json()
+	var c_event := InputEventKey.new()
+	c_event.keycode = KEY_C
+	c_event.pressed = true
+	main._unhandled_input(c_event)
+	if main.sim.economy_snapshot_json() != econ_before:
+		_fail("pressing C changed the economy — the collect-product command was supposed to be gone")
+		return
+	if main.sim.dock_snapshot_json() != dock_before:
+		_fail("pressing C changed the dock — the collect-product command was supposed to be gone")
+		return
+
+	print("INTERACTION_OK: simulated SPACE keypress reached SimBridge and loaded the hopper (%d -> %d), and C is gone from both the legend and the key handler" % [before, after])
 	quit(0)

@@ -47,22 +47,48 @@ func _initialize() -> void:
 		_fail("filling the hopper must not put anything on a belt — that happens on tick")
 		return
 
-	# Run long enough for the single resulting unit to travel every belt and
-	# clear every machine's `time_ticks` in the chain.
+	# Run long enough for the single resulting unit to travel every belt, clear
+	# every machine's `time_ticks`, run down the DOCK's own belt and be shipped
+	# into the economy's shared delivery pool.
+	#
+	# That last hop is the delivery-dock ticket's whole point, and this loop is
+	# where it is proven through the real gdext boundary: no command is issued
+	# here at all. `PlayerCommand::CollectOutput` — the **C** keypress that used
+	# to lift finished cases out of the last machine's buffer — does not exist
+	# any more, and nothing replaced it; the dock ships by itself, every tick.
 	for i in range(20000):
 		sim.tick()
-		if _final_output_count(sim, final_recipe) > 0:
+		if _delivered_count(sim, final_recipe) > 0:
 			break
 
-	var final_output := _final_output_count(sim, final_recipe)
-	if final_output != 1:
-		_fail("expected exactly 1 unit of the final product ('%s') in output, got %d" % [final_recipe, final_output])
+	var delivered := _delivered_count(sim, final_recipe)
+	if delivered != 1:
+		_fail("expected exactly 1 unit of '%s' shipped into the delivery pool with no player command, got %d" % [final_recipe, delivered])
+		return
+	if _final_output_count(sim, final_recipe) != 0:
+		_fail("the last machine should have handed its case to the dock's belt, but still holds %d" % _final_output_count(sim, final_recipe))
 		return
 
-	sim.issue_command_json(JSON.stringify({"type": "collect_output"}))
-	var after := _final_output_count(sim, final_recipe)
-	if after != 0:
-		_fail("collect_output did not empty the final stage's output buffer (still %d)" % after)
+	# The dock's own snapshot, over the same wire. `contents` is asserted
+	# EMPTY on purpose: the dock is a pass-through (see sim_core's dock.rs),
+	# so between ticks it holds nothing and `shipped_total` is the number
+	# that actually moved.
+	var dock = JSON.parse_string(sim.dock_snapshot_json())
+	if dock == null:
+		_fail("dock_snapshot_json did not parse")
+		return
+	for field in ["tile", "kind", "footprint", "belt_start_tile", "belt_length_tiles", "contents", "capacity_per_item", "shipped_total"]:
+		if not dock.has(field):
+			_fail("dock_snapshot_json is missing '%s': %s" % [field, str(dock)])
+			return
+	if String(dock["kind"]) != "dock":
+		_fail("dock_snapshot_json reported kind '%s'" % str(dock["kind"]))
+		return
+	if int(dock["shipped_total"]) < 1:
+		_fail("the dock reports nothing shipped even though the pool holds a case: %s" % str(dock))
+		return
+	if dock["contents"].size() != 0:
+		_fail("the dock is a pass-through — its buffer must read empty between ticks, got %s" % str(dock["contents"]))
 		return
 
 	# Milestone 5 (Economy MVP, ARCHITECTURE.md §9 item 5): economy_snapshot_json
@@ -92,15 +118,15 @@ func _initialize() -> void:
 			_fail("contract '%s': mix and progress must zip positionally" % str(contract["id"]))
 			return
 
-	# The single unit collected above went into the shared pool even though it
-	# alone isn't enough to satisfy every contract's quantity — confirm both
-	# the raw pool and per-contract progress see it.
+	# The single unit the dock shipped above went into the shared pool even
+	# though it alone isn't enough to satisfy every contract's quantity —
+	# confirm both the raw pool and per-contract progress see it.
 	var stock_seen := false
 	for pair in econ["delivery_stock"]:
 		if pair[0] == final_recipe and int(pair[1]) > 0:
 			stock_seen = true
 	if not stock_seen:
-		_fail("expected delivery_stock to hold the collected unit of '%s': %s" % [final_recipe, str(econ["delivery_stock"])])
+		_fail("expected delivery_stock to hold the shipped unit of '%s': %s" % [final_recipe, str(econ["delivery_stock"])])
 		return
 	var found_progress := false
 	for contract in contracts:
@@ -108,7 +134,7 @@ func _initialize() -> void:
 			if pair[0] == final_recipe and int(pair[1]) > 0:
 				found_progress = true
 	if not found_progress:
-		_fail("expected some contract's progress to reflect the collected unit of '%s': %s" % [final_recipe, str(contracts)])
+		_fail("expected some contract's progress to reflect the shipped unit of '%s': %s" % [final_recipe, str(contracts)])
 		return
 
 	# query_tile_json: confirm the first belt and first machine tiles
@@ -127,8 +153,27 @@ func _initialize() -> void:
 		_fail("query_tile_json on an empty tile should return an empty string")
 		return
 
-	print("CORE_LOOP_OK: 4 tomatoes unloaded from the hopper, travelled all %d stages -> 1 '%s', collected, tile queries correct" % [layout.size(), final_recipe])
+	# The dock's tile answers query_tile_json too, with its own variant.
+	var dock_tile_pair: Array = dock["tile"]
+	var dock_tile = JSON.parse_string(sim.query_tile_json(int(dock_tile_pair[0]), int(dock_tile_pair[1])))
+	if dock_tile == null or dock_tile.get("kind") != "dock":
+		_fail("query_tile_json did not report a dock tile at %s: %s" % [str(dock_tile_pair), str(dock_tile)])
+		return
+
+	print("CORE_LOOP_OK: 4 tomatoes unloaded from the hopper, travelled all %d stages -> 1 '%s', shipped by the dock with no player command, tile queries correct" % [layout.size(), final_recipe])
 	quit(0)
+
+
+## How many units of `item` are standing in the economy's shared delivery
+## pool — i.e. what the dock has shipped and no contract has claimed yet.
+func _delivered_count(sim, item: String) -> int:
+	var econ = JSON.parse_string(sim.economy_snapshot_json())
+	if econ == null:
+		return 0
+	for pair in econ.get("delivery_stock", []):
+		if String(pair[0]) == item:
+			return int(pair[1])
+	return 0
 
 
 func _tomato_count(sim) -> int:

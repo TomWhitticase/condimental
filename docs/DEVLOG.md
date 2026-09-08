@@ -27,7 +27,7 @@ below is history and should only ever be appended to.)*
 - **Visual overhaul, first attempt (superseded by round 2 above):** closed a floor-level seam between machine/hopper footings and belt/pipe edges, added a connector fitting for the fluid-fed stage, gave the hopper's status lamp real feedback, and fixed some contract-clipboard typography — real fixes, but not the one the player actually flagged, which is what round 2 above addressed.
 - **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, SPACE/SHIFT up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
 - **Lighting:** the sky is the real background (`BG_SKY`), not a flat colour — see the "empty void" DEVLOG entry below for why that matters. `scripts/screenshot-scene.sh --first-person` reviews that mode's lighting specifically.
-- **Delivery dock (sim half done, presentation to do):** the chain has a real exit. One more belt runs past the last machine into a `dock` building, which ships finished product into the shared delivery pool automatically every tick — `PlayerCommand::CollectOutput` (the **C** key) is **removed**, so a supplied factory now earns money with no player action beyond keeping the hopper and vinegar tank topped up. The dock is deliberately a pass-through (its own buffer is empty between ticks); the number to show for "waiting to be sold" is still the economy snapshot's `delivery_stock`. The shipped line now spans three chunks, (-1, 0) through (1, 0). Ticket 2 — the Godot dock asset, hover text, and removing **C** from the on-screen legend — is still to do.
+- **Delivery dock (done, both halves):** the chain has a real exit, and you can see it. One more belt runs past the last machine into a `dock` building, which ships finished product into the shared delivery pool automatically every tick — `PlayerCommand::CollectOutput` (the **C** key) is **removed**, so a supplied factory now earns money with no player action beyond keeping the hopper and vinegar tank topped up. The dock is drawn as the one piece of *architecture* on the line rather than another machine: a raised, hazard-striped loading platform with rubber bumpers, a hooded transfer housing where the belt runs in, and a despatch door under a canopy. It has **no fill gauge**, deliberately — its own buffer empties every tick, so a bar driven from it would read zero forever; what stands on its deck instead is one case per unit of the economy's shared `delivery_stock`, the same figure the clipboard labels ON THE DOCK. The shipped line now spans three chunks, (-1, 0) through (1, 0).
 - **Contracts (done, both halves):** contracts are `data/contracts.ron` content and three run concurrently, each with its own mix/cadence/payout, all drawing from one shared pool of delivered stock (a box pays one contract, never two). The clipboard panel shows all of them — one paper docket card per contract on the one board, each with its own checklist, payout, countdown and delivered/missed tally, above a single shared money figure and a single "on the dock" line naming the pool they compete for.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
@@ -44,6 +44,33 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-08 — The delivery dock you can actually see (presentation half)
+
+The dock existed in simulation but not on screen: the tile past the packer
+rendered as bare floor, the belt feeding it was not drawn at all, and the
+control legend still offered a **C: collect product** key for a command that
+no longer exists. All three are fixed, and `sim_core`/`data/` were not
+touched — every fact drawn here was already on the wire.
+
+The dock is deliberately the one building on the line that is a *place*
+rather than a machine: a poured platform at trailer-bed height, its edge
+hazard-striped, with rubber bumpers, a despatch door under a canopy, and the
+same hooded transfer housing every other machine is fed through. That last
+part matters — the packer had never had a discharge doorway, because until
+this ticket it was the end of the line, so it grew one and the dock's belt
+now leaves and arrives through real junctions like every other hop.
+
+**No fill gauge, and that was the decision worth making carefully.** The dock
+ships everything it receives in the same tick, so its own level is always
+zero and a bar reading it would be a gauge lying about its mechanism. The
+number that is real is the economy's shared delivery pool, so the deck stands
+one case on it per unit waiting to be sold — drawn with the item's own model,
+capped at two because a third case starts hiding the building. The exact
+figure stays where it already was: the clipboard's ON THE DOCK line, and the
+dock's own hover, which reports what it has shipped over the factory's whole
+life alongside what is standing on it now. **This completes the delivery-dock
+work.**
 
 ### 2026-09-08 — The chain has an end: a real delivery dock (sim half)
 

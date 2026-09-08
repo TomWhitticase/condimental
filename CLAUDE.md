@@ -299,6 +299,48 @@ it's gone stale.
 
 ## Decisions log
 
+- 2026-09-08: **The delivery dock, drawn** (the delivery-dock ticket's
+  presentation half; `sim_core` and `data/` deliberately untouched — every
+  fact drawn was already on the wire from ticket 1). Five calls worth not
+  re-litigating. (1) **The dock is drawn as architecture, not as
+  equipment.** Every other kind on the line is identified by machinery (or,
+  for the aging rack, by the deliberate absence of it); a dock does no work
+  at all, so it is a poured platform at trailer-bed height with a striped
+  edge, rubber bumpers, a despatch door and a canopy — which is both what a
+  real loading bay is and the one silhouette on this line that cannot be
+  mistaken for another housing. (2) **Its layout was decided by an occlusion
+  rule, recorded as UI_UX.md §2b point 16.** The obvious design — a truck bay
+  carved into the camera-facing +X face — was built first and walls off the
+  entire deck, because on this camera a sight line travels `(+x, -y, +z)` and
+  every deck voxel's exits through those columns. The tall structure
+  therefore stands at the FAR side, where its own face is still square to the
+  camera and it occludes nothing. That corollary to point 11 is new and
+  applies to any future building with something inside it. (3) **No fill
+  gauge, and that is the point rather than an omission.** `Dock::ship_into`
+  empties the buffer every tick, so `DockSnapshot` has no `fill` field and a
+  bar reading it would be a gauge lying about its mechanism (the same failure
+  `FluidTank` refused). What the deck shows instead is one case per unit of
+  `EconomySnapshot::delivery_stock` — the shared pool the clipboard already
+  labels ON THE DOCK, exactly as `sim::DockSnapshot`'s own doc instructs —
+  drawn with the item's OWN model through `ITEM_MODELS`, capped at two
+  because a rendered four-slot version buried the building under cardboard.
+  The uncapped figure stays on the clipboard and in the hover. (4) **The
+  packer gained an outfeed it never had**, and the `NO_OUTFEED` list in
+  `voxgen`'s junction tests now names the dock instead of it: a real belt runs
+  past the packer now, so its +X face was a wall a case appeared in front of
+  out of nowhere. The dock is the end of the line and has no outfeed by the
+  same rule. (5) **`C` is removed, not left inert.** The keybind, both help
+  strings' `"C: collect product"` fragment, and every `{"type":
+  "collect_output"}` call left in the headless test scripts are gone —
+  `issue_command_json` silently ignores an unknown command, so a key left in
+  place would have advertised a control the simulation no longer has.
+  `test_interaction.gd` now asserts both halves (the legend never says
+  "collect", and pressing **C** changes neither the economy nor the dock).
+  One thing fixed in passing: `--contracts` in `scripts/screenshot-scene.sh`
+  waited for the pool to hold *exactly* two units, a state the aging rack's
+  throughput makes essentially unreachable, so it silently ran its whole tick
+  limit and photographed an empty dock; it is a minimum now.
+
 - 2026-09-08: **The chain has a real end: a delivery dock** (GAMEPLAY.md
   §6/§9's long-flagged "a real delivery-dock tile is future polish"; ticket 1
   of 2, the sim half — `godot_project/` deliberately untouched). Finished

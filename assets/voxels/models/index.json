@@ -82,6 +82,11 @@
     "metal",
     "emissive"
   ],
+  "machine_dock": [
+    "matte",
+    "metal",
+    "emissive"
+  ],
   "machine_mixer": [
     "matte",
     "metal",

@@ -26,7 +26,15 @@
 #     live-data-drives-a-scaled-body contract the pipe run's liquid has,
 #   * hovering resolves for a NON-ORIGIN tile inside the vat's footprint (the
 #     case that did not exist before this milestone) and for the hopper,
-#     through the one `_hover_text_at_tile` mechanism.
+#     through the one `_hover_text_at_tile` mechanism,
+#   * the delivery dock (the delivery-dock ticket) renders its OWN model at
+#     the tile the simulation puts it on — not the generic fallback, the
+#     failure the aging rack briefly shipped — with the belt that feeds it
+#     drawn from the same snapshot, the goods standing on its deck tracking
+#     the economy's shared delivery pool, and its own hover branch answering.
+#     Whether its inlet is a real carved opening rather than a rectangle
+#     painted black is checked voxel by voxel by `cargo test -p voxgen`; a
+#     mesh cannot tell the two apart.
 #
 # The one-frame-before-checking dance and the "never hold your own camera
 # reference" rule are inherited from test_hover.gd — see that file's header
@@ -286,12 +294,111 @@ func _run_checks() -> void:
 		_fail("open floor four tiles north of the hopper resolved to the hopper")
 		return
 
+	# --- the delivery dock: its own model, its own belt, its own hover -----
+	var dock: Dictionary = JSON.parse_string(main.sim.dock_snapshot_json())
+	if dock.is_empty():
+		_fail("dock_snapshot_json returned nothing — every world has a dock")
+		return
+	var dock_pair: Array = dock["tile"]
+	var dock_tile := Vector2i(int(dock_pair[0]), int(dock_pair[1]))
+	var dock_body: Node3D = main.get_node_or_null("Dock/dock_body")
+	if dock_body == null:
+		_fail("the dock is not drawn at all")
+		return
+	var dock_meshes := _meshes(dock_body, [])
+	if dock_meshes.is_empty():
+		_fail("the dock rendered no voxel mesh")
+		return
+	var expected_dock_pos: Vector3 = main._footprint_centre(
+		dock_tile, main._footprint_size(dock.get("footprint")), main.FLOOR_Y
+	)
+	if dock_body.position.distance_to(expected_dock_pos) > 0.001:
+		_fail("the dock is drawn at %s, but the sim puts it at %s" % [
+			str(dock_body.position), str(expected_dock_pos),
+		])
+		return
+	# ...and it is a BESPOKE model, not the generic housing every kind falls
+	# back to. This is the check the aging rack briefly failed.
+	if not main.MACHINE_MODELS.has("dock"):
+		_fail("the 'dock' kind has no MACHINE_MODELS entry, so it draws the generic fallback")
+		return
+	var generic: Node3D = main._asset_node(main.MACHINE_MODEL_FALLBACK)
+	var generic_meshes := _meshes(generic, [])
+	if not generic_meshes.is_empty() and dock_meshes[0].mesh == generic_meshes[0].mesh:
+		_fail("the dock renders the generic fallback model '%s'" % main.MACHINE_MODEL_FALLBACK)
+		return
+	generic.free()
+
+	# The belt that runs into it — the one belt in the world belonging to no
+	# stage, so it is drawn from the dock's snapshot rather than the layout.
+	var dock_belt_pair: Array = dock["belt_start_tile"]
+	var dock_belt_start := Vector2i(int(dock_belt_pair[0]), int(dock_belt_pair[1]))
+	var dock_belt_length: int = int(dock["belt_length_tiles"])
+	if dock_belt_length < 1:
+		_fail("the dock reports no belt feeding it: %s" % str(dock))
+		return
+	for i in range(dock_belt_length):
+		var belt_tile := dock_belt_start + Vector2i(i, 0)
+		if not main._belt_assets.has("%d,%d" % [belt_tile.x, belt_tile.y]):
+			_fail("the dock's belt tile %s was never drawn" % str(belt_tile))
+			return
+	# Its LAST tile meets the dock, so it takes the inlet-adjacent variant —
+	# which only happens if `_machine_occupied_tiles` knows about the dock.
+	var last_belt_tile := dock_belt_start + Vector2i(dock_belt_length - 1, 0)
+	var last_belt_asset: String = main._belt_assets["%d,%d" % [last_belt_tile.x, last_belt_tile.y]]
+	if last_belt_asset != main.BELT_INLET_ASSET:
+		_fail("the belt tile against the dock drew '%s', not the inlet variant" % last_belt_asset)
+		return
+
+	# The goods on the deck follow the economy's SHARED pool, not the dock's
+	# own buffer (which is a pass-through and always empty — see DOCK_ASSET).
+	if main._dock_stock_nodes.size() != main.DOCK_STOCK_SLOTS:
+		_fail("expected %d dock stock slots, got %d" % [main.DOCK_STOCK_SLOTS, main._dock_stock_nodes.size()])
+		return
+	main._update_dock_stock([])
+	for slot in main._dock_stock_nodes:
+		if slot.visible:
+			_fail("a case is standing on the dock with nothing in the delivery pool")
+			return
+	main._update_dock_stock([["boxed_ketchup", 1]])
+	if not main._dock_stock_nodes[0].visible:
+		_fail("one unit in the delivery pool put no case on the dock")
+		return
+	if main._dock_stock_nodes[main.DOCK_STOCK_SLOTS - 1].visible:
+		_fail("one unit in the delivery pool filled more than one slot")
+		return
+	if _meshes(main._dock_stock_nodes[0], []).is_empty():
+		_fail("the case standing on the dock rendered no mesh")
+		return
+	# More stock than there are slots must fill them and stop, not error.
+	main._update_dock_stock([["boxed_ketchup", 99]])
+	for slot in main._dock_stock_nodes:
+		if not slot.visible:
+			_fail("a full delivery pool left a dock slot empty")
+			return
+
+	# --- hover: the dock answers through the same one mechanism -----------
+	if not main._dock_at_tile(dock_tile):
+		_fail("the dock's own tile %s doesn't resolve to the dock" % str(dock_tile))
+		return
+	var dock_text: String = main._hover_text_at_tile(dock_tile)
+	if not dock_text.begins_with("delivery dock"):
+		_fail("hovering the dock tile should describe the dock, got: %s" % dock_text)
+		return
+	if not dock_text.contains("shipped"):
+		_fail("the dock tooltip should report what it has shipped, got: %s" % dock_text)
+		return
+	if main._dock_at_tile(dock_tile + Vector2i(0, 4)):
+		_fail("open floor four tiles north of the dock resolved to the dock")
+		return
+
 	# --- the help text tells the player what SPACE now does ---------------
 	if not main.ISO_HELP_TEXT.to_lower().contains("hopper"):
 		_fail("ISO_HELP_TEXT still doesn't mention the hopper: %s" % main.ISO_HELP_TEXT)
 		return
 
-	print("MACHINES_OK: %d stage(s) rendered at the sim's own tiles, %d bespoke kind(s) and zero generic fallbacks, %d multi-tile machine(s) spanning their full footprint, hopper drawn at %s with a live product level, hover resolves a non-origin footprint tile and the hopper" % [
+	print("MACHINES_OK: %d stage(s) rendered at the sim's own tiles, %d bespoke kind(s) and zero generic fallbacks, %d multi-tile machine(s) spanning their full footprint, hopper drawn at %s with a live product level, the delivery dock drawn with its own model at %s behind a %d-tile belt, hover resolves a non-origin footprint tile, the hopper and the dock" % [
 		layout.size(), bespoke_meshes.size(), multi_tile_stages, str(hopper_tile),
+		str(dock_tile), dock_belt_length,
 	])
 	quit(0)

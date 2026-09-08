@@ -49,6 +49,9 @@ pub const ASSETS: &[Asset] = &[
     // the hopper's and the tank's (see `aging_rack_gauge`).
     Asset { name: "machine_aging_rack", build: machine_aging_rack },
     Asset { name: "aging_rack_gauge", build: aging_rack_gauge },
+    // The chain's exit (the delivery-dock ticket): the tile finished cases
+    // leave the world through. Not a processing kind — see `machine_dock`.
+    Asset { name: "machine_dock", build: machine_dock },
     Asset { name: "hopper", build: hopper },
     Asset { name: "hopper_fill", build: hopper_fill },
     // The pipe run's supply vessel and the liquid column inside it (the
@@ -1315,16 +1318,22 @@ pub fn machine_packer(p: &Palette) -> VoxModel {
 
     // Taping head on a stand over the case: an arm carrying a brass tape
     // roll, reaching in from the back so it doesn't block the open case.
-    m.cuboid((26, 28), (23, 26), (12, 27), p.idx("steel"));
-    m.cuboid((16, 28), (18, 26), (26, 27), p.idx("steel_light"));
+    // The stand stops at x = 27 rather than 28 so it clears the discharge
+    // housing added below, which occupies the last four columns.
+    m.cuboid((25, 27), (23, 26), (12, 27), p.idx("steel"));
+    m.cuboid((16, 27), (18, 26), (26, 27), p.idx("steel_light"));
     m.cylinder_y((19, 24), 3.0, (19, 25), p.idx("brass"));
     m.cuboid((16, 18), (18, 25), (22, 24), p.idx("steel_dark"));
 
-    // Infeed only. The packer is the chain's last stage — `chain_layout_json`
-    // puts no belt downstream of it and the player collects finished cases
-    // from it — so a discharge doorway would open onto bare floor and
-    // promise a conveyor that does not exist.
+    // Infeed AND outfeed. The packer used to have no discharge at all,
+    // because it was the chain's last stage and the player lifted finished
+    // cases straight out of it with a keypress. The delivery-dock ticket
+    // deleted that command and laid a real belt past this machine, running
+    // into a dock — so this face now hands product to a conveyor like every
+    // other stage's does, and would otherwise be a blank wall a case
+    // appears in front of out of nowhere.
     machine_infeed(&mut m, p, BELT_LANE);
+    machine_outfeed(&mut m, p, BELT_LANE, TILE_VOXELS as i32 - 1);
 
     control_panel(&mut m, p, (5, 14), (3, 7), 2);
     m
@@ -1814,6 +1823,154 @@ pub fn hopper_fill(p: &Palette) -> VoxModel {
 }
 
 // ---------------------------------------------------------------------------
+// Delivery dock (the delivery-dock ticket, GAMEPLAY.md §6/§9)
+// ---------------------------------------------------------------------------
+
+/// Top voxel of the dock's raised platform, and deliberately the same number
+/// as [`BELT_SURFACE_Z`]: a case leaving the last belt has to arrive on a
+/// surface level with the one it left, or the transfer housing at the end of
+/// this line would be the only junction in the factory with a step in it.
+/// `main.gd` mirrors it (DOCK_DECK_VOXELS) to stand the waiting stock on the
+/// deck — change one, change both.
+pub const DOCK_DECK_Z: i32 = BELT_SURFACE_Z;
+
+/// `data/machines.ron`'s 1x1 `dock` — the chain's exit, where finished cases
+/// leave the factory and become money (`sim_core::sim::dock`).
+///
+/// **Why a raised platform with a despatch door, rather than another housing
+/// with a mechanism on top.** Every processing kind on this line is
+/// identified by the machinery that does its work — flywheels, an agitator,
+/// a filling gantry, a taping head — and the aging rack by the deliberate
+/// absence of one (UI_UX.md §2b point 15). A dock does no work at all: it is
+/// a *place*, the one tile in the world that is not equipment. So it is
+/// drawn as architecture — a poured platform at trailer-bed height, its edge
+/// striped, with a despatch opening and a canopy behind it — which is both
+/// what a real loading bay looks like and the one silhouette on this line
+/// that could not be mistaken for a machine.
+///
+/// **Where each piece goes is decided by the camera, exactly as the junction
+/// section above derives it.** The fixed isometric view (UI_UX.md §1) can
+/// only ever see faces whose normal points +X or -Y in this model's own
+/// coordinates, and — the part that actually drove this layout — a sight
+/// line leaving any point travels `(+x, -y, +z)`, so anything at HIGH x and
+/// LOW y stands in front of everything behind it. That rules out the obvious
+/// design, which was tried first: a truck bay carved into the +X face. It
+/// reads beautifully on its own and it walls off the entire deck behind it,
+/// because every deck voxel's sight line has to pass through x = 28..31 on
+/// its way out. So the tall structure went to the FAR (high-y) side, where
+/// its -Y face is still square to the camera but it occludes nothing, and
+/// the deck's near half was left clear for the goods that actually stand on
+/// it (see `main.gd`'s `_update_dock_stock`).
+///
+/// **Material** (UI_UX.md §2b point 8, "food contact is stainless, structure
+/// is painted or poured"): a dock is almost entirely structure — poured
+/// concrete deck, painted steel wall and canopy, rubber bumpers, hazard
+/// striping — so it is the least stainless building in the factory, and
+/// deliberately so. The stainless is exactly where product passes: the
+/// infeed transfer housing and its brass threshold, and the despatch
+/// opening's frame. That split is the rule doing its job rather than an
+/// exception to it.
+pub fn machine_dock(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::tile();
+    let last = TILE_VOXELS as i32 - 1;
+    let deck = DOCK_DECK_Z;
+
+    // --- The platform ------------------------------------------------------
+    // A solid poured block, not a machine footing: this is the one building
+    // on the line the player is meant to read as floor rather than as
+    // equipment. Flush with the tile's own edges for `machine_footing`'s
+    // reason — the last belt tile butts straight against it.
+    // Poured mid-grey with a lighter wearing surface and a dark kerb course
+    // at the bottom. The first cut made the whole block `concrete_dark`,
+    // which is right for a floor slab's *seam* and wrong for a mass this
+    // size: rendered in the scene it read as a black pit with a lit rail
+    // round it, not as a platform goods stand on.
+    m.cuboid((0, last), (0, last), (0, 1), p.idx("concrete_dark"));
+    m.cuboid((0, last), (0, last), (2, deck - 1), p.idx("concrete_light"));
+    m.cuboid((1, last - 1), (1, last - 1), (2, deck - 1), p.idx("concrete"));
+    m.cuboid((0, last), (0, last), (deck, deck), p.idx("concrete_light"));
+
+    // Edge striping on the two faces the camera can actually see. A loading
+    // dock's edge is marked because the drop is the hazard, so this is
+    // signage doing its real job rather than decoration (UI_UX.md §3). Two
+    // voxels, not three: half a hazard stripe is black, and this band runs
+    // the full length of both camera-facing edges — the wider first cut put
+    // more black on the dock than anything else.
+    m.hazard_stripe_x((0, last), (0, 0), (deck - 1, deck), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    for y in 0..=last {
+        let a = if (y + 2).rem_euclid(6) < 3 { p.idx("hazard_yellow") } else { p.idx("hazard_black") };
+        for z in (deck - 1)..=deck {
+            m.set(last, y, z, a);
+        }
+    }
+
+    // Rubber dock bumpers on the +X edge, where a trailer would come to rest
+    // against the platform. Short (they sit below deck level), so they add a
+    // recognisable piece of dock hardware to the most camera-facing face
+    // without standing between the camera and anything.
+    for (y0, y1) in [(4, 8), (23, 27)] {
+        m.cuboid((last - 1, last), (y0, y1), (deck - 6, deck - 1), p.idx("rubber_dark"));
+    }
+
+    // --- The despatch wall, on the FAR side --------------------------------
+    // Painted steel, ribbed, standing at high y so its -Y face is square to
+    // the camera and it occludes nothing on the deck in front of it.
+    m.cuboid((0, last), (26, last), (deck + 1, 27), p.idx("paint_blue"));
+    for x in (2..=30).step_by(4) {
+        m.cuboid((x, x), (26, 26), (deck + 1, 25), p.idx("steel_dark"));
+    }
+
+    // The despatch opening, carved through to a black back wall — a real
+    // hole, not a dark rectangle painted on the wall (see this file's
+    // junction tests for why that distinction is checked rather than
+    // eyeballed). Its floor is what a sight line entering it actually
+    // reaches (the infeed housing's doc derives that for the mirrored case),
+    // so the floor is black and the frame around it is the palette's
+    // brightest metal.
+    m.cuboid((8, 25), (24, 26), (deck + 1, 23), p.idx("steel_light"));
+    m.carve_cuboid((11, 22), (24, 30), (deck + 1, 21));
+    m.cuboid((11, 22), (last, last), (deck + 1, 21), p.idx("hazard_black"));
+    m.cuboid((11, 22), (24, 30), (deck + 1, deck + 1), p.idx("hazard_black"));
+    // Brass threshold at the lip: the same accent every other fitting
+    // product physically passes through carries.
+    m.cuboid((11, 22), (24, 24), (deck + 1, deck + 1), p.idx("brass"));
+    // The roller shutter, wound up above the opening — what says this
+    // opening is a door rather than a window.
+    m.cuboid((10, 23), (23, 24), (22, 23), p.idx("steel_dark"));
+    m.cuboid((10, 23), (23, 23), (22, 22), p.idx("steel_light"));
+
+    // --- Canopy over the bay ----------------------------------------------
+    // Cantilevered off the wall toward the camera. It stops well short of
+    // the deck's near edge so the goods standing there stay in clear air.
+    // Integral with the wall's own head rather than a slab hovering over it:
+    // the first cut stood it two voxels clear on thin posts and rendered as
+    // a white shelf floating in front of a blue wall — at scene scale a gap
+    // that small is not read as a gap, it is read as two unrelated objects.
+    // Shallow, too, because every voxel it reaches toward the camera is a
+    // voxel of deck it shades, and the deck is where the goods stand.
+    m.cuboid((6, 25), (20, 26), (26, 27), p.idx("steel"));
+    m.cuboid((6, 25), (20, 20), (25, 25), p.idx("hazard_yellow"));
+    for x in [6, 25] {
+        m.cuboid((x, x), (21, 26), (24, 25), p.idx("steel_dark"));
+    }
+
+    // Bay light under the canopy's leading edge — hung one voxel proud of it
+    // so the canopy itself doesn't shadow it out of the frame. This is the
+    // dock's status lamp: `main.gd` swaps it green when stock is waiting to
+    // be sold and amber when the dock is clear, the same idle/running pair
+    // every machine's lamp uses.
+    m.cuboid((13, 18), (18, 19), (24, 25), p.idx("steel_light"));
+    m.cuboid((14, 17), (18, 18), (23, 24), p.idx("status_amber"));
+
+    // --- The junction ------------------------------------------------------
+    // The belt from the packer runs in on -X, through exactly the transfer
+    // housing every other machine on the line is fed through. No outfeed:
+    // nothing is downstream of the dock — product leaves the world here.
+    machine_infeed(&mut m, p, BELT_LANE);
+    m
+}
+
+// ---------------------------------------------------------------------------
 // Junction tests (the "Visual overhaul round 2" epic's ticket 3)
 // ---------------------------------------------------------------------------
 //
@@ -1869,6 +2026,7 @@ mod tests {
             one_tile("machine_bottler", machine_bottler(p)),
             one_tile("machine_packer", machine_packer(p)),
             one_tile("machine_aging_rack", machine_aging_rack(p)),
+            one_tile("machine_dock", machine_dock(p)),
             Junctions {
                 name: "machine_cooking_vat",
                 model: machine_cooking_vat(p),
@@ -1879,10 +2037,19 @@ mod tests {
         ]
     }
 
-    /// The chain's last stage takes product in but hands none on — the player
-    /// collects from it — so it deliberately has no outfeed (see
-    /// `machine_packer`). Everything else must have one.
-    const NO_OUTFEED: &[&str] = &["machine_packer"];
+    /// The one building at the end of the line that takes product in and
+    /// hands none on: nothing is downstream of the delivery dock, because
+    /// product leaves the world there (`sim_core::sim::dock`). Everything
+    /// else must have an outfeed — including the packer, which used to be
+    /// on this list and lost its place the moment the delivery-dock ticket
+    /// laid a real belt past it.
+    ///
+    /// The dock is *skipped* rather than checked with the rule inverted:
+    /// its +X face is a platform edge, so the air above it is open by
+    /// design, and a "there is no doorway here" assertion would read that
+    /// open air as a doorway. What the dock's own face has to satisfy is
+    /// checked by `the_docks_deck_is_solid_out_to_the_platform_edge`.
+    const NO_OUTFEED: &[&str] = &["machine_dock"];
 
     #[test]
     fn every_machine_has_an_open_inlet_at_the_belt_lane() {
@@ -1909,12 +2076,6 @@ mod tests {
         for j in machines(&p) {
             let mid = (j.belt_lane.0 + j.belt_lane.1) / 2;
             if NO_OUTFEED.contains(&j.name) {
-                assert!(
-                    !j.model.filled(j.last_x, mid, BELT_SURFACE_Z),
-                    "{}: has no downstream belt, so it should NOT have a discharge lip \
-                     handing product to one",
-                    j.name
-                );
                 continue;
             }
             assert!(
@@ -2009,6 +2170,55 @@ mod tests {
         assert!(
             rack.filled(mid_x, GAUGE_Y.0, GAUGE_Z0 + GAUGE_HEIGHT + 2),
             "the gauge slot is open above a full bar's head"
+        );
+    }
+
+    /// The delivery dock's own face, which the belt-junction rules above
+    /// deliberately skip (see `NO_OUTFEED`). Three things have to hold, and
+    /// none of them are visible in a screenshot at scene scale:
+    ///
+    ///  * the deck is solid right out to the +X tile edge, so the platform
+    ///    reads as a platform rather than as a machine with a lip;
+    ///  * it is level with the belt that feeds it, so a case arriving does
+    ///    not step up or down at the tile boundary;
+    ///  * the despatch opening in the far wall is a genuinely EMPTY hole
+    ///    with a back wall behind it — a dark rectangle painted on the wall
+    ///    would mesh flat and render as a sticker, which is the same
+    ///    distinction the junction tests above exist for.
+    #[test]
+    fn the_docks_deck_is_solid_out_to_the_platform_edge() {
+        let p = palette();
+        let dock = machine_dock(&p);
+        let last = TILE_VOXELS as i32 - 1;
+        let mid = (BELT_LANE.0 + BELT_LANE.1) / 2;
+
+        assert_eq!(
+            DOCK_DECK_Z, BELT_SURFACE_Z,
+            "the dock's deck must stand at the belt's own running height"
+        );
+        assert!(
+            dock.filled(last, mid, DOCK_DECK_Z),
+            "the deck stops short of the +X tile edge"
+        );
+        assert!(
+            !dock.filled(last, mid, DOCK_DECK_Z + 1),
+            "something stands on the platform edge at the belt's lane — the dock \
+             has no downstream conveyor, so nothing should promise one"
+        );
+
+        // The despatch opening: empty through the wall, with a wall behind it.
+        assert!(
+            !dock.filled(16, 27, DOCK_DECK_Z + 6),
+            "the despatch opening is filled — a painted door is not a door"
+        );
+        assert!(
+            dock.filled(16, last, DOCK_DECK_Z + 6),
+            "the despatch opening has no back wall, so it shows straight through \
+             the building"
+        );
+        assert!(
+            dock.filled(10, 26, DOCK_DECK_Z + 6),
+            "the despatch opening has no frame, so its edge is nothing"
         );
     }
 

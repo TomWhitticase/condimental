@@ -44,15 +44,14 @@ func _shop_snapshot(main) -> Dictionary:
 
 ## Runs the real chain until the contract has paid out at least once, so
 ## there is genuinely earned money to spend — mirroring
-## sim_core/tests/shop.rs's own drive loop. `collect_output` is issued every
-## tick rather than only when something is ready: it is a documented no-op on
-## an empty machine, which keeps this loop from needing to inspect chunks.
+## sim_core/tests/shop.rs's own drive loop. Nothing has to be collected: the
+## delivery-dock ticket replaced the `collect_output` keypress this loop used
+## to issue every tick with a building that ships into the pool by itself.
 func _earn_money(main) -> float:
 	for i in range(EARN_TICK_LIMIT):
 		main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
 		main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
 		main.sim.tick()
-		main.sim.issue_command_json(JSON.stringify({"type": "collect_output"}))
 		var money: float = float(_shop_snapshot(main).get("money", 0.0))
 		if money > 0.0:
 			return money
