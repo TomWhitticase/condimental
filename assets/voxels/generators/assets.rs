@@ -1516,10 +1516,7 @@ pub fn machine_aging_rack(p: &Palette) -> VoxModel {
 /// hopper holds is content, but "how far through" is one universal quantity
 /// with no per-machine colour to look up.
 pub fn aging_rack_gauge(p: &Palette) -> VoxModel {
-    debug_assert!(
-        GAUGE_Z0 + GAUGE_HEIGHT <= 32,
-        "a full bar would rise past the gauge slot"
-    );
+    const { assert!(GAUGE_Z0 + GAUGE_HEIGHT <= 32, "a full bar would rise past the gauge slot") };
     let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 1]);
     m.cuboid(GAUGE_X, GAUGE_Y, (0, 0), p.idx("status_amber"));
     m
@@ -1676,10 +1673,12 @@ pub fn fluid_tank(p: &Palette) -> VoxModel {
 /// per-fluid tint over these vertices and one model serves every fluid
 /// `data/recipes.ron` will ever name.
 pub fn fluid_tank_fill(p: &Palette) -> VoxModel {
-    debug_assert!(
-        TANK_FILL_Z0 + TANK_FILL_HEIGHT <= 29,
-        "a full tank's level would rise into its domed head"
-    );
+    const {
+        assert!(
+            TANK_FILL_Z0 + TANK_FILL_HEIGHT <= 29,
+            "a full tank's level would rise into its domed head"
+        )
+    };
     let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 1]);
     m.cylinder_z((TANK_CENTER, TANK_CENTER), TANK_INNER_R, (0, 0), p.idx("fluid_pale"));
     m
@@ -1807,10 +1806,12 @@ pub fn hopper(p: &Palette) -> VoxModel {
 /// vertices — and unlike a fluid, a heap of product is not a wet surface, so
 /// it takes the `matte` class rather than `liquid` (see palette.ron).
 pub fn hopper_fill(p: &Palette) -> VoxModel {
-    debug_assert!(
-        HOPPER_FILL_Z0 + HOPPER_FILL_HEIGHT <= 30,
-        "a full hopper's level would rise above its loading lip"
-    );
+    const {
+        assert!(
+            HOPPER_FILL_Z0 + HOPPER_FILL_HEIGHT <= 30,
+            "a full hopper's level would rise above its loading lip"
+        )
+    };
     let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 1]);
     let c = HOPPER_CENTER;
     m.cuboid(

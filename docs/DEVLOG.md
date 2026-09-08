@@ -49,6 +49,46 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-08 — A performance/code-quality audit, run alongside the fluid-pipes rework
+
+A dedicated audit (not milestone work) hunting for real, measured waste in
+today's small-factory scale — explicitly not milestone 8 (Scale-up) territory.
+Two genuine, low-risk fixes landed; several other candidates were measured and
+deliberately left alone, which is itself the useful result in those cases.
+
+**Fixed:** `sim_core/tests/shop.rs`'s `world_with_earned_money` fixture ran
+the *whole* reference chain (aging rack and all) until the bank held 200 —
+24,000 ticks, redundantly, once per test in that file (7 of them, ~168,000
+ticks total), and it was measurably the most expensive part of
+`cargo test -p sim_core`'s debug-mode run. 200 was never load-bearing (the
+hungriest test in the file only ever needed 36); dropping the threshold to 50
+keeps a real margin over that while cutting the file's own runtime by more
+than half (serial: 6.48s -> 2.88s). Also converted three `debug_assert!`s in
+`assets/voxels/generators/assets.rs` (gauge/tank-fill/hopper-fill geometry
+bounds) that clippy flagged as compile-time-constant into real `const { assert!
+(..) }`s — same check, but it now fails the build instead of only a debug
+test run if a future geometry tweak breaks the invariant.
+
+**Measured and left alone, on purpose:**
+`sim_core/src/sim/world.rs`'s `tick()`/`recompute_topology` already match
+ARCHITECTURE.md §3.8's "recompute on topology change, not per tick" — no
+change needed. `godot_project/main.gd`'s `_rebuild_world` (flagged in the
+"Real Placement" `worker_done` report as a possible concern) fires only on a
+discrete Place/Remove/Rotate action, never per tick or per frame, which
+matches the project's own already-recorded decision that a full rebuild is
+the right call at this scale — confirmed by reading the call sites, not
+re-litigated. `sim_core/tests/fluids.rs` has a real version of the same
+redundant-work pattern the shop.rs fix addressed — two test helpers
+(`count_item_anywhere`, `mixer_is_starved`) each rebuild a full multi-chunk
+snapshot on *every tick* of a ~5,000–10,000-tick loop, and that one test
+alone is ~1.7s of the suite — but `tests/fluids.rs` sits directly next to
+`fluid.rs`, which the concurrent mixer/cooking-vat/bottler fluid-pipes rework
+is actively rewriting, so fixing it now would almost certainly be thrown away
+or conflict; left as a flagged finding for whoever picks up that file next
+instead of fixed. `cargo clippy -p sim_core` came back otherwise clean
+(a couple of cosmetic `collapsible_if`/`needless_borrow` nits, mostly in
+files the same rework already owns) — not fixed, for the same reason.
+
 ### 2026-09-08 — Factorio's controls: E opens the build menu, ESC closes everything
 
 Two small control changes, both about matching what a player arriving from

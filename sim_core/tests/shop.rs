@@ -68,9 +68,25 @@ fn price_of(kind: &str) -> Fx {
 /// risked returning as little as 24, which this file's own
 /// `repeated_purchases_of_several_kinds_accumulate_independently` test
 /// (needing 36 to cover its purchases) is not guaranteed to cover.
+///
+/// **50, not 200 (performance note, added during a codebase-wide perf
+/// audit).** This function runs once per test in this file (7 of them), each
+/// driving the *whole* reference chain — including the 240-tick cooking vat
+/// — tick by tick until the threshold is crossed. At 200 that was 24,000
+/// ticks per test, ~168,000 ticks total just to set up this file, and it was
+/// measurably the most expensive part of `cargo test -p sim_core` (this
+/// file's tests took ~1.1s of the suite's ~6.5s wall time, almost entirely
+/// spent here). 200 was never load-bearing: it was chosen as "several times
+/// the largest single-contract payout" for comfortable headroom, not because
+/// any test needs that much. 50 keeps ~39% of headroom over the 36 this
+/// file's hungriest test actually spends (repeated purchases of 4 belts + 2
+/// pipes) — comfortably more than one contract's smallest payout (24) alone
+/// can satisfy, so the "not guaranteed by a single payout" reasoning above
+/// still holds — while cutting the tick count (and this file's wall time) by
+/// more than half.
 fn world_with_earned_money() -> World {
     let mut world = world();
-    const MIN_MONEY: i64 = 200;
+    const MIN_MONEY: i64 = 50;
 
     for _ in 0..2_000_000u32 {
         world.issue_command(PlayerCommand::FillHopper { amount: 32, tile: None });
