@@ -33,6 +33,14 @@
 //! full-chain test fills once up front and lets the unload happen over the
 //! following ticks instead of spawning per tick.
 //!
+//! **Milestone 7 (ARCHITECTURE.md §9 item 7, "Timed processes") inserted a
+//! 2400-tick aging stage mid-chain**, and the only edit it needed here was
+//! the stage-count assertion below — the conservation accounting itself
+//! reads the chain out of the data file, and it already counted a machine's
+//! in-flight `TimedProcess` batch as mass in the system. That was written
+//! for craft cycles lasting tens of ticks; it holds unchanged for one
+//! lasting thousands, which is a small piece of the milestone's own proof.
+//!
 //! **The "Visual overhaul round 2" epic's ticket 1 did the same to fluid**,
 //! and needed the same kind of edit: the pipe run's vinegar used to arrive
 //! from an off-map tap that refilled itself every tick, and now comes from a
@@ -162,14 +170,19 @@ fn assert_conserved(
 fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
     let registry = recipes();
     let ordered = registry.ordered();
-    // Five solid stages since ticket 2 split the front end into crusher ->
-    // mixer -> cooking vat: mass has to survive two more hand-offs than it
-    // did when this was a four-stage chain.
+    // Six solid stages: ticket 2 split the front end into crusher -> mixer
+    // -> cooking vat, and milestone 7 inserted the aging rack between the
+    // vat and the bottler. Mass has to survive three more hand-offs than it
+    // did when this was a four-stage chain — including one across a stage
+    // that holds a batch for 2400 ticks, which is exactly the case a
+    // conservation check should be nervous about (mass sitting in no visible
+    // buffer for a long time is the shape a leak would hide in).
     assert_eq!(
         ordered.len(),
-        5,
-        "expected the shipped 5-stage chain (crusher, mixer, cooking vat, bottler, packer), \
-         got {} recipe(s) — if a stage was added or removed deliberately, update this",
+        6,
+        "expected the shipped 6-stage chain (crusher, mixer, cooking vat, aging rack, \
+         bottler, packer), got {} recipe(s) — if a stage was added or removed deliberately, \
+         update this",
         ordered.len()
     );
     let final_recipe = ordered.last().unwrap().clone();

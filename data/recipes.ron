@@ -45,11 +45,23 @@
 // bottling/boxing stages below are untouched.
 //
 // PROCESS TIMES follow the work each machine does, so the line has a visible
-// bottleneck rather than five interchangeable stages: crushing is mechanical
-// and quick (60 ticks = 1s at ARCHITECTURE.md §3.9's 60 ticks/sec), blending
-// a little slower (90), and the cook-down is by far the longest step (240) —
-// which is precisely why the cooking vat is also the biggest machine on the
-// line (`data/machines.ron`).
+// bottleneck rather than a row of interchangeable stages: crushing is
+// mechanical and quick (60 ticks = 1s at ARCHITECTURE.md §3.9's 60
+// ticks/sec), blending a little slower (90), and the cook-down was long the
+// longest step (240) — which is precisely why the cooking vat is also the
+// biggest machine on the line (`data/machines.ron`).
+//
+// MILESTONE 7 ADDS A SIXTH STAGE OF A DIFFERENT KIND (ARCHITECTURE.md §9
+// item 7, "Timed processes"). `aged_ketchup` below runs for 2400 ticks —
+// ten times the cook, forty seconds of real time — on the same generic
+// `TimedProcess` component (ARCHITECTURE.md §3.5) every entry here already
+// used. It is inserted BETWEEN the cook and the bottling, which is the only
+// reason any existing entry changed at all: the bottler now consumes
+// `aged_ketchup` instead of `ketchup`. The chain's final output id is
+// untouched, so `sim_core/src/sim/economy.rs`'s hardcoded contract needed no
+// change; `sim_core` needed none either, which is the milestone's actual
+// point — a process an order of magnitude longer than a craft cycle is a
+// number in this file, not a mechanism in Rust.
 (
     schema_version: 2,
     recipes: [
@@ -90,9 +102,55 @@
             machine: "cooking_vat",
             time_ticks: 240,
         ),
+        // Age: the milestone-7 stage (ARCHITECTURE.md §9 item 7, "Timed
+        // processes"). Cooked ketchup rests on a rack until it is ready to
+        // bottle. Nothing about this recipe is a new mechanism — it is an
+        // ordinary one-in/one-out entry running on the same generic
+        // `TimedProcess` (ARCHITECTURE.md §3.5) every machine above already
+        // uses. What is new is only its NUMBER.
+        //
+        // **2400 ticks = 40 seconds at ARCHITECTURE.md §3.9's 60 ticks/sec,
+        // exactly ten times the cooking vat's 240.** The milestone asks for
+        // a process "proven end to end" at a qualitatively different
+        // timescale from a craft cycle, and an exact 10x makes "an order of
+        // magnitude longer than anything else on the line" a fact a test can
+        // assert rather than a claim in a comment
+        // (`sim_core/tests/timed_processes.rs`). It is also the shortest
+        // duration that reads as *waiting* rather than as slow cooking: at
+        // 40 seconds a player watching the line sees the rack sit loaded
+        // while every other machine cycles repeatedly around it, which is
+        // precisely the feel GAMEPLAY.md §2's tier 6 (aged/fermented sauces)
+        // is built on. Pre-alpha proof, not balance — GAMEPLAY.md §10 puts
+        // exact numbers in a future balancing pass, and a real aged sauce
+        // would be far longer still.
+        //
+        // Thematically this is a placeholder on the only chain that exists.
+        // Ketchup is not an aged sauce; GAMEPLAY.md §2's tier 6 is where
+        // ageing genuinely belongs, and that tier has no chain yet. Rather
+        // than build a second production line just to hang one stage off it,
+        // the milestone proves the mechanism on the line already running —
+        // and it inserts MID-chain rather than at the end specifically so
+        // the proof covers the hard case: a long process with real stages
+        // both upstream and downstream of it, back-pressuring the one and
+        // starving the other. Replace this stage with a real tier-6 sauce
+        // when that content lands; the machinery under it will not change.
+        Recipe(
+            id: "aged_ketchup",
+            inputs: [("ketchup", 1)],
+            outputs: [("aged_ketchup", 1)],
+            machine: "aging_rack",
+            time_ticks: 2400,
+        ),
+        // Bottling now consumes `aged_ketchup` rather than `ketchup` — the
+        // one edit inserting the stage above required, and the reason it is
+        // an *insertion* rather than an append. The chain's FINAL output id
+        // is deliberately untouched (`boxed_ketchup`, below), so the
+        // hardcoded contract in `sim_core/src/sim/economy.rs` needed no
+        // change at all; see `sim_core/tests/timed_processes.rs`, which
+        // asserts exactly that.
         Recipe(
             id: "bottled_ketchup",
-            inputs: [("ketchup", 1)],
+            inputs: [("aged_ketchup", 1)],
             outputs: [("bottled_ketchup", 1)],
             machine: "bottler",
             time_ticks: 60,

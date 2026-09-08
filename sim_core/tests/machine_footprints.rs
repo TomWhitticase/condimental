@@ -95,15 +95,25 @@ fn kinds(entries: &[(&str, i32, i32)]) -> MachineRegistry {
 ///
 /// So: crusher 1 wide at x=4 (next stage at 5), mixer 1 wide at x=9 (next at
 /// 10), **cooking vat 2 wide at x=14, covering 14 and 15** (next at 16, one
-/// further east than a 1x1 would have put it), bottler at x=20, packer at
-/// x=25. Every stage's *origin* is on row 0; the vat is the one machine that
-/// also claims row 1.
-const EXPECTED_SHIPPED_LAYOUT: [(&str, &str, (i32, i32), i32, (i32, i32), (i32, i32)); 5] = [
+/// further east than a 1x1 would have put it), aging rack at x=20, bottler
+/// at x=25, packer at x=30. Every stage's *origin* is on row 0; the vat is
+/// the one machine that also claims row 1.
+///
+/// Milestone 7's aging rack is the reason the last two rows moved five tiles
+/// east of where the "Machines improvement" epic left them: it is an
+/// ordinary 1x1 stage inserted mid-chain, so it costs exactly one stage span
+/// (4 belt tiles + 1 machine tile) and shifts everything downstream by that
+/// much, changing nothing upstream. Note the packer's machine now sits at
+/// x=30 — one tile short of the east edge of chunk (0, 0) (ARCHITECTURE.md
+/// §3.1's 32x32 chunks). That headroom is why the rack is 1x1; see
+/// `data/machines.ron`'s note on the kind.
+const EXPECTED_SHIPPED_LAYOUT: [(&str, &str, (i32, i32), i32, (i32, i32), (i32, i32)); 6] = [
     ("tomato_paste", "crusher", (0, 0), 4, (4, 0), (1, 1)),
     ("ketchup_mix", "mixer", (5, 0), 4, (9, 0), (1, 1)),
     ("ketchup", "cooking_vat", (10, 0), 4, (14, 0), (2, 2)),
-    ("bottled_ketchup", "bottler", (16, 0), 4, (20, 0), (1, 1)),
-    ("boxed_ketchup", "packer", (21, 0), 4, (25, 0), (1, 1)),
+    ("aged_ketchup", "aging_rack", (16, 0), 4, (20, 0), (1, 1)),
+    ("bottled_ketchup", "bottler", (21, 0), 4, (25, 0), (1, 1)),
+    ("boxed_ketchup", "packer", (26, 0), 4, (30, 0), (1, 1)),
 ];
 
 #[test]

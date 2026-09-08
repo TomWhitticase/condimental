@@ -128,6 +128,35 @@
             id: "cooking_vat",
             footprint: Footprint(width_tiles: 2, height_tiles: 2),
         ),
+        // ARCHITECTURE.md §9 milestone 7's ("Timed processes") machine: a
+        // rack the sauce sits on to age, and the first piece of equipment on
+        // this line whose entire purpose is to make the product WAIT. Its
+        // recipe (`aged_ketchup` in `data/recipes.ron`) runs for 2400 ticks
+        // — ten times the cooking vat's cook — so what distinguishes this
+        // kind from every other one here is time, not throughput.
+        //
+        // 1x1, and deliberately so, even though it is the slowest machine on
+        // the line and the cooking-vat note above ties size to gravity. Two
+        // reasons. (1) Thematically an aging rack IS small per batch: the
+        // cost of ageing is that a batch occupies the rack for a long while,
+        // not that it needs a hall — a vat holds a whole batch in one vessel
+        // and a rack holds it on a shelf. Time is this machine's expense,
+        // and the footprint field cannot express time. (2) Mechanically, the
+        // chain now runs x = 0..30 and ARCHITECTURE.md §3.1's chunks are
+        // 32x32, so a 1x1 rack keeps the whole line inside chunk (0, 0) with
+        // exactly one tile to spare. That is a real constraint on this
+        // kind's size, not a hidden one: widening it (or anything upstream
+        // of the packer) pushes the last stage into chunk (1, 0), which is
+        // handled correctly — a machine is reported in every chunk it
+        // overlaps — but several tests pin the chain's chunk list, so it is
+        // a deliberate change rather than an accident. Ticket 2 (the Godot
+        // presentation half) may well want the rack to LOOK like a tall
+        // shelf of resting batches; height in voxels is free, height in
+        // tiles is not.
+        MachineKind(
+            id: "aging_rack",
+            footprint: Footprint(width_tiles: 1, height_tiles: 1),
+        ),
         // Tier 2's bottling & sealing line.
         MachineKind(
             id: "bottler",
