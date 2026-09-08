@@ -51,6 +51,20 @@
 # slot locked, which is exactly half of what needs reviewing. Implies the
 # money-earning run whether or not `--populate` was also passed.
 #
+# `--aging` runs the chain until the aging rack (ARCHITECTURE.md §9
+# milestone 7) is roughly half way through its 2400-tick process, so its
+# progress gauge is actually part-full in the shot. `--populate` alone stops
+# well before the rack has even loaded, and a gauge photographed at 0% is a
+# picture of an empty slot — exactly the half of the readout that does not
+# need reviewing. Same problem, and the same solution, as `--shop`'s
+# earn-some-money run. Implies `--populate`'s chain-running.
+#
+# `--hover-aging` is the sixth hover flag, over the aging rack's own tile —
+# the tooltip worth reviewing separately because milestone 7's timescale is
+# what made the old bare-percentage readout inadequate (see
+# `_machine_hover_text`). Combine it with `--aging` to photograph a real
+# part-way progress rather than "idle".
+#
 # `--closeup TX,TY[,SIZE]` re-aims the ISOMETRIC camera at one simulation
 # tile and zooms it right in (SIZE is the orthographic width in world units,
 # default CLOSEUP_SIZE). The whole-factory shot above is the right frame for
@@ -94,6 +108,13 @@ var _hover_hopper := false
 var _hover_tank := false
 var _shop := false
 var _contracts := false
+var _aging := false
+var _hover_aging := false
+## Ticks to keep driving the chain while waiting for the gauged stage, and
+## how far into its process to stop. Generous: the rack is the fifth stage,
+## so a crush, a mix and a 240-tick cook all have to happen upstream first.
+const AGING_TICK_LIMIT := 8000
+const AGING_TARGET_FRACTION := 0.5
 ## `--closeup` target tile and orthographic width; `_closeup` gates both.
 const CLOSEUP_SIZE := 9.0
 var _closeup := false
@@ -115,6 +136,8 @@ func _initialize() -> void:
 	_hover_tank = args.has("--hover-tank")
 	_shop = args.has("--shop")
 	_contracts = args.has("--contracts")
+	_aging = args.has("--aging")
+	_hover_aging = args.has("--hover-aging")
 	_parse_closeup(args)
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
@@ -293,6 +316,42 @@ func _contract_board_is_mixed() -> bool:
 	return made >= 1 and missed >= 1
 
 
+## The recipe id of the first stage whose machine kind declares a progress
+## gauge, from the SIMULATION's own layout — shared by `--aging` and
+## `--hover-aging` so neither types a tile in.
+func _gauged_stage_recipe() -> String:
+	for stage in JSON.parse_string(_main.sim.chain_layout_json()):
+		if _main.MACHINE_PROGRESS_GAUGES.has(String(stage.get("machine_kind", ""))):
+			return String(stage["recipe"])
+	return ""
+
+
+## Drives the real chain until the first machine kind declaring a progress
+## gauge (`main.gd`'s MACHINE_PROGRESS_GAUGES) is AGING_TARGET_FRACTION
+## through its process. Which stage that is comes from the simulation's own
+## layout, not from a tile typed in here.
+func _age_a_batch() -> void:
+	var gauged := _gauged_stage_recipe()
+	if gauged == "":
+		return # this content has no gauged stage; nothing to wait for
+	for i in range(AGING_TICK_LIMIT):
+		_main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
+		_main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
+		_main.sim.tick()
+		_main.sim.issue_command_json(JSON.stringify({"type": "collect_output"}))
+		_main._apply_dirty_chunks()
+		if _main._machine_progress(gauged) >= AGING_TARGET_FRACTION:
+			break
+	_main._update_machine_gauges()
+
+
+func _hover_over_aging_rack() -> void:
+	var gauged := _gauged_stage_recipe()
+	if gauged == "":
+		return
+	_hover_over_tile(_main._machine_tiles[gauged])
+
+
 func _open_shop_menu() -> void:
 	_earn_contract_money()
 	_main._set_shop_menu_open(true)
@@ -316,6 +375,10 @@ func _process(_delta: float) -> bool:
 		_hover_over_fluid_tank()
 	if _frames == 2 and _contracts:
 		_run_contract_cycles()
+	if _frames == 2 and _aging:
+		_age_a_batch()
+	if _frames == 2 and _hover_aging:
+		_hover_over_aging_rack()
 	if _frames == 2 and _shop:
 		_open_shop_menu()
 	if _frames == 2 and _closeup:

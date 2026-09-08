@@ -319,6 +319,54 @@ it's gone stale.
   the clipboard first landed, rendering as a clipped diagonal in dark ink on
   dark green. **This completes the contracts epic.**
 
+- 2026-09-08: ARCHITECTURE.md §9 milestone 7 ("Timed processes"), ticket 2 —
+  **the aging rack's presentation, and the project's first live progress
+  readout on a machine.** Ticket 1 put a 2400-tick `aging_rack` into the
+  chain; this draws it. `sim_core`, `SimBridge` and `data/` were not touched.
+  Five calls worth not re-litigating. (1) **The rack is the one machine on
+  the line with no mechanism, deliberately.** Every other kind is identified
+  by something that moves — flywheels, an agitator, a gantry, a taping head —
+  and the rack is identified by the absence of one, because what makes it
+  different from its neighbours is that it only *waits*. Four oak casks
+  standing on a stainless frame; standing rather than lying in a cradle
+  because a cask on its side recedes into the tile as a ridge under this
+  camera and four of them read as corrugation (UI_UX.md §2b point 15).
+  (2) **Its casks are oak, which is UI_UX.md §2b point 8's "food contact is
+  stainless" rule's one deliberate exception** — in a barrel-aging room the
+  wood *is* the process, and GAMEPLAY.md §2's tier 6 names "barrel-aged"
+  outright. Argued once at `palette.ron`'s `oak` entry so a later
+  consistency pass doesn't "fix" it to steel. (3) **A long process gets a
+  passive gauge; a short one does not.** `main.gd`'s `MACHINE_PROGRESS_GAUGES`
+  is keyed on machine kind and holds exactly one entry: a bar tracking the
+  crusher's 60-tick cycle would be a flicker, and five flickering bars along
+  a line is noise. The gauge itself is the FOURTH use of the
+  one-voxel-slab-scaled-every-frame mechanism (`pipe_fluid`, `hopper_fill`,
+  `fluid_tank_fill`), not a fifth mechanism. (4) **The bar is recomputed from
+  `current_tick()` every frame, not from a snapshot.** A machine dirties its
+  chunk only when its state changes, so nothing at all arrives during a
+  forty-second wait — a snapshot-driven bar would sit still and then jump.
+  This is the one place in the presentation layer where polling is not a
+  convenience but the only correct option, and `test_timed_processes.gd`
+  asserts it by ticking with no chunks applied. (5) **The gauge emits its
+  own light, and shows its scale when empty.** Both came off the rendered
+  scene: the face it sits on is permanently unlit under this camera + key
+  light, so a painted gauge is a dark stripe on a dark column; and a hidden
+  bar leaves a black slot with no indication of how far it has to climb, so
+  an always-lit green finish line marks the top (a position, not a state in
+  colour — UI_UX.md §7). Also: the hover tooltip now prints a remaining TIME
+  beside its percentage, because a percentage of a duration the player was
+  never told is not an answer at this timescale. **This completes milestone
+  7.** One thing fixed in passing that is worth knowing, though since
+  superseded: this ticket's branch predated the contracts epic's ticket 2
+  above, so `main.gd`'s contract panel still read the pre-multi-contract
+  `next_delivery_tick` field at the time, and the resulting GDScript error
+  **aborted `_process` at that line every frame**, silently stopping
+  fluid/hopper/hover/camera updates in the live scene. A narrow
+  tolerate-both-shapes patch fixed that live-blocking bug on this branch;
+  rebasing onto main afterward picked up the real N-contract clipboard
+  rebuild from the entry above instead, which is what actually shipped —
+  the narrow patch itself did not survive the rebase.
+
 - 2026-09-08: **Contracts are data, and several run at once** (GAMEPLAY.md
   §6/§9; ticket 1 of 2, the sim half — `godot_project/` deliberately
   untouched). Milestone 5's Economy MVP had exactly one `Contract`,

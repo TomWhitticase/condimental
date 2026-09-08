@@ -44,6 +44,11 @@ pub const ASSETS: &[Asset] = &[
     // every kind in `data/machines.ron` now has a silhouette of its own.
     Asset { name: "machine_bottler", build: machine_bottler },
     Asset { name: "machine_packer", build: machine_packer },
+    // ARCHITECTURE.md §9 milestone 7's machine, and the live bar that reads
+    // its progress — a `<model>` + `<model>_fill`-shaped pair, exactly like
+    // the hopper's and the tank's (see `aging_rack_gauge`).
+    Asset { name: "machine_aging_rack", build: machine_aging_rack },
+    Asset { name: "aging_rack_gauge", build: aging_rack_gauge },
     Asset { name: "hopper", build: hopper },
     Asset { name: "hopper_fill", build: hopper_fill },
     // The pipe run's supply vessel and the liquid column inside it (the
@@ -1326,6 +1331,192 @@ pub fn machine_packer(p: &Palette) -> VoxModel {
 }
 
 // ---------------------------------------------------------------------------
+// Aging rack (ARCHITECTURE.md §9 milestone 7, "Timed processes")
+// ---------------------------------------------------------------------------
+//
+// Numbers `main.gd` mirrors to place and scale the maturation gauge's bar,
+// stated in voxels — the same arrangement the pipe run (PIPE_BORE_*), the
+// hopper (HOPPER_FILL_*) and the tank (TANK_FILL_*) already use. Change one,
+// change both.
+/// Bottom of the gauge slot, i.e. where a progress of 0 sits.
+const GAUGE_Z0: i32 = 11;
+/// How far a full bar rises above that floor. One voxel short of the slot's
+/// own height, so a finished batch reads as a full bar inside a frame rather
+/// than as a bar that has burst out of it.
+const GAUGE_HEIGHT: i32 = 21;
+/// The slot's inner span. The bar model is exactly this cross-section, so it
+/// sits flush in the recess instead of hovering in front of it.
+const GAUGE_X: (i32, i32) = (27, 29);
+const GAUGE_Y: (i32, i32) = (0, 1);
+/// The gauge post itself: the rack's camera-near corner upright, thickened
+/// to carry the readout. High X and low Y is the one corner of a tile that
+/// both visible faces meet at (see the junction section's camera
+/// derivation), so it is the corner a glanceable readout belongs on.
+const GAUGE_POST_X: (i32, i32) = (26, 30);
+const GAUGE_POST_Y: (i32, i32) = (0, 4);
+
+/// `data/machines.ron`'s 1x1 `aging_rack` — ARCHITECTURE.md §9 milestone 7's
+/// machine: four oak casks resting on a stainless rack, with a maturation
+/// gauge on the corner post.
+///
+/// **The silhouette decision, which is the whole ticket.** Every other
+/// machine on this line is *driven* — the crusher has flywheels, the mixer an
+/// agitator, the bottler a gantry, the packer a taping head — and each of
+/// them is identified by its mechanism. This machine has no mechanism at
+/// all, deliberately: what makes it different from every stage around it is
+/// that it does nothing but hold a batch while 2400 ticks pass
+/// (`data/recipes.ron`) — over a minute of real time at the rate `main.gd`
+/// actually ticks, and ten times the longest process on the line. A rack
+/// is the honest shape for that, and "the one machine with no moving part"
+/// is also, at scene scale, a genuinely distinct read.
+///
+/// **Why casks, and why upright.** GAMEPLAY.md §2's tier 6 names
+/// "barrel-aged" outright, and a hooped cask is a silhouette nothing else in
+/// this factory has. They stand on end rather than lying in a cradle because
+/// of the camera (UI_UX.md §1, the (1, 1, 1) view direction): a cask lying on
+/// its side presents a round head to the camera but recedes into the tile as
+/// a long ridge, and four of them read as corrugation; standing, each is a
+/// separate round-topped object with its own visible head and bung, and four
+/// of those read as *four things resting* — which is the point.
+///
+/// **Material.** The rack, deck and gauge post are stainless per UI_UX.md
+/// §2b point 8; the casks are oak, which is that rule's one deliberate
+/// exception, argued at `palette.ron`'s `oak` entry rather than here.
+pub fn machine_aging_rack(p: &Palette) -> VoxModel {
+    // Taller than a tile, like the cooking vat: `data/machines.ron` explains
+    // that this kind stays 1x1 because its cost is TIME, not floor space —
+    // "height in voxels is free, height in tiles is not."
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 38]);
+    machine_footing(&mut m, p, (0, TILE_VOXELS as i32 - 1), 7, "paint_blue");
+
+    // Stainless deck the casks stand on, with a raised lip on the
+    // camera-facing edge so it reads as a tray rather than as a painted band.
+    m.cuboid((8, 27), (1, 30), (10, 11), p.idx("steel"));
+    m.cuboid((8, 27), (1, 1), (12, 12), p.idx("steel_light"));
+
+    // Four casks in a 2x2. Each is a stack of discs: a narrow chime at top
+    // and bottom, a belly in the middle. Hoops are full discs rather than
+    // rings on purpose — only the outer surface is ever visible, so a disc
+    // costs nothing and needs no ring primitive.
+    for cx in [13, 22] {
+        for cy in [10, 21] {
+            for (z0, z1, r, wood) in [
+                (12, 13, 3.4, "oak_dark"),
+                (14, 15, 3.9, "oak"),
+                (16, 24, 4.2, "oak"),
+                (25, 26, 3.9, "oak"),
+                (27, 28, 3.4, "oak_dark"),
+            ] {
+                m.cylinder_z((cx, cy), r, (z0, z1), p.idx(wood));
+            }
+            for (z, r) in [(14, 4.0), (18, 4.35), (23, 4.35), (27, 3.5)] {
+                m.cylinder_z((cx, cy), r, (z, z), p.idx("steel_dark"));
+            }
+            // Head and bung: what says "sealed and left alone" from above,
+            // which is the only angle this camera really sees a cask's top
+            // from.
+            m.cylinder_z((cx, cy), 3.2, (29, 29), p.idx("oak_dark"));
+            m.cuboid((cx - 1, cx + 1), (cy - 1, cy + 1), (29, 30), p.idx("brass"));
+        }
+    }
+
+    // The rack cage: legs and a top rectangle of beams. The legs stand in the
+    // two Y bands the casks do NOT occupy, which is also what keeps them
+    // clear of the infeed housing's camera-facing window (carved at y = 5..6
+    // — a leg there would be sliced in half by it).
+    //
+    // Three legs, not four: the camera-near corner's leg is the gauge post
+    // below, which stands in exactly that spot and is taller. Drawing both
+    // put two uprights within two voxels of each other and the rendered
+    // close-up read as a picket fence across the machine's front, with the
+    // readout lost among them.
+    //
+    // `steel`, not `steel_dark`: a vertical face on a metal catches almost
+    // no light at this fixed camera angle, so the first cut's dark legs
+    // rendered as black bars and became the machine's loudest feature —
+    // louder than the casks they exist to hold.
+    for (x0, x1, y0, y1) in [(9, 10, 2, 3), (9, 10, 28, 29), (25, 26, 28, 29)] {
+        m.cuboid((x0, x1), (y0, y1), (8, 34), p.idx("steel"));
+    }
+    for (y0, y1) in [(2, 3), (28, 29)] {
+        m.cuboid((9, 26), (y0, y1), (33, 34), p.idx("steel"));
+    }
+    for (x0, x1) in [(9, 10), (25, 26)] {
+        m.cuboid((x0, x1), (2, 29), (33, 34), p.idx("steel"));
+    }
+
+    // --- the maturation gauge ------------------------------------------
+    // A recessed slot in the corner post, with a bar that grows up it. See
+    // GAUGE_Z0 above and `aging_rack_gauge` below for the moving half.
+    m.cuboid(GAUGE_POST_X, GAUGE_POST_Y, (8, 36), p.idx("steel_light"));
+    // GENUINELY carved, not painted: a face is only culled when its
+    // neighbour is absent (see `VoxModel::erase`), so a slot filled with a
+    // dark colour would mesh flat and the bar would appear to be stuck to a
+    // wall rather than sitting in a channel.
+    m.carve_cuboid(GAUGE_X, GAUGE_Y, (GAUGE_Z0, GAUGE_Z0 + GAUGE_HEIGHT));
+    // Back of the slot, black, so an empty gauge reads as an EMPTY SLOT and
+    // not merely as "the amber one is off" — UI_UX.md §7 forbids state in
+    // colour alone, and an unlit bar is exactly that failure mode.
+    m.cuboid(GAUGE_X, (2, 2), (GAUGE_Z0, GAUGE_Z0 + GAUGE_HEIGHT), p.idx("hazard_black"));
+    // The finish line, at the head of the scale: the one part of this
+    // readout that is lit whether or not a batch is in. The gauge sits on a
+    // face the fixed camera can only ever see UNLIT (every vertical face
+    // pointing this way is away from the key light), so an empty slot is a
+    // black stripe on a dark column and the scale's extent is invisible —
+    // the player would have no idea how far the bar still has to travel.
+    // A green line does not encode state in colour alone; it is a position,
+    // and what it says is "when the amber reaches here, the batch is out."
+    m.cuboid(GAUGE_X, (0, 1), (GAUGE_Z0 + GAUGE_HEIGHT + 1, GAUGE_Z0 + GAUGE_HEIGHT + 1), p.idx("status_green"));
+    // Graduations down both sides of the slot, on the camera-facing face:
+    // brass, the same accent every "product passes through here" fitting in
+    // this factory already carries, and the thing that makes a bar read as a
+    // measurement rather than as a light.
+    for i in 0..=4 {
+        let z = GAUGE_Z0 + (GAUGE_HEIGHT * i) / 4;
+        for x in [GAUGE_POST_X.0, GAUGE_POST_X.1] {
+            m.cuboid((x, x), (0, 0), (z, z), p.idx("brass"));
+        }
+    }
+    // Weather hood over the head of the gauge, and a bracket at its foot.
+    m.cuboid((25, 31), (0, 5), (36, 36), p.idx("steel"));
+    m.cuboid((25, 31), (0, 5), (8, 9), p.idx("steel_dark"));
+
+    machine_infeed(&mut m, p, BELT_LANE);
+    machine_outfeed(&mut m, p, BELT_LANE, TILE_VOXELS as i32 - 1);
+
+    control_panel(&mut m, p, (11, 20), (3, 7), 2);
+    m
+}
+
+/// The bar standing in the aging rack's gauge — the live half of the
+/// readout, and the fourth asset built to this same one-voxel-slab pattern
+/// (`pipe_fluid`, `hopper_fill`, `fluid_tank_fill`).
+///
+/// **One voxel tall**: `main.gd` scales this node vertically to the
+/// machine's live process fraction, and a one-voxel slab scaled to N voxels
+/// is geometrically the same box as an N-voxel column with none of the pivot
+/// arithmetic (`vox::encode` puts a model's origin at its footprint centre
+/// *at ground level*).
+///
+/// `status_amber`, and therefore the `emissive` class: this is a status
+/// readout, which is exactly what UI_UX.md §7 reserves saturated colour for,
+/// and emissive is what lets it be read at a glance across a lit factory
+/// floor — the whole point of giving this process a passive indicator rather
+/// than leaving it to the hover tooltip. Unlike the fill bodies above it
+/// carries its own hue rather than a near-white one Godot tints: what a
+/// hopper holds is content, but "how far through" is one universal quantity
+/// with no per-machine colour to look up.
+pub fn aging_rack_gauge(p: &Palette) -> VoxModel {
+    debug_assert!(
+        GAUGE_Z0 + GAUGE_HEIGHT <= 32,
+        "a full bar would rise past the gauge slot"
+    );
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 1]);
+    m.cuboid(GAUGE_X, GAUGE_Y, (0, 0), p.idx("status_amber"));
+    m
+}
+
+// ---------------------------------------------------------------------------
 // Fluid tank (the "Visual overhaul round 2" epic — ticket 1's building)
 // ---------------------------------------------------------------------------
 //
@@ -1677,6 +1868,7 @@ mod tests {
             one_tile("machine_mixer", machine_mixer(p)),
             one_tile("machine_bottler", machine_bottler(p)),
             one_tile("machine_packer", machine_packer(p)),
+            one_tile("machine_aging_rack", machine_aging_rack(p)),
             Junctions {
                 name: "machine_cooking_vat",
                 model: machine_cooking_vat(p),
@@ -1780,6 +1972,44 @@ mod tests {
         // ... and neither dresses the end it does NOT meet a machine at.
         assert!(!inlet.filled(0, BELT_LANE.0 - 1, BELT_SURFACE_Z + 1), "belt_inlet dressed its upstream end");
         assert!(!outlet.filled(last, BELT_LANE.0 - 1, BELT_SURFACE_Z + 1), "belt_outlet dressed its downstream end");
+    }
+
+    /// The aging rack's maturation gauge (ARCHITECTURE.md §9 milestone 7).
+    /// Same class of check as the junctions above and for the same reason: a
+    /// slot painted dark meshes flat, so the bar would read as a sticker on
+    /// a wall rather than as a level in a channel — a distinction no
+    /// screenshot at scene scale can settle. Also pins the bar model to the
+    /// slot it is supposed to sit in, since the two are separate models that
+    /// only line up because `vox::encode` centres both on the same footprint.
+    #[test]
+    fn the_aging_racks_gauge_slot_is_genuinely_open_and_its_bar_fits_it() {
+        let p = palette();
+        let rack = machine_aging_rack(&p);
+        let bar = aging_rack_gauge(&p);
+        let mid_x = (GAUGE_X.0 + GAUGE_X.1) / 2;
+
+        for z in [GAUGE_Z0, GAUGE_Z0 + GAUGE_HEIGHT] {
+            assert!(
+                !rack.filled(mid_x, GAUGE_Y.0, z),
+                "the gauge slot is filled at z = {z} — a painted slot is not a slot"
+            );
+        }
+        // ...and it is a slot, not a hole through the post: the black back
+        // wall is what an empty gauge shows.
+        assert!(
+            rack.filled(mid_x, GAUGE_Y.1 + 1, GAUGE_Z0 + 1),
+            "the gauge slot has no back wall, so an empty gauge would show straight through"
+        );
+        // The bar occupies exactly the slot's cross-section, one voxel tall.
+        assert!(bar.filled(mid_x, GAUGE_Y.0, 0), "the gauge bar misses the slot");
+        assert!(!bar.filled(mid_x, GAUGE_Y.1 + 1, 0), "the gauge bar is deeper than the slot");
+        assert!(!bar.filled(GAUGE_X.1 + 1, GAUGE_Y.0, 0), "the gauge bar is wider than the slot");
+        // The slot has a head above a full bar, so the bar reads as filling
+        // a frame rather than as running off the top of the post.
+        assert!(
+            rack.filled(mid_x, GAUGE_Y.0, GAUGE_Z0 + GAUGE_HEIGHT + 2),
+            "the gauge slot is open above a full bar's head"
+        );
     }
 
     /// The pipe run's two ends. Its downstream end is closed by a blind

@@ -184,8 +184,46 @@ const MACHINE_MODELS := {
 	"cooking_vat": "machine_cooking_vat",
 	"bottler": "machine_bottler",
 	"packer": "machine_packer",
+	"aging_rack": "machine_aging_rack",
 }
 const MACHINE_MODEL_FALLBACK := "machine"
+
+## Which machine kinds draw a live PROGRESS GAUGE beside their model, and
+## which asset that gauge's moving bar is (ARCHITECTURE.md §9 milestone 7).
+##
+## Keyed on kind, like MACHINE_MODELS, and deliberately sparse: a gauge is
+## not a thing every machine should have. The crusher's whole process is 60
+## ticks — one second — so a bar tracking it would be a flicker, and five
+## flickering bars along the line would be noise rather than information.
+## The aging rack's is 2400 ticks (data/recipes.ron), forty seconds, which
+## is long enough that the interesting question about it is not "is it
+## running" (its status lamp already answers that) but "how far through is
+## it" — and that question deserves an answer a player gets by GLANCING,
+## not by parking a cursor on the machine and reading a tooltip. That is the
+## whole reason this mapping exists: the milestone is about a process at a
+## qualitatively different timescale, and a timescale you have to hover to
+## perceive has not really been presented.
+##
+## A kind with no entry here simply has no gauge — the same deliberate
+## fall-through MACHINE_MODELS documents, so pricing or shipping a new kind
+## never requires a Godot edit first.
+const MACHINE_PROGRESS_GAUGES := {
+	"aging_rack": "aging_rack_gauge",
+}
+
+## The gauge's slot geometry, mirroring assets/voxels/generators/assets.rs's
+## GAUGE_Z0 / GAUGE_HEIGHT — stated in voxels, the same arrangement (and the
+## same change-one-change-both warning) the pipe bore, the hopper fill and
+## the tank fill already carry.
+const MACHINE_GAUGE_FLOOR_VOXELS := 11
+const MACHINE_GAUGE_HEIGHT_VOXELS := 21
+const MACHINE_GAUGE_FLOOR_Y := FLOOR_Y + MACHINE_GAUGE_FLOOR_VOXELS * VOXEL_UNIT
+## Below this fraction the bar is hidden outright rather than drawn as a
+## sub-voxel sliver — the same call FLUID_MIN_VISIBLE_PRESSURE,
+## HOPPER_MIN_VISIBLE_FILL and FLUID_TANK_MIN_VISIBLE_FILL all make. An idle
+## rack therefore shows an empty black slot, which is a SHAPE difference
+## rather than a colour one (UI_UX.md §7).
+const MACHINE_GAUGE_MIN_VISIBLE := 0.01
 
 ## The chain's raw-ingredient hopper and the bulk product visible inside it.
 ## The fill body is the solid counterpart of PIPE_FLUID_ASSET and is driven
@@ -283,6 +321,7 @@ var _machine_tiles: Dictionary = {} # recipe id -> Vector2i machine ORIGIN tile 
 var _machine_footprints: Dictionary = {} # recipe id -> Vector2i(width, height) in tiles, from data/machines.ron
 var _last_machines: Dictionary = {} # recipe id -> last machine snapshot dict
 var _machine_lamps: Dictionary = {} # recipe id -> MeshInstance3D (emissive mesh)
+var _machine_gauges: Dictionary = {} # recipe id -> Node3D, the live progress bar (see MACHINE_PROGRESS_GAUGES)
 var _machine_running: Dictionary = {} # recipe id -> bool, to avoid redundant swaps
 var _item_nodes: Dictionary = {} # pooled item nodes, keyed per belt slot
 var _chain_tile_width := 5
@@ -723,6 +762,7 @@ func _build_chain() -> void:
 	# Cleared, not appended to: `_ready()` genuinely runs twice under the
 	# headless `--script` SceneTree harness (see test_hover.gd's header).
 	_belt_assets.clear()
+	_machine_gauges.clear()
 
 	var occupied := _machine_occupied_tiles(layout)
 	for stage in layout:
@@ -759,6 +799,22 @@ func _build_chain() -> void:
 			_machine_lamps[recipe] = lamp
 			_machine_running[recipe] = true # force the first update to apply
 			_set_machine_running(recipe, false)
+
+		# The progress bar, for the kinds that declare one. Built exactly the
+		# way the hopper's product body and the tank's liquid column are — a
+		# sibling node holding a one-voxel-tall model, rescaled every frame —
+		# rather than as a fourth mechanism. It is a SIBLING rather than a
+		# child of `machine` so that `machine.get_node_or_null("emissive")`
+		# above keeps finding the machine's own status lamps and nothing
+		# else: the bar's mesh is emissive too, and `_set_machine_running`
+		# swaps the whole emissive mesh's material.
+		if MACHINE_PROGRESS_GAUGES.has(kind):
+			var gauge := _asset_node(String(MACHINE_PROGRESS_GAUGES[kind]))
+			gauge.name = "gauge_%s" % recipe
+			gauge.position = _footprint_centre(origin, size, MACHINE_GAUGE_FLOOR_Y)
+			gauge.visible = false
+			stages.add_child(gauge)
+			_machine_gauges[recipe] = gauge
 
 
 ## Fills `_last_machines` (what the hover tooltip reads, see
@@ -1123,6 +1179,46 @@ func _update_fluid_network() -> void:
 		node.visible = pressure > FLUID_MIN_VISIBLE_PRESSURE
 		if node.visible:
 			node.scale.y = pressure * float(PIPE_BORE_HEIGHT_VOXELS)
+
+
+## How far through its current process one stage's machine is, as 0..1, or
+## -1.0 when it is idle. Derived from `_last_machines`'s own
+## `process` = `[start_tick, required_ticks]` pair plus the simulation's
+## current tick — NOT from a per-tick snapshot, and that distinction matters
+## here more than anywhere else in this file: a machine only dirties its
+## chunk when its state actually changes (a craft starts, a craft finishes),
+## so during the aging rack's 2400-tick wait no snapshot arrives at all.
+## Recomputing from `current_tick()` every frame is what makes a long
+## process animate smoothly rather than jump when it ends.
+## Pure given `_last_machines`/`sim.current_tick()`, so it is directly
+## testable — the same property `_machine_hover_text` is written for.
+func _machine_progress(recipe_id: String) -> float:
+	if not _last_machines.has(recipe_id):
+		return -1.0
+	var process = _last_machines[recipe_id].get("process")
+	if process == null:
+		return -1.0
+	var required: int = int(process[1])
+	if required <= 0:
+		return -1.0
+	var elapsed: int = sim.current_tick() - int(process[0])
+	return clampf(float(elapsed) / float(required), 0.0, 1.0)
+
+
+## Rescales every declared progress gauge to its machine's live process
+## fraction — the same one-poll/one-scaled-body pattern
+## `_update_fluid_network` established for a pipe's liquid and
+## `_update_hopper`/`_update_fluid_tank` reused for bulk and tank levels,
+## deliberately reused a fourth time rather than invented again.
+func _update_machine_gauges() -> void:
+	for recipe_id in _machine_gauges.keys():
+		var gauge: Node3D = _machine_gauges[recipe_id]
+		if gauge == null:
+			continue
+		var fraction := _machine_progress(recipe_id)
+		gauge.visible = fraction > MACHINE_GAUGE_MIN_VISIBLE
+		if gauge.visible:
+			gauge.scale.y = fraction * float(MACHINE_GAUGE_HEIGHT_VOXELS)
 
 
 func _set_machine_running(recipe: String, running: bool) -> void:
@@ -2337,6 +2433,7 @@ func _process(delta: float) -> void:
 	_update_fluid_network()
 	_update_hopper()
 	_update_fluid_tank()
+	_update_machine_gauges()
 	_update_hover_tooltip()
 	if _view_mode == ViewMode.ISOMETRIC:
 		_pan_camera(delta)
@@ -2590,16 +2687,44 @@ func _machine_hover_text(recipe_id: String) -> String:
 	var process = machine.get("process")
 	var progress_text := "idle"
 	if process != null:
-		var elapsed: int = sim.current_tick() - int(process[0])
 		var required: int = int(process[1])
-		var pct: float = clamp(float(elapsed) / float(required), 0.0, 1.0) * 100.0
-		progress_text = "%.0f%%" % pct
+		var elapsed: int = clampi(sim.current_tick() - int(process[0]), 0, required)
+		var pct: float = (float(elapsed) / float(required)) * 100.0 if required > 0 else 100.0
+		# The percentage ALONE stopped being enough at milestone 7's
+		# timescale. A 60-tick crush is over before a player finishes reading
+		# it, so "40%" is all it can usefully say; the aging rack's 2400-tick
+		# wait is forty real seconds, and "40%" of a number the player has
+		# never been told is not an answer to the question they are actually
+		# asking, which is "how long until this is done". So the remaining
+		# time is spelled out beside it, in seconds — the unit the player
+		# experiences — rather than in ticks, which are an implementation
+		# detail of ARCHITECTURE.md §3.9's fixed timestep. (At this scene's
+		# TICK_HZ the rack's 2400 ticks are 80 real seconds, not the 40 that
+		# data/recipes.ron's comment quotes at the nominal 60/sec rate —
+		# another reason to print a time rather than leave the player to
+		# convert one.)
+		progress_text = "%.0f%%  ·  %s left" % [pct, _format_remaining(required - elapsed)]
 	return "%s\n%s\nin: %s\nout: %s" % [
 		recipe_id,
 		progress_text,
 		_format_counts(machine["input"]),
 		_format_counts(machine["output"]),
 	]
+
+
+## A tick count as the wall-clock time it will take, at the rate this scene
+## actually advances the simulation (`TICK_HZ`) — deliberately not at
+## ARCHITECTURE.md §3.9's nominal 60/sec, because what the player is asking
+## is "how long do I wait", and they wait at the rate the game runs. If
+## TICK_HZ ever changes, every number this prints follows it, which is the
+## point of reading the constant rather than typing a rate in twice.
+## Minutes appear only once there is a minute to show, so the chain's short
+## stages still read as plain seconds. Pure, so a test can drive it directly.
+func _format_remaining(ticks: int) -> String:
+	var seconds: int = int(ceil(float(maxi(ticks, 0)) / TICK_HZ))
+	if seconds < 60:
+		return "%ds" % seconds
+	return "%dm %02ds" % [seconds / 60, seconds % 60]
 
 
 ## Which pipe segment sits on `tile` (see `_pipe_tiles`, populated once in

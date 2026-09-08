@@ -1,4 +1,7 @@
 {
+  "aging_rack_gauge": [
+    "emissive"
+  ],
   "belt": [
     "matte",
     "metal"
@@ -55,6 +58,11 @@
     "matte"
   ],
   "machine": [
+    "matte",
+    "metal",
+    "emissive"
+  ],
+  "machine_aging_rack": [
     "matte",
     "metal",
     "emissive"

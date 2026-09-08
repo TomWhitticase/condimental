@@ -126,5 +126,25 @@
         (name: "liquid_paste",   rgb: "#8E2418", class: "liquid"),
         (name: "liquid_mix",     rgb: "#AF3B27", class: "liquid"),
         (name: "liquid_ketchup", rgb: "#C4190E", class: "liquid"),
+
+        // --- oak, for the aging rack's casks (ARCHITECTURE.md §9
+        // milestone 7's machine) ---
+        // The one FOOD-CONTACT surface in this factory that is deliberately
+        // not stainless, and therefore the one deliberate exception to
+        // UI_UX.md §2b point 8's "food contact is stainless, structure is
+        // painted or poured" rule. A barrel is not made of wood because
+        // nobody had steel; the oak is doing the work — it is the process,
+        // which is exactly what the machine that holds it exists to depict
+        // (GAMEPLAY.md §2 tier 6, "barrel-aged"). Don't "fix" these to
+        // steel later.
+        //
+        // Matte, and warmer/redder than `cardboard` (#AD8450, the packer's
+        // case stock) on purpose: those are the factory's only two large
+        // warm surfaces, they sit two stages apart on the same line, and
+        // they have to stay tellable apart at scene scale. Shape does most
+        // of that work — a round hooped cask against a folded flat case —
+        // and hue does the rest.
+        (name: "oak",            rgb: "#7A4A28", class: "matte"),
+        (name: "oak_dark",       rgb: "#563117", class: "matte"),
     ],
 )

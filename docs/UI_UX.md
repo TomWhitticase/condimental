@@ -217,6 +217,63 @@ were only discoverable by building it:
     is what found it. Any presentation-side lookup keyed by a content id has
     this failure mode; the rendered scene is the only check for it.
 
+13. **A process an order of magnitude longer than a craft cycle needs a
+    passive readout, and on this camera that readout has to emit its own
+    light (ARCHITECTURE.md §9 milestone 7's aging rack).** Every machine
+    already reports *running vs. idle* through its status lamp, and the hover
+    tooltip already reports progress — which is enough while every process on
+    the line is one to four seconds long. It stops being enough at 2400
+    ticks: the only question a player has about a machine that will sit
+    loaded for over a minute is "how far through is it", and an answer you
+    have to park a cursor on is not an answer you can glance at. So the rack
+    carries a **maturation gauge**: a slot in its corner post with an
+    emissive amber bar scaled to the live process fraction — the fourth use
+    of the same one-voxel-slab-scaled-every-frame mechanism the pipe liquid,
+    the hopper fill and the tank level already use (point 5 above), not a
+    fifth mechanism.
+
+    Two things about it were only discoverable by rendering it. **The gauge
+    face is permanently unlit.** §1's fixed camera means the only visible
+    vertical faces are +X and +Z-world (point 11), and on this scene's key
+    light *both* of those read as shadow side — every bright surface in a
+    machine close-up is a horizontal one. A painted or brushed-metal gauge
+    would therefore be a dark stripe on a dark column; emissive is not
+    decoration here, it is the only thing that reads. **And an empty gauge
+    has to show its own scale.** With the bar hidden below its sub-voxel
+    threshold the slot is just black, so the player cannot see how far the
+    bar still has to climb — the fix is a lit green line at the head of the
+    scale, always on: a finish line, which is a *position* rather than a
+    state encoded in colour (§7). Amber climbing toward green is the whole
+    readout.
+
+    Corollary for the next machine that wants one: this is keyed on machine
+    *kind* (`main.gd`'s `MACHINE_PROGRESS_GAUGES`) and deliberately sparse. A
+    bar tracking the crusher's 60-tick cycle would be a flicker, and five
+    flickering bars along a line is noise, not information.
+
+14. **Wood is the one deliberate exception to point 8's "food contact is
+    stainless" rule.** The aging rack's casks are oak because in a real
+    barrel-aging room the wood *is* the process, not a material someone
+    settled for — and GAMEPLAY.md §2's tier 6 names "barrel-aged" outright.
+    It is also, with the packer's cardboard, one of only two large warm
+    surfaces in the factory, so its palette entry is deliberately browner and
+    redder than `cardboard`; shape does most of the work of telling them
+    apart (a round hooped cask against a folded flat case) and hue does the
+    rest. Recorded here so a later pass doesn't "correct" the barrels to
+    steel for consistency.
+
+15. **The machine with no mechanism is a legitimate silhouette.** Every other
+    kind on this line is identified by something that moves — flywheels, an
+    agitator, a filling gantry, a taping head (points 8/9). The aging rack
+    has none, on purpose: what distinguishes it from its neighbours is that
+    it only *waits*, and a rack of sealed casks with nothing driving them is
+    the honest shape for that. Casks stand on end rather than lying in a
+    cradle for the same camera reason as everything else here — lying down,
+    a cask presents one round head and then recedes into the tile as a long
+    ridge, and four of them render as corrugation; standing, each is a
+    separate round-topped object with a visible head and bung, and four of
+    those read as four things resting.
+
 ## 3. Theme & setting
 
 **A grounded, semi-realistic 21st-century industrial food factory** — stainless steel tanks, rubber conveyor belts, PVC/steel piping, poured concrete floors, hazard-stripe signage, factory floor lighting, pallets and crates, loading docks. The tone is closer to "a real bottling/food-processing plant you could actually walk into," rendered in voxels, than a whimsical toy-factory aesthetic.

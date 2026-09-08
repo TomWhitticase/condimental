@@ -13,7 +13,7 @@
 # default isometric one.
 #
 # Pass one of --hover / --hover-pipe / --hover-vat / --hover-hopper /
-# --hover-tank to park the cursor over the first machine, the fluid network's
+# --hover-tank / --hover-aging to park the cursor over the first machine, the fluid network's
 # machine-inlet pipe, the FAR CORNER of the multi-tile cooking vat, the
 # chain's hopper, or the pipe run's fluid tank, so that tooltip is in the
 # shot. (--hover-vat deliberately picks a non-origin tile: "any tile of a
@@ -25,6 +25,11 @@
 # contract clipboard is photographed with its dockets in genuinely different
 # states — satisfied / part-filled / missed — instead of three identical 0/N
 # checklists. --populate alone never collects anything, so it cannot show this.
+#
+# Pass --aging to run the chain until the aging rack is about half way
+# through its 2400-tick process, so its progress gauge is part-full in the
+# shot (ARCHITECTURE.md §9 milestone 7) — --populate alone stops before the
+# rack has even loaded.
 #
 # Pass --shop to run the chain until the contract has paid out and then open
 # the build menu (docs/UI_UX.md §5), so the menu is in the shot with some
@@ -41,7 +46,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --populate --closeup 8.4,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--populate] [--contracts] [--first-person] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank] [--shop] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--populate] [--contracts] [--first-person] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-aging] [--aging] [--shop] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

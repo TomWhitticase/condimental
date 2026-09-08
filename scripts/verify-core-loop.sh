@@ -12,7 +12,7 @@
 #      conservation across every stage, not just one. No Godot involved.
 #   2. `cargo xtask` builds the extension and copies it into
 #      godot_project/bin/.
-#   3. Eleven headless Godot scripts exercise the parts cargo test can't: the
+#   3. Twelve headless Godot scripts exercise the parts cargo test can't: the
 #      real `gdext` boundary (JSON command/snapshot/layout wire format going
 #      through Godot's own Variant/String/JSON machinery, driven through the
 #      whole chain end to end), the interactive scene's keyboard input
@@ -32,7 +32,12 @@
 #      non-origin footprint tile), and the "Shop & Inventory" epic's build
 #      menu (a grid of voxel-rendered icon slots built from
 #      shop_snapshot_json, toggled with B, affordability as a visible slot
-#      state, and a real purchase moving the displayed owned count).
+#      state, and a real purchase moving the displayed owned count), and
+#      milestone 7's aging rack (a bespoke model at the tile the simulation
+#      reports, and a progress gauge whose bar tracks a 2400-tick process
+#      recomputed from the live tick rather than from a chunk snapshot —
+#      which is the only way a process that dirties nothing for a minute at
+#      a time can be shown moving at all).
 #
 # Usage: scripts/verify-core-loop.sh
 
@@ -130,11 +135,14 @@ run_godot_script test_fluids.gd FLUIDS_OK "pipe rendering + fluid hover, milesto
 run_godot_script test_machines.gd MACHINES_OK "per-kind machine models, multi-tile footprints, hopper fill"
 run_godot_script test_connections.gd CONNECTIONS_OK "belt/pipe-to-machine junctions, visual overhaul round 2"
 run_godot_script test_shop_menu.gd SHOP_MENU_OK "build menu grid + purchases, UI_UX.md §5"
+run_godot_script test_timed_processes.gd TIMED_PROCESSES_OK "aging rack + live progress gauge, milestone 7"
 
 echo
 echo "PASS: milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"
 echo "      + icons + hover + milestone 6 fluid presentation + machine footprints/hopper"
-echo "      + belt/pipe junctions + the build menu, all verified headlessly (sim_core tests"
+echo "      + belt/pipe junctions + the build menu + milestone 7's aging rack and its"
+echo "      progress gauge, all verified headlessly (sim_core tests"
 echo "      + gdext boundary + interaction + 3D scene structure + pan/zoom + contract panel"
 echo "      structure + icons + hover tooltips + pipe/fluid rendering + per-kind machine"
-echo "      models and the hopper's fill + shop slots/affordability/purchases)."
+echo "      models and the hopper's fill + shop slots/affordability/purchases + the"
+echo "      rack's live progress bar)."
