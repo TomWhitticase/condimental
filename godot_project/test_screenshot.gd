@@ -36,6 +36,12 @@
 # All five hover flags share one implementation (`_hover_over_tile`) — they
 # differ only in which tile they ask the simulation for.
 #
+# `--shop` opens the build menu (docs/UI_UX.md §5, the "Shop & Inventory"
+# epic's ticket 2) before rendering, and first runs the chain far enough to
+# earn a contract payout — a menu photographed with zero money shows every
+# slot locked, which is exactly half of what needs reviewing. Implies the
+# money-earning run whether or not `--populate` was also passed.
+#
 # `--closeup TX,TY[,SIZE]` re-aims the ISOMETRIC camera at one simulation
 # tile and zooms it right in (SIZE is the orthographic width in world units,
 # default CLOSEUP_SIZE). The whole-factory shot above is the right frame for
@@ -65,6 +71,7 @@ var _hover_pipe := false
 var _hover_vat := false
 var _hover_hopper := false
 var _hover_tank := false
+var _shop := false
 ## `--closeup` target tile and orthographic width; `_closeup` gates both.
 const CLOSEUP_SIZE := 9.0
 var _closeup := false
@@ -84,6 +91,7 @@ func _initialize() -> void:
 	_hover_vat = args.has("--hover-vat")
 	_hover_hopper = args.has("--hover-hopper")
 	_hover_tank = args.has("--hover-tank")
+	_shop = args.has("--shop")
 	_parse_closeup(args)
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
@@ -213,6 +221,29 @@ func _run_chain_forward() -> void:
 	_main._apply_dirty_chunks()
 
 
+## Ticks the real chain until the hardcoded contract pays out at least once,
+## so `--shop` photographs a menu with some slots affordable and some not.
+## `collect_output` every tick is a documented no-op on an empty machine, so
+## this needs no chunk inspection — same drive loop test_shop_menu.gd uses.
+const SHOP_EARN_TICK_LIMIT := 20000
+
+
+func _earn_contract_money() -> void:
+	for i in range(SHOP_EARN_TICK_LIMIT):
+		_main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
+		_main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
+		_main.sim.tick()
+		_main.sim.issue_command_json(JSON.stringify({"type": "collect_output"}))
+		if float(JSON.parse_string(_main.sim.shop_snapshot_json())["money"]) > 0.0:
+			break
+	_main._apply_dirty_chunks()
+
+
+func _open_shop_menu() -> void:
+	_earn_contract_money()
+	_main._set_shop_menu_open(true)
+
+
 func _process(_delta: float) -> bool:
 	_frames += 1
 	if _frames == 1 and _first_person:
@@ -229,6 +260,8 @@ func _process(_delta: float) -> bool:
 		_hover_over_hopper()
 	if _frames == 2 and _hover_tank:
 		_hover_over_fluid_tank()
+	if _frames == 2 and _shop:
+		_open_shop_menu()
 	if _frames == 2 and _closeup:
 		_enter_closeup()
 	if _frames < WARMUP_FRAMES:

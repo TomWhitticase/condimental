@@ -249,6 +249,23 @@ const ITEM_MODELS := {
 }
 const ITEM_MODEL_FALLBACK := "item_box"
 
+## Which voxel model's icon stands for each *buildable kind* in the build
+## menu (the "Shop & Inventory" epic's ticket 2). This is the kind-id twin of
+## ITEM_MODELS above — `data/shop.ron`'s ids are buildable kinds, not item
+## ids, so they can't go through that table — and it only needs to name the
+## kinds MACHINE_MODELS doesn't already cover: the two pieces of
+## infrastructure and the two buffers, each of which happens to share its
+## asset's own name. `_shop_asset_for` consults this first, then
+## MACHINE_MODELS, then MACHINE_MODEL_FALLBACK, so a kind added to
+## `data/shop.ron` still shows *something* rather than vanishing from the
+## menu — the same deliberate fallback MACHINE_MODELS documents.
+const SHOP_MODELS := {
+	"belt": "belt",
+	"pipe": "pipe",
+	"hopper": "hopper",
+	"fluid_tank": "fluid_tank",
+}
+
 ## UI icons (UI_UX.md §5): small, transparent-background renders of the same
 ## voxel models above, generated offline by
 ## assets/voxels/generators/icons.rs (`cargo run -p voxgen --bin voxicons`,
@@ -334,6 +351,29 @@ const CONTRACT_CHECKLIST_MAX_BOXES := 12 # beyond this, fall back to one box rep
 # --- Voxel-rendered UI icons (UI_UX.md §5) ---------------------------------
 var _icon_cache: Dictionary = {} # asset name -> Texture2D, see _icon_for
 var _icon_fallback_texture: Texture2D
+
+# --- The build menu (the "Shop & Inventory" epic's ticket 2) ---------------
+## UI_UX.md §5's "build/recipe menus as grids of voxel-rendered icon slots",
+## driven entirely from `shop_snapshot_json` — the catalog, its prices, what
+## the player owns and what they can afford all arrive in that one object, so
+## nothing about the menu's contents is written down here.
+var _shop_menu: PanelContainer
+var _shop_money_label: Label
+## One dictionary per catalog entry, in the snapshot's own order (which is
+## `data/shop.ron`'s file order, i.e. the intended menu order):
+## {kind, button, icon, price_label, owned_label}.
+var _shop_slots: Array = []
+var _shop_open := false
+## How many icon slots fit across before wrapping. Three, so the shipped
+## nine-kind catalog reads as a tidy 3x3 block rather than one long strip.
+const SHOP_SLOT_COLUMNS := 3
+const SHOP_SLOT_SIZE := Vector2(150, 152)
+const SHOP_ICON_SIZE := Vector2(52, 52)
+## Slots 1..9 get a number-key shortcut printed in their corner; a tenth
+## catalog entry would simply be click-only rather than silently stealing
+## KEY_0. Minecraft-adjacent on purpose (UI_UX.md §5's hotbar), and it is
+## also the only way to buy while first-person has the mouse captured.
+const SHOP_HOTKEY_SLOTS := 9
 
 # Hover tooltip (docs/UI_UX.md §5: "hover tooltips for recipe/machine detail
 # rather than dense always-on text") — see _tile_under_screen_pos/
@@ -1110,8 +1150,8 @@ const FP_NEAR := 0.05 # much closer than ISO_NEAR — this mode gets right up ne
 const CROSSHAIR_SIZE := 14.0 # px, each bar's length
 const CROSSHAIR_THICKNESS := 2.0 # px, each bar's width
 
-const ISO_HELP_TEXT := "SPACE: load the hopper    V: load the fluid tank    C: collect product    WASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
-const FP_HELP_TEXT := "V: load the fluid tank    C: collect product    WASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
+const ISO_HELP_TEXT := "SPACE: load the hopper    V: load the fluid tank    C: collect product    B: build menu    WASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
+const FP_HELP_TEXT := "V: load the fluid tank    C: collect product    B: build menu    WASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
 
 
 func _build_camera() -> void:
@@ -1317,8 +1357,7 @@ func _set_view_mode(mode: int) -> void:
 	if mode == _view_mode:
 		return
 	_view_mode = mode
-	if _crosshair != null:
-		_crosshair.visible = mode == ViewMode.FIRST_PERSON
+	_update_crosshair_visibility()
 
 	if mode == ViewMode.FIRST_PERSON:
 		_iso_dragging = false
@@ -1334,7 +1373,10 @@ func _set_view_mode(mode: int) -> void:
 		_camera.fov = FP_FOV
 		_camera.near = FP_NEAR
 		_camera.keep_aspect = Camera3D.KEEP_HEIGHT
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		# ...unless the build menu is up, which needs the cursor (see
+		# _set_shop_menu_open); closing it recaptures.
+		if not _shop_open:
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		_update_fp_camera_transform()
 		if _help_label != null:
 			_help_label.text = FP_HELP_TEXT
@@ -1530,6 +1572,10 @@ func _build_ui() -> void:
 	# clip bar, checkbox-style tick marks for delivery progress.
 	_build_contract_panel(hud, settings)
 
+	# UI_UX.md §5's other named widget: "build/recipe menus as grids of
+	# voxel-rendered icon slots." Hidden until B is pressed.
+	_build_shop_menu(hud, settings)
+
 	# The hover tooltip (docs/UI_UX.md §5): replaces the always-on per-machine
 	# text this panel used to show — see _build_hover_tooltip/
 	# _update_hover_tooltip below.
@@ -1694,6 +1740,314 @@ func _build_contract_checklist_row(body: VBoxContainer, ink_settings: LabelSetti
 	_contract_checklist_boxes[item_id] = boxes
 
 
+# --------------------------------------------------------------------------
+# The build menu (UI_UX.md §5, the "Shop & Inventory" epic's ticket 2)
+# --------------------------------------------------------------------------
+
+## The player's first real agency: a grid of voxel-rendered icon slots, one
+## per `data/shop.ron` entry, that spends contract money on equipment.
+##
+## Everything on it comes from `shop_snapshot_json` — kinds, order, unit
+## prices, owned counts and affordability — so adding a kind to
+## `data/shop.ron` puts a slot here with no Godot edit, exactly the way
+## adding a recipe already extends the chain. Ticket 1's snapshot is polled
+## rather than pushed, per its own doc: a purchase changes money and a count,
+## never a tile, so `dirty_chunk_ids()` will never report one.
+##
+## Visual language is the scene's DARK PLATE, not the contract clipboard's
+## paper — the same near-black panel with a hazard-yellow rule the HUD strip
+## and the hover tooltip already use. The clipboard motif is for orders and
+## checklists (UI_UX.md §5 says so explicitly); a build menu is machine-side
+## factory UI, and it also has to stay legible while floating over a lit 3D
+## scene, which is exactly what that dark plate exists for.
+func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.06, 0.06, 0.07, 0.94)
+	panel_style.border_color = Color(0.85, 0.63, 0.11, 0.95)
+	panel_style.border_width_top = 4
+	panel_style.border_width_left = 2
+	panel_style.border_width_right = 2
+	panel_style.border_width_bottom = 2
+	panel_style.set_content_margin_all(16.0)
+
+	_shop_menu = PanelContainer.new()
+	_shop_menu.name = "ShopMenu"
+	_shop_menu.add_theme_stylebox_override("panel", panel_style)
+	_shop_menu.visible = false
+	hud.add_child(_shop_menu)
+
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", 10)
+	_shop_menu.add_child(body)
+
+	var title_settings := LabelSettings.new()
+	title_settings.font_size = base_settings.font_size + 4
+	title_settings.font_color = base_settings.font_color
+	title_settings.outline_size = base_settings.outline_size
+	title_settings.outline_color = base_settings.outline_color
+
+	var title := Label.new()
+	title.label_settings = title_settings
+	title.text = "BUILD MENU"
+	body.add_child(title)
+
+	# Money is repeated here rather than left to the contract clipboard in
+	# the opposite screen corner. The decision a player makes in this menu is
+	# "can I afford that", and making them look across the screen to answer it
+	# is exactly the readability problem UI_UX.md §5 is about. It is the same
+	# number from the same snapshot — `shop_snapshot_json` carries `money`
+	# precisely so a build menu is one call — not a second counter.
+	var money_settings := LabelSettings.new()
+	money_settings.font_size = base_settings.font_size + 6
+	money_settings.font_color = Color(0.98, 0.85, 0.42) # the panel's own hazard accent
+	money_settings.outline_size = base_settings.outline_size
+	money_settings.outline_color = base_settings.outline_color
+
+	_shop_money_label = Label.new()
+	_shop_money_label.label_settings = money_settings
+	body.add_child(_shop_money_label)
+
+	var grid := GridContainer.new()
+	grid.name = "ShopGrid"
+	grid.columns = SHOP_SLOT_COLUMNS
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	body.add_child(grid)
+
+	var snapshot: Dictionary = JSON.parse_string(sim.shop_snapshot_json())
+	var entries: Array = snapshot.get("entries", [])
+	for index in range(entries.size()):
+		_build_shop_slot(grid, base_settings, index, String(entries[index]["kind"]))
+
+	var footer := Label.new()
+	footer.label_settings = base_settings
+	footer.text = "click a slot (or press its number) to buy one    B: close"
+	body.add_child(footer)
+
+	_shop_menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
+
+
+## One icon slot. A Button rather than a Panel so pressing it is the whole
+## interaction — no selection cursor, no confirm step, no second mode to
+## explain; this is the project's first interactive menu and the simplest
+## thing that works is the right thing. Its label children ignore the mouse
+## so the entire square stays one click target.
+func _build_shop_slot(grid: GridContainer, base_settings: LabelSettings, index: int, kind: String) -> void:
+	var button := Button.new()
+	button.name = "ShopSlot_%s" % kind
+	button.custom_minimum_size = SHOP_SLOT_SIZE
+	button.focus_mode = Control.FOCUS_NONE
+	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+		button.add_theme_stylebox_override(state, _shop_slot_style(state))
+	button.pressed.connect(_on_shop_slot_pressed.bind(index))
+	grid.add_child(button)
+
+	# Anchored over the button rather than parented through a container: a
+	# Button lays its own (text) content out and is not a container, so its
+	# children have to place themselves.
+	var column := VBoxContainer.new()
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_theme_constant_override("separation", 2)
+	column.set_anchors_preset(Control.PRESET_FULL_RECT)
+	column.offset_left = 8
+	column.offset_right = -8
+	column.offset_top = 8
+	column.offset_bottom = -8
+	button.add_child(column)
+
+	# The hotkey corner. Slots past SHOP_HOTKEY_SLOTS simply show nothing
+	# here and stay click-only, rather than inventing a second key scheme.
+	var hotkey_settings := LabelSettings.new()
+	hotkey_settings.font_size = base_settings.font_size - 3
+	hotkey_settings.font_color = Color(0.62, 0.64, 0.68)
+	hotkey_settings.outline_size = base_settings.outline_size
+	hotkey_settings.outline_color = base_settings.outline_color
+
+	var hotkey := Label.new()
+	hotkey.name = "Hotkey"
+	hotkey.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hotkey.label_settings = hotkey_settings
+	hotkey.text = str(index + 1) if index < SHOP_HOTKEY_SLOTS else ""
+	column.add_child(hotkey)
+
+	var icon := TextureRect.new()
+	icon.name = "Icon"
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.custom_minimum_size = SHOP_ICON_SIZE
+	# Same reason _build_contract_checklist_row gives: without
+	# EXPAND_IGNORE_SIZE a TextureRect's minimum size is the source PNG's own
+	# 64x64, which would win over custom_minimum_size above.
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.texture = _icon_for_asset(_shop_asset_for(kind))
+	column.add_child(icon)
+
+	var name_label := Label.new()
+	name_label.name = "KindName"
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	name_label.label_settings = base_settings
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	name_label.text = _kind_display_name(kind)
+	column.add_child(name_label)
+
+	var price_settings := LabelSettings.new()
+	price_settings.font_size = base_settings.font_size
+	price_settings.font_color = base_settings.font_color
+	price_settings.outline_size = base_settings.outline_size
+	price_settings.outline_color = base_settings.outline_color
+
+	var price_label := Label.new()
+	price_label.name = "Price"
+	price_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	price_label.label_settings = price_settings
+	price_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(price_label)
+
+	var owned_settings := LabelSettings.new()
+	owned_settings.font_size = base_settings.font_size - 2
+	owned_settings.font_color = Color(0.66, 0.68, 0.72)
+	owned_settings.outline_size = base_settings.outline_size
+	owned_settings.outline_color = base_settings.outline_color
+
+	var owned_label := Label.new()
+	owned_label.name = "Owned"
+	owned_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	owned_label.label_settings = owned_settings
+	owned_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(owned_label)
+
+	_shop_slots.append({
+		"kind": kind,
+		"button": button,
+		"icon": icon,
+		"price_label": price_label,
+		"owned_label": owned_label,
+	})
+
+
+## Flat-shaded slot squares with chunky borders — UI_UX.md §5's Minecraft
+## adjacency, and deliberately the same near-black/hazard-yellow pair the
+## rest of the HUD already uses rather than a third palette.
+func _shop_slot_style(state: String) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.set_border_width_all(3)
+	style.set_content_margin_all(6.0)
+	match state:
+		"hover", "focus":
+			style.bg_color = Color(0.19, 0.19, 0.21, 0.98)
+			style.border_color = Color(0.85, 0.63, 0.11, 0.95)
+		"pressed":
+			style.bg_color = Color(0.30, 0.24, 0.08, 0.98)
+			style.border_color = Color(0.98, 0.80, 0.22, 1.0)
+		"disabled":
+			# Visibly recessed and dim: an unaffordable slot reads as "off"
+			# from its border and background as well as its greyed icon and
+			# its price glyph, never from colour alone (UI_UX.md §7).
+			style.bg_color = Color(0.08, 0.08, 0.09, 0.92)
+			style.border_color = Color(0.20, 0.21, 0.23, 0.95)
+		_:
+			style.bg_color = Color(0.13, 0.14, 0.16, 0.96)
+			style.border_color = Color(0.36, 0.38, 0.42, 0.95)
+	return style
+
+
+## Which asset's icon stands for a buildable kind — see SHOP_MODELS.
+func _shop_asset_for(kind: String) -> String:
+	if SHOP_MODELS.has(kind):
+		return SHOP_MODELS[kind]
+	return MACHINE_MODELS.get(kind, MACHINE_MODEL_FALLBACK)
+
+
+## "cooking_vat" -> "Cooking Vat". Kind ids are content, so the menu titles
+## itself from them rather than carrying a hand-written label per kind that
+## a new `data/shop.ron` entry would silently miss.
+func _kind_display_name(kind: String) -> String:
+	var words: PackedStringArray = kind.split("_", false)
+	var out: Array[String] = []
+	for word in words:
+		out.append(word.capitalize())
+	return " ".join(out)
+
+
+## Repolls `shop_snapshot_json` and redraws every slot. Called each frame
+## while the menu is open and once on opening — cheap (one JSON parse of a
+## nine-entry object) and it means money earned by the running factory makes
+## a slot become affordable under the player's eyes.
+func _update_shop_menu() -> void:
+	if _shop_menu == null:
+		return
+	var snapshot: Dictionary = JSON.parse_string(sim.shop_snapshot_json())
+	var entries: Array = snapshot.get("entries", [])
+	_shop_money_label.text = "Money: %.0f" % float(snapshot.get("money", 0.0))
+
+	for index in range(_shop_slots.size()):
+		if index >= entries.size():
+			break
+		var slot: Dictionary = _shop_slots[index]
+		var entry: Dictionary = entries[index]
+		var affordable: bool = bool(entry.get("affordable", false))
+		var price: float = float(entry.get("price", 0.0))
+
+		# Three independent signals for "you can't afford this", per
+		# UI_UX.md §7's never-colour-alone rule: the price gains a "✗" mark,
+		# the icon dims, and the whole slot is disabled (which also recolours
+		# its border/background via the disabled stylebox).
+		slot["price_label"].text = ("Cost %.0f" % price) if affordable else ("Cost %.0f  ✗" % price)
+		slot["price_label"].label_settings.font_color = (
+			Color(0.92, 0.93, 0.94) if affordable else Color(0.55, 0.50, 0.48)
+		)
+		slot["icon"].modulate = Color.WHITE if affordable else Color(0.42, 0.42, 0.45, 0.75)
+		slot["button"].disabled = not affordable
+		slot["owned_label"].text = "Owned %d" % int(entry.get("owned", 0))
+
+
+func _on_shop_slot_pressed(index: int) -> void:
+	_buy_slot(index)
+
+
+## Buys exactly one of the slot's kind. Quantity is deliberately fixed at
+## one — `PlayerCommand::Purchase`'s own wire default — so a click means one
+## thing and the menu needs no quantity widget. An unaffordable or unknown
+## purchase is a silent no-op in the simulation, so the only thing this has
+## to do afterwards is re-read the snapshot either way.
+func _buy_slot(index: int) -> void:
+	if index < 0 or index >= _shop_slots.size():
+		return
+	var kind: String = _shop_slots[index]["kind"]
+	sim.issue_command_json(JSON.stringify({"type": "purchase", "kind": kind}))
+	_update_shop_menu()
+
+
+func _set_shop_menu_open(open: bool) -> void:
+	if _shop_menu == null or open == _shop_open:
+		return
+	_shop_open = open
+	_shop_menu.visible = open
+	if open:
+		_update_shop_menu()
+	# The menu is clickable in first-person too, which means handing the
+	# mouse back while it is up and recapturing it on close — otherwise the
+	# only way to buy in that mode would be the number keys.
+	if _view_mode == ViewMode.FIRST_PERSON:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
+	_update_crosshair_visibility()
+
+
+## The crosshair stands in for the cursor in first-person — so it belongs on
+## screen in exactly the case where there is no real cursor. With the build
+## menu up the mouse is handed back (above), and leaving the crosshair drawn
+## would park a stray mark on top of a menu slot.
+func _update_crosshair_visibility() -> void:
+	if _crosshair == null:
+		return
+	_crosshair.visible = _view_mode == ViewMode.FIRST_PERSON and not _shop_open
+
+
+func _toggle_shop_menu() -> void:
+	_set_shop_menu_open(not _shop_open)
+
+
 func _build_hover_tooltip(hud: CanvasLayer) -> void:
 	# The hover tooltip (docs/UI_UX.md §5): a small, separately-positioned
 	# panel that follows the cursor and shows one stage's recipe/progress/
@@ -1781,6 +2135,10 @@ func _process(delta: float) -> void:
 		_tick_accum = 0.0
 
 	_update_contract_panel()
+	if _shop_open:
+		# Only while it's up: money the running factory earns should make a
+		# slot go from unaffordable to affordable while the player watches.
+		_update_shop_menu()
 	_update_fluid_network()
 	_update_hopper()
 	_update_fluid_tank()
@@ -1826,11 +2184,31 @@ func _unhandled_input(event: InputEvent) -> void:
 		if _view_mode == ViewMode.ISOMETRIC:
 			if _iso_dragging:
 				_apply_drag_pan(event.relative)
-		else:
+		elif not _shop_open:
+			# With the build menu up in first-person the mouse is visible and
+			# is being used to click slots — swinging the camera with it too
+			# would make the menu unusable.
 			_apply_look(event.relative)
 		return
 
 	if not (event is InputEventKey and event.pressed and not event.echo):
+		return
+
+	# B opens and closes the build menu (the "Shop & Inventory" epic's ticket
+	# 2). Handled in BOTH view modes, like V and unlike SPACE: it collides
+	# with nothing in either, and buying equipment is not something the
+	# player should have to leave first-person to do.
+	if event.keycode == KEY_B:
+		_toggle_shop_menu()
+		return
+
+	# While the menu is up, the number keys buy the slot they label — the
+	# keyboard half of the interaction, and the only half available in
+	# first-person if the player would rather not free the mouse. They do
+	# nothing at all when the menu is closed, so this reserves no key from
+	# whatever a later epic wants a hotbar to do.
+	if _shop_open and event.keycode >= KEY_1 and event.keycode <= KEY_9:
+		_buy_slot(event.keycode - KEY_1)
 		return
 
 	if _view_mode == ViewMode.ISOMETRIC:
@@ -2141,6 +2519,11 @@ func _hover_text_at_tile(tile: Vector2i) -> String:
 func _update_hover_tooltip() -> void:
 	if _hover_tooltip == null:
 		return
+	if _shop_open:
+		# The build menu sits over the middle of the screen; a world tooltip
+		# chasing the cursor across it would just be two panels fighting.
+		_hover_tooltip.visible = false
+		return
 	var vp := get_viewport()
 	if vp == null:
 		_hover_tooltip.visible = false
@@ -2230,7 +2613,16 @@ func _set_checkbox_checked(box: Panel, checked: bool) -> void:
 ## regenerated), still returns a real, non-null Texture2D: a plain
 ## placeholder swatch, never null and never a silently-broken texture.
 func _icon_for(item_id: String) -> Texture2D:
-	var asset: String = ITEM_MODELS.get(item_id, ITEM_MODEL_FALLBACK)
+	return _icon_for_asset(ITEM_MODELS.get(item_id, ITEM_MODEL_FALLBACK))
+
+
+## The loading/caching/fallback half of `_icon_for`, keyed by ASSET name
+## rather than item id — extracted (behaviour unchanged) when the build menu
+## needed icons for *buildable kinds*, which resolve through SHOP_MODELS/
+## MACHINE_MODELS instead of ITEM_MODELS. Both callers share this one cache
+## and this one documented fallback; there is deliberately not a second icon
+## system.
+func _icon_for_asset(asset: String) -> Texture2D:
 	if _icon_cache.has(asset):
 		return _icon_cache[asset]
 

@@ -20,6 +20,11 @@
 # multi-tile machine identifies it" is what the "Machines improvement"
 # milestone added, and hovering the origin would not show it.)
 #
+# Pass --shop to run the chain until the contract has paid out and then open
+# the build menu (docs/UI_UX.md §5), so the menu is in the shot with some
+# slots affordable and some not — the only way to review it without a live
+# interactive session, the same problem the --hover flags solve.
+#
 # Pass --closeup TX,TY[,SIZE] to aim the isometric camera at one simulation
 # tile and zoom right in (SIZE is the orthographic width in world units;
 # fractional tile coordinates are allowed, because a junction sits ON a tile
@@ -30,7 +35,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --populate --closeup 8.4,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--populate] [--first-person] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--populate] [--first-person] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank] [--shop] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

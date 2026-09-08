@@ -12,7 +12,7 @@
 #      conservation across every stage, not just one. No Godot involved.
 #   2. `cargo xtask` builds the extension and copies it into
 #      godot_project/bin/.
-#   3. Ten headless Godot scripts exercise the parts cargo test can't: the
+#   3. Eleven headless Godot scripts exercise the parts cargo test can't: the
 #      real `gdext` boundary (JSON command/snapshot/layout wire format going
 #      through Godot's own Variant/String/JSON machinery, driven through the
 #      whole chain end to end), the interactive scene's keyboard input
@@ -28,7 +28,10 @@
 #      "Machines improvement" milestone's presentation (a bespoke model per
 #      machine kind, a multi-tile machine actually covering its footprint,
 #      the hopper drawn with a live product level, and hover resolving a
-#      non-origin footprint tile).
+#      non-origin footprint tile), and the "Shop & Inventory" epic's build
+#      menu (a grid of voxel-rendered icon slots built from
+#      shop_snapshot_json, toggled with B, affordability as a visible slot
+#      state, and a real purchase moving the displayed owned count).
 #
 # Usage: scripts/verify-core-loop.sh
 
@@ -125,10 +128,12 @@ run_godot_script test_hover.gd HOVER_OK "machine hover tooltips, UI_UX.md §5"
 run_godot_script test_fluids.gd FLUIDS_OK "pipe rendering + fluid hover, milestone 6"
 run_godot_script test_machines.gd MACHINES_OK "per-kind machine models, multi-tile footprints, hopper fill"
 run_godot_script test_connections.gd CONNECTIONS_OK "belt/pipe-to-machine junctions, visual overhaul round 2"
+run_godot_script test_shop_menu.gd SHOP_MENU_OK "build menu grid + purchases, UI_UX.md §5"
 
 echo
 echo "PASS: milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"
-echo "      + icons + hover + milestone 6 fluid presentation + machine footprints/hopper,"
-echo "      all verified headlessly (sim_core tests + gdext boundary + interaction + 3D scene"
-echo "      structure + pan/zoom + contract panel structure + icons + hover tooltips"
-echo "      + pipe/fluid rendering + per-kind machine models and the hopper's fill)."
+echo "      + icons + hover + milestone 6 fluid presentation + machine footprints/hopper"
+echo "      + belt/pipe junctions + the build menu, all verified headlessly (sim_core tests"
+echo "      + gdext boundary + interaction + 3D scene structure + pan/zoom + contract panel"
+echo "      structure + icons + hover tooltips + pipe/fluid rendering + per-kind machine"
+echo "      models and the hopper's fill + shop slots/affordability/purchases)."
