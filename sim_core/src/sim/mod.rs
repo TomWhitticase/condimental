@@ -5,6 +5,7 @@
 
 pub mod belt;
 pub mod contracts;
+pub mod dock;
 pub mod economy;
 pub mod fluid;
 pub mod hopper;
@@ -17,6 +18,7 @@ pub mod types;
 pub mod world;
 
 pub use contracts::{Contract, ContractRegistry};
+pub use dock::{DOCK_CAPACITY, DOCK_KIND, Dock};
 pub use economy::{ActiveContract, ContractSnapshot, Economy, EconomySnapshot};
 pub use fluid::{
     FLUID_TANK_CAPACITY, FLUID_TANK_FILL_AMOUNT, FLUID_TANK_KIND, FluidNetwork, FluidTank,
@@ -31,6 +33,7 @@ pub use shop::{
 };
 pub use types::{decode_chunk_id, encode_chunk_id};
 pub use world::{
-    BeltSnapshot, ChunkSnapshot, FluidSnapshot, FluidTankSnapshot, HopperSnapshot, MachineSnapshot,
-    PipeSnapshot, PlayerCommand, StageLayout, TileSnapshot, World, command_from_json,
+    BeltSnapshot, ChunkSnapshot, DockSnapshot, FluidSnapshot, FluidTankSnapshot, HopperSnapshot,
+    MachineSnapshot, PipeSnapshot, PlayerCommand, StageLayout, TileSnapshot, World,
+    command_from_json,
 };

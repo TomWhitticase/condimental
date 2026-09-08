@@ -27,6 +27,7 @@ below is history and should only ever be appended to.)*
 - **Visual overhaul, first attempt (superseded by round 2 above):** closed a floor-level seam between machine/hopper footings and belt/pipe edges, added a connector fitting for the fluid-fed stage, gave the hopper's status lamp real feedback, and fixed some contract-clipboard typography — real fixes, but not the one the player actually flagged, which is what round 2 above addressed.
 - **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, SPACE/SHIFT up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
 - **Lighting:** the sky is the real background (`BG_SKY`), not a flat colour — see the "empty void" DEVLOG entry below for why that matters. `scripts/screenshot-scene.sh --first-person` reviews that mode's lighting specifically.
+- **Delivery dock (sim half done, presentation to do):** the chain has a real exit. One more belt runs past the last machine into a `dock` building, which ships finished product into the shared delivery pool automatically every tick — `PlayerCommand::CollectOutput` (the **C** key) is **removed**, so a supplied factory now earns money with no player action beyond keeping the hopper and vinegar tank topped up. The dock is deliberately a pass-through (its own buffer is empty between ticks); the number to show for "waiting to be sold" is still the economy snapshot's `delivery_stock`. The shipped line now spans three chunks, (-1, 0) through (1, 0). Ticket 2 — the Godot dock asset, hover text, and removing **C** from the on-screen legend — is still to do.
 - **Contracts (done, both halves):** contracts are `data/contracts.ron` content and three run concurrently, each with its own mix/cadence/payout, all drawing from one shared pool of delivered stock (a box pays one contract, never two). The clipboard panel shows all of them — one paper docket card per contract on the one board, each with its own checklist, payout, countdown and delivered/missed tally, above a single shared money figure and a single "on the dock" line naming the pool they compete for.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
@@ -43,6 +44,51 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-08 — The chain has an end: a real delivery dock (sim half)
+
+Until now the factory's product left the world on a keypress. `C` ran
+`PlayerCommand::CollectOutput`, which reached into the last machine's own
+output buffer and dropped its contents into the economy's shared delivery
+pool — there was no tile downstream of the packer at all, so finished boxes
+were teleported off the floor and sold. That is exactly the shape the
+"Machines improvement" epic's hopper removed at the *feed* end, and
+GAMEPLAY.md §9 and `economy.rs` had both been carrying a "a real
+delivery-dock tile is future polish" note ever since.
+
+It is no longer future. `data/machines.ron` has a `dock` kind (priced in
+`shop.ron` like everything else buildable), `World` lays one more ordinary
+belt past the last machine and stands the dock at its end, and the dock takes
+arriving boxes off that belt and deposits them into the shared pool **every
+tick, by itself**. The old command is gone rather than kept beside it — two
+ways to sell the same box, one of which teleports, is the contradiction the
+hopper existed to remove. Feeding the factory is still the player's job;
+emptying it is now the machinery's.
+
+The one decision worth knowing before building anything on top of this: the
+dock is a **pass-through, not a store**. It ships everything it receives in
+the same tick, so its own buffer reads empty between ticks. That keeps
+"what's on the dock" exactly one number in exactly one place — the shared
+delivery pool every contract settles against — instead of two numbers where
+the one the player can see is the one contracts cannot use. A visible hold
+becomes worth having the day something gates the release (a truck on a
+cadence, GAMEPLAY.md §7's logistics staff); a hold with nothing gating it is
+latency, not a mechanic.
+
+Two consequences. First, this is a **breaking wire-format change**:
+`{"type": "collect_output"}` no longer parses (it is a silent no-op, like any
+malformed command, so nothing crashes), and there is a new
+`dock_snapshot_json` plus a `docks` array on chunk snapshots and a `dock`
+variant on tile queries. Ticket 2 (the Godot dock asset, hover, and control
+legend) consumes those and has to drop the now-dead **C** keybind. Second,
+the shipped line now runs x = 0..35 and therefore genuinely spans three
+chunks rather than two — handled, and pinned by tests, rather than avoided.
+
+Verified the way this project verifies things: `core_loop.rs`'s
+mass-conservation invariant still holds every tick across the longer chain,
+now counting the dock's buffer as mass and reading "shipped" off the dock
+instead of tallying a command — and *no test issues any command to empty the
+chain any more*, which is the property the ticket exists to create.
 
 ### 2026-09-08 — Contracts, ticket 2: the clipboard shows all of them
 

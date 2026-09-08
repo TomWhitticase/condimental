@@ -79,8 +79,12 @@ impl SimBridge {
     /// whose footprint straddles a chunk boundary is reported in *every*
     /// chunk it overlaps, identically — so a caller merging several chunks'
     /// snapshots must key machines by `tile` and de-duplicate. The same rule
-    /// applies to the `hoppers` and (since the "Visual overhaul round 2"
-    /// epic's ticket 1) `fluid_tanks` arrays.
+    /// applies to the `hoppers`, `fluid_tanks` and (since the delivery-dock
+    /// ticket) `docks` arrays.
+    ///
+    /// **The shipped world spans three chunks since the delivery-dock
+    /// ticket**, not two: the hopper is in (-1, 0), most of the chain is in
+    /// (0, 0), and the dock at x = 35 is in (1, 0).
     #[func]
     fn chunk_snapshot_json(&self, chunk_id: i64) -> GString {
         let snapshot = self.world.chunk_snapshot(decode_chunk_id(chunk_id));
@@ -111,8 +115,20 @@ impl SimBridge {
     /// Applies a player command, JSON-encoded per
     /// `sim::world::PlayerCommandDto` (e.g.
     /// `{"type": "fill_hopper", "amount": 16}` or
-    /// `{"type": "collect_output"}`). Malformed/invalid commands are
-    /// silently ignored, same as an out-of-range command would be.
+    /// `{"type": "purchase", "kind": "belt"}`). Malformed/invalid commands
+    /// are silently ignored, same as an out-of-range command would be.
+    ///
+    /// **`collect_output` NO LONGER EXISTS — this is a breaking wire-format
+    /// change** (the delivery-dock ticket). It used to drain the last
+    /// machine's output buffer into the economy's shared delivery pool on a
+    /// keypress. The chain now ends in a real loading dock which does that
+    /// every tick by itself (see `dock_snapshot_json`), so there is nothing
+    /// for a command to do and keeping it would leave two ways to sell the
+    /// same box. Sending `{"type": "collect_output"}` is now simply a
+    /// no-op — it fails to parse and is ignored like any other malformed
+    /// command, so a stale caller does not crash — but it is dead code:
+    /// `main.gd`'s **C** keybind and the `"C: collect product"` fragment of
+    /// its `ISO_HELP_TEXT`/`FP_HELP_TEXT` legends should both be removed.
     ///
     /// **`fill_hopper` replaced `spawn_item`** (the "Machines improvement"
     /// milestone's ticket 3): raw ingredient is now loaded into the chain's
@@ -275,6 +291,50 @@ impl SimBridge {
         }
     }
 
+    /// A JSON-serialized `sim::DockSnapshot` — where the chain's delivery
+    /// dock stands, which belt runs into it, and how much it has shipped
+    /// (the delivery-dock ticket):
+    ///
+    /// ```json
+    /// {"tile": [35, 0], "kind": "dock",
+    ///  "footprint": {"width_tiles": 1, "height_tiles": 1},
+    ///  "belt_start_tile": [31, 0], "belt_length_tiles": 4,
+    ///  "contents": [], "capacity_per_item": 32, "shipped_total": 37}
+    /// ```
+    ///
+    /// The exit-end counterpart of `hopper_snapshot_json`, and it always
+    /// returns a value for the same reason (every world has exactly one
+    /// dock) — there is no empty-string case. Two shape differences from the
+    /// hopper's are deliberate:
+    ///
+    /// 1. **No `fill` field.** The dock ships everything it receives into
+    ///    the shared delivery pool in the same tick, so its own level is
+    ///    always zero between ticks and `contents` is normally `[]`. **Draw
+    ///    a pallet stack from `economy_snapshot_json`'s `delivery_stock`
+    ///    instead** — that is the one shared "what's on the dock" figure
+    ///    every contract settles against.
+    /// 2. **`contents` is a list**, not one item plus a count: a hopper
+    ///    holds one item id fixed by `data/recipes.ron`, a dock accepts
+    ///    whatever the line delivers.
+    ///
+    /// `shipped_total` is the line's cumulative lifetime output, and is the
+    /// number worth putting on a hover ("Loading dock — 37 shipped").
+    /// `belt_start_tile`/`belt_length_tiles` describe the one belt in the
+    /// world that appears in no `chain_layout_json` stage (it runs from the
+    /// last machine to a building rather than to another stage), so a scene
+    /// can draw it without hunting through chunk snapshots.
+    ///
+    /// `chunk_snapshot_json` carries the identical object in a new `docks`
+    /// array for a chunk-driven renderer, and `query_tile_json` answers with
+    /// a `"dock"` tile carrying the same `contents`/`shipped_total` for
+    /// hover. `sim::DockSnapshot` documents the full shape.
+    #[func]
+    fn dock_snapshot_json(&self) -> GString {
+        let snapshot = self.world.dock_snapshot();
+        let json = serde_json::to_string(&snapshot).expect("DockSnapshot must serialize");
+        GString::from(json.as_str())
+    }
+
     /// A JSON-serialized `sim::EconomySnapshot` — money, the shared delivery
     /// pool, and an ARRAY of every active contract (GAMEPLAY.md §6/§9).
     /// Unlike the chunk snapshots above there's no dirty-tracking to check
@@ -345,7 +405,8 @@ impl SimBridge {
     ///    {"kind": "mixer",       "price": 100.0, "owned": 0, "affordable": true},
     ///    {"kind": "cooking_vat", "price": 200.0, "owned": 0, "affordable": false},
     ///    {"kind": "bottler",     "price": 120.0, "owned": 0, "affordable": false},
-    ///    {"kind": "packer",      "price": 90.0,  "owned": 0, "affordable": true}
+    ///    {"kind": "packer",      "price": 90.0,  "owned": 0, "affordable": true},
+    ///    {"kind": "dock",        "price": 70.0,  "owned": 0, "affordable": true}
     ///  ]}
     /// ```
     ///

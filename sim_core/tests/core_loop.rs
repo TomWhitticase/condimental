@@ -41,6 +41,20 @@
 //! for craft cycles lasting tens of ticks; it holds unchanged for one
 //! lasting thousands, which is a small piece of the milestone's own proof.
 //!
+//! **The delivery-dock ticket changed how mass LEAVES the chain**, and that
+//! needed edits here for the same reason ticket 3's did at the other end:
+//! the old behavior being tested is the behavior being removed. Finished
+//! boxes are no longer lifted out of the last machine's output buffer by
+//! `PlayerCommand::CollectOutput` (which no longer exists); they travel one
+//! more real belt into a `Dock` building, which ships them into the
+//! economy's shared delivery pool automatically, every tick. So the
+//! conservation accounting now counts the dock's own buffer as mass in the
+//! system (it is — momentarily, inside a tick), and "collected" is read from
+//! the dock's cumulative `shipped_total` instead of being tallied by the
+//! caller issuing a command. **Nothing in the test issues any command to
+//! empty the chain any more**, which is precisely the property this ticket
+//! is for.
+//!
 //! **The "Visual overhaul round 2" epic's ticket 1 did the same to fluid**,
 //! and needed the same kind of edit: the pipe run's vinegar used to arrive
 //! from an off-map tap that refilled itself every tick, and now comes from a
@@ -85,8 +99,9 @@ fn tomato_value(item: &str, recipes: &RecipeRegistry) -> u32 {
 /// Every belt/machine snapshot across the whole chain, regardless of how
 /// many chunks it spans — gathered via `World::all_chunks` rather than
 /// assuming a fixed chunk count, so this keeps working if the chain grows
-/// long enough to cross a chunk boundary. (Since ticket 3 it genuinely
-/// spans two chunks: the hopper sits west of x = 0, in chunk (-1, 0).)
+/// long enough to cross a chunk boundary. It genuinely spans three chunks
+/// now: the hopper sits west of x = 0, in chunk (-1, 0), and since the
+/// delivery-dock ticket the dock sits at x = 35, in chunk (1, 0).
 fn full_chain_snapshot(world: &World) -> (Vec<BeltSnapshot>, Vec<MachineSnapshot>) {
     let mut belts = Vec::new();
     let mut machines = Vec::new();
@@ -98,13 +113,24 @@ fn full_chain_snapshot(world: &World) -> (Vec<BeltSnapshot>, Vec<MachineSnapshot
     (belts, machines)
 }
 
-/// Total mass currently held anywhere in the sim (belts, machine input/
-/// output buffers, and any mid-`TimedProcess` batch), in tomato-equivalent
-/// units. Does NOT include anything already handed to the player via
-/// `CollectOutput` — the caller adds that back in separately.
+/// Total mass currently held anywhere in the sim (belts — including the
+/// dock's own inbound belt — machine input/output buffers, the dock's
+/// transfer buffer, and any mid-`TimedProcess` batch), in tomato-equivalent
+/// units. Does NOT include anything the dock has already shipped into the
+/// economy's delivery pool — the caller adds that back in separately, from
+/// the dock's `shipped_total`.
 fn total_tomato_equivalent(world: &World, recipes: &RecipeRegistry) -> u32 {
     let (belts, machines) = full_chain_snapshot(world);
     let mut total = 0u32;
+
+    // Anything standing on the dock but not yet shipped. Between ticks this
+    // is always empty (the dock is a pass-through — `sim/dock.rs`'s module
+    // doc), but counting it is what makes this accounting independent of
+    // that decision: if the drain were ever gated, mass parked on the dock
+    // would still be accounted for rather than reading as a leak.
+    for (item, qty) in &world.dock_snapshot().contents {
+        total += tomato_value(item, recipes) * qty;
+    }
 
     // Raw ingredient waiting in the hopper is mass in the system exactly the
     // way mass in a machine's input buffer is (ticket 3) — it has been
@@ -146,9 +172,10 @@ fn total_tomato_equivalent(world: &World, recipes: &RecipeRegistry) -> u32 {
 
 /// The conservation invariant this test exists to check: every tomato ever
 /// successfully loaded is accounted for exactly once, as either raw mass
-/// still somewhere in the chain (in the hopper, on a belt, in a buffer, or
-/// mid-craft) or already collected as the finished product — never
-/// duplicated, never silently lost, at any of the chain's several stages.
+/// still somewhere in the chain (in the hopper, on a belt, in a buffer, on
+/// the dock, or mid-craft) or already shipped off the dock as the finished
+/// product — never duplicated, never silently lost, at any of the chain's
+/// several stages or across the new belt-and-dock exit.
 fn assert_conserved(
     world: &World,
     recipes: &RecipeRegistry,
@@ -190,7 +217,6 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
     let final_item_value = tomato_value(&final_item, &registry);
 
     let mut world = World::new(recipes());
-    let mut collected_final = 0u32;
 
     // Ticket 3: one fill command loads the hopper, and the hopper meters
     // those tomatoes onto the first belt over the following ticks — nothing
@@ -220,41 +246,25 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
         "the loaded tomatoes must be sitting in the hopper, not already on a belt"
     );
 
+    // No command is issued inside this loop at all — that is the point of
+    // the delivery dock. The chain feeds itself from the hopper, runs, and
+    // the dock ships the finished box into the economy's delivery pool by
+    // itself; conservation is checked on every single tick along the way.
+    let mut shipped = 0u32;
     for tick_i in 0..20_000u32 {
         world.tick();
 
+        shipped = world.dock_snapshot().shipped_total;
         assert_conserved(
             &world,
             &registry,
             loaded_tomatoes,
-            collected_final,
+            shipped,
             final_item_value,
             &format!("tick {tick_i}"),
         );
 
-        let (_, machines) = full_chain_snapshot(&world);
-        let final_machine = machines
-            .iter()
-            .find(|m| m.recipe == final_recipe.id)
-            .expect("final stage's machine must be present in some chunk snapshot");
-        let final_output_qty = final_machine
-            .output
-            .iter()
-            .find(|(id, _)| *id == final_item)
-            .map(|(_, qty)| *qty)
-            .unwrap_or(0);
-
-        if final_output_qty > 0 {
-            world.issue_command(PlayerCommand::CollectOutput);
-            collected_final += final_output_qty;
-            assert_conserved(
-                &world,
-                &registry,
-                loaded_tomatoes,
-                collected_final,
-                final_item_value,
-                &format!("tick {tick_i} (post-collect)"),
-            );
+        if shipped > 0 {
             break; // one full unit made it through the entire chain — proven.
         }
     }
@@ -265,27 +275,71 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
         "the hopper should have unloaded all {TOMATOES_PER_CRAFT} tomatoes onto the belt"
     );
     assert_eq!(
-        collected_final, 1,
-        "exactly one unit of '{final_item}' should have made it through all {} stages \
-         and been collected — the theoretical chain-throughput this milestone proves",
+        shipped, 1,
+        "exactly one unit of '{final_item}' should have made it through all {} stages, \
+         crossed the dock's belt and been shipped — with no player command whatsoever, \
+         which is what the dock replaced `CollectOutput` to achieve",
         ordered.len()
+    );
+    // ...and it landed in the ONE shared pool every contract settles
+    // against, which is the actual end of GAMEPLAY.md §1's loop.
+    assert_eq!(
+        world.economy_snapshot().delivery_stock,
+        vec![(final_item.clone(), 1)],
+        "the shipped box must be in the shared delivery pool, not held on the dock"
+    );
+    assert!(
+        world.dock_snapshot().contents.is_empty(),
+        "the dock is a pass-through: it must be empty again the tick it shipped"
     );
     assert_eq!(
         total_tomato_equivalent(&world, &registry),
         0,
-        "no mass should be left anywhere in the chain after the one unit is fully collected"
+        "no mass should be left anywhere in the chain after the one unit is fully shipped"
     );
 }
 
+/// The exit end's equivalent of "an unfilled hopper unloads nothing": an
+/// idle chain must ship nothing, rather than the dock's per-tick drain
+/// manufacturing a delivery out of an empty buffer.
 #[test]
-fn collecting_output_with_nothing_produced_yet_is_a_harmless_no_op() {
+fn an_unfed_chain_ships_nothing_and_the_dock_stays_empty() {
     let mut world = World::new(recipes());
-    world.issue_command(PlayerCommand::CollectOutput);
-    world.tick();
+    for _ in 0..500 {
+        world.tick();
+    }
+
+    let dock = world.dock_snapshot();
+    assert_eq!(dock.shipped_total, 0, "nothing was ever produced to ship");
+    assert!(dock.contents.is_empty());
+    assert!(
+        world.economy_snapshot().delivery_stock.is_empty(),
+        "an idle factory must not put anything in the delivery pool"
+    );
+
     let (_, machines) = full_chain_snapshot(&world);
     for machine in &machines {
         assert!(machine.output.is_empty(), "no machine should hold output yet");
     }
+}
+
+/// `collect_output` was a real command until the delivery-dock ticket. A
+/// stale GDScript caller (`main.gd`'s **C** key, until ticket 2 removes it)
+/// must get the same silent no-op any malformed command gets — never a
+/// panic, and never a second way to move product.
+#[test]
+fn the_removed_collect_output_command_no_longer_parses() {
+    assert!(
+        sim_core::sim::command_from_json(r#"{"type": "collect_output"}"#).is_none(),
+        "collect_output must no longer deserialize — the dock replaced it"
+    );
+    // ...and the commands that remain still do, so this is a targeted
+    // removal rather than a broken parser.
+    assert!(sim_core::sim::command_from_json(r#"{"type": "fill_hopper"}"#).is_some());
+    assert!(sim_core::sim::command_from_json(r#"{"type": "fill_fluid_tank"}"#).is_some());
+    assert!(
+        sim_core::sim::command_from_json(r#"{"type": "purchase", "kind": "belt"}"#).is_some()
+    );
 }
 
 #[test]
@@ -348,16 +402,22 @@ fn dirty_chunks_report_touched_chunks_and_clear_between_ticks() {
     let mut world = World::new(recipes());
     world.issue_command(PlayerCommand::FillHopper { amount: 4 });
     world.tick();
-    // The whole 5-stage chain (26 tiles wide, 2 rows tall where the cooking
-    // vat sits) still fits inside chunk (0,0) (ARCHITECTURE.md §3.1's 32x32
-    // chunks); the hopper sits west of it at x = -1, i.e. in chunk (-1, 0).
-    // On this tick the hopper unloads its first tomato, which changes both:
-    // the belt it landed on and the hopper's own fill level.
+    // The six recipe-driven stages run x = 0..30 and still fit inside chunk
+    // (0,0) (ARCHITECTURE.md §3.1's 32x32 chunks); the hopper sits west of
+    // them at x = -1, i.e. in chunk (-1, 0). On this tick the hopper unloads
+    // its first tomato, which changes both: the belt it landed on and the
+    // hopper's own fill level. Nothing at the dock end has moved yet, so
+    // its chunk is NOT dirty — dirty tracking is per-tick, unlike
+    // `all_chunks`.
     assert_eq!(world.dirty_chunks(), &[(0, 0), (-1, 0)]);
+    // `all_chunks` is the whole world, and since the delivery-dock ticket
+    // that is three chunks: the dock stands at x = 35, past the x = 32
+    // boundary, and its inbound belt straddles it.
     assert_eq!(
         world.all_chunks(),
-        vec![(0, 0), (-1, 0)],
-        "the hopper's chunk must be reported too, or a renderer never draws it"
+        vec![(0, 0), (-1, 0), (1, 0)],
+        "the hopper's chunk and the dock's chunk must both be reported, or a renderer \
+         never draws either end of the line"
     );
 
     // A tick where absolutely nothing moves/changes reports no dirty

@@ -23,7 +23,7 @@
 //! no second currency, so there must not be a second money counter either;
 //! a purchase debits the same `Economy::money` a contract delivery credits.
 //! [`super::world::World::issue_command`] is what holds both sides at once
-//! (the same way its `CollectOutput` arm already holds a machine and the
+//! (the same way its `FillHopper` arm already holds the hopper and the
 //! economy at once).
 //!
 //! # What this module does not do yet

@@ -704,15 +704,16 @@ fn the_tank_drains_as_the_mixer_crafts_and_the_mixer_stalls_once_it_is_dry() {
         "...but a fill bigger than the run holds must leave a reserve in the tank"
     );
 
-    // Step 3: with the hopper kept fed and finished product kept collected,
-    // the mixer crafts — and *only* fluid can stop it.
+    // Step 3: with the hopper kept fed (and the delivery dock at the chain's
+    // tail clearing finished product by itself, every tick, since the
+    // delivery-dock ticket), the mixer crafts — and *only* fluid can stop
+    // it.
     let mut crafts = 0;
     let mut stalled_for = 0;
     for _ in 0..200_000 {
         world.issue_command(PlayerCommand::FillHopper {
             amount: FLUID_TANK_CAPACITY,
         });
-        world.issue_command(PlayerCommand::CollectOutput);
         world.tick();
         crafts = crafts.max(count_item_anywhere(&world, FLUID_GATED_RECIPE));
         // The mixer is starved once it sits idle while holding solid input.
@@ -759,7 +760,6 @@ fn the_tank_drains_as_the_mixer_crafts_and_the_mixer_stalls_once_it_is_dry() {
     });
     let before = crafts;
     for _ in 0..5_000 {
-        world.issue_command(PlayerCommand::CollectOutput);
         world.tick();
         crafts = crafts.max(count_item_anywhere(&world, FLUID_GATED_RECIPE));
     }

@@ -86,6 +86,24 @@
 //! (negative tiles) precisely so that adding it moved no existing tile —
 //! the same discipline ticket 1 followed.
 //!
+//! **The chain is emptied by a dock, not by a command** (the delivery-dock
+//! ticket), which is the same argument as the hopper's run at the other end
+//! of the line. Until this ticket there was nothing at all downstream of the
+//! last machine: `PlayerCommand::CollectOutput` reached into that machine's
+//! own `output` buffer and deposited the contents into [`Economy`]'s shared
+//! delivery pool, so finished boxes left the factory floor on a keypress
+//! without ever travelling anywhere. Now the last machine hands its output
+//! onto one more ordinary [`BeltSegment`] exactly the way every inter-stage
+//! hop already works, that belt runs into a [`Dock`] standing immediately
+//! east of it, and the dock ships whatever it receives into the pool every
+//! tick by itself. `CollectOutput` is **gone**, not kept alongside — see
+//! [`PlayerCommand`]. Like the hopper and the tank the dock is deliberately
+//! not a recipe-driven stage (it buffers and forwards, it doesn't consume
+//! and produce), and unlike them it is placed to the *east*, so it is the
+//! one of the three that extends the chain's own span: the shipped line now
+//! reaches x = 35 and therefore genuinely spans chunks (0, 0) and (1, 0)
+//! alongside the hopper's (-1, 0).
+//!
 //! **The pipe run is fed by a tank, not by an off-map tap** (the "Visual
 //! overhaul round 2" epic's ticket 1). Milestone 6's fluid supply was a
 //! [`PipeSegment`] flagged `is_source` that refilled itself to capacity
@@ -111,6 +129,7 @@ use hecs::Entity;
 
 use super::belt::BeltSegment;
 use super::contracts::ContractRegistry;
+use super::dock::{DOCK_CAPACITY, DOCK_KIND, Dock};
 use super::economy::{Economy, EconomySnapshot};
 use super::fluid::{
     FLUID_TANK_CAPACITY, FLUID_TANK_FILL_AMOUNT, FLUID_TANK_KIND, FluidNetwork, FluidTank,
@@ -152,18 +171,29 @@ pub struct MachinePlacement {
 }
 
 /// A command the player can issue (ARCHITECTURE.md §4's `PlayerCommand`).
-/// Kept intentionally small — the chain's single entry point (loading raw
-/// ingredient into the hopper that feeds the first belt) and single exit
-/// point (collecting finished output from the last machine), not a full
-/// build-mode yet.
+/// Kept intentionally small — supplying the chain's two consumables and
+/// buying equipment, not a full build-mode yet.
 ///
 /// **`FillHopper` replaced the old `SpawnItem`** (the "Machines improvement"
 /// milestone's ticket 3), rather than being added alongside it: `SpawnItem`
 /// teleported an item straight onto stage 0's belt, which is precisely the
 /// debug behavior the hopper exists to remove, so keeping it would leave two
-/// contradictory ways to feed the chain. The variant count is unchanged —
-/// §4's advice to keep this surface narrow is why this is a rename, not a
+/// contradictory ways to feed the chain. The variant count was unchanged —
+/// §4's advice to keep this surface narrow is why that was a rename, not a
 /// third command.
+///
+/// **`CollectOutput` is GONE, and nothing replaced it** (the delivery-dock
+/// ticket) — this is a breaking change to the JSON wire format, not a
+/// rename. It used to drain the last machine's `output` buffer straight into
+/// [`Economy`]'s shared delivery pool on a keypress. The chain now ends in a
+/// real [`Dock`] that does exactly that every tick, automatically, so the
+/// command has nothing left to do; keeping it would leave two ways to sell
+/// the same box, one of which teleports. A GDScript caller sending
+/// `{"type": "collect_output"}` now gets `command_from_json` returning
+/// `None`, i.e. the same silent no-op any malformed command already gets —
+/// so a stale caller does not crash, it simply stops doing anything, and
+/// `main.gd`'s **C** keybind and its "C: collect product" legend entry
+/// should be removed.
 #[derive(Debug, Clone)]
 pub enum PlayerCommand {
     /// Loads raw ingredient into the chain's hopper. The *item* is not a
@@ -182,7 +212,6 @@ pub enum PlayerCommand {
     /// run and therefore no tank; this command is then a no-op, per
     /// `issue_command`'s "an impossible command does nothing" contract.
     FillFluidTank { amount: u32 },
-    CollectOutput,
     /// Buys `quantity` of a buildable kind from the shop (the "Shop &
     /// Inventory" epic's ticket 1): debits `quantity * price` from
     /// `Economy::money` and credits `quantity` to the player's owned count
@@ -195,8 +224,8 @@ pub enum PlayerCommand {
     ///
     /// **All or nothing, and silent about failure** — the rule every other
     /// command in this enum already follows (`FillHopper` past capacity,
-    /// `FillFluidTank` in a world with no pipe run, `CollectOutput` on an
-    /// empty machine). An unknown kind, a zero quantity, or a total the
+    /// `FillFluidTank` in a world with no pipe run). An unknown kind, a zero
+    /// quantity, or a total the
     /// player can't afford leaves money *and* the owned count exactly as
     /// they were; nothing is ever partially applied. Presentation decides
     /// what to say about that, using `shop_snapshot_json`'s `affordable`
@@ -209,6 +238,11 @@ pub enum PlayerCommand {
 /// dictionary, converts it to a JSON string, and this is what parses it.
 /// Kept separate from `PlayerCommand` itself so the pure sim type isn't
 /// coupled to a wire format.
+///
+/// **`{"type": "collect_output"}` is no longer a valid command** (the
+/// delivery-dock ticket removed it — see [`PlayerCommand`]); it now fails to
+/// deserialize and `command_from_json` returns `None`, which
+/// `issue_command_json` already treats as a silent no-op.
 ///
 /// `amount` is optional on the wire (`{"type": "fill_hopper"}` alone is
 /// valid and means [`HOPPER_FILL_AMOUNT`]), so the common "player pressed
@@ -228,7 +262,6 @@ enum PlayerCommandDto {
         #[serde(default = "default_fluid_fill_amount")]
         amount: u32,
     },
-    CollectOutput,
     /// `{"type": "purchase", "kind": "belt", "quantity": 4}` — `quantity`
     /// optional, defaulting to [`DEFAULT_PURCHASE_QUANTITY`] (one), the same
     /// "the player clicked the button once" convenience `fill_hopper`'s
@@ -260,7 +293,6 @@ impl From<PlayerCommandDto> for PlayerCommand {
             PlayerCommandDto::FillFluidTank { amount } => {
                 PlayerCommand::FillFluidTank { amount }
             }
-            PlayerCommandDto::CollectOutput => PlayerCommand::CollectOutput,
             PlayerCommandDto::Purchase { kind, quantity } => {
                 PlayerCommand::Purchase { kind, quantity }
             }
@@ -314,6 +346,17 @@ pub struct ChunkSnapshot {
     /// one way it differs from `hoppers`: a world always has a hopper, but
     /// only a fluid-using world has a tank. See [`FluidTankSnapshot`].
     pub fluid_tanks: Vec<FluidTankSnapshot>,
+    /// The chain's delivery dock (the delivery-dock ticket), if its
+    /// footprint falls in this chunk — a `Vec` for exactly the reason
+    /// `hoppers` is one, and never empty across the whole world for the same
+    /// reason: every chain has exactly one dock, at its tail. See
+    /// [`DockSnapshot`].
+    ///
+    /// Note the shipped dock sits at x = 35, i.e. in chunk **(1, 0)**, while
+    /// most of the chain is in (0, 0) and the hopper is in (-1, 0) — the
+    /// shipped world is a three-chunk world since this ticket.
+    /// `World::all_chunks` reports all three.
+    pub docks: Vec<DockSnapshot>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -514,6 +557,76 @@ pub struct FluidTankSnapshot {
     pub pipe_tile: TileCoord,
 }
 
+/// The chain's delivery dock (the delivery-dock ticket), for rendering and
+/// for hover. The *same* struct is returned by `World::dock_snapshot` and
+/// carried in `ChunkSnapshot::docks`, so a consumer only ever learns one
+/// shape.
+///
+/// It is the exit-end counterpart of [`HopperSnapshot`], and its `tile` /
+/// `kind` / `footprint` fields mean exactly what they mean there. Two
+/// differences are deliberate and worth reading before building a visual
+/// from this:
+///
+/// 1. **There is no `fill` field**, unlike [`HopperSnapshot`] and
+///    [`FluidTankSnapshot`]. The dock is a pass-through: it ships everything
+///    it receives into the economy's shared delivery pool in the same tick,
+///    so its own level is always zero between ticks and a fill-level visual
+///    driven from it would always read empty. **The number to draw a pallet
+///    stack from is `EconomySnapshot::delivery_stock`** — the one shared
+///    "what's on the dock" figure every contract settles against. See
+///    [`super::dock`]'s module doc for why there is deliberately only one
+///    such number.
+/// 2. **`contents` is a list, not one item and a count.** A hopper holds one
+///    item id fixed by `recipes.ron`; a dock accepts whatever the line
+///    delivers to it. On the shipped chain that is always `boxed_ketchup`,
+///    and always an empty list between ticks (see above).
+///
+/// `shipped_total` is the cumulative count of units this dock has put into
+/// the pool since tick 0 — the line's lifetime output, and the one number
+/// about the building itself that is worth showing ("Loading dock — 37
+/// shipped").
+///
+/// JSON shape (`snake_case` field names, as serialized by `serde_json`):
+///
+/// ```json
+/// {
+///   "tile": [35, 0],
+///   "kind": "dock",
+///   "footprint": { "width_tiles": 1, "height_tiles": 1 },
+///   "belt_start_tile": [31, 0],
+///   "belt_length_tiles": 4,
+///   "contents": [],
+///   "capacity_per_item": 32,
+///   "shipped_total": 37
+/// }
+/// ```
+///
+/// `belt_start_tile`/`belt_length_tiles` describe the belt that feeds this
+/// dock — the one belt in the world that belongs to no `StageLayout`,
+/// because it runs from the last machine to a building rather than to
+/// another stage. They are carried here so presentation can draw that belt
+/// from `chain_layout_json` + this call without hunting for it in chunk
+/// snapshots (a chunk snapshot does report it, but keyed on the chunk
+/// holding its *start* tile, and on the shipped content that belt straddles
+/// the x = 32 chunk boundary).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DockSnapshot {
+    pub tile: TileCoord,
+    /// Machine kind id from `data/machines.ron` — always `"dock"` today
+    /// (see [`super::dock::DOCK_KIND`]), carried anyway so presentation
+    /// picks a mesh the same way it does for a machine.
+    pub kind: String,
+    pub footprint: Footprint,
+    /// First tile of the belt that runs into this dock.
+    pub belt_start_tile: TileCoord,
+    pub belt_length_tiles: i32,
+    /// What is standing on the dock right now — empty between ticks, see
+    /// this type's doc.
+    pub contents: Vec<(ItemId, u32)>,
+    pub capacity_per_item: u32,
+    pub shipped_total: u32,
+}
+
 /// The whole fluid network in one snapshot — what a HUD/overlay needs
 /// without having to stitch together per-chunk pipe lists.
 ///
@@ -658,6 +771,28 @@ pub enum TileSnapshot {
         capacity: f64,
         fill: f64,
     },
+    /// A tile occupied by the chain's delivery dock (the delivery-dock
+    /// ticket). Mirrors [`TileSnapshot::Hopper`] at the other end of the
+    /// line, including that **any** tile inside the footprint resolves to
+    /// it, not only the origin. JSON:
+    ///
+    /// `{"kind": "dock", "footprint": {"width_tiles": 1, "height_tiles": 1},
+    ///   "origin_tile": [35, 0], "contents": [], "capacity_per_item": 32,
+    ///   "shipped_total": 37}`
+    ///
+    /// Enough for a hover tooltip ("Loading dock — 37 shipped") without a
+    /// second call. There is deliberately no `fill` here and `contents` is
+    /// normally empty — see [`DockSnapshot`] for why, and for which number
+    /// a "what's waiting to be sold" readout should actually use. As with
+    /// the `hopper` variant there is no `machine_kind` field: this enum's
+    /// own `kind` tag already *is* the kind id.
+    Dock {
+        footprint: Footprint,
+        origin_tile: TileCoord,
+        contents: Vec<(ItemId, u32)>,
+        capacity_per_item: u32,
+        shipped_total: u32,
+    },
 }
 
 /// Static (non-per-tick) description of one pipeline stage's placement —
@@ -742,6 +877,28 @@ struct FluidTankStage {
     pipe_tile: TileCoord,
 }
 
+/// The chain's delivery dock, the belt that feeds it, and where both stand
+/// (the delivery-dock ticket).
+///
+/// A plain field on [`World`] rather than an ECS entity, for `HopperStage`'s
+/// reason: exactly one per world. It differs from `HopperStage` in owning a
+/// belt entity too — the dock is fed by a real [`BeltSegment`], laid out and
+/// ticked exactly like every inter-stage belt, and that belt lives in the
+/// ECS with the same `Position`/`BeltSpan`/`BeltSegment` components so
+/// snapshot and query code treats it uniformly. It is *not* a [`Stage`],
+/// because a stage is a belt plus a recipe-driven machine and a dock runs no
+/// recipe.
+#[derive(Debug)]
+struct DockStage {
+    dock: Dock,
+    /// The belt running from the last machine into this dock.
+    belt_entity: Entity,
+    /// Footprint origin — min-X/min-Y corner, as for any machine.
+    tile: TileCoord,
+    footprint: Footprint,
+    kind: String,
+}
+
 pub struct World {
     ecs: hecs::World,
     recipes: RecipeRegistry,
@@ -774,6 +931,11 @@ pub struct World {
     /// Where the pipe run's tank stands — `Some` iff `fluid` is. See
     /// [`FluidTankStage`].
     fluid_tank: Option<FluidTankStage>,
+    /// The chain's finished-product exit (the delivery-dock ticket) — see
+    /// [`DockStage`]. Never optional, for [`HopperStage`]'s reason: a chain
+    /// always has exactly one exit, and since this ticket that exit is a
+    /// building rather than a command.
+    dock: DockStage,
     /// What the player can buy and what they own of it (the "Shop &
     /// Inventory" epic's ticket 1) — a plain field for the same reason
     /// `economy` and `fluid` are: exactly one per world. Note nothing in
@@ -1019,6 +1181,48 @@ impl World {
             kind: HOPPER_KIND.to_string(),
         };
 
+        // The dock (the delivery-dock ticket): the chain's finished-product
+        // exit, and the mirror image of the hopper above. Unlike the hopper
+        // and the tank — both of which are placed *outside* the chain's span
+        // so that introducing them moved no tile — the dock genuinely
+        // extends the line eastward, because that is where the end of a
+        // conveyor is. It gets one ordinary belt (same length, same speed,
+        // same min-spacing as every inter-stage belt) starting on the very
+        // next tile after the last machine, and stands immediately east of
+        // that belt's last tile.
+        //
+        // On the shipped content that puts the belt at x = 31..34 and the
+        // dock at x = 35, so the chain now crosses the x = 32 chunk boundary
+        // (ARCHITECTURE.md §3.1) — handled, not avoided: `all_chunks`
+        // reports (1, 0) and `chunk_snapshot` reports a footprint in every
+        // chunk it overlaps. See `data/machines.ron`'s note on the kind.
+        let dock_footprint = machines.footprint_of(DOCK_KIND).unwrap_or_else(|| {
+            panic!(
+                "machine content error: data/machines.ron must define the '{DOCK_KIND}' kind —                  every chain ends in one, so its footprint has to come from the same file                  every other placed building's does (known kinds: {})",
+                machines.kind_ids().join(", ")
+            )
+        });
+        let dock_belt_start_x = next_stage_x;
+        let dock_belt_entity = ecs.spawn((
+            Position {
+                tile: (dock_belt_start_x, CHAIN_ROW_Y),
+            },
+            BeltSpan {
+                length_tiles: BELT_LENGTH_TILES,
+            },
+            BeltSegment::new(
+                Fx::from_num(BELT_LENGTH_TILES),
+                Fx::from_num(ITEM_MIN_SPACING_TILES),
+            ),
+        ));
+        let dock = DockStage {
+            dock: Dock::new(DOCK_CAPACITY),
+            belt_entity: dock_belt_entity,
+            tile: (dock_belt_start_x + BELT_LENGTH_TILES, CHAIN_ROW_Y),
+            footprint: dock_footprint,
+            kind: DOCK_KIND.to_string(),
+        };
+
         let world = Self {
             ecs,
             recipes,
@@ -1031,6 +1235,7 @@ impl World {
             fluid_stage,
             hopper,
             fluid_tank,
+            dock,
             // The bundled `data/shop.ron`, owning nothing. Deliberately not
             // parameterized alongside `machines` the way `with_machines`
             // parameterizes footprints: no layout arithmetic reads a price,
@@ -1081,6 +1286,22 @@ impl World {
             for tile in tank.footprint.tiles(tank.tile) {
                 claims.push((tile, "the pipe run's fluid tank".to_string()));
             }
+        }
+
+        let dock_belt_tile = self.position_of(self.dock.belt_entity);
+        let dock_belt_span = self
+            .ecs
+            .get::<&BeltSpan>(self.dock.belt_entity)
+            .unwrap()
+            .length_tiles;
+        for dx in 0..dock_belt_span {
+            claims.push((
+                (dock_belt_tile.0 + dx, dock_belt_tile.1),
+                "the delivery dock's belt".to_string(),
+            ));
+        }
+        for tile in self.dock.footprint.tiles(self.dock.tile) {
+            claims.push((tile, "the delivery dock".to_string()));
         }
 
         assert_no_tile_conflicts(&claims);
@@ -1208,6 +1429,36 @@ impl World {
         })
     }
 
+    /// The chain's delivery dock — placement, what is on it, and how much it
+    /// has shipped in total (the delivery-dock ticket). See [`DockSnapshot`]
+    /// for the full JSON shape and, importantly, for why `contents` is
+    /// normally empty and there is no `fill` field.
+    ///
+    /// Always returns a value (every world has exactly one dock), like
+    /// `hopper_snapshot`. Read it the way `hopper_snapshot` is read: there is
+    /// one per world, so polling it when the HUD redraws is cheap and always
+    /// current — and, like the hopper's, its changes *do* dirty its chunk
+    /// (at most once per shipped box, not every tick), so a chunk-driven
+    /// renderer stays correct too. `ChunkSnapshot` carries the identical
+    /// struct.
+    pub fn dock_snapshot(&self) -> DockSnapshot {
+        let d = &self.dock;
+        DockSnapshot {
+            tile: d.tile,
+            kind: d.kind.clone(),
+            footprint: d.footprint,
+            belt_start_tile: self.position_of(d.belt_entity),
+            belt_length_tiles: self
+                .ecs
+                .get::<&BeltSpan>(d.belt_entity)
+                .unwrap()
+                .length_tiles,
+            contents: d.dock.contents().cloned().collect(),
+            capacity_per_item: d.dock.capacity_per_item(),
+            shipped_total: d.dock.shipped_total(),
+        }
+    }
+
     fn position_of(&self, entity: Entity) -> TileCoord {
         self.ecs.get::<&Position>(entity).unwrap().tile
     }
@@ -1242,13 +1493,19 @@ impl World {
     /// stage order, so behavior stays deterministic:
     ///
     /// 1. Per stage: belt movement, machine process/timer, then the belt's
-    ///    front item hands off to that same stage's machine input.
+    ///    front item hands off to that same stage's machine input. The
+    ///    dock's own belt moves in this pass too, and the dock takes at most
+    ///    one arrived unit off its end and ships it into [`Economy`]'s
+    ///    shared delivery pool — the automatic replacement for the removed
+    ///    `CollectOutput` command.
     /// 2. Hand-offs onto a belt, once every belt has already moved: the
     ///    hopper meters at most one raw unit onto stage 0's belt, then a
     ///    finished item in stage `i`'s machine output hands off onto stage
-    ///    `i + 1`'s belt (the inter-stage conveyor hop). Done as a second
-    ///    pass so every stage's own belt/machine tick has already happened
-    ///    this tick before anything crosses a stage boundary.
+    ///    `i + 1`'s belt (the inter-stage conveyor hop), and finally the
+    ///    LAST machine hands off onto the dock's belt by exactly the same
+    ///    call. Done as a second pass so every stage's own belt/machine tick
+    ///    has already happened this tick before anything crosses a stage
+    ///    boundary.
     pub fn tick(&mut self) {
         self.dirty.clear();
         self.tick_count += 1;
@@ -1297,6 +1554,40 @@ impl World {
             }
         }
 
+        // The dock's belt is ticked in the same phase every other belt is,
+        // and the dock takes off its end exactly the way a machine takes off
+        // a stage belt's end — so the exit hop obeys the same ordering rule
+        // as every hop before it. Shipping runs immediately after the
+        // absorb, in the same tick, because the dock is a pass-through (see
+        // `sim::dock`'s module doc): a box that reaches the dock on tick N is
+        // in the delivery pool on tick N, in time for `economy.tick` at the
+        // bottom of this function to settle a contract against it.
+        {
+            let dock_belt = self.dock.belt_entity;
+            let belt_tile = self.position_of(dock_belt);
+            let belt_changed = {
+                let mut belt = self.ecs.get::<&mut BeltSegment>(dock_belt).unwrap();
+                belt.tick(self.belt_speed)
+            };
+            let absorbed = {
+                let mut belt = self.ecs.get::<&mut BeltSegment>(dock_belt).unwrap();
+                self.dock.dock.try_absorb(&mut belt)
+            };
+            let shipped = self.dock.dock.ship_into(&mut self.economy);
+
+            if belt_changed || absorbed {
+                self.mark_dirty(belt_tile);
+            }
+            if absorbed || shipped > 0 {
+                // The dock's own snapshot changed (`shipped_total` at least),
+                // so a chunk-driven renderer has to re-read it. This is at
+                // most once per box, not once per tick, so it does not defeat
+                // dirty tracking the way fluid movement would.
+                let (dock_tile, dock_footprint) = (self.dock.tile, self.dock.footprint);
+                self.mark_machine_dirty(dock_tile, dock_footprint);
+            }
+        }
+
         // The hopper's unload (ticket 3) is the upstream twin of the
         // machine-output hand-off below — both are "put one unit onto a belt
         // that has room for it" — so it runs in the same phase, after every
@@ -1326,6 +1617,23 @@ impl World {
 
             let transferred = self.try_transfer_machine_output_to_belt(from_machine, to_belt);
             if transferred {
+                self.mark_machine_dirty(machine_tile, machine_footprint);
+                self.mark_dirty(belt_tile);
+            }
+        }
+
+        // ...and the same hop once more, from the LAST machine onto the
+        // dock's belt. Deliberately the same call, not a special case: the
+        // chain's exit is now an ordinary conveyor hand-off, which is the
+        // whole point of replacing `CollectOutput` with a building.
+        {
+            let from_machine = self.stages.last().unwrap().machine_entity;
+            let to_belt = self.dock.belt_entity;
+            let machine_tile = self.position_of(from_machine);
+            let machine_footprint = self.placement_of(from_machine).footprint;
+            let belt_tile = self.position_of(to_belt);
+
+            if self.try_transfer_machine_output_to_belt(from_machine, to_belt) {
                 self.mark_machine_dirty(machine_tile, machine_footprint);
                 self.mark_dirty(belt_tile);
             }
@@ -1469,6 +1777,33 @@ impl World {
                 .push(self.fluid_tank_snapshot().expect("fluid_tank is Some here"));
         }
 
+        // The dock's own belt, reported like every stage belt: keyed on the
+        // chunk holding its START tile, which on the shipped content is
+        // (0, 0) even though the belt itself runs into (1, 0). That is the
+        // pre-existing rule for belts (unlike machines, which fan out across
+        // every chunk they overlap) and it is left alone rather than changed
+        // here — `DockSnapshot` carries this belt's geometry directly, so
+        // presentation never has to reconstruct it from chunk snapshots.
+        let dock_belt_tile = self.position_of(self.dock.belt_entity);
+        if chunk_of(dock_belt_tile) == id {
+            let belt = self.ecs.get::<&BeltSegment>(self.dock.belt_entity).unwrap();
+            let span = self.ecs.get::<&BeltSpan>(self.dock.belt_entity).unwrap();
+            snapshot.belts.push(BeltSnapshot {
+                start_tile: dock_belt_tile,
+                length_tiles: span.length_tiles,
+                items: belt
+                    .snapshot_positions()
+                    .into_iter()
+                    .map(|(item, pos)| (item, pos.to_num::<f64>()))
+                    .collect(),
+            });
+        }
+
+        // ...and the dock building itself, with the hopper's fan-out rule.
+        if footprint_chunks(self.dock.tile, self.dock.footprint).contains(&id) {
+            snapshot.docks.push(self.dock_snapshot());
+        }
+
         snapshot
     }
 
@@ -1513,6 +1848,31 @@ impl World {
                 if !ids.contains(&chunk) {
                     ids.push(chunk);
                 }
+            }
+        }
+        // The dock stands east of the chain's end, so on the shipped content
+        // it is the reason chunk (1, 0) exists at all — a caller that wants
+        // "everything in the world" must get it from here, exactly as it must
+        // get the hopper's (-1, 0). Its belt is included by span rather than
+        // by start tile, because that belt genuinely straddles the boundary.
+        let dock_belt_tile = self.position_of(self.dock.belt_entity);
+        let dock_belt_span = self
+            .ecs
+            .get::<&BeltSpan>(self.dock.belt_entity)
+            .unwrap()
+            .length_tiles;
+        let dock_chunks = footprint_chunks(
+            dock_belt_tile,
+            Footprint {
+                width_tiles: dock_belt_span,
+                height_tiles: 1,
+            },
+        )
+        .into_iter()
+        .chain(footprint_chunks(self.dock.tile, self.dock.footprint));
+        for chunk in dock_chunks {
+            if !ids.contains(&chunk) {
+                ids.push(chunk);
             }
         }
         ids
@@ -1575,6 +1935,37 @@ impl World {
             }
         }
 
+        // The dock's belt, resolved exactly like a stage belt.
+        {
+            let belt_tile = self.position_of(self.dock.belt_entity);
+            let span = self
+                .ecs
+                .get::<&BeltSpan>(self.dock.belt_entity)
+                .unwrap()
+                .length_tiles;
+            if pos.1 == belt_tile.1 && pos.0 >= belt_tile.0 && pos.0 < belt_tile.0 + span {
+                let belt = self.ecs.get::<&BeltSegment>(self.dock.belt_entity).unwrap();
+                let items_here = belt
+                    .snapshot_positions()
+                    .into_iter()
+                    .filter(|(_, dist)| dist.floor() == Fx::from_num(pos.0 - belt_tile.0))
+                    .map(|(item, _)| item)
+                    .collect();
+                return Some(TileSnapshot::Belt { items_here });
+            }
+        }
+
+        if self.dock.footprint.contains(self.dock.tile, pos) {
+            let snapshot = self.dock_snapshot();
+            return Some(TileSnapshot::Dock {
+                footprint: snapshot.footprint,
+                origin_tile: snapshot.tile,
+                contents: snapshot.contents,
+                capacity_per_item: snapshot.capacity_per_item,
+                shipped_total: snapshot.shipped_total,
+            });
+        }
+
         if self.hopper.footprint.contains(self.hopper.tile, pos) {
             let snapshot = self.hopper_snapshot();
             return Some(TileSnapshot::Hopper {
@@ -1625,10 +2016,12 @@ impl World {
     /// commands (e.g. filling a hopper that is already full) are silently
     /// ignored, same as `BeltSegment::try_spawn`'s own contract.
     /// `FillHopper` always targets the chain's hopper (the raw-ingredient
-    /// entry point) and `FillFluidTank` the pipe run's tank (the fluid
-    /// entry point); `CollectOutput` always targets the chain's last
-    /// machine (the finished-product exit point) — a single entry/exit pair
-    /// per chain, matching this milestone's "one straight line" scope.
+    /// entry point) and `FillFluidTank` the pipe run's tank (the fluid entry
+    /// point) — one of each per chain, matching this milestone's "one
+    /// straight line" scope. **There is no exit command any more:** the
+    /// finished-product exit is the [`Dock`] at the chain's tail, which ships
+    /// into [`Economy`] every tick from [`Self::tick`] with no player action
+    /// at all (the delivery-dock ticket removed `CollectOutput`).
     ///
     /// Note what `FillHopper` deliberately does *not* do: it never touches a
     /// belt. Getting raw ingredient onto the line is the hopper's job, one
@@ -1660,30 +2053,6 @@ impl World {
                     let (tile, footprint) = (stage.tile, stage.footprint);
                     self.mark_machine_dirty(tile, footprint);
                 }
-            }
-            PlayerCommand::CollectOutput => {
-                let last = *self.stages.last().unwrap();
-                let machine_tile = self.position_of(last.machine_entity);
-                let machine_footprint = self.placement_of(last.machine_entity).footprint;
-                let mut machine = self.ecs.get::<&mut Machine>(last.machine_entity).unwrap();
-                let held: Vec<(ItemId, u32)> = machine.output.iter().cloned().collect();
-                if held.is_empty() {
-                    return;
-                }
-                for (item, qty) in &held {
-                    machine.output.remove(item, *qty);
-                }
-                drop(machine);
-                // Collected product becomes delivered stock in the ONE
-                // shared pool every active contract draws from, checked
-                // against each contract at its own cadence boundary
-                // (GAMEPLAY.md §6; see `economy.rs`'s module doc for the
-                // allocation rule — stock is consumed by the contract that
-                // gets it, never credited to two at once).
-                for (item, qty) in &held {
-                    self.economy.deposit(item, *qty);
-                }
-                self.mark_machine_dirty(machine_tile, machine_footprint);
             }
             PlayerCommand::Purchase { kind, quantity } => {
                 // Priced first, then paid for, then credited — and every

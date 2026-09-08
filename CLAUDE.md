@@ -82,7 +82,8 @@ sauce-factory/
                                # here too when those land — not a second file.
                                # items.ron lands here when it exists.
     shop.ron                 # what the player can BUY and what it costs — one
-                               # entry per buildable kind (every machines.ron kind
+                               # entry per buildable kind (every machines.ron kind,
+                               # incl. the no-recipe hopper/fluid_tank/dock buildings,
                                # PLUS the belt and pipe tiles, which are
                                # infrastructure, not machines), each with a whole-
                                # number price in the same money economy.rs counts.
@@ -117,6 +118,14 @@ sauce-factory/
                                          # allows exactly one currency
       contracts.rs                     # ContractRegistry — loads + validates
                                          # data/contracts.ron; owns the Contract type
+      dock.rs                          # Dock — the chain's exit building: takes
+                                         # finished product off the belt past the
+                                         # last machine and ships it into Economy's
+                                         # shared delivery pool EVERY TICK (no player
+                                         # command; it replaced CollectOutput). A
+                                         # pass-through by design — its own buffer is
+                                         # empty between ticks, so "what's on the
+                                         # dock" is EconomySnapshot::delivery_stock
       economy.rs                       # Economy: money (Fx) + a Vec<ActiveContract>,
                                          # each with its OWN cadence clock, all drawing
                                          # from ONE shared delivery_buffer Inventory —
@@ -143,6 +152,13 @@ sauce-factory/
                                  # correctly (money increases on a satisfied mix,
                                  # stays put on a miss) — economy.rs's own #[cfg(test)]
                                  # covers Economy in isolation (cadence/mix edge cases)
+    tests/dock.rs              # headless integration test for the delivery dock:
+                                 # its geometry past the last machine, the chain
+                                 # shipping and EARNING with no player command at
+                                 # all, the dock reading empty while the shared pool
+                                 # fills, and dock_snapshot_json's exact shape —
+                                 # dock.rs's own #[cfg(test)] covers Dock in
+                                 # isolation (intake gating, the full-dock refusal)
     tests/shop.rs              # headless integration test: the chain earns contract
                                  # money and spends it on equipment, a refused
                                  # purchase (unaffordable/unknown/zero-quantity) is a
@@ -283,6 +299,68 @@ it's gone stale.
 
 ## Decisions log
 
+- 2026-09-08: **The chain has a real end: a delivery dock** (GAMEPLAY.md
+  §6/§9's long-flagged "a real delivery-dock tile is future polish"; ticket 1
+  of 2, the sim half — `godot_project/` deliberately untouched). Finished
+  product used to leave the world on a keypress: `PlayerCommand::CollectOutput`
+  reached into the LAST machine's own `output` buffer and deposited the lot
+  into `Economy`'s shared delivery pool, with no tile downstream of the packer
+  existing at all. Now `data/machines.ron` has a `dock` kind (1x1, priced at
+  70 in `data/shop.ron`), `World` lays one more ordinary `BeltSegment` past
+  the last machine and stands the dock at its end, and
+  `sim_core::sim::dock::Dock` absorbs from that belt and calls
+  `Economy::deposit` every tick, automatically. Six calls worth not
+  re-litigating. (1) **The dock is a pass-through, not a store**, and that
+  was the ticket's real decision: `Dock::ship_into` empties the buffer in the
+  same tick it filled, so the dock's own level always reads zero between
+  ticks and `DockSnapshot` deliberately has NO `fill` field. The alternative
+  — hold a visible stack and release it on some schedule — would create two
+  different numbers both honestly called "what's on the dock," and the one
+  the player could see (the dock tile) would be the one contracts *cannot*
+  count, since they settle against `Economy`'s pool. That is the same
+  gauge-lies-about-the-mechanism failure `FluidTank` rejected when it chose
+  constant head over its own fill fraction. It also has nothing gating it:
+  contracts already meter the pool out at their own cadences, so a hold would
+  be latency with no decision attached. It becomes a real mechanic the day a
+  truck cadence or GAMEPLAY.md §7's logistics staff gates the release — one
+  line changes then. Presentation draws the pallet stack from
+  `EconomySnapshot::delivery_stock`. (2) **`CollectOutput` is REMOVED, not
+  kept alongside** — a breaking wire-format change:
+  `{"type": "collect_output"}` no longer deserializes, so `command_from_json`
+  returns `None` and `issue_command_json` treats it as the silent no-op any
+  malformed command gets (a stale caller does not crash, it just stops doing
+  anything). `main.gd`'s **C** keybind and the `"C: collect product"`
+  fragment of `ISO_HELP_TEXT`/`FP_HELP_TEXT` are ticket 2's to delete. This
+  is the same discipline ticket 3 followed when `FillHopper` replaced
+  `SpawnItem`: do the rewrite, don't accumulate two ways to do one thing.
+  (3) **`DOCK_CAPACITY` is 32 per item and is deliberately unreachable
+  today** — the drain empties the dock every tick and the intake takes at
+  most one unit per tick, so it never holds more than one. The bound exists
+  because `try_absorb` has to be able to say *no*: that is what makes a full
+  dock back the belt up instead of annihilating the box, which is the
+  property `tests/core_loop.rs`'s mass-conservation invariant actually
+  checks, and it is unit-tested with a capacity-1 dock rather than left to a
+  world that cannot reach it. (4) **The dock holds a multi-item `Inventory`,
+  not the hopper's single fixed item id.** A hopper's item is decided by
+  `recipes.ron` (a chain has one raw ingredient); a dock accepts whatever the
+  line delivers, which costs nothing today and is the honest model of the
+  building. (5) **It is placed EAST, so unlike the hopper and the fluid tank
+  it genuinely moves the world's boundaries.** Both of those were placed
+  outside the chain's span specifically so introducing them moved no tile;
+  the dock is the chain's tail, so it extends it — the shipped line now runs
+  x = 0..35 and spans three chunks ((-1, 0), (0, 0), (1, 0)) instead of two.
+  That is handled (footprints are reported in every chunk they overlap,
+  `all_chunks` lists all three) and now pinned by tests, and it spends the
+  one-tile chunk headroom `data/machines.ron`'s `aging_rack` note was
+  protecting — that note has been updated rather than left stale. (6) **The
+  exit hop reuses `try_transfer_machine_output_to_belt` verbatim**, and the
+  dock's belt is an ordinary belt entity with the same `Position`/`BeltSpan`/
+  `BeltSegment` components: the chain's exit is now the same conveyor
+  hand-off as every hop before it, which is the whole reason a building beats
+  a command. New wire surface for ticket 2: `dock_snapshot_json`, a `docks`
+  array on `chunk_snapshot_json`, and a `"dock"` variant from
+  `query_tile_json`.
+
 - 2026-09-08: "Contracts as data" epic, ticket 2 of 2 — **the clipboard
   shows every active contract**, one docket card each. Presentation only:
   `sim_core` and `data/` were untouched, and every fact drawn was already on
@@ -408,8 +486,10 @@ it's gone stale.
   reads 2/2, never 7/2); the unclamped pool is `delivery_stock`. Every
   shipped contract targets `boxed_ketchup` and that is a content limit, not a
   shape limit — the multi-item mix is implemented and tested, but the chain
-  makes one sellable product and `CollectOutput` only drains its final stage,
-  so any other target would be permanently unsatisfiable. Real mix diversity
+  makes one sellable product and the chain has exactly one exit (the
+  delivery dock, added later the same day, which only ever receives that
+  line's final product), so any other target would be permanently
+  unsatisfiable. Real mix diversity
   needs a second sauce line.
 
 - 2026-09-06: Commit messages must follow Conventional Commits (enforced via
@@ -613,8 +693,10 @@ it's gone stale.
   one money counter and one active contract at this scope, so ECS
   machinery wasn't warranted (mirrors how `World` already owns `stages` as
   a plain `Vec`, not an ECS resource). The delivery mechanism: milestone 4's
-  `CollectOutput` command used to just discard collected product; it now
-  deposits it into `Economy`'s `delivery_buffer` (a plain `Inventory`),
+  `CollectOutput` command used to just discard collected product; it then
+  deposited it into `Economy`'s `delivery_buffer` (a plain `Inventory`) —
+  and that command has since been replaced entirely by the delivery dock,
+  see the 2026-09-08 entry at the top of this log —
   which `Economy::tick` checks against the contract's mix once
   `current_tick` reaches the cadence boundary — on a satisfied mix it pays
   out and advances the boundary by the cadence; on a miss it still advances
@@ -878,7 +960,7 @@ it's gone stale.
   capacity-bounded store of *item* ids, and conflating the two would let one
   be passed where the other is meant. (4) **`Purchase` is a silent no-op on
   failure**, like every other command in the enum (`FillHopper` past
-  capacity, `CollectOutput` on an empty machine): an unknown kind, a zero
+  capacity, `FillFluidTank` in a world with no pipe run): an unknown kind, a zero
   quantity, a total `Fx` can't represent, or simply not enough money all
   leave the world byte-identical. It also dirties no chunk, because money and
   a count are not tiles — presentation polls `shop_snapshot_json`, as it

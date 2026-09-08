@@ -105,11 +105,15 @@ pub struct Economy {
     /// which is also the priority order under scarcity (module doc).
     pub contracts: Vec<ActiveContract>,
     /// The ONE shared pool of delivered-but-not-yet-shipped product that
-    /// every contract draws from (module doc's allocation rule). Filled by
-    /// `World::issue_command(PlayerCommand::CollectOutput)` — the chain's
-    /// existing exit point — rather than a separate delivery
-    /// building/entity; a real delivery-dock tile is future polish, not
-    /// required for the loop to work.
+    /// every contract draws from (module doc's allocation rule) — the
+    /// number the UI calls "on the dock", and since the delivery-dock ticket
+    /// that is literally true: it is filled by [`super::dock::Dock`], the
+    /// building at the chain's tail, which ships whatever arrives on its
+    /// belt into here every tick. (Until that ticket it was filled by
+    /// `World::issue_command(PlayerCommand::CollectOutput)`, a keypress that
+    /// reached into the last machine's own output buffer; that command is
+    /// gone. This field's meaning and shape did not change — only who fills
+    /// it.)
     pub delivery_buffer: Inventory,
 }
 
@@ -187,7 +191,10 @@ impl Economy {
     }
 
     /// Adds finished product into the shared delivery pool — called from
-    /// `World::issue_command`'s `CollectOutput` handler.
+    /// [`super::dock::Dock::ship_into`], once per tick, for whatever the
+    /// chain's delivery dock received that tick. (It was the
+    /// `CollectOutput` command's handler before the delivery-dock ticket;
+    /// the call is identical, it just isn't a player action any more.)
     pub fn deposit(&mut self, item: &str, qty: u32) {
         self.delivery_buffer.add(item, qty);
     }

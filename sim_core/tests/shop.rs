@@ -52,27 +52,12 @@ fn price_of(kind: &str) -> Fx {
         .price_money()
 }
 
-/// How many units of `item` the final stage's machine currently holds in its
-/// output buffer (the same helper `economy.rs` uses).
-fn final_output_count(world: &World, item: &str) -> u32 {
-    for chunk in world.all_chunks() {
-        for machine in &world.chunk_snapshot(chunk).machines {
-            if machine.recipe == item {
-                return machine
-                    .output
-                    .iter()
-                    .find(|(id, _)| id == item)
-                    .map(|(_, qty)| *qty)
-                    .unwrap_or(0);
-            }
-        }
-    }
-    0
-}
-
 /// Runs the real chain until enough contract payouts have landed to fund
 /// this file's purchases several times over, so the returned world has
-/// genuine, earned money to spend. Mirrors `economy.rs`'s own drive loop.
+/// genuine, earned money to spend. Mirrors `economy.rs`'s own drive loop —
+/// which, since the delivery-dock ticket, only *feeds* the line: the dock at
+/// the chain's tail ships finished boxes into the delivery pool by itself
+/// every tick, so no collect command is issued (there isn't one any more).
 ///
 /// The threshold is deliberately a generous flat amount rather than "at
 /// least one payout": `data/contracts.ron` now ships three contracts with
@@ -82,8 +67,6 @@ fn final_output_count(world: &World, item: &str) -> u32 {
 /// `repeated_purchases_of_several_kinds_accumulate_independently` test
 /// (needing 36 to cover its purchases) is not guaranteed to cover.
 fn world_with_earned_money() -> World {
-    let registry = recipes();
-    let final_item = registry.ordered().last().unwrap().id.clone();
     let mut world = world();
     const MIN_MONEY: i64 = 200;
 
@@ -93,9 +76,6 @@ fn world_with_earned_money() -> World {
             amount: FLUID_TANK_CAPACITY,
         });
         world.tick();
-        if final_output_count(&world, &final_item) > 0 {
-            world.issue_command(PlayerCommand::CollectOutput);
-        }
         if world.money() >= Fx::from_num(MIN_MONEY) {
             break;
         }

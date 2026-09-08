@@ -55,19 +55,21 @@ fn chain_on(kinds: &[&str]) -> RecipeRegistry {
     .expect("generated recipe text must parse")
 }
 
-/// A registry of `(id, width, height)` kinds, plus the two 1x1 kinds every
+/// A registry of `(id, width, height)` kinds, plus the three 1x1 kinds every
 /// world needs from the machine registry regardless of its recipes: the
 /// `hopper` (ticket 3: `World` builds one raw-ingredient feeder at the head
-/// of the chain) and the `fluid_tank` (the "Visual overhaul round 2" epic's
+/// of the chain), the `fluid_tank` (the "Visual overhaul round 2" epic's
 /// ticket 1: a chain with a fluid-requiring recipe gets one tank supplying
-/// its pipe run). Both take their footprint from this registry like any
-/// other placed building. Added here rather than at each call site because
-/// none of these fixtures are *about* either — they are about machine
-/// geometry.
+/// its pipe run), and the `dock` (the delivery-dock ticket: every chain ends
+/// in one, fed by one more belt past the last machine). All three take their
+/// footprint from this registry like any other placed building. Added here
+/// rather than at each call site because none of these fixtures are *about*
+/// any of them — they are about machine geometry.
 fn kinds(entries: &[(&str, i32, i32)]) -> MachineRegistry {
     let mut body: String = concat!(
         "MachineKind(id: \"hopper\", footprint: Footprint(width_tiles: 1, height_tiles: 1)),",
         "MachineKind(id: \"fluid_tank\", footprint: Footprint(width_tiles: 1, height_tiles: 1)),",
+        "MachineKind(id: \"dock\", footprint: Footprint(width_tiles: 1, height_tiles: 1)),",
     )
     .to_string();
     body += &entries
@@ -475,7 +477,18 @@ fn a_machine_straddling_a_chunk_boundary_appears_in_both_chunks() {
             other => panic!("expected the sprawler at x = {x}, got {other:?}"),
         }
     }
-    assert!(world.query_tile((34, 0)).is_none());
+    // x = 34 is past the sprawler's east edge. Since the delivery-dock
+    // ticket that tile is not empty — it is the first tile of the belt
+    // running from the last machine into the chain's dock — but it must not
+    // resolve as any part of the straddling machine, which is what this
+    // check is actually for.
+    match world.query_tile((34, 0)) {
+        Some(TileSnapshot::Belt { .. }) => {}
+        other => panic!(
+            "x = 34 is one past the sprawler's footprint and should be the dock's inbound \
+             belt, got {other:?}"
+        ),
+    }
 }
 
 #[test]

@@ -53,7 +53,9 @@
 // Order matters only for presentation: the loader preserves this file's
 // order and `shop_snapshot_json` reports the catalog in it, so this is the
 // order a build menu lists things in. It runs infrastructure first, then the
-// two buffers, then the chain's machines in chain order.
+// two feed-end buffers, then the chain's machines in chain order, then the
+// delivery dock — which has no recipe, so it is placed by its POSITION in
+// the chain (the tail) rather than by recipe order.
 (
     schema_version: 1,
     entries: [
@@ -117,6 +119,24 @@
         ShopEntry(
             id: "packer",
             price: 90,
+        ),
+
+        // --- The chain's exit, placed by position rather than by recipe ---
+        // The delivery dock has no recipe at all (like the hopper and the
+        // fluid tank), so it cannot be placed in "recipes.ron order" the way
+        // every entry above it is. It is listed last because that is where
+        // it stands on the floor: the packer's boxes run down one more belt
+        // and into it, and it ships them into the shared delivery pool every
+        // tick without the player doing anything.
+        //
+        // Priced between the two other no-recipe buffers and the cheap
+        // machines: a loading bay with a conveyor head is more than the
+        // hopper's bin and less than any of the processing equipment, and
+        // it is the one building whose value is that the line does not need
+        // watching once it exists.
+        ShopEntry(
+            id: "dock",
+            price: 70,
         ),
     ],
 )

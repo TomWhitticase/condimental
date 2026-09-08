@@ -29,10 +29,10 @@
 // EVERY CONTRACT BELOW ASKS FOR `boxed_ketchup`, AND THAT IS NOT A DESIGN
 // STATEMENT. GAMEPLAY.md §6's mixes are meant to name several *different*
 // sauces; the chain in `data/recipes.ron` currently produces exactly one
-// sellable product, and `PlayerCommand::CollectOutput` only ever collects
-// from the chain's final stage, so any contract naming a different item
-// would be permanently unsatisfiable content rather than interesting
-// content. The multi-item `mix` shape is fully implemented and tested —
+// sellable product, and the delivery dock at the chain's tail only ever
+// receives what that one line's final stage makes, so any contract naming a
+// different item would be permanently unsatisfiable content rather than
+// interesting content. The multi-item `mix` shape is fully implemented and tested —
 // what is missing is a second sauce line to point it at, which is future
 // content work (GAMEPLAY.md §2's tier table), not a limitation of this file.
 // What the three below DO create today is the real thing this ticket is

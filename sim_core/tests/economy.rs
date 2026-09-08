@@ -3,15 +3,25 @@
 //! `sim_core/src/sim/economy.rs` and `contracts.rs` already unit-test the
 //! loader and `Economy` in isolation (schema/degenerate-content rejection,
 //! cadence boundaries, the shared-pool allocation rule); this file instead
-//! drives the *whole* production chain end to end — spawning raw tomatoes,
-//! letting them travel every belt/machine stage, collecting the finished
-//! product, and letting `World::tick` settle contracts — to prove "build
-//! factory -> make money" is actually true for the real chain, not just for
-//! `Economy` in a vacuum.
+//! drives the *whole* production chain end to end — loading raw tomatoes,
+//! letting them travel every belt/machine stage, letting the delivery dock
+//! ship the finished product, and letting `World::tick` settle contracts —
+//! to prove "build factory -> make money" is actually true for the real
+//! chain, not just for `Economy` in a vacuum.
 //!
 //! It was written against milestone 5's single hardcoded contract; the
 //! invariants it asserts are unchanged ("money increases on a satisfied
 //! mix, stays put on a miss"), they are just per-contract now.
+//!
+//! **The delivery-dock ticket removed the one player action this file used
+//! to depend on.** Every drive loop below used to call
+//! `PlayerCommand::CollectOutput` whenever the last machine held product;
+//! that command no longer exists, because the chain now ends in a real
+//! belt-and-dock exit that ships into the shared delivery pool by itself
+//! every tick. The loops therefore only *feed* the line now — hopper and
+//! vinegar tank — and everything downstream happens with no player
+//! involvement at all, which is exactly the behaviour these tests should be
+//! proving in the first place.
 
 use sim_core::sim::types::Fx;
 use sim_core::sim::{
@@ -57,38 +67,20 @@ fn single_contract_world() -> World {
     )
 }
 
-/// How many units of `item` the final stage's machine currently holds in its
-/// output buffer, searching every chunk the chain occupies (mirrors
-/// `core_loop.rs`'s own `full_chain_snapshot` helper).
-fn final_output_count(world: &World, item: &str) -> u32 {
-    for chunk in world.all_chunks() {
-        let snapshot = world.chunk_snapshot(chunk);
-        for machine in &snapshot.machines {
-            if machine.recipe == item {
-                return machine
-                    .output
-                    .iter()
-                    .find(|(id, _)| id == item)
-                    .map(|(_, qty)| *qty)
-                    .unwrap_or(0);
-            }
-        }
-    }
-    0
-}
-
-/// Runs the chain until `target` units of its final product have been
-/// collected into the shared delivery pool, or the tick budget runs out.
-/// Returns how many were actually collected.
-fn run_until_collected(world: &mut World, final_item: &str, target: u32) -> u32 {
-    let mut collected = 0u32;
+/// Runs the chain until the delivery dock has shipped `target` units into
+/// the shared delivery pool, or the tick budget runs out. Returns how many
+/// it actually shipped.
+///
+/// Note what this does *not* do since the delivery-dock ticket: nothing here
+/// empties the chain. The only commands issued are the two that supply
+/// consumables; the dock does the rest by itself, every tick.
+fn run_until_shipped(world: &mut World, target: u32) -> u32 {
     for _ in 0..500_000u32 {
-        if collected < target {
-            // Keep the hopper topped up rather than spawning onto the belt.
-            // `FillHopper` clamps at capacity, so issuing it every tick just
-            // means "never let the feed run dry" — the hopper still meters
-            // onto the belt at one unit per tick at most, so the chain's
-            // throughput is unchanged by this.
+        if world.dock_snapshot().shipped_total < target {
+            // Keep the hopper topped up. `FillHopper` clamps at capacity, so
+            // issuing it every tick just means "never let the feed run dry"
+            // — the hopper still meters onto the belt at one unit per tick
+            // at most, so the chain's throughput is unchanged by this.
             world.issue_command(PlayerCommand::FillHopper {
                 amount: target.saturating_mul(4).max(4),
             });
@@ -102,17 +94,11 @@ fn run_until_collected(world: &mut World, final_item: &str, target: u32) -> u32 
 
         world.tick();
 
-        let ready = final_output_count(world, final_item);
-        if ready > 0 {
-            world.issue_command(PlayerCommand::CollectOutput);
-            collected += ready;
-        }
-
-        if collected >= target {
+        if world.dock_snapshot().shipped_total >= target {
             break;
         }
     }
-    collected
+    world.dock_snapshot().shipped_total
 }
 
 #[test]
@@ -134,17 +120,18 @@ fn full_chain_delivers_against_a_contract_and_pays_out_exactly_that_contracts_pa
     // contract paid — with the whole shipped board the others would settle
     // too and the assertion would be about their sum instead.
     let mut world = single_contract_world();
-    let collected = run_until_collected(&mut world, &final_item, want_qty);
+    let shipped = run_until_shipped(&mut world, want_qty);
 
     assert!(
-        collected >= want_qty,
-        "expected to collect at least {want_qty} units of '{final_item}' well within 500k ticks, got {collected}"
+        shipped >= want_qty,
+        "expected the dock to ship at least {want_qty} units of '{final_item}' well within \
+         500k ticks with no collect command at all, got {shipped}"
     );
 
     // The full mix is now sitting in the delivery pool, but the exact tick
     // it landed on may fall anywhere relative to a cadence boundary — the
-    // collection above could have completed just *after* the contract's
-    // check already ran (and missed) this window. Advance a full extra
+    // last box could have arrived just *after* the contract's check already
+    // ran (and missed) this window. Advance a full extra
     // cadence period to guarantee at least one boundary is checked with the
     // complete mix already deposited.
     let target_tick = world.current_tick() + cadence;
@@ -236,8 +223,8 @@ fn several_contracts_settle_independently_against_one_real_chain() {
         ContractRegistry::from_ron_str(&board).expect("fixture board must load"),
     );
 
-    // Run the chain continuously (never stop feeding, never stop
-    // collecting) through exactly one slow-cadence window — the slow
+    // Run the chain continuously (never stop feeding; the dock never stops
+    // shipping) through exactly one slow-cadence window — the slow
     // contract's very first boundary. Production ramps up for the first
     // ~3000 ticks (the aging rack's own hold plus every stage upstream and
     // downstream of it) and then settles into steady state well before
@@ -251,10 +238,11 @@ fn several_contracts_settle_independently_against_one_real_chain() {
             amount: FLUID_TANK_CAPACITY,
         });
         world.tick();
-        if final_output_count(&world, &final_item) > 0 {
-            world.issue_command(PlayerCommand::CollectOutput);
-        }
     }
+    assert!(
+        world.dock_snapshot().shipped_total > 0,
+        "the dock must have shipped product on its own for either contract to settle"
+    );
 
     let econ = world.economy();
     let quick = econ.contract("quick").unwrap();
@@ -314,9 +302,9 @@ fn one_delivered_unit_pays_one_contract_not_every_contract_that_wants_it() {
         ContractRegistry::from_ron_str(&board).expect("fixture board must load"),
     );
 
-    // Collect exactly one unit, then stop feeding the line entirely.
-    let collected = run_until_collected(&mut world, &final_item, 1);
-    assert_eq!(collected, 1, "the chain produces one unit at a time");
+    // Ship exactly one unit, then stop feeding the line entirely.
+    let shipped = run_until_shipped(&mut world, 1);
+    assert_eq!(shipped, 1, "the chain produces one unit at a time");
 
     let target = world.current_tick() + 1000;
     while world.current_tick() < target {
