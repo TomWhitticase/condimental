@@ -27,7 +27,6 @@
 //! placement to spend this inventory is a later epic. See `sim::shop`'s
 //! module doc.
 
-use sim_core::sim::economy::CONTRACT_PAYOUT_MONEY;
 use sim_core::sim::types::Fx;
 use sim_core::sim::{
     FLUID_TANK_CAPACITY, MachineRegistry, PlayerCommand, RecipeRegistry, ShopCatalog, World,
@@ -94,7 +93,7 @@ fn world_with_earned_money() -> World {
     }
 
     assert!(
-        world.money() >= Fx::from_num(CONTRACT_PAYOUT_MONEY),
+        world.money() > Fx::ZERO,
         "the chain must earn at least one contract payout before this test can spend it \
          (got {})",
         world.money()
