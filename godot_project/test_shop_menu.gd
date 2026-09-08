@@ -15,7 +15,7 @@
 #   * it renders exactly one slot per `shop_snapshot_json` catalog entry, in
 #     the snapshot's own order, each carrying a real icon plus price and
 #     owned-count text that match the snapshot's numbers,
-#   * B actually toggles it open and closed, driven through the scene's real
+#   * E actually toggles it open and closed, driven through the scene's real
 #     `_unhandled_input` (the approach test_interaction.gd establishes),
 #   * affordability is a visible slot state, not just a JSON field: a new
 #     world's STARTING_MONEY leaves every slot open AND covers one of
@@ -173,16 +173,23 @@ func _initialize() -> void:
 		])
 		return
 
-	# --- B toggles the menu, through the real input path ------------------
-	_press(main, KEY_B)
+	# --- E toggles the menu, through the real input path ------------------
+	# **E**, not B: the E/ESC-controls ticket rebound this onto Factorio's
+	# own inventory key and removed the old binding outright rather than
+	# leaving it as an undiscoverable alias, so B must now do NOTHING.
+	_press(main, KEY_E)
 	if not menu.visible or not main._shop_open:
-		_fail("pressing B did not open the build menu")
+		_fail("pressing E did not open the build menu")
+		return
+	_press(main, KEY_E)
+	if menu.visible or main._shop_open:
+		_fail("pressing E a second time did not close the build menu")
 		return
 	_press(main, KEY_B)
 	if menu.visible or main._shop_open:
-		_fail("pressing B a second time did not close the build menu")
+		_fail("B is no longer the build-menu key and must not open it")
 		return
-	_press(main, KEY_B) # leave it open for the purchase below
+	_press(main, KEY_E) # leave it open for the purchase below
 
 	# --- A real purchase moves the displayed owned count ------------------
 	# Buy the cheapest affordable kind, whatever the catalog currently says
@@ -234,7 +241,7 @@ func _initialize() -> void:
 		_fail("entering placement mode should close the build menu")
 		return
 	main._exit_build_mode()
-	_press(main, KEY_B) # reopen for the hotkey check below
+	_press(main, KEY_E) # reopen for the hotkey check below
 
 	# And the keyboard half of BUYING is SHIFT+number, while this menu is up.
 	# (Its plain-number half became the hotbar's selection key — checked
@@ -268,7 +275,7 @@ func _initialize() -> void:
 			_fail("a bare number key should have selected '%s' for placement" % kind)
 			return
 		main._exit_build_mode()
-		_press(main, KEY_B) # reopen for the spend-down below
+		_press(main, KEY_E) # reopen for the spend-down below
 
 	# --- Spend the balance: now unaffordability has to be VISIBLE ---------
 	# Buy the most expensive kind until nothing is affordable, then check the
@@ -300,7 +307,7 @@ func _initialize() -> void:
 		_fail("spending the whole balance left every slot affordable — the locked state was never exercised")
 		return
 
-	print("SHOP_MENU_OK: ShopMenu is a distinct node with %d slots (one per catalog entry), B toggles it, buying '%s' moved the displayed owned count, an owned slot enters placement mode, and %d slot(s) lock and mark themselves once the balance is spent" % [
+	print("SHOP_MENU_OK: ShopMenu is a distinct node with %d slots (one per catalog entry), E toggles it (and B no longer does), buying '%s' moved the displayed owned count, an owned slot enters placement mode, and %d slot(s) lock and mark themselves once the balance is spent" % [
 		main._shop_slots.size(), kind, locked,
 	])
 	quit(0)

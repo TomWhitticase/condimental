@@ -100,14 +100,78 @@ func _initialize() -> void:
 		_fail("rotating the belt at (0, 0) should turn east -> south, got %s -> %s" % [belt_before, belt_after])
 		return
 
+	# --- E OPENS THE MENU, ESC CLOSES EVERYTHING (the E/ESC-controls ticket)
+	# The build menu moved off B onto Factorio's own inventory key, and B was
+	# removed rather than kept as an alias — so both halves get asserted, the
+	# same way C's removal above is.
+	_press(main, KEY_E)
+	if not main._shop_open:
+		_fail("E should open the build menu")
+		return
+	_press(main, KEY_E)
+	if main._shop_open:
+		_fail("E a second time should close the build menu")
+		return
+	_press(main, KEY_B)
+	if main._shop_open:
+		_fail("B is no longer the build-menu key and must not open it")
+		return
+
+	# ESC used to leave build/remove mode ONLY: with the menu up it did
+	# nothing at all, so the one key a player reaches for to dismiss things
+	# left the biggest panel on screen standing. It closes all three pieces
+	# of stateful UI now — menu, placement mode, remove mode — from any
+	# combination of them, which is what `_close_all_overlays` exists for.
+	_press(main, KEY_E)
+	_press(main, KEY_ESCAPE)
+	if main._shop_open:
+		_fail("ESC should close the build menu")
+		return
+
+	# Placement mode alone. A kind has to be OWNED to be held, so buy one.
+	main.sim.issue_command_json(JSON.stringify({"type": "purchase", "kind": "belt"}))
+	main._refresh_owned_counts()
+	main._enter_build_mode("belt")
+	if main._build_kind != "belt":
+		_fail("could not enter placement mode for a belt the player owns")
+		return
+	_press(main, KEY_ESCAPE)
+	if main._in_build_mode():
+		_fail("ESC should leave placement mode")
+		return
+
+	# And the awkward combination: menu up WITH something in hand. Every
+	# route the player has closes one when it opens the other, so this is
+	# forced deliberately — ESC has to clear whatever it is actually handed,
+	# not whatever the UI usually allows.
+	for mode in ["placement", "remove"]:
+		if mode == "placement":
+			main._enter_build_mode("belt")
+		else:
+			_press(main, KEY_X)
+		main._set_shop_menu_open(true)
+		if not (main._shop_open and main._in_build_mode()):
+			_fail("failed to set up the menu-open-plus-%s-mode combination" % mode)
+			return
+		_press(main, KEY_ESCAPE)
+		if main._shop_open or main._in_build_mode():
+			_fail("one ESC must close the menu AND leave %s mode (shop_open=%s build_mode=%s)" % [
+				mode, main._shop_open, main._in_build_mode(),
+			])
+			return
+
 	# Every new key is advertised, the same rule that removed C's hint.
 	for legend in [main.ISO_HELP_TEXT, main.FP_HELP_TEXT]:
-		for fragment in ["R: rotate", "X: remove mode", "ESC: cancel", "click: place"]:
+		for fragment in ["R: rotate", "X: remove mode", "ESC: close", "click: place", "E: build menu"]:
 			if not legend.contains(fragment):
 				_fail("the control legend is missing '%s': %s" % [fragment, legend])
 				return
+	for legend in [main.ISO_HELP_TEXT, main.FP_HELP_TEXT]:
+		if legend.contains("B: build menu"):
+			_fail("the control legend still advertises the removed B binding: %s" % legend)
+			return
 
-	print("INTERACTION_OK: simulated SPACE keypress reached SimBridge and loaded the hopper (%d -> %d), C is gone from both the legend and the key handler, and X/ESC/R drive build mode" % [before, after])
+	print("INTERACTION_OK: simulated SPACE keypress reached SimBridge and loaded the hopper (%d -> %d), C is gone from both the legend and the key handler, X/ESC/R drive build mode, E (not B) opens the build menu, and one ESC closes the menu and either mode from any combination" % [before, after])
 	quit(0)
 
 

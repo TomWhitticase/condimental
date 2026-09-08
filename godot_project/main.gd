@@ -1703,8 +1703,8 @@ const CROSSHAIR_THICKNESS := 2.0 # px, each bar's width
 ## being clipped behind the contract clipboard in the top-right corner — the
 ## kind of thing only a rendered frame shows (UI_UX.md §2b point 12). The
 ## build controls lead, because they are what the player does most.
-const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate    X: remove mode    ESC: cancel    B: build menu (buy)\nSPACE: load hoppers    V: load tanks    WASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
-const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate    X: remove mode    ESC: cancel    B: build menu (buy)\nV: load tanks    WASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
+const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate    X: remove mode    ESC: close    E: build menu (buy)\nSPACE: load hoppers    V: load tanks    WASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
+const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate    X: remove mode    ESC: close    E: build menu (buy)\nV: load tanks    WASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
 
 
 ## The tile box the isometric camera frames at startup: whatever is placed,
@@ -2149,7 +2149,7 @@ func _build_ui() -> void:
 	_build_contract_panel(hud, settings)
 
 	# UI_UX.md §5's other named widget: "build/recipe menus as grids of
-	# voxel-rendered icon slots." Hidden until B is pressed.
+	# voxel-rendered icon slots." Hidden until E is pressed.
 	_build_shop_menu(hud, settings)
 
 	# UI_UX.md §5's LAST unbuilt named widget: "a Minecraft-style hotbar/
@@ -2569,7 +2569,7 @@ func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 
 	var footer := Label.new()
 	footer.label_settings = base_settings
-	footer.text = "left-click (or SHIFT+its number) buys one    right-click (or just its number) puts one in your hand    B: close"
+	footer.text = "left-click (or SHIFT+its number) buys one    right-click (or just its number) puts one in your hand    E/ESC: close"
 	body.add_child(footer)
 
 	_position_shop_menu()
@@ -3104,7 +3104,7 @@ func _hotbar_index_for_keycode(keycode: int) -> int:
 ##
 ## Buying is deliberately NOT here. Selecting what is in your hand and
 ## acquiring more of it are different verbs and stay on different actions:
-## buying lives in the build menu (**B**), on a slot's left click, with
+## buying lives in the build menu (**E**), on a slot's left click, with
 ## SHIFT+number as its keyboard mirror. Collapsing them would mean a key that
 ## sometimes spends money, which is the one thing a player must never do by
 ## accident.
@@ -3149,7 +3149,7 @@ func _pulse_hotbar_slot(index: int) -> void:
 
 ## Which slot is currently in the player's hand, or -1. Derived from
 ## `_build_kind` rather than stored, so the strip can never disagree with the
-## ghost — ESC, B and running out of a kind all leave build mode without
+## ghost — ESC, E and running out of a kind all leave build mode without
 ## going through this file.
 func _hotbar_selected_index() -> int:
 	if _build_kind == "":
@@ -3336,7 +3336,7 @@ func _fill_hotbar_tooltip(index: int, owned: int, price: float) -> void:
 	_hotbar_tooltip_name.text = _kind_display_name(kind)
 	var key := _hotbar_key_label(index)
 	var select_line := ("press %s to select" % key) if key != "" else "click to select"
-	_hotbar_tooltip_body.text = "%s    ·    %.0f each\n%s    ·    buy in the build menu (B)" % [
+	_hotbar_tooltip_body.text = "%s    ·    %.0f each\n%s    ·    buy in the build menu (E)" % [
 		("carrying %d" % owned) if owned > 0 else "carrying none",
 		price,
 		select_line,
@@ -3472,9 +3472,30 @@ func _exit_build_mode() -> void:
 	if _placement_prompt != null:
 		_placement_prompt.visible = false
 	# The strip's selection is derived from `_build_kind`, so leaving build
-	# mode by ANY route (ESC, B, X, running out of a kind) clears the
+	# mode by ANY route (ESC, E, X, running out of a kind) clears the
 	# highlight without that route having to know the hotbar exists.
 	_update_hotbar()
+
+
+## ESC's universal "close whatever is open". The scene has exactly three
+## pieces of stateful UI a player can leave standing — the build menu
+## (`_shop_open`), placement mode (`_build_kind`) and remove mode
+## (`_remove_mode`) — and one press clears all three from any combination of
+## them, which is what every builder this game borrows from does.
+##
+## It is a separate function rather than a line added to `_exit_build_mode`
+## on purpose: that function's other callers must NOT close the menu.
+## `_select_hotbar_slot` calls it to put down the kind in hand, and the
+## number keys are documented to work with the menu open or closed — a
+## deselect that also swept the menu away would break that. Same for
+## `_confirm_build`'s "you placed your last one" exit. So ESC gets the wider
+## verb and everything else keeps the narrow one.
+##
+## Nothing else here is a mode: the hover tooltip and the hotbar tooltip are
+## driven by where the cursor is, and the name flyout fades on its own timer.
+func _close_all_overlays() -> void:
+	_set_shop_menu_open(false)
+	_exit_build_mode()
 
 
 func _in_build_mode() -> bool:
@@ -3743,7 +3764,7 @@ func _placement_prompt_text() -> String:
 	var owned := _owned_of(_build_kind)
 	match _ghost_reason:
 		"none_owned":
-			return "✗ NONE OWNED  %s\nbuy one in the build menu (B)\nESC: cancel" % kind_name
+			return "✗ NONE OWNED  %s\nbuy one in the build menu (E)\nESC: cancel" % kind_name
 		"blocked":
 			return "✗ BLOCKED  %s  ·  facing %s\nsomething is already there\nR: rotate    ESC: cancel" % [kind_name, _build_direction]
 	return "✔ PLACE  %s  ·  facing %s\nclick to build    %d left to place\nR: rotate    ESC: cancel" % [
@@ -3943,11 +3964,17 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
 
-	# B opens and closes the build menu (the "Shop & Inventory" epic's ticket
-	# 2). Handled in BOTH view modes, like V and unlike SPACE: it collides
-	# with nothing in either, and buying equipment is not something the
-	# player should have to leave first-person to do.
-	if event.keycode == KEY_B:
+	# E opens and closes the build menu — Factorio's own inventory key, which
+	# is what a player arriving from that genre will reach for first. It used
+	# to be **B**, and B is deliberately NOT kept as an alias: two keys for
+	# one panel means the legend can only print one of them, and the one it
+	# does not print becomes an undiscoverable duplicate that the next rebind
+	# has to remember about. One key, printed in ISO_HELP_TEXT/FP_HELP_TEXT.
+	#
+	# Handled in BOTH view modes, like V and unlike SPACE: it collides with
+	# nothing in either, and buying equipment is not something the player
+	# should have to leave first-person to do.
+	if event.keycode == KEY_E:
 		# Opening the menu leaves build mode: the menu is where you pick what
 		# to place, so arriving there with a ghost still following the cursor
 		# would leave two answers to "what does a click do".
@@ -3956,10 +3983,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		_toggle_shop_menu()
 		return
 
-	# ESC leaves either build mode. It does nothing else, so it stays free
-	# for a pause menu that would want it when one exists.
+	# ESC closes whatever is open — see `_close_all_overlays`.
 	if event.keycode == KEY_ESCAPE:
-		_exit_build_mode()
+		_close_all_overlays()
 		return
 
 	# R turns things: the ghost's facing while placing, and — outside

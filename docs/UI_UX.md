@@ -442,7 +442,7 @@ so a new catalog entry appears on the strip with no Godot edit.
 3. **Selecting and buying are different verbs on different actions.** Number
    keys 1-9 and 0 select (in either view mode, menu open or closed), and
    pressing the selected slot's key again puts it down, mirroring ESC.
-   Buying stays in the build menu (**B**) on a slot's left click, with
+   Buying stays in the build menu (**E**) on a slot's left click, with
    SHIFT+number as its keyboard mirror — and that key buys *only while the
    menu is open*, because that is the one screen where the price and the
    balance being spent are both in front of the player. A key that spends

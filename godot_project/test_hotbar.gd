@@ -22,7 +22,7 @@
 #     impossible before: the keys used to do nothing unless the build menu
 #     was up,
 #   * pressing the selected slot's key again deselects, mirroring ESC, and
-#     ESC/X/B leaving build mode by their own routes clears the strip's
+#     ESC/X/E leaving build mode by their own routes clears the strip's
 #     highlight too (the selection is derived from `_build_kind`, not stored),
 #   * an empty socket refuses selection rather than showing an unbuildable
 #     ghost,
