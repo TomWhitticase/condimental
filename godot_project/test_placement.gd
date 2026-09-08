@@ -15,8 +15,9 @@
 #     tile is blocked, a kind with none owned is refused — and each state is
 #     signalled by MORE than colour (UI_UX.md §7): the prompt's own glyph and
 #     wording differ, and the tint differs too,
-#   * a click through `_confirm_build` places over the real
-#     `issue_command_json` boundary, and the rendered scene follows,
+#   * a real left-click through `_unhandled_input` places over the real
+#     `issue_command_json` boundary and the rendered scene follows — and a
+#     click on a blocked tile changes nothing at all,
 #   * every one of the four facings renders with the matching Y rotation, and
 #     a quarter turn swaps a non-square footprint's extents,
 #   * the junction art's east-only fallback holds under real placement: a
@@ -59,6 +60,15 @@ func _process(_delta: float) -> bool:
 	_ran = true
 	_run_checks()
 	return true
+
+
+## A real left mouse button press through the scene's own input handler —
+## the click that builds.
+func _left_click(target) -> void:
+	var event := InputEventMouseButton.new()
+	event.button_index = MOUSE_BUTTON_LEFT
+	event.pressed = true
+	target._unhandled_input(event)
 
 
 func _meshes(node: Node, out: Array) -> Array:
@@ -257,17 +267,33 @@ func _run_checks() -> void:
 	main._enter_build_mode("belt")
 	main._build_direction = "south"
 	var before: int = main._placements.size()
-	# `_confirm_build` reads the live cursor, which is meaningless headlessly,
-	# so drive the command it issues with an explicit tile — the key/click
-	# wiring itself is covered by test_interaction.gd.
-	main._issue_world_command({
-		"type": "place", "kind": "belt", "tile": [12, 12], "direction": "south",
-	})
+	# A real left-click, through `_unhandled_input`. It acts on the tile the
+	# GHOST is on rather than re-picking from the cursor (see `_confirm_build`),
+	# which is what makes this drivable at all without a live mouse: aim the
+	# ghost, then click.
+	main._ghost_tile = Vector2i(12, 12)
+	main._ghost_valid = true
+	main._ghost_reason = ""
+	_left_click(main)
 	if main._placements.size() != before + 1:
-		_fail("placing should have added exactly one placement")
+		_fail("a left-click in placement mode should have added exactly one placement")
 		return
 	if main.get_node_or_null("World/belt_12,12") == null:
 		_fail("the placed belt did not render")
+		return
+	if String(main._placement_at_tile(Vector2i(12, 12)).get("direction", "")) != "south":
+		_fail("the click should have built the ghost's facing, not the default")
+		return
+	# A click on a blocked tile is a total no-op, like the simulation's own
+	# refusal — the prompt says so and the click must agree with the prompt.
+	main._enter_build_mode("belt")
+	var blocked_before: int = main._placements.size()
+	main._ghost_tile = Vector2i(12, 12)
+	main._ghost_valid = false
+	main._ghost_reason = "blocked"
+	_left_click(main)
+	if main._placements.size() != blocked_before:
+		_fail("clicking a blocked tile must change nothing at all")
 		return
 
 	# --- 8. Remove mode ghosts the target, and a click picks it up ---------

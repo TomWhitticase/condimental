@@ -2881,7 +2881,12 @@ func _rotate_under_cursor() -> void:
 ## total no-op), so refusing here as well keeps the prompt honest rather than
 ## letting a click look like it did something.
 func _confirm_build() -> void:
-	var tile := _ghost_target_tile()
+	# Acts on the tile the GHOST IS DRAWN ON (`_ghost_tile`, recomputed once
+	# per frame by `_update_ghost`), not on a freshly re-picked one. What the
+	# player is aiming at is what they can see; re-picking here would let a
+	# cursor that moved between the frame and the button-down land the build
+	# somewhere the ghost never was.
+	var tile := _ghost_tile
 	if tile == HOVER_NO_TILE:
 		return
 	if _remove_mode:
