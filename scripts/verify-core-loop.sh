@@ -12,7 +12,7 @@
 #      conservation across every stage, not just one. No Godot involved.
 #   2. `cargo xtask` builds the extension and copies it into
 #      godot_project/bin/.
-#   3. Twelve headless Godot scripts exercise the parts cargo test can't: the
+#   3. Thirteen headless Godot scripts exercise the parts cargo test can't: the
 #      real `gdext` boundary (JSON command/snapshot/layout wire format going
 #      through Godot's own Variant/String/JSON machinery, driven through the
 #      whole chain end to end), the interactive scene's keyboard input
@@ -42,7 +42,20 @@
 #      one belt in the world that belongs to no stage drawn from its snapshot,
 #      the goods on its deck following the economy's shared delivery pool, its
 #      own hover branch — and the removed **C** collect-product control being
-#      gone from both the legend and the key handler).
+#      gone from both the legend and the key handler), and the "Real
+#      Placement" epic's ticket 2 (an EMPTY starting world rendering correctly,
+#      a translucent ghost with footprint-aware validity signalled by glyph
+#      and word as well as colour, all four facings drawn with the matching
+#      rotation, the junction art's east-only fallback holding under real
+#      placement, and place/remove/rotate driving the rendered scene through
+#      the real command boundary).
+#
+# NOTE ON WHAT THESE TESTS BUILD. Since that epic a world starts EMPTY, so
+# every script below builds the factory it then asserts against, using real
+# purchase/place commands (godot_project/test_layouts.gd). What they can build
+# is bounded by `sim::STARTING_MONEY`; the shipped six-stage line costs several
+# times that and stays asserted where it always was, in `cargo test -p sim_core`
+# against `sim::reference_chain`. See test_layouts.gd's header.
 #
 # Usage: scripts/verify-core-loop.sh
 
@@ -141,9 +154,10 @@ run_godot_script test_machines.gd MACHINES_OK "per-kind machine models, multi-ti
 run_godot_script test_connections.gd CONNECTIONS_OK "belt/pipe-to-machine junctions, visual overhaul round 2"
 run_godot_script test_shop_menu.gd SHOP_MENU_OK "build menu grid + purchases, UI_UX.md §5"
 run_godot_script test_timed_processes.gd TIMED_PROCESSES_OK "aging rack + live progress gauge, milestone 7"
+run_godot_script test_placement.gd PLACEMENT_OK "empty world, ghost, rotation, place/remove — Real Placement ticket 2"
 
 echo
-echo "PASS: milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"
+echo "PASS: real placement + milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"
 echo "      + icons + hover + milestone 6 fluid presentation + machine footprints/hopper"
 echo "      + belt/pipe junctions + the build menu + milestone 7's aging rack and its"
 echo "      progress gauge + the delivery dock that ends the line, all verified"

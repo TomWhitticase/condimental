@@ -203,11 +203,14 @@ func _initialize() -> void:
 	if not main._contract_dock_empty_label.visible:
 		_fail("with nothing delivered, the dock line should read as empty")
 		return
-	var delivered_item: String = _run_until_delivery(main)
-	if delivered_item.is_empty():
-		_fail("could not get any product onto the dock — cannot verify the shared-pool readout")
-		return
-	main._update_contract_panel()
+	# Driven with a pool directly rather than by running a chain to fill one.
+	# Since the "Real Placement" epic a world starts EMPTY and a starting
+	# balance cannot buy the six machines a boxed case needs (see
+	# test_layouts.gd's header), so the honest thing to exercise here is the
+	# readout itself, which is pure given the pool — the pool's own arithmetic
+	# is asserted in `cargo test -p sim_core`.
+	var delivered_item := "boxed_ketchup"
+	main._update_contract_dock([[delivered_item, 3]])
 	if main._contract_dock_empty_label.visible:
 		_fail("stock is on the dock but the readout still says empty")
 		return
@@ -262,20 +265,3 @@ func _countdowns(main) -> Array:
 		# the first segment.
 		out.append(int(text.split(" ticks")[0].split("in ")[1]))
 	return out
-
-
-## Runs the real chain until something lands in the shared delivery pool,
-## exactly the way test_shop_menu.gd earns money: real commands, real ticks.
-## Only the two loading commands are issued — the delivery dock ships into
-## the pool by itself every tick (the delivery-dock ticket removed
-## `collect_output`).
-## Returns the item id delivered, or "" if nothing arrived.
-func _run_until_delivery(main) -> String:
-	for i in range(20000):
-		main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
-		main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
-		main.sim.tick()
-		var stock: Array = JSON.parse_string(main.sim.economy_snapshot_json()).get("delivery_stock", [])
-		if not stock.is_empty():
-			return String(stock[0][0])
-	return ""

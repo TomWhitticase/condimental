@@ -1,16 +1,24 @@
-# Headless proof for milestone 4 (ARCHITECTURE.md §7, §9 item 4).
+# Headless proof of the real `gdext` JSON boundary (ARCHITECTURE.md §7).
 #
 # Run with:
 #   godot --headless --path godot_project --script test_core_loop.gd
 #
-# This is deliberately separate from sim_core's own `cargo test` suite
-# (which already proves conservation across the whole multi-stage chain in
-# pure Rust). What this script actually exercises is the part cargo test
-# can't: the real `gdext` boundary — GDScript building/parsing the JSON
-# `issue_command_json`/`chunk_snapshot_json`/`chain_layout_json` wire format
-# through Godot's own Variant/String/JSON machinery, not sim_core's — driven
-# through the whole chain end to end, not just one belt/machine.
+# This is deliberately separate from sim_core's own `cargo test` suite, which
+# already proves conservation, contract payouts and fluid consumption across
+# the whole six-stage chain in pure Rust (against `sim::reference_chain`).
+# What this script exercises is the part cargo test can't: GDScript building
+# and parsing the JSON `issue_command_json` / `world_layout_json` /
+# `chunk_snapshot_json` / `query_tile_json` wire format through Godot's own
+# Variant/String/JSON machinery.
+#
+# **It now starts from an empty world and BUILDS one**, which is both the new
+# reality (`World::new` places nothing — the "Real Placement" epic's ticket 1)
+# and a better test: the factory it asserts against is one `purchase` and
+# `place` put there over this same boundary. See test_layouts.gd for why that
+# factory is small.
 extends SceneTree
+
+const Layouts = preload("res://test_layouts.gd")
 
 
 func _fail(msg: String) -> void:
@@ -18,93 +26,146 @@ func _fail(msg: String) -> void:
 	quit(1)
 
 
+## Packs a chunk coordinate the way `sim::encode_chunk_id` does, so a test can
+## ask for a specific chunk rather than depending on `dirty_chunk_ids`, which
+## only reports chunks the LAST tick touched.
+func _chunk_id(cx: int, cy: int) -> int:
+	return (cx << 32) | (cy & 0xFFFFFFFF)
+
+
 func _initialize() -> void:
 	var sim = SimBridge.new()
 
-	var layout: Array = JSON.parse_string(sim.chain_layout_json())
-	if layout.size() < 2:
-		_fail("expected a multi-stage chain (>=2 recipes), got %d stage(s)" % layout.size())
+	# --- A new game is EMPTY. This is a real, newly reachable state. --------
+	var empty: Array = JSON.parse_string(sim.world_layout_json())
+	if not (empty is Array) or not empty.is_empty():
+		_fail("a new world must contain nothing at all, got %s" % str(empty))
 		return
-	var final_recipe: String = layout[layout.size() - 1]["recipe"]
-
-	# Load the 4 tomatoes the first recipe needs into the chain's hopper
-	# ("Machines improvement" ticket 3). The hopper — not this command —
-	# meters them onto the first belt over the following ticks, one at a
-	# time, so nothing here has to respect the belt's min-spacing itself.
-	sim.issue_command_json(JSON.stringify({"type": "fill_hopper", "amount": 4}))
-	# ...and load the pipe run's vinegar tank the same way ("Visual overhaul
-	# round 2" ticket 1 replaced the always-refilling off-map source with a
-	# tank the player fills), or the fluid-gated mixing stage never runs.
-	sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
-	var hopper = JSON.parse_string(sim.hopper_snapshot_json())
-	if hopper == null or not hopper.has("quantity") or not hopper.has("capacity") or not hopper.has("fill"):
-		_fail("hopper_snapshot_json did not return the expected shape: %s" % str(hopper))
-		return
-	if int(hopper["quantity"]) != 4:
-		_fail("expected 4 tomatoes loaded into the hopper, got %s" % str(hopper["quantity"]))
-		return
-	if _tomato_count(sim) != 0:
-		_fail("filling the hopper must not put anything on a belt — that happens on tick")
-		return
-
-	# Run long enough for the single resulting unit to travel every belt, clear
-	# every machine's `time_ticks`, run down the DOCK's own belt and be shipped
-	# into the economy's shared delivery pool.
-	#
-	# That last hop is the delivery-dock ticket's whole point, and this loop is
-	# where it is proven through the real gdext boundary: no command is issued
-	# here at all. `PlayerCommand::CollectOutput` — the **C** keypress that used
-	# to lift finished cases out of the last machine's buffer — does not exist
-	# any more, and nothing replaced it; the dock ships by itself, every tick.
-	for i in range(20000):
-		sim.tick()
-		if _delivered_count(sim, final_recipe) > 0:
-			break
-
-	var delivered := _delivered_count(sim, final_recipe)
-	if delivered != 1:
-		_fail("expected exactly 1 unit of '%s' shipped into the delivery pool with no player command, got %d" % [final_recipe, delivered])
-		return
-	if _final_output_count(sim, final_recipe) != 0:
-		_fail("the last machine should have handed its case to the dock's belt, but still holds %d" % _final_output_count(sim, final_recipe))
-		return
-
-	# The dock's own snapshot, over the same wire. `contents` is asserted
-	# EMPTY on purpose: the dock is a pass-through (see sim_core's dock.rs),
-	# so between ticks it holds nothing and `shipped_total` is the number
-	# that actually moved.
-	var dock = JSON.parse_string(sim.dock_snapshot_json())
-	if dock == null:
-		_fail("dock_snapshot_json did not parse")
-		return
-	for field in ["tile", "kind", "footprint", "belt_start_tile", "belt_length_tiles", "contents", "capacity_per_item", "shipped_total"]:
-		if not dock.has(field):
-			_fail("dock_snapshot_json is missing '%s': %s" % [field, str(dock)])
+	for call_name in ["hopper_snapshots_json", "fluid_tank_snapshots_json", "dock_snapshots_json", "fluid_snapshots_json"]:
+		var parsed = JSON.parse_string(sim.call(call_name))
+		if not (parsed is Array) or not parsed.is_empty():
+			_fail("%s must be an empty array in a new world, got %s" % [call_name, str(parsed)])
 			return
-	if String(dock["kind"]) != "dock":
-		_fail("dock_snapshot_json reported kind '%s'" % str(dock["kind"]))
+	var shop: Dictionary = JSON.parse_string(sim.shop_snapshot_json())
+	if float(shop["money"]) <= 0.0:
+		_fail("a new world must start with STARTING_MONEY, got %s" % str(shop["money"]))
 		return
-	if int(dock["shipped_total"]) < 1:
-		_fail("the dock reports nothing shipped even though the pool holds a case: %s" % str(dock))
+	for entry in shop["entries"]:
+		if int(entry["owned"]) != 0:
+			_fail("a new world owns nothing, but '%s' reports %s" % [entry["kind"], str(entry["owned"])])
+			return
+
+	# --- Build one, through the same wire the scene uses. -------------------
+	Layouts.build_demo_line(sim)
+	var layout: Array = JSON.parse_string(sim.world_layout_json())
+	if layout.size() != 13:
+		_fail("expected the 13-piece demo line, got %d placements" % layout.size())
 		return
-	if dock["contents"].size() != 0:
-		_fail("the dock is a pass-through — its buffer must read empty between ticks, got %s" % str(dock["contents"]))
+	var directions_seen := {}
+	for placement in layout:
+		for field in ["kind", "tile", "direction", "footprint", "occupies", "recipe"]:
+			if not placement.has(field):
+				_fail("world_layout_json entry is missing '%s': %s" % [field, str(placement)])
+				return
+		directions_seen[String(placement["direction"])] = true
+	# The fixture deliberately uses more than one facing — the whole point of
+	# ticket 1 — so a wire format that dropped `direction` would show up here.
+	for wanted in ["east", "north", "west", "south"]:
+		if not directions_seen.has(wanted):
+			_fail("the demo line should place something facing %s: %s" % [wanted, str(directions_seen.keys())])
+			return
+
+	# --- The three new commands round-trip. ---------------------------------
+	# Rotate: any tile of a footprint, 90 degrees clockwise, contents kept.
+	var before := _placement_at(sim, Vector2i(0, 0))
+	if String(before["direction"]) != "east":
+		_fail("the first belt should face east, got %s" % str(before["direction"]))
+		return
+	sim.issue_command_json(JSON.stringify({"type": "rotate", "tile": [0, 0]}))
+	var after := _placement_at(sim, Vector2i(0, 0))
+	if String(after["direction"]) != "south":
+		_fail("rotate must turn east -> south (Direction::rotate_cw), got %s" % str(after["direction"]))
+		return
+	sim.issue_command_json(JSON.stringify({"type": "rotate", "tile": [0, 0]}))
+	sim.issue_command_json(JSON.stringify({"type": "rotate", "tile": [0, 0]}))
+	sim.issue_command_json(JSON.stringify({"type": "rotate", "tile": [0, 0]}))
+	if String(_placement_at(sim, Vector2i(0, 0))["direction"]) != "east":
+		_fail("four rotations must return a placement to where it started")
 		return
 
-	# Milestone 5 (Economy MVP, ARCHITECTURE.md §9 item 5): economy_snapshot_json
-	# exposes money + every active contract's status through the same gdext
-	# JSON boundary this script already exercises for chunk/tile/layout data.
-	# Full contract economics (cadence math, payout correctness) is already
-	# proven headlessly in `cargo test` (sim_core/tests/economy.rs); this just
-	# confirms the wire format survives a real Godot Variant/JSON round trip.
+	# Remove: credits one back to the owned count, and the tile empties.
+	sim.issue_command_json(JSON.stringify({"type": "remove", "tile": [-1, 2]}))
+	if not _placement_at(sim, Vector2i(-1, 2)).is_empty():
+		_fail("remove left something at (-1, 2)")
+		return
+	if _owned(sim, "belt") != 1:
+		_fail("remove must credit one belt back to inventory, got %d" % _owned(sim, "belt"))
+		return
+	# Place it back, facing a different way, out of that same credited unit.
+	sim.issue_command_json(JSON.stringify({
+		"type": "place", "kind": "belt", "tile": [-1, 2], "direction": "south",
+	}))
+	if String(_placement_at(sim, Vector2i(-1, 2))["direction"]) != "south":
+		_fail("re-placing the removed belt should have kept the direction asked for")
+		return
+	if _owned(sim, "belt") != 0:
+		_fail("placing must spend the owned unit again")
+		return
+	# A collision is a total no-op, not a partial apply.
+	var placement_count: int = JSON.parse_string(sim.world_layout_json()).size()
+	sim.issue_command_json(JSON.stringify({"type": "purchase", "kind": "belt"}))
+	sim.issue_command_json(JSON.stringify({
+		"type": "place", "kind": "belt", "tile": [0, 0], "direction": "east",
+	}))
+	if JSON.parse_string(sim.world_layout_json()).size() != placement_count:
+		_fail("placing onto an occupied tile must change nothing at all")
+		return
+
+	# --- The built line actually runs. --------------------------------------
+	sim.issue_command_json(JSON.stringify({"type": "fill_hopper", "amount": 4}))
+	var hoppers: Array = JSON.parse_string(sim.hopper_snapshots_json())
+	if hoppers.size() != 1 or int(hoppers[0]["quantity"]) != 4:
+		_fail("expected one hopper holding 4 tomatoes, got %s" % str(hoppers))
+		return
+	if hoppers[0].get("belt_tile") == null:
+		_fail("the hopper faces a belt, so belt_tile must not be null: %s" % str(hoppers[0]))
+		return
+
+	var produced := 0
+	for i in range(4000):
+		sim.tick()
+		produced = _item_count(sim, "tomato_paste")
+		if produced > 0:
+			break
+	if produced <= 0:
+		_fail("the hopper -> belts -> crusher line never produced tomato_paste")
+		return
+
+	# --- Tile queries, one per variant the fixture contains. ----------------
+	var expectations := {
+		"belt": Vector2i(1, 0),
+		"machine": Vector2i(3, 2),
+		"hopper": Vector2i(-1, 0),
+		"pipe": Vector2i(5, 2),
+	}
+	for expected_kind in expectations.keys():
+		var tile: Vector2i = expectations[expected_kind]
+		var parsed = JSON.parse_string(sim.query_tile_json(tile.x, tile.y))
+		if parsed == null or String(parsed.get("kind", "")) != expected_kind:
+			_fail("query_tile_json at %s should be a %s: %s" % [str(tile), expected_kind, str(parsed)])
+			return
+		if not parsed.has("direction"):
+			_fail("every query_tile_json variant carries a direction now: %s" % str(parsed))
+			return
+	if sim.query_tile_json(9999, 9999) != "":
+		_fail("query_tile_json on an empty tile should return an empty string")
+		return
+
+	# --- The economy's wire shape (milestone 5, then contracts-as-data). ----
 	var econ = JSON.parse_string(sim.economy_snapshot_json())
 	if econ == null or not econ.has("money") or not econ.has("delivery_stock") or not econ.has("contracts"):
 		_fail("economy_snapshot_json did not return the expected shape: %s" % str(econ))
 		return
-	# Contracts became `data/contracts.ron` content, so this is an ARRAY of
-	# them (the four inline contract fields this used to read are gone), each
-	# with its own mix, cadence clock and counters. All of them draw from the
-	# one shared `delivery_stock` pool.
 	var contracts: Array = econ["contracts"]
 	if contracts.is_empty():
 		_fail("economy_snapshot_json reported no contracts at all: %s" % str(econ))
@@ -118,97 +179,39 @@ func _initialize() -> void:
 			_fail("contract '%s': mix and progress must zip positionally" % str(contract["id"]))
 			return
 
-	# The single unit the dock shipped above went into the shared pool even
-	# though it alone isn't enough to satisfy every contract's quantity —
-	# confirm both the raw pool and per-contract progress see it.
-	var stock_seen := false
-	for pair in econ["delivery_stock"]:
-		if pair[0] == final_recipe and int(pair[1]) > 0:
-			stock_seen = true
-	if not stock_seen:
-		_fail("expected delivery_stock to hold the shipped unit of '%s': %s" % [final_recipe, str(econ["delivery_stock"])])
-		return
-	var found_progress := false
-	for contract in contracts:
-		for pair in contract["progress"]:
-			if pair[0] == final_recipe and int(pair[1]) > 0:
-				found_progress = true
-	if not found_progress:
-		_fail("expected some contract's progress to reflect the shipped unit of '%s': %s" % [final_recipe, str(contracts)])
-		return
-
-	# query_tile_json: confirm the first belt and first machine tiles
-	# resolve to the right kind, and an empty tile resolves to nothing.
-	var first_belt_start: Array = layout[0]["belt_start_tile"]
-	var belt_tile = JSON.parse_string(sim.query_tile_json(int(first_belt_start[0]), int(first_belt_start[1])))
-	if belt_tile == null or belt_tile.get("kind") != "belt":
-		_fail("query_tile_json did not report a belt tile at the chain start: %s" % str(belt_tile))
-		return
-	var first_machine_tile: Array = layout[0]["machine_tile"]
-	var machine_tile = JSON.parse_string(sim.query_tile_json(int(first_machine_tile[0]), int(first_machine_tile[1])))
-	if machine_tile == null or machine_tile.get("kind") != "machine":
-		_fail("query_tile_json did not report a machine tile at the first stage: %s" % str(machine_tile))
-		return
-	if sim.query_tile_json(9999, 9999) != "":
-		_fail("query_tile_json on an empty tile should return an empty string")
-		return
-
-	# The dock's tile answers query_tile_json too, with its own variant.
-	var dock_tile_pair: Array = dock["tile"]
-	var dock_tile = JSON.parse_string(sim.query_tile_json(int(dock_tile_pair[0]), int(dock_tile_pair[1])))
-	if dock_tile == null or dock_tile.get("kind") != "dock":
-		_fail("query_tile_json did not report a dock tile at %s: %s" % [str(dock_tile_pair), str(dock_tile)])
-		return
-
-	print("CORE_LOOP_OK: 4 tomatoes unloaded from the hopper, travelled all %d stages -> 1 '%s', shipped by the dock with no player command, tile queries correct" % [layout.size(), final_recipe])
+	print("CORE_LOOP_OK: empty world -> 13 placements bought and placed over the wire, place/remove/rotate round-trip, the built line produced tomato_paste, tile queries and economy shape correct")
 	quit(0)
 
 
-## How many units of `item` are standing in the economy's shared delivery
-## pool — i.e. what the dock has shipped and no contract has claimed yet.
-func _delivered_count(sim, item: String) -> int:
-	var econ = JSON.parse_string(sim.economy_snapshot_json())
-	if econ == null:
-		return 0
-	for pair in econ.get("delivery_stock", []):
-		if String(pair[0]) == item:
-			return int(pair[1])
-	return 0
+func _placement_at(sim, tile: Vector2i) -> Dictionary:
+	for placement in JSON.parse_string(sim.world_layout_json()):
+		for pair in placement["occupies"]:
+			if int(pair[0]) == tile.x and int(pair[1]) == tile.y:
+				return placement
+	return {}
 
 
-func _tomato_count(sim) -> int:
+func _owned(sim, kind: String) -> int:
+	for entry in JSON.parse_string(sim.shop_snapshot_json())["entries"]:
+		if String(entry["kind"]) == kind:
+			return int(entry["owned"])
+	return -1
+
+
+## Units of `item` anywhere on a belt or in a machine buffer, across the two
+## chunks the demo line straddles (it reaches x = -1, i.e. chunk (-1, 0)).
+func _item_count(sim, item: String) -> int:
 	var total := 0
-	# The whole chain fits in chunk (0,0) at this milestone's scale (see
-	# sim_core/tests/core_loop.rs's equivalent note) — always read it
-	# directly rather than depending on dirty_chunk_ids, which only reports
-	# chunks touched by the *last* tick.
-	var snapshot = JSON.parse_string(sim.chunk_snapshot_json(0))
-	if snapshot == null:
-		return 0
-	for belt in snapshot.get("belts", []):
-		for pair in belt["items"]:
-			if pair[0] == "tomato":
-				total += 1
-	for machine in snapshot.get("machines", []):
-		total += _count_of(machine["input"], "tomato")
-	return total
-
-
-func _final_output_count(sim, final_recipe: String) -> int:
-	var snapshot = JSON.parse_string(sim.chunk_snapshot_json(0))
-	if snapshot == null:
-		return 0
-	for machine in snapshot.get("machines", []):
-		if machine["recipe"] == final_recipe:
-			var total := 0
+	for chunk in [_chunk_id(0, 0), _chunk_id(-1, 0)]:
+		var snapshot = JSON.parse_string(sim.chunk_snapshot_json(chunk))
+		if snapshot == null:
+			continue
+		for belt in snapshot.get("belts", []):
+			for pair in belt["items"]:
+				if String(pair[0]) == item:
+					total += 1
+		for machine in snapshot.get("machines", []):
 			for pair in machine["output"]:
-				total += int(pair[1])
-			return total
-	return 0
-
-
-func _count_of(pairs: Array, item_name: String) -> int:
-	for pair in pairs:
-		if pair[0] == item_name:
-			return int(pair[1])
-	return 0
+				if String(pair[0]) == item:
+					total += int(pair[1])
+	return total

@@ -243,7 +243,7 @@ fn the_aging_process_completes_exactly_at_required_ticks_and_not_a_tick_before()
 /// 60 ticks/sec, so any wall-clock leakage into the timing (a `SystemTime`
 /// read, an `Instant` delta) would show up as a completion-tick difference
 /// rather than being lost in rounding. The test also asserts that the paused
-/// run really did take measurably longer in wall-clock terms, so it cannot
+/// run really did spend at least the pause in wall-clock time, so it cannot
 /// quietly degrade into comparing two identical runs.
 #[test]
 fn pausing_mid_age_in_wall_clock_time_does_not_change_the_tick_it_completes_on() {
@@ -301,18 +301,24 @@ fn pausing_mid_age_in_wall_clock_time_does_not_change_the_tick_it_completes_on()
         "a run paused for {PAUSE:?} of wall-clock time must complete on the very same \
          simulation tick as one that never paused"
     );
-    // The two halves must genuinely have run for different amounts of real
-    // time, or the equality above would be comparing two identical runs and
-    // proving nothing. Asserted as "at least the pause, and longer than the
-    // control" rather than "at least control + pause": the control's own
-    // wall-clock cost is a few hundred microseconds of scheduling noise that
-    // can legitimately differ between the two runs, and the claim under test
-    // is about real time passing at all, not about timing it precisely.
+    // The paused half must genuinely have spent real time standing still, or
+    // the equality above would be comparing two identical runs and proving
+    // nothing.
+    //
+    // Asserted against the PAUSE alone, deliberately, and NOT against the
+    // control run's own wall clock. That comparison was here and is a flake:
+    // both runs are several hundred milliseconds of debug-build ticking, and
+    // on a loaded machine the run-to-run scheduling variance comfortably
+    // exceeds a 250ms pause — so the unpaused control can legitimately
+    // measure *longer* than the paused run and fail an assertion about a
+    // property neither run has. What is actually claimed here is that real
+    // time passed while the simulation did not advance, and the sleep below
+    // is what makes that true regardless of how fast either run ticked.
     assert!(
-        paused_wall >= PAUSE && paused_wall > control_wall,
-        "the paused run must genuinely have taken longer in real time ({paused_wall:?} vs \
-         {control_wall:?}, pause {PAUSE:?}), or this test isn't exercising a wall-clock \
-         difference at all"
+        paused_wall >= PAUSE,
+        "the paused run must genuinely have spent at least the pause in real time \
+         ({paused_wall:?}, pause {PAUSE:?}; the control ran in {control_wall:?}), or this \
+         test isn't exercising a wall-clock difference at all"
     );
 }
 

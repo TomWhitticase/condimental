@@ -17,20 +17,14 @@
 #     owned-count text that match the snapshot's numbers,
 #   * B actually toggles it open and closed, driven through the scene's real
 #     `_unhandled_input` (the approach test_interaction.gd establishes),
-#   * affordability is a visible slot state, not just a JSON field: with no
-#     money every slot is disabled and its price carries the "unaffordable"
-#     mark,
-#   * and a REAL purchase — money earned by running the actual chain against
-#     the actual contract, then spent through `issue_command_json` — moves
-#     the displayed owned count.
+#   * affordability is a visible slot state, not just a JSON field: a new
+#     world's STARTING_MONEY leaves every slot open, and spending it locks
+#     them and marks each price with the unaffordable glyph,
+#   * a REAL purchase through `issue_command_json` moves the displayed owned
+#     count, on both the click and the number-key paths,
+#   * and an OWNED slot offers the second action the "Real Placement" epic
+#     added — placing one — which enters placement mode and closes the menu.
 extends SceneTree
-
-## Ticks to run while trying to earn a contract payout. The hardcoded
-## contract (sim_core/src/sim/economy.rs) pays out at a 1000-tick cadence and
-## the chain's own latency is several hundred ticks on top, so this is a
-## generous ceiling, not an expected cost — the loop breaks the moment money
-## appears.
-const EARN_TICK_LIMIT := 20000
 
 
 func _fail(msg: String) -> void:
@@ -40,22 +34,6 @@ func _fail(msg: String) -> void:
 
 func _shop_snapshot(main) -> Dictionary:
 	return JSON.parse_string(main.sim.shop_snapshot_json())
-
-
-## Runs the real chain until the contract has paid out at least once, so
-## there is genuinely earned money to spend — mirroring
-## sim_core/tests/shop.rs's own drive loop. Nothing has to be collected: the
-## delivery-dock ticket replaced the `collect_output` keypress this loop used
-## to issue every tick with a building that ships into the pool by itself.
-func _earn_money(main) -> float:
-	for i in range(EARN_TICK_LIMIT):
-		main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
-		main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
-		main.sim.tick()
-		var money: float = float(_shop_snapshot(main).get("money", 0.0))
-		if money > 0.0:
-			return money
-	return 0.0
 
 
 func _press(main, keycode: int) -> void:
@@ -154,18 +132,18 @@ func _initialize() -> void:
 			return
 
 	# --- Affordability is a visible slot state, not just a JSON field -----
-	# A fresh world has no money at all, so every slot must read as locked.
-	if float(snapshot.get("money", 0.0)) != 0.0:
-		_fail("expected a fresh world to start with zero money, got %.2f" % float(snapshot.get("money", 0.0)))
+	# A new world starts with `sim::STARTING_MONEY`, which is enough for
+	# everything in the shipped catalog, so every slot should read as
+	# available. (Before the "Real Placement" epic a fresh world had zero and
+	# this test asserted the opposite — the starting balance is what makes a
+	# first move possible at all.)
+	var starting_money: float = float(snapshot.get("money", 0.0))
+	if starting_money <= 0.0:
+		_fail("expected a new world to start with STARTING_MONEY, got %.2f" % starting_money)
 		return
 	for slot in main._shop_slots:
-		if not slot["button"].disabled:
-			_fail("with zero money, slot '%s' should be disabled" % slot["kind"])
-			return
-		if not String(slot["price_label"].text).contains("✗"):
-			_fail("an unaffordable slot's price text must carry the unaffordable mark, not rely on colour alone (slot '%s' reads '%s')" % [
-				slot["kind"], slot["price_label"].text,
-			])
+		if slot["button"].disabled:
+			_fail("with %.0f in the bank, slot '%s' should not be locked" % [starting_money, slot["kind"]])
 			return
 
 	# --- B toggles the menu, through the real input path ------------------
@@ -180,12 +158,6 @@ func _initialize() -> void:
 	_press(main, KEY_B) # leave it open for the purchase below
 
 	# --- A real purchase moves the displayed owned count ------------------
-	var money: float = _earn_money(main)
-	if money <= 0.0:
-		_fail("the chain earned no contract money within %d ticks, so a purchase cannot be tested" % EARN_TICK_LIMIT)
-		return
-	main._update_shop_menu()
-
 	# Buy the cheapest affordable kind, whatever the catalog currently says
 	# that is — nothing here hardcodes data/shop.ron's prices.
 	var target := -1
@@ -194,7 +166,7 @@ func _initialize() -> void:
 			target = index
 			break
 	if target < 0:
-		_fail("earned %.0f money but no slot became affordable" % money)
+		_fail("no slot is affordable at all with %.0f in the bank" % starting_money)
 		return
 
 	var kind: String = main._shop_slots[target]["kind"]
@@ -202,7 +174,7 @@ func _initialize() -> void:
 	var text_before: String = main._shop_slots[target]["owned_label"].text
 
 	# Emit the button's own signal rather than calling _buy_slot directly —
-	# this is what a click does, so this is what should be proven.
+	# this is what a LEFT click does, so this is what should be proven.
 	main._shop_slots[target]["button"].pressed.emit()
 
 	var after: Dictionary = _shop_snapshot(main)
@@ -210,8 +182,8 @@ func _initialize() -> void:
 	if owned_after != owned_before + 1:
 		_fail("clicking slot '%s' should have bought exactly one (%d -> %d)" % [kind, owned_before, owned_after])
 		return
-	if float(after["money"]) >= money:
-		_fail("buying '%s' did not spend money (%.0f -> %.0f)" % [kind, money, float(after["money"])])
+	if float(after["money"]) >= starting_money:
+		_fail("buying '%s' did not spend money (%.0f -> %.0f)" % [kind, starting_money, float(after["money"])])
 		return
 	var text_after: String = main._shop_slots[target]["owned_label"].text
 	if text_after == text_before:
@@ -220,6 +192,22 @@ func _initialize() -> void:
 	if not text_after.contains(str(owned_after)):
 		_fail("the displayed owned count for '%s' reads '%s', expected it to show %d" % [kind, text_after, owned_after])
 		return
+
+	# --- An OWNED slot offers the second action: place one ----------------
+	# The affordance is on the owned line, because that is the line whose
+	# number decides whether placing is possible at all.
+	if not text_after.to_lower().contains("place"):
+		_fail("an owned slot should say how to place one, reads '%s'" % text_after)
+		return
+	main._place_from_slot(target)
+	if not main._in_build_mode() or main._build_kind != kind:
+		_fail("placing from an owned slot did not enter placement mode for '%s'" % kind)
+		return
+	if main._shop_open:
+		_fail("entering placement mode should close the build menu")
+		return
+	main._exit_build_mode()
+	_press(main, KEY_B) # reopen for the hotkey check below
 
 	# And the number-key half of the interaction buys too.
 	if target < main.SHOP_HOTKEY_SLOTS:
@@ -231,7 +219,37 @@ func _initialize() -> void:
 			])
 			return
 
-	print("SHOP_MENU_OK: ShopMenu is a distinct node with %d slots (one per catalog entry), B toggles it, unaffordable slots are disabled and marked, and buying '%s' moved the displayed owned count to '%s'" % [
-		main._shop_slots.size(), kind, main._shop_slots[target]["owned_label"].text,
+	# --- Spend the balance: now unaffordability has to be VISIBLE ---------
+	# Buy the most expensive kind until nothing is affordable, then check the
+	# locked state is signalled by more than colour (UI_UX.md §7).
+	for i in range(200):
+		if float(_shop_snapshot(main).get("money", 0.0)) <= 0.0:
+			break
+		var dearest := -1
+		var dearest_price := 0.0
+		var live: Array = _shop_snapshot(main)["entries"]
+		for index in range(live.size()):
+			if bool(live[index]["affordable"]) and float(live[index]["price"]) > dearest_price:
+				dearest = index
+				dearest_price = float(live[index]["price"])
+		if dearest < 0:
+			break
+		main._buy_slot(dearest)
+	main._update_shop_menu()
+	var locked := 0
+	for slot in main._shop_slots:
+		if slot["button"].disabled:
+			locked += 1
+			if not String(slot["price_label"].text).contains("✗"):
+				_fail("an unaffordable slot's price text must carry the unaffordable mark, not rely on colour alone (slot '%s' reads '%s')" % [
+					slot["kind"], slot["price_label"].text,
+				])
+				return
+	if locked == 0:
+		_fail("spending the whole balance left every slot affordable — the locked state was never exercised")
+		return
+
+	print("SHOP_MENU_OK: ShopMenu is a distinct node with %d slots (one per catalog entry), B toggles it, buying '%s' moved the displayed owned count, an owned slot enters placement mode, and %d slot(s) lock and mark themselves once the balance is spent" % [
+		main._shop_slots.size(), kind, locked,
 	])
 	quit(0)

@@ -70,6 +70,8 @@
 # happens not to care about it.
 extends SceneTree
 
+const Layouts = preload("res://test_layouts.gd")
+
 var main
 var _ran := false
 
@@ -98,67 +100,92 @@ func _process(_delta: float) -> bool:
 
 
 func _run_checks() -> void:
+	# Built HERE, not in `_initialize`. `_ready` runs twice under this harness
+	# (see the header) and each run creates a fresh `SimBridge` — i.e. a fresh,
+	# EMPTY world — so anything built before the second run is wiped. That was
+	# invisible while every world arrived pre-built; since the "Real Placement"
+	# epic it is the difference between a factory and bare floor.
+	Layouts.build_demo_line(main.sim)
+	main._rebuild_world()
+
 	var camera: Camera3D = main._camera
 	if camera == null:
 		_fail("main._camera was not set by _build_camera()")
 		return
-	if main._stage_order.is_empty():
-		_fail("chain layout produced no stages — nothing to hover")
+	if main._placements.is_empty():
+		_fail("the demo line produced no placements — nothing to hover")
 		return
 
-	# --- A screen position exactly on a known machine's tile resolves to it --
-	var recipe_id: String = main._stage_order[0]
-	var machine_tile: Vector2i = main._machine_tiles[recipe_id]
+	# --- A screen position exactly on the crusher's tile resolves to it -----
+	# Hover is keyed on the placement's ORIGIN TILE now, not on a recipe id:
+	# the player can place several machines running the same recipe, so
+	# "which machine is this" is answered by which footprint the cursor is
+	# over. `_hover_text_at_tile` is the one entry point for every kind.
+	var machine_tile := Vector2i(3, 2)
 	var world_point: Vector3 = main._tile_origin(machine_tile.x, machine_tile.y, main.BELT_SURFACE_Y)
 	var screen_pos: Vector2 = camera.unproject_position(world_point)
 
 	var resolved_tile: Vector2i = main._tile_under_screen_pos(screen_pos)
 	if resolved_tile != machine_tile:
-		_fail("screen pos over %s's machine tile %s resolved to %s instead" % [
-			recipe_id, str(machine_tile), str(resolved_tile),
+		_fail("screen pos over the crusher's tile %s resolved to %s instead" % [
+			str(machine_tile), str(resolved_tile),
 		])
 		return
 
-	var resolved_recipe: String = main._machine_recipe_at_tile(resolved_tile)
-	if resolved_recipe != recipe_id:
-		_fail("tile %s should resolve to recipe '%s', got '%s'" % [
-			str(resolved_tile), recipe_id, resolved_recipe,
-		])
+	var placement: Dictionary = main._placement_at_tile(resolved_tile)
+	if String(placement.get("kind", "")) != "crusher":
+		_fail("tile %s should resolve to the crusher, got %s" % [str(resolved_tile), str(placement)])
 		return
 
-	var hover_text: String = main._machine_hover_text(resolved_recipe)
-	if hover_text == "" or not hover_text.begins_with(recipe_id):
-		_fail("_machine_hover_text('%s') should start with the recipe id, got: %s" % [recipe_id, hover_text])
+	var hover_text: String = main._hover_text_at_tile(resolved_tile)
+	if hover_text == "" or not hover_text.begins_with("tomato_paste"):
+		_fail("hover text over the crusher should start with its recipe id, got: %s" % hover_text)
 		return
 	if not hover_text.contains("in:") or not hover_text.contains("out:"):
-		_fail("_machine_hover_text should include input/output buffer contents, got: %s" % hover_text)
+		_fail("machine hover text should include input/output buffer contents, got: %s" % hover_text)
+		return
+	# Which way it faces is a fact only placement created, and one the player
+	# can change — so the tooltip has to carry it.
+	if not hover_text.contains("facing west"):
+		_fail("machine hover text should report the facing the player gave it, got: %s" % hover_text)
 		return
 
-	# --- A screen position clearly off in open floor finds no machine -------
-	# Far outside the chain's footprint (FLOOR_GROUND_MARGIN_Z alone is 24
-	# tiles) but still on the floor plane, so this is a real "open floor, no
-	# machine" case, not an off-screen/degenerate ray.
+	# --- Every other placed kind answers through the same one entry point ---
+	# A pipe's tooltip leads with the fluid it carries (or "empty run"), so
+	# these are `contains` rather than `begins_with` — the point is that each
+	# kind identifies itself, not that they all use one sentence shape.
+	var kinds := {
+		Vector2i(1, 0): "belt",
+		Vector2i(-1, 0): "hopper",
+		Vector2i(5, 2): "pipe",
+	}
+	for tile in kinds.keys():
+		var text: String = main._hover_text_at_tile(tile)
+		if not text.contains(String(kinds[tile])):
+			_fail("hover over %s should describe a %s, got: %s" % [str(tile), str(kinds[tile]), text])
+			return
+
+	# A ROTATED tile still identifies itself — the belt at (3, 1) faces north,
+	# which is a facing no asset was authored for (see `_belt_asset_for`), and
+	# hover must be indifferent to that.
+	var north_belt: String = main._hover_text_at_tile(Vector2i(3, 1))
+	if not north_belt.contains("north"):
+		_fail("hover over the north-facing belt should say so, got: %s" % north_belt)
+		return
+
+	# --- A screen position clearly off in open floor finds nothing ---------
 	var open_floor_world: Vector3 = main._tile_origin(0, 20, main.BELT_SURFACE_Y)
 	var open_floor_screen: Vector2 = camera.unproject_position(open_floor_world)
 	var open_floor_tile: Vector2i = main._tile_under_screen_pos(open_floor_screen)
 	if open_floor_tile != Vector2i(0, 20):
 		_fail("screen pos over open floor tile (0, 20) resolved to %s instead" % str(open_floor_tile))
 		return
-	var no_recipe: String = main._machine_recipe_at_tile(open_floor_tile)
-	if no_recipe != "":
-		_fail("open floor tile (0, 20) should have no machine, found '%s'" % no_recipe)
-		return
-	if main._machine_hover_text(no_recipe) != "":
-		_fail("_machine_hover_text('') (no recipe) should return empty text")
+	if main._hover_text_at_tile(open_floor_tile) != "":
+		_fail("open floor should produce no tooltip text at all")
 		return
 
 	# --- FIRST_PERSON: the crosshair (screen centre) resolves to a machine --
-	# it's aimed at, exactly like the isometric cursor does above. Aim by
-	# setting _fp_position/_fp_yaw/_fp_pitch directly (same fields
-	# _apply_look/_fp_camera_move drive) and deriving yaw/pitch from the
-	# desired look direction, then read back via _update_fp_camera_transform
-	# — no live Input needed, matching _tile_under_screen_pos's own
-	# Input-free contract.
+	# it's aimed at, exactly like the isometric cursor does above.
 	main._set_view_mode(main.ViewMode.FIRST_PERSON)
 	if main._crosshair == null or not main._crosshair.visible:
 		_fail("crosshair should be visible in FIRST_PERSON mode")
@@ -178,13 +205,12 @@ func _run_checks() -> void:
 	var crosshair_screen_pos: Vector2 = camera.unproject_position(world_point)
 	var fp_resolved_tile: Vector2i = main._tile_under_screen_pos(crosshair_screen_pos)
 	if fp_resolved_tile != machine_tile:
-		_fail("FIRST_PERSON crosshair aimed at %s's machine tile %s resolved to %s instead" % [
-			recipe_id, str(machine_tile), str(fp_resolved_tile),
+		_fail("FIRST_PERSON crosshair aimed at the crusher's tile %s resolved to %s instead" % [
+			str(machine_tile), str(fp_resolved_tile),
 		])
 		return
 
 	# --- FIRST_PERSON: looking steeply up finds nothing (the t < 0 guard) ---
-	# Same eye position, pitched up toward the sky instead of at the machine.
 	main._fp_pitch = main.FP_PITCH_LIMIT
 	main._update_fp_camera_transform()
 	var ahead: Vector3 = eye + (-main._camera.transform.basis.z) * (main.TILE * 10.0)
@@ -199,5 +225,5 @@ func _run_checks() -> void:
 		_fail("crosshair should be hidden in ISOMETRIC mode")
 		return
 
-	print("HOVER_OK: screen-to-tile resolution finds the right machine in both view modes, open floor finds none, looking up in first-person finds no tile, hover text carries live recipe/progress/buffer data, crosshair visibility tracks view mode")
+	print("HOVER_OK: screen-to-tile resolution finds the right machine in both view modes, every placed kind answers through one entry point, a rotated tile reports its facing, open floor finds none, looking up in first-person finds no tile, crosshair visibility tracks view mode")
 	quit(0)

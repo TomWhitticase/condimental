@@ -21,6 +21,8 @@
 #   * an item spawned through the real command path gets a voxel node.
 extends SceneTree
 
+const Layouts = preload("res://test_layouts.gd")
+
 
 func _fail(msg: String) -> void:
 	printerr("PRESENTATION_FAIL: %s" % msg)
@@ -44,6 +46,10 @@ func _initialize() -> void:
 	# `_ready()` only fires on the engine's own next-frame processing, which
 	# this headless script-mode SceneTree never runs — call it directly.
 	main._ready()
+	# The world starts empty (the "Real Placement" epic), so the test builds
+	# the factory it then asserts is rendered. See test_layouts.gd.
+	Layouts.build_demo_line(main.sim)
+	main._rebuild_world()
 
 	# --- Camera: fixed and orthographic (UI_UX.md §1) ---------------------
 	var cameras := _find_all(main, "Camera3D", [])
@@ -130,15 +136,20 @@ func _initialize() -> void:
 		_fail("metal (rough %f) is not shinier than matte (rough %f) — UI_UX.md §4" % [metal_roughness, matte_roughness])
 		return
 
-	# --- The chain rendered matches the chain the simulation reports ------
-	var layout: Array = JSON.parse_string(main.sim.chain_layout_json())
+	# --- What is rendered matches what the simulation says is placed ------
+	# Every node under "World" is named `<kind>_<origin tile>`, so this is a
+	# direct correspondence check between `world_layout_json` and the scene —
+	# the same "Godot draws what the sim says exists" rule, now over a world
+	# the test itself built rather than one that arrived pre-made.
+	var layout: Array = JSON.parse_string(main.sim.world_layout_json())
 	if layout.is_empty():
-		_fail("chain_layout_json returned no stages")
+		_fail("world_layout_json returned nothing after the demo line was built")
 		return
-	for stage in layout:
-		var node_name := "machine_%s" % stage["recipe"]
-		if main.get_node_or_null("Chain/" + node_name) == null:
-			_fail("no rendered machine for stage '%s' — the scene is not following the sim's layout" % stage["recipe"])
+	for placement in layout:
+		var tile: Array = placement["tile"]
+		var node_name := "%s_%d,%d" % [String(placement["kind"]), int(tile[0]), int(tile[1])]
+		if main.get_node_or_null("World/" + node_name) == null:
+			_fail("no rendered node for %s — the scene is not following the sim's layout" % node_name)
 			return
 
 	if main.get_node_or_null("Floor") == null:
@@ -168,7 +179,7 @@ func _initialize() -> void:
 		_fail("a tomato metered out of the hopper produced no item node in the 3D scene")
 		return
 
-	print("PRESENTATION_OK: orthographic camera, %d light(s) w/ shadows, SSAO+glow, %d voxel meshes, %d stage(s), item rendered" % [
+	print("PRESENTATION_OK: orthographic camera, %d light(s) w/ shadows, SSAO+glow, %d voxel meshes, %d placement(s), item rendered" % [
 		lights.size(), meshes.size(), layout.size()
 	])
 	quit(0)

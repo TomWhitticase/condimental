@@ -9,73 +9,65 @@
 # exits.
 #
 # Run via scripts/screenshot-scene.sh, or directly:
-#   godot --path godot_project --script test_screenshot.gd -- /abs/out.png [--populate]
+#   godot --path godot_project --script test_screenshot.gd -- /abs/out.png [flags]
 #
-# `--populate` runs the chain forward first so the screenshot shows product
-# actually moving, not an idle factory — the belts and item models are half
-# the point of the visual pass.
+# **THE WORLD STARTS EMPTY.** Since the "Real Placement" epic a new game
+# contains nothing at all, so most flags below now begin by BUILDING
+# something — and what they can build is bounded by `sim::STARTING_MONEY`
+# (200), which is nothing like the shipped six-stage line. See
+# test_layouts.gd's header for the full note; the practical consequence is
+# that `--contracts`, `--aging` and `--hover-aging` are gone, because each of
+# them needed a factory a starting balance cannot buy.
+#
+# `--build` puts down the demo line (test_layouts.gd's `build_demo_line`): a
+# hopper feeding belts that run east, TURN NORTH into a crusher facing WEST,
+# which discharges back west, with a pipe run heading SOUTH beside it. Three
+# of the four facings on belts and the fourth on the pipes, which is what
+# makes it the right subject for reviewing per-tile rotation and the
+# junction art's east-only fallback in one frame.
+#
+# `--fixture <name>` picks a different one: `machines` (hopper, machine and
+# dock, i.e. one of each sort of building), `fluids` (a tank, a pipe run and
+# the machine that taps it), `vat` (the 2x2 cooking vat, alone — it costs the
+# entire starting balance) or `rack` (the aging rack, alone).
+#
+# `--populate` runs whatever has been built forward first so the screenshot
+# shows product actually moving, not an idle factory.
+#
+# `--ghost <kind>` buys one of `kind` and enters placement mode with the
+# cursor over open ground, so the VALID ghost and its prompt are in the shot.
+# `--ghost-blocked <kind>` does the same with the cursor over something
+# already placed, for the invalid state. `--remove-mode` enters remove mode
+# with the cursor over a placed tile. These three are the only way to review
+# build mode without a live interactive session — the same problem the hover
+# flags solve for tooltips.
 #
 # `--first-person` switches to the first-person camera before rendering
 # (looking slightly up, from height, so the sky/ground extent is actually in
 # frame) — the only way to visually review that mode's lighting/skybox
 # without a live interactive session.
 #
-# `--hover` warps the OS cursor over the first stage's machine before
+# `--hover` warps the OS cursor over the first placed machine before
 # rendering, so the hover tooltip (docs/UI_UX.md §5) actually shows up in the
-# shot — otherwise there is no way to visually review it without a live
-# interactive session, the same problem --first-person solves for that mode.
-# `--hover-pipe` does the same over the fluid network's machine-inlet pipe
-# segment, for reviewing milestone 6's fluid tooltip. `--hover-vat` parks it
-# over the FAR CORNER of the first machine whose footprint is bigger than one
-# tile — deliberately not its origin, since "hovering anywhere on a multi-tile
-# machine identifies it" is the claim the "Machines improvement" milestone
-# added, and hovering the origin would not show it. `--hover-hopper` does the
-# same over the chain's hopper, `--hover-tank` over the pipe run's fluid
-# tank (the "Visual overhaul round 2" epic's building), and `--hover-dock`
-# over the delivery dock at the end of the line.
+# shot. `--hover-pipe`, `--hover-hopper`, `--hover-tank`, `--hover-dock` and
+# `--hover-vat` do the same over the first placed pipe, hopper, fluid tank,
+# dock, or the FAR CORNER of the first machine whose footprint is bigger than
+# one tile (deliberately not its origin — "hovering anywhere on a multi-tile
+# machine identifies it" is the claim, and hovering the origin would not show
+# it). All of them share one implementation (`_hover_over_tile`) and differ
+# only in how they pick the tile out of `world_layout_json`.
 #
-# All the hover flags share one implementation (`_hover_over_tile`) — they
-# differ only in which tile they ask the simulation for.
-#
-# `--contracts` runs the chain forward far enough to cross several contract
-# cadence boundaries WITH deliveries collected, so the contract clipboard is
-# photographed with its dockets in genuinely different states — one satisfied,
-# one part-filled, one that has been missed — rather than the three identical
-# 0/N checklists an idle factory gives. (`--populate` alone now does reach the
-# delivery pool, since the delivery dock ships without being asked, but it
-# stops long before a cadence boundary.)
-# CONTRACTS_REVIEW_TICKS is tuned against the shipped `data/contracts.ron`
-# cadences for exactly that spread; see its own comment.
-#
-# `--shop` opens the build menu (docs/UI_UX.md §5, the "Shop & Inventory"
-# epic's ticket 2) before rendering, and first runs the chain far enough to
-# earn a contract payout — a menu photographed with zero money shows every
-# slot locked, which is exactly half of what needs reviewing. Implies the
-# money-earning run whether or not `--populate` was also passed.
-#
-# `--aging` runs the chain until the aging rack (ARCHITECTURE.md §9
-# milestone 7) is roughly half way through its 2400-tick process, so its
-# progress gauge is actually part-full in the shot. `--populate` alone stops
-# well before the rack has even loaded, and a gauge photographed at 0% is a
-# picture of an empty slot — exactly the half of the readout that does not
-# need reviewing. Same problem, and the same solution, as `--shop`'s
-# earn-some-money run. Implies `--populate`'s chain-running.
-#
-# `--hover-aging` is the sixth hover flag, over the aging rack's own tile —
-# the tooltip worth reviewing separately because milestone 7's timescale is
-# what made the old bare-percentage readout inadequate (see
-# `_machine_hover_text`). Combine it with `--aging` to photograph a real
-# part-way progress rather than "idle".
+# `--shop` opens the build menu (docs/UI_UX.md §5) before rendering.
 #
 # `--closeup TX,TY[,SIZE]` re-aims the ISOMETRIC camera at one simulation
 # tile and zooms it right in (SIZE is the orthographic width in world units,
-# default CLOSEUP_SIZE). The whole-factory shot above is the right frame for
-# "does the line read", and the wrong one for "does this belt actually meet
-# this machine" — a junction is about four voxels of detail and at 1600x900
-# the full chain gives it about six pixels. Every belt/pipe-to-machine
-# connection in the "Visual overhaul round 2" epic's ticket 3 was diagnosed
-# and re-checked through this flag, one junction at a time.
+# default CLOSEUP_SIZE). The whole-factory shot is the right frame for "does
+# the line read", and the wrong one for "does this belt actually meet this
+# machine" — a junction is about four voxels of detail and at 1600x900 the
+# full line gives it about six pixels.
 extends SceneTree
+
+const Layouts = preload("res://test_layouts.gd")
 
 ## Enough frames for shadow atlases, SSAO and glow to be resolved — a
 ## screenshot on frame 1 shows an unlit, shadowless scene and is misleading.
@@ -87,28 +79,10 @@ const WARMUP_FRAMES := 45
 const POPULATE_SPAWNS := 60
 const POPULATE_TICKS_PER_SPAWN := 10
 
-## `--contracts` runs until the board is in a genuinely MIXED state rather
-## than for a fixed number of ticks: a tick count drifts with any change to
-## the chain's throughput or the shipped cadences and quietly goes back to
-## photographing three identical checklists. The state waited for is a dock
-## holding at least CONTRACTS_REVIEW_DOCK_UNITS, with at least one delivery
-## and at least one miss on the board — against the shipped contracts (asks
-## of 2, 3 and 1 from one shared pool) that reads as one docket satisfied and
-## the rest part-filled, which is both the checkbox mechanic and the
-## shared-pool competition in a single frame, plus goods actually standing on
-## the dock's deck.
-##
-## A MINIMUM rather than an exact count, and one rather than two: the aging
-## rack (ARCHITECTURE.md §9 milestone 7) holds a batch for 2400 ticks while
-## the three contracts check every 1000/1500/2500, so the pool is drained
-## about as fast as the line can fill it and an exact "exactly two waiting"
-## is a state this content essentially never sits in — the loop ran its full
-## limit and photographed an empty dock instead.
-const CONTRACTS_REVIEW_DOCK_UNITS := 1
-const CONTRACTS_REVIEW_TICK_LIMIT := 20000
-
 var _frames := 0
 var _out := "user://scene.png"
+var _build := false
+var _fixture := ""
 var _populate := false
 var _first_person := false
 var _hover := false
@@ -118,14 +92,9 @@ var _hover_hopper := false
 var _hover_tank := false
 var _hover_dock := false
 var _shop := false
-var _contracts := false
-var _aging := false
-var _hover_aging := false
-## Ticks to keep driving the chain while waiting for the gauged stage, and
-## how far into its process to stop. Generous: the rack is the fifth stage,
-## so a crush, a mix and a 240-tick cook all have to happen upstream first.
-const AGING_TICK_LIMIT := 8000
-const AGING_TARGET_FRACTION := 0.5
+var _ghost_kind := ""
+var _ghost_blocked := false
+var _remove_mode := false
 ## `--closeup` target tile and orthographic width; `_closeup` gates both.
 const CLOSEUP_SIZE := 9.0
 var _closeup := false
@@ -138,6 +107,8 @@ func _initialize() -> void:
 	var args := OS.get_cmdline_user_args()
 	if args.size() > 0:
 		_out = args[0]
+	_build = args.has("--build")
+	_fixture = _string_arg(args, "--fixture")
 	_populate = args.has("--populate")
 	_first_person = args.has("--first-person")
 	_hover = args.has("--hover")
@@ -147,9 +118,11 @@ func _initialize() -> void:
 	_hover_tank = args.has("--hover-tank")
 	_hover_dock = args.has("--hover-dock")
 	_shop = args.has("--shop")
-	_contracts = args.has("--contracts")
-	_aging = args.has("--aging")
-	_hover_aging = args.has("--hover-aging")
+	_ghost_kind = _string_arg(args, "--ghost")
+	if _ghost_kind == "":
+		_ghost_kind = _string_arg(args, "--ghost-blocked")
+		_ghost_blocked = _ghost_kind != ""
+	_remove_mode = args.has("--remove-mode")
 	_parse_closeup(args)
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
@@ -159,6 +132,52 @@ func _initialize() -> void:
 	# exist yet at this point. Anything that touches it has to wait for
 	# _process()'s first frame instead. (Learned the hard way: this used to
 	# live here and crashed with "base object of type Nil".)
+
+
+## `--flag value` as one look-up, since every option below that takes an
+## argument takes exactly one.
+func _string_arg(args: Array, flag: String) -> String:
+	for i in range(args.size()):
+		if String(args[i]) == flag and i + 1 < args.size():
+			return String(args[i + 1])
+	return ""
+
+
+## Builds whatever the flags asked for, through the same purchase/place
+## commands a player uses (test_layouts.gd). The camera is re-framed
+## afterwards, because it frames the placed world and there was nothing to
+## frame when `_ready` ran.
+func _build_fixture() -> void:
+	match _fixture:
+		"machines":
+			Layouts.build_machines_fixture(_main.sim)
+		"fluids":
+			Layouts.build_fluid_run(_main.sim)
+		"vat":
+			Layouts.build_multi_tile(_main.sim)
+		"rack":
+			Layouts.build_aging_rack(_main.sim)
+		_:
+			Layouts.build_demo_line(_main.sim)
+	_main._rebuild_world()
+	_main._refresh_owned_counts()
+	_reframe()
+
+
+## Re-runs the isometric camera's own auto-framing against the world as it now
+## stands. The scene frames once at startup, deliberately (re-framing on every
+## placement would yank the view around while the player builds), so a
+## screenshot that builds a factory after `_ready` has to ask for it.
+func _reframe() -> void:
+	_main._frame_bounds = _main._framing_bounds()
+	_main._camera_focus = Vector3(
+		(float(_main._frame_bounds.position.x) + float(_main._frame_bounds.size.x) * 0.5) * _main.TILE,
+		_main.TILE * 0.35,
+		(float(_main._frame_bounds.position.y) + float(_main._frame_bounds.size.y) * 0.5) * _main.TILE
+	)
+	_main._camera_base_size = _main._framing_size(_main._camera.transform.basis)
+	_main._camera_size = _main._camera_base_size
+	_main._update_camera_transform()
 
 
 ## `--closeup TX,TY[,SIZE]` — the argument is one comma-separated token so
@@ -215,171 +234,144 @@ func _hover_over_tile(tile: Vector2i) -> void:
 	Input.warp_mouse(_main._camera.unproject_position(world_point))
 
 
+## The first placed thing of a given kind, or HOVER_NONE. Everything the
+## hover flags need comes out of `world_layout_json`, so none of them types a
+## tile in — which is what keeps them meaningful when the fixture changes.
+const HOVER_NONE := Vector2i(-999999, -999999)
+
+
+func _first_tile_of(predicate: Callable) -> Vector2i:
+	for placement in JSON.parse_string(_main.sim.world_layout_json()):
+		if predicate.call(placement):
+			var pair: Array = placement["tile"]
+			return Vector2i(int(pair[0]), int(pair[1]))
+	return HOVER_NONE
+
+
+func _first_tile_of_kind(kind: String) -> Vector2i:
+	return _first_tile_of(func(p): return String(p["kind"]) == kind)
+
+
+## The first placement that RUNS A RECIPE — a machine, as opposed to a belt,
+## a pipe or one of the buffer buildings.
+func _first_machine_tile() -> Vector2i:
+	return _first_tile_of(func(p): return p.get("recipe") != null)
+
+
 func _hover_over_first_machine() -> void:
-	_hover_over_tile(_main._machine_tiles[_main._stage_order[0]])
+	var tile := _first_machine_tile()
+	if tile != HOVER_NONE:
+		_hover_over_tile(tile)
 
 
-## Aimed at the pipe segment the machine actually draws from — the one whose
-## level visibly moves.
 func _hover_over_pipe_inlet() -> void:
-	var json: String = _main.sim.fluid_snapshot_json()
-	if json.is_empty():
-		return # no pipe run in this world; nothing to hover
-	var snapshot: Dictionary = JSON.parse_string(json)
-	var segment: Dictionary = snapshot["segments"][int(snapshot["inlet_index"])]
-	var tile_pair: Array = segment["tile"]
-	_hover_over_tile(Vector2i(int(tile_pair[0]), int(tile_pair[1])))
+	var tile := _first_tile_of_kind("pipe")
+	if tile != HOVER_NONE:
+		_hover_over_tile(tile)
 
 
 ## The far corner of the first multi-tile machine — NOT its origin, see this
-## file's header. Does nothing if the loaded content has no multi-tile kind,
+## file's header. Does nothing if nothing placed is bigger than one tile,
 ## rather than silently hovering something else.
 func _hover_over_multi_tile_machine() -> void:
-	for stage in JSON.parse_string(_main.sim.chain_layout_json()):
-		var size: Vector2i = _main._footprint_size(stage.get("machine_footprint"))
+	for placement in JSON.parse_string(_main.sim.world_layout_json()):
+		var size: Vector2i = _main._footprint_size(placement.get("footprint"))
 		if size == Vector2i.ONE:
 			continue
-		var pair: Array = stage["machine_tile"]
+		var pair: Array = placement["tile"]
 		_hover_over_tile(Vector2i(int(pair[0]), int(pair[1])) + size - Vector2i.ONE)
 		return
 
 
 func _hover_over_hopper() -> void:
-	var json: String = _main.sim.hopper_snapshot_json()
-	if json.is_empty():
-		return
-	var tile_pair: Array = JSON.parse_string(json)["tile"]
-	_hover_over_tile(Vector2i(int(tile_pair[0]), int(tile_pair[1])))
+	var tile := _first_tile_of_kind("hopper")
+	if tile != HOVER_NONE:
+		_hover_over_tile(tile)
 
 
 func _hover_over_fluid_tank() -> void:
-	var json: String = _main.sim.fluid_tank_snapshot_json()
-	if json.is_empty():
-		return # no pipe run in this world, so no tank
-	var tile_pair: Array = JSON.parse_string(json)["tile"]
-	_hover_over_tile(Vector2i(int(tile_pair[0]), int(tile_pair[1])))
+	var tile := _first_tile_of_kind("fluid_tank")
+	if tile != HOVER_NONE:
+		_hover_over_tile(tile)
 
 
-## The delivery dock's own tooltip (the delivery-dock ticket) — worth its own
-## flag for the reason `--hover-tank` has one: the dock is the only building
-## whose tooltip reports a number that lives somewhere else entirely (the
-## economy's shared pool), so what it prints can only be reviewed by looking.
 func _hover_over_dock() -> void:
-	var json: String = _main.sim.dock_snapshot_json()
-	if json.is_empty():
-		return
-	var tile_pair: Array = JSON.parse_string(json)["tile"]
-	_hover_over_tile(Vector2i(int(tile_pair[0]), int(tile_pair[1])))
+	var tile := _first_tile_of_kind("dock")
+	if tile != HOVER_NONE:
+		_hover_over_tile(tile)
 
 
+## Loads both consumables and ticks, so the shot shows product moving rather
+## than an idle factory. Whatever was built is what runs; a fixture with no
+## hopper simply has nothing to meter out.
 func _run_chain_forward() -> void:
-	# Calls SimBridge directly rather than simulating a SPACE keypress
-	# through _unhandled_input: SPACE only spawns in ISOMETRIC mode (it's
-	# "fly up" in first-person), so going through the view-mode-sensitive
-	# input path would silently do nothing when --first-person is also set.
-	#
-	# BOTH consumables get loaded, not just the hopper. Since the "Visual
-	# overhaul round 2" epic's ticket 1 the pipe run has no self-refilling
-	# source, so a populate run that only fed tomatoes stalled the whole chain
-	# at the mixer and photographed empty belts downstream of it — which is
-	# not "the factory running", it is a picture of a starved factory.
 	for i in range(POPULATE_SPAWNS):
 		_main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
 		_main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
 		for j in range(POPULATE_TICKS_PER_SPAWN):
 			_main.sim.tick()
 	_main._apply_dirty_chunks()
+	_main._refresh_buffers()
+	_main._update_fluid_network()
 
 
-## Ticks the real chain until the hardcoded contract pays out at least once,
-## so `--shop` photographs a menu with some slots affordable and some not.
-## Nothing has to be collected: since the delivery-dock ticket the chain
-## ships into the pool by itself — same drive loop test_shop_menu.gd uses.
-const SHOP_EARN_TICK_LIMIT := 20000
-
-
-func _earn_contract_money() -> void:
-	for i in range(SHOP_EARN_TICK_LIMIT):
-		_main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
-		_main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
-		_main.sim.tick()
-		if float(JSON.parse_string(_main.sim.shop_snapshot_json())["money"]) > 0.0:
-			break
-	_main._apply_dirty_chunks()
-
-
-## Drives the real chain across several contract cadence boundaries. Exactly
-## the same command path as _run_chain_forward now — what puts product in the
-## shared delivery pool the contracts draw from is the delivery dock at the
-## end of the line, not a command issued from here.
-func _run_contract_cycles() -> void:
-	for i in range(CONTRACTS_REVIEW_TICK_LIMIT):
-		_main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
-		_main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
-		_main.sim.tick()
-		if _contract_board_is_mixed():
-			break
-	_main._apply_dirty_chunks()
-	_main._update_contract_panel()
-
-
-func _contract_board_is_mixed() -> bool:
-	var econ: Dictionary = JSON.parse_string(_main.sim.economy_snapshot_json())
-	var stock := 0
-	for pair in econ.get("delivery_stock", []):
-		stock += int(pair[1])
-	if stock < CONTRACTS_REVIEW_DOCK_UNITS:
-		return false
-	var made := 0
-	var missed := 0
-	for contract in econ.get("contracts", []):
-		made += int(contract["deliveries_made"])
-		missed += int(contract["deliveries_missed"])
-	return made >= 1 and missed >= 1
-
-
-## The recipe id of the first stage whose machine kind declares a progress
-## gauge, from the SIMULATION's own layout — shared by `--aging` and
-## `--hover-aging` so neither types a tile in.
-func _gauged_stage_recipe() -> String:
-	for stage in JSON.parse_string(_main.sim.chain_layout_json()):
-		if _main.MACHINE_PROGRESS_GAUGES.has(String(stage.get("machine_kind", ""))):
-			return String(stage["recipe"])
-	return ""
-
-
-## Drives the real chain until the first machine kind declaring a progress
-## gauge (`main.gd`'s MACHINE_PROGRESS_GAUGES) is AGING_TARGET_FRACTION
-## through its process. Which stage that is comes from the simulation's own
-## layout, not from a tile typed in here.
-func _age_a_batch() -> void:
-	var gauged := _gauged_stage_recipe()
-	if gauged == "":
-		return # this content has no gauged stage; nothing to wait for
-	for i in range(AGING_TICK_LIMIT):
-		_main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
-		_main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
-		_main.sim.tick()
-		_main._apply_dirty_chunks()
-		if _main._machine_progress(gauged) >= AGING_TARGET_FRACTION:
-			break
-	_main._update_machine_gauges()
-
-
-func _hover_over_aging_rack() -> void:
-	var gauged := _gauged_stage_recipe()
-	if gauged == "":
+## Enters placement mode with the cursor parked somewhere the ghost reads as
+## valid (open ground) or invalid (on top of something already placed) — the
+## two states `_update_ghost` distinguishes, and the only way to photograph
+## either without a live session.
+func _enter_ghost_mode() -> void:
+	_main.sim.issue_command_json(JSON.stringify({
+		"type": "purchase", "kind": _ghost_kind, "quantity": 1,
+	}))
+	_main._refresh_owned_counts()
+	if _main._owned_of(_ghost_kind) <= 0:
+		# The fixture spent the starting balance and this kind could not be
+		# afforded, so there is nothing to ghost. Said out loud rather than
+		# photographed as an empty frame — see this file's header on what a
+		# starting balance buys.
+		printerr("SCREENSHOT_NOTE: could not afford one '%s' after building the fixture — no ghost to show" % _ghost_kind)
 		return
-	_hover_over_tile(_main._machine_tiles[gauged])
+	_main._enter_build_mode(_ghost_kind)
+	var target := _open_ground_tile()
+	if _ghost_blocked:
+		var occupied := _first_machine_tile()
+		if occupied == HOVER_NONE:
+			occupied = _first_tile_of(func(_p): return true)
+		if occupied != HOVER_NONE:
+			target = occupied
+	_hover_over_tile(target)
+	_main._update_ghost()
+
+
+## A tile next to what has been built but not on it, so the valid ghost is in
+## frame beside the factory rather than off in empty floor.
+func _open_ground_tile() -> Vector2i:
+	var bounds: Rect2i = _main._world_tile_bounds()
+	return Vector2i(bounds.position.x + bounds.size.x + 1, bounds.position.y)
+
+
+## Remove mode, with the cursor over something removable.
+func _enter_remove_mode() -> void:
+	_main._toggle_remove_mode()
+	var tile := _first_machine_tile()
+	if tile == HOVER_NONE:
+		tile = _first_tile_of(func(_p): return true)
+	if tile != HOVER_NONE:
+		_hover_over_tile(tile)
+	_main._update_ghost()
 
 
 func _open_shop_menu() -> void:
-	_earn_contract_money()
 	_main._set_shop_menu_open(true)
 
 
 func _process(_delta: float) -> bool:
 	_frames += 1
+	# Build first: every flag below is about looking at something, and since
+	# the "Real Placement" epic there is nothing to look at until one of the
+	# fixtures has been placed.
+	if _frames == 1 and (_build or _fixture != ""):
+		_build_fixture()
 	if _frames == 1 and _first_person:
 		_enter_first_person()
 	if _frames == 2 and _populate:
@@ -401,12 +393,10 @@ func _process(_delta: float) -> bool:
 		_hover_over_fluid_tank()
 	if _frames == 2 and _hover_dock:
 		_hover_over_dock()
-	if _frames == 2 and _contracts:
-		_run_contract_cycles()
-	if _frames == 2 and _aging:
-		_age_a_batch()
-	if _frames == 2 and _hover_aging:
-		_hover_over_aging_rack()
+	if _frames == 2 and _ghost_kind != "":
+		_enter_ghost_mode()
+	if _frames == 2 and _remove_mode:
+		_enter_remove_mode()
 	if _frames == 2 and _shop:
 		_open_shop_menu()
 	if _frames < WARMUP_FRAMES:

@@ -195,8 +195,10 @@ sauce-factory/
   godot_project/             # Godot 4 project (presentation layer)
     project.godot              # run/main_scene = main.tscn
     sim_core.gdextension       # checked in; points at godot_project/bin/, which is gitignored (build output)
-    main.tscn / main.gd          # interactive 3D scene, built entirely in code from
-                                   # chain_layout_json + chunk snapshots: voxel meshes,
+    main.tscn / main.gd          # interactive 3D scene, rebuilt in code from
+                                   # world_layout_json (re-read after every place/remove/
+                                   # rotate) + chunk snapshots, with a real BUILD MODE —
+                                   # ghost, rotation, removal: voxel meshes,
                                    # a FIXED orthographic isometric camera, real-time
                                    # lights/shadows/SSAO/glow, SPACE/C still drive
                                    # issue_command_json, a readout panel reads
@@ -219,6 +221,15 @@ sauce-factory/
     test_presentation.gd           # headless proof of the 3D scene's structure: orthographic
                                      # camera, lights+shadows, SSAO/glow, imported voxel
                                      # meshes, metal shinier than matte (UI_UX.md §1/§2/§4)
+    test_placement.gd               # headless proof of the "Real Placement" epic's ticket 2:
+                                      # an EMPTY starting world, the ghost and its
+                                      # footprint-aware validity, all four facings drawn with
+                                      # the matching rotation, the junction art's east-only
+                                      # fallback, and place/remove driving the scene
+    test_layouts.gd                  # shared fixture: small factories built through real
+                                       # purchase/place commands. Its header explains what
+                                       # STARTING_MONEY (200) can and cannot buy, which is why
+                                       # every Godot test's factory is small now
     test_screenshot.gd              # NOT headless — renders the real scene to a PNG so a
                                       # visual change can actually be looked at
     bin/                          # gitignored: compiled extension lands here via `cargo xtask`
@@ -322,6 +333,98 @@ diff). Update docs/DEVLOG.md's "Current status" section in the same commit if
 it's gone stale.
 
 ## Decisions log
+
+- 2026-09-08: **"Real Placement" epic, ticket 2 of 2 (the Godot half) — the
+  scene boots into an empty floor and the player builds the factory.**
+  `sim_core` and `data/` were deliberately untouched: every fact drawn here
+  was already on the wire after ticket 1. The largest presentation change the
+  project has had, and with ticket 1 it completes the shop/inventory/building
+  pivot. Eight calls worth not re-litigating.
+
+  (1) **The scene rebuilds its whole "World" subtree on every
+  place/remove/rotate, and never per tick.** `main.gd` used to read
+  `chain_layout_json` ONCE, because the factory arrived pre-built and nothing
+  could move it; it now re-reads `world_layout_json` and rebuilds. A full
+  rebuild rather than an incremental patch, for exactly the reason
+  `World::recompute_topology` rebuilds rather than maintaining an incremental
+  union-find: at this scale rebuilding a few hundred nodes costs less than
+  the bookkeeping an incremental update needs, and it cannot drift out of
+  step with the simulation. The trade flips at milestone 8's scale, in that
+  one function, on both sides.
+
+  (2) **Rotation needed no new geometry, only a Y rotation and a re-centred
+  footprint.** Every asset is modelled facing east and the encoder puts a
+  model's origin at its own footprint centre, so a placement is the same mesh
+  spun about that origin and re-centred on the rotated rectangle. `east 0°,
+  south 90°, west 180°, north 270°` is exactly `index * 90` along one array
+  held in the simulation's own clockwise order (`Direction::rotate_cw`), so
+  the ghost's rotation and `PlayerCommand::Rotate` cannot disagree about
+  which way "rotate" goes.
+
+  (3) **The junction art stays east-only, and the fallback is now tested
+  rather than asserted in prose.** UI_UX.md §2b point 11 derives the belt's
+  inlet/outlet variants from the fact that this camera can only ever see the
+  +X and +Z-world faces; spinning those models 180° puts the carved side
+  where nobody can see it and a blank wall where the product path is, which
+  is visibly *worse* than the plain symmetric tile. So three of the four
+  facings a player can now choose deliberately fall through to the plain
+  model. A four-directional junction pass is an art ticket, explicitly not
+  this one. `test_connections.gd` asserts the fallback on a tile that WOULD
+  take a variant, and a rendered frame confirms nothing floats or clips.
+
+  (4) **Two mouse buttons on a build-menu slot, not one that changes
+  meaning.** Left-click buys one; right-click places one you own (number and
+  shift+number are the keyboard mirror). The alternative — "click buys when
+  you own none, places when you own some" — is shorter to explain and worse
+  to use: it makes buying a second of anything impossible without placing the
+  first, and makes one gesture mean two things depending on remembered state.
+  The affordance is printed on the slot's own owned line and in the menu
+  footer.
+
+  (5) **Ghost validity is a pure Godot-side, footprint-aware check against
+  the occupancy map, and it is signalled by glyph and word as well as
+  colour** (UI_UX.md §7): **✔ PLACE** / **✗ BLOCKED** / **✗ NONE OWNED** in a
+  prompt beside the cursor, plus a tint and a matching panel border. The
+  ghost's tint MULTIPLIES over the model's own vertex colours rather than
+  replacing them — the first cut replaced them and a rendered frame showed a
+  belt ghost as a featureless green rectangle, which says a tile is involved
+  but not which thing.
+
+  (6) **Remove is a MODE (X), not a modifier-click**, because it is the one
+  destructive action in the game (what a removed thing held is destroyed) and
+  a mode announces itself in the legend and in the on-screen prompt where a
+  held modifier cannot. Its prompt is red even when the click will succeed:
+  green means "this click builds", red means "this click destroys, or
+  refuses" — the first cut framed a valid REMOVE in the same green a valid
+  PLACE gets, which reads as two claims about one action.
+
+  (7) **R rotates what is under the cursor when not placing**, so turning a
+  belt you already laid needs no pick-up-and-re-place round trip. It is free:
+  `Rotate` resolves from any tile of a footprint and keeps the thing's
+  contents.
+
+  (8) **A starting balance cannot buy the shipped line, and that reshaped the
+  test suite.** A new game has `STARTING_MONEY` (200); the six-stage chain
+  costs about 1,087, and `Purchase` is all-or-nothing with money arriving
+  only through contract deliveries — which need that line. So no Godot-side
+  test or screenshot can reach it any more. Full-chain behaviour stays where
+  it already was, in `cargo test -p sim_core` against `sim::reference_chain`
+  (which starts its world with exactly its bill via
+  `World::with_content_and_money`, a seam with no wire equivalent — a player
+  has none either). Every headless Godot script now BUILDS the factory it
+  asserts against out of real purchase/place commands
+  (`godot_project/test_layouts.gd`), which is a better test of the boundary.
+  **Flagged, not fixed:** the same arithmetic means a new save cannot be
+  played forward to a payout at all — 200 buys a hopper, some belt and one
+  machine, and the first sellable product is six machines away. That is a
+  balance decision for whoever picks up the economy (GAMEPLAY.md §10's
+  balancing pass), not a rendering one. One thing fixed in passing:
+  `sim_core/tests/timed_processes.rs` asserted that a paused run took longer
+  in wall-clock time than an unpaused *control* run, which is below
+  run-to-run scheduling noise for two half-second debug-build loops and
+  failed reproducibly on a loaded machine (confirmed against a clean
+  checkout). It now asserts only that the paused run really spent the pause
+  in real time, which is the claim that was actually being made.
 
 - 2026-09-08: **The delivery dock, drawn** (the delivery-dock ticket's
   presentation half; `sim_core` and `data/` deliberately untouched — every

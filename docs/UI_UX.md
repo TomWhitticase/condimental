@@ -323,6 +323,30 @@ were only discoverable by building it:
     "goods are waiting", not a readout — the exact figure is on the clipboard
     and in the dock's own hover, neither of which is capped.
 
+18. **A rotated placement needs no new geometry — and the junction art is the
+    one thing that does not survive the rotation (the "Real Placement" epic's
+    ticket 2).** Every asset here is modelled with its product path along +X,
+    because until that epic +X was the only direction anything could face. A
+    placement facing another way is therefore just the same mesh spun about
+    its own origin — the encoder puts that origin at the model's footprint
+    centre (point 1), so the node is re-centred on the rotated rectangle and
+    nothing else changes. That covers belts, pipes, machines and buildings
+    alike.
+
+    What it does *not* cover is point 11's junction pieces, and the reason is
+    point 11 itself: an outlet is a doorway carved through the camera-facing
+    +X wall and an inlet is a hood cut open on that same visible side, so
+    spinning either 180° puts the carved side where nobody can see it and a
+    blank wall where the product path is — **visibly worse than the plain,
+    symmetric tile**. So the belt's `belt_inlet`/`belt_outlet` variants stay
+    east-only and three of the four facings a player can choose fall back to
+    the plain model. That is a known, tested, accepted gap, not an oversight:
+    a four-directional junction pass is its own art ticket, and until it
+    happens the fallback is what keeps a turned line honest rather than
+    wrong. A machine turned away from the camera is a milder case of the
+    same thing — its own doorway is still in the right place relative to its
+    body, it is simply on the side you cannot see.
+
 ## 3. Theme & setting
 
 **A grounded, semi-realistic 21st-century industrial food factory** — stainless steel tanks, rubber conveyor belts, PVC/steel piping, poured concrete floors, hazard-stripe signage, factory floor lighting, pallets and crates, loading docks. The tone is closer to "a real bottling/food-processing plant you could actually walk into," rendered in voxels, than a whimsical toy-factory aesthetic.
@@ -343,10 +367,11 @@ were only discoverable by building it:
 > **Status:** most of §5 is built. The contract readout is a real diegetic
 > clipboard (paper panel, steel clip bar, checkbox tick marks, voxel-rendered
 > item icons), machine/pipe detail is hover-only rather than dense always-on
-> text, and the build menu is a grid of voxel-rendered icon slots. The scene's
-> other readouts still use the plain dark plate, deliberately — that is
-> machine-side factory UI, and the clipboard motif is reserved for orders and
-> checklists. Not built: the hotbar/quick-access strip.
+> text, and the build menu is a grid of voxel-rendered icon slots that now
+> also *places* what it sells (see §5a). The scene's other readouts still use
+> the plain dark plate, deliberately — that is machine-side factory UI, and
+> the clipboard motif is reserved for orders and checklists. Not built: the
+> hotbar/quick-access strip.
 
 - **Clean and simple, Minecraft-adjacent**: chunky panel borders, flat-shaded slot grids, a limited, consistent color palette per panel, generous hit targets. Avoid modern skeuomorphic-app UI (gradients, drop shadows everywhere, thin hairline fonts) — the UI should feel like it belongs in the same voxel world as the factory.
 - **Icons are rendered from the real assets**: item/recipe/machine icons are small isometric renders of the actual voxel models (the same asset the player sees in the world, rendered to a thumbnail), not separately-drawn 2D icon art. This keeps the UI and the world visually consistent and halves the art workload per item.
@@ -354,6 +379,37 @@ were only discoverable by building it:
 - **Diegetic paper-and-metal widgets**: recipe lists, orders, and objectives are framed as **clipboards and checklists** — a paper texture on a metal clipboard clip, checkbox-style tick marks for completed items — rather than flat modern list UI. This is a deliberate physical/tactile framing choice that fits the industrial setting (a factory floor clipboard, not an app notification list). [GAMEPLAY.md](GAMEPLAY.md) §6's contracts (a standing order for a sauce mix, delivered on a cadence) are the concrete, driving use case for this motif — a contract *is* a clipboard.
 - **Typography**: a simple, sturdy, slightly blocky sans-serif — readable at UI sizes, evokes stenciled factory signage/pixel fonts without tipping into illegible novelty pixel fonts.
 - **Layout conventions**: a Minecraft-style hotbar/quick-access strip along one screen edge; build/recipe menus as grids of voxel-rendered icon slots; hover tooltips for recipe/machine detail rather than dense always-on text.
+
+### 5a. Build mode: the ghost, and what the next click will do
+
+The world starts empty and the player places every tile in it (the "Real
+Placement" epic), so "what will this click do" became a question the UI has to
+answer continuously. It is answered by two things at once, deliberately:
+
+- **A translucent tinted ghost of the real voxel model**, standing on the tile
+  under the cursor, turned to the facing the player has chosen. It is the
+  asset that will actually be built — including the belt's context-dependent
+  variant — so the ghost is a preview rather than a marker. The tint
+  *multiplies* over the model's own vertex colours rather than replacing them:
+  a flat wash reads as "a tile is involved" and loses which thing.
+- **A prompt beside the cursor** that names the kind, its facing and the
+  action in words and a glyph: **✔ PLACE**, **✗ BLOCKED**, **✗ NONE OWNED**,
+  **✔ REMOVE**. This is §7's never-colour-alone rule doing real work — the
+  glyph and the wording alone are enough to know whether the click will
+  succeed, with the tint and the panel's own border as reinforcement.
+
+Two conventions worth keeping. **Green means "this click builds"; red means
+"this click destroys, or refuses"** — so a valid removal is framed in red,
+not green, even though the click will succeed. And **removal is a mode (X),
+not a modifier-click**: it is the one destructive action in the game (what a
+removed thing was holding is destroyed), and a mode announces itself in the
+control legend and in the prompt, where a held modifier cannot.
+
+A build-menu slot carries two actions on the two mouse buttons — left-click
+buys one, right-click places one you own — rather than one button that
+changes meaning with the owned count. The latter is shorter to explain and
+worse to use: it makes buying a second of anything impossible without placing
+the first.
 
 ## 6. Feedback, motion & animation
 

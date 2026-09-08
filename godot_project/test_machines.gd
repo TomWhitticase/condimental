@@ -1,48 +1,44 @@
-# Headless proof of the "Machines improvement" milestone's *presentation*
-# half (ticket 4) — the structural claims a machine can check without a
-# framebuffer. Whether the new assets actually look right is what
-# scripts/screenshot-scene.sh is for, the same division test_presentation.gd
-# and test_fluids.gd already draw.
+# Headless proof of the per-kind machine presentation — the structural claims
+# a machine can check without a framebuffer. Whether the assets actually look
+# right is what scripts/screenshot-scene.sh is for, the same division
+# test_presentation.gd and test_fluids.gd already draw.
 #
 # Run with:
 #   godot --headless --path godot_project --script test_machines.gd
 #
 # Verifies:
-#   * every stage renders a real, non-empty imported voxel mesh at the tiles
-#     the SIMULATION reports — not a silently-missing asset,
-#   * EVERY machine kind the shipped chain uses has a bespoke model, and all
-#     of them are distinct meshes — so no stage falls through to the generic
-#     fallback. This is the "Visual overhaul round 2" epic's ticket 2 claim:
-#     `bottler` and `packer` used to have no model and rendered as two more
-#     copies of the generic housing,
-#   * the cooking vat — the first machine in the game bigger than one tile —
-#     genuinely spans more than one tile of world space, and its node sits at
-#     its footprint's CENTRE rather than on its origin tile,
-#   * every 1x1 kind is still placed exactly where it was before footprints
-#     existed (on its own tile centre), i.e. generalizing the placement moved
-#     nothing,
-#   * the hopper renders at the tile the simulation puts it on, and its
-#     product body rescales when its fill level changes — the same
-#     live-data-drives-a-scaled-body contract the pipe run's liquid has,
-#   * hovering resolves for a NON-ORIGIN tile inside the vat's footprint (the
-#     case that did not exist before this milestone) and for the hopper,
-#     through the one `_hover_text_at_tile` mechanism,
-#   * the delivery dock (the delivery-dock ticket) renders its OWN model at
-#     the tile the simulation puts it on — not the generic fallback, the
-#     failure the aging rack briefly shipped — with the belt that feeds it
-#     drawn from the same snapshot, the goods standing on its deck tracking
-#     the economy's shared delivery pool, and its own hover branch answering.
-#     Whether its inlet is a real carved opening rather than a rectangle
-#     painted black is checked voxel by voxel by `cargo test -p voxgen`; a
-#     mesh cannot tell the two apart.
+#   * EVERY buildable kind in `data/shop.ron` resolves to a bespoke model, and
+#     all of them are distinct meshes — nothing falls through to the generic
+#     `machine` housing. This is checked against the SHOP CATALOG rather than
+#     against whatever happens to be placed, which is stronger than the old
+#     chain-driven version: a kind priced but unmodelled fails here even
+#     though no world contains one yet,
+#   * a hopper, a machine and a delivery dock each render a real, non-empty
+#     imported mesh at the tile the simulation reports, at the centre of the
+#     footprint the simulation reports,
+#   * the hopper's product body rescales when its fill level changes — the
+#     same live-data-drives-a-scaled-body contract the pipe run's liquid has,
+#   * the goods standing on a dock's deck follow the economy's SHARED pool,
+#     not the dock's own (always empty) buffer,
+#   * the 2x2 cooking vat genuinely spans more than one tile, sits at its
+#     footprint's centre rather than on its origin tile, and resolves for
+#     hover from a NON-ORIGIN tile of its footprint.
+#
+# WHY THERE ARE TWO SCENES IN HERE. A new world has `sim::STARTING_MONEY`
+# (200) and the cooking vat costs exactly that, so it cannot share a world
+# with any other fixture — see test_layouts.gd's header for the full note on
+# what a starting balance can and cannot buy. A second instantiated scene is a
+# second world with its own balance, which is the honest way to exercise two
+# fixtures that each want most of one.
 #
 # The one-frame-before-checking dance and the "never hold your own camera
-# reference" rule are inherited from test_hover.gd — see that file's header
-# for the full explanation of the `--script` SceneTree bootstrap quirk they
-# work around.
+# reference" rule are inherited from test_hover.gd — see that file's header.
 extends SceneTree
 
+const Layouts = preload("res://test_layouts.gd")
+
 var main
+var vat_scene
 var _ran := false
 
 
@@ -55,6 +51,13 @@ func _initialize() -> void:
 	main = load("res://main.tscn").instantiate()
 	root.add_child(main)
 	main._ready()
+	vat_scene = load("res://main.tscn").instantiate()
+	root.add_child(vat_scene)
+	vat_scene._ready()
+	# The fixtures go down in `_run_checks`, not here: `_ready` runs twice
+	# under this harness and each run creates a fresh (empty) world, so
+	# anything built now is wiped before the checks see it. See
+	# test_hover.gd's header.
 
 
 func _process(_delta: float) -> bool:
@@ -65,8 +68,6 @@ func _process(_delta: float) -> bool:
 	return true
 
 
-## Every MeshInstance3D under `node`, so "the asset actually imported" can be
-## asserted rather than assumed (a missing .vox yields an empty Node3D).
 func _meshes(node: Node, out: Array) -> Array:
 	if node is MeshInstance3D:
 		out.append(node)
@@ -75,15 +76,14 @@ func _meshes(node: Node, out: Array) -> Array:
 	return out
 
 
-## The world-space bounding box of every mesh under `node`, in that node's
-## own parent space — what "does this thing actually span two tiles" needs.
 func _world_aabb(node: Node3D) -> AABB:
-	var meshes := _meshes(node, [])
 	var box := AABB()
 	var first := true
-	for mi in meshes:
-		var mesh_box: AABB = mi.mesh.get_aabb()
-		var here := AABB(node.position + mesh_box.position, mesh_box.size)
+	for mi in _meshes(node, []):
+		if mi.mesh == null:
+			continue
+		var here: AABB = mi.mesh.get_aabb()
+		here.position += node.position
 		if first:
 			box = here
 			first = false
@@ -93,312 +93,153 @@ func _world_aabb(node: Node3D) -> AABB:
 
 
 func _run_checks() -> void:
-	var layout: Array = JSON.parse_string(main.sim.chain_layout_json())
-	if layout.is_empty():
-		_fail("chain_layout_json returned no stages")
-		return
+	Layouts.build_machines_fixture(main.sim)
+	main._rebuild_world()
+	Layouts.build_multi_tile(vat_scene.sim)
+	vat_scene._rebuild_world()
 
-	var multi_tile_stages := 0
-	var bespoke_meshes := {} # kind -> the first surface's Mesh, to compare kinds
-	var fallback_kinds := [] # kinds with no MACHINE_MODELS entry — must stay empty
-
-	for stage in layout:
-		var recipe := String(stage["recipe"])
-		var kind := String(stage.get("machine_kind", ""))
-		var tile_pair: Array = stage["machine_tile"]
-		var origin := Vector2i(int(tile_pair[0]), int(tile_pair[1]))
-		var size: Vector2i = main._footprint_size(stage.get("machine_footprint"))
-
-		var node: Node3D = main.get_node_or_null("Chain/machine_%s" % recipe)
-		if node == null:
-			_fail("no rendered machine for stage '%s' — the scene is not following the sim's layout" % recipe)
+	# --- every priced kind has a bespoke model, and they all differ --------
+	var catalog: Dictionary = JSON.parse_string(main.sim.shop_snapshot_json())
+	var seen_meshes := {}
+	var kinds := 0
+	for entry in catalog["entries"]:
+		var kind := String(entry["kind"])
+		var asset: String = main._shop_asset_for(kind)
+		if asset == main.MACHINE_MODEL_FALLBACK:
+			_fail("kind '%s' has no bespoke model — it would draw the generic '%s'" % [
+				kind, main.MACHINE_MODEL_FALLBACK,
+			])
 			return
-
-		# --- a real imported mesh, not a silently-missing asset ------------
+		var node: Node3D = main._asset_node(asset)
 		var meshes := _meshes(node, [])
 		if meshes.is_empty():
-			_fail("machine '%s' (kind '%s') rendered no meshes — the .vox didn't import" % [recipe, kind])
+			_fail("kind '%s' -> asset '%s' rendered no meshes — the .vox didn't import" % [kind, asset])
 			return
 		for mi in meshes:
 			if mi.mesh == null or mi.mesh.get_surface_count() < 1:
-				_fail("machine '%s' has an empty mesh '%s'" % [recipe, mi.name])
+				_fail("asset '%s' has an empty mesh '%s'" % [asset, mi.name])
 				return
+		if seen_meshes.has(asset):
+			pass # two kinds may legitimately share ONE asset name; the check is per asset
+		seen_meshes[asset] = meshes[0].mesh
+		node.free()
+		kinds += 1
+	var distinct := []
+	for asset in seen_meshes.keys():
+		var mesh = seen_meshes[asset]
+		if distinct.has(mesh):
+			_fail("asset '%s' shares a mesh with another asset — the models didn't actually differ" % asset)
+			return
+		distinct.append(mesh)
 
-		# --- placed at the footprint's CENTRE, per _footprint_centre -------
-		var expected: Vector3 = main._footprint_centre(origin, size, main.FLOOR_Y)
+	# --- a hopper, a machine and a dock, each where the sim says -----------
+	var placed := {"hopper": Vector2i(-1, 0), "crusher": Vector2i(1, 0), "dock": Vector2i(5, 0)}
+	for kind in placed.keys():
+		var tile: Vector2i = placed[kind]
+		var node: Node3D = main.get_node_or_null("World/%s_%d,%d" % [kind, tile.x, tile.y])
+		if node == null:
+			_fail("no rendered node for the placed %s at %s" % [kind, str(tile)])
+			return
+		if _meshes(node, []).is_empty():
+			_fail("the placed %s rendered no meshes" % kind)
+			return
+		var expected: Vector3 = main._tile_origin(tile.x, tile.y, main.FLOOR_Y)
 		if not node.position.is_equal_approx(expected):
-			_fail("machine '%s' (kind '%s', footprint %s at %s) sits at %s, expected its footprint centre %s" % [
-				recipe, kind, str(size), str(origin), str(node.position), str(expected),
-			])
+			_fail("the %s sits at %s, expected its 1x1 tile centre %s" % [kind, str(node.position), str(expected)])
 			return
-		if size == Vector2i.ONE:
-			# The pre-footprint placement rule, restated: generalizing it
-			# must not have moved any of the 1x1 kinds that were already
-			# rendering correctly before this milestone.
-			var old_rule: Vector3 = main._tile_origin(origin.x, origin.y, main.FLOOR_Y)
-			if not node.position.is_equal_approx(old_rule):
-				_fail("1x1 machine '%s' moved off its tile (%s vs %s)" % [recipe, str(node.position), str(old_rule)])
-				return
-		else:
-			multi_tile_stages += 1
-			# --- the whole point: it visibly occupies more than one tile ---
-			var box := _world_aabb(node)
-			if box.size.x <= main.TILE * 1.05:
-				_fail("multi-tile machine '%s' (footprint %s) spans only %f world units in X — barely one tile (%f)" % [
-					recipe, str(size), box.size.x, main.TILE,
-				])
-				return
-			if size.y > 1 and box.size.z <= main.TILE * 1.05:
-				_fail("machine '%s' declares %d tiles of depth but its mesh spans only %f units in Z" % [
-					recipe, size.y, box.size.z,
-				])
-				return
 
-		if main.MACHINE_MODELS.has(kind):
-			bespoke_meshes[kind] = meshes[0].mesh
-		elif not fallback_kinds.has(kind):
-			fallback_kinds.append(kind)
-
-	if multi_tile_stages < 1:
-		_fail("no stage in the shipped chain has a footprint bigger than 1x1 — this test would prove nothing")
+	# --- the hopper's product body tracks its live fill --------------------
+	var hopper_nodes: Dictionary = main._hopper_nodes.get("-1,0", {})
+	if hopper_nodes.is_empty():
+		_fail("the placed hopper built no live-level nodes")
 		return
-
-	# --- the bespoke kinds are genuinely different models -----------------
-	if bespoke_meshes.size() < 3:
-		_fail("expected the crusher/mixer/cooking vat to render bespoke models, found %d" % bespoke_meshes.size())
-		return
-	var seen := []
-	for kind in bespoke_meshes.keys():
-		var mesh = bespoke_meshes[kind]
-		if seen.has(mesh):
-			_fail("kind '%s' shares a mesh with another kind — the models didn't actually differ" % kind)
-			return
-		seen.append(mesh)
-
-	# --- NO stage falls through to the generic fallback -------------------
-	# The "Visual overhaul round 2" epic's ticket 2: `bottler` and `packer`
-	# had no entry in MACHINE_MODELS, so the chain's last two stages both
-	# drew the generic `machine` housing. Asserting on the *kinds the chain
-	# actually uses* rather than on those two names keeps this honest if
-	# data/recipes.ron adds a stage — a new kind without a model would fail
-	# here rather than quietly shipping another duplicate.
-	if not fallback_kinds.is_empty():
-		_fail("kind(s) %s still render the generic fallback model '%s' — they have no bespoke asset" % [
-			str(fallback_kinds), main.MACHINE_MODEL_FALLBACK,
-		])
-		return
-
-	# --- the hopper: rendered where the sim says, with a live fill body ---
-	var hopper_json: String = main.sim.hopper_snapshot_json()
-	if hopper_json.is_empty():
-		_fail("hopper_snapshot_json is empty — ticket 3's hopper should always exist")
-		return
-	var hopper: Dictionary = JSON.parse_string(hopper_json)
-	var hopper_tile_pair: Array = hopper["tile"]
-	var hopper_tile := Vector2i(int(hopper_tile_pair[0]), int(hopper_tile_pair[1]))
-
-	var hopper_root: Node3D = main.get_node_or_null("Hopper")
-	if hopper_root == null:
-		_fail("no Hopper node — the chain's feeder didn't build")
-		return
-	var body: Node3D = hopper_root.get_node_or_null("hopper_body")
-	if body == null or _meshes(body, []).is_empty():
-		_fail("the hopper body rendered no meshes — the .vox didn't import")
-		return
-	var hopper_expected: Vector3 = main._footprint_centre(
-		hopper_tile, main._footprint_size(hopper.get("footprint")), main.FLOOR_Y
-	)
-	if not body.position.is_equal_approx(hopper_expected):
-		_fail("hopper body sits at %s, expected %s (sim tile %s)" % [
-			str(body.position), str(hopper_expected), str(hopper_tile),
-		])
-		return
-	if main._hopper_tile != hopper_tile:
-		_fail("scene tracks the hopper at %s, sim reports %s" % [str(main._hopper_tile), str(hopper_tile)])
-		return
-
-	if main._hopper_fill_node == null or _meshes(main._hopper_fill_node, []).is_empty():
+	var fill_node: Node3D = hopper_nodes["fill"]
+	if _meshes(fill_node, []).is_empty():
 		_fail("the hopper's product body rendered no meshes")
 		return
-	# An empty hopper shows nothing at all...
-	main._update_hopper()
-	if int(hopper.get("quantity", 0)) == 0 and main._hopper_fill_node.visible:
+	main._refresh_buffers()
+	if fill_node.visible:
 		_fail("an empty hopper should hide its product body, not draw a sliver")
 		return
-	# ...and filling it through the real command path raises the level.
 	main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
-	main._update_hopper()
-	if not main._hopper_fill_node.visible:
+	main._refresh_buffers()
+	if not fill_node.visible:
 		_fail("a filled hopper should show its product body")
 		return
-	var part_full_scale: float = main._hopper_fill_node.scale.y
+	var part_full: float = fill_node.scale.y
 	for i in range(8):
 		main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
-	main._update_hopper()
-	if main._hopper_fill_node.scale.y <= part_full_scale:
-		_fail("filling the hopper further did not raise its product level (%f -> %f)" % [
-			part_full_scale, main._hopper_fill_node.scale.y,
-		])
+	main._refresh_buffers()
+	if fill_node.scale.y <= part_full:
+		_fail("filling the hopper further did not raise its level (%f -> %f)" % [part_full, fill_node.scale.y])
 		return
-	if main._hopper_fill_node.scale.y > float(main.HOPPER_FILL_HEIGHT_VOXELS) + 0.001:
-		_fail("a full hopper's level (%f) rose past its box section (%d voxels)" % [
-			main._hopper_fill_node.scale.y, main.HOPPER_FILL_HEIGHT_VOXELS,
-		])
+	if fill_node.scale.y > float(main.HOPPER_FILL_HEIGHT_VOXELS) + 0.001:
+		_fail("a full hopper's level (%f) rose past its box section" % fill_node.scale.y)
 		return
 
-	# --- hover: a NON-ORIGIN tile of a multi-tile machine resolves ---------
-	var multi_recipe := ""
-	var multi_origin := Vector2i.ZERO
-	var multi_size := Vector2i.ONE
-	for stage in layout:
-		var size2: Vector2i = main._footprint_size(stage.get("machine_footprint"))
-		if size2 != Vector2i.ONE:
-			multi_recipe = String(stage["recipe"])
-			var pair: Array = stage["machine_tile"]
-			multi_origin = Vector2i(int(pair[0]), int(pair[1]))
-			multi_size = size2
-			break
-
-	var far_corner := multi_origin + multi_size - Vector2i.ONE
-	if far_corner == multi_origin:
-		_fail("the multi-tile machine's far corner is its origin — nothing new is being tested")
+	# --- the dock's deck follows the SHARED pool, not its own buffer -------
+	var dock_nodes: Dictionary = main._dock_nodes.get("5,0", {})
+	if dock_nodes.is_empty():
+		_fail("the placed dock built no deck slots")
 		return
-	if main._machine_recipe_at_tile(far_corner) != multi_recipe:
-		_fail("far corner %s of '%s' (origin %s, footprint %s) resolved to '%s'" % [
-			str(far_corner), multi_recipe, str(multi_origin), str(multi_size),
-			main._machine_recipe_at_tile(far_corner),
-		])
-		return
-	var far_text: String = main._hover_text_at_tile(far_corner)
-	if not far_text.begins_with(multi_recipe):
-		_fail("hovering %s should describe '%s', got: %s" % [str(far_corner), multi_recipe, far_text])
-		return
-	# ...and the tile just past that corner must NOT resolve to it.
-	var past := far_corner + Vector2i(0, 1)
-	if main._machine_recipe_at_tile(past) == multi_recipe:
-		_fail("tile %s is outside '%s'’s footprint but still resolved to it" % [str(past), multi_recipe])
-		return
-
-	# --- hover: the hopper answers through the same mechanism -------------
-	if not main._hopper_at_tile(hopper_tile):
-		_fail("the hopper's own tile %s doesn't resolve to the hopper" % str(hopper_tile))
-		return
-	var hopper_text: String = main._hover_text_at_tile(hopper_tile)
-	if not hopper_text.begins_with("hopper"):
-		_fail("hovering the hopper tile should describe the hopper, got: %s" % hopper_text)
-		return
-	if not hopper_text.contains(String(hopper["item"])) or not hopper_text.contains("units"):
-		_fail("the hopper tooltip should name its item and its level, got: %s" % hopper_text)
-		return
-	if main._hopper_at_tile(hopper_tile + Vector2i(0, 4)):
-		_fail("open floor four tiles north of the hopper resolved to the hopper")
-		return
-
-	# --- the delivery dock: its own model, its own belt, its own hover -----
-	var dock: Dictionary = JSON.parse_string(main.sim.dock_snapshot_json())
-	if dock.is_empty():
-		_fail("dock_snapshot_json returned nothing — every world has a dock")
-		return
-	var dock_pair: Array = dock["tile"]
-	var dock_tile := Vector2i(int(dock_pair[0]), int(dock_pair[1]))
-	var dock_body: Node3D = main.get_node_or_null("Dock/dock_body")
-	if dock_body == null:
-		_fail("the dock is not drawn at all")
-		return
-	var dock_meshes := _meshes(dock_body, [])
-	if dock_meshes.is_empty():
-		_fail("the dock rendered no voxel mesh")
-		return
-	var expected_dock_pos: Vector3 = main._footprint_centre(
-		dock_tile, main._footprint_size(dock.get("footprint")), main.FLOOR_Y
-	)
-	if dock_body.position.distance_to(expected_dock_pos) > 0.001:
-		_fail("the dock is drawn at %s, but the sim puts it at %s" % [
-			str(dock_body.position), str(expected_dock_pos),
-		])
-		return
-	# ...and it is a BESPOKE model, not the generic housing every kind falls
-	# back to. This is the check the aging rack briefly failed.
-	if not main.MACHINE_MODELS.has("dock"):
-		_fail("the 'dock' kind has no MACHINE_MODELS entry, so it draws the generic fallback")
-		return
-	var generic: Node3D = main._asset_node(main.MACHINE_MODEL_FALLBACK)
-	var generic_meshes := _meshes(generic, [])
-	if not generic_meshes.is_empty() and dock_meshes[0].mesh == generic_meshes[0].mesh:
-		_fail("the dock renders the generic fallback model '%s'" % main.MACHINE_MODEL_FALLBACK)
-		return
-	generic.free()
-
-	# The belt that runs into it — the one belt in the world belonging to no
-	# stage, so it is drawn from the dock's snapshot rather than the layout.
-	var dock_belt_pair: Array = dock["belt_start_tile"]
-	var dock_belt_start := Vector2i(int(dock_belt_pair[0]), int(dock_belt_pair[1]))
-	var dock_belt_length: int = int(dock["belt_length_tiles"])
-	if dock_belt_length < 1:
-		_fail("the dock reports no belt feeding it: %s" % str(dock))
-		return
-	for i in range(dock_belt_length):
-		var belt_tile := dock_belt_start + Vector2i(i, 0)
-		if not main._belt_assets.has("%d,%d" % [belt_tile.x, belt_tile.y]):
-			_fail("the dock's belt tile %s was never drawn" % str(belt_tile))
-			return
-	# Its LAST tile meets the dock, so it takes the inlet-adjacent variant —
-	# which only happens if `_machine_occupied_tiles` knows about the dock.
-	var last_belt_tile := dock_belt_start + Vector2i(dock_belt_length - 1, 0)
-	var last_belt_asset: String = main._belt_assets["%d,%d" % [last_belt_tile.x, last_belt_tile.y]]
-	if last_belt_asset != main.BELT_INLET_ASSET:
-		_fail("the belt tile against the dock drew '%s', not the inlet variant" % last_belt_asset)
-		return
-
-	# The goods on the deck follow the economy's SHARED pool, not the dock's
-	# own buffer (which is a pass-through and always empty — see DOCK_ASSET).
-	if main._dock_stock_nodes.size() != main.DOCK_STOCK_SLOTS:
-		_fail("expected %d dock stock slots, got %d" % [main.DOCK_STOCK_SLOTS, main._dock_stock_nodes.size()])
+	var slots: Array = dock_nodes["slots"]
+	if slots.size() != main.DOCK_STOCK_SLOTS:
+		_fail("expected %d dock stock slots, got %d" % [main.DOCK_STOCK_SLOTS, slots.size()])
 		return
 	main._update_dock_stock([])
-	for slot in main._dock_stock_nodes:
+	for slot in slots:
 		if slot.visible:
 			_fail("a case is standing on the dock with nothing in the delivery pool")
 			return
 	main._update_dock_stock([["boxed_ketchup", 1]])
-	if not main._dock_stock_nodes[0].visible:
+	if not slots[0].visible:
 		_fail("one unit in the delivery pool put no case on the dock")
 		return
-	if main._dock_stock_nodes[main.DOCK_STOCK_SLOTS - 1].visible:
+	if slots[main.DOCK_STOCK_SLOTS - 1].visible:
 		_fail("one unit in the delivery pool filled more than one slot")
 		return
-	if _meshes(main._dock_stock_nodes[0], []).is_empty():
+	if _meshes(slots[0], []).is_empty():
 		_fail("the case standing on the dock rendered no mesh")
 		return
-	# More stock than there are slots must fill them and stop, not error.
 	main._update_dock_stock([["boxed_ketchup", 99]])
-	for slot in main._dock_stock_nodes:
+	for slot in slots:
 		if not slot.visible:
 			_fail("a full delivery pool left a dock slot empty")
 			return
 
-	# --- hover: the dock answers through the same one mechanism -----------
-	if not main._dock_at_tile(dock_tile):
-		_fail("the dock's own tile %s doesn't resolve to the dock" % str(dock_tile))
+	# --- hover answers for every placed kind through one mechanism --------
+	for kind in placed.keys():
+		var tile: Vector2i = placed[kind]
+		if main._hover_text_at_tile(tile) == "":
+			_fail("hovering the placed %s at %s produced no tooltip" % [kind, str(tile)])
+			return
+
+	# --- the 2x2 cooking vat, in its own world (see this file's header) ----
+	var vat: Node3D = vat_scene.get_node_or_null("World/cooking_vat_0,0")
+	if vat == null:
+		_fail("the cooking vat did not render")
 		return
-	var dock_text: String = main._hover_text_at_tile(dock_tile)
-	if not dock_text.begins_with("delivery dock"):
-		_fail("hovering the dock tile should describe the dock, got: %s" % dock_text)
+	var vat_expected: Vector3 = vat_scene._footprint_centre(Vector2i(0, 0), Vector2i(2, 2), vat_scene.FLOOR_Y)
+	if not vat.position.is_equal_approx(vat_expected):
+		_fail("the 2x2 vat sits at %s, expected its footprint CENTRE %s" % [str(vat.position), str(vat_expected)])
 		return
-	if not dock_text.contains("shipped"):
-		_fail("the dock tooltip should report what it has shipped, got: %s" % dock_text)
+	if vat.position.is_equal_approx(vat_scene._tile_origin(0, 0, vat_scene.FLOOR_Y)):
+		_fail("the 2x2 vat is drawn on its origin tile rather than across its footprint")
 		return
-	if main._dock_at_tile(dock_tile + Vector2i(0, 4)):
-		_fail("open floor four tiles north of the dock resolved to the dock")
+	var box := _world_aabb(vat)
+	if box.size.x <= vat_scene.TILE * 1.05 or box.size.z <= vat_scene.TILE * 1.05:
+		_fail("the 2x2 vat spans %s — barely one tile (%f)" % [str(box.size), vat_scene.TILE])
+		return
+	# Hover from a NON-ORIGIN tile of the footprint — the case that only
+	# exists because a machine can be bigger than one tile.
+	var far_corner := Vector2i(1, 1)
+	var far_text: String = vat_scene._hover_text_at_tile(far_corner)
+	if not far_text.begins_with("ketchup"):
+		_fail("the vat's far corner %s should identify the vat, got: %s" % [str(far_corner), far_text])
+		return
+	if vat_scene._hover_text_at_tile(Vector2i(1, 2)) != "":
+		_fail("the tile just past the vat's footprint still resolved to it")
 		return
 
-	# --- the help text tells the player what SPACE now does ---------------
-	if not main.ISO_HELP_TEXT.to_lower().contains("hopper"):
-		_fail("ISO_HELP_TEXT still doesn't mention the hopper: %s" % main.ISO_HELP_TEXT)
-		return
-
-	print("MACHINES_OK: %d stage(s) rendered at the sim's own tiles, %d bespoke kind(s) and zero generic fallbacks, %d multi-tile machine(s) spanning their full footprint, hopper drawn at %s with a live product level, the delivery dock drawn with its own model at %s behind a %d-tile belt, hover resolves a non-origin footprint tile, the hopper and the dock" % [
-		layout.size(), bespoke_meshes.size(), multi_tile_stages, str(hopper_tile),
-		str(dock_tile), dock_belt_length,
-	])
+	print("MACHINES_OK: all %d priced kinds resolve to distinct bespoke models, a hopper/machine/dock render at the sim's own tiles with a live product level and a deck following the shared pool, and the 2x2 vat spans its whole footprint and answers hover from a non-origin tile" % kinds)
 	quit(0)

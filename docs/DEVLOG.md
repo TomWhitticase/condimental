@@ -28,7 +28,7 @@ below is history and should only ever be appended to.)*
 - **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, SPACE/SHIFT up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
 - **Lighting:** the sky is the real background (`BG_SKY`), not a flat colour — see the "empty void" DEVLOG entry below for why that matters. `scripts/screenshot-scene.sh --first-person` reviews that mode's lighting specifically.
 - **Delivery dock (done, both halves):** the chain has a real exit, and you can see it. One more belt runs past the last machine into a `dock` building, which ships finished product into the shared delivery pool automatically every tick — `PlayerCommand::CollectOutput` (the **C** key) is **removed**, so a supplied factory now earns money with no player action beyond keeping the hopper and vinegar tank topped up. The dock is drawn as the one piece of *architecture* on the line rather than another machine: a raised, hazard-striped loading platform with rubber bumpers, a hooded transfer housing where the belt runs in, and a despatch door under a canopy. It has **no fill gauge**, deliberately — its own buffer empties every tick, so a bar driven from it would read zero forever; what stands on its deck instead is one case per unit of the economy's shared `delivery_stock`, the same figure the clipboard labels ON THE DOCK. The shipped line now spans three chunks, (-1, 0) through (1, 0).
-- **Real placement (sim half done, presentation to do):** the world starts **empty**, with `STARTING_MONEY` (200) and a bare floor. `Place`/`Remove`/`Rotate` commands put things down out of the shop inventory, take them back, and turn them 90° clockwise; a belt carries toward the way it faces, a machine accepts on the face opposite the way it faces and discharges on the face it points at, and a line may turn corners. The hopper, the fluid tank and the dock are ordinary placeable kinds now, and a world may hold any number of each. `chain_layout_json` is gone (replaced by `world_layout_json`), several snapshot calls returned single objects and now return arrays, and every belt/pipe/machine/building on the wire carries a `direction` — all breaking changes ticket 2 consumes. The shipped six-stage line still exists as `sim::reference_chain`, a fixture that rebuilds it out of nothing but purchase and placement commands, which is what every integration test is built on.
+- **Real placement (DONE, both halves):** the world starts **empty**, with `STARTING_MONEY` (200) and a bare floor, and the player builds everything on it. `Place`/`Remove`/`Rotate` commands put things down out of the shop inventory, take them back, and turn them 90° clockwise; a belt carries toward the way it faces, a machine accepts on the face opposite the way it faces and discharges on the face it points at, and a line may turn corners. The hopper, the fluid tank and the dock are ordinary placeable kinds now, and a world may hold any number of each. The scene rebuilds itself from `world_layout_json` after every place/remove/rotate, draws every tile at the facing the player gave it, and has a real build mode: right-click an owned build-menu slot (or shift+number) to pick it up, a translucent ghost follows the cursor and says **✔ PLACE** / **✗ BLOCKED** / **✗ NONE OWNED** in a glyph and a word as well as a colour, **R** rotates the ghost or whatever is under the cursor, **X** toggles remove mode, **ESC** cancels, left-click confirms. The belt junction art stays east-only and falls back to the plain tile for the other three facings — a known, tested, accepted gap; a four-directional art pass is a separate ticket. **Balance caveat worth knowing:** 200 buys a hopper, a few belts and one machine, and the first sellable product is six machines away, so a new save cannot currently be played forward to a payout — the shipped six-stage line survives only as `sim::reference_chain`, the `cargo test` fixture, and every headless Godot test now builds what 200 buys instead.
 - **Contracts (done, both halves):** contracts are `data/contracts.ron` content and three run concurrently, each with its own mix/cadence/payout, all drawing from one shared pool of delivered stock (a box pays one contract, never two). The clipboard panel shows all of them — one paper docket card per contract on the one board, each with its own checklist, payout, countdown and delivered/missed tally, above a single shared money figure and a single "on the dock" line naming the pool they compete for.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
@@ -45,6 +45,57 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-08 — You build the factory now (the presentation half)
+
+The world has been empty since this morning's sim ticket; today it is empty
+*on screen*, and the player is the one who fills it. This is the largest
+presentation change the project has had, and together with that ticket it
+completes the shop/inventory/building pivot.
+
+The scene used to learn its shape once, from `chain_layout_json`, because a
+factory arrived pre-built and nothing could ever move it. It now re-reads
+`world_layout_json` and rebuilds its whole "World" subtree after every place,
+remove and rotate — a full rebuild on a player action, never per tick, which
+is deliberately the same trade the simulation makes when it recomputes its
+adjacency graph rather than maintaining an incremental one. Everything drawn
+carries the facing the player gave it: a belt turned north is drawn turned
+north, a machine facing west discharges to the west, and a rotated footprint
+is re-centred on the rectangle it actually claims.
+
+**Build mode.** An owned slot in the build menu is right-clicked (or
+shift+number) to enter placement mode; left-click still buys, so the two
+actions are two buttons rather than one that changes meaning with the owned
+count. A translucent tinted ghost of the real voxel model then follows the
+tile under the cursor — the same ray/plane pick the hover tooltip already
+used — and says whether the click will work, in a glyph and a word as well as
+a colour: **✔ PLACE** on free ground, **✗ BLOCKED** over anything already
+placed, **✗ NONE OWNED** when the inventory runs out. Validity is answered
+entirely on the Godot side, footprint-aware, from the occupancy map the
+layout already carries, so aiming costs no simulation round trip. **R**
+turns the ghost, and — outside placement mode — turns whatever is under the
+cursor where it stands. **X** toggles remove mode, which ghosts the target in
+red and picks it up on click. **ESC** leaves either.
+
+**The junction art is deliberately not fixed, and now it is checked.** The
+belt's inlet/outlet variants are authored for a camera that can only see two
+faces, so they are east-only; three of the four facings a player can now
+choose fall back to the plain tile rather than draw a doorway pointing away
+from the camera. A four-directional art pass is its own ticket. What this one
+adds is that the fallback is asserted rather than assumed, and a rendered
+frame confirms nothing floats or clips at a turned junction.
+
+**One thing this ticket could not do, and it is worth knowing.** A new game
+has 200 in the bank and the shipped six-stage line costs about 1,087, so
+nothing on the Godot side — tests or screenshots — can reach that factory any
+more; it stays asserted in `cargo test` against `sim::reference_chain`, which
+starts its world with exactly the money to pay for it. Every headless Godot
+test now builds what 200 buys, through real purchase and place commands,
+which is a better test of the boundary and a smaller factory to look at. It
+also means the game as it stands cannot be *played* forward from a new save:
+200 buys a hopper, a few belts and one machine, and the first sellable
+product is six machines away. That is a balance question for whoever picks up
+the economy next, not a rendering one.
 
 ### 2026-09-08 — The delivery dock you can actually see (presentation half)
 

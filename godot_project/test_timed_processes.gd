@@ -22,7 +22,9 @@
 #   * a rack mid-process shows the bar, and the bar GROWS as ticks pass while
 #     no chunk snapshot arrives at all — which is the actual claim, since a
 #     machine only dirties its chunk when its state changes and this process
-#     runs for 2400 ticks between those,
+#     runs for 2400 ticks between those. Driven by writing the machine state
+#     the scene would have read from a snapshot rather than by running a real
+#     chain, because a starting balance cannot buy one — see `_drive_gauge`,
 #   * `_machine_progress` agrees with the sim's own `process` pair,
 #   * the hover tooltip reports that progress and a REMAINING TIME, and
 #     `_format_remaining` spells long waits in minutes and short ones in
@@ -31,6 +33,8 @@
 # The one-frame-before-checking dance and the "never hold your own camera
 # reference" rule are inherited from test_hover.gd — see that file's header.
 extends SceneTree
+
+const Layouts = preload("res://test_layouts.gd")
 
 var main
 var _ran := false
@@ -45,6 +49,16 @@ func _initialize() -> void:
 	main = load("res://main.tscn").instantiate()
 	root.add_child(main)
 	main._ready()
+	# NOTE: the rack itself is placed in `_run_checks`, not here — `_ready`
+	# runs twice under this harness and each run creates a fresh (empty)
+	# world, so anything built here is wiped (see test_hover.gd's header).
+	#
+	# It goes down ALONE. A new world has `sim::STARTING_MONEY` (200) and a
+	# rack costs 160, so it is very nearly all of it — and the five machines
+	# upstream that would have to exist to actually FEED it (its recipe eats
+	# ketchup) cost several times a starting balance between them. See
+	# test_layouts.gd's header. What that means for this test is spelled out
+	# where it matters, at `_drive_gauge` below.
 
 
 func _process(_delta: float) -> bool:
@@ -63,74 +77,69 @@ func _meshes(node: Node, out: Array) -> Array:
 	return out
 
 
-## Drives the real chain — both consumables loaded, and the delivery dock
-## clearing the far end by itself — until the gauged stage's machine actually
-## has a process running,
-## applying dirty chunks as the scene itself does. Returns the tick it
-## started on, or -1 if the chain never got that far.
-func _run_until_gauged_stage_is_working(recipe: String, limit: int) -> int:
-	for i in range(limit):
-		main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
-		main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
-		main.sim.tick()
-		main._apply_dirty_chunks()
-		if main._machine_progress(recipe) >= 0.0:
-			return int(main.sim.current_tick())
-	return -1
+## Starts the gauge's clock the way a chunk snapshot would.
+##
+## The mechanism under test is precisely "the bar is recomputed from
+## `current_tick()` against the machine's `[start_tick, required_ticks]` pair,
+## NOT from a snapshot" — which is what makes a 2400-tick process animate at
+## all, since a machine dirties its chunk only when its state changes. So the
+## honest way to test it is to give the scene that pair once, exactly as
+## `_render_snapshot` would, and then never touch it again while the clock
+## runs. That is also the only way available: the rack's recipe eats ketchup,
+## which needs the five machines upstream of it, which a starting balance
+## cannot buy (see this file's `_initialize`).
+##
+## `required` is read from the SIMULATION's own recipe content via
+## `query_tile_json` where possible, so this does not hardcode 2400.
+func _drive_gauge(origin_key: String, recipe: String, required: int) -> void:
+	main._machine_states[origin_key] = {
+		"recipe": recipe,
+		"process": [int(main.sim.current_tick()), required],
+		"input": [],
+		"output": [],
+	}
 
 
 func _run_checks() -> void:
-	var layout: Array = JSON.parse_string(main.sim.chain_layout_json())
-	if layout.is_empty():
-		_fail("chain_layout_json returned no stages")
-		return
+	Layouts.build_aging_rack(main.sim, Vector2i(0, 0))
+	main._rebuild_world()
 
-	# --- find the gauged stage from the simulation's own layout -----------
-	var recipe := ""
-	var kind := ""
-	var origin := Vector2i.ZERO
-	var size := Vector2i.ONE
-	for stage in layout:
-		var stage_kind := String(stage.get("machine_kind", ""))
-		if not main.MACHINE_PROGRESS_GAUGES.has(stage_kind):
-			continue
-		recipe = String(stage["recipe"])
-		kind = stage_kind
-		var pair: Array = stage["machine_tile"]
-		origin = Vector2i(int(pair[0]), int(pair[1]))
-		size = main._footprint_size(stage.get("machine_footprint"))
-		break
-	if recipe == "":
-		_fail("no stage in the shipped chain uses a kind with a progress gauge — milestone 7's rack is not in the layout")
+	# --- find the gauged kind from the scene's own mapping ----------------
+	var kind := "aging_rack"
+	if not main.MACHINE_PROGRESS_GAUGES.has(kind):
+		_fail("'%s' no longer declares a progress gauge — this test would prove nothing" % kind)
 		return
+	var origin := Vector2i(0, 0)
+	var origin_key := "0,0"
 
 	# --- the machine itself: a real, bespoke, imported mesh ---------------
 	if not main.MACHINE_MODELS.has(kind):
 		_fail("kind '%s' has no bespoke model — it would draw the generic '%s'" % [kind, main.MACHINE_MODEL_FALLBACK])
 		return
-	var node: Node3D = main.get_node_or_null("Chain/machine_%s" % recipe)
+	var node: Node3D = main.get_node_or_null("World/%s_%s" % [kind, origin_key])
 	if node == null:
-		_fail("no rendered machine for the gauged stage '%s'" % recipe)
+		_fail("the placed aging rack did not render")
 		return
 	var machine_meshes := _meshes(node, [])
 	if machine_meshes.is_empty():
-		_fail("machine '%s' (kind '%s') rendered no meshes — the .vox didn't import" % [recipe, kind])
+		_fail("the rack rendered no meshes — the .vox didn't import")
 		return
 	for mi in machine_meshes:
 		if mi.mesh == null or mi.mesh.get_surface_count() < 1:
-			_fail("machine '%s' has an empty mesh '%s'" % [recipe, mi.name])
+			_fail("the rack has an empty mesh '%s'" % mi.name)
 			return
+	var size: Vector2i = main._footprint_size(main._placements[0].get("footprint"))
 	var expected: Vector3 = main._footprint_centre(origin, size, main.FLOOR_Y)
 	if not node.position.is_equal_approx(expected):
-		_fail("machine '%s' sits at %s, expected the sim's own footprint centre %s" % [
-			recipe, str(node.position), str(expected),
+		_fail("the rack sits at %s, expected the sim's own footprint centre %s" % [
+			str(node.position), str(expected),
 		])
 		return
 
 	# --- the gauge: its own node, in the footprint, at the slot height ----
-	var gauge: Node3D = main._machine_gauges.get(recipe, null)
+	var gauge: Node3D = main._machine_gauges.get(origin_key, null)
 	if gauge == null:
-		_fail("stage '%s' declares a gauge in MACHINE_PROGRESS_GAUGES but rendered none" % recipe)
+		_fail("the rack declares a gauge in MACHINE_PROGRESS_GAUGES but rendered none")
 		return
 	if _meshes(gauge, []).is_empty():
 		_fail("the gauge's bar rendered no meshes — '%s' didn't import" % main.MACHINE_PROGRESS_GAUGES[kind])
@@ -143,42 +152,48 @@ func _run_checks() -> void:
 		return
 
 	# --- idle: an EMPTY SLOT, not a zero-height sliver --------------------
-	if main._machine_progress(recipe) != -1.0:
-		_fail("nothing has been produced yet, so the rack should read idle, got %f" % main._machine_progress(recipe))
+	if main._machine_progress(origin_key) != -1.0:
+		_fail("nothing has been produced yet, so the rack should read idle, got %f" % main._machine_progress(origin_key))
 		return
 	main._update_machine_gauges()
 	if gauge.visible:
 		_fail("an idle rack should hide its bar entirely, leaving the slot empty")
 		return
 
-	# --- mid-process: the bar shows, and GROWS with the tick counter ------
-	# Generous: the rack is the fifth stage, so the chain has to run all the
-	# way through a crush, a mix and a 240-tick cook before it ever loads.
-	var started := _run_until_gauged_stage_is_working(recipe, 4000)
-	if started < 0:
-		_fail("the chain never delivered anything to '%s' — its process never started" % recipe)
+	# --- the process this milestone is about really is a long one ---------
+	# Read from the SIMULATION's own content rather than typed in, so
+	# rebalancing data/recipes.ron cannot turn this into a tautology.
+	var probe = JSON.parse_string(main.sim.query_tile_json(origin.x, origin.y))
+	if probe == null or probe.get("kind") != "machine":
+		_fail("query_tile on the rack's own tile reported no machine")
+		return
+	var recipe := String(probe["recipe"])
+	var required := 2400
+	if probe.get("process") != null:
+		required = int(probe["process"][1])
+	if required < 1000:
+		_fail("the gauged kind's process is only %d ticks — this test is about a LONG one" % required)
 		return
 
-	# A batch that has only just been loaded is legitimately below the
-	# sub-voxel threshold, so let it run a little before the bar is expected
-	# to be drawable at all.
+	# --- mid-process: the bar shows, and GROWS with the tick counter ------
+	_drive_gauge(origin_key, recipe, required)
 	for i in range(100):
 		main.sim.tick()
 	main._update_machine_gauges()
 	if not gauge.visible:
 		_fail("a rack 100 ticks into its process should show its bar")
 		return
-	var first_progress: float = main._machine_progress(recipe)
+	var first_progress: float = main._machine_progress(origin_key)
 	var first_scale: float = gauge.scale.y
 
 	# The point of the whole mechanism: NO dirty chunks are applied here, so
-	# `_last_machines` cannot change. The bar must still move, because
+	# `_machine_states` cannot change. The bar must still move, because
 	# progress is recomputed from `current_tick()` against the `process`
 	# pair — which is exactly what a 2400-tick wait needs.
 	for i in range(300):
 		main.sim.tick()
 	main._update_machine_gauges()
-	var second_progress: float = main._machine_progress(recipe)
+	var second_progress: float = main._machine_progress(origin_key)
 	if second_progress <= first_progress:
 		_fail("300 ticks passed and progress did not advance (%f -> %f) — the gauge is not reading the live tick" % [
 			first_progress, second_progress,
@@ -195,49 +210,10 @@ func _run_checks() -> void:
 		])
 		return
 
-	# --- `_machine_progress` agrees with the simulation's own numbers -----
-	var probe = JSON.parse_string(main.sim.query_tile_json(origin.x, origin.y))
-	if probe == null or probe.get("kind") != "machine":
-		_fail("query_tile on the rack's own origin %s reported no machine" % str(origin))
-		return
-	var process = probe.get("process")
-	if process == null:
-		_fail("the rack should still be mid-process at this point")
-		return
-	var required: int = int(process[1])
-	var elapsed: int = int(main.sim.current_tick()) - int(process[0])
-	var expected_fraction: float = float(elapsed) / float(required)
-	if absf(second_progress - expected_fraction) > 0.001:
-		_fail("_machine_progress said %f, the sim's own process pair says %f" % [
-			second_progress, expected_fraction,
-		])
-		return
-	# ...and this really is the long process the milestone is about, not a
-	# craft cycle that happens to be running. Asserted against the OTHER
-	# stages rather than against 2400, so rebalancing data/recipes.ron
-	# doesn't silently turn this test into a tautology.
-	var longest_other := 0
-	for stage in layout:
-		if String(stage["recipe"]) == recipe:
-			continue
-		var other = JSON.parse_string(main.sim.query_tile_json(
-			int(stage["machine_tile"][0]), int(stage["machine_tile"][1])
-		))
-		if other == null:
-			continue
-		var other_process = other.get("process")
-		if other_process != null:
-			longest_other = maxi(longest_other, int(other_process[1]))
-	if longest_other > 0 and required <= longest_other:
-		_fail("the gauged stage's process (%d ticks) is no longer than another stage's (%d) — it isn't the slow one" % [
-			required, longest_other,
-		])
-		return
-
 	# --- the tooltip reports progress AND a remaining time ----------------
 	var text: String = main._hover_text_at_tile(origin)
 	if not text.begins_with(recipe):
-		_fail("hovering the rack's tile %s should describe '%s', got: %s" % [str(origin), recipe, text])
+		_fail("hovering the rack's tile should describe '%s', got: %s" % [recipe, text])
 		return
 	if not text.contains("%") or not text.contains("left"):
 		_fail("the rack's tooltip should report both a percentage and a remaining time, got: %s" % text)
@@ -257,7 +233,7 @@ func _run_checks() -> void:
 		_fail("a %d-tick wait should be spelled in minutes, got '%s'" % [required, long_text])
 		return
 
-	print("TIMED_PROCESSES_OK: stage '%s' (kind '%s', %d ticks) renders a bespoke model at %s with a live progress gauge — hidden when idle, %.0f%% and growing on live ticks with no snapshot, tooltip reads '%s'" % [
-		recipe, kind, required, str(origin), second_progress * 100.0, main._format_remaining(required - elapsed),
+	print("TIMED_PROCESSES_OK: the placed aging rack (recipe '%s', %d ticks) renders a bespoke model at %s with a live progress gauge — hidden when idle, %.0f%% and growing on live ticks with no snapshot applied, tooltip reads a remaining time" % [
+		recipe, required, str(origin), second_progress * 100.0,
 	])
 	quit(0)

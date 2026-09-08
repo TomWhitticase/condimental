@@ -188,7 +188,18 @@ Everything in this doc should be **content**, not simulation code, per [ARCHITEC
   what you bought; `Rotate` turns a placement 90° clockwise. All three leave
   money alone — it moved at purchase time, which is what keeps §1's single
   currency single. Prices, and the starting balance they are measured
-  against, are still placeholders per §10.
+  against, are still placeholders per §10 — and the "Real Placement" epic's
+  ticket 2 turned up a concrete consequence of the current numbers worth
+  recording here rather than rediscovering: **`STARTING_MONEY` (200) buys a
+  hopper, a few belts and one machine, and the first sellable product
+  (`boxed_ketchup`) is six machines away**, so a new save cannot currently be
+  played forward to a contract payout at all. Nothing is broken — every
+  mechanism works, and `sim::reference_chain` still builds the whole line for
+  tests — but the loop §1 describes does not yet close from a cold start.
+  Closing it is the balancing pass's first job: either a larger starting
+  balance, cheaper early equipment, or an earlier sellable product (a contract
+  for something the front end alone can make would do it, and is the option
+  that adds progression rather than just money).
 
 - **Where things stand, and which way they face, is the player's decision
   (the same epic).** A machine accepts input on the face opposite the way it

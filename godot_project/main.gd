@@ -16,13 +16,19 @@ extends Node3D
 ## board, because GAMEPLAY.md §6's diversification pressure only reaches the
 ## player if every concurrent obligation is visible together.
 ##
-## What has NOT changed from the previous flat-2D version, deliberately: this
-## script still learns the chain's shape entirely from `chain_layout_json`
-## (static, read once) plus `chunk_snapshot_json`/`dirty_chunk_ids` (dynamic,
-## per tick). Stage count, tile positions and item identities all come from
-## the simulation; nothing about the chain is hardcoded here, and nothing
-## here reads a belt's gap array or a machine's raw `TimedProcess`. Godot
-## still draws what the sim says exists — it just draws it far better.
+## **The world starts EMPTY and the player builds it** (the "Real Placement"
+## epic). This script no longer learns a chain's shape once from
+## `chain_layout_json` — there is no chain, and nothing is built for free. It
+## re-reads `world_layout_json` and rebuilds its whole "World" subtree after
+## every place, remove and rotate, draws each tile at the facing the player
+## gave it, and carries a real build mode: a translucent ghost that follows
+## the cursor and says whether the click will work, **R** to turn things,
+## **X** to take them back. `chunk_snapshot_json`/`dirty_chunk_ids` still
+## drive what MOVES (items on belts, machines starting and stopping) per tick.
+## Nothing about the factory is hardcoded here, and nothing here reads a
+## belt's gap array or a machine's raw `TimedProcess`. Godot still draws what
+## the sim says exists — the difference is that what exists is now the
+## player's doing.
 ##
 ## Milestone 6 (Fluids) adds the pipe run: pipe tiles and the liquid inside
 ## them are built and sized entirely from `fluid_snapshot_json` (see
@@ -89,6 +95,10 @@ const FLOOR_MARGIN_Z := 2
 # plane; the isometric camera never zooms out to show all of it.
 const FLOOR_GROUND_MARGIN_X := 24
 const FLOOR_GROUND_MARGIN_Z := 24
+# How much floor the isometric camera frames when the world is EMPTY — the
+# state a new game now starts in, where there is no factory to frame. Enough
+# tiles to lay a first line across without immediately panning.
+const EMPTY_WORLD_FRAME_TILES := 14
 
 const TICK_HZ := 30.0
 ## Never advance more than this many simulation ticks in one frame, and drop
@@ -377,68 +387,85 @@ const ICON_DIR := "res://voxels/icons/"
 var sim: SimBridge
 
 var _tick_accum := 0.0
-var _stage_order: Array[String] = [] # recipe ids, in chain order
-var _machine_tiles: Dictionary = {} # recipe id -> Vector2i machine ORIGIN tile (min-X/min-Y corner)
-var _machine_footprints: Dictionary = {} # recipe id -> Vector2i(width, height) in tiles, from data/machines.ron
-var _last_machines: Dictionary = {} # recipe id -> last machine snapshot dict
-var _machine_lamps: Dictionary = {} # recipe id -> MeshInstance3D (emissive mesh)
-var _machine_gauges: Dictionary = {} # recipe id -> Node3D, the live progress bar (see MACHINE_PROGRESS_GAUGES)
-var _machine_running: Dictionary = {} # recipe id -> bool, to avoid redundant swaps
+
+# --- Everything the player has placed (the "Real Placement" epic, ticket 2)-
+# This scene used to learn its shape ONCE, from `chain_layout_json`, because
+# `World::new` built a fixed six-stage chain at construction and nothing
+# could ever move it. Ticket 1 deleted that: a world now starts EMPTY and
+# every belt tile, pipe tile, machine and building in it is something the
+# player bought and put down, facing a direction they chose.
+#
+# So the shape is live state. `world_layout_json` is re-read and the whole
+# "World" subtree rebuilt after every place/remove/rotate — a FULL rebuild
+# rather than an incremental patch, deliberately, for exactly the reason
+# `World::recompute_topology` rebuilds its whole adjacency graph rather than
+# maintaining an incremental union-find (see its doc): at this scale
+# rebuilding a few hundred nodes costs less than the bookkeeping an
+# incremental update needs, and it cannot drift out of step with the
+# simulation. A rebuild happens on a player action, never per tick.
+var _placements: Array = [] # world_layout_json, parsed, in the simulation's own tile order
+var _by_origin: Dictionary = {} # "x,y" of a placement's ORIGIN -> its layout dict
+var _occupancy: Dictionary = {} # "x,y" of ANY covered tile -> that placement's origin key
+var _world_root: Node3D
+var _floor_node: MultiMeshInstance3D
+var _floor_bounds := Rect2i(0, 0, -1, -1) # tile bounds the floor mesh currently covers
+var _frame_bounds := Rect2i(0, 0, 0, 0) # tile bounds the camera framed at startup
+## A buildable kind's DECLARED (unrotated) footprint, learned from any
+## placement of it and otherwise derived from its own model — see
+## `_kind_footprint`, which is the only thing that writes this.
+var _kind_footprints: Dictionary = {}
+
+# Machine state is keyed by the machine's ORIGIN TILE, not by its recipe id.
+# It used to be by recipe, which was safe only because the chain contained
+# exactly one machine per recipe by construction; the player can now place
+# three crushers, and a recipe-keyed dictionary would collapse all three into
+# one entry that flickered between them.
+var _machine_states: Dictionary = {} # origin key -> last machine snapshot dict
+var _machine_lamps: Dictionary = {} # origin key -> MeshInstance3D (emissive mesh)
+var _machine_gauges: Dictionary = {} # origin key -> Node3D, the live progress bar (see MACHINE_PROGRESS_GAUGES)
+var _machine_running: Dictionary = {} # origin key -> bool, to avoid redundant swaps
 var _item_nodes: Dictionary = {} # pooled item nodes, keyed per belt slot
-var _chain_tile_width := 5
 
-# --- Fluid network (milestone 6) -------------------------------------------
-# Geometry is built once from fluid_snapshot_json's `segments` (see
-# _build_fluid_network for why that call, not chunk snapshots, is the right
-# source); levels are re-read from the same call every frame.
-var _pipe_tiles: Dictionary = {} # Vector2i tile -> segment index, for hover lookups
-var _pipe_fluid_nodes: Array[Node3D] = [] # one liquid body per segment, indexed alike
-var _fluid_material: StandardMaterial3D
-var _last_fluid: Dictionary = {} # last fluid snapshot; {} when this world has no pipe run
+# --- Fluid networks (milestone 6, now one per connected run of pipe) -------
+# `fluid_snapshots_json` returns an ARRAY since ticket 1: a world has one
+# network per connected component of placed pipe, not one run. Geometry is
+# rebuilt with the rest of the world; levels are re-read from the same call
+# every frame, since fluid movement deliberately dirties no chunk.
+var _pipe_tiles: Dictionary = {} # "x,y" -> Vector2i(network index, segment index), for hover
+var _pipe_roles: Dictionary = {} # "x,y" -> asset name, decided from taps/tank_tiles
+var _pipe_fluid_nodes: Dictionary = {} # "net:seg" -> Node3D, the liquid body in that segment
+var _last_fluid: Array = [] # last fluid snapshot array; [] when nothing is plumbed
 
-# --- The chain's hopper (ticket 3's building, rendered here) ---------------
-# Geometry is built once from hopper_snapshot_json; the fill level is re-read
-# from the same call every frame, the same poll-don't-dirty-track trade
-# _update_fluid_network makes.
-var _hopper_tile := Vector2i.ZERO # footprint origin (min-X/min-Y corner)
-var _hopper_footprint := Vector2i.ONE
-var _hopper_fill_node: Node3D
-## The hopper's one status lamp (see `hopper()`'s doc), swapped between the
-## same idle/running materials a machine's lamp uses — the visual-overhaul
-## pass's answer to "does filling the hopper give feedback beyond its level
-## slowly rising": the lamp now actually reports "holds stock"/"empty" the
-## same way a machine's lamp reports running/idle, rather than sitting a
-## fixed colour regardless of state.
-var _hopper_lamp: MeshInstance3D
-var _hopper_has_stock: bool = false
-var _last_hopper: Dictionary = {} # last hopper snapshot, for the hover tooltip
+# --- Buffer buildings: hoppers, fluid tanks and delivery docks -------------
+# All three used to be single, always-present buildings with a `_tile`, a
+# `_footprint` and one `_last_*` snapshot each. Ticket 1 made them ordinary
+# placeable kinds and a world may hold NONE or SEVERAL of each, so each is a
+# dictionary keyed by origin tile: the snapshot for hover, and the nodes
+# whose level/lamp/deck follow it.
+var _hopper_states: Dictionary = {} # origin key -> hopper snapshot
+var _hopper_nodes: Dictionary = {} # origin key -> {"fill": Node3D, "lamp": MeshInstance3D, "stocked": bool}
+var _fluid_tank_states: Dictionary = {} # origin key -> tank snapshot
+var _fluid_tank_nodes: Dictionary = {} # origin key -> {"fill": Node3D, "lamp": MeshInstance3D, "stocked": bool}
+var _dock_states: Dictionary = {} # origin key -> dock snapshot
+var _dock_nodes: Dictionary = {} # origin key -> {"slots": Array[Node3D], "lamp": MeshInstance3D, "stocked": bool}
+var _last_dock_stock: Array = [] # economy_snapshot_json's delivery_stock, shared by every dock
 
-# --- The pipe run's fluid tank (ticket 1's building, rendered here) --------
-# Geometry is built once from fluid_tank_snapshot_json; the level is re-read
-# from the same call every frame. Polling is not optional here the way it is
-# for the hopper: the tank is drained by the same equalization pass the pipe
-# run is, and that pass deliberately does NOT dirty its chunk, so a
-# chunk-driven renderer would never learn the level fell (see
-# SimBridge::fluid_tank_snapshot_json's own doc).
-var _fluid_tank_tile := Vector2i.ZERO # footprint origin (min-X/min-Y corner)
-var _fluid_tank_footprint := Vector2i.ONE
-var _fluid_tank_fill_node: Node3D
-var _fluid_tank_lamp: MeshInstance3D
-var _fluid_tank_has_stock: bool = false
-var _last_fluid_tank: Dictionary = {} # last tank snapshot; {} when this world has no pipe run
-
-# --- The chain's delivery dock (the delivery-dock ticket) ------------------
-# Geometry (the dock, and the one belt that runs into it) is built once from
-# dock_snapshot_json; the goods standing on the deck are re-read every frame
-# from economy_snapshot_json — see DOCK_ASSET's doc for why those are two
-# different calls rather than one.
-var _dock_tile := Vector2i.ZERO # footprint origin (min-X/min-Y corner)
-var _dock_footprint := Vector2i.ONE
-var _dock_stock_nodes: Array[Node3D] = []
-var _dock_lamp: MeshInstance3D
-var _dock_has_stock: bool = false
-var _last_dock: Dictionary = {} # last dock snapshot, for the hover tooltip
-var _last_dock_stock: Array = [] # economy_snapshot_json's delivery_stock, likewise
+# --- Build mode: the ghost, and what the next click will do ----------------
+# `_build_kind` is "" when the player is not placing anything; `_remove_mode`
+# is the destructive twin. The two are mutually exclusive by construction
+# (entering one leaves the other), so "what does a click do right now" always
+# has exactly one answer.
+var _build_kind := ""
+var _build_direction := "east"
+var _remove_mode := false
+var _ghost_root: Node3D
+var _ghost_asset := ""
+var _ghost_tile := Vector2i.ZERO
+var _ghost_valid := false
+var _ghost_reason := "" # "", "blocked", "none_owned", "nothing_here"
+var _owned_counts: Dictionary = {} # kind -> owned count, repolled while building
+var _placement_prompt: PanelContainer
+var _placement_label: Label
 
 var _class_materials: Dictionary = {} # "matte"/"metal"/"emissive" -> StandardMaterial3D
 var _lamp_idle: StandardMaterial3D
@@ -556,22 +583,18 @@ var _fp_pitch := 0.0 # radians, clamped to +/-FP_PITCH_LIMIT
 func _ready() -> void:
 	sim = SimBridge.new()
 	_load_voxel_materials()
-	_read_chain_layout()
 	_build_environment()
-	_build_floor()
-	_build_chain()
-	_build_hopper()
-	_build_fluid_network()
-	_build_fluid_tank()
-	_build_dock()
+	# The world the player has built — NOTHING, in a new game. This is a real
+	# starting state now, not a degenerate one: `World::new` places nothing at
+	# all, so the first thing the scene draws is bare floor with a build menu
+	# over it, and everything else appears as the player puts it there.
+	_rebuild_world()
 	_build_camera()
 	_build_ui()
-	_seed_machine_state()
+	_build_ghost_layer()
+	_refresh_owned_counts()
 	_update_contract_panel() # fill in real text/sizing before the first frame draws
 	_update_fluid_network() # show tick 0's fluid levels, not an empty pipe run
-	_update_hopper() # likewise: tick 0's fill level, and seed the hover text
-	_update_fluid_tank() # and the tank's, which starts empty until the player loads it
-	_update_dock() # and the dock's, which starts clear until the line delivers
 	_apply_dirty_chunks() # render tick 0's (empty) state immediately
 
 
@@ -666,7 +689,12 @@ func _asset_node(asset: String) -> Node3D:
 		var mi := MeshInstance3D.new()
 		mi.name = String(class_name_)
 		mi.mesh = mesh
-		mi.set_surface_override_material(0, _class_materials.get(class_name_, null))
+		# Only when there IS one: assigning a null override makes the headless
+		# dummy renderer log "Parameter 'material' is null" when the node is
+		# later freed, which is noise in every test log.
+		var class_material = _class_materials.get(class_name_, null)
+		if class_material != null:
+			mi.set_surface_override_material(0, class_material)
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 		root.add_child(mi)
 		built += 1
@@ -726,48 +754,214 @@ func _footprint_size(footprint) -> Vector2i:
 	)
 
 
-func _read_chain_layout() -> void:
-	var layout: Array = JSON.parse_string(sim.chain_layout_json())
-	for stage in layout:
-		var recipe: String = stage["recipe"]
-		_stage_order.append(recipe)
-		var machine_tile: Array = stage["machine_tile"]
-		_machine_tiles[recipe] = Vector2i(int(machine_tile[0]), int(machine_tile[1]))
-		_machine_footprints[recipe] = _footprint_size(stage.get("machine_footprint"))
-	if layout.size() > 0:
-		var last: Dictionary = layout[layout.size() - 1]
-		var last_machine_tile: Array = last["machine_tile"]
-		# Past the machine's far edge, not past its origin — a multi-tile
-		# last stage would otherwise be half off the framed/floored area.
-		_chain_tile_width = int(last_machine_tile[0]) + _footprint_size(last.get("machine_footprint")).x
-	# ...and then past the delivery dock, which stands east of the last stage
-	# on a belt of its own (the delivery-dock ticket). `chain_layout_json`
-	# describes recipe-driven stages only, so the dock is invisible to the
-	# loop above — without this the floor would stop short of it and the
-	# camera would frame the chain with its own exit hanging off the edge.
-	var dock := _read_dock_snapshot()
-	if dock.has("tile"):
-		var dock_tile: Array = dock["tile"]
-		_chain_tile_width = maxi(
-			_chain_tile_width,
-			int(dock_tile[0]) + _footprint_size(dock.get("footprint")).x
+## A tile as the string key `_occupancy`/`_by_origin`/every per-placement
+## dictionary in this file are keyed by. One helper rather than the "%d,%d"
+## literal repeated a dozen times, because a mismatched key is silent.
+func _tile_key(tile: Vector2i) -> String:
+	return "%d,%d" % [tile.x, tile.y]
+
+
+## --- Facing (the "Real Placement" epic's ticket 2) -------------------------
+##
+## `sim::types::Direction` is four-way and every belt, pipe, machine and
+## building on the wire now carries one. This array is in the simulation's
+## own CLOCKWISE order (`Direction::rotate_cw`: east -> south -> west ->
+## north), so rotating the ghost is one step along it and the yaw below is
+## simply `index * 90 degrees` — which is why the two are one table rather
+## than two that have to agree.
+const DIRECTIONS := ["east", "south", "west", "north"]
+
+## Tile-space unit offset per direction, matching `Direction::offset`:
+## **east is +X and north is +Y** (see that type's own doc — the axis
+## convention is the simulation's, not this file's, and is never re-derived
+## here).
+const DIRECTION_OFFSETS := {
+	"east": Vector2i(1, 0),
+	"south": Vector2i(0, -1),
+	"west": Vector2i(-1, 0),
+	"north": Vector2i(0, 1),
+}
+
+
+func _direction_index(direction: String) -> int:
+	var i: int = DIRECTIONS.find(direction)
+	return i if i >= 0 else 0
+
+
+func _direction_offset(direction: String) -> Vector2i:
+	return DIRECTION_OFFSETS.get(direction, Vector2i(1, 0))
+
+
+## The Y-axis rotation that turns a model authored facing EAST into one
+## facing `direction`.
+##
+## Every voxel asset in this project is modelled with its product path
+## running along +X, because until this epic that was the only direction
+## anything could face. Tile (x, y) maps to world (x, ., y) — sim +Y is world
+## +Z — and a Godot rotation of `t` about +Y sends local +X to world
+## `(cos t, 0, -sin t)`. So east is 0, south (sim -Y, world -Z) is +90,
+## west is 180 and north is -90 — i.e. exactly `index * 90` along DIRECTIONS,
+## which is the whole reason that array is in clockwise order.
+##
+## **This is all the base rotation needs.** The encoder puts a model's origin
+## at its own footprint centre at ground level (UI_UX.md §2b), so a rotated
+## placement is the same mesh spun about that origin and re-centred on the
+## rotated rectangle — no new geometry. What rotation does NOT fix is the
+## junction art, which is authored for a camera that can only see two faces;
+## see `_belt_asset_for`.
+func _direction_yaw(direction: String) -> float:
+	return deg_to_rad(float(_direction_index(direction)) * 90.0)
+
+
+## The rectangle a kind actually claims once turned: a quarter turn SWAPS the
+## extents, anchored at the same origin corner (`sim::machines`'s module doc
+## owns that rule; this is its one presentation-side restatement).
+func _rotated_footprint(size: Vector2i, direction: String) -> Vector2i:
+	if direction == "north" or direction == "south":
+		return Vector2i(size.y, size.x)
+	return size
+
+
+## Every tile a placement of `size` at `origin` facing `direction` covers.
+func _placement_tiles(origin: Vector2i, size: Vector2i, direction: String) -> Array:
+	var rotated := _rotated_footprint(size, direction)
+	var tiles: Array = []
+	for dy in range(rotated.y):
+		for dx in range(rotated.x):
+			tiles.append(Vector2i(origin.x + dx, origin.y + dy))
+	return tiles
+
+
+## Re-reads `world_layout_json` into the three indexes the rest of this file
+## asks questions of: the placements themselves, a lookup by origin tile, and
+## an occupancy map from *every* covered tile back to the placement's origin.
+##
+## The occupancy map is what makes "point at a machine, not at its corner"
+## work here the way it already does in the simulation (`World::query_tile`,
+## `Remove`, `Rotate` all resolve from any tile of a footprint), and it is
+## also the whole of the ghost's validity check — see `_ghost_blocked`.
+##
+## `occupies` comes straight off the wire rather than being re-derived from
+## `footprint` + `direction`: the simulation reports both precisely so a
+## consumer can take whichever it needs (see `sim::PlacementSnapshot`).
+func _read_world_layout() -> void:
+	_placements.clear()
+	_by_origin.clear()
+	_occupancy.clear()
+	var parsed = JSON.parse_string(sim.world_layout_json())
+	if not (parsed is Array):
+		return
+	for placement in parsed:
+		if not (placement is Dictionary):
+			continue
+		_placements.append(placement)
+		var origin := _placement_origin(placement)
+		var key := _tile_key(origin)
+		_by_origin[key] = placement
+		# A kind's declared footprint is content (data/machines.ron) and the
+		# only place it reaches this scene is on a placement — so every
+		# placement teaches it, for the ghost of a kind nothing has placed
+		# yet to fall back on. See `_kind_footprint`.
+		_kind_footprints[String(placement.get("kind", ""))] = _footprint_size(placement.get("footprint"))
+		for pair in placement.get("occupies", []):
+			if pair is Array and pair.size() >= 2:
+				_occupancy[_tile_key(Vector2i(int(pair[0]), int(pair[1])))] = key
+
+
+func _placement_origin(placement: Dictionary) -> Vector2i:
+	var pair: Array = placement.get("tile", [0, 0])
+	return Vector2i(int(pair[0]), int(pair[1]))
+
+
+func _placement_direction(placement: Dictionary) -> String:
+	return String(placement.get("direction", "east"))
+
+
+## Whichever placement covers `tile`, or `{}`. Any tile of a multi-tile
+## footprint answers, via `_occupancy`.
+func _placement_at_tile(tile: Vector2i) -> Dictionary:
+	var origin_key: String = _occupancy.get(_tile_key(tile), "")
+	if origin_key == "":
+		return {}
+	return _by_origin.get(origin_key, {})
+
+
+## The declared (unrotated) footprint of a buildable kind, for a GHOST of
+## something not yet placed.
+##
+## Nothing on the wire reports a kind's footprint before one exists — every
+## snapshot describes a *placement* — so this learns it two ways, in order.
+## (1) From any placement of that kind in the world, which is the
+## simulation's own number and therefore authoritative. (2) Failing that,
+## from the kind's own voxel model: UI_UX.md's asset scale fixes one tile at
+## 32 voxels and the "Machines improvement" epic's ticket 4 made a kind's
+## model size and its `machines.ron` footprint *deliberately coupled* — the
+## 2x2 cooking vat is modelled at 64x64 — so the mesh's own extent in tiles
+## IS the footprint, rounded. It is derived rather than typed into a table
+## here on purpose: a hand-written kind -> size table is exactly the kind of
+## presentation-side lookup keyed by a content id that UI_UX.md §2b point 12
+## records going silently stale.
+func _kind_footprint(kind: String) -> Vector2i:
+	if _kind_footprints.has(kind):
+		return _kind_footprints[kind]
+	var size := Vector2i.ONE
+	var mesh := _mesh_for(_shop_asset_for(kind))
+	if mesh != null:
+		var aabb := mesh.get_aabb()
+		size = Vector2i(
+			maxi(1, roundi(aabb.size.x / TILE)),
+			maxi(1, roundi(aabb.size.z / TILE))
 		)
+	_kind_footprints[kind] = size
+	return size
+
+
+## The tile bounding box of everything currently placed — `position` is the
+## minimum tile and `size` the inclusive span, so the covered range is
+## `position .. position + size`. An EMPTY world (the new starting state)
+## reports a degenerate box at the origin, which is what the floor and the
+## camera then pad out.
+func _world_tile_bounds() -> Rect2i:
+	var seen := false
+	var min_tile := Vector2i.ZERO
+	var max_tile := Vector2i.ZERO
+	for key in _occupancy.keys():
+		var parts: PackedStringArray = String(key).split(",")
+		var tile := Vector2i(int(parts[0]), int(parts[1]))
+		if not seen:
+			min_tile = tile
+			max_tile = tile
+			seen = true
+			continue
+		min_tile = Vector2i(mini(min_tile.x, tile.x), mini(min_tile.y, tile.y))
+		max_tile = Vector2i(maxi(max_tile.x, tile.x), maxi(max_tile.y, tile.y))
+	return Rect2i(min_tile, max_tile - min_tile)
 
 
 ## The poured-concrete factory floor. Drawn as one `MultiMeshInstance3D`
 ## rather than one node per tile: the floor is the only asset whose instance
 ## count scales with the size of the world, so it is the one worth batching.
 ## The tile's darker perimeter is what keeps the grid legible (UI_UX.md §1).
+##
+## Its extent follows the placed world rather than a fixed chain length, and
+## it is rebuilt only when those bounds actually change — which for an empty
+## world (nothing placed, the state the game now starts in) is a square of
+## bare floor centred on the origin, i.e. somewhere to build.
 func _build_floor() -> void:
+	var bounds := _world_tile_bounds()
+	if _floor_node != null and bounds == _floor_bounds:
+		return
+	_floor_bounds = bounds
+
 	var mesh := _mesh_for("floor_tile")
 	if mesh == null:
 		push_warning("floor_tile mesh missing — skipping floor")
 		return
 
-	var x_from := -FLOOR_GROUND_MARGIN_X
-	var x_to := _chain_tile_width - 1 + FLOOR_GROUND_MARGIN_X
-	var z_from := -FLOOR_GROUND_MARGIN_Z
-	var z_to := FLOOR_GROUND_MARGIN_Z
+	var x_from := bounds.position.x - FLOOR_GROUND_MARGIN_X
+	var x_to := bounds.position.x + bounds.size.x + FLOOR_GROUND_MARGIN_X
+	var z_from := bounds.position.y - FLOOR_GROUND_MARGIN_Z
+	var z_to := bounds.position.y + bounds.size.y + FLOOR_GROUND_MARGIN_Z
 
 	var multimesh := MultiMesh.new()
 	multimesh.transform_format = MultiMesh.TRANSFORM_3D
@@ -780,160 +974,291 @@ func _build_floor() -> void:
 			multimesh.set_instance_transform(i, Transform3D(Basis(), _tile_origin(tx, tz, 0.0)))
 			i += 1
 
-	var node := MultiMeshInstance3D.new()
-	node.name = "Floor"
-	node.multimesh = multimesh
-	node.material_override = _class_materials.get("matte", null)
+	if _floor_node != null:
+		remove_child(_floor_node)
+		_floor_node.free()
+	_floor_node = MultiMeshInstance3D.new()
+	_floor_node.name = "Floor"
+	_floor_node.multimesh = multimesh
 	# The floor takes shadows from the machinery but casts none of its own.
-	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(node)
+	_floor_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_floor_node)
+	var floor_material = _class_materials.get("matte", null)
+	if floor_material != null:
+		_floor_node.material_override = floor_material
 
 
-## Every tile any machine footprint covers, plus the hopper's own tile, as a
-## set keyed "x,y". This is what a belt tile asks "what is next to me?"
+## Which of the three belt models this tile draws with.
 ##
-## The hopper belongs in here even though it is not a machine: it discharges
-## onto the head of stage 0's belt exactly the way a machine discharges onto
-## the next stage's, so that belt tile is an outlet tile by the same rule
-## rather than by a special case. Its tile comes from `hopper_snapshot_json`,
-## not from an assumption about where the chain starts.
-func _machine_occupied_tiles(layout: Array) -> Dictionary:
-	var occupied := {}
-	for stage in layout:
-		var pair: Array = stage["machine_tile"]
-		var origin := Vector2i(int(pair[0]), int(pair[1]))
-		var size := _footprint_size(stage.get("machine_footprint"))
-		for dy in range(size.y):
-			for dx in range(size.x):
-				occupied["%d,%d" % [origin.x + dx, origin.y + dy]] = true
-	var hopper := _read_hopper_snapshot()
-	if hopper.has("tile"):
-		var tile: Array = hopper["tile"]
-		occupied["%d,%d" % [int(tile[0]), int(tile[1])]] = true
-	# The delivery dock belongs here for the hopper's reason, mirrored: the
-	# hopper discharges onto the head of the first belt, the dock swallows the
-	# end of the last one, and both are junctions with a belt whether or not
-	# the building is a `chain_layout_json` stage. Its tile comes from
-	# `dock_snapshot_json`, not from an assumption about where the chain ends.
-	var dock := _read_dock_snapshot()
-	if dock.has("tile"):
-		var dock_tile: Array = dock["tile"]
-		var dock_origin := Vector2i(int(dock_tile[0]), int(dock_tile[1]))
-		var dock_size := _footprint_size(dock.get("footprint"))
-		for dy in range(dock_size.y):
-			for dx in range(dock_size.x):
-				occupied["%d,%d" % [dock_origin.x + dx, dock_origin.y + dy]] = true
-	return occupied
-
-
-## Which way a stage's belt travels, derived from the two tiles the layout
-## already reports: it starts at `belt_start_tile` and ends against
-## `machine_tile`, so the sign of the difference IS the direction. Deriving
-## it rather than assuming +X is the point — nothing here would need editing
-## if the simulation ever laid a stage out along another axis, it would just
-## fall through to the plain belt model (see `_belt_asset_for`).
-func _belt_direction(start_tile: Vector2i, machine_tile: Vector2i) -> Vector2i:
-	return Vector2i(signi(machine_tile.x - start_tile.x), signi(machine_tile.y - start_tile.y))
-
-
-## Which of the three belt models this tile draws with. See BELT_ASSET's doc
-## for the rule and for why a non-+X direction deliberately gets the plain
-## model.
-func _belt_asset_for(tile: Vector2i, direction: Vector2i, occupied: Dictionary) -> String:
-	if direction != Vector2i(1, 0):
+## The rule is the one the "Visual overhaul round 2" epic's ticket 3 built,
+## now fed a REAL per-tile direction instead of one derived from a fixed
+## chain: a belt whose next tile along its own facing is covered by a
+## machine or a building hands over into it and draws `belt_inlet`; one whose
+## previous tile is a machine or building catches a discharge and draws
+## `belt_outlet`; everything else is the plain `belt`.
+##
+## **The variants stay east-only, and three quarters of placements
+## deliberately fall through to the plain model.** That is the known,
+## accepted gap this ticket does not close, and it is not laziness: UI_UX.md
+## §2b point 11 derives the junction art from the fact that this camera can
+## only ever see the +X and +Z-world faces, so an outlet is a doorway carved
+## into the camera-facing wall and an inlet is a hood cut open on that same
+## side. Spinning those models 180 degrees puts the carved side where nobody
+## can see it and a blank wall where the product path is — visibly worse than
+## the plain tile, which is symmetric and reads correctly at any angle. A
+## full four-directional junction pass is an art ticket, not this one; until
+## then the fallback is what keeps every non-east placement honest.
+func _belt_asset_for(tile: Vector2i, direction: String) -> String:
+	if direction != "east":
 		return BELT_ASSET
-	var ahead := tile + direction
-	if occupied.has("%d,%d" % [ahead.x, ahead.y]):
+	var offset := _direction_offset(direction)
+	if _is_building_tile(tile + offset):
 		return BELT_INLET_ASSET
-	var behind := tile - direction
-	if occupied.has("%d,%d" % [behind.x, behind.y]):
+	if _is_building_tile(tile - offset):
 		return BELT_OUTLET_ASSET
 	return BELT_ASSET
 
 
-## One belt run + one machine per stage, placed exactly where the simulation
-## says they are. Re-read from `chain_layout_json` every time rather than
-## cached in the scene, so appending a recipe to data/recipes.ron still
-## changes the rendered factory with no Godot-side edit.
-func _build_chain() -> void:
-	var layout: Array = JSON.parse_string(sim.chain_layout_json())
-	var stages := Node3D.new()
-	stages.name = "Chain"
-	add_child(stages)
-	# Cleared, not appended to: `_ready()` genuinely runs twice under the
-	# headless `--script` SceneTree harness (see test_hover.gd's header).
-	_belt_assets.clear()
+## Whether `tile` is covered by something a belt hands product to or takes it
+## from — a machine, a hopper, a fluid tank or a dock, i.e. anything that is
+## not itself a length of conveyor or pipe.
+func _is_building_tile(tile: Vector2i) -> bool:
+	var placement := _placement_at_tile(tile)
+	if placement.is_empty():
+		return false
+	var kind := String(placement.get("kind", ""))
+	return kind != "belt" and kind != "pipe"
+
+
+## Which model draws a pipe tile — the plain bore, the supply fitting where a
+## tank discharges, or the branch fitting where a machine taps the run.
+## `_pipe_roles` is filled from the fluid snapshots in `_rebuild_world`,
+## since which tile is which is a property of the network, not of the tile.
+func _pipe_asset_for(tile: Vector2i) -> String:
+	return String(_pipe_roles.get(_tile_key(tile), PIPE_ASSET))
+
+
+## Which voxel asset draws one placement. Belts and pipes have context-
+## dependent variants (above); everything else goes through the same
+## `_shop_asset_for` the build menu's icons use, so a kind added to
+## `data/shop.ron` draws in the world and in the menu from one mapping.
+func _asset_for_placement(placement: Dictionary) -> String:
+	var kind := String(placement.get("kind", ""))
+	var origin := _placement_origin(placement)
+	if kind == BELT_KIND:
+		return _belt_asset_for(origin, _placement_direction(placement))
+	if kind == PIPE_KIND:
+		return _pipe_asset_for(origin)
+	return _shop_asset_for(kind)
+
+
+## The buildable-kind ids that are infrastructure rather than buildings —
+## spelled here for the same reason `sim::world` spells them in Rust: they
+## are the two kinds that are priced and placed but are not in
+## `data/machines.ron` at all.
+const BELT_KIND := "belt"
+const PIPE_KIND := "pipe"
+
+## The three buildable kinds that are buffers rather than processes — no
+## recipe, but a footprint and a live level. Spelled here so the `match` in
+## `_build_placement` reads as kind ids rather than string literals; they are
+## `data/machines.ron` ids, and their Rust twins are `sim::hopper::HOPPER_KIND`
+## and friends.
+const HOPPER_KIND := "hopper"
+const FLUID_TANK_KIND := "fluid_tank"
+const DOCK_KIND := "dock"
+
+
+## Rebuilds the entire rendered world from `world_layout_json` plus the
+## buffer/fluid snapshots — the one function every place, remove and rotate
+## goes through, and the one `_ready` calls to draw the (empty) starting
+## state. See `_placements`'s doc for why this is a full rebuild.
+func _rebuild_world() -> void:
+	_read_world_layout()
+
+	# Pipe roles first: which tile draws a supply fitting and which a branch
+	# is a property of the NETWORK (who taps it, which tank feeds it), so it
+	# has to be known before the pipe tiles themselves are built.
+	_last_fluid = _read_fluid_snapshots()
+	_pipe_roles.clear()
+	_pipe_tiles.clear()
+	for n in range(_last_fluid.size()):
+		var network: Dictionary = _last_fluid[n]
+		var segments: Array = network.get("segments", [])
+		for s in range(segments.size()):
+			var seg: Dictionary = segments[s]
+			var tile := _pair_to_tile(seg.get("tile", [0, 0]))
+			_pipe_tiles[_tile_key(tile)] = Vector2i(n, s)
+			_pipe_roles[_tile_key(tile)] = PIPE_SOURCE_ASSET if bool(seg.get("is_source", false)) else PIPE_ASSET
+		for tap in network.get("taps", []):
+			var index := int(tap.get("segment_index", -1))
+			if index < 0 or index >= segments.size():
+				continue
+			var tap_tile := _pair_to_tile(segments[index].get("tile", [0, 0]))
+			# A tapped tile that a tank also feeds keeps the supply fitting:
+			# the tank connection is the more distinctive silhouette, and the
+			# same tile being both is only reachable on a one-tile run.
+			if _pipe_roles.get(_tile_key(tap_tile), PIPE_ASSET) == PIPE_ASSET:
+				_pipe_roles[_tile_key(tap_tile)] = PIPE_INLET_ASSET
+
+	# Cleared and rebuilt together, never appended to: `_ready()` genuinely
+	# runs twice under the headless `--script` SceneTree harness (see
+	# test_hover.gd's header), and a place/remove/rotate re-enters this.
+	var existing := get_node_or_null("World")
+	if existing != null:
+		remove_child(existing)
+		existing.free()
+	_machine_lamps.clear()
 	_machine_gauges.clear()
+	_machine_running.clear()
+	_hopper_nodes.clear()
+	_fluid_tank_nodes.clear()
+	_dock_nodes.clear()
+	_pipe_fluid_nodes.clear()
+	for key in _item_nodes.keys():
+		_item_nodes[key]["node"].queue_free()
+	_item_nodes.clear()
 
-	var occupied := _machine_occupied_tiles(layout)
-	for stage in layout:
-		var recipe: String = stage["recipe"]
-		var start: Array = stage["belt_start_tile"]
-		var length: int = int(stage["belt_length_tiles"])
-		var start_tile := Vector2i(int(start[0]), int(start[1]))
-		var machine_pair: Array = stage["machine_tile"]
-		var direction := _belt_direction(start_tile, Vector2i(int(machine_pair[0]), int(machine_pair[1])))
-		for i in range(length):
-			var tile := start_tile + direction * i
-			var asset := _belt_asset_for(tile, direction, occupied)
-			_belt_assets["%d,%d" % [tile.x, tile.y]] = asset
-			var belt := _asset_node(asset)
-			belt.name = "belt_%s_%d" % [recipe, i]
-			belt.position = _tile_origin(tile.x, tile.y, FLOOR_Y)
-			stages.add_child(belt)
+	_world_root = Node3D.new()
+	_world_root.name = "World"
+	add_child(_world_root)
 
-		# Which model, and where it sits, both come from the simulation's own
-		# `machine_kind`/`machine_footprint` fields — so a kind that grows in
-		# data/machines.ron grows here, and a new kind draws (as the generic
-		# model) without a Godot edit. See MACHINE_MODELS.
-		var machine_tile: Array = stage["machine_tile"]
-		var kind := String(stage.get("machine_kind", ""))
-		var origin := Vector2i(int(machine_tile[0]), int(machine_tile[1]))
-		var size := _footprint_size(stage.get("machine_footprint"))
-		var machine := _asset_node(MACHINE_MODELS.get(kind, MACHINE_MODEL_FALLBACK))
-		machine.name = "machine_%s" % recipe
-		machine.position = _footprint_centre(origin, size, FLOOR_Y)
-		stages.add_child(machine)
+	for placement in _placements:
+		_build_placement(placement)
 
-		var lamp := machine.get_node_or_null("emissive")
-		if lamp != null:
-			_machine_lamps[recipe] = lamp
-			_machine_running[recipe] = true # force the first update to apply
-			_set_machine_running(recipe, false)
-
-		# The progress bar, for the kinds that declare one. Built exactly the
-		# way the hopper's product body and the tank's liquid column are — a
-		# sibling node holding a one-voxel-tall model, rescaled every frame —
-		# rather than as a fourth mechanism. It is a SIBLING rather than a
-		# child of `machine` so that `machine.get_node_or_null("emissive")`
-		# above keeps finding the machine's own status lamps and nothing
-		# else: the bar's mesh is emissive too, and `_set_machine_running`
-		# swaps the whole emissive mesh's material.
-		if MACHINE_PROGRESS_GAUGES.has(kind):
-			var gauge := _asset_node(String(MACHINE_PROGRESS_GAUGES[kind]))
-			gauge.name = "gauge_%s" % recipe
-			gauge.position = _footprint_centre(origin, size, MACHINE_GAUGE_FLOOR_Y)
-			gauge.visible = false
-			stages.add_child(gauge)
-			_machine_gauges[recipe] = gauge
+	_build_floor()
+	_seed_machine_states()
+	_refresh_buffers()
 
 
-## Fills `_last_machines` (what the hover tooltip reads, see
-## _machine_hover_text) before the first item ever moves.
+## Builds the node (or nodes) for one placement: its body at the centre of
+## its ROTATED footprint, turned to face the way the simulation says it
+## faces, plus whatever live parts that kind carries — a status lamp, a fill
+## body, a progress gauge, a deck for waiting goods.
+func _build_placement(placement: Dictionary) -> void:
+	var kind := String(placement.get("kind", ""))
+	var origin := _placement_origin(placement)
+	var direction := _placement_direction(placement)
+	var key := _tile_key(origin)
+	var size := _rotated_footprint(_footprint_size(placement.get("footprint")), direction)
+	var yaw := _direction_yaw(direction)
+
+	var body := _asset_node(_asset_for_placement(placement))
+	body.name = "%s_%s" % [kind, key]
+	body.position = _footprint_centre(origin, size, FLOOR_Y)
+	body.rotation.y = yaw
+	_world_root.add_child(body)
+
+	var lamp := body.get_node_or_null("emissive")
+
+	match kind:
+		BELT_KIND, PIPE_KIND:
+			pass
+		HOPPER_KIND:
+			_hopper_nodes[key] = {
+				"fill": _build_level_body(HOPPER_FILL_ASSET, origin, size, HOPPER_FILL_FLOOR_Y, yaw, null),
+				"lamp": lamp,
+				"stocked": true, # forces the first refresh to apply
+			}
+		FLUID_TANK_KIND:
+			_fluid_tank_nodes[key] = {
+				"fill": _build_level_body(FLUID_TANK_FILL_ASSET, origin, size, FLUID_TANK_FILL_FLOOR_Y, yaw, null),
+				"lamp": lamp,
+				"stocked": true,
+			}
+		DOCK_KIND:
+			_dock_nodes[key] = {
+				"slots": _build_dock_slots(origin, size, yaw),
+				"lamp": lamp,
+				"stocked": true,
+			}
+		_:
+			# A machine: a recipe-running kind. Its status lamp and (for the
+			# kinds that declare one) its progress gauge.
+			_machine_lamps[key] = lamp
+			_machine_running[key] = true
+			_set_machine_running(key, false)
+			if MACHINE_PROGRESS_GAUGES.has(kind):
+				# A SIBLING of the body rather than a child, so
+				# `body.get_node_or_null("emissive")` above keeps finding the
+				# machine's own lamps and not the gauge's emissive bar, whose
+				# material `_set_machine_running` would otherwise swap.
+				var gauge := _asset_node(String(MACHINE_PROGRESS_GAUGES[kind]))
+				gauge.name = "gauge_%s" % key
+				gauge.position = _footprint_centre(origin, size, MACHINE_GAUGE_FLOOR_Y)
+				gauge.rotation.y = yaw
+				gauge.visible = false
+				_world_root.add_child(gauge)
+				_machine_gauges[key] = gauge
+
+
+## One of the one-voxel-tall bodies this scene scales every frame to show a
+## live level — the pipe's liquid, the hopper's product, the tank's column
+## (UI_UX.md §2b point 5). Shared because all three are the same mechanism,
+## differing only in asset, height and tint.
+func _build_level_body(
+	asset: String, origin: Vector2i, size: Vector2i, height: float, yaw: float,
+	material: StandardMaterial3D
+) -> Node3D:
+	var node := _asset_node(asset)
+	node.name = "%s_%s" % [asset, _tile_key(origin)]
+	node.position = _footprint_centre(origin, size, height)
+	node.rotation.y = yaw
+	if material != null:
+		for child in node.get_children():
+			if child is MeshInstance3D:
+				child.set_surface_override_material(0, material)
+	_world_root.add_child(node)
+	return node
+
+
+## The pooled nodes the goods waiting on one dock's deck stand in — created
+## hidden, revealed by `_update_dock_stock`. Pooled rather than spawned per
+## frame for `_item_node_for`'s reason: this is the same "a case standing
+## somewhere" node, just standing on a deck instead of on a belt.
+func _build_dock_slots(origin: Vector2i, size: Vector2i, yaw: float) -> Array:
+	var deck := _footprint_centre(origin, size, DOCK_DECK_Y)
+	var slots: Array = []
+	for i in range(DOCK_STOCK_SLOTS):
+		var offset: Vector2 = DOCK_STOCK_OFFSETS[i]
+		var slot := Node3D.new()
+		slot.name = "dock_stock_%s_%d" % [_tile_key(origin), i]
+		# The vox importer maps low local Y to high world Z, so a slot's
+		# model-space Y offset runs the other way in the world (the same
+		# mapping `_footprint_centre`'s doc relies on). Rotated with the
+		# building, so a turned dock stages its goods on its own near edge.
+		var local := Vector3(offset.x * VOXEL_UNIT, 0.0, -offset.y * VOXEL_UNIT)
+		slot.position = deck + local.rotated(Vector3.UP, yaw)
+		slot.visible = false
+		_world_root.add_child(slot)
+		slots.append(slot)
+	return slots
+
+
+func _pair_to_tile(pair) -> Vector2i:
+	if pair is Array and pair.size() >= 2:
+		return Vector2i(int(pair[0]), int(pair[1]))
+	return Vector2i.ZERO
+
+
+## Fills `_machine_states` (what the hover tooltip and the progress gauges
+## read) for every placed machine, before any item has moved.
 ##
 ## `dirty_chunk_ids` only reports chunks something *changed* in, so an idle
 ## factory produces no snapshots at all and hovering a machine would show
 ## nothing until the player pressed a key. This asks the simulation directly,
-## via SimBridge's existing `query_tile_json`, rather than inventing a
-## default state Godot has no business knowing.
-func _seed_machine_state() -> void:
-	var layout: Array = JSON.parse_string(sim.chain_layout_json())
-	for stage in layout:
-		var tile: Array = stage["machine_tile"]
-		var parsed = JSON.parse_string(sim.query_tile_json(int(tile[0]), int(tile[1])))
+## via `query_tile_json`, rather than inventing a default state Godot has no
+## business knowing.
+func _seed_machine_states() -> void:
+	_machine_states.clear()
+	for placement in _placements:
+		if placement.get("recipe") == null:
+			continue
+		var origin := _placement_origin(placement)
+		var parsed = JSON.parse_string(sim.query_tile_json(origin.x, origin.y))
 		if parsed == null or parsed.get("kind") != "machine":
 			continue
-		_last_machines[parsed["recipe"]] = {
+		_machine_states[_tile_key(origin)] = {
 			"recipe": parsed["recipe"],
 			"process": parsed.get("process"),
 			# query_tile deliberately doesn't report buffer contents; the
@@ -943,130 +1268,129 @@ func _seed_machine_state() -> void:
 		}
 
 
-## Builds the chain's delivery dock (the delivery-dock ticket) — the building
-## itself, the one belt that runs into it, and the pooled nodes the goods
-## waiting on its deck are drawn with.
+# --------------------------------------------------------------------------
+# Live levels: hoppers, tanks, docks and the liquid in the pipes
+# --------------------------------------------------------------------------
+
+## Re-reads every buffer building's own snapshot array and updates the nodes
+## built for it. Called every frame, and once at build time so tick 0's
+## levels are drawn rather than an empty factory.
 ##
-## Read from `dock_snapshot_json` for `_build_hopper`'s reasons and one more
-## of its own. `chain_layout_json` describes recipe-driven belt/machine stages
-## only, and the dock is not one — nothing in `data/recipes.ron` names it. And
-## the belt that feeds it is the one belt in the world belonging to no stage,
-## so it is not in that layout either; `DockSnapshot` carries its
-## `belt_start_tile`/`belt_length_tiles` precisely so this doesn't have to be
-## hunted for in chunk snapshots, which report it keyed on the chunk holding
-## its START tile while the dock itself sits over the x = 32 chunk boundary.
-func _build_dock() -> void:
-	# Rebuilding replaces the dock rather than adding a second one — the same
-	# guard `_build_hopper`/`_build_fluid_tank` carry, for the same
-	# headless-test double-`_ready()` reason (see test_hover.gd's header).
-	var existing := get_node_or_null("Dock")
-	if existing != null:
-		remove_child(existing)
-		existing.free()
-	_dock_stock_nodes.clear()
-	_dock_lamp = null
+## Polling rather than waiting on `dirty_chunk_ids` is not a shortcut: a
+## tank is drained by the same equalization pass the pipes are and that pass
+## deliberately dirties no chunk, so a chunk-driven renderer would sit
+## waiting on an event that never comes (see `SimBridge`'s own docs). The
+## hopper and dock could be chunk-driven and are polled with them for one
+## code path rather than two.
+func _refresh_buffers() -> void:
+	_hopper_states.clear()
+	for snapshot in _read_snapshot_array(sim.hopper_snapshots_json()):
+		var key := _tile_key(_pair_to_tile(snapshot.get("tile")))
+		_hopper_states[key] = snapshot
+		var nodes: Dictionary = _hopper_nodes.get(key, {})
+		if nodes.is_empty():
+			continue
+		var fill: float = clampf(float(snapshot.get("fill", 0.0)), 0.0, 1.0)
+		_apply_level(nodes["fill"], fill, HOPPER_MIN_VISIBLE_FILL, HOPPER_FILL_HEIGHT_VOXELS)
+		# Retinted only when the item id actually changes: this runs every
+		# frame, and a fresh StandardMaterial3D per frame per building is a
+		# real cost for a colour that almost never moves.
+		var item := String(snapshot.get("item", ""))
+		if String(nodes.get("tint", "")) != item:
+			nodes["tint"] = item
+			_tint_level_body(nodes["fill"], _hopper_fill_material(item))
+		_set_lamp_stocked(nodes, fill > HOPPER_MIN_VISIBLE_FILL)
 
-	var snapshot := _read_dock_snapshot()
-	if snapshot.is_empty():
-		return
+	_fluid_tank_states.clear()
+	for snapshot in _read_snapshot_array(sim.fluid_tank_snapshots_json()):
+		var key := _tile_key(_pair_to_tile(snapshot.get("tile")))
+		_fluid_tank_states[key] = snapshot
+		var nodes: Dictionary = _fluid_tank_nodes.get(key, {})
+		if nodes.is_empty():
+			continue
+		var fill: float = clampf(float(snapshot.get("fill", 0.0)), 0.0, 1.0)
+		_apply_level(nodes["fill"], fill, FLUID_TANK_MIN_VISIBLE_FILL, FLUID_TANK_FILL_HEIGHT_VOXELS)
+		var fluid := _fluid_id_of(snapshot)
+		if String(nodes.get("tint", "")) != fluid:
+			nodes["tint"] = fluid
+			_tint_level_body(nodes["fill"], _fluid_material_for(fluid))
+		_set_lamp_stocked(nodes, fill > FLUID_TANK_MIN_VISIBLE_FILL)
 
-	var tile_pair: Array = snapshot["tile"]
-	_dock_tile = Vector2i(int(tile_pair[0]), int(tile_pair[1]))
-	_dock_footprint = _footprint_size(snapshot.get("footprint"))
+	_dock_states.clear()
+	for snapshot in _read_snapshot_array(sim.dock_snapshots_json()):
+		_dock_states[_tile_key(_pair_to_tile(snapshot.get("tile")))] = snapshot
 
-	var root := Node3D.new()
-	root.name = "Dock"
-	add_child(root)
-
-	# The exit belt, drawn through exactly the machinery every stage's belt
-	# goes through — same `_belt_asset_for` rule, same `_belt_assets` record —
-	# so its first tile picks up the outlet variant behind the packer and its
-	# last one the inlet variant against the dock, without either end being
-	# special-cased here.
-	var belt_pair: Array = snapshot["belt_start_tile"]
-	var belt_start := Vector2i(int(belt_pair[0]), int(belt_pair[1]))
-	var belt_length: int = int(snapshot.get("belt_length_tiles", 0))
-	var direction := _belt_direction(belt_start, _dock_tile)
-	var occupied := _machine_occupied_tiles(JSON.parse_string(sim.chain_layout_json()))
-	for i in range(belt_length):
-		var tile := belt_start + direction * i
-		var asset := _belt_asset_for(tile, direction, occupied)
-		_belt_assets["%d,%d" % [tile.x, tile.y]] = asset
-		var belt := _asset_node(asset)
-		belt.name = "belt_dock_%d" % i
-		belt.position = _tile_origin(tile.x, tile.y, FLOOR_Y)
-		root.add_child(belt)
-
-	var body := _asset_node(MACHINE_MODELS.get(String(snapshot.get("kind", "dock")), MACHINE_MODEL_FALLBACK))
-	body.name = "dock_body"
-	body.position = _footprint_centre(_dock_tile, _dock_footprint, FLOOR_Y)
-	root.add_child(body)
-
-	_dock_lamp = body.get_node_or_null("emissive")
-	_dock_has_stock = true # force the first _update_dock call to apply
-	_set_dock_lamp_stocked(false)
-
-	# One node per stock slot, created hidden and revealed by
-	# `_update_dock_stock`. Pooled rather than spawned per frame for
-	# `_item_node_for`'s reason — this is the same "a case standing
-	# somewhere" node, just standing on a deck instead of on a belt.
-	var deck := _footprint_centre(_dock_tile, _dock_footprint, DOCK_DECK_Y)
-	for i in range(DOCK_STOCK_SLOTS):
-		var offset: Vector2 = DOCK_STOCK_OFFSETS[i]
-		var slot := Node3D.new()
-		slot.name = "dock_stock_%d" % i
-		# The vox importer maps low local Y to high world Z, so a slot's
-		# model-space Y offset runs the other way in the world (the same
-		# mapping `_footprint_centre`'s doc relies on).
-		slot.position = deck + Vector3(offset.x * VOXEL_UNIT, 0.0, -offset.y * VOXEL_UNIT)
-		slot.visible = false
-		root.add_child(slot)
-		_dock_stock_nodes.append(slot)
-
-
-## Every world has exactly one dock, so unlike `fluid_snapshot_json` this
-## never legitimately returns an empty string — it is still guarded, the same
-## way `_read_hopper_snapshot` is, so a future SimBridge that drops the
-## building doesn't crash the scene.
-func _read_dock_snapshot() -> Dictionary:
-	var json: String = sim.dock_snapshot_json()
-	if json.is_empty():
-		return {}
-	var parsed = JSON.parse_string(json)
-	return parsed if parsed is Dictionary else {}
-
-
-## Re-reads the dock every frame: its own snapshot (for the hover tooltip and
-## the lifetime shipped count) and the economy's shared delivery pool (for the
-## goods actually standing on the deck).
-##
-## Two calls rather than one because they answer two different questions, and
-## conflating them would be the lie DOCK_ASSET's doc describes: the dock's own
-## `contents` is a transfer buffer that empties every tick, so it is always
-## `[]` here, while `delivery_stock` is the pool that accumulates between
-## contract settlements and therefore the only honest source for "what is
-## waiting to be sold".
-func _update_dock() -> void:
-	var snapshot := _read_dock_snapshot()
-	if not snapshot.is_empty():
-		_last_dock = snapshot
 	var econ = JSON.parse_string(sim.economy_snapshot_json())
-	var stock: Array = econ.get("delivery_stock", []) if econ is Dictionary else []
-	_last_dock_stock = stock
-	_update_dock_stock(stock)
+	_last_dock_stock = econ.get("delivery_stock", []) if econ is Dictionary else []
+	_update_dock_stock(_last_dock_stock)
 
 
-## Stands one case on the deck per unit of stock waiting to be sold, up to
-## DOCK_STOCK_SLOTS, each drawn with that item's OWN model — so what is
-## standing on the dock looks like what came down the belt, through the same
-## ITEM_MODELS table, rather than through a second "goods" asset that would
-## drift from it the way ITEM_MODELS itself once drifted from
-## `data/recipes.ron` (see its doc).
-##
-## Pure given `stock`, so a test can drive it with a list directly.
-func _update_dock_stock(stock: Array) -> void:
-	if _dock_stock_nodes.is_empty():
+## Parses one of the SimBridge calls that returns an ARRAY of snapshots —
+## hoppers, tanks, docks, fluid networks. All four became arrays in ticket 1
+## (a world may hold none or several of each), so they get one reader.
+func _read_snapshot_array(json: String) -> Array:
+	if json.is_empty():
+		return []
+	var parsed = JSON.parse_string(json)
+	return parsed if parsed is Array else []
+
+
+func _read_fluid_snapshots() -> Array:
+	return _read_snapshot_array(sim.fluid_snapshots_json())
+
+
+## Scales one of the one-voxel-tall level bodies to a live fraction, hiding
+## it outright below a minimum rather than drawing a sub-voxel sliver that
+## would z-fight whatever it stands on.
+func _apply_level(node: Node3D, fraction: float, minimum: float, height_voxels: int) -> void:
+	if node == null:
 		return
+	node.visible = fraction > minimum
+	if node.visible:
+		node.scale.y = fraction * float(height_voxels)
+
+
+func _tint_level_body(node: Node3D, material: StandardMaterial3D) -> void:
+	if node == null or material == null:
+		return
+	for child in node.get_children():
+		if child is MeshInstance3D:
+			child.set_surface_override_material(0, material)
+
+
+## A hopper's product body is near-white so a per-item tint multiplies
+## cleanly over it — *which* item a hopper holds is simulation data.
+func _hopper_fill_material(item_id: String) -> StandardMaterial3D:
+	var base: StandardMaterial3D = _class_materials.get("matte", null)
+	var mat: StandardMaterial3D = base.duplicate() if base != null else _make_material(0.0, 0.95, 0.0)
+	mat.albedo_color = HOPPER_FILL_TINTS.get(item_id, HOPPER_FILL_TINT_FALLBACK)
+	return mat
+
+
+## Swaps a building's status lamp between the same idle/running materials a
+## machine's lamp uses (UI_UX.md §4/§7: saturated colour reserved for
+## meaning). One helper for all three buffer kinds, since "holds stock" is
+## the one state a buffer has.
+func _set_lamp_stocked(nodes: Dictionary, stocked: bool) -> void:
+	if bool(nodes.get("stocked", false)) == stocked:
+		return
+	nodes["stocked"] = stocked
+	var lamp = nodes.get("lamp")
+	if lamp != null:
+		lamp.set_surface_override_material(0, _lamp_running if stocked else _lamp_idle)
+
+
+## Stands one case per unit of stock waiting to be sold on EVERY dock's deck,
+## up to DOCK_STOCK_SLOTS each, drawn with that item's own model.
+##
+## Every dock shows the same pool, deliberately: `EconomySnapshot`'s
+## `delivery_stock` is one shared number however many docks the player
+## builds (a second dock is another door out of the factory, not a second
+## ledger), and the dock's own `contents` empties every tick, so a per-dock
+## figure would be zero forever — see DOCK_ASSET's doc.
+##
+## Pure given `stock` and the built nodes, so a test can drive it directly.
+func _update_dock_stock(stock: Array) -> void:
 	# Flatten the pool's (item, quantity) pairs into one case per unit, in
 	# snapshot order, so a multi-item pool shows a mixed stack rather than
 	# only its first product.
@@ -1079,343 +1403,34 @@ func _update_dock_stock(stock: Array) -> void:
 				break
 			waiting.append(String(pair[0]))
 
-	for i in range(_dock_stock_nodes.size()):
-		var slot := _dock_stock_nodes[i]
-		if i >= waiting.size():
-			slot.visible = false
-			continue
-		var asset: String = ITEM_MODELS.get(waiting[i], ITEM_MODEL_FALLBACK)
-		var current := slot.get_node_or_null("case")
-		if current == null or String(current.get_meta("asset", "")) != asset:
-			if current != null:
-				slot.remove_child(current)
-				current.queue_free()
-			var node := _asset_node(asset)
-			node.name = "case"
-			node.set_meta("asset", asset)
-			slot.add_child(node)
-		slot.visible = true
-
-	_set_dock_lamp_stocked(not waiting.is_empty())
-
-
-## The dock's bay light, swapped between the same idle/running materials the
-## hopper's and every machine's lamp use. It reports the one state a dock
-## actually has: goods are waiting to be sold, or the bay is clear. A lamp
-## reporting "the dock is running" would be on every tick of the game, since
-## the dock ships automatically and unconditionally.
-func _set_dock_lamp_stocked(has_stock: bool) -> void:
-	if _dock_has_stock == has_stock:
-		return
-	_dock_has_stock = has_stock
-	if _dock_lamp != null:
-		_dock_lamp.set_surface_override_material(0, _lamp_running if has_stock else _lamp_idle)
+	for key in _dock_nodes.keys():
+		var nodes: Dictionary = _dock_nodes[key]
+		var slots: Array = nodes.get("slots", [])
+		for i in range(slots.size()):
+			var slot: Node3D = slots[i]
+			if i >= waiting.size():
+				slot.visible = false
+				continue
+			var asset: String = ITEM_MODELS.get(waiting[i], ITEM_MODEL_FALLBACK)
+			var current := slot.get_node_or_null("case")
+			if current == null or String(current.get_meta("asset", "")) != asset:
+				if current != null:
+					slot.remove_child(current)
+					current.queue_free()
+				var node := _asset_node(asset)
+				node.name = "case"
+				node.set_meta("asset", asset)
+				slot.add_child(node)
+			slot.visible = true
+		_set_lamp_stocked(nodes, not waiting.is_empty())
 
 
-## Builds the chain's raw-ingredient hopper (ticket 3's building) plus the
-## body of product visible inside it, at the tile the SIMULATION says it
-## stands on — the same rule `_build_chain` follows for machines.
-##
-## Read from `hopper_snapshot_json`, not from `chain_layout_json` (which
-## describes recipe-driven belt/machine stages only — the hopper is not one
-## of them) and not from `chunk_snapshot_json` (which carries the identical
-## object, but only for chunks that are currently dirty, and the hopper sits
-## at a negative x, i.e. in chunk (-1, 0) rather than the (0, 0) that holds
-## the rest of the chain — a renderer asking only for the chain's own chunk
-## would never see it). The hopper snapshot is the one call that always
-## describes it, exactly as `sim::HopperSnapshot`'s doc says.
-func _build_hopper() -> void:
-	# Rebuilding replaces the hopper rather than adding a second one — the
-	# same guard `_build_fluid_network` carries, for the same headless-test
-	# double-`_ready()` reason (see test_hover.gd's header).
-	var existing := get_node_or_null("Hopper")
-	if existing != null:
-		remove_child(existing)
-		existing.free()
-	_hopper_fill_node = null
-	_hopper_lamp = null
-
-	var snapshot := _read_hopper_snapshot()
-	if snapshot.is_empty():
-		return
-
-	var tile_pair: Array = snapshot["tile"]
-	_hopper_tile = Vector2i(int(tile_pair[0]), int(tile_pair[1]))
-	_hopper_footprint = _footprint_size(snapshot.get("footprint"))
-
-	var root := Node3D.new()
-	root.name = "Hopper"
-	add_child(root)
-
-	var body := _asset_node(HOPPER_ASSET)
-	body.name = "hopper_body"
-	body.position = _footprint_centre(_hopper_tile, _hopper_footprint, FLOOR_Y)
-	root.add_child(body)
-
-	_hopper_lamp = body.get_node_or_null("emissive")
-	_hopper_has_stock = true # force the first _update_hopper call to apply
-	_set_hopper_lamp_stocked(false)
-
-	# The product level: one voxel tall, scaled every frame — see _update_hopper.
-	var fill := _asset_node(HOPPER_FILL_ASSET)
-	fill.name = "hopper_fill"
-	fill.position = _footprint_centre(_hopper_tile, _hopper_footprint, HOPPER_FILL_FLOOR_Y)
-	var tint: Color = HOPPER_FILL_TINTS.get(String(snapshot.get("item", "")), HOPPER_FILL_TINT_FALLBACK)
-	for child in fill.get_children():
-		if child is MeshInstance3D:
-			var base: StandardMaterial3D = _class_materials.get("matte", null)
-			var mat: StandardMaterial3D = base.duplicate() if base != null else _make_material(0.0, 0.95, 0.0)
-			mat.albedo_color = tint
-			child.set_surface_override_material(0, mat)
-	root.add_child(fill)
-	_hopper_fill_node = fill
-
-
-## Unlike `fluid_snapshot_json` there is no empty-string case (every world
-## has exactly one hopper), but this still guards for one so a future
-## SimBridge that grows one doesn't crash the scene.
-func _read_hopper_snapshot() -> Dictionary:
-	var json: String = sim.hopper_snapshot_json()
-	if json.is_empty():
-		return {}
-	var parsed = JSON.parse_string(json)
-	return parsed if parsed is Dictionary else {}
-
-
-## Re-reads the hopper every frame and rescales the product body to its live
-## fill fraction — the exact pattern `_update_fluid_network` established for
-## the liquid in a pipe, deliberately reused rather than invented again: one
-## poll of a whole-world snapshot, one node scaled on its Y axis, hidden
-## outright below a minimum so it never renders as a sub-voxel sliver.
-##
-## Polling (rather than waiting for `dirty_chunk_ids`) is the right call for
-## a different reason than fluid's: a hopper's level DOES dirty its chunk,
-## but only chunk (-1, 0), and the tooltip wants the level every frame
-## regardless — so one call here is simpler than teaching the chunk path
-## about a second chunk.
-func _update_hopper() -> void:
-	var snapshot := _read_hopper_snapshot()
-	if snapshot.is_empty():
-		return
-	_last_hopper = snapshot
-	if _hopper_fill_node == null:
-		return
-	var fill: float = clampf(float(snapshot.get("fill", 0.0)), 0.0, 1.0)
-	_hopper_fill_node.visible = fill > HOPPER_MIN_VISIBLE_FILL
-	if _hopper_fill_node.visible:
-		_hopper_fill_node.scale.y = fill * float(HOPPER_FILL_HEIGHT_VOXELS)
-	_set_hopper_lamp_stocked(fill > HOPPER_MIN_VISIBLE_FILL)
-
-
-## Swaps the hopper's status lamp between the same idle/running materials a
-## machine's lamp uses (`_set_machine_running`'s exact pattern, applied to a
-## building that isn't a `stages` entry) — see `_hopper_lamp`'s doc for why.
-func _set_hopper_lamp_stocked(has_stock: bool) -> void:
-	if _hopper_has_stock == has_stock:
-		return
-	_hopper_has_stock = has_stock
-	if _hopper_lamp != null:
-		_hopper_lamp.set_surface_override_material(0, _lamp_running if has_stock else _lamp_idle)
-
-
-## Builds the pipe run's fluid tank (ticket 1's building) plus the column of
-## liquid standing inside it, at the tile the SIMULATION says it occupies.
-##
-## Read from `fluid_tank_snapshot_json` for the same reasons `_build_hopper`
-## reads the hopper's own call: `chain_layout_json` describes recipe-driven
-## belt/machine stages only and the tank is not one, and
-## `chunk_snapshot_json`'s `fluid_tanks` array only arrives for chunks that
-## are currently dirty — and the tank's level changes without dirtying its
-## chunk at all (only a `fill_fluid_tank` command does), so a chunk-driven
-## renderer would sit waiting on an event that never comes. Unlike the
-## hopper's call this one can legitimately return an empty string: a world
-## whose `data/recipes.ron` declares no `fluid_inputs` has no pipe run and
-## therefore no tank.
-func _build_fluid_tank() -> void:
-	# Rebuilding replaces the tank rather than adding a second one — the same
-	# guard `_build_hopper`/`_build_fluid_network` carry, for the same
-	# headless-test double-`_ready()` reason (see test_hover.gd's header).
-	var existing := get_node_or_null("FluidTank")
-	if existing != null:
-		remove_child(existing)
-		existing.free()
-	_fluid_tank_fill_node = null
-	_fluid_tank_lamp = null
-
-	var snapshot := _read_fluid_tank_snapshot()
-	if snapshot.is_empty():
-		return # no recipe declares fluid_inputs — this world has no tank
-
-	var tile_pair: Array = snapshot["tile"]
-	_fluid_tank_tile = Vector2i(int(tile_pair[0]), int(tile_pair[1]))
-	_fluid_tank_footprint = _footprint_size(snapshot.get("footprint"))
-
-	var root := Node3D.new()
-	root.name = "FluidTank"
-	add_child(root)
-
-	var body := _asset_node(FLUID_TANK_ASSET)
-	body.name = "fluid_tank_body"
-	body.position = _footprint_centre(_fluid_tank_tile, _fluid_tank_footprint, FLOOR_Y)
-	root.add_child(body)
-
-	_fluid_tank_lamp = body.get_node_or_null("emissive")
-	_fluid_tank_has_stock = true # force the first _update_fluid_tank call to apply
-	_set_fluid_tank_lamp_stocked(false)
-
-	# The liquid column: one voxel tall, scaled every frame — see
-	# _update_fluid_tank. Tinted per fluid exactly as the pipe run's own
-	# liquid is, through the same `_fluid_material_for`, so the vinegar in the
-	# tank and the vinegar in the pipes are the same colour by construction
-	# rather than by two constants agreeing.
-	var fill := _asset_node(FLUID_TANK_FILL_ASSET)
-	fill.name = "fluid_tank_fill"
-	fill.position = _footprint_centre(_fluid_tank_tile, _fluid_tank_footprint, FLUID_TANK_FILL_FLOOR_Y)
-	var mat := _fluid_material_for(String(snapshot.get("fluid", "")))
-	for child in fill.get_children():
-		if child is MeshInstance3D:
-			child.set_surface_override_material(0, mat)
-	root.add_child(fill)
-	_fluid_tank_fill_node = fill
-
-
-## `fluid_tank_snapshot_json` returns an EMPTY STRING (not `null`) when the
-## world has no pipe run, per SimBridge's own documented convention — check
-## that before parsing, exactly as `_read_fluid_snapshot` does.
-func _read_fluid_tank_snapshot() -> Dictionary:
-	var json: String = sim.fluid_tank_snapshot_json()
-	if json.is_empty():
-		return {}
-	var parsed = JSON.parse_string(json)
-	return parsed if parsed is Dictionary else {}
-
-
-## Re-reads the tank every frame and rescales its liquid column to the live
-## fill fraction — the same one-poll/one-scaled-body pattern
-## `_update_fluid_network` established for a pipe and `_update_hopper` reused
-## for bulk product, deliberately reused a third time rather than invented
-## again.
-func _update_fluid_tank() -> void:
-	var snapshot := _read_fluid_tank_snapshot()
-	if snapshot.is_empty():
-		return
-	_last_fluid_tank = snapshot
-	if _fluid_tank_fill_node == null:
-		return
-	var fill: float = clampf(float(snapshot.get("fill", 0.0)), 0.0, 1.0)
-	_fluid_tank_fill_node.visible = fill > FLUID_TANK_MIN_VISIBLE_FILL
-	if _fluid_tank_fill_node.visible:
-		_fluid_tank_fill_node.scale.y = fill * float(FLUID_TANK_FILL_HEIGHT_VOXELS)
-	_set_fluid_tank_lamp_stocked(fill > FLUID_TANK_MIN_VISIBLE_FILL)
-
-
-## Swaps the tank's status lamp between the same idle/running materials a
-## machine's and the hopper's lamps use — an empty tank stalls the mixer, so
-## it is exactly the kind of state UI_UX.md §7 wants reported by more than
-## the level itself.
-func _set_fluid_tank_lamp_stocked(has_stock: bool) -> void:
-	if _fluid_tank_has_stock == has_stock:
-		return
-	_fluid_tank_has_stock = has_stock
-	if _fluid_tank_lamp != null:
-		_fluid_tank_lamp.set_surface_override_material(0, _lamp_running if has_stock else _lamp_idle)
-
-
-## Builds the pipe run — one voxel model per pipe tile the SIMULATION says
-## exists, plus one liquid body sitting in each one's bore.
-##
-## Geometry comes from `fluid_snapshot_json`, not from `chain_layout_json`
-## (which describes belt/machine stages only) and not from
-## `chunk_snapshot_json` (whose `pipes` array carries the same geometry, but
-## only for chunks that are currently *dirty* — and ticket 1 deliberately
-## made fluid movement NOT dirty its chunk, so a chunk-driven renderer would
-## be waiting on an event that never comes). The fluid snapshot is the one
-## call that always describes the whole network, which is exactly why
-## `sim::FluidSnapshot`'s own doc says to poll it like the economy snapshot.
-##
-## Nothing about the pipe run is written down here: how many tiles there are,
-## where they sit, and which one is the source all come out of that JSON, so
-## a `data/recipes.ron` edit that plumbs a different stage moves the pipes
-## with no Godot-side change — the same rule `_build_chain` follows.
-func _build_fluid_network() -> void:
-	# Rebuilding replaces the run rather than adding a second one. This
-	# matters in the headless `--script` SceneTree tests, where `_ready()`
-	# genuinely runs twice (see test_hover.gd's header for that harness
-	# quirk) — without this, `_pipe_fluid_nodes` would end up holding two
-	# entries per simulated segment.
-	var existing := get_node_or_null("FluidNetwork")
-	if existing != null:
-		remove_child(existing)
-		existing.free()
-	_pipe_tiles.clear()
-	_pipe_fluid_nodes.clear()
-
-	var snapshot := _read_fluid_snapshot()
-	if snapshot.is_empty():
-		return # no recipe declares fluid_inputs — this world has no pipes
-
-	_fluid_material = _fluid_material_for(String(snapshot.get("fluid", "")))
-
-	var run := Node3D.new()
-	run.name = "FluidNetwork"
-	add_child(run)
-
-	var segments: Array = snapshot.get("segments", [])
-	var inlet_index := int(snapshot.get("inlet_index", -1))
-	for i in range(segments.size()):
-		var segment: Dictionary = segments[i]
-		var tile_pair: Array = segment["tile"]
-		var tile := Vector2i(int(tile_pair[0]), int(tile_pair[1]))
-		_pipe_tiles[tile] = i
-
-		var asset: String
-		if bool(segment.get("is_source", false)):
-			asset = PIPE_SOURCE_ASSET
-		elif i == inlet_index:
-			# The one segment actually feeding a machine — see PIPE_INLET_ASSET's
-			# doc for why it needs its own model rather than the plain one.
-			asset = PIPE_INLET_ASSET
-		else:
-			asset = PIPE_ASSET
-		var pipe := _asset_node(asset)
-		pipe.name = "pipe_%d" % i
-		pipe.position = _tile_origin(tile.x, tile.y, FLOOR_Y)
-		run.add_child(pipe)
-
-		var fluid := _asset_node(PIPE_FLUID_ASSET)
-		fluid.name = "fluid_%d" % i
-		fluid.position = _tile_origin(tile.x, tile.y, PIPE_BORE_FLOOR_Y)
-		if i == inlet_index:
-			# The run's downstream end is CLOSED (`pipe_inlet` draws a blind
-			# flange there — see its generator doc), and the liquid model
-			# spans its whole tile because every other segment butts into the
-			# next one. Left full length it pushed straight through that
-			# flange and the end of the run rendered as an open, liquid-
-			# filled cut pipe, which was exactly the "nothing terminates
-			# anything" reading this ticket exists to remove. Trim it back by
-			# the flange's own thickness, anchored so the trim comes off the
-			# downstream end only.
-			fluid.scale.x = 1.0 - FLUID_END_CAP_TRIM
-			fluid.position.x -= 0.5 * FLUID_END_CAP_TRIM * TILE
-		# The liquid is the one thing in the scene whose colour is live data,
-		# so it gets its own material rather than the shared class one.
-		for child in fluid.get_children():
-			if child is MeshInstance3D:
-				child.set_surface_override_material(0, _fluid_material)
-		run.add_child(fluid)
-		_pipe_fluid_nodes.append(fluid)
-
-
-## `fluid_snapshot_json` returns an EMPTY STRING (not `null`) when the world
-## has no pipe run, per SimBridge's own documented convention — check that
-## before parsing, or JSON.parse_string returns null and every caller has to
-## re-handle it.
-func _read_fluid_snapshot() -> Dictionary:
-	var json: String = sim.fluid_snapshot_json()
-	if json.is_empty():
-		return {}
-	var parsed = JSON.parse_string(json)
-	return parsed if parsed is Dictionary else {}
+## A network's or tank's fluid id, or "" — `fluid` is NULLABLE on the wire
+## (a run no machine taps has not been told what it carries), and `String(null)`
+## is a hard error in GDScript rather than an empty string.
+func _fluid_id_of(snapshot: Dictionary) -> String:
+	var value = snapshot.get("fluid")
+	return String(value) if value != null else ""
 
 
 ## The liquid's material: palette.ron's own `liquid` class numbers (glossy
@@ -1429,43 +1444,76 @@ func _fluid_material_for(fluid_id: String) -> StandardMaterial3D:
 	return mat
 
 
-## Re-reads the whole network every frame and resizes each liquid body to its
-## segment's live fill fraction. Cheap by design: there is exactly one
-## network per world (see `sim::FluidSnapshot`), and fluid moves on nearly
-## every tick, so this is the same poll-don't-dirty-track trade the contract
-## clipboard already makes with `economy_snapshot_json`.
+## Re-reads every fluid network and resizes each segment's liquid body to its
+## live fill fraction. Cheap by design, and polled for the reason
+## `sim::FluidSnapshot`'s own doc gives: fluid moves on nearly every tick and
+## deliberately does not dirty its chunk.
+##
+## The liquid bodies are created here rather than in `_build_placement`,
+## because which network a pipe tile belongs to is decided by the whole run,
+## and a network's fluid — which decides the tint — is decided by whichever
+## machine taps it, so both are only known once the snapshots are read.
 func _update_fluid_network() -> void:
-	if _pipe_fluid_nodes.is_empty():
-		return
-	var snapshot := _read_fluid_snapshot()
-	if snapshot.is_empty():
-		return
-	_last_fluid = snapshot
-
-	var segments: Array = snapshot.get("segments", [])
-	for i in range(min(segments.size(), _pipe_fluid_nodes.size())):
-		var pressure: float = clampf(float(segments[i].get("pressure", 0.0)), 0.0, 1.0)
-		var node: Node3D = _pipe_fluid_nodes[i]
-		node.visible = pressure > FLUID_MIN_VISIBLE_PRESSURE
-		if node.visible:
-			node.scale.y = pressure * float(PIPE_BORE_HEIGHT_VOXELS)
+	_last_fluid = _read_fluid_snapshots()
+	for n in range(_last_fluid.size()):
+		var network: Dictionary = _last_fluid[n]
+		var material := _fluid_material_for(_fluid_id_of(network))
+		var segments: Array = network.get("segments", [])
+		for s in range(segments.size()):
+			var segment: Dictionary = segments[s]
+			var node := _fluid_body_for(n, s, segment, material)
+			if node == null:
+				continue
+			var pressure: float = clampf(float(segment.get("pressure", 0.0)), 0.0, 1.0)
+			_apply_level(node, pressure, FLUID_MIN_VISIBLE_PRESSURE, PIPE_BORE_HEIGHT_VOXELS)
 
 
-## How far through its current process one stage's machine is, as 0..1, or
-## -1.0 when it is idle. Derived from `_last_machines`'s own
+## The liquid body sitting in one pipe segment's bore, created on first
+## sight. Keyed by (network, segment) rather than pooled in an array, because
+## a placement can add or remove a whole network between frames.
+func _fluid_body_for(network_index: int, segment_index: int, segment: Dictionary,
+		material: StandardMaterial3D) -> Node3D:
+	if _world_root == null:
+		return null
+	var key := "%d:%d" % [network_index, segment_index]
+	if _pipe_fluid_nodes.has(key):
+		# Deliberately NOT retinted here: this runs every frame, and a
+		# network's fluid is decided by whichever machine taps it, which only
+		# changes when something is placed — and a placement rebuilds these.
+		return _pipe_fluid_nodes[key]
+	var tile := _pair_to_tile(segment.get("tile", [0, 0]))
+	var direction := String(segment.get("direction", "east"))
+	var node := _asset_node(PIPE_FLUID_ASSET)
+	node.name = "fluid_%s" % _tile_key(tile)
+	node.position = _tile_origin(tile.x, tile.y, PIPE_BORE_FLOOR_Y)
+	node.rotation.y = _direction_yaw(direction)
+	if _pipe_asset_for(tile) == PIPE_INLET_ASSET:
+		# `pipe_inlet` closes its downstream end with a blind flange (see its
+		# generator doc). Left full length the liquid pushes straight through
+		# it and the run reads as an open, liquid-filled cut pipe. Trimmed
+		# along the tile's OWN facing, so a turned inlet trims its own end.
+		var offset := _direction_offset(direction)
+		node.scale.x = 1.0 - FLUID_END_CAP_TRIM
+		node.position -= Vector3(float(offset.x), 0.0, float(offset.y)) * (0.5 * FLUID_END_CAP_TRIM * TILE)
+	_tint_level_body(node, material)
+	_world_root.add_child(node)
+	_pipe_fluid_nodes[key] = node
+	return node
+
+
+## How far through its current process the machine at `origin_key` is, as
+## 0..1, or -1.0 when it is idle. Derived from `_machine_states`'s own
 ## `process` = `[start_tick, required_ticks]` pair plus the simulation's
 ## current tick — NOT from a per-tick snapshot, and that distinction matters
 ## here more than anywhere else in this file: a machine only dirties its
-## chunk when its state actually changes (a craft starts, a craft finishes),
-## so during the aging rack's 2400-tick wait no snapshot arrives at all.
-## Recomputing from `current_tick()` every frame is what makes a long
-## process animate smoothly rather than jump when it ends.
-## Pure given `_last_machines`/`sim.current_tick()`, so it is directly
-## testable — the same property `_machine_hover_text` is written for.
-func _machine_progress(recipe_id: String) -> float:
-	if not _last_machines.has(recipe_id):
+## chunk when its state actually changes, so during the aging rack's
+## 2400-tick wait no snapshot arrives at all. Recomputing from
+## `current_tick()` every frame is what makes a long process animate smoothly
+## rather than jump when it ends. Pure, so it is directly testable.
+func _machine_progress(origin_key: String) -> float:
+	if not _machine_states.has(origin_key):
 		return -1.0
-	var process = _last_machines[recipe_id].get("process")
+	var process = _machine_states[origin_key].get("process")
 	if process == null:
 		return -1.0
 	var required: int = int(process[1])
@@ -1476,26 +1524,25 @@ func _machine_progress(recipe_id: String) -> float:
 
 
 ## Rescales every declared progress gauge to its machine's live process
-## fraction — the same one-poll/one-scaled-body pattern
-## `_update_fluid_network` established for a pipe's liquid and
-## `_update_hopper`/`_update_fluid_tank` reused for bulk and tank levels,
-## deliberately reused a fourth time rather than invented again.
+## fraction — the same one-poll/one-scaled-body pattern the pipe's liquid and
+## the hopper's and tank's levels use, deliberately reused rather than
+## invented again.
 func _update_machine_gauges() -> void:
-	for recipe_id in _machine_gauges.keys():
-		var gauge: Node3D = _machine_gauges[recipe_id]
+	for origin_key in _machine_gauges.keys():
+		var gauge: Node3D = _machine_gauges[origin_key]
 		if gauge == null:
 			continue
-		var fraction := _machine_progress(recipe_id)
+		var fraction := _machine_progress(origin_key)
 		gauge.visible = fraction > MACHINE_GAUGE_MIN_VISIBLE
 		if gauge.visible:
 			gauge.scale.y = fraction * float(MACHINE_GAUGE_HEIGHT_VOXELS)
 
 
-func _set_machine_running(recipe: String, running: bool) -> void:
-	if _machine_running.get(recipe, null) == running:
+func _set_machine_running(origin_key: String, running: bool) -> void:
+	if _machine_running.get(origin_key, null) == running:
 		return
-	_machine_running[recipe] = running
-	var lamp: MeshInstance3D = _machine_lamps.get(recipe, null)
+	_machine_running[origin_key] = running
+	var lamp: MeshInstance3D = _machine_lamps.get(origin_key, null)
 	if lamp != null:
 		lamp.set_surface_override_material(0, _lamp_running if running else _lamp_idle)
 
@@ -1555,15 +1602,54 @@ const CROSSHAIR_THICKNESS := 2.0 # px, each bar's width
 # that quietly did nothing would be worse than no key — `issue_command_json`
 # treats an unknown command as a silent no-op, so the legend would have been
 # advertising a control the simulation no longer has.
-const ISO_HELP_TEXT := "SPACE: load the hopper    V: load the fluid tank    B: build menu    WASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
-const FP_HELP_TEXT := "V: load the fluid tank    B: build menu    WASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
+## Three keys are new in the "Real Placement" epic's ticket 2, and they are
+## what a build mode is made of. **R** turns things: it cycles the ghost's
+## facing while placing, and — outside placement mode — rotates whatever is
+## under the cursor in place, so turning a belt you already laid needs no
+## pick-up-and-re-place round trip. **X** toggles remove mode, a mode rather
+## than a modifier-click precisely because it is destructive and a mode is
+## visible in this legend and in the on-screen prompt, where a held key is
+## not. **ESC** leaves either. All three are free in both view modes (R, X
+## and ESC collided with nothing), and the left mouse button — which
+## `_unhandled_input` had deliberately left unbound "so a future
+## click-to-build has nothing to fight with" — is now that click.
+## Two LINES, not one. Build mode added three keys and a mouse button to a
+## legend that already ran the width of the window, and a single line was
+## being clipped behind the contract clipboard in the top-right corner — the
+## kind of thing only a rendered frame shows (UI_UX.md §2b point 12). The
+## build controls lead, because they are what the player does most.
+const ISO_HELP_TEXT := "click: place    R: rotate    X: remove mode    ESC: cancel    B: build menu\nSPACE: load hoppers    V: load tanks    WASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
+const FP_HELP_TEXT := "click: place    R: rotate    X: remove mode    ESC: cancel    B: build menu\nV: load tanks    WASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
+
+
+## The tile box the isometric camera frames at startup: whatever is placed,
+## widened to at least EMPTY_WORLD_FRAME_TILES in each axis about its own
+## centre. The widening is what makes an EMPTY world (the new starting state)
+## open on a usable expanse of floor instead of on one tile — there is no
+## chain to frame any more, and "frame nothing" has to mean something.
+func _framing_bounds() -> Rect2i:
+	var bounds := _world_tile_bounds()
+	var span_x: int = maxi(bounds.size.x, EMPTY_WORLD_FRAME_TILES)
+	var span_y: int = maxi(bounds.size.y, EMPTY_WORLD_FRAME_TILES)
+	var centre_x: float = float(bounds.position.x) + float(bounds.size.x) * 0.5
+	var centre_y: float = float(bounds.position.y) + float(bounds.size.y) * 0.5
+	return Rect2i(
+		Vector2i(int(round(centre_x - float(span_x) * 0.5)), int(round(centre_y - float(span_y) * 0.5))),
+		Vector2i(span_x, span_y)
+	)
 
 
 func _build_camera() -> void:
+	# Framed on whatever is placed, padded out to at least a workable square
+	# of floor — which for a NEW GAME (nothing placed at all) means the view
+	# opens on empty ground around the origin rather than zoomed into a
+	# single tile. Framing happens once, at build time: re-framing on every
+	# placement would yank the view around while the player is building.
+	_frame_bounds = _framing_bounds()
 	_camera_focus = Vector3(
-		float(_chain_tile_width - 1) * TILE * 0.5,
+		(float(_frame_bounds.position.x) + float(_frame_bounds.size.x) * 0.5) * TILE,
 		TILE * 0.35,
-		0.0
+		(float(_frame_bounds.position.y) + float(_frame_bounds.size.y) * 0.5) * TILE
 	)
 
 	var camera := Camera3D.new()
@@ -1808,10 +1894,10 @@ func _set_view_mode(mode: int) -> void:
 ## the screen — a naive "width = chain length" estimate is wrong in both
 ## directions at once.
 func _framing_size(basis: Basis) -> float:
-	var x_from := float(-FLOOR_MARGIN_X) - 0.5
-	var x_to := float(_chain_tile_width - 1 + FLOOR_MARGIN_X) + 0.5
-	var z_from := float(-FLOOR_MARGIN_Z) - 0.5
-	var z_to := float(FLOOR_MARGIN_Z) + 0.5
+	var x_from := float(_frame_bounds.position.x - FLOOR_MARGIN_X) - 0.5
+	var x_to := float(_frame_bounds.position.x + _frame_bounds.size.x + FLOOR_MARGIN_X) + 0.5
+	var z_from := float(_frame_bounds.position.y - FLOOR_MARGIN_Z) - 0.5
+	var z_to := float(_frame_bounds.position.y + _frame_bounds.size.y + FLOOR_MARGIN_Z) + 0.5
 
 	var min_right := INF
 	var max_right := -INF
@@ -1985,6 +2071,9 @@ func _build_ui() -> void:
 	# text this panel used to show — see _build_hover_tooltip/
 	# _update_hover_tooltip below.
 	_build_hover_tooltip(hud)
+	# The build-mode prompt (the "Real Placement" epic's ticket 2) — the same
+	# dark plate by the cursor, saying what the next click will do.
+	_build_placement_prompt(hud, settings)
 	_build_crosshair(hud)
 
 
@@ -2389,7 +2478,7 @@ func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 
 	var footer := Label.new()
 	footer.label_settings = base_settings
-	footer.text = "click a slot (or press its number) to buy one    B: close"
+	footer.text = "left-click (or its number) buys one    right-click (or shift+number) places one you own    B: close"
 	body.add_child(footer)
 
 	_shop_menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
@@ -2408,6 +2497,10 @@ func _build_shop_slot(grid: GridContainer, base_settings: LabelSettings, index: 
 	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
 		button.add_theme_stylebox_override(state, _shop_slot_style(state))
 	button.pressed.connect(_on_shop_slot_pressed.bind(index))
+	# Right-click is the PLACE half of a slot (see `_on_shop_slot_gui_input`).
+	# A Button only reports the left button through `pressed`, so the second
+	# action has to come off the raw event.
+	button.gui_input.connect(_on_shop_slot_gui_input.bind(index))
 	grid.add_child(button)
 
 	# Anchored over the button rather than parented through a container: a
@@ -2567,11 +2660,49 @@ func _update_shop_menu() -> void:
 		)
 		slot["icon"].modulate = Color.WHITE if affordable else Color(0.42, 0.42, 0.45, 0.75)
 		slot["button"].disabled = not affordable
-		slot["owned_label"].text = "Owned %d" % int(entry.get("owned", 0))
+		# The owned line carries the PLACE affordance, because that is the
+		# line whose number decides whether placing is possible at all.
+		var owned: int = int(entry.get("owned", 0))
+		slot["owned_label"].text = ("Owned %d  ·  right-click to place" % owned) if owned > 0 else "Owned 0"
+		slot["owned_label"].label_settings.font_color = (
+			Color(0.98, 0.85, 0.42) if owned > 0 else Color(0.66, 0.68, 0.72)
+		)
 
 
 func _on_shop_slot_pressed(index: int) -> void:
 	_buy_slot(index)
+
+
+## A slot has two actions, and they are on the two mouse buttons.
+##
+## **Left-click buys one; right-click places one you already own.** Both were
+## weighed against the alternative of one button that changes meaning with
+## the owned count — "click buys when you have none, places when you have
+## some" — which is shorter to explain and worse to use: it makes buying a
+## second of anything impossible without first placing the first, and it
+## makes the same gesture do two different things depending on state the
+## player has to remember. Two buttons, two meanings, both spelled out on the
+## slot itself (the owned line says "right-click to place") and in the menu's
+## footer. The keyboard mirrors it: number buys, SHIFT+number places.
+func _on_shop_slot_gui_input(event: InputEvent, index: int) -> void:
+	if not (event is InputEventMouseButton):
+		return
+	if event.button_index != MOUSE_BUTTON_RIGHT or not event.pressed:
+		return
+	# Consumed here so the isometric camera's right-drag pan never starts
+	# under the menu.
+	get_viewport().set_input_as_handled()
+	_place_from_slot(index)
+
+
+## Enters placement mode for a slot's kind, if the player owns one. A slot
+## with nothing owned simply does nothing — the ghost would be unbuildable,
+## and the slot already says "Owned 0".
+func _place_from_slot(index: int) -> void:
+	if index < 0 or index >= _shop_slots.size():
+		return
+	_refresh_owned_counts()
+	_enter_build_mode(String(_shop_slots[index]["kind"]))
 
 
 ## Buys exactly one of the slot's kind. Quantity is deliberately fixed at
@@ -2584,6 +2715,7 @@ func _buy_slot(index: int) -> void:
 		return
 	var kind: String = _shop_slots[index]["kind"]
 	sim.issue_command_json(JSON.stringify({"type": "purchase", "kind": kind}))
+	_refresh_owned_counts()
 	_update_shop_menu()
 
 
@@ -2614,6 +2746,413 @@ func _update_crosshair_visibility() -> void:
 
 func _toggle_shop_menu() -> void:
 	_set_shop_menu_open(not _shop_open)
+
+
+# --------------------------------------------------------------------------
+# Build mode: the ghost, and what the next click will do
+# (the "Real Placement" epic's ticket 2)
+# --------------------------------------------------------------------------
+
+## How the ghost reads. Two independent signals per state, never colour
+## alone (UI_UX.md §7): the translucent model is tinted, AND the prompt beside
+## the cursor spells the state out with a glyph and a word. A player who
+## cannot tell the green from the red still reads "✔ PLACE" or "✗ BLOCKED".
+const GHOST_TINT_VALID := Color(0.55, 2.20, 0.75, 0.62)
+const GHOST_TINT_INVALID := Color(2.40, 0.45, 0.35, 0.62)
+## Remove mode tints the thing that would be picked up, in the same red as an
+## invalid placement — red is "this click destroys or refuses", and the prompt
+## says which. There is no green case: removing is either possible or there is
+## nothing there, and "nothing there" shows no ghost at all.
+const GHOST_TINT_REMOVE := Color(2.40, 0.45, 0.35, 0.68)
+
+
+## The 3D node the ghost lives under, and the material it is drawn with.
+## Separate from "World" so a rebuild of the world never disturbs the ghost
+## the player is currently aiming.
+func _build_ghost_layer() -> void:
+	var existing := get_node_or_null("Ghost")
+	if existing != null:
+		remove_child(existing)
+		existing.free()
+	_ghost_root = Node3D.new()
+	_ghost_root.name = "Ghost"
+	_ghost_root.visible = false
+	add_child(_ghost_root)
+	_ghost_asset = ""
+
+
+## A translucent, unshaded, TINTED copy of the asset. Three deliberate parts.
+##
+## Unshaded, because a ghost lit like the real building reads as a real
+## building that has already been placed, and the whole job of this node is to
+## say "not yet". Translucent for the same reason.
+##
+## And the tint MULTIPLIES over the model's own vertex colours rather than
+## replacing them (`vertex_color_use_as_albedo`), which is what keeps the
+## ghost a recognisable silhouette instead of a flat slab — the first cut
+## replaced them and a rendered frame showed a belt ghost as a featureless
+## green rectangle, telling the player a tile was involved but not which
+## thing. The tint is deliberately pale so the model's dark voxels still come
+## through as clearly tinted rather than as black.
+func _ghost_material(tint: Color) -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
+	mat.albedo_color = tint
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return mat
+
+
+## Enters placement mode for `kind`. Refuses a kind the player owns none of
+## rather than showing a ghost that could never be built — the build menu
+## only offers this on an owned slot, and this is the second half of that
+## rule so a hotkey cannot get round it.
+func _enter_build_mode(kind: String) -> void:
+	if _owned_of(kind) <= 0:
+		return
+	_remove_mode = false
+	_build_kind = kind
+	_build_direction = "east"
+	_set_shop_menu_open(false)
+	_rebuild_ghost_body()
+	_update_ghost()
+
+
+## Remove mode is a MODE, not a modifier-click, and that is deliberate: it is
+## the one destructive action in the game (what a removed thing was holding is
+## destroyed — see `PlayerCommand::Remove`), and a mode announces itself in
+## the legend and in the on-screen prompt, where a held modifier cannot.
+func _toggle_remove_mode() -> void:
+	if _remove_mode:
+		_exit_build_mode()
+		return
+	_build_kind = ""
+	_remove_mode = true
+	_set_shop_menu_open(false)
+	_rebuild_ghost_body()
+	_update_ghost()
+
+
+## Leaves whichever of the two modes is active, with no dangling state: the
+## ghost's own body is freed, not just hidden, so the next entry starts clean.
+func _exit_build_mode() -> void:
+	_build_kind = ""
+	_remove_mode = false
+	_ghost_reason = ""
+	_ghost_valid = false
+	_clear_ghost_body()
+	if _ghost_root != null:
+		_ghost_root.visible = false
+	if _placement_prompt != null:
+		_placement_prompt.visible = false
+
+
+func _in_build_mode() -> bool:
+	return _build_kind != "" or _remove_mode
+
+
+## Cycles the ghost's facing one quarter turn CLOCKWISE — the same single
+## rotation the simulation offers (`Direction::rotate_cw`), so the ghost and
+## `PlayerCommand::Rotate` can never disagree about which way "rotate" goes.
+func _rotate_ghost() -> void:
+	_build_direction = DIRECTIONS[(_direction_index(_build_direction) + 1) % DIRECTIONS.size()]
+	_rebuild_ghost_body()
+	_update_ghost()
+
+
+## **R** outside placement mode: turns whatever is under the cursor where it
+## stands. No pick-up-and-re-place round trip, which is what a player coming
+## from any other builder expects, and it is free — `PlayerCommand::Rotate`
+## resolves from any tile of a footprint and keeps the thing's contents.
+func _rotate_under_cursor() -> void:
+	var tile := _ghost_target_tile()
+	if tile == HOVER_NO_TILE:
+		return
+	if _placement_at_tile(tile).is_empty():
+		return
+	_issue_world_command({"type": "rotate", "tile": [tile.x, tile.y]})
+
+
+## The left click. Places in placement mode, removes in remove mode, and does
+## nothing at all when the ghost says the click could not succeed — the
+## simulation would refuse it silently anyway (every impossible command is a
+## total no-op), so refusing here as well keeps the prompt honest rather than
+## letting a click look like it did something.
+func _confirm_build() -> void:
+	var tile := _ghost_target_tile()
+	if tile == HOVER_NO_TILE:
+		return
+	if _remove_mode:
+		if _placement_at_tile(tile).is_empty():
+			return
+		_issue_world_command({"type": "remove", "tile": [tile.x, tile.y]})
+		return
+	if _build_kind == "" or not _ghost_valid:
+		return
+	_issue_world_command({
+		"type": "place",
+		"kind": _build_kind,
+		"tile": [tile.x, tile.y],
+		"direction": _build_direction,
+	})
+	# Placing spends one owned unit. Running out ends the mode rather than
+	# leaving a ghost that can no longer be built — the prompt would read
+	# "✗ NONE OWNED" forever, which is a dead end rather than feedback.
+	_refresh_owned_counts()
+	if _owned_of(_build_kind) <= 0:
+		_exit_build_mode()
+
+
+## Issues one of the three topology commands and redraws. A place, remove or
+## rotate is exactly the event `World::recompute_topology` rebuilds its
+## adjacency graph for, so it is exactly the event this scene rebuilds its
+## own view for — see `_placements`'s doc.
+func _issue_world_command(command: Dictionary) -> void:
+	sim.issue_command_json(JSON.stringify(command))
+	_rebuild_world()
+	_refresh_owned_counts()
+	_apply_dirty_chunks()
+	if _shop_open:
+		_update_shop_menu()
+
+
+## How many of each kind the player owns and has not yet placed — repolled
+## after every purchase and placement. `shop_snapshot_json` is the one call
+## that reports it, and it is cheap (one parse of a ten-entry object).
+func _refresh_owned_counts() -> void:
+	_owned_counts.clear()
+	var snapshot = JSON.parse_string(sim.shop_snapshot_json())
+	if not (snapshot is Dictionary):
+		return
+	for entry in snapshot.get("entries", []):
+		_owned_counts[String(entry.get("kind", ""))] = int(entry.get("owned", 0))
+
+
+func _owned_of(kind: String) -> int:
+	return int(_owned_counts.get(kind, 0))
+
+
+## The tile the ghost sits on — the same ray/plane pick the hover tooltip
+## uses, from the same screen point (the live cursor in ISOMETRIC, the screen
+## centre where the crosshair is drawn in FIRST_PERSON). Deliberately the
+## SAME function, not a second implementation: build mode and hover are two
+## questions about one cursor.
+func _ghost_target_tile() -> Vector2i:
+	var vp := get_viewport()
+	if vp == null:
+		return HOVER_NO_TILE
+	var query_pos: Vector2
+	if _view_mode == ViewMode.FIRST_PERSON:
+		query_pos = vp.get_visible_rect().size / 2.0
+	else:
+		query_pos = vp.get_mouse_position()
+	return _tile_under_screen_pos(query_pos)
+
+
+## Whether the rotated footprint of `kind` at `tile` would overlap anything
+## already placed. A pure Godot-side check against `_occupancy` — the same map
+## hover resolves through, which came from `world_layout_json`'s own
+## `occupies` lists — so aiming the ghost costs no simulation round trip at
+## all. The simulation still has the final say (`Place` refuses a collision
+## silently); this is what stops the player finding that out by clicking.
+func _ghost_blocked_tiles(kind: String, tile: Vector2i, direction: String) -> Array:
+	var blocked: Array = []
+	for covered in _placement_tiles(tile, _kind_footprint(kind), direction):
+		if _occupancy.has(_tile_key(covered)):
+			blocked.append(covered)
+	return blocked
+
+
+## Rebuilds the ghost's own body — one translucent copy of the kind's real
+## voxel model, turned to the ghost's facing. Rebuilt (rather than retinted)
+## when the ASSET changes, which a rotation can do: a belt facing east next
+## to a machine draws the inlet variant, and the same belt facing north
+## draws the plain tile (see `_belt_asset_for`), so the ghost shows the model
+## that will actually be built.
+func _rebuild_ghost_body(asset_override := "") -> void:
+	if _ghost_root == null:
+		return
+	var asset := asset_override
+	if asset == "" and _build_kind != "":
+		asset = _shop_asset_for(_build_kind)
+	if asset == _ghost_asset:
+		return
+	_clear_ghost_body()
+	_ghost_asset = asset
+	if asset == "":
+		return
+	var body := _asset_node(asset)
+	body.name = "ghost_body"
+	# A ghost casts no shadow: a shadow on the floor is the strongest cue
+	# there IS something there, which is the opposite of what this node says.
+	for child in body.get_children():
+		if child is MeshInstance3D:
+			child.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_ghost_root.add_child(body)
+
+
+func _clear_ghost_body() -> void:
+	if _ghost_root == null:
+		return
+	var body := _ghost_root.get_node_or_null("ghost_body")
+	if body != null:
+		_ghost_root.remove_child(body)
+		body.free()
+	_ghost_asset = ""
+
+
+## Per-frame: where the ghost stands, whether the click would succeed, and
+## what the prompt says. Cheap — one ray/plane intersection and one
+## dictionary lookup per covered tile — and it does nothing at all when
+## neither mode is active.
+func _update_ghost() -> void:
+	if _ghost_root == null:
+		return
+	if not _in_build_mode():
+		if _ghost_root != null:
+			_ghost_root.visible = false
+		if _placement_prompt != null:
+			_placement_prompt.visible = false
+		return
+
+	_refresh_owned_counts()
+	var tile := _ghost_target_tile()
+	_ghost_tile = tile
+	var showing := false
+
+	if _remove_mode:
+		var placement := _placement_at_tile(tile) if tile != HOVER_NO_TILE else {}
+		if placement.is_empty():
+			_ghost_valid = false
+			_ghost_reason = "nothing_here"
+		else:
+			_ghost_valid = true
+			_ghost_reason = ""
+			var origin := _placement_origin(placement)
+			var direction := _placement_direction(placement)
+			var size := _rotated_footprint(_footprint_size(placement.get("footprint")), direction)
+			_rebuild_ghost_body(_asset_for_placement(placement))
+			_ghost_root.position = _footprint_centre(origin, size, FLOOR_Y)
+			_ghost_root.rotation.y = _direction_yaw(direction)
+			_tint_ghost(GHOST_TINT_REMOVE)
+			showing = true
+	elif tile != HOVER_NO_TILE:
+		var blocked := _ghost_blocked_tiles(_build_kind, tile, _build_direction)
+		if _owned_of(_build_kind) <= 0:
+			_ghost_valid = false
+			_ghost_reason = "none_owned"
+		elif not blocked.is_empty():
+			_ghost_valid = false
+			_ghost_reason = "blocked"
+		else:
+			_ghost_valid = true
+			_ghost_reason = ""
+		# A belt's model depends on what it would sit next to, so the ghost
+		# asks the same question the built tile will.
+		var ghost_asset := _shop_asset_for(_build_kind)
+		if _build_kind == BELT_KIND:
+			ghost_asset = _belt_asset_for(tile, _build_direction)
+		elif _build_kind == PIPE_KIND:
+			ghost_asset = PIPE_ASSET
+		_rebuild_ghost_body(ghost_asset)
+		var ghost_size := _rotated_footprint(_kind_footprint(_build_kind), _build_direction)
+		_ghost_root.position = _footprint_centre(tile, ghost_size, FLOOR_Y)
+		_ghost_root.rotation.y = _direction_yaw(_build_direction)
+		_tint_ghost(GHOST_TINT_VALID if _ghost_valid else GHOST_TINT_INVALID)
+		showing = true
+	else:
+		_ghost_valid = false
+		_ghost_reason = "blocked"
+
+	_ghost_root.visible = showing
+	if _placement_prompt != null:
+		_placement_label.text = _placement_prompt_text()
+		_placement_prompt.add_theme_stylebox_override(
+			"panel", _placement_prompt_style(_ghost_valid, _remove_mode)
+		)
+		var vp := get_viewport()
+		if vp != null:
+			var anchor: Vector2
+			if _view_mode == ViewMode.FIRST_PERSON:
+				anchor = vp.get_visible_rect().size / 2.0
+			else:
+				anchor = vp.get_mouse_position()
+			_placement_prompt.position = _panel_position_near(_placement_prompt, anchor)
+		_placement_prompt.visible = true
+
+
+func _tint_ghost(tint: Color) -> void:
+	var body := _ghost_root.get_node_or_null("ghost_body")
+	if body == null:
+		return
+	var mat := _ghost_material(tint)
+	for child in body.get_children():
+		if child is MeshInstance3D:
+			child.set_surface_override_material(0, mat)
+
+
+## What the prompt beside the cursor says. The glyph and the word are the
+## non-colour half of UI_UX.md §7's rule — this text alone is enough to know
+## whether the click will do anything, with the tint as reinforcement rather
+## than as the signal. Pure, so a test can drive every state directly.
+func _placement_prompt_text() -> String:
+	if _remove_mode:
+		if _ghost_reason == "nothing_here":
+			return "✗ REMOVE\nnothing here\nX or ESC: stop removing"
+		var placement := _placement_at_tile(_ghost_tile)
+		return "✔ REMOVE  %s\nclick to pick it up (what it holds is lost)\nX or ESC: stop removing" % \
+			_kind_display_name(String(placement.get("kind", "")))
+	if _build_kind == "":
+		return ""
+	var kind_name := _kind_display_name(_build_kind)
+	var owned := _owned_of(_build_kind)
+	match _ghost_reason:
+		"none_owned":
+			return "✗ NONE OWNED  %s\nbuy one in the build menu (B)\nESC: cancel" % kind_name
+		"blocked":
+			return "✗ BLOCKED  %s  ·  facing %s\nsomething is already there\nR: rotate    ESC: cancel" % [kind_name, _build_direction]
+	return "✔ PLACE  %s  ·  facing %s\nclick to build    %d left to place\nR: rotate    ESC: cancel" % [
+		kind_name, _build_direction, owned
+	]
+
+
+## The prompt's plate: the scene's near-black HUD panel with its rule
+## recoloured to the ghost's state, so the panel edge carries the same signal
+## the glyph does.
+##
+## `destructive` (remove mode) overrides `valid`, and that came off a rendered
+## frame: a valid REMOVE is still a red-ghosted building about to be destroyed,
+## and framing it in the same green a valid PLACE gets read as two different
+## claims about one action. Green means "this click builds"; red means "this
+## click destroys, or refuses".
+func _placement_prompt_style(valid: bool, destructive := false) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.06, 0.06, 0.07, 0.92)
+	var ok := valid and not destructive
+	style.border_color = Color(0.35, 0.85, 0.45, 0.95) if ok else Color(0.92, 0.35, 0.30, 0.95)
+	style.set_border_width_all(3)
+	style.set_content_margin_all(10.0)
+	return style
+
+
+## The on-screen prompt, built beside the hover tooltip and deliberately the
+## same shape as it: a small dark plate that follows the cursor. Build mode
+## and hover never show at once (see `_update_hover_tooltip`), so what the
+## player sees is one panel by the cursor that changes what it is about.
+func _build_placement_prompt(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	_placement_prompt = PanelContainer.new()
+	_placement_prompt.name = "PlacementPrompt"
+	_placement_prompt.add_theme_stylebox_override("panel", _placement_prompt_style(true))
+	_placement_prompt.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_placement_prompt.visible = false
+	hud.add_child(_placement_prompt)
+
+	_placement_label = Label.new()
+	_placement_label.label_settings = base_settings
+	_placement_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_placement_prompt.add_child(_placement_label)
 
 
 func _build_hover_tooltip(hud: CanvasLayer) -> void:
@@ -2708,10 +3247,9 @@ func _process(delta: float) -> void:
 		# slot go from unaffordable to affordable while the player watches.
 		_update_shop_menu()
 	_update_fluid_network()
-	_update_hopper()
-	_update_fluid_tank()
-	_update_dock()
+	_refresh_buffers()
 	_update_machine_gauges()
+	_update_ghost()
 	_update_hover_tooltip()
 	if _view_mode == ViewMode.ISOMETRIC:
 		_pan_camera(delta)
@@ -2726,9 +3264,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if event is InputEventMouseButton:
-		# Right-drag panning (isometric only) — right button, not left, so a
-		# future click-to-build/select on the left button has nothing to
-		# fight with.
+		# The left button is the build click (the "Real Placement" epic's
+		# ticket 2) — the button this handler had deliberately left unbound
+		# "so a future click-to-build has nothing to fight with". It does
+		# nothing outside build mode, so nothing that used to work changed.
+		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed \
+				and _in_build_mode() and not _shop_open:
+			_confirm_build()
+			return
+		# Right-drag panning (isometric only) — right button, not left, which
+		# is what left that button free for the click above.
 		if event.button_index == MOUSE_BUTTON_RIGHT and _view_mode == ViewMode.ISOMETRIC:
 			_iso_dragging = event.pressed
 			return
@@ -2769,16 +3314,47 @@ func _unhandled_input(event: InputEvent) -> void:
 	# with nothing in either, and buying equipment is not something the
 	# player should have to leave first-person to do.
 	if event.keycode == KEY_B:
+		# Opening the menu leaves build mode: the menu is where you pick what
+		# to place, so arriving there with a ghost still following the cursor
+		# would leave two answers to "what does a click do".
+		if not _shop_open:
+			_exit_build_mode()
 		_toggle_shop_menu()
 		return
 
-	# While the menu is up, the number keys buy the slot they label — the
-	# keyboard half of the interaction, and the only half available in
-	# first-person if the player would rather not free the mouse. They do
-	# nothing at all when the menu is closed, so this reserves no key from
-	# whatever a later epic wants a hotbar to do.
+	# ESC leaves either build mode. It does nothing else, so it stays free
+	# for a pause menu that would want it when one exists.
+	if event.keycode == KEY_ESCAPE:
+		_exit_build_mode()
+		return
+
+	# R turns things: the ghost's facing while placing, and — outside
+	# placement mode — whatever is under the cursor, in place. Both are the
+	# same quarter turn clockwise the simulation offers.
+	if event.keycode == KEY_R:
+		if _build_kind != "":
+			_rotate_ghost()
+		else:
+			_rotate_under_cursor()
+		return
+
+	# X toggles remove mode — see `_toggle_remove_mode` for why a mode rather
+	# than a modifier-click.
+	if event.keycode == KEY_X:
+		_toggle_remove_mode()
+		return
+
+	# While the menu is up, the number keys buy the slot they label, and
+	# SHIFT+number places one you already own — the keyboard halves of the
+	# two mouse buttons below, and the only halves available in first-person
+	# if the player would rather not free the mouse. They do nothing at all
+	# when the menu is closed, so this reserves no key from whatever a later
+	# epic wants a hotbar to do.
 	if _shop_open and event.keycode >= KEY_1 and event.keycode <= KEY_9:
-		_buy_slot(event.keycode - KEY_1)
+		if event.shift_pressed:
+			_place_from_slot(event.keycode - KEY_1)
+		else:
+			_buy_slot(event.keycode - KEY_1)
 		return
 
 	if _view_mode == ViewMode.ISOMETRIC:
@@ -2831,22 +3407,24 @@ func _render_snapshot(snapshot: Dictionary) -> void:
 
 	var belts: Array = snapshot.get("belts", [])
 	for belt in belts:
-		var start: Array = belt["start_tile"]
-		var items: Array = belt["items"]
+		var tile := _pair_to_tile(belt.get("tile"))
+		# A belt is ONE TILE now (`start_tile`/`length_tiles` are gone), and
+		# it carries toward its own `direction` rather than always along +X —
+		# so an item's distance runs along that facing, which is what lets a
+		# line turn a corner and still look like one line.
+		var offset := _direction_offset(String(belt.get("direction", "east")))
+		var items: Array = belt.get("items", [])
 		for i in range(items.size()):
 			var pair: Array = items[i]
-			# Keyed by belt start tile so multiple stages' belts never
-			# collide with each other's item nodes.
-			var key := "belt_%d_%d_%d" % [int(start[0]), int(start[1]), i]
+			var key := "belt_%d_%d_%d" % [tile.x, tile.y, i]
 			seen[key] = true
 			var node := _item_node_for(key, String(pair[0]))
 			node.visible = true
-			# `pair[1]` is the item's distance from the belt start in tiles;
-			# the belt runs along +X, so it slides straight along that axis.
+			var distance := float(pair[1])
 			node.position = Vector3(
-				(float(start[0]) + float(pair[1])) * TILE,
+				(float(tile.x) + float(offset.x) * distance) * TILE,
 				BELT_SURFACE_Y,
-				float(start[1]) * TILE
+				(float(tile.y) + float(offset.y) * distance) * TILE
 			)
 
 	for key in _item_nodes.keys():
@@ -2855,8 +3433,12 @@ func _render_snapshot(snapshot: Dictionary) -> void:
 
 	var machines: Array = snapshot.get("machines", [])
 	for machine in machines:
-		_last_machines[machine["recipe"]] = machine
-		_set_machine_running(String(machine["recipe"]), machine.get("process") != null)
+		# Keyed by ORIGIN TILE, not by recipe: the player may place several
+		# machines running the same recipe, and a recipe-keyed entry would
+		# collapse them into one that flickered between them.
+		var key := _tile_key(_pair_to_tile(machine.get("tile")))
+		_machine_states[key] = machine
+		_set_machine_running(key, machine.get("process") != null)
 
 
 ## Pooled per belt slot. If the slot's item type changes (it doesn't in the
@@ -2931,35 +3513,51 @@ func _tile_under_screen_pos(screen_pos: Vector2) -> Vector2i:
 	return Vector2i(roundi(point.x / TILE), roundi(point.z / TILE))
 
 
-## Whichever stage's machine covers `tile`, or "" if none does.
+## What the tooltip should say about whatever occupies `tile` — a machine, a
+## belt, a pipe, a hopper, a tank, a dock, or nothing ("", the sentinel
+## `_update_hover_tooltip` checks to decide whether to show the tooltip at
+## all).
 ##
-## **Any** tile inside a machine's footprint answers, not just its origin —
-## which is the whole point since the "Machines improvement" milestone made
-## the cooking vat 2x2: hovering its far corner has to identify it, not fall
-## through to bare floor. Both halves of the containment test come from the
-## simulation (`_machine_tiles`/`_machine_footprints`, populated once in
-## `_read_chain_layout` from `chain_layout_json`), so a kind that grows in
-## data/machines.ron grows its hover target with no change here. Pure
-## dictionary lookup — no Input/mouse reads, directly testable.
-func _machine_recipe_at_tile(tile: Vector2i) -> String:
-	for recipe_id in _machine_tiles.keys():
-		var origin: Vector2i = _machine_tiles[recipe_id]
-		var size: Vector2i = _machine_footprints.get(recipe_id, Vector2i.ONE)
-		if tile.x >= origin.x and tile.x < origin.x + size.x \
-				and tile.y >= origin.y and tile.y < origin.y + size.y:
-			return String(recipe_id)
-	return ""
-
-
-## The recipe/progress/input/output text for one stage's machine — the same
-## per-stage data the always-on panel used to show for every stage at once
-## (removed; see docs/UI_UX.md §5's "hover tooltips ... rather than dense
-## always-on text") formatted for a single stage, shown only on hover.
-## Pure given `_last_machines`/`sim.current_tick()` — no Input reads.
-func _machine_hover_text(recipe_id: String) -> String:
-	if not _last_machines.has(recipe_id):
+## This used to be a chain of "is it the machine? is it THE hopper? is it THE
+## tank?" tests against one remembered building each. It is now one lookup in
+## `_occupancy` followed by a branch on the placement's own `kind`, which is
+## what makes hover work unchanged when the player builds a second hopper, a
+## third dock, or a machine facing south: which placement the cursor is over
+## is answered by the same footprint-aware map the ghost's validity check
+## uses, and disambiguating two hoppers falls straight out of it.
+##
+## Pure given the polled snapshots, so a test can drive it with a tile.
+func _hover_text_at_tile(tile: Vector2i) -> String:
+	var placement := _placement_at_tile(tile)
+	if placement.is_empty():
 		return ""
-	var machine: Dictionary = _last_machines[recipe_id]
+	var kind := String(placement.get("kind", ""))
+	var key := _tile_key(_placement_origin(placement))
+	var direction := _placement_direction(placement)
+	match kind:
+		BELT_KIND:
+			return "belt\ncarries %s" % direction
+		PIPE_KIND:
+			return _pipe_hover_text(tile, direction)
+		HOPPER_KIND:
+			return _hopper_hover_text(key, direction)
+		FLUID_TANK_KIND:
+			return _fluid_tank_hover_text(key, direction)
+		DOCK_KIND:
+			return _dock_hover_text(key, direction)
+	return _machine_hover_text(key, kind, direction)
+
+
+## The recipe/progress/input/output text for one machine, keyed by its origin
+## tile. Now also prints which way it faces, because that is a decision the
+## player made and can change (**R**) and it decides which side takes product
+## and which side gives it back — the one fact about a machine that used to be
+## the same for every machine in the world and now is not.
+## Pure given `_machine_states`/`sim.current_tick()` — no Input reads.
+func _machine_hover_text(origin_key: String, kind: String, direction: String) -> String:
+	if not _machine_states.has(origin_key):
+		return "%s\nfacing %s" % [_kind_display_name(kind), direction]
+	var machine: Dictionary = _machine_states[origin_key]
 	var process = machine.get("process")
 	var progress_text := "idle"
 	if process != null:
@@ -2974,17 +3572,14 @@ func _machine_hover_text(recipe_id: String) -> String:
 		# asking, which is "how long until this is done". So the remaining
 		# time is spelled out beside it, in seconds — the unit the player
 		# experiences — rather than in ticks, which are an implementation
-		# detail of ARCHITECTURE.md §3.9's fixed timestep. (At this scene's
-		# TICK_HZ the rack's 2400 ticks are 80 real seconds, not the 40 that
-		# data/recipes.ron's comment quotes at the nominal 60/sec rate —
-		# another reason to print a time rather than leave the player to
-		# convert one.)
+		# detail of ARCHITECTURE.md §3.9's fixed timestep.
 		progress_text = "%.0f%%  ·  %s left" % [pct, _format_remaining(required - elapsed)]
-	return "%s\n%s\nin: %s\nout: %s" % [
-		recipe_id,
+	return "%s  ·  facing %s\n%s\nin: %s\nout: %s" % [
+		String(machine.get("recipe", kind)),
+		direction,
 		progress_text,
-		_format_counts(machine["input"]),
-		_format_counts(machine["output"]),
+		_format_counts(machine.get("input", [])),
+		_format_counts(machine.get("output", [])),
 	]
 
 
@@ -3003,141 +3598,90 @@ func _format_remaining(ticks: int) -> String:
 	return "%dm %02ds" % [seconds / 60, seconds % 60]
 
 
-## Which pipe segment sits on `tile` (see `_pipe_tiles`, populated once in
-## _build_fluid_network from fluid_snapshot_json), or -1 if none does. The
-## exact parallel of `_machine_recipe_at_tile` above, deliberately — a pipe
-## is another thing occupying a tile, not a second kind of hover.
-func _pipe_segment_at_tile(tile: Vector2i) -> int:
-	return int(_pipe_tiles.get(tile, -1))
+## Which (network, segment) pair sits on `tile`, or `Vector2i(-1, -1)`.
+## Populated in `_rebuild_world` from the fluid snapshots, since which network
+## a pipe tile belongs to is a property of the whole connected run.
+func _pipe_indices_at_tile(tile: Vector2i) -> Vector2i:
+	return _pipe_tiles.get(_tile_key(tile), Vector2i(-1, -1))
 
 
-## Fluid type, level and pressure for one pipe segment — what the hover
-## tooltip shows over a pipe, the same way `_machine_hover_text` describes a
-## machine. Pure given `_last_fluid` (refreshed each frame by
-## `_update_fluid_network`), so it is directly testable.
-func _pipe_hover_text(segment_index: int) -> String:
-	if segment_index < 0 or _last_fluid.is_empty():
-		return ""
-	var segments: Array = _last_fluid.get("segments", [])
-	if segment_index >= segments.size():
-		return ""
-	var segment: Dictionary = segments[segment_index]
+## Fluid type, level and pressure for the pipe tile under the cursor. Reads
+## the live snapshot array rather than one remembered network: a world has one
+## network per connected run of pipe now, and the player can split or join
+## them by placing and removing a single tile.
+func _pipe_hover_text(tile: Vector2i, direction: String) -> String:
+	var indices := _pipe_indices_at_tile(tile)
+	if indices.x < 0 or indices.x >= _last_fluid.size():
+		return "pipe\nfacing %s\nnot connected to anything" % direction
+	var network: Dictionary = _last_fluid[indices.x]
+	var segments: Array = network.get("segments", [])
+	if indices.y < 0 or indices.y >= segments.size():
+		return "pipe\nfacing %s" % direction
+	var segment: Dictionary = segments[indices.y]
 	var role := "pipe"
 	if bool(segment.get("is_source", false)):
-		role = "pipe (supply)"
-	elif segment_index == int(_last_fluid.get("inlet_index", -1)):
+		role = "pipe (tank supply)"
+	elif _pipe_asset_for(tile) == PIPE_INLET_ASSET:
 		role = "pipe (machine inlet)"
-	return "%s\n%s\n%.1f / %.1f units\npressure %.0f%%" % [
-		String(_last_fluid.get("fluid", "fluid")),
+	return "%s\n%s  ·  facing %s\n%.1f / %.1f units\npressure %.0f%%" % [
+		_fluid_id_of(network) if _fluid_id_of(network) != "" else "empty run",
 		role,
+		direction,
 		float(segment.get("volume", 0.0)),
 		float(segment.get("capacity", 0.0)),
 		clampf(float(segment.get("pressure", 0.0)), 0.0, 1.0) * 100.0,
 	]
 
 
-## Whether the chain's hopper covers `tile`. Footprint-aware for exactly the
-## reason `_machine_recipe_at_tile` is, even though the shipped hopper is
-## 1x1 — its footprint is data (`data/machines.ron`) like any machine's, and
-## the hover shouldn't need revisiting the day it isn't.
-func _hopper_at_tile(tile: Vector2i) -> bool:
-	if _last_hopper.is_empty():
-		return false
-	return tile.x >= _hopper_tile.x and tile.x < _hopper_tile.x + _hopper_footprint.x \
-			and tile.y >= _hopper_tile.y and tile.y < _hopper_tile.y + _hopper_footprint.y
-
-
-## What the hopper's tooltip says: what it holds and how full it is — the
-## same shape `_pipe_hover_text` uses for a pipe's level, since they are the
-## same question about two different buffers. Pure given `_last_hopper`
-## (refreshed each frame by `_update_hopper`), so it is directly testable.
-func _hopper_hover_text() -> String:
-	if _last_hopper.is_empty():
-		return ""
-	return "hopper\n%s\n%d / %d units\n%.0f%% full" % [
-		String(_last_hopper.get("item", "raw ingredient")),
-		int(_last_hopper.get("quantity", 0)),
-		int(_last_hopper.get("capacity", 0)),
-		clampf(float(_last_hopper.get("fill", 0.0)), 0.0, 1.0) * 100.0,
+## What one hopper's tooltip says: what it holds, how full it is, and — new
+## since placement — whether it is actually discharging onto anything. A
+## hopper facing bare ground reports `belt_tile: null`, which is an ordinary
+## state now and exactly the mistake a player wants told about.
+func _hopper_hover_text(origin_key: String, direction: String) -> String:
+	var snapshot: Dictionary = _hopper_states.get(origin_key, {})
+	if snapshot.is_empty():
+		return "hopper\nfacing %s" % direction
+	return "hopper  ·  facing %s\n%s\n%d / %d units\n%s" % [
+		direction,
+		String(snapshot.get("item", "raw ingredient")),
+		int(snapshot.get("quantity", 0)),
+		int(snapshot.get("capacity", 0)),
+		"unloading onto a belt" if snapshot.get("belt_tile") != null else "no belt in front of it",
 	]
 
 
-## Whether the pipe run's fluid tank covers `tile`. Footprint-aware for the
-## same reason `_hopper_at_tile` is, even though the shipped tank is 1x1: its
-## footprint is data (`data/machines.ron`) like any machine's.
-func _fluid_tank_at_tile(tile: Vector2i) -> bool:
-	if _last_fluid_tank.is_empty():
-		return false
-	return tile.x >= _fluid_tank_tile.x and tile.x < _fluid_tank_tile.x + _fluid_tank_footprint.x \
-			and tile.y >= _fluid_tank_tile.y and tile.y < _fluid_tank_tile.y + _fluid_tank_footprint.y
-
-
-## What the tank's tooltip says: which fluid it holds and how much is left —
-## the hopper's own tooltip shape, with the one difference the wire format
-## already has (a fluid volume is fractional, an item count is not). Pure
-## given `_last_fluid_tank` (refreshed each frame by `_update_fluid_tank`),
-## so it is directly testable.
-func _fluid_tank_hover_text() -> String:
-	if _last_fluid_tank.is_empty():
-		return ""
-	return "fluid tank\n%s\n%.1f / %.0f units\n%.0f%% full" % [
-		String(_last_fluid_tank.get("fluid", "fluid")),
-		float(_last_fluid_tank.get("quantity", 0.0)),
-		float(_last_fluid_tank.get("capacity", 0.0)),
-		clampf(float(_last_fluid_tank.get("fill", 0.0)), 0.0, 1.0) * 100.0,
+## The tank's tooltip — the hopper's shape, with the one difference the wire
+## format already has (a fluid volume is fractional, an item count is not).
+func _fluid_tank_hover_text(origin_key: String, direction: String) -> String:
+	var snapshot: Dictionary = _fluid_tank_states.get(origin_key, {})
+	if snapshot.is_empty():
+		return "fluid tank\nfacing %s" % direction
+	return "fluid tank  ·  facing %s\n%s\n%.1f / %.0f units\n%s" % [
+		direction,
+		_fluid_id_of(snapshot) if _fluid_id_of(snapshot) != "" else "empty",
+		float(snapshot.get("quantity", 0.0)),
+		float(snapshot.get("capacity", 0.0)),
+		"feeding a pipe run" if snapshot.get("pipe_tile") != null else "no pipe in front of it",
 	]
 
 
-## Whether the chain's delivery dock covers `tile`. Footprint-aware for the
-## same reason `_hopper_at_tile` is, even though the shipped dock is 1x1: its
-## footprint is data (`data/machines.ron`) like any machine's.
-func _dock_at_tile(tile: Vector2i) -> bool:
-	if _last_dock.is_empty():
-		return false
-	return tile.x >= _dock_tile.x and tile.x < _dock_tile.x + _dock_footprint.x \
-			and tile.y >= _dock_tile.y and tile.y < _dock_tile.y + _dock_footprint.y
-
-
-## What the dock's tooltip says. The one building on the line with no recipe
-## and no process, so the machine tooltip's shape (recipe / progress / in /
-## out) has nothing to put in three of its four lines — and the obvious
-## substitute, its own buffer level, is always zero by design (see
-## DOCK_ASSET's doc). So it answers the two questions a dock can actually
-## answer: what it has shipped over the factory's whole life
-## (`shipped_total`, which `sim::DockSnapshot` calls "the one number about a
-## dock that is worth showing"), and what is standing on it right now waiting
-## for a contract to claim it — the economy's shared pool, which is the same
-## figure the clipboard prints as ON THE DOCK, deliberately, rather than a
-## second number the player would have to reconcile with it.
-##
-## Pure given `_last_dock`/`_last_dock_stock` (both refreshed each frame by
-## `_update_dock`), so it is directly testable.
-func _dock_hover_text() -> String:
-	if _last_dock.is_empty():
-		return ""
-	return "delivery dock\nships to contracts every tick\n%d shipped in total\nwaiting: %s" % [
-		int(_last_dock.get("shipped_total", 0)),
+## The dock's tooltip. The one building on the line with no recipe and no
+## process, so the machine tooltip's shape has nothing to put in three of its
+## four lines — and the obvious substitute, its own buffer level, is always
+## zero by design (see DOCK_ASSET's doc). So it answers the two questions a
+## dock can actually answer: what THIS dock has shipped over its life, and
+## what is standing on the shared pool waiting for a contract to claim it —
+## the same figure the clipboard prints as ON THE DOCK, deliberately, rather
+## than a second number the player would have to reconcile with it.
+func _dock_hover_text(origin_key: String, direction: String) -> String:
+	var snapshot: Dictionary = _dock_states.get(origin_key, {})
+	if snapshot.is_empty():
+		return "delivery dock\nfacing %s" % direction
+	return "delivery dock  ·  facing %s\nships to contracts every tick\n%d shipped by this dock\nwaiting: %s" % [
+		direction,
+		int(snapshot.get("shipped_total", 0)),
 		_format_counts(_last_dock_stock),
 	]
-
-
-## What the tooltip should say about whatever occupies `tile` — a machine, a
-## pipe, the hopper, or nothing ("" , the sentinel `_update_hover_tooltip`
-## checks to decide whether to show the tooltip at all). Pure, so a test can
-## drive it with a tile directly; adding a further hoverable thing means
-## adding a branch here, not a second hover mechanism — which is exactly
-## what the hopper did, the same way milestone 6's pipes did before it.
-func _hover_text_at_tile(tile: Vector2i) -> String:
-	var recipe_id := _machine_recipe_at_tile(tile)
-	if recipe_id != "":
-		return _machine_hover_text(recipe_id)
-	if _hopper_at_tile(tile):
-		return _hopper_hover_text()
-	if _fluid_tank_at_tile(tile):
-		return _fluid_tank_hover_text()
-	if _dock_at_tile(tile):
-		return _dock_hover_text()
-	return _pipe_hover_text(_pipe_segment_at_tile(tile))
 
 
 ## The thin, live-state-reading half (deliberately not unit tested, same
@@ -3150,9 +3694,11 @@ func _hover_text_at_tile(tile: Vector2i) -> String:
 func _update_hover_tooltip() -> void:
 	if _hover_tooltip == null:
 		return
-	if _shop_open:
+	if _shop_open or _in_build_mode():
 		# The build menu sits over the middle of the screen; a world tooltip
-		# chasing the cursor across it would just be two panels fighting.
+		# chasing the cursor across it would just be two panels fighting. And
+		# in build mode the placement prompt is already the panel by the
+		# cursor, saying the more useful of the two things.
 		_hover_tooltip.visible = false
 		return
 	var vp := get_viewport()
@@ -3170,8 +3716,30 @@ func _update_hover_tooltip() -> void:
 		_hover_tooltip.visible = false
 		return
 	_hover_label.text = text
-	_hover_tooltip.position = query_pos + HOVER_TOOLTIP_OFFSET
+	_hover_tooltip.position = _panel_position_near(_hover_tooltip, query_pos)
 	_hover_tooltip.visible = true
+
+
+## Where a cursor-following panel goes: offset from the cursor, then kept
+## inside the viewport.
+##
+## The clamp is new with build mode and is not cosmetic — the placement prompt
+## is three lines wide and the cursor spends most of its time near the right
+## of the screen while a factory is being extended eastward, so without it the
+## panel telling the player whether the click will work runs off the edge.
+## (Found the only way it could be: in a rendered frame — UI_UX.md §2b
+## point 12.) It flips to the other side of the cursor rather than sliding, so
+## the panel never sits on top of the tile it is describing.
+func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
+	var size := panel.get_combined_minimum_size()
+	var vp := get_viewport()
+	var bounds := vp.get_visible_rect().size if vp != null else Vector2(1600, 900)
+	var pos := anchor + HOVER_TOOLTIP_OFFSET
+	if pos.x + size.x > bounds.x:
+		pos.x = anchor.x - HOVER_TOOLTIP_OFFSET.x - size.x
+	if pos.y + size.y > bounds.y:
+		pos.y = anchor.y - HOVER_TOOLTIP_OFFSET.y - size.y
+	return Vector2(maxf(pos.x, 0.0), maxf(pos.y, 0.0))
 
 
 ## Drives the contract clipboard (UI_UX.md §5) from `economy_snapshot_json`:

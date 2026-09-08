@@ -368,10 +368,16 @@ GAMEPLAY.md both already have a section like this, this doc didn't.
   nowhere to learn that a tile does~~ — **resolved 2026-09-08** by the "Real
   Placement" epic's ticket 1. `sim::types::Direction` is a real four-way type
   on every placement, `Footprint` rotates around the same origin corner, and
-  every belt/pipe/machine/building snapshot carries a `direction`. What
-  remains open is only the *presentation* half `world.rs`'s old note also
-  named: rotated voxel models, or one shared per-tile rotation transform
-  applied in Godot (that epic's ticket 2).
+  every belt/pipe/machine/building snapshot carries a `direction`.
+  **The presentation half is resolved too (same day, that epic's ticket 2):**
+  one shared per-tile Y rotation applied in Godot, not rotated models — every
+  asset is modelled facing east and the encoder centres it on its own
+  footprint, so a turned placement is the same mesh spun about that origin and
+  re-centred on the rotated rectangle. What is *not* done, deliberately, is a
+  four-directional pass on the belt's junction variants, which are authored
+  for the two faces this camera can see; three of the four facings fall back
+  to the plain tile. See UI_UX.md §2b point 18 — that is an art ticket, and it
+  is the one open thread this epic leaves.
 - Spoilage (perishables) and corrosion (acid-handling) likewise have no
   designed component yet (GAMEPLAY.md §9) — needed before their respective
   equipment tiers are implemented, not before milestone 5.
