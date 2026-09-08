@@ -30,9 +30,10 @@
 # tile — deliberately not its origin, since "hovering anywhere on a multi-tile
 # machine identifies it" is the claim the "Machines improvement" milestone
 # added, and hovering the origin would not show it. `--hover-hopper` does the
-# same over the chain's hopper.
+# same over the chain's hopper, and `--hover-tank` over the pipe run's fluid
+# tank (the "Visual overhaul round 2" epic's building).
 #
-# All four hover flags share one implementation (`_hover_over_tile`) — they
+# All five hover flags share one implementation (`_hover_over_tile`) — they
 # differ only in which tile they ask the simulation for.
 extends SceneTree
 
@@ -54,6 +55,7 @@ var _hover := false
 var _hover_pipe := false
 var _hover_vat := false
 var _hover_hopper := false
+var _hover_tank := false
 var _main: Node
 
 
@@ -67,6 +69,7 @@ func _initialize() -> void:
 	_hover_pipe = args.has("--hover-pipe")
 	_hover_vat = args.has("--hover-vat")
 	_hover_hopper = args.has("--hover-hopper")
+	_hover_tank = args.has("--hover-tank")
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 	# NOT here: in a real (non-headless) run, add_child()'s _ready() is
@@ -135,13 +138,28 @@ func _hover_over_hopper() -> void:
 	_hover_over_tile(Vector2i(int(tile_pair[0]), int(tile_pair[1])))
 
 
+func _hover_over_fluid_tank() -> void:
+	var json: String = _main.sim.fluid_tank_snapshot_json()
+	if json.is_empty():
+		return # no pipe run in this world, so no tank
+	var tile_pair: Array = JSON.parse_string(json)["tile"]
+	_hover_over_tile(Vector2i(int(tile_pair[0]), int(tile_pair[1])))
+
+
 func _run_chain_forward() -> void:
 	# Calls SimBridge directly rather than simulating a SPACE keypress
 	# through _unhandled_input: SPACE only spawns in ISOMETRIC mode (it's
 	# "fly up" in first-person), so going through the view-mode-sensitive
 	# input path would silently do nothing when --first-person is also set.
+	#
+	# BOTH consumables get loaded, not just the hopper. Since the "Visual
+	# overhaul round 2" epic's ticket 1 the pipe run has no self-refilling
+	# source, so a populate run that only fed tomatoes stalled the whole chain
+	# at the mixer and photographed empty belts downstream of it — which is
+	# not "the factory running", it is a picture of a starved factory.
 	for i in range(POPULATE_SPAWNS):
 		_main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
+		_main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
 		for j in range(POPULATE_TICKS_PER_SPAWN):
 			_main.sim.tick()
 	_main._apply_dirty_chunks()
@@ -161,6 +179,8 @@ func _process(_delta: float) -> bool:
 		_hover_over_multi_tile_machine()
 	if _frames == 2 and _hover_hopper:
 		_hover_over_hopper()
+	if _frames == 2 and _hover_tank:
+		_hover_over_fluid_tank()
 	if _frames < WARMUP_FRAMES:
 		return false
 

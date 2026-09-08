@@ -10,9 +10,11 @@
 # Verifies:
 #   * every stage renders a real, non-empty imported voxel mesh at the tiles
 #     the SIMULATION reports — not a silently-missing asset,
-#   * the three kinds with a bespoke model (crusher, mixer, cooking vat) get
-#     distinct meshes from each other and from the generic fallback, so the
-#     chain's front end is actually distinguishable,
+#   * EVERY machine kind the shipped chain uses has a bespoke model, and all
+#     of them are distinct meshes — so no stage falls through to the generic
+#     fallback. This is the "Visual overhaul round 2" epic's ticket 2 claim:
+#     `bottler` and `packer` used to have no model and rendered as two more
+#     copies of the generic housing,
 #   * the cooking vat — the first machine in the game bigger than one tile —
 #     genuinely spans more than one tile of world space, and its node sits at
 #     its footprint's CENTRE rather than on its origin tile,
@@ -90,6 +92,7 @@ func _run_checks() -> void:
 
 	var multi_tile_stages := 0
 	var bespoke_meshes := {} # kind -> the first surface's Mesh, to compare kinds
+	var fallback_kinds := [] # kinds with no MACHINE_MODELS entry — must stay empty
 
 	for stage in layout:
 		var recipe := String(stage["recipe"])
@@ -145,6 +148,8 @@ func _run_checks() -> void:
 
 		if main.MACHINE_MODELS.has(kind):
 			bespoke_meshes[kind] = meshes[0].mesh
+		elif not fallback_kinds.has(kind):
+			fallback_kinds.append(kind)
 
 	if multi_tile_stages < 1:
 		_fail("no stage in the shipped chain has a footprint bigger than 1x1 — this test would prove nothing")
@@ -161,6 +166,19 @@ func _run_checks() -> void:
 			_fail("kind '%s' shares a mesh with another kind — the models didn't actually differ" % kind)
 			return
 		seen.append(mesh)
+
+	# --- NO stage falls through to the generic fallback -------------------
+	# The "Visual overhaul round 2" epic's ticket 2: `bottler` and `packer`
+	# had no entry in MACHINE_MODELS, so the chain's last two stages both
+	# drew the generic `machine` housing. Asserting on the *kinds the chain
+	# actually uses* rather than on those two names keeps this honest if
+	# data/recipes.ron adds a stage — a new kind without a model would fail
+	# here rather than quietly shipping another duplicate.
+	if not fallback_kinds.is_empty():
+		_fail("kind(s) %s still render the generic fallback model '%s' — they have no bespoke asset" % [
+			str(fallback_kinds), main.MACHINE_MODEL_FALLBACK,
+		])
+		return
 
 	# --- the hopper: rendered where the sim says, with a live fill body ---
 	var hopper_json: String = main.sim.hopper_snapshot_json()
@@ -273,7 +291,7 @@ func _run_checks() -> void:
 		_fail("ISO_HELP_TEXT still doesn't mention the hopper: %s" % main.ISO_HELP_TEXT)
 		return
 
-	print("MACHINES_OK: %d stage(s) rendered at the sim's own tiles, %d bespoke kind(s), %d multi-tile machine(s) spanning their full footprint, hopper drawn at %s with a live product level, hover resolves a non-origin footprint tile and the hopper" % [
+	print("MACHINES_OK: %d stage(s) rendered at the sim's own tiles, %d bespoke kind(s) and zero generic fallbacks, %d multi-tile machine(s) spanning their full footprint, hopper drawn at %s with a live product level, hover resolves a non-origin footprint tile and the hopper" % [
 		layout.size(), bespoke_meshes.size(), multi_tile_stages, str(hopper_tile),
 	])
 	quit(0)

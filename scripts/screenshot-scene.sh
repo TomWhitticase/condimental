@@ -12,14 +12,15 @@
 # --first-person to review that camera mode's lighting/skybox instead of the
 # default isometric one.
 #
-# Pass one of --hover / --hover-pipe / --hover-vat / --hover-hopper to park
-# the cursor over the first machine, the fluid network's machine-inlet pipe,
-# the FAR CORNER of the multi-tile cooking vat, or the chain's hopper, so that
-# tooltip is in the shot. (--hover-vat deliberately picks a non-origin tile:
-# "any tile of a multi-tile machine identifies it" is what the "Machines
-# improvement" milestone added, and hovering the origin would not show it.)
+# Pass one of --hover / --hover-pipe / --hover-vat / --hover-hopper /
+# --hover-tank to park the cursor over the first machine, the fluid network's
+# machine-inlet pipe, the FAR CORNER of the multi-tile cooking vat, the
+# chain's hopper, or the pipe run's fluid tank, so that tooltip is in the
+# shot. (--hover-vat deliberately picks a non-origin tile: "any tile of a
+# multi-tile machine identifies it" is what the "Machines improvement"
+# milestone added, and hovering the origin would not show it.)
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--populate] [--first-person] [--hover|--hover-pipe|--hover-vat|--hover-hopper]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--populate] [--first-person] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

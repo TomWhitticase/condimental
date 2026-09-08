@@ -107,5 +107,24 @@
         // per this file's own rule: an insert re-indexes every colour after
         // it, and `fluid_pale` was after it on the first attempt.
         (name: "bulk_pale",      rgb: "#EDE7DE", class: "matte"),
+
+        // --- liquid product on the belt ("Visual overhaul round 2",
+        // ticket 2) ---
+        // Unlike `fluid_pale` above these DO carry their own hue, and that
+        // difference is the point: which fluid is in a pipe is live
+        // simulation data, but which product is in a pail is fixed by
+        // `data/recipes.ron`'s chain — there is exactly one colour each of
+        // these can ever be, so a near-white voxel plus a GDScript tint
+        // would just move a constant out of the one file that is supposed
+        // to own colour. Class `liquid`, not `matte`, because the project
+        // owner's review of the rendered scene said these three read as
+        // solid painted blocks: the pails' contents ARE a wet surface, and
+        // the gloss is what says so (UI_UX.md §4). They darken and redden
+        // along the chain — thick paste, then paste cut with vinegar, then
+        // the cooked-down classic ketchup red — so the three stages stay
+        // tellable apart on the belt.
+        (name: "liquid_paste",   rgb: "#8E2418", class: "liquid"),
+        (name: "liquid_mix",     rgb: "#AF3B27", class: "liquid"),
+        (name: "liquid_ketchup", rgb: "#C4190E", class: "liquid"),
     ],
 )

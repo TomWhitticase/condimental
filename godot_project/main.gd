@@ -125,12 +125,21 @@ const FLUID_TINT_FALLBACK := Color(0.60, 0.79, 0.86)
 ## no entry here still renders — as the generic `machine` model — rather than
 ## vanishing. That fallback is deliberate and load-bearing: adding a kind to
 ## `data/machines.ron` must never require a Godot edit before the chain will
-## draw, and the two downstream kinds (bottler, packer) have no bespoke model
-## yet and rely on it today.
+## draw.
+##
+## Since the "Visual overhaul round 2" epic's ticket 2 **every kind
+## `data/machines.ron` currently defines has a model of its own**, so the
+## fallback is now a safety net rather than something the shipped chain
+## relies on. It used to catch `bottler` and `packer`, which meant the last
+## two stages both rendered as another copy of the generic housing — the
+## project owner's review named exactly that ("some machines are still
+## missing assets or just reuse assets (bottling machine)").
 const MACHINE_MODELS := {
 	"crusher": "machine_crusher",
 	"mixer": "machine_mixer",
 	"cooking_vat": "machine_cooking_vat",
+	"bottler": "machine_bottler",
+	"packer": "machine_packer",
 }
 const MACHINE_MODEL_FALLBACK := "machine"
 
@@ -148,6 +157,25 @@ const HOPPER_FILL_FLOOR_Y := FLOOR_Y + HOPPER_FILL_FLOOR_VOXELS * VOXEL_UNIT
 ## Below this fill fraction the product body is hidden outright rather than
 ## drawn as a sub-voxel sliver — the same call FLUID_MIN_VISIBLE_PRESSURE makes.
 const HOPPER_MIN_VISIBLE_FILL := 0.02
+
+## The pipe run's fluid tank and the liquid standing in it (the "Visual
+## overhaul round 2" epic — ticket 1 made the tank real in simulation, this
+## draws it). Deliberately the exact shape the hopper pair above has: a body
+## asset plus a one-voxel-tall fill body scaled to a live fraction every
+## frame, because the tank IS the fluid twin of the hopper on the wire
+## (`fluid_tank_snapshot_json` is field-for-field `hopper_snapshot_json`), so
+## it should be the same code path here too rather than a third mechanism.
+## These two constants mirror assets/voxels/generators/assets.rs's
+## TANK_FILL_Z0 / TANK_FILL_HEIGHT; change one, change both.
+const FLUID_TANK_ASSET := "fluid_tank"
+const FLUID_TANK_FILL_ASSET := "fluid_tank_fill"
+const FLUID_TANK_FILL_FLOOR_VOXELS := 8
+const FLUID_TANK_FILL_HEIGHT_VOXELS := 18
+const FLUID_TANK_FILL_FLOOR_Y := FLOOR_Y + FLUID_TANK_FILL_FLOOR_VOXELS * VOXEL_UNIT
+## Below this fill fraction the liquid column is hidden outright rather than
+## drawn as a sub-voxel sliver — the same call FLUID_MIN_VISIBLE_PRESSURE and
+## HOPPER_MIN_VISIBLE_FILL both make.
+const FLUID_TANK_MIN_VISIBLE_FILL := 0.02
 
 ## Presentation-only tint per raw-ingredient item id, the same shape as
 ## FLUID_TINTS: *which* item a hopper holds is simulation data (the first
@@ -171,7 +199,7 @@ const HOPPER_FILL_TINT_FALLBACK := Color(0.72, 0.66, 0.56)
 ## ticket's rendered-scene review caught it.
 const ITEM_MODELS := {
 	"tomato": "item_tomato",
-	"tomato_paste": "item_sauce_pail",
+	"tomato_paste": "item_paste_pail",
 	"ketchup_mix": "item_mix_pail",
 	"ketchup": "item_ketchup_pail",
 	"bottled_ketchup": "item_bottle",
@@ -223,6 +251,20 @@ var _hopper_fill_node: Node3D
 var _hopper_lamp: MeshInstance3D
 var _hopper_has_stock: bool = false
 var _last_hopper: Dictionary = {} # last hopper snapshot, for the hover tooltip
+
+# --- The pipe run's fluid tank (ticket 1's building, rendered here) --------
+# Geometry is built once from fluid_tank_snapshot_json; the level is re-read
+# from the same call every frame. Polling is not optional here the way it is
+# for the hopper: the tank is drained by the same equalization pass the pipe
+# run is, and that pass deliberately does NOT dirty its chunk, so a
+# chunk-driven renderer would never learn the level fell (see
+# SimBridge::fluid_tank_snapshot_json's own doc).
+var _fluid_tank_tile := Vector2i.ZERO # footprint origin (min-X/min-Y corner)
+var _fluid_tank_footprint := Vector2i.ONE
+var _fluid_tank_fill_node: Node3D
+var _fluid_tank_lamp: MeshInstance3D
+var _fluid_tank_has_stock: bool = false
+var _last_fluid_tank: Dictionary = {} # last tank snapshot; {} when this world has no pipe run
 
 var _class_materials: Dictionary = {} # "matte"/"metal"/"emissive" -> StandardMaterial3D
 var _lamp_idle: StandardMaterial3D
@@ -288,12 +330,14 @@ func _ready() -> void:
 	_build_chain()
 	_build_hopper()
 	_build_fluid_network()
+	_build_fluid_tank()
 	_build_camera()
 	_build_ui()
 	_seed_machine_state()
 	_update_contract_panel() # fill in real text/sizing before the first frame draws
 	_update_fluid_network() # show tick 0's fluid levels, not an empty pipe run
 	_update_hopper() # likewise: tick 0's fill level, and seed the hover text
+	_update_fluid_tank() # and the tank's, which starts empty until the player loads it
 	_apply_dirty_chunks() # render tick 0's (empty) state immediately
 
 
@@ -670,6 +714,109 @@ func _set_hopper_lamp_stocked(has_stock: bool) -> void:
 		_hopper_lamp.set_surface_override_material(0, _lamp_running if has_stock else _lamp_idle)
 
 
+## Builds the pipe run's fluid tank (ticket 1's building) plus the column of
+## liquid standing inside it, at the tile the SIMULATION says it occupies.
+##
+## Read from `fluid_tank_snapshot_json` for the same reasons `_build_hopper`
+## reads the hopper's own call: `chain_layout_json` describes recipe-driven
+## belt/machine stages only and the tank is not one, and
+## `chunk_snapshot_json`'s `fluid_tanks` array only arrives for chunks that
+## are currently dirty — and the tank's level changes without dirtying its
+## chunk at all (only a `fill_fluid_tank` command does), so a chunk-driven
+## renderer would sit waiting on an event that never comes. Unlike the
+## hopper's call this one can legitimately return an empty string: a world
+## whose `data/recipes.ron` declares no `fluid_inputs` has no pipe run and
+## therefore no tank.
+func _build_fluid_tank() -> void:
+	# Rebuilding replaces the tank rather than adding a second one — the same
+	# guard `_build_hopper`/`_build_fluid_network` carry, for the same
+	# headless-test double-`_ready()` reason (see test_hover.gd's header).
+	var existing := get_node_or_null("FluidTank")
+	if existing != null:
+		remove_child(existing)
+		existing.free()
+	_fluid_tank_fill_node = null
+	_fluid_tank_lamp = null
+
+	var snapshot := _read_fluid_tank_snapshot()
+	if snapshot.is_empty():
+		return # no recipe declares fluid_inputs — this world has no tank
+
+	var tile_pair: Array = snapshot["tile"]
+	_fluid_tank_tile = Vector2i(int(tile_pair[0]), int(tile_pair[1]))
+	_fluid_tank_footprint = _footprint_size(snapshot.get("footprint"))
+
+	var root := Node3D.new()
+	root.name = "FluidTank"
+	add_child(root)
+
+	var body := _asset_node(FLUID_TANK_ASSET)
+	body.name = "fluid_tank_body"
+	body.position = _footprint_centre(_fluid_tank_tile, _fluid_tank_footprint, FLOOR_Y)
+	root.add_child(body)
+
+	_fluid_tank_lamp = body.get_node_or_null("emissive")
+	_fluid_tank_has_stock = true # force the first _update_fluid_tank call to apply
+	_set_fluid_tank_lamp_stocked(false)
+
+	# The liquid column: one voxel tall, scaled every frame — see
+	# _update_fluid_tank. Tinted per fluid exactly as the pipe run's own
+	# liquid is, through the same `_fluid_material_for`, so the vinegar in the
+	# tank and the vinegar in the pipes are the same colour by construction
+	# rather than by two constants agreeing.
+	var fill := _asset_node(FLUID_TANK_FILL_ASSET)
+	fill.name = "fluid_tank_fill"
+	fill.position = _footprint_centre(_fluid_tank_tile, _fluid_tank_footprint, FLUID_TANK_FILL_FLOOR_Y)
+	var mat := _fluid_material_for(String(snapshot.get("fluid", "")))
+	for child in fill.get_children():
+		if child is MeshInstance3D:
+			child.set_surface_override_material(0, mat)
+	root.add_child(fill)
+	_fluid_tank_fill_node = fill
+
+
+## `fluid_tank_snapshot_json` returns an EMPTY STRING (not `null`) when the
+## world has no pipe run, per SimBridge's own documented convention — check
+## that before parsing, exactly as `_read_fluid_snapshot` does.
+func _read_fluid_tank_snapshot() -> Dictionary:
+	var json: String = sim.fluid_tank_snapshot_json()
+	if json.is_empty():
+		return {}
+	var parsed = JSON.parse_string(json)
+	return parsed if parsed is Dictionary else {}
+
+
+## Re-reads the tank every frame and rescales its liquid column to the live
+## fill fraction — the same one-poll/one-scaled-body pattern
+## `_update_fluid_network` established for a pipe and `_update_hopper` reused
+## for bulk product, deliberately reused a third time rather than invented
+## again.
+func _update_fluid_tank() -> void:
+	var snapshot := _read_fluid_tank_snapshot()
+	if snapshot.is_empty():
+		return
+	_last_fluid_tank = snapshot
+	if _fluid_tank_fill_node == null:
+		return
+	var fill: float = clampf(float(snapshot.get("fill", 0.0)), 0.0, 1.0)
+	_fluid_tank_fill_node.visible = fill > FLUID_TANK_MIN_VISIBLE_FILL
+	if _fluid_tank_fill_node.visible:
+		_fluid_tank_fill_node.scale.y = fill * float(FLUID_TANK_FILL_HEIGHT_VOXELS)
+	_set_fluid_tank_lamp_stocked(fill > FLUID_TANK_MIN_VISIBLE_FILL)
+
+
+## Swaps the tank's status lamp between the same idle/running materials a
+## machine's and the hopper's lamps use — an empty tank stalls the mixer, so
+## it is exactly the kind of state UI_UX.md §7 wants reported by more than
+## the level itself.
+func _set_fluid_tank_lamp_stocked(has_stock: bool) -> void:
+	if _fluid_tank_has_stock == has_stock:
+		return
+	_fluid_tank_has_stock = has_stock
+	if _fluid_tank_lamp != null:
+		_fluid_tank_lamp.set_surface_override_material(0, _lamp_running if has_stock else _lamp_idle)
+
+
 ## Builds the pipe run — one voxel model per pipe tile the SIMULATION says
 ## exists, plus one liquid body sitting in each one's bore.
 ##
@@ -845,8 +992,8 @@ const FP_NEAR := 0.05 # much closer than ISO_NEAR — this mode gets right up ne
 const CROSSHAIR_SIZE := 14.0 # px, each bar's length
 const CROSSHAIR_THICKNESS := 2.0 # px, each bar's width
 
-const ISO_HELP_TEXT := "SPACE: load the hopper    C: collect product    WASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
-const FP_HELP_TEXT := "C: collect product    WASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
+const ISO_HELP_TEXT := "SPACE: load the hopper    V: load the fluid tank    C: collect product    WASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
+const FP_HELP_TEXT := "V: load the fluid tank    C: collect product    WASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
 
 
 func _build_camera() -> void:
@@ -1511,6 +1658,7 @@ func _process(delta: float) -> void:
 	_update_contract_panel()
 	_update_fluid_network()
 	_update_hopper()
+	_update_fluid_tank()
 	_update_hover_tooltip()
 	if _view_mode == ViewMode.ISOMETRIC:
 		_pan_camera(delta)
@@ -1578,6 +1726,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	# the hopper itself (see _update_hopper) and in its hover tooltip.
 	if event.keycode == KEY_SPACE and _view_mode == ViewMode.ISOMETRIC:
 		command = JSON.stringify({"type": "fill_hopper"})
+	# V is the fluid twin of SPACE (the "Visual overhaul round 2" epic).
+	# Ticket 1 replaced the pipe run's always-full off-map tap with a tank the
+	# player loads — but it added no way to load it, so the shipped scene had
+	# no vinegar at all and the chain silently stalled at the mixer with the
+	# belts past it running empty. Unlike SPACE this works in BOTH view modes,
+	# because unlike SPACE it collides with nothing (SPACE is "fly up" in
+	# first person).
+	elif event.keycode == KEY_V:
+		command = JSON.stringify({"type": "fill_fluid_tank"})
 	elif event.keycode == KEY_C:
 		command = JSON.stringify({"type": "collect_output"})
 	else:
@@ -1806,6 +1963,32 @@ func _hopper_hover_text() -> String:
 	]
 
 
+## Whether the pipe run's fluid tank covers `tile`. Footprint-aware for the
+## same reason `_hopper_at_tile` is, even though the shipped tank is 1x1: its
+## footprint is data (`data/machines.ron`) like any machine's.
+func _fluid_tank_at_tile(tile: Vector2i) -> bool:
+	if _last_fluid_tank.is_empty():
+		return false
+	return tile.x >= _fluid_tank_tile.x and tile.x < _fluid_tank_tile.x + _fluid_tank_footprint.x \
+			and tile.y >= _fluid_tank_tile.y and tile.y < _fluid_tank_tile.y + _fluid_tank_footprint.y
+
+
+## What the tank's tooltip says: which fluid it holds and how much is left —
+## the hopper's own tooltip shape, with the one difference the wire format
+## already has (a fluid volume is fractional, an item count is not). Pure
+## given `_last_fluid_tank` (refreshed each frame by `_update_fluid_tank`),
+## so it is directly testable.
+func _fluid_tank_hover_text() -> String:
+	if _last_fluid_tank.is_empty():
+		return ""
+	return "fluid tank\n%s\n%.1f / %.0f units\n%.0f%% full" % [
+		String(_last_fluid_tank.get("fluid", "fluid")),
+		float(_last_fluid_tank.get("quantity", 0.0)),
+		float(_last_fluid_tank.get("capacity", 0.0)),
+		clampf(float(_last_fluid_tank.get("fill", 0.0)), 0.0, 1.0) * 100.0,
+	]
+
+
 ## What the tooltip should say about whatever occupies `tile` — a machine, a
 ## pipe, the hopper, or nothing ("" , the sentinel `_update_hover_tooltip`
 ## checks to decide whether to show the tooltip at all). Pure, so a test can
@@ -1818,6 +2001,8 @@ func _hover_text_at_tile(tile: Vector2i) -> String:
 		return _machine_hover_text(recipe_id)
 	if _hopper_at_tile(tile):
 		return _hopper_hover_text()
+	if _fluid_tank_at_tile(tile):
+		return _fluid_tank_hover_text()
 	return _pipe_hover_text(_pipe_segment_at_tile(tile))
 
 

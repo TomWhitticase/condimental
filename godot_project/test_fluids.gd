@@ -21,7 +21,14 @@
 #     BOTH view modes (ISOMETRIC cursor and FIRST_PERSON crosshair),
 #   * the inlet segment (the one that actually feeds a machine) renders as
 #     the dedicated connector fitting (PIPE_INLET_ASSET), not a plain header
-#     tile — the visual-overhaul pass's fix for the pipe-to-machine seam.
+#     tile — the visual-overhaul pass's fix for the pipe-to-machine seam,
+#   * the pipe run's FLUID TANK (the "Visual overhaul round 2" epic: ticket 1
+#     made it real in simulation, ticket 2 draws it) renders as a real
+#     non-empty mesh at the tile the SIMULATION reports, its liquid column
+#     rescales when the tank is filled through the real command path, an
+#     empty tank hides that column outright, and its tile answers hover
+#     through the same one `_hover_text_at_tile` mechanism every other
+#     building uses.
 #
 # The one-frame-before-checking dance and the "never hold your own camera
 # reference" rule below are both inherited from test_hover.gd — see that
@@ -250,5 +257,100 @@ func _run_checks() -> void:
 		return
 	main._set_view_mode(main.ViewMode.ISOMETRIC)
 
-	print("FLUIDS_OK: %d pipe tiles rendered from the sim's own segments (source drawn distinctly), liquid bodies scale to live pressure, pipe hover resolves fluid/volume/pressure in both view modes" % segments.size())
+	# --- The fluid tank: drawn where the sim says, with a live level -------
+	# Read from the tank's OWN snapshot, never from a tile written down here
+	# — same rule every other building in this scene follows.
+	var tank_json: String = main.sim.fluid_tank_snapshot_json()
+	if tank_json.is_empty():
+		_fail("fluid_tank_snapshot_json is empty even though this world has a pipe run — ticket 1's tank should exist wherever the run does")
+		return
+	var tank: Dictionary = JSON.parse_string(tank_json)
+	var tank_tile_pair: Array = tank["tile"]
+	var tank_tile := Vector2i(int(tank_tile_pair[0]), int(tank_tile_pair[1]))
+
+	var tank_root: Node3D = main.get_node_or_null("FluidTank")
+	if tank_root == null:
+		_fail("no FluidTank node — the pipe run's supply vessel didn't build")
+		return
+	var tank_body: Node3D = tank_root.get_node_or_null("fluid_tank_body")
+	if tank_body == null or _meshes(tank_body, []).is_empty():
+		_fail("the fluid tank body rendered no meshes — fluid_tank.vox didn't import (run `cargo xtask`)")
+		return
+	for mi in _meshes(tank_body, []):
+		if mi.mesh == null or mi.mesh.get_surface_count() < 1:
+			_fail("the fluid tank has an empty mesh '%s'" % mi.name)
+			return
+	var tank_expected: Vector3 = main._footprint_centre(
+		tank_tile, main._footprint_size(tank.get("footprint")), main.FLOOR_Y
+	)
+	if not tank_body.position.is_equal_approx(tank_expected):
+		_fail("fluid tank body sits at %s, expected %s (sim tile %s)" % [
+			str(tank_body.position), str(tank_expected), str(tank_tile),
+		])
+		return
+	if main._fluid_tank_tile != tank_tile:
+		_fail("scene tracks the tank at %s, sim reports %s" % [str(main._fluid_tank_tile), str(tank_tile)])
+		return
+	if main._fluid_tank_fill_node == null or _meshes(main._fluid_tank_fill_node, []).is_empty():
+		_fail("the tank's liquid column rendered no meshes — fluid_tank_fill.vox didn't import")
+		return
+
+	# One default fill was issued 200 ticks ago and the tank discharges at
+	# constant full head, so by now it has emptied itself into the run —
+	# which is exactly the state worth asserting first: an empty tank must
+	# hide its column outright, not draw a sub-voxel sliver.
+	main._update_fluid_tank()
+	if float(tank.get("quantity", 0.0)) > 0.0:
+		_fail("expected the tank to have drained into the run after 200 ticks, sim reports %f units" % float(tank.get("quantity", 0.0)))
+		return
+	if main._fluid_tank_fill_node.visible:
+		_fail("an empty tank should hide its liquid column, not draw a sliver")
+		return
+	# ...and filling it through the REAL command path raises the column.
+	main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
+	main._update_fluid_tank()
+	if not main._fluid_tank_fill_node.visible:
+		_fail("a filled tank should show its liquid column")
+		return
+	var part_full_level: float = main._fluid_tank_fill_node.scale.y
+	for i in range(8):
+		main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
+	main._update_fluid_tank()
+	if main._fluid_tank_fill_node.scale.y <= part_full_level:
+		_fail("filling the tank further did not raise its liquid column (%f -> %f)" % [
+			part_full_level, main._fluid_tank_fill_node.scale.y,
+		])
+		return
+	if main._fluid_tank_fill_node.scale.y > float(main.FLUID_TANK_FILL_HEIGHT_VOXELS) + 0.001:
+		_fail("a full tank's level (%f) rose past its barrel section (%d voxels)" % [
+			main._fluid_tank_fill_node.scale.y, main.FLUID_TANK_FILL_HEIGHT_VOXELS,
+		])
+		return
+
+	# --- Hovering the tank answers through the same mechanism -------------
+	if not main._fluid_tank_at_tile(tank_tile):
+		_fail("the tank's own tile %s doesn't resolve to the tank" % str(tank_tile))
+		return
+	var tank_text: String = main._hover_text_at_tile(tank_tile)
+	if not tank_text.begins_with("fluid tank"):
+		_fail("hovering the tank tile should describe the tank, got: %s" % tank_text)
+		return
+	if not tank_text.contains(String(tank["fluid"])) or not tank_text.contains("units"):
+		_fail("the tank tooltip should name its fluid and its level, got: %s" % tank_text)
+		return
+	if main._fluid_tank_at_tile(tank_tile + Vector2i(0, 4)):
+		_fail("open floor four tiles north of the tank resolved to the tank")
+		return
+
+	# --- The player can actually load it ----------------------------------
+	# Ticket 1 shipped the `fill_fluid_tank` command but no key bound to it,
+	# so the running scene had no vinegar at all and the chain stalled at the
+	# mixer with every belt downstream of it empty.
+	if not main.ISO_HELP_TEXT.to_lower().contains("tank"):
+		_fail("ISO_HELP_TEXT doesn't tell the player how to load the tank: %s" % main.ISO_HELP_TEXT)
+		return
+
+	print("FLUIDS_OK: %d pipe tiles rendered from the sim's own segments (source drawn distinctly), liquid bodies scale to live pressure, pipe hover resolves fluid/volume/pressure in both view modes, fluid tank drawn at %s with a live level and its own hover" % [
+		segments.size(), str(tank_tile),
+	])
 	quit(0)

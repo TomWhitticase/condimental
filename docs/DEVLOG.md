@@ -23,7 +23,7 @@ below is history and should only ever be appended to.)*
 - **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. **Milestone 6 (Fluids) is done**: its simulation half (pipe network, pressure equalization, a recipe requiring a liquid, the `SimBridge` fluid snapshot) and its presentation half (pipe/supply-tap/liquid voxel assets, a pipe run rendered from the simulation's own segment list, a liquid body whose height tracks live pressure, and pipe hover info in both view modes) have both landed, built as a 2-ticket orchestration Run (`run_2867a25ae373`, sequential: sim core then presentation). Milestone 7 (Timed processes) is next. A separate **"Machines improvement"** epic (not an ARCHITECTURE.md §9 milestone — an infrastructure/content pass requested directly) is in progress: ticket 1 landed machine footprints as data (`data/machines.ron`), generalizing the chain's layout math so a machine can occupy more than one tile, and ticket 2 spent that on real content — the chain's front end is now a crusher, a mixer and a genuinely 2x2 cooking vat. Ticket 3 replaced the debug "spawn a tomato onto the belt" command with a real **hopper** — a building west of the chain's head that buffers raw tomatoes and meters them onto the first belt one per tick, filled by the player (SPACE) rather than teleporting items. **Ticket 4 finished the epic**: the Godot presentation of all three — a bespoke voxel model per front-end machine kind, multi-tile rendering so the cooking vat actually covers its 2x2 footprint, the hopper drawn with a product level that tracks its live fill, and hover resolving any tile of a multi-tile machine as well as the hopper. **The "Machines improvement" epic is complete.**
 - **Art/UI:** the voxel pipeline (UI_UX.md §2a/§2b) exists and is the source of every asset in the scene — including milestone 6's pipes and the liquid inside them, which added a fourth material class (`liquid`, a glossy dielectric) to `palette.ron` — Rust generators in `assets/voxels/generators/` produce `.vox` models, reviewed as isometric PNGs via `scripts/build-voxels.sh`, imported into Godot by a pinned community importer. UI_UX.md §5's real UI is now landed: the money/contract readout is a diegetic clipboard panel (paper background, steel clip bar, checkbox tick marks) with a voxel-rendered icon per required item, and per-machine detail (recipe/progress/buffers) is hover-only instead of dense always-on text, working in both view modes — a screen-centre crosshair stands in for the cursor in first-person — see the log entries below.
 - **UI polish epic (done):** a Run (`run_cc6860507d36`) with 3 parallel tickets targeting UI_UX.md §5, all done and merged — hover tooltips for machines, a voxel-rendered icon pipeline, and the clipboard reskin. Check `orca orchestration task-list --run run_cc6860507d36 --json` for the DAG's final state.
-- **Visual overhaul round 2 (in progress):** a second directly-requested pass, run as a 3-ticket epic. **Ticket 1 (sim) is done:** the pipe run's always-refilling off-map source is gone, replaced by a player-loadable `FluidTank` (120 units, one tile west of the run's head) filled with a `FillFluidTank` command and drained by the same pressure-equalization pass that moves fluid along the run — so vinegar is a consumable the player manages, exactly as tomatoes already were via the hopper. New wire surface for tickets 2/3: `fluid_tank_snapshot_json`, a `fluid_tanks` chunk array, and a `"fluid_tank"` hover tile. Tickets 2 (new/redone voxel assets, including a tank model) and 3 (belt/pipe-to-machine connections) are still to come.
+- **Visual overhaul round 2 (in progress):** a second directly-requested pass, run as a 3-ticket epic. **Ticket 1 (sim) is done:** the pipe run's always-refilling off-map source is gone, replaced by a player-loadable `FluidTank` (120 units, one tile west of the run's head) filled with a `FillFluidTank` command and drained by the same pressure-equalization pass that moves fluid along the run — so vinegar is a consumable the player manages, exactly as tomatoes already were via the hopper. New wire surface for tickets 2/3: `fluid_tank_snapshot_json`, a `fluid_tanks` chunk array, and a `"fluid_tank"` hover tile. **Ticket 2 (assets) is done:** every machine kind in `data/machines.ron` now has a model of its own (the bottler and packer were still generic boxes), ticket 1's tank is drawn with a live level gauge and is loadable with a new **V** key, the pipe run and the crusher were redesigned, and the three bulk stages travel the belt as visibly *liquid* product. Ticket 3 (belt/pipe-to-machine connections) is still to come.
 - **Visual overhaul (done):** a dedicated pass on top of everything above, requested directly — see the log entry below for specifics. Root-caused and fixed the belt/pipe-to-machine seam (machine and hopper footings were inset from their own tile edges while belts and pipes already ran flush to theirs), added a dedicated connector fitting for the one pipe segment that actually feeds a machine, gave the hopper's status lamp real running/empty feedback, and made a couple of small typography fixes to the contract clipboard. Corner handling for belts/pipes stays deliberately undone — documented in `sim_core/src/sim/world.rs`'s module doc as needing a per-tile direction field in the sim's own snapshots before it's a rendering change at all, not something to speculatively half-build against a topology that doesn't exist yet. Not yet reviewed or merged.
 - **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, SPACE/SHIFT up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
 - **Lighting:** the sky is the real background (`BG_SKY`), not a flat colour — see the "empty void" DEVLOG entry below for why that matters. `scripts/screenshot-scene.sh --first-person` reviews that mode's lighting specifically.
@@ -42,6 +42,69 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-08 — Visual overhaul round 2, ticket 2: every machine has a face, and the sauce is liquid
+
+Presentation-only. `sim_core` and `data/` were not touched at all — every fact
+this ticket draws was already on the JSON wire, ticket 1 included. It answers
+four specific complaints from the project owner's live-demo review, and the
+method for all four was the one this project keeps re-learning: render the
+whole factory, look at it, change something, look again.
+
+**Two machines had no face.** `bottler` and `packer` had no entry in
+`main.gd`'s model table, so the chain's last two stages both drew the generic
+housing and the end of the line looked like the same machine twice. Both now
+have models built around what actually identifies them — bottles standing
+under a filling gantry with a capping head; a packing table with a stack of
+case blanks, an open case and a taping head. The packer is deliberately low
+and mostly *cardboard*, the one large warm matte surface in the factory, so
+it reads apart from its stainless neighbours at a glance.
+
+**The pipes and the crusher were redesigned, not tweaked.** Rendering them
+alone was not enough to see what was wrong; rendering the factory was. Each
+pipe tile carried four oversized rings, so a join stacked two of them and the
+run read as a row of bobbins rather than one pipe; the sight opening removed
+almost half the top wall, so the tube had no round silhouette left; and the
+dark support legs out-massed the run they carried. It is now one flange per
+tile, a short framed sight window, one slim centred stand — and the tube is
+the *brightest* metal in the palette with the fittings darker, which is
+backwards from convention and is the thing that finally let the eye follow
+the run from the tank to the mixer. The crusher's flared lip was, at scene
+scale, a flat plate laid over the machine. Replacing it with the obviously
+correct shape — a converging feed mouth — made it worse, because a shallow
+taper seen from a fixed oblique angle *is* a plate; that failed attempt is
+recorded in the generator so the next session doesn't reach for it. The
+version that works identifies the machine from the side instead: a squared
+frame with an open feed pocket you can see product sitting in, and big driven
+flywheels on the camera-facing face.
+
+**The tank ticket 1 built is now drawn**, with a level gauge slot down its
+front and a liquid column behind it scaled to the live fill — the same
+one-poll/one-scaled-body pattern the pipe run's liquid and the hopper's
+product level already use, deliberately reused a third time rather than
+reinvented. It also gained the thing ticket 1 didn't: a **key to fill it**.
+The shipped scene had no way to load the tank at all, so the chain silently
+stalled at the mixer with every belt past it running empty; **V** is now the
+fluid twin of SPACE, and the screenshot harness loads both consumables.
+
+**And the sauce is liquid.** Tomato paste, ketchup mix and finished ketchup
+travelled the belt as pails capped by a flat matte disc, which read as a
+painted lid. The pails are hollow now, with the product surface a voxel below
+the rim, and that surface takes `palette.ron`'s glossy `liquid` class — the
+material milestone 6 added for exactly this. Three new palette entries carry
+their own hue rather than being tinted in GDScript, because unlike a pipe's
+contents these are fixed by the recipe chain.
+
+One rename while in there: `item_sauce_pail` became `item_paste_pail`. The old
+name still referred to `tomato_sauce`, an item id deleted two epics ago — the
+exact drift that once shipped cardboard boxes down the belt.
+
+Verified headlessly by the full `scripts/verify-core-loop.sh` suite (`cargo
+test -p sim_core` unchanged and green, plus nine Godot scripts), with
+`test_machines.gd` extended to fail if *any* stage falls through to the
+generic model and `test_fluids.gd` extended to cover the tank's mesh,
+placement, live level and hover. Then reviewed the way it has to be: repeated
+rendered screenshots of the running factory, zoomed in, four iterations deep.
 
 ### 2026-09-07 — Visual overhaul round 2, ticket 1: the vinegar comes from a tank the player fills
 
