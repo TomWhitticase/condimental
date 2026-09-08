@@ -206,6 +206,12 @@ const MACHINE_MODELS := {
 	"bottler": "machine_bottler",
 	"packer": "machine_packer",
 	"aging_rack": "machine_aging_rack",
+	# Epic B's conveyor splitter. It is not a processing machine at all — it
+	# has no recipe, it is priced with the belts and it carries product at
+	# belt speed — but it has a footprint in `data/machines.ron` like every
+	# placed thing, and this table is keyed on that file's kinds, so it is
+	# where its model belongs. See `_build_splitter` for the live half.
+	"splitter": "machine_splitter",
 	# The chain's exit (the delivery-dock ticket). It is not a `chain_layout_json`
 	# stage — nothing in `data/recipes.ron` names it — so `_build_chain` never
 	# looks it up; `_build_dock` and the build menu's `_shop_asset_for` both do,
@@ -265,6 +271,39 @@ const HOPPER_FILL_FLOOR_Y := FLOOR_Y + HOPPER_FILL_FLOOR_VOXELS * VOXEL_UNIT
 ## Below this fill fraction the product body is hidden outright rather than
 ## drawn as a sub-voxel sliver — the same call FLUID_MIN_VISIBLE_PRESSURE makes.
 const HOPPER_MIN_VISIBLE_FILL := 0.02
+
+## --- The conveyor splitter (Epic B) ---------------------------------------
+##
+## The body is in MACHINE_MODELS above; this is its LIVE half — the lit arrow
+## that answers the one question a splitter's tile cannot: which of its two
+## outputs takes the next item (`SplitterSnapshot::next_output`, "the one
+## piece of state a player cannot infer from the tiles around it").
+##
+## **One asset, turned by a quarter turn, and the turn is the simulation's
+## own.** The model is authored pointing STRAIGHT, and the branch is shown by
+## rotating it 90° clockwise on top of the placement's own facing — because
+## that is literally how the simulation derives the second output
+## (`Direction::rotate_cw`, `sim_core/src/sim/splitter.rs`). A second,
+## separately-authored branch arrow could end up pointing somewhere the
+## simulation does not; a rotation of the first cannot.
+##
+## The arrow sits FLUSH in a groove cut into the deck (its floor is one voxel
+## down, hence SPLITTER_ARROW_FLOOR_VOXELS = BELT_SURFACE_VOXELS - 1) rather
+## than standing on it: items are drawn sliding across this tile at
+## BELT_SURFACE_Y, so anything proud of the deck gets driven through. Both
+## grooves are cut whether or not either is lit, which is what makes the
+## readout a PAIR OF POSITIONS rather than a colour (UI_UX.md §7) — mirrors
+## assets/voxels/generators/assets.rs's SPLITTER_ARROW_Z; change one, change
+## both.
+const SPLITTER_ASSET := "machine_splitter"
+const SPLITTER_ARROW_ASSET := "splitter_arrow"
+const SPLITTER_ARROW_FLOOR_VOXELS := BELT_SURFACE_VOXELS - 1
+const SPLITTER_ARROW_FLOOR_Y := FLOOR_Y + SPLITTER_ARROW_FLOOR_VOXELS * VOXEL_UNIT
+## Which side a snapshot's `next_output` names, as an index into its
+## `outputs` pair. Straight is 0, exactly as `sim::splitter::Side::index`
+## says — the array order is the simulation's, not this file's.
+const SPLITTER_STRAIGHT := 0
+const SPLITTER_BRANCH := 1
 
 ## The pipe run's fluid tank and the liquid standing in it (the "Visual
 ## overhaul round 2" epic — ticket 1 made the tank real in simulation, this
@@ -426,6 +465,12 @@ var _machine_gauges: Dictionary = {} # origin key -> Node3D, the live progress b
 var _machine_running: Dictionary = {} # origin key -> bool, to avoid redundant swaps
 var _item_nodes: Dictionary = {} # pooled item nodes, keyed per belt slot
 
+# --- Conveyor splitters (Epic B) ------------------------------------------
+# Keyed by origin tile like the machines above, and for the same reason: a
+# player may build any number of them.
+var _splitter_nodes: Dictionary = {} # origin key -> {"arrow": Node3D, "yaw": float}
+var _splitter_states: Dictionary = {} # origin key -> last snapshot (outputs + next_output)
+
 # --- Fluid networks (milestone 6, now one per connected run of pipe) -------
 # `fluid_snapshots_json` returns an ARRAY since ticket 1: a world has one
 # network per connected component of placed pipe, not one run. Geometry is
@@ -552,7 +597,11 @@ const SHOP_ICON_SIZE := Vector2(52, 52)
 ## How many catalog entries get a number key at all. Ten — 1..9 then 0, the
 ## row a Minecraft or Terraria hotbar occupies. A catalog longer than this
 ## simply leaves its tail click-only rather than inventing a second key
-## scheme (the shipped catalog is eleven kinds, so the dock is click-only).
+## scheme. The shipped catalog is TWELVE kinds since Epic B added the
+## splitter, so the last two (`packer` and `dock`) are click-only — which is
+## what this constant was written for and is checked by test_hotbar.gd
+## rather than assumed: a slot past the tenth prints no digit, no keycode
+## resolves to it, and it is still buyable and placeable from the build menu.
 ## The build menu prints the same key in each slot's corner, because it is
 ## the SAME index: menu slot N and hotbar slot N are one kind, in
 ## `data/shop.ron` order, so the two views never disagree.
@@ -1107,12 +1156,19 @@ func _belt_asset_for(tile: Vector2i, direction: String) -> String:
 ## Whether `tile` is covered by something a belt hands product to or takes it
 ## from — a machine, a hopper, a fluid tank or a dock, i.e. anything that is
 ## not itself a length of conveyor or pipe.
+##
+## A SPLITTER counts as conveyor here, not as a building, and that is the
+## point of it: it is a belt tile with a choice at the end (`sim_core/src/sim/
+## splitter.rs`), so a belt running into one hands over to another length of
+## conveyor and must NOT draw the hand-over-to-a-machine variant. Drawing
+## `belt_inlet` there would put a machine's dead-plate and guide kerbs in
+## front of what is just more belt.
 func _is_building_tile(tile: Vector2i) -> bool:
 	var placement := _placement_at_tile(tile)
 	if placement.is_empty():
 		return false
 	var kind := String(placement.get("kind", ""))
-	return kind != "belt" and kind != "pipe"
+	return kind != BELT_KIND and kind != PIPE_KIND and kind != SPLITTER_KIND
 
 
 ## Which model draws a pipe tile — the plain bore, the supply fitting where a
@@ -1152,6 +1208,10 @@ const PIPE_KIND := "pipe"
 const HOPPER_KIND := "hopper"
 const FLUID_TANK_KIND := "fluid_tank"
 const DOCK_KIND := "dock"
+## Epic B's splitter. A `data/machines.ron` kind like the three above, but
+## belt-LIKE rather than a buffer: it carries product at belt speed and hands
+## it on, so `_is_building_tile` deliberately groups it with the conveyor.
+const SPLITTER_KIND := "splitter"
 
 
 ## Rebuilds the entire rendered world from `world_layout_json` plus the
@@ -1196,6 +1256,8 @@ func _rebuild_world() -> void:
 	_machine_lamps.clear()
 	_machine_gauges.clear()
 	_machine_running.clear()
+	_splitter_nodes.clear()
+	_splitter_states.clear()
 	_hopper_nodes.clear()
 	_fluid_tank_nodes.clear()
 	_dock_nodes.clear()
@@ -1213,6 +1275,7 @@ func _rebuild_world() -> void:
 
 	_build_floor()
 	_seed_machine_states()
+	_seed_splitter_states()
 	_refresh_buffers()
 
 
@@ -1257,6 +1320,19 @@ func _build_placement(placement: Dictionary) -> void:
 				"lamp": lamp,
 				"stocked": true,
 			}
+		SPLITTER_KIND:
+			# Its own branch rather than falling through to the machine arm
+			# below: a splitter runs no recipe, so it has no idle/running
+			# state for a status lamp to swap and nothing for
+			# `_seed_machine_states` to find. What it has instead is one lit
+			# arrow, hidden until a snapshot says which way it points.
+			var arrow := _asset_node(SPLITTER_ARROW_ASSET)
+			arrow.name = "splitter_arrow_%s" % key
+			arrow.position = _footprint_centre(origin, size, SPLITTER_ARROW_FLOOR_Y)
+			arrow.rotation.y = yaw
+			arrow.visible = false
+			_world_root.add_child(arrow)
+			_splitter_nodes[key] = {"arrow": arrow, "yaw": yaw}
 		_:
 			# A machine: a recipe-running kind. Its status lamp and (for the
 			# kinds that declare one) its progress gauge.
@@ -1351,6 +1427,75 @@ func _seed_machine_states() -> void:
 			"input": [],
 			"output": [],
 		}
+
+
+## Fills `_splitter_states` (and points every arrow) for every placed
+## splitter, before any item has moved — `_seed_machine_states`'s twin, and
+## it exists for the same reason: `dirty_chunk_ids` only reports chunks
+## something CHANGED in, so a splitter that has not yet passed an item
+## produces no snapshot and its arrow would stay dark until it did. Which
+## way a freshly placed splitter will deal its first item is knowable (it is
+## `Side::default()`, straight), so it is asked for rather than guessed at.
+func _seed_splitter_states() -> void:
+	for placement in _placements:
+		if String(placement.get("kind", "")) != SPLITTER_KIND:
+			continue
+		var origin := _placement_origin(placement)
+		var parsed = JSON.parse_string(sim.query_tile_json(origin.x, origin.y))
+		if parsed == null or parsed.get("kind") != SPLITTER_KIND:
+			continue
+		_apply_splitter_state(_tile_key(origin), parsed)
+
+
+## Points one splitter's arrow at the output its next item will actually
+## reach, and remembers the snapshot for the hover tooltip.
+##
+## **Why this is not simply `next_output`.** The raw field is which side gets
+## FIRST REFUSAL, and `sim_core/src/sim/splitter.rs`'s fallback rule is that
+## a side which cannot take the item passes it to the other one in the same
+## tick — so a splitter whose branch was never built reports `"branch"`
+## forever while every item goes straight through it. An arrow drawn from
+## that field alone would point at bare floor while product sailed past it in
+## the other direction: a readout lying about its own mechanism, which is the
+## thing this codebase already refused to build for the fluid tank's head and
+## the dock's fill level. So the ONE case the wire can settle is settled
+## here — a due side with no output tile (`outputs[i] == null`) hands to the
+## other — and it is settled from the `outputs` pair the simulation reports
+## precisely so a renderer need not re-derive where they point.
+##
+## What this deliberately cannot show is a side that is built but momentarily
+## FULL, which also falls back. That is transient and invisible on the wire;
+## an unbuilt branch is durable and is the mistake a player wants told about.
+##
+## With neither output connected nothing can leave at all, and the arrow is
+## hidden outright — a shape difference (no lit groove anywhere) for a
+## splitter that is a dead end.
+func _apply_splitter_state(key: String, snapshot: Dictionary) -> void:
+	_splitter_states[key] = snapshot
+	var nodes: Dictionary = _splitter_nodes.get(key, {})
+	if nodes.is_empty():
+		return
+	var arrow: Node3D = nodes["arrow"]
+	var side := _splitter_effective_side(snapshot)
+	arrow.visible = side >= 0
+	if side >= 0:
+		arrow.rotation.y = float(nodes["yaw"]) + (PI * 0.5 if side == SPLITTER_BRANCH else 0.0)
+
+
+## Which output the next item off `snapshot` will reach — SPLITTER_STRAIGHT,
+## SPLITTER_BRANCH, or -1 when neither side is connected to anything. Pure,
+## so a test can drive it with a hand-built snapshot.
+func _splitter_effective_side(snapshot: Dictionary) -> int:
+	var outputs: Array = snapshot.get("outputs", [])
+	var due := SPLITTER_BRANCH if String(snapshot.get("next_output", "straight")) == "branch" else SPLITTER_STRAIGHT
+	var other := SPLITTER_STRAIGHT if due == SPLITTER_BRANCH else SPLITTER_BRANCH
+	if outputs.size() < 2:
+		return -1
+	if outputs[due] != null:
+		return due
+	if outputs[other] != null:
+		return other
+	return -1
 
 
 # --------------------------------------------------------------------------
@@ -4072,33 +4217,22 @@ func _apply_dirty_chunks() -> void:
 
 
 func _render_snapshot(snapshot: Dictionary) -> void:
-	var seen := {}
-
 	var belts: Array = snapshot.get("belts", [])
 	for belt in belts:
-		var tile := _pair_to_tile(belt.get("tile"))
-		# A belt is ONE TILE now (`start_tile`/`length_tiles` are gone), and
-		# it carries toward its own `direction` rather than always along +X —
-		# so an item's distance runs along that facing, which is what lets a
-		# line turn a corner and still look like one line.
-		var offset := _direction_offset(String(belt.get("direction", "east")))
-		var items: Array = belt.get("items", [])
-		for i in range(items.size()):
-			var pair: Array = items[i]
-			var key := "belt_%d_%d_%d" % [tile.x, tile.y, i]
-			seen[key] = true
-			var node := _item_node_for(key, String(pair[0]))
-			node.visible = true
-			var distance := float(pair[1])
-			node.position = Vector3(
-				(float(tile.x) + float(offset.x) * distance) * TILE,
-				BELT_SURFACE_Y,
-				(float(tile.y) + float(offset.y) * distance) * TILE
-			)
+		_render_carried_items(belt, "belt")
 
-	for key in _item_nodes.keys():
-		if not seen.has(key):
-			_item_nodes[key]["node"].visible = false
+	# A splitter carries its contents in an ordinary one-tile belt segment
+	# (`sim_core/src/sim/splitter.rs`), and `SplitterSnapshot` is
+	# `BeltSnapshot` plus the two facts only a splitter has — so the items on
+	# one are drawn by the same function, from the same `items` field, at the
+	# same running height. That is not a shortcut: an item takes exactly as
+	# long to cross a splitter as to cross the belt tile it replaced, and it
+	# should look like it.
+	var splitters: Array = snapshot.get("splitters", [])
+	for splitter in splitters:
+		var tile := _pair_to_tile(splitter.get("tile"))
+		_render_carried_items(splitter, "splitter")
+		_apply_splitter_state(_tile_key(tile), splitter)
 
 	var machines: Array = snapshot.get("machines", [])
 	for machine in machines:
@@ -4108,6 +4242,51 @@ func _render_snapshot(snapshot: Dictionary) -> void:
 		var key := _tile_key(_pair_to_tile(machine.get("tile")))
 		_machine_states[key] = machine
 		_set_machine_running(key, machine.get("process") != null)
+
+
+## Stands one item node on every slot of a conveyor tile — a belt or a
+## splitter, whose `tile`/`direction`/`items` fields are identical on the
+## wire. `prefix` keeps the two kinds' pooled node keys apart so a splitter
+## replacing a belt on the same tile cannot inherit its items.
+##
+## A tile is ONE TILE and carries toward its own `direction` rather than
+## always along +X, so an item's distance runs along that facing — which is
+## what lets a line turn a corner (or fork) and still look like one line.
+##
+## **Emptied slots are hidden per TILE, not per pass, and that is a fix
+## rather than a style.** This used to collect every key it had drawn into
+## one `seen` set and then hide every pooled node missing from it — but
+## `_render_snapshot` runs once per DIRTY CHUNK, so with two chunks dirty the
+## second pass hid everything the first had just drawn. It went unnoticed
+## while every factory fitted in one chunk and was caught the moment a
+## splitter branched a line across a chunk boundary: the branch belt held
+## eight tomatoes in the simulation and rendered empty. A tile knows exactly
+## how many items it has, so the slots past that are the ones to hide, and no
+## other tile's nodes are any of this tile's business.
+func _render_carried_items(carrier: Dictionary, prefix: String) -> void:
+	var tile := _pair_to_tile(carrier.get("tile"))
+	var offset := _direction_offset(String(carrier.get("direction", "east")))
+	var items: Array = carrier.get("items", [])
+	for i in range(items.size()):
+		var pair: Array = items[i]
+		var key := "%s_%d_%d_%d" % [prefix, tile.x, tile.y, i]
+		var node := _item_node_for(key, String(pair[0]))
+		node.visible = true
+		var distance := float(pair[1])
+		node.position = Vector3(
+			(float(tile.x) + float(offset.x) * distance) * TILE,
+			BELT_SURFACE_Y,
+			(float(tile.y) + float(offset.y) * distance) * TILE
+		)
+	# Slots this tile used to fill and no longer does. Pooled keys are handed
+	# out from 0 upward, so the first gap is the end.
+	var spare := items.size()
+	while true:
+		var key := "%s_%d_%d_%d" % [prefix, tile.x, tile.y, spare]
+		if not _item_nodes.has(key):
+			break
+		_item_nodes[key]["node"].visible = false
+		spare += 1
 
 
 ## Pooled per belt slot. If the slot's item type changes (it doesn't in the
@@ -4206,6 +4385,8 @@ func _hover_text_at_tile(tile: Vector2i) -> String:
 	match kind:
 		BELT_KIND:
 			return "belt\ncarries %s" % direction
+		SPLITTER_KIND:
+			return _splitter_hover_text(key, direction)
 		PIPE_KIND:
 			return _pipe_hover_text(tile, direction)
 		HOPPER_KIND:
@@ -4215,6 +4396,46 @@ func _hover_text_at_tile(tile: Vector2i) -> String:
 		DOCK_KIND:
 			return _dock_hover_text(key, direction)
 	return _machine_hover_text(key, kind, direction)
+
+
+## What one splitter's tooltip says. Three lines, because a splitter has
+## exactly three facts and one of them is the reason it exists: where each
+## output goes, and which one takes the next item.
+##
+## Both outputs are named even when one is `null`, and an unbuilt one is
+## called out in words rather than left off — "branch: not connected" is the
+## answer to "why is everything going straight", which is the single most
+## likely question a player has about a splitter they just placed. The NEXT
+## line reports the side the item will actually reach (see
+## `_apply_splitter_state` for why that is not always `next_output`) and says
+## so when the due side is being passed over.
+func _splitter_hover_text(origin_key: String, direction: String) -> String:
+	var snapshot: Dictionary = _splitter_states.get(origin_key, {})
+	if snapshot.is_empty():
+		return "splitter\nfacing %s" % direction
+	var outputs: Array = snapshot.get("outputs", [null, null])
+	var side := _splitter_effective_side(snapshot)
+	var due := SPLITTER_BRANCH if String(snapshot.get("next_output", "straight")) == "branch" else SPLITTER_STRAIGHT
+	var next_line := "next: nowhere — neither output is connected"
+	if side >= 0:
+		next_line = "next: %s" % ("branch" if side == SPLITTER_BRANCH else "straight")
+		if side != due:
+			next_line += " (%s not connected)" % ("branch" if due == SPLITTER_BRANCH else "straight")
+	return "splitter  ·  facing %s\n%s\nstraight: %s\nbranch: %s" % [
+		direction,
+		next_line,
+		_splitter_output_text(outputs, SPLITTER_STRAIGHT),
+		_splitter_output_text(outputs, SPLITTER_BRANCH),
+	]
+
+
+## One output's tile, or "not connected" — the state `outputs[i] == null`
+## means, which is "nothing that can accept an item stands there".
+func _splitter_output_text(outputs: Array, side: int) -> String:
+	if side >= outputs.size() or outputs[side] == null:
+		return "not connected"
+	var tile := _pair_to_tile(outputs[side])
+	return "%d, %d" % [tile.x, tile.y]
 
 
 ## The recipe/progress/input/output text for one machine, keyed by its origin

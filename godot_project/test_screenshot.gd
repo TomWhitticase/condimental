@@ -109,6 +109,7 @@ var _hover_vat := false
 var _hover_hopper := false
 var _hover_tank := false
 var _hover_dock := false
+var _hover_splitter := false
 var _shop := false
 var _contracts := false
 var _hotbar_key := ""
@@ -150,6 +151,7 @@ func _initialize() -> void:
 	_hover_hopper = args.has("--hover-hopper")
 	_hover_tank = args.has("--hover-tank")
 	_hover_dock = args.has("--hover-dock")
+	_hover_splitter = args.has("--hover-splitter")
 	_shop = args.has("--shop")
 	_contracts = args.has("--contracts")
 	if _contracts:
@@ -195,6 +197,8 @@ func _build_fixture() -> void:
 			Layouts.build_multi_tile(_main.sim)
 		"rack":
 			Layouts.build_aging_rack(_main.sim)
+		"splitter":
+			Layouts.build_splitter_line(_main.sim)
 		"chain":
 			Layouts.build_reference_line(_main.sim)
 		_:
@@ -341,6 +345,12 @@ func _hover_over_dock() -> void:
 		_hover_over_tile(tile)
 
 
+func _hover_over_splitter() -> void:
+	var tile := _first_tile_of_kind("splitter")
+	if tile != HOVER_NONE:
+		_hover_over_tile(tile)
+
+
 ## Loads both consumables and ticks, so the shot shows product moving rather
 ## than an idle factory. Whatever was built is what runs; a fixture with no
 ## hopper simply has nothing to meter out.
@@ -350,6 +360,13 @@ func _run_chain_forward() -> void:
 		_main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
 		for j in range(POPULATE_TICKS_PER_SPAWN):
 			_main.sim.tick()
+			# Applied EVERY tick, not once at the end, because `World::tick`
+			# clears its dirty set at the START of each tick — so a batched
+			# run reports only whatever the very last tick happened to touch
+			# and the shot is drawn from that. It photographed a branch belt
+			# as empty while the simulation held eight tomatoes on it, which
+			# is exactly the kind of lie this whole script exists to catch.
+			_main._apply_dirty_chunks()
 	_main._apply_dirty_chunks()
 	_main._refresh_buffers()
 	_main._update_fluid_network()
@@ -509,6 +526,8 @@ func _process(_delta: float) -> bool:
 		_hover_over_fluid_tank()
 	if _frames == 2 and _hover_dock:
 		_hover_over_dock()
+	if _frames == 2 and _hover_splitter:
+		_hover_over_splitter()
 	if _frames == 2 and _ghost_kind != "":
 		_enter_ghost_mode()
 	if _frames == 2 and _remove_mode:

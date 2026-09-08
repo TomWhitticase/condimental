@@ -104,6 +104,32 @@ func _initialize() -> void:
 		])
 		return
 
+	# The catalog OUTGREW the number row when Epic B priced the splitter (it is
+	# twelve kinds against ten keys), so the overflow this constant was always
+	# written for is now live rather than hypothetical. It has to degrade the
+	# way the constant promises: the tail is keyless and click-only, and — the
+	# part worth checking rather than assuming — no keycode resolves to a slot
+	# that prints no key, which would be a number key silently selecting the
+	# wrong kind.
+	if entries.size() <= main.SHOP_HOTKEY_SLOTS:
+		print("HOTBAR_NOTE: the catalog (%d) no longer overflows the %d hotkey slots" % [
+			entries.size(), main.SHOP_HOTKEY_SLOTS,
+		])
+	for keycode in main.HOTBAR_KEYCODES:
+		var index: int = main._hotbar_index_for_keycode(keycode)
+		if index < 0 or index >= main.SHOP_HOTKEY_SLOTS:
+			_fail("keycode %d resolves to hotbar slot %d, outside the %d keyed slots" % [
+				keycode, index, main.SHOP_HOTKEY_SLOTS,
+			])
+			return
+	for index in range(main.SHOP_HOTKEY_SLOTS, entries.size()):
+		if main._hotbar_key_label(index) != "":
+			_fail("slot %d is past the key row but still prints a key" % index)
+			return
+		if main.HOTBAR_KEYCODES.size() > index:
+			_fail("slot %d is past the key row but a keycode exists for it" % index)
+			return
+
 	var strip: Node = main._hotbar_panel.find_child("HotbarSlots", true, false)
 	if strip == null:
 		_fail("no HotbarSlots container found under Hotbar")

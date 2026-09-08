@@ -29,6 +29,14 @@ pub const ASSETS: &[Asset] = &[
     // simulation's own layout — see `belt_inlet`'s doc.
     Asset { name: "belt_inlet", build: belt_inlet },
     Asset { name: "belt_outlet", build: belt_outlet },
+    // Epic B's conveyor splitter and the lit arrow that says which of its two
+    // outputs takes the next item. Grouped with the belts rather than with
+    // the machines below because that is what a splitter is (see
+    // `machine_splitter`); the `machine_` prefix on the body is only there
+    // because `main.gd`'s MACHINE_MODELS keys `data/machines.ron` kinds, and
+    // a splitter has a footprint in that file like every other placed thing.
+    Asset { name: "machine_splitter", build: machine_splitter },
+    Asset { name: "splitter_arrow", build: splitter_arrow },
     Asset { name: "machine", build: machine },
     // The kinds `data/machines.ron` names that have a silhouette of their
     // own (the "Machines improvement" milestone, ticket 4). `machine` above
@@ -236,6 +244,264 @@ fn belt_body(m: &mut VoxModel, p: &Palette) {
             m.cuboid((x, x), (7, 24), (9, 9), p.idx("rubber_dark"));
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Conveyor splitter (Epic B, ticket 2 — the presentation half)
+// ---------------------------------------------------------------------------
+//
+// `sim_core::sim::splitter` made a line able to fork; these two assets are
+// what a player actually sees when it does. They live in the conveyor
+// section rather than with the machines on purpose: a splitter is priced,
+// sized and timed as a belt tile (`data/shop.ron` lists it with the
+// infrastructure, `data/machines.ron` makes it 1x1, and it carries product
+// in an ordinary one-tile `BeltSegment` so an item crosses it in the same 50
+// ticks) — it is a belt tile with a choice at the end of it, and the model
+// says so.
+//
+// **THE GEOMETRY, in this file's coordinates.** Every asset here is authored
+// facing EAST, and east is vox +X. The splitter's second output is one
+// quarter turn CLOCKWISE from its facing (`splitter.rs` owns that rule), so
+// for an east-facing splitter the branch runs SOUTH — and south is world -Z,
+// which this file's junction header establishes is vox **+Y**. So the model
+// is a T laid out as: intake from -X, straight exit at +X, branch exit at
+// +Y, and a closed rail along -Y. That closed rail is the near, camera-facing
+// edge (vox low-Y is world +Z), which is the right side to close: it is a
+// belt-height frame, so it frames the deck without standing in front of it.
+//
+// **WHY THE READOUT IS INLAID IN THE DECK.** `SplitterSnapshot::next_output`
+// is the one piece of a splitter's state a player cannot infer from the tiles
+// around it, and it changes with every item, so it needs to be legible at a
+// glance and it must never be in the way of the product crossing the table.
+// A raised arm or a swinging gate is both: at this scale it would occlude
+// the very lane it describes, and items are drawn sliding across the deck at
+// `BELT_SURFACE_Z`, so anything standing proud of the table gets driven
+// through. So both output directions are cut into the table as **arrow
+// grooves** and the live asset ([`splitter_arrow`]) fills one of them flush,
+// emissive — the fifth use of the "one flat slab, positioned by main.gd from
+// live data" mechanism `pipe_fluid`, `hopper_fill`, `fluid_tank_fill` and
+// `aging_rack_gauge` already share, and the first that carries a DIRECTION
+// rather than a level.
+//
+// The dark groove is not decoration either: it is what makes the readout a
+// pair of positions rather than a colour (UI_UX.md §7). An empty groove and a
+// lit one are two different shapes on the deck, so "which way next" survives
+// being read in one glance, in a screenshot, or by someone who cannot tell
+// amber from steel.
+
+/// The steel diverter table in the middle of a splitter, in vox coordinates.
+/// Deliberately the same span on both axes: the tile has two outputs at
+/// right angles and neither is the special one.
+const SPLITTER_TABLE: (i32, i32) = BELT_LANE;
+
+/// Floor of the arrow grooves — one voxel below the deck's top, so a groove
+/// is a real recess and [`splitter_arrow`] sits flush in it rather than
+/// standing on the table. `main.gd` mirrors this as
+/// SPLITTER_ARROW_FLOOR_VOXELS; change one, change both.
+pub const SPLITTER_ARROW_Z: i32 = BELT_SURFACE_Z;
+
+/// The cells of the STRAIGHT-through arrow (pointing +X), in vox (x, y).
+///
+/// It sits **at the exit lip, not at the tile centre**, and that is what
+/// makes one asset serve both outputs: two arrows drawn from the middle of
+/// the table cross each other near the centre and render as one unreadable
+/// blob (built, looked at, rejected — UI_UX.md §2b point 9's rule that the
+/// render, not the generator, is what you review). Pushed out to the lips
+/// the two grooves are disjoint, and each one sits where the product it
+/// describes actually leaves.
+///
+/// The branch arrow is this one rotated a quarter turn clockwise about the
+/// tile centre — `(dx, dy) -> (-dy, dx)` — computed by [`splitter_arrow_cells`]
+/// rather than typed out a second time, for exactly the reason the simulation
+/// derives the branch output from the facing instead of storing it: two
+/// hand-written copies of one quarter turn are two things that can disagree.
+fn splitter_straight_arrow() -> Vec<(i32, i32)> {
+    let mut cells = Vec::new();
+    // Shaft.
+    for x in 22..=26 {
+        for y in 14..=17 {
+            cells.push((x, y));
+        }
+    }
+    // Head, tapering to the lip.
+    for (i, x) in (27..=30).enumerate() {
+        let half = 5 - i as i32;
+        for y in (16 - half)..=(15 + half) {
+            cells.push((x, y));
+        }
+    }
+    cells
+}
+
+/// One quarter turn clockwise about the tile centre (15.5, 15.5), the same
+/// turn `Direction::rotate_cw` applies — `(dx, dy) -> (-dy, dx)` — applied
+/// `turns` times.
+fn splitter_arrow_cells(turns: u32) -> Vec<(i32, i32)> {
+    let mut cells = splitter_straight_arrow();
+    for _ in 0..turns {
+        cells = cells
+            .into_iter()
+            .map(|(x, y)| {
+                // Doubled coordinates so the half-voxel centre stays exact.
+                let (dx, dy) = (2 * x - 31, 2 * y - 31);
+                (((-dy) + 31) / 2, (dx + 31) / 2)
+            })
+            .collect();
+    }
+    cells
+}
+
+/// A conveyor splitter: one belt in, two belts out.
+///
+/// See this section's header for the layout and for why the next-output
+/// readout is inlaid in the deck rather than standing on it.
+pub fn machine_splitter(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 16]);
+    let last = TILE_VOXELS as i32 - 1;
+    let (l0, l1) = BELT_LANE;
+    let (t0, t1) = SPLITTER_TABLE;
+    let deck = (BELT_SURFACE_Z - 1, BELT_SURFACE_Z);
+
+    // Legs: the belt's own four, plus two more carrying the branch stub, so
+    // the tile stands on something wherever it has deck.
+    for (x0, x1) in [(2, 4), (27, 29)] {
+        for (y0, y1) in [(5, 7), (24, 26)] {
+            m.cuboid((x0, x1), (y0, y1), (0, 4), p.idx("steel_dark"));
+        }
+    }
+    for (x0, x1) in [(4, 6), (25, 27)] {
+        m.cuboid((x0, x1), (28, 30), (0, 4), p.idx("steel_dark"));
+    }
+
+    // Side frames at exactly the belt's own height, so a splitter dropped
+    // into a run reads as part of the line. The -Y rail is unbroken (that
+    // side has no output); the +Y one is only the two stubs either side of
+    // the branch mouth, and the branch's own rails carry on from them.
+    m.cuboid((0, last), (4, 6), (4, 8), p.idx("steel_dark"));
+    for (x0, x1) in [(0, l0 - 1), (l1 + 1, last)] {
+        m.cuboid((x0, x1), (25, 27), (4, 8), p.idx("steel_dark"));
+    }
+    for (x0, x1) in [(4, 6), (25, 27)] {
+        m.cuboid((x0, x1), (25, last), (4, 8), p.idx("steel_dark"));
+    }
+
+    // Hazard striping on the outer face of the rails the camera can see
+    // (UI_UX.md §3), matching `belt_body`'s.
+    m.hazard_stripe_x((0, last), (4, 4), (5, 6), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+
+    // Rollers: one pair under the through lane, one under the branch stub.
+    for x in [3, 28] {
+        m.cylinder_y((x, 7), 2.5, (l0, l1), p.idx("brass"));
+    }
+    m.cylinder_x((28, 7), 2.5, (l0, l1), p.idx("brass"));
+
+    // Running surfaces. Rubber where product travels in a straight line —
+    // the intake, the straight exit and the branch stub — with the same
+    // cleat rhythm the belt has, so the three stubs line up with whatever
+    // belt tile they are laid against.
+    for (x0, x1) in [(0, t0 - 1), (t1 + 1, last)] {
+        m.cuboid((x0, x1), (l0, l1), deck, p.idx("rubber"));
+        for x in x0..=x1 {
+            if x.rem_euclid(8) < 2 {
+                m.cuboid((x, x), (l0, l1), (deck.1, deck.1), p.idx("rubber_dark"));
+            }
+        }
+    }
+    m.cuboid((l0, l1), (t1 + 1, last), deck, p.idx("rubber"));
+    for y in (t1 + 1)..=last {
+        if y.rem_euclid(8) < 2 {
+            m.cuboid((l0, l1), (y, y), (deck.1, deck.1), p.idx("rubber_dark"));
+        }
+    }
+
+    // The diverter table itself: stainless, because it is the one part of a
+    // splitter that is a mechanism rather than a surface, and it is what
+    // makes the tile tell itself apart from the belt run it sits in.
+    //
+    // `steel` and NOT `steel_light`, which is what it was first built with:
+    // rendered in the scene the palette's brightest metal is a blown-out
+    // white square filling most of the tile, and everything cut into it
+    // (both arrows, the seam) washes out against it. Mid steel keeps the
+    // "this is machined, that is rubber" contrast and gives the grooves
+    // something to be dark against.
+    m.cuboid((t0, t1), (t0, t1), deck, p.idx("steel"));
+    // Seam and corner bolts, so the table reads as a fabricated plate rather
+    // than as a hole in the belt. One voxel, at the deck's own top: any more
+    // and it becomes a lip for product to catch on.
+    for i in t0..=t1 {
+        for (x, y) in [(i, t0), (i, t1), (t0, i), (t1, i)] {
+            m.set(x, y, deck.1, p.idx("steel_dark"));
+        }
+    }
+    for (x, y) in [(t0 + 2, t0 + 2), (t1 - 2, t0 + 2), (t0 + 2, t1 - 2), (t1 - 2, t1 - 2)] {
+        m.set(x, y, deck.1, p.idx("steel_dark"));
+    }
+
+    // Brass threshold at each of the two exit lips — the same accent every
+    // other "product passes through here" fitting in this factory carries,
+    // and here it is what marks the tile as having TWO ways out.
+    m.cuboid((last, last), (l0, l1), (deck.1, deck.1), p.idx("brass"));
+    m.cuboid((l0, l1), (last, last), (deck.1, deck.1), p.idx("brass"));
+
+    // The two arrow grooves, one at each exit lip. Cut, not painted: a
+    // painted arrow is a decal the deck's own shading flattens, where a
+    // recess keeps an edge at every angle and gives `splitter_arrow`
+    // somewhere to sit flush instead of standing in the product's way.
+    //
+    // Their floor is `steel_dark`, and that is the one colour in the palette
+    // that works here: an arrow spans the machined table AND the rubber lane
+    // it discharges onto, so the near-black used inside every other opening
+    // in this factory would vanish on the rubber and the bright steel used
+    // to frame them would vanish on the table. Mid-dark reads against both.
+    // Brass was tried first, on the reasoning that it is this factory's
+    // "product passes through here" accent, and the render settled it: brass
+    // and the lit amber are the same colour at scene scale, so the readout
+    // had two arrows and no way to tell which one was on.
+    //
+    // Both grooves are cut whether or not either is lit, which is the whole
+    // of UI_UX.md §7's never-colour-alone rule here: what the player reads is
+    // WHICH OF TWO POSITIONS is glowing, and both positions are visible
+    // shapes on the deck even with nothing lit at all.
+    for turns in [0, 1] {
+        for (x, y) in splitter_arrow_cells(turns) {
+            m.erase(x, y, SPLITTER_ARROW_Z);
+            m.set(x, y, SPLITTER_ARROW_Z - 1, p.idx("steel_dark"));
+        }
+    }
+
+    // Drive cabinet on the near (-Y) edge, ahead of the rail and clear of
+    // every lane: the one piece of the tile that says a splitter is powered
+    // kit rather than a bend in a conveyor. Kept below the deck's own height
+    // so it cannot stand in front of the table it belongs to.
+    m.cuboid((21, 28), (0, 3), (0, 7), p.idx("paint_blue"));
+    m.cuboid((21, 28), (0, 3), (8, 8), p.idx("steel_light"));
+    m.cuboid((23, 26), (0, 0), (3, 5), p.idx("status_green"));
+    m
+}
+
+/// The lit arrow standing in one of the splitter's two deck grooves — the
+/// live half of the readout, and the fifth asset built to the same
+/// one-flat-slab pattern (`pipe_fluid`, `hopper_fill`, `fluid_tank_fill`,
+/// `aging_rack_gauge`).
+///
+/// **One voxel tall, and authored in the STRAIGHT position only.** `main.gd`
+/// turns this node a further quarter turn clockwise to show the branch —
+/// which is not a rendering trick but the simulation's own rule reused: the
+/// branch output *is* the facing rotated by `Direction::rotate_cw`, so the
+/// arrow that points at it is the straight arrow rotated by the same quarter
+/// turn. One asset, one rotation, and no second arrow that could end up
+/// pointing somewhere the simulation does not.
+///
+/// `status_amber`, and therefore the `emissive` class, for
+/// `aging_rack_gauge`'s reason: this is a status readout, which is what
+/// UI_UX.md §7 reserves saturated colour for, and a deck inlay that did not
+/// emit would be a dark shape on a dark shape at scene scale.
+pub fn splitter_arrow(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 1]);
+    for (x, y) in splitter_straight_arrow() {
+        m.set(x, y, 0, p.idx("status_amber"));
+    }
+    m
 }
 
 // ---------------------------------------------------------------------------
@@ -2036,6 +2302,66 @@ mod tests {
                 last_x: TILE_VOXELS as i32 * 2 - 1,
             },
         ]
+    }
+
+    /// The splitter's own geometry claims — it is deliberately NOT in
+    /// `machines()` above, because it is not a housed machine: it has no
+    /// hooded infeed and no discharge doorway, for the same reason a belt
+    /// tile has neither. What it has instead is three open lanes and one
+    /// closed rail, and two arrow grooves that must be genuinely cut rather
+    /// than painted (the same distinction the junction tests exist for: a
+    /// mesh cannot tell a recess from a rectangle painted dark, and neither
+    /// can a screenshot at scene scale).
+    #[test]
+    fn the_splitter_is_open_on_three_sides_and_closed_on_the_fourth() {
+        let p = palette();
+        let m = machine_splitter(&p);
+        let last = TILE_VOXELS as i32 - 1;
+        let mid = (BELT_LANE.0 + BELT_LANE.1) / 2;
+        let deck = BELT_SURFACE_Z;
+
+        // Intake (-X), straight output (+X) and branch output (+Y): a lane
+        // runs out to the tile edge at the belt's own running height on all
+        // three, so product never meets a wall.
+        assert!(m.filled(0, mid, deck), "the -X intake lane stops short of the tile edge");
+        assert!(m.filled(last, mid, deck), "the +X straight output stops short of the tile edge");
+        assert!(m.filled(mid, last, deck), "the +Y branch output stops short of the tile edge");
+        // ...and nothing stands in any of them.
+        for z in (deck + 1)..=(deck + 4) {
+            assert!(!m.filled(0, mid, z), "something blocks the intake lane");
+            assert!(!m.filled(last, mid, z), "something blocks the straight output");
+            assert!(!m.filled(mid, last, z), "something blocks the branch output");
+        }
+        // The fourth side is a rail, not an output. It is BELOW the deck, as
+        // a belt's own side frame is, so it closes the tile without standing
+        // in front of the table the camera has to see into.
+        assert!(m.filled(mid, 5, 6), "the -Y side has no rail, so the tile reads as open on all four sides");
+        assert!(!m.filled(mid, 5, deck + 1), "the -Y rail stands above the deck and would occlude the table");
+
+        // Both arrow grooves are real recesses, one voxel down, and they do
+        // not overlap — two arrows crossing at the tile centre render as one
+        // unreadable blob (see `splitter_straight_arrow`).
+        let straight: std::collections::BTreeSet<(i32, i32)> =
+            splitter_arrow_cells(0).into_iter().collect();
+        let branch: std::collections::BTreeSet<(i32, i32)> =
+            splitter_arrow_cells(1).into_iter().collect();
+        assert!(!straight.is_empty(), "the straight arrow is empty");
+        assert_eq!(straight.len(), branch.len(), "a quarter turn must not change an arrow's size");
+        assert!(
+            straight.is_disjoint(&branch),
+            "the two arrow grooves overlap, so neither reads as an arrow"
+        );
+        for &(x, y) in straight.union(&branch) {
+            assert!(!m.filled(x, y, SPLITTER_ARROW_Z), "the arrow groove at {x},{y} was painted, not cut");
+            assert!(m.filled(x, y, SPLITTER_ARROW_Z - 1), "the arrow groove at {x},{y} has no floor to sit on");
+        }
+
+        // The lit slab fills exactly the straight groove, so it sits flush
+        // rather than standing proud of the deck in the product's way.
+        let arrow = splitter_arrow(&p);
+        let lit: std::collections::BTreeSet<(i32, i32)> =
+            arrow.voxels.keys().map(|&(x, y, _)| (x as i32, y as i32)).collect();
+        assert_eq!(lit, straight, "the lit arrow does not match the groove cut for it");
     }
 
     /// The one building at the end of the line that takes product in and

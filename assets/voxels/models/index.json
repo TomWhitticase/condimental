@@ -97,6 +97,11 @@
     "metal",
     "emissive"
   ],
+  "machine_splitter": [
+    "matte",
+    "metal",
+    "emissive"
+  ],
   "pipe": [
     "metal"
   ],
@@ -108,5 +113,8 @@
   ],
   "pipe_source": [
     "metal"
+  ],
+  "splitter_arrow": [
+    "emissive"
   ]
 }

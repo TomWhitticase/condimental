@@ -31,7 +31,7 @@ below is history and should only ever be appended to.)*
 - **Real placement (DONE, both halves):** the world starts **empty**, with `STARTING_MONEY` (200) and a bare floor, and the player builds everything on it. `Place`/`Remove`/`Rotate` commands put things down out of the shop inventory, take them back, and turn them 90° clockwise; a belt carries toward the way it faces, a machine accepts on the face opposite the way it faces and discharges on the face it points at, and a line may turn corners. The hopper, the fluid tank and the dock are ordinary placeable kinds now, and a world may hold any number of each. The scene rebuilds itself from `world_layout_json` after every place/remove/rotate, draws every tile at the facing the player gave it, and has a real build mode: right-click an owned build-menu slot (or shift+number) to pick it up, a translucent ghost follows the cursor and says **✔ PLACE** / **✗ BLOCKED** / **✗ NONE OWNED** in a glyph and a word as well as a colour, **R** rotates the ghost or whatever is under the cursor, **X** toggles remove mode, **ESC** cancels, left-click confirms. The belt junction art stays east-only and falls back to the plain tile for the other three facings — a known, tested, accepted gap; a four-directional art pass is a separate ticket. *(The balance caveat this entry used to carry — 200 could not reach a first payout — was fixed by the inventory-hotbar work below; `STARTING_MONEY` is 3000 now.)*
 - **Inventory hotbar (done):** an always-visible strip along the bottom edge, one slot per `data/shop.ron` kind, showing what the player is carrying. **Number keys 1-9 and 0 select a slot and put that kind in your hand** — in either view mode, with or without a menu open, which is the behaviour change: until now nothing at all was reachable without opening the build menu first. Pressing the selected slot's key again puts it down, mirroring ESC. Buying stays a separate verb in the build menu (**E**), on a slot's left click or SHIFT+number. A kind you own none of is an empty socket rather than a disabled button, selection is signalled four ways at once (bigger slot, hazard-yellow frame, caret, brightened key digit) plus Minecraft's fading name flyout, and the whole strip is driven from `shop_snapshot_json` like the menu it now fronts. **Starting money went from 200 to 3000 in the same ticket** — the shipped six-stage line costs 1087, so a new save can now build all of it outright with ~1900 to spare, and the core loop finally closes from a cold start.
 
-- **Conveyor splitters (sim half done, presentation to come):** a line can fork. A `splitter` is a 1x1 buildable kind that carries product exactly like a belt tile and deals it alternately between two outputs — the tile it faces, and the tile one quarter turn clockwise from it — so one `rotate` turns both outputs together and no new command was needed. If the side that is due is blocked (or was never built) the item goes down the other one in the same tick, so a full branch never stalls the whole line and "only one output connected" needs no special case. It reaches every sink a belt's hand-off does: another belt, another splitter, a machine's inlet face, a dock. Its wire form (a `splitters` array on the chunk snapshot, a `splitter` variant from `query_tile`) is on the boundary; nothing draws it yet.
+- **Conveyor splitters (DONE, both halves):** a line can fork. A `splitter` is a 1x1 buildable kind that carries product exactly like a belt tile and deals it alternately between two outputs — the tile it faces, and the tile one quarter turn clockwise from it — so one `rotate` turns both outputs together and no new command was needed. If the side that is due is blocked (or was never built) the item goes down the other one in the same tick, so a full branch never stalls the whole line and "only one output connected" needs no special case. It reaches every sink a belt's hand-off does: another belt, another splitter, a machine's inlet face, a dock. It is **drawn** as a machined diverter table set into the belt run — a bright steel plate where the rest of the line is rubber, with three open lanes and one closed rail — carrying a **next-output arrow inlaid flush in the deck**: both directions are cut into the table as grooves and one of them lights up, so which way the next item goes is a pair of positions rather than a colour, and nothing stands proud of the surface the product slides over. The arrow shows where the item will **actually** go, not the raw `next_output`: a splitter whose branch was never built reports "branch" forever while everything goes straight, and an arrow driven off that field alone would point at bare floor. Items cross a splitter drawn exactly as they cross a belt, and hover names both outputs and says "not connected" about one that was never laid.
 - **Contracts (done, both halves):** contracts are `data/contracts.ron` content and three run concurrently, each with its own mix/cadence/payout, all drawing from one shared pool of delivered stock (a box pays one contract, never two). The clipboard panel shows all of them — one paper docket card per contract on the one board, each with its own checklist, payout, countdown and delivered/missed tally, above a single shared money figure and a single "on the dock" line naming the pool they compete for.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
@@ -101,6 +101,42 @@ left the biggest panel on screen standing. That was a real gap, not a
 preference; `_close_all_overlays` is the ESC-only wider verb, deliberately
 separate from `_exit_build_mode` because the hotbar's deselect and the
 "you placed your last one" exit must *not* sweep the menu away with them.
+
+### 2026-09-08 — The fork, drawn: the splitter's diverter table and its lit arrow
+
+Epic B's ticket 2, and the presentation half of the entry below. `sim_core`
+and `data/` were untouched — every fact drawn was already on the wire — and
+the ticket's minimum bar was that `main` had been left failing its own
+headless suite: `test_machines.gd` asserts every priced kind resolves to a
+bespoke model, and the splitter had none.
+
+It is drawn as the one piece of **machined table** in a run of rubber: a
+stainless diverter plate with three open lanes and one closed rail, so the
+tile reads as "the line forks here" from across the factory without reading
+as another machine. The state that needed showing is which output takes the
+next item, and that is an **arrow inlaid flush in the deck** — both
+directions cut as grooves, one of them lit — rather than a gate or a signal
+arm, because items are drawn sliding across this tile and anything standing
+proud of it gets driven through. Two grooves and one glow means the readout
+is a pair of *positions*, which survives a screenshot and a player who cannot
+tell amber from steel.
+
+The arrow points where the item will **actually** go rather than at the raw
+`next_output` field, and that distinction is the ticket's one real design
+call: a splitter whose branch was never built reports "branch" for ever while
+everything goes straight past it, so an arrow driven off that field alone
+would sit pointing at bare floor — a readout lying about its own mechanism,
+which this project has now refused three times.
+
+Two bugs came out of it, both found by looking at a rendered frame rather
+than by a test. Items on a belt in a **second chunk** were being erased by the
+first chunk's render, which a splitter branching a line across a chunk
+boundary is what finally exposed: the simulation held eight tomatoes on the
+branch belt and the scene drew none of them. And
+`--populate`, the flag that runs a factory forward before photographing it,
+was batching thousands of ticks without reading the dirty set the simulation
+clears every tick, so it had been photographing whatever the last tick
+happened to touch. Both are fixed, and the first is now a regression test.
 
 ### 2026-09-08 — A line can fork: the conveyor splitter (sim half)
 

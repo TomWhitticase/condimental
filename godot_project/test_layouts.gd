@@ -128,6 +128,39 @@ static func build_machines_fixture(sim) -> void:
 	place(sim, "dock", Vector2i(5, 0), "east")
 
 
+## A LINE THAT FORKS (Epic B) — 130 of 3000. A hopper feeding two belts into
+## a splitter that has both of its outputs built, then further along a second
+## splitter with only its straight output built.
+##
+## The second one is the point of the fixture as much as the first: a
+## splitter whose branch was never laid reports `next_output: "branch"`
+## forever while every item goes straight through it (`splitter.rs`'s
+## fallback rule), so it is the case where a readout driven straight off that
+## field would point at bare floor. Having both in one world means the
+## arrow's two behaviours can be seen side by side, in a test and in a
+## screenshot.
+##
+## The geometry is the simulation's own rule, not a guess: a splitter's
+## straight output is the tile it faces and its branch is one quarter turn
+## CLOCKWISE from that, so an EAST-facing splitter at (2, 0) hands straight
+## to (3, 0) and branches SOUTH to (2, -1).
+static func build_splitter_line(sim) -> void:
+	place(sim, "hopper", Vector2i(-1, 0), "east")
+	place(sim, "belt", Vector2i(0, 0), "east")
+	place(sim, "belt", Vector2i(1, 0), "east")
+	place(sim, "splitter", Vector2i(2, 0), "east")
+	# The straight run on, and the branch heading south away from it.
+	place(sim, "belt", Vector2i(3, 0), "east")
+	place(sim, "belt", Vector2i(4, 0), "east")
+	place(sim, "belt", Vector2i(2, -1), "south")
+	place(sim, "belt", Vector2i(2, -2), "south")
+	# The second splitter: straight output built, branch (6, -1) deliberately
+	# left as bare floor.
+	place(sim, "belt", Vector2i(5, 0), "east")
+	place(sim, "splitter", Vector2i(6, 0), "east")
+	place(sim, "belt", Vector2i(7, 0), "east")
+
+
 ## The aging rack on its own — 160 of 3000. Feeding it for real is now
 ## affordable (its recipe eats ketchup, which needs the five machines upstream
 ## of it; that is what `build_reference_line` is), but it would also mean

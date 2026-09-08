@@ -164,6 +164,7 @@ run_godot_script test_shop_menu.gd SHOP_MENU_OK "build menu grid + purchases, UI
 run_godot_script test_hotbar.gd HOTBAR_OK "always-visible hotbar, number-key selection, UI_UX.md §5"
 run_godot_script test_timed_processes.gd TIMED_PROCESSES_OK "aging rack + live progress gauge, milestone 7"
 run_godot_script test_placement.gd PLACEMENT_OK "empty world, ghost, rotation, place/remove — Real Placement ticket 2"
+run_godot_script test_splitters.gd SPLITTERS_OK "splitter model, next-output arrow, items crossing, hover — Epic B ticket 2"
 
 echo
 echo "PASS: real placement + milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"

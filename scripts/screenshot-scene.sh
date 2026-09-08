@@ -16,11 +16,14 @@
 # with a pipe run heading SOUTH beside it. Three of the four facings on belts
 # and the fourth on the pipes, which makes it the right subject for reviewing
 # per-tile rotation and the junction art's east-only fallback in one frame.
-# Pass --fixture <machines|fluids|vat|rack|chain|demo> for a different one:
+# Pass --fixture <machines|fluids|vat|rack|splitter|chain|demo> for a different one:
 # `machines` (a hopper, a machine and a dock), `fluids` (a tank, a pipe run
 # and the machine tapping it), `vat` (the 2x2 cooking vat alone), `rack` (the
-# aging rack alone) or `chain` (THE WHOLE SHIPPED SIX-STAGE LINE — 1,087 of a
-# new game's 3,000 balance, bought and placed like anything else).
+# aging rack alone), `splitter` (a line that FORKS — one splitter with both
+# outputs built and a second with only its straight one, so the next-output
+# arrow's two behaviours are in one frame) or `chain` (THE WHOLE SHIPPED
+# SIX-STAGE LINE — 1,087 of a new game's 3,000 balance, bought and placed like
+# anything else).
 #
 # Pass --contracts to build that full line and then run it until the contract
 # board is genuinely mixed (some deliveries made, some missed, goods on the
@@ -45,8 +48,9 @@
 # interactive session — the same problem the hover flags solve for tooltips.
 #
 # Pass one of --hover / --hover-pipe / --hover-vat / --hover-hopper /
-# --hover-tank / --hover-dock to park the cursor over the first placed
-# machine, pipe, multi-tile machine's FAR CORNER, hopper, fluid tank or dock,
+# --hover-tank / --hover-dock / --hover-splitter to park the cursor over the
+# first placed machine, pipe, multi-tile machine's FAR CORNER, hopper, fluid
+# tank, dock or conveyor splitter,
 # so that tooltip is in the shot. (--hover-vat deliberately picks a
 # non-origin tile: "any tile of a multi-tile machine identifies it" is the
 # claim, and hovering the origin would not show it.)
@@ -62,7 +66,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--contracts] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock] [--shop] [--stock] [--hotbar N] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--contracts] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--shop] [--stock] [--hotbar N] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

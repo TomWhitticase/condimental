@@ -221,6 +221,14 @@ sauce-factory/
     test_presentation.gd           # headless proof of the 3D scene's structure: orthographic
                                      # camera, lights+shadows, SSAO/glow, imported voxel
                                      # meshes, metal shinier than matte (UI_UX.md §1/§2/§4)
+    test_splitters.gd               # headless proof of the conveyor splitter's presentation
+                                      # (Epic B ticket 2): a bespoke model at the sim's tile,
+                                      # the belt feeding it still drawing the PLAIN tile, the
+                                      # next-output arrow along the facing and one quarter
+                                      # turn clockwise for the branch, an unbuilt branch
+                                      # falling back to straight, a dead end hiding the
+                                      # arrow, and items drawn crossing the tile AND down a
+                                      # branch that leaves the splitter's own chunk
     test_placement.gd               # headless proof of the "Real Placement" epic's ticket 2:
                                       # an EMPTY starting world, the ghost and its
                                       # footprint-aware validity, all four facings drawn with
@@ -339,6 +347,91 @@ diff). Update docs/DEVLOG.md's "Current status" section in the same commit if
 it's gone stale.
 
 ## Decisions log
+
+- 2026-09-08: **Epic B, ticket 2 of 2 (the Godot/assets half; `sim_core/` and
+  `data/` deliberately untouched) — the fork, drawn.** Ticket 1 left `main`
+  failing its own headless suite: `test_machines.gd` asserts every kind
+  priced in `data/shop.ron` resolves to a bespoke model and the splitter had
+  none. Closing that was the floor; six calls worth not re-litigating.
+
+  (1) **The splitter is drawn as the one MACHINED TABLE in a run of rubber,
+  and its model lives with the belts.** A bright stainless diverter plate,
+  three open lanes (intake, straight, branch) and one closed rail, at exactly
+  the belt's own running height with the belt's own frames and rollers under
+  it — so it reads as "the line forks here" from across the factory without
+  reading as another machine with a housing on top. That is what a splitter
+  IS in this simulation (it is priced with the infrastructure, it is 1x1, and
+  it carries product in an ordinary one-tile `BeltSegment` at belt speed), so
+  the generator sits in `assets.rs`'s conveyor section, not with the machines.
+  The `machine_` prefix on the asset name is only because `main.gd`'s
+  `MACHINE_MODELS` is keyed on `data/machines.ron` kinds, which a splitter has
+  a footprint in like every other placed thing.
+
+  (2) **The next-output readout is an arrow INLAID FLUSH IN THE DECK, not a
+  gate, an arm or a lamp.** `SplitterSnapshot::next_output` is the one piece
+  of a splitter's state a player cannot infer from the tiles around it, so it
+  needs a passive readout — and this tile has items drawn sliding across it,
+  so anything standing proud of the table gets driven through by the product
+  it describes. Both output directions are therefore cut into the table as
+  grooves and a one-voxel emissive slab fills whichever one is live: the fifth
+  use of the "one flat slab, positioned by `main.gd` from live data" mechanism
+  `pipe_fluid`, `hopper_fill`, `fluid_tank_fill` and `aging_rack_gauge`
+  already share, and the first that carries a DIRECTION rather than a level.
+  Cutting both grooves whether or not either is lit is what satisfies UI_UX.md
+  §7: the readout is **which of two positions is glowing**, and both positions
+  are visible shapes on the deck with nothing lit at all.
+
+  (3) **One arrow asset, turned by the simulation's own quarter turn.** The
+  model is authored pointing straight and the branch is shown by rotating the
+  node 90° clockwise on top of the placement's own facing — which is literally
+  how `sim::splitter` derives the second output (`Direction::rotate_cw`). A
+  separately-authored branch arrow could end up pointing somewhere the
+  simulation does not; a rotation of the first cannot. The two grooves in the
+  base model are generated the same way, from one `arrow_cells` function
+  rotated, for the same reason.
+
+  (4) **The arrow shows where the item will ACTUALLY go, which is not always
+  `next_output`.** The raw field is which side gets first refusal, and
+  `splitter.rs`'s fallback rule sends a refused item down the other side in
+  the same tick — so a splitter whose branch was never built reports
+  `"branch"` for ever while everything goes straight through it. An arrow
+  driven off that field alone would point at bare floor while product sailed
+  past in the other direction: the same gauge-lies-about-its-mechanism failure
+  the fluid tank's constant head and the dock's absent fill gauge both
+  refused. So the one case the wire can settle is settled in
+  `_apply_splitter_state` — a due side whose `outputs` entry is `null` hands to
+  the other, and with neither connected the arrow is hidden outright. What it
+  deliberately cannot show is a side that is built but momentarily FULL, which
+  also falls back: that is transient and invisible on the wire, where an
+  unbuilt branch is durable and is the mistake a player wants told about. The
+  hover tooltip names both output tiles and says "not connected" in words.
+
+  (5) **A splitter is CONVEYOR to `_belt_asset_for`, not a building.**
+  `_is_building_tile` decides whether a belt tile draws the
+  hand-over-to-a-machine variant, and it was "anything that is not a belt or a
+  pipe" — which would have put `belt_inlet`'s dead-plate and guide kerbs in
+  front of what is actually more conveyor. One kind added to that test.
+
+  (6) **Two rendering bugs came off the rendered frame, and only one of them
+  is about splitters** (UI_UX.md §2b point 12's lesson yet again). Items were
+  hidden per RENDER PASS: `_render_snapshot` collected every key it had drawn
+  and hid every pooled node missing from that set — but it runs once per DIRTY
+  CHUNK, so with two chunks dirty the second pass wiped what the first had
+  just drawn. It was invisible while every test factory fitted in one chunk
+  and the shipped chain spans three; a splitter branching a line across a
+  chunk boundary is what finally showed it, with eight tomatoes on the branch
+  belt in the simulation and none on screen. Emptied slots are hidden per TILE
+  now, from the tile's own item count, which needs no cross-chunk bookkeeping
+  at all. And `screenshot-scene.sh --populate` was batching thousands of ticks
+  before reading `dirty_chunk_ids()` **once** — but `World::tick` clears its
+  dirty set at the start of every tick, so the flag that exists to photograph
+  a running factory was photographing whatever the last tick happened to
+  touch. It applies every tick now. **Flagged, not fixed:** the catalog is
+  twelve kinds against ten number keys, so `packer` and `dock` are keyless;
+  `SHOP_HOTKEY_SLOTS` was written for exactly that and degrades correctly
+  (no digit printed, no keycode resolving to them, still buyable and placeable
+  from the build menu), which `test_hotbar.gd` now asserts rather than assumes.
+  A second key scheme, if anyone wants one, is its own ticket.
 
 - 2026-09-08: **Epic B, ticket 1 of 2 (the sim half; `godot_project/` and
   `assets/voxels/` deliberately untouched) — the conveyor splitter, and with
