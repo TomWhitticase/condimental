@@ -51,9 +51,12 @@
 //      a belt tile is small change, a mid-chain machine is a couple of
 //      deliveries, and the cooking vat is a genuine save-up.
 //   4. A new game starts with `economy.rs`'s STARTING_MONEY (3000), and
-//      against these prices the whole shipped six-stage line comes to 1087
-//      — so a new player can build all of it outright and still have most
-//      of a second one's worth left over. That margin is the point: money
+//      against these prices the whole shipped five-stage line comes to well
+//      under half of it — so a new player can build all of it outright and
+//      still have two more lines' worth left over, which also has to cover
+//      the raw ingredients it runs on (`data/ingredients.ron`, priced
+//      separately because an ingredient is consumed and a machine is not).
+//      That margin is the point: money
 //      only arrives through contract deliveries, deliveries need a line
 //      that reaches the dock, so a starting balance below the bill closes
 //      nothing (which is what the previous 200 did). The two numbers are
@@ -131,14 +134,6 @@
         ShopEntry(
             id: "cooking_vat",
             price: 200,
-        ),
-        // Milestone 7's aging rack. It is 1x1 — footprint cannot express
-        // time — but it holds a batch ten times longer than the cooking
-        // vat's own cook, so it is priced as a real capital purchase in the
-        // vat's neighbourhood rather than by tile count.
-        ShopEntry(
-            id: "aging_rack",
-            price: 160,
         ),
         // GAMEPLAY.md §4 groups bottling with the reduction step as one
         // equipment tier, so it is priced in the vat's neighbourhood rather

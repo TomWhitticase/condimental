@@ -47,25 +47,41 @@ impl Machine {
     /// Godot can derive progress itself from `start_tick`/`required_ticks`
     /// plus the current tick count, without a new snapshot every tick.
     ///
-    /// `fluid` is this machine's tap into a pipe network, if it has one
-    /// (milestone 6 — ARCHITECTURE.md §9 item 6/§3.4; a [`FluidTap`] is the
-    /// network plus the one segment this machine touches, since the "Real
-    /// Placement" epic made which segment that is a placement question). A
-    /// recipe with
-    /// `fluid_inputs` treats it exactly the way it treats its solid
-    /// `inputs`: enough of the right fluid must be available *before* a
-    /// craft starts, and starting consumes it. A machine that can't get
-    /// its fluid simply sits idle — it never runs degraded, never crafts a
-    /// partial batch, and never half-consumes its solid input; the same
-    /// "stalls, doesn't run degraded" rule power and staff will use later
-    /// (GAMEPLAY.md §7). Passing `None` for a recipe that wants fluid is
-    /// therefore a permanent stall, which is the correct reading of "this
-    /// machine has no pipe connected."
+    /// `fluid_in` is this machine's tap into the pipe network it *draws*
+    /// from, if it has one (milestone 6 — ARCHITECTURE.md §9 item 6/§3.4; a
+    /// [`FluidTap`] is the network plus the one segment this machine
+    /// touches, since the "Real Placement" epic made which segment that is a
+    /// placement question). A recipe with `fluid_inputs` treats it exactly
+    /// the way it treats its solid `inputs`: enough of the right fluid must
+    /// be available *before* a craft starts, and starting consumes it. A
+    /// machine that can't get its fluid simply sits idle — it never runs
+    /// degraded, never crafts a partial batch, and never half-consumes its
+    /// solid input; the same "stalls, doesn't run degraded" rule power and
+    /// staff will use later (GAMEPLAY.md §7). Passing `None` for a recipe
+    /// that wants fluid is therefore a permanent stall, which is the correct
+    /// reading of "this machine has no pipe connected."
+    ///
+    /// `fluid_out` is the **second** tap, added by the chain-rework epic: the
+    /// network this machine *deposits* into, for a recipe with
+    /// `fluid_outputs`. It is a separate argument rather than a second use
+    /// of the same tap because it is a genuinely different network — a
+    /// machine that both consumes and produces liquid stands between two
+    /// unconnected runs, which is exactly the shipped cooking vat. `world.rs`
+    /// guarantees the two are never the same network, so holding both
+    /// mutable borrows at once is sound.
+    ///
+    /// **A fluid output is gated at completion, not at start**, symmetrically
+    /// with the solid output buffer it sits beside: a finished batch that has
+    /// nowhere to go is *held*, and retried next tick, rather than being
+    /// dropped or spilled. So a full pipe backs a machine up exactly the way
+    /// a full output buffer does, which is the same back-pressure rule the
+    /// belt follows.
     pub fn tick(
         &mut self,
         current_tick: u64,
         recipes: &RecipeRegistry,
-        fluid: Option<FluidTap<'_>>,
+        fluid_in: Option<FluidTap<'_>>,
+        fluid_out: Option<FluidTap<'_>>,
     ) -> bool {
         let mut changed = false;
         let Some(recipe) = recipes.get(&self.recipe) else {
@@ -79,7 +95,7 @@ impl Machine {
                 .all(|(item, qty)| self.input.has_at_least(item, *qty));
             // Checked before anything is consumed, so a fluid shortage can
             // never leave the machine having eaten its solid input.
-            let has_fluids = match &fluid {
+            let has_fluids = match &fluid_in {
                 Some(tap) => recipe
                     .fluid_inputs
                     .iter()
@@ -90,7 +106,7 @@ impl Machine {
                 for (item, qty) in &recipe.inputs {
                     self.input.remove(item, *qty);
                 }
-                if let Some(mut tap) = fluid {
+                if let Some(mut tap) = fluid_in {
                     for (id, units) in &recipe.fluid_inputs {
                         let drawn = tap.draw(id, Fx::from_num(*units));
                         debug_assert!(
@@ -113,15 +129,39 @@ impl Machine {
                     .outputs
                     .iter()
                     .all(|(item, qty)| self.output.has_room_for(item, *qty));
-                if has_room {
+                // The fluid half of the same question. An empty
+                // `fluid_outputs` is vacuously satisfiable, so an ordinary
+                // solid-only stage is unaffected by any of this; a recipe
+                // that wants to deposit and has no tap at all can never
+                // finish, which is the correct reading of "this machine has
+                // no pipe to discharge into."
+                let has_fluid_room = match &fluid_out {
+                    Some(tap) => recipe
+                        .fluid_outputs
+                        .iter()
+                        .all(|(id, units)| tap.can_accept(id, Fx::from_num(*units))),
+                    None => recipe.fluid_outputs.is_empty(),
+                };
+                if has_room && has_fluid_room {
                     for (item, qty) in &recipe.outputs {
                         self.output.add(item, *qty);
+                    }
+                    if let Some(mut tap) = fluid_out {
+                        for (id, units) in &recipe.fluid_outputs {
+                            let deposited = tap.deposit(id, Fx::from_num(*units));
+                            debug_assert!(
+                                deposited,
+                                "room was checked immediately above, so this deposit cannot \
+                                 fail without something having mutated the network in between"
+                            );
+                        }
                     }
                     self.process = None;
                     changed = true;
                 }
-                // else: finished but blocked on a full output buffer —
-                // retried next tick, same back-pressure idea as the belt.
+                // else: finished but blocked on a full output buffer or a
+                // full pipe — retried next tick, same back-pressure idea as
+                // the belt.
             }
         }
 
@@ -138,7 +178,7 @@ mod tests {
     fn registry() -> RecipeRegistry {
         RecipeRegistry::from_ron_str(
             r#"(
-                schema_version: 2,
+                schema_version: 3,
                 recipes: [
                     Recipe(
                         id: "tomato_sauce",
@@ -159,7 +199,7 @@ mod tests {
         let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
         machine.input.add("tomato", 2);
         for tick in 0..20 {
-            machine.tick(tick, &recipes, None);
+            machine.tick(tick, &recipes, None, None);
         }
         assert!(machine.process.is_none());
         assert_eq!(machine.output.count("tomato_sauce"), 0);
@@ -171,12 +211,12 @@ mod tests {
         let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
         machine.input.add("tomato", 4);
 
-        machine.tick(0, &recipes, None); // consumes input, starts process
+        machine.tick(0, &recipes, None, None); // consumes input, starts process
         assert_eq!(machine.input.count("tomato"), 0);
         assert!(machine.process.is_some());
 
         for tick in 1..10 {
-            machine.tick(tick, &recipes, None);
+            machine.tick(tick, &recipes, None, None);
             assert_eq!(
                 machine.output.count("tomato_sauce"),
                 0,
@@ -184,7 +224,7 @@ mod tests {
             );
         }
 
-        machine.tick(10, &recipes, None); // required_ticks elapsed
+        machine.tick(10, &recipes, None, None); // required_ticks elapsed
         assert_eq!(machine.output.count("tomato_sauce"), 1);
         assert!(machine.process.is_none());
     }
@@ -196,9 +236,9 @@ mod tests {
         machine.output.add("tomato_sauce", 1); // pre-fill the only slot
         machine.input.add("tomato", 4);
 
-        machine.tick(0, &recipes, None);
+        machine.tick(0, &recipes, None, None);
         for tick in 1..=10 {
-            machine.tick(tick, &recipes, None);
+            machine.tick(tick, &recipes, None, None);
         }
         // Blocked: process completed but couldn't deposit, so it must
         // still be holding, not silently dropping the crafted item.
@@ -206,7 +246,7 @@ mod tests {
         assert_eq!(machine.output.count("tomato_sauce"), 1);
 
         machine.output.remove("tomato_sauce", 1);
-        machine.tick(11, &recipes, None);
+        machine.tick(11, &recipes, None, None);
         assert_eq!(machine.output.count("tomato_sauce"), 1);
         assert!(machine.process.is_none());
     }
@@ -215,7 +255,7 @@ mod tests {
     fn fluid_registry() -> RecipeRegistry {
         RecipeRegistry::from_ron_str(
             r#"(
-                schema_version: 2,
+                schema_version: 3,
                 recipes: [
                     Recipe(
                         id: "ketchup",
@@ -281,7 +321,7 @@ mod tests {
 
         for tick in 0..500 {
             network.tick();
-            machine.tick(tick, &recipes, Some(tap(&mut network, 0)));
+            machine.tick(tick, &recipes, Some(tap(&mut network, 0)), None);
         }
 
         assert!(machine.process.is_none(), "must never start a craft without its fluid");
@@ -300,7 +340,7 @@ mod tests {
         machine.input.add("tomato_sauce", 10);
 
         for tick in 0..500 {
-            machine.tick(tick, &recipes, None);
+            machine.tick(tick, &recipes, None, None);
         }
 
         assert!(machine.process.is_none());
@@ -315,7 +355,7 @@ mod tests {
         let (mut network, mut tank) = supplied_network();
         let before = network.segments()[1].volume;
 
-        machine.tick(0, &recipes, Some(tap(&mut network, 1)));
+        machine.tick(0, &recipes, Some(tap(&mut network, 1)), None);
         assert!(machine.process.is_some(), "craft must start once fluid is available");
         assert_eq!(
             network.segments()[1].volume,
@@ -326,9 +366,129 @@ mod tests {
         for tick in 1..=10 {
             network.discharge_from_tank(&mut tank, 0);
             network.tick();
-            machine.tick(tick, &recipes, Some(tap(&mut network, 1)));
+            machine.tick(tick, &recipes, Some(tap(&mut network, 1)), None);
         }
         assert_eq!(machine.output.count("ketchup"), 1);
+    }
+
+    /// A recipe whose entire output is a fluid and whose entire input is a
+    /// fluid — the shipped cooking vat's shape, and the one that needs two
+    /// separate networks at once.
+    fn producer_registry() -> RecipeRegistry {
+        RecipeRegistry::from_ron_str(
+            r#"(
+                schema_version: 3,
+                recipes: [
+                    Recipe(
+                        id: "ketchup",
+                        inputs: [],
+                        fluid_inputs: [("ketchup_mix", 1)],
+                        outputs: [],
+                        fluid_outputs: [("ketchup", 1)],
+                        machine: "cooking_vat",
+                        time_ticks: 5,
+                    ),
+                ],
+            )"#,
+        )
+        .unwrap()
+    }
+
+    /// One tile of pipe carrying `fluid`, already holding `volume`.
+    fn one_tile_network(fluid: &str, capacity: i32, volume: i32) -> FluidNetwork {
+        let mut network = FluidNetwork::new(
+            Some(fluid.to_string()),
+            vec![PipeSegment::new((0, 0), Direction::East, Fx::from_num(capacity))],
+            vec![],
+        );
+        network.deposit_at(0, fluid, Fx::from_num(volume));
+        network
+    }
+
+    #[test]
+    fn deposits_its_fluid_output_into_the_outlet_network_on_completion() {
+        let recipes = producer_registry();
+        let mut machine = Machine::new("ketchup".into(), 10, 10);
+        let mut inflow = one_tile_network("ketchup_mix", 10, 4);
+        let mut outflow = one_tile_network("ketchup", 10, 0);
+
+        machine.tick(0, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)));
+        assert!(machine.process.is_some(), "a fluid-only input must start a craft");
+        assert_eq!(
+            inflow.segments()[0].volume,
+            Fx::from_num(3),
+            "starting consumes exactly the recipe's fluid input"
+        );
+        assert_eq!(
+            outflow.segments()[0].volume,
+            Fx::ZERO,
+            "nothing is deposited until the process completes"
+        );
+
+        for tick in 1..=5 {
+            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)));
+        }
+        assert!(machine.process.is_none());
+        assert_eq!(outflow.segments()[0].volume, Fx::from_num(1));
+    }
+
+    /// The producer-side mirror of `holds_finished_output_when_buffer_is_full`:
+    /// a full pipe must back the machine up, not spill.
+    #[test]
+    fn holds_a_finished_batch_when_the_outlet_pipe_is_full() {
+        let recipes = producer_registry();
+        let mut machine = Machine::new("ketchup".into(), 10, 10);
+        let mut inflow = one_tile_network("ketchup_mix", 10, 4);
+        let mut outflow = one_tile_network("ketchup", 10, 10); // brim full
+
+        for tick in 0..=5 {
+            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)));
+        }
+        assert!(
+            machine.process.is_some(),
+            "the batch is finished but has nowhere to go, so it is still held"
+        );
+        assert_eq!(outflow.segments()[0].volume, Fx::from_num(10), "nothing spilled");
+
+        // Make room, and the very next tick the held batch lands.
+        outflow.draw_at(0, "ketchup", Fx::from_num(2));
+        machine.tick(6, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)));
+        assert!(machine.process.is_none());
+        assert_eq!(outflow.segments()[0].volume, Fx::from_num(9));
+    }
+
+    #[test]
+    fn never_completes_a_fluid_producing_craft_with_no_outlet_network_at_all() {
+        let recipes = producer_registry();
+        let mut machine = Machine::new("ketchup".into(), 10, 10);
+        let mut inflow = one_tile_network("ketchup_mix", 10, 10);
+
+        for tick in 0..500 {
+            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), None);
+        }
+        assert!(
+            machine.process.is_some(),
+            "an unplumbed outlet is a permanent hold, never a silent discard"
+        );
+        assert_eq!(
+            inflow.segments()[0].volume,
+            Fx::from_num(9),
+            "exactly one craft's worth was drawn, and the machine has been stuck since"
+        );
+    }
+
+    #[test]
+    fn refuses_to_deposit_into_a_network_carrying_the_wrong_fluid() {
+        let recipes = producer_registry();
+        let mut machine = Machine::new("ketchup".into(), 10, 10);
+        let mut inflow = one_tile_network("ketchup_mix", 10, 10);
+        let mut outflow = one_tile_network("water", 10, 0);
+
+        for tick in 0..500 {
+            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)));
+        }
+        assert!(machine.process.is_some());
+        assert_eq!(outflow.segments()[0].volume, Fx::ZERO);
     }
 
     #[test]
@@ -342,7 +502,7 @@ mod tests {
         for tick in 0..500 {
             network.discharge_from_tank(&mut tank, 0);
             network.tick();
-            machine.tick(tick, &recipes, Some(tap(&mut network, 1)));
+            machine.tick(tick, &recipes, Some(tap(&mut network, 1)), None);
         }
 
         assert!(machine.process.is_none(), "vinegar recipe must not run on a water pipe");

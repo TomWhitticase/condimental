@@ -48,9 +48,20 @@
 // describes what a player claims when they put one down, and it rotates:
 // facing north or south swaps `width_tiles` and `height_tiles` on the grid,
 // anchored at the same origin corner. See `sim_core/src/sim/machines.rs`'s
-// module doc for the full rotation convention, and note the consequence for
-// content — no kind in this file is oblong, so no shipped kind changes shape
-// when turned (the 2x2 vat is square). That is a content fact, not a limit.
+// module doc for the full rotation convention. The `mixer` below is the
+// first shipped kind that is genuinely oblong (1x2), so it is also the first
+// whose footprint really does change shape when turned — which is worth
+// knowing before rotating one against a wall.
+//
+// A FOOTPRINT'S INLET FACE IS AS LONG AS THE FOOTPRINT (the chain-rework
+// epic). A machine accepts solid input on every tile of the edge opposite
+// the way it points, so **a machine that consumes N different solid
+// ingredients needs an inlet face at least N tiles long** — otherwise its
+// one inlet tile is a merge point, and a merge point with no splitter or
+// filtered insertion behind it deadlocks: whichever ingredient arrives
+// faster fills the shared belt and starves the other one out. That is the
+// concrete reason the `mixer` grew to 1x2 when its recipe gained sugar, and
+// it is a rule any future multi-ingredient kind has to satisfy too.
 //
 // A kind also has to be priced in `data/shop.ron` to be placeable at all, and
 // the loader enforces that: adding a kind here without a price there is an
@@ -139,21 +150,34 @@
             id: "crusher",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
         ),
-        // Blends tomato paste with vinegar into an uncooked ketchup mix.
-        // This is the one stage plumbed into a fluid network (its recipe is
-        // the only one declaring `fluid_inputs`), so its footprint *height*
-        // also decides where a pipe run can reach it: a machine taps any pipe
-        // tile orthogonally adjacent to any tile of its footprint, whatever
-        // either is facing. Kept 1x1: an in-line blender is a small
-        // unit, and keeping it one tile tall also keeps the pipe run on row
-        // 1, exactly where milestone 6 first put it.
+        // Blends tomato paste and sugar with vinegar into an uncooked
+        // ketchup mix, and discharges that mix as a **liquid** into a second
+        // pipe run. It is therefore the first kind here plumbed on both
+        // sides at once — it draws from a network touching its footprint and
+        // deposits into the one off its outlet face — so its footprint
+        // decides where two runs can reach it, not one.
+        //
+        // **1x2, and the only oblong kind in this file.** One tile wide,
+        // because an in-line blender is a small unit; two tiles *deep*
+        // because its recipe takes two different solid ingredients (tomato
+        // paste and sugar) and, per the header note above, each one needs
+        // its own tile of inlet face to arrive on. A 1x1 mixer would force
+        // both onto one belt, and that merge deadlocks as soon as either
+        // ingredient outruns the other. The extra tile is not decoration:
+        // it is the second feed chute, and it is what makes a two-ingredient
+        // recipe buildable at all today.
         MachineKind(
             id: "mixer",
-            footprint: Footprint(width_tiles: 1, height_tiles: 1),
+            footprint: Footprint(width_tiles: 1, height_tiles: 2),
         ),
         // GAMEPLAY.md §2 tier 1/2's cooker/kettle, grown up: a batch vat
         // that cooks the mix down into finished ketchup. **This is the
         // milestone's big machine, and the only kind that is not 1x1.**
+        //
+        // Since the chain rework it is also the one machine on the line
+        // with **no belt attached to it at all**: liquid mix arrives by
+        // pipe and finished ketchup leaves by pipe, which is what a batch
+        // cook in a real plant looks like.
         //
         // 2x2, not 2x1, for two reasons. Thematically, a vat is the one
         // machine on this line whose bulk is the point — it holds a whole
@@ -170,41 +194,10 @@
             id: "cooking_vat",
             footprint: Footprint(width_tiles: 2, height_tiles: 2),
         ),
-        // ARCHITECTURE.md §9 milestone 7's ("Timed processes") machine: a
-        // rack the sauce sits on to age, and the first piece of equipment on
-        // this line whose entire purpose is to make the product WAIT. Its
-        // recipe (`aged_ketchup` in `data/recipes.ron`) runs for 2400 ticks
-        // — ten times the cooking vat's cook — so what distinguishes this
-        // kind from every other one here is time, not throughput.
-        //
-        // 1x1, and deliberately so, even though it is the slowest machine on
-        // the line and the cooking-vat note above ties size to gravity. Two
-        // reasons. (1) Thematically an aging rack IS small per batch: the
-        // cost of ageing is that a batch occupies the rack for a long while,
-        // not that it needs a hall — a vat holds a whole batch in one vessel
-        // and a rack holds it on a shelf. Time is this machine's expense,
-        // and the footprint field cannot express time. (2) Mechanically, at
-        // the time this kind was added the recipe-driven chain ran x = 0..30
-        // and a 1x1 rack kept the whole line inside chunk (0, 0) (32x32,
-        // ARCHITECTURE.md §3.1) with exactly one tile to spare.
-        //
-        // **That second reason is now spent, deliberately.** The
-        // delivery-dock ticket added a belt and a dock past the packer, so
-        // the line runs x = 0..35 and genuinely crosses into chunk (1, 0) —
-        // which is handled correctly (a footprint is reported in every chunk
-        // it overlaps, and `World::all_chunks` lists all three of the
-        // world's chunks) and is now pinned by tests rather than avoided by
-        // them. So widening this kind no longer trips a chunk boundary that
-        // wasn't already crossed; it just moves the dock further east. The
-        // first reason still stands on its own. Ticket 2 (the Godot
-        // presentation half) may well want the rack to LOOK like a tall
-        // shelf of resting batches; height in voxels is free, height in
-        // tiles is not.
-        MachineKind(
-            id: "aging_rack",
-            footprint: Footprint(width_tiles: 1, height_tiles: 1),
-        ),
-        // Tier 2's bottling & sealing line.
+        // Tier 2's bottling & sealing line — and, since the chain rework,
+        // the stage where the product stops being a fluid: it draws liquid
+        // ketchup out of a pipe run touching its footprint and puts bottles
+        // onto the belt off its outlet face.
         MachineKind(
             id: "bottler",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
@@ -231,15 +224,12 @@
         // dock ships everything it receives in the same tick.
         //
         // Unlike the hopper and the tank it is placed EAST of the chain
-        // rather than west, because it is the tail rather than the head, so
-        // it is the one of the three that does move a tile boundary: the
-        // shipped line now runs x = 0..35 and therefore crosses into chunk
-        // (1, 0) (ARCHITECTURE.md §3.1's 32x32 chunks). That is handled —
-        // `World::all_chunks` reports both chunks and a footprint is
-        // reported in every chunk it overlaps — and it is why the
-        // `aging_rack` note above says widening anything upstream is a
-        // deliberate change: the one-tile headroom that note was protecting
-        // is spent, and the line is now genuinely a two-chunk line.
+        // rather than west, because it is the tail rather than the head. A
+        // footprint straddling one of ARCHITECTURE.md §3.1's 32x32 chunk
+        // boundaries is handled rather than avoided — `World::all_chunks`
+        // reports every chunk anything stands in, and a footprint is
+        // reported in every chunk it overlaps — so widening a kind upstream
+        // of this one is an ordinary content decision, not a boundary risk.
         MachineKind(
             id: "dock",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),

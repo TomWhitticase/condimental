@@ -28,12 +28,13 @@
 //! this file is about. Spending inventory on placement is covered in
 //! `placement.rs`; what is asserted here is still the money half.
 
+mod common;
+
 use sim_core::sim::types::Fx;
 use sim_core::sim::{
-    FLUID_TANK_CAPACITY, MachineRegistry, PlayerCommand, RecipeRegistry, ShopCatalog, World,
-    command_from_json, reference_chain,
+    MachineRegistry, PlayerCommand, RecipeRegistry, ShopCatalog, World,
+    command_from_json, reference_chain, reference_chain_with_budget,
 };
-
 
 fn recipes() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
@@ -69,31 +70,38 @@ fn price_of(kind: &str) -> Fx {
 /// `repeated_purchases_of_several_kinds_accumulate_independently` test
 /// (needing 36 to cover its purchases) is not guaranteed to cover.
 ///
-/// **50, not 200 (performance note, added during a codebase-wide perf
-/// audit).** This function runs once per test in this file (7 of them), each
-/// driving the *whole* reference chain — including the 240-tick cooking vat
-/// — tick by tick until the threshold is crossed. At 200 that was 24,000
-/// ticks per test, ~168,000 ticks total just to set up this file, and it was
-/// measurably the most expensive part of `cargo test -p sim_core` (this
-/// file's tests took ~1.1s of the suite's ~6.5s wall time, almost entirely
-/// spent here). 200 was never load-bearing: it was chosen as "several times
-/// the largest single-contract payout" for comfortable headroom, not because
-/// any test needs that much. 50 keeps ~39% of headroom over the 36 this
-/// file's hungriest test actually spends (repeated purchases of 4 belts + 2
-/// pipes) — comfortably more than one contract's smallest payout (24) alone
-/// can satisfy, so the "not guaranteed by a single payout" reasoning above
-/// still holds — while cutting the tick count (and this file's wall time) by
-/// more than half.
+/// Since the chain-rework epic the world is built with exactly
+/// `common::STOCK_COST` on top of its shop bill and spends every unit of it
+/// on raw ingredients before the loop starts — so the balance is still
+/// **zero** when the run begins, and every unit of money it then reports is
+/// genuinely earned from a contract rather than left over from the fixture.
+///
+/// **`MIN_MONEY` is 50, not 200 (performance note, added during a
+/// codebase-wide perf audit run alongside this same rework).** This function
+/// runs once per test in this file (7 of them), each driving the *whole*
+/// reference chain — including the 240-tick cooking vat — tick by tick until
+/// the threshold is crossed. At 200 that was 24,000 ticks per test, ~168,000
+/// ticks total just to set up this file, and it was measurably the most
+/// expensive part of `cargo test -p sim_core`. 200 was never load-bearing: it
+/// was chosen as "several times the largest single-contract payout" for
+/// comfortable headroom, not because any test needs that much. 50 keeps ~39%
+/// of headroom over the 36 this file's hungriest test actually spends
+/// (repeated purchases of 4 belts + 2 pipes) — comfortably more than one
+/// contract's smallest payout (24) alone can satisfy, so the "not guaranteed
+/// by a single payout" reasoning above still holds — while cutting the tick
+/// count (and this file's wall time) by more than half.
 fn world_with_earned_money() -> World {
-    let mut world = world();
+    let mut world = reference_chain_with_budget(recipes(), common::STOCK_COST);
+    common::stock_up(&mut world);
+    assert_eq!(
+        world.money(),
+        Fx::ZERO,
+        "the fixture must start broke, or 'earned money' would not mean earned"
+    );
     const MIN_MONEY: i64 = 50;
 
     for _ in 0..2_000_000u32 {
-        world.issue_command(PlayerCommand::FillHopper { amount: 32, tile: None });
-        world.issue_command(PlayerCommand::FillFluidTank {
-            amount: FLUID_TANK_CAPACITY,
-            tile: None,
-        });
+        common::supply(&mut world);
         world.tick();
         if world.money() >= Fx::from_num(MIN_MONEY) {
             break;

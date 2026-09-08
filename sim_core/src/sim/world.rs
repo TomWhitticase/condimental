@@ -81,14 +81,37 @@
 //!   only onto a belt standing off its outlet face. A belt pointing into a
 //!   machine's flank does nothing. This is what makes rotating a machine a
 //!   decision with a visible consequence.
-//! - **Fluids connect by touching.** A fluid-consuming machine taps any pipe
-//!   tile orthogonally adjacent to any tile of its footprint, whatever
-//!   either is facing, and pipe-to-pipe flow is undirected (see
-//!   [`super::fluid`]'s module doc). That is not a shortcut: the shipped
-//!   mixer has always been fed from the row *above* it — neither its inlet
-//!   face nor its outlet — because a pressure network is not a conveyor, and
-//!   requiring a fluid inlet to face the right way would break the one
-//!   plumbing arrangement the game has always had.
+//! - **A fluid is drawn by touching and pushed by facing.** A machine draws
+//!   its recipe's `fluid_inputs` from any pipe tile orthogonally adjacent to
+//!   any tile of its footprint, whatever either is facing, and pipe-to-pipe
+//!   flow is undirected (see [`super::fluid`]'s module doc). That half is
+//!   not a shortcut: the shipped mixer has always been fed from the row
+//!   *above* it — neither its inlet face nor its outlet — because a pressure
+//!   network is not a conveyor, and requiring a fluid inlet to face the
+//!   right way would break the one plumbing arrangement the game has always
+//!   had.
+//!
+//!   Its `fluid_outputs`, added by the chain-rework epic, are the other way
+//!   round: **a fluid output leaves by the face the machine points at,
+//!   exactly as a solid one does.** [`super::machines`]'s convention is that
+//!   `direction` *is* "the side product leaves by", and a liquid product is
+//!   still product. That asymmetry is what makes a machine plumbed on both
+//!   sides unambiguous without the player having to label a run: the mixer
+//!   pushes its ketchup mix east into the pipe it faces, and draws its
+//!   vinegar from the run merely touching it. An input tap is therefore
+//!   resolved as "the first adjacent pipe network that is **not** the output
+//!   network" — so a loop of pipe touching a machine on both sides is read
+//!   as its outlet and gives it no inlet at all, rather than as a machine
+//!   quietly feeding itself.
+//!
+//!   A network's fluid id is still decided by content and not by the player:
+//!   the topology pass claims an unclaimed network for whichever fluid the
+//!   first machine to reach it names, whether that machine is drawing or
+//!   depositing. Producer and consumer agree by naming the same id in
+//!   `recipes.ron` — a run between the mixer and the vat resolves to
+//!   `"ketchup_mix"` whichever end is walked first — and a run whose two
+//!   ends disagree simply stalls one of them, the same way a machine tapping
+//!   the wrong fluid always has.
 //! - **One placement resolves to two downstream targets, and only one.** A
 //!   belt looks at the single tile it points at; a
 //!   [splitter](super::splitter) looks at two — the tile on its own facing
@@ -133,6 +156,9 @@ use super::fluid::{
     FluidTap, PipeSegment,
 };
 use super::hopper::{HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, HOPPER_KIND, Hopper};
+use super::ingredients::{
+    DEFAULT_BUY_QUANTITY, Ingredients, IngredientsSnapshot, raw_ingredient_ids,
+};
 use super::machine::Machine;
 use super::machines::{Footprint, MachineRegistry};
 use super::recipe::{Recipe, RecipeRegistry};
@@ -216,10 +242,11 @@ struct PipeTile {
 /// place.
 #[derive(Debug, Clone)]
 pub enum PlayerCommand {
-    /// Loads raw ingredient into a hopper. The *item* is not a parameter: a
-    /// hopper holds exactly one item id, decided by `data/recipes.ron` (see
-    /// [`super::hopper`]), so naming an item here could only ever name the
-    /// wrong one.
+    /// Loads raw ingredient into a hopper, **out of the stock the player has
+    /// bought**. The *item* is not a parameter: each hopper holds exactly
+    /// one item id, chosen when it was placed (see
+    /// [`PlayerCommand::Place`]), so naming an item here could only ever
+    /// name the wrong one.
     ///
     /// `tile` names **which** hopper (any tile of its footprint, like every
     /// other tile-addressed command here). `None` means *every* hopper in
@@ -227,19 +254,48 @@ pub enum PlayerCommand {
     /// with one hopper has always done on a keypress, and which is why the
     /// pre-placement wire format still works unchanged. A world with no
     /// hopper at all, or a `tile` holding something else, is a no-op.
+    ///
+    /// **The stock check is new with the ingredient economy** (GAMEPLAY.md
+    /// §5): `amount` is clamped to how many of that hopper's item the player
+    /// owns *before* [`Hopper::fill`] clamps it again to the room in the
+    /// bin, and the owned ledger is debited by **exactly what `fill` reports
+    /// it added** — never the requested amount, since a nearly-full hopper
+    /// accepts less than it is offered and the difference must not vanish
+    /// from the ledger. Filling with no stock is a silent no-op, like every
+    /// other under-resourced command here.
     FillHopper {
         amount: u32,
         tile: Option<TileCoord>,
     },
-    /// Loads fluid into a tank, in whole fluid units. Exactly
-    /// [`PlayerCommand::FillHopper`]'s shape for exactly its reasons,
-    /// including `tile`: the *fluid* is not a parameter (a network carries
-    /// the fluid its tapping machine's recipe names), and over-filling is
-    /// clamped at the tank's capacity, silently.
+    /// Loads fluid into a tank, in whole fluid units, out of bought stock.
+    /// Exactly [`PlayerCommand::FillHopper`]'s shape for exactly its
+    /// reasons, including `tile` and the clamp-then-debit-what-was-added
+    /// rule.
+    ///
+    /// The *fluid* is not a parameter here either, but for a subtler reason
+    /// than the hopper's: a tank deliberately holds no fluid id of its own
+    /// (see [`FluidTank`]), so what it is being filled with is **the fluid
+    /// of the network it discharges into** — which is what its own snapshot
+    /// has always reported. A tank plumbed to nothing, or to a run no
+    /// machine taps, therefore has no id to charge the player for and is a
+    /// no-op: you cannot buy a drum of nothing.
     FillFluidTank {
         amount: u32,
         tile: Option<TileCoord>,
     },
+    /// Buys `quantity` units of a raw ingredient — the consumable half of
+    /// GAMEPLAY.md §5's cost axes, and the twin of
+    /// [`PlayerCommand::Purchase`] in every respect: priced from
+    /// `data/ingredients.ron`, paid out of the one [`Economy::money`]
+    /// counter through `try_spend`, credited to a per-id ledger
+    /// ([`super::ingredients::OwnedIngredients`]), and **all-or-nothing and
+    /// silent about failure** — an unknown ingredient, a zero quantity, an
+    /// unrepresentable total or simply not enough money all leave the world
+    /// byte-identical.
+    ///
+    /// `item` names an item *or* a fluid: both are plain string ids and both
+    /// are bought by the unit (see [`super::ingredients`]).
+    BuyIngredient { item: String, quantity: u32 },
     /// Buys `quantity` of a buildable kind from the shop (the "Shop &
     /// Inventory" epic's ticket 1): debits `quantity * price` from
     /// [`Economy::money`] and credits `quantity` to the player's owned count
@@ -268,10 +324,24 @@ pub enum PlayerCommand {
     /// `tile` is the footprint's origin — its minimum-X/minimum-Y corner —
     /// exactly as it is everywhere else in this crate. Placing succeeds or
     /// fails as a unit; there is no partial placement.
+    ///
+    /// **`item` is the hopper's contents, and is only read for a hopper.**
+    /// A hopper holds one item id for its whole life ([`super::hopper`]), and
+    /// until the chain gained a second raw ingredient the simulation owned a
+    /// sensible answer for which — there was exactly one raw item, so every
+    /// hopper held it and the player was never asked. With `tomato` *and*
+    /// `sugar` there is no such answer, and this field follows
+    /// `PlayerCommandDto`'s own rule for that case: **optional while it is
+    /// inferable, required once it is ambiguous.** Concretely, placing a
+    /// hopper with `item: None` succeeds in a world whose recipes name
+    /// exactly one raw item and is a silent no-op in one that names two, and
+    /// naming an item that is not raw at all is likewise refused. For every
+    /// other kind the field is ignored.
     Place {
         kind: String,
         tile: TileCoord,
         direction: Direction,
+        item: Option<ItemId>,
     },
     /// Picks up whatever occupies `tile` and credits one back to the
     /// player's owned count of its kind.
@@ -348,13 +418,25 @@ enum PlayerCommandDto {
         #[serde(default = "default_purchase_quantity")]
         quantity: u32,
     },
+    /// `{"type": "buy_ingredient", "item": "tomato", "quantity": 40}` —
+    /// `quantity` optional, defaulting to [`DEFAULT_BUY_QUANTITY`] (one),
+    /// exactly as `purchase`'s does.
+    BuyIngredient {
+        item: String,
+        #[serde(default = "default_buy_quantity")]
+        quantity: u32,
+    },
     /// `{"type": "place", "kind": "crusher", "tile": [4, 0],
     /// "direction": "east"}` — `direction` optional, defaulting to `"east"`.
+    /// `item` is optional too and is only read when placing a hopper; see
+    /// [`PlayerCommand::Place`] for when omitting it is a refusal.
     Place {
         kind: String,
         tile: TileCoord,
         #[serde(default)]
         direction: Direction,
+        #[serde(default)]
+        item: Option<ItemId>,
     },
     /// `{"type": "remove", "tile": [4, 0]}`.
     Remove { tile: TileCoord },
@@ -374,6 +456,10 @@ fn default_purchase_quantity() -> u32 {
     DEFAULT_PURCHASE_QUANTITY
 }
 
+fn default_buy_quantity() -> u32 {
+    DEFAULT_BUY_QUANTITY
+}
+
 impl From<PlayerCommandDto> for PlayerCommand {
     fn from(dto: PlayerCommandDto) -> Self {
         match dto {
@@ -386,14 +472,19 @@ impl From<PlayerCommandDto> for PlayerCommand {
             PlayerCommandDto::Purchase { kind, quantity } => {
                 PlayerCommand::Purchase { kind, quantity }
             }
+            PlayerCommandDto::BuyIngredient { item, quantity } => {
+                PlayerCommand::BuyIngredient { item, quantity }
+            }
             PlayerCommandDto::Place {
                 kind,
                 tile,
                 direction,
+                item,
             } => PlayerCommand::Place {
                 kind,
                 tile,
                 direction,
+                item,
             },
             PlayerCommandDto::Remove { tile } => PlayerCommand::Remove { tile },
             PlayerCommandDto::Rotate { tile } => PlayerCommand::Rotate { tile },
@@ -688,16 +779,20 @@ pub struct DockSnapshot {
     pub shipped_total: u32,
 }
 
-/// One machine's tap into a fluid network, for presentation.
+/// One machine's tap into a fluid network, for presentation. Used for both
+/// roles — see [`FluidSnapshot::taps`] (machines drawing) and
+/// [`FluidSnapshot::producers`] (machines depositing).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FluidTapSnapshot {
-    /// Origin tile of the machine drawing from this network.
+    /// Origin tile of the machine on this end of the network.
     pub machine_tile: TileCoord,
     pub machine_recipe: RecipeId,
-    /// How much the recipe consumes per craft.
+    /// How much the recipe moves per craft — consumed for a tap in `taps`,
+    /// deposited for one in `producers`.
     pub units_per_craft: u32,
-    /// Index into the network's `segments` of the tile this machine draws
-    /// from — the one whose level drops when a craft starts.
+    /// Index into the network's `segments` of the tile this machine is
+    /// plumbed to — the one whose level drops when a craft starts, or rises
+    /// when one finishes.
     pub segment_index: usize,
 }
 
@@ -719,6 +814,7 @@ pub struct FluidTapSnapshot {
 ///                   "capacity": 10.0, "pressure": 1.0, "is_source": true } ],
 ///   "taps": [ { "machine_tile": [9, 0], "machine_recipe": "ketchup_mix",
 ///               "units_per_craft": 2, "segment_index": 3 } ],
+///   "producers": [],
 ///   "tank_tiles": [[5, 1]]
 /// }
 /// ```
@@ -747,6 +843,11 @@ pub struct FluidSnapshot {
     pub pressure: f64,
     pub segments: Vec<PipeSnapshot>,
     pub taps: Vec<FluidTapSnapshot>,
+    /// Machines **depositing** into this network — the chain-rework epic's
+    /// addition, and the reason a run can now have fluid in it with no tank
+    /// anywhere. Without it a consumer reading `tank_tiles: []` alongside a
+    /// rising volume would have no way to say where the liquid comes from.
+    pub producers: Vec<FluidTapSnapshot>,
     pub tank_tiles: Vec<TileCoord>,
 }
 
@@ -959,8 +1060,14 @@ struct Topology {
     /// doesn't have to search every network.
     pipe_index: BTreeMap<TileCoord, (usize, usize)>,
     /// `(machine, network index, segment index)` for every fluid-consuming
-    /// machine that touches a pipe.
+    /// machine that touches a pipe — the network it **draws** from.
     machine_taps: Vec<(Entity, usize, usize)>,
+    /// The same, for the network a fluid-producing machine **deposits**
+    /// into: the first pipe off its outlet face. Kept as a separate list
+    /// rather than a second field on `machine_taps` because the two are
+    /// derived by different rules (touching vs. facing — see this module's
+    /// doc) and a machine may have either, both or neither.
+    machine_output_taps: Vec<(Entity, usize, usize)>,
     /// `(tank, network index, segment index)` for every tank discharging
     /// into a pipe.
     tank_discharges: Vec<(Entity, usize, usize)>,
@@ -977,11 +1084,21 @@ pub struct World {
     /// one recipe per kind (construction panics if that stops being true,
     /// rather than silently picking one).
     recipe_for_kind: HashMap<String, RecipeId>,
-    /// The chain's raw ingredient — the first recipe's first input — which
-    /// is what any hopper the player places will hold. `None` for a recipe
-    /// file whose first recipe has no inputs, in which case a hopper cannot
-    /// be placed at all (rather than the world refusing to be built).
-    raw_item: Option<ItemId>,
+    /// Every **raw** item the chain consumes: an item some recipe takes as a
+    /// solid input and no recipe produces
+    /// ([`super::ingredients::raw_ingredient_ids`], filtered to solids
+    /// here), in order of first appearance.
+    ///
+    /// This replaced a single `raw_item: Option<ItemId>` computed as "the
+    /// first recipe's first input, and nothing else is ever considered raw."
+    /// That was a correct reading of a chain with exactly one raw
+    /// ingredient and stopped being one the moment the mixer gained sugar:
+    /// it would have named `tomato` alone, leaving `sugar` unbuyable, no
+    /// hopper able to hold it, and the line unable to run.
+    ///
+    /// Empty for a recipe file with no raw solid at all, in which case a
+    /// hopper cannot be placed (rather than the world refusing to be built).
+    raw_items: Vec<ItemId>,
     tick_count: u64,
     belt_speed: Fx,
     /// Chunks touched since the start of the current `tick()` call. Cleared
@@ -995,6 +1112,10 @@ pub struct World {
     /// owned count is real inventory: `Place` spends one and `Remove`
     /// credits one back.
     shop: Shop,
+    /// The raw-ingredient market and the stock the player has bought out of
+    /// it (GAMEPLAY.md §5). A plain field beside `shop` and `economy` for
+    /// their reason: one per world.
+    ingredients: Ingredients,
     topology: Topology,
 }
 
@@ -1099,19 +1220,30 @@ impl World {
             }
             recipe_for_kind.insert(recipe.machine.clone(), recipe.id.clone());
         }
-        let raw_item = ordered[0].inputs.first().map(|(item, _)| item.clone());
+        // Raw = consumed somewhere, produced nowhere. The fluid raws
+        // (vinegar) are bought the same way but are not hopper contents, so
+        // only the solids are kept here.
+        let solid_inputs: Vec<&str> = ordered
+            .iter()
+            .flat_map(|r| r.inputs.iter().map(|(item, _)| item.as_str()))
+            .collect();
+        let raw_items: Vec<ItemId> = raw_ingredient_ids(&recipes)
+            .into_iter()
+            .filter(|id| solid_inputs.contains(&id.as_str()))
+            .collect();
 
         Self {
             ecs: hecs::World::new(),
             recipes,
             machines,
             recipe_for_kind,
-            raw_item,
+            raw_items,
             tick_count: 0,
             belt_speed: Fx::from_num(BELT_SPEED_TILES_PER_TICK),
             dirty: Vec::new(),
             economy: Economy::with_money(&contracts, money),
             shop: Shop::bundled(),
+            ingredients: Ingredients::bundled(),
             topology: Topology::default(),
         }
     }
@@ -1144,6 +1276,25 @@ impl World {
     /// in one object — see [`ShopSnapshot`] for the exact JSON shape.
     pub fn shop_snapshot(&self) -> ShopSnapshot {
         self.shop.snapshot(self.economy.money)
+    }
+
+    /// The raw-ingredient market plus the stock the player owns and their
+    /// money, in one object — see [`IngredientsSnapshot`].
+    pub fn ingredients_snapshot(&self) -> IngredientsSnapshot {
+        self.ingredients.snapshot(self.economy.money)
+    }
+
+    /// How many units of a raw ingredient the player owns and has **not**
+    /// loaded. The ingredient twin of [`Self::owned_count`].
+    pub fn owned_ingredient(&self, item: &str) -> u32 {
+        self.ingredients.owned.count(item)
+    }
+
+    /// Every raw solid item this world's recipes need, in order of first
+    /// appearance — the set a hopper's contents must be drawn from. See
+    /// [`Self::raw_items`]'s field doc for what "raw" means.
+    pub fn raw_items(&self) -> &[ItemId] {
+        &self.raw_items
     }
 
     /// How many of `kind` the player owns and has **not** placed. A thin
@@ -1185,18 +1336,61 @@ impl World {
         }
         match kind {
             BELT_KIND | PIPE_KIND | SPLITTER_KIND | DOCK_KIND | FLUID_TANK_KIND => true,
-            HOPPER_KIND => self.raw_item.is_some(),
+            HOPPER_KIND => !self.raw_items.is_empty(),
             other => self.recipe_for_kind.contains_key(other),
+        }
+    }
+
+    /// Which item a hopper being placed will hold, given what the player
+    /// asked for (if anything). `None` means "refuse the placement".
+    ///
+    /// This is where [`PlayerCommand::Place`]'s optional-when-inferable rule
+    /// is actually decided, in one place, so the wire form and the pure
+    /// command agree by construction:
+    ///
+    /// - a named item is honoured **only if it is genuinely raw** — a hopper
+    ///   full of bottled ketchup is not a thing to allow by omission of a
+    ///   check;
+    /// - an omitted item falls back to the world's single raw item when
+    ///   there is exactly one, which is what every pre-sugar world had and
+    ///   why nothing about that world's behaviour changed;
+    /// - an omitted item in a world with **several** raw items is a refusal,
+    ///   because the simulation genuinely does not know which bin the player
+    ///   meant and picking the first would silently choose for them.
+    fn hopper_item_for(&self, requested: Option<&str>) -> Option<ItemId> {
+        match requested {
+            Some(item) => self.raw_items.iter().find(|raw| *raw == item).cloned(),
+            None => match self.raw_items.as_slice() {
+                [only] => Some(only.clone()),
+                _ => None,
+            },
         }
     }
 
     /// Places one owned unit of `kind`, returning whether it happened. See
     /// [`PlayerCommand::Place`] for the refusal rules — every one of them
     /// leaves the world byte-identical.
-    fn try_place(&mut self, kind: &str, tile: TileCoord, direction: Direction) -> bool {
+    fn try_place(
+        &mut self,
+        kind: &str,
+        tile: TileCoord,
+        direction: Direction,
+        item: Option<&str>,
+    ) -> bool {
         if self.shop.owned.count(kind) == 0 || !self.can_construct(kind) {
             return false;
         }
+        // Resolved before anything is spawned, so an ambiguous or bogus
+        // hopper item is a refusal that changes nothing rather than a
+        // half-built placement.
+        let hopper_item = if kind == HOPPER_KIND {
+            match self.hopper_item_for(item) {
+                Some(resolved) => Some(resolved),
+                None => return false,
+            }
+        } else {
+            None
+        };
         let footprint = self
             .footprint_for(kind)
             .expect("can_construct checked the footprint exists");
@@ -1246,10 +1440,8 @@ impl World {
                 },
             )),
             HOPPER_KIND => {
-                let item = self
-                    .raw_item
-                    .clone()
-                    .expect("can_construct checked the chain has a raw ingredient");
+                let item =
+                    hopper_item.expect("the hopper's item was resolved before anything spawned");
                 self.ecs.spawn((
                     position,
                     placement,
@@ -1559,10 +1751,21 @@ impl World {
             topology.networks.push(FluidNetwork::new(None, segments, links));
         }
 
-        // --- who taps what. A machine touching a pipe taps it (fluids
-        // connect by touching, not by facing — this module's doc), and the
-        // first fluid-consuming machine to reach a network is what decides
-        // the fluid that network carries.
+        // --- who taps what.
+        //
+        // Two rules, and the asymmetry between them is deliberate (this
+        // module's doc): a machine **deposits** into the pipe off its outlet
+        // face, exactly as it discharges a solid, and **draws** from any
+        // other pipe merely touching its footprint. Resolving the output
+        // first is what makes the input's "any other network" well defined,
+        // and it is why a loop of pipe wrapped around one machine reads as
+        // its outlet rather than as a machine feeding itself.
+        //
+        // Whichever machine reaches an unclaimed network first names it,
+        // producer or consumer alike; machines are walked in tile order, so
+        // that is deterministic. Two machines naming the same run agree by
+        // naming the same id in `recipes.ron`, which is what makes a
+        // mixer -> pipe -> vat run resolve to one fluid from either end.
         for &machine in &topology.machines {
             let placement = self.placement_of(machine);
             let origin = self.position_of(machine);
@@ -1574,21 +1777,41 @@ impl World {
             else {
                 continue;
             };
-            let Some((fluid_id, _)) = recipe.fluid_inputs.first().cloned() else {
-                continue;
-            };
-            let tap = placement
-                .tiles(origin)
-                .into_iter()
-                .flat_map(|tile| Direction::ALL.map(|dir| dir.step(tile)))
-                .find_map(|neighbour| topology.pipe_index.get(&neighbour).copied());
-            let Some((network, segment)) = tap else {
-                continue;
-            };
-            if topology.networks[network].fluid.is_none() {
-                topology.networks[network].fluid = Some(fluid_id);
+
+            let mut output_network: Option<usize> = None;
+            if let Some((fluid_id, _)) = recipe.fluid_outputs.first().cloned() {
+                let tap = placement
+                    .footprint
+                    .outlet_neighbours(origin, placement.direction)
+                    .into_iter()
+                    .find_map(|tile| topology.pipe_index.get(&tile).copied());
+                if let Some((network, segment)) = tap {
+                    if topology.networks[network].fluid.is_none() {
+                        topology.networks[network].fluid = Some(fluid_id);
+                    }
+                    output_network = Some(network);
+                    topology
+                        .machine_output_taps
+                        .push((machine, network, segment));
+                }
             }
-            topology.machine_taps.push((machine, network, segment));
+
+            if let Some((fluid_id, _)) = recipe.fluid_inputs.first().cloned() {
+                let tap = placement
+                    .tiles(origin)
+                    .into_iter()
+                    .flat_map(|tile| Direction::ALL.map(|dir| dir.step(tile)))
+                    .filter_map(|neighbour| topology.pipe_index.get(&neighbour).copied())
+                    // A machine never draws from the run it fills: that is
+                    // not plumbing, it is a machine feeding itself.
+                    .find(|&(network, _)| Some(network) != output_network);
+                if let Some((network, segment)) = tap {
+                    if topology.networks[network].fluid.is_none() {
+                        topology.networks[network].fluid = Some(fluid_id);
+                    }
+                    topology.machine_taps.push((machine, network, segment));
+                }
+            }
         }
         for &tank in &topology.tanks {
             let placement = self.placement_of(tank);
@@ -1726,27 +1949,57 @@ impl World {
         // 3. Machines.
         let machines = std::mem::take(&mut self.topology.machines);
         let taps = std::mem::take(&mut self.topology.machine_taps);
+        let output_taps = std::mem::take(&mut self.topology.machine_output_taps);
         for &machine in &machines {
             let tapped = taps
                 .iter()
                 .find(|&&(entity, _, _)| entity == machine)
                 .map(|&(_, network, inlet)| (network, inlet));
+            let pushing = output_taps
+                .iter()
+                .find(|&&(entity, _, _)| entity == machine)
+                .map(|&(_, network, outlet)| (network, outlet));
             let changed = {
                 let mut body = self
                     .ecs
                     .get::<&mut Machine>(machine)
                     .expect("a machine placement carries a Machine");
-                let tap = tapped.map(|(network, inlet)| FluidTap {
-                    network: &mut self.topology.networks[network],
-                    inlet,
-                });
-                body.tick(self.tick_count, &self.recipes, tap)
+                // The topology pass guarantees the two networks are
+                // different (see `recompute_topology`), which is what makes
+                // holding both mutable borrows at once sound — and what
+                // `two_networks_mut` asserts rather than assumes.
+                let (fluid_in, fluid_out) = match (tapped, pushing) {
+                    (Some((a, inlet)), Some((b, outlet))) => {
+                        let (net_a, net_b) = two_networks_mut(&mut self.topology.networks, a, b);
+                        (
+                            Some(FluidTap { network: net_a, inlet }),
+                            Some(FluidTap { network: net_b, inlet: outlet }),
+                        )
+                    }
+                    (Some((a, inlet)), None) => (
+                        Some(FluidTap {
+                            network: &mut self.topology.networks[a],
+                            inlet,
+                        }),
+                        None,
+                    ),
+                    (None, Some((b, outlet))) => (
+                        None,
+                        Some(FluidTap {
+                            network: &mut self.topology.networks[b],
+                            inlet: outlet,
+                        }),
+                    ),
+                    (None, None) => (None, None),
+                };
+                body.tick(self.tick_count, &self.recipes, fluid_in, fluid_out)
             };
             if changed {
                 self.mark_placement_dirty(machine);
             }
         }
         self.topology.machine_taps = taps;
+        self.topology.machine_output_taps = output_taps;
 
         // 4. Consumers pull off a belt's end.
         let belt_to_sink = std::mem::take(&mut self.topology.belt_to_sink);
@@ -2012,11 +2265,20 @@ impl World {
             PlayerCommand::FillHopper { amount, tile } => {
                 let hoppers = self.targets(&self.topology.hoppers.clone(), tile);
                 for hopper in hoppers {
-                    // Clamped at capacity, never an error — see `Hopper::fill`.
+                    // Two clamps, in this order: what the player owns, then
+                    // what the bin has room for. The ledger is debited by
+                    // what `fill` actually took, never by what was asked
+                    // for — see `PlayerCommand::FillHopper`.
+                    let item = self.ecs.get::<&Hopper>(hopper).unwrap().item().clone();
+                    let allowed = amount.min(self.ingredients.owned.count(&item));
+                    if allowed == 0 {
+                        continue;
+                    }
                     let added = {
                         let mut body = self.ecs.get::<&mut Hopper>(hopper).unwrap();
-                        body.fill(amount)
+                        body.fill(allowed)
                     };
+                    self.ingredients.owned.take(&item, added);
                     if added > 0 {
                         self.mark_placement_dirty(hopper);
                     }
@@ -2025,11 +2287,29 @@ impl World {
             PlayerCommand::FillFluidTank { amount, tile } => {
                 let tanks = self.targets(&self.topology.tanks.clone(), tile);
                 for tank in tanks {
+                    // A tank holds no fluid id of its own, so what is being
+                    // bought is the fluid of the run it discharges into.
+                    // Plumbed to nothing means there is nothing to charge
+                    // for, and the fill is a no-op.
+                    let Some(fluid) = self.tank_fluid(tank) else {
+                        continue;
+                    };
+                    let allowed = amount.min(self.ingredients.owned.count(&fluid));
+                    if allowed == 0 {
+                        continue;
+                    }
                     // Clamped at capacity, never an error — see `FluidTank::fill`.
                     let added = {
                         let mut body = self.ecs.get::<&mut FluidTank>(tank).unwrap();
-                        body.fill(amount)
+                        body.fill(allowed)
                     };
+                    // A tank's room is continuous, so `fill` can report a
+                    // fraction of a unit. Stock is whole units, so a partial
+                    // unit is billed as a whole one — capped at what was
+                    // allowed, so the ledger can never go further than the
+                    // clamp above already permitted.
+                    let debit = added.ceil().to_num::<i64>().max(0) as u32;
+                    self.ingredients.owned.take(&fluid, debit.min(allowed));
                     if added > Fx::ZERO {
                         self.mark_placement_dirty(tank);
                     }
@@ -2054,12 +2334,26 @@ impl World {
                 }
                 self.shop.owned.add(&kind, quantity);
             }
+            PlayerCommand::BuyIngredient { item, quantity } => {
+                // `Purchase`'s arm, verbatim, against the other catalog and
+                // the other ledger: priced first, then paid for, then
+                // credited, with every failure landing before anything has
+                // changed. No chunk is dirtied — stock is not a tile.
+                let Some(cost) = self.ingredients.cost_of(&item, quantity) else {
+                    return;
+                };
+                if !self.economy.try_spend(cost) {
+                    return;
+                }
+                self.ingredients.owned.add(&item, quantity);
+            }
             PlayerCommand::Place {
                 kind,
                 tile,
                 direction,
+                item,
             } => {
-                self.try_place(&kind, tile, direction);
+                self.try_place(&kind, tile, direction, item.as_deref());
             }
             PlayerCommand::Remove { tile } => {
                 self.try_remove(tile);
@@ -2260,26 +2554,8 @@ impl World {
                         (network.total_volume() / total_capacity).to_num::<f64>()
                     },
                     segments: network.segments().iter().map(pipe_snapshot).collect(),
-                    taps: self
-                        .topology
-                        .machine_taps
-                        .iter()
-                        .filter(|&&(_, net, _)| net == index)
-                        .filter_map(|&(machine, _, segment)| {
-                            let body = self.ecs.get::<&Machine>(machine).ok()?;
-                            let units_per_craft = self
-                                .recipes
-                                .get(&body.recipe)
-                                .and_then(|r| r.fluid_inputs.first().map(|(_, units)| *units))
-                                .unwrap_or(0);
-                            Some(FluidTapSnapshot {
-                                machine_tile: self.position_of(machine),
-                                machine_recipe: body.recipe.clone(),
-                                units_per_craft,
-                                segment_index: segment,
-                            })
-                        })
-                        .collect(),
+                    taps: self.tap_snapshots(&self.topology.machine_taps, index, false),
+                    producers: self.tap_snapshots(&self.topology.machine_output_taps, index, true),
                     tank_tiles: self
                         .topology
                         .tank_discharges
@@ -2288,6 +2564,42 @@ impl World {
                         .map(|&(tank, _, _)| self.position_of(tank))
                         .collect(),
                 }
+            })
+            .collect()
+    }
+
+    /// One end's worth of [`FluidTapSnapshot`]s for network `index` —
+    /// shared by `taps` and `producers`, which differ only in which list
+    /// they walk and which side of the recipe they report a quantity from.
+    fn tap_snapshots(
+        &self,
+        links: &[(Entity, usize, usize)],
+        index: usize,
+        producing: bool,
+    ) -> Vec<FluidTapSnapshot> {
+        links
+            .iter()
+            .filter(|&&(_, net, _)| net == index)
+            .filter_map(|&(machine, _, segment)| {
+                let body = self.ecs.get::<&Machine>(machine).ok()?;
+                let units_per_craft = self
+                    .recipes
+                    .get(&body.recipe)
+                    .and_then(|r| {
+                        let side = if producing {
+                            &r.fluid_outputs
+                        } else {
+                            &r.fluid_inputs
+                        };
+                        side.first().map(|(_, units)| *units)
+                    })
+                    .unwrap_or(0);
+                Some(FluidTapSnapshot {
+                    machine_tile: self.position_of(machine),
+                    machine_recipe: body.recipe.clone(),
+                    units_per_craft,
+                    segment_index: segment,
+                })
             })
             .collect()
     }
@@ -2427,6 +2739,18 @@ impl World {
             .map(|&(_, belt)| self.position_of(belt))
     }
 
+    /// The fluid a tank is currently holding, which is the fluid of the
+    /// network it discharges into — read off the topology's own links, so it
+    /// can never disagree with [`FluidTankSnapshot::fluid`], which is
+    /// derived the same way.
+    fn tank_fluid(&self, tank: Entity) -> Option<FluidId> {
+        self.topology
+            .tank_discharges
+            .iter()
+            .find(|&&(entity, _, _)| entity == tank)
+            .and_then(|&(_, network, _)| self.topology.networks[network].fluid.clone())
+    }
+
     /// The tile of the belt currently feeding this placement, if any.
     fn inbound_belt_tile(&self, sink: Entity) -> Option<TileCoord> {
         self.topology
@@ -2556,17 +2880,54 @@ impl World {
 fn validate_chain(ordered: &[Recipe]) {
     for pair in ordered.windows(2) {
         let (prev, next) = (&pair[0], &pair[1]);
-        let links = next
+        let links_by_item = next
             .inputs
             .iter()
             .any(|(item, _)| prev.outputs.iter().any(|(out_item, _)| out_item == item));
+        // The fluid half, added by the chain-rework epic. Two stages joined
+        // by a pipe share no solid id at all — the mixer's whole output is a
+        // liquid and the cooking vat's whole input is one — so without this
+        // the middle of the shipped chain would look like a break in the
+        // line. A typo'd *fluid* id is exactly as much a content error as a
+        // typo'd item id, and gets exactly the same construction-time panic.
+        let links_by_fluid = next.fluid_inputs.iter().any(|(fluid, _)| {
+            prev.fluid_outputs
+                .iter()
+                .any(|(out_fluid, _)| out_fluid == fluid)
+        });
         assert!(
-            links,
-            "recipes.ron chain error: recipe '{}' (output {:?}) does not feed recipe '{}' \
-             (inputs {:?}) — the file describes one production line, so consecutive recipes \
-             must chain by a shared item id",
-            prev.id, prev.outputs, next.id, next.inputs
+            links_by_item || links_by_fluid,
+            "recipes.ron chain error: recipe '{}' (outputs {:?}, fluid_outputs {:?}) does not \
+             feed recipe '{}' (inputs {:?}, fluid_inputs {:?}) — the file describes one \
+             production line, so consecutive recipes must chain by a shared id, solid or fluid",
+            prev.id, prev.outputs, prev.fluid_outputs, next.id, next.inputs, next.fluid_inputs
         );
+    }
+}
+
+/// Two distinct networks out of one `Vec`, as a pair of mutable borrows.
+///
+/// Exists so [`World::tick`] can hand a machine an input tap and an output
+/// tap at the same time. `a != b` is an invariant of the topology pass —
+/// a machine never draws from the run it fills (see
+/// [`World::recompute_topology`]) — and this asserts it rather than trusting
+/// it, because getting it wrong would be aliasing rather than a wrong
+/// answer.
+fn two_networks_mut(
+    networks: &mut [FluidNetwork],
+    a: usize,
+    b: usize,
+) -> (&mut FluidNetwork, &mut FluidNetwork) {
+    assert_ne!(
+        a, b,
+        "a machine's input and output taps must be different networks — the topology pass          resolves the output first and excludes it when choosing the input"
+    );
+    let (lo, hi) = (a.min(b), a.max(b));
+    let (left, right) = networks.split_at_mut(hi);
+    if a < b {
+        (&mut left[lo], &mut right[0])
+    } else {
+        (&mut right[0], &mut left[lo])
     }
 }
 
@@ -2637,9 +2998,16 @@ fn validate_fluid_scope(ordered: &[Recipe]) {
         assert!(
             recipe.fluid_inputs.len() <= 1,
             "recipes.ron fluid error: recipe '{}' declares {} fluid inputs, but a machine taps \
-             exactly one network",
+             exactly one network to draw from",
             recipe.id,
             recipe.fluid_inputs.len()
+        );
+        assert!(
+            recipe.fluid_outputs.len() <= 1,
+            "recipes.ron fluid error: recipe '{}' declares {} fluid outputs, but a machine \
+             deposits into exactly one network — the one off its outlet face",
+            recipe.id,
+            recipe.fluid_outputs.len()
         );
     }
 }

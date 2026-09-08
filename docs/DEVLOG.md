@@ -89,6 +89,66 @@ instead of fixed. `cargo clippy -p sim_core` came back otherwise clean
 (a couple of cosmetic `collapsible_if`/`needless_borrow` nits, mostly in
 files the same rework already owns) — not fixed, for the same reason.
 
+### 2026-09-08 — The chain rework, ticket 1: piped through the middle, and ingredients you have to buy (sim half)
+
+A directly-requested content-and-mechanics pass, and the largest change to
+`data/recipes.ron`'s shape since it was written. Four things at once, because
+each needs the others to make sense. `godot_project/` and `assets/voxels/` are
+deliberately untouched — a follow-up presentation ticket owns those.
+
+**The aging rack is gone.** Milestone 7 inserted a 2400-tick `aged_ketchup`
+stage to prove the generic `TimedProcess` at a qualitatively different
+timescale; the project owner has decided ageing isn't a mechanic this game
+wants, so the stage, its machine kind, its price and its dedicated test file
+are deleted rather than disabled. `TimedProcess` itself is untouched and still
+runs every craft cycle in the game.
+
+**The middle of the line is piped, not belted.** Until now a machine could
+*consume* a fluid and nothing could produce one, so every stage-to-stage link
+had to be a conveyor even where a real plant uses pipe. `Recipe` gained
+`fluid_outputs` (mirroring `fluid_inputs`), `FluidNetwork` gained the
+producer-side twin of its draw API, and `Machine::tick` now takes two taps —
+one to draw from, one to deposit into. The shipped chain uses it: the mixer's
+ketchup mix and the cooking vat's finished ketchup are both **liquids**, so
+the vat has no belt touching it at all, and the bottler is where the product
+becomes a solid again. `recipes.ron`'s `schema_version` is 3.
+
+The rule that makes a machine plumbed on both sides unambiguous is geometric,
+and worth knowing: **a fluid output leaves by the face the machine points at,
+exactly as a solid one does; a fluid input may come from any other pipe
+touching the footprint.** So the player never has to label a run, and a loop
+of pipe wrapped around one machine reads as its outlet rather than as a
+machine quietly feeding itself.
+
+**Sugar, and a rule about inlet faces.** The mixer's recipe gained sugar, the
+chain's second raw ingredient — which meant two hoppers, which meant `Place`
+had to start asking *what* a hopper holds (optional while there is one raw
+ingredient to infer, required once there are two). The unanticipated finding
+was geometric: a 1x1 machine has **one** inlet tile, so two solid ingredients
+would have to merge onto one belt, and a merge with no splitter behind it
+deadlocks — whichever ingredient arrives faster fills the shared belt and
+starves the other out. That was built and measured, not theorised. The mixer
+is **1x2** now, giving sugar its own lane into its own inlet tile, and
+`data/machines.ron` records the general rule for the next multi-ingredient
+kind: a machine that consumes N solid ingredients needs an inlet face at least
+N tiles long.
+
+**Ingredients cost money.** GAMEPLAY.md §5 has named ingredients as one of
+three recurring cost axes since it was written and it had never been
+implemented — `FillHopper` and `FillFluidTank` conjured material out of
+nothing. There is now a `data/ingredients.ron` catalog and an owned-stock
+ledger (`sim/ingredients.rs`, `shop.rs`'s shape with one word changed), a
+`buy_ingredient` command, and both fill commands draw from that stock and are
+silent no-ops without it. One consequence is a real design change rather than
+a mechanical one: **overproduction is now a loss**, since a box no contract
+has ordered is ingredients converted into unsold stock — which is exactly the
+pressure GAMEPLAY.md §6 chooses contracts over a spot market to create.
+
+`cargo test -p sim_core` is green at 228 tests across 11 binaries, including a
+rebuilt full-chain mass-conservation check that now accounts for product
+standing in pipes as well as on belts, and runs once per raw ingredient
+rather than once in "tomato equivalents".
+
 ### 2026-09-08 — Factorio's controls: E opens the build menu, ESC closes everything
 
 Two small control changes, both about matching what a player arriving from

@@ -9,6 +9,7 @@ pub mod dock;
 pub mod economy;
 pub mod fluid;
 pub mod hopper;
+pub mod ingredients;
 pub mod inventory;
 pub mod machine;
 pub mod machines;
@@ -29,15 +30,22 @@ pub use fluid::{
     FluidTap, PipeSegment,
 };
 pub use hopper::{HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, HOPPER_KIND, Hopper};
+pub use ingredients::{
+    DEFAULT_BUY_QUANTITY, IngredientCatalog, IngredientEntry, IngredientSnapshot, Ingredients,
+    IngredientsSnapshot, OwnedIngredients, raw_ingredient_ids,
+};
 pub use machines::{Footprint, MachineKind, MachineRegistry};
 pub use recipe::{Recipe, RecipeRegistry};
-pub use reference::{reference_chain, reference_chain_with};
+pub use reference::{
+    reference_chain, reference_chain_with, reference_chain_with_budget,
+    reference_chain_with_content_and_budget,
+};
 pub use shop::{
     DEFAULT_PURCHASE_QUANTITY, OwnedEquipment, Shop, ShopCatalog, ShopEntry, ShopEntrySnapshot,
     ShopSnapshot,
 };
 pub use splitter::{SPLITTER_KIND, Side, Splitter};
-pub use types::{Direction, decode_chunk_id, encode_chunk_id};
+pub use types::{Direction, Fx, decode_chunk_id, encode_chunk_id};
 pub use world::{
     BELT_KIND, BeltSnapshot, ChunkSnapshot, DockSnapshot, FluidSnapshot, FluidTankSnapshot,
     FluidTapSnapshot, HopperSnapshot, MachineSnapshot, PIPE_KIND, PipeSnapshot, PlacementSnapshot,

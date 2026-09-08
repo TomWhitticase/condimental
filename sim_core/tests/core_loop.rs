@@ -33,14 +33,6 @@
 //! full-chain test fills once up front and lets the unload happen over the
 //! following ticks instead of spawning per tick.
 //!
-//! **Milestone 7 (ARCHITECTURE.md §9 item 7, "Timed processes") inserted a
-//! 2400-tick aging stage mid-chain**, and the only edit it needed here was
-//! the stage-count assertion below — the conservation accounting itself
-//! reads the chain out of the data file, and it already counted a machine's
-//! in-flight `TimedProcess` batch as mass in the system. That was written
-//! for craft cycles lasting tens of ticks; it holds unchanged for one
-//! lasting thousands, which is a small piece of the milestone's own proof.
-//!
 //! **The delivery-dock ticket changed how mass LEAVES the chain**, and that
 //! needed edits here for the same reason ticket 3's did at the other end:
 //! the old behavior being tested is the behavior being removed. Finished
@@ -59,64 +51,110 @@
 //! and needed the same kind of edit: the pipe run's vinegar used to arrive
 //! from an off-map tap that refilled itself every tick, and now comes from a
 //! tank the player loads (`PlayerCommand::FillFluidTank`). So the full-chain
-//! test loads the tank once up front too. Vinegar is not counted in the
-//! tomato-equivalent accounting below — it enters the chain as a fluid, not
-//! as belt-borne mass, and leaves it dissolved in the product.
+//! test loads the tank once up front too.
+//!
+//! # What the chain-rework epic changed, and why it is a bigger edit
+//!
+//! Three things at once, and each of them moves what "mass" even means here.
+//!
+//! 1. **The middle of the chain is piped, not belted.** The mixer's output
+//!    and the cooking vat's output are *fluids* now, so between the mixer and
+//!    the bottler the product is not on any belt and not in any machine
+//!    buffer — it is volume standing in a pipe network. A conservation check
+//!    that only walked belts and buffers would read that as a leak, so the
+//!    accounting below counts every network's volume and every tank's.
+//! 2. **There are two raw ingredients** (tomato and sugar), so a single
+//!    "tomato-equivalent" figure can no longer describe the whole system.
+//!    The check is run **once per raw ingredient**: how many tomatoes are
+//!    accounted for, and separately how many units of sugar. `raw_content`
+//!    below is the generalized version of the old `tomato_value` — it
+//!    recurses through solid *and* fluid production alike, and answers zero
+//!    for an item that embodies none of the raw it is asked about.
+//! 3. **Ingredients cost money** (GAMEPLAY.md §5). Nothing can be loaded
+//!    that was not bought, so the fixture is
+//!    `reference_chain_with_budget` and the test buys exactly the stock it
+//!    then accounts for. Vinegar is bought and loaded like the rest but
+//!    contributes nothing to either raw's accounting, because it embodies
+//!    neither.
+//!
+//! Everything is measured in fixed-point (`Fx`), because a pipe's volume is
+//! continuous. That is not a weakening of the invariant: every fluid
+//! transfer in `fluid.rs` is a paired subtract/add clamped to what the donor
+//! has, so conservation is an exact equality there too, not an epsilon
+//! comparison.
 
 use sim_core::sim::{
-    BeltSnapshot, DockSnapshot, FLUID_TANK_CAPACITY, HopperSnapshot, MachineSnapshot,
-    PlayerCommand, RecipeRegistry, TileSnapshot, World, reference_chain,
+    BeltSnapshot, DockSnapshot, Fx, MachineSnapshot, PlayerCommand, RecipeRegistry,
+    TileSnapshot, World, reference_chain_with_budget,
 };
 
-/// The reference chain's one hopper and one dock. Several of each are a real
-/// supported thing since the "Real Placement" epic (`placement.rs` covers
-/// that); this file's accounting is about the shipped single-line factory.
-fn the_hopper(world: &World) -> HopperSnapshot {
-    let mut hoppers = world.hopper_snapshots();
-    assert_eq!(hoppers.len(), 1, "the reference chain places one hopper");
-    hoppers.remove(0)
-}
-
-fn the_dock(world: &World) -> DockSnapshot {
-    let mut docks = world.dock_snapshots();
-    assert_eq!(docks.len(), 1, "the reference chain places one dock");
-    docks.remove(0)
-}
+/// Enough money to buy the stock this file loads, on top of the shop bill
+/// the fixture already spends.
+const BUDGET: u32 = 400;
 
 fn recipes() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
         .expect("bundled data/recipes.ron must parse")
 }
 
-const TOMATOES_PER_CRAFT: u32 = 4;
+/// The reference chain's one dock. Several are a real supported thing since
+/// the "Real Placement" epic (`placement.rs` covers that); this file's
+/// accounting is about the shipped single-line factory.
+fn the_dock(world: &World) -> DockSnapshot {
+    let mut docks = world.dock_snapshots();
+    assert_eq!(docks.len(), 1, "the reference chain places one dock");
+    docks.remove(0)
+}
 
-/// How many raw tomatoes one unit of `item` represents, by recursing back
-/// through whichever recipe produces it. Relies on this milestone's
-/// single-strand-chain assumption (world.rs's module doc): each non-root
-/// recipe has exactly one input and one output unit, so an item's value is
-/// just its recipe's input quantity times its input item's own value.
-fn tomato_value(item: &str, recipes: &RecipeRegistry) -> u32 {
-    if item == "tomato" {
+/// Buys `quantity` of `item`, asserting it was affordable.
+fn buy(world: &mut World, item: &str, quantity: u32) {
+    let before = world.owned_ingredient(item);
+    world.issue_command(PlayerCommand::BuyIngredient {
+        item: item.to_string(),
+        quantity,
+    });
+    assert_eq!(
+        world.owned_ingredient(item),
+        before + quantity,
+        "the fixture must be able to afford {quantity} x {item}"
+    );
+}
+
+/// How many units of raw ingredient `raw` one unit of `id` embodies, by
+/// recursing back through whichever recipe produces it — following **fluid**
+/// production as readily as solid, since the middle of the chain is piped.
+///
+/// Answers `1` for `raw` itself and `0` for anything nothing produces and
+/// that is not `raw` (i.e. a *different* raw ingredient: sugar carries no
+/// tomatoes). Relies on the chain's single-strand shape, which
+/// `validate_chain` enforces: every recipe past the first produces one unit
+/// from a fixed bill of inputs, so an id's raw content is just the sum of
+/// its inputs' contents times their quantities.
+fn raw_content(id: &str, raw: &str, recipes: &RecipeRegistry) -> u32 {
+    if id == raw {
         return 1;
     }
-    let recipe = recipes
-        .ordered()
-        .iter()
-        .find(|r| r.outputs.iter().any(|(id, _)| id == item))
-        .unwrap_or_else(|| panic!("no recipe in data/recipes.ron produces item '{item}'"));
-    let (input_item, input_qty) = recipe
+    let Some(recipe) = recipes.ordered().iter().find(|r| {
+        r.outputs.iter().any(|(out, _)| out == id)
+            || r.fluid_outputs.iter().any(|(out, _)| out == id)
+    }) else {
+        // Produced by nothing: another raw ingredient, which embodies none
+        // of the one being counted.
+        return 0;
+    };
+    recipe
         .inputs
-        .first()
-        .unwrap_or_else(|| panic!("recipe '{}' has no inputs", recipe.id));
-    input_qty * tomato_value(input_item, recipes)
+        .iter()
+        .chain(recipe.fluid_inputs.iter())
+        .map(|(input, qty)| qty * raw_content(input, raw, recipes))
+        .sum()
 }
 
 /// Every belt/machine snapshot across the whole chain, regardless of how
 /// many chunks it spans — gathered via `World::all_chunks` rather than
-/// assuming a fixed chunk count, so this keeps working if the chain grows
-/// long enough to cross a chunk boundary. It genuinely spans three chunks
-/// now: the hopper sits west of x = 0, in chunk (-1, 0), and since the
-/// delivery-dock ticket the dock sits at x = 35, in chunk (1, 0).
+/// assuming a fixed chunk count. It genuinely spans two chunks: the line
+/// sits in chunk (0, 0) and the first feed lane's hopper stands west of it
+/// at x = -1, in chunk (-1, 0).
 fn full_chain_snapshot(world: &World) -> (Vec<BeltSnapshot>, Vec<MachineSnapshot>) {
     let mut belts = Vec::new();
     let mut machines = Vec::new();
@@ -128,158 +166,217 @@ fn full_chain_snapshot(world: &World) -> (Vec<BeltSnapshot>, Vec<MachineSnapshot
     (belts, machines)
 }
 
-/// Total mass currently held anywhere in the sim (belts — including the
-/// dock's own inbound belt — machine input/output buffers, the dock's
-/// transfer buffer, and any mid-`TimedProcess` batch), in tomato-equivalent
-/// units. Does NOT include anything the dock has already shipped into the
-/// economy's delivery pool — the caller adds that back in separately, from
-/// the dock's `shipped_total`.
-fn total_tomato_equivalent(world: &World, recipes: &RecipeRegistry) -> u32 {
+/// Total `raw`-equivalent mass currently held anywhere in the sim: hoppers,
+/// belts, machine buffers, any mid-`TimedProcess` batch, **every fluid
+/// network and tank**, and the dock's own transfer buffer. Does NOT include
+/// anything the dock has already shipped into the economy's delivery pool —
+/// the caller adds that back in separately, from `shipped_total`.
+fn total_raw_equivalent(world: &World, raw: &str, recipes: &RecipeRegistry) -> Fx {
     let (belts, machines) = full_chain_snapshot(world);
-    let mut total = 0u32;
+    let mut total = Fx::ZERO;
+    let value = |id: &str| Fx::from_num(raw_content(id, raw, recipes));
 
     // Anything standing on the dock but not yet shipped. Between ticks this
     // is always empty (the dock is a pass-through — `sim/dock.rs`'s module
     // doc), but counting it is what makes this accounting independent of
-    // that decision: if the drain were ever gated, mass parked on the dock
-    // would still be accounted for rather than reading as a leak.
+    // that decision.
     for (item, qty) in &the_dock(world).contents {
-        total += tomato_value(item, recipes) * qty;
+        total += value(item) * Fx::from_num(*qty);
     }
 
-    // Raw ingredient waiting in the hopper is mass in the system exactly the
-    // way mass in a machine's input buffer is (ticket 3) — it has been
-    // loaded but not yet consumed. Counting it is what makes conservation
-    // hold from the instant of the fill command rather than only once the
-    // hopper has finished unloading.
-    let hopper = the_hopper(world);
-    total += tomato_value(&hopper.item, recipes) * hopper.quantity;
+    // Raw ingredient waiting in a hopper is mass in the system exactly the
+    // way mass in a machine's input buffer is — it has been bought and
+    // loaded but not yet consumed. There is one hopper per raw ingredient
+    // now, and only the one holding `raw` contributes.
+    for hopper in world.hopper_snapshots() {
+        total += value(&hopper.item) * Fx::from_num(hopper.quantity);
+    }
 
     for belt in &belts {
         for (item, _pos) in &belt.items {
-            total += tomato_value(item, recipes);
+            total += value(item);
         }
     }
 
     for machine in &machines {
         for (item, qty) in &machine.input {
-            total += tomato_value(item, recipes) * qty;
+            total += value(item) * Fx::from_num(*qty);
         }
         for (item, qty) in &machine.output {
-            total += tomato_value(item, recipes) * qty;
+            total += value(item) * Fx::from_num(*qty);
         }
         if machine.process.is_some() {
             // Mid-craft: input has already been consumed but output isn't
-            // deposited yet. That in-flight mass equals the tomato-value of
-            // the batch's eventual output item (recipe outputs are always
-            // qty 1 in this chain, so this is exactly the consumed input
-            // mass, just not currently sitting in any visible buffer).
+            // deposited yet. That in-flight mass is the raw content of what
+            // the batch will become — solid, fluid, or both.
             let recipe = recipes
                 .get(&machine.recipe)
                 .expect("machine must reference a real recipe");
-            let (out_item, _out_qty) = &recipe.outputs[0];
-            total += tomato_value(out_item, recipes);
+            for (item, qty) in recipe.outputs.iter().chain(recipe.fluid_outputs.iter()) {
+                total += value(item) * Fx::from_num(*qty);
+            }
+        }
+    }
+
+    // The piped middle of the chain: liquid mix and liquid ketchup standing
+    // in a network are mass, and the only place it lives between the mixer
+    // and the bottler.
+    for network in world.fluid_snapshots() {
+        if let Some(fluid) = &network.fluid {
+            total += value(fluid) * Fx::from_num(network.total_volume);
+        }
+    }
+    // ...and the tanks, which hold raw fluid the player bought. (Vinegar
+    // embodies no tomato and no sugar, so this contributes nothing today —
+    // it is here so that a future raw fluid carrying real mass cannot read
+    // as a leak.)
+    for tank in world.fluid_tank_snapshots() {
+        if let Some(fluid) = &tank.fluid {
+            total += value(fluid) * Fx::from_num(tank.quantity);
         }
     }
 
     total
 }
 
-/// The conservation invariant this test exists to check: every tomato ever
-/// successfully loaded is accounted for exactly once, as either raw mass
-/// still somewhere in the chain (in the hopper, on a belt, in a buffer, on
-/// the dock, or mid-craft) or already shipped off the dock as the finished
-/// product — never duplicated, never silently lost, at any of the chain's
-/// several stages or across the new belt-and-dock exit.
+/// The conservation invariant this test exists to check, run once per raw
+/// ingredient: every unit ever successfully loaded is accounted for exactly
+/// once, as either mass still somewhere in the chain (in a hopper, on a
+/// belt, in a buffer, in a pipe, on the dock, or mid-craft) or already
+/// shipped off the dock inside the finished product — never duplicated,
+/// never silently lost.
 fn assert_conserved(
     world: &World,
     recipes: &RecipeRegistry,
-    loaded_tomatoes: u32,
+    raw: &str,
+    loaded: u32,
     collected_final: u32,
-    final_item_value: u32,
+    final_item: &str,
     context: &str,
 ) {
-    let in_system = total_tomato_equivalent(world, recipes);
-    let accounted = in_system + collected_final * final_item_value;
+    let in_system = total_raw_equivalent(world, raw, recipes);
+    let per_box = Fx::from_num(raw_content(final_item, raw, recipes));
+    let accounted = in_system + per_box * Fx::from_num(collected_final);
     assert_eq!(
-        accounted, loaded_tomatoes,
-        "tomato mass not conserved at {context}: in_system={in_system}, \
-         collected_final={collected_final} (x{final_item_value} each), loaded={loaded_tomatoes}"
+        accounted,
+        Fx::from_num(loaded),
+        "{raw} mass not conserved at {context}: in_system={in_system}, \
+         collected_final={collected_final} (x{per_box} each), loaded={loaded}"
     );
 }
+
+/// How much stock the full-chain run below buys and loads. Sized against
+/// what the piped middle actually needs, and *small* deliberately:
+///
+/// - **Sugar is the tight one.** A hopper meters its whole load onto the
+///   belt as fast as the belt will take it, and the mixer's input buffer
+///   holds only so much of any one item — so a sugar hopper loaded to the
+///   brim would fill the mixer's feed belt with sugar and starve it of the
+///   tomato paste it also needs. Buying only what the run consumes is both
+///   the fix and the natural incentive the ingredient economy creates: over-
+///   stocking a secondary ingredient wastes money *and* jams the line. (A
+///   splitter or filtered insertion is what would make over-stocking safe;
+///   that is deliberately a later epic's job.)
+/// - **Six mixer batches** is what it takes for one box to come out the far
+///   end, because each machine-to-machine pipe run has to be primed before
+///   its far end can draw a whole unit at the single tile it taps (see
+///   `sim::reference`'s note on run length). Six batches needs six sugar and
+///   six tomato paste, i.e. twenty-four tomatoes.
+const SUGAR_UNITS: u32 = 6;
+const TOMATOES_PER_PASTE: u32 = 4;
+const TOMATO_UNITS: u32 = SUGAR_UNITS * TOMATOES_PER_PASTE;
+/// Vinegar is bought generously: the tank presents constant full head into a
+/// four-tile run that keeps a standing charge, so the mixer only ever sees
+/// vinegar at its own tap once the run is wetted (`FLUID_TANK_CAPACITY`'s
+/// own doc). It carries no tomato and no sugar, so its quantity does not
+/// enter the accounting at all.
+const VINEGAR_UNITS: u32 = 60;
 
 #[test]
 fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
     let registry = recipes();
     let ordered = registry.ordered();
-    // Six solid stages: ticket 2 split the front end into crusher -> mixer
-    // -> cooking vat, and milestone 7 inserted the aging rack between the
-    // vat and the bottler. Mass has to survive three more hand-offs than it
-    // did when this was a four-stage chain — including one across a stage
-    // that holds a batch for 2400 ticks, which is exactly the case a
-    // conservation check should be nervous about (mass sitting in no visible
-    // buffer for a long time is the shape a leak would hide in).
+    // Five stages: crush, mix, cook, bottle, pack. The chain-rework epic
+    // removed the aging rack and turned the two middle links into pipe runs,
+    // so mass now has to survive two hand-offs that are not belt hand-offs at
+    // all — which is exactly the case a conservation check should be nervous
+    // about, since fluid in a pipe sits in no buffer any snapshot of a
+    // machine would show.
     assert_eq!(
         ordered.len(),
-        6,
-        "expected the shipped 6-stage chain (crusher, mixer, cooking vat, aging rack, \
-         bottler, packer), got {} recipe(s) — if a stage was added or removed deliberately, \
-         update this",
+        5,
+        "expected the shipped 5-stage chain (crusher, mixer, cooking vat, bottler, packer), \
+         got {} recipe(s) — if a stage was added or removed deliberately, update this",
         ordered.len()
     );
     let final_recipe = ordered.last().unwrap().clone();
     let final_item = final_recipe.outputs[0].0.clone();
-    let final_item_value = tomato_value(&final_item, &registry);
 
-    let mut world = reference_chain(recipes());
+    let mut world = reference_chain_with_budget(recipes(), BUDGET);
 
-    // Ticket 3: one fill command loads the hopper, and the hopper meters
-    // those tomatoes onto the first belt over the following ticks — nothing
-    // is teleported onto a belt any more. The load happens once, before the
-    // loop, precisely to prove the *unload* is what feeds the chain.
-    // The pipe run's tank likewise has to be loaded before the fluid-gated
-    // mixing stage can run at all (the "Visual overhaul round 2" epic's
-    // ticket 1 removed the always-refilling off-map source, so vinegar is a
-    // consumable the player supplies now). It is not a tomato and so
-    // contributes nothing to the mass accounting below.
-    world.issue_command(PlayerCommand::FillFluidTank {
-        amount: FLUID_TANK_CAPACITY,
-        tile: None,
-    });
-
-    let before_fill = total_tomato_equivalent(&world, &registry);
-    world.issue_command(PlayerCommand::FillHopper {
-        amount: TOMATOES_PER_CRAFT,
-        tile: None,
-    });
-    let loaded_tomatoes = total_tomato_equivalent(&world, &registry) - before_fill;
-    assert_eq!(
-        loaded_tomatoes, TOMATOES_PER_CRAFT,
-        "an empty hopper must accept a full crafts' worth of raw ingredient"
+    // Nothing is free any more: every unit accounted for below was paid for
+    // out of the one money counter first (GAMEPLAY.md §5).
+    let money_before = world.money();
+    buy(&mut world, "tomato", TOMATO_UNITS);
+    buy(&mut world, "sugar", SUGAR_UNITS);
+    buy(&mut world, "vinegar", VINEGAR_UNITS);
+    assert!(
+        world.money() < money_before,
+        "buying ingredients must cost money — that is the whole point of the mechanic"
     );
+
+    // One fill command per buffer, before the loop, precisely to prove the
+    // *unload* is what feeds the chain: nothing is teleported onto a belt
+    // and nothing is conjured into a pipe.
+    world.issue_command(PlayerCommand::FillFluidTank {
+        amount: VINEGAR_UNITS,
+        tile: None,
+    });
+    let before_fill: Vec<Fx> = ["tomato", "sugar"]
+        .iter()
+        .map(|raw| total_raw_equivalent(&world, raw, &registry))
+        .collect();
+    world.issue_command(PlayerCommand::FillHopper {
+        amount: TOMATO_UNITS.max(SUGAR_UNITS),
+        tile: None,
+    });
+    for (i, raw) in ["tomato", "sugar"].iter().enumerate() {
+        let loaded = total_raw_equivalent(&world, raw, &registry) - before_fill[i];
+        let expected = if *raw == "tomato" { TOMATO_UNITS } else { SUGAR_UNITS };
+        assert_eq!(
+            loaded,
+            Fx::from_num(expected),
+            "the {raw} hopper must accept exactly the stock that was bought for it"
+        );
+    }
     assert_eq!(
-        the_hopper(&world).quantity,
-        TOMATOES_PER_CRAFT,
-        "the loaded tomatoes must be sitting in the hopper, not already on a belt"
+        world.owned_ingredient("tomato"),
+        0,
+        "the whole tomato load went into the hopper, not half of it"
     );
 
     // No command is issued inside this loop at all — that is the point of
-    // the delivery dock. The chain feeds itself from the hopper, runs, and
+    // the delivery dock. The chain feeds itself from the hoppers, runs, and
     // the dock ships the finished box into the economy's delivery pool by
-    // itself; conservation is checked on every single tick along the way.
+    // itself; conservation is checked, for both raw ingredients, on every
+    // single tick along the way.
     let mut shipped = 0u32;
-    for tick_i in 0..20_000u32 {
+    for tick_i in 0..40_000u32 {
         world.tick();
 
         shipped = the_dock(&world).shipped_total;
-        assert_conserved(
-            &world,
-            &registry,
-            loaded_tomatoes,
-            shipped,
-            final_item_value,
-            &format!("tick {tick_i}"),
-        );
+        for raw in ["tomato", "sugar"] {
+            let loaded = if raw == "tomato" { TOMATO_UNITS } else { SUGAR_UNITS };
+            assert_conserved(
+                &world,
+                &registry,
+                raw,
+                loaded,
+                shipped,
+                &final_item,
+                &format!("tick {tick_i}"),
+            );
+        }
 
         if shipped > 0 {
             break; // one full unit made it through the entire chain — proven.
@@ -287,15 +384,10 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
     }
 
     assert_eq!(
-        the_hopper(&world).quantity,
-        0,
-        "the hopper should have unloaded all {TOMATOES_PER_CRAFT} tomatoes onto the belt"
-    );
-    assert_eq!(
         shipped, 1,
-        "exactly one unit of '{final_item}' should have made it through all {} stages, \
-         crossed the dock's belt and been shipped — with no player command whatsoever, \
-         which is what the dock replaced `CollectOutput` to achieve",
+        "exactly one unit of '{final_item}' should have made it through all {} stages — \
+         crushed on a belt, mixed and cooked entirely in pipe, bottled back onto a belt, \
+         packed and shipped — with no player command whatsoever",
         ordered.len()
     );
     // ...and it landed in the ONE shared pool every contract settles
@@ -309,11 +401,92 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
         the_dock(&world).contents.is_empty(),
         "the dock is a pass-through: it must be empty again the tick it shipped"
     );
+}
+
+/// The piped middle of the chain, stated as its own claim rather than left
+/// implicit in the conservation walk above: between the mixer and the
+/// bottler the product exists **only** as volume in a fluid network, and
+/// gets there because a machine put it there.
+#[test]
+fn the_middle_of_the_chain_moves_product_through_pipes_with_no_tank_behind_them() {
+    let mut world = reference_chain_with_budget(recipes(), BUDGET);
+    buy(&mut world, "tomato", TOMATO_UNITS);
+    buy(&mut world, "sugar", SUGAR_UNITS);
+    buy(&mut world, "vinegar", VINEGAR_UNITS);
+    world.issue_command(PlayerCommand::FillFluidTank {
+        amount: VINEGAR_UNITS,
+        tile: None,
+    });
+    world.issue_command(PlayerCommand::FillHopper {
+        amount: TOMATO_UNITS,
+        tile: None,
+    });
+
+    for _ in 0..40_000 {
+        world.tick();
+        if the_dock(&world).shipped_total > 0 {
+            break;
+        }
+    }
+
+    let networks = world.fluid_snapshots();
     assert_eq!(
-        total_tomato_equivalent(&world, &registry),
-        0,
-        "no mass should be left anywhere in the chain after the one unit is fully shipped"
+        networks.len(),
+        3,
+        "three runs: the tank-fed vinegar supply, mixer -> vat, and vat -> bottler"
     );
+
+    let mix = networks
+        .iter()
+        .find(|n| n.fluid.as_deref() == Some("ketchup_mix"))
+        .expect("the mixer's output run must carry the mix it names");
+    assert!(
+        mix.tank_tiles.is_empty(),
+        "nothing but a machine supplies this run — that is what fluid_outputs added"
+    );
+    assert_eq!(
+        mix.producers.len(),
+        1,
+        "the mixer is on the producing end of it"
+    );
+    assert_eq!(mix.producers[0].machine_recipe, "ketchup_mix");
+    assert_eq!(mix.taps.len(), 1, "and the cooking vat is on the drawing end");
+    assert_eq!(mix.taps[0].machine_recipe, "ketchup");
+
+    let cooked = networks
+        .iter()
+        .find(|n| n.fluid.as_deref() == Some("ketchup"))
+        .expect("the vat's output run must carry finished ketchup");
+    assert!(cooked.tank_tiles.is_empty());
+    assert_eq!(cooked.producers[0].machine_recipe, "ketchup");
+    assert_eq!(cooked.taps[0].machine_recipe, "bottled_ketchup");
+    assert!(
+        cooked.total_volume > 0.0,
+        "a run that has been primed keeps a standing charge — that is the pressure model, \
+         not a leak (`sim::reference` explains why the machine-to-machine runs are short)"
+    );
+
+    // Neither of the two piped stages touches a belt at all: no belt tile is
+    // adjacent to the cooking vat, and that is the visible shape of the
+    // rework rather than an accident of this layout.
+    let layout = world.world_layout();
+    let vat = layout
+        .iter()
+        .find(|p| p.kind == "cooking_vat")
+        .expect("the vat is placed");
+    for tile in &vat.occupies {
+        for neighbour in [
+            (tile.0 + 1, tile.1),
+            (tile.0 - 1, tile.1),
+            (tile.0, tile.1 + 1),
+            (tile.0, tile.1 - 1),
+        ] {
+            assert!(
+                !matches!(world.query_tile(neighbour), Some(TileSnapshot::Belt { .. })),
+                "no belt may touch the cooking vat: liquid in, liquid out"
+            );
+        }
+    }
 }
 
 /// The exit end's equivalent of "an unfilled hopper unloads nothing": an
@@ -321,7 +494,7 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
 /// manufacturing a delivery out of an empty buffer.
 #[test]
 fn an_unfed_chain_ships_nothing_and_the_dock_stays_empty() {
-    let mut world = reference_chain(recipes());
+    let mut world = reference_chain_with_budget(recipes(), BUDGET);
     for _ in 0..500 {
         world.tick();
     }
@@ -357,13 +530,19 @@ fn the_removed_collect_output_command_no_longer_parses() {
     assert!(
         sim_core::sim::command_from_json(r#"{"type": "purchase", "kind": "belt"}"#).is_some()
     );
+    // ...including the one the ingredient economy added.
+    assert!(
+        sim_core::sim::command_from_json(r#"{"type": "buy_ingredient", "item": "tomato"}"#)
+            .is_some()
+    );
 }
 
 #[test]
 fn query_tile_reflects_every_stage_belt_and_machine_position() {
     let registry = recipes();
     let ordered = registry.ordered().to_vec();
-    let mut world = reference_chain(registry);
+    let mut world = reference_chain_with_budget(registry, BUDGET);
+    buy(&mut world, "tomato", 4);
     world.issue_command(PlayerCommand::FillHopper { amount: 4, tile: None });
     world.tick();
 
@@ -412,14 +591,31 @@ fn query_tile_reflects_every_stage_belt_and_machine_position() {
             }
         }
 
-        // The four belt tiles feeding it — one placement each now, where the
-        // pre-placement chain built a single four-tile segment.
-        for dx in 1..=4 {
-            let tile = (placement.tile.0 - dx, placement.tile.1);
-            match world.query_tile(tile) {
-                Some(TileSnapshot::Belt { .. }) => {}
-                other => panic!("expected belt at {tile:?}, got {other:?}"),
+        // What stands immediately west of the machine is now a property of
+        // its recipe rather than a fixed rule: a stage with solid inputs is
+        // belt-fed (four tiles), and a stage whose inputs are entirely fluid
+        // stands straight off the pipe run that feeds it. That is the chain
+        // rework in one assertion.
+        let feed = (placement.tile.0 - 1, placement.tile.1);
+        let belt_fed = !recipe.inputs.is_empty();
+        match (world.query_tile(feed), belt_fed) {
+            (Some(TileSnapshot::Belt { .. }), true) => {
+                for dx in 1..=4 {
+                    let tile = (placement.tile.0 - dx, placement.tile.1);
+                    match world.query_tile(tile) {
+                        Some(TileSnapshot::Belt { .. }) => {}
+                        other => panic!("expected belt at {tile:?}, got {other:?}"),
+                    }
+                }
             }
+            (Some(TileSnapshot::Pipe { .. }), false) => {}
+            (other, _) => panic!(
+                "recipe '{}' has {} solid inputs, so the tile west of it should be a {} — \
+                 got {other:?}",
+                recipe.id,
+                recipe.inputs.len(),
+                if belt_fed { "belt" } else { "pipe" }
+            ),
         }
     }
 
@@ -428,37 +624,35 @@ fn query_tile_reflects_every_stage_belt_and_machine_position() {
 
 #[test]
 fn dirty_chunks_report_touched_chunks_and_clear_between_ticks() {
-    let mut world = reference_chain(recipes());
+    let mut world = reference_chain_with_budget(recipes(), BUDGET);
+    buy(&mut world, "tomato", 4);
     world.issue_command(PlayerCommand::FillHopper { amount: 4, tile: None });
     world.tick();
-    // The six recipe-driven stages run x = 0..30 and still fit inside chunk
-    // (0,0) (ARCHITECTURE.md §3.1's 32x32 chunks); the hopper sits west of
-    // them at x = -1, i.e. in chunk (-1, 0). On this tick the hopper unloads
-    // its first tomato, which changes both: the belt it landed on and the
-    // hopper's own fill level. Nothing at the dock end has moved yet, so
-    // its chunk is NOT dirty — dirty tracking is per-tick, unlike
-    // `all_chunks`.
+    // The five recipe-driven stages run x = 0..26 and fit inside chunk (0,0)
+    // (ARCHITECTURE.md §3.1's 32x32 chunks); the tomato hopper stands at the
+    // head of the first feed lane, west of them at x = -1, i.e. in chunk
+    // (-1, 0). On this tick it unloads its first tomato, which changes both:
+    // the belt it landed on and the hopper's own fill level.
     // The order is the order the tick's passes touch them, which is
     // deterministic (every pass walks a tile-ordered list) — the hopper's
     // own chunk is marked when it unloads, then the belt's when the tomato
     // lands.
     assert_eq!(world.dirty_chunks(), &[(-1, 0), (0, 0)]);
-    // `all_chunks` is the whole world, and since the delivery-dock ticket
-    // that is three chunks: the dock stands at x = 35, past the x = 32
-    // boundary, and its inbound belt straddles it.
+    // `all_chunks` is the whole world: the line's own chunk and the one the
+    // first lane's hopper reaches back into.
     assert_eq!(
         world.all_chunks(),
-        vec![(-1, 0), (0, 0), (1, 0)],
-        "the hopper's chunk and the dock's chunk must both be reported, or a renderer \
-         never draws either end of the line"
+        vec![(-1, 0), (0, 0)],
+        "the tomato hopper's chunk and the line's must both be reported, or a renderer never \
+         draws the feed end"
     );
 
     // A tick where absolutely nothing moves/changes reports no dirty
     // chunks — every machine is idle without input, every belt is empty,
     // and an unfilled hopper has nothing to unload.
-    let mut idle_world = reference_chain(recipes());
+    let mut idle_world = reference_chain_with_budget(recipes(), BUDGET);
     // The first tick clears the dirt left by *building* the chain — placing
-    // anything dirties its chunks, and the fixture places forty-odd things.
+    // anything dirties its chunks, and the fixture places thirty-odd things.
     idle_world.tick();
     idle_world.tick();
     assert!(idle_world.dirty_chunks().is_empty());

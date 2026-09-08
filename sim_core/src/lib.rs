@@ -168,6 +168,25 @@ impl SimBridge {
     /// **`collect_output` and `spawn_item` do not exist** and have not for
     /// two tickets: product leaves the factory through a dock building and
     /// arrives through a hopper. Sending either is a silent no-op.
+    ///
+    /// **Two changes from the chain-rework epic**, both of which a caller
+    /// has to consume:
+    ///
+    /// - **`place` takes an optional `item`, and a hopper now needs it**:
+    ///   `{"type": "place", "kind": "hopper", "tile": [0, -1],
+    ///   "direction": "north", "item": "sugar"}`. A hopper holds one item
+    ///   for its whole life, and the shipped chain has two raw ingredients
+    ///   (tomato and sugar), so omitting it is a **silent refusal** rather
+    ///   than a default — there is no longer one sensible answer for the
+    ///   simulation to supply. `ingredients_snapshot_json` lists the ids a
+    ///   hopper may legally be given. The field is ignored for every other
+    ///   kind.
+    /// - **`buy_ingredient` is new**: `{"type": "buy_ingredient",
+    ///   "item": "tomato", "quantity": 40}` (`quantity` optional, default
+    ///   one). Raw ingredients are no longer free — `fill_hopper` and
+    ///   `fill_fluid_tank` now draw from bought stock and are a silent no-op
+    ///   when there is none, so a UI that offers "fill" must also offer
+    ///   "buy".
     #[func]
     fn issue_command_json(&mut self, command_json: GString) {
         if let Some(cmd) = sim::command_from_json(&command_json.to_string()) {
@@ -462,6 +481,39 @@ impl SimBridge {
     fn shop_snapshot_json(&self) -> GString {
         let snapshot = self.world.shop_snapshot();
         let json = serde_json::to_string(&snapshot).expect("ShopSnapshot must serialize");
+        GString::from(json.as_str())
+    }
+
+    /// The raw-ingredient market — what a unit of each consumable costs,
+    /// how much of it the player is carrying, and the same money figure
+    /// `shop_snapshot_json` reports — as one JSON object
+    /// (`sim::IngredientsSnapshot`).
+    ///
+    /// ```json
+    /// {"money": 2913.0,
+    ///  "entries": [
+    ///    {"id": "tomato", "price": 1.0, "owned": 40, "affordable": true},
+    ///    {"id": "sugar", "price": 3.0, "owned": 0, "affordable": true},
+    ///    {"id": "vinegar", "price": 2.0, "owned": 12, "affordable": true}
+    ///  ]}
+    /// ```
+    ///
+    /// Deliberately the same shape as `shop_snapshot_json`, so a buy panel
+    /// can be one widget driven by either — but a **different call**,
+    /// because the two price different kinds of thing: a shop entry is a
+    /// building you place and can pick back up, an entry here is stock a
+    /// machine eats (GAMEPLAY.md §5). `entries` is in
+    /// `data/ingredients.ron`'s own order and lists every priced
+    /// ingredient, including ones the player currently has none of.
+    ///
+    /// This is also the list of ids a hopper may be placed holding — see
+    /// `issue_command_json` on `place`'s `item` field — minus any that are
+    /// fluids, which go in a tank instead.
+    #[func]
+    fn ingredients_snapshot_json(&self) -> GString {
+        let snapshot = self.world.ingredients_snapshot();
+        let json =
+            serde_json::to_string(&snapshot).expect("IngredientsSnapshot must serialize");
         GString::from(json.as_str())
     }
 }

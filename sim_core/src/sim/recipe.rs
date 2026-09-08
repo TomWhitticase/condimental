@@ -16,19 +16,23 @@ use super::types::{FluidId, ItemId, RecipeId};
 /// changes in a way older data can't satisfy.
 ///
 /// **v2 (milestone 6, Fluids)** added `Recipe::fluid_inputs`.
+/// **v3 (the chain-rework epic)** added its mirror, `Recipe::fluid_outputs`.
 ///
-/// v1 data is **rejected, not migrated**, even though `fluid_inputs` is
-/// `#[serde(default)]` and a v1 file would therefore parse cleanly as "no
-/// fluid inputs." ARCHITECTURE.md §4 allows either, and rejection is the
+/// Older data is **rejected, not migrated**, even though both fluid fields
+/// are `#[serde(default)]` and an older file would therefore parse cleanly
+/// as "no fluids." ARCHITECTURE.md §4 allows either, and rejection is the
 /// right call here: `data/recipes.ron` is bundled into the binary at
 /// compile time (`include_str!` in `lib.rs`), so there is exactly one such
-/// file and it is updated in the same commit as this constant — a v1 file
+/// file and it is updated in the same commit as this constant — an old file
 /// reaching this loader means someone's data and binary have drifted
-/// apart, which is worth a loud error rather than a silent default. A
-/// migration path becomes worth writing when recipe data is loaded from
-/// disk at runtime (i.e. when players or mods can supply their own), which
-/// is not the case yet.
-pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+/// apart, which is worth a loud error rather than a silent default. The v3
+/// bump makes that concrete rather than theoretical: a v2 file's chain is
+/// belt-connected end to end, and defaulting it into a build that expects
+/// the middle of the line to be piped would produce a factory that loads,
+/// renders, and never runs. A migration path becomes worth writing when
+/// recipe data is loaded from disk at runtime (i.e. when players or mods can
+/// supply their own), which is not the case yet.
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Recipe {
@@ -57,7 +61,34 @@ pub struct Recipe {
     #[serde(default)]
     pub fluid_inputs: Vec<(FluidId, u32)>,
     /// (item id, quantity) pairs produced per craft.
+    ///
+    /// May be **empty**, which is what a stage whose whole output is a fluid
+    /// looks like (the shipped mixer and cooking vat). An empty list is
+    /// vacuously satisfiable, so such a machine is never blocked on its
+    /// solid output buffer.
     pub outputs: Vec<(ItemId, u32)>,
+    /// (fluid id, whole fluid units) **deposited** per craft into the
+    /// `fluid::FluidNetwork` off this machine's outlet face — the exact
+    /// mirror of [`Recipe::fluid_inputs`], added by the chain-rework epic so
+    /// a machine can put liquid into a pipe rather than only take it out.
+    ///
+    /// Until this existed, the only thing that could add volume to the
+    /// system was a player filling a [`super::fluid::FluidTank`]; a recipe
+    /// could consume a fluid and nothing could make one, so the middle of a
+    /// production line had to be belt-connected even where a real plant
+    /// pipes it.
+    ///
+    /// Which network it goes into is **geometric, not positional in this
+    /// list**: a fluid output leaves by the face the machine points at,
+    /// exactly as a solid one does, while a fluid input may come from any
+    /// other pipe touching the footprint. That asymmetry is what lets one
+    /// machine be plumbed on both sides at once without the player having to
+    /// name which run is which. See `world.rs`'s module doc.
+    ///
+    /// Defaults to empty and is authored in whole units, for the same two
+    /// reasons [`Recipe::fluid_inputs`] gives.
+    #[serde(default)]
+    pub fluid_outputs: Vec<(FluidId, u32)>,
     /// The machine kind this recipe runs on (e.g. "crusher"). Must name an
     /// entry in `data/machines.ron` — [`super::machines::MachineRegistry::validate_covers`]
     /// checks that at world-construction time, and that entry is what says
@@ -145,7 +176,7 @@ mod tests {
     use super::*;
 
     const EXAMPLE: &str = r#"(
-        schema_version: 2,
+        schema_version: 3,
         recipes: [
             Recipe(
                 id: "tomato_sauce",
@@ -179,7 +210,7 @@ mod tests {
     #[test]
     fn loads_a_recipe_that_requires_a_fluid() {
         const WITH_FLUID: &str = r#"(
-            schema_version: 2,
+            schema_version: 3,
             recipes: [
                 Recipe(
                     id: "ketchup",
@@ -198,7 +229,7 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_schema_version() {
-        let text = EXAMPLE.replacen("schema_version: 2", "schema_version: 99", 1);
+        let text = EXAMPLE.replacen("schema_version: 3", "schema_version: 99", 1);
         let err = RecipeRegistry::from_ron_str(&text).unwrap_err();
         assert!(matches!(
             err,
@@ -206,15 +237,52 @@ mod tests {
         ));
     }
 
-    /// See `CURRENT_SCHEMA_VERSION`'s doc: pre-fluids data is rejected
-    /// rather than migrated-with-defaults, on purpose.
+    /// See `CURRENT_SCHEMA_VERSION`'s doc: older data is rejected rather
+    /// than migrated-with-defaults, on purpose — both the pre-fluids v1
+    /// shape and the input-fluids-only v2 one.
     #[test]
-    fn rejects_pre_fluids_v1_data_rather_than_silently_defaulting_it() {
-        let text = EXAMPLE.replacen("schema_version: 2", "schema_version: 1", 1);
-        let err = RecipeRegistry::from_ron_str(&text).unwrap_err();
-        assert!(matches!(
-            err,
-            RecipeLoadError::UnsupportedSchemaVersion { found: 1, supported: 2 }
-        ));
+    fn rejects_older_data_rather_than_silently_defaulting_it() {
+        for (older, expected) in [(1u32, 1u32), (2, 2)] {
+            let text = EXAMPLE.replacen("schema_version: 3", &format!("schema_version: {older}"), 1);
+            let err = RecipeRegistry::from_ron_str(&text).unwrap_err();
+            assert!(matches!(
+                err,
+                RecipeLoadError::UnsupportedSchemaVersion { found, supported: 3 } if found == expected
+            ));
+        }
+    }
+
+    #[test]
+    fn a_recipe_without_fluid_outputs_defaults_to_none() {
+        let registry = RecipeRegistry::from_ron_str(EXAMPLE).unwrap();
+        let recipe = registry.get("tomato_sauce").expect("recipe present");
+        assert!(
+            recipe.fluid_outputs.is_empty(),
+            "fluid_outputs must be additive — omitting it means 'this recipe makes no liquid'"
+        );
+    }
+
+    /// The shape the chain rework needs: a stage whose entire output is a
+    /// fluid, so its solid `outputs` list is empty.
+    #[test]
+    fn loads_a_recipe_that_produces_a_fluid_and_no_solid() {
+        const FLUID_OUT: &str = r#"(
+            schema_version: 3,
+            recipes: [
+                Recipe(
+                    id: "ketchup_mix",
+                    inputs: [("tomato_paste", 1)],
+                    fluid_inputs: [("vinegar", 2)],
+                    outputs: [],
+                    fluid_outputs: [("ketchup_mix", 1)],
+                    machine: "mixer",
+                    time_ticks: 90,
+                ),
+            ],
+        )"#;
+        let registry = RecipeRegistry::from_ron_str(FLUID_OUT).unwrap();
+        let recipe = registry.get("ketchup_mix").expect("recipe present");
+        assert!(recipe.outputs.is_empty());
+        assert_eq!(recipe.fluid_outputs, vec![("ketchup_mix".to_string(), 1)]);
     }
 }

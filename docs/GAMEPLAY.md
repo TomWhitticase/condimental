@@ -222,9 +222,31 @@ Everything in this doc should be **content**, not simulation code, per [ARCHITEC
   delivery pool this section's allocation rule describes (a second dock is
   another door out of the factory, not a second ledger). `data/recipes.ron`'s
   file order no longer describes any geometry — it describes the production
-  line as *content*, which is what makes "the first recipe's first input is
-  the raw ingredient a hopper holds" true, and `sim::reference_chain` is a
-  test fixture that lays that line out using ordinary placement commands.
+  line as *content*, which is what makes the raw-ingredient rule below true,
+  and `sim::reference_chain` is a test fixture that lays that line out using
+  ordinary placement commands.
+- **Raw ingredients are bought, and there is more than one (added 2026-09-08,
+  the chain-rework epic's ticket 1):** §5's first cost axis — "ingredients —
+  recurring, scales directly with production volume" — is implemented. A
+  **raw** ingredient is defined once, structurally: an item or fluid some
+  recipe in `data/recipes.ron` consumes and no recipe produces. The shipped
+  chain has three (tomato, sugar, vinegar), which is what retired the old
+  "the first recipe's first input is *the* raw ingredient" shortcut. Each is
+  priced per unit in a new `data/ingredients.ron` — a separate file from
+  `shop.ron` because the two price different kinds of thing: a shop entry is
+  a building you place and can pick back up, an ingredient is stock a machine
+  eats and never returns. A new `BuyIngredient` command debits the same
+  single `Economy::money` counter §1 allows and credits a per-id stock ledger;
+  `FillHopper`/`FillFluidTank` now draw from that stock and are silent no-ops
+  without it, so nothing enters the factory that was not paid for. A hopper
+  holds one raw item, chosen by the player when it is placed (the simulation
+  still infers it when a chain has only one raw solid to choose from); a tank
+  holds whatever the pipe run it discharges into carries. **Consequence worth
+  stating:** overproduction is now a genuine loss, since a unit no contract
+  has ordered is ingredients converted into unsold stock — which is the
+  design pressure §6 chooses contracts over a spot market to create, and it
+  makes §11's open question about a secondary spot market a live one rather
+  than a theoretical one.
 - **Money and active-contract state's architectural home (resolved at milestone 5, 2026-09-06):** both live as plain fields on a new `sim_core::sim::economy::Economy` struct, owned directly by `World` and advanced once per tick — not a new ECS component/entity, since milestone 5 has exactly one money counter and one active contract (no per-entity multiplicity to justify ECS machinery yet). `money` is a single fixed-point (`Fx`) counter, per ARCHITECTURE.md §3.9. The one hardcoded `Contract` (fixed mix/cadence/payout, named constants in `economy.rs`) is checked against an accumulating `delivery_buffer` `Inventory` at its cadence boundary (`Economy::tick`), which is where `World::issue_command(PlayerCommand::CollectOutput)` then deposited collected product instead of discarding it — this was milestone 5's "delivery mechanism." (**Superseded 2026-09-08 by the delivery dock**, two bullets up: that command no longer exists and the pool is filled by a building at the chain's tail instead. The pool itself, and everything about how contracts settle against it, is unchanged.) Exposed to Godot as a `SimBridge::economy_snapshot_json` JSON snapshot (money, contract mix, per-item progress, cadence), same pattern as the existing chunk/tile/layout snapshots. **Superseded in part on 2026-09-08:** `contracts.ron` data-file loading and multiple concurrent contracts have since landed — `Economy` now holds a `Vec<ActiveContract>` (each with its own cadence clock and delivery counters) plus one shared `delivery_buffer`, and `economy_snapshot_json` returns an array of contracts rather than one inline. The `Economy`-as-a-plain-field-on-`World` call above was unaffected and still stands: several contracts are a `Vec` inside the one struct, not a reason for ECS machinery. **Still explicitly deferred:** contract-loss/reputation penalties on a missed cadence window (a miss today just skips that window's payout and keeps the contract active — see this doc's own open question below), and the `StaffPools` resource — all future work, per GAMEPLAY.md §6/§9's original fuller design and the milestone-5 task's own scope note.
 
 ---

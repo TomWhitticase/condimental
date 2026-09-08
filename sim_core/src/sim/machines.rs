@@ -544,7 +544,7 @@ mod tests {
     fn recipe_on(machine: &str) -> RecipeRegistry {
         let text = format!(
             r#"(
-                schema_version: 2,
+                schema_version: 3,
                 recipes: [
                     Recipe(
                         id: "tomato_sauce",

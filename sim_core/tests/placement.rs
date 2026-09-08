@@ -45,7 +45,7 @@ fn shipped_recipes() -> RecipeRegistry {
 fn one_stage() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(
         r#"(
-            schema_version: 2,
+            schema_version: 3,
             recipes: [
                 Recipe(
                     id: "tomato_paste",
@@ -60,15 +60,28 @@ fn one_stage() -> RecipeRegistry {
     .expect("test recipe text must parse")
 }
 
-/// A world with money to spend and nothing built — a new game, except
-/// richer, so a test doesn't have to earn its way to the thing it is about.
+/// A world with money to spend, a full larder and nothing built — a new
+/// game, except richer, so a test doesn't have to earn its way to the thing
+/// it is about.
+///
+/// The larder is part of the fixture since the chain-rework epic: raw
+/// ingredients are bought now (GAMEPLAY.md §5), so a world that has not
+/// stocked up cannot fill a hopper or a tank at all, and every fill in this
+/// file would silently do nothing.
 fn funded(recipes: RecipeRegistry) -> World {
-    World::with_content_and_money(
+    let mut world = World::with_content_and_money(
         recipes,
         MachineRegistry::bundled(),
         ContractRegistry::bundled(),
         Fx::from_num(20_000),
-    )
+    );
+    for item in ["tomato", "sugar", "vinegar"] {
+        world.issue_command(PlayerCommand::BuyIngredient {
+            item: item.to_string(),
+            quantity: 1_000,
+        });
+    }
+    world
 }
 
 /// A registry with one deliberately oblong kind, so rotation's extent-swap
@@ -104,10 +117,24 @@ fn buy(world: &mut World, kind: &str, quantity: u32) {
 }
 
 fn place(world: &mut World, kind: &str, tile: (i32, i32), direction: Direction) {
+    place_holding(world, kind, tile, direction, None);
+}
+
+/// [`place`], but naming what a hopper holds — the field
+/// `PlayerCommand::Place` gained once the chain had more than one raw
+/// ingredient. `None` is the ordinary case for everything else.
+fn place_holding(
+    world: &mut World,
+    kind: &str,
+    tile: (i32, i32),
+    direction: Direction,
+    item: Option<&str>,
+) {
     world.issue_command(PlayerCommand::Place {
         kind: kind.to_string(),
         tile,
         direction,
+        item: item.map(str::to_string),
     });
 }
 
@@ -115,8 +142,13 @@ fn place(world: &mut World, kind: &str, tile: (i32, i32), direction: Direction) 
 /// fixtures below, where a silently-refused placement would show up as a
 /// confusing failure much later.
 fn build(world: &mut World, kind: &str, tile: (i32, i32), direction: Direction) {
+    // A hopper has to be told what it holds once a chain has more than one
+    // raw ingredient, and every fixture here feeds tomatoes. Naming it
+    // unconditionally is also correct for a single-raw-ingredient chain,
+    // where it would have been inferred.
+    let item = (kind == "hopper").then_some("tomato");
     buy(world, kind, 1);
-    place(world, kind, tile, direction);
+    place_holding(world, kind, tile, direction, item);
     assert!(
         world.query_tile(tile).is_some(),
         "{kind} must be standing at {tile:?} after being placed"
@@ -239,6 +271,7 @@ fn an_unbuildable_kind_is_refused_even_when_owned() {
         kind: "fermenter".to_string(),
         tile: (0, 0),
         direction: Direction::East,
+        item: None,
     });
     assert_eq!(world.placement_count(), 0);
 }
@@ -597,6 +630,10 @@ fn a_belt_pointing_at_the_wrong_face_feeds_nothing() {
         ContractRegistry::bundled(),
         Fx::from_num(20_000),
     );
+    world.issue_command(PlayerCommand::BuyIngredient {
+        item: "tomato".to_string(),
+        quantity: 64,
+    });
     // A 3x1 crusher facing east at (2, 0): its inlet face is the tile (2, 0)
     // column, i.e. only a belt at (1, 0) pointing east feeds it. This hopper
     // and belt aim at its southern flank instead.
@@ -779,10 +816,12 @@ fn a_fill_command_can_name_which_hopper_to_load() {
 fn two_disconnected_pipe_runs_are_two_networks() {
     let mut world = funded(shipped_recipes());
     // Run A, tapped by a mixer (whose recipe declares the vinegar input).
+    // The mixer is 1x2, so it stands clear of the run and taps it edge-on —
+    // fluids connect by touching, not by facing.
     build(&mut world, "fluid_tank", (0, 1), Direction::East);
     build(&mut world, "pipe", (1, 1), Direction::East);
     build(&mut world, "pipe", (2, 1), Direction::East);
-    build(&mut world, "mixer", (2, 0), Direction::East);
+    build(&mut world, "mixer", (3, 0), Direction::East);
     // Run B, three tiles away and tapped by nothing.
     build(&mut world, "fluid_tank", (0, 5), Direction::East);
     build(&mut world, "pipe", (1, 5), Direction::East);
@@ -795,7 +834,7 @@ fn two_disconnected_pipe_runs_are_two_networks() {
         .expect("one run is tapped by the mixer");
     assert_eq!(tapped.fluid.as_deref(), Some("vinegar"));
     assert_eq!(tapped.segments.len(), 2);
-    assert_eq!(tapped.taps[0].machine_tile, (2, 0));
+    assert_eq!(tapped.taps[0].machine_tile, (3, 0));
     let untapped = networks
         .iter()
         .find(|n| n.taps.is_empty())
@@ -805,20 +844,41 @@ fn two_disconnected_pipe_runs_are_two_networks() {
         "a network nothing taps carries nothing in particular — it is pipe with no customer"
     );
 
-    // Both tanks fill, and only the run each one faces receives anything.
+    // Filling every tank at once loads only the one whose run has a fluid
+    // id — the other is plumbed to pipe nothing taps, so there is nothing to
+    // buy for it and the fill is a silent no-op (GAMEPLAY.md §5: a fill
+    // draws from bought stock, and stock is per ingredient).
+    let vinegar_before = world.owned_ingredient("vinegar");
     world.issue_command(PlayerCommand::FillFluidTank {
         amount: 60,
         tile: None,
     });
+    assert_eq!(
+        vinegar_before - world.owned_ingredient("vinegar"),
+        60,
+        "exactly one tank's worth was bought and loaded, not two"
+    );
     for _ in 0..50 {
         world.tick();
     }
-    for network in world.fluid_snapshots() {
-        assert!(
-            network.total_volume > 0.0,
-            "each tank must have discharged into its own run"
-        );
-    }
+    let tapped = world
+        .fluid_snapshots()
+        .into_iter()
+        .find(|n| !n.taps.is_empty())
+        .unwrap();
+    assert!(
+        tapped.total_volume > 0.0,
+        "the tank facing the tapped run must have discharged into it"
+    );
+    let untapped = world
+        .fluid_snapshots()
+        .into_iter()
+        .find(|n| n.taps.is_empty())
+        .unwrap();
+    assert_eq!(
+        untapped.total_volume, 0.0,
+        "and the run nothing taps stays dry, because its tank could not be filled"
+    );
 }
 
 /// Joining two runs by placing one pipe between them makes them one
@@ -830,6 +890,11 @@ fn placing_a_pipe_between_two_runs_merges_them_without_losing_fluid() {
     build(&mut world, "fluid_tank", (0, 0), Direction::East);
     build(&mut world, "pipe", (1, 0), Direction::East);
     build(&mut world, "pipe", (3, 0), Direction::East);
+    // A machine has to tap one of the runs for either to have a *fluid*:
+    // a network's id comes from the recipe of whatever taps it, and since
+    // ingredients cost money a tank plumbed to an unnamed run cannot be
+    // filled at all — there is nothing to charge the player for.
+    build(&mut world, "mixer", (1, 1), Direction::East);
     assert_eq!(world.fluid_snapshots().len(), 2, "a gap at (2, 0)");
 
     world.issue_command(PlayerCommand::FillFluidTank {

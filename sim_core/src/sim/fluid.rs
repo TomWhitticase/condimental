@@ -26,15 +26,23 @@
 //! `world.rs`), feeding *one* machine. Specifically NOT in scope, and
 //! deliberately not half-built here:
 //!
-//! - **Fluid *outputs*.** Recipes can consume a fluid (see
-//!   `recipe::Recipe::fluid_inputs`); producing one back into a network is
-//!   future work, so the only thing that can add volume to the system is the
-//!   player filling a tank ([`FluidTank::fill`]).
 //! - **Choosing what a pipe carries.** A network's fluid is still decided by
-//!   content, not by the player: it is whatever the recipe of the
-//!   fluid-consuming machine tapping it names. A network nothing taps
-//!   carries `None` and can supply nobody — a length of pipe with fluid in
-//!   it and no customer.
+//!   content, not by the player: it is whatever the recipe of the first
+//!   machine tapping it names. A network nothing taps carries `None` and can
+//!   neither supply nor accept — a length of pipe with fluid in it and no
+//!   customer.
+//!
+//! **Fluid *outputs* are no longer excluded (the chain-rework epic).** They
+//! were, for two milestones: a recipe could consume a fluid and nothing
+//! could make one, so the only thing that could add volume to the system was
+//! the player filling a tank ([`FluidTank::fill`]). [`FluidNetwork::
+//! can_accept_at`]/[`FluidNetwork::deposit_at`] are the producer-side mirror
+//! of `can_supply_at`/`draw_at`, with the same all-or-nothing semantics for
+//! the same reason: a craft must not half-deposit its output any more than
+//! it may half-consume its input. The conservation property in
+//! [`FluidNetwork::tick`]'s doc is unchanged in shape — there are simply two
+//! ways in (a tank fill, a machine deposit) and one way out (a machine
+//! draw), all of them exact.
 //!
 //! **What the "Real Placement" epic changed here.** Two further exclusions
 //! this list used to carry are now real behaviour instead:
@@ -438,6 +446,44 @@ impl FluidNetwork {
         true
     }
 
+    /// Whether the segment at `index` has room for `amount` more of
+    /// `fluid` — the producer-side mirror of [`Self::can_supply_at`], and
+    /// deliberately its exact shape.
+    ///
+    /// Wrong fluid type is a hard "no", and so is an **unnamed** network:
+    /// `None` matches nothing here just as it supplies nobody there. That is
+    /// not a gap, it is the same rule read from the other side — a network's
+    /// fluid is derived by the topology pass from whichever machine taps it
+    /// (`world.rs`), including a machine that taps it to *deposit*, so by
+    /// the time any deposit is attempted the network has already been named.
+    /// A network that is still `None` is one nothing taps, and a machine
+    /// with nowhere to put its output simply holds it (see
+    /// [`super::machine::Machine::tick`]).
+    ///
+    /// Indexed, like its mirror, because a machine deposits into the **one
+    /// segment it discharges against** rather than into a network total:
+    /// fill that tile and the machine backs up until pressure carries the
+    /// charge away down the run, which is what makes a full pipe a real
+    /// back-pressure state rather than a cosmetic one.
+    pub fn can_accept_at(&self, index: usize, fluid: &str, amount: Fx) -> bool {
+        self.fluid.as_deref() == Some(fluid)
+            && self
+                .segments
+                .get(index)
+                .is_some_and(|segment| segment.room() >= amount)
+    }
+
+    /// Adds `amount` of `fluid` to the segment at `index`, or returns
+    /// `false` and changes nothing — [`Self::draw_at`]'s mirror, all-or-
+    /// nothing for its reason.
+    pub fn deposit_at(&mut self, index: usize, fluid: &str, amount: Fx) -> bool {
+        if !self.can_accept_at(index, fluid, amount) {
+            return false;
+        }
+        self.segments[index].volume += amount;
+        true
+    }
+
     /// Equalizes `tank` against the segment at `into` — the tank half of the
     /// per-tick pass, run by `world.rs` immediately before [`Self::tick`]
     /// because the tank is a placed entity this network does not own.
@@ -518,11 +564,20 @@ impl FluidNetwork {
 /// The one machine-facing view of a network: which network, and which
 /// segment that machine is plumbed into.
 ///
-/// It exists because a machine draws from the single pipe tile it touches
-/// rather than from a network total (see [`FluidNetwork::can_supply_at`]),
-/// and because [`super::machine::Machine::tick`] should not have to be told
-/// that fact twice. `world.rs` builds one per fluid-consuming machine when
-/// it derives the topology.
+/// It exists because a machine draws from (or deposits into) the single pipe
+/// tile it touches rather than a network total (see
+/// [`FluidNetwork::can_supply_at`]), and because
+/// [`super::machine::Machine::tick`] should not have to be told that fact
+/// twice. `world.rs` builds one per *role* per machine when it derives the
+/// topology: an **input** tap for a recipe's `fluid_inputs` and a separate
+/// **output** tap for its `fluid_outputs`. The two are always different
+/// networks — the topology pass refuses to hand a machine the same one
+/// twice — which is what lets a machine hold a mutable borrow of both at
+/// once.
+///
+/// The field is still called `inlet` for both roles. Renaming it per role
+/// would need two types (or a direction flag) for one `usize`, and the type
+/// already says which role it is by which argument it was passed as.
 pub struct FluidTap<'a> {
     pub network: &'a mut FluidNetwork,
     /// Index into `network.segments()` of the tile this machine touches.
@@ -536,6 +591,14 @@ impl FluidTap<'_> {
 
     pub fn draw(&mut self, fluid: &str, amount: Fx) -> bool {
         self.network.draw_at(self.inlet, fluid, amount)
+    }
+
+    pub fn can_accept(&self, fluid: &str, amount: Fx) -> bool {
+        self.network.can_accept_at(self.inlet, fluid, amount)
+    }
+
+    pub fn deposit(&mut self, fluid: &str, amount: Fx) -> bool {
+        self.network.deposit_at(self.inlet, fluid, amount)
     }
 }
 

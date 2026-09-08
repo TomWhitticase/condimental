@@ -33,10 +33,16 @@
 //! `core_loop.rs`, which counts the dock's buffer as mass in the system and
 //! reads "shipped" off the dock rather than tallying a command.
 
+mod common;
+
 use sim_core::sim::{
-    DOCK_CAPACITY, DockSnapshot, Direction, FLUID_TANK_CAPACITY, PlayerCommand, RecipeRegistry,
-    TileSnapshot, World, reference_chain,
+    DOCK_CAPACITY, DockSnapshot, Direction, RecipeRegistry, TileSnapshot, World,
+    reference_chain_with_budget,
 };
+
+/// Exactly `common::stock_up`'s ingredient bill, so a stocked world starts
+/// with a factory, a full larder and zero money.
+const BUDGET: u32 = common::STOCK_COST;
 
 fn recipes() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
@@ -44,7 +50,9 @@ fn recipes() -> RecipeRegistry {
 }
 
 fn world() -> World {
-    reference_chain(recipes())
+    let mut world = reference_chain_with_budget(recipes(), BUDGET);
+    common::stock_up(&mut world);
+    world
 }
 
 /// The world's one dock. The reference chain places exactly one; several are
@@ -61,11 +69,7 @@ fn the_dock(world: &World) -> DockSnapshot {
 /// runs out. Returns the dock's shipped total.
 fn run_until_shipped(world: &mut World, target: u32) -> u32 {
     for _ in 0..500_000u32 {
-        world.issue_command(PlayerCommand::FillHopper { amount: 32, tile: None });
-        world.issue_command(PlayerCommand::FillFluidTank {
-            amount: FLUID_TANK_CAPACITY,
-            tile: None,
-        });
+        common::supply(world);
         world.tick();
         if the_dock(&world).shipped_total >= target {
             break;
@@ -96,14 +100,14 @@ fn the_dock_stands_at_the_end_of_its_own_belt_past_the_last_machine() {
         .max_by_key(|p| p.tile.0)
         .expect("the reference chain places machines");
     assert_eq!(last_machine.kind, "packer");
-    assert_eq!(last_machine.tile, (30, 0));
+    assert_eq!(last_machine.tile, (21, 0));
 
     let dock = the_dock(&world);
     assert_eq!(dock.kind, "dock");
     assert_eq!(dock.direction, Direction::East);
     // Four belt tiles run from the packer to the dock — placed one at a
     // time now, where the pre-placement chain built one four-tile segment.
-    for x in 31..=34 {
+    for x in 22..=25 {
         assert!(
             layout
                 .iter()
@@ -113,12 +117,12 @@ fn the_dock_stands_at_the_end_of_its_own_belt_past_the_last_machine() {
     }
     assert_eq!(
         dock.belt_tile,
-        Some((34, 0)),
+        Some((25, 0)),
         "the dock is fed by the last belt tile of that run"
     );
     assert_eq!(
         dock.tile,
-        (35, 0),
+        (26, 0),
         "and the dock stands immediately east of that belt's last tile"
     );
     assert_eq!(dock.footprint.width_tiles, 1);
@@ -134,7 +138,7 @@ fn every_tile_of_the_dock_and_its_belt_resolves() {
     let world = world();
     let dock = the_dock(&world);
 
-    for x in 31..=34 {
+    for x in 22..=25 {
         let tile = (x, 0);
         match world.query_tile(tile) {
             Some(TileSnapshot::Belt { .. }) => {}
@@ -159,39 +163,43 @@ fn every_tile_of_the_dock_and_its_belt_resolves() {
     }
 
     assert!(
-        world.query_tile((36, 0)).is_none(),
+        world.query_tile((27, 0)).is_none(),
         "and nothing exists past the dock"
     );
 }
 
-/// The dock is the reason the shipped world is a three-chunk world: it
-/// stands at x = 35, past ARCHITECTURE.md §3.1's x = 32 boundary, so a
-/// renderer that only ever asked for the chain's own chunk would never draw
-/// the end of the line. This is the exit-end twin of `hopper.rs`'s
-/// `the_hoppers_chunk_is_reported_alongside_the_chains`.
+/// The dock, its belt and the hoppers all have to be reachable from
+/// `all_chunks`, or a renderer that only asked for the line's own chunk
+/// would never draw one end of it. The shipped line is shorter than it was
+/// before the chain rework (the aging rack is gone and two belt runs became
+/// short pipe runs), so it no longer crosses ARCHITECTURE.md §3.1's x = 32
+/// boundary — the chunk fan-out itself is exercised deliberately, on
+/// synthetic wide machines, in `machine_footprints.rs`.
 #[test]
 fn the_docks_chunk_is_reported_alongside_the_chains() {
     let world = world();
     let chunks = world.all_chunks();
     assert!(chunks.contains(&(0, 0)), "{chunks:?}");
-    assert!(chunks.contains(&(-1, 0)), "the hopper's chunk: {chunks:?}");
-    assert!(chunks.contains(&(1, 0)), "the dock's chunk: {chunks:?}");
+    assert!(chunks.contains(&(-1, 0)), "the hoppers' chunk: {chunks:?}");
 
+    let dock = the_dock(&world);
+    let dock_chunk = (dock.tile.0.div_euclid(32), dock.tile.1.div_euclid(32));
+    assert!(chunks.contains(&dock_chunk), "the dock's chunk: {chunks:?}");
     assert_eq!(
-        world.chunk_snapshot((1, 0)).docks.len(),
+        world.chunk_snapshot(dock_chunk).docks.len(),
         1,
         "the dock must be in the snapshot of the chunk it occupies"
     );
     assert!(
-        world.chunk_snapshot((0, 0)).docks.is_empty(),
-        "and only in that chunk — its footprint doesn't reach the chain's"
+        world.chunk_snapshot((-1, 0)).docks.is_empty(),
+        "and only in that chunk"
     );
     assert_eq!(
         world
             .chunk_snapshot((0, 0))
             .belts
             .iter()
-            .filter(|b| b.tile == (31, 0))
+            .filter(|b| b.tile == (22, 0))
             .count(),
         1,
         "the belt tiles feeding the dock are reported in the chunk holding them"
@@ -242,11 +250,7 @@ fn the_chain_ships_and_earns_with_no_player_command_but_refilling() {
         .unwrap();
     let until = world.current_tick() + longest;
     while world.current_tick() < until {
-        world.issue_command(PlayerCommand::FillHopper { amount: 32, tile: None });
-        world.issue_command(PlayerCommand::FillFluidTank {
-            amount: FLUID_TANK_CAPACITY,
-            tile: None,
-        });
+        common::supply(&mut world);
         world.tick();
     }
 
@@ -275,18 +279,14 @@ fn finished_product_actually_travels_the_dock_belt() {
     let belt_start = the_dock(&world)
         .belt_tile
         .expect("the dock is fed by a belt");
-    // That belt tile is at x = 34, i.e. in chunk (1, 0) — past the x = 32
-    // boundary — which is exactly the sort of thing a test that assumed one
-    // chunk would silently miss.
+    // Located by chunk arithmetic rather than by a literal, so this test
+    // keeps working whichever side of a chunk boundary the line's tail
+    // happens to fall on as content changes.
     let belt_chunk = (belt_start.0.div_euclid(32), belt_start.1.div_euclid(32));
     let mut saw_item_on_the_dock_belt = false;
 
     for _ in 0..500_000u32 {
-        world.issue_command(PlayerCommand::FillHopper { amount: 32, tile: None });
-        world.issue_command(PlayerCommand::FillFluidTank {
-            amount: FLUID_TANK_CAPACITY,
-            tile: None,
-        });
+        common::supply(&mut world);
         world.tick();
 
         let on_belt = world
@@ -325,11 +325,7 @@ fn the_dock_is_empty_between_ticks_while_the_shared_pool_fills() {
     let mut world = world();
 
     for _ in 0..500_000u32 {
-        world.issue_command(PlayerCommand::FillHopper { amount: 32, tile: None });
-        world.issue_command(PlayerCommand::FillFluidTank {
-            amount: FLUID_TANK_CAPACITY,
-            tile: None,
-        });
+        common::supply(&mut world);
         world.tick();
 
         assert!(
@@ -370,14 +366,14 @@ fn the_dock_json_shape_is_what_presentation_is_told_to_expect() {
     // dock_snapshots_json serializes an array of exactly these.
     let dock: serde_json::Value =
         serde_json::from_str(&serde_json::to_string(&the_dock(&world)).unwrap()).unwrap();
-    assert_eq!(dock["tile"], serde_json::json!([35, 0]));
+    assert_eq!(dock["tile"], serde_json::json!([26, 0]));
     assert_eq!(dock["kind"], "dock");
     assert_eq!(
         dock["footprint"],
         serde_json::json!({ "width_tiles": 1, "height_tiles": 1 })
     );
     assert_eq!(dock["direction"], "east");
-    assert_eq!(dock["belt_tile"], serde_json::json!([34, 0]));
+    assert_eq!(dock["belt_tile"], serde_json::json!([25, 0]));
     assert!(
         dock.get("belt_start_tile").is_none() && dock.get("belt_length_tiles").is_none(),
         "a dock does not own a belt any more — it reports which belt tile feeds it: {dock}"
@@ -393,7 +389,7 @@ fn the_dock_json_shape_is_what_presentation_is_told_to_expect() {
 
     // chunk_snapshot_json's new `docks` array, carrying the identical object.
     let chunk: serde_json::Value =
-        serde_json::from_str(&serde_json::to_string(&world.chunk_snapshot((1, 0))).unwrap())
+        serde_json::from_str(&serde_json::to_string(&world.chunk_snapshot((0, 0))).unwrap())
             .unwrap();
     let docks = chunk["docks"].as_array().expect("a `docks` array");
     assert_eq!(docks.len(), 1);
@@ -401,11 +397,11 @@ fn the_dock_json_shape_is_what_presentation_is_told_to_expect() {
 
     // query_tile_json's new `dock` variant.
     let tile: serde_json::Value =
-        serde_json::from_str(&serde_json::to_string(&world.query_tile((35, 0)).unwrap()).unwrap())
+        serde_json::from_str(&serde_json::to_string(&world.query_tile((26, 0)).unwrap()).unwrap())
             .unwrap();
     assert_eq!(tile["kind"], "dock");
     assert_eq!(tile["direction"], "east");
-    assert_eq!(tile["origin_tile"], serde_json::json!([35, 0]));
+    assert_eq!(tile["origin_tile"], serde_json::json!([26, 0]));
     assert_eq!(tile["contents"], serde_json::json!([]));
     assert_eq!(tile["capacity_per_item"], DOCK_CAPACITY);
     assert_eq!(tile["shipped_total"], 0);

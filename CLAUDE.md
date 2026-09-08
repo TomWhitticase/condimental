@@ -81,6 +81,16 @@ sauce-factory/
                                # Per-kind staff/power draw and build cost belong
                                # here too when those land — not a second file.
                                # items.ron lands here when it exists.
+    ingredients.ron          # what a unit of each RAW INGREDIENT costs
+                               # (GAMEPLAY.md §5's recurring cost axis) — a
+                               # separate file from shop.ron because it prices a
+                               # different kind of thing: stock a machine eats,
+                               # not a building you place and can pick back up.
+                               # Loaded by sim/ingredients.rs, which errors on a
+                               # bad schema version, a duplicate id or a price
+                               # below 1. An id here is "raw": consumed by some
+                               # recipe, produced by none — solids and fluids
+                               # alike, in one catalog and one ledger.
     shop.ron                 # what the player can BUY and what it costs — one
                                # entry per buildable kind (every machines.ron kind,
                                # incl. the no-recipe hopper/fluid_tank/dock buildings,
@@ -117,6 +127,12 @@ sauce-factory/
                                          # the extents around that same corner; the
                                          # edge on the facing side is the outlet, the
                                          # opposite edge the inlet, the flanks neither)
+      ingredients.rs                   # IngredientCatalog (loads/validates
+                                         # data/ingredients.ron) + OwnedIngredients
+                                         # (per-id stock) + Ingredients, which pairs
+                                         # them — shop.rs's shape with one word
+                                         # changed. Also owns `raw_ingredient_ids`,
+                                         # the crate's single definition of "raw"
       shop.rs                          # ShopCatalog (loads/validates data/shop.ron) +
                                          # OwnedEquipment (per-kind owned counts) +
                                          # Shop, which pairs them. Money is NOT here —
@@ -171,6 +187,18 @@ sauce-factory/
                                  # and drives test-only 2-/3-wide machines for the
                                  # width math, multi-tile query_tile and the
                                  # chunk-boundary case
+    tests/fluid_production.rs  # headless integration test for the chain rework:
+                                 # a machine DEPOSITING fluid into a pipe, which
+                                 # network it fills vs. draws from (outlet face vs.
+                                 # touching), the pipe-loop refusal, and
+                                 # validate_chain's fluid-link half
+    tests/ingredients.rs       # headless integration test: raw ingredients are
+                                 # bought, a refused purchase is a no-op, an
+                                 # unstocked factory produces nothing, and a
+                                 # delivered unit is worth more than what made it
+    tests/common/mod.rs        # shared fixture for the tests that RUN the chain
+                                 # for a long time (buy stock, keep both hoppers
+                                 # and the tank fed)
     tests/economy.rs           # headless integration test: full chain collects
                                  # against the hardcoded contract and pays out
                                  # correctly (money increases on a satisfied mix,
@@ -510,6 +538,131 @@ it's gone stale.
   the splitter in the infrastructure group makes the last two kinds keyless
   rather than the last one. Nothing becomes unreachable (the build menu still
   places by right-click), and it is ticket 2's to solve.
+- 2026-09-08: **The chain rework, ticket 1 of 2 (the sim half;
+  `godot_project/` and `assets/voxels/` deliberately untouched).** Four
+  changes that only make sense together: the aging rack is deleted, the
+  middle of the production line is **piped instead of belted**, the mixer
+  gains **sugar** as a second raw ingredient, and **raw ingredients are
+  bought with money** instead of being free and infinite. Seven calls worth
+  not re-litigating.
+
+  (1) **`Recipe` gained `fluid_outputs`, and which network it goes into is
+  geometric.** Until now a recipe could *consume* a fluid and nothing could
+  make one — the only thing that could add volume to the system was the
+  player filling a tank — so the middle of a line had to be belt-connected
+  even where a real plant pipes it. `fluid_outputs` mirrors `fluid_inputs`
+  (`#[serde(default)]`, whole units) and `fluid.rs` gained
+  `can_accept_at`/`deposit_at` as the exact mirror of `can_supply_at`/
+  `draw_at`, all-or-nothing for its reason. The rule that makes a machine
+  plumbed on *both* sides unambiguous without the player labelling a run:
+  **a fluid output leaves by the face the machine points at, exactly as a
+  solid one does; a fluid input may come from any other pipe touching the
+  footprint.** So the topology pass resolves the output tap first and then
+  excludes that network when choosing the input — which also decides the
+  degenerate case, a loop of pipe touching one machine on two sides: it
+  reads as the outlet and the machine gets **no** inlet, because a machine
+  must not draw from the run it fills. `Machine::tick` therefore takes two
+  taps rather than one; they are always different networks, which is what
+  makes holding both mutable borrows sound (`world.rs`'s `two_networks_mut`
+  asserts it rather than assuming it). A fluid output is gated at craft
+  *completion*, symmetrically with the solid output buffer beside it, so a
+  full pipe backs a machine up instead of spilling. `recipes.ron`'s
+  `schema_version` goes to **3**, rejecting v2 rather than migrating it —
+  the same call v1 got, and more clearly right this time: a v2 file's chain
+  is belt-connected end to end, and defaulting it into this build would
+  produce a factory that loads, renders and never runs.
+
+  (2) **`validate_chain` recognises a fluid link.** Two stages joined only
+  by a pipe share no solid id at all — the mixer's whole output is a liquid
+  and the vat's whole input is one — so without this the shipped file would
+  look like a broken line. A typo'd *fluid* id is exactly as much a content
+  error as a typo'd item id and still panics at construction.
+
+  (3) **A machine's inlet face is as long as its footprint, and that is why
+  the mixer is now 1x2.** This is the call the ticket did not anticipate and
+  the one most worth recording. A machine accepts solid input on every tile
+  of the edge opposite the way it points, so a 1x1 machine consuming two
+  different solid ingredients has **one** inlet tile, i.e. a merge point —
+  and a merge with no splitter or filtered insertion behind it *deadlocks*:
+  whichever ingredient arrives faster fills the shared belt, the other never
+  reaches the machine, and the machine then never consumes the first either.
+  This was built and measured, not theorised: a 1x1 mixer with sugar
+  side-fed onto the paste belt jammed permanently within a few thousand
+  ticks. Giving the mixer a second tile of depth gives sugar its own lane
+  into its own inlet tile and removes the merge entirely. So: **a machine
+  that consumes N solid ingredients needs an inlet face at least N tiles
+  long**, recorded in `data/machines.ron`'s header for the next
+  multi-ingredient kind. The mixer is also the first shipped kind that is
+  genuinely oblong, which is a small bonus — rotation's extent-swap now has
+  real content behind it, not only a test fixture. **Note for the
+  presentation ticket: the mixer's model is 32x64 voxels now, not 32x32.**
+
+  (4) **Hoppers hold what the player says, and `Place` gained an optional
+  `item`.** `World`'s `raw_item: Option<ItemId>` was "the first recipe's
+  first input, and nothing else is ever considered raw" — correct while
+  there was one raw ingredient, and wrong the moment sugar existed. It is a
+  `raw_items: Vec<ItemId>` now, derived by the general rule
+  (`ingredients::raw_ingredient_ids`: consumed by some recipe, produced by
+  none) so `world.rs` and `ingredients.rs` cannot drift on what "raw" means.
+  `PlayerCommand::Place` follows its own documented rule for optionality —
+  optional when the simulation owns a sensible answer, required when only
+  the player can know it — which here means **optional while inferable,
+  required once ambiguous**: omitting `item` still works in a world with one
+  raw solid (so nothing about the old wire form changed) and is a silent
+  refusal in one with two. Naming a non-raw item is refused too. `FillHopper`
+  needs no item parameter: a placed hopper already knows its own.
+
+  (5) **Ingredients are bought, in a second catalog and a second ledger.**
+  `data/ingredients.ron` + `sim/ingredients.rs` are `shop.ron` +
+  `sim/shop.rs` with one word changed, deliberately — schema version,
+  duplicate/degenerate rejection, `include_str!` bundling, and a new
+  `PlayerCommand::BuyIngredient` that is `Purchase`'s arm verbatim against
+  the other catalog. Two files rather than one column because they price two
+  different *kinds of thing*: a shop entry is a building you place and can
+  pick back up, an ingredient is stock a machine eats and never returns —
+  the same argument `OwnedEquipment` makes for not being an `Inventory`. A
+  solid and a fluid *do* share one catalog and one ledger, because ids never
+  collide and both are bought in whole units. Money stays on `Economy`
+  (GAMEPLAY.md §1 allows one currency). The debit rule is the fiddly bit and
+  is stated once: **clamp the request to owned stock, let `fill` clamp again
+  to its own capacity, then debit exactly what `fill` reports it added** —
+  never the requested amount, since a nearly-full bin accepts less than it
+  is offered. A tank holds no fluid id of its own, so what it is filled with
+  is the fluid of the run it discharges into; a tank plumbed to a run
+  nothing taps cannot be filled at all, because there is nothing to charge
+  for. `IngredientCatalog::validate_covers` is a **test**, not a
+  construction-time panic — an unpriced ingredient leaves the world coherent
+  and merely unfillable, which is the same call `contracts.rs` made about an
+  unsatisfiable contract.
+
+  (6) **Overproduction is a real loss now, and that is the design working.**
+  With ingredients free, a kept-fed line printed money. It no longer does:
+  every box nobody has ordered is ingredients converted into stock in a pool
+  no contract wants. The invariant `tests/ingredients.rs` pins is therefore
+  the **per-unit margin** (a delivered unit is worth more than the
+  ingredients that made it, on every shipped contract, derived from the data
+  files rather than written as literals) rather than "a running factory
+  earns more than it spends over N ticks", which is false and correctly so —
+  it is exactly the pressure GAMEPLAY.md §6 chooses contracts over a spot
+  market to create.
+
+  (7) **The reference chain is rebuilt, and every test file with it.**
+  `sim::reference_chain`'s `plan()` now lays **one feed lane per solid
+  input** (row `CHAIN_ROW_Y + j` for input `j`, with a hopper at its head if
+  that input is raw), no belt at all for a stage whose inputs are entirely
+  fluid, and a short pipe run east of any stage with a fluid output. The
+  machine-to-machine runs are **two tiles** where the tank-fed vinegar run
+  is four: a pressure network equalizes, so a run of `n` tiles holds roughly
+  `n` times what the far end needs to draw once, and a run fed by a machine
+  has no pump behind it to push through that standing charge. Two new
+  fixture seams exist because a world that is going to be *run* now needs
+  money for stock: `reference_chain_with_budget` and
+  `reference_chain_with_content_and_budget`, both of which still assert the
+  chain spends its whole shop bill. `tests/timed_processes.rs` is deleted
+  with the aging rack; its pause/resume coverage went with it deliberately,
+  since that test asserted a property of a 2400-tick process and
+  `TimedProcess` itself is unchanged and exercised by every craft cycle in
+  the suite.
 
 - 2026-09-08: **An inventory hotbar, and a starting balance that lets the
   loop close.** Two directly-requested changes in one ticket, because the

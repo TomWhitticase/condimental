@@ -23,10 +23,12 @@
 //! involvement at all, which is exactly the behaviour these tests should be
 //! proving in the first place.
 
+mod common;
+
 use sim_core::sim::types::Fx;
 use sim_core::sim::{
-    ContractRegistry, DockSnapshot, FLUID_TANK_CAPACITY, MachineRegistry, PlayerCommand,
-    RecipeRegistry, World, reference_chain, reference_chain_with,
+    ContractRegistry, DockSnapshot, MachineRegistry,
+    RecipeRegistry, World, reference_chain_with_budget, reference_chain_with_content_and_budget,
 };
 
 /// The reference chain's one dock — where every delivery this file measures
@@ -69,11 +71,26 @@ fn single_contract_world() -> World {
         c.cadence_ticks,
         c.payout.to_num::<u32>(),
     );
-    reference_chain_with(
+    stocked(reference_chain_with_content_and_budget(
         recipes(),
         MachineRegistry::bundled(),
         ContractRegistry::from_ron_str(&text).expect("re-serialized shipped contract must load"),
-    )
+        BUDGET,
+    ))
+}
+
+/// Exactly `common::stock_up`'s ingredient bill — so a stocked world has a
+/// factory, a full larder and **zero money**, which is the baseline every
+/// payout assertion below is measured against.
+const BUDGET: u32 = common::STOCK_COST;
+
+/// Buys the raw ingredients a long run needs. `reference_chain*` spends
+/// exactly its shop bill and leaves only the budget it was given, and
+/// ingredients cost money now (GAMEPLAY.md §5), so a fixture that wants the
+/// line to actually run has to be built with a budget and then stocked.
+fn stocked(mut world: World) -> World {
+    common::stock_up(&mut world);
+    world
 }
 
 /// Runs the chain until the delivery dock has shipped `target` units into
@@ -86,21 +103,9 @@ fn single_contract_world() -> World {
 fn run_until_shipped(world: &mut World, target: u32) -> u32 {
     for _ in 0..500_000u32 {
         if the_dock(&world).shipped_total < target {
-            // Keep the hopper topped up. `FillHopper` clamps at capacity, so
-            // issuing it every tick just means "never let the feed run dry"
-            // — the hopper still meters onto the belt at one unit per tick
-            // at most, so the chain's throughput is unchanged by this.
-            world.issue_command(PlayerCommand::FillHopper {
-                amount: target.saturating_mul(4).max(4),
-                tile: None,
-            });
-            // ...and keep the pipe run's vinegar tank topped up the same
-            // way, since it is the run's only supply and the fluid-gated
-            // mixing stage stalls without it.
-            world.issue_command(PlayerCommand::FillFluidTank {
-                amount: FLUID_TANK_CAPACITY,
-                tile: None,
-            });
+            // Keep the line supplied — see `common`'s module doc for why
+            // sugar is metered rather than dumped onto a shared belt.
+            common::supply(world);
         }
 
         world.tick();
@@ -163,7 +168,7 @@ fn full_chain_delivers_against_a_contract_and_pays_out_exactly_that_contracts_pa
 
 #[test]
 fn money_stays_zero_through_a_cadence_boundary_with_nothing_delivered() {
-    let mut world = reference_chain(recipes());
+    let mut world = stocked(reference_chain_with_budget(recipes(), BUDGET));
     let longest = world
         .economy()
         .contracts
@@ -228,11 +233,12 @@ fn several_contracts_settle_independently_against_one_real_chain() {
             ],
         )"#
     );
-    let mut world = reference_chain_with(
+    let mut world = stocked(reference_chain_with_content_and_budget(
         recipes(),
         MachineRegistry::bundled(),
         ContractRegistry::from_ron_str(&board).expect("fixture board must load"),
-    );
+        BUDGET,
+    ));
 
     // Run the chain continuously (never stop feeding; the dock never stops
     // shipping) through exactly one slow-cadence window — the slow
@@ -244,11 +250,7 @@ fn several_contracts_settle_independently_against_one_real_chain() {
     // contract's own two checks (at one and two quick-cadences in) have
     // each taken their share.
     while world.current_tick() < slow_cadence {
-        world.issue_command(PlayerCommand::FillHopper { amount: 32, tile: None });
-        world.issue_command(PlayerCommand::FillFluidTank {
-            amount: FLUID_TANK_CAPACITY,
-            tile: None,
-        });
+        common::supply(&mut world);
         world.tick();
     }
     assert!(
@@ -308,11 +310,12 @@ fn one_delivered_unit_pays_one_contract_not_every_contract_that_wants_it() {
             ],
         )"#
     );
-    let mut world = reference_chain_with(
+    let mut world = stocked(reference_chain_with_content_and_budget(
         recipes(),
         MachineRegistry::bundled(),
         ContractRegistry::from_ron_str(&board).expect("fixture board must load"),
-    );
+        BUDGET,
+    ));
 
     // Ship exactly one unit, then stop feeding the line entirely.
     let shipped = run_until_shipped(&mut world, 1);
@@ -343,7 +346,7 @@ fn one_delivered_unit_pays_one_contract_not_every_contract_that_wants_it() {
 /// Ticket 2's contract cards are built against.
 #[test]
 fn the_economy_snapshot_reports_one_entry_per_shipped_contract() {
-    let world = reference_chain(recipes());
+    let world = stocked(reference_chain_with_budget(recipes(), BUDGET));
     let snapshot = world.economy_snapshot();
     let board = contracts();
 

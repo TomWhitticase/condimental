@@ -29,41 +29,68 @@
 //! Everything below runs with no Godot process involved (ARCHITECTURE.md
 //! §7).
 
+mod common;
+
 use sim_core::sim::types::Fx;
 use sim_core::sim::{
     FLUID_TANK_CAPACITY, FLUID_TANK_FILL_AMOUNT, FluidSnapshot, FluidTankSnapshot,
     HopperSnapshot, PlayerCommand, RecipeRegistry, TileSnapshot, World, command_from_json,
-    reference_chain,
+    reference_chain_with_budget,
 };
 
-/// The reference chain's one hopper.
+/// Exactly `common::stock_up`'s bill, so a stocked world has a factory, a
+/// full larder and zero money.
+const BUDGET: u32 = common::STOCK_COST;
+
+/// The reference chain, funded and stocked. Ingredients cost money since the
+/// chain-rework epic (GAMEPLAY.md §5), so a fixture that fills anything has
+/// to buy the contents first.
+fn stocked(recipes: RecipeRegistry) -> World {
+    let mut world = reference_chain_with_budget(recipes, BUDGET);
+    common::stock_up(&mut world);
+    world
+}
+
+/// The hopper holding raw tomatoes. The shipped chain has two hoppers now,
+/// one per raw solid; a two-stage fixture has only this one.
 fn the_hopper(world: &World) -> HopperSnapshot {
-    let mut hoppers = world.hopper_snapshots();
-    assert_eq!(hoppers.len(), 1, "the reference chain places one hopper");
-    hoppers.remove(0)
+    world
+        .hopper_snapshots()
+        .into_iter()
+        .find(|h| h.item == "tomato")
+        .expect("every fixture here feeds tomatoes")
 }
 
-/// The world's one fluid network, or `None` when no pipe is placed.
+/// **The tank-fed vinegar run**, or `None` when no pipe carries vinegar.
 ///
-/// A world can hold several networks since the "Real Placement" epic (one
-/// per connected component of placed pipe), which is why the snapshot call
-/// returns a list — but the reference chain lays exactly one run, so this
-/// file asserts that and then talks about "the" network, the way it always
-/// has.
+/// A world holds one network per connected component of placed pipe, and
+/// since the chain rework the shipped chain has three of them — the vinegar
+/// supply plus the two machine-to-machine runs carrying the liquid product.
+/// This file is about the *supplied* one (the only kind that existed when
+/// fluids landed), so it names it rather than assuming there is only one.
 fn the_network(world: &World) -> Option<FluidSnapshot> {
-    let mut networks = world.fluid_snapshots();
-    assert!(
-        networks.len() <= 1,
-        "the reference chain lays one pipe run, so at most one network"
-    );
-    networks.pop()
+    world
+        .fluid_snapshots()
+        .into_iter()
+        .find(|n| n.fluid.as_deref() == Some("vinegar"))
 }
 
-/// The world's one fluid tank, or `None` when none is placed.
+/// The world's one fluid tank, or `None` when none is placed. Only the
+/// vinegar run is tank-fed; the product runs have a machine behind them.
 fn the_tank(world: &World) -> Option<FluidTankSnapshot> {
     let mut tanks = world.fluid_tank_snapshots();
     assert!(tanks.len() <= 1, "the reference chain places one tank");
     tanks.pop()
+}
+
+/// The total volume of the network carrying `fluid`, or 0 if there is none.
+fn volume_of(world: &World, fluid: &str) -> f64 {
+    world
+        .fluid_snapshots()
+        .into_iter()
+        .find(|n| n.fluid.as_deref() == Some(fluid))
+        .map(|n| n.total_volume)
+        .unwrap_or(0.0)
 }
 
 fn shipped_recipes() -> RecipeRegistry {
@@ -86,7 +113,7 @@ const FLUID_GATED_INPUT: &str = "tomato_paste";
 fn two_stage_chain(vinegar_units: u32) -> RecipeRegistry {
     let text = format!(
         r#"(
-            schema_version: 2,
+            schema_version: 3,
             recipes: [
                 Recipe(
                     id: "tomato_paste",
@@ -206,7 +233,7 @@ fn a_stage_stalls_without_its_fluid_and_runs_once_the_fluid_is_available() {
     // machine is permanently starved of fluid while having plenty of solid
     // input, which is exactly the "stalls, doesn't run degraded" case
     // (GAMEPLAY.md §7).
-    let mut starved = reference_chain(two_stage_chain(1000));
+    let mut starved = stocked(two_stage_chain(1000));
     let starved_output = run_chain(&mut starved, 4, 3_000, FLUID_GATED_RECIPE);
     assert_eq!(
         starved_output, 0,
@@ -239,7 +266,7 @@ fn a_stage_stalls_without_its_fluid_and_runs_once_the_fluid_is_available() {
 
     // Same chain, same everything, a fluid requirement the pipe run can
     // actually meet.
-    let mut supplied = reference_chain(two_stage_chain(2));
+    let mut supplied = stocked(two_stage_chain(2));
     let supplied_output = run_chain(&mut supplied, 4, 3_000, FLUID_GATED_RECIPE);
     assert_eq!(
         supplied_output, 1,
@@ -247,18 +274,21 @@ fn a_stage_stalls_without_its_fluid_and_runs_once_the_fluid_is_available() {
     );
 }
 
-/// The shipped chain (`data/recipes.ron`) still runs end to end now that
-/// its *mixing* stage needs vinegar — i.e. the pipe run `World` builds
-/// really does deliver fluid to the machine that asked for it, and the
-/// network really is being drawn from. Watching `ketchup` (the cooking
-/// vat's output, one stage *past* the fluid gate) rather than the mix
-/// itself is deliberate: nothing downstream of the mixer can exist unless
-/// the mixer actually got its vinegar.
+/// The shipped chain (`data/recipes.ron`) still runs now that its *mixing*
+/// stage needs vinegar — i.e. the tank-fed pipe run really does deliver
+/// fluid to the machine that asked for it, and that machine really does draw
+/// from it.
+///
+/// What it watches changed with the chain rework: the mixer's own output is
+/// a **fluid** now, so there is no item to count anywhere. The observable
+/// consequence of the mixer running is volume appearing in the
+/// `ketchup_mix` run — a network with no tank behind it, which can only have
+/// been filled by a machine.
 #[test]
 fn the_shipped_chain_consumes_fluid_as_it_produces() {
-    let mut world = reference_chain(shipped_recipes());
+    let mut world = stocked(shipped_recipes());
     let before =
-        the_network(&world).expect("the reference chain lays a pipe run for the fluid recipe");
+        the_network(&world).expect("the reference chain lays a tank-fed run for the raw fluid");
     assert_eq!(before.fluid.as_deref(), Some("vinegar"));
     let tap = before
         .taps
@@ -266,34 +296,60 @@ fn the_shipped_chain_consumes_fluid_as_it_produces() {
         .expect("a machine must be tapping the run");
     assert_eq!(
         tap.machine_recipe, FLUID_GATED_RECIPE,
-        "the fluid requirement is on the mixing stage — which machine taps the run follows \
+        "the vinegar requirement is on the mixing stage — which machine taps the run follows \
          the data file and the placement, not a hardcoded stage"
     );
     assert!(
         tap.units_per_craft > 0,
         "the fluid recipe must consume a non-zero amount"
     );
+    assert!(
+        before.producers.is_empty(),
+        "nothing produces vinegar — it is bought and poured into a tank"
+    );
 
-    let tank_before = the_tank(&world).expect("a pipe run has a tank supplying it");
+    let tank_before = the_tank(&world).expect("a tank supplies the raw-fluid run");
     assert_eq!(tank_before.fluid.as_deref(), Some("vinegar"));
     assert_eq!(tank_before.quantity, 0.0, "a new tank starts empty");
 
-    let (produced, min_volume) = run_chain_watching_fluid(&mut world, 4, 20_000, "ketchup");
-    assert_eq!(
-        produced, 1,
-        "the shipped chain must still reach its cooked-ketchup stage"
+    // Fill the tank once, then keep only the solids topped up: the tank has
+    // to be allowed to fall for the drain assertions below to mean anything.
+    world.issue_command(PlayerCommand::FillFluidTank {
+        amount: FLUID_TANK_CAPACITY,
+        tile: None,
+    });
+    let mut min_vinegar: Option<f64> = None;
+    let mut peak_mix = 0.0f64;
+    for tick_i in 0..20_000u32 {
+        common::supply_solids(&mut world);
+        world.tick();
+        peak_mix = peak_mix.max(volume_of(&world, "ketchup_mix"));
+        if tick_i >= SETTLE_TICKS {
+            let v = the_network(&world).unwrap().total_volume;
+            min_vinegar = Some(match min_vinegar {
+                Some(m) => m.min(v),
+                None => v,
+            });
+        }
+        if peak_mix > 0.0 && tick_i > SETTLE_TICKS {
+            break;
+        }
+    }
+    assert!(
+        peak_mix > 0.0,
+        "the mixer must have deposited liquid mix into the run off its outlet face — that is \
+         `fluid_outputs` doing the only thing it exists to do"
     );
 
-    // The tank was filled to capacity by `run_chain_watching_fluid`; what it
-    // holds now is strictly less, because the run drew from it to wet the
-    // pipes and the mixer drew from the run. This is the assertion the
-    // always-refilling source could never have supported.
+    // The tank was filled to capacity; what it holds now is strictly less,
+    // because the run drew from it to wet the pipes and the mixer drew from
+    // the run. This is the assertion the always-refilling source could never
+    // have supported.
     let tank_after = the_tank(&world).unwrap();
     assert_eq!(tank_after.capacity, f64::from(FLUID_TANK_CAPACITY));
     assert!(
         tank_after.quantity > 0.0 && tank_after.quantity < tank_after.capacity,
-        "one craft's worth of production must visibly draw the tank down without emptying it \
-         ({} of {})",
+        "production must visibly draw the tank down without emptying it ({} of {})",
         tank_after.quantity,
         tank_after.capacity
     );
@@ -305,10 +361,10 @@ fn the_shipped_chain_consumes_fluid_as_it_produces() {
         "`fill` must be quantity/capacity — presentation drives a level from it directly"
     );
 
-    let min_volume = min_volume.expect("the run is long enough to observe the settled network");
+    let min_vinegar = min_vinegar.expect("the run is long enough to observe the settled network");
     assert!(
-        min_volume < before.total_capacity,
-        "total volume never dipped below capacity ({min_volume} vs {}) — the craft was not \
+        min_vinegar < before.total_capacity,
+        "total volume never dipped below capacity ({min_vinegar} vs {}) — the craft was not \
          actually drawing from the network",
         before.total_capacity
     );
@@ -329,7 +385,7 @@ fn the_shipped_chain_consumes_fluid_as_it_produces() {
 fn a_chain_with_no_fluid_recipe_has_no_pipe_run_at_all() {
     let registry = RecipeRegistry::from_ron_str(
         r#"(
-            schema_version: 2,
+            schema_version: 3,
             recipes: [
                 Recipe(
                     id: "tomato_paste",
@@ -342,7 +398,7 @@ fn a_chain_with_no_fluid_recipe_has_no_pipe_run_at_all() {
         )"#,
     )
     .unwrap();
-    let mut world = reference_chain(registry);
+    let mut world = stocked(registry);
     world.tick();
 
     assert!(the_network(&world).is_none());
@@ -378,7 +434,7 @@ fn a_chain_with_no_fluid_recipe_has_no_pipe_run_at_all() {
 /// silently renders nothing.
 #[test]
 fn fluid_snapshot_json_has_the_documented_shape() {
-    let mut world = reference_chain(shipped_recipes());
+    let mut world = stocked(shipped_recipes());
     for _ in 0..50 {
         world.tick();
     }
@@ -461,12 +517,22 @@ fn fluid_snapshot_json_has_the_documented_shape() {
         snapshot.segments.len() - 1,
         "the tapped segment is the far end of this run"
     );
+    // The tapped tile is orthogonally adjacent to *some* tile of the
+    // machine's footprint, which is what "fluids connect by touching" means
+    // — and since the mixer became 1x2 that is no longer the same thing as
+    // being adjacent to its origin.
     let inlet_tile = snapshot.segments[tap.segment_index].tile;
-    let (mx, my) = tap.machine_tile;
-    assert_eq!(
-        (inlet_tile.0 - mx).abs() + (inlet_tile.1 - my).abs(),
-        1,
-        "the tapped segment must sit directly beside the machine it feeds"
+    let machine = world
+        .world_layout()
+        .into_iter()
+        .find(|p| p.tile == tap.machine_tile)
+        .expect("the tapping machine is placed");
+    assert!(
+        machine.occupies.iter().any(|&(mx, my)| {
+            (inlet_tile.0 - mx).abs() + (inlet_tile.1 - my).abs() == 1
+        }),
+        "the tapped segment {inlet_tile:?} must touch the machine's footprint {:?}",
+        machine.occupies
     );
     assert_eq!(tap.machine_recipe, FLUID_GATED_RECIPE);
     assert_eq!(
@@ -481,7 +547,7 @@ fn fluid_snapshot_json_has_the_documented_shape() {
 /// case.
 #[test]
 fn pipes_appear_in_chunk_snapshots_and_query_tile() {
-    let mut world = reference_chain(shipped_recipes());
+    let mut world = stocked(shipped_recipes());
     for _ in 0..50 {
         world.tick();
     }
@@ -491,10 +557,19 @@ fn pipes_appear_in_chunk_snapshots_and_query_tile() {
     for chunk in world.all_chunks() {
         pipes_in_chunks += world.chunk_snapshot(chunk).pipes.len();
     }
+    let all_segments: usize = world
+        .fluid_snapshots()
+        .iter()
+        .map(|n| n.segments.len())
+        .sum();
     assert_eq!(
-        pipes_in_chunks,
-        snapshot.segments.len(),
-        "every pipe segment must show up in exactly one chunk snapshot"
+        pipes_in_chunks, all_segments,
+        "every pipe segment of every network must show up in exactly one chunk snapshot"
+    );
+    assert!(
+        all_segments > snapshot.segments.len(),
+        "the shipped chain has more than just the vinegar run now — the two piped stages \
+         between the mixer and the bottler are the point of the chain rework"
     );
 
     let inlet_index = snapshot.taps[0].segment_index;
@@ -538,7 +613,7 @@ fn pipes_appear_in_chunk_snapshots_and_query_tile() {
 /// itself back up every tick forever.
 #[test]
 fn the_pipe_run_fills_from_the_tank_over_successive_ticks() {
-    let mut untouched = reference_chain(shipped_recipes());
+    let mut untouched = stocked(shipped_recipes());
     for _ in 0..500 {
         untouched.tick();
     }
@@ -558,7 +633,7 @@ fn the_pipe_run_fills_from_the_tank_over_successive_ticks() {
     );
 
     let world_at = |ticks: u32| {
-        let mut world = reference_chain(shipped_recipes());
+        let mut world = stocked(shipped_recipes());
         world.issue_command(PlayerCommand::FillFluidTank {
             amount: FLUID_TANK_CAPACITY,
             tile: None,
@@ -602,7 +677,7 @@ fn the_pipe_run_fills_from_the_tank_over_successive_ticks() {
 /// conversion at the snapshot edge only.
 #[test]
 fn fluid_volume_is_fixed_point_simulation_state() {
-    let mut world = reference_chain(shipped_recipes());
+    let mut world = stocked(shipped_recipes());
     for _ in 0..30 {
         world.tick();
     }
@@ -631,7 +706,7 @@ fn fluid_volume_is_fixed_point_simulation_state() {
 /// catch the derivation being wrong.
 #[test]
 fn the_tank_stands_immediately_west_of_the_pipe_runs_first_tile() {
-    let world = reference_chain(shipped_recipes());
+    let world = stocked(shipped_recipes());
     let tank = the_tank(&world).expect("the shipped chain has a pipe run");
     let fluid = the_network(&world).unwrap();
 
@@ -644,11 +719,11 @@ fn the_tank_stands_immediately_west_of_the_pipe_runs_first_tile() {
         (pipe_tile.0 - tank.footprint.width_tiles, pipe_tile.1),
         "the tank's footprint must end on the tile immediately west of the pipe it feeds"
     );
-    // The shipped placement: the run starts at (6, 1), so a 1x1 tank is at
-    // (5, 1) — a tile no belt, machine or pipe already claimed, which is why
-    // adding it moved nothing.
-    assert_eq!(pipe_tile, (6, 1));
-    assert_eq!(tank.tile, (5, 1));
+    // The shipped placement: the run sits on the row immediately north of
+    // the mixer's whole 1x2 footprint and starts at (6, 2), so a 1x1 tank is
+    // at (5, 2) — a tile no belt, machine or pipe claims.
+    assert_eq!(pipe_tile, (6, 2));
+    assert_eq!(tank.tile, (5, 2));
     assert_eq!(
         (tank.footprint.width_tiles, tank.footprint.height_tiles),
         (1, 1)
@@ -673,14 +748,14 @@ fn the_tank_stands_immediately_west_of_the_pipe_runs_first_tile() {
         ));
     }
     assert!(matches!(
-        world.query_tile((6, 1)),
+        world.query_tile((6, 2)),
         Some(TileSnapshot::Pipe { .. })
     ));
 }
 
 #[test]
 fn filling_the_tank_past_capacity_is_clamped_not_a_panic_or_an_overflow() {
-    let mut world = reference_chain(shipped_recipes());
+    let mut world = stocked(shipped_recipes());
 
     // `Fx` is a 16.16 fixed-point type, so `u32::MAX` is not even
     // representable — clamping has to happen before any conversion.
@@ -706,7 +781,7 @@ fn filling_the_tank_past_capacity_is_clamped_not_a_panic_or_an_overflow() {
 
 #[test]
 fn a_fill_command_dirties_the_tanks_chunk_so_the_fill_ui_can_redraw() {
-    let mut world = reference_chain(shipped_recipes());
+    let mut world = stocked(shipped_recipes());
     // One tick first, to clear the dirt from *building* the chain: placing
     // anything dirties its chunks, and the fixture places forty-odd things.
     world.tick();
@@ -716,7 +791,7 @@ fn a_fill_command_dirties_the_tanks_chunk_so_the_fill_ui_can_redraw() {
 
 #[test]
 fn the_fill_tank_command_parses_from_json_with_or_without_an_amount() {
-    let mut world = reference_chain(shipped_recipes());
+    let mut world = stocked(shipped_recipes());
     world.issue_command(
         command_from_json(r#"{"type": "fill_fluid_tank", "amount": 3}"#).expect("must parse"),
     );
@@ -753,7 +828,7 @@ fn the_tank_drains_as_the_mixer_crafts_and_the_mixer_stalls_once_it_is_dry() {
     // (A two-stage chain's last machine simply fills its own output buffer
     // and blocks, which looks identical from outside and would prove
     // nothing.)
-    let mut world = reference_chain(shipped_recipes());
+    let mut world = stocked(shipped_recipes());
 
     // Step 1: fill the tank. Nothing is in the pipes yet.
     world.issue_command(PlayerCommand::FillFluidTank { amount: FILL, tile: None });
@@ -779,19 +854,18 @@ fn the_tank_drains_as_the_mixer_crafts_and_the_mixer_stalls_once_it_is_dry() {
         "...but a fill bigger than the run holds must leave a reserve in the tank"
     );
 
-    // Step 3: with the hopper kept fed (and the delivery dock at the chain's
-    // tail clearing finished product by itself, every tick, since the
-    // delivery-dock ticket), the mixer crafts — and *only* fluid can stop
-    // it.
-    let mut crafts = 0;
+    // Step 3: with the hoppers kept fed (and the delivery dock at the
+    // chain's tail clearing finished product by itself, every tick, since
+    // the delivery-dock ticket), the mixer crafts — and *only* fluid can
+    // stop it. Its output is a liquid now, so "it crafted" is observed as
+    // volume appearing in the run off its outlet face rather than as an item
+    // appearing anywhere.
+    let mut crafts = 0.0f64;
     let mut stalled_for = 0;
     for _ in 0..200_000 {
-        world.issue_command(PlayerCommand::FillHopper {
-            amount: FLUID_TANK_CAPACITY,
-            tile: None,
-        });
+        common::supply_solids(&mut world);
         world.tick();
-        crafts = crafts.max(count_item_anywhere(&world, FLUID_GATED_RECIPE));
+        crafts = crafts.max(volume_of(&world, FLUID_GATED_RECIPE));
         // The mixer is starved once it sits idle while holding solid input.
         if mixer_is_starved(&world) {
             stalled_for += 1;
@@ -802,7 +876,10 @@ fn the_tank_drains_as_the_mixer_crafts_and_the_mixer_stalls_once_it_is_dry() {
             break;
         }
     }
-    assert!(crafts > 0, "the mixer must have run at all while fluid was available");
+    assert!(
+        crafts > 0.0,
+        "the mixer must have run at all while fluid was available"
+    );
     assert!(
         stalled_for > 2_000,
         "the run must actually dry out within the tick budget, not merely be slow"
@@ -838,7 +915,7 @@ fn the_tank_drains_as_the_mixer_crafts_and_the_mixer_stalls_once_it_is_dry() {
     let before = crafts;
     for _ in 0..5_000 {
         world.tick();
-        crafts = crafts.max(count_item_anywhere(&world, FLUID_GATED_RECIPE));
+        crafts = crafts.max(volume_of(&world, FLUID_GATED_RECIPE));
     }
     assert!(
         crafts > before || !mixer_is_starved(&world),
@@ -870,7 +947,7 @@ fn mixer_is_starved(world: &World) -> bool {
 /// hopper's. A rename here fails a test instead of silently breaking a scene.
 #[test]
 fn the_fluid_tank_json_shape_is_what_presentation_is_told_to_expect() {
-    let mut world = reference_chain(shipped_recipes());
+    let mut world = stocked(shipped_recipes());
     world.issue_command(PlayerCommand::FillFluidTank { amount: 30, tile: None });
 
     // fluid_tank_snapshots_json (`SimBridge`) serializes an array of
@@ -882,7 +959,7 @@ fn the_fluid_tank_json_shape_is_what_presentation_is_told_to_expect() {
     assert_eq!(
         snapshot,
         serde_json::json!({
-            "tile": [5, 1],
+            "tile": [5, 2],
             "kind": "fluid_tank",
             "direction": "east",
             "footprint": { "width_tiles": 1, "height_tiles": 1 },
@@ -890,7 +967,7 @@ fn the_fluid_tank_json_shape_is_what_presentation_is_told_to_expect() {
             "quantity": 30.0,
             "capacity": 120.0,
             "fill": 0.25,
-            "pipe_tile": [6, 1],
+            "pipe_tile": [6, 2],
         })
     );
 
@@ -910,7 +987,7 @@ fn the_fluid_tank_json_shape_is_what_presentation_is_told_to_expect() {
     // query_tile_json answers with a `fluid_tank` tile: enough for a hover
     // tooltip without a second call.
     let tile: serde_json::Value =
-        serde_json::from_str(&serde_json::to_string(&world.query_tile((5, 1)).unwrap()).unwrap())
+        serde_json::from_str(&serde_json::to_string(&world.query_tile((5, 2)).unwrap()).unwrap())
             .unwrap();
     assert_eq!(
         tile,
@@ -918,7 +995,7 @@ fn the_fluid_tank_json_shape_is_what_presentation_is_told_to_expect() {
             "kind": "fluid_tank",
             "direction": "east",
             "footprint": { "width_tiles": 1, "height_tiles": 1 },
-            "origin_tile": [5, 1],
+            "origin_tile": [5, 2],
             "fluid": "vinegar",
             "quantity": 30.0,
             "capacity": 120.0,
@@ -933,7 +1010,7 @@ fn the_fluid_tank_json_shape_is_what_presentation_is_told_to_expect() {
         .into_iter()
         .find(|p| p.kind == "fluid_tank")
         .expect("the tank is a placement like any other");
-    assert_eq!(entry.tile, (5, 1));
+    assert_eq!(entry.tile, (5, 2));
     assert!(entry.recipe.is_none());
 }
 
@@ -943,7 +1020,7 @@ fn the_fluid_tank_json_shape_is_what_presentation_is_told_to_expect() {
 /// gives the pipe run.
 #[test]
 fn tank_volume_is_fixed_point_simulation_state() {
-    let mut world = reference_chain(shipped_recipes());
+    let mut world = stocked(shipped_recipes());
     world.issue_command(PlayerCommand::FillFluidTank {
         amount: FLUID_TANK_CAPACITY,
         tile: None,
