@@ -81,6 +81,15 @@ sauce-factory/
                                # Per-kind staff/power draw and build cost belong
                                # here too when those land — not a second file.
                                # items.ron/contracts.ron land here when they exist.
+    shop.ron                 # what the player can BUY and what it costs — one
+                               # entry per buildable kind (every machines.ron kind
+                               # PLUS the belt and pipe tiles, which are
+                               # infrastructure, not machines), each with a whole-
+                               # number price in the same money economy.rs counts.
+                               # Loaded by sim/shop.rs, which errors on a bad schema
+                               # version, a duplicate kind, a price below 1, or a
+                               # machine kind it doesn't price. Prices are
+                               # placeholders (GAMEPLAY.md §10).
   sim_core/               # Rust crate: pure sim core + the gdext binding
     Cargo.toml              # crate-type = ["cdylib", "rlib"] — rlib is what lets
                               # sim_core/tests/ link against it without Godot
@@ -96,6 +105,11 @@ sauce-factory/
                                          # data/machines.ron; owns the footprint
                                          # origin convention (min-X/min-Y corner,
                                          # = the tile the belt feeds into)
+      shop.rs                          # ShopCatalog (loads/validates data/shop.ron) +
+                                         # OwnedEquipment (per-kind owned counts) +
+                                         # Shop, which pairs them. Money is NOT here —
+                                         # it stays on Economy, since GAMEPLAY.md §1
+                                         # allows exactly one currency
       economy.rs                       # Economy: money (Fx) + one hardcoded Contract
                                          # (fixed mix/cadence/payout), checked against
                                          # an accumulating delivery_buffer Inventory
@@ -120,6 +134,12 @@ sauce-factory/
                                  # correctly (money increases on a satisfied mix,
                                  # stays put on a miss) — economy.rs's own #[cfg(test)]
                                  # covers Economy in isolation (cadence/mix edge cases)
+    tests/shop.rs              # headless integration test: the chain earns contract
+                                 # money and spends it on equipment, a refused
+                                 # purchase (unaffordable/unknown/zero-quantity) is a
+                                 # true no-op, and shop_snapshot_json's exact shape —
+                                 # shop.rs's and world.rs's own #[cfg(test)] cover the
+                                 # loader's error cases and the Purchase arm's edges
   xtask/                   # build script (ARCHITECTURE.md §7): `cargo xtask` builds sim_core,
     Cargo.toml              # copies the compiled extension into godot_project/bin/, and stages
     src/main.rs               # assets/voxels/models/ into godot_project/voxels/ (both gitignored)
@@ -696,3 +716,38 @@ it's gone stale.
   meshes, metal rougher-than-matte — and `scripts/screenshot-scene.sh`
   renders the actual scene to a PNG, which is the only non-headless check in
   the project and deliberately so.
+
+- 2026-09-08: "Shop & Inventory" epic, ticket 1 (of 2) — **equipment is
+  something the player buys, and `data/shop.ron` is where its price lives.**
+  The first half of a directly-requested priority shift from a fixed
+  always-built line toward a real build-your-own-factory game (ticket 2 is
+  the Godot build menu; a following epic is real placement/rotation/pickup).
+  Rust + data only. Five calls worth not re-litigating. (1) **A new data
+  file, not a field on `machines.ron`.** `machines.ron`'s own header does
+  invite "build cost ... belongs in this file too" — but a shop entry is not
+  a machine property: the belt and the pipe are priced and are not machines
+  at all, and `machines.ron` is loaded to answer "how big is that thing,"
+  which every world needs, whereas a price is only needed by the economy. So
+  `shop.ron` is the catalog of *buildable kinds*, a superset of machine
+  kinds, and `ShopCatalog::validate_covers` makes an unpriced machine kind an
+  error rather than a thing the player can never buy. (2) **There is exactly
+  one money counter, and it stays on `Economy`.** GAMEPLAY.md §1 is explicit
+  that no second currency or tech-point resource exists; a shop wallet would
+  be one by the back door. `Economy::try_spend` is the only way money leaves,
+  and it is all-or-nothing, so a purchase cannot half-apply. (3) **Owned
+  counts are a plain `Shop` field on `World`**, beside `economy` and `fluid`,
+  for their reason: one per world, so ECS machinery buys nothing. They are a
+  `BTreeMap`, not `Inventory` — an unbounded ledger of *kind* ids is not a
+  capacity-bounded store of *item* ids, and conflating the two would let one
+  be passed where the other is meant. (4) **`Purchase` is a silent no-op on
+  failure**, like every other command in the enum (`FillHopper` past
+  capacity, `CollectOutput` on an empty machine): an unknown kind, a zero
+  quantity, a total `Fx` can't represent, or simply not enough money all
+  leave the world byte-identical. It also dirties no chunk, because money and
+  a count are not tiles — presentation polls `shop_snapshot_json`, as it
+  already polls `economy_snapshot_json`. (5) **This ticket changes nothing
+  about the factory.** Every machine still exists unconditionally from tick
+  0; buying credits a number and nothing else. That is deliberate — the
+  economy layer and the placement rewiring are kept apart so this half is
+  testable in isolation and moved no existing tile, and the whole
+  pre-existing suite passes untouched.

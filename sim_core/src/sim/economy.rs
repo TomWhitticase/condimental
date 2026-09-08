@@ -121,6 +121,26 @@ impl Economy {
         self.delivery_buffer.add(item, qty);
     }
 
+    /// Spends `amount` if there is enough money, and reports whether it
+    /// did. **All or nothing:** on `false` not a single unit has moved, so
+    /// a caller can check-and-spend in one step without ever leaving a
+    /// half-applied transaction behind ("Shop & Inventory" epic, ticket 1 —
+    /// `World::issue_command`'s `Purchase` arm is the only caller).
+    ///
+    /// This is the *only* way money leaves the economy, and it lives here
+    /// rather than on the shop for the reason `sim::shop`'s module doc
+    /// gives: GAMEPLAY.md §1 allows exactly one currency, so there is
+    /// exactly one counter, and a purchase debits the same field a contract
+    /// delivery credits. A non-positive `amount` is refused rather than
+    /// treated as a free purchase.
+    pub fn try_spend(&mut self, amount: Fx) -> bool {
+        if amount <= Fx::ZERO || self.money < amount {
+            return false;
+        }
+        self.money -= amount;
+        true
+    }
+
     /// Checks the contract at its cadence boundary. Once `current_tick`
     /// reaches `next_delivery_tick`, tests whether the delivery buffer holds
     /// the full required mix:

@@ -119,6 +119,7 @@ use super::hopper::{HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, HOPPER_KIND, Hopper};
 use super::machine::Machine;
 use super::machines::{Footprint, MachineRegistry};
 use super::recipe::{Recipe, RecipeRegistry};
+use super::shop::{DEFAULT_PURCHASE_QUANTITY, Shop, ShopSnapshot};
 use super::types::{ChunkId, FluidId, Fx, ItemId, RecipeId, TileCoord, chunk_of};
 
 /// Where an entity sits in the tile grid (ARCHITECTURE.md §3.1/§3.2).
@@ -181,6 +182,25 @@ pub enum PlayerCommand {
     /// `issue_command`'s "an impossible command does nothing" contract.
     FillFluidTank { amount: u32 },
     CollectOutput,
+    /// Buys `quantity` of a buildable kind from the shop (the "Shop &
+    /// Inventory" epic's ticket 1): debits `quantity * price` from
+    /// `Economy::money` and credits `quantity` to the player's owned count
+    /// of that kind (`sim::shop::OwnedEquipment`).
+    ///
+    /// Unlike `FillHopper`/`FillFluidTank`, the *thing* IS a parameter
+    /// here, and has to be: those two each have exactly one possible target
+    /// per world (one hopper, one tank), whereas the whole point of a shop
+    /// is choosing between kinds. The id is a `data/shop.ron` kind id.
+    ///
+    /// **All or nothing, and silent about failure** — the rule every other
+    /// command in this enum already follows (`FillHopper` past capacity,
+    /// `FillFluidTank` in a world with no pipe run, `CollectOutput` on an
+    /// empty machine). An unknown kind, a zero quantity, or a total the
+    /// player can't afford leaves money *and* the owned count exactly as
+    /// they were; nothing is ever partially applied. Presentation decides
+    /// what to say about that, using `shop_snapshot_json`'s `affordable`
+    /// flag to avoid offering the purchase in the first place.
+    Purchase { kind: String, quantity: u32 },
 }
 
 /// JSON wire shape for `PlayerCommand`, used only at the `gdext` boundary
@@ -208,6 +228,16 @@ enum PlayerCommandDto {
         amount: u32,
     },
     CollectOutput,
+    /// `{"type": "purchase", "kind": "belt", "quantity": 4}` — `quantity`
+    /// optional, defaulting to [`DEFAULT_PURCHASE_QUANTITY`] (one), the same
+    /// "the player clicked the button once" convenience `fill_hopper`'s
+    /// optional `amount` provides. `kind` is required: there is no sensible
+    /// default for *what to buy*.
+    Purchase {
+        kind: String,
+        #[serde(default = "default_purchase_quantity")]
+        quantity: u32,
+    },
 }
 
 fn default_fill_amount() -> u32 {
@@ -218,6 +248,10 @@ fn default_fluid_fill_amount() -> u32 {
     FLUID_TANK_FILL_AMOUNT
 }
 
+fn default_purchase_quantity() -> u32 {
+    DEFAULT_PURCHASE_QUANTITY
+}
+
 impl From<PlayerCommandDto> for PlayerCommand {
     fn from(dto: PlayerCommandDto) -> Self {
         match dto {
@@ -226,6 +260,9 @@ impl From<PlayerCommandDto> for PlayerCommand {
                 PlayerCommand::FillFluidTank { amount }
             }
             PlayerCommandDto::CollectOutput => PlayerCommand::CollectOutput,
+            PlayerCommandDto::Purchase { kind, quantity } => {
+                PlayerCommand::Purchase { kind, quantity }
+            }
         }
     }
 }
@@ -736,6 +773,13 @@ pub struct World {
     /// Where the pipe run's tank stands — `Some` iff `fluid` is. See
     /// [`FluidTankStage`].
     fluid_tank: Option<FluidTankStage>,
+    /// What the player can buy and what they own of it (the "Shop &
+    /// Inventory" epic's ticket 1) — a plain field for the same reason
+    /// `economy` and `fluid` are: exactly one per world. Note nothing in
+    /// `World`'s construction reads it yet; the shipped chain is still built
+    /// unconditionally, and spending owned equipment on placement is a later
+    /// epic. See [`super::shop`]'s module doc.
+    shop: Shop,
 }
 
 const BELT_LENGTH_TILES: i32 = 4;
@@ -958,6 +1002,13 @@ impl World {
             fluid_stage,
             hopper,
             fluid_tank,
+            // The bundled `data/shop.ron`, owning nothing. Deliberately not
+            // parameterized alongside `machines` the way `with_machines`
+            // parameterizes footprints: no layout arithmetic reads a price,
+            // so a test never needs a fake catalog to observe placement, and
+            // one that wants a different catalog can build a `Shop`
+            // directly (`sim::shop`'s own tests do).
+            shop: Shop::bundled(),
         };
         world.validate_placement();
         world
@@ -1595,7 +1646,47 @@ impl World {
                 }
                 self.mark_machine_dirty(machine_tile, machine_footprint);
             }
+            PlayerCommand::Purchase { kind, quantity } => {
+                // Priced first, then paid for, then credited — and every
+                // step that can fail does so before anything has changed,
+                // so an unknown kind, a zero quantity, an unrepresentable
+                // total (see `Shop::cost_of`) or simply not enough money all
+                // leave the world byte-identical. `Economy::try_spend` is
+                // itself all-or-nothing for the same reason.
+                //
+                // No chunk is marked dirty: a purchase changes money and an
+                // owned count, neither of which is a tile. Presentation
+                // learns about it by polling `shop_snapshot_json`, the same
+                // way it already polls `economy_snapshot_json` (there is one
+                // shop per world, so there is nothing to dirty-track). When
+                // a later epic makes an owned machine actually placeable,
+                // *placement* is what will dirty a chunk — buying it still
+                // won't.
+                let Some(cost) = self.shop.cost_of(&kind, quantity) else {
+                    return;
+                };
+                if !self.economy.try_spend(cost) {
+                    return;
+                }
+                self.shop.owned.add(&kind, quantity);
+            }
         }
+    }
+
+    /// The shop catalog, the player's owned counts and their current money
+    /// in one object — see [`ShopSnapshot`] for the exact JSON shape.
+    /// Always available (every world has a shop), never dirty-tracked, for
+    /// the same reason [`Self::economy_snapshot`] is: there is exactly one
+    /// per world, so presentation just polls it when the build menu redraws.
+    pub fn shop_snapshot(&self) -> ShopSnapshot {
+        self.shop.snapshot(self.economy.money)
+    }
+
+    /// How many of `kind` the player owns. A thin read-only accessor for
+    /// tests and for any future placement code; presentation should use
+    /// [`Self::shop_snapshot`], which answers for every kind at once.
+    pub fn owned_count(&self, kind: &str) -> u32 {
+        self.shop.owned.count(kind)
     }
 }
 
@@ -1784,5 +1875,105 @@ mod tests {
             ((4, 1), "the pipe run".to_string()),
             ((5, 0), "stage 1's belt".to_string()),
         ]);
+    }
+
+    /// A world with a chosen amount of money, so a purchase can be exercised
+    /// without first driving the whole chain through a contract delivery.
+    /// Only reachable from inside this module — `economy` is private, which
+    /// is exactly why `tests/shop.rs` earns its money the real way instead.
+    fn world_with_money(money: u32) -> World {
+        let recipes = RecipeRegistry::from_ron_str(include_str!("../../../data/recipes.ron"))
+            .expect("bundled recipes must parse");
+        let mut world = World::new(recipes);
+        world.economy.money = Fx::from_num(money);
+        world
+    }
+
+    #[test]
+    fn a_purchase_debits_money_and_credits_the_owned_count() {
+        let mut world = world_with_money(500);
+        let price = world.shop.catalog.get("crusher").unwrap().price_money();
+
+        world.issue_command(PlayerCommand::Purchase {
+            kind: "crusher".to_string(),
+            quantity: 2,
+        });
+
+        assert_eq!(
+            world.economy.money,
+            Fx::from_num(500) - price * Fx::from_num(2)
+        );
+        assert_eq!(world.owned_count("crusher"), 2);
+    }
+
+    #[test]
+    fn a_purchase_costing_exactly_the_balance_succeeds_and_leaves_nothing() {
+        let mut world = world_with_money(0);
+        let price = world.shop.catalog.get("belt").unwrap().price_money();
+        world.economy.money = price;
+
+        world.issue_command(PlayerCommand::Purchase {
+            kind: "belt".to_string(),
+            quantity: 1,
+        });
+
+        assert_eq!(world.economy.money, Fx::ZERO);
+        assert_eq!(world.owned_count("belt"), 1);
+    }
+
+    /// Money must never go negative, and a refused purchase must leave
+    /// *both* halves of the transaction untouched.
+    #[test]
+    fn a_purchase_one_unit_over_the_balance_spends_nothing() {
+        let mut world = world_with_money(0);
+        let price = world.shop.catalog.get("belt").unwrap().price_money();
+        world.economy.money = price - Fx::from_num(1);
+        let before = world.economy.money;
+
+        world.issue_command(PlayerCommand::Purchase {
+            kind: "belt".to_string(),
+            quantity: 1,
+        });
+
+        assert_eq!(world.economy.money, before);
+        assert_eq!(world.owned_count("belt"), 0);
+    }
+
+    /// An absurd quantity overflows what `Fx` can represent; `Shop::cost_of`
+    /// refuses to price it rather than saturating into something that might
+    /// look affordable to a rich player.
+    #[test]
+    fn an_unrepresentable_total_is_refused_rather_than_saturated() {
+        let mut world = world_with_money(30_000);
+        let before = world.economy.money;
+
+        world.issue_command(PlayerCommand::Purchase {
+            kind: "belt".to_string(),
+            quantity: u32::MAX,
+        });
+
+        assert_eq!(world.economy.money, before);
+        assert_eq!(world.owned_count("belt"), 0);
+    }
+
+    /// A purchase touches money and a count, neither of which is a tile —
+    /// so it must not dirty a chunk. Presentation polls
+    /// `shop_snapshot_json` instead, and this is what keeps that documented
+    /// contract honest.
+    #[test]
+    fn a_purchase_dirties_no_chunk() {
+        let mut world = world_with_money(500);
+        world.tick();
+        world.dirty.clear();
+
+        world.issue_command(PlayerCommand::Purchase {
+            kind: "belt".to_string(),
+            quantity: 1,
+        });
+
+        assert!(
+            world.dirty.is_empty(),
+            "buying equipment changes no tile, so no chunk may be marked dirty"
+        );
     }
 }

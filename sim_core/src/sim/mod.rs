@@ -11,6 +11,7 @@ pub mod inventory;
 pub mod machine;
 pub mod machines;
 pub mod recipe;
+pub mod shop;
 pub mod types;
 pub mod world;
 
@@ -22,6 +23,10 @@ pub use fluid::{
 pub use hopper::{HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, HOPPER_KIND, Hopper};
 pub use machines::{Footprint, MachineKind, MachineRegistry};
 pub use recipe::{Recipe, RecipeRegistry};
+pub use shop::{
+    DEFAULT_PURCHASE_QUANTITY, OwnedEquipment, Shop, ShopCatalog, ShopEntry, ShopEntrySnapshot,
+    ShopSnapshot,
+};
 pub use types::{decode_chunk_id, encode_chunk_id};
 pub use world::{
     BeltSnapshot, ChunkSnapshot, FluidSnapshot, FluidTankSnapshot, HopperSnapshot, MachineSnapshot,

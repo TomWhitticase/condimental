@@ -158,6 +158,28 @@ Everything in this doc should be **content**, not simulation code, per [ARCHITEC
 - Multi-stage aged/fermented recipes (tier 6) are exactly what the generic `TimedProcess` component (ARCHITECTURE.md §3.5) was designed for — a chain of several `TimedProcess`-bearing stages feeding into each other, no new architecture needed.
 - Perishability (refrigeration) and corrosion/durability (acid-handling) are the first concrete gameplay uses of "equipment condition/requirements" as a concept — neither exists yet as an ECS component. When these tiers are implemented, they'll need a component (or a tag + countdown on `Inventory`/`Machine`) representing spoilage or wear; that's an implementation detail for whoever builds tier 4/5, not decided here. Corrosion is also what feeds maintenance-staff demand (§7), so this component and the staff-pool mechanic below are linked.
 - **Staff pools (§7) are a new architectural concept, closest in shape to `PowerNetwork`:** four aggregate demand/capacity counters (one per category), with machines declaring a per-category staff requirement while active, resolved as a capacity check each tick rather than per-entity simulation. This likely wants its own small resource type (e.g. `StaffPools { manufacturing, maintenance, packaging, logistics }`) checked alongside power in the same tiered-scheduler pass (ARCHITECTURE.md §3.7/§3.8), not a new ECS component per machine.
+- **Equipment purchasing has its own data file, `shop.ron` (added 2026-09-08,
+  the "Shop & Inventory" epic's ticket 1):** §4's "equipment purchases *are*
+  the tech tree" needs a price per buildable kind, and that lives in
+  `data/shop.ron` (`schema_version` 1, one `ShopEntry(id, price)` per kind)
+  rather than as a field on `machines.ron`, because the set of *buildable*
+  kinds is a superset of the set of *machine* kinds — belt and pipe tiles are
+  priced and are not machines. The loader
+  (`sim_core::sim::shop::ShopCatalog`) rejects a mismatched schema version, a
+  duplicate kind, or a price below 1, and its `validate_covers` makes a
+  machine kind with no price an error rather than something the player can
+  never buy. What the player owns is a per-kind count
+  (`shop::OwnedEquipment`), a plain field on `World` for the same reason
+  `Economy` is one. **Money is deliberately not duplicated there:** §1 allows
+  exactly one currency, so a purchase debits the same `Economy::money` a
+  contract delivery credits, via `Economy::try_spend` (all-or-nothing, so a
+  refused purchase changes nothing at all). Exposed to Godot as
+  `SimBridge::shop_snapshot_json` (catalog + owned counts + money in one
+  object). **Still deliberately deferred:** nothing consumes an owned count
+  yet — the production chain is still built unconditionally — so buying is
+  currently a real money transaction with no effect on the factory floor;
+  real placement/rotation/pickup is a following epic. Prices are placeholders
+  per §10, not a balancing pass.
 - **Money and active-contract state's architectural home (resolved at milestone 5, 2026-09-06):** both live as plain fields on a new `sim_core::sim::economy::Economy` struct, owned directly by `World` and advanced once per tick — not a new ECS component/entity, since milestone 5 has exactly one money counter and one active contract (no per-entity multiplicity to justify ECS machinery yet). `money` is a single fixed-point (`Fx`) counter, per ARCHITECTURE.md §3.9. The one hardcoded `Contract` (fixed mix/cadence/payout, named constants in `economy.rs`) is checked against an accumulating `delivery_buffer` `Inventory` at its cadence boundary (`Economy::tick`), which is where `World::issue_command(PlayerCommand::CollectOutput)` now deposits collected product instead of discarding it — this is milestone 5's "delivery mechanism." Exposed to Godot as a `SimBridge::economy_snapshot_json` JSON snapshot (money, contract mix, per-item progress, cadence), same pattern as the existing chunk/tile/layout snapshots. **Still explicitly deferred, not decided by this resolution:** `contracts.ron` data-file loading, multiple concurrent contracts, contract-loss/reputation penalties on a missed cadence window (a miss today just skips that window's payout and keeps the contract active — see this doc's own open question below), and the `StaffPools` resource — all future work, per GAMEPLAY.md §6/§9's original fuller design and the milestone-5 task's own scope note.
 
 ---

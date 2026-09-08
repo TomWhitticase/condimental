@@ -286,4 +286,64 @@ impl SimBridge {
         let json = serde_json::to_string(&snapshot).expect("EconomySnapshot must serialize");
         GString::from(json.as_str())
     }
+
+    /// A JSON-serialized `sim::ShopSnapshot` — the whole build menu in one
+    /// object: what is buyable, what each thing costs, how many the player
+    /// owns, and how much money they have (GAMEPLAY.md §1/§4, the "Shop &
+    /// Inventory" epic's ticket 1):
+    ///
+    /// ```json
+    /// {"money": 120.0,
+    ///  "entries": [
+    ///    {"kind": "belt",        "price": 5.0,   "owned": 3, "affordable": true},
+    ///    {"kind": "pipe",        "price": 8.0,   "owned": 0, "affordable": true},
+    ///    {"kind": "hopper",      "price": 40.0,  "owned": 0, "affordable": true},
+    ///    {"kind": "fluid_tank",  "price": 60.0,  "owned": 0, "affordable": true},
+    ///    {"kind": "crusher",     "price": 75.0,  "owned": 1, "affordable": true},
+    ///    {"kind": "mixer",       "price": 100.0, "owned": 0, "affordable": true},
+    ///    {"kind": "cooking_vat", "price": 200.0, "owned": 0, "affordable": false},
+    ///    {"kind": "bottler",     "price": 120.0, "owned": 0, "affordable": false},
+    ///    {"kind": "packer",      "price": 90.0,  "owned": 0, "affordable": true}
+    ///  ]}
+    /// ```
+    ///
+    /// Field by field: `kind` is a `data/shop.ron` buildable-kind id (every
+    /// `data/machines.ron` machine kind, plus `belt` and `pipe`, which are
+    /// infrastructure priced per tile); `price` is the **unit** price;
+    /// `owned` is how many the player has bought and not yet placed — zero
+    /// for everything in a fresh world; `affordable` is whether **one** is
+    /// buyable at the current `money` (a menu buying several at once should
+    /// compare `money` against `price * quantity` itself). `money` is the
+    /// same value `economy_snapshot_json` reports, repeated so a build menu
+    /// is one call rather than two.
+    ///
+    /// `entries` lists **every** priced kind, owned or not, in
+    /// `data/shop.ron`'s own file order — which is the intended menu order,
+    /// so a UI should render it as it arrives rather than re-sorting.
+    ///
+    /// Always returns a value (every world has a shop), like
+    /// `hopper_snapshot_json` and unlike `fluid_snapshot_json` — there is no
+    /// empty-string case. **Poll it whenever the build menu redraws**, like
+    /// `economy_snapshot_json`: a purchase changes money and a count, not a
+    /// tile, so `dirty_chunk_ids()` will never report one, and no chunk
+    /// snapshot carries this.
+    ///
+    /// Buying is `issue_command_json` with
+    /// `{"type": "purchase", "kind": "belt", "quantity": 4}` — `quantity`
+    /// optional, defaulting to 1. An unaffordable or unknown purchase is a
+    /// silent no-op that changes nothing at all (the same contract every
+    /// other command has); re-read this snapshot to see the result either
+    /// way.
+    ///
+    /// **What `owned` does not mean yet:** nothing in the simulation
+    /// consumes an owned count. The shipped chain is still built
+    /// unconditionally at tick 0 whether or not anything was bought, so a
+    /// count here is a purchase ledger, not a statement about what is on the
+    /// factory floor. Spending it on real placement is a later epic.
+    #[func]
+    fn shop_snapshot_json(&self) -> GString {
+        let snapshot = self.world.shop_snapshot();
+        let json = serde_json::to_string(&snapshot).expect("ShopSnapshot must serialize");
+        GString::from(json.as_str())
+    }
 }

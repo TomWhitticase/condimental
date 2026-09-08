@@ -1,0 +1,114 @@
+// Shop content — what the player can buy, and what it costs (GAMEPLAY.md
+// §1's core loop and §4's "equipment purchases *are* the tech tree"). Data,
+// never hardcoded in sim_core, exactly like `recipes.ron` and
+// `machines.ron`; the loader is `sim_core::sim::shop::ShopCatalog`.
+//
+// `schema_version` follows ARCHITECTURE.md §4's data-file versioning rule:
+// the loader rejects a mismatched version rather than silently misreading a
+// changed shape, the same way the other two data files' loaders do.
+//
+// WHAT THIS FILE IS FOR. GAMEPLAY.md §1 is explicit that there is no
+// separate currency or tech-point resource: "money buys equipment,
+// equipment unlocks sauces, sauces satisfy contracts, contracts pay money."
+// This file is the "money buys equipment" half of that sentence made
+// concrete — a catalog of every buildable kind together with its price in
+// the same money `Economy` already counts. Buying a kind credits one to the
+// player's owned count of it; nothing more yet.
+//
+// WHAT IT IS *NOT* FOR YET ("Shop & Inventory" epic, ticket 1 of 2). Today
+// every machine in the chain still exists unconditionally from tick 0 —
+// `World::new` builds the whole fixed line whether or not anything has been
+// purchased. This ticket is deliberately additive: the shop, the prices and
+// the owned counts are real and fully simulated, but nothing consumes an
+// owned count yet. A later epic rewires placement to actually spend this
+// inventory; until then a purchase is a real money transaction whose result
+// is a number in `shop_snapshot_json`, not a machine appearing on the floor.
+//
+// KIND IDS. An `id` here is a *buildable kind* id, which is a superset of
+// `data/machines.ron`'s machine kinds: every kind that file defines appears
+// here (the loader's `validate_covers` checks exactly that, so adding a
+// machine kind without pricing it is an error rather than a thing the
+// player can never buy), plus the two pieces of infrastructure that are not
+// machines at all — a belt tile and a pipe tile. Those two are priced *per
+// tile*, because that is the unit a player places them in; everything else
+// is priced per building.
+//
+// PRICES ARE PLACEHOLDERS. GAMEPLAY.md §10 puts exact numeric balance
+// ("ingredient costs, contract payouts, equipment prices, wage rates")
+// explicitly in a future balancing pass, not here, and this project is
+// pre-alpha. What these numbers *do* encode is a deliberate shape, so the
+// catalog reads sensibly even before it is balanced:
+//
+//   1. Infrastructure is cheap enough to lay by the dozen; a building costs
+//      an order of magnitude more than a tile of belt.
+//   2. A building's price tracks how much machine it is — the same instinct
+//      `machines.ron` uses to decide footprints. The 2x2 cooking vat that
+//      runs the chain's longest process is the most expensive thing here;
+//      the crusher, the simplest machine on the line, is the cheapest.
+//   3. Everything is scaled against the one economic number that already
+//      exists: `economy.rs`'s hardcoded contract pays 50 per delivery. So a
+//      belt tile is small change, a mid-chain machine is a couple of
+//      deliveries, and the cooking vat is a genuine save-up.
+//
+// Order matters only for presentation: the loader preserves this file's
+// order and `shop_snapshot_json` reports the catalog in it, so this is the
+// order a build menu lists things in. It runs infrastructure first, then the
+// two buffers, then the chain's machines in chain order.
+(
+    schema_version: 1,
+    entries: [
+        // --- Infrastructure, priced per tile ---
+        ShopEntry(
+            id: "belt",
+            price: 5,
+        ),
+        // Slightly dearer than a belt tile: a pipe run is stainless and
+        // carries a fluid (UI_UX.md §2b point 6), where a belt is rubber.
+        ShopEntry(
+            id: "pipe",
+            price: 8,
+        ),
+
+        // --- Buffers: placed buildings with no recipe (see machines.ron) ---
+        ShopEntry(
+            id: "hopper",
+            price: 40,
+        ),
+        // Dearer than the hopper for the same reason a pipe is dearer than
+        // a belt — a pressure vessel is more than a bin.
+        ShopEntry(
+            id: "fluid_tank",
+            price: 60,
+        ),
+
+        // --- Chain machines, in `data/recipes.ron` order ---
+        // The line's simplest machine (a hopper and a screw) and its
+        // cheapest.
+        ShopEntry(
+            id: "crusher",
+            price: 75,
+        ),
+        ShopEntry(
+            id: "mixer",
+            price: 100,
+        ),
+        // The most expensive thing in the catalog, on purpose: the only 2x2
+        // kind, running the chain's longest process. GAMEPLAY.md §4 treats
+        // the cooker/kettle as a real capital purchase, and this is it.
+        ShopEntry(
+            id: "cooking_vat",
+            price: 200,
+        ),
+        // GAMEPLAY.md §4 groups bottling with the reduction step as one
+        // equipment tier, so it is priced in the vat's neighbourhood rather
+        // than with the cheap front end.
+        ShopEntry(
+            id: "bottler",
+            price: 120,
+        ),
+        ShopEntry(
+            id: "packer",
+            price: 90,
+        ),
+    ],
+)
