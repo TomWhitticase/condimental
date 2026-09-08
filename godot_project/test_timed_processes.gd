@@ -53,12 +53,15 @@ func _initialize() -> void:
 	# runs twice under this harness and each run creates a fresh (empty)
 	# world, so anything built here is wiped (see test_hover.gd's header).
 	#
-	# It goes down ALONE. A new world has `sim::STARTING_MONEY` (200) and a
-	# rack costs 160, so it is very nearly all of it — and the five machines
-	# upstream that would have to exist to actually FEED it (its recipe eats
-	# ketchup) cost several times a starting balance between them. See
-	# test_layouts.gd's header. What that means for this test is spelled out
-	# where it matters, at `_drive_gauge` below.
+	# It goes down ALONE, and since the inventory-hotbar ticket raised
+	# `sim::STARTING_MONEY` to 3000 that is a choice rather than a ceiling:
+	# the five machines upstream that would have to exist to actually FEED it
+	# (its recipe eats ketchup) are affordable now — `test_layouts.gd`'s
+	# `build_reference_line` builds exactly them — but ketchup would still
+	# take thousands of ticks to travel down the line before this test could
+	# check its first frame. Driving the gauge's own mechanism is both faster
+	# and a sharper test of the claim; that is spelled out where it matters,
+	# at `_drive_gauge` below.
 
 
 func _process(_delta: float) -> bool:

@@ -48,9 +48,15 @@
 //! ([`World::with_content_and_money`]), and every unit of it is spent — so a
 //! reference-chain world starts with a factory, **zero money and zero
 //! unplaced inventory**, which is the clean baseline a test measuring
-//! earnings wants. It is emphatically not what a new game starts with
-//! ([`super::economy::STARTING_MONEY`] buys a hopper, one machine and some
-//! belt): a player works up to this line, and this fixture skips that.
+//! earnings wants.
+//!
+//! The bill comes to **1087** against today's `data/shop.ron`, and that
+//! number is what [`super::economy::STARTING_MONEY`] is measured against: a
+//! new game starts with comfortably more than it (about 2.75x), so a player
+//! *can* build this exact line as their first act if they want to. What this
+//! fixture still skips is the choosing — it lays the shipped layout down
+//! east-facing, tile for tile, with no money left over, which is what makes
+//! it a regression anchor rather than a game.
 
 use std::collections::BTreeMap;
 

@@ -12,7 +12,7 @@
 #      conservation across every stage, not just one. No Godot involved.
 #   2. `cargo xtask` builds the extension and copies it into
 #      godot_project/bin/.
-#   3. Thirteen headless Godot scripts exercise the parts cargo test can't: the
+#   3. Fourteen headless Godot scripts exercise the parts cargo test can't: the
 #      real `gdext` boundary (JSON command/snapshot/layout wire format going
 #      through Godot's own Variant/String/JSON machinery, driven through the
 #      whole chain end to end), the interactive scene's keyboard input
@@ -32,7 +32,11 @@
 #      non-origin footprint tile), and the "Shop & Inventory" epic's build
 #      menu (a grid of voxel-rendered icon slots built from
 #      shop_snapshot_json, toggled with B, affordability as a visible slot
-#      state, and a real purchase moving the displayed owned count), and
+#      state, and a real purchase moving the displayed owned count) plus the
+#      always-visible inventory hotbar built from the same snapshot (number
+#      keys 1-9/0 selecting a slot into placement mode with no menu open,
+#      pressing the same key again to deselect, empty sockets showing no
+#      count, and buying still a separate verb), and
 #      milestone 7's aging rack (a bespoke model at the tile the simulation
 #      reports, and a progress gauge whose bar tracks a 2400-tick process
 #      recomputed from the live tick rather than from a chunk snapshot —
@@ -52,10 +56,14 @@
 #
 # NOTE ON WHAT THESE TESTS BUILD. Since that epic a world starts EMPTY, so
 # every script below builds the factory it then asserts against, using real
-# purchase/place commands (godot_project/test_layouts.gd). What they can build
-# is bounded by `sim::STARTING_MONEY`; the shipped six-stage line costs several
-# times that and stays asserted where it always was, in `cargo test -p sim_core`
-# against `sim::reference_chain`. See test_layouts.gd's header.
+# purchase/place commands (godot_project/test_layouts.gd). Those fixtures stay
+# small on purpose — a nine-tile line proves a wire format and a scene graph
+# exactly as well as a forty-tile one, and much faster — not because of what a
+# starting balance can afford: `sim::STARTING_MONEY` is 3000 against a 1,087
+# bill for the shipped six-stage line since the inventory-hotbar ticket, so
+# `test_layouts.gd`'s `build_reference_line` can and does build the whole
+# thing. Full-chain BEHAVIOUR stays asserted where it always was, in
+# `cargo test -p sim_core` against `sim::reference_chain`.
 #
 # Usage: scripts/verify-core-loop.sh
 
@@ -153,13 +161,14 @@ run_godot_script test_fluids.gd FLUIDS_OK "pipe rendering + fluid hover, milesto
 run_godot_script test_machines.gd MACHINES_OK "per-kind machine models, multi-tile footprints, hopper fill"
 run_godot_script test_connections.gd CONNECTIONS_OK "belt/pipe-to-machine junctions, visual overhaul round 2"
 run_godot_script test_shop_menu.gd SHOP_MENU_OK "build menu grid + purchases, UI_UX.md §5"
+run_godot_script test_hotbar.gd HOTBAR_OK "always-visible hotbar, number-key selection, UI_UX.md §5"
 run_godot_script test_timed_processes.gd TIMED_PROCESSES_OK "aging rack + live progress gauge, milestone 7"
 run_godot_script test_placement.gd PLACEMENT_OK "empty world, ghost, rotation, place/remove — Real Placement ticket 2"
 
 echo
 echo "PASS: real placement + milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"
 echo "      + icons + hover + milestone 6 fluid presentation + machine footprints/hopper"
-echo "      + belt/pipe junctions + the build menu + milestone 7's aging rack and its"
+echo "      + belt/pipe junctions + the build menu + the inventory hotbar + milestone 7's aging rack and its"
 echo "      progress gauge + the delivery dock that ends the line, all verified"
 echo "      headlessly (sim_core tests"
 echo "      + gdext boundary + interaction + 3D scene structure + pan/zoom + contract panel"

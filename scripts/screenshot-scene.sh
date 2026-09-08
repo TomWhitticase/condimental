@@ -16,16 +16,23 @@
 # with a pipe run heading SOUTH beside it. Three of the four facings on belts
 # and the fourth on the pipes, which makes it the right subject for reviewing
 # per-tile rotation and the junction art's east-only fallback in one frame.
-# Pass --fixture <machines|fluids|vat|rack|demo> for a different one:
+# Pass --fixture <machines|fluids|vat|rack|chain|demo> for a different one:
 # `machines` (a hopper, a machine and a dock), `fluids` (a tank, a pipe run
-# and the machine tapping it), `vat` (the 2x2 cooking vat alone — it costs
-# the whole starting balance) or `rack` (the aging rack alone).
+# and the machine tapping it), `vat` (the 2x2 cooking vat alone), `rack` (the
+# aging rack alone) or `chain` (THE WHOLE SHIPPED SIX-STAGE LINE — 1,087 of a
+# new game's 3,000 balance, bought and placed like anything else).
 #
-# What a fixture can contain is bounded by `sim::STARTING_MONEY` (200); the
-# shipped six-stage line costs about five times that and there is no way to
-# reach it from a new game without playing one. That is why --contracts,
-# --aging and --hover-aging are gone: each needed a factory a starting
-# balance cannot buy.
+# Pass --contracts to build that full line and then run it until the contract
+# board is genuinely mixed (some deliveries made, some missed, goods on the
+# dock), so the clipboard can be reviewed against a working economy. It came
+# back with `sim::STARTING_MONEY`'s rise from 200 to 3000: under the old
+# balance no fixture could reach a factory that earns anything.
+#
+# Pass --stock to buy an assorted kit (belts, pipes, a hopper, a tank, a
+# machine or two) so the hotbar shows carried sockets, multi-digit counts and
+# empty sockets side by side, and --hotbar N to press hotbar key N for real —
+# the only way to review the selected-slot state, the name flyout and the
+# ghost it puts in the player's hand.
 #
 # Pass --populate to run whatever was built forward first, so the shot shows
 # product moving instead of an idle factory. Pass --first-person to review
@@ -55,7 +62,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock] [--shop] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--contracts] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock] [--shop] [--stock] [--hotbar N] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

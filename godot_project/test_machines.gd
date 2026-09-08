@@ -24,12 +24,14 @@
 #     footprint's centre rather than on its origin tile, and resolves for
 #     hover from a NON-ORIGIN tile of its footprint.
 #
-# WHY THERE ARE TWO SCENES IN HERE. A new world has `sim::STARTING_MONEY`
-# (200) and the cooking vat costs exactly that, so it cannot share a world
-# with any other fixture — see test_layouts.gd's header for the full note on
-# what a starting balance can and cannot buy. A second instantiated scene is a
-# second world with its own balance, which is the honest way to exercise two
-# fixtures that each want most of one.
+# WHY THERE ARE TWO SCENES IN HERE. The vat fixture and the machines fixture
+# both start at tile (0, 0), and a `place` onto an occupied tile is refused —
+# so the two cannot share a world whatever the balance is. (This used to be a
+# money argument too: the vat cost exactly the whole 200 a new world had. The
+# inventory-hotbar ticket raised `sim::STARTING_MONEY` to 3000, so only the
+# collision remains, and it is the reason that never depended on balance.) A
+# second instantiated scene is a second world, which is the honest way to
+# exercise two fixtures that want the same corner of the floor.
 #
 # The one-frame-before-checking dance and the "never hold your own camera
 # reference" rule are inherited from test_hover.gd — see that file's header.

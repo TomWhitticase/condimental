@@ -50,11 +50,17 @@
 //      exists: the shipped board's middle contract pays 50 per delivery. So
 //      a belt tile is small change, a mid-chain machine is a couple of
 //      deliveries, and the cooking vat is a genuine save-up.
-//   4. A new game starts with `economy.rs`'s STARTING_MONEY (200), which
-//      against these prices buys a hopper, a first machine and a handful of
-//      belt — a first move, deliberately not a factory. The two numbers are
-//      balanced against each other, so changing prices here means revisiting
-//      that constant.
+//   4. A new game starts with `economy.rs`'s STARTING_MONEY (3000), and
+//      against these prices the whole shipped six-stage line comes to 1087
+//      — so a new player can build all of it outright and still have most
+//      of a second one's worth left over. That margin is the point: money
+//      only arrives through contract deliveries, deliveries need a line
+//      that reaches the dock, so a starting balance below the bill closes
+//      nothing (which is what the previous 200 did). The two numbers are
+//      balanced against each other, so changing prices here means
+//      revisiting that constant — `sim_core/tests/shop.rs` pins the
+//      relationship rather than either literal, and will fail if a price
+//      change breaks it.
 //
 // Order matters only for presentation: the loader preserves this file's
 // order and `shop_snapshot_json` reports the catalog in it, so this is the

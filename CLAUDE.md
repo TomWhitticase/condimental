@@ -226,10 +226,16 @@ sauce-factory/
                                       # footprint-aware validity, all four facings drawn with
                                       # the matching rotation, the junction art's east-only
                                       # fallback, and place/remove driving the scene
-    test_layouts.gd                  # shared fixture: small factories built through real
-                                       # purchase/place commands. Its header explains what
-                                       # STARTING_MONEY (200) can and cannot buy, which is why
-                                       # every Godot test's factory is small now
+    test_hotbar.gd                   # headless proof of the inventory hotbar: an always-
+                                       # visible strip built from shop_snapshot_json, number
+                                       # keys 1-9/0 selecting a slot into placement mode with
+                                       # NO menu open, the same key again deselecting, empty
+                                       # sockets, and buying still a separate verb
+    test_layouts.gd                  # shared fixture: factories built through real purchase/
+                                       # place commands. Most are small BY CHOICE (a nine-tile
+                                       # line proves a wire format as well as a forty-tile
+                                       # one); `build_reference_line` builds the whole shipped
+                                       # six-stage chain, which a 3000 starting balance affords
     test_screenshot.gd              # NOT headless — renders the real scene to a PNG so a
                                       # visual change can actually be looked at
     bin/                          # gitignored: compiled extension lands here via `cargo xtask`
@@ -334,6 +340,88 @@ it's gone stale.
 
 ## Decisions log
 
+- 2026-09-08: **An inventory hotbar, and a starting balance that lets the
+  loop close.** Two directly-requested changes in one ticket, because the
+  second breaks what the first touches. `sim_core` got exactly one changed
+  constant; everything else is `godot_project/`. Six calls worth not
+  re-litigating.
+
+  (1) **`STARTING_MONEY` is 3000, not 200.** The "Real Placement" epic's
+  ticket 2 flagged the hole and left it for the balancing pass: money enters
+  the world only through contract deliveries, a delivery needs a line that
+  reaches the dock, and that line (`sim::reference_chain`, priced out of
+  `data/shop.ron`) costs **1087** — so at 200 a new save could not be played
+  forward to a first payout by any sequence of commands. Not a slow game, a
+  dead one. 3000 is deliberately **more than 2.5x** the bill rather than
+  exactly it: a new player can build the whole shipped line outright and
+  still have ~1900 for the mistakes and a second line, and a balance that
+  only just covered the bill would make a first factory a puzzle with one
+  solution. `sim_core/tests/shop.rs` pins the **relationship** (starting
+  money against the chain's own dynamically priced bill) rather than the two
+  literals, plus one test pinning the literal itself, so a price change moves
+  the expectation instead of breaking it.
+
+  (2) **Every test calibrated against 200 was reworked, not patched.** Three
+  Godot files argued from insufficiency — "176 of a 200 balance is why this
+  fixture is small", "the vat costs the entire balance so it needs its own
+  scene", "the rack cannot be fed on a starting balance" — and every one of
+  those reasons had evaporated. Each was rewritten to the reason that
+  actually holds now: the fixtures are small *by choice* (a nine-tile line
+  proves a wire format as well as a forty-tile one, and much faster), the vat
+  needs its own world because its footprint **collides** with the other
+  fixture's at (0, 0), and the rack is driven through its own gauge mechanism
+  because feeding it for real would mean thousands of ticks of travel. The
+  Rust test that asserted "one of each front-end machine costs more than
+  twice your balance" was replaced by its opposite-facing twin, which is the
+  claim now worth defending. And coverage the old balance had *deleted* came
+  back: `test_layouts.gd` gained `build_reference_line` (the whole six-stage
+  chain, through ordinary purchase/place commands) and
+  `screenshot-scene.sh` got `--contracts` back on top of it.
+
+  (3) **The hotbar is the shop catalog in `data/shop.ron` order — fixed
+  slots, not a packed list of what is owned.** Packing reads tidier and
+  destroys the one property a hotbar exists for: slot 5 has to still be the
+  crusher after the last crusher is placed, or every key the player has
+  learned renumbers itself under them. Minecraft, Terraria and Factorio's
+  quickbar are all fixed-slot for exactly this reason. A kind owned in
+  quantity 0 is drawn as an **empty socket** (ghosted icon, no count at all,
+  recessed) rather than a disabled button — the kind is not unavailable, the
+  player simply is not carrying one. Bottom edge, centred: the other edges
+  are taken by the legend and the clipboard.
+
+  (4) **Number keys select; SHIFT+number buys, and only with the build menu
+  open.** Selecting what is in your hand and spending money on more of it are
+  different verbs and stay on different actions. The number keys used to buy
+  while the menu was up and do nothing otherwise (that handler's own comment
+  reserved them "for whatever a later epic wants a hotbar to do" — this was
+  that epic); they now select in either view mode, menu or no menu, and
+  pressing the selected slot's key again deselects, mirroring ESC. Buying
+  keeps its keyboard path on SHIFT+number but **only while the menu is
+  open**, because that is the one screen where the price and the balance
+  being spent are both on screen. A key that spends money with no prices
+  visible is the accident this split exists to prevent.
+
+  (5) **The selected state is signalled four ways at once, and the strip is
+  animated.** UI_UX.md §7 forbids colour alone: the slot grows, its frame
+  turns hazard-yellow, a caret appears above its icon, and its key digit
+  brightens — plus Minecraft's name flyout above the bar, which fades after
+  ~1.5s. The growth is a **scale**, not a position, because an
+  `HBoxContainer` owns its children's positions and sizes but never their
+  transforms; the same 100ms spring is the click pulse. Selection itself is
+  **derived from `_build_kind`**, never stored, so ESC, B, X and running out
+  of a kind all clear the highlight without knowing the hotbar exists.
+
+  (6) **Two things came off a rendered frame that the code could not show**
+  (UI_UX.md §2b point 12's lesson again). The strip's plate was translucent
+  enough that the floor's diamond tiling showed through the gaps between
+  sockets and turned the row into noise — it is nearly opaque now, like the
+  build menu's. And the build menu, centred in the viewport and now a row
+  taller (the owned line wraps, so a slot grew), reached down far enough to
+  bury **its own footer** — the one line that explains how to buy — under the
+  hotbar plate. The menu is centred in the space *above* the strip now and
+  went from three columns to four so it fits there. `--stock` and
+  `--hotbar N` were added to `screenshot-scene.sh` to make both reviewable.
+
 - 2026-09-08: **"Real Placement" epic, ticket 2 of 2 (the Godot half) — the
   scene boots into an empty floor and the player builds the factory.**
   `sim_core` and `data/` were deliberately untouched: every fact drawn here
@@ -404,7 +492,10 @@ it's gone stale.
   contents.
 
   (8) **A starting balance cannot buy the shipped line, and that reshaped the
-  test suite.** A new game has `STARTING_MONEY` (200); the six-stage chain
+  test suite.** *(Superseded on the same day by the inventory-hotbar entry at
+  the top of this log, which raised `STARTING_MONEY` to 3000 — the "Flagged,
+  not fixed" note below is the thing it fixed. The test-suite reshaping it
+  describes still stands.)* A new game had `STARTING_MONEY` (200); the six-stage chain
   costs about 1,087, and `Purchase` is all-or-nothing with money arriving
   only through contract deliveries — which need that line. So no Godot-side
   test or screenshot can reach it any more. Full-chain behaviour stays where

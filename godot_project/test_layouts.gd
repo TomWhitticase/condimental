@@ -11,21 +11,29 @@
 # (it drives `place`/`remove`/`rotate` through the same wire format the scene
 # does) with one hard limit worth stating plainly:
 #
-#   **A new game has `sim::STARTING_MONEY` (200) and the shipped six-stage
-#   line costs about 1,087.** No amount of command-issuing gets round that:
-#   `Purchase` is all-or-nothing and money only arrives through contract
-#   deliveries, which need the very line you cannot afford. The Rust side
-#   builds that layout as `sim::reference_chain`, which starts its world with
-#   exactly the money to pay for it (`World::with_content_and_money`) — a seam
-#   that has no wire equivalent, deliberately, because a player has no such
-#   seam either.
+#   **A new game has `sim::STARTING_MONEY` (3000) and the shipped six-stage
+#   line costs 1,087.** That relationship was the other way round until the
+#   inventory-hotbar ticket raised the balance from 200 — under which a Godot
+#   test genuinely could not reach the shipped layout by any sequence of
+#   commands, because `Purchase` is all-or-nothing and money only arrives
+#   through contract deliveries, which need the very line you could not
+#   afford. `build_reference_line` below now builds the whole thing out of
+#   ordinary purchase/place commands, which is both a fixture and a standing
+#   proof that a new save can reach the shipped content.
 #
-# So these fixtures are what 200 buys, and full-chain behaviour (mass
-# conservation, contract payouts, fluid consumption, footprint geometry) stays
-# asserted where it already was: `cargo test -p sim_core`, against
-# `reference_chain`. What the Godot tests assert is the WIRE and the SCENE —
-# shapes, models, rotations, ghosts, hover — which a small line shows just as
-# well as a big one.
+# The SMALL fixtures stayed small anyway, and that is now a choice rather
+# than a ceiling: what the Godot tests assert is the WIRE and the SCENE —
+# shapes, models, rotations, ghosts, hover — and a nine-tile line shows those
+# exactly as well as a forty-tile one while being far quicker to run and far
+# easier to read a failure out of. Full-chain BEHAVIOUR (mass conservation,
+# contract payouts, fluid consumption, footprint geometry) stays asserted
+# where it always was: `cargo test -p sim_core`, against
+# `sim::reference_chain`, whose world is built with exactly its own bill
+# (`World::with_content_and_money`) so that it starts from a clean zero.
+#
+# The per-fixture bills below are quoted against the 3000 balance so it stays
+# obvious how much headroom each one leaves — none of them is close to it any
+# more.
 extends RefCounted
 
 
@@ -52,8 +60,10 @@ static func place(sim, kind: String, tile: Vector2i, direction: String) -> void:
 ## belt, the belts carry, the crusher crushes and discharges — so it is a
 ## working factory rather than a diorama.
 ##
-## Its bill is 176 against a starting balance of 200 (see this file's header),
-## which is the constraint that decided its size.
+## Its bill is 176 of a 3000 starting balance. Its SIZE, though, is decided by
+## what it has to show rather than by what it costs (see this file's header):
+## every additional tile is another node to build and another line of failure
+## output, and none of them would add a facing this line does not already use.
 static func build_demo_line(sim) -> void:
 	place(sim, "hopper", Vector2i(-1, 0), "east")
 	place(sim, "belt", Vector2i(0, 0), "east")
@@ -70,28 +80,31 @@ static func build_demo_line(sim) -> void:
 	place(sim, "belt", Vector2i(-1, 2), "west")
 
 
-## The multi-tile fixture: one 2x2 cooking vat and nothing else. It costs 200
-## — the ENTIRE starting balance — which is why it cannot be combined with the
-## demo line above and gets a fixture of its own. It is what proves a
-## footprint bigger than one tile still renders over all four of its tiles,
-## and (turned) that a quarter turn is drawn as a quarter turn.
+## The multi-tile fixture: one 2x2 cooking vat and nothing else (200 of 3000).
+## It stands alone because its footprint COLLIDES with the demo line's — both
+## start at (0, 0) — not because of what it costs; a `place` onto an occupied
+## tile is refused, so the two cannot share a world whatever the balance is.
+## It is what proves a footprint bigger than one tile still renders over all
+## four of its tiles, and (turned) that a quarter turn is drawn as a quarter
+## turn.
 static func build_multi_tile(sim, direction := "east") -> void:
 	place(sim, "cooking_vat", Vector2i(0, 0), direction)
 
 
-## A hopper and one belt: the cheapest thing that is a working factory at all
-## (45 of 200), for tests that only need "something is placed".
+## A hopper and one belt: the smallest thing that is a working factory at all
+## (45 of 3000), for tests that only need "something is placed".
 static func build_minimal(sim) -> void:
 	place(sim, "hopper", Vector2i(-1, 0), "east")
 	place(sim, "belt", Vector2i(0, 0), "east")
 
 
 ## A vinegar tank, a four-tile pipe run and the one machine whose recipe
-## declares `fluid_inputs` — 192 of 200, and the most that can be plumbed on a
-## starting balance. The mixer never actually crafts (nothing feeds it tomato
-## paste, which would need the rest of the chain), which does not matter for
-## what this fixture is for: a machine TAPS a network just by touching it, so
-## the run has a fluid, a source, an inlet and a level that moves.
+## declares `fluid_inputs` — 192 of 3000, and everything a pipe network needs
+## to be worth looking at. The mixer never actually crafts (nothing feeds it
+## tomato paste, which would need the rest of the chain — see
+## `build_reference_line` for the version that does), which does not matter
+## for what this fixture is for: a machine TAPS a network just by touching it,
+## so the run has a fluid, a source, an inlet and a level that moves.
 static func build_fluid_run(sim) -> void:
 	place(sim, "mixer", Vector2i(0, 0), "east")
 	place(sim, "pipe", Vector2i(0, 1), "west")
@@ -101,8 +114,8 @@ static func build_fluid_run(sim) -> void:
 	place(sim, "fluid_tank", Vector2i(4, 1), "west")
 
 
-## Hopper -> belt -> crusher, then a belt into a delivery dock: 195 of 200,
-## and the most *kinds* that fit on a starting balance. It exists to give the
+## Hopper -> belt -> crusher, then a belt into a delivery dock: 195 of 3000,
+## and one of each SORT of thing on the floor. It exists to give the
 ## per-kind model checks and the junction rule something of each sort to look
 ## at — a feed building, a machine, an exit building, and the two belt tiles
 ## that sit against a building on either side (one catching a discharge, one
@@ -115,9 +128,64 @@ static func build_machines_fixture(sim) -> void:
 	place(sim, "dock", Vector2i(5, 0), "east")
 
 
-## The aging rack on its own — 160 of 200. It cannot be *fed* on a starting
-## balance (its recipe eats ketchup, which needs the five machines upstream of
-## it), so a test that wants to watch its gauge move drives the gauge's own
-## mechanism instead; see test_timed_processes.gd.
+## The aging rack on its own — 160 of 3000. Feeding it for real is now
+## affordable (its recipe eats ketchup, which needs the five machines upstream
+## of it; that is what `build_reference_line` is), but it would also mean
+## running the chain for the thousands of ticks it takes ketchup to reach the
+## rack before a single frame could be checked. A test that wants to watch the
+## gauge move therefore drives the gauge's own mechanism instead, which is a
+## sharper test of the thing being claimed as well as a faster one; see
+## test_timed_processes.gd.
 static func build_aging_rack(sim, tile := Vector2i(0, 0)) -> void:
 	place(sim, "aging_rack", tile, "east")
+
+
+## THE WHOLE SHIPPED LINE, bought and placed like anything else — the
+## six-stage chain `sim::reference_chain` builds on the Rust side, tile for
+## tile, all of it east-facing: hopper, four belts per stage into that stage's
+## machine, the vinegar tank and its four-tile pipe run on the row above the
+## mixer, and four last belts into the delivery dock.
+##
+## It costs 1,087 of a 3000 starting balance, and that is the point of it.
+## Under the old 200 this fixture could not exist at all, which is why the
+## screenshot flags that needed a working economy (`--contracts` and the
+## aging-rack ones) were deleted rather than fixed. It is both the fixture
+## those flags came back on and a standing proof, through the real wire, that
+## a new save can reach the shipped content by playing rather than by a test
+## seam.
+##
+## The coordinates mirror `sim_core/src/sim/reference.rs`'s `plan()` — which
+## derives them from `data/recipes.ron` order and `data/machines.ron`
+## footprints — and `sim_core/tests/machine_footprints.rs` pins the same
+## literals, so a content change that moves the line fails there first, with a
+## far better message than a Godot script could give.
+static func build_reference_line(sim) -> void:
+	place(sim, "hopper", Vector2i(-1, 0), "east")
+	for x in [0, 1, 2, 3]:
+		place(sim, "belt", Vector2i(x, 0), "east")
+	place(sim, "crusher", Vector2i(4, 0), "east")
+	for x in [5, 6, 7, 8]:
+		place(sim, "belt", Vector2i(x, 0), "east")
+	place(sim, "mixer", Vector2i(9, 0), "east")
+	for x in [10, 11, 12, 13]:
+		place(sim, "belt", Vector2i(x, 0), "east")
+	place(sim, "cooking_vat", Vector2i(14, 0), "east") # 2x2: it also covers x=15 and y=1
+	for x in [16, 17, 18, 19]:
+		place(sim, "belt", Vector2i(x, 0), "east")
+	place(sim, "aging_rack", Vector2i(20, 0), "east")
+	for x in [21, 22, 23, 24]:
+		place(sim, "belt", Vector2i(x, 0), "east")
+	place(sim, "bottler", Vector2i(25, 0), "east")
+	for x in [26, 27, 28, 29]:
+		place(sim, "belt", Vector2i(x, 0), "east")
+	place(sim, "packer", Vector2i(30, 0), "east")
+	for x in [31, 32, 33, 34]:
+		place(sim, "belt", Vector2i(x, 0), "east")
+	place(sim, "dock", Vector2i(35, 0), "east")
+	# The vinegar supply: the run sits on the row north of the mixer it feeds,
+	# ending beside it, with the tank one tile west of the run's head. A
+	# machine taps a network by TOUCHING it, not by facing it, which is why
+	# feeding the mixer from above works at all.
+	place(sim, "fluid_tank", Vector2i(5, 1), "east")
+	for x in [6, 7, 8, 9]:
+		place(sim, "pipe", Vector2i(x, 1), "east")

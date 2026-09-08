@@ -179,27 +179,33 @@ Everything in this doc should be **content**, not simulation code, per [ARCHITEC
   `SimBridge::shop_snapshot_json` (catalog + owned counts + money in one
   object). **No longer deferred (2026-09-08, the "Real Placement" epic's
   ticket 1):** an owned count is unplaced inventory now. `World::new` builds
-  nothing at all, a new game starts with `economy.rs`'s `STARTING_MONEY` (200
-  — a placeholder sized to buy a hopper, one machine and a handful of belt,
-  i.e. §8's "start small", deliberately not a factory), and every belt tile,
+  nothing at all, a new game starts with `economy.rs`'s `STARTING_MONEY`
+  (3000 — enough to build the whole shipped line outright with room to spare;
+  see the balance note at the end of this bullet), and every belt tile,
   pipe tile, machine and building in a world is something a `Purchase` paid
   for and a `Place` put down. `Place` spends one owned unit and `Remove`
   credits one back, so what you own plus what you have placed always equals
   what you bought; `Rotate` turns a placement 90° clockwise. All three leave
   money alone — it moved at purchase time, which is what keeps §1's single
   currency single. Prices, and the starting balance they are measured
-  against, are still placeholders per §10 — and the "Real Placement" epic's
-  ticket 2 turned up a concrete consequence of the current numbers worth
-  recording here rather than rediscovering: **`STARTING_MONEY` (200) buys a
-  hopper, a few belts and one machine, and the first sellable product
-  (`boxed_ketchup`) is six machines away**, so a new save cannot currently be
-  played forward to a contract payout at all. Nothing is broken — every
-  mechanism works, and `sim::reference_chain` still builds the whole line for
-  tests — but the loop §1 describes does not yet close from a cold start.
-  Closing it is the balancing pass's first job: either a larger starting
-  balance, cheaper early equipment, or an earlier sellable product (a contract
-  for something the front end alone can make would do it, and is the option
-  that adds progression rather than just money).
+  against, are still placeholders per §10 — but **the balancing pass's first
+  job is done (2026-09-08, the inventory-hotbar ticket).** The "Real
+  Placement" epic's ticket 2 had recorded a concrete hole here: at
+  `STARTING_MONEY` 200, a new save could not be played forward to a contract
+  payout *at all*, because money arrives only through deliveries, deliveries
+  need a line that reaches the dock, and that line costs 1087. Not a slow
+  game — a dead one. `STARTING_MONEY` is **3000** now, deliberately more than
+  2.5x that bill: a new player can build the entire shipped six-stage line
+  outright if they choose and still have about 1900 left for the mistakes and
+  the second line, rather than being unable to reach the shipped content at
+  all. The margin is the point — a balance that only just covered the bill
+  would make a first factory a puzzle with one solution. `sim_core/tests/shop.rs`
+  pins the *relationship* (starting money against the chain's own dynamically
+  priced bill) rather than the two literals, so a price change moves the
+  expectation with it instead of breaking it. Of the three options that entry
+  listed, this is the larger starting balance; the third — an earlier sellable
+  product, a contract the front end alone can satisfy — is still the one that
+  would add progression rather than money, and is still worth doing.
 
 - **Where things stand, and which way they face, is the player's decision
   (the same epic).** A machine accepts input on the face opposite the way it

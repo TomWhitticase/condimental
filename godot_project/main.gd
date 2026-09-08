@@ -536,16 +536,101 @@ var _shop_money_label: Label
 ## {kind, button, icon, price_label, owned_label}.
 var _shop_slots: Array = []
 var _shop_open := false
-## How many icon slots fit across before wrapping. Three, so the shipped
-## nine-kind catalog reads as a tidy 3x3 block rather than one long strip.
-const SHOP_SLOT_COLUMNS := 3
-const SHOP_SLOT_SIZE := Vector2(150, 152)
+## How many icon slots fit across before wrapping. FOUR — it was three when
+## the catalog was nine kinds and read as a tidy 3x3 block; at eleven kinds
+## and a slot tall enough for a wrapped owned line, three columns made a menu
+## taller than the space above the hotbar and pushed its own footer off the
+## bottom of the screen. Four columns is 4/4/3, which is both shorter and no
+## more ragged than 3/3/3/2 was.
+const SHOP_SLOT_COLUMNS := 4
+## Tall enough for the owned line to WRAP onto a second row. It used to be
+## 152 and the affordance ("right-click to hold") ran straight out of the
+## square and over the neighbouring slot — visible only in a rendered frame,
+## which is the same lesson UI_UX.md §2b point 12 records.
+const SHOP_SLOT_SIZE := Vector2(150, 176)
 const SHOP_ICON_SIZE := Vector2(52, 52)
-## Slots 1..9 get a number-key shortcut printed in their corner; a tenth
-## catalog entry would simply be click-only rather than silently stealing
-## KEY_0. Minecraft-adjacent on purpose (UI_UX.md §5's hotbar), and it is
-## also the only way to buy while first-person has the mouse captured.
-const SHOP_HOTKEY_SLOTS := 9
+## How many catalog entries get a number key at all. Ten — 1..9 then 0, the
+## row a Minecraft or Terraria hotbar occupies. A catalog longer than this
+## simply leaves its tail click-only rather than inventing a second key
+## scheme (the shipped catalog is eleven kinds, so the dock is click-only).
+## The build menu prints the same key in each slot's corner, because it is
+## the SAME index: menu slot N and hotbar slot N are one kind, in
+## `data/shop.ron` order, so the two views never disagree.
+const SHOP_HOTKEY_SLOTS := 10
+
+# --- The hotbar (UI_UX.md §5, the inventory-hotbar ticket) -----------------
+## An always-visible quick-select strip along the bottom edge — the thing
+## UI_UX.md §5 called for as "a Minecraft-style hotbar/quick-access strip"
+## and, until this ticket, the one named widget in that section that did not
+## exist. Before it, NOTHING in the game was reachable without opening the
+## full build menu first: there was no glanceable view of what the player was
+## carrying, and entering placement mode meant navigating a modal grid every
+## time. Minecraft, Terraria and Factorio's quickbar all answer that the same
+## way, and so does this.
+##
+## THREE DECISIONS, recorded so they are not re-litigated:
+##
+## 1. **Bottom edge, centred.** §5 says "along one screen edge" without
+##    saying which. All three reference games use the bottom, the top-left is
+##    already the control legend and the top-right the contract clipboard,
+##    and the bottom strip is the one place a wide row does not cover
+##    factory floor the player is working on.
+## 2. **Fixed slots, one per catalog kind, in `data/shop.ron` order** — NOT
+##    a packed list of only what is owned. Packing reads tidier and destroys
+##    the one property a hotbar exists for: slot 5 has to still be the
+##    crusher after the last crusher is placed, or every key the player has
+##    learned renumbers itself under them. Every reference game uses fixed
+##    slots for exactly this reason.
+## 3. **A kind owned in quantity 0 is drawn as an EMPTY SOCKET**, not as a
+##    disabled button: its icon drops to a ghost, its count disappears
+##    entirely rather than reading "0", and the slot recesses. Minecraft
+##    shows an empty inventory slot as literally empty rather than as
+##    something broken, and that is the honest read here too — the kind is
+##    not unavailable, the player is simply not carrying one.
+##
+## Everything on it comes from `shop_snapshot_json`, exactly as the build
+## menu does: no hardcoded content, so a new `data/shop.ron` entry appears
+## here with no Godot edit.
+var _hotbar_panel: PanelContainer
+## One dictionary per catalog entry, in the snapshot's order:
+## {kind, button, icon, key_label, count_label, mark, state}.
+var _hotbar_slots: Array = []
+## The three slot appearances, built once and re-assigned by reference — a
+## fresh StyleBoxFlat per slot per frame would be 30-odd allocations a frame
+## for a strip that changes appearance a handful of times a minute.
+var _hotbar_styles: Dictionary = {}
+const HOTBAR_SLOT_SIZE := Vector2(64.0, 64.0)
+const HOTBAR_ICON_INSET := 13.0 # px of slot edge the icon does not use
+const HOTBAR_BOTTOM_MARGIN := 14
+## The keycodes, in slot order: 1..9 then 0, which is the row every hotbar
+## in this genre uses and the order the digits sit on a keyboard.
+const HOTBAR_KEYCODES := [KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_0]
+## The selected slot grows a little rather than merely recolouring. This is
+## Minecraft's selector box — drawn deliberately LARGER than the slot it
+## marks — and it is why a Minecraft player never has to look twice to see
+## what is in their hand. A scale (not a position) because an HBoxContainer
+## owns its children's positions and sizes but never their transforms.
+const HOTBAR_SELECTED_SCALE := 1.13
+const HOTBAR_PRESS_SCALE := 0.90 # the pulse a click starts from
+const HOTBAR_POP_SECONDS := 0.10 # snappy: perceptible, never something to wait for
+var _hotbar_root: VBoxContainer
+## The name flyout above the strip: the selected kind's name, shown on every
+## selection and fading out shortly after. Minecraft's, and it earns its keep
+## for the same reason — a 64px icon says *which* slot, a word says *what*,
+## and at a glance the player only needs the word for the second or two
+## right after they switched.
+var _hotbar_flyout: Label
+var _hotbar_flyout_until_msec := 0
+const HOTBAR_FLYOUT_HOLD_MSEC := 1500
+const HOTBAR_FLYOUT_FADE_MSEC := 450
+## Terraria's contribution: a framed tooltip on hover that gives the item its
+## spec sheet rather than a bare name. Ours is the scene's own dark plate, so
+## it reads as the same UI as the build menu, and it carries the two verbs —
+## which is what stops the number-key rebinding from being undiscoverable.
+var _hotbar_tooltip: PanelContainer
+var _hotbar_tooltip_name: Label
+var _hotbar_tooltip_body: Label
+var _hotbar_tooltip_index := -1
 
 # Hover tooltip (docs/UI_UX.md §5: "hover tooltips for recipe/machine detail
 # rather than dense always-on text") — see _tile_under_screen_pos/
@@ -1618,8 +1703,8 @@ const CROSSHAIR_THICKNESS := 2.0 # px, each bar's width
 ## being clipped behind the contract clipboard in the top-right corner — the
 ## kind of thing only a rendered frame shows (UI_UX.md §2b point 12). The
 ## build controls lead, because they are what the player does most.
-const ISO_HELP_TEXT := "click: place    R: rotate    X: remove mode    ESC: cancel    B: build menu\nSPACE: load hoppers    V: load tanks    WASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
-const FP_HELP_TEXT := "click: place    R: rotate    X: remove mode    ESC: cancel    B: build menu\nV: load tanks    WASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
+const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate    X: remove mode    ESC: cancel    B: build menu (buy)\nSPACE: load hoppers    V: load tanks    WASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
+const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate    X: remove mode    ESC: cancel    B: build menu (buy)\nV: load tanks    WASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
 
 
 ## The tile box the isometric camera frames at startup: whatever is placed,
@@ -2067,6 +2152,12 @@ func _build_ui() -> void:
 	# voxel-rendered icon slots." Hidden until B is pressed.
 	_build_shop_menu(hud, settings)
 
+	# UI_UX.md §5's LAST unbuilt named widget: "a Minecraft-style hotbar/
+	# quick-access strip along one screen edge." Always visible, unlike the
+	# menu above — it is how a kind gets picked up now, and the menu is where
+	# more of one gets bought.
+	_build_hotbar(hud, settings)
+
 	# The hover tooltip (docs/UI_UX.md §5): replaces the always-on per-machine
 	# text this panel used to show — see _build_hover_tooltip/
 	# _update_hover_tooltip below.
@@ -2478,10 +2569,31 @@ func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 
 	var footer := Label.new()
 	footer.label_settings = base_settings
-	footer.text = "left-click (or its number) buys one    right-click (or shift+number) places one you own    B: close"
+	footer.text = "left-click (or SHIFT+its number) buys one    right-click (or just its number) puts one in your hand    B: close"
 	body.add_child(footer)
 
+	_position_shop_menu()
+
+
+## Centres the menu in the space ABOVE the hotbar rather than in the whole
+## viewport. The strip is always on screen now, and a plain centred menu tall
+## enough to reach it buries its own FOOTER under the plate — which is exactly
+## where the two mouse buttons' meanings are written down, so the one line
+## that explains buying was the one line the hotbar hid. Found in a rendered
+## frame; nothing in the code could have shown it.
+func _position_shop_menu() -> void:
+	if _shop_menu == null:
+		return
 	_shop_menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
+	var vp := get_viewport()
+	if vp == null:
+		return
+	var reserved := HOTBAR_SLOT_SIZE.y * HOTBAR_SELECTED_SCALE + HOTBAR_BOTTOM_MARGIN * 3.0
+	if _hotbar_root != null and _hotbar_root.size.y > 0.0:
+		reserved = _hotbar_root.size.y + HOTBAR_BOTTOM_MARGIN * 2.0
+	var bounds := vp.get_visible_rect().size
+	var menu_size := _shop_menu.get_combined_minimum_size()
+	_shop_menu.position.y = max(8.0, (bounds.y - reserved - menu_size.y) * 0.5)
 
 
 ## One icon slot. A Button rather than a Panel so pressing it is the whole
@@ -2528,7 +2640,11 @@ func _build_shop_slot(grid: GridContainer, base_settings: LabelSettings, index: 
 	hotkey.name = "Hotkey"
 	hotkey.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hotkey.label_settings = hotkey_settings
-	hotkey.text = str(index + 1) if index < SHOP_HOTKEY_SLOTS else ""
+	# The SAME digit the hotbar prints on the same slot — menu slot N and
+	# hotbar slot N are one kind, so one label serves both. Since the
+	# inventory-hotbar ticket that digit no longer means "buy": it means
+	# "select", here as well as down on the strip, and SHIFT+it buys.
+	hotkey.text = _hotbar_key_label(index)
 	column.add_child(hotkey)
 
 	var icon := TextureRect.new()
@@ -2576,6 +2692,7 @@ func _build_shop_slot(grid: GridContainer, base_settings: LabelSettings, index: 
 	owned_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	owned_label.label_settings = owned_settings
 	owned_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	owned_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	column.add_child(owned_label)
 
 	_shop_slots.append({
@@ -2641,6 +2758,7 @@ func _update_shop_menu() -> void:
 	var snapshot: Dictionary = JSON.parse_string(sim.shop_snapshot_json())
 	var entries: Array = snapshot.get("entries", [])
 	_shop_money_label.text = "Money: %.0f" % float(snapshot.get("money", 0.0))
+	_position_shop_menu()
 
 	for index in range(_shop_slots.size()):
 		if index >= entries.size():
@@ -2663,7 +2781,7 @@ func _update_shop_menu() -> void:
 		# The owned line carries the PLACE affordance, because that is the
 		# line whose number decides whether placing is possible at all.
 		var owned: int = int(entry.get("owned", 0))
-		slot["owned_label"].text = ("Owned %d  ·  right-click to place" % owned) if owned > 0 else "Owned 0"
+		slot["owned_label"].text = ("Owned %d  ·  right-click to hold" % owned) if owned > 0 else "Owned 0"
 		slot["owned_label"].label_settings.font_color = (
 			Color(0.98, 0.85, 0.42) if owned > 0 else Color(0.66, 0.68, 0.72)
 		)
@@ -2749,6 +2867,502 @@ func _toggle_shop_menu() -> void:
 
 
 # --------------------------------------------------------------------------
+# The hotbar (UI_UX.md §5, the inventory-hotbar ticket)
+# --------------------------------------------------------------------------
+
+## Builds the always-visible quick-select strip. See `_hotbar_panel`'s doc
+## for the three layout decisions; this is where they are made concrete.
+##
+## VISUAL LANGUAGE. The scene's DARK PLATE with a hazard-yellow rule — the
+## same one the HUD strip, the hover tooltip and the build menu already use,
+## and deliberately not the contract clipboard's paper. UI_UX.md §5 draws
+## that line explicitly (paper is for orders and checklists); a hotbar is
+## machine-side factory UI, and this is the third widget in that family
+## rather than a third visual language.
+##
+## WHAT WAS TAKEN FROM WHERE, since the point was to bring in the patterns
+## players actually praise rather than to draw a grid:
+##
+##   * **Minecraft** — fixed slots with a selector that is *bigger than the
+##     slot*, so "what is in my hand" is answerable from peripheral vision;
+##     a stack count in the corner; and the item name flying out above the
+##     bar on every switch, then fading. All three are here.
+##   * **Terraria** — hover gives an item a framed spec sheet, not a bare
+##     name. `_hotbar_tooltip` is that, in this game's plate styling, and it
+##     is where the price and the two verbs live.
+##   * **Factorio's quickbar** — a slot you have none of stays exactly where
+##     it was, visible and dimmed, rather than vanishing or renumbering the
+##     bar. That is what makes the keys muscle memory.
+func _build_hotbar(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	_hotbar_styles = {
+		"empty": _hotbar_slot_style("empty"),
+		"stocked": _hotbar_slot_style("stocked"),
+		"selected": _hotbar_slot_style("selected"),
+	}
+
+	_hotbar_root = VBoxContainer.new()
+	_hotbar_root.name = "HotbarRoot"
+	# IGNORE, not STOP: the strip is a wide band across the bottom of the
+	# screen, and a plate that swallowed clicks would make the floor tiles
+	# behind it unbuildable. Only the slot buttons themselves take the mouse.
+	_hotbar_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hotbar_root.alignment = BoxContainer.ALIGNMENT_CENTER
+	_hotbar_root.add_theme_constant_override("separation", 6)
+	hud.add_child(_hotbar_root)
+
+	var flyout_settings := LabelSettings.new()
+	flyout_settings.font_size = base_settings.font_size + 3
+	flyout_settings.font_color = Color(0.98, 0.85, 0.42) # the plate's hazard accent
+	flyout_settings.outline_size = base_settings.outline_size + 2
+	flyout_settings.outline_color = Color(0, 0, 0, 0.9)
+
+	_hotbar_flyout = Label.new()
+	_hotbar_flyout.name = "HotbarFlyout"
+	_hotbar_flyout.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hotbar_flyout.label_settings = flyout_settings
+	_hotbar_flyout.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hotbar_flyout.modulate = Color(1, 1, 1, 0)
+	_hotbar_root.add_child(_hotbar_flyout)
+
+	# Nearly opaque, like the build menu's own plate rather than the help
+	# strip's lighter one: at 0.80 the floor's diamond tiling showed through
+	# the gaps between sockets and turned the strip into visual noise, which
+	# a rendered frame made obvious and the code never would.
+	var plate := StyleBoxFlat.new()
+	plate.bg_color = Color(0.06, 0.06, 0.07, 0.93)
+	plate.border_color = Color(0.85, 0.63, 0.11, 0.95)
+	plate.border_width_top = 3
+	plate.set_content_margin_all(10.0)
+
+	_hotbar_panel = PanelContainer.new()
+	_hotbar_panel.name = "Hotbar"
+	_hotbar_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hotbar_panel.add_theme_stylebox_override("panel", plate)
+	_hotbar_root.add_child(_hotbar_panel)
+
+	var strip := HBoxContainer.new()
+	strip.name = "HotbarSlots"
+	strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Wide enough that a selected slot at HOTBAR_SELECTED_SCALE never laps
+	# its neighbours: 64 * 0.13 is ~8px of growth, ~4 to each side.
+	strip.add_theme_constant_override("separation", 9)
+	_hotbar_panel.add_child(strip)
+
+	var snapshot = JSON.parse_string(sim.shop_snapshot_json())
+	var entries: Array = snapshot.get("entries", []) if snapshot is Dictionary else []
+	for index in range(entries.size()):
+		_build_hotbar_slot(strip, base_settings, index, String(entries[index]["kind"]))
+
+	_build_hotbar_tooltip(hud, base_settings)
+	_position_hotbar()
+	_update_hotbar()
+
+
+## One socket. A Button, like a build-menu slot, so pressing it is the whole
+## interaction; its label children ignore the mouse so the whole square stays
+## one target.
+func _build_hotbar_slot(strip: HBoxContainer, base_settings: LabelSettings, index: int, kind: String) -> void:
+	var button := Button.new()
+	button.name = "HotbarSlot_%s" % kind
+	button.custom_minimum_size = HOTBAR_SLOT_SIZE
+	button.focus_mode = Control.FOCUS_NONE
+	# The pop scales about the slot's own centre; without this it would grow
+	# from the top-left corner and shove itself off the strip.
+	button.pivot_offset = HOTBAR_SLOT_SIZE / 2.0
+	button.pressed.connect(_on_hotbar_slot_pressed.bind(index))
+	button.mouse_entered.connect(_on_hotbar_slot_hovered.bind(index))
+	button.mouse_exited.connect(_on_hotbar_slot_unhovered.bind(index))
+	strip.add_child(button)
+
+	# Anchored over the button rather than parented through a container, for
+	# the reason `_build_shop_slot` gives: a Button is not a container.
+	var icon := TextureRect.new()
+	icon.name = "Icon"
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.set_anchors_preset(Control.PRESET_FULL_RECT)
+	icon.offset_left = HOTBAR_ICON_INSET
+	icon.offset_right = -HOTBAR_ICON_INSET
+	icon.offset_top = HOTBAR_ICON_INSET
+	icon.offset_bottom = -HOTBAR_ICON_INSET
+	icon.texture = _icon_for_asset(_shop_asset_for(kind))
+	button.add_child(icon)
+
+	# The key digit, top-left. Printed on the slot rather than left to the
+	# legend: the whole claim of a hotbar is that the key is obvious.
+	var key_settings := LabelSettings.new()
+	key_settings.font_size = base_settings.font_size - 4
+	key_settings.font_color = Color(0.62, 0.64, 0.68)
+	key_settings.outline_size = base_settings.outline_size
+	key_settings.outline_color = base_settings.outline_color
+
+	var key_label := Label.new()
+	key_label.name = "Key"
+	key_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	key_label.label_settings = key_settings
+	key_label.text = _hotbar_key_label(index)
+	key_label.position = Vector2(5, 1)
+	button.add_child(key_label)
+
+	# The stack count, bottom-right, in Minecraft's own corner. Hazard-yellow
+	# with a heavy outline so it reads over any icon behind it.
+	var count_settings := LabelSettings.new()
+	count_settings.font_size = base_settings.font_size - 1
+	count_settings.font_color = Color(0.98, 0.85, 0.42)
+	count_settings.outline_size = base_settings.outline_size + 1
+	count_settings.outline_color = Color(0, 0, 0, 0.92)
+
+	var count_label := Label.new()
+	count_label.name = "Count"
+	count_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	count_label.label_settings = count_settings
+	count_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	count_label.offset_right = -5
+	count_label.offset_bottom = -2
+	count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	count_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	button.add_child(count_label)
+
+	# The selection caret, top-centre. UI_UX.md §7: the selected state is
+	# never colour alone — it is a bigger slot, a hazard-yellow frame, a
+	# brightened key digit AND this glyph.
+	var mark_settings := LabelSettings.new()
+	mark_settings.font_size = base_settings.font_size - 3
+	mark_settings.font_color = Color(1.0, 0.90, 0.50)
+	mark_settings.outline_size = base_settings.outline_size
+	mark_settings.outline_color = base_settings.outline_color
+
+	var mark := Label.new()
+	mark.name = "SelectMark"
+	mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mark.label_settings = mark_settings
+	mark.text = "\u25bc"
+	mark.visible = false
+	mark.set_anchors_preset(Control.PRESET_FULL_RECT)
+	mark.offset_top = -1
+	mark.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	mark.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	button.add_child(mark)
+
+	_hotbar_slots.append({
+		"kind": kind,
+		"button": button,
+		"icon": icon,
+		"key_label": key_label,
+		"count_label": count_label,
+		"mark": mark,
+		"state": "",
+	})
+
+
+## Chunky flat sockets (UI_UX.md §5's Minecraft adjacency) in the same
+## near-black/hazard-yellow pair the rest of the HUD uses.
+##
+##   * `empty`    — recessed and dim: the player is carrying none of this.
+##   * `stocked`  — a normal socket with something in it.
+##   * `selected` — the hazard-yellow frame, thicker and brighter than any
+##                  other border in the HUD, because this is the one piece of
+##                  state the player checks most often.
+func _hotbar_slot_style(state: String) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.set_border_width_all(3)
+	style.set_corner_radius_all(2)
+	match state:
+		"selected":
+			style.bg_color = Color(0.30, 0.24, 0.08, 0.98)
+			style.border_color = Color(1.0, 0.83, 0.24, 1.0)
+			style.set_border_width_all(4)
+		"stocked":
+			style.bg_color = Color(0.13, 0.14, 0.16, 0.96)
+			style.border_color = Color(0.42, 0.44, 0.48, 0.95)
+		_:
+			style.bg_color = Color(0.08, 0.08, 0.09, 0.88)
+			style.border_color = Color(0.21, 0.22, 0.24, 0.92)
+	return style
+
+
+## "1".."9", "0" for the first ten slots; "" past them (see
+## SHOP_HOTKEY_SLOTS). The build menu prints the same string in its own
+## slot corners, so the two views cannot disagree about which key is which.
+func _hotbar_key_label(index: int) -> String:
+	if index < 0 or index >= SHOP_HOTKEY_SLOTS:
+		return ""
+	return str((index + 1) % 10)
+
+
+## Which slot a keycode selects, or -1 for a key that is not a hotbar key.
+func _hotbar_index_for_keycode(keycode: int) -> int:
+	var at := HOTBAR_KEYCODES.find(keycode)
+	return at if at < _hotbar_slots.size() else -1
+
+
+## THE ticket's behaviour change: a key (or a click) SELECTS a slot, and
+## selecting is entering placement mode for that kind. Pressing the selected
+## slot again puts it down, exactly as ESC already does — a hotbar key is a
+## toggle in every game this borrows from.
+##
+## Buying is deliberately NOT here. Selecting what is in your hand and
+## acquiring more of it are different verbs and stay on different actions:
+## buying lives in the build menu (**B**), on a slot's left click, with
+## SHIFT+number as its keyboard mirror. Collapsing them would mean a key that
+## sometimes spends money, which is the one thing a player must never do by
+## accident.
+func _select_hotbar_slot(index: int) -> void:
+	if index < 0 or index >= _hotbar_slots.size():
+		return
+	var kind: String = String(_hotbar_slots[index]["kind"])
+	_pulse_hotbar_slot(index)
+	_refresh_owned_counts()
+	if _build_kind == kind:
+		_exit_build_mode()
+		_update_hotbar()
+		return
+	# `_enter_build_mode` refuses a kind the player owns none of — an empty
+	# socket therefore does nothing, which is what the socket already looks
+	# like. Say so in the flyout rather than leaving the keypress silent.
+	_enter_build_mode(kind)
+	if _build_kind != kind:
+		_show_hotbar_flyout("%s — none carried" % _kind_display_name(kind))
+	_update_hotbar()
+
+
+func _on_hotbar_slot_pressed(index: int) -> void:
+	_select_hotbar_slot(index)
+
+
+## The click pulse: the slot dips and springs back. Purely visual, ~100ms,
+## and it is what makes a click feel like it landed on something physical
+## rather than toggling a boolean.
+func _pulse_hotbar_slot(index: int) -> void:
+	if index < 0 or index >= _hotbar_slots.size():
+		return
+	var button: Button = _hotbar_slots[index]["button"]
+	if not button.is_inside_tree():
+		return
+	var target := Vector2.ONE * (HOTBAR_SELECTED_SCALE if _hotbar_selected_index() == index else 1.0)
+	button.scale = Vector2.ONE * HOTBAR_PRESS_SCALE
+	var tween := button.create_tween()
+	tween.tween_property(button, "scale", target, HOTBAR_POP_SECONDS)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+## Which slot is currently in the player's hand, or -1. Derived from
+## `_build_kind` rather than stored, so the strip can never disagree with the
+## ghost — ESC, B and running out of a kind all leave build mode without
+## going through this file.
+func _hotbar_selected_index() -> int:
+	if _build_kind == "":
+		return -1
+	for index in range(_hotbar_slots.size()):
+		if String(_hotbar_slots[index]["kind"]) == _build_kind:
+			return index
+	return -1
+
+
+## Repolls `shop_snapshot_json` and redraws the strip. Called every frame:
+## the strip is always on screen, so a count that moved because a belt was
+## placed, removed or bought has to move here in the same frame. One parse of
+## an eleven-entry object per frame is the same cost the contract clipboard
+## already pays, and it is what keeps the hotbar honest with no push channel.
+func _update_hotbar() -> void:
+	if _hotbar_slots.is_empty():
+		return
+	var snapshot = JSON.parse_string(sim.shop_snapshot_json())
+	var entries: Array = snapshot.get("entries", []) if snapshot is Dictionary else []
+	var selected := _hotbar_selected_index()
+
+	for index in range(_hotbar_slots.size()):
+		if index < entries.size():
+			# The strip already parses the one snapshot `_refresh_owned_counts`
+			# would, every frame — so it keeps that cache current rather than
+			# making the next caller parse the same object again.
+			_owned_counts[String(entries[index].get("kind", ""))] = int(entries[index].get("owned", 0))
+	for index in range(_hotbar_slots.size()):
+		var slot: Dictionary = _hotbar_slots[index]
+		var owned := 0
+		var price := 0.0
+		if index < entries.size():
+			owned = int(entries[index].get("owned", 0))
+			price = float(entries[index].get("price", 0.0))
+		var state := "selected" if index == selected else ("stocked" if owned > 0 else "empty")
+		if String(slot["state"]) != state:
+			slot["state"] = state
+			_apply_hotbar_slot_state(slot, state, index == selected)
+
+		# An empty socket shows no number at all — Minecraft shows an empty
+		# slot as empty, not as a slot reading zero.
+		slot["count_label"].text = str(owned) if owned > 0 else ""
+		slot["icon"].modulate = Color.WHITE if owned > 0 else Color(1, 1, 1, 0.22)
+		if _hotbar_tooltip_index == index:
+			_fill_hotbar_tooltip(index, owned, price)
+
+	_update_hotbar_flyout()
+	_position_hotbar()
+
+
+## Everything about a slot's appearance that is not per-frame data: the
+## socket style, the caret, the key digit's brightness, and the pop.
+func _apply_hotbar_slot_state(slot: Dictionary, state: String, selected: bool) -> void:
+	var button: Button = slot["button"]
+	var style: StyleBoxFlat = _hotbar_styles[state]
+	for name in ["normal", "hover", "pressed", "disabled", "focus"]:
+		button.add_theme_stylebox_override(name, style)
+	slot["mark"].visible = selected
+	slot["key_label"].label_settings.font_color = (
+		Color(1.0, 0.90, 0.50) if selected else Color(0.62, 0.64, 0.68)
+	)
+	# Selected slots draw over their neighbours, since they are bigger.
+	button.z_index = 1 if selected else 0
+	var target := Vector2.ONE * (HOTBAR_SELECTED_SCALE if selected else 1.0)
+	if not button.is_inside_tree():
+		button.scale = target
+		return
+	var tween := button.create_tween()
+	tween.tween_property(button, "scale", target, HOTBAR_POP_SECONDS)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+## The name flyout — shown for HOTBAR_FLYOUT_HOLD_MSEC then faded out over
+## HOTBAR_FLYOUT_FADE_MSEC. Hand-timed off `Time.get_ticks_msec` rather than
+## tweened, because a tween would have to be cancelled and rebuilt on every
+## rapid slot switch, and because this way the fade is a pure function of the
+## clock — which is also what makes it checkable headlessly.
+func _show_hotbar_flyout(text: String) -> void:
+	if _hotbar_flyout == null:
+		return
+	_hotbar_flyout.text = text
+	_hotbar_flyout_until_msec = Time.get_ticks_msec() + HOTBAR_FLYOUT_HOLD_MSEC
+	_hotbar_flyout.modulate = Color(1, 1, 1, 1)
+
+
+func _update_hotbar_flyout() -> void:
+	if _hotbar_flyout == null:
+		return
+	var remaining := _hotbar_flyout_until_msec - Time.get_ticks_msec()
+	if remaining >= 0:
+		_hotbar_flyout.modulate = Color(1, 1, 1, 1)
+	elif remaining > -HOTBAR_FLYOUT_FADE_MSEC:
+		_hotbar_flyout.modulate = Color(1, 1, 1, 1.0 + float(remaining) / float(HOTBAR_FLYOUT_FADE_MSEC))
+	else:
+		_hotbar_flyout.modulate = Color(1, 1, 1, 0)
+
+
+## Re-anchors the strip to the bottom centre. Re-applied on every update for
+## the same reason `_update_contract_panel` re-applies its own preset: a
+## MINSIZE preset is computed from the content, and the content's size only
+## settles once its labels have text in them.
+func _position_hotbar() -> void:
+	if _hotbar_root == null:
+		return
+	_hotbar_root.set_anchors_and_offsets_preset(
+		Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE, HOTBAR_BOTTOM_MARGIN
+	)
+
+
+## Terraria's framed hover panel, in this scene's plate styling: the kind's
+## name, what the player is carrying, the unit price, and — the part this
+## ticket actually needs — the two verbs, so "number selects, the build menu
+## buys" is discoverable without reading source.
+func _build_hotbar_tooltip(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.10, 0.09, 0.06, 0.96)
+	style.border_color = Color(0.85, 0.63, 0.11, 0.95)
+	style.set_border_width_all(2)
+	style.set_content_margin_all(9.0)
+
+	_hotbar_tooltip = PanelContainer.new()
+	_hotbar_tooltip.name = "HotbarTooltip"
+	_hotbar_tooltip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hotbar_tooltip.add_theme_stylebox_override("panel", style)
+	_hotbar_tooltip.visible = false
+	hud.add_child(_hotbar_tooltip)
+
+	var rows := VBoxContainer.new()
+	rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rows.add_theme_constant_override("separation", 3)
+	_hotbar_tooltip.add_child(rows)
+
+	var name_settings := LabelSettings.new()
+	name_settings.font_size = base_settings.font_size + 2
+	name_settings.font_color = Color(0.98, 0.85, 0.42)
+	name_settings.outline_size = base_settings.outline_size
+	name_settings.outline_color = base_settings.outline_color
+
+	_hotbar_tooltip_name = Label.new()
+	_hotbar_tooltip_name.name = "TooltipName"
+	_hotbar_tooltip_name.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hotbar_tooltip_name.label_settings = name_settings
+	rows.add_child(_hotbar_tooltip_name)
+
+	_hotbar_tooltip_body = Label.new()
+	_hotbar_tooltip_body.name = "TooltipBody"
+	_hotbar_tooltip_body.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hotbar_tooltip_body.label_settings = base_settings
+	rows.add_child(_hotbar_tooltip_body)
+
+
+func _on_hotbar_slot_hovered(index: int) -> void:
+	_hotbar_tooltip_index = index
+	var owned := _owned_of(String(_hotbar_slots[index]["kind"]))
+	_fill_hotbar_tooltip(index, owned, _hotbar_price_of(index))
+	if _hotbar_tooltip != null:
+		_hotbar_tooltip.visible = true
+		_position_hotbar_tooltip(index)
+
+
+func _on_hotbar_slot_unhovered(index: int) -> void:
+	if _hotbar_tooltip_index != index:
+		return
+	_hotbar_tooltip_index = -1
+	if _hotbar_tooltip != null:
+		_hotbar_tooltip.visible = false
+
+
+func _hotbar_price_of(index: int) -> float:
+	var snapshot = JSON.parse_string(sim.shop_snapshot_json())
+	if not (snapshot is Dictionary):
+		return 0.0
+	var entries: Array = snapshot.get("entries", [])
+	if index < 0 or index >= entries.size():
+		return 0.0
+	return float(entries[index].get("price", 0.0))
+
+
+func _fill_hotbar_tooltip(index: int, owned: int, price: float) -> void:
+	if _hotbar_tooltip_name == null or index < 0 or index >= _hotbar_slots.size():
+		return
+	var kind: String = String(_hotbar_slots[index]["kind"])
+	_hotbar_tooltip_name.text = _kind_display_name(kind)
+	var key := _hotbar_key_label(index)
+	var select_line := ("press %s to select" % key) if key != "" else "click to select"
+	_hotbar_tooltip_body.text = "%s    ·    %.0f each\n%s    ·    buy in the build menu (B)" % [
+		("carrying %d" % owned) if owned > 0 else "carrying none",
+		price,
+		select_line,
+	]
+
+
+## Above the slot it belongs to, clamped on screen — the strip is at the
+## bottom edge, so a tooltip has to grow upward or it would be off-screen.
+func _position_hotbar_tooltip(index: int) -> void:
+	if _hotbar_tooltip == null or index < 0 or index >= _hotbar_slots.size():
+		return
+	var button: Button = _hotbar_slots[index]["button"]
+	var size := _hotbar_tooltip.get_combined_minimum_size()
+	var anchor := button.global_position + Vector2(button.size.x / 2.0, 0.0)
+	var pos := anchor - Vector2(size.x / 2.0, size.y + 14.0)
+	var vp := get_viewport()
+	if vp != null:
+		var bounds := vp.get_visible_rect().size
+		pos.x = clamp(pos.x, 8.0, max(8.0, bounds.x - size.x - 8.0))
+		pos.y = clamp(pos.y, 8.0, max(8.0, bounds.y - size.y - 8.0))
+	_hotbar_tooltip.position = pos
+	_hotbar_tooltip.size = size
+
+
+
+# --------------------------------------------------------------------------
 # Build mode: the ghost, and what the next click will do
 # (the "Real Placement" epic's ticket 2)
 # --------------------------------------------------------------------------
@@ -2816,8 +3430,13 @@ func _enter_build_mode(kind: String) -> void:
 	_build_kind = kind
 	_build_direction = "east"
 	_set_shop_menu_open(false)
+	# The name flyout fires here rather than in `_select_hotbar_slot`, so
+	# every route into placement mode announces what is now in hand — the
+	# hotbar key, a hotbar click, and the build menu's right-click alike.
+	_show_hotbar_flyout("%s  ×%d" % [_kind_display_name(kind), _owned_of(kind)])
 	_rebuild_ghost_body()
 	_update_ghost()
+	_update_hotbar()
 
 
 ## Remove mode is a MODE, not a modifier-click, and that is deliberate: it is
@@ -2833,6 +3452,11 @@ func _toggle_remove_mode() -> void:
 	_set_shop_menu_open(false)
 	_rebuild_ghost_body()
 	_update_ghost()
+	# Remove mode replaces placement mode, so the strip has nothing selected
+	# any more — and the highlight has to go with it, or the hotbar would
+	# claim the player is holding something while the ghost says they are
+	# about to destroy something.
+	_update_hotbar()
 
 
 ## Leaves whichever of the two modes is active, with no dangling state: the
@@ -2847,6 +3471,10 @@ func _exit_build_mode() -> void:
 		_ghost_root.visible = false
 	if _placement_prompt != null:
 		_placement_prompt.visible = false
+	# The strip's selection is derived from `_build_kind`, so leaving build
+	# mode by ANY route (ESC, B, X, running out of a kind) clears the
+	# highlight without that route having to know the hotbar exists.
+	_update_hotbar()
 
 
 func _in_build_mode() -> bool:
@@ -3254,6 +3882,7 @@ func _process(delta: float) -> void:
 	_update_fluid_network()
 	_refresh_buffers()
 	_update_machine_gauges()
+	_update_hotbar()
 	_update_ghost()
 	_update_hover_tooltip()
 	if _view_mode == ViewMode.ISOMETRIC:
@@ -3349,17 +3978,26 @@ func _unhandled_input(event: InputEvent) -> void:
 		_toggle_remove_mode()
 		return
 
-	# While the menu is up, the number keys buy the slot they label, and
-	# SHIFT+number places one you already own — the keyboard halves of the
-	# two mouse buttons below, and the only halves available in first-person
-	# if the player would rather not free the mouse. They do nothing at all
-	# when the menu is closed, so this reserves no key from whatever a later
-	# epic wants a hotbar to do.
-	if _shop_open and event.keycode >= KEY_1 and event.keycode <= KEY_9:
+	# THE NUMBER KEYS ARE THE HOTBAR (the inventory-hotbar ticket). 1..9 then
+	# 0 select the slot they label — always, with the build menu open or
+	# closed, in either view mode. That is the behaviour change this ticket
+	# makes: until now they only acted while the menu was up, and this
+	# handler's own comment reserved them "for whatever a later epic wants a
+	# hotbar to do".
+	#
+	# Selecting enters placement mode for that kind, and pressing the
+	# selected slot's key again leaves it, mirroring ESC. SHIFT+number is
+	# BUYING, and — deliberately — only while the build menu is open, because
+	# that is the only screen where the price and the balance the purchase
+	# spends are both in front of the player. A key that spends money with no
+	# prices on screen is exactly the accident this split exists to prevent.
+	var hotbar_index := _hotbar_index_for_keycode(event.keycode)
+	if hotbar_index >= 0:
 		if event.shift_pressed:
-			_place_from_slot(event.keycode - KEY_1)
-		else:
-			_buy_slot(event.keycode - KEY_1)
+			if _shop_open:
+				_buy_slot(hotbar_index)
+			return
+		_select_hotbar_slot(hotbar_index)
 		return
 
 	if _view_mode == ViewMode.ISOMETRIC:

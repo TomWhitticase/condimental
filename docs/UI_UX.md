@@ -364,21 +364,22 @@ were only discoverable by building it:
 
 ## 5. UI style
 
-> **Status:** most of §5 is built. The contract readout is a real diegetic
-> clipboard (paper panel, steel clip bar, checkbox tick marks, voxel-rendered
-> item icons), machine/pipe detail is hover-only rather than dense always-on
-> text, and the build menu is a grid of voxel-rendered icon slots that now
-> also *places* what it sells (see §5a). The scene's other readouts still use
-> the plain dark plate, deliberately — that is machine-side factory UI, and
-> the clipboard motif is reserved for orders and checklists. Not built: the
-> hotbar/quick-access strip.
+> **Status: §5 is built.** The contract readout is a real diegetic clipboard
+> (paper panel, steel clip bar, checkbox tick marks, voxel-rendered item
+> icons), machine/pipe detail is hover-only rather than dense always-on text,
+> the build menu is a grid of voxel-rendered icon slots that also *places*
+> what it sells (see §5a), and the hotbar — this section's last unbuilt named
+> widget — is now the primary way anything gets picked up (see §5b). The
+> scene's other readouts use the plain dark plate, deliberately — that is
+> machine-side factory UI, and the clipboard motif is reserved for orders and
+> checklists.
 
 - **Clean and simple, Minecraft-adjacent**: chunky panel borders, flat-shaded slot grids, a limited, consistent color palette per panel, generous hit targets. Avoid modern skeuomorphic-app UI (gradients, drop shadows everywhere, thin hairline fonts) — the UI should feel like it belongs in the same voxel world as the factory.
 - **Icons are rendered from the real assets**: item/recipe/machine icons are small isometric renders of the actual voxel models (the same asset the player sees in the world, rendered to a thumbnail), not separately-drawn 2D icon art. This keeps the UI and the world visually consistent and halves the art workload per item.
 - **Several concurrent contracts are one board of dockets, not one clipboard each** (built alongside `data/contracts.ron`'s arrival). GAMEPLAY.md §6's design pressure is that several standing orders compete for one factory's throughput, so all of them have to be legible at once. The panel keeps its single sheet and single clip bar and prints one **docket card** per contract on it — the checkbox's own paper tone plus a steel hairline, i.e. no third colour. A separate clipboard per contract repeats the frame and the clip for no new information; a single flat list of checklist rows loses which rows belong to which order as soon as two contracts want the same item. What is shared appears once, above the dockets — the money figure (there is exactly one currency, GAMEPLAY.md §1) and the delivery pool every contract draws from; what is per-contract (checklist, payout, cadence countdown, delivered/missed tally) appears on its own docket. Past a capped height the stack scrolls rather than growing off-screen.
 - **Diegetic paper-and-metal widgets**: recipe lists, orders, and objectives are framed as **clipboards and checklists** — a paper texture on a metal clipboard clip, checkbox-style tick marks for completed items — rather than flat modern list UI. This is a deliberate physical/tactile framing choice that fits the industrial setting (a factory floor clipboard, not an app notification list). [GAMEPLAY.md](GAMEPLAY.md) §6's contracts (a standing order for a sauce mix, delivered on a cadence) are the concrete, driving use case for this motif — a contract *is* a clipboard.
 - **Typography**: a simple, sturdy, slightly blocky sans-serif — readable at UI sizes, evokes stenciled factory signage/pixel fonts without tipping into illegible novelty pixel fonts.
-- **Layout conventions**: a Minecraft-style hotbar/quick-access strip along one screen edge; build/recipe menus as grids of voxel-rendered icon slots; hover tooltips for recipe/machine detail rather than dense always-on text.
+- **Layout conventions**: a Minecraft-style hotbar/quick-access strip along the bottom screen edge (§5b); build/recipe menus as grids of voxel-rendered icon slots; hover tooltips for recipe/machine detail rather than dense always-on text.
 
 ### 5a. Build mode: the ghost, and what the next click will do
 
@@ -410,6 +411,70 @@ buys one, right-click places one you own — rather than one button that
 changes meaning with the owned count. The latter is shorter to explain and
 worse to use: it makes buying a second of anything impossible without placing
 the first.
+
+### 5b. The hotbar: what is in your hand
+
+Built with the inventory-hotbar ticket, and it changed how the game is
+played rather than only how it looks. Before it, **nothing** was reachable
+without opening the build menu first: there was no glanceable view of what
+the player was carrying, and entering placement mode meant navigating a modal
+grid every time. Minecraft, Terraria and Factorio's quickbar all answer that
+the same way — a strip of slots that is always on screen, shows what you are
+carrying, and equips a slot on a keypress — and so does this.
+
+**What it is.** An always-visible strip along the **bottom** edge, centred:
+§5 says "one screen edge" without saying which, all three reference games use
+the bottom, and the other edges are taken (the control legend top-left, the
+contract clipboard top-right). One slot per `data/shop.ron` entry, in that
+file's order, built from `shop_snapshot_json` exactly as the build menu is —
+so a new catalog entry appears on the strip with no Godot edit.
+
+**Three calls worth not re-litigating.**
+
+1. **Fixed slots, not a packed list of what is owned.** Packing reads tidier
+   and destroys the property a hotbar exists for: slot 5 has to still be the
+   crusher after the last crusher is placed, or every key the player has
+   learned renumbers itself under them.
+2. **A kind you own none of is an empty socket, not a disabled button** — the
+   icon drops to a ghost, the count disappears rather than reading "0", and
+   the slot recesses. The kind is not unavailable; the player is simply not
+   carrying one.
+3. **Selecting and buying are different verbs on different actions.** Number
+   keys 1-9 and 0 select (in either view mode, menu open or closed), and
+   pressing the selected slot's key again puts it down, mirroring ESC.
+   Buying stays in the build menu (**B**) on a slot's left click, with
+   SHIFT+number as its keyboard mirror — and that key buys *only while the
+   menu is open*, because that is the one screen where the price and the
+   balance being spent are both in front of the player. A key that spends
+   money with no prices on screen is the accident this split exists to
+   prevent.
+
+**What was taken from where**, since the point was to bring in the patterns
+players actually praise rather than to draw a grid. From **Minecraft**: a
+selector drawn *bigger than the slot it marks*, so what is in hand is
+answerable from peripheral vision; a stack count in the slot's corner; and
+the item's name flying out above the bar on every switch, then fading. From
+**Terraria**: hover gives an item a framed spec sheet rather than a bare
+name — here the kind, what is carried, the unit price, and the two verbs,
+which is what keeps the number-key rebinding discoverable. From
+**Factorio's quickbar**: a slot you have none of stays exactly where it was.
+
+**Selection is signalled four ways at once**, per §7's never-colour-alone
+rule: the slot grows, its frame turns hazard-yellow, a caret appears above
+its icon, and its key digit brightens — plus the name flyout. The growth is a
+*scale*, not a position, because the row's container owns its children's
+positions and sizes but never their transforms; the same 100ms spring is what
+makes a click feel like it landed on something rather than toggling a
+boolean.
+
+Two things came off a rendered frame and would not have come off the code
+(§2b point 12's lesson, again). The strip's plate was translucent enough that
+the floor's diamond tiling showed through the gaps between sockets and turned
+the row into visual noise; it is nearly opaque now, like the build menu's own
+plate. And the build menu, centred in the viewport, grew tall enough to reach
+the strip and buried **its own footer** — the one line that explains buying —
+under it; the menu is centred in the space *above* the hotbar now, and went
+from three columns to four so it fits there.
 
 ## 6. Feedback, motion & animation
 

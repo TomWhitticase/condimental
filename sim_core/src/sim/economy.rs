@@ -71,29 +71,46 @@ use super::types::{Fx, ItemId};
 /// player bought and placed, so a fresh world needs enough to make a first
 /// move with.
 ///
-/// **200, and it is a placeholder** — GAMEPLAY.md §10 puts exact numeric
-/// balance ("ingredient costs, contract payouts, equipment prices") in a
-/// later pass, and `data/shop.ron`'s own header says the same about the
+/// **3000, and it is still a placeholder** — GAMEPLAY.md §10 puts exact
+/// numeric balance ("ingredient costs, contract payouts, equipment prices")
+/// in a later pass, and `data/shop.ron`'s own header says the same about the
 /// prices this is measured against. What the number *does* encode, against
-/// today's catalog, is the shape GAMEPLAY.md §8's walkthrough describes —
-/// "start with a basic cooker and one small contract", not with a factory:
+/// today's catalog, is that **the core loop closes from a cold start**:
 ///
-/// - It buys a hopper (40), a crusher (75) and seventeen belt tiles (85):
-///   a raw feed, one processing machine and a line to run between them.
-/// - It does **not** buy the reference chain, which costs a little over
-///   1000 all told — so the shipped six-stage line is something a player
-///   works up to through contract deliveries, which is the loop GAMEPLAY.md
-///   §1 describes.
-/// - It is a bit over two payouts of the shipped board's middle contract
-///   (50), so the first expansion is a handful of deliveries away rather
-///   than a grind.
+/// - The shipped six-stage line — [`super::reference::reference_chain`],
+///   which prices its own bill out of `data/shop.ron` rather than
+///   hardcoding it — costs exactly **1087**. A new player can therefore
+///   build the whole thing outright if that is what they want to do, and
+///   still have about **1900** left for the mistakes, the second line and
+///   the belt they laid the wrong way round.
+/// - That is deliberately **more than 2.5x** the bill rather than exactly
+///   it. A balance that only just covers the line is a puzzle with one
+///   solution; the point of the margin is that a first factory can be built
+///   wrong and rebuilt.
+///
+/// **Why it is not 200 any more.** 200 was this constant's first value, and
+/// it was chosen to be "a first move, not a factory" — a hopper (40), a
+/// crusher (75) and seventeen belt tiles (85). Against a 1087 bill and a
+/// chain whose first *sellable* product is six machines downstream, that
+/// turned out not to be a slow start but a dead one: money only ever arrives
+/// through contract deliveries, deliveries need the line, and the line could
+/// not be reached from 200 by any sequence of commands. GAMEPLAY.md §9
+/// recorded exactly that as the balancing pass's first job. This is that
+/// fix, taking the option that adds a real decision — the player *chooses*
+/// what to build first — rather than the option that only removes one.
+///
+/// The two numbers are balanced against each other, so changing prices in
+/// `data/shop.ron` means revisiting this constant; `tests/shop.rs` pins the
+/// relationship (starting money against the chain's *dynamically priced*
+/// bill) rather than the pair of literals, so a price change moves the
+/// test's expectations with it instead of breaking them.
 ///
 /// It lives here, beside the contract bookkeeping, because this is the file
 /// that owns economic state — the same reason the Economy MVP's contract
 /// constants lived here before contracts became data. It is applied by
 /// `World`'s constructors (through [`Economy::with_money`]), not by
 /// [`Economy::new`], which starts an empty ledger at zero.
-pub const STARTING_MONEY: u32 = 200;
+pub const STARTING_MONEY: u32 = 3000;
 
 /// One contract plus the bookkeeping that is *this world's* rather than the
 /// content's: when it is next checked, and how it has done so far.

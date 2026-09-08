@@ -18,12 +18,21 @@
 #   * B actually toggles it open and closed, driven through the scene's real
 #     `_unhandled_input` (the approach test_interaction.gd establishes),
 #   * affordability is a visible slot state, not just a JSON field: a new
-#     world's STARTING_MONEY leaves every slot open, and spending it locks
-#     them and marks each price with the unaffordable glyph,
+#     world's STARTING_MONEY leaves every slot open AND covers one of
+#     everything in the catalog twice over, and spending it locks the slots
+#     and marks each price with the unaffordable glyph,
 #   * a REAL purchase through `issue_command_json` moves the displayed owned
-#     count, on both the click and the number-key paths,
+#     count, on both the click and the SHIFT+number paths,
 #   * and an OWNED slot offers the second action the "Real Placement" epic
-#     added — placing one — which enters placement mode and closes the menu.
+#     added — putting one in your hand — which enters placement mode and
+#     closes the menu.
+#
+# WHAT THE INVENTORY-HOTBAR TICKET CHANGED HERE. The number keys used to buy
+# while this menu was open; they are the hotbar's selection keys now, in every
+# mode, menu or no menu (see test_hotbar.gd). Buying kept a keyboard path but
+# moved onto SHIFT+number, and that key only buys WITH THIS MENU OPEN — the
+# one screen where the price and the balance being spent are both visible.
+# The checks below follow that split rather than being deleted with it.
 extends SceneTree
 
 
@@ -36,10 +45,11 @@ func _shop_snapshot(main) -> Dictionary:
 	return JSON.parse_string(main.sim.shop_snapshot_json())
 
 
-func _press(main, keycode: int) -> void:
+func _press(main, keycode: int, shift := false) -> void:
 	var event := InputEventKey.new()
 	event.keycode = keycode
 	event.pressed = true
+	event.shift_pressed = shift
 	main._unhandled_input(event)
 
 
@@ -132,11 +142,10 @@ func _initialize() -> void:
 			return
 
 	# --- Affordability is a visible slot state, not just a JSON field -----
-	# A new world starts with `sim::STARTING_MONEY`, which is enough for
-	# everything in the shipped catalog, so every slot should read as
-	# available. (Before the "Real Placement" epic a fresh world had zero and
-	# this test asserted the opposite — the starting balance is what makes a
-	# first move possible at all.)
+	# A new world starts with `sim::STARTING_MONEY`, and every slot should
+	# read as available. (Before the "Real Placement" epic a fresh world had
+	# zero and this test asserted the opposite — the starting balance is what
+	# makes a first move possible at all.)
 	var starting_money: float = float(snapshot.get("money", 0.0))
 	if starting_money <= 0.0:
 		_fail("expected a new world to start with STARTING_MONEY, got %.2f" % starting_money)
@@ -145,6 +154,24 @@ func _initialize() -> void:
 		if slot["button"].disabled:
 			_fail("with %.0f in the bank, slot '%s' should not be locked" % [starting_money, slot["kind"]])
 			return
+
+	# And it is not merely "the cheapest thing is affordable". The starting
+	# balance was raised from 200 to 3000 precisely because a new game has to
+	# be able to reach a first contract payout, which means building a line
+	# that ends at a dock — so it must cover a whole factory's worth of
+	# catalog, not a first move. Priced off the SNAPSHOT rather than off
+	# `data/shop.ron`'s literals, so a balancing pass moves this with it;
+	# `sim_core/tests/shop.rs` pins the exact relationship (starting money
+	# against the reference chain's own dynamically-priced bill), and this is
+	# the wire-side shadow of it.
+	var one_of_everything := 0.0
+	for entry in entries:
+		one_of_everything += float(entry["price"])
+	if starting_money <= one_of_everything * 2.0:
+		_fail("a starting balance of %.0f must comfortably cover a factory, not a first move: one of every catalog kind is %.0f" % [
+			starting_money, one_of_everything,
+		])
+		return
 
 	# --- B toggles the menu, through the real input path ------------------
 	_press(main, KEY_B)
@@ -193,11 +220,11 @@ func _initialize() -> void:
 		_fail("the displayed owned count for '%s' reads '%s', expected it to show %d" % [kind, text_after, owned_after])
 		return
 
-	# --- An OWNED slot offers the second action: place one ----------------
+	# --- An OWNED slot offers the second action: put one in your hand -----
 	# The affordance is on the owned line, because that is the line whose
 	# number decides whether placing is possible at all.
-	if not text_after.to_lower().contains("place"):
-		_fail("an owned slot should say how to place one, reads '%s'" % text_after)
+	if not text_after.to_lower().contains("right-click"):
+		_fail("an owned slot should say how to take one in hand, reads '%s'" % text_after)
 		return
 	main._place_from_slot(target)
 	if not main._in_build_mode() or main._build_kind != kind:
@@ -209,15 +236,39 @@ func _initialize() -> void:
 	main._exit_build_mode()
 	_press(main, KEY_B) # reopen for the hotkey check below
 
-	# And the number-key half of the interaction buys too.
+	# And the keyboard half of BUYING is SHIFT+number, while this menu is up.
+	# (Its plain-number half became the hotbar's selection key — checked
+	# immediately below, and in full in test_hotbar.gd.)
 	if target < main.SHOP_HOTKEY_SLOTS:
-		_press(main, KEY_1 + target)
+		var buy_key: int = main.HOTBAR_KEYCODES[target]
+		_press(main, buy_key, true)
 		var owned_hotkey: int = int(_shop_snapshot(main)["entries"][target]["owned"])
 		if owned_hotkey != owned_after + 1:
-			_fail("the number-key shortcut for slot %d did not buy one of '%s' (%d -> %d)" % [
-				target + 1, kind, owned_after, owned_hotkey,
+			_fail("SHIFT+%s with the menu open did not buy one of '%s' (%d -> %d)" % [
+				main._hotbar_key_label(target), kind, owned_after, owned_hotkey,
 			])
 			return
+		if not main._shop_open:
+			_fail("buying with SHIFT+number should leave the build menu open — it is where the prices are")
+			return
+
+		# The same key WITHOUT shift must not spend a thing: it selects.
+		var money_before_select: float = float(_shop_snapshot(main)["money"])
+		_press(main, buy_key)
+		var after_select: Dictionary = _shop_snapshot(main)
+		if float(after_select["money"]) != money_before_select:
+			_fail("a bare number key must never spend money (%.0f -> %.0f)" % [
+				money_before_select, float(after_select["money"]),
+			])
+			return
+		if int(after_select["entries"][target]["owned"]) != owned_hotkey:
+			_fail("a bare number key must not change what is owned")
+			return
+		if not main._in_build_mode() or main._build_kind != kind:
+			_fail("a bare number key should have selected '%s' for placement" % kind)
+			return
+		main._exit_build_mode()
+		_press(main, KEY_B) # reopen for the spend-down below
 
 	# --- Spend the balance: now unaffordability has to be VISIBLE ---------
 	# Buy the most expensive kind until nothing is affordable, then check the

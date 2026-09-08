@@ -405,31 +405,67 @@ fn a_fresh_world_is_empty_and_holds_only_starting_money() {
     );
     let snapshot = world.shop_snapshot();
     assert!(snapshot.entries.iter().all(|e| e.owned == 0));
-    // Enough to make a first move with — a hopper, a machine and some belt —
-    // and nothing like enough for the whole line (see `STARTING_MONEY`).
-    let affordable: Vec<&str> = snapshot
+    // Every kind in the shipped catalog is within reach on day one — the
+    // starting balance is not a filter on *what* can be built, only on how
+    // much of it (see `starting_money_covers_the_reference_chain_with_room_to_spare`).
+    let unaffordable: Vec<&str> = snapshot
         .entries
         .iter()
-        .filter(|e| e.affordable)
+        .filter(|e| !e.affordable)
         .map(|e| e.kind.as_str())
         .collect();
-    for kind in ["belt", "pipe", "hopper", "crusher"] {
-        assert!(
-            affordable.contains(&kind),
-            "a new game must be able to afford a {kind}: {affordable:?}"
-        );
-    }
-    // ...and nothing like enough for a factory. Priced off the shipped
-    // catalog rather than restated, so a balancing pass moves this test's
-    // expectations with it instead of breaking them.
-    let one_of_each_machine: Fx = ["hopper", "crusher", "mixer", "cooking_vat"]
-        .iter()
-        .map(|kind| price_of(kind))
-        .fold(Fx::ZERO, |acc, price| acc + price);
     assert!(
-        one_of_each_machine > world.money() * Fx::from_num(2),
-        "starting money must be a first move, not a factory: {} vs a {one_of_each_machine} \
-         front end alone",
-        world.money()
+        unaffordable.is_empty(),
+        "a new game should be able to afford one of anything in the catalog: {unaffordable:?}"
     );
 }
+
+/// **The relationship `STARTING_MONEY` exists to hold**, and the reason it
+/// stopped being 200.
+///
+/// Money only ever enters the world through a contract delivery, a delivery
+/// needs a line that reaches the dock, and the shipped line is
+/// `sim::reference_chain`. So if a new game cannot afford that line, the
+/// core loop GAMEPLAY.md §1 describes cannot close from a cold start at all
+/// — which is exactly what 200 against a 1087 bill meant. This test is the
+/// check that keeps that from happening again silently.
+///
+/// It prices the chain **dynamically**, out of `data/shop.ron`, by summing
+/// what every placement in a reference-chain world cost — so a balancing
+/// pass that changes prices moves this test's expectation with it, and only
+/// a change that breaks the *relationship* fails. The 2.5x margin is the
+/// deliberate part: covering the bill exactly would make a first factory a
+/// puzzle with one solution, and the surplus is what pays for building it
+/// wrong once.
+#[test]
+fn starting_money_covers_the_reference_chain_with_room_to_spare() {
+    let starting = Fx::from_num(sim_core::sim::STARTING_MONEY);
+
+    // The bill, summed off the shipped catalog rather than restated: one
+    // placement is one purchased unit (a belt tile, a pipe tile, a machine,
+    // a building), so this is the same arithmetic `reference_chain` does
+    // before it builds anything.
+    let bill = world()
+        .world_layout()
+        .iter()
+        .fold(Fx::ZERO, |acc, p| acc + price_of(&p.kind));
+
+    assert!(
+        starting > bill,
+        "a new game must be able to build the shipped line at all: {starting} in the bank \
+         against a {bill} bill"
+    );
+    assert!(
+        starting > bill * Fx::from_num(2.5),
+        "and with real room left over, not just barely: {starting} against a {bill} bill"
+    );
+}
+
+/// The literal, pinned once so a change to it is a deliberate edit to a test
+/// rather than a number that drifts. Everything *about* the value is checked
+/// as a relationship above; this only asserts what was actually chosen.
+#[test]
+fn starting_money_is_the_documented_value() {
+    assert_eq!(sim_core::sim::STARTING_MONEY, 3000);
+}
+

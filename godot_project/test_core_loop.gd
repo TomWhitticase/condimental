@@ -47,6 +47,12 @@ func _initialize() -> void:
 			_fail("%s must be an empty array in a new world, got %s" % [call_name, str(parsed)])
 			return
 	var shop: Dictionary = JSON.parse_string(sim.shop_snapshot_json())
+	# STARTING_MONEY is 3000 since the inventory-hotbar ticket, and the
+	# shipped six-stage line costs 1,087 — so a fresh balance has to be enough
+	# to buy a whole factory, not just a first belt. The exact relationship is
+	# pinned in `sim_core/tests/shop.rs` against the chain's own dynamically
+	# priced bill; what is checked here is that the wire reports a real
+	# balance at all.
 	if float(shop["money"]) <= 0.0:
 		_fail("a new world must start with STARTING_MONEY, got %s" % str(shop["money"]))
 		return

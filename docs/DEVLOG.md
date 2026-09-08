@@ -28,7 +28,9 @@ below is history and should only ever be appended to.)*
 - **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, SPACE/SHIFT up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
 - **Lighting:** the sky is the real background (`BG_SKY`), not a flat colour — see the "empty void" DEVLOG entry below for why that matters. `scripts/screenshot-scene.sh --first-person` reviews that mode's lighting specifically.
 - **Delivery dock (done, both halves):** the chain has a real exit, and you can see it. One more belt runs past the last machine into a `dock` building, which ships finished product into the shared delivery pool automatically every tick — `PlayerCommand::CollectOutput` (the **C** key) is **removed**, so a supplied factory now earns money with no player action beyond keeping the hopper and vinegar tank topped up. The dock is drawn as the one piece of *architecture* on the line rather than another machine: a raised, hazard-striped loading platform with rubber bumpers, a hooded transfer housing where the belt runs in, and a despatch door under a canopy. It has **no fill gauge**, deliberately — its own buffer empties every tick, so a bar driven from it would read zero forever; what stands on its deck instead is one case per unit of the economy's shared `delivery_stock`, the same figure the clipboard labels ON THE DOCK. The shipped line now spans three chunks, (-1, 0) through (1, 0).
-- **Real placement (DONE, both halves):** the world starts **empty**, with `STARTING_MONEY` (200) and a bare floor, and the player builds everything on it. `Place`/`Remove`/`Rotate` commands put things down out of the shop inventory, take them back, and turn them 90° clockwise; a belt carries toward the way it faces, a machine accepts on the face opposite the way it faces and discharges on the face it points at, and a line may turn corners. The hopper, the fluid tank and the dock are ordinary placeable kinds now, and a world may hold any number of each. The scene rebuilds itself from `world_layout_json` after every place/remove/rotate, draws every tile at the facing the player gave it, and has a real build mode: right-click an owned build-menu slot (or shift+number) to pick it up, a translucent ghost follows the cursor and says **✔ PLACE** / **✗ BLOCKED** / **✗ NONE OWNED** in a glyph and a word as well as a colour, **R** rotates the ghost or whatever is under the cursor, **X** toggles remove mode, **ESC** cancels, left-click confirms. The belt junction art stays east-only and falls back to the plain tile for the other three facings — a known, tested, accepted gap; a four-directional art pass is a separate ticket. **Balance caveat worth knowing:** 200 buys a hopper, a few belts and one machine, and the first sellable product is six machines away, so a new save cannot currently be played forward to a payout — the shipped six-stage line survives only as `sim::reference_chain`, the `cargo test` fixture, and every headless Godot test now builds what 200 buys instead.
+- **Real placement (DONE, both halves):** the world starts **empty**, with `STARTING_MONEY` (200) and a bare floor, and the player builds everything on it. `Place`/`Remove`/`Rotate` commands put things down out of the shop inventory, take them back, and turn them 90° clockwise; a belt carries toward the way it faces, a machine accepts on the face opposite the way it faces and discharges on the face it points at, and a line may turn corners. The hopper, the fluid tank and the dock are ordinary placeable kinds now, and a world may hold any number of each. The scene rebuilds itself from `world_layout_json` after every place/remove/rotate, draws every tile at the facing the player gave it, and has a real build mode: right-click an owned build-menu slot (or shift+number) to pick it up, a translucent ghost follows the cursor and says **✔ PLACE** / **✗ BLOCKED** / **✗ NONE OWNED** in a glyph and a word as well as a colour, **R** rotates the ghost or whatever is under the cursor, **X** toggles remove mode, **ESC** cancels, left-click confirms. The belt junction art stays east-only and falls back to the plain tile for the other three facings — a known, tested, accepted gap; a four-directional art pass is a separate ticket. *(The balance caveat this entry used to carry — 200 could not reach a first payout — was fixed by the inventory-hotbar work below; `STARTING_MONEY` is 3000 now.)*
+- **Inventory hotbar (done):** an always-visible strip along the bottom edge, one slot per `data/shop.ron` kind, showing what the player is carrying. **Number keys 1-9 and 0 select a slot and put that kind in your hand** — in either view mode, with or without a menu open, which is the behaviour change: until now nothing at all was reachable without opening the build menu first. Pressing the selected slot's key again puts it down, mirroring ESC. Buying stays a separate verb in the build menu (**B**), on a slot's left click or SHIFT+number. A kind you own none of is an empty socket rather than a disabled button, selection is signalled four ways at once (bigger slot, hazard-yellow frame, caret, brightened key digit) plus Minecraft's fading name flyout, and the whole strip is driven from `shop_snapshot_json` like the menu it now fronts. **Starting money went from 200 to 3000 in the same ticket** — the shipped six-stage line costs 1087, so a new save can now build all of it outright with ~1900 to spare, and the core loop finally closes from a cold start.
+
 - **Contracts (done, both halves):** contracts are `data/contracts.ron` content and three run concurrently, each with its own mix/cadence/payout, all drawing from one shared pool of delivered stock (a box pays one contract, never two). The clipboard panel shows all of them — one paper docket card per contract on the one board, each with its own checklist, payout, countdown and delivered/missed tally, above a single shared money figure and a single "on the dock" line naming the pool they compete for.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
@@ -45,6 +47,45 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-08 — A real hotbar, and a starting balance the loop can close from
+
+Two directly-requested changes in one ticket, bundled because the second
+breaks the tests the first has to touch.
+
+**The hotbar.** UI_UX.md §5 has asked for "a Minecraft-style hotbar/quick-access
+strip along one screen edge" since it was written, and it was the last named
+widget in that section still unbuilt. Until now **nothing** in the game was
+reachable without opening the full build menu first — no glanceable view of
+what you were carrying, and a modal grid to navigate every time you wanted to
+place something. There is now a strip along the bottom edge, one fixed slot
+per `data/shop.ron` kind, driven from the same `shop_snapshot_json` the menu
+uses. Number keys 1-9 and 0 select a slot and enter placement mode directly,
+in either view mode, menu open or closed; pressing the selected slot's key
+again puts it down. Buying stays a different verb in a different place — the
+build menu (**B**), on a slot's left click or SHIFT+number — because a key
+that spends money with no prices on screen is exactly the accident worth
+designing out. Fixed slots rather than a packed list of what is owned, so the
+keys stay muscle memory; a kind you own none of is drawn as an empty socket
+rather than a disabled button. Selection is signalled four ways at once and
+the strip animates (a scale pop on select, a pulse on click, and Minecraft's
+name flyout above the bar). Two problems only the rendered frame could show
+got fixed on the way: the strip's plate was translucent enough that the
+floor's tiling showed through and made the row noisy, and the build menu grew
+tall enough to bury its own footer — the one line explaining how to buy —
+under the new strip.
+
+**The balance.** `STARTING_MONEY` went from 200 to **3000**. The "Real
+Placement" epic had flagged the hole and left it for the balancing pass:
+money enters only through contract deliveries, a delivery needs a line that
+reaches the dock, and that line costs 1087 — so at 200 a new save could not be
+played forward to a first payout at all. Not a slow game, a dead one. 3000 is
+deliberately more than 2.5x the bill, so a first factory can be built wrong
+and rebuilt. Every test that argued from the old insufficiency was reworked
+rather than patched, and coverage that the old balance had *deleted* came
+back: a Godot fixture that builds the entire shipped six-stage line out of
+ordinary purchase/place commands, and the `--contracts` screenshot flag on top
+of it.
 
 ### 2026-09-08 — You build the factory now (the presentation half)
 

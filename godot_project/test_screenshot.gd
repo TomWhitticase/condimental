@@ -12,12 +12,11 @@
 #   godot --path godot_project --script test_screenshot.gd -- /abs/out.png [flags]
 #
 # **THE WORLD STARTS EMPTY.** Since the "Real Placement" epic a new game
-# contains nothing at all, so most flags below now begin by BUILDING
-# something — and what they can build is bounded by `sim::STARTING_MONEY`
-# (200), which is nothing like the shipped six-stage line. See
-# test_layouts.gd's header for the full note; the practical consequence is
-# that `--contracts`, `--aging` and `--hover-aging` are gone, because each of
-# them needed a factory a starting balance cannot buy.
+# contains nothing at all, so most flags below begin by BUILDING something.
+# What they can build is bounded by `sim::STARTING_MONEY`, which the
+# inventory-hotbar ticket raised from 200 to 3000 — comfortably more than the
+# shipped six-stage line's 1,087 — so `--fixture chain` and `--contracts`
+# can build and run the real line again. See test_layouts.gd's header.
 #
 # `--build` puts down the demo line (test_layouts.gd's `build_demo_line`): a
 # hopper feeding belts that run east, TURN NORTH into a crusher facing WEST,
@@ -28,8 +27,15 @@
 #
 # `--fixture <name>` picks a different one: `machines` (hopper, machine and
 # dock, i.e. one of each sort of building), `fluids` (a tank, a pipe run and
-# the machine that taps it), `vat` (the 2x2 cooking vat, alone — it costs the
-# entire starting balance) or `rack` (the aging rack, alone).
+# the machine that taps it), `vat` (the 2x2 cooking vat, alone), `rack` (the
+# aging rack, alone) or `chain` (THE WHOLE SHIPPED SIX-STAGE LINE, bought and
+# placed out of a new game's own balance — test_layouts.gd's
+# `build_reference_line`).
+#
+# `--contracts` builds that full line and then runs it until the contract
+# board is in a genuinely mixed state — some deliveries made, some missed,
+# goods standing on the dock — so the clipboard can be reviewed against a
+# working economy rather than an idle one. It implies `--fixture chain`.
 #
 # `--populate` runs whatever has been built forward first so the screenshot
 # shows product actually moving, not an idle factory.
@@ -58,6 +64,18 @@
 # only in how they pick the tile out of `world_layout_json`.
 #
 # `--shop` opens the build menu (docs/UI_UX.md §5) before rendering.
+#
+# `--stock` buys an assorted starting kit (belts, pipes, a hopper, a tank and
+# a machine or two) so the hotbar shows CARRIED sockets, multi-digit counts and
+# EMPTY sockets side by side — the only way to review that distinction, since a
+# new game carries nothing and every socket is empty.
+#
+# `--hotbar N` presses hotbar key N (1..9, or 0 for the tenth slot) through
+# the scene's real `_unhandled_input`, after buying one of that slot's kind so
+# the socket is not empty — so the selected-slot state, the name flyout and
+# the ghost that selection puts in the player's hand are all in the shot. It
+# is the only way to review the hotbar's selected state without a live
+# session, exactly as `--ghost` is for build mode.
 #
 # `--closeup TX,TY[,SIZE]` re-aims the ISOMETRIC camera at one simulation
 # tile and zooms it right in (SIZE is the orthographic width in world units,
@@ -92,6 +110,21 @@ var _hover_hopper := false
 var _hover_tank := false
 var _hover_dock := false
 var _shop := false
+var _contracts := false
+var _hotbar_key := ""
+var _stock := false
+## `--contracts` waits for a STATE, not a tick count: a fixed count drifts
+## with any change to throughput or to the shipped cadences and quietly goes
+## back to photographing three identical checklists. What it waits for is at
+## least one unit standing on the dock plus at least one delivery AND one miss
+## on the board — which against the shipped contracts (asks of 2, 3 and 1 out
+## of one shared pool) reads as one docket satisfied and the rest part-filled:
+## the checkbox mechanic and the shared-pool competition in a single frame.
+## A MINIMUM dock count rather than an exact one, because the aging rack holds
+## a batch for 2400 ticks while the contracts check every 1000/1500/2500, so
+## the pool is drained about as fast as the line can fill it.
+const CONTRACTS_REVIEW_DOCK_UNITS := 1
+const CONTRACTS_REVIEW_TICK_LIMIT := 20000
 var _ghost_kind := ""
 var _ghost_blocked := false
 var _remove_mode := false
@@ -118,6 +151,11 @@ func _initialize() -> void:
 	_hover_tank = args.has("--hover-tank")
 	_hover_dock = args.has("--hover-dock")
 	_shop = args.has("--shop")
+	_contracts = args.has("--contracts")
+	if _contracts:
+		_fixture = "chain"
+	_hotbar_key = _string_arg(args, "--hotbar")
+	_stock = args.has("--stock")
 	_ghost_kind = _string_arg(args, "--ghost")
 	if _ghost_kind == "":
 		_ghost_kind = _string_arg(args, "--ghost-blocked")
@@ -157,6 +195,8 @@ func _build_fixture() -> void:
 			Layouts.build_multi_tile(_main.sim)
 		"rack":
 			Layouts.build_aging_rack(_main.sim)
+		"chain":
+			Layouts.build_reference_line(_main.sim)
 		_:
 			Layouts.build_demo_line(_main.sim)
 	_main._rebuild_world()
@@ -365,6 +405,82 @@ func _open_shop_menu() -> void:
 	_main._set_shop_menu_open(true)
 
 
+## Drives the real chain across several contract cadence boundaries, feeding
+## it exactly the way a player does. What puts product in the shared delivery
+## pool the contracts draw from is the delivery dock at the end of the line,
+## not a command issued from here.
+func _run_contract_cycles() -> void:
+	for i in range(CONTRACTS_REVIEW_TICK_LIMIT):
+		_main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
+		_main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
+		_main.sim.tick()
+		if _contract_board_is_mixed():
+			break
+	_main._apply_dirty_chunks()
+	_main._refresh_buffers()
+	_main._update_fluid_network()
+	_main._update_contract_panel()
+
+
+func _contract_board_is_mixed() -> bool:
+	var econ: Dictionary = JSON.parse_string(_main.sim.economy_snapshot_json())
+	var stock := 0
+	for pair in econ.get("delivery_stock", []):
+		stock += int(pair[1])
+	if stock < CONTRACTS_REVIEW_DOCK_UNITS:
+		return false
+	var made := 0
+	var missed := 0
+	for contract in econ.get("contracts", []):
+		made += int(contract["deliveries_made"])
+		missed += int(contract["deliveries_missed"])
+	return made >= 1 and missed >= 1
+
+
+## Presses a hotbar key for real, having first bought one of that slot's kind
+## so the socket has something in it — an empty socket refuses selection, by
+## design, and would photograph as nothing happening.
+func _select_hotbar_key() -> void:
+	var index: int = _main.HOTBAR_KEYCODES.find(_hotbar_key_code())
+	if index < 0 or index >= _main._hotbar_slots.size():
+		printerr("SCREENSHOT_NOTE: --hotbar '%s' is not a hotbar key" % _hotbar_key)
+		return
+	var kind: String = String(_main._hotbar_slots[index]["kind"])
+	_main.sim.issue_command_json(JSON.stringify({
+		"type": "purchase", "kind": kind, "quantity": 1,
+	}))
+	_main._refresh_owned_counts()
+	var event := InputEventKey.new()
+	event.keycode = _hotbar_key_code()
+	event.pressed = true
+	_main._unhandled_input(event)
+	# Park the cursor on open ground so the ghost selection put in the
+	# player's hand reads as valid rather than blocked.
+	_hover_over_tile(_open_ground_tile())
+	_main._update_ghost()
+	_main._update_hotbar()
+
+
+## An assorted kit, so a review frame shows every socket state at once. The
+## quantities are picked to include a two-digit count (belts), single-digit
+## counts, and several kinds left at zero.
+func _stock_the_hotbar() -> void:
+	for pair in [["belt", 24], ["pipe", 6], ["hopper", 1], ["fluid_tank", 1], ["crusher", 2]]:
+		_main.sim.issue_command_json(JSON.stringify({
+			"type": "purchase", "kind": pair[0], "quantity": pair[1],
+		}))
+	_main._refresh_owned_counts()
+	_main._update_hotbar()
+
+
+func _hotbar_key_code() -> int:
+	if _hotbar_key == "0":
+		return KEY_0
+	if _hotbar_key.length() == 1 and _hotbar_key >= "1" and _hotbar_key <= "9":
+		return KEY_1 + (_hotbar_key.to_int() - 1)
+	return 0
+
+
 func _process(_delta: float) -> bool:
 	_frames += 1
 	# Build first: every flag below is about looking at something, and since
@@ -399,6 +515,12 @@ func _process(_delta: float) -> bool:
 		_enter_remove_mode()
 	if _frames == 2 and _shop:
 		_open_shop_menu()
+	if _frames == 2 and _contracts:
+		_run_contract_cycles()
+	if _frames == 2 and _stock:
+		_stock_the_hotbar()
+	if _frames == 2 and _hotbar_key != "":
+		_select_hotbar_key()
 	if _frames < WARMUP_FRAMES:
 		return false
 
