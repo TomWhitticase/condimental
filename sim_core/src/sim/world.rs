@@ -73,7 +73,7 @@
 //! builds the old fixed layout, tile for tile, out of nothing but purchase
 //! and placement commands.
 //!
-//! Two adjacency rules are decided *here*, because they are about linking
+//! Three adjacency rules are decided *here*, because they are about linking
 //! rather than geometry:
 //!
 //! - **Solids respect faces.** A belt feeds a machine only if the tile it
@@ -89,6 +89,16 @@
 //!   face nor its outlet — because a pressure network is not a conveyor, and
 //!   requiring a fluid inlet to face the right way would break the one
 //!   plumbing arrangement the game has always had.
+//! - **One placement resolves to two downstream targets, and only one.** A
+//!   belt looks at the single tile it points at; a
+//!   [splitter](super::splitter) looks at two — the tile on its own facing
+//!   and the tile one quarter turn clockwise from it — and deals its front
+//!   item alternately between them (`splitter_outputs` below, and
+//!   `splitter.rs`'s module doc for both rules). Everything else about it is
+//!   belt-like: it holds what it carries in an ordinary [`BeltSegment`] and
+//!   accepts a hand-off from anything a belt accepts one from, so it can be
+//!   dropped into a line in place of a belt tile without changing how fast
+//!   product moves through it.
 //!
 //! # Corners, finally
 //!
@@ -127,6 +137,7 @@ use super::machine::Machine;
 use super::machines::{Footprint, MachineRegistry};
 use super::recipe::{Recipe, RecipeRegistry};
 use super::shop::{DEFAULT_PURCHASE_QUANTITY, Shop, ShopSnapshot};
+use super::splitter::{SPLITTER_KIND, Side, Splitter};
 use super::types::{ChunkId, Direction, FluidId, Fx, ItemId, RecipeId, TileCoord, chunk_of};
 
 /// The buildable-kind id (`data/shop.ron`) of one tile of conveyor.
@@ -411,6 +422,7 @@ pub fn command_from_json(json: &str) -> Option<PlayerCommand> {
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct ChunkSnapshot {
     pub belts: Vec<BeltSnapshot>,
+    pub splitters: Vec<SplitterSnapshot>,
     pub machines: Vec<MachineSnapshot>,
     pub pipes: Vec<PipeSnapshot>,
     pub hoppers: Vec<HopperSnapshot>,
@@ -445,6 +457,46 @@ pub struct BeltSnapshot {
     pub tile: TileCoord,
     pub direction: Direction,
     pub items: Vec<(ItemId, f64)>,
+}
+
+/// One conveyor splitter (Epic B), for rendering.
+///
+/// JSON shape (`snake_case`, as serialized by `serde_json`):
+///
+/// ```json
+/// { "tile": [6, 0], "kind": "splitter", "direction": "east",
+///   "footprint": { "width_tiles": 1, "height_tiles": 1 },
+///   "items": [["tomato", 0.44]],
+///   "outputs": [[7, 0], [6, -1]],
+///   "next_output": "straight" }
+/// ```
+///
+/// A splitter is drawn like a belt tile that has something on its end, and
+/// this snapshot is [`BeltSnapshot`] plus the three facts only a splitter
+/// has:
+///
+/// - **`outputs` is always a two-element array, straight-through first**:
+///   the tile on the placement's own `direction`, then the tile one quarter
+///   turn clockwise from it (see [`super::splitter`], which owns that rule —
+///   presentation should read these tiles rather than re-derive them). An
+///   entry is `null` when nothing that can accept an item stands there,
+///   which is exactly the state "this branch isn't built yet".
+/// - **`next_output`** is `"straight"` or `"branch"` — which side gets first
+///   refusal on the next item. It is the one piece of a splitter's state a
+///   player cannot infer from the tiles around it, and the natural thing for
+///   an arrow or a lamp to point at.
+/// - `items` are positioned exactly as a belt tile's are, in `[0, 1]` from
+///   this tile's start, because a splitter carries them in an ordinary
+///   one-tile belt segment.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SplitterSnapshot {
+    pub tile: TileCoord,
+    pub kind: String,
+    pub direction: Direction,
+    pub footprint: Footprint,
+    pub items: Vec<(ItemId, f64)>,
+    pub outputs: [Option<TileCoord>; 2],
+    pub next_output: Side,
 }
 
 /// One machine, for rendering.
@@ -713,6 +765,17 @@ pub enum TileSnapshot {
         direction: Direction,
         items_here: Vec<ItemId>,
     },
+    /// `{"kind": "splitter", "direction": "east",
+    ///   "items_here": ["tomato"], "outputs": [[7, 0], [6, -1]],
+    ///   "next_output": "straight"}` — enough for a hover tooltip
+    /// ("Splitter — next: straight"). `outputs` and `next_output` mean
+    /// exactly what they do in [`SplitterSnapshot`].
+    Splitter {
+        direction: Direction,
+        items_here: Vec<ItemId>,
+        outputs: [Option<TileCoord>; 2],
+        next_output: Side,
+    },
     /// `{"kind": "machine", "machine_kind": "cooking_vat",
     ///   "direction": "east",
     ///   "footprint": {"width_tiles": 2, "height_tiles": 2},
@@ -836,6 +899,14 @@ pub struct PlacementSnapshot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BodyKind {
     Belt,
+    /// A conveyor splitter (see [`super::splitter`]). Belt-*like*: it
+    /// carries its contents in an ordinary one-tile [`BeltSegment`] and
+    /// accepts a hand-off from anything a belt accepts one from, so every
+    /// existing transfer function works on it verbatim. What makes it its
+    /// own kind rather than a flag on `Belt` is the other end: it resolves
+    /// to **two** downstream targets instead of one, which no other
+    /// placement in this simulation does.
+    Splitter,
     Pipe,
     Machine,
     Hopper,
@@ -862,13 +933,22 @@ struct Topology {
     /// `all_chunks` walks.
     all: Vec<Entity>,
     belts: Vec<Entity>,
+    splitters: Vec<Entity>,
     pipes: Vec<Entity>,
     machines: Vec<Entity>,
     hoppers: Vec<Entity>,
     tanks: Vec<Entity>,
     docks: Vec<Entity>,
-    /// A belt hands off to the belt it points at.
+    /// A belt hands off to the belt (or splitter) it points at.
     belt_to_belt: Vec<(Entity, Entity)>,
+    /// **The one one-to-many relation in this simulation**: a splitter and
+    /// the two things standing on its output tiles — straight-through
+    /// first, then the branch one quarter turn clockwise (see
+    /// [`super::splitter`]). Either entry is `None` when nothing that can
+    /// accept an item is there, which is what makes "a splitter with one
+    /// output feeds that one" and "a splitter with none holds everything"
+    /// fall out of the ordinary offer loop rather than being special cases.
+    splitter_outputs: Vec<(Entity, [Option<Entity>; 2])>,
     /// A belt hands off into a machine's inlet face, or into a dock.
     belt_to_sink: Vec<(Entity, Entity)>,
     /// A machine or hopper discharges onto the belt off its outlet face.
@@ -1104,7 +1184,7 @@ impl World {
             return false;
         }
         match kind {
-            BELT_KIND | PIPE_KIND | DOCK_KIND | FLUID_TANK_KIND => true,
+            BELT_KIND | PIPE_KIND | SPLITTER_KIND | DOCK_KIND | FLUID_TANK_KIND => true,
             HOPPER_KIND => self.raw_item.is_some(),
             other => self.recipe_for_kind.contains_key(other),
         }
@@ -1140,6 +1220,22 @@ impl World {
                     Fx::from_num(BELT_TILE_LENGTH),
                     Fx::from_num(ITEM_MIN_SPACING_TILES),
                 ),
+            )),
+            // A splitter is a one-tile belt segment plus a cursor saying
+            // which output is due — see `splitter.rs`'s module doc for why
+            // the buffer is a `BeltSegment` and not a bespoke slot. Same
+            // length and spacing as a belt tile, deliberately: dropping a
+            // splitter into a line must not change how fast product moves
+            // through it.
+            SPLITTER_KIND => self.ecs.spawn((
+                position,
+                placement,
+                BodyKind::Splitter,
+                BeltSegment::new(
+                    Fx::from_num(BELT_TILE_LENGTH),
+                    Fx::from_num(ITEM_MIN_SPACING_TILES),
+                ),
+                Splitter::new(),
             )),
             PIPE_KIND => self.ecs.spawn((
                 position,
@@ -1296,6 +1392,7 @@ impl World {
             topology.all.push(entity);
             match body {
                 BodyKind::Belt => topology.belts.push(entity),
+                BodyKind::Splitter => topology.splitters.push(entity),
                 BodyKind::Pipe => topology.pipes.push(entity),
                 BodyKind::Machine => topology.machines.push(entity),
                 BodyKind::Hopper => topology.hoppers.push(entity),
@@ -1323,41 +1420,68 @@ impl World {
         // --- solid hand-offs: a belt hands to whatever it points at, and a
         // machine/hopper discharges onto whatever belt is off its outlet
         // face. Faces matter here (see this module's doc).
-        for &belt in &topology.belts {
-            let placement = self.placement_of(belt);
-            let target = placement.direction.step(self.position_of(belt));
-            let Some(&occupant) = topology.grid.get(&target) else {
-                continue;
-            };
+        //
+        // What may receive a solid item handed *into* `target`. Written once
+        // because two relations now ask it — a belt's single downstream tile
+        // and each of a splitter's two — and they must never diverge on what
+        // counts as a valid sink.
+        let resolve_sink = |grid: &BTreeMap<TileCoord, Entity>, target: TileCoord| {
+            let &occupant = grid.get(&target)?;
             match body_of(occupant) {
-                BodyKind::Belt => topology.belt_to_belt.push((belt, occupant)),
+                // Belt-like: takes anything, whatever it is facing, exactly
+                // as a belt tile always has.
+                BodyKind::Belt | BodyKind::Splitter => Some(occupant),
+                // A machine or a dock only accepts on its inlet face.
                 BodyKind::Machine | BodyKind::Dock => {
                     let sink = self.placement_of(occupant);
                     let sink_origin = self.position_of(occupant);
-                    if sink
-                        .footprint
+                    sink.footprint
                         .inlet_tiles(sink_origin, sink.direction)
                         .contains(&target)
-                    {
-                        topology.belt_to_sink.push((belt, occupant));
-                    }
+                        .then_some(occupant)
                 }
-                _ => {}
+                BodyKind::Pipe | BodyKind::Hopper | BodyKind::FluidTank => None,
             }
+        };
+        for &belt in &topology.belts {
+            let placement = self.placement_of(belt);
+            let target = placement.direction.step(self.position_of(belt));
+            let Some(occupant) = resolve_sink(&topology.grid, target) else {
+                continue;
+            };
+            if is_belt_like(body_of(occupant)) {
+                topology.belt_to_belt.push((belt, occupant));
+            } else {
+                topology.belt_to_sink.push((belt, occupant));
+            }
+        }
+        // A splitter's two outputs: its own facing, then one quarter turn
+        // clockwise from it (`splitter.rs` owns that rule and this is its
+        // only call site). A side with nothing valid on it stays `None` and
+        // simply always refuses at tick time.
+        for &splitter in &topology.splitters {
+            let placement = self.placement_of(splitter);
+            let origin = self.position_of(splitter);
+            let outputs = Side::BOTH.map(|side| {
+                let target = side.direction_from(placement.direction).step(origin);
+                resolve_sink(&topology.grid, target)
+            });
+            topology.splitter_outputs.push((splitter, outputs));
         }
         for &source in topology.machines.iter().chain(topology.hoppers.iter()) {
             let placement = self.placement_of(source);
             let origin = self.position_of(source);
-            // The first belt off the outlet face, in the face's own
-            // deterministic order. A machine hands over one unit per tick,
-            // so a second belt against the same face would need a
-            // round-robin rule nobody has asked for.
+            // The first belt (or splitter) off the outlet face, in the
+            // face's own deterministic order. A machine hands over one unit
+            // per tick, so a second belt against the same face would need a
+            // round-robin rule nobody has asked for — which is exactly what
+            // a splitter standing there gives the player instead.
             let outlet_belt = placement
                 .footprint
                 .outlet_neighbours(origin, placement.direction)
                 .into_iter()
                 .filter_map(|tile| topology.grid.get(&tile).copied())
-                .find(|&occupant| body_of(occupant) == BodyKind::Belt);
+                .find(|&occupant| is_belt_like(body_of(occupant)));
             if let Some(belt) = outlet_belt {
                 topology.source_to_belt.push((source, belt));
             }
@@ -1541,14 +1665,19 @@ impl World {
     ///    dirty: fluid moves on nearly every tick, and dirtying a chunk
     ///    every tick would defeat the point of dirty tracking (§4's delta
     ///    granularity). Presentation polls `fluid_snapshots` instead.
-    /// 2. **Belts move**, each by one tick's travel.
+    /// 2. **Belts move**, each by one tick's travel — splitters too, which
+    ///    are belt tiles with a choice at the end (see
+    ///    [`super::splitter`]), so product crosses one at belt speed.
     /// 3. **Machines run** — start a craft, or deposit a finished one.
     /// 4. **Consumers pull** off a belt's end: into a machine's input
     ///    buffer, or onto a dock.
     /// 5. **Producers push** onto a belt's start: a hopper meters one raw
-    ///    unit, a machine hands over one finished unit, and a belt hands its
-    ///    front item to the belt ahead of it. All after every belt has
-    ///    already moved this tick, so nothing crosses two tiles in one tick.
+    ///    unit, a machine hands over one finished unit, a belt hands its
+    ///    front item to the belt ahead of it, and **a splitter deals its
+    ///    front item to one of its two outputs**. All after every belt has
+    ///    already moved this tick, so nothing crosses two tiles in one tick
+    ///    — a splitter included, since an item handed *onto* it this tick
+    ///    lands at the start of its segment and is not at the end yet.
     /// 6. **Docks ship** whatever they took in step 4 into [`Economy`]'s
     ///    shared delivery pool — in the same tick it arrived, because a dock
     ///    is a pass-through (see [`super::dock`]) and the pool is what
@@ -1574,21 +1703,25 @@ impl World {
             network.tick();
         }
 
-        // 2. Belts.
+        // 2. Belts — and splitters, which carry their contents in an
+        // ordinary belt segment (`splitter.rs`) so that product crosses one
+        // in exactly the time it would cross the belt tile it replaced.
         let belts = std::mem::take(&mut self.topology.belts);
-        for &belt in &belts {
+        let splitters = std::mem::take(&mut self.topology.splitters);
+        for &carrier in belts.iter().chain(splitters.iter()) {
             let moved = {
                 let mut segment = self
                     .ecs
-                    .get::<&mut BeltSegment>(belt)
-                    .expect("a belt placement carries a BeltSegment");
+                    .get::<&mut BeltSegment>(carrier)
+                    .expect("a belt or splitter placement carries a BeltSegment");
                 segment.tick(self.belt_speed)
             };
             if moved {
-                let tile = self.position_of(belt);
+                let tile = self.position_of(carrier);
                 self.mark_dirty(tile);
             }
         }
+        self.topology.splitters = splitters;
 
         // 3. Machines.
         let machines = std::mem::take(&mut self.topology.machines);
@@ -1656,6 +1789,22 @@ impl World {
             }
         }
         self.topology.belt_to_belt = belt_to_belt;
+
+        // ...and a splitter deals its front item to one of its two outputs,
+        // alternating (`splitter.rs` owns the rule). After the belt-to-belt
+        // hop rather than before it only so the whole of step 5 reads in one
+        // order; the two passes are independent, because an item handed onto
+        // a splitter this tick lands at the start of its segment and cannot
+        // also leave it.
+        let splitter_outputs = std::mem::take(&mut self.topology.splitter_outputs);
+        for &(splitter, outputs) in &splitter_outputs {
+            if let Some(target) = self.try_split(splitter, outputs) {
+                let tile = self.position_of(splitter);
+                self.mark_dirty(tile);
+                self.mark_placement_dirty(target);
+            }
+        }
+        self.topology.splitter_outputs = splitter_outputs;
 
         // 6. Docks ship.
         let docks = std::mem::take(&mut self.topology.docks);
@@ -1778,6 +1927,63 @@ impl World {
             "the item was ready one statement ago and nothing else can have moved it"
         );
         true
+    }
+
+    /// Offers `splitter`'s front item to its two outputs in the order its
+    /// cursor says (due side first, then the other — see
+    /// [`super::splitter`]'s module doc for why the fallback exists and why
+    /// the cursor advances on whichever side actually took it). Returns the
+    /// entity that took it, so the caller can dirty its chunk.
+    ///
+    /// One item per tick at most, like every other hand-off here. Nothing at
+    /// all happens when both sides refuse: the item stays exactly where it
+    /// is and the line backs up behind the splitter, which is what a
+    /// splitter with no outputs — or two full ones — has to do.
+    fn try_split(&mut self, splitter: Entity, outputs: [Option<Entity>; 2]) -> Option<Entity> {
+        {
+            // Cheap early out, and the reason `record_output` below can
+            // trust that a successful hand-off moved *this* item.
+            let segment = self
+                .ecs
+                .get::<&BeltSegment>(splitter)
+                .expect("a splitter placement carries a BeltSegment");
+            segment.front_ready()?;
+        }
+        let order = self
+            .ecs
+            .get::<&Splitter>(splitter)
+            .expect("a splitter placement carries a Splitter")
+            .offer_order();
+        for side in order {
+            let Some(target) = outputs[side.index()] else {
+                continue;
+            };
+            if self.try_handoff_from_belt_like(splitter, target) {
+                self.ecs
+                    .get::<&mut Splitter>(splitter)
+                    .expect("a splitter placement carries a Splitter")
+                    .record_output(side);
+                return Some(target);
+            }
+        }
+        None
+    }
+
+    /// Hands `from`'s front item to whatever `target` is — the three
+    /// existing belt-side transfers behind one dispatch, so a splitter's
+    /// output reaches exactly the sinks a belt's does and by exactly the
+    /// same code. `target` has already been validated by
+    /// `recompute_topology`'s `resolve_sink` (a machine's inlet face, in
+    /// particular, was checked there); this only picks the transfer.
+    fn try_handoff_from_belt_like(&mut self, from: Entity, target: Entity) -> bool {
+        match self.body_kind(target) {
+            Some(BodyKind::Belt) | Some(BodyKind::Splitter) => {
+                self.try_transfer_belt_to_belt(from, target)
+            }
+            Some(BodyKind::Machine) => self.try_transfer_belt_to_machine(from, target),
+            Some(BodyKind::Dock) => self.try_absorb_belt_into_dock(from, target),
+            _ => false,
+        }
     }
 
     fn try_unload_hopper_onto_belt(&mut self, hopper: Entity, belt: Entity) -> bool {
@@ -1914,6 +2120,12 @@ impl World {
             let tile = self.position_of(belt);
             if chunk_of(tile) == id {
                 snapshot.belts.push(self.belt_snapshot(belt));
+            }
+        }
+        for &splitter in &self.topology.splitters {
+            let tile = self.position_of(splitter);
+            if chunk_of(tile) == id {
+                snapshot.splitters.push(self.splitter_snapshot(splitter));
             }
         }
         // Anything with a footprint is reported for every chunk it
@@ -2093,6 +2305,41 @@ impl World {
         }
     }
 
+    fn splitter_snapshot(&self, splitter: Entity) -> SplitterSnapshot {
+        let placement = self.placement_of(splitter);
+        let segment = self.ecs.get::<&BeltSegment>(splitter).unwrap();
+        SplitterSnapshot {
+            tile: self.position_of(splitter),
+            kind: placement.kind,
+            direction: placement.direction,
+            footprint: placement.footprint,
+            items: segment
+                .snapshot_positions()
+                .into_iter()
+                .map(|(item, pos)| (item, pos.to_num::<f64>()))
+                .collect(),
+            outputs: self.splitter_output_tiles(splitter),
+            next_output: self
+                .ecs
+                .get::<&Splitter>(splitter)
+                .expect("a splitter placement carries a Splitter")
+                .due(),
+        }
+    }
+
+    /// The tile each of a splitter's outputs currently hands to, read off
+    /// the topology's own links rather than re-derived — so what is reported
+    /// can never disagree with where an item actually goes (the same rule
+    /// [`Self::outbound_belt_tile`] follows).
+    fn splitter_output_tiles(&self, splitter: Entity) -> [Option<TileCoord>; 2] {
+        self.topology
+            .splitter_outputs
+            .iter()
+            .find(|&&(entity, _)| entity == splitter)
+            .map(|&(_, outputs)| outputs.map(|target| target.map(|t| self.position_of(t))))
+            .unwrap_or([None, None])
+    }
+
     fn machine_snapshot(&self, machine: Entity) -> MachineSnapshot {
         let placement = self.placement_of(machine);
         let body = self.ecs.get::<&Machine>(machine).unwrap();
@@ -2206,6 +2453,23 @@ impl World {
                         .into_iter()
                         .map(|(item, _)| item)
                         .collect(),
+                }
+            }
+            BodyKind::Splitter => {
+                let segment = self.ecs.get::<&BeltSegment>(entity).unwrap();
+                TileSnapshot::Splitter {
+                    direction: placement.direction,
+                    items_here: segment
+                        .snapshot_positions()
+                        .into_iter()
+                        .map(|(item, _)| item)
+                        .collect(),
+                    outputs: self.splitter_output_tiles(entity),
+                    next_output: self
+                        .ecs
+                        .get::<&Splitter>(entity)
+                        .expect("a splitter placement carries a Splitter")
+                        .due(),
                 }
             }
             BodyKind::Machine => {
@@ -2337,6 +2601,14 @@ fn footprint_chunks(origin: TileCoord, footprint: Footprint) -> Vec<ChunkId> {
     }
     debug_assert_eq!(chunks[0], chunk_of(origin));
     chunks
+}
+
+/// Whether a body carries solid items in a [`BeltSegment`] — a belt tile or
+/// a splitter. The single answer to "can this thing be handed an item the
+/// way a belt can", so belt linking, machine/hopper discharge and a
+/// splitter's own outputs cannot disagree about it.
+fn is_belt_like(body: BodyKind) -> bool {
+    matches!(body, BodyKind::Belt | BodyKind::Splitter)
 }
 
 fn pipe_snapshot(segment: &PipeSegment) -> PipeSnapshot {

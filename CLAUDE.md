@@ -340,6 +340,84 @@ it's gone stale.
 
 ## Decisions log
 
+- 2026-09-08: **Epic B, ticket 1 of 2 (the sim half; `godot_project/` and
+  `assets/voxels/` deliberately untouched) — the conveyor splitter, and with
+  it the first one-to-many hand-off in the simulation.** Every link
+  `World::recompute_topology` had built until now was one-to-one: a belt
+  looks at the single tile its own `Direction` points at. A splitter looks
+  at two, which is what lets one crusher feed two mixers, or a line be
+  tapped without being cut. Five calls worth not re-litigating.
+
+  (1) **The second output is derived from the placement's one `direction`,
+  not stored.** `direction` is the **straight-through** output — a splitter
+  placed facing the way the belts around it already run carries product
+  exactly where a belt tile would have — and the branch is one quarter turn
+  **clockwise** (`Direction::rotate_cw`, the same turn `PlayerCommand::Rotate`
+  applies). Three things follow, and they are why this beats a second stored
+  facing: a splitter drops into an existing line without the player working
+  out which of two facings is "the main one"; one `rotate` turns **both**
+  outputs together, for free, with no second field that could drift out of
+  step with the first and no new command; and the four facings reach all four
+  L-shapes, so nothing is unreachable (a player who wants the branch on the
+  other side faces the splitter the other way and lets the straight run take
+  the corner). What a splitter *accepts* is deliberately not face-gated at
+  all — it is belt-like, so anything that hands to a belt hands to it, which
+  is the 1x1 rule this codebase already has (a 1x1 placement's inlet face is
+  its only tile, which is why a dock and a hopper already behave this way).
+
+  (2) **The distribution rule is round-robin with fallback**, i.e. Factorio's
+  default splitter. The due side gets first refusal; if it cannot take the
+  item the other side is offered it **in the same tick**; whichever side
+  actually takes it, the other becomes due. The fallback is what makes it a
+  splitter rather than a metering valve — a splitter that insisted on its
+  turn would stall a whole line on one full buffer, which is a throughput bug
+  the player cannot see. Advancing the cursor on *whichever* side took it
+  (rather than only on the side that was due) is what makes fairness resume
+  by itself: while one branch is blocked, every item goes down the open one
+  and the blocked one stays permanently due, so the first item after it
+  clears is its. No catch-up counter, no starvation. **Both degenerate
+  wirings fall out of that loop rather than being special-cased**: one output
+  connected feeds that one, no outputs connected holds everything and backs
+  the line up.
+
+  (3) **The buffer is an ordinary one-tile `BeltSegment`, not a bespoke
+  one-slot type** — the `Splitter` component holds *only* the round-robin
+  cursor. A splitter is a belt tile with a choice at the end of it, so
+  reusing the belt's own gap-based storage means an item crosses it in the
+  same 50 ticks it would cross a belt: inserting one into a line changes
+  where product goes and never how fast it travels, where an instant one-slot
+  buffer would have made a line *with* a splitter measurably quicker than the
+  same line without one. It also means every existing hand-off works on it
+  verbatim (belt-to-splitter is `try_transfer_belt_to_belt`, machine- and
+  hopper-to-splitter are the functions they already use for a belt), so the
+  "spawn first, then take" ordering that makes a refused hop non-destructive
+  is inherited rather than written a fourth time in a place the
+  mass-conservation tests would only catch by luck.
+
+  (4) **A genuinely new kind and a genuinely new `BodyKind`, not a flag on
+  the belt.** It has its own 1x1 footprint in `data/machines.ron` (the
+  *fourth* kind there with no recipe behind it, beside the hopper, the tank
+  and the dock) and its own price in `data/shop.ron`, so it is bought,
+  placed, rotated and removed by the existing commands with **no new command
+  type**. What makes it its own `BodyKind` rather than `Belt` with a second
+  target is precisely the one-to-many resolution: `Topology` gained one
+  relation, `splitter_outputs: Vec<(Entity, [Option<Entity>; 2])>`, and the
+  belt loop's sink classification was factored into one `resolve_sink`
+  closure both relations call — so a splitter's outputs reach exactly the
+  sinks a belt's hand-off does (another belt, another splitter, a machine's
+  inlet face, a dock) and the two can never diverge on what counts as valid.
+
+  (5) **Priced at 25 and listed with the infrastructure**, not with the
+  buildings: five belt tiles' worth, a real premium over a plain tile and
+  still an order of magnitude under any building. A splitter is a mechanism
+  where a belt is a surface, and half the point of building one is that it is
+  cheaper than the second production line it lets you feed. **Flagged, not
+  fixed:** `main.gd`'s hotbar has ten number keys and `shop.ron` already had
+  eleven entries before this, so the catalog has outgrown the strip — adding
+  the splitter in the infrastructure group makes the last two kinds keyless
+  rather than the last one. Nothing becomes unreachable (the build menu still
+  places by right-click), and it is ticket 2's to solve.
+
 - 2026-09-08: **An inventory hotbar, and a starting balance that lets the
   loop close.** Two directly-requested changes in one ticket, because the
   second breaks what the first touches. `sim_core` got exactly one changed

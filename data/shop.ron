@@ -30,9 +30,9 @@
 // here (the loader's `validate_covers` checks exactly that, so adding a
 // machine kind without pricing it is an error rather than a thing the
 // player can never buy), plus the two pieces of infrastructure that are not
-// machines at all — a belt tile and a pipe tile. Those two are priced *per
-// tile*, because that is the unit a player places them in; everything else
-// is priced per building.
+// machines at all — a belt tile and a pipe tile. Those two, and the splitter
+// that sits between them in a line, are priced *per tile*, because that is
+// the unit a player places them in; everything else is priced per building.
 //
 // PRICES ARE PLACEHOLDERS. GAMEPLAY.md §10 puts exact numeric balance
 // ("ingredient costs, contract payouts, equipment prices, wage rates")
@@ -81,6 +81,25 @@
         ShopEntry(
             id: "pipe",
             price: 8,
+        ),
+        // Epic B's conveyor splitter — one belt in, two belts out. Listed
+        // with the infrastructure rather than with the buildings because
+        // that is what it is: a tile you drop into a line, the same size and
+        // the same speed as the belt tile it stands in place of (it holds
+        // what it carries in an ordinary one-tile belt segment — see
+        // `sim_core/src/sim/splitter.rs`).
+        //
+        // Five belt tiles' worth, which is a real premium over the 5 a plain
+        // tile costs and still an order of magnitude under any building, per
+        // shape rule 1 above. The premium is meant to be felt but not saved
+        // up for: a splitter is a mechanism (it holds product and chooses
+        // where each unit goes) where a belt is a surface, and half the
+        // point of building one is that it is cheaper than the second
+        // production line it lets you feed. Priced above the pipe for the
+        // same reason the pipe is priced above the belt.
+        ShopEntry(
+            id: "splitter",
+            price: 25,
         ),
 
         // --- Buffers: placed buildings with no recipe (see machines.ron) ---

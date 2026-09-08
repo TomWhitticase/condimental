@@ -31,6 +31,7 @@ below is history and should only ever be appended to.)*
 - **Real placement (DONE, both halves):** the world starts **empty**, with `STARTING_MONEY` (200) and a bare floor, and the player builds everything on it. `Place`/`Remove`/`Rotate` commands put things down out of the shop inventory, take them back, and turn them 90° clockwise; a belt carries toward the way it faces, a machine accepts on the face opposite the way it faces and discharges on the face it points at, and a line may turn corners. The hopper, the fluid tank and the dock are ordinary placeable kinds now, and a world may hold any number of each. The scene rebuilds itself from `world_layout_json` after every place/remove/rotate, draws every tile at the facing the player gave it, and has a real build mode: right-click an owned build-menu slot (or shift+number) to pick it up, a translucent ghost follows the cursor and says **✔ PLACE** / **✗ BLOCKED** / **✗ NONE OWNED** in a glyph and a word as well as a colour, **R** rotates the ghost or whatever is under the cursor, **X** toggles remove mode, **ESC** cancels, left-click confirms. The belt junction art stays east-only and falls back to the plain tile for the other three facings — a known, tested, accepted gap; a four-directional art pass is a separate ticket. *(The balance caveat this entry used to carry — 200 could not reach a first payout — was fixed by the inventory-hotbar work below; `STARTING_MONEY` is 3000 now.)*
 - **Inventory hotbar (done):** an always-visible strip along the bottom edge, one slot per `data/shop.ron` kind, showing what the player is carrying. **Number keys 1-9 and 0 select a slot and put that kind in your hand** — in either view mode, with or without a menu open, which is the behaviour change: until now nothing at all was reachable without opening the build menu first. Pressing the selected slot's key again puts it down, mirroring ESC. Buying stays a separate verb in the build menu (**E**), on a slot's left click or SHIFT+number. A kind you own none of is an empty socket rather than a disabled button, selection is signalled four ways at once (bigger slot, hazard-yellow frame, caret, brightened key digit) plus Minecraft's fading name flyout, and the whole strip is driven from `shop_snapshot_json` like the menu it now fronts. **Starting money went from 200 to 3000 in the same ticket** — the shipped six-stage line costs 1087, so a new save can now build all of it outright with ~1900 to spare, and the core loop finally closes from a cold start.
 
+- **Conveyor splitters (sim half done, presentation to come):** a line can fork. A `splitter` is a 1x1 buildable kind that carries product exactly like a belt tile and deals it alternately between two outputs — the tile it faces, and the tile one quarter turn clockwise from it — so one `rotate` turns both outputs together and no new command was needed. If the side that is due is blocked (or was never built) the item goes down the other one in the same tick, so a full branch never stalls the whole line and "only one output connected" needs no special case. It reaches every sink a belt's hand-off does: another belt, another splitter, a machine's inlet face, a dock. Its wire form (a `splitters` array on the chunk snapshot, a `splitter` variant from `query_tile`) is on the boundary; nothing draws it yet.
 - **Contracts (done, both halves):** contracts are `data/contracts.ron` content and three run concurrently, each with its own mix/cadence/payout, all drawing from one shared pool of delivered stock (a box pays one contract, never two). The clipboard panel shows all of them — one paper docket card per contract on the one board, each with its own checklist, payout, countdown and delivered/missed tally, above a single shared money figure and a single "on the dock" line naming the pool they compete for.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
@@ -60,6 +61,36 @@ left the biggest panel on screen standing. That was a real gap, not a
 preference; `_close_all_overlays` is the ESC-only wider verb, deliberately
 separate from `_exit_build_mode` because the hotbar's deselect and the
 "you placed your last one" exit must *not* sweep the menu away with them.
+
+### 2026-09-08 — A line can fork: the conveyor splitter (sim half)
+
+Epic B's ticket 1. Until now every hand-off in the simulation was
+one-to-one — a belt looks at the single tile it points at — so a production
+line could turn corners but never branch. A **splitter** is the first
+placement that resolves to two downstream targets: a 1x1 buildable kind
+(`data/machines.ron`, priced at 25 in `data/shop.ron`) that carries product
+like a belt tile and deals it alternately between the tile it faces and the
+tile one quarter turn clockwise from it. One `rotate` turns both outputs
+together, because the second output is derived from the placement's single
+`direction` rather than stored — so no new command and no second facing that
+could drift out of step with the first.
+
+The distribution rule is Factorio's: strict alternation while both sides can
+take, falling back to the other side in the same tick when one is blocked, so
+a full branch never stalls the whole line. Both degenerate wirings fall out
+of that loop rather than being special-cased — one output connected feeds
+that one, no outputs connected holds everything and backs the line up. What
+a splitter is *holding* lives in an ordinary one-tile belt segment, which is
+what makes an item cross it at belt speed and lets every existing transfer
+function feed it unchanged.
+
+Sim and data only: `godot_project/` and `assets/voxels/` were deliberately
+untouched, and the splitter's wire form (`chunk_snapshot`'s new `splitters`
+array, `query_tile`'s new variant) is on the boundary waiting for ticket 2 to
+draw it. One thing flagged in passing: the shop catalog has outgrown the
+hotbar's ten number keys, so the last two kinds are now keyless — a
+presentation problem for that ticket, not a simulation one. See CLAUDE.md's
+decisions log for the five design calls.
 
 ### 2026-09-08 — A real hotbar, and a starting balance the loop can close from
 

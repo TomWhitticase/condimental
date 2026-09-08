@@ -15,6 +15,7 @@ pub mod machines;
 pub mod recipe;
 pub mod reference;
 pub mod shop;
+pub mod splitter;
 pub mod types;
 pub mod world;
 
@@ -35,9 +36,10 @@ pub use shop::{
     DEFAULT_PURCHASE_QUANTITY, OwnedEquipment, Shop, ShopCatalog, ShopEntry, ShopEntrySnapshot,
     ShopSnapshot,
 };
+pub use splitter::{SPLITTER_KIND, Side, Splitter};
 pub use types::{Direction, decode_chunk_id, encode_chunk_id};
 pub use world::{
     BELT_KIND, BeltSnapshot, ChunkSnapshot, DockSnapshot, FluidSnapshot, FluidTankSnapshot,
     FluidTapSnapshot, HopperSnapshot, MachineSnapshot, PIPE_KIND, PipeSnapshot, PlacementSnapshot,
-    PlayerCommand, TileSnapshot, World, command_from_json,
+    PlayerCommand, SplitterSnapshot, TileSnapshot, World, command_from_json,
 };

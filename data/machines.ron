@@ -56,20 +56,22 @@
 // the loader enforces that: adding a kind here without a price there is an
 // error, not a thing the player can never build.
 //
-// THREE KINDS HERE ARE NOT A RECIPE'S MACHINE (ticket 3, the "Visual
-// overhaul round 2" epic's ticket 1, and the delivery-dock ticket). Every
-// other kind in this file is named by some `Recipe.machine` in
-// `data/recipes.ron`; the `hopper`, the `fluid_tank` and the `dock` are not.
-// Each is a *buffer* rather than a process — the hopper holds raw tomatoes
-// and meters them onto the first belt, the fluid tank holds vinegar and
-// feeds it into the pipe run, the dock takes finished boxes off the last
-// belt and ships them into the economy's shared delivery pool — so none of
-// them turns anything into anything, none has a recipe, and all three are
-// built as their own stage types (`sim_core/src/sim/hopper.rs`,
-// `sim_core/src/sim/fluid.rs`, `sim_core/src/sim/dock.rs`) rather than as a
-// `Machine`. They still live in this file because a footprint is a
-// footprint: they are placed buildings that claim tiles, and nothing else
-// should have to know a second way of answering "how big is that thing."
+// FOUR KINDS HERE ARE NOT A RECIPE'S MACHINE (ticket 3, the "Visual
+// overhaul round 2" epic's ticket 1, the delivery-dock ticket, and Epic B's
+// splitter). Every other kind in this file is named by some `Recipe.machine`
+// in `data/recipes.ron`; the `hopper`, the `fluid_tank`, the `dock` and the
+// `splitter` are not. Each moves product without turning anything into
+// anything — the hopper holds raw tomatoes and meters them onto the first
+// belt, the fluid tank holds vinegar and feeds it into the pipe run, the
+// dock takes finished boxes off the last belt and ships them into the
+// economy's shared delivery pool, the splitter takes one belt's product and
+// deals it out to two — so none of them has a recipe, and all four are
+// built as their own body types (`sim_core/src/sim/hopper.rs`,
+// `sim_core/src/sim/fluid.rs`, `sim_core/src/sim/dock.rs`,
+// `sim_core/src/sim/splitter.rs`) rather than as a `Machine`. They still
+// live in this file because a footprint is a footprint: they are placed
+// buildings that claim tiles, and nothing else should have to know a second
+// way of answering "how big is that thing."
 //
 // ORDER IN THIS FILE IS NOT THE CHAIN, and since the "Real Placement" epic
 // nothing else is either: there is no chain in the simulation at all, only
@@ -106,6 +108,27 @@
         // player stands it.
         MachineKind(
             id: "fluid_tank",
+            footprint: Footprint(width_tiles: 1, height_tiles: 1),
+        ),
+        // A conveyor splitter (Epic B) — one belt in, two belts out, and
+        // the FOURTH kind in this file with no recipe behind it. Like the
+        // hopper, the tank and the dock it moves product without changing
+        // it, so it is a placed building with a footprint rather than a
+        // `Recipe.machine`; unlike those three it is *belt-like*, holding
+        // what it carries in an ordinary one-tile `BeltSegment` (see
+        // `sim_core/src/sim/splitter.rs`).
+        //
+        // 1x1, and this one is not a judgement call: a splitter has to be
+        // interchangeable with the belt tile it stands in place of, or it
+        // could not be dropped into an existing line. It is the same
+        // rotation convention as everything else here with one addition
+        // that is stated in `splitter.rs` rather than invented per call
+        // site — the placement's `direction` is the straight-through
+        // output, and the second output is one quarter turn CLOCKWISE from
+        // it, so rotating the building turns both outputs together and no
+        // second facing field exists to drift out of step with the first.
+        MachineKind(
+            id: "splitter",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
         ),
         // GAMEPLAY.md §2 tier 1's raw-ingredient prep: crushes whole
