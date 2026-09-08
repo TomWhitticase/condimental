@@ -8,11 +8,13 @@ extends Node3D
 ##
 ## Milestone 5 (Economy MVP, ARCHITECTURE.md §9 item 5) added a minimal money
 ## + contract-status HUD readout, read every frame from `economy_snapshot_json`.
-## It now renders as UI_UX.md §5's diegetic clipboard — a paper-toned panel
-## with checkbox-style tick marks for delivery progress, its own distinct
+## It renders as UI_UX.md §5's diegetic clipboard — a paper-toned panel with
+## checkbox-style tick marks for delivery progress, its own distinct
 ## PanelContainer rather than folded into the generic dark HUD panel (see
-## `_build_contract_panel`). The rest of §5 (voxel-rendered icon slots, a
-## hotbar) is still later polish.
+## `_build_contract_panel`). Since contracts became `data/contracts.ron`
+## content it shows ALL of them at once, one docket card each on the one
+## board, because GAMEPLAY.md §6's diversification pressure only reaches the
+## player if every concurrent obligation is visible together.
 ##
 ## What has NOT changed from the previous flat-2D version, deliberately: this
 ## script still learns the chain's shape entirely from `chain_layout_json`
@@ -335,18 +337,48 @@ var _help_label: Label
 # --- Contract clipboard (UI_UX.md §5) --------------------------------------
 # The money/contract readout used to be one plain Label folded into the
 # generic dark HUD panel above. It now lives in its own diegetic "clipboard"
-# panel (a distinct node, per this ticket) so ticket A's hover-tooltip work
+# panel (a distinct node, per that ticket) so ticket A's hover-tooltip work
 # can freely reshape or remove the machine-line panel above without ever
 # touching this one.
+#
+# It shows EVERY active contract, not one. `economy_snapshot_json` reports an
+# array of contracts (each with its own mix, cadence and payout, all drawing
+# from one shared delivery pool — see sim_core/src/sim/economy.rs), and
+# GAMEPLAY.md §6's whole design pressure is that several concurrent orders
+# compete for one factory's throughput. That pressure only exists for the
+# player if all of them are actually on screen at once, so the clipboard is
+# now a board of dockets: ONE sheet of paper (the panel, its steel clip bar
+# unchanged) carrying the shared money figure and the shared dock stock, then
+# one printed docket card per contract below it.
 var _contract_panel: PanelContainer
 var _contract_money_label: Label
-var _contract_meta_label: Label
-var _contract_progress_labels: Dictionary = {} # item id -> Label ("item n/required")
-var _contract_item_icons: Dictionary = {} # item id -> TextureRect, see _icon_for (ticket B)
-var _contract_checklist_boxes: Dictionary = {} # item id -> Array[Panel], one per required unit
+## The shared delivery pool, shown once above the dockets. It is the
+## player-visible face of the allocation rule: every contract below draws
+## from THIS pile, so three checklists reading "2/2" do not mean three
+## payouts — see `_update_contract_dock`.
+var _contract_dock_row: HBoxContainer
+var _contract_dock_entries: Dictionary = {} # item id -> {"row": HBoxContainer, "label": Label}
+var _contract_dock_empty_label: Label
+## One docket card per active contract, in snapshot (= priority) order.
+var _contract_cards: Array = [] # Array[Dictionary], see _build_contract_card
+var _contract_card_ids: Array = [] # the contract ids _contract_cards was built for
+var _contract_cards_box: VBoxContainer
+var _contract_cards_scroll: ScrollContainer
+var _contract_ink_settings: LabelSettings
+var _contract_name_settings: LabelSettings
+var _contract_meta_settings: LabelSettings
+var _checkbox_mark_settings: LabelSettings
 var _checkbox_style_unchecked: StyleBoxFlat
 var _checkbox_style_checked: StyleBoxFlat
+var _contract_card_style: StyleBoxFlat
 const CONTRACT_CHECKLIST_MAX_BOXES := 12 # beyond this, fall back to one box representing "complete"
+## How much of the window height the docket stack may occupy before it
+## scrolls instead of growing (see _update_contract_panel). `data/contracts.ron`
+## ships three contracts and a realistic board is a handful, so this is a
+## safety valve for a content change, not a UI the player is expected to
+## drive — it is cheaper than a compact/summary mode and never silently hides
+## an obligation off the bottom of the screen.
+const CONTRACT_LIST_MAX_HEIGHT_RATIO := 0.62
 
 # --- Voxel-rendered UI icons (UI_UX.md §5) ---------------------------------
 var _icon_cache: Dictionary = {} # asset name -> Texture2D, see _icon_for
@@ -1583,11 +1615,25 @@ func _build_ui() -> void:
 	_build_crosshair(hud)
 
 
-## The first diegetic clipboard/checklist widget (UI_UX.md §5) — reskins the
-## money/contract readout from a plain Label into something that actually
-## reads as "a paper texture on a metal clipboard clip." Deliberately its own
-## PanelContainer, sibling to (not nested inside) the generic HUD panel above,
-## so this stays intact regardless of what other panels come and go there.
+## The diegetic clipboard/checklist widget (UI_UX.md §5) — the money/contract
+## readout as "a paper texture on a metal clipboard clip" rather than a plain
+## Label. Deliberately its own PanelContainer, sibling to (not nested inside)
+## the generic HUD panel above, so this stays intact regardless of what other
+## panels come and go there.
+##
+## LAYOUT DECISION (contracts-as-data, ticket 2). `economy_snapshot_json`
+## reports an ARRAY of contracts, so this is a board of dockets, not a
+## clipboard per contract: one sheet of paper under one steel clip, carrying
+## the SHARED money figure and the SHARED dock stock once at the top, then one
+## printed docket card per contract stacked below. Both alternatives were
+## considered and rejected — a separate PanelContainer per contract repeats
+## the 12px clip bar and the paper frame three times over for no new
+## information, and a single flat list of checklist rows loses which rows
+## belong to which order the moment two contracts want the same item (all
+## three shipped contracts want `boxed_ketchup`). A docket is a slightly
+## darker paper tone with a steel hairline — the same two colours the panel
+## and its checkboxes already use, so this adds separation without adding a
+## visual language.
 func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	# Paper cream background + a thick steel-toned top border standing in for
 	# "the clip" — the same technique the panel above already uses for its
@@ -1619,10 +1665,10 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	# panel. Font family and size are still the ones already established in
 	# _build_ui() (UI_UX.md §5's own "sturdy, slightly blocky" typography
 	# call), only colour/outline change for the paper background.
-	var ink_settings := LabelSettings.new()
-	ink_settings.font_size = base_settings.font_size
-	ink_settings.font_color = Color(0.16, 0.13, 0.08)
-	ink_settings.outline_size = 0
+	_contract_ink_settings = LabelSettings.new()
+	_contract_ink_settings.font_size = base_settings.font_size
+	_contract_ink_settings.font_color = Color(0.16, 0.13, 0.08)
+	_contract_ink_settings.outline_size = 0
 
 	# A small type-scale hierarchy on the clipboard, added during the visual-
 	# overhaul pass: the title and the money figure used to share the exact
@@ -1630,25 +1676,70 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	# — a real UI_UX.md §5 polish gap ("typography/readability issues"), not
 	# just an aesthetic nicety. Same ink colour and family throughout, only
 	# size steps up, so it still reads as one consistent clipboard rather
-	# than mixed styles.
+	# than mixed styles. With several dockets on the board the hierarchy has
+	# one more rung: a contract's NAME is the heading of its own docket, and
+	# its cadence/tally line is deliberately the smallest thing on the panel.
 	var title_settings := LabelSettings.new()
 	title_settings.font_size = base_settings.font_size + 2
-	title_settings.font_color = ink_settings.font_color
+	title_settings.font_color = _contract_ink_settings.font_color
 	title_settings.outline_size = 0
 
 	var money_settings := LabelSettings.new()
 	money_settings.font_size = base_settings.font_size + 6
-	money_settings.font_color = ink_settings.font_color
+	money_settings.font_color = _contract_ink_settings.font_color
 	money_settings.outline_size = 0
+
+	_contract_name_settings = LabelSettings.new()
+	_contract_name_settings.font_size = base_settings.font_size + 1
+	_contract_name_settings.font_color = _contract_ink_settings.font_color
+	_contract_name_settings.outline_size = 0
+
+	# The tick mark gets its own settings, not the body ink's. At body size a
+	# "✓" overflows a 14px checkbox and renders as a clipped diagonal in the
+	# corner (visible only in a real screenshot — the headless test happily
+	# reports a visible Mark node either way), and dark ink on the checked
+	# green is the panel's weakest contrast anywhere. Small and paper-pale
+	# fixes both.
+	_checkbox_mark_settings = LabelSettings.new()
+	_checkbox_mark_settings.font_size = max(8, base_settings.font_size - 4)
+	_checkbox_mark_settings.font_color = Color(0.91, 0.88, 0.78)
+	_checkbox_mark_settings.outline_size = 0
+
+	_contract_meta_settings = LabelSettings.new()
+	_contract_meta_settings.font_size = max(9, base_settings.font_size - 2)
+	# A touch lighter than body ink — still well clear of the paper, but the
+	# cadence/tally line should read as a footnote on the docket, not as
+	# another checklist item.
+	_contract_meta_settings.font_color = Color(0.34, 0.29, 0.20)
+	_contract_meta_settings.outline_size = 0
 
 	var title := Label.new()
 	title.label_settings = title_settings
-	title.text = "CONTRACT"
+	title.text = "CONTRACTS"
 	body.add_child(title)
 
+	# Money is shown ONCE, here, and never per docket: GAMEPLAY.md §1 allows
+	# exactly one currency, and sim_core keeps exactly one counter for it.
 	_contract_money_label = Label.new()
 	_contract_money_label.label_settings = money_settings
 	body.add_child(_contract_money_label)
+
+	# The shared delivery pool, also once. See _update_contract_dock for why
+	# this line exists at all.
+	_contract_dock_row = HBoxContainer.new()
+	_contract_dock_row.name = "DockRow"
+	_contract_dock_row.add_theme_constant_override("separation", 6)
+	body.add_child(_contract_dock_row)
+
+	var dock_title := Label.new()
+	dock_title.label_settings = _contract_meta_settings
+	dock_title.text = "ON THE DOCK"
+	_contract_dock_row.add_child(dock_title)
+
+	_contract_dock_empty_label = Label.new()
+	_contract_dock_empty_label.label_settings = _contract_meta_settings
+	_contract_dock_empty_label.text = "empty"
+	_contract_dock_row.add_child(_contract_dock_empty_label)
 
 	_checkbox_style_unchecked = StyleBoxFlat.new()
 	_checkbox_style_unchecked.bg_color = Color(0.80, 0.74, 0.57, 1.0) # a shade darker than the paper
@@ -1662,24 +1753,124 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_checkbox_style_checked.border_color = Color(0.27, 0.29, 0.32, 1.0)
 	_checkbox_style_checked.set_border_width_all(2)
 
-	# One row per required item in the contract's mix, read live from
-	# economy_snapshot_json rather than assumed — sim_core/src/sim/economy.rs
-	# names the one hardcoded item today, but nothing here hardcodes it.
-	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
-	var mix: Array = econ.get("contract_mix", [])
-	for pair in mix:
-		var item_id: String = String(pair[0])
-		var required: int = int(pair[1])
-		_build_contract_checklist_row(body, ink_settings, item_id, required)
+	# One docket = the checkbox's own paper tone plus a steel hairline. Reusing
+	# those two existing colours is the point (see this function's header):
+	# separation without a third palette.
+	_contract_card_style = StyleBoxFlat.new()
+	_contract_card_style.bg_color = Color(0.83, 0.77, 0.60, 1.0)
+	_contract_card_style.border_color = Color(0.47, 0.44, 0.38, 1.0)
+	_contract_card_style.set_border_width_all(1)
+	_contract_card_style.set_content_margin_all(8.0)
 
-	_contract_meta_label = Label.new()
-	_contract_meta_label.label_settings = ink_settings
-	body.add_child(_contract_meta_label)
+	# The dockets live in a ScrollContainer whose height is capped in
+	# _update_contract_panel — a safety valve for a future contracts.ron with
+	# more orders than fit, not a UI the player is expected to drive today.
+	_contract_cards_scroll = ScrollContainer.new()
+	_contract_cards_scroll.name = "ContractList"
+	_contract_cards_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_contract_cards_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	body.add_child(_contract_cards_scroll)
+
+	_contract_cards_box = VBoxContainer.new()
+	_contract_cards_box.name = "ContractCards"
+	_contract_cards_box.add_theme_constant_override("separation", 8)
+	_contract_cards_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_contract_cards_scroll.add_child(_contract_cards_box)
+
+	# One docket per active contract, read live from economy_snapshot_json
+	# rather than assumed — nothing here hardcodes how many contracts exist,
+	# what they ask for, or what they pay.
+	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
+	_rebuild_contract_cards(econ.get("contracts", []))
 
 	# Anchored to the top-right corner with a fixed margin, sized to its own
 	# content — independent of however tall the machine-line panel ends up
-	# being (ticket A may shrink or remove that panel entirely).
+	# being.
 	_contract_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 16)
+
+
+## Rebuilds the docket stack from a `contracts` array. Called once at build
+## time and again only if the SET of contract ids changes — the shipped world
+## loads its contracts once and never adds or drops one, but a future
+## "contract accepted / contract lost" mechanic (GAMEPLAY.md §11's open
+## question about what a missed window costs) would, and the guard costs a
+## string compare per frame.
+func _rebuild_contract_cards(contracts: Array) -> void:
+	for card in _contract_cards:
+		# Detach FIRST, then queue_free: queue_free is deferred to the end of
+		# the frame, so freeing alone would leave the old dockets in the
+		# container alongside the new ones for a frame. Detach from whatever
+		# the panel's parent actually IS rather than from the current card
+		# box — a scene re-entering the tree runs _ready (and so
+		# _build_contract_panel) a second time, at which point these records
+		# still point at the previous build's container.
+		var panel: Node = card["panel"]
+		if is_instance_valid(panel):
+			if panel.get_parent() != null:
+				panel.get_parent().remove_child(panel)
+			panel.queue_free()
+	_contract_cards.clear()
+	_contract_card_ids.clear()
+	for contract in contracts:
+		_contract_cards.append(_build_contract_card(contract))
+		_contract_card_ids.append(String(contract.get("id", "")))
+
+
+## One contract's docket: its name and payout on a header row, a checklist row
+## per line of its mix, and its OWN cadence/tally footnote. Every contract
+## clocks independently in sim_core, so this countdown is per docket and is
+## never shared the way money is.
+##
+## Returns the record `_update_contract_panel` drives it through:
+##   {"id", "panel", "name_label", "payout_label", "meta_label",
+##    "rows": {item id -> {"icon", "label", "boxes"}}}
+func _build_contract_card(contract: Dictionary) -> Dictionary:
+	var panel := PanelContainer.new()
+	panel.name = "ContractCard_%s" % String(contract.get("id", "?"))
+	panel.add_theme_stylebox_override("panel", _contract_card_style)
+	_contract_cards_box.add_child(panel)
+
+	var card_body := VBoxContainer.new()
+	card_body.add_theme_constant_override("separation", 4)
+	panel.add_child(card_body)
+
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 10)
+	card_body.add_child(header)
+
+	var name_label := Label.new()
+	name_label.label_settings = _contract_name_settings
+	name_label.text = String(contract.get("name", contract.get("id", "?")))
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(name_label)
+
+	# What this order is worth per delivery. It is the whole reason a player
+	# chooses which docket to feed when the line can't serve them all
+	# (GAMEPLAY.md §6), so it belongs on the docket, not in a tooltip.
+	var payout_label := Label.new()
+	payout_label.label_settings = _contract_name_settings
+	payout_label.text = "+%d" % int(contract.get("payout", 0))
+	payout_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	header.add_child(payout_label)
+
+	var rows: Dictionary = {}
+	for pair in contract.get("mix", []):
+		var item_id: String = String(pair[0])
+		var required: int = int(pair[1])
+		rows[item_id] = _build_contract_checklist_row(card_body, item_id, required)
+
+	var meta_label := Label.new()
+	meta_label.label_settings = _contract_meta_settings
+	card_body.add_child(meta_label)
+
+	return {
+		"id": String(contract.get("id", "")),
+		"panel": panel,
+		"name_label": name_label,
+		"payout_label": payout_label,
+		"meta_label": meta_label,
+		"rows": rows,
+	}
 
 
 ## One checklist row: the item's numeric progress text, plus a row of small
@@ -1687,11 +1878,17 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 ## style tick marks for completed items." A contract asking for a very large
 ## quantity would make a per-unit row unreadably wide, so past
 ## CONTRACT_CHECKLIST_MAX_BOXES this falls back to a single box standing for
-## "fully delivered" — the minimum the ticket calls acceptable.
-func _build_contract_checklist_row(body: VBoxContainer, ink_settings: LabelSettings, item_id: String, required: int) -> void:
+## "fully delivered" — the minimum the original ticket calls acceptable.
+##
+## Returns `{"icon", "label", "boxes"}` for its docket's record: the nodes are
+## no longer stashed in a panel-wide dictionary keyed by item id, because
+## several contracts legitimately ask for the SAME item (every contract in the
+## shipped `data/contracts.ron` wants `boxed_ketchup`) and one such dictionary
+## would have them silently overwrite each other's rows.
+func _build_contract_checklist_row(body: VBoxContainer, item_id: String, required: int) -> Dictionary:
 	# Icon + text share a row: UI_UX.md §5's "icons are rendered from the
-	# real assets" (_icon_for, ticket B) applied to the one place this panel
-	# names a specific item.
+	# real assets" (_icon_for) applied to the one place this panel names a
+	# specific item.
 	var header := HBoxContainer.new()
 	header.add_theme_constant_override("separation", 6)
 	body.add_child(header)
@@ -1705,12 +1902,10 @@ func _build_contract_checklist_row(body: VBoxContainer, ink_settings: LabelSetti
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.texture = _icon_for(item_id)
 	header.add_child(icon)
-	_contract_item_icons[item_id] = icon
 
 	var progress_label := Label.new()
-	progress_label.label_settings = ink_settings
+	progress_label.label_settings = _contract_ink_settings
 	header.add_child(progress_label)
-	_contract_progress_labels[item_id] = progress_label
 
 	var checklist := HBoxContainer.new()
 	checklist.add_theme_constant_override("separation", 4)
@@ -1728,7 +1923,7 @@ func _build_contract_checklist_row(body: VBoxContainer, ink_settings: LabelSetti
 		var mark := Label.new()
 		mark.name = "Mark"
 		mark.text = "✓"
-		mark.label_settings = ink_settings
+		mark.label_settings = _checkbox_mark_settings
 		mark.visible = false
 		mark.set_anchors_preset(Control.PRESET_FULL_RECT)
 		mark.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1737,7 +1932,7 @@ func _build_contract_checklist_row(body: VBoxContainer, ink_settings: LabelSetti
 
 		checklist.add_child(box)
 		boxes.append(box)
-	_contract_checklist_boxes[item_id] = boxes
+	return {"icon": icon, "label": progress_label, "boxes": boxes}
 
 
 # --------------------------------------------------------------------------
@@ -2543,36 +2738,36 @@ func _update_hover_tooltip() -> void:
 	_hover_tooltip.visible = true
 
 
-## Drives the contract clipboard (UI_UX.md §5) from the same
-## `economy_snapshot_json` the old plain-Label readout used — money text, the
-## per-item "n/required" numeric line, and each checklist box's checked state.
+## Drives the contract clipboard (UI_UX.md §5) from `economy_snapshot_json`:
+## the one shared money figure, the one shared dock pool, and then EVERY
+## active contract's own docket — its checklist boxes, its numeric progress
+## and its own countdown to its own next delivery check.
 func _update_contract_panel() -> void:
 	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
-	var money: float = float(econ["money"])
-	_contract_money_label.text = "Money: %.0f" % money
+	_contract_money_label.text = "Money: %.0f" % float(econ["money"])
+	_update_contract_dock(econ.get("delivery_stock", []))
 
-	var mix: Array = econ.get("contract_mix", [])
-	var progress: Array = econ.get("contract_progress", [])
-	for i in range(mix.size()):
-		var item_id: String = String(mix[i][0])
-		var required: int = int(mix[i][1])
-		var have: int = int(progress[i][1]) if i < progress.size() else 0
+	var contracts: Array = econ.get("contracts", [])
+	if not _contract_cards_match(contracts):
+		_rebuild_contract_cards(contracts)
 
-		var progress_label: Label = _contract_progress_labels.get(item_id, null)
-		if progress_label != null:
-			progress_label.text = "%s  %d/%d" % [item_id, have, required]
+	var current_tick: int = sim.current_tick()
+	for i in range(min(contracts.size(), _contract_cards.size())):
+		_update_contract_card(_contract_cards[i], contracts[i], current_tick)
 
-		var boxes: Array = _contract_checklist_boxes.get(item_id, [])
-		if boxes.size() == 1 and required > CONTRACT_CHECKLIST_MAX_BOXES:
-			# The single-box fallback (see _build_contract_checklist_row):
-			# checked only once the whole quantity is in.
-			_set_checkbox_checked(boxes[0], have >= required)
-		else:
-			for u in range(boxes.size()):
-				_set_checkbox_checked(boxes[u], u < have)
-
-	var ticks_left: int = max(0, int(econ["next_delivery_tick"]) - sim.current_tick())
-	_contract_meta_label.text = "Next check in %d ticks" % ticks_left
+	# Cap the docket stack's height rather than letting it grow off the
+	# bottom of the screen: past the cap it scrolls. `data/contracts.ron`
+	# ships three and this never engages, which is the intent — a handful of
+	# concurrent orders is the realistic board (GAMEPLAY.md §6 names no
+	# count), so this is a safety valve for a content change rather than a
+	# compact/summary mode nobody needs yet.
+	var natural_height: float = _contract_cards_box.get_combined_minimum_size().y
+	# A headless SceneTree run has no viewport at all, and a window that has
+	# not laid out yet reports a zero rect — neither must collapse the stack
+	# to nothing, so "no viewport" means "no cap", not "a cap of zero".
+	var viewport := get_viewport()
+	var cap: float = viewport.get_visible_rect().size.y * CONTRACT_LIST_MAX_HEIGHT_RATIO if viewport != null else 0.0
+	_contract_cards_scroll.custom_minimum_size.y = min(natural_height, cap) if cap > 0.0 else natural_height
 
 	# Re-anchor every update, not just once at build time: the panel's
 	# minimum size grows once real text ("Money: 1234", "Next check in 1000
@@ -2581,6 +2776,109 @@ func _update_contract_panel() -> void:
 	# the panel stays sized/positioned for its build-time (near-empty) text
 	# and later, wider text spills past its right edge.
 	_contract_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 16)
+
+
+## True when the built dockets already correspond, in order, to the reported
+## contracts — the cheap guard that keeps _update_contract_panel from
+## rebuilding nodes every frame for a list that never changes.
+func _contract_cards_match(contracts: Array) -> bool:
+	if contracts.size() != _contract_card_ids.size():
+		return false
+	for i in range(contracts.size()):
+		if String(contracts[i].get("id", "")) != String(_contract_card_ids[i]):
+			return false
+	return true
+
+
+## The shared delivery pool, shown once above the dockets.
+##
+## This line is the player-visible face of sim_core's allocation rule: there
+## is ONE pile of collected stock and a settling contract CONSUMES its mix
+## from it, so a box is never credited to two orders. Without it, three
+## dockets whose checklists all read "2/2" look like three imminent payouts
+## when the dock may hold only two boxes total — the checklists are each
+## clamped to their own ask (that clamping is sim_core's, deliberately), and
+## this unclamped number is what reconciles them. It is one line of text
+## rather than a new widget: surfacing the rule is worth it, inventing a
+## second progress language for it is not.
+func _update_contract_dock(stock: Array) -> void:
+	var seen: Dictionary = {}
+	for pair in stock:
+		var item_id: String = String(pair[0])
+		var qty: int = int(pair[1])
+		seen[item_id] = true
+		var entry: Dictionary = _contract_dock_entries.get(item_id, {})
+		if entry.is_empty():
+			entry = _build_contract_dock_entry(item_id)
+			_contract_dock_entries[item_id] = entry
+		entry["label"].text = "%d" % qty
+		entry["row"].visible = true
+	for item_id in _contract_dock_entries:
+		if not seen.has(item_id):
+			_contract_dock_entries[item_id]["row"].visible = false
+	# `delivery_stock` reports non-zero entries only, so an empty array is
+	# genuinely "nothing on the dock" — say so rather than showing a bare label.
+	_contract_dock_empty_label.visible = stock.is_empty()
+
+
+func _build_contract_dock_entry(item_id: String) -> Dictionary:
+	var row := HBoxContainer.new()
+	row.name = "dock_%s" % item_id
+	row.add_theme_constant_override("separation", 3)
+	_contract_dock_row.add_child(row)
+
+	var icon := TextureRect.new()
+	icon.custom_minimum_size = Vector2(14, 14)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.texture = _icon_for(item_id)
+	row.add_child(icon)
+
+	var label := Label.new()
+	label.label_settings = _contract_meta_settings
+	row.add_child(label)
+	return {"row": row, "label": label, "icon": icon}
+
+
+## One docket's live state. `progress` is sim_core's per-contract, clamped
+## coverage of this contract's own mix (a checklist reads 2/2, never 7/2);
+## the unclamped pool it is drawn from is the dock line above.
+func _update_contract_card(card: Dictionary, contract: Dictionary, current_tick: int) -> void:
+	var mix: Array = contract.get("mix", [])
+	var progress: Array = contract.get("progress", [])
+	var rows: Dictionary = card["rows"]
+	for i in range(mix.size()):
+		var item_id: String = String(mix[i][0])
+		var required: int = int(mix[i][1])
+		var have: int = int(progress[i][1]) if i < progress.size() else 0
+
+		var row: Dictionary = rows.get(item_id, {})
+		if row.is_empty():
+			continue
+		row["label"].text = "%s  %d/%d" % [item_id, have, required]
+
+		var boxes: Array = row["boxes"]
+		if boxes.size() == 1 and required > CONTRACT_CHECKLIST_MAX_BOXES:
+			# The single-box fallback (see _build_contract_checklist_row):
+			# checked only once the whole quantity is in.
+			_set_checkbox_checked(boxes[0], have >= required)
+		else:
+			for u in range(boxes.size()):
+				_set_checkbox_checked(boxes[u], u < have)
+
+	# Each contract clocks independently in sim_core, so this countdown is
+	# this docket's, never a shared one. The tally beside it is the only
+	# feedback a player gets that an order is being under-served: a missed
+	# window costs that window's payout and nothing else today (GAMEPLAY.md
+	# §11 has not decided what else it should cost), so the count is the
+	# whole consequence and it should be visible.
+	var ticks_left: int = max(0, int(contract.get("next_delivery_tick", 0)) - current_tick)
+	card["meta_label"].text = "next check in %d ticks  ·  every %d  ·  %d done, %d missed" % [
+		ticks_left,
+		int(contract.get("cadence_ticks", 0)),
+		int(contract.get("deliveries_made", 0)),
+		int(contract.get("deliveries_missed", 0)),
+	]
 
 
 ## Swaps a checklist box's style (and its tick-mark visibility) between the

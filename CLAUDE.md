@@ -283,6 +283,42 @@ it's gone stale.
 
 ## Decisions log
 
+- 2026-09-08: "Contracts as data" epic, ticket 2 of 2 — **the clipboard
+  shows every active contract**, one docket card each. Presentation only:
+  `sim_core` and `data/` were untouched, and every fact drawn was already on
+  the wire in ticket 1's `economy_snapshot_json`. Four calls worth not
+  re-litigating. (1) **One board, several dockets — not a clipboard per
+  contract, and not one flat checklist.** A PanelContainer per contract
+  repeats the paper frame and the 12px steel clip bar for no new
+  information; a single flat list of checklist rows loses which rows belong
+  to which order the moment two contracts ask for the same item, which every
+  shipped contract does (they all want `boxed_ketchup`). So the panel keeps
+  its one sheet and one clip, and a contract is a printed docket on it — the
+  checkbox's own paper tone plus a steel hairline, i.e. two colours the panel
+  already used, so separation was added without a new visual language.
+  (2) **Money is shown once, everything else per docket.** GAMEPLAY.md §1
+  allows exactly one currency and `Economy` keeps exactly one counter, so a
+  per-contract money figure would be a lie; cadence countdown, payout and
+  the delivered/missed tally are per contract, because each clocks
+  independently in `Economy`. (3) **The shared delivery pool gets one line of
+  its own ("on the dock").** Per-contract `progress` is clamped to that
+  contract's own ask, so three dockets can all read satisfied while the pool
+  holds fewer boxes than they collectively want — without the unclamped pool
+  figure beside them that reads as three imminent payouts rather than the
+  competition ticket 1's allocation rule actually creates. It is a line of
+  text, not a second progress widget: surfacing the rule is worth it,
+  inventing a parallel visual language for it is not. (4) **Overflow is a
+  capped, scrolling stack, chosen over a compact/summary mode.** GAMEPLAY.md
+  names no contract count; `contracts.ron` ships three and a realistic board
+  is a handful, so the cap (a fraction of window height) never engages today
+  and exists so a content change cannot push an obligation off the bottom of
+  the screen unseen. Node rebuilds are guarded on the set of contract ids, so
+  the per-frame poll costs a string compare, not a rebuild. Also fixed, and
+  only findable in a rendered frame (UI_UX.md §2b point 12's lesson again):
+  the checklist tick mark had been body-text sized inside a 14px box since
+  the clipboard first landed, rendering as a clipped diagonal in dark ink on
+  dark green. **This completes the contracts epic.**
+
 - 2026-09-08: **Contracts are data, and several run at once** (GAMEPLAY.md
   §6/§9; ticket 1 of 2, the sim half — `godot_project/` deliberately
   untouched). Milestone 5's Economy MVP had exactly one `Contract`,

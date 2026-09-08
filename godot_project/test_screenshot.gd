@@ -36,6 +36,15 @@
 # All five hover flags share one implementation (`_hover_over_tile`) — they
 # differ only in which tile they ask the simulation for.
 #
+# `--contracts` runs the chain forward far enough to cross several contract
+# cadence boundaries WITH deliveries collected, so the contract clipboard is
+# photographed with its dockets in genuinely different states — one satisfied,
+# one part-filled, one that has been missed — rather than the three identical
+# 0/N checklists an idle or merely `--populate`d factory gives (`--populate`
+# never issues `collect_output`, so nothing ever reaches the delivery pool).
+# CONTRACTS_REVIEW_TICKS is tuned against the shipped `data/contracts.ron`
+# cadences for exactly that spread; see its own comment.
+#
 # `--shop` opens the build menu (docs/UI_UX.md §5, the "Shop & Inventory"
 # epic's ticket 2) before rendering, and first runs the chain far enough to
 # earn a contract payout — a menu photographed with zero money shows every
@@ -62,6 +71,18 @@ const WARMUP_FRAMES := 45
 const POPULATE_SPAWNS := 60
 const POPULATE_TICKS_PER_SPAWN := 10
 
+## `--contracts` runs until the board is in a genuinely MIXED state rather
+## than for a fixed number of ticks: a tick count drifts with any change to
+## the chain's throughput or the shipped cadences and quietly goes back to
+## photographing three identical checklists. The state waited for is a dock
+## holding exactly CONTRACTS_REVIEW_DOCK_UNITS, with at least one delivery
+## and at least one miss on the board — against the shipped contracts (asks
+## of 2, 3 and 1 from one shared pool) that reads as one docket satisfied,
+## one part-filled and one satisfied-but-already-missed, which is both the
+## checkbox mechanic and the shared-pool competition in a single frame.
+const CONTRACTS_REVIEW_DOCK_UNITS := 2
+const CONTRACTS_REVIEW_TICK_LIMIT := 20000
+
 var _frames := 0
 var _out := "user://scene.png"
 var _populate := false
@@ -72,6 +93,7 @@ var _hover_vat := false
 var _hover_hopper := false
 var _hover_tank := false
 var _shop := false
+var _contracts := false
 ## `--closeup` target tile and orthographic width; `_closeup` gates both.
 const CLOSEUP_SIZE := 9.0
 var _closeup := false
@@ -92,6 +114,7 @@ func _initialize() -> void:
 	_hover_hopper = args.has("--hover-hopper")
 	_hover_tank = args.has("--hover-tank")
 	_shop = args.has("--shop")
+	_contracts = args.has("--contracts")
 	_parse_closeup(args)
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
@@ -239,6 +262,37 @@ func _earn_contract_money() -> void:
 	_main._apply_dirty_chunks()
 
 
+## Drives the real chain, with deliveries collected, across several contract
+## cadence boundaries. Same command path as _run_chain_forward — the only
+## addition is `collect_output`, which is what actually puts product in the
+## shared delivery pool the contracts draw from.
+func _run_contract_cycles() -> void:
+	for i in range(CONTRACTS_REVIEW_TICK_LIMIT):
+		_main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
+		_main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
+		_main.sim.tick()
+		_main.sim.issue_command_json(JSON.stringify({"type": "collect_output"}))
+		if _contract_board_is_mixed():
+			break
+	_main._apply_dirty_chunks()
+	_main._update_contract_panel()
+
+
+func _contract_board_is_mixed() -> bool:
+	var econ: Dictionary = JSON.parse_string(_main.sim.economy_snapshot_json())
+	var stock := 0
+	for pair in econ.get("delivery_stock", []):
+		stock += int(pair[1])
+	if stock != CONTRACTS_REVIEW_DOCK_UNITS:
+		return false
+	var made := 0
+	var missed := 0
+	for contract in econ.get("contracts", []):
+		made += int(contract["deliveries_made"])
+		missed += int(contract["deliveries_missed"])
+	return made >= 1 and missed >= 1
+
+
 func _open_shop_menu() -> void:
 	_earn_contract_money()
 	_main._set_shop_menu_open(true)
@@ -260,6 +314,8 @@ func _process(_delta: float) -> bool:
 		_hover_over_hopper()
 	if _frames == 2 and _hover_tank:
 		_hover_over_fluid_tank()
+	if _frames == 2 and _contracts:
+		_run_contract_cycles()
 	if _frames == 2 and _shop:
 		_open_shop_menu()
 	if _frames == 2 and _closeup:

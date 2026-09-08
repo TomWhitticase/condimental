@@ -234,13 +234,17 @@ were only discoverable by building it:
 
 ## 5. UI style
 
-> **Status:** none of §5 is built yet. The scene has a deliberately plain
-> dark readout panel so text stays legible over a lit 3D scene; the
-> clipboard/checklist widgets, voxel-rendered icon slots and hotbar below are
-> their own piece of work, not something to approximate half-way.
+> **Status:** most of §5 is built. The contract readout is a real diegetic
+> clipboard (paper panel, steel clip bar, checkbox tick marks, voxel-rendered
+> item icons), machine/pipe detail is hover-only rather than dense always-on
+> text, and the build menu is a grid of voxel-rendered icon slots. The scene's
+> other readouts still use the plain dark plate, deliberately — that is
+> machine-side factory UI, and the clipboard motif is reserved for orders and
+> checklists. Not built: the hotbar/quick-access strip.
 
 - **Clean and simple, Minecraft-adjacent**: chunky panel borders, flat-shaded slot grids, a limited, consistent color palette per panel, generous hit targets. Avoid modern skeuomorphic-app UI (gradients, drop shadows everywhere, thin hairline fonts) — the UI should feel like it belongs in the same voxel world as the factory.
 - **Icons are rendered from the real assets**: item/recipe/machine icons are small isometric renders of the actual voxel models (the same asset the player sees in the world, rendered to a thumbnail), not separately-drawn 2D icon art. This keeps the UI and the world visually consistent and halves the art workload per item.
+- **Several concurrent contracts are one board of dockets, not one clipboard each** (built alongside `data/contracts.ron`'s arrival). GAMEPLAY.md §6's design pressure is that several standing orders compete for one factory's throughput, so all of them have to be legible at once. The panel keeps its single sheet and single clip bar and prints one **docket card** per contract on it — the checkbox's own paper tone plus a steel hairline, i.e. no third colour. A separate clipboard per contract repeats the frame and the clip for no new information; a single flat list of checklist rows loses which rows belong to which order as soon as two contracts want the same item. What is shared appears once, above the dockets — the money figure (there is exactly one currency, GAMEPLAY.md §1) and the delivery pool every contract draws from; what is per-contract (checklist, payout, cadence countdown, delivered/missed tally) appears on its own docket. Past a capped height the stack scrolls rather than growing off-screen.
 - **Diegetic paper-and-metal widgets**: recipe lists, orders, and objectives are framed as **clipboards and checklists** — a paper texture on a metal clipboard clip, checkbox-style tick marks for completed items — rather than flat modern list UI. This is a deliberate physical/tactile framing choice that fits the industrial setting (a factory floor clipboard, not an app notification list). [GAMEPLAY.md](GAMEPLAY.md) §6's contracts (a standing order for a sauce mix, delivered on a cadence) are the concrete, driving use case for this motif — a contract *is* a clipboard.
 - **Typography**: a simple, sturdy, slightly blocky sans-serif — readable at UI sizes, evokes stenciled factory signage/pixel fonts without tipping into illegible novelty pixel fonts.
 - **Layout conventions**: a Minecraft-style hotbar/quick-access strip along one screen edge; build/recipe menus as grids of voxel-rendered icon slots; hover tooltips for recipe/machine detail rather than dense always-on text.

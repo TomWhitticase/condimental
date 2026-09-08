@@ -66,28 +66,49 @@ func _initialize() -> void:
 		return
 
 	# Milestone 5 (Economy MVP, ARCHITECTURE.md §9 item 5): economy_snapshot_json
-	# exposes money + the hardcoded contract's status through the same gdext
+	# exposes money + every active contract's status through the same gdext
 	# JSON boundary this script already exercises for chunk/tile/layout data.
 	# Full contract economics (cadence math, payout correctness) is already
 	# proven headlessly in `cargo test` (sim_core/tests/economy.rs); this just
 	# confirms the wire format survives a real Godot Variant/JSON round trip.
 	var econ = JSON.parse_string(sim.economy_snapshot_json())
-	if econ == null or not econ.has("money") or not econ.has("contract_mix") or not econ.has("contract_progress"):
+	if econ == null or not econ.has("money") or not econ.has("delivery_stock") or not econ.has("contracts"):
 		_fail("economy_snapshot_json did not return the expected shape: %s" % str(econ))
 		return
-	if float(econ["money"]) != 0.0:
-		_fail("expected money to start at 0 before the contract mix is fully delivered, got %s" % str(econ["money"]))
+	# Contracts became `data/contracts.ron` content, so this is an ARRAY of
+	# them (the four inline contract fields this used to read are gone), each
+	# with its own mix, cadence clock and counters. All of them draw from the
+	# one shared `delivery_stock` pool.
+	var contracts: Array = econ["contracts"]
+	if contracts.is_empty():
+		_fail("economy_snapshot_json reported no contracts at all: %s" % str(econ))
 		return
-	# The single unit collected above was deposited into the delivery buffer
-	# even though it alone isn't enough to satisfy the contract's quantity —
-	# confirm that partial progress is visible through the snapshot.
-	var progress: Array = econ["contract_progress"]
-	var found_progress := false
-	for pair in progress:
+	for contract in contracts:
+		for field in ["id", "name", "mix", "progress", "cadence_ticks", "next_delivery_tick", "payout", "deliveries_made", "deliveries_missed"]:
+			if not contract.has(field):
+				_fail("contract '%s' is missing '%s': %s" % [str(contract.get("id", "?")), field, str(contract)])
+				return
+		if contract["mix"].size() != contract["progress"].size():
+			_fail("contract '%s': mix and progress must zip positionally" % str(contract["id"]))
+			return
+
+	# The single unit collected above went into the shared pool even though it
+	# alone isn't enough to satisfy every contract's quantity — confirm both
+	# the raw pool and per-contract progress see it.
+	var stock_seen := false
+	for pair in econ["delivery_stock"]:
 		if pair[0] == final_recipe and int(pair[1]) > 0:
-			found_progress = true
+			stock_seen = true
+	if not stock_seen:
+		_fail("expected delivery_stock to hold the collected unit of '%s': %s" % [final_recipe, str(econ["delivery_stock"])])
+		return
+	var found_progress := false
+	for contract in contracts:
+		for pair in contract["progress"]:
+			if pair[0] == final_recipe and int(pair[1]) > 0:
+				found_progress = true
 	if not found_progress:
-		_fail("expected contract_progress to reflect the collected unit of '%s': %s" % [final_recipe, str(progress)])
+		_fail("expected some contract's progress to reflect the collected unit of '%s': %s" % [final_recipe, str(contracts)])
 		return
 
 	# query_tile_json: confirm the first belt and first machine tiles

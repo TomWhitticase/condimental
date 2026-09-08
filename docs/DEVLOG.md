@@ -27,7 +27,7 @@ below is history and should only ever be appended to.)*
 - **Visual overhaul, first attempt (superseded by round 2 above):** closed a floor-level seam between machine/hopper footings and belt/pipe edges, added a connector fitting for the fluid-fed stage, gave the hopper's status lamp real feedback, and fixed some contract-clipboard typography — real fixes, but not the one the player actually flagged, which is what round 2 above addressed.
 - **Camera:** two view modes, toggled with TAB. Isometric (default): pan (WASD/right-drag/arrows) and zoom (scroll, trackpad, +/-); the fixed angle itself never changes, per UI_UX.md §1. First-person: a free-look "fly" camera (mouse-look, WASD move, SPACE/SHIFT up/down) — not a UI_UX.md concept, and not real player physics (no gravity/collision, this project has neither). 90° snap-rotation of the isometric angle is still not implemented (still a nice-to-have, not required).
 - **Lighting:** the sky is the real background (`BG_SKY`), not a flat colour — see the "empty void" DEVLOG entry below for why that matters. `scripts/screenshot-scene.sh --first-person` reviews that mode's lighting specifically.
-- **Contracts (sim half done, presentation pending):** contracts are now `data/contracts.ron` content and three run concurrently, each with its own mix/cadence/payout, all drawing from one shared pool of delivered stock (a box pays one contract, never two). `economy_snapshot_json` now returns an array of contracts — a breaking change the Godot clipboard panel has not yet been updated for, which is the follow-up ticket.
+- **Contracts (done, both halves):** contracts are `data/contracts.ron` content and three run concurrently, each with its own mix/cadence/payout, all drawing from one shared pool of delivered stock (a box pays one contract, never two). The clipboard panel shows all of them — one paper docket card per contract on the one board, each with its own checklist, payout, countdown and delivered/missed tally, above a single shared money figure and a single "on the dock" line naming the pool they compete for.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -43,6 +43,49 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-08 — Contracts, ticket 2: the clipboard shows all of them
+
+The presentation half of "contracts are data." Ticket 1 made
+`economy_snapshot_json` report an array of contracts; the Godot clipboard was
+still drawing exactly one of them, which meant GAMEPLAY.md §6's whole point —
+several orders competing for one factory's throughput — existed in the
+simulation and nowhere the player could see it.
+
+The clipboard is now a **board of dockets**: one sheet of paper under the same
+steel clip, carrying the shared money figure once, then one printed docket
+card per contract below it with its own name, payout, checklist, cadence
+countdown and delivered/missed tally. A clipboard *per* contract was the other
+obvious option and was rejected — it repeats the frame and the clip bar for no
+new information — and a single flat list of checklist rows was rejected too,
+because it loses which rows belong to which order the moment two contracts
+want the same item, which all three shipped contracts do. The docket is the
+checkbox's own paper tone plus a steel hairline, so this adds separation
+without adding a visual language. Beyond a capped height the stack scrolls
+rather than growing off the bottom of the screen; three contracts is nowhere
+near it, and that cap is a safety valve for a content change, not a UI anyone
+is expected to drive.
+
+One deliberate addition beyond "show them all": a small **"on the dock"** line
+above the dockets, showing the shared delivery pool. It is the player-visible
+face of ticket 1's allocation rule — every checklist is clamped to its own
+ask, so three dockets can all read "ready" while the dock holds fewer boxes
+than they collectively want, and without the pool figure that reads as three
+imminent payouts instead of a competition.
+
+`sim_core` was not touched. Verified headlessly (`test_contract_panel.gd` now
+asserts one docket per reported contract in priority order, per-contract
+checkbox counts and distinct nodes for the same item id across contracts, one
+money readout and per-contract countdowns that diverge as the sim runs, the
+dock line tracking a real delivery, and — the regression this work could
+cause — that a one-contract board still renders) and visually, via a new
+`scripts/screenshot-scene.sh --contracts` flag that runs the real chain until
+the board is in a genuinely mixed state (one order satisfied, one part-filled,
+one already missed) rather than photographing three identical empty
+checklists. That review pass also caught something no headless test could:
+the checkbox tick mark was body-text sized inside a 14px box and had been
+rendering as a clipped diagonal in dark ink on dark green ever since the
+clipboard landed.
 
 ### 2026-09-08 — Shop & Inventory, ticket 2: a build menu you can actually buy from
 

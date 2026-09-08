@@ -20,7 +20,8 @@
 #      (orthographic isometric camera, real-time lighting, imported voxel
 #      meshes, metal shinier than matte — docs/UI_UX.md §1/§2/§4), camera
 #      pan/zoom (§1: allowed, unlike free rotation of the fixed angle), and
-#      UI_UX.md §5's diegetic UI epic — the contract clipboard panel, voxel-
+#      UI_UX.md §5's diegetic UI epic — the contract clipboard panel (now one
+#      docket per active contract, since contracts became data), voxel-
 #      rendered icons, and machine hover tooltips (hover, not dense
 #      always-on text) — plus milestone 6's fluid presentation (pipe tiles
 #      rendered from the simulation's own segment list, liquid bodies scaled
@@ -122,7 +123,7 @@ run_godot_script test_core_loop.gd CORE_LOOP_OK "real gdext JSON boundary"
 run_godot_script test_interaction.gd INTERACTION_OK "keyboard input -> SimBridge"
 run_godot_script test_presentation.gd PRESENTATION_OK "UI_UX.md §1/§2/§4 scene structure"
 run_godot_script test_camera_nav.gd CAMERA_NAV_OK "pan/zoom, UI_UX.md §1"
-run_godot_script test_contract_panel.gd CONTRACT_PANEL_OK "contract clipboard, UI_UX.md §5"
+run_godot_script test_contract_panel.gd CONTRACT_PANEL_OK "contract clipboard, one docket per contract, UI_UX.md §5"
 run_godot_script test_icons.gd ICONS_OK "_icon_for, UI_UX.md §5"
 run_godot_script test_hover.gd HOVER_OK "machine hover tooltips, UI_UX.md §5"
 run_godot_script test_fluids.gd FLUIDS_OK "pipe rendering + fluid hover, milestone 6"
