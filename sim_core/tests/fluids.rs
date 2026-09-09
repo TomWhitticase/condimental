@@ -33,8 +33,8 @@ mod common;
 
 use sim_core::sim::types::Fx;
 use sim_core::sim::{
-    FLUID_TANK_CAPACITY, FLUID_TANK_FILL_AMOUNT, FluidSnapshot, FluidTankSnapshot,
-    HopperSnapshot, PlayerCommand, RecipeRegistry, TileSnapshot, World, command_from_json,
+    FLUID_TANK_CAPACITY, FLUID_TANK_FILL_AMOUNT, FluidSnapshot, FluidTankSnapshot, HopperSnapshot,
+    PlayerCommand, RecipeRegistry, TileSnapshot, World, command_from_json,
     reference_chain_with_budget,
 };
 
@@ -197,7 +197,10 @@ fn run_chain_watching_fluid(
     // spacing exactly as the old per-tick spawn attempts were.
     let loaded = {
         let before = the_hopper(&world).quantity;
-        world.issue_command(PlayerCommand::FillHopper { amount: tomatoes, tile: None });
+        world.issue_command(PlayerCommand::FillHopper {
+            amount: tomatoes,
+            tile: None,
+        });
         the_hopper(&world).quantity - before
     };
     assert_eq!(
@@ -461,7 +464,12 @@ fn fluid_snapshot_json_has_the_documented_shape() {
             "FluidSnapshot JSON must carry '{field}' — ticket 2 reads it by name"
         );
     }
-    for field in ["inlet_index", "machine_tile", "machine_recipe", "units_per_craft"] {
+    for field in [
+        "inlet_index",
+        "machine_tile",
+        "machine_recipe",
+        "units_per_craft",
+    ] {
         assert!(
             value.get(field).is_none(),
             "'{field}' moved into the `taps` array — a stale reader should fail loudly"
@@ -497,7 +505,10 @@ fn fluid_snapshot_json_has_the_documented_shape() {
             );
         }
         let pressure = segment["pressure"].as_f64().unwrap();
-        assert!((0.0..=1.0).contains(&pressure), "pressure is a fill fraction");
+        assert!(
+            (0.0..=1.0).contains(&pressure),
+            "pressure is a fill fraction"
+        );
     }
 
     // Geometry contract: exactly one source, it comes first, the inlet is
@@ -510,7 +521,11 @@ fn fluid_snapshot_json_has_the_documented_shape() {
         .filter(|(_, s)| s.is_source)
         .map(|(i, _)| i)
         .collect();
-    assert_eq!(sources, vec![0], "exactly one source, at the head of the run");
+    assert_eq!(
+        sources,
+        vec![0],
+        "exactly one source, at the head of the run"
+    );
     let tap = &snapshot.taps[0];
     assert_eq!(
         tap.segment_index,
@@ -528,9 +543,10 @@ fn fluid_snapshot_json_has_the_documented_shape() {
         .find(|p| p.tile == tap.machine_tile)
         .expect("the tapping machine is placed");
     assert!(
-        machine.occupies.iter().any(|&(mx, my)| {
-            (inlet_tile.0 - mx).abs() + (inlet_tile.1 - my).abs() == 1
-        }),
+        machine
+            .occupies
+            .iter()
+            .any(|&(mx, my)| { (inlet_tile.0 - mx).abs() + (inlet_tile.1 - my).abs() == 1 }),
         "the tapped segment {inlet_tile:?} must touch the machine's footprint {:?}",
         machine.occupies
     );
@@ -759,14 +775,20 @@ fn filling_the_tank_past_capacity_is_clamped_not_a_panic_or_an_overflow() {
 
     // `Fx` is a 16.16 fixed-point type, so `u32::MAX` is not even
     // representable — clamping has to happen before any conversion.
-    world.issue_command(PlayerCommand::FillFluidTank { amount: u32::MAX, tile: None });
+    world.issue_command(PlayerCommand::FillFluidTank {
+        amount: u32::MAX,
+        tile: None,
+    });
     let tank = the_tank(&world).unwrap();
     assert_eq!(tank.quantity, f64::from(FLUID_TANK_CAPACITY));
     assert_eq!(tank.fill, 1.0);
 
     // ...and again on an already-full tank: still a silent no-op, with no
     // wrap-around and nothing spilled into the pipes.
-    world.issue_command(PlayerCommand::FillFluidTank { amount: u32::MAX, tile: None });
+    world.issue_command(PlayerCommand::FillFluidTank {
+        amount: u32::MAX,
+        tile: None,
+    });
     assert_eq!(
         the_tank(&world).unwrap().quantity,
         f64::from(FLUID_TANK_CAPACITY)
@@ -785,7 +807,10 @@ fn a_fill_command_dirties_the_tanks_chunk_so_the_fill_ui_can_redraw() {
     // One tick first, to clear the dirt from *building* the chain: placing
     // anything dirties its chunks, and the fixture places forty-odd things.
     world.tick();
-    world.issue_command(PlayerCommand::FillFluidTank { amount: 1, tile: None });
+    world.issue_command(PlayerCommand::FillFluidTank {
+        amount: 1,
+        tile: None,
+    });
     assert_eq!(world.dirty_chunks(), &[(0, 0)]);
 }
 
@@ -831,7 +856,10 @@ fn the_tank_drains_as_the_mixer_crafts_and_the_mixer_stalls_once_it_is_dry() {
     let mut world = stocked(shipped_recipes());
 
     // Step 1: fill the tank. Nothing is in the pipes yet.
-    world.issue_command(PlayerCommand::FillFluidTank { amount: FILL, tile: None });
+    world.issue_command(PlayerCommand::FillFluidTank {
+        amount: FILL,
+        tile: None,
+    });
     assert_eq!(the_tank(&world).unwrap().quantity, f64::from(FILL));
     assert_eq!(the_network(&world).unwrap().total_volume, 0.0);
 
@@ -948,14 +976,15 @@ fn mixer_is_starved(world: &World) -> bool {
 #[test]
 fn the_fluid_tank_json_shape_is_what_presentation_is_told_to_expect() {
     let mut world = stocked(shipped_recipes());
-    world.issue_command(PlayerCommand::FillFluidTank { amount: 30, tile: None });
+    world.issue_command(PlayerCommand::FillFluidTank {
+        amount: 30,
+        tile: None,
+    });
 
     // fluid_tank_snapshots_json (`SimBridge`) serializes an array of
     // exactly these.
-    let snapshot: serde_json::Value = serde_json::from_str(
-        &serde_json::to_string(&the_tank(&world).unwrap()).unwrap(),
-    )
-    .unwrap();
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&the_tank(&world).unwrap()).unwrap()).unwrap();
     assert_eq!(
         snapshot,
         serde_json::json!({
@@ -967,6 +996,7 @@ fn the_fluid_tank_json_shape_is_what_presentation_is_told_to_expect() {
             "quantity": 30.0,
             "capacity": 120.0,
             "fill": 0.25,
+            "auto_fill": false,
             "pipe_tile": [6, 2],
         })
     );
@@ -1000,6 +1030,7 @@ fn the_fluid_tank_json_shape_is_what_presentation_is_told_to_expect() {
             "quantity": 30.0,
             "capacity": 120.0,
             "fill": 0.25,
+            "auto_fill": false,
         })
     );
 

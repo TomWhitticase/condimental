@@ -312,7 +312,11 @@ fn a_fill_draws_from_bought_stock_and_does_nothing_without_any() {
         10,
         "the fill is clamped to what was actually bought"
     );
-    assert_eq!(world.owned_ingredient("tomato"), 0, "and the stock is spent");
+    assert_eq!(
+        world.owned_ingredient("tomato"),
+        0,
+        "and the stock is spent"
+    );
 }
 
 /// The second clamp, and the rule that makes the two compose without leaking:
@@ -362,7 +366,11 @@ fn filling_every_hopper_charges_each_against_its_own_ingredient() {
     });
 
     assert_eq!(tomato_hopper(&world).quantity, 8);
-    assert_eq!(hopper_for(&world, "sugar").quantity, 5, "clamped to the sugar owned");
+    assert_eq!(
+        hopper_for(&world, "sugar").quantity,
+        5,
+        "clamped to the sugar owned"
+    );
     assert_eq!(world.owned_ingredient("tomato"), 12);
     assert_eq!(world.owned_ingredient("sugar"), 0);
 }
@@ -509,6 +517,7 @@ fn the_hopper_json_shape_is_what_presentation_is_told_to_expect() {
             "quantity": 16,
             "capacity": 64,
             "fill": 0.25,
+            "auto_fill": false,
             "belt_tile": [0, 0],
         })
     );
@@ -519,10 +528,7 @@ fn the_hopper_json_shape_is_what_presentation_is_told_to_expect() {
         serde_json::from_str(&serde_json::to_string(&world.chunk_snapshot((-1, 0))).unwrap())
             .unwrap();
     assert!(
-        chunk["hoppers"]
-            .as_array()
-            .unwrap()
-            .contains(&snapshot),
+        chunk["hoppers"].as_array().unwrap().contains(&snapshot),
         "the hopper's chunk snapshot must carry the identical object"
     );
     for existing in ["belts", "machines", "pipes"] {
@@ -548,6 +554,7 @@ fn the_hopper_json_shape_is_what_presentation_is_told_to_expect() {
             "quantity": 16,
             "capacity": 64,
             "fill": 0.25,
+            "auto_fill": false,
         })
     );
 
@@ -616,14 +623,17 @@ fn the_place_command_carries_an_optional_item_on_the_wire() {
         other => panic!("expected a place command, got {other:?}"),
     }
 
-    let without_item =
-        command_from_json(r#"{"type": "place", "kind": "belt", "tile": [3, 0]}"#)
-            .expect("must parse");
+    let without_item = command_from_json(r#"{"type": "place", "kind": "belt", "tile": [3, 0]}"#)
+        .expect("must parse");
     match without_item {
         PlayerCommand::Place {
             direction, item, ..
         } => {
-            assert_eq!(direction, Direction::East, "the default facing is unchanged");
+            assert_eq!(
+                direction,
+                Direction::East,
+                "the default facing is unchanged"
+            );
             assert!(item.is_none());
         }
         other => panic!("expected a place command, got {other:?}"),
@@ -703,7 +713,10 @@ fn cycling_an_empty_or_non_hopper_tile_is_a_no_op() {
     let empty_tile = (500, 500);
     world.issue_command(PlayerCommand::CycleHopperItem { tile: empty_tile });
     assert!(
-        world.hopper_snapshots().iter().all(|h| h.tile != empty_tile),
+        world
+            .hopper_snapshots()
+            .iter()
+            .all(|h| h.tile != empty_tile),
         "cycling an empty tile must not create a hopper out of nothing"
     );
 
@@ -717,9 +730,7 @@ fn cycling_an_empty_or_non_hopper_tile_is_a_no_op() {
         .expect("the reference chain places a crusher")
         .tile;
     let before = hopper_for(&world, "tomato").item.clone();
-    world.issue_command(PlayerCommand::CycleHopperItem {
-        tile: crusher_tile,
-    });
+    world.issue_command(PlayerCommand::CycleHopperItem { tile: crusher_tile });
     assert_eq!(
         hopper_for(&world, "tomato").item,
         before,
@@ -756,8 +767,8 @@ fn cycling_with_only_one_raw_item_is_a_no_op_that_keeps_contents() {
 
 #[test]
 fn the_cycle_hopper_item_command_parses_from_json() {
-    let parsed = command_from_json(r#"{"type": "cycle_hopper_item", "tile": [-1, 0]}"#)
-        .expect("must parse");
+    let parsed =
+        command_from_json(r#"{"type": "cycle_hopper_item", "tile": [-1, 0]}"#).expect("must parse");
     match parsed {
         PlayerCommand::CycleHopperItem { tile } => assert_eq!(tile, (-1, 0)),
         other => panic!("expected a cycle_hopper_item command, got {other:?}"),

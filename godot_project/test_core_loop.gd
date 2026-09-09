@@ -151,6 +151,77 @@ func _initialize() -> void:
 		_fail("the hopper -> belts -> crusher line never produced tomato_paste")
 		return
 
+	# --- Auto-fill: the three new commands and the new snapshot field. -----
+	# The panel that fronts these is the next ticket's; what is proved here is
+	# that its wire forms reach the simulation and that the flag comes back
+	# on every snapshot presentation reads.
+	if bool(hoppers[0].get("auto_fill", true)):
+		_fail("a placed hopper starts manual: %s" % str(hoppers[0]))
+		return
+	sim.issue_command_json(JSON.stringify({"type": "set_hopper_auto_fill", "tile": [-1, 0]}))
+	hoppers = JSON.parse_string(sim.hopper_snapshots_json())
+	if not bool(hoppers[0].get("auto_fill", false)):
+		_fail("set_hopper_auto_fill must default `enabled` to true: %s" % str(hoppers[0]))
+		return
+	var hopper_tile = JSON.parse_string(sim.query_tile_json(-1, 0))
+	if not bool(hopper_tile.get("auto_fill", false)):
+		_fail("query_tile_json carries auto_fill too: %s" % str(hopper_tile))
+		return
+	# It is topped up out of bought stock, and only out of bought stock.
+	Layouts.stock(sim, "tomato", 64)
+	var stock_before: int = _owned_ingredient(sim, "tomato")
+	var money_before: float = float(JSON.parse_string(sim.shop_snapshot_json())["money"])
+	sim.tick()
+	hoppers = JSON.parse_string(sim.hopper_snapshots_json())
+	if int(hoppers[0]["quantity"]) <= 4:
+		_fail("an auto-filling hopper must be topped up on the next tick: %s" % str(hoppers[0]))
+		return
+	if _owned_ingredient(sim, "tomato") >= stock_before:
+		_fail("the top-up must be paid for out of bought stock")
+		return
+	if float(JSON.parse_string(sim.shop_snapshot_json())["money"]) != money_before:
+		_fail("auto-fill must never move the money counter by itself")
+		return
+	sim.issue_command_json(JSON.stringify({
+		"type": "set_hopper_auto_fill", "tile": [-1, 0], "enabled": false,
+	}))
+	if bool(JSON.parse_string(sim.hopper_snapshots_json())[0].get("auto_fill", true)):
+		_fail("an explicit `enabled: false` must turn it back off")
+		return
+	# The tank twin, and the explicit item picker.
+	# The demo line has no tank of its own, so stand one at the head of its
+	# pipe run — the tank toggle has to be proved on a real placed tank, not
+	# skipped when the fixture happens not to have one.
+	Layouts.place(sim, "fluid_tank", Vector2i(5, 0), "south")
+	var tanks: Array = JSON.parse_string(sim.fluid_tank_snapshots_json())
+	if tanks.is_empty():
+		_fail("the tank placed for this check must exist — the tank half must not silently skip")
+		return
+	# `tile` comes back off the wire as JSON numbers, which Godot parses as
+	# floats — and the command DTO's `TileCoord` is a pair of `i32`, so
+	# `[5.0, 0.0]` fails to deserialize and the command is silently dropped.
+	# Round-tripping a tile from a snapshot into a command has to go through
+	# `int()`; ticket 2's panel will do exactly this round trip.
+	var tank_tile := [int(tanks[0]["tile"][0]), int(tanks[0]["tile"][1])]
+	if bool(tanks[0].get("auto_fill", true)):
+		_fail("a placed tank starts manual: %s" % str(tanks[0]))
+		return
+	sim.issue_command_json(JSON.stringify({
+		"type": "set_tank_auto_fill", "tile": tank_tile, "enabled": true,
+	}))
+	if not bool(JSON.parse_string(sim.fluid_tank_snapshots_json())[0].get("auto_fill", false)):
+		_fail("set_tank_auto_fill must reach the simulation over the wire")
+		return
+	sim.issue_command_json(JSON.stringify({
+		"type": "set_hopper_item", "tile": [-1, 0], "item": "sugar",
+	}))
+	if String(JSON.parse_string(sim.hopper_snapshots_json())[0]["item"]) != "sugar":
+		_fail("set_hopper_item must name the ingredient outright over the wire")
+		return
+	sim.issue_command_json(JSON.stringify({
+		"type": "set_hopper_item", "tile": [-1, 0], "item": "tomato",
+	}))
+
 	# --- Tile queries, one per variant the fixture contains. ----------------
 	var expectations := {
 		"belt": Vector2i(1, 0),
@@ -189,7 +260,7 @@ func _initialize() -> void:
 			_fail("contract '%s': mix and progress must zip positionally" % str(contract["id"]))
 			return
 
-	print("CORE_LOOP_OK: empty world -> 13 placements bought and placed over the wire, place/remove/rotate round-trip, the built line produced tomato_paste, tile queries and economy shape correct")
+	print("CORE_LOOP_OK: empty world -> 13 placements bought and placed over the wire, place/remove/rotate round-trip, the built line produced tomato_paste, auto-fill toggles and the item picker cross the wire, tile queries and economy shape correct")
 	quit(0)
 
 
@@ -206,6 +277,16 @@ func _owned(sim, kind: String) -> int:
 		if String(entry["kind"]) == kind:
 			return int(entry["owned"])
 	return -1
+
+
+## How many units of a raw ingredient the player owns and has NOT loaded —
+## the larder, off `ingredients_snapshot_json`, not what is on a belt.
+func _owned_ingredient(sim, item: String) -> int:
+	var snapshot = JSON.parse_string(sim.ingredients_snapshot_json())
+	for entry in snapshot.get("entries", []):
+		if String(entry.get("id", "")) == item:
+			return int(entry.get("owned", 0))
+	return 0
 
 
 ## Units of `item` anywhere on a belt or in a machine buffer, across the two

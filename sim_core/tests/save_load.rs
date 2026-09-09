@@ -73,7 +73,10 @@ fn fingerprint(world: &World) -> String {
         "economy",
         serde_json::to_string(&world.economy_snapshot()).unwrap(),
     );
-    push("shop", serde_json::to_string(&world.shop_snapshot()).unwrap());
+    push(
+        "shop",
+        serde_json::to_string(&world.shop_snapshot()).unwrap(),
+    );
     push(
         "ingredients",
         serde_json::to_string(&world.ingredients_snapshot()).unwrap(),
@@ -118,9 +121,7 @@ fn assert_mid_flight(world: &World) {
     let mid_craft: Vec<&str> = save
         .placements
         .iter()
-        .filter(|p| {
-            matches!(&p.body, SavedBody::Machine(m) if m.process.is_some())
-        })
+        .filter(|p| matches!(&p.body, SavedBody::Machine(m) if m.process.is_some()))
         .map(|p| p.kind.as_str())
         .collect();
     assert!(
@@ -149,9 +150,7 @@ fn assert_mid_flight(world: &World) {
     let partial_hoppers = save
         .placements
         .iter()
-        .filter(|p| {
-            matches!(&p.body, SavedBody::Hopper(h) if h.quantity > 0 && h.quantity < 64)
-        })
+        .filter(|p| matches!(&p.body, SavedBody::Hopper(h) if h.quantity > 0 && h.quantity < 64))
         .count();
     assert!(
         partial_hoppers > 0,
@@ -173,7 +172,10 @@ fn assert_mid_flight(world: &World) {
         .iter()
         .map(|dock| dock.shipped_total)
         .sum();
-    assert!(shipped > 0, "the fixture's dock must have shipped something");
+    assert!(
+        shipped > 0,
+        "the fixture's dock must have shipped something"
+    );
 
     let settled: u32 = save
         .contracts
@@ -217,6 +219,104 @@ fn a_saved_factory_comes_back_running_state_identical() {
     // And after all that, the loaded world still saves to the same file the
     // original does — the round trip is stable, not merely close.
     assert_eq!(original.to_save_ron(), loaded.to_save_ron());
+}
+
+/// An auto-filling factory comes back auto-filling — and, crucially, **keeps
+/// topping itself up after the load**, which is the behaviour the flag exists
+/// for and the thing a save that carried the flag but not its consequence
+/// would still get wrong.
+///
+/// The flag is one `#[serde(default)] bool` per hopper and tank body record
+/// and was added *without* a `schema_version` bump, per `sim::save`'s own
+/// forward-compatibility note — nothing has shipped with a save file yet.
+#[test]
+fn auto_fill_survives_a_save_and_keeps_working_after_the_load() {
+    let mut original = reference_chain_with_budget(recipes(), common::STOCK_COST);
+    common::stock_up(&mut original);
+    for hopper in original.hopper_snapshots() {
+        original.issue_command(PlayerCommand::SetHopperAutoFill {
+            tile: hopper.tile,
+            enabled: true,
+        });
+    }
+    for tank in original.fluid_tank_snapshots() {
+        original.issue_command(PlayerCommand::SetTankAutoFill {
+            tile: tank.tile,
+            enabled: true,
+        });
+    }
+    // Run it far enough that the flags have visibly been doing work and the
+    // world is mid-flight rather than freshly built.
+    for _ in 0..2000 {
+        original.tick();
+    }
+    assert!(
+        original.hopper_snapshots().iter().all(|h| h.auto_fill),
+        "the fixture must actually have auto-fill on"
+    );
+    assert!(original.fluid_tank_snapshots().iter().all(|t| t.auto_fill));
+    assert!(
+        original.owned_ingredient("tomato") < common::TOMATO_UNITS,
+        "...and it must actually have been drawing on the larder"
+    );
+
+    let mut loaded =
+        World::from_save_ron(&original.to_save_ron(), recipes()).expect("the save must load");
+    assert_eq!(
+        fingerprint(&loaded),
+        fingerprint(&original),
+        "the flags are part of the hopper and tank snapshots, so a lost flag \
+         shows up here directly"
+    );
+
+    // Lockstep for long enough that a *silently manual* loaded world would
+    // starve while the original kept running.
+    for step in 0..LOCKSTEP_TICKS {
+        original.tick();
+        loaded.tick();
+        assert_eq!(
+            fingerprint(&loaded),
+            fingerprint(&original),
+            "the two worlds diverged {} tick(s) after the load",
+            step + 1
+        );
+    }
+    assert!(
+        loaded.hopper_snapshots().iter().any(|h| h.quantity > 0),
+        "the loaded world's hoppers must still be being topped up"
+    );
+}
+
+/// Turning auto-fill *off* is saved too — the default-`false` field must not
+/// quietly turn every loaded building manual OR every loaded building
+/// automatic.
+#[test]
+fn a_mixed_set_of_auto_fill_flags_round_trips_exactly() {
+    let mut world = reference_chain_with_budget(recipes(), common::STOCK_COST);
+    common::stock_up(&mut world);
+
+    // One hopper on, one off; the tank on.
+    let hoppers: Vec<(i32, i32)> = world.hopper_snapshots().iter().map(|h| h.tile).collect();
+    assert!(hoppers.len() >= 2, "the shipped chain places two hoppers");
+    world.issue_command(PlayerCommand::SetHopperAutoFill {
+        tile: hoppers[0],
+        enabled: true,
+    });
+    let tank = world.fluid_tank_snapshots()[0].tile;
+    world.issue_command(PlayerCommand::SetTankAutoFill {
+        tile: tank,
+        enabled: true,
+    });
+
+    let loaded = World::from_save_ron(&world.to_save_ron(), recipes()).unwrap();
+    let flags: Vec<((i32, i32), bool)> = loaded
+        .hopper_snapshots()
+        .iter()
+        .map(|h| (h.tile, h.auto_fill))
+        .collect();
+    assert!(flags.contains(&(hoppers[0], true)));
+    assert!(flags.contains(&(hoppers[1], false)));
+    assert!(loaded.fluid_tank_snapshots()[0].auto_fill);
 }
 
 /// A loaded world announces itself to a chunk-driven renderer: every chunk
@@ -511,7 +611,13 @@ fn a_forked_line_with_turned_placements_round_trips() {
             "the fixture's {kind} at {tile:?} was refused"
         );
     };
-    place(&mut world, "hopper", (0, 0), Direction::East, Some("tomato"));
+    place(
+        &mut world,
+        "hopper",
+        (0, 0),
+        Direction::East,
+        Some("tomato"),
+    );
     place(&mut world, "belt", (1, 0), Direction::East, None);
     place(&mut world, "belt", (2, 0), Direction::East, None);
     // Straight is east to (4, 0); the branch is one quarter turn clockwise,
