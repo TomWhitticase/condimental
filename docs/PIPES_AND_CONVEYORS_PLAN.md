@@ -134,8 +134,30 @@ visibility flips.
 
 ## Coordinator notes (appended as wave 1 lands)
 
-**Merged so far:** ticket 1 (`links`), ticket 4 (instancing), ticket 3
-(pipe models). Read their DEVLOG entries.
+**Merged so far:** tickets 1 (`links`), 4 (instancing), 3 (pipe models) and
+2 (belt models). Read their DEVLOG entries.
+
+**For ticket 5, from ticket 2's worker and the merge:**
+
+- The belt lesson ticket 2 wrote up is UI_UX.md §2b **point 23** (it was
+  numbered 19 on its branch; ticket 3 had already taken 19–22, so every
+  reference was renumbered at merge). Ticket 2's own decisions are in the
+  "Decisions made by tickets" section above: no belt-side junction variants
+  (`belt_inlet`/`belt_outlet` are aliases of `belt_f0` — stop requesting
+  them and delete the aliases, their models and icons in this ticket), frame
+  models `belt_f{0..3}` / `belt_corner_left_f{0..3}` /
+  `belt_corner_right_f{0..3}`, `BELT_FRAMES` = 4.
+- Corner face convention as authored: output +X; `belt_corner_left` is fed
+  from **vox low Y = north** (the same convention ticket 3 used for pipes);
+  right is the Y-mirror. Verify by render at all four facings — no
+  committed script has drawn a corner yet.
+- Ticket 2 flagged that the 4-frame march at sim speed is ~5 fps; judge it
+  at default zoom in the real scene, and if it reads as stutter, prefer
+  showing the frame closest to the exact sub-tile phase over changing the
+  frame count (a change to BELT_FRAMES is an `ask`).
+- The straight tile's arrow reads at all four facings in ticket 2's
+  close-ups; the south facing was never rendered — include it in the belt
+  gallery.
 
 **For ticket 6, from ticket 3's worker (verbatim facts, verify by render):**
 
