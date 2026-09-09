@@ -12,7 +12,7 @@
 #      conservation across every stage, not just one. No Godot involved.
 #   2. `cargo xtask` builds the extension and copies it into
 #      godot_project/bin/.
-#   3. Fourteen headless Godot scripts exercise the parts cargo test can't: the
+#   3. Nineteen headless Godot scripts exercise the parts cargo test can't: the
 #      real `gdext` boundary (JSON command/snapshot/layout wire format going
 #      through Godot's own Variant/String/JSON machinery, driven through the
 #      whole chain end to end), the interactive scene's keyboard input
@@ -55,7 +55,13 @@
 #      the real command boundary), and save/load's own boundary (a whole RON
 #      save crossing as a String in both directions, an earlier moment coming
 #      back exactly, a refused load saying why and changing nothing, and New
-#      Game emptying the floor).
+#      Game emptying the floor), and the MAIN MENU and PAUSE MENU built on top
+#      of it (menu.tscn's three buttons and its save list read from
+#      `user://saves/`, a chosen save coming back as the same factory through
+#      the `GameSession` autoload, a corrupt one refused on the menu with
+#      `load_ron`'s own reason, and — in the game — ESC opening a pause menu
+#      that genuinely stops the simulation, a named save slot, the reserved
+#      autosave slot, the three-minute autosave timer and Quit to Menu).
 #
 # NOTE ON WHAT THESE TESTS BUILD. Since that epic a world starts EMPTY, so
 # every script below builds the factory it then asserts against, using real
@@ -171,17 +177,20 @@ run_godot_script test_fill_feedback.gd FILL_FEEDBACK_OK "SPACE/V say why they di
 run_godot_script test_placement.gd PLACEMENT_OK "empty world, ghost, rotation, place/remove — Real Placement ticket 2"
 run_godot_script test_splitters.gd SPLITTERS_OK "splitter model, next-output arrow, items crossing, hover — Epic B ticket 2"
 run_godot_script test_save_load.gd SAVE_LOAD_OK "save_ron/load_ron/new_game across the real boundary — save/load ticket 1"
+run_godot_script test_main_menu.gd MAIN_MENU_OK "menu.tscn, the save list, the GameSession handoff — save/load ticket 2"
+run_godot_script test_pause_menu.gd PAUSE_MENU_OK "ESC pause menu, save slots, autosave, quit to menu — save/load ticket 2"
 
 echo
 echo "PASS: real placement + milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"
 echo "      + icons + hover + milestone 6 fluid presentation + machine footprints/hopper"
 echo "      + belt/pipe junctions + the build menu + the inventory hotbar + the chain rework's"
 echo "      piped middle, 1x2 mixer, hopper-contents choice and ingredient market"
-echo "      + the delivery dock that ends the line + save/load across the boundary,"
+echo "      + the delivery dock that ends the line + save/load across the boundary"
+echo "      + the main menu, save slots, autosave and the pause menu,"
 echo "      all verified"
 echo "      headlessly (sim_core tests"
 echo "      + gdext boundary + interaction + 3D scene structure + pan/zoom + contract panel"
 echo "      structure + icons + hover tooltips + pipe/fluid rendering + per-kind machine"
 echo "      models and the hopper's fill + shop slots/affordability/purchases + the"
 echo "      market's crates and the larder + the dock's model/belt/deck stock/hover"
-echo "      + save_ron/load_ron/new_game)."
+echo "      + save_ron/load_ron/new_game + menu.tscn/the save list/the pause menu)."
