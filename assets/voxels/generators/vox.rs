@@ -183,6 +183,9 @@ impl VoxModel {
     }
 
     /// The bore: [`Self::cylinder_x`] in reverse, leaving empty space.
+    /// (Kept as the pair of `cylinder_x` even while the pipes carve with
+    /// the fractional-centre twin below.)
+    #[allow(dead_code)]
     pub fn carve_cylinder_x(
         &mut self,
         center: (i32, i32),
@@ -262,6 +265,167 @@ impl VoxModel {
             }
         }
         self
+    }
+
+    /// Solid cylinder along +X whose axis may sit BETWEEN voxels — the
+    /// fractional-centre twin of [`Self::cylinder_x`], added for the pipe
+    /// family ("Pipes & Conveyors Overhaul", ticket 3). `center` is in
+    /// voxel-index units (voxel `i` is centred on `i`), so a Y centre of
+    /// 15.5 puts the axis exactly on the tile's midline between voxels 15
+    /// and 16. That is what lets a tile turned 90° or 180° about its
+    /// footprint centre land on the same voxels as its neighbour; an
+    /// integer centre (16) is half a voxel off the midline and a run of
+    /// tiles at mixed facings steps by one voxel at every joint.
+    pub fn cylinder_x_f(&mut self, center: (f32, f32), radius: f32, x: (i32, i32), color: u8) -> &mut Self {
+        self.cylinder_x_f_inner(center, radius, x, Some(color))
+    }
+
+    /// [`Self::cylinder_x_f`] in reverse.
+    pub fn carve_cylinder_x_f(&mut self, center: (f32, f32), radius: f32, x: (i32, i32)) -> &mut Self {
+        self.cylinder_x_f_inner(center, radius, x, None)
+    }
+
+    fn cylinder_x_f_inner(&mut self, center: (f32, f32), radius: f32, x: (i32, i32), color: Option<u8>) -> &mut Self {
+        let r2 = radius * radius;
+        let span = (radius + 1.0).ceil() as i32;
+        let (cy, cz) = (center.0.round() as i32, center.1.round() as i32);
+        for xx in x.0..=x.1 {
+            for zz in (cz - span)..=(cz + span) {
+                for yy in (cy - span)..=(cy + span) {
+                    let (dy, dz) = (yy as f32 - center.0, zz as f32 - center.1);
+                    if dy * dy + dz * dz <= r2 {
+                        match color {
+                            Some(c) => self.set(xx, yy, zz, c),
+                            None => self.erase(xx, yy, zz),
+                        }
+                    }
+                }
+            }
+        }
+        self
+    }
+
+    /// The +Y twin of [`Self::cylinder_x_f`]: `center` is `(x, z)`.
+    pub fn cylinder_y_f(&mut self, center: (f32, f32), radius: f32, y: (i32, i32), color: u8) -> &mut Self {
+        self.cylinder_y_f_inner(center, radius, y, Some(color))
+    }
+
+    /// [`Self::cylinder_y_f`] in reverse.
+    pub fn carve_cylinder_y_f(&mut self, center: (f32, f32), radius: f32, y: (i32, i32)) -> &mut Self {
+        self.cylinder_y_f_inner(center, radius, y, None)
+    }
+
+    fn cylinder_y_f_inner(&mut self, center: (f32, f32), radius: f32, y: (i32, i32), color: Option<u8>) -> &mut Self {
+        let r2 = radius * radius;
+        let span = (radius + 1.0).ceil() as i32;
+        let (cx, cz) = (center.0.round() as i32, center.1.round() as i32);
+        for yy in y.0..=y.1 {
+            for zz in (cz - span)..=(cz + span) {
+                for xx in (cx - span)..=(cx + span) {
+                    let (dx, dz) = (xx as f32 - center.0, zz as f32 - center.1);
+                    if dx * dx + dz * dz <= r2 {
+                        match color {
+                            Some(c) => self.set(xx, yy, zz, c),
+                            None => self.erase(xx, yy, zz),
+                        }
+                    }
+                }
+            }
+        }
+        self
+    }
+
+    /// The +Z twin, for a hand wheel or a hub whose centre is on the tile
+    /// midline: `center` is `(x, y)`.
+    pub fn cylinder_z_f(&mut self, center: (f32, f32), radius: f32, z: (i32, i32), color: u8) -> &mut Self {
+        self.cylinder_z_f_inner(center, radius, z, Some(color))
+    }
+
+    /// [`Self::cylinder_z_f`] in reverse.
+    pub fn carve_cylinder_z_f(&mut self, center: (f32, f32), radius: f32, z: (i32, i32)) -> &mut Self {
+        self.cylinder_z_f_inner(center, radius, z, None)
+    }
+
+    fn cylinder_z_f_inner(&mut self, center: (f32, f32), radius: f32, z: (i32, i32), color: Option<u8>) -> &mut Self {
+        let r2 = radius * radius;
+        let span = (radius + 1.0).ceil() as i32;
+        let (cx, cy) = (center.0.round() as i32, center.1.round() as i32);
+        for zz in z.0..=z.1 {
+            for yy in (cy - span)..=(cy + span) {
+                for xx in (cx - span)..=(cx + span) {
+                    let (dx, dy) = (xx as f32 - center.0, yy as f32 - center.1);
+                    if dx * dx + dy * dy <= r2 {
+                        match color {
+                            Some(c) => self.set(xx, yy, zz, c),
+                            None => self.erase(xx, yy, zz),
+                        }
+                    }
+                }
+            }
+        }
+        self
+    }
+
+    /// A ball with a fractional centre — the cast body where two pipe legs
+    /// meet. Same coordinate rule as [`Self::cylinder_x_f`].
+    pub fn sphere_f(&mut self, center: (f32, f32, f32), radius: f32, color: u8) -> &mut Self {
+        self.sphere_f_inner(center, radius, Some(color))
+    }
+
+    /// [`Self::sphere_f`] in reverse: the hollow inside that cast body.
+    pub fn carve_sphere_f(&mut self, center: (f32, f32, f32), radius: f32) -> &mut Self {
+        self.sphere_f_inner(center, radius, None)
+    }
+
+    fn sphere_f_inner(&mut self, center: (f32, f32, f32), radius: f32, color: Option<u8>) -> &mut Self {
+        let r2 = radius * radius;
+        let span = (radius + 1.0).ceil() as i32;
+        let (cx, cy, cz) = (center.0.round() as i32, center.1.round() as i32, center.2.round() as i32);
+        for zz in (cz - span)..=(cz + span) {
+            for yy in (cy - span)..=(cy + span) {
+                for xx in (cx - span)..=(cx + span) {
+                    let (dx, dy, dz) = (xx as f32 - center.0, yy as f32 - center.1, zz as f32 - center.2);
+                    if dx * dx + dy * dy + dz * dz <= r2 {
+                        match color {
+                            Some(c) => self.set(xx, yy, zz, c),
+                            None => self.erase(xx, yy, zz),
+                        }
+                    }
+                }
+            }
+        }
+        self
+    }
+
+    /// Draws every voxel of `other` into this model (later wins), clipped to
+    /// this model's volume. This is how a composable fitting is proved in
+    /// the scene before Godot overlays it as its own node: the deprecated
+    /// `pipe_source`/`pipe_inlet` are a shape plus a fitting merged here.
+    pub fn merge(&mut self, other: &VoxModel) -> &mut Self {
+        for (&(x, y, z), &idx) in &other.voxels {
+            self.set(x as i32, y as i32, z as i32, idx);
+        }
+        self
+    }
+
+    /// This model turned `turns` quarter turns CLOCKWISE (seen from above)
+    /// about its footprint centre — the same turn `Direction::rotate_cw`
+    /// applies and the same one Godot applies to a placement, so what this
+    /// returns is exactly what the scene shows for a rotated tile. In vox
+    /// coordinates that is `(dx, dy) -> (-dy, dx)`: the +X face goes to
+    /// the +Y (south) face. Requires a square footprint.
+    pub fn rotated_cw(&self, turns: u32) -> VoxModel {
+        assert_eq!(self.size[0], self.size[1], "rotated_cw needs a square footprint");
+        let mut out = self.clone();
+        let last = self.size[0] - 1;
+        for _ in 0..(turns % 4) {
+            let mut next = VoxModel::new(out.size);
+            for (&(x, y, z), &idx) in &out.voxels {
+                next.voxels.insert((last - y, x, z), idx);
+            }
+            out = next;
+        }
+        out
     }
 
     /// Axis-aligned ellipsoid — tomatoes, domed tank tops, bottle shoulders.

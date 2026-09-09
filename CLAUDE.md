@@ -177,6 +177,21 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-09 **Pipe model family (Pipes & Conveyors ticket 3, assets
+  only).** Shapes `pipe`/`pipe_corner`/`pipe_tee`/`pipe_cross`/`pipe_end`,
+  fittings `pipe_fitting_machine`/`pipe_fitting_tank` (authored on +X,
+  overlaid by Godot on any open leg, hardware at x ≥ 27 so no leg window is
+  covered), one one-voxel fluid body per shape. Face convention: vox LOW Y
+  is north (camera-facing); a corner is open on x = 31 and y = 0. The pipe
+  axis sits on the tile midline (`PIPE_C` = 15.5, `*_f` primitives), not on
+  voxel 16; machine nozzles stay on 16. The fluid body is narrower than the
+  bore (`PIPE_FLUID_Y` 14..17) so no face of a full column coincides with
+  the tube's outer wall. Junction shapes carry a hub and NO end flange; the
+  straight keeps one at low X. A cap is a bright plate with brass bolts,
+  never a brass disc. `main.gd`'s PIPE_BORE_* stay 12/7; the end body stops
+  before its cap. `pipe_source`/`pipe_inlet` are deprecated compositions
+  until ticket 6 deletes them. Voxgen tests pin open faces, body-in-bore,
+  window and flange-on-boundary; `VoxModel::rotated_cw` is `rotate_cw`.
 - 2026-09-09 **Pipes & conveyors, ticket 4 (instanced rendering).** Belts,
   splitters, pipes and carried items are `MultiMesh` instances: one
   `MultiMeshInstance3D` per (asset, material class) under `World/Tiles`,

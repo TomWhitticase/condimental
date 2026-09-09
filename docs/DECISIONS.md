@@ -22,6 +22,89 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-09: **Pipe model family — "Pipes & Conveyors Overhaul" ticket 3
+  (`assets/voxels/` only; `godot_project/main.gd` deliberately untouched,
+  ticket 6 wires it).** The ticket began by rendering every pipe run in the
+  chain, fluids and demo fixtures and listing what was wrong (the DEVLOG
+  entry has the seven defects). Six calls worth not re-litigating.
+
+  (1) **The pipe axis is on the tile MIDLINE, between voxels 15 and 16, not
+  on voxel 16.** Every earlier pipe asset was centred on voxel 16 because
+  the integer-centred cylinder primitives could not do otherwise, and it was
+  invisible while every tile faced east. Godot spins a placement about its
+  footprint centre, so an east tile's axis sat at y = 16, a west tile's at
+  y = 15, a south tile's at x = 15 and a north tile's at x = 16 — a run at
+  mixed facings stepped by one voxel at every joint, and a corner could never
+  have met both of its neighbours. `vox.rs` gained fractional-centre
+  primitives (`cylinder_x_f` and friends, centre in voxel-index units) and
+  every shape is built on `PIPE_C` = 15.5. A side effect is a rounder tube:
+  the old profile had three nine-wide rows and read as a square beam at
+  scene scale. The machines' own nozzles (`machine_fluid_port`, the tank
+  spout) still sit on voxel 16 — a radius-3 stub half a voxel off inside a
+  six-wide bore is not a visible step, and moving them is machine art
+  outside this ticket.
+
+  (2) **The fluid body is NARROWER than the bore (14..17 in a 13..18 bore).**
+  The most visible pipe bug in a rendered factory was a coloured stripe
+  along the top of every closed tile: the slab's side faces coincided with
+  the tube's OUTER wall where it curves in toward the crown, and the two
+  z-fought. Two voxels in from each side keeps every face of a full column
+  inside wall material except where the window has genuinely been carved.
+  `main.gd`'s PIPE_BORE_FLOOR_VOXELS (12) and PIPE_BORE_HEIGHT_VOXELS (7)
+  are unchanged; each body reaches every open face and stops short of a cap,
+  so the Godot-side `FLUID_END_CAP_TRIM` is no longer needed.
+
+  (3) **Face convention: vox low Y is north.** The plan's corner conventions
+  name the corner's second face "+Y (north)" in TILE space; the vox importer
+  maps tile north (world +Z) from vox LOW Y (the junction header's
+  derivation, and the mixer's stub reaching its north neighbour through
+  y = 0). So `pipe_corner` is open on x = 31 and y = 0, `pipe_tee` on x = 31,
+  x = 0 and y = 0, `pipe_end` on x = 0 only. Both of a corner's openings are
+  on camera-visible faces (§2b point 11). Stated once in the pipe section's
+  header; `VoxModel::rotated_cw` applies the same `(dx, dy) -> (-dy, dx)`
+  turn as `Direction::rotate_cw`, and a test proves a corner turned twice
+  opens west and south.
+
+  (4) **Fittings are overlays authored on +X, and hardware at tube height
+  stays at x ≥ 27 (`PIPE_FITTING_X0`).** A fitting is the pipe's half of a
+  joint with something that is not a pipe; Godot rotates one onto whichever
+  face touches a machine or a tank, on ANY shape. That composability is why
+  the junction shapes' window sits at 20..26 on the +X leg and the fittings
+  never reach it; the tank valve's hand wheel, which stands well above the
+  tube, may reach x = 25 because a sight line out of a window rises one
+  voxel per voxel of travel and cannot meet it. A fitting's bore is carved
+  0.4 wider than the shape's so an overlay's inner faces sit inside the
+  shape's wall rather than coinciding with its bore surface. The machine
+  fitting is a radius-6 brass flange on the boundary — one radius larger
+  than the tube — because a plain tube end butting the machine's radius-4
+  flange showed its own cut face around the smaller ring. The tank fitting
+  is the heaviest flange on the line with the isolation valve standing ON
+  it (a flanged valve bolted to a tank outlet is how a real tank is
+  plumbed), the bonnet narrow in Y so a leg window's sight line passes it,
+  and in `steel` rather than `steel_dark` because it stands in the tank's
+  shadow.
+
+  (5) **Junction shapes carry a cast hub and no end flange; the straight
+  keeps one flange at low X; a cap is a bright bolted plate.** A flange on a
+  corner's leg would stack against a straight neighbour's own flange half
+  the time (a straight facing INTO a joint puts its flange on that boundary);
+  the hub sphere is what says "fitting". The old cap put a brass disc in the
+  middle of the plate and the render showed a black hole — the +X face is
+  camera-facing but on the shadow side, and brass there reads near-black.
+  Small brass bolt heads on a pale plate keep the accent without giving the
+  eye a dark circle to read as a bore.
+
+  (6) **`pipe_source` and `pipe_inlet` are deprecated, composed from the
+  family, and kept generating.** They exist so the scene renders before
+  ticket 6 and so both fittings could be reviewed in a REAL render now
+  (`VoxModel::merge` + `rotated_cw`): the tank fitting at the tank, the
+  machine fitting on the branch to the mixer. `pipe_inlet` is still wrong
+  at every facing but one — that is the defect the family exists to remove,
+  and `main.gd` already falls back around it. Voxgen tests pin: each shape
+  open exactly on its declared faces (bore empty AND wall present on the
+  boundary), each fluid body inside its bore and reaching only open faces,
+  a genuinely empty window on every shape, and each fitting's flange on the
+  boundary at `PIPE_AXIS_Z` with an open bore.
 - 2026-09-09: **Pipes & conveyors overhaul, ticket 4 — instanced rendering
   for belts, pipes and items (`godot_project/` only; the sim and the assets
   deliberately untouched).** `_rebuild_world` used to free and rebuild one
@@ -2353,6 +2436,50 @@ were only discoverable by building it:
     same thing — its own doorway is still in the right place relative to its
     body, it is simply on the side you cannot see.
 
+
+19. **Two meshes that share a face z-fight, and the place it happens on a
+    pipe is the fluid body against the OUTSIDE of the tube (ticket 3 of the
+    Pipes & Conveyors Overhaul).** The one-voxel fluid slab (point 5) is
+    scaled inside the bore, and the obvious width for it is the bore's
+    width. But a round tube's outer wall curves in toward the crown, so at
+    the rows just below the crown the outer wall is exactly as wide as the
+    bore's equator — and a full column's side faces then lie ON the tube's
+    outer surface. The render showed a coloured stripe running along the
+    top of every closed tile, which no test and no model preview could
+    have shown (a preview has no fluid in it). The rule: a live body scaled
+    inside a hollow shape must be strictly narrower than the shape's
+    outer wall at every height it can reach, not merely inside the cavity.
+
+20. **Anything that will be spun by Godot must be symmetric about the
+    tile's midline, which is BETWEEN voxels 15 and 16.** The integer-
+    centred primitives put an axis on a voxel, half a voxel off the
+    midline, and a placement rotated 90° or 180° about its footprint centre
+    lands that axis on the other side of the midline. A pipe run at mixed
+    facings stepped by a voxel at every joint. The fractional-centre
+    primitives (`cylinder_x_f` etc., centre 15.5 in index units) are the
+    fix; the rule applies to anything that has to meet its neighbour
+    across a boundary — belts, pipes, junction art.
+
+21. **A dark accent on a camera-facing shadow-side face reads as a hole.**
+    The end cap's brass disc was meant as "a fitting"; on the +X face,
+    which the camera looks straight at but the key light does not reach,
+    it rendered as a black circle in a pale ring — the open mouth it
+    existed to close. Point 11 already says an opening must be genuinely
+    black; the converse holds too: a thing that is NOT an opening must not
+    be a dark circle on that face. Small brass bolts on a bright plate keep
+    the accent.
+
+22. **A composable fitting is an overlay, and an overlay must keep out of
+    the shape's windows.** With one fitting for every shape and every
+    facing, the fitting cannot know which leg it lands on; so every shape
+    puts its sight window in the same place relative to the +X leg
+    (20..26) and every fitting keeps tube-height hardware east of 27. Its
+    bore is carved a little wider than the shape's so the two meshes never
+    share the bore surface (the same z-fight as point 19, from the inside).
+    `vengi`'s isometric preview looks from the -X/+Y corner — the two faces
+    the game camera never shows — so a fitting or a cap on the +X face can
+    only be judged in the real scene; the deprecated `pipe_source`/
+    `pipe_inlet` were kept as merged compositions for exactly that review.
 
 ---
 
