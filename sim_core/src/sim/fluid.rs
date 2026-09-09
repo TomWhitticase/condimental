@@ -95,7 +95,7 @@
 //! in `world.rs`'s presentation snapshots, the same one-way conversion
 //! `BeltSnapshot` already makes.
 
-use super::types::{Direction, Fx, FluidId, TileCoord};
+use super::types::{Direction, FluidId, Fx, TileCoord};
 
 /// Fraction of the pressure difference that moves between two adjacent
 /// segments per tick. `0.5` equalizes a pair in a single tick when their
@@ -223,6 +223,7 @@ pub const FLUID_TANK_FILL_AMOUNT: u32 = 30;
 pub struct FluidTank {
     volume: Fx,
     capacity: Fx,
+    auto_fill: bool,
 }
 
 impl FluidTank {
@@ -232,6 +233,8 @@ impl FluidTank {
             // first thing a player does is fill it.
             volume: Fx::ZERO,
             capacity,
+            // ...and is filled by hand until the player says otherwise.
+            auto_fill: false,
         }
     }
 
@@ -242,10 +245,11 @@ impl FluidTank {
     /// ever produce: `fill` is the player's way in, this is the loader's.
     /// The volume is clamped into `[0, capacity]` so a hand-edited save
     /// cannot create a tank holding more than it can.
-    pub(crate) fn restore(capacity: Fx, volume: Fx) -> Self {
+    pub(crate) fn restore(capacity: Fx, volume: Fx, auto_fill: bool) -> Self {
         Self {
             volume: volume.max(Fx::ZERO).min(capacity),
             capacity,
+            auto_fill,
         }
     }
 
@@ -305,6 +309,42 @@ impl FluidTank {
 
     pub fn room(&self) -> Fx {
         self.capacity - self.volume
+    }
+
+    /// This tank's room **in whole units it can take without leaving a
+    /// fraction unpaid for** — the floor of [`FluidTank::room`], and what an
+    /// automatic top-up asks for (see `World::tick`'s auto-fill phase).
+    ///
+    /// The floor rather than the ceiling is the whole point, and it is
+    /// [`FluidTank::auto_fill`]'s reason for existing as a separate accessor.
+    /// Stock is bought and debited in whole units while a tank's room is
+    /// continuous, so `World`'s manual `FillFluidTank` arm bills a part unit
+    /// as a whole one — correct for one deliberate action, and ruinous sixty
+    /// times a second. Asking only for whole units means an automatic top-up
+    /// is billed for exactly what it added, always, and a tank with less than
+    /// a unit of room is simply left alone until it has drained enough to
+    /// take one.
+    pub fn whole_unit_room(&self) -> u32 {
+        self.room().max(Fx::ZERO).floor().to_num::<i64>().max(0) as u32
+    }
+
+    /// Whether `World::tick` keeps this tank topped up out of the player's
+    /// bought stock, every tick, without a command — the fluid twin of
+    /// [`super::hopper::Hopper::auto_fill`] in every respect, including
+    /// "spends stock, never money" and "an empty larder just stops the
+    /// top-ups".
+    ///
+    /// One thing is specific to a tank: what it is being filled *with* is
+    /// the fluid of the run it discharges into (see this type's own doc), so
+    /// **a tank plumbed to nothing is never topped up and is never charged
+    /// for anything** — exactly as the manual command already refuses, since
+    /// there is no id to buy a drum of.
+    pub fn auto_fill(&self) -> bool {
+        self.auto_fill
+    }
+
+    pub fn set_auto_fill(&mut self, enabled: bool) {
+        self.auto_fill = enabled;
     }
 
     /// Adds up to `amount` **whole fluid units**, clamped at capacity, and
@@ -372,7 +412,11 @@ impl FluidNetwork {
     /// same "clear panic at construction time, not a silently-stuck
     /// simulation" stance the rest of this crate takes. Both are internal
     /// invariants of the topology pass in `world.rs`, not player input.
-    pub fn new(fluid: Option<FluidId>, segments: Vec<PipeSegment>, links: Vec<(usize, usize)>) -> Self {
+    pub fn new(
+        fluid: Option<FluidId>,
+        segments: Vec<PipeSegment>,
+        links: Vec<(usize, usize)>,
+    ) -> Self {
         assert!(
             !segments.is_empty(),
             "a FluidNetwork must have at least one pipe segment"
@@ -933,7 +977,10 @@ mod tests {
             net.tick();
         }
 
-        assert!(drawn > Fx::ZERO, "the machine must have been supplied at all");
+        assert!(
+            drawn > Fx::ZERO,
+            "the machine must have been supplied at all"
+        );
         assert!(
             net.tank().is_empty(),
             "sustained draw must drain the tank completely, not leave a share of every \
@@ -1023,7 +1070,10 @@ mod tests {
             net.tick();
         }
         let available = net.inlet().volume;
-        assert!(available > Fx::ZERO, "the tank must have supplied the inlet");
+        assert!(
+            available > Fx::ZERO,
+            "the tank must have supplied the inlet"
+        );
 
         assert!(
             !net.draw("water", Fx::from_num(1)),
@@ -1033,10 +1083,56 @@ mod tests {
             !net.draw("vinegar", available + Fx::from_num(1)),
             "a draw larger than the inlet holds must fail outright, not partially drain it"
         );
-        assert_eq!(net.inlet().volume, available, "a refused draw must change nothing");
+        assert_eq!(
+            net.inlet().volume,
+            available,
+            "a refused draw must change nothing"
+        );
 
         assert!(net.draw("vinegar", available));
         assert_eq!(net.inlet().volume, Fx::ZERO);
+    }
+
+    #[test]
+    fn a_tanks_auto_fill_flag_is_off_by_default_and_toggles() {
+        let mut tank = FluidTank::new(tank_cap());
+        assert!(!tank.auto_fill(), "a new tank is filled by hand");
+        tank.set_auto_fill(true);
+        assert!(tank.auto_fill());
+        tank.set_auto_fill(false);
+        assert!(!tank.auto_fill());
+    }
+
+    /// The rule the automatic path is built on: a top-up asks only for whole
+    /// units, so a part unit is never billed as a whole one. Ceiling instead
+    /// of floor here is what would make a trickling tank cost sixty units a
+    /// second.
+    #[test]
+    fn whole_unit_room_is_the_floor_of_the_real_room() {
+        let mut tank = FluidTank::new(Fx::from_num(10));
+        assert_eq!(tank.whole_unit_room(), 10);
+        tank.fill(4);
+        assert_eq!(tank.whole_unit_room(), 6);
+
+        // Drain half a unit, leaving 5.5 of room.
+        tank.volume -= Fx::from_num(0.5);
+        assert_eq!(tank.room(), Fx::from_num(6.5));
+        assert_eq!(
+            tank.whole_unit_room(),
+            6,
+            "the half unit of room is left alone rather than billed as a whole one"
+        );
+
+        tank.fill(6);
+        assert_eq!(
+            tank.whole_unit_room(),
+            0,
+            "a tank with less than a unit of room asks for nothing at all"
+        );
+        assert!(
+            tank.room() > Fx::ZERO,
+            "...even though it is not quite full"
+        );
     }
 
     #[test]

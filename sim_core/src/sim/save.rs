@@ -97,12 +97,11 @@
 //! # Forward compatibility
 //!
 //! Nothing has shipped with a save file yet, so **`schema_version` 1 is
-//! whatever this batch of work merges with**. The auto-fill ticket landing
-//! alongside this one adds an `auto_fill` flag to hoppers and tanks: the
-//! per-kind body records are named-field structs precisely so that is one
-//! `#[serde(default)]` field each, and it must **not** bump the schema
-//! version. After this batch ships, a field addition is a version bump like
-//! any other shape change.
+//! whatever this batch of work merges with**. The auto-fill ticket has since
+//! landed and did exactly what this note reserved: `SavedHopper` and
+//! `SavedTank` each gained one `#[serde(default)] auto_fill: bool`, and the
+//! schema version stayed at 1. After this batch ships, a field addition is a
+//! version bump like any other shape change.
 
 use serde::{Deserialize, Serialize};
 
@@ -254,6 +253,12 @@ pub struct SavedMachine {
 pub struct SavedHopper {
     pub item: ItemId,
     pub quantity: u32,
+    /// Whether the player has switched this hopper to automatic top-up
+    /// (`sim::hopper::Hopper::auto_fill`). `#[serde(default)]` because it was
+    /// added to `schema_version` 1 rather than bumping it — see this module's
+    /// "Forward compatibility" note.
+    #[serde(default)]
+    pub auto_fill: bool,
 }
 
 /// A tank's exact volume. Fractional in general — a discharging tank holds a
@@ -261,6 +266,9 @@ pub struct SavedHopper {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedTank {
     pub volume_bits: FxBits,
+    /// `SavedHopper::auto_fill`'s twin (`sim::fluid::FluidTank::auto_fill`).
+    #[serde(default)]
+    pub auto_fill: bool,
 }
 
 /// A dock's buffer (normally empty — it is a pass-through, see
@@ -526,16 +534,19 @@ impl World {
                     SavedBody::Hopper(SavedHopper {
                         item: hopper.item().clone(),
                         quantity: hopper.quantity(),
+                        auto_fill: hopper.auto_fill(),
                     })
                 }
-                FLUID_TANK_KIND => SavedBody::FluidTank(SavedTank {
-                    volume_bits: FxBits::of(
-                        self.ecs()
-                            .get::<&FluidTank>(entity)
-                            .expect("a tank placement carries a FluidTank")
-                            .volume(),
-                    ),
-                }),
+                FLUID_TANK_KIND => {
+                    let tank = self
+                        .ecs()
+                        .get::<&FluidTank>(entity)
+                        .expect("a tank placement carries a FluidTank");
+                    SavedBody::FluidTank(SavedTank {
+                        volume_bits: FxBits::of(tank.volume()),
+                        auto_fill: tank.auto_fill(),
+                    })
+                }
                 DOCK_KIND => {
                     let dock = self
                         .ecs()
@@ -554,9 +565,7 @@ impl World {
                     SavedBody::Machine(SavedMachine {
                         input: machine.input.slots().to_vec(),
                         output: machine.output.slots().to_vec(),
-                        process: machine
-                            .process
-                            .map(|p| (p.start_tick, p.required_ticks)),
+                        process: machine.process.map(|p| (p.start_tick, p.required_ticks)),
                     })
                 }
             };
@@ -663,8 +672,7 @@ impl World {
         // An empty world first, so every validation below can be asked of
         // the real content registries rather than of a second copy of the
         // rules. Its starting money is irrelevant and is overwritten.
-        let mut world =
-            World::with_content_and_money(recipes, machines, contracts, Fx::ZERO);
+        let mut world = World::with_content_and_money(recipes, machines, contracts, Fx::ZERO);
 
         validate(&world, &data)?;
         rebuild_structure(&mut world, &data)?;
@@ -800,11 +808,7 @@ fn expected_body(kind: &str) -> &'static str {
     }
 }
 
-fn check_belt_items(
-    belt: &SavedBelt,
-    known: &[String],
-    tile: TileCoord,
-) -> Result<(), SaveError> {
+fn check_belt_items(belt: &SavedBelt, known: &[String], tile: TileCoord) -> Result<(), SaveError> {
     for (item, _) in &belt.items {
         check_item(item, known, || format!("on the belt at {tile:?}"))?;
     }
@@ -901,7 +905,12 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                         machine.output.capacity_per_item,
                     )
                 };
-                check_capacity(&saved.input, input_capacity, "machine input", placement.tile)?;
+                check_capacity(
+                    &saved.input,
+                    input_capacity,
+                    "machine input",
+                    placement.tile,
+                )?;
                 check_capacity(
                     &saved.output,
                     output_capacity,
@@ -914,12 +923,12 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                     .expect("a machine placement carries a Machine");
                 machine.input = Inventory::restore(input_capacity, saved.input.clone());
                 machine.output = Inventory::restore(output_capacity, saved.output.clone());
-                machine.process = saved.process.map(|(start_tick, required_ticks)| {
-                    TimedProcess {
+                machine.process = saved
+                    .process
+                    .map(|(start_tick, required_ticks)| TimedProcess {
                         start_tick,
                         required_ticks,
-                    }
-                });
+                    });
             }
             SavedBody::Hopper(saved) => {
                 let mut hopper = world
@@ -935,6 +944,7 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                     });
                 }
                 hopper.fill(saved.quantity);
+                hopper.set_auto_fill(saved.auto_fill);
             }
             SavedBody::FluidTank(saved) => {
                 let capacity = world
@@ -953,7 +963,10 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                 }
                 world
                     .ecs_mut()
-                    .insert_one(entity, FluidTank::restore(capacity, volume))
+                    .insert_one(
+                        entity,
+                        FluidTank::restore(capacity, volume, saved.auto_fill),
+                    )
                     .expect("the entity was just placed");
             }
             SavedBody::Dock(saved) => {
@@ -1096,7 +1109,9 @@ mod tests {
 
         // ...and the text path reports it as a version problem rather than
         // as whatever the shape change happens to break.
-        let text = a_save().to_ron().replace("schema_version: 1", "schema_version: 99");
+        let text = a_save()
+            .to_ron()
+            .replace("schema_version: 1", "schema_version: 99");
         match SaveData::from_ron(&text) {
             Err(SaveError::UnsupportedSchemaVersion { found, supported }) => {
                 assert_eq!((found, supported), (99, SAVE_SCHEMA_VERSION));
@@ -1148,6 +1163,7 @@ mod tests {
         hopper.body = SavedBody::Hopper(SavedHopper {
             item: "boxed_ketchup".to_string(),
             quantity: 3,
+            auto_fill: false,
         });
         let message = refusal(data);
         assert!(message.contains("boxed_ketchup"), "{message}");

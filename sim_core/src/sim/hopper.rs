@@ -86,6 +86,7 @@ pub struct Hopper {
     item: ItemId,
     quantity: u32,
     capacity: u32,
+    auto_fill: bool,
 }
 
 impl Hopper {
@@ -94,6 +95,9 @@ impl Hopper {
             item,
             quantity: 0,
             capacity,
+            // A new hopper is loaded by hand until the player says
+            // otherwise — see [`Hopper::auto_fill`].
+            auto_fill: false,
         }
     }
 
@@ -113,6 +117,40 @@ impl Hopper {
         self.quantity == 0
     }
 
+    /// How much more this hopper can take — what an automatic top-up asks
+    /// for (see `World::tick`'s auto-fill phase).
+    pub fn room(&self) -> u32 {
+        self.capacity.saturating_sub(self.quantity)
+    }
+
+    /// Whether `World::tick` keeps this hopper topped up to capacity out of
+    /// the player's bought stock, every tick, without a command.
+    ///
+    /// **It spends stock, never money.** Buying ingredients stays an
+    /// explicit `PlayerCommand::BuyIngredient` — GAMEPLAY.md §5 makes the
+    /// recurring ingredient cost one of the three things the player is
+    /// deciding about, and a toggle that quietly drained the balance would
+    /// turn that decision into a background leak. When the larder runs out
+    /// the hopper simply stops being topped up: no error, and this flag is
+    /// **not** flipped off, so the top-ups resume by themselves the moment
+    /// stock is bought again.
+    ///
+    /// **Changing the contents does not clear it** ([`Hopper::retarget`]).
+    /// "Keep this bin full" is a statement about the bin, not about what is
+    /// in it — a player who set it and then switched a hopper from tomato to
+    /// sugar still wants it kept full, now of sugar.
+    ///
+    /// `false` on a newly placed hopper, and a removed-then-replaced hopper
+    /// is a new hopper (`PlayerCommand::Remove` destroys the body with
+    /// everything in it), so it comes back `false` too.
+    pub fn auto_fill(&self) -> bool {
+        self.auto_fill
+    }
+
+    pub fn set_auto_fill(&mut self, enabled: bool) {
+        self.auto_fill = enabled;
+    }
+
     /// Switches which item this hopper holds, discarding whatever it
     /// currently has — a hopper is single-item by design (this module's own
     /// doc), so there is no "half tomato, half sugar" state to preserve.
@@ -122,6 +160,8 @@ impl Hopper {
     /// alternative, refusing to retarget a non-empty hopper, would leave a
     /// player with no way to switch a full tomato hopper to sugar short of
     /// removing and re-placing it, for no real benefit over just clearing it.
+    ///
+    /// [`Hopper::auto_fill`] is deliberately **not** reset — see its doc.
     pub fn retarget(&mut self, item: ItemId) {
         self.item = item;
         self.quantity = 0;
@@ -239,6 +279,31 @@ mod tests {
         }
         assert_eq!(moved, 3, "all three units eventually reached the belt");
         assert!(h.is_empty());
+    }
+
+    #[test]
+    fn auto_fill_is_off_on_a_new_hopper_and_survives_a_retarget() {
+        let mut h = hopper();
+        assert!(!h.auto_fill(), "a new hopper is loaded by hand");
+        h.set_auto_fill(true);
+        h.fill(10);
+
+        h.retarget("sugar".to_string());
+        assert!(
+            h.auto_fill(),
+            "\"keep this bin full\" is about the bin, not about what is in it"
+        );
+        assert_eq!(h.quantity(), 0, "retargeting still clears the contents");
+    }
+
+    #[test]
+    fn room_is_what_a_top_up_asks_for() {
+        let mut h = hopper();
+        assert_eq!(h.room(), HOPPER_CAPACITY);
+        h.fill(10);
+        assert_eq!(h.room(), HOPPER_CAPACITY - 10);
+        h.fill(HOPPER_CAPACITY);
+        assert_eq!(h.room(), 0, "a full hopper asks for nothing");
     }
 
     /// The belt-full case, mirroring `belt.rs`'s own

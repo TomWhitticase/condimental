@@ -391,7 +391,43 @@ pub enum PlayerCommand {
     /// on an empty tile, on a tile that is not a hopper, or in a world with
     /// fewer than two raw items (there is nothing to cycle *to*). See
     /// [`super::hopper::Hopper::retarget`] for what happens to its contents.
+    ///
+    /// **Superseded by [`Self::SetHopperItem`]** (the auto-fill ticket),
+    /// which names the item outright — which is what a picker in a placed
+    /// hopper's own panel wants. This variant is kept only until the
+    /// presentation half of that epic removes the **Q** keybind that is its
+    /// last caller; nothing new should reach for it.
     CycleHopperItem { tile: TileCoord },
+    /// Switches the hopper at `tile` to hold `item` — the explicit form of
+    /// [`Self::CycleHopperItem`], and the one a panel with a list of
+    /// ingredients in it wants: a picker that already names the item should
+    /// not have to press "next" until it arrives there.
+    ///
+    /// A silent no-op on an empty tile, on a tile that is not a hopper, and
+    /// on an item that is not raw (the same set [`Self::Place`] validates a
+    /// hopper's contents against — [`World::raw_items`]). Naming the item
+    /// the hopper **already** holds is a no-op too, contents and all: a
+    /// picker redraws its own current selection, and re-selecting it must
+    /// not empty the bin. Otherwise it is exactly
+    /// [`super::hopper::Hopper::retarget`] — the contents go, the
+    /// [`super::hopper::Hopper::auto_fill`] flag stays.
+    SetHopperItem { tile: TileCoord, item: ItemId },
+    /// Turns automatic top-up on or off for the hopper at `tile` (see
+    /// [`super::hopper::Hopper::auto_fill`]): while it is on, `World::tick`
+    /// refills that hopper to capacity out of the player's **bought stock**,
+    /// every tick, spending no money.
+    ///
+    /// Tile-addressed like [`Self::Rotate`] — any tile of the footprint
+    /// resolves — and a silent no-op on an empty tile or one holding
+    /// something that is not a hopper. Setting the value it already has is a
+    /// no-op that dirties nothing.
+    SetHopperAutoFill { tile: TileCoord, enabled: bool },
+    /// The fluid twin of [`Self::SetHopperAutoFill`], for the tank at
+    /// `tile`. A tank plumbed to nothing can be *flagged*, and simply never
+    /// tops up while there is no fluid to charge the player for — the same
+    /// refusal [`Self::FillFluidTank`] already makes, rather than a second
+    /// rule about when the toggle itself is allowed.
+    SetTankAutoFill { tile: TileCoord, enabled: bool },
 }
 
 /// JSON wire shape for [`PlayerCommand`], used only at the `gdext` boundary
@@ -459,6 +495,32 @@ enum PlayerCommandDto {
     Rotate { tile: TileCoord },
     /// `{"type": "cycle_hopper_item", "tile": [-1, 0]}`.
     CycleHopperItem { tile: TileCoord },
+    /// `{"type": "set_hopper_item", "tile": [-1, 0], "item": "sugar"}` —
+    /// both required: only the player knows which hopper and which
+    /// ingredient.
+    SetHopperItem { tile: TileCoord, item: ItemId },
+    /// `{"type": "set_hopper_auto_fill", "tile": [-1, 0], "enabled": true}`
+    /// — `enabled` optional, defaulting to `true`, because a panel's toggle
+    /// sends the state it wants and "turn it on" is the one this command
+    /// exists for.
+    SetHopperAutoFill {
+        tile: TileCoord,
+        #[serde(default = "default_auto_fill_enabled")]
+        enabled: bool,
+    },
+    /// `{"type": "set_tank_auto_fill", "tile": [5, 1], "enabled": true}` —
+    /// exactly `set_hopper_auto_fill`'s shape.
+    SetTankAutoFill {
+        tile: TileCoord,
+        #[serde(default = "default_auto_fill_enabled")]
+        enabled: bool,
+    },
+}
+
+/// Turning auto-fill *on* is what the command is for; see
+/// `PlayerCommandDto::SetHopperAutoFill`.
+fn default_auto_fill_enabled() -> bool {
+    true
 }
 
 fn default_fill_amount() -> u32 {
@@ -505,8 +567,15 @@ impl From<PlayerCommandDto> for PlayerCommand {
             },
             PlayerCommandDto::Remove { tile } => PlayerCommand::Remove { tile },
             PlayerCommandDto::Rotate { tile } => PlayerCommand::Rotate { tile },
-            PlayerCommandDto::CycleHopperItem { tile } => {
-                PlayerCommand::CycleHopperItem { tile }
+            PlayerCommandDto::CycleHopperItem { tile } => PlayerCommand::CycleHopperItem { tile },
+            PlayerCommandDto::SetHopperItem { tile, item } => {
+                PlayerCommand::SetHopperItem { tile, item }
+            }
+            PlayerCommandDto::SetHopperAutoFill { tile, enabled } => {
+                PlayerCommand::SetHopperAutoFill { tile, enabled }
+            }
+            PlayerCommandDto::SetTankAutoFill { tile, enabled } => {
+                PlayerCommand::SetTankAutoFill { tile, enabled }
             }
         }
     }
@@ -696,6 +765,7 @@ pub struct PipeSnapshot {
 ///   "tile": [-1, 0], "kind": "hopper", "direction": "east",
 ///   "footprint": { "width_tiles": 1, "height_tiles": 1 },
 ///   "item": "tomato", "quantity": 12, "capacity": 64, "fill": 0.1875,
+///   "auto_fill": false,
 ///   "belt_tile": [0, 0]
 /// }
 /// ```
@@ -718,6 +788,9 @@ pub struct HopperSnapshot {
     pub quantity: u32,
     pub capacity: u32,
     pub fill: f64,
+    /// Whether `World::tick` keeps this hopper topped up out of bought
+    /// stock — [`super::hopper::Hopper::auto_fill`].
+    pub auto_fill: bool,
     pub belt_tile: Option<TileCoord>,
 }
 
@@ -731,7 +804,7 @@ pub struct HopperSnapshot {
 ///   "tile": [5, 1], "kind": "fluid_tank", "direction": "east",
 ///   "footprint": { "width_tiles": 1, "height_tiles": 1 },
 ///   "fluid": "vinegar", "quantity": 30.0, "capacity": 120.0,
-///   "fill": 0.25, "pipe_tile": [6, 1]
+///   "fill": 0.25, "auto_fill": false, "pipe_tile": [6, 1]
 /// }
 /// ```
 ///
@@ -756,6 +829,9 @@ pub struct FluidTankSnapshot {
     pub quantity: f64,
     pub capacity: f64,
     pub fill: f64,
+    /// Whether `World::tick` keeps this tank topped up out of bought stock —
+    /// [`FluidTank::auto_fill`].
+    pub auto_fill: bool,
     pub pipe_tile: Option<TileCoord>,
 }
 
@@ -929,7 +1005,8 @@ pub enum TileSnapshot {
     },
     /// `{"kind": "hopper", "direction": "east",
     ///   "footprint": {...}, "origin_tile": [-1, 0], "item": "tomato",
-    ///   "quantity": 12, "capacity": 64, "fill": 0.1875}` — enough for a
+    ///   "quantity": 12, "capacity": 64, "fill": 0.1875,
+    ///   "auto_fill": false}` — enough for a
     /// hover tooltip ("Hopper — 12/64 tomato"). There is no `machine_kind`
     /// field: this enum's own `kind` tag already *is* the kind id.
     Hopper {
@@ -940,10 +1017,12 @@ pub enum TileSnapshot {
         quantity: u32,
         capacity: u32,
         fill: f64,
+        auto_fill: bool,
     },
     /// `{"kind": "fluid_tank", "direction": "east", "footprint": {...},
     ///   "origin_tile": [5, 1], "fluid": "vinegar", "quantity": 30.0,
-    ///   "capacity": 120.0, "fill": 0.25}`. `fluid` is nullable for
+    ///   "capacity": 120.0, "fill": 0.25, "auto_fill": false}`. `fluid` is
+    /// nullable for
     /// [`FluidTankSnapshot`]'s reason.
     FluidTank {
         direction: Direction,
@@ -953,6 +1032,7 @@ pub enum TileSnapshot {
         quantity: f64,
         capacity: f64,
         fill: f64,
+        auto_fill: bool,
     },
     /// `{"kind": "dock", "direction": "east", "footprint": {...},
     ///   "origin_tile": [35, 0], "contents": [], "capacity_per_item": 32,
@@ -1185,12 +1265,7 @@ impl World {
         machines: MachineRegistry,
         contracts: ContractRegistry,
     ) -> Self {
-        Self::with_content_and_money(
-            recipes,
-            machines,
-            contracts,
-            Fx::from_num(STARTING_MONEY),
-        )
+        Self::with_content_and_money(recipes, machines, contracts, Fx::from_num(STARTING_MONEY))
     }
 
     /// [`World::with_content`], but starting from a chosen balance instead
@@ -1301,7 +1376,8 @@ impl World {
     /// The raw-ingredient market plus the stock the player owns and their
     /// money, in one object — see [`IngredientsSnapshot`].
     pub fn ingredients_snapshot(&self) -> IngredientsSnapshot {
-        self.ingredients.snapshot(self.economy.money, &self.raw_items)
+        self.ingredients
+            .snapshot(self.economy.money, &self.raw_items)
     }
 
     /// How many units of a raw ingredient the player owns and has **not**
@@ -1711,7 +1787,10 @@ impl World {
                     .get::<&PipeTile>(entity)
                     .expect("a pipe placement carries a PipeTile")
                     .capacity;
-                (self.position_of(entity), (entity, capacity, placement.direction))
+                (
+                    self.position_of(entity),
+                    (entity, capacity, placement.direction),
+                )
             })
             .collect();
         let mut unvisited: Vec<TileCoord> = pipe_tiles.keys().copied().collect();
@@ -1768,7 +1847,9 @@ impl World {
                     .pipe_index
                     .insert(tile, (network_index, segment_index));
             }
-            topology.networks.push(FluidNetwork::new(None, segments, links));
+            topology
+                .networks
+                .push(FluidNetwork::new(None, segments, links));
         }
 
         // --- who taps what.
@@ -1901,6 +1982,16 @@ impl World {
     /// The passes, in order — every one of them walking a list the topology
     /// pass built in tile order, so the whole tick is deterministic:
     ///
+    /// 0. **Auto-fill.** Every hopper and tank the player has switched to
+    ///    automatic ([`super::hopper::Hopper::auto_fill`]) is topped up to
+    ///    capacity out of bought stock. **First**, before anything consumes
+    ///    anything, and that placement is the mechanic: a topped-up tank
+    ///    discharges into its run in step 1 of the same tick, and a topped-up
+    ///    hopper meters a unit onto its belt in step 5 of the same tick — so
+    ///    an auto-filled line never stutters for a tick between "the stock
+    ///    exists" and "the machine gets it". Running it last would mean a
+    ///    hopper that emptied this tick fed nothing this tick, which is a
+    ///    one-tick hiccup with no reason behind it.
     /// 1. **Fluid.** Every tank discharges into the pipe it faces, then
     ///    every network equalizes across its own links. First, so a machine
     ///    starting a craft below sees this tick's pressure rather than last
@@ -1933,6 +2024,9 @@ impl World {
     pub fn tick(&mut self) {
         self.dirty.clear();
         self.tick_count += 1;
+
+        // 0. Auto-fill, before anything draws down a buffer.
+        self.auto_fill_buffers();
 
         // 1. Fluid.
         let tank_discharges = std::mem::take(&mut self.topology.tank_discharges);
@@ -1992,8 +2086,14 @@ impl World {
                     (Some((a, inlet)), Some((b, outlet))) => {
                         let (net_a, net_b) = two_networks_mut(&mut self.topology.networks, a, b);
                         (
-                            Some(FluidTap { network: net_a, inlet }),
-                            Some(FluidTap { network: net_b, inlet: outlet }),
+                            Some(FluidTap {
+                                network: net_a,
+                                inlet,
+                            }),
+                            Some(FluidTap {
+                                network: net_b,
+                                inlet: outlet,
+                            }),
                         )
                     }
                     (Some((a, inlet)), None) => (
@@ -2105,6 +2205,58 @@ impl World {
         // dirty-chunk tracking; Godot reads economy state via its own
         // always-fresh snapshot instead.
         self.economy.tick(self.tick_count);
+    }
+
+    /// Step 0 of [`World::tick`]: tops every auto-filling hopper and tank up
+    /// **to capacity** out of the player's bought stock.
+    ///
+    /// Three rules, all of them deliberate and all of them stated in
+    /// [`super::hopper::Hopper::auto_fill`]'s doc as well:
+    ///
+    /// - **To capacity, not by a fill-command's worth.** The mechanic is
+    ///   "keep this bin full", so it asks for the whole room every tick; in
+    ///   practice a running hopper is one unit down and takes one unit back.
+    /// - **It spends stock, never money.** [`PlayerCommand::BuyIngredient`]
+    ///   stays the only thing that moves the balance (GAMEPLAY.md §5). An
+    ///   empty larder simply means nothing is added — no error, no flag flip,
+    ///   and top-ups resume by themselves once stock is bought.
+    /// - **The same fill rule as the manual command**, because it is
+    ///   literally the same function ([`World::fill_hopper_entity`] /
+    ///   [`World::fill_tank_entity`]): two clamps, owned stock then room, and
+    ///   the ledger debited by what was actually added.
+    ///
+    /// A tank asks only for [`FluidTank::whole_unit_room`] and therefore
+    /// **marks no chunk dirty**, both for the same reason: this runs every
+    /// tick, so rounding a part unit up would bill sixty whole units a second
+    /// for a trickle, and dirtying the chunk every tick would defeat
+    /// ARCHITECTURE.md §4's delta granularity exactly the way the discharge
+    /// pass below would if it dirtied. A tank's level is already documented
+    /// as poll-only ([`World::fluid_tank_snapshots`]); a hopper's is not, so
+    /// a hopper top-up does dirty, as it always has.
+    fn auto_fill_buffers(&mut self) {
+        let hoppers = std::mem::take(&mut self.topology.hoppers);
+        for &hopper in &hoppers {
+            let room = match self.ecs.get::<&Hopper>(hopper) {
+                Ok(body) if body.auto_fill() => body.room(),
+                _ => 0,
+            };
+            if room > 0 {
+                self.fill_hopper_entity(hopper, room);
+            }
+        }
+        self.topology.hoppers = hoppers;
+
+        let tanks = std::mem::take(&mut self.topology.tanks);
+        for &tank in &tanks {
+            let room = match self.ecs.get::<&FluidTank>(tank) {
+                Ok(body) if body.auto_fill() => body.whole_unit_room(),
+                _ => 0,
+            };
+            if room > 0 {
+                self.fill_tank_entity(tank, room);
+            }
+        }
+        self.topology.tanks = tanks;
     }
 
     fn body_kind(&self, entity: Entity) -> Option<BodyKind> {
@@ -2285,52 +2437,16 @@ impl World {
             PlayerCommand::FillHopper { amount, tile } => {
                 let hoppers = self.targets(&self.topology.hoppers.clone(), tile);
                 for hopper in hoppers {
-                    // Two clamps, in this order: what the player owns, then
-                    // what the bin has room for. The ledger is debited by
-                    // what `fill` actually took, never by what was asked
-                    // for — see `PlayerCommand::FillHopper`.
-                    let item = self.ecs.get::<&Hopper>(hopper).unwrap().item().clone();
-                    let allowed = amount.min(self.ingredients.owned.count(&item));
-                    if allowed == 0 {
-                        continue;
-                    }
-                    let added = {
-                        let mut body = self.ecs.get::<&mut Hopper>(hopper).unwrap();
-                        body.fill(allowed)
-                    };
-                    self.ingredients.owned.take(&item, added);
-                    if added > 0 {
-                        self.mark_placement_dirty(hopper);
-                    }
+                    self.fill_hopper_entity(hopper, amount);
                 }
             }
             PlayerCommand::FillFluidTank { amount, tile } => {
                 let tanks = self.targets(&self.topology.tanks.clone(), tile);
                 for tank in tanks {
-                    // A tank holds no fluid id of its own, so what is being
-                    // bought is the fluid of the run it discharges into.
-                    // Plumbed to nothing means there is nothing to charge
-                    // for, and the fill is a no-op.
-                    let Some(fluid) = self.tank_fluid(tank) else {
-                        continue;
-                    };
-                    let allowed = amount.min(self.ingredients.owned.count(&fluid));
-                    if allowed == 0 {
-                        continue;
-                    }
-                    // Clamped at capacity, never an error — see `FluidTank::fill`.
-                    let added = {
-                        let mut body = self.ecs.get::<&mut FluidTank>(tank).unwrap();
-                        body.fill(allowed)
-                    };
-                    // A tank's room is continuous, so `fill` can report a
-                    // fraction of a unit. Stock is whole units, so a partial
-                    // unit is billed as a whole one — capped at what was
-                    // allowed, so the ledger can never go further than the
-                    // clamp above already permitted.
-                    let debit = added.ceil().to_num::<i64>().max(0) as u32;
-                    self.ingredients.owned.take(&fluid, debit.min(allowed));
-                    if added > Fx::ZERO {
+                    if self.fill_tank_entity(tank, amount) > Fx::ZERO {
+                        // A discrete player action, so a chunk-driven
+                        // renderer is told; the per-tick auto-fill path
+                        // deliberately is not (see `auto_fill_buffers`).
                         self.mark_placement_dirty(tank);
                     }
                 }
@@ -2384,7 +2500,141 @@ impl World {
             PlayerCommand::CycleHopperItem { tile } => {
                 self.try_cycle_hopper_item(tile);
             }
+            PlayerCommand::SetHopperItem { tile, item } => {
+                self.try_set_hopper_item(tile, &item);
+            }
+            PlayerCommand::SetHopperAutoFill { tile, enabled } => {
+                self.try_set_hopper_auto_fill(tile, enabled);
+            }
+            PlayerCommand::SetTankAutoFill { tile, enabled } => {
+                self.try_set_tank_auto_fill(tile, enabled);
+            }
         }
+    }
+
+    /// **The one hopper fill rule in this file.** Adds up to `amount` units
+    /// of this hopper's own item out of bought stock, and returns how many
+    /// actually landed.
+    ///
+    /// Both the manual `PlayerCommand::FillHopper` arm and `World::tick`'s
+    /// automatic top-up go through here, so the two cannot drift on the part
+    /// that matters: **two clamps, in this order** — what the player owns,
+    /// then what the bin has room for — and the ledger debited by what
+    /// [`Hopper::fill`] reports it actually took, never by what was asked
+    /// for.
+    ///
+    /// It marks the placement dirty itself when something moved, because
+    /// both callers want that: a hopper's level is a chunk-visible fact
+    /// (see [`World::hopper_snapshots`]), and a hopper being topped up is
+    /// also a hopper feeding a belt, which dirties its chunk anyway.
+    fn fill_hopper_entity(&mut self, hopper: Entity, amount: u32) -> u32 {
+        let item = self.ecs.get::<&Hopper>(hopper).unwrap().item().clone();
+        let allowed = amount.min(self.ingredients.owned.count(&item));
+        if allowed == 0 {
+            return 0;
+        }
+        let added = {
+            let mut body = self.ecs.get::<&mut Hopper>(hopper).unwrap();
+            body.fill(allowed)
+        };
+        self.ingredients.owned.take(&item, added);
+        if added > 0 {
+            self.mark_placement_dirty(hopper);
+        }
+        added
+    }
+
+    /// **The one tank fill rule in this file**, and [`World::
+    /// fill_hopper_entity`]'s twin — same two clamps in the same order, same
+    /// debit-what-was-added rule, shared by the manual command and the
+    /// per-tick top-up.
+    ///
+    /// Two things are specific to fluid. A tank holds no fluid id of its own,
+    /// so what is being bought is the fluid of the run it discharges into —
+    /// **plumbed to nothing is a no-op**, because there is nothing to charge
+    /// for. And a tank's room is continuous while stock is whole units, so a
+    /// part unit is billed as a whole one, capped at what the ownership clamp
+    /// already allowed. (The automatic path never hits that rounding: it asks
+    /// only for [`FluidTank::whole_unit_room`].)
+    ///
+    /// Unlike the hopper's, this does **not** mark the placement dirty —
+    /// its callers do, or deliberately do not. See `auto_fill_buffers`.
+    fn fill_tank_entity(&mut self, tank: Entity, amount: u32) -> Fx {
+        let Some(fluid) = self.tank_fluid(tank) else {
+            return Fx::ZERO;
+        };
+        let allowed = amount.min(self.ingredients.owned.count(&fluid));
+        if allowed == 0 {
+            return Fx::ZERO;
+        }
+        // Clamped at capacity, never an error — see `FluidTank::fill`.
+        let added = {
+            let mut body = self.ecs.get::<&mut FluidTank>(tank).unwrap();
+            body.fill(allowed)
+        };
+        let debit = added.ceil().to_num::<i64>().max(0) as u32;
+        self.ingredients.owned.take(&fluid, debit.min(allowed));
+        added
+    }
+
+    /// [`PlayerCommand::SetHopperItem`]. Silent no-op on an empty tile, a
+    /// tile that is not a hopper, an item that is not raw, or the item the
+    /// hopper already holds.
+    fn try_set_hopper_item(&mut self, tile: TileCoord, item: &str) -> bool {
+        if !self.raw_items.iter().any(|raw| raw == item) {
+            return false;
+        }
+        let Some(&entity) = self.topology.grid.get(&tile) else {
+            return false;
+        };
+        let Ok(mut hopper) = self.ecs.get::<&mut Hopper>(entity) else {
+            return false;
+        };
+        if hopper.item() == item {
+            // Re-selecting the current item must not empty the bin.
+            return false;
+        }
+        hopper.retarget(item.to_string());
+        drop(hopper);
+        self.mark_placement_dirty(entity);
+        true
+    }
+
+    /// [`PlayerCommand::SetHopperAutoFill`]. Silent no-op on an empty tile
+    /// or one that is not a hopper; setting the value it already has changes
+    /// and dirties nothing.
+    fn try_set_hopper_auto_fill(&mut self, tile: TileCoord, enabled: bool) -> bool {
+        let Some(&entity) = self.topology.grid.get(&tile) else {
+            return false;
+        };
+        let Ok(mut hopper) = self.ecs.get::<&mut Hopper>(entity) else {
+            return false;
+        };
+        if hopper.auto_fill() == enabled {
+            return false;
+        }
+        hopper.set_auto_fill(enabled);
+        drop(hopper);
+        self.mark_placement_dirty(entity);
+        true
+    }
+
+    /// [`PlayerCommand::SetTankAutoFill`] — `try_set_hopper_auto_fill`'s
+    /// twin, against a tank.
+    fn try_set_tank_auto_fill(&mut self, tile: TileCoord, enabled: bool) -> bool {
+        let Some(&entity) = self.topology.grid.get(&tile) else {
+            return false;
+        };
+        let Ok(mut tank) = self.ecs.get::<&mut FluidTank>(entity) else {
+            return false;
+        };
+        if tank.auto_fill() == enabled {
+            return false;
+        }
+        tank.set_auto_fill(enabled);
+        drop(tank);
+        self.mark_placement_dirty(entity);
+        true
     }
 
     /// [`PlayerCommand::CycleHopperItem`]. Silent no-op on an empty tile, a
@@ -2482,9 +2732,9 @@ impl World {
         }
         for (&tile, &(network, segment)) in &self.topology.pipe_index {
             if chunk_of(tile) == id {
-                snapshot
-                    .pipes
-                    .push(pipe_snapshot(&self.topology.networks[network].segments()[segment]));
+                snapshot.pipes.push(pipe_snapshot(
+                    &self.topology.networks[network].segments()[segment],
+                ));
             }
         }
         for &hopper in &self.topology.hoppers {
@@ -2732,6 +2982,7 @@ impl World {
             } else {
                 body.quantity() as f64 / body.capacity() as f64
             },
+            auto_fill: body.auto_fill(),
             belt_tile: self.outbound_belt_tile(hopper),
         }
     }
@@ -2757,6 +3008,7 @@ impl World {
             // exactly what this field means — not its `discharge_pressure`,
             // which is a flow-model quantity and is always 1.
             fill: body.pressure().to_num::<f64>(),
+            auto_fill: body.auto_fill(),
             pipe_tile: discharge
                 .map(|(network, segment)| self.topology.networks[network].segments()[segment].tile),
         }
@@ -2884,6 +3136,7 @@ impl World {
                     quantity: snapshot.quantity,
                     capacity: snapshot.capacity,
                     fill: snapshot.fill,
+                    auto_fill: snapshot.auto_fill,
                 }
             }
             BodyKind::FluidTank => {
@@ -2896,6 +3149,7 @@ impl World {
                     quantity: snapshot.quantity,
                     capacity: snapshot.capacity,
                     fill: snapshot.fill,
+                    auto_fill: snapshot.auto_fill,
                 }
             }
             BodyKind::Dock => {
@@ -3087,7 +3341,12 @@ fn validate_chain(ordered: &[Recipe]) {
             "recipes.ron chain error: recipe '{}' (outputs {:?}, fluid_outputs {:?}) does not \
              feed recipe '{}' (inputs {:?}, fluid_inputs {:?}) — the file describes one \
              production line, so consecutive recipes must chain by a shared id, solid or fluid",
-            prev.id, prev.outputs, prev.fluid_outputs, next.id, next.inputs, next.fluid_inputs
+            prev.id,
+            prev.outputs,
+            prev.fluid_outputs,
+            next.id,
+            next.inputs,
+            next.fluid_inputs
         );
     }
 }
