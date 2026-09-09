@@ -50,6 +50,17 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-09 — The always-loaded docs were cut to a third of their size
+
+`CLAUDE.md`, `ARCHITECTURE.md` and `UI_UX.md` had all grown past the 40k-char
+per-file budget (160k, 52k and 52k). Every decision record that lived in
+`CLAUDE.md`'s log, the long form of `UI_UX.md` §2b and `ARCHITECTURE.md`
+§9a moved verbatim into a new `docs/DECISIONS.md`, which is not
+`@`-included. What stays loaded is the **rule** each record produced, in
+condensed form, under the same section and point numbers code comments
+cite. The three files are now 28k, 19.5k and 18k. New decisions: condensed
+rule in the loaded doc, full reasoning in DECISIONS.md.
+
 ### 2026-09-09 — A hopper or a tank can keep itself topped up
 
 The sim half of moving hopper/tank configuration off the keyboard and onto

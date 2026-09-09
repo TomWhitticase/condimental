@@ -657,7 +657,7 @@ pub fn item_sugar(p: &Palette) -> VoxModel {
 /// name still referred to `tomato_sauce`, an item id the "Machines
 /// improvement" epic's ticket 2 deleted. A presentation-side name that
 /// silently outlives the content id it describes is exactly the failure
-/// UI_UX.md §2b point 10 records, so it is worth not keeping one around.
+/// UI_UX.md §2b point 12 records, so it is worth not keeping one around.
 pub fn item_paste_pail(p: &Palette) -> VoxModel {
     pail(p, "pail_grey", "liquid_paste", "brass")
 }

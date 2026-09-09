@@ -1,48 +1,57 @@
 # Sauce Factory — Architecture Plan
 
-A Factorio-like automation/logistics game, sauce-themed. Target platforms: PC, Mac, mobile.
+A Factorio-like automation game, sauce-themed. Targets: PC, Mac, mobile.
 
-This doc is about **architecture and technology choices only** — how the game
-is built, not what it plays like or looks like. Gameplay design (specific
-recipes, ingredients, mechanics, economy) is covered in
-[docs/GAMEPLAY.md](GAMEPLAY.md); visual style and UI/UX are covered in
-[docs/UI_UX.md](UI_UX.md). This file should stay useful even if the theme,
-feature set, or visual style changes.
+This doc covers **architecture and technology only** — how the game is
+built. Gameplay is [GAMEPLAY.md](GAMEPLAY.md); visuals are
+[UI_UX.md](UI_UX.md). Full decision records are in
+[DECISIONS.md](DECISIONS.md).
 
-This doc follows the pattern established by Factorio's own architecture (deterministic tick simulation, data-oriented ECS, aggregate item representation, tiered update scheduling) and Godot's text-native, agent-friendly project structure. This file is self-contained — it includes the reasoning behind each tech choice and the sources it's based on, so it doesn't depend on any earlier conversation.
-
-**Revision note:** this plan went through an internal critical review after the first draft, specifically hunting for things that would trip up development later. Several points that were originally left as open options ("X or Y", "prefer X") have since been turned into firm decisions — determinism mechanism (§3.9), ECS/threading primitive (§3.8), SimBridge scope (§4), version pinning (§1a) — because the review's main finding was that hedged decisions in an architecture doc are themselves a risk on an agent-built project: an agent will pick *something* when it hits an "or," and it should be picking the one the team actually chose, not whichever is easier to write in the moment.
+The plan follows Factorio's own patterns (deterministic tick simulation,
+data-oriented ECS, aggregate item representation, tiered scheduling) and
+Godot's text-native project structure. After a critical review, every hedged
+"X or Y" was turned into a firm decision: an agent hitting an "or" will pick
+something, and it should pick what the team chose.
 
 ---
 
 ## 0. Background & rationale (why this stack)
 
-The overall goal is a codebase where an AI coding agent (Claude Code or similar) can do most of the implementation work reliably. That constraint, not just "what's technically best for a factory game," drove the following decisions.
+The goal is a codebase an AI coding agent can build reliably. That constraint
+drove these choices.
 
-**General evidence on AI-agent-friendly development** (not game-specific, but applied throughout this plan):
+**Evidence on agent-friendly development:**
 
-- **Training-data density ("on-distribution") beats paradigm elegance.** Anthropic built Claude Code itself in TypeScript specifically because it's a stack the model has seen enormously more of — this is *why* Claude was able to write ~90% of Claude Code's own codebase. The lesson generalizes: prefer mainstream, heavily-documented tech over a technically "purer" niche option.
-- **Static/strong typing's main value for agents is the compiler-error feedback loop, not upfront error prevention.** An agent that gets a specific, structured compile error can self-correct in a tight loop; this matters more than the type system stopping mistakes before they're written.
-- **Functional programming does *not* currently help LLM code generation**, despite the intuition that stateless/declarative code should be easier to reason about. A 2026 study ("Perish or Flourish?") found Haskell/OCaml/Scala underperform imperative languages for LLM generation, because training corpora are overwhelmingly imperative — an availability problem, not a paradigm-difficulty one.
-- **Language choice no longer blocks *whether* an agent can build something, but it does control cost, quality ceiling, and how much supervision you need.** A 2026 study had Claude Code and Codex build chess engines in 17 languages, from mainstream to Brainfuck — all worked, but "strong playing strength is only reachable in mainstream compiled languages," and cost/effort rose sharply with exotic languages.
-- **Visual/node-based tooling is a hard capability boundary, not a style preference.** LLM agents operate on text diffs. Anything that can't be faithfully represented as text (Blueprints, visual scripting graphs, binary scene formats) is something agents can't reliably read or edit — 2026 reporting on agentic game-dev specifically flags Unreal Blueprints as "largely AI-resistant" for this reason, while text-serialized engines are the most reliable combination.
+- Training-data density beats paradigm elegance. Prefer mainstream,
+  heavily-documented tech.
+- Static typing's main value for agents is the compiler-error feedback loop.
+- Functional languages do not help LLM generation today (training corpora are
+  imperative).
+- Exotic languages raise cost and lower the quality ceiling; mainstream
+  compiled languages reach the highest quality.
+- Visual/node-based tooling (Blueprints, binary scenes) is a hard capability
+  boundary: agents operate on text diffs.
 
-**Why Godot over Unity or Unreal:**
+**Godot over Unity/Unreal:** `.tscn`/`.tres` are plain text, so the whole
+project is agent-diffable end to end. Unity keeps a binary asset database
+underneath; Unreal is Blueprint-centric.
 
-Godot's `.tscn`/`.tres` scene and resource files are plain text by design, so an agent edits and diffs them exactly like source code. Unity has improved (YAML text scene serialization is now default, and MCP servers exist to bridge live-editor state) but still layers a binary asset database underneath. Unreal's Blueprint-centric workflows hit the visual-scripting boundary above directly. Godot isn't chosen for being open-source or trendy — it's chosen because the whole project stays text-native end to end.
+**Not Bevy:** pre-1.0, breaking API changes roughly every 3 months, so
+training data is stale and agents hallucinate old signatures. Mobile export
+is thinner than Godot's.
 
-**Why not a pure-Rust engine (Bevy)** — the obvious alternative once Rust is in play:
+**Rust for the simulation core** (via GDExtension, not as the whole engine):
+the borrow checker gives a sharp agentic feedback loop (LLM repair of
+borrow-checker errors succeeds ~74% of the time).
 
-- Bevy is pre-1.0 and ships breaking API changes roughly every 3 months, with migration guides listing dozens of renames per release. That churn means a chunk of any LLM's training data on Bevy is for an API version that no longer exists, producing confident hallucinations of stale method signatures.
-- Bevy's mobile (iOS/Android) export is functional but noticeably thinner than Unity's or Godot's — a direct problem given this project targets PC/Mac/mobile.
+**Accepted risk: `gdext` is pre-1.0 and niche**, with the same stale-API risk
+as Bevy. Mitigation: pin exact versions (§1a), treat each `gdext` bump as a
+reviewed decision, and keep the `gdext` API surface this codebase touches
+small (§4).
 
-**Why Rust specifically for the simulation core** (via Godot's GDExtension, not as the whole engine):
-
-Rust's compiler gives an unusually sharp agentic feedback loop: the LLM writes code, `cargo check` rejects it with a specific ownership/borrow violation, the LLM fixes exactly that. Research on LLM-assisted Rust repair found this loop resolves borrow-checker violations correctly roughly 74% of the time. That's a sharper version of the "type system as feedback loop" effect than TypeScript or C# provide — worth having specifically on the performance-critical, correctness-sensitive simulation core, without taking on Bevy's engine-level risks by using it for the whole project.
-
-**Known risk this plan accepts, and how it's contained — `gdext` carries a version of the same risk as Bevy.** `gdext` (godot-rust) won't be considered API-stable until its own 1.0, minor versions are allowed to break, and it's more niche than Bevy — meaning less training data, so the "stale method signature" problem the Bevy section above describes can hit here too, arguably harder to self-correct from. This is accepted rather than avoided, because the alternative (writing the Rust↔Godot boundary in C++ via GDNative/classic bindings, or dropping Rust from the equation) is worse on every other axis this doc cares about. The mitigation is process, not architecture: pin exact versions (§1a), treat every `gdext` minor-version bump as a deliberate, reviewed decision — read its migration notes first, the same way the team would treat a Bevy upgrade — and keep the actual surface of `gdext` API touched by this codebase small (§4), since a smaller surface is less exposed to any one breaking change.
-
-**Known risk this plan accepts — mobile export via GDExtension (not plain GDScript) is less proven than the "Godot beats Bevy on mobile" framing above implies.** That framing is true for GDScript-only Godot projects; it does not automatically transfer to a GDExtension-based one. As of this writing, iOS export of GDExtension-based projects is explicitly flagged experimental/buggy in Godot's own issue tracker and forums (works on Android/macOS, fails on iOS in some reported cases); Android export works but requires real NDK cross-compilation setup, not a checkbox. See §9 for how this plan de-risks that early instead of discovering it at platform-polish time.
+**Accepted risk: mobile export via GDExtension is less proven than plain
+GDScript.** iOS export of GDExtension projects is flagged experimental;
+Android needs real NDK cross-compilation. See §9 milestone 2 and §9a.
 
 ---
 
@@ -50,32 +59,32 @@ Rust's compiler gives an unusually sharp agentic feedback loop: the LLM writes c
 
 | Layer | Tech | Role |
 |---|---|---|
-| Simulation core | **Rust**, `hecs` (ECS) + `rayon` (parallelism) | Deterministic game logic: belts, machines, fluid networks, timed processes, power. No Godot dependency. |
-| Interop | **GDExtension** via `gdext` | Thin binding layer between Rust core and Godot. |
-| Presentation | **Godot 4.x**, GDScript | Rendering (TileMap), UI, input, camera, build mode, animation/interpolation. |
-| Data | **RON or JSON** files | Items, recipes, machines — all content is data-driven, not hardcoded. |
-| Tests | **Rust unit/integration/replay tests** (headless) + **GUT** (Godot) | Simulation invariants, determinism, interop boundary + UI smoke tests. See §6. |
+| Simulation core | **Rust**, `hecs` (ECS) + `rayon` | Deterministic logic: belts, machines, fluids, timed processes, power. No Godot dependency. |
+| Interop | **GDExtension** via `gdext` | Thin binding layer. |
+| Presentation | **Godot 4.x**, GDScript | Rendering, UI, input, camera, build mode, interpolation. |
+| Data | **RON** files | Items, recipes, machines, shop, contracts — all content is data. |
+| Tests | Rust headless tests + GUT | Sim invariants, determinism, interop boundary; UI smoke tests. See §6. |
 
-**Hard rule:** anything that must be deterministic or fast lives in Rust. Anything about how it looks/feels lives in Godot. The boundary between them is the `SimBridge` API described in §4.
+**Hard rule:** anything deterministic or fast lives in Rust. Anything about
+look/feel lives in Godot. The boundary is `SimBridge` (§4).
 
-**Why `hecs` over `bevy_ecs` (resolved — was previously left open):** `bevy_ecs` used standalone gives a built-in parallel scheduler, but as a dependency it still inherits Bevy's own churn/breaking-change cadence — the exact risk §0 uses to reject Bevy-as-engine, reintroduced through the back door as a library. `hecs` is smaller, more stable, and has a slower-moving API, at the cost of having no scheduler of its own — which is fine here, because §3.8 already calls for a custom network-partitioned scheduler rather than a generic per-system one; `rayon` supplies the actual parallelism primitive under that scheduler.
+**`hecs` over `bevy_ecs`:** `bevy_ecs` inherits Bevy's churn. `hecs` is
+small and stable; it has no scheduler, which is fine because §3.8 calls for a
+custom network-partitioned scheduler with `rayon` underneath.
 
 ### 1a. Pinned versions
 
-Pin these explicitly rather than "latest" — bump only as a deliberate, recorded decision (add a line to the CLAUDE.md decisions log when you do), not incidentally via `cargo update`/editor auto-update:
+Bump only as a deliberate, recorded decision (add a line to CLAUDE.md's
+decisions log), never incidentally.
 
 | Dependency | Pinned to |
 |---|---|
 | Godot | 4.6.3-stable |
-| `gdext` (crate `godot`) | 0.5.5 |
-| Rust | edition 2024, MSRV = 1.98.1 (stable at time of pinning) |
-| `hecs` | 0.11.1 |
-| Godot `.vox` importer ([qbradq/Godot-MagicaVoxel-Importer-with-Extensions](https://github.com/qbradq/Godot-MagicaVoxel-Importer-with-Extensions)) | v1.2, commit `288f1d8` — vendored under `godot_project/addons/` |
-| `vengi` (voxel thumbnailer, dev tool only — not shipped) | 0.5.0 |
-
-Rationale: §0 already argues Bevy's churn poisons an agent's training-data reliability for it; `gdext` is comparatively niche and evolving too (see §0's `gdext` risk note), so the same discipline applies to it, not just to the thing being rejected.
-
-**How these were picked (milestone 1, 2026-09-06):** `gdext` 0.5.5 is its latest release and its default API level targets Godot 4.6 (0.5.0 made "Godot 4.6 the default"; 0.5.4 added an opt-in `api-4-7` feature that milestone 1 does not enable) — so 0.5.5 is the newest `gdext` that still matches a 4.6.x Godot pin without opting into a newer, less-tested API level. Godot 4.6.3-stable is the latest 4.6.x point release. `hecs` 0.11.1 (last published 2026-07-28) resolves §11's open question about its maintenance activity — still active as of this pinning, not abandoned. `hecs` isn't a dependency yet (milestone 1 has no simulation code), but the version is recorded now so a later milestone doesn't need to re-research it.
+| `gdext` (crate `godot`) | 0.5.5 (default API level targets Godot 4.6; the `api-4-7` feature is NOT enabled) |
+| Rust | edition 2024, MSRV 1.98.1 |
+| `hecs` | 0.11.1 (last published 2026-07-28, actively maintained) |
+| Godot `.vox` importer | [qbradq/Godot-MagicaVoxel-Importer-with-Extensions](https://github.com/qbradq/Godot-MagicaVoxel-Importer-with-Extensions) v1.2, commit `288f1d8`, vendored under `godot_project/addons/` |
+| `vengi` (dev tool only) | 0.5.0 |
 
 ---
 
@@ -83,25 +92,20 @@ Rationale: §0 already argues Bevy's churn poisons an agent's training-data reli
 
 ```mermaid
 flowchart TB
-    subgraph Presentation["Presentation Layer — Godot / GDScript"]
-        UI[UI: build menu, recipe browser, factory stats]
-        Render[TileMap renderer + interpolation]
+    subgraph Presentation["Presentation — Godot / GDScript"]
+        UI[UI: build menu, hotbar, clipboard]
+        Render[3D scene + interpolation]
         Input[Input / camera / build mode]
     end
-
-    subgraph Interop["Interop Layer — GDExtension (gdext)"]
-        Bridge[SimBridge API:\ntick(), dirty_chunks(), issue_command(),\npreview_command(), query()]
+    subgraph Interop["Interop — GDExtension (gdext)"]
+        Bridge[SimBridge: tick, dirty_chunks, chunk_snapshot,\nissue_command, query_tile, save_ron/load_ron]
     end
-
-    subgraph Sim["Simulation Core — pure Rust, headless, deterministic"]
+    subgraph Sim["Simulation core — pure Rust, headless, deterministic"]
         World[Chunked tile world]
-        ECS[ECS: belts, machines, fluid networks, timed processes, power]
-        Scheduler[Tiered update scheduler\nactive / warm / sleeping]
-        Threading[Dependency-group threading]
+        ECS[ECS: belts, machines, fluids, timed processes]
+        Scheduler[Tiered scheduler (future)]
     end
-
-    Data[(Data files: items.ron, recipes.ron, machines.ron)]
-
+    Data[(data/*.ron)]
     UI --> Bridge
     Input --> Bridge
     Bridge --> Render
@@ -110,7 +114,8 @@ flowchart TB
     Data --> UI
 ```
 
-Data files are the single source of truth for both the simulation (what a recipe consumes/produces) and the UI (what to display in the build menu) — no duplicated definitions.
+Data files are the single source of truth for both the simulation and the
+UI. No duplicated definitions.
 
 ---
 
@@ -118,39 +123,44 @@ Data files are the single source of truth for both the simulation (what a recipe
 
 ### 3.1 World representation
 
-- Tile grid divided into **32×32 chunks**, matching Factorio's proven size — big enough to amortize per-chunk overhead, small enough for fine-grained activity tracking.
-- Only chunks near a player, or containing something mid-process, are in the "active" set each tick.
+- Tile grid in **32×32 chunks** (Factorio's size).
+- Only chunks near a player or with something mid-process are "active"
+  (future, §3.7).
 
 ### 3.2 Core components (ECS)
 
 | Component | Purpose |
 |---|---|
 | `Position` | Tile coordinate |
-| `BeltSegment` | Ordered belt line using **gap-based item storage** (see §3.3) — carries solid items |
-| `FluidNetwork` | Connected pipe network carrying a liquid as a pressure/volume value, **not** individual particles |
-| `Machine` | Current recipe, progress timer, input/output buffers |
-| `TimedProcess` | Generic tick-counted long-duration process state (see §3.5) — attached to any entity that needs to represent a multi-tick process beyond a single machine cycle |
-| `PowerNode` | Producer/consumer, grouped into `PowerNetwork` |
-| `Inventory` | Generic slot-based storage (chests, machine buffers, player) |
+| `BeltSegment` | Belt tile with **gap-based item storage** (§3.3) |
+| `FluidNetwork` | Connected pipes carrying a fluid as volume/pressure, not particles |
+| `Machine` | Recipe, progress timer, input/output buffers |
+| `TimedProcess` | Generic tick-counted long process (§3.5) |
+| `PowerNode` | Producer/consumer in a `PowerNetwork` (future) |
+| `Inventory` | Generic slot-based storage |
 
 ### 3.3 Solid items on belts
 
-Directly apply Factorio's FFF #176 trick: a belt line stores **gaps between items**, not absolute item positions. Track the index of the last non-zero gap; while a line is jammed, only that boundary value changes each tick, and everything behind it is provably untouched. This is what lets a factory with thousands of items on belts stay cheap.
+Factorio FFF #176: a belt stores **gaps between items**, not positions, and
+tracks the last non-zero gap. A jammed line changes one value per tick.
+Implementation detail: gaps are slack beyond a fixed minimum item spacing
+(see `belt.rs`'s module doc).
 
 ### 3.4 Liquids / fluid networks
 
-Model as a **connected-network pressure system** (Factorio pipes), not particles: each `FluidNetwork` has a total volume and a fluid type; flow between adjacent segments equalizes pressure each tick. Never simulate individual droplets — that was the exact mistake Factorio's own devs made with belt items early on, and fluids are the same trap at a smaller item size.
+A **connected-network pressure system**: each network has a volume and a
+fluid type; flow equalizes between adjacent segments each tick. Never
+simulate droplets.
 
-### 3.5 Long-running / timed processes (generic pattern)
+### 3.5 Long-running / timed processes
 
-Some gameplay mechanics need a process to run over many ticks before producing a result (anything slower than a single machine cycle — aging, curing, growth, etc., depending on what design settles on). The architectural pattern for this, regardless of which specific mechanic uses it: a **tick-counted state machine** (`TimedProcess { start_tick, required_ticks }`) attached to a container, never wall-clock time.
-
-- **Why tick-counted, not wall-clock:** if multiplayer/lockstep is ever added (§8), any wall-clock read is an instant desync source. Counting sim ticks keeps it deterministic for free, and also means fast-forwarding/pausing the simulation behaves correctly.
-- Progress is a function of `(current_tick - start_tick)` vs. `required_ticks`. Any gameplay meaning layered on top of that progress value (quality, yield, etc.) is a design decision, not an architecture one — this component just guarantees the timing itself stays deterministic.
+A **tick-counted state machine** `TimedProcess { start_tick, required_ticks }`
+attached to a container. Never wall-clock time: wall-clock reads desync
+lockstep multiplayer (§8) and break pause/fast-forward. Progress is a
+function of `current_tick - start_tick`. Gameplay meaning layered on top is a
+design concern.
 
 ### 3.6 Recipes & content — fully data-driven
-
-`recipes.ron` example shape (placeholder ids — actual items/recipes are a game-design concern, not an architecture one):
 
 ```ron
 Recipe(
@@ -162,279 +172,270 @@ Recipe(
 )
 ```
 
-New items, recipes, and machines are added by editing data files, never simulation code — this keeps the Rust core stable (fewer breaking changes = better long-term agent-generated-code reliability, per the earlier Bevy-API-churn discussion) while content grows freely.
+Items, recipes and machines are added by editing data files, never
+simulation code. `data/recipes.ron` also carries `fluid_inputs` and
+`fluid_outputs`. If a new item needs a Rust change, a data field is missing.
 
-### 3.7 Update scheduling (tiered)
+### 3.7 Update scheduling (tiered) — future, milestone 8
 
-- **Active:** belts/machines currently processing something — updated every tick.
-- **Warm:** trucks/conveyor-bots in transit — updated every N ticks, position interpolated for rendering in between (Factorio's robot pattern).
-- **Sleeping:** a fully-stocked, blocked machine or an idle timed-process mid-wait — skips simulation entirely until an adjacent change wakes it (an item arrives, a recipe finishes upstream).
+- **Active:** belts/machines processing — every tick.
+- **Warm:** things in transit — every N ticks, interpolated in rendering.
+- **Sleeping:** blocked or idle — skipped until an adjacent change wakes it.
 
 ### 3.8 Threading
 
-**Status (2026-09-08):** the "compute connected components once per topology change, not every tick" half of this section is now real — for fluid networks and for belt/machine hand-off links alike — and is the only half that is. `World::recompute_topology` (`sim_core/src/sim/world.rs`) rebuilds the occupancy grid, every hand-off link and every pipe network's connected component whenever a `Place`, `Remove` or `Rotate` command changes what is adjacent to what, and never from `tick`. It is a full single-threaded rebuild rather than an incremental union-find, deliberately: at this project's scale rebuilding a few hundred tiles is cheaper than the bookkeeping an incremental structure needs, and it cannot drift out of sync with the grid the way an incremental one could. The trade flips around milestone 8's "thousands of entities," and that one function is what changes when it does. Everything below — `rayon`, per-network threading, boundary entities — remains unbuilt.
+**Status (2026-09-08):** the "compute connected components once per topology
+change, not every tick" half is real for fluid networks and belt/machine
+links. `World::recompute_topology` rebuilds the occupancy grid, every
+hand-off link and every pipe network on `Place`/`Remove`/`Rotate`, never
+from `tick`. It is a full single-threaded rebuild, not an incremental
+union-find: at this scale that is cheaper and cannot drift out of sync. It
+flips around milestone 8, in that one function. `rayon`, per-network threads
+and boundary entities are unbuilt.
 
-Partition by **connected network**, not by entity type. Concurrency primitive: **`rayon`**, used to run independent partitions across a thread pool — not a hand-rolled thread-per-network model.
-
-- All belt-reader passes (read-only) run in parallel freely.
-- A given `PowerNetwork` or `FluidNetwork` must be updated entirely by one thread — cross-network order-dependence is exactly the desync bug Factorio hit with shared-entity electric networks. Compute connected-component grouping via **union-find**, once per topology change (a belt/pipe/wire placed or removed), not every tick. Each connected component becomes one `rayon` task.
-- **Boundary entities** — an entity that is simultaneously a member of two independently-threaded networks (e.g. a pump that's part of both a `FluidNetwork` and a `PowerNetwork`, or an item handing off between two separately-partitioned belt networks) are a synchronization point, not a normal member of either network. They are updated in a single-threaded pass that runs *after* all per-network parallel passes for the tick complete, reading the now-finalized state of every network it touches. This generalizes the power-network rule above to the general case instead of leaving it implicit.
+Design when it lands: partition by **connected network**, not entity type,
+with `rayon` running independent partitions. Read-only belt passes run in
+parallel freely. A `PowerNetwork`/`FluidNetwork` is updated entirely by one
+thread. **Boundary entities** (a member of two networks) update in a
+single-threaded pass after all parallel passes complete.
 
 ### 3.9 Determinism
 
-**Decision: fixed-point, not floating point, for all simulation state that is shared across systems, persisted, or could ever be replayed/compared across machines** (positions, item counts, fluid volumes/pressure, power values, timed-process progress). This was previously left as "fixed-point or a deterministic float policy" — that hedge is the risk, not a real option: fixed-point means one integer-backed numeric type threaded through the ECS from the start; "deterministic floats" means solving bit-identical FP behavior across x86_64 (PC) and Apple Silicon ARM64 (Mac) — the project's own two target desktop platforms — which is a genuinely open, often-unsolved problem (FMA contraction, differing transcendental implementations, summation order), not a checkbox. §0's own principle — decide the hard-to-retrofit thing now — applies most to this exact decision, so it's being made now: use a fixed-point crate (e.g. `fixed`) for the types above. Floats remain fine for anything purely presentational in Godot (tweening, camera, particle timing) that never feeds back into simulation state.
+**Fixed-point, not floats, for all shared, persisted or replayable
+simulation state** (positions, counts, volumes, power, progress). The `Fx`
+type is `fixed`'s `I16F16`. Bit-identical floats across x86_64 and ARM64 is
+an unsolved problem; fixed-point is one integer type threaded from the
+start. Floats are fine for Godot-side presentation values that never feed
+back into the sim.
 
-Also: fixed timestep (e.g. 60 ticks/sec), deterministic iteration order (stable entity IDs, no hashmap iteration in hot paths). See §6 for how this is actually tested, not just asserted.
+Also: fixed timestep (60 ticks/s), deterministic iteration order (stable ids,
+no hashmap iteration in hot paths). Tested per §6, not asserted.
 
 ---
 
 ## 4. Interop layer (`gdext`)
 
-Keep the Rust↔Godot boundary deliberately narrow. The first draft of this API was underspecified in ways that matter — no way to preview a command without applying it, no save/undo story — so this version fills those in:
+Keep the boundary narrow. Current and planned API:
 
 ```rust
-pub struct SimBridge;
 impl SimBridge {
     pub fn tick(&mut self);
-
-    // Changed-since-last-call, at chunk granularity (not per-entity — see
-    // "Delta granularity" below), so Godot only re-reads chunks that actually
-    // changed AND are currently visible.
+    // Changed-since-last-call, per CHUNK, so Godot re-reads only what changed.
     pub fn dirty_chunks(&self) -> &[ChunkId];
     pub fn chunk_snapshot(&self, id: ChunkId) -> ChunkSnapshot;
-
-    // Mutating: place/rotate/recipe-select/etc. Also pushed onto the
-    // undo/inverse-command stack (see "Undo/redo" below).
     pub fn issue_command(&mut self, cmd: PlayerCommand);
-
-    // Non-mutating dry run for build-mode ghosts/placement validation.
-    // Never touches real world state — implemented as a validation pass,
-    // not "mutate then roll back."
-    pub fn preview_command(&self, cmd: &PlayerCommand) -> PreviewResult;
-
     pub fn query_tile(&self, pos: TileCoord) -> Option<TileSnapshot>;
-
-    pub fn undo(&mut self) -> bool;
-    pub fn redo(&mut self) -> bool;
-
-    // Save/load (built 2026-09-09). RON text in and out; writing it to a
-    // file is Godot's job, because `user://` is Godot's. `load_ron` returns
-    // "" on success and a human-readable reason on failure, leaving the
-    // live world untouched — see the amended save-format paragraph below.
+    // Save/load (built 2026-09-09). RON text both ways; file I/O is Godot's.
+    // load_ron returns "" on success or a human-readable reason, leaving
+    // the live world untouched on failure.
     pub fn save_ron(&self) -> GString;
     pub fn load_ron(&mut self, ron: GString) -> GString;
     pub fn new_game(&mut self);
+    // Planned, not built:
+    pub fn preview_command(&self, cmd: &PlayerCommand) -> PreviewResult; // validation pass, never mutate-then-rollback
+    pub fn undo(&mut self) -> bool;
+    pub fn redo(&mut self) -> bool;
 }
 ```
 
-Godot never sees internal representations (gap arrays, fluid pressure math) — only snapshots and deltas. This means the belt-compression algorithm, the fluid model, anything in §3 can be rewritten later without touching a line of GDScript.
+Also on the wire today: `world_layout_json`, `economy_snapshot_json`,
+`shop_snapshot_json`, `ingredients_snapshot_json`, `fluid_snapshot_json`,
+`dock_snapshot_json`, and JSON forms of the above. Godot never sees internal
+representations, only snapshots.
 
-**Delta granularity (resolved — was previously unaddressed):** deltas are per-*chunk*, not per-entity. At the scale milestone 8 (Scale-up) stress-tests for ("thousands of entities"), a per-entity `Vec<EntityDelta>` reallocated and copied across FFI every tick is the kind of thing that's invisible at milestone 2 and shows up as frame-time spikes only once the world is large — precisely because chunks (§3.1) already exist as a partitioning unit, dirty tracking reuses them instead of inventing a second granularity. `dirty_chunks()` returns a reused, cleared-not-reallocated buffer.
+**Wire format is JSON strings via `serde_json`**, not `Dictionary`/`Array`,
+to minimise the `gdext`-specific API surface (the least agent-friendly layer).
 
-**Undo/redo (resolved):** implemented Rust-side as a bounded stack of `(command, inverse_command)` pairs — not a Godot-side snapshot diff. This keeps Godot from needing to understand simulation internals to reverse an action. *(This paragraph used to add "and keeps undo consistent with the save format below, both being built out of the same command representation." The save format is a snapshot now — see the amendment below — so that consistency argument no longer applies. It was never the load-bearing half of the case for a command stack: reversing an action still wants an inverse command whatever a save file is made of.)*
+**Delta granularity: per chunk, not per entity.** A per-entity delta copied
+across FFI every tick shows up as frame spikes at milestone 8's scale.
+`dirty_chunks()` returns a reused buffer. Consequence: fluid movement and
+tank auto-fill deliberately dirty nothing; those readouts are polled.
 
-**Save format — amended 2026-09-09, when save/load was actually built: the shipped save is a full state snapshot, not a command log.** This paragraph originally read "a save is a command log plus periodic full-state snapshots (snapshots are a load-time optimization on top of the log, not the source of truth), not a bare state dump," on the reasoning that save/load and §8's lockstep multiplayer replay should share one mechanism rather than two. That reasoning still holds *for replay* — and neither of the two things it was sharing with exists: no undo/redo is implemented, and multiplayer is an explicit stretch milestone (§9 item 11). Building a replay engine to answer "put my factory back" would have been solving a problem this project does not have, and it is also the more fragile of the two here: a command log has to be replayed through whatever game logic the **current** build has, so any change to what a command does silently rewrites every existing save, where a snapshot of the resulting state cannot drift that way.
+**Undo/redo (planned):** a bounded Rust-side stack of
+`(command, inverse_command)` pairs, not a Godot-side snapshot diff.
 
-So: **a save is a `schema_version`-carrying RON snapshot of world state** (`sim_core/src/sim/save.rs`), rejected rather than migrated on a version mismatch, exactly like every `data/*.ron` loader. Fixed-point values are stored as their raw bits, never as decimal text, because a decimal round trip can land a fraction of a bit away from where it started and §3.9's whole determinism bet is that it does not. Loading rebuilds *structure* by replaying real `Purchase`/`Place` commands (so a load cannot build a world a player could not have built) and then writes *live state* — craft progress, belt positions, fluid volumes, contract clocks — on top through restore-only methods that are deliberately not commands and not public. **File I/O is not in `sim_core`**: Rust produces and consumes the RON string, and Godot resolves `user://saves/…`, because `user://` is Godot's. That half landed the same day, in `godot_project/game_session.gd` — an autoload that owns the saves directory, the listing, the slot-name sanitizer and the reserved autosave slot, and that also carries the New Game / Load choice from `menu.tscn` (the project's `run/main_scene` now) into `main.tscn` across a `change_scene_to_file`.
+**Save format (amended 2026-09-09):** a save is a **full state snapshot**
+with a `schema_version`, in RON, rejected (not migrated) on a version
+mismatch. The original plan was a command log plus snapshots, shared with
+undo/redo and multiplayer replay; neither exists, and a command log is
+replayed through the *current* game logic, so any behaviour change would
+silently rewrite every save. Fixed-point values are stored as raw bits.
+Loading rebuilds structure by replaying real `Purchase`/`Place` commands
+(a load cannot build what a player could not), then writes live state
+through restore-only non-public methods. **File I/O is not in `sim_core`**;
+`godot_project/game_session.gd` owns `user://saves/…`, slot names and the
+autosave. A command log can still sit on top of this later.
 
-This does not preclude a command log later. If undo/redo or lockstep multiplayer land, the command-log design above is still the right shape for *them*, and a snapshot format sits underneath it unchanged — a command log needs a known start state, and that is what this is.
+**Data-file schema versioning:** every `data/*.ron` carries `schema_version`;
+loaders reject a mismatch. Content changes never bump it.
 
-**Data-file schema versioning:** every RON data file type (`recipes.ron`, `items.ron`, `machines.ron`) carries a `schema_version` field; the loader rejects or explicitly migrates a mismatched version rather than silently misreading a changed shape. This is a separate concern from save-file versioning above — content can change shape between playthroughs of the same save.
-
-**Interop-layer training-data gap:** `SimBridge`'s own API is project-specific and appears in no training corpus, unlike plain Rust or plain GDScript — this is very likely to be the least agent-friendly part of the codebase in practice (see §0's `gdext` risk note for the same issue one layer down). Mitigation: once this API exists, maintain a small set of worked, runnable examples of every call pattern in-repo (doc-tests or an `examples/` crate), and treat changes to this file with higher scrutiny than changes confined to one side of the boundary — an agent can't lean on the outside world for this layer, only on what's already in the repo.
+**Interop training-data gap:** `SimBridge` appears in no training corpus.
+Keep worked, runnable examples of every call pattern in-repo (the headless
+`test_*.gd` scripts serve this role) and review changes here with more
+scrutiny than one-sided changes.
 
 ---
 
 ## 5. Presentation layer (Godot)
 
-- **TileMap** for the factory floor; layers for ground, belts/pipes, buildings.
-- **Interpolation**: for anything in the "warm" tier (§3.7), tween between the last two known snapshots rather than snapping — smooth visuals independent of simulation tick rate.
-- **UI reads the same data files** as the simulation (recipes, items) — the build menu is generated from `recipes.ron`, not hand-authored per recipe.
-- All scenes/resources kept as Godot's default **text-based `.tscn`/`.tres`** — never switch to binary scene serialization, since that's the property that makes this whole project agent-diffable.
-- Avoid Godot's visual scripting entirely; GDScript/C#/Rust text only.
+- 3D isometric scene rebuilt from `world_layout_json` on every
+  place/remove/rotate, never per tick (a full rebuild, mirroring §3.8).
+- Interpolate "warm" entities between snapshots (future).
+- UI is generated from the same data files (`shop.ron` drives the build
+  menu and hotbar).
+- Keep scenes as text `.tscn`/`.tres`. Never binary. No visual scripting.
 
 ---
 
 ## 6. Testing strategy
 
-- **Headless Rust integration tests** simulating N ticks against known factory layouts, asserting invariants: no item duplication/loss across a belt network, fluid volume conservation, timed-process state correctness. This is the project's actual "compiler feedback loop" for gameplay logic — lean on it heavily for any AI-agent-driven changes to the simulation core.
-- **Scripted playtests**: build a known factory (e.g. "N input producers → 1 processing chain"), run it headless for X ticks, assert throughput matches the theoretical recipe-chain rate.
-- **Determinism/replay tests** (new tier — previously missing, despite determinism being this doc's central bet in §3.9): record a fixed command log, run it twice, hash world state at fixed tick intervals, assert the hash sequence is identical. Once both desktop platforms are in CI, run the same log on an x86_64 runner and an ARM64 runner and assert identical hashes — this is the test that would actually catch a determinism regression (e.g. a stray `f32` sneaking into shared state) before it's buried under months of code, not just something asserted in prose.
-- **Interop boundary tests** (new tier — previously missing): tests that exercise `SimBridge` itself — issue a command, tick, confirm `dirty_chunks`/`chunk_snapshot`/`query_tile` reflect it correctly, confirm undo/redo round-trip — without a running Godot process. This is the layer §4 flags as having the least external training data to lean on, so it's also the layer most likely to silently rot without its own tests; "Rust tests cover sim, GUT covers UI" left it with zero coverage.
-- **GUT tests** in Godot for UI/menu logic only — not simulation correctness.
+- **Headless Rust integration tests** (`sim_core/tests/`): run N ticks
+  against known layouts built by `sim::reference_chain` and assert
+  invariants — no item duplication/loss, fluid conservation, timed-process
+  correctness. This is the gameplay-logic compiler loop.
+- **Scripted playtests:** build a factory headlessly, assert throughput and
+  economics.
+- **Determinism/replay tests:** the save/load lockstep test compares every
+  snapshot every tick for 2600 ticks. Cross-platform hash comparison (x86_64
+  vs ARM64 CI) is still to do.
+- **Interop boundary tests:** the headless `godot_project/test_*.gd`
+  scripts exercise the real `gdext` JSON boundary. Each prints its own
+  success marker because Godot exits 0 on a script parse failure.
+- **GUT tests** for UI logic only.
+- **`cargo test -p voxgen`** asserts voxel-level properties of assets
+  (openings genuinely empty).
+- **`scripts/screenshot-scene.sh`** is the one non-headless check; it finds
+  stale presentation lookups no structural test can (UI_UX.md §2b point 12).
 
 ---
 
-## 7. Development loop (new section — was previously unaddressed)
+## 7. Development loop
 
-The whole rationale for this architecture is a tight edit-compile-test loop for an agent. That loop was previously asserted, not designed — GDExtension hot-reload inside a running Godot editor exists since Godot 4.2 but has open issues around editor-plugin reload ordering and reports of editor crashes on recompile-while-open. Relying on it as the primary loop would tax every single iteration on the simulation core, which is where most of the work happens.
-
-**Decision:** the primary iteration loop is **headless** — `cargo check` / `cargo test` against the Rust simulation core, with no Godot process involved at all. The Godot editor is opened only for milestone-level visual verification, not per-edit. This is also just consistent with §6 already calling headless tests "the project's actual compiler feedback loop" — it means that loop doesn't get undermined by editor hot-reload flakiness on the majority of changes.
-
-Concretely: milestone 1 (§9) must produce a checked-in build script (or `justfile`/`cargo xtask`) that does `cargo build` → copies the resulting `.so`/`.dylib`/`.dll` to where the project's `.gdextension` file expects it, and that `.gdextension` file itself gets checked in at that point too. Don't leave this implicit until someone needs it.
+The primary loop is **headless**: `cargo check`/`cargo test` on the sim
+core, no Godot process. GDExtension editor hot-reload is flaky; open the
+editor only for milestone-level visual checks. `cargo xtask` builds
+`sim_core`, copies the library to where `sim_core.gdextension` expects it,
+and stages voxel models. `scripts/verify-core-loop.sh` runs everything.
 
 ---
 
-## 8. Multiplayer (deferred, but designed for)
+## 8. Multiplayer (deferred, designed for)
 
-Not in early milestones, but §3.9's determinism work means it stays possible without a rewrite: multiplayer would use deterministic lockstep (send player commands, not state) exactly as Factorio does, and this only works because §3.5–3.9 were designed deterministically from the start. It also reuses the command-log save format from §4 directly — a lockstep session and a save file are the same underlying representation.
+Deterministic lockstep (send commands, not state), possible because §3.5–3.9
+are deterministic. Needs a command log on top of §4's snapshot save.
 
 ---
 
 ## 9. Milestones
 
-1. **Scaffold** — Godot project + `gdext` hello-world binding, confirm Rust↔Godot round-trip works. Also produces the build script and `.gdextension` file from §7.
-2. **Mobile export spike** — ✅ **done (2026-09-06). Android export works end-to-end; iOS is blocked in this dev environment and needs re-verification on real Apple hardware/CI before it can be trusted as a launch platform.** See §9a for the full writeup; the short version: Android GDExtension export via Gradle produced a validly-signed APK with the Rust extension embedded in both ABIs, cross-compiled with stock `rustup`/NDK tooling and no macOS-only tricks. iOS could not be attempted for real because this environment has no Xcode.app (only Command Line Tools) — Godot's iOS export and `rustc`'s iOS target both hard-require it, and this was confirmed two independent ways, not assumed. **Recommendation: keep iOS as a stretch/deferred platform, not a milestone-10 launch commitment, until someone re-runs this spike on a Mac with Xcode installed** — see §9a and §11.
-3. **Core loop proof** — one belt, one machine, one recipe (raw input → processed output), rendered and interactable.
-4. **First full chain** — a multi-step production chain end-to-end, driven entirely by data-driven recipes.
-5. **Economy MVP** (new — was previously missing from this list entirely, even though [docs/GAMEPLAY.md](GAMEPLAY.md) §1 defines the core loop as production *plus* this): a minimal money value and a single hardcoded contract (fixed sauce mix, fixed cadence, fixed payout) that the milestone-4 chain can actually deliver against and get paid for. Doesn't need the full `contracts.ron`/staff-pool design from GAMEPLAY.md §7/§9 yet — just enough that "build factory → make money" is true end to end, which is the point where this stops being a production-chain tech demo and starts being *this* game.
-6. **Fluids** — pipe network, a recipe requiring a liquid input.
-7. **Timed processes** — ✅ **done (2026-09-08)**: the generic tick-counted long-duration process pattern (§3.5) was proven end to end by an `aging_rack` stage inserted mid-chain that held a batch for 2400 ticks — ten times the longest process on the line — on the *existing* `TimedProcess`, needing no `sim_core` change at all, which was the milestone's actual point. Its presentation half drew the rack as a bespoke voxel model with a live progress gauge, so a process at that timescale was legible without hovering. **That stage has since been removed** (the chain-rework epic, 2026-09-08): ageing is not a mechanic this game wants, and it was deleted rather than left in as scenery. The milestone still stands as done and what it proved still holds — `TimedProcess` is unchanged and runs every craft cycle on the line — but nothing in the shipped content exercises the *long* timescale any more, which is worth knowing before assuming it is covered. `main.gd`'s `MACHINE_PROGRESS_GAUGES` is deliberately kept as an empty table with the mechanism behind it intact, so the next long process is one line of data plus one asset. See docs/DEVLOG.md's entries and CLAUDE.md's decisions log.
-8. **Scale-up** — power system, tiered update scheduler, chunk activity tracking; stress-test to thousands of entities. This is also the point at which §4's per-chunk delta design and §3.8's threading model actually get load-tested — don't wait longer than this to find out if they hold up.
-9. **Logistics expansion** — transport between multiple factory sites.
-10. **Platform polish** — mobile touch controls/export, Mac/PC packaging, UI pass. Mobile export risk should already be known from milestone 2; this is about polish, not first discovery.
-11. *(Stretch)* **Multiplayer** — lockstep networking on top of the already-deterministic core.
+1. **Scaffold** — ✅ Godot + `gdext` round trip, build script, `.gdextension`.
+2. **Mobile export spike** — ✅ Android builds; iOS blocked, see §9a.
+3. **Core loop proof** — ✅ one belt, one machine, one recipe.
+4. **First full chain** — ✅ multi-step chain from data.
+5. **Economy MVP** — ✅ money + a contract to deliver against. (Added during
+   a consistency pass; GAMEPLAY.md §1's loop needs it.)
+6. **Fluids** — ✅ pipe network, a recipe needing a liquid.
+7. **Timed processes** — ✅ proven by a 2400-tick `aging_rack` on the
+   existing `TimedProcess` with no sim change. The rack has since been
+   deleted (ageing is not a mechanic this game wants), so nothing shipped
+   exercises the long timescale; `main.gd`'s `MACHINE_PROGRESS_GAUGES` is
+   kept as an empty table for the next long process.
+8. **Scale-up** — power, tiered scheduler, chunk activity; stress-test to
+   thousands of entities. Load-tests §4's per-chunk deltas and §3.8.
+9. **Logistics expansion** — transport between factory sites.
+10. **Platform polish** — mobile touch controls/export, packaging, UI pass.
+11. *(Stretch)* **Multiplayer**.
+
+Epics outside this list (all done, see DEVLOG): machines improvement
+(footprints), visual overhaul rounds, shop & inventory, real placement,
+contracts as data, delivery dock, splitters, chain rework, hotbar, save/load,
+auto-fill.
 
 ---
 
-## 9a. Mobile export spike — findings (milestone 2, 2026-09-06)
+## 9a. Mobile export spike — summary (milestone 2, 2026-09-06)
 
-Ran against the milestone-1 scaffold, no gameplay code involved. Dev environment: macOS/arm64, Godot 4.6.3-stable (matching §1a's pin), only Xcode **Command Line Tools** installed (no Xcode.app).
+Full findings: [DECISIONS.md](DECISIONS.md) Part C.
 
-### Android — works
+**Android works.** `cargo ndk -t arm64-v8a -t x86_64 build -p sim_core`
+cross-compiled `sim_core` unmodified; the Gradle-based export produced a
+validly-signed APK with both `.so`s embedded. One-time local setup: Android
+SDK/NDK paths in Editor Settings, the Gradle build template extracted by
+hand into `godot_project/android/build/`, a debug keystore (machine-local).
+Two traps: `rendering/textures/vram_compression/import_etc2_astc=true` is
+required in `project.godot` or export fails with a **blank** error (Godot
+4.6.3 bug, confirmed in its source); and `--install-android-build-template`
+with unresolved preset errors opens a native blocking dialog even under
+`--headless`. **Unverified:** install/launch on a device (skipped for host
+memory). Close before milestone 10.
 
-1. Installed a standalone Android SDK (cmdline-tools, platform-tools, `build-tools;34.0.0`, `platforms;android-34`, NDK **27.2.12479018**) plus `rustup target add aarch64-linux-android x86_64-linux-android` and `cargo install cargo-ndk` — no Android Studio needed, everything scriptable/headless.
-2. `cargo ndk -t arm64-v8a -t x86_64 build -p sim_core` cross-compiled `sim_core` unmodified — zero source changes were needed to make the milestone-1 crate Android-buildable. Both `.so`s copied to `godot_project/bin/android/`; `sim_core.gdextension` got `android.debug.arm64`/`android.debug.x86_64` (+ release) entries alongside the existing macOS/Linux/Windows ones.
-3. Godot's **Gradle-based** Android export (required for GDExtension — the prebuilt-APK export path can't embed extra native libraries) needed several pieces of one-time local machine setup beyond what's in the repo, none of it Android-specific-obscure but all of it undocumented by Godot itself for a from-scratch headless setup:
-   - Editor Settings' `export/android/android_sdk_path` and `export/android/java_sdk_path` (both machine-local, correctly *not* repo-tracked).
-   - The Android Gradle build template extracted from the export templates' `android_source.zip` into `godot_project/android/build/` (normally done by Godot's own `--install-android-build-template`, which — see below — hung in this environment; extracting it manually and writing the `.build_version` marker Godot itself expects there worked identically).
-   - `rendering/textures/vram_compression/import_etc2_astc=true` in `project.godot`. **This is the one genuine surprise worth flagging for future sessions:** without it, export fails validation with a completely blank error message — Godot's own Android exporter has a config check (`ResourceImporterTextureSettings::should_import_etc2_astc()` in `has_valid_project_configuration`) that sets `valid = false` without ever appending anything to the error string it hands back, so the CLI just prints "due to configuration errors:" and nothing else. Confirmed by reading Godot's own `platform/android/export/export_plugin.cpp` at the 4.6.3-stable tag rather than guessing — this is a real (if narrow) upstream gap in the CLI export path's error reporting, not a mistake in this project's config.
-   - A debug keystore (any `keytool`-generated one works) — machine-local by convention, so keep it out of `export_presets.cfg`; either point Editor Settings at one or export `GODOT_ANDROID_KEYSTORE_DEBUG_{PATH,USER,PASSWORD}` at export time.
-4. **A real, undocumented headless-automation trap:** running `godot --headless --install-android-build-template` when the project's `export_presets.cfg` still has unresolved Android config errors makes the editor pop a **native blocking macOS alert dialog** — confirmed via a real on-screen window (`orca computer list-windows` found it) that never returns control even under `--headless`, because that flag doesn't suppress this particular alert path. There is no CLI flag to auto-dismiss it; the only way through in an environment with no one to click "OK" is to avoid triggering it in the first place — fix the underlying config errors first (per the bullets above), or extract the build template by hand instead of via that command, as this spike ended up doing.
-5. Result: `godot --headless --export-debug "Android" build/android/sauce-factory.apk` produced a **373 MB, validly-signed** (`apksigner verify` ✅, APK Signature Scheme v2) APK with both `lib/arm64-v8a/libsim_core.arm64-v8a.so` and `lib/x86_64/libsim_core.x86_64.so` actually embedded (`unzip -l` confirmed), package `com.saucefactory.spike`, target SDK 36.
-6. **What was *not* verified, and why:** actually installing/launching the APK on a device or emulator to confirm the extension loads and runs at runtime. This dev host is a shared multi-agent machine that was down to double-digit MB of free physical memory with other sessions' work running concurrently (one background process here was already killed for memory pressure mid-spike) — booting a full Android emulator on top of that risked destabilizing sibling sessions on the same machine, so it was deliberately skipped rather than risking a shared resource. The APK's structural/signature validity was confirmed instead (`apksigner verify`, `aapt2 dump badging`). **This is the one open item before Android export can be called fully proven, not just built** — install/launch on a real device or a properly-resourced CI runner and confirm the GDExtension actually initializes at runtime (e.g. via `adb logcat` for the `Initialize godot-rust` line this project's own scaffold already prints).
+**iOS blocked, not proven broken.** The dev host has only Command Line
+Tools, no Xcode.app; `xcodebuild`/`xcrun` fail and a Rust
+`aarch64-apple-ios` build links against the macOS SDK (a "successful" build
+that is not a valid iOS artifact). **iOS is stretch/deferred** until the
+spike is re-run on a Mac with full Xcode or Apple-hosted CI.
 
-### iOS — blocked, not proven broken
-
-Two independent checks both confirm the blocker is this environment, consistent with §0's flagged risk (which was about iOS being *buggy*, not *impossible* — worth distinguishing):
-
-1. `xcodebuild -showsdks` and `xcrun --sdk iphoneos --show-sdk-path` both fail outright: `xcode-select`'s active developer directory is `/Library/Developer/CommandLineTools`, and the iOS SDK is only ever shipped inside full Xcode.app, never inside standalone Command Line Tools. Godot's iOS export generates and builds an actual Xcode project (`xcodebuild`) — there is no headless-CLT-only path around this.
-2. Confirmed independently at the Rust layer too, so this isn't just "Godot's fault": `rustup target add aarch64-apple-ios` + `cargo build --target aarch64-apple-ios` **appeared to succeed** (no build error), but the linker fell back to the macOS SDK sysroot with an explicit warning (`ld: building for 'iOS', but linking in dylib ... built for 'macOS'`), and `vtool -show-build` on the resulting `.dylib` shows an internally inconsistent `LC_VERSION_MIN_IPHONEOS`/`sdk 15.5` (a macOS SDK version number) pairing. **This is exactly the kind of "looks done, isn't" result worth calling out explicitly: the build not erroring is not evidence the binary is a valid iOS artifact** — it almost certainly is not, and this was not treated as a pass.
-
-Godot's own iOS export was not attempted with a real preset run to completion — the environment gates in (1) make the outcome deterministic (it would fail at the Xcode-project-build step) and attempting it burned into a separate, apparently-unrelated instability instead (see below), so the Xcode-absence finding stands on its own two-pronged evidence above rather than on a completed (and therefore misleadingly "further along") export log.
-
-**Recommendation per this milestone's own framing (§9 item 2's "decide explicitly"): keep iOS as a stretch/deferred platform, not a committed milestone-10 launch target, until this spike is re-run to completion on a Mac with a full Xcode install** (Xcode.app, not just Command Line Tools) or on Apple-hosted CI (e.g. GitHub Actions `macos-*` runners, which ship full Xcode). That re-run should be quick — the Android half of this spike shows the `gdext`/GDExtension side of the pipeline needs no source changes for mobile, so the only unknown left for iOS is Godot's own Xcode-project-generation and code-signing path, which needs the real toolchain to observe.
-
-### An unrelated instability surfaced late in this spike, worth flagging separately
-
-Late in this session, this shared dev host (12 concurrently logged-in users, load average 6.5–8+, physical memory pinned with double-digit MB free) started failing to even load the **unmodified, checksum-verified-identical** `libsim_core.dylib` that had worked correctly across all eight-plus Android export runs earlier in the same session — every invocation (including the plain milestone-1 `scripts/verify-scaffold.sh` round-trip check, with no export involved at all) now aborts immediately with:
-
-```
-ERROR: [panic .../godot-ffi-0.5.5/src/toolbox.rs:462]
-  unsafe precondition(s) violated: hint::unreachable_unchecked must never be reached
-   at: godot_core::private::install_godot_rust_hook::{{closure}} (.../godot-core-0.5.5/src/private.rs:331)
-thread caused non-unwinding panic. aborting.
-```
-
-This reproduced identically with a fully clean environment (`env -i`) and against a byte-identical dylib (`md5` checked before/after), which rules out anything this spike changed. It looks like a resource-exhaustion-triggered trip of one of `gdext`'s optional Rust UB-check assertions (its own error text says as much: "this Undefined Behavior check is optional, and cannot be relied on for safety") rather than a real bug in `sim_core` or in this project's changes — **but it means milestone-1's own round-trip check may currently be unreliable on this specific shared host under load**, independent of anything mobile-export-related. Re-run `scripts/verify-scaffold.sh` on a less-contended machine (or this same one once load drops) before treating any future failure of it as a real regression.
+**Host instability note:** under heavy load the shared host began failing to
+load a byte-identical `libsim_core.dylib` with a `gdext` UB-check panic. Re-run
+`scripts/verify-scaffold.sh` on a quiet machine before treating that failure
+as a regression.
 
 ---
 
 ## 10. AI-agent development conventions for this repo
 
-- Keep the Rust simulation core covered by headless tests before merging any agent-written change to it — that's the fast, precise feedback loop this architecture is built around.
-- Content (recipes/items/machines) changes should never require touching Rust — if an agent needs to modify simulation code just to add a new item or recipe, that's a sign a data field is missing, not a reason to hardcode.
-- Keep `.tscn`/`.tres` as text; never let a "convert to binary for performance" temptation in — the diffability is worth more than the marginal load-time savings at this scale.
-- One `CLAUDE.md`-equivalent per major module (`sim_core/`, `godot_project/`) documenting the invariants that aren't obvious from the code (e.g. "belt gaps must remain non-negative," "fluid network recompute only on topology change").
-- No `f32`/`f64` in any Rust ECS component that participates in shared simulation state (§3.9) — if a value needs to be shared, persisted, or replayed, it's fixed-point. Floats are fine only for Godot-side, presentation-only values that never feed back into the sim.
-- Treat any `gdext` version bump as a reviewed decision, not a routine dependency update — read its migration notes first (§0, §1a).
-- The primary edit-test loop is headless `cargo test`, not the Godot editor (§7) — don't default to editor-reload cycles for simulation-core changes.
+- Cover every sim-core change with headless tests before merging.
+- Content changes never require Rust changes; if they do, add a data field.
+- Keep `.tscn`/`.tres` as text.
+- One `CLAUDE.md` per major module (`sim_core/`, `godot_project/`)
+  documenting non-obvious invariants, once warranted.
+- No `f32`/`f64` in shared simulation state (§3.9).
+- Treat any `gdext` bump as a reviewed decision.
+- The primary loop is headless `cargo test` (§7).
+- Review the rendered scene for presentation changes (§6).
 
 ---
 
-## 11. Open questions (not yet decided)
+## 11. Open questions
 
-Consolidated here for the first time during a cross-doc consistency pass —
-several of these existed only as asides earlier in the doc; UI_UX.md and
-GAMEPLAY.md both already have a section like this, this doc didn't.
+Resolved: data-file path (`data/`, top-level); `hecs` maintenance; `gdext`
+version; `.vox` importer; money/contract home (GAMEPLAY.md §9); per-tile
+orientation (real placement epic — `Direction` on every placement, one Y
+rotation in Godot; the belt junction art is still east-only, UI_UX.md §2b
+point 18).
 
-- ~~Exact directory path for data files~~ — resolved at milestone 3
-  (2026-09-06): top-level `data/` (e.g. `data/recipes.ron`), sibling to
-  `sim_core/`/`godot_project/`, not nested under either — see CLAUDE.md's
-  Project Structure section and decisions log for the reasoning.
-  `items.ron`/`machines.ron`/`contracts.ron` (GAMEPLAY.md §9) belong here too
-  when they're added.
-- ~~`hecs`'s long-term maintenance activity should be re-verified before
-  milestone 1 starts~~ — resolved at milestone 1 (2026-09-06): `hecs` 0.11.1
-  was last published 2026-07-28, so it's still actively maintained; see §1a.
-- ~~The exact `gdext` version deferred to "pick and pin during milestone
-  1"~~ — resolved: `gdext` 0.5.5 against Godot 4.6.3-stable; see §1a.
-  ~~The Godot `.vox` import plugin (UI_UX.md §2a) is still open~~ — also
-  resolved (2026-09-07), during the visual-polish pass that first created
-  voxel assets: pinned in §1a, rationale in UI_UX.md §9.
-- ~~Money and in-flight contract state (GAMEPLAY.md's economy, §6)~~ —
-  resolved at milestone 5; see GAMEPLAY.md §9. The `StaffPools` resource
-  (GAMEPLAY.md §7) still has no designed ECS shape.
-- ~~Per-tile orientation: nothing in the simulation or on the wire carried a
-  direction, so a belt/pipe run could not turn a corner and a renderer had
-  nowhere to learn that a tile does~~ — **resolved 2026-09-08** by the "Real
-  Placement" epic's ticket 1. `sim::types::Direction` is a real four-way type
-  on every placement, `Footprint` rotates around the same origin corner, and
-  every belt/pipe/machine/building snapshot carries a `direction`.
-  **The presentation half is resolved too (same day, that epic's ticket 2):**
-  one shared per-tile Y rotation applied in Godot, not rotated models — every
-  asset is modelled facing east and the encoder centres it on its own
-  footprint, so a turned placement is the same mesh spun about that origin and
-  re-centred on the rotated rectangle. What is *not* done, deliberately, is a
-  four-directional pass on the belt's junction variants, which are authored
-  for the two faces this camera can see; three of the four facings fall back
-  to the plain tile. See UI_UX.md §2b point 18 — that is an art ticket, and it
-  is the one open thread this epic leaves.
-- Spoilage (perishables) and corrosion (acid-handling) likewise have no
-  designed component yet (GAMEPLAY.md §9) — needed before their respective
-  equipment tiers are implemented, not before milestone 5.
-- ~~Is iOS export via GDExtension viable, or does it need to slip to a
-  stretch platform (§0, §9 milestone 2)?~~ — **still genuinely open**, not
-  resolved, despite milestone 2 having run: see §9a. iOS could not be
-  attempted for real in the dev environment used (no Xcode.app, only Command
-  Line Tools — confirmed two independent ways, not assumed), so this remains
-  a real open question until the spike is re-run on a Mac with full Xcode or
-  on Apple-hosted CI. Current recommendation while it's open: treat iOS as
-  stretch/deferred, not a committed milestone-10 launch platform.
-- Android export is proven to *build* (§9a) but not yet proven to *run* — the
-  produced APK's structural/signature validity was confirmed, but installing
-  and launching it on a real device or emulator (to confirm the GDExtension
-  actually initializes at runtime, not just packages correctly) was
-  deliberately skipped in this spike due to host memory constraints. Should
-  be closed out before milestone 10 (Platform polish), ideally by whoever has
-  a real Android device or a properly-resourced CI runner handy.
+Still open:
+
+- `StaffPools` (GAMEPLAY.md §7) has no ECS shape.
+- Spoilage and corrosion components (GAMEPLAY.md §9) — needed before tiers
+  4/5.
+- iOS export viability — re-run the spike with full Xcode (§9a).
+- Android runtime launch — unverified (§9a). Close before milestone 10.
+- Cross-platform determinism hash test in CI (§6).
 
 ---
 
 ## 12. References
 
-**Factorio engineering (primary source for the simulation-architecture patterns in §3, §6):**
-- [Friday Facts #176 — Belts optimization for 0.15](https://www.factorio.com/blog/post/fff-176) — gap-based belt item storage, the "compression is permanent" invariant
-- [Friday Facts #421 — Optimizations 2.0](https://www.factorio.com/blog/post/fff-421) — multithreading by dependency group, tiered update scheduling (robots/roboports)
-- [Desynchronization — Factorio Wiki](https://wiki.factorio.com/Desynchronization) — deterministic lockstep networking
-- [Active chunks — Factorio Forums](https://forums.factorio.com/viewtopic.php?t=107797) — chunk-based entity activity tracking
+**Factorio engineering:** [FFF #176 belts](https://www.factorio.com/blog/post/fff-176),
+[FFF #421 optimizations](https://www.factorio.com/blog/post/fff-421),
+[Desynchronization wiki](https://wiki.factorio.com/Desynchronization),
+[Active chunks forum](https://forums.factorio.com/viewtopic.php?t=107797).
 
-**Data-oriented design / ECS foundations (§3.2):**
-- [CppCon 2014: Mike Acton — "Data-Oriented Design and C++"](https://www.youtube.com/watch?v=rX0ItVEVjHc) — the discipline underlying why ECS architectures fit this genre
+**Data-oriented design:** [Mike Acton, CppCon 2014](https://www.youtube.com/watch?v=rX0ItVEVjHc).
 
-**AI-agent development evidence (§0):**
-- [How Claude Code is built — Pragmatic Engineer](https://newsletter.pragmaticengineer.com/p/how-claude-code-is-built) — "on-distribution" rationale for TypeScript, Claude writing ~90% of its own codebase
-- [Do programming languages still matter to your AI coding agent teammate? — arXiv 2606.13763](https://arxiv.org/abs/2606.13763) — 17-language chess-engine study
-- [Perish or Flourish? LLM Code Generation in Functional Programming — arXiv 2601.02060](https://arxiv.org/pdf/2601.02060) — functional languages underperform imperative for LLM generation
-- [Security and Quality in LLM-Generated Code — arXiv 2502.01853](https://arxiv.org/html/2502.01853) — typed vs. dynamic language generation accuracy
-- [Building a C compiler with a team of parallel Claudes — Anthropic](https://www.anthropic.com/engineering/building-c-compiler) — Rust chosen for a large agent-built project
-- [Rust and LLMs: the compiler does what code review shouldn't have to](https://dev.to/arezvov/rust-and-llms-the-compiler-does-what-code-review-shouldnt-have-to-3ia4) — borrow-checker repair feedback loop
-- [Fixing Rust Compilation Errors using LLMs — arXiv 2308.05177](https://arxiv.org/pdf/2308.05177) — ~74% borrow-checker violation repair rate via compiler feedback
+**AI-agent evidence:** [How Claude Code is built](https://newsletter.pragmaticengineer.com/p/how-claude-code-is-built),
+[17-language chess-engine study, arXiv 2606.13763](https://arxiv.org/abs/2606.13763),
+[Perish or Flourish, arXiv 2601.02060](https://arxiv.org/pdf/2601.02060),
+[LLM code quality by language, arXiv 2502.01853](https://arxiv.org/html/2502.01853),
+[Building a C compiler with parallel Claudes](https://www.anthropic.com/engineering/building-c-compiler),
+[Rust and LLMs](https://dev.to/arezvov/rust-and-llms-the-compiler-does-what-code-review-shouldnt-have-to-3ia4),
+[Fixing Rust errors with LLMs, arXiv 2308.05177](https://arxiv.org/pdf/2308.05177).
 
-**Engine/tooling specifics (§0):**
-- [Bevy — "When will Bevy be Production Ready?" (GitHub Discussion #21911)](https://github.com/bevyengine/bevy/discussions/21911) — API churn discussion
-- [Future support for exporting Bevy games to Android and iOS (GitHub Discussion #20998)](https://github.com/bevyengine/bevy/discussions/20998) — mobile export maturity
-- [godot-rust `gdext` — Rust bindings for Godot 4](https://github.com/godot-rust/gdext) — the interop layer this plan uses in §4
-- [Compatibility and stability — The godot-rust book](https://godot-rust.github.io/book/toolchain/compatibility.html) — `gdext`'s own API stability policy pre-1.0, source for §0/§1a's version-pinning rationale
-- [GDExtension iOS export minimum OS version is hard coded — godotengine/godot #85158](https://github.com/godotengine/godot/issues/85158) and the [Godot Forum thread on GDExtension + iOS](https://forum.godotengine.org/t/gd-extension-in-ios/132963) — source for the iOS GDExtension export risk noted in §0/§9
-- [`hecs` — crates.io](https://crates.io/crates/hecs) — the ECS crate chosen in §1; verify current maintenance activity before relying on it long-term, per the review that produced this revision
+**Engine/tooling:** [Bevy production readiness #21911](https://github.com/bevyengine/bevy/discussions/21911),
+[Bevy mobile #20998](https://github.com/bevyengine/bevy/discussions/20998),
+[gdext](https://github.com/godot-rust/gdext),
+[gdext compatibility policy](https://godot-rust.github.io/book/toolchain/compatibility.html),
+[GDExtension iOS issue #85158](https://github.com/godotengine/godot/issues/85158),
+[Godot forum: GDExtension + iOS](https://forum.godotengine.org/t/gd-extension-in-ios/132963),
+[`hecs`](https://crates.io/crates/hecs).
