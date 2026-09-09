@@ -1,0 +1,459 @@
+## The main menu — the first thing the player sees (the "Save/load + a real
+## main menu" epic, ticket 2). New Game, Load Game, Quit, modelled on the
+## screen Minecraft and Factorio both open on.
+##
+## It is `project.godot`'s `run/main_scene` now; `main.tscn` is what this
+## changes to. The handoff between the two is `game_session.gd`, an autoload
+## that outlives both scenes — see that file for why a singleton rather than
+## a scene parameter.
+##
+## **Style: this is the game's own industrial UI, not a default Godot theme**
+## (UI_UX.md §5). Everything here is built in code, like every other panel in
+## this project, out of the same three ingredients `main.gd`'s HUD uses: a
+## near-opaque dark plate, a hazard-yellow rule along its top edge, and
+## outlined sturdy text. A menu drawn in Godot's stock grey would be the one
+## screen in the game that does not look like the game, and it is the screen
+## that sets the expectation for everything after it.
+##
+## **A save is validated BEFORE the scene changes.** Selecting a slot reads
+## the file and runs it through a throwaway `SimBridge.load_ron`, whose
+## message is shown verbatim beside the list on failure — so a corrupt or
+## older-build save is refused on the one screen still able to say why,
+## rather than after `main.tscn` has already replaced this one. See
+## `_arm_slot`.
+extends Control
+
+const GameSaves = preload("res://game_session.gd")
+
+# --- Plate palette, shared with main.gd's HUD ------------------------------
+## Deliberately the same three colours `main.gd` builds every panel from, so
+## the menu and the game read as one product. They are repeated rather than
+## imported because `main.gd` builds them inline too and neither file should
+## have to load the other just to draw a rectangle.
+const PLATE_BG := Color(0.06, 0.06, 0.07, 0.94)
+const PLATE_ACCENT := Color(0.85, 0.63, 0.11, 0.95)
+const INK := Color(0.92, 0.93, 0.94)
+const INK_DIM := Color(0.66, 0.68, 0.70)
+const HAZARD := Color(0.98, 0.85, 0.42)
+const ERROR_INK := Color(0.97, 0.55, 0.48)
+
+## The backdrop. A flat industrial charcoal rather than the factory scene:
+## `main.tscn` costs a full voxel-asset load and a lit 3D frame to stand
+## behind a menu the player leaves in two seconds, and this ticket's own
+## brief called a clean panel enough. The band across the middle is the
+## hazard stripe the rest of the UI already uses, at the one scale where it
+## can be architecture instead of trim.
+const BACKDROP := Color(0.09, 0.095, 0.105, 1.0)
+const BACKDROP_STRIPE := Color(0.13, 0.115, 0.075, 1.0)
+## Half the band's height, in pixels — sized so the panel sits inside it with
+## the floor showing above and below at the 720-line viewport this ships at.
+const BAND_HALF_HEIGHT := 190.0
+
+const BASE_FONT_SIZE := 15 # main.gd's own HUD size; every size here derives from it
+const TITLE_FONT_SIZE := BASE_FONT_SIZE + 33
+const SUBTITLE_FONT_SIZE := BASE_FONT_SIZE + 1
+const BUTTON_FONT_SIZE := BASE_FONT_SIZE + 5
+const BUTTON_MIN_SIZE := Vector2(260.0, 52.0)
+const PANEL_MIN_WIDTH := 560.0
+## The load list scrolls past this height rather than pushing the panel off
+## the screen — the same cap the contract clipboard's docket stack takes.
+const SAVE_LIST_MAX_HEIGHT := 300.0
+
+var _root_box: VBoxContainer
+var _button_box: VBoxContainer
+var _load_box: VBoxContainer
+var _save_rows_box: VBoxContainer
+var _save_rows: Array = [] # Array[Dictionary]: the rows `list_saves` returned
+var _empty_label: Label
+var _error_label: Label
+var _new_game_button: Button
+var _load_button: Button
+var _quit_button: Button
+var _back_button: Button
+## Which half of the menu is showing. The load list replaces the three
+## buttons rather than opening beside them: this is one panel, and a modal
+## list over a modal menu is two things to close.
+var _load_open := false
+
+
+func _ready() -> void:
+	# `_ready` runs twice under the headless test scripts (once from
+	# `add_child`, once called directly, which is this project's established
+	# test shape). Rebuilding the whole menu the second time would leave two
+	# of everything parented to the same node, so the second pass just
+	# refreshes the list.
+	if _root_box != null:
+		_refresh_saves()
+		return
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_build_backdrop()
+	_build_panel()
+	_refresh_saves()
+
+
+func _build_backdrop() -> void:
+	var back := ColorRect.new()
+	back.name = "Backdrop"
+	back.color = BACKDROP
+	back.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	back.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(back)
+
+	# One wide hazard band behind the panel — the factory's own signage
+	# language at building scale. It is deliberately very low contrast: it
+	# should be read as "there is a floor here", not as a second UI element
+	# competing with the plate in front of it. The two hairlines are what
+	# make it read as a painted band rather than as an accidental change of
+	# background: an edge with nothing on it looked like a rendering seam in
+	# the first frame of this.
+	_add_band(BACKDROP_STRIPE, -BAND_HALF_HEIGHT, BAND_HALF_HEIGHT)
+	_add_band(Color(PLATE_ACCENT.r, PLATE_ACCENT.g, PLATE_ACCENT.b, 0.30),
+			-BAND_HALF_HEIGHT, -BAND_HALF_HEIGHT + 2.0)
+	_add_band(Color(PLATE_ACCENT.r, PLATE_ACCENT.g, PLATE_ACCENT.b, 0.30),
+			BAND_HALF_HEIGHT - 2.0, BAND_HALF_HEIGHT)
+
+
+## A full-width horizontal band centred vertically on the screen, `top` and
+## `bottom` pixels from the middle.
+func _add_band(colour: Color, top: float, bottom: float) -> void:
+	var band := ColorRect.new()
+	band.color = colour
+	band.set_anchors_and_offsets_preset(Control.PRESET_CENTER_LEFT)
+	band.anchor_right = 1.0
+	band.offset_left = 0.0
+	band.offset_right = 0.0
+	band.offset_top = top
+	band.offset_bottom = bottom
+	band.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(band)
+
+
+func _build_panel() -> void:
+	var style := StyleBoxFlat.new()
+	style.bg_color = PLATE_BG
+	style.border_color = PLATE_ACCENT
+	style.border_width_top = 4
+	style.border_width_left = 2
+	style.border_width_right = 2
+	style.border_width_bottom = 2
+	style.set_content_margin_all(26.0)
+
+	# A CenterContainer filling the screen, rather than a PRESET_CENTER on the
+	# panel itself: that preset is computed from the panel's minimum size at
+	# the moment it is applied, and at build time the labels inside it have no
+	# text yet — the first cut put the whole menu in the bottom-right corner,
+	# which is the kind of thing only a rendered frame shows (UI_UX.md §2b
+	# point 12). A container re-centres its child whenever the child resizes.
+	var centre := CenterContainer.new()
+	centre.name = "MenuCentre"
+	centre.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	centre.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(centre)
+
+	var panel := PanelContainer.new()
+	panel.name = "MenuPanel"
+	panel.add_theme_stylebox_override("panel", style)
+	panel.custom_minimum_size = Vector2(PANEL_MIN_WIDTH, 0.0)
+	centre.add_child(panel)
+
+	_root_box = VBoxContainer.new()
+	_root_box.name = "MenuBody"
+	_root_box.add_theme_constant_override("separation", 14)
+	panel.add_child(_root_box)
+
+	var title := Label.new()
+	title.name = "Title"
+	title.label_settings = _settings(TITLE_FONT_SIZE, HAZARD, 6)
+	title.text = "SAUCE FACTORY"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_root_box.add_child(title)
+
+	var subtitle := Label.new()
+	subtitle.label_settings = _settings(SUBTITLE_FONT_SIZE, INK_DIM, 3)
+	subtitle.text = "condiment production, automated"
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_root_box.add_child(subtitle)
+
+	_root_box.add_child(_rule())
+
+	_button_box = VBoxContainer.new()
+	_button_box.name = "MenuButtons"
+	_button_box.add_theme_constant_override("separation", 10)
+	_root_box.add_child(_button_box)
+
+	_new_game_button = _menu_button("NewGameButton", "NEW GAME")
+	_new_game_button.pressed.connect(_on_new_game_pressed)
+	_button_box.add_child(_new_game_button)
+
+	_load_button = _menu_button("LoadGameButton", "LOAD GAME")
+	_load_button.pressed.connect(_on_load_pressed)
+	_button_box.add_child(_load_button)
+
+	_quit_button = _menu_button("QuitButton", "QUIT")
+	_quit_button.pressed.connect(_on_quit_pressed)
+	_button_box.add_child(_quit_button)
+
+	_build_load_view()
+
+	# The error line lives OUTSIDE the load view, at the bottom of the panel,
+	# because it has to survive the view it was produced in: a refused load
+	# leaves the list up, and a refused anything-else would otherwise have
+	# nowhere to print.
+	_error_label = Label.new()
+	_error_label.name = "MenuError"
+	_error_label.label_settings = _settings(BASE_FONT_SIZE, ERROR_INK, 4)
+	_error_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_error_label.custom_minimum_size = Vector2(PANEL_MIN_WIDTH - 52.0, 0.0)
+	_error_label.visible = false
+	_root_box.add_child(_error_label)
+
+
+func _build_load_view() -> void:
+	_load_box = VBoxContainer.new()
+	_load_box.name = "LoadView"
+	_load_box.add_theme_constant_override("separation", 8)
+	_load_box.visible = false
+	_root_box.add_child(_load_box)
+
+	var heading := Label.new()
+	heading.label_settings = _settings(BUTTON_FONT_SIZE, INK, 4)
+	heading.text = "LOAD GAME"
+	_load_box.add_child(heading)
+
+	_empty_label = Label.new()
+	_empty_label.name = "NoSavesLabel"
+	_empty_label.label_settings = _settings(BASE_FONT_SIZE, INK_DIM, 4)
+	_empty_label.text = "No saves yet — start a new game and the factory will autosave itself."
+	_empty_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_empty_label.custom_minimum_size = Vector2(PANEL_MIN_WIDTH - 52.0, 0.0)
+	_load_box.add_child(_empty_label)
+
+	var scroll := ScrollContainer.new()
+	scroll.name = "SaveScroll"
+	scroll.custom_minimum_size = Vector2(PANEL_MIN_WIDTH - 52.0, 0.0)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_load_box.add_child(scroll)
+
+	_save_rows_box = VBoxContainer.new()
+	_save_rows_box.name = "SaveRows"
+	_save_rows_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_save_rows_box.add_theme_constant_override("separation", 6)
+	scroll.add_child(_save_rows_box)
+
+	_load_box.add_child(_rule())
+
+	_back_button = _menu_button("BackButton", "BACK")
+	_back_button.pressed.connect(_on_back_pressed)
+	_load_box.add_child(_back_button)
+
+
+# --------------------------------------------------------------------------
+# Widgets
+# --------------------------------------------------------------------------
+
+func _settings(size: int, colour: Color, outline: int) -> LabelSettings:
+	var s := LabelSettings.new()
+	s.font_size = size
+	s.font_color = colour
+	s.outline_size = outline
+	s.outline_color = Color(0, 0, 0, 0.85)
+	return s
+
+
+## A hazard-yellow hairline, the divider the rest of the UI already uses as
+## the top border of every plate — here as a rule inside one.
+func _rule() -> Panel:
+	var rule := Panel.new()
+	rule.custom_minimum_size = Vector2(0.0, 2.0)
+	rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(PLATE_ACCENT.r, PLATE_ACCENT.g, PLATE_ACCENT.b, 0.55)
+	rule.add_theme_stylebox_override("panel", style)
+	return rule
+
+
+func _menu_button(node_name: String, text: String) -> Button:
+	var button := Button.new()
+	button.name = node_name
+	button.text = text
+	button.custom_minimum_size = BUTTON_MIN_SIZE
+	button.focus_mode = Control.FOCUS_NONE
+	button.add_theme_font_size_override("font_size", BUTTON_FONT_SIZE)
+	button.add_theme_color_override("font_color", INK)
+	button.add_theme_color_override("font_hover_color", HAZARD)
+	button.add_theme_color_override("font_pressed_color", HAZARD)
+	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+		button.add_theme_stylebox_override(state, _button_style(state))
+	return button
+
+
+func _button_style(state: String) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.13, 0.13, 0.15, 0.96)
+	style.border_color = Color(0.30, 0.30, 0.33, 0.95)
+	match state:
+		"hover":
+			style.bg_color = Color(0.19, 0.18, 0.14, 0.98)
+			style.border_color = PLATE_ACCENT
+		"pressed":
+			style.bg_color = Color(0.24, 0.21, 0.12, 0.98)
+			style.border_color = PLATE_ACCENT
+		"disabled":
+			style.bg_color = Color(0.10, 0.10, 0.11, 0.85)
+	style.set_border_width_all(2)
+	style.set_content_margin_all(10.0)
+	return style
+
+
+# --------------------------------------------------------------------------
+# The save list
+# --------------------------------------------------------------------------
+
+## Rebuilds the list from disk. Called on `_ready` and every time the load
+## view opens, so a save written by a session that has since quit to this
+## menu shows up without a restart.
+func _refresh_saves() -> void:
+	_save_rows = GameSaves.list_saves()
+	if _save_rows_box == null:
+		return
+	for child in _save_rows_box.get_children():
+		child.queue_free()
+		_save_rows_box.remove_child(child)
+	for index in range(_save_rows.size()):
+		_save_rows_box.add_child(_build_save_row(index))
+	if _empty_label != null:
+		_empty_label.visible = _save_rows.is_empty()
+	_apply_list_height()
+
+
+func _apply_list_height() -> void:
+	var scroll := _load_box.get_node_or_null("SaveScroll") if _load_box != null else null
+	if scroll == null:
+		return
+	var wanted := float(_save_rows.size()) * (BUTTON_MIN_SIZE.y + 6.0)
+	(scroll as ScrollContainer).custom_minimum_size = Vector2(
+		PANEL_MIN_WIDTH - 52.0, minf(wanted, SAVE_LIST_MAX_HEIGHT)
+	)
+
+
+## One save, as a button: its slot name, and — the honest second fact, read
+## from the file's own mtime rather than from its contents — when it was last
+## written. The autosave is labelled as such rather than hidden or sorted
+## specially: it is a save like any other and the player should be able to
+## fall back on it, but they should also be able to see that it is the one
+## the game overwrites by itself.
+func _build_save_row(index: int) -> Button:
+	var row: Dictionary = _save_rows[index]
+	var button := _menu_button("SaveRow_%d" % index, "")
+	button.custom_minimum_size = Vector2(PANEL_MIN_WIDTH - 52.0, BUTTON_MIN_SIZE.y)
+	button.add_theme_font_size_override("font_size", BASE_FONT_SIZE + 2)
+	var label := String(row["slot"])
+	if bool(row["autosave"]):
+		label = "%s  (autosave)" % label
+	button.text = "%s          %s" % [label, String(row["modified"])]
+	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	button.pressed.connect(_on_save_row_pressed.bind(index))
+	return button
+
+
+# --------------------------------------------------------------------------
+# Actions
+# --------------------------------------------------------------------------
+
+## The `GameSession` autoload, or null. Reached through the main loop's own
+## root rather than through an absolute node path, because the headless test
+## scripts instantiate this scene OUTSIDE the active scene tree and an
+## absolute path resolved from there is an engine error rather than a null.
+## `main.gd._session` is the same function for the same reason.
+func _session() -> Node:
+	var loop := Engine.get_main_loop()
+	if not (loop is SceneTree):
+		return null
+	var tree_root: Node = (loop as SceneTree).root
+	return tree_root.get_node_or_null("GameSession") if tree_root != null else null
+
+
+func _show_error(text: String) -> void:
+	if _error_label == null:
+		return
+	_error_label.text = text
+	_error_label.visible = text != ""
+
+
+func _on_new_game_pressed() -> void:
+	_show_error("")
+	var session := _session()
+	if session != null:
+		session.arm_new_game()
+	_start_game()
+
+
+func _on_load_pressed() -> void:
+	_show_error("")
+	_set_load_open(true)
+
+
+func _on_back_pressed() -> void:
+	_show_error("")
+	_set_load_open(false)
+
+
+func _set_load_open(open: bool) -> void:
+	_load_open = open
+	if open:
+		_refresh_saves()
+	if _button_box != null:
+		_button_box.visible = not open
+	if _load_box != null:
+		_load_box.visible = open
+
+
+func _on_quit_pressed() -> void:
+	if is_inside_tree():
+		get_tree().quit()
+
+
+func _on_save_row_pressed(index: int) -> void:
+	var error := _arm_slot(index)
+	if error != "":
+		_show_error(error)
+		return
+	_show_error("")
+	_start_game()
+
+
+## Reads one save, PROVES it loads, and arms the session with it. Returns ""
+## on success or the reason it was refused.
+##
+## The proof is a throwaway `SimBridge`: `load_ron` builds a whole new world
+## and only swaps it in once every step succeeded, so running the text
+## through one here costs a load and answers the question this screen has to
+## answer before it can leave. Doing it in `main.tscn` instead would mean
+## discovering a bad file on a screen with no list, no Back button and a
+## world already thrown away — which is exactly the "silently starts a fresh
+## world" failure this ticket is told not to have.
+func _arm_slot(index: int) -> String:
+	if index < 0 or index >= _save_rows.size():
+		return "That save is no longer there."
+	var row: Dictionary = _save_rows[index]
+	var path := String(row["path"])
+	var text := GameSaves.read_save(path)
+	if text == "":
+		return "Could not read %s." % path
+	var probe = SimBridge.new()
+	var refusal: String = probe.load_ron(text)
+	if refusal != "":
+		return "Could not load '%s': %s" % [String(row["slot"]), refusal]
+	var session := _session()
+	if session != null:
+		session.arm_load(path, String(row["slot"]))
+	return ""
+
+
+## Hands over to the game. The `is_inside_tree` guard is for the headless
+## test scripts, which instantiate this scene outside the active tree — there
+## is no tree to change there, and the assertions those tests make are about
+## what was ARMED on the session, which has already happened by this point.
+func _start_game() -> void:
+	if is_inside_tree():
+		get_tree().change_scene_to_file("res://main.tscn")

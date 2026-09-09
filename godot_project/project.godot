@@ -12,7 +12,11 @@ config_version=5
 
 config/name="Sauce Factory"
 config/description="Isometric voxel presentation of the data-driven production chain (UI_UX.md)."
-run/main_scene="res://main.tscn"
+; The game opens on the MAIN MENU, not straight into a factory (the
+; "Save/load + a real main menu" epic). menu.tscn changes scene to
+; main.tscn once the player has chosen New Game or a save to load; the
+; GameSession autoload below is what carries that choice across.
+run/main_scene="res://menu.tscn"
 config/features=PackedStringArray("4.6")
 
 [display]
@@ -26,6 +30,14 @@ config/features=PackedStringArray("4.6")
 ; a smaller window; it is not the intended default any more.
 window/size/viewport_width=1600
 window/size/viewport_height=900
+
+[autoload]
+
+; The one node that outlives a scene change: it carries "start a new game"
+; vs. "load this file" from menu.tscn to main.tscn, and owns every rule
+; about where a save file lives and what it may be called (sim_core does no
+; file I/O at all — user:// is Godot's). See godot_project/game_session.gd.
+GameSession="*res://game_session.gd"
 
 [editor_plugins]
 
