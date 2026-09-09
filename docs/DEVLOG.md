@@ -50,6 +50,33 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-09 — A hopper or a tank can keep itself topped up
+
+The sim half of moving hopper/tank configuration off the keyboard and onto
+the buildings themselves. Until now keeping a factory fed was a key you held
+down: **SPACE** filled every hopper in the world and **V** every tank, so an
+unattended line ran for one hopper-load and stopped. A placed hopper or tank
+can now be switched to **automatic**, after which the simulation tops it up
+to capacity out of the player's bought stock every tick, before anything else
+in the tick consumes anything — so a refilled bin feeds its belt in the same
+tick rather than stuttering.
+
+**It spends stock, never money.** Buying ingredients stays an explicit
+purchase (GAMEPLAY.md §5's recurring ingredient cost is one of the three
+things the player is deciding about, and a toggle that quietly drained the
+balance would turn that decision into a background leak). An empty larder
+just stops the top-ups — no error, and the flag is not flipped off, so they
+resume by themselves the moment stock is bought again.
+
+Three new tile-addressed commands go with it: the two toggles, plus a
+`set_hopper_item` that names an ingredient outright, which is what the item
+picker in a placed hopper's panel wants (the **Q**-key `cycle_hopper_item` is
+kept only until the presentation ticket removes that key). The flags ride on
+the snapshots presentation already reads and in the save file, and the whole
+thing is pinned by a new `sim_core/tests/auto_fill.rs` plus a save round-trip
+that keeps topping up after the load. The panel that fronts all of this is
+the following ticket.
+
 ### 2026-09-09 — A factory can be saved, and comes back still running
 
 Until this ticket nothing a player did survived closing the window: the

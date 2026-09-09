@@ -247,6 +247,24 @@ Everything in this doc should be **content**, not simulation code, per [ARCHITEC
   design pressure §6 chooses contracts over a spot market to create, and it
   makes §11's open question about a secondary spot market a live one rather
   than a theoretical one.
+- **A hopper or a tank can keep itself topped up, and that still spends
+  stock rather than money (added 2026-09-09).** Loading a bin was two global
+  keybinds, so keeping a factory fed was something the player did with their
+  hands rather than something they *built*; a placed hopper or tank can now
+  be switched to automatic, after which the simulation refills it to capacity
+  every tick out of the stock the previous bullet's `BuyIngredient` paid for.
+  **This deliberately does not touch §5's first cost axis.** Auto-fill can
+  only move units the player already bought — it never buys, and it never
+  debits the one money counter — so the recurring ingredient cost stays a
+  visible decision the player makes in a shop, not a drain that happens while
+  they are looking somewhere else. An empty larder simply stops the top-ups,
+  and they resume by themselves when stock is bought again. What the toggle
+  removes is the *chore* of loading a bin, not the *cost* of filling it,
+  which is exactly the split §5 needs to keep making the ongoing spend
+  legible. (Its one non-obvious rule: a tank's room is continuous while stock
+  is whole units, so an automatic top-up asks only for the whole units it can
+  take — a manual fill rounds a part unit up to a whole one, which is fair
+  for one keypress and would bankrupt a player sixty times a second.)
 - **Money and active-contract state's architectural home (resolved at milestone 5, 2026-09-06):** both live as plain fields on a new `sim_core::sim::economy::Economy` struct, owned directly by `World` and advanced once per tick — not a new ECS component/entity, since milestone 5 has exactly one money counter and one active contract (no per-entity multiplicity to justify ECS machinery yet). `money` is a single fixed-point (`Fx`) counter, per ARCHITECTURE.md §3.9. The one hardcoded `Contract` (fixed mix/cadence/payout, named constants in `economy.rs`) is checked against an accumulating `delivery_buffer` `Inventory` at its cadence boundary (`Economy::tick`), which is where `World::issue_command(PlayerCommand::CollectOutput)` then deposited collected product instead of discarding it — this was milestone 5's "delivery mechanism." (**Superseded 2026-09-08 by the delivery dock**, two bullets up: that command no longer exists and the pool is filled by a building at the chain's tail instead. The pool itself, and everything about how contracts settle against it, is unchanged.) Exposed to Godot as a `SimBridge::economy_snapshot_json` JSON snapshot (money, contract mix, per-item progress, cadence), same pattern as the existing chunk/tile/layout snapshots. **Superseded in part on 2026-09-08:** `contracts.ron` data-file loading and multiple concurrent contracts have since landed — `Economy` now holds a `Vec<ActiveContract>` (each with its own cadence clock and delivery counters) plus one shared `delivery_buffer`, and `economy_snapshot_json` returns an array of contracts rather than one inline. The `Economy`-as-a-plain-field-on-`World` call above was unaffected and still stands: several contracts are a `Vec` inside the one struct, not a reason for ECS machinery. **Still explicitly deferred:** contract-loss/reputation penalties on a missed cadence window (a miss today just skips that window's payout and keeps the contract active — see this doc's own open question below), and the `StaffPools` resource — all future work, per GAMEPLAY.md §6/§9's original fuller design and the milestone-5 task's own scope note.
 
 ---

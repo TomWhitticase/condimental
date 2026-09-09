@@ -409,6 +409,103 @@ it's gone stale.
 
 ## Decisions log
 
+- 2026-09-09: **Hopper/tank auto-fill, ticket 1 of 2 (the sim half;
+  `godot_project/`, `data/` and `assets/voxels/` deliberately untouched) — a
+  bin can keep itself full, and the keyboard stops being the feed
+  mechanism.** Until this ticket, keeping a factory stocked was two global
+  keybinds: **SPACE** (`FillHopper` with `tile: None`) filled every hopper in
+  the world and **V** every tank, so an unattended line ran for exactly one
+  hopper-load and then stopped. Ticket 2 replaces both with a per-building
+  panel; this is the mechanics that panel drives. Six calls worth not
+  re-litigating.
+
+  (1) **Auto-fill runs FIRST in the tick — a new step 0, before the tank
+  discharge and long before hoppers meter onto belts — and that placement is
+  the mechanic rather than an ordering detail.** A topped-up tank therefore
+  discharges into its run in the same tick it was filled, and a topped-up
+  hopper hands a unit to its belt in the same tick. Running it last is the
+  obvious alternative and is worse in a way that is invisible in a test and
+  visible in a rendered factory: a hopper that emptied on tick *n* would feed
+  nothing on tick *n*, so an auto-filled line would hiccup for one tick every
+  time a bin bottomed out, for no reason a player could see or fix. The
+  observable consequence is pinned rather than described —
+  `tests/auto_fill.rs` asserts a draining hopper reads at or above
+  `capacity - 1` at the end of **every** tick for four hundred ticks.
+
+  (2) **To capacity, out of ONE shared fill helper per kind.** The tick path
+  and the manual `FillHopper`/`FillFluidTank` arms both go through
+  `World::fill_hopper_entity` / `fill_tank_entity`, so there is one fill rule
+  per kind in `world.rs` rather than two that can drift: **two clamps in this
+  order** — what the player owns, then what the buffer has room for — and the
+  ledger debited by **exactly what `fill` reported it added**, never by what
+  was asked for. That rule already existed and was already subtle (a
+  nearly-full bin accepts less than it is offered); duplicating it into a
+  per-tick path was the one thing most likely to leak stock a thousand ticks
+  later.
+
+  (3) **It spends STOCK, never MONEY** — the call the whole feature turns on.
+  `BuyIngredient` stays an explicit player action, so auto-fill can only ever
+  move units that were already paid for out of the larder and into a bin.
+  Wiring it to buy what it needs would be one line and would delete
+  GAMEPLAY.md §5's first cost axis as a decision: the recurring ingredient
+  cost is supposed to be one of the three things the player is choosing
+  between, and a toggle that quietly debits the balance turns it into a
+  background leak the player cannot see, cannot budget for, and would only
+  discover as an unexplained bankruptcy. When the larder runs dry the
+  top-ups simply stop — **no error, and the flag is deliberately not flipped
+  off**, so they resume by themselves the moment stock is bought again
+  (turning it off would mean the player has to remember to re-arm every bin
+  after every shortage, which is the chore the feature exists to remove).
+
+  (4) **A tank asks only for its WHOLE-UNIT room, where the manual command
+  bills a part unit as a whole one.** A tank's room is continuous while stock
+  is bought and debited in whole units, so `FillFluidTank` has always rounded
+  a fractional fill up. That is correct for one deliberate keypress and
+  ruinous sixty times a second: a tank trickling a fraction of a unit per
+  tick would be billed a whole unit per tick, and the larder would drain
+  orders of magnitude faster than the factory consumed. `FluidTank::
+  whole_unit_room` is the floor of its room, so an automatic top-up is billed
+  for exactly what it added, always, and a tank with less than a unit of room
+  is left alone until it has drained enough to take one. This is not asserted
+  in prose: **vinegar is in `tests/auto_fill.rs`'s mass-conservation walk**
+  precisely because it is the one raw ingredient with a continuous buffer, and
+  a ceiling-rounded top-up makes that equality drift within a handful of
+  ticks.
+
+  (5) **A hopper's top-up dirties its chunk; a tank's does not**, and that
+  asymmetry is inherited rather than invented. A hopper's level has always
+  been a chunk-visible fact (`hopper_snapshots`' own doc says a chunk-driven
+  renderer stays correct), and a hopper being topped up is a hopper feeding a
+  belt, which dirties its chunk anyway — so nothing new is spent. A tank's
+  level is already documented as poll-only, because the discharge pass that
+  moves fluid every tick deliberately dirties nothing (ARCHITECTURE.md §4's
+  delta granularity); an automatic top-up runs on exactly that cadence, so
+  dirtying on it would flag a chunk every tick for a fact no chunk consumer
+  reads. The discrete player command still dirties, as it always did.
+
+  (6) **`SetHopperItem` is added and `CycleHopperItem` is kept, on purpose,
+  for exactly one ticket.** A picker that already names an ingredient should
+  not have to press "next" until it arrives there, so the panel gets an
+  explicit form — refusing a non-raw item against the same `World::raw_items`
+  set `Place` validates against, and treating "the item it already holds" as
+  a **no-op that keeps the contents**, because a picker redraws its own
+  current selection and re-selecting must not empty the bin. Cycling is not
+  deleted here only because `main.gd` still binds **Q** to it and removing it
+  would leave `main` red between the two halves of this epic; its doc comment
+  says so and ticket 2 deletes both together. This is the same discipline the
+  delivery dock followed with `CollectOutput` — do the rewrite, do not
+  accumulate two ways to do one thing — with the deletion deferred by exactly
+  one ticket rather than skipped. **The flag survives a retarget**, which is
+  the small call inside this one: "keep this bin full" is a statement about
+  the bin, not about what is in it, so a player who switches a hopper from
+  tomato to sugar still wants it kept full, now of sugar. It survives a
+  `Rotate` too (rotation is pure geometry and never reaches into a body) and
+  is destroyed by a `Remove` along with everything else the body held, so a
+  re-placed hopper starts manual. **`schema_version` stayed at 1**, exactly as
+  the save ticket's own forward-compatibility note reserved: one
+  `#[serde(default)] auto_fill: bool` on each of `SavedHopper` and
+  `SavedTank`, and nothing has shipped with a save file yet.
+
 - 2026-09-09: **Save/load, ticket 1 of 2 (the sim + `SimBridge` half;
   `godot_project/main.gd`, `main.tscn`, `assets/voxels/` and `data/`
   deliberately untouched apart from one new headless test script) — a world
