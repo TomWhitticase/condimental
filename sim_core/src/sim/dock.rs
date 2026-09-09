@@ -146,6 +146,31 @@ impl Dock {
         }
     }
 
+    /// Rebuilds a dock holding `contents` and having already shipped
+    /// `shipped_total` — the save/load module's seam (`sim::save`), and
+    /// `pub(crate)` for its reason: `shipped_total` is a cumulative
+    /// counter no player action can set, so only a loader may.
+    ///
+    /// Contents keep their slot order, empties included, for
+    /// [`Inventory::restore`]'s reason.
+    pub(crate) fn restore(
+        capacity_per_item: u32,
+        contents: Vec<(ItemId, u32)>,
+        shipped_total: u32,
+    ) -> Self {
+        Self {
+            buffer: Inventory::restore(capacity_per_item, contents),
+            shipped_total,
+        }
+    }
+
+    /// Every slot on the dock, empties included — the save side of
+    /// [`Self::restore`], see [`Inventory::slots`] for why the empties
+    /// matter.
+    pub(crate) fn slots(&self) -> &[(ItemId, u32)] {
+        self.buffer.slots()
+    }
+
     /// What is sitting on the dock right now, `(item id, quantity)`,
     /// non-zero entries only. Between ticks this is always empty — see the
     /// module doc's drain rule; it is non-empty only *inside* a tick,

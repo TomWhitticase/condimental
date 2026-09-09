@@ -216,6 +216,14 @@ impl SimBridge {
 
     pub fn undo(&mut self) -> bool;
     pub fn redo(&mut self) -> bool;
+
+    // Save/load (built 2026-09-09). RON text in and out; writing it to a
+    // file is Godot's job, because `user://` is Godot's. `load_ron` returns
+    // "" on success and a human-readable reason on failure, leaving the
+    // live world untouched — see the amended save-format paragraph below.
+    pub fn save_ron(&self) -> GString;
+    pub fn load_ron(&mut self, ron: GString) -> GString;
+    pub fn new_game(&mut self);
 }
 ```
 
@@ -223,9 +231,13 @@ Godot never sees internal representations (gap arrays, fluid pressure math) — 
 
 **Delta granularity (resolved — was previously unaddressed):** deltas are per-*chunk*, not per-entity. At the scale milestone 8 (Scale-up) stress-tests for ("thousands of entities"), a per-entity `Vec<EntityDelta>` reallocated and copied across FFI every tick is the kind of thing that's invisible at milestone 2 and shows up as frame-time spikes only once the world is large — precisely because chunks (§3.1) already exist as a partitioning unit, dirty tracking reuses them instead of inventing a second granularity. `dirty_chunks()` returns a reused, cleared-not-reallocated buffer.
 
-**Undo/redo (resolved):** implemented Rust-side as a bounded stack of `(command, inverse_command)` pairs — not a Godot-side snapshot diff. This keeps undo consistent with the save format below (both are built out of the same command representation) and keeps Godot from needing to understand simulation internals to reverse an action.
+**Undo/redo (resolved):** implemented Rust-side as a bounded stack of `(command, inverse_command)` pairs — not a Godot-side snapshot diff. This keeps Godot from needing to understand simulation internals to reverse an action. *(This paragraph used to add "and keeps undo consistent with the save format below, both being built out of the same command representation." The save format is a snapshot now — see the amendment below — so that consistency argument no longer applies. It was never the load-bearing half of the case for a command stack: reversing an action still wants an inverse command whatever a save file is made of.)*
 
-**Save format (resolved — was previously unaddressed):** a save is a **command log plus periodic full-state snapshots** (snapshots are a load-time optimization on top of the log, not the source of truth), not a bare state dump. This is deliberately the same representation §7's lockstep multiplayer needs (replaying commands against a known start state), so save/load and multiplayer replay share one mechanism instead of two, and it's also exactly what a determinism/replay test (§6) replays against.
+**Save format — amended 2026-09-09, when save/load was actually built: the shipped save is a full state snapshot, not a command log.** This paragraph originally read "a save is a command log plus periodic full-state snapshots (snapshots are a load-time optimization on top of the log, not the source of truth), not a bare state dump," on the reasoning that save/load and §8's lockstep multiplayer replay should share one mechanism rather than two. That reasoning still holds *for replay* — and neither of the two things it was sharing with exists: no undo/redo is implemented, and multiplayer is an explicit stretch milestone (§9 item 11). Building a replay engine to answer "put my factory back" would have been solving a problem this project does not have, and it is also the more fragile of the two here: a command log has to be replayed through whatever game logic the **current** build has, so any change to what a command does silently rewrites every existing save, where a snapshot of the resulting state cannot drift that way.
+
+So: **a save is a `schema_version`-carrying RON snapshot of world state** (`sim_core/src/sim/save.rs`), rejected rather than migrated on a version mismatch, exactly like every `data/*.ron` loader. Fixed-point values are stored as their raw bits, never as decimal text, because a decimal round trip can land a fraction of a bit away from where it started and §3.9's whole determinism bet is that it does not. Loading rebuilds *structure* by replaying real `Purchase`/`Place` commands (so a load cannot build a world a player could not have built) and then writes *live state* — craft progress, belt positions, fluid volumes, contract clocks — on top through restore-only methods that are deliberately not commands and not public. **File I/O is not in `sim_core`**: Rust produces and consumes the RON string, and Godot resolves `user://saves/…`, because `user://` is Godot's.
+
+This does not preclude a command log later. If undo/redo or lockstep multiplayer land, the command-log design above is still the right shape for *them*, and a snapshot format sits underneath it unchanged — a command log needs a known start state, and that is what this is.
 
 **Data-file schema versioning:** every RON data file type (`recipes.ron`, `items.ron`, `machines.ron`) carries a `schema_version` field; the loader rejects or explicitly migrates a mismatched version rather than silently misreading a changed shape. This is a separate concern from save-file versioning above — content can change shape between playthroughs of the same save.
 

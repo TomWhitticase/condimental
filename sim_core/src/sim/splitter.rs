@@ -210,6 +210,15 @@ impl Splitter {
         [self.due, self.due.other()]
     }
 
+    /// Rebuilds a splitter whose next-due side is `due` — the save/load
+    /// module's seam (`sim::save`), and the only way to set this field
+    /// other than by actually handing an item over. `pub(crate)` on purpose:
+    /// a player cannot choose which way a splitter deals next, only a
+    /// loader legitimately can.
+    pub(crate) fn restore(due: Side) -> Self {
+        Self { due }
+    }
+
     /// Records that `side` actually took an item, whether or not it was the
     /// side that was due. The other side becomes due, which is what makes a
     /// blocked branch the next one served the moment it clears.

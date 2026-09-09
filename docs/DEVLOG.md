@@ -50,6 +50,34 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-09 — A factory can be saved, and comes back still running
+
+Until this ticket nothing a player did survived closing the window: the
+scene built a brand-new empty world on every launch. There is a save format
+now — a full state snapshot in RON, with its own `schema_version`, rejected
+rather than migrated on a mismatch like every `data/*.ron` loader — plus
+`save_ron()` / `load_ron()` / `new_game()` on the `SimBridge` boundary.
+
+The bar it is built to is that a saved-and-reloaded factory is
+**running-state-identical**, not layout-identical: a machine mid-craft does
+not restart its batch, an item part way across a belt tile comes back at the
+same fraction of it, every pipe tile and tank holds the exact volume it did,
+and every contract keeps counting on its own clock. That is proven by
+running the saved world and the loaded world side by side for longer than
+the longest contract cadence and comparing every snapshot the boundary
+exposes at every single tick.
+
+Two design calls worth knowing about. **ARCHITECTURE.md §4's "command log
+plus periodic snapshots" save format is amended**, because the two things it
+was meant to share a mechanism with — undo/redo and lockstep multiplayer —
+do not exist, and a command log is the more fragile of the two anyway (it
+has to be replayed through whatever game logic the current build has, so a
+change to what a command does silently rewrites every old save). And **file
+I/O stays out of `sim_core`**: Rust produces and consumes the RON string,
+Godot decides what file it becomes, because `user://` is Godot's.
+
+The main menu, save slots, autosave and an in-game way out are ticket 2.
+
 ### 2026-09-09 — SPACE and V say why, instead of doing nothing
 
 More real playtesting fallout: with a hopper's item choice and raw-ingredient

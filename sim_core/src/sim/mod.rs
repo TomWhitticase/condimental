@@ -15,6 +15,7 @@ pub mod machine;
 pub mod machines;
 pub mod recipe;
 pub mod reference;
+pub mod save;
 pub mod shop;
 pub mod splitter;
 pub mod types;
@@ -40,6 +41,7 @@ pub use reference::{
     reference_chain, reference_chain_with, reference_chain_with_budget,
     reference_chain_with_content_and_budget,
 };
+pub use save::{SAVE_SCHEMA_VERSION, SaveData, SaveError};
 pub use shop::{
     DEFAULT_PURCHASE_QUANTITY, OwnedEquipment, Shop, ShopCatalog, ShopEntry, ShopEntrySnapshot,
     ShopSnapshot,

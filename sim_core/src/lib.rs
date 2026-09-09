@@ -516,4 +516,72 @@ impl SimBridge {
             serde_json::to_string(&snapshot).expect("IngredientsSnapshot must serialize");
         GString::from(json.as_str())
     }
+
+    /// The whole world as a RON save file, as text
+    /// (`sim::save::SaveData` — see that module's doc for the format and
+    /// for why it is a full snapshot rather than ARCHITECTURE.md §4's
+    /// command log).
+    ///
+    /// **Writing it somewhere is the caller's job, deliberately.** Nothing
+    /// in `sim_core` touches the filesystem: resolving `user://saves/…` is
+    /// Godot's, so this hands back a string and GDScript decides what file
+    /// it becomes. Two saves of one unchanged world are byte-identical, so
+    /// a caller may compare them.
+    ///
+    /// Always succeeds — every world is saveable.
+    #[func]
+    fn save_ron(&self) -> GString {
+        GString::from(self.world.to_save_ron().as_str())
+    }
+
+    /// Replaces the live world with the one in `ron`, and reports what
+    /// happened: **an empty string means it loaded**, anything else is a
+    /// human-readable reason it did not.
+    ///
+    /// A message rather than a `bool` for the reason DEVLOG's "SPACE and V
+    /// say why, instead of doing nothing" entry gives: a control that fails
+    /// silently leaves the player unable to tell a corrupt file from a save
+    /// written by an older build from one they never made. The text is
+    /// suitable for showing verbatim (e.g. *"save schema_version 2 is not
+    /// supported by this build (supports 1)"*).
+    ///
+    /// **On failure the live world is untouched** — not partially loaded,
+    /// not emptied. The load builds a whole new world and only swaps it in
+    /// once every step has succeeded, so a refused load is exactly as
+    /// eventless as a refused command.
+    ///
+    /// On success the world reports **every** chunk it occupies as dirty,
+    /// so a chunk-driven renderer redraws all of it. Re-read
+    /// `world_layout_json` too: a load changes what is on the floor exactly
+    /// the way a `place`/`remove`/`rotate` does.
+    #[func]
+    fn load_ron(&mut self, ron: GString) -> GString {
+        match World::from_save_ron(&ron.to_string(), load_bundled_recipes()) {
+            Ok(world) => {
+                self.world = world;
+                GString::new()
+            }
+            Err(error) => GString::from(error.to_string().as_str()),
+        }
+    }
+
+    /// Throws the live world away and starts a fresh one — an empty floor
+    /// and `sim::STARTING_MONEY`, exactly what a newly constructed
+    /// `SimBridge` has.
+    ///
+    /// It exists so a main menu's *New Game* and its *Load* are the same
+    /// shape: both replace the world inside one long-lived bridge, so
+    /// nothing else in the scene has to know which of the two happened.
+    /// Constructing a new `SimBridge` would do the same job, so this is a
+    /// convenience rather than a capability — but a scene that keeps the
+    /// bridge in one place and swaps worlds under it has one fewer thing
+    /// that can go stale.
+    ///
+    /// Like a load, this reports every chunk of the new world dirty (there
+    /// are none), and `world_layout_json` is empty afterwards.
+    #[func]
+    fn new_game(&mut self) {
+        self.world = World::new(load_bundled_recipes());
+    }
 }
+

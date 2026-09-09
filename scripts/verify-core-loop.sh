@@ -52,7 +52,10 @@
 #      and word as well as colour, all four facings drawn with the matching
 #      rotation, the junction art's east-only fallback holding under real
 #      placement, and place/remove/rotate driving the rendered scene through
-#      the real command boundary).
+#      the real command boundary), and save/load's own boundary (a whole RON
+#      save crossing as a String in both directions, an earlier moment coming
+#      back exactly, a refused load saying why and changing nothing, and New
+#      Game emptying the floor).
 #
 # NOTE ON WHAT THESE TESTS BUILD. Since that epic a world starts EMPTY, so
 # every script below builds the factory it then asserts against, using real
@@ -166,15 +169,18 @@ run_godot_script test_chain_rework.gd CHAIN_REWORK_OK "1x2 mixer, piped middle, 
 run_godot_script test_fill_feedback.gd FILL_FEEDBACK_OK "SPACE/V say why they did nothing, before the sim ever sees the command"
 run_godot_script test_placement.gd PLACEMENT_OK "empty world, ghost, rotation, place/remove — Real Placement ticket 2"
 run_godot_script test_splitters.gd SPLITTERS_OK "splitter model, next-output arrow, items crossing, hover — Epic B ticket 2"
+run_godot_script test_save_load.gd SAVE_LOAD_OK "save_ron/load_ron/new_game across the real boundary — save/load ticket 1"
 
 echo
 echo "PASS: real placement + milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"
 echo "      + icons + hover + milestone 6 fluid presentation + machine footprints/hopper"
 echo "      + belt/pipe junctions + the build menu + the inventory hotbar + the chain rework's"
 echo "      piped middle, 1x2 mixer, hopper-contents choice and ingredient market"
-echo "      + the delivery dock that ends the line, all verified"
+echo "      + the delivery dock that ends the line + save/load across the boundary,"
+echo "      all verified"
 echo "      headlessly (sim_core tests"
 echo "      + gdext boundary + interaction + 3D scene structure + pan/zoom + contract panel"
 echo "      structure + icons + hover tooltips + pipe/fluid rendering + per-kind machine"
 echo "      models and the hopper's fill + shop slots/affordability/purchases + the"
-echo "      market's crates and the larder + the dock's model/belt/deck stock/hover)."
+echo "      market's crates and the larder + the dock's model/belt/deck stock/hover"
+echo "      + save_ron/load_ron/new_game)."

@@ -70,6 +70,36 @@ impl Inventory {
     pub fn iter(&self) -> impl Iterator<Item = &(ItemId, u32)> {
         self.slots.iter().filter(|(_, n)| *n > 0)
     }
+
+    /// Every slot in its own order, **including ones currently at zero** —
+    /// the save/load module's seam (`sim::save`) and the reason it is not
+    /// [`Self::iter`].
+    ///
+    /// Slot order is observable: it is the order a `MachineSnapshot`'s
+    /// `input`/`output` arrays come out in, and a slot that has been emptied
+    /// keeps its place so the next unit of that item lands back where it
+    /// was. A save that dropped empty slots would therefore reload a machine
+    /// that reports its buffers in a different order the moment the missing
+    /// item arrives again — running-state-*nearly*-identical, which is not
+    /// the bar.
+    pub(crate) fn slots(&self) -> &[(ItemId, u32)] {
+        &self.slots
+    }
+
+    /// Rebuilds an inventory with `slots` exactly as [`Self::slots`]
+    /// reported them, order and empties included. Counts are clamped at
+    /// `capacity_per_item` the same way [`Self::add`] clamps, so a
+    /// hand-edited save cannot over-fill a buffer; `sim::save` rejects such
+    /// a save before it reaches here rather than relying on the clamp.
+    pub(crate) fn restore(capacity_per_item: u32, slots: Vec<(ItemId, u32)>) -> Self {
+        Self {
+            slots: slots
+                .into_iter()
+                .map(|(item, count)| (item, count.min(capacity_per_item)))
+                .collect(),
+            capacity_per_item,
+        }
+    }
 }
 
 #[cfg(test)]

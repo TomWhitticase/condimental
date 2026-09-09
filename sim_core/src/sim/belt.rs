@@ -168,6 +168,60 @@ impl BeltSegment {
         true
     }
 
+    /// How far back `tick` still has to scan — **restore-only state**, see
+    /// [`BeltSegment::restore`] for why a save has to carry it.
+    pub(crate) fn frontier(&self) -> usize {
+        self.frontier
+    }
+
+    /// Rebuilds a belt from what [`Self::snapshot_positions`] reported, for
+    /// the save/load module and nothing else (`sim::save`).
+    ///
+    /// `positions` is front to back, i.e. descending distance-from-start,
+    /// exactly as `snapshot_positions` emits it; the gap representation this
+    /// module is built on is derived back out of it here, which is what
+    /// makes the round trip exact rather than approximate (`positions` is
+    /// the only view of a belt anything outside this file has, and a save
+    /// storing the internal gaps instead would be storing a representation
+    /// the format is not allowed to depend on).
+    ///
+    /// **`frontier` is a parameter and not recomputed**, because it is
+    /// genuinely behavioural rather than a cache: the module doc's
+    /// "freed space ripples back by at most one item per tick" property is
+    /// enforced *by* the scan bound, so a belt restored with a wider
+    /// frontier would let a compressed run advance further in its first tick
+    /// than the belt it was saved from. It is clamped on the way in, so a
+    /// hand-edited save cannot push it out of range.
+    pub(crate) fn restore(
+        length: Fx,
+        min_spacing: Fx,
+        positions: &[(ItemId, Fx)],
+        frontier: usize,
+    ) -> Self {
+        let mut items: VecDeque<BeltItem> = VecDeque::with_capacity(positions.len());
+        for (index, (item, position)) in positions.iter().enumerate() {
+            // Index 0 stores its plain distance to the belt's end; every
+            // item behind it stores the slack beyond `min_spacing` to the
+            // one ahead (the module doc's two cases, inverted).
+            let gap_ahead = if index == 0 {
+                length - *position
+            } else {
+                (positions[index - 1].1 - *position) - min_spacing
+            };
+            items.push_back(BeltItem {
+                item: item.clone(),
+                gap_ahead,
+            });
+        }
+        let frontier = frontier.min(items.len().saturating_sub(1));
+        Self {
+            length,
+            min_spacing,
+            items,
+            frontier,
+        }
+    }
+
     /// (item, distance-from-belt-start) for every item currently on the
     /// belt, front to back — presentation-only, computed on demand for
     /// snapshots (ARCHITECTURE.md §4). Never stored as simulation state.
@@ -238,6 +292,52 @@ mod tests {
             gap_between >= fx(SPACING),
             "items must never overlap closer than min spacing, got gap {gap_between}"
         );
+    }
+
+    /// The save/load round trip's floor: whatever `snapshot_positions`
+    /// reports must rebuild a belt that reports exactly the same thing —
+    /// exactly, not nearly, since `Fx` is fixed-point and a save is expected
+    /// to come back running-state-identical (`sim::save`).
+    #[test]
+    fn restoring_from_snapshot_positions_is_exact() {
+        let mut belt = BeltSegment::new(fx(4.0), fx(SPACING));
+        // An item has to have travelled `min_spacing` from the start before
+        // the next one fits behind it, which at this speed is 13 ticks.
+        assert!(belt.try_spawn("a".into()));
+        for _ in 0..21 {
+            belt.tick(fx(0.02));
+        }
+        assert!(belt.try_spawn("b".into()));
+        for _ in 0..13 {
+            belt.tick(fx(0.02));
+        }
+        assert!(belt.try_spawn("c".into()));
+        for _ in 0..11 {
+            belt.tick(fx(0.02));
+        }
+
+        let positions = belt.snapshot_positions();
+        assert_eq!(positions.len(), 3);
+        let restored =
+            BeltSegment::restore(belt.length, belt.min_spacing, &positions, belt.frontier());
+        assert_eq!(restored.snapshot_positions(), positions);
+        assert_eq!(restored.frontier(), belt.frontier());
+
+        // ...and it must keep behaving identically, not just read the same.
+        let mut original = belt;
+        let mut copy = restored;
+        for _ in 0..50 {
+            assert_eq!(original.tick(fx(0.02)), copy.tick(fx(0.02)));
+            assert_eq!(original.snapshot_positions(), copy.snapshot_positions());
+        }
+    }
+
+    /// An empty belt round-trips too — the case a freshly placed tile is in.
+    #[test]
+    fn restoring_an_empty_belt_yields_an_empty_belt() {
+        let belt = BeltSegment::restore(fx(1.0), fx(SPACING), &[], 0);
+        assert!(belt.is_empty());
+        assert_eq!(belt.snapshot_positions(), Vec::new());
     }
 
     #[test]

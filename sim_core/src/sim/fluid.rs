@@ -235,6 +235,20 @@ impl FluidTank {
         }
     }
 
+    /// Rebuilds a tank already holding `volume` — the save/load module's
+    /// seam (`sim::save`). `pub(crate)`, and taking an [`Fx`] rather than
+    /// [`FluidTank::fill`]'s whole `u32` units, because a tank that has been
+    /// discharging holds a *fractional* volume that no player command could
+    /// ever produce: `fill` is the player's way in, this is the loader's.
+    /// The volume is clamped into `[0, capacity]` so a hand-edited save
+    /// cannot create a tank holding more than it can.
+    pub(crate) fn restore(capacity: Fx, volume: Fx) -> Self {
+        Self {
+            volume: volume.max(Fx::ZERO).min(capacity),
+            capacity,
+        }
+    }
+
     pub fn volume(&self) -> Fx {
         self.volume
     }
@@ -392,6 +406,19 @@ impl FluidNetwork {
     pub fn mark_source(&mut self, index: usize) {
         if let Some(segment) = self.segments.get_mut(index) {
             segment.is_source = true;
+        }
+    }
+
+    /// Sets one segment's volume outright — the save/load module's seam
+    /// (`sim::save`), reached through `world.rs` because a network is
+    /// derived and a loader addresses a pipe by *tile*, not by index.
+    /// `pub(crate)`: volume otherwise only ever moves through
+    /// [`Self::tick`], [`Self::draw_at`], [`Self::deposit_at`] and
+    /// [`Self::discharge_from_tank`], and it should stay that way for
+    /// anything a player can do. Clamped into `[0, capacity]`.
+    pub(crate) fn restore_volume_at(&mut self, index: usize, volume: Fx) {
+        if let Some(segment) = self.segments.get_mut(index) {
+            segment.volume = volume.max(Fx::ZERO).min(segment.capacity);
         }
     }
 

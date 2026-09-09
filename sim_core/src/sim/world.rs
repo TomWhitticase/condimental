@@ -2914,6 +2914,144 @@ impl World {
     }
 }
 
+// =====================================================================
+// The save/load seam (`super::save`)
+// =====================================================================
+
+impl World {
+    /// Every placement, in the topology's own tile order, as
+    /// `(origin tile, placement, entity)`.
+    ///
+    /// This block, and only this block, is what [`super::save`] reaches
+    /// through: a save has to read state this module otherwise keeps to
+    /// itself, and a load has to write state no [`PlayerCommand`] can
+    /// express (a machine's craft progress, a dock's lifetime total, an
+    /// exact money balance). Everything here is therefore `pub(super)` —
+    /// visible to the save module, invisible outside the crate, and never
+    /// part of the player-facing API. See `save.rs`'s module doc for the
+    /// rule that keeps it that way.
+    pub(super) fn saved_placements(&self) -> Vec<(TileCoord, Placement, Entity)> {
+        self.topology
+            .all
+            .iter()
+            .map(|&entity| (self.position_of(entity), self.placement_of(entity), entity))
+            .collect()
+    }
+
+    /// Whatever claims `tile`, if anything — any tile of a footprint, like
+    /// every other tile-addressed lookup here.
+    pub(super) fn entity_at(&self, tile: TileCoord) -> Option<Entity> {
+        self.topology.grid.get(&tile).copied()
+    }
+
+    pub(super) fn ecs(&self) -> &hecs::World {
+        &self.ecs
+    }
+
+    pub(super) fn ecs_mut(&mut self) -> &mut hecs::World {
+        &mut self.ecs
+    }
+
+    /// How much fluid the pipe tile at `tile` holds, and how much it could —
+    /// `None` when no pipe stands there. Volume lives on whichever network
+    /// currently owns the tile (`fluid.rs`), which is why this is addressed
+    /// by tile rather than by network index: a network is derived and its
+    /// indices are not stable across a rebuild, but a tile is exactly what
+    /// the player placed.
+    pub(super) fn pipe_volume_at(&self, tile: TileCoord) -> Option<(Fx, Fx)> {
+        let &(network, segment) = self.topology.pipe_index.get(&tile)?;
+        let segment = self.topology.networks[network].segments().get(segment)?;
+        Some((segment.volume, segment.capacity))
+    }
+
+    /// Sets a pipe tile's volume outright, for a load. Returns whether a
+    /// pipe was actually there.
+    pub(super) fn restore_pipe_volume(&mut self, tile: TileCoord, volume: Fx) -> bool {
+        let Some(&(network, segment)) = self.topology.pipe_index.get(&tile) else {
+            return false;
+        };
+        self.topology.networks[network].restore_volume_at(segment, volume);
+        true
+    }
+
+    /// Sets the money balance outright. Money otherwise only ever moves
+    /// through [`Economy::try_spend`] and a contract payout, deliberately
+    /// ([`World::with_content_and_money`]'s own doc) — a load is the one
+    /// caller that legitimately states a balance rather than earning it, and it
+    /// has to do so twice: once to fund each rebuild purchase, and once at
+    /// the end to install the saved balance, so those purchases cannot leak
+    /// into it.
+    pub(super) fn restore_money(&mut self, money: Fx) {
+        self.economy.money = money;
+    }
+
+    pub(super) fn restore_tick_count(&mut self, tick: u64) {
+        self.tick_count = tick;
+    }
+
+    pub(super) fn economy_mut(&mut self) -> &mut Economy {
+        &mut self.economy
+    }
+
+    pub(super) fn shop(&self) -> &Shop {
+        &self.shop
+    }
+
+    pub(super) fn shop_mut(&mut self) -> &mut Shop {
+        &mut self.shop
+    }
+
+    pub(super) fn ingredients(&self) -> &Ingredients {
+        &self.ingredients
+    }
+
+    pub(super) fn ingredients_mut(&mut self) -> &mut Ingredients {
+        &mut self.ingredients
+    }
+
+    /// The footprint `kind` is placed with, or `None` for a kind this world
+    /// cannot construct at all — `try_place`'s own first question, asked by
+    /// [`super::save`] before it places anything so a save naming a kind
+    /// this build no longer has fails with a message about *that* rather
+    /// than as a generic refusal.
+    pub(super) fn footprint_of_kind(&self, kind: &str) -> Option<Footprint> {
+        self.footprint_for(kind)
+    }
+
+    /// Every solid item id this world's recipes mention, consumed or
+    /// produced, sorted and deduplicated. There is no `items.ron`, so this
+    /// is the closest thing to an item registry the crate has — and it is
+    /// what [`super::save`] checks a loaded belt, buffer, dock or delivery
+    /// pool against, since an item id that no recipe names any more is a
+    /// content change the save cannot survive.
+    pub(super) fn recipe_item_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self
+            .recipes
+            .ordered()
+            .iter()
+            .flat_map(|recipe| {
+                recipe
+                    .inputs
+                    .iter()
+                    .chain(recipe.outputs.iter())
+                    .map(|(item, _)| item.clone())
+            })
+            .collect();
+        ids.sort();
+        ids.dedup();
+        ids
+    }
+
+    /// Marks every chunk the world occupies dirty, so a presentation layer
+    /// driven by `dirty_chunks()` redraws all of a freshly loaded world
+    /// rather than only whatever the next tick happens to touch. Each
+    /// individual `Place` during a load already dirties what it touched;
+    /// this is what makes the load *as a whole* announce itself.
+    pub(super) fn mark_every_chunk_dirty(&mut self) {
+        self.dirty = self.all_chunks();
+    }
+}
+
 /// Enforces the chain-linkage assumption `data/recipes.ron` is written
 /// under: recipe `i + 1` must consume (as one of its inputs) an item that
 /// recipe `i` produces. A clear panic here — at construction time, before

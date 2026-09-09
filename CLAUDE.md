@@ -165,6 +165,16 @@ sauce-factory/
                                          # pure-logic half — tick()/dirty_chunks()/
                                          # chunk_snapshot()/issue_command()/query_tile()/
                                          # world_layout()/economy_snapshot() (§4)
+      save.rs                          # the save format (ARCH §4, amended): SaveData/
+                                         # SaveError + to_ron/from_ron + World::to_save/
+                                         # from_save. A full state SNAPSHOT, not a command
+                                         # log; fixed-point values as raw bits; a load
+                                         # rebuilds structure through real Purchase/Place
+                                         # commands and writes live state on top through
+                                         # restore-only methods (pub(crate)/pub(super),
+                                         # never player-facing). NO filesystem code —
+                                         # `user://` is Godot's, so Rust only ever handles
+                                         # the RON string
       reference.rs                     # sim::reference_chain — the pre-placement shipped
                                          # layout, rebuilt out of nothing but Purchase +
                                          # Place commands. Both the fixture every
@@ -211,6 +221,13 @@ sauce-factory/
                                  # fills, and dock_snapshot_json's exact shape —
                                  # dock.rs's own #[cfg(test)] covers Dock in
                                  # isolation (intake gating, the full-dock refusal)
+    tests/save_load.rs         # headless integration test for save/load: a mid-flight
+                                 # shipped chain saved, loaded into a NEW world and ticked
+                                 # forward in LOCKSTEP for longer than a contract cadence
+                                 # with every snapshot compared every tick; plus byte-exact
+                                 # idempotence, an empty world, a forked line with turned
+                                 # placements, and unplaced inventory. save.rs's own
+                                 # #[cfg(test)] covers every loader refusal
     tests/shop.rs              # headless integration test: the chain earns contract
                                  # money and spends it on equipment, a refused
                                  # purchase (unaffordable/unknown/zero-quantity) is a
@@ -267,6 +284,11 @@ sauce-factory/
                                        # keys 1-9/0 selecting a slot into placement mode with
                                        # NO menu open, the same key again deselecting, empty
                                        # sockets, and buying still a separate verb
+    test_save_load.gd                # headless proof of save/load across the real boundary:
+                                       # a whole RON save crossing as a String both ways, an
+                                       # earlier moment coming back exactly, a refused load
+                                       # saying WHY and leaving the world untouched, a loaded
+                                       # world reporting every chunk dirty, and new_game()
     test_layouts.gd                  # shared fixture: factories built through real purchase/
                                        # place commands. Most are small BY CHOICE (a nine-tile
                                        # line proves a wire format as well as a forty-tile
@@ -386,6 +408,124 @@ diff). Update docs/DEVLOG.md's "Current status" section in the same commit if
 it's gone stale.
 
 ## Decisions log
+
+- 2026-09-09: **Save/load, ticket 1 of 2 (the sim + `SimBridge` half;
+  `godot_project/main.gd`, `main.tscn`, `assets/voxels/` and `data/`
+  deliberately untouched apart from one new headless test script) — a world
+  can be written to text and put back running.** Until this ticket there was
+  no save code anywhere: `main.gd` built a brand-new empty `World` on every
+  launch, so nothing a player did survived closing the window. Eight calls
+  worth not re-litigating.
+
+  (1) **A save is a full state SNAPSHOT, not ARCHITECTURE.md §4's command
+  log — and §4 is amended to say so.** That paragraph proposed "a command
+  log plus periodic full-state snapshots," to share one mechanism with
+  undo/redo and with §8's lockstep multiplayer replay. Neither of those
+  exists: no undo/redo is implemented and multiplayer is an explicit stretch
+  milestone, so a replay engine would have been built to answer "put my
+  factory back" — a problem this project does not have. It is also the more
+  fragile of the two *here*: a command log is replayed through whatever game
+  logic the **current** build has, so changing what a command does silently
+  rewrites every existing save, where a snapshot of the resulting state
+  cannot drift that way. The doc now records the snapshot as shipped and
+  keeps the command log as the right shape for undo/redo and replay **if**
+  those land — a snapshot does not preclude one, it is the known start state
+  a command log needs.
+
+  (2) **The bar is running-state-identical, not layout-identical, and it is
+  pinned by a lockstep test rather than by a list of fields.** A machine
+  mid-craft must not restart its batch; an item 37% across a belt tile comes
+  back at 37%; every pipe tile, tank, hopper, splitter cursor, dock buffer
+  and lifetime shipped total, every contract's own cadence clock and
+  delivered/missed counters, the shared delivery pool, money, owned
+  equipment, owned stock and the tick count all survive.
+  `sim_core/tests/save_load.rs` builds the shipped chain, runs it into a
+  genuinely messy mid-flight state (asserting it *reached* one, so the
+  fixture cannot quietly stop exercising what it claims), saves, loads into a
+  different world, and then compares **every snapshot the boundary exposes,
+  at every tick, for 2600 ticks** — longer than the longest contract cadence,
+  so a restored clock has to settle a real window after the load. A
+  divergence surfaces on the tick it happens rather than as "it looked wrong
+  later".
+
+  (3) **Fixed-point values are stored as raw bits (`FxBits`), never as
+  decimal text.** `Fx` is `I16F16`; a decimal print-and-reparse can land a
+  fraction of a bit away, which is precisely the divergence (2)'s lockstep
+  comparison would find a thousand ticks later. `fixed`'s own serde feature
+  is deliberately not enabled: raw bits is the promise this format wants to
+  make, and it should not be a property of a dependency's formatting
+  choices.
+
+  (4) **A load rebuilds STRUCTURE through the real commands and writes LIVE
+  STATE on top through restore-only methods.** Half one is `Purchase` then
+  `Place` per placement, exactly what `sim::reference_chain` already does —
+  so nothing about footprints, collision, hopper contents or topology is
+  re-implemented in the loader, and a load cannot build a world a player
+  could not have built. A refused `Place` is a **corrupt save** (an `Err`
+  naming the kind and the tile), never a silently missing tile. Half two
+  writes what no command can express — craft progress, belt item positions,
+  a dock's lifetime total, an exact balance — through methods that are
+  `pub(crate)` on the body types and `pub(super)` on `World` (world.rs's
+  "save/load seam" block). **That visibility is the rule, not an accident:**
+  the player-facing API must not gain a way to set a machine's progress just
+  because a loader needs one.
+
+  (5) **Money is written twice, and the rebuild is funded one item at a
+  time.** Each rebuild purchase spends real money, so the saved balance is
+  installed *last* and the rebuild's spending cannot leak into it. Funding
+  per item rather than pricing the whole bill up front (which is what
+  `reference.rs` does) is not fussiness: `Fx` saturates around 32 767, so a
+  single up-front bill for a few thousand belt tiles would not fit in the
+  money counter even though every individual price does — a factory that
+  saved fine would refuse to load.
+
+  (6) **Two pieces of "internal" state turned out to be genuinely
+  behavioural and are saved: a belt's `frontier`, and every inventory's
+  EMPTY slots.** `frontier` is `belt.rs`'s scan bound, and it is what
+  enforces the module's own "freed space ripples back by at most one item
+  per tick" property — a belt restored with a wider one would let a
+  compressed run advance further in its first tick than the belt it came
+  from. Empty inventory slots matter because slot order is observable: it is
+  the order `MachineSnapshot`'s `input`/`output` arrays come out in, and a
+  slot emptied by a craft keeps its place so the next unit of that item
+  lands back where it was. Dropping zeros would reload a machine that
+  reports its buffers in a *different* order the moment the missing
+  ingredient arrives again — running-state-nearly-identical, which is not
+  the bar. Everything genuinely derived stays out of the file: recipes (a
+  machine's kind names its recipe), every capacity (a Rust constant), pipe
+  network shape/fluid id/source flags (re-derived by
+  `recompute_topology`, the same pass a `Place` triggers), and the dirty set.
+
+  (7) **File I/O is not in `sim_core`, and `load_ron` returns a MESSAGE
+  rather than a bool.** Rust produces and consumes the RON *string*;
+  resolving `user://saves/<slot>.ron` is Godot's, because `user://` is
+  Godot's — so the crate gains no filesystem code at all and ticket 2 owns
+  slots, autosave and the menu. `SimBridge::load_ron` returns `""` on
+  success and a human-readable reason on failure ("save schema_version 2 is
+  not supported by this build (supports 1)"), which is the DEVLOG 2026-09-09
+  "SPACE and V say why, instead of doing nothing" lesson applied to the one
+  control that can fail for reasons a player cannot see. On failure the live
+  world is **untouched** — a load builds a whole new world and swaps it in
+  only once every step succeeded — and on success it reports **every** chunk
+  dirty, so a chunk-driven renderer redraws all of it. `new_game()` is there
+  so a menu's New Game and its Load are the same shape (both replace the
+  world under one long-lived bridge); constructing a fresh `SimBridge` would
+  do the same job, so it is a convenience, not a capability.
+
+  (8) **A changed contract board is an error in BOTH directions.** A save
+  naming a contract this build does not have is rejected; so is a build
+  having a contract the save says nothing about. Quietly starting the new
+  one from scratch would hide the fact that the save's economy state cannot
+  be faithfully restored, and the same reasoning covers an unknown kind, an
+  item no recipe mentions any more, and a hopper holding something that is
+  not raw — content changed under the save, and this crate's whole loader
+  convention is to say so rather than to guess. **Flagged, not fixed:**
+  `schema_version` is **1** and stays 1 for the rest of this batch — the
+  auto-fill ticket adds an `auto_fill` flag to hoppers and tanks, which the
+  per-kind body records are named-field structs precisely to make a one-line
+  `#[serde(default)]` addition. Nothing has shipped with a save file yet, so
+  v1 is whatever this batch merges with; after that, a field addition is a
+  version bump like any other shape change.
 
 - 2026-09-08: **The chain rework, ticket 2 of 2 (the Godot/assets half;
   `sim_core/src/sim/` touched in exactly one place, see (1)) — the piped
