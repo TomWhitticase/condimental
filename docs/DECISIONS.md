@@ -22,6 +22,82 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-09: **Pipes & conveyors overhaul, ticket 4 — instanced rendering
+  for belts, pipes and items (`godot_project/` only; the sim and the assets
+  deliberately untouched).** `_rebuild_world` used to free and rebuild one
+  `Node3D` (with a `MeshInstance3D` per material class) per placement, and
+  `_render_carried_items` kept one pooled `Node3D` per belt slot and moved it
+  every tick. At the scale the overhaul is heading for — a few thousand
+  conveyor tiles, animated — node count is the cost, and it is paid twice: on
+  every place/remove/rotate (a full rebuild, by design) and every tick (a
+  transform write per item node, each of which notifies its mesh children).
+  Six calls.
+
+  (1) **`MultiMesh` per (asset, material class), the same shape
+  `_build_floor` already used.** A voxel asset is one mesh per material class
+  (UI_UX.md §2b point 2), so an instanced tile is one `MultiMeshInstance3D`
+  per class with the class material as `material_override`, exactly what the
+  node had as a surface override. Lighting, shadows and SSAO are identical —
+  `scripts/screenshot-scene.sh --populate` before and after differed only on
+  the carried items and one clipboard digit, and the digit said why: the two
+  runs were one simulation tick apart (the screenshot ticks by wall clock;
+  two runs of the OLD renderer differ from each other the same way). With
+  `--no-hud` on the splitter fixture the two PNGs were byte-identical.
+
+  (2) **What stays a node is a rule, not a list: anything with live
+  per-instance state.** A machine's status lamp swaps material; a hopper's,
+  tank's and pipe segment's level body scales and retints; the splitter's
+  arrow turns and hides; the dock's cases change model; the ghost is tinted.
+  A `MultiMesh` instance has a transform and nothing else, so each of those
+  would need a pool per material or a colour channel with its own design —
+  and they are tens of things, not thousands. Pipe fluid bodies in
+  particular stay nodes even though pipes are instanced: ticket 6 redraws
+  them per shape and is the right place to decide whether the tint becomes a
+  per-instance colour.
+
+  (3) **Three seams built now for tickets 5 and 6, so animation and corners
+  land ON this rather than beside it.** (a) A tile's asset is a FRAME SET:
+  `_tile_frames_for` returns a list of asset names (one frame each), every
+  frame gets its own per-class MultiMeshes with the SAME transforms, and
+  `_set_tile_frame(k)` flips visibility — so the plan's belt animation costs
+  a handful of visibility flips per frame change for any number of belts.
+  Until ticket 5 every set has one frame. (b) `_stage_tile_instance` takes a
+  position and a YAW from the caller; `_build_placement` passes the
+  placement's direction yaw today, and a corner tile can pass something
+  else. (c) `_carried_item_transform(tile, direction, distance)` is the only
+  place an item's position is computed; the corner arc goes there with the
+  same `distance` in. The basis is identity, as items never were rotated.
+
+  (4) **A `MultiMesh` needs its count up front, so tiles are STAGED during
+  the rebuild and built together after the placement loop.** Staged order is
+  placement order (the sim's own tile order), so two rebuilds of one world
+  produce the same instance indices — determinism for free.
+
+  (5) **Items are a swap-remove pool per asset with a dense visible prefix**
+  (`visible_instance_count`), not a hidden-by-zero-scale instance: hiding is
+  one transform write plus a count. Growth doubles capacity and replays a
+  mirror of the transforms, because setting `instance_count` clears a
+  MultiMesh's buffer. The per-TILE hiding rule from the splitter ticket is
+  kept verbatim (`_hide_carried_item` returns false at the first gap).
+
+  (6) **Measure, and say what the number is.** `build_stress_line` is a
+  1500-belt serpentine with hoppers on its free flanks and three tank-fed,
+  mixer-tapped pipe runs. Its bill (~8,500) is past `STARTING_MONEY`, and
+  the sim is off limits to this ticket, so `fund` sets the balance through
+  the one door Godot has — `save_ron`, patch `money_bits`, `load_ron` —
+  with `Fx`'s ~32 767 ceiling. Results: rendered objects in the stress frame
+  7,772 → 910, draw calls 204 → 174, headless warm rebuild 57 → 38 ms. The
+  per-frame headless figure (7.2 ms) did not move, and profiling says why:
+  ~8 ms of every tick step is `JSON.parse_string` on ~80 KB of chunk
+  snapshot for two dirty chunks, because the wire reports every belt in a
+  dirty chunk every tick (ARCHITECTURE.md §4's per-chunk delta). That is a
+  wire-format matter for milestone 8 and is recorded, not worked around.
+  `test_perf.gd` asserts generous ceilings (an order-of-magnitude
+  regression, not a ten-percent one) and that drawn items equal the sim's
+  count; `screenshot-scene.sh --stress` prints the renderer's own
+  object/primitive/draw-call counts so the GPU side can be compared without
+  a profiler. Primitives rose ~15% on the stress shot: a MultiMesh is culled
+  as one whole, which at a camera that frames the whole world is nothing.
 - 2026-09-09: **Pipes & conveyors overhaul, ticket 1 of 7 (sim only) —
   connectivity goes on the wire as `links`, recorded by the topology pass
   and never derived by Godot.** The overhaul's tickets 5 and 6 draw a belt

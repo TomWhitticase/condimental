@@ -269,3 +269,77 @@ static func build_reference_line(sim) -> void:
 ## How many placements `build_reference_line` makes. Stated once here so a
 ## test asserting the line was built in full does not restate the layout.
 const REFERENCE_LINE_PLACEMENTS := 37
+
+
+## Sets the balance to `amount` through the save/load boundary — the one
+## door into a sim the presentation layer is allowed to use, and the only
+## way a Godot fixture can be bigger than `sim::STARTING_MONEY` (3000)
+## allows without a Rust test seam. `save_ron` writes money as raw `Fx`
+## bits (`money_bits: N`, I16F16, so N = amount * 65536); the text is
+## rewritten and loaded back. `Fx` saturates near 32 767, so that is the
+## ceiling. Everything else in the world survives the round trip unchanged,
+## which the save/load lockstep test is what guarantees.
+static func fund(sim, amount: int) -> void:
+	var text: String = sim.save_ron()
+	var regex := RegEx.new()
+	regex.compile("money_bits:\\s*-?\\d+")
+	var bits: int = mini(amount, 32767) * 65536
+	var patched := regex.sub(text, "money_bits: %d" % bits)
+	var error: String = sim.load_ron(patched)
+	if error != "":
+		push_error("fund(): load_ron refused the patched save: %s" % error)
+
+
+## THE STRESS LINE (the pipes & conveyors overhaul, ticket 4) — the fixture
+## `test_perf.gd` times and `scripts/screenshot-scene.sh --stress`
+## photographs. Big on purpose, where every other fixture here is small: it
+## exists to make per-tile rendering costs visible, and a thousand tiles is
+## where a node per tile stops being free.
+##
+## A serpentine of STRESS_ROWS x STRESS_COLUMNS belts: even rows run east,
+## odd rows run west, and the last tile of every row turns north into the
+## next one — so the whole thing is ONE line of 1500 conveyor tiles with a
+## corner at each end of each row, on three of the four facings. Fed by a
+## hopper at its head and by hoppers on the free flanks of the first and last
+## rows, so product enters at several points and the belts near the feeds
+## carry items from the first few hundred ticks. Beside it, three tank-fed
+## pipe runs, each tapped by a mixer so the run carries vinegar and its
+## liquid bodies have something to show.
+##
+## Its bill (about 8,500) is far past a new game's balance, so it funds
+## itself through `fund` first. The line's tail hands to nothing, so the last
+## row backs up over time — a jammed stretch is a realistic thing to draw.
+const STRESS_ROWS := 30
+const STRESS_COLUMNS := 50
+const STRESS_BELTS := STRESS_ROWS * STRESS_COLUMNS
+const STRESS_PIPE_RUNS := 3
+const STRESS_PIPES_PER_RUN := 8
+const STRESS_FLANK_HOPPER_COLUMNS := [10, 20, 30, 40]
+
+static func build_stress_line(sim) -> void:
+	fund(sim, 32000)
+	sim.issue_command_json(JSON.stringify({"type": "purchase", "kind": "belt", "quantity": STRESS_BELTS}))
+	for row in range(STRESS_ROWS):
+		var eastward := row % 2 == 0
+		for column in range(STRESS_COLUMNS):
+			var x := column if eastward else STRESS_COLUMNS - 1 - column
+			var last := column == STRESS_COLUMNS - 1
+			var direction := "north" if last else ("east" if eastward else "west")
+			sim.issue_command_json(JSON.stringify({
+				"type": "place", "kind": "belt", "tile": [x, row], "direction": direction,
+			}))
+	place(sim, "hopper", Vector2i(-1, 0), "east", "tomato")
+	for column in STRESS_FLANK_HOPPER_COLUMNS:
+		place(sim, "hopper", Vector2i(column, -1), "north", "tomato")
+		place(sim, "hopper", Vector2i(column, STRESS_ROWS), "south", "sugar")
+	for run in range(STRESS_PIPE_RUNS):
+		var y := STRESS_ROWS + 4 + run * 3
+		place(sim, "fluid_tank", Vector2i(-1, y), "east")
+		for x in range(STRESS_PIPES_PER_RUN):
+			place(sim, "pipe", Vector2i(x, y), "east")
+		place(sim, "mixer", Vector2i(STRESS_PIPES_PER_RUN, y), "east")
+
+
+## How many placements `build_stress_line` makes, so a test can assert the
+## whole thing was affordable and legal.
+const STRESS_PLACEMENTS := STRESS_BELTS + 1 + 2 * 4 + STRESS_PIPE_RUNS * (2 + STRESS_PIPES_PER_RUN)

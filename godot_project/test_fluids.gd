@@ -111,18 +111,23 @@ func _run_checks() -> void:
 	for segment in segments:
 		var pair: Array = segment["tile"]
 		var tile := Vector2i(int(pair[0]), int(pair[1]))
-		var node: Node3D = main.get_node_or_null("World/pipe_%d,%d" % [tile.x, tile.y])
-		if node == null:
+		# A pipe tile is a MultiMesh instance (the pipes & conveyors
+		# overhaul's ticket 4), read back through `_tile_instance_at`.
+		var instance: Dictionary = main._tile_instance_at(tile)
+		if instance.is_empty():
 			_fail("no rendered pipe at %s, which the simulation reports as a segment" % str(tile))
 			return
-		if _meshes(node, []).is_empty():
+		if instance["nodes"].is_empty():
 			_fail("the pipe at %s rendered no meshes — the .vox didn't import" % str(tile))
 			return
 		var expected: Vector3 = main._tile_origin(tile.x, tile.y, main.FLOOR_Y)
-		if not node.position.is_equal_approx(expected):
-			_fail("the pipe at %s is drawn at %s, expected %s" % [str(tile), str(node.position), str(expected)])
+		if not instance["position"].is_equal_approx(expected):
+			_fail("the pipe at %s is drawn at %s, expected %s" % [str(tile), str(instance["position"]), str(expected)])
 			return
 		var asset: String = main._pipe_asset_for(tile)
+		if instance["asset"] != asset:
+			_fail("the pipe at %s is drawn as '%s' but `_pipe_asset_for` says '%s'" % [str(tile), instance["asset"], asset])
+			return
 		if bool(segment.get("is_source", false)):
 			source_asset = asset
 		elif asset == main.PIPE_INLET_ASSET:

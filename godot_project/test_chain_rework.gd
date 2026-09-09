@@ -312,7 +312,7 @@ func _run_checks() -> void:
 			if _placement_kind_on(line, tile) != "pipe":
 				_fail("no pipe at %s — the piped middle of the chain is missing" % str(tile))
 				return
-			if line.get_node_or_null("World/pipe_%d,%d" % [tile.x, tile.y]) == null:
+			if line._tile_instance_at(tile).is_empty():
 				_fail("the pipe at %s was not rendered" % str(tile))
 				return
 			if line._pipe_asset_for(tile) != line.PIPE_ASSET:
