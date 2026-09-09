@@ -69,9 +69,17 @@
 # the hotbar cover the top-right and the bottom of the frame — which is where
 # a junction lands about half the time.
 #
-# Pass --contents N alongside --ghost hopper to press Q N times first, so the
-# hopper ghost is photographed holding the SECOND raw ingredient rather than
-# the first. That is the only way to see the contents key doing anything.
+# Pass --config TX,TY to click the hopper or tank on that tile after the
+# fixture is built, so the frame shows its configuration panel (the
+# hopper/tank click-to-configure ticket). With an empty larder FILL is
+# photographed blocked, with its reason; add --stock to see it enabled.
+# --contents N on top presses the open panel's picker slot N, so a placed
+# hopper is photographed retargeted to another raw ingredient, e.g.
+#
+#   scripts/screenshot-scene.sh out.png --build --config=-1,0 --contents 1
+#
+# (the demo line's hopper stands at (-1, 0); note the `=` form, since a
+# value starting with `-` would otherwise be read as another flag).
 #
 # Pass --closeup TX,TY[,SIZE] to aim the isometric camera at one simulation
 # tile and zoom right in (SIZE is the orthographic width in world units;
@@ -82,7 +90,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--contracts] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--no-hud] [--stock] [--hotbar N] [--contents N] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--contracts] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--no-hud] [--stock] [--hotbar N] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

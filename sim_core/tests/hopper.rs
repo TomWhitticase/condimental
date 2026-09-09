@@ -28,14 +28,14 @@
 //!    verbatim, pinned the way `fluids.rs` and `machine_footprints.rs` pin
 //!    theirs — a rename here fails a test instead of silently breaking the
 //!    scene.
-//! 5. **Retargeting an already-placed hopper.** `Place`'s own "you must name
-//!    the contents with more than one raw item" rule (point 1) leaves a real
-//!    gap once the hopper is down: nothing before `PlayerCommand::
-//!    CycleHopperItem` let a player change a placed hopper's mind short of
-//!    removing and re-placing it. This proves cycling actually advances
-//!    through every raw item in order, wraps around, clears whatever the
-//!    hopper held, and is a no-op on an empty tile, a non-hopper tile, or a
-//!    world with only one raw item to begin with.
+//!
+//! **Retargeting an already-placed hopper** used to be point 5 here, against
+//! a `CycleHopperItem` command that no longer exists — it was deleted with
+//! the **Q** keybind that was its only caller (the click-to-configure
+//! ticket). Its replacement, `SetHopperItem`, is covered in `auto_fill.rs`
+//! alongside the two toggles the same panel issues: switching clears the
+//! bin, a non-raw item is refused, and naming the item it already holds
+//! keeps the contents.
 //!
 //! Mass conservation across the whole chain *through* the hoppers is covered
 //! in `core_loop.rs`, which counts hopper contents as mass in the system.
@@ -637,140 +637,5 @@ fn the_place_command_carries_an_optional_item_on_the_wire() {
             assert!(item.is_none());
         }
         other => panic!("expected a place command, got {other:?}"),
-    }
-}
-
-// ---------------------------------------------------------------------
-// 5. Retargeting an already-placed hopper.
-// ---------------------------------------------------------------------
-
-/// The whole point: a hopper placed as one raw item can become another
-/// without removing and re-placing it, and its old contents do not survive
-/// the switch — a hopper is single-item, so there is no "half tomato, half
-/// sugar" state to preserve.
-#[test]
-fn cycling_switches_the_item_and_clears_whatever_it_held() {
-    let mut world = world();
-    buy(&mut world, "tomato", 20);
-
-    let before = tomato_hopper(&world);
-    world.issue_command(PlayerCommand::FillHopper {
-        amount: 10,
-        tile: Some(before.tile),
-    });
-    assert!(
-        hopper_for(&world, "tomato").quantity > 0,
-        "the fixture must actually have filled the hopper before cycling it away"
-    );
-
-    world.issue_command(PlayerCommand::CycleHopperItem { tile: before.tile });
-
-    let after = world
-        .hopper_snapshots()
-        .into_iter()
-        .find(|h| h.tile == before.tile)
-        .expect("the hopper is still there — cycling changes its item, not its existence");
-    assert_ne!(after.item, "tomato", "cycling must have changed the item");
-    assert_eq!(
-        after.quantity, 0,
-        "the old contents must not survive a switch to a different item"
-    );
-}
-
-/// Cycling through every raw item returns to where it started — a hopper
-/// with N raw items to choose from has exactly N states, arranged in a ring.
-#[test]
-fn cycling_all_the_way_around_returns_to_the_original_item() {
-    let mut world = world();
-    let raw_items = world.raw_items().to_vec();
-    assert!(
-        raw_items.len() >= 2,
-        "this test needs at least two raw items to prove a cycle, not just a no-op"
-    );
-
-    let tile = tomato_hopper(&world).tile;
-    let original = hopper_for(&world, "tomato").item.clone();
-    for _ in 0..raw_items.len() {
-        world.issue_command(PlayerCommand::CycleHopperItem { tile });
-    }
-    let final_item = world
-        .hopper_snapshots()
-        .into_iter()
-        .find(|h| h.tile == tile)
-        .unwrap()
-        .item;
-    assert_eq!(
-        final_item, original,
-        "cycling through every raw item exactly once must return to the start"
-    );
-}
-
-/// No hopper, no cycle — the same silent-no-op convention every other
-/// impossible command in this codebase already follows.
-#[test]
-fn cycling_an_empty_or_non_hopper_tile_is_a_no_op() {
-    let mut world = world();
-    let empty_tile = (500, 500);
-    world.issue_command(PlayerCommand::CycleHopperItem { tile: empty_tile });
-    assert!(
-        world
-            .hopper_snapshots()
-            .iter()
-            .all(|h| h.tile != empty_tile),
-        "cycling an empty tile must not create a hopper out of nothing"
-    );
-
-    // A machine tile (not a hopper) must refuse just as quietly — reuse the
-    // crusher's own tile, which the reference chain always places.
-    let crusher_tile = world
-        .all_chunks()
-        .into_iter()
-        .flat_map(|chunk| world.chunk_snapshot(chunk).machines)
-        .find(|m| m.kind == "crusher")
-        .expect("the reference chain places a crusher")
-        .tile;
-    let before = hopper_for(&world, "tomato").item.clone();
-    world.issue_command(PlayerCommand::CycleHopperItem { tile: crusher_tile });
-    assert_eq!(
-        hopper_for(&world, "tomato").item,
-        before,
-        "cycling a machine tile must not touch any hopper"
-    );
-}
-
-/// A world with only one raw item has nothing to cycle *to* — cycling must
-/// leave it exactly as it was rather than "advancing" to itself and quietly
-/// discarding its contents, which would be a real, player-visible loss for
-/// zero benefit.
-#[test]
-fn cycling_with_only_one_raw_item_is_a_no_op_that_keeps_contents() {
-    let mut world = reference_chain(recipes());
-    if world.raw_items().len() != 1 {
-        // This fixture only exercises the single-raw-item case; the
-        // multi-item cases above already cover today's shipped content.
-        return;
-    }
-    let hopper = world.hopper_snapshots().into_iter().next().unwrap();
-    world.issue_command(PlayerCommand::FillHopper {
-        amount: 5,
-        tile: Some(hopper.tile),
-    });
-    let before = world.hopper_snapshots().into_iter().next().unwrap();
-    world.issue_command(PlayerCommand::CycleHopperItem { tile: before.tile });
-    let after = world.hopper_snapshots().into_iter().next().unwrap();
-    assert_eq!(after.item, before.item);
-    assert_eq!(
-        after.quantity, before.quantity,
-        "a no-op cycle must not clear contents"
-    );
-}
-
-#[test]
-fn the_cycle_hopper_item_command_parses_from_json() {
-    let parsed =
-        command_from_json(r#"{"type": "cycle_hopper_item", "tile": [-1, 0]}"#).expect("must parse");
-    match parsed {
-        PlayerCommand::CycleHopperItem { tile } => assert_eq!(tile, (-1, 0)),
-        other => panic!("expected a cycle_hopper_item command, got {other:?}"),
     }
 }

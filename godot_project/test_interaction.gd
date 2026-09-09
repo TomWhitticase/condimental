@@ -3,6 +3,16 @@
 # not just that the underlying issue_command_json API works (test_core_loop.gd
 # already covers that), but that Main._unhandled_input's key handling does.
 #
+# It is also this project's standing list of REMOVED controls. Three keys have
+# been deleted over three tickets and every one of them had to be checked two
+# ways — the legend no longer advertises it, and the key genuinely does
+# nothing — because `issue_command_json` silently drops a command it does not
+# recognise, so a key left behind advertises a control the simulation does not
+# have. **C** went with the delivery dock; **SPACE**, **V** and **Q** went
+# with the click-to-configure panel, which is where loading and retargeting a
+# bin live now (see test_config_panel.gd). SPACE still means "up" in
+# first-person, which is why it is pressed here in ISOMETRIC.
+#
 # Run with:
 #   godot --headless --path godot_project --script test_interaction.gd
 extends SceneTree
@@ -25,6 +35,13 @@ func _hopper_quantity(sim) -> int:
 	return int(hoppers[0]["quantity"])
 
 
+func _hopper_item(sim) -> String:
+	var hoppers = JSON.parse_string(sim.hopper_snapshots_json())
+	if not (hoppers is Array) or hoppers.is_empty():
+		return ""
+	return String(hoppers[0]["item"])
+
+
 func _initialize() -> void:
 	var main = load("res://main.tscn").instantiate()
 	root.add_child(main)
@@ -32,37 +49,44 @@ func _initialize() -> void:
 	# this headless script-mode SceneTree never runs — call it directly.
 	main._ready()
 
-	# Nothing exists until the player builds it. SPACE loading "the hopper"
-	# is only meaningful once there IS one, which is itself the change this
-	# epic made.
+	# Nothing exists until the player builds it, and a hopper is what the
+	# three deleted keys used to act on — so one is built, and stocked, so
+	# that a key which still worked would have something to move and would
+	# show up as a changed level rather than as a silent pass.
 	Layouts.build_minimal(main.sim)
-	# Nothing enters the factory that was not paid for since the chain rework:
-	# SPACE loads a hopper FROM STOCK, so an unstocked world answers the
-	# keypress by doing nothing at all.
 	Layouts.stock_larder(main.sim)
 	main._rebuild_world()
 
-	# Since the "Machines improvement" ticket 3, SPACE loads the chain's
-	# hopper rather than teleporting an item onto the belt — the hopper is
-	# what puts tomatoes on the belt, one per tick. So the observable effect
-	# of the keypress is the hopper's fill level rising.
+	# --- SPACE, V AND Q ARE GONE (the click-to-configure ticket) -----------
+	# SPACE filled every hopper in the world, V every tank, and Q cycled the
+	# contents of the hopper under the cursor. All three are per-building
+	# decisions, and all three are made in the configuration panel now, so
+	# the keys were deleted rather than left as a second way to do one thing.
+	# With stock bought and a hopper placed, a surviving SPACE would fill it.
 	var before := _hopper_quantity(main.sim)
-
-	var key_event := InputEventKey.new()
-	key_event.keycode = KEY_SPACE
-	key_event.pressed = true
-	main._unhandled_input(key_event)
-
+	var hopper_item_before := _hopper_item(main.sim)
+	for removed in [KEY_SPACE, KEY_V, KEY_Q]:
+		_press(main, removed)
 	var after := _hopper_quantity(main.sim)
-	if after <= before:
-		_fail("pressing SPACE via _unhandled_input did not load the hopper (before=%d after=%d)" % [before, after])
+	if after != before:
+		_fail("SPACE/V no longer fill anything, but the hopper moved %d -> %d" % [before, after])
 		return
+	if _hopper_item(main.sim) != hopper_item_before:
+		_fail("Q no longer cycles contents, but the hopper now holds '%s' (was '%s')" % [
+			_hopper_item(main.sim), hopper_item_before,
+		])
+		return
+	for legend in [main.ISO_HELP_TEXT, main.FP_HELP_TEXT]:
+		for fragment in ["SPACE: load", "V: load", "Q: "]:
+			if legend.contains(fragment):
+				_fail("the control legend still offers the removed '%s' control: %s" % [fragment, legend])
+				return
 
 	# C is GONE (the delivery-dock ticket). `PlayerCommand::CollectOutput` no
 	# longer exists sim-side, so the key was removed here rather than left to
 	# send a command `issue_command_json` would silently drop — a control that
-	# quietly does nothing is worse than no control. Both halves are checked:
-	# the legend no longer advertises it, and the key genuinely does nothing.
+	# quietly does nothing is worse than no control. Both halves are checked,
+	# exactly as they are for SPACE/V/Q above.
 	for legend in [main.ISO_HELP_TEXT, main.FP_HELP_TEXT]:
 		if legend.to_lower().contains("collect"):
 			_fail("the control legend still offers the removed collect-product control: %s" % legend)
@@ -175,7 +199,10 @@ func _initialize() -> void:
 			_fail("the control legend still advertises the removed B binding: %s" % legend)
 			return
 
-	print("INTERACTION_OK: simulated SPACE keypress reached SimBridge and loaded the hopper (%d -> %d), C is gone from both the legend and the key handler, X/ESC/R drive build mode, E (not B) opens the build menu, and one ESC closes the menu and either mode from any combination" % [before, after])
+	# One key that still DOES reach the simulation, so this file keeps proving
+	# what it was written for: E through `_unhandled_input` opens the menu
+	# built from `shop_snapshot_json`, and the rotate above moved a real tile.
+	print("INTERACTION_OK: C, SPACE, V and Q are all gone from both the legend and the key handler (a stocked hopper stayed at %d units and kept its contents), X/ESC/R drive build mode and rotate a real tile through SimBridge, E (not B) opens the build menu, and one ESC closes the menu and either mode from any combination" % after)
 	quit(0)
 
 
