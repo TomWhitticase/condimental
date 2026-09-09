@@ -108,9 +108,9 @@ use serde::{Deserialize, Serialize};
 
 use super::belt::BeltSegment;
 use super::contracts::ContractRegistry;
-use super::dock::Dock;
-use super::fluid::FluidTank;
-use super::hopper::Hopper;
+use super::dock::{DOCK_KIND, Dock};
+use super::fluid::{FLUID_TANK_KIND, FluidTank};
+use super::hopper::{HOPPER_KIND, Hopper};
 use super::inventory::Inventory;
 use super::machine::{Machine, TimedProcess};
 use super::machines::MachineRegistry;
@@ -118,9 +118,6 @@ use super::recipe::RecipeRegistry;
 use super::splitter::{SPLITTER_KIND, Side, Splitter};
 use super::types::{Direction, Fx, ItemId, TileCoord};
 use super::world::{BELT_KIND, PIPE_KIND, PlayerCommand, World};
-use super::dock::DOCK_KIND;
-use super::fluid::FLUID_TANK_KIND;
-use super::hopper::HOPPER_KIND;
 
 /// The save format's version. Bumped whenever the shape below changes;
 /// a file naming any other version is rejected, never migrated — see the
@@ -672,7 +669,7 @@ impl World {
         validate(&world, &data)?;
         rebuild_structure(&mut world, &data)?;
         restore_bodies(&mut world, &data)?;
-        restore_ledgers(&mut world, &data)?;
+        restore_ledgers(&mut world, &data);
 
         world.restore_tick_count(data.tick_count);
         world.restore_money(data.money_bits.value());
@@ -1027,7 +1024,7 @@ fn check_capacity(
 /// buys exactly one of each thing it places and spends it immediately, so
 /// the ledger is empty again by the time this runs and the saved counts are
 /// the player's genuine unplaced inventory.
-fn restore_ledgers(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
+fn restore_ledgers(world: &mut World, data: &SaveData) {
     debug_assert_eq!(
         world.shop().owned.iter().count(),
         0,
@@ -1054,7 +1051,6 @@ fn restore_ledgers(world: &mut World, data: &SaveData) -> Result<(), SaveError> 
         active.deliveries_made = saved.deliveries_made;
         active.deliveries_missed = saved.deliveries_missed;
     }
-    Ok(())
 }
 
 #[cfg(test)]
