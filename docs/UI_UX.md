@@ -386,7 +386,9 @@ were only discoverable by building it:
 
 ## 5. UI style
 
-> **Status: §5 is built.** The contract readout is a real diegetic clipboard
+> **Status: §5 is built.** The two screens *around* the game — the main menu
+> and the pause menu — are §5c below.
+> The contract readout is a real diegetic clipboard
 > (paper panel, steel clip bar, checkbox tick marks, voxel-rendered item
 > icons), machine/pipe detail is hover-only rather than dense always-on text,
 > the build menu is a grid of voxel-rendered icon slots that also *places*
@@ -558,6 +560,49 @@ which is the exact failure the menu's positioning was written to prevent.
 scrolling is what a smaller window gets.
 
 ---
+
+### 5c. The screens around the game: the main menu and the pause menu
+
+The last two screens this game was missing, added with save/load. Both are
+built out of §5's existing ingredients — the near-opaque dark plate, the
+hazard-yellow rule, the outlined sturdy text — rather than as a new visual
+language, and that is the point: **the main menu is the first thing a player
+sees, and a menu drawn in a stock engine theme would be the one screen in
+the game that does not look like the game.**
+
+**The main menu** is a single centred plate: title, a one-line subtitle, and
+three buttons — New Game, Load Game, Quit — over a flat industrial backdrop
+with one wide hazard band across it (edged with the same accent hairline the
+plates use, or it reads as a rendering seam rather than as paint on a
+floor). Load Game **replaces** the three buttons with the save list rather
+than opening beside them, because this is one panel and a modal list over a
+modal menu is two things to close.
+
+A save's row says two things: its slot name, and when it was last written.
+The time comes from the file's own mtime, which is honest and free; the
+save's tick count is deliberately *not* read, since drawing the list would
+then mean parsing every file in the directory, and a tick number is a worse
+answer to "which save is this" than a date is. The autosave is listed like
+any other save and **labelled** as the autosave — falling back on it is
+legitimate, being surprised by which file the game overwrites by itself is
+not. With nothing saved, the list says so in a sentence rather than showing
+an empty box.
+
+**The pause menu** is the same plate one step more opaque, centred in the
+whole viewport rather than in the space above the hotbar (unlike the build
+menu and the market): the game is stopped, so nothing underneath it is worth
+keeping clear. It says so in a line of text — *"the factory is stopped while
+this is open"* — because a stopped simulation is otherwise something the
+player has to infer from belts not moving, which is exactly the
+never-encode-state-invisibly problem §7 is about.
+
+Two conventions carried in from §5a. **Quit to Menu asks first** and Save &
+Quit does not, because the confirm step is for the one action that throws
+work away, not for every action that ends the session. And the save field is
+a **name**, not a numbered slot: this game has no save-profile concept and no
+screen that would show three empty boxes usefully, the list is sorted by time
+anyway, and the field prefills with whatever this session was loaded from so
+the common case is one click.
 
 ## 6. Feedback, motion & animation
 

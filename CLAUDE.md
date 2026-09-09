@@ -238,7 +238,20 @@ sauce-factory/
     Cargo.toml              # copies the compiled extension into godot_project/bin/, and stages
     src/main.rs               # assets/voxels/models/ into godot_project/voxels/ (both gitignored)
   godot_project/             # Godot 4 project (presentation layer)
-    project.godot              # run/main_scene = main.tscn
+    project.godot              # run/main_scene = menu.tscn, and the [autoload]
+                                 # registering GameSession (below)
+    menu.tscn / menu.gd          # the MAIN MENU — the first screen: New Game,
+                                   # Load Game (a list read from user://saves/,
+                                   # newest first, each save PROVED to load
+                                   # before the scene changes), Quit. Drawn in
+                                   # the game's own plate styling (UI_UX.md §5c)
+    game_session.gd              # the autoload that outlives a scene change:
+                                   # the pending new_game/load action menu.gd
+                                   # arms and main.gd reads, PLUS every rule
+                                   # about save files (directory, listing, slot
+                                   # sanitizer, the reserved `autosave` slot).
+                                   # sim_core does no file I/O on purpose, so
+                                   # this is the whole of it
     sim_core.gdextension       # checked in; points at godot_project/bin/, which is gitignored (build output)
     main.tscn / main.gd          # interactive 3D scene, rebuilt in code from
                                    # world_layout_json (re-read after every place/remove/
@@ -289,6 +302,22 @@ sauce-factory/
                                        # earlier moment coming back exactly, a refused load
                                        # saying WHY and leaving the world untouched, a loaded
                                        # world reporting every chunk dirty, and new_game()
+    test_main_menu.gd                # headless proof of the main menu: the three
+                                       # buttons, a real save appearing in the list
+                                       # with its slot and mtime, a chosen save
+                                       # coming back as the same factory through
+                                       # the GameSession handoff, and a CORRUPT one
+                                       # refused on the menu with load_ron's own
+                                       # reason and nothing moved
+    test_pause_menu.gd               # headless proof of the pause menu: ESC closing
+                                       # what is open FIRST and opening the menu when
+                                       # nothing is, the simulation genuinely stopping
+                                       # (accumulator included) and resuming without a
+                                       # jump, Save writing save_ron() to a sanitized
+                                       # slot, the reserved autosave name refused, the
+                                       # three-minute timer firing without waiting
+                                       # three minutes, and quit-to-menu/window-close
+                                       # autosaving
     test_layouts.gd                  # shared fixture: factories built through real purchase/
                                        # place commands. Most are small BY CHOICE (a nine-tile
                                        # line proves a wire format as well as a forty-tile
@@ -505,6 +534,118 @@ it's gone stale.
   the save ticket's own forward-compatibility note reserved: one
   `#[serde(default)] auto_fill: bool` on each of `SavedHopper` and
   `SavedTank`, and nothing has shipped with a save file yet.
+
+- 2026-09-09: **Save/load, ticket 2 of 2 (the Godot half; `sim_core/`,
+  `data/` and `assets/voxels/` deliberately untouched — every capability
+  drawn on here was already on the boundary after ticket 1) — the game opens
+  on a MAIN MENU, and there is a way back out of it.** Ticket 1 could write
+  a world to text and put it back; nothing could reach either, because
+  `project.godot` booted straight into `main.tscn` and the only way out of a
+  session was the window's close button. Eight calls worth not
+  re-litigating.
+
+  (1) **An AUTOLOAD carries the choice between the two scenes, and what it
+  is pending is STICKY rather than consumed.** `change_scene_to_file` frees
+  the old scene before the new one's `_ready` runs, so there is nowhere in
+  either scene to hand "the player picked Load Game, from this file" across;
+  `game_session.gd` (registered as `GameSession`) lives outside both, which
+  is Godot's own answer to exactly this. Reading `pending_action` does not
+  clear it, for a reason that is not academic: **every headless test in this
+  project calls `_ready()` a second time by hand** (`add_child` fires it
+  once, the test fires it again), and a consumed action would silently
+  revert a loaded world to a new game on the second pass. Every transition
+  into `main.tscn` arms the action first, so nothing is ambiguous, and the
+  default is `new_game` — which is what makes the eighteen tests that
+  instantiate `main.tscn` directly and never touch the singleton behave
+  exactly as they did before this ticket.
+
+  (2) **Everything about save FILES lives in that same file, not split
+  between the two screens.** `sim_core` produces and consumes the RON text
+  and nothing else (ticket 1's call 7), so the directory, the listing, the
+  sanitizer and the reserved-name rule are Godot's — and they are one set of
+  static functions both scenes call, because the screen that writes a save
+  and the screen that loads one must not be able to disagree about where a
+  save lives or what it may be called. Saves are
+  `user://saves/<sanitized-slot>.ron`, and `main.gd` prints
+  `ProjectSettings.globalize_path` of that directory once per launch, since
+  a developer looking for the files should not have to know Godot's
+  per-platform `user://` layout.
+
+  (3) **A save is proved to LOAD before the scene changes.** Selecting a
+  slot reads the file and runs it through a throwaway `SimBridge.load_ron`
+  — which builds a whole new world and only swaps it in once every step
+  succeeded, so the probe costs a load and answers the question — and
+  `load_ron`'s own message is shown verbatim beside the list on failure.
+  Discovering a bad file inside `main.tscn` instead would put the message on
+  a screen with no list, no Back button and the previous world already gone,
+  which is precisely the "silently starts a fresh world" failure this ticket
+  was told not to have. `main.gd` still checks the load again defensively
+  (the file can be deleted between the two moments) and prints rather than
+  failing silently, but the normal case is answered where the player can act
+  on it.
+
+  (4) **ESC gained a second meaning rather than the pause menu gaining a
+  key.** ESC already closed whatever was open; it now opens the pause menu
+  when nothing is. That reads as one escalating rule — ESC backs out of the
+  thing you are in, and when you are in nothing it backs out of the game —
+  it is Minecraft's convention, and it cost no new letter on a legend that
+  already runs the width of the window. **Build mode counts as "open"**
+  (`_anything_open`), so putting a ghost down is the first press and the
+  menu is the second: a ghost following the cursor is a state the player is
+  in.
+
+  (5) **The simulation genuinely stops, and the stop is on the ACCUMULATOR
+  as well as the tick loop.** `MAX_TICKS_PER_FRAME` caps how far one frame
+  can catch up, but an accumulator that kept filling through a five-minute
+  pause would still be paid back over the frames after it — so `_tick_accum`
+  is cleared while the panel is up and again on the way out, and the
+  autosave clock does not run either. The tick loop moved out of `_process`
+  into `_advance_simulation` for one honest reason: `_process` needs a
+  viewport for everything else it does, and a headless test asserting "ten
+  seconds of paused time is zero ticks, and the next frame is exactly one"
+  needs the half that does not.
+
+  (6) **Autosave owns one slot and only that slot, in both directions.**
+  `autosave.ron` on a three-minute real-time timer (Factorio's own order of
+  magnitude — long enough never to be noticed, short enough that a crash
+  costs minutes rather than an evening) and on quit-to-menu, quit-game and
+  the window's close button. A manual save is **refused** the name
+  `autosave`, out loud, rather than quietly renamed: a save that went
+  somewhere other than where it was asked to go is worse than one that did
+  not happen, and the thing being protected is that a timer must never be
+  able to overwrite a save the player deliberately made. It is listed like
+  any other save and labelled as the autosave, because falling back on it
+  is legitimate and being surprised by it is not. Real seconds, not ticks,
+  because what it protects against is the process going away and the process
+  goes away in real time.
+
+  (7) **`auto_accept_quit` is turned OFF, deliberately, and that is the
+  riskiest line in the ticket.** Godot's default close handling quits
+  immediately, which would take the last few minutes of building with it, so
+  `main.gd` intercepts `NOTIFICATION_WM_CLOSE_REQUEST`, autosaves and quits
+  itself. The failure mode of getting that wrong is an unclosable window, so
+  it is verified two ways rather than reasoned about: a headless assertion
+  that the notification writes the autosave, and a real windowed run that
+  propagates the notification the way the OS does and confirms the process
+  shuts down.
+
+  (8) **A typed save name is player text and a file name is not, so the
+  sanitizer is a WHITELIST.** Letters, digits, space, `-` and `_` survive
+  and everything else becomes `_`; `../../etc/passwd` becomes
+  `.._.._etc_passwd`, which is a file name in the saves directory and
+  nothing else. A blacklist has to be right about every bad sequence; this
+  has to be right about the good ones, of which there are five. A name with
+  nothing usable left is a refusal rather than an invented name. **Two
+  things came off a rendered frame and not off the code** (UI_UX.md §2b
+  point 12, again): the whole menu was drawn in the BOTTOM-RIGHT CORNER,
+  because `PRESET_CENTER` is computed from a control's minimum size at the
+  moment it is applied and the labels inside it had no text yet — it is a
+  `CenterContainer` now, which re-centres whenever its child resizes; and
+  the backdrop's hazard band had no edge treatment, so it read as a
+  rendering seam rather than as paint on a floor. **Flagged, not fixed:**
+  the save list has no delete and no overwrite confirmation — saving over an
+  existing slot just does it, which is what a name field implies but is
+  worth a confirm step the day slots get long-lived.
 
 - 2026-09-09: **Save/load, ticket 1 of 2 (the sim + `SimBridge` half;
   `godot_project/main.gd`, `main.tscn`, `assets/voxels/` and `data/`

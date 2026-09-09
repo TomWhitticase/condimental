@@ -77,6 +77,45 @@ thing is pinned by a new `sim_core/tests/auto_fill.rs` plus a save round-trip
 that keeps topping up after the load. The panel that fronts all of this is
 the following ticket.
 
+### 2026-09-09 — The game opens on a menu, and there is a way out of it
+
+The other half of save/load. Until this the project booted straight into a
+factory and the only way out of a session was the window's close button —
+so the save format that landed the same day had nothing to reach it.
+
+There is a **main menu** now (`menu.tscn`, and it is what `project.godot`
+opens on): New Game, Load Game, Quit, drawn in the game's own dark-plate and
+hazard-yellow language rather than in a stock engine theme, because it is the
+screen that sets the expectation for everything after it. Load Game lists
+what is actually in `user://saves/`, newest first, each row naming its slot
+and when it was written. Choosing one **proves it loads before the scene
+changes** — the file goes through a throwaway `SimBridge` first — so a
+corrupt or older-build save is refused on the one screen still able to show
+`load_ron`'s own reason, with the list still up, rather than after the
+previous world has already been thrown away.
+
+In the game, **ESC now opens a pause menu when nothing else is open**, which
+is one escalating rule rather than a new key: ESC backs out of the thing you
+are in, and when you are in nothing, it backs out of the game. It carries
+Resume, Save into a named slot, Save & Quit to Menu, Quit to Menu (which
+asks first, since it is the one button that throws work away) and Quit Game
+— and the factory genuinely stops while it is up, including the tick
+accumulator, so reading the panel for five minutes costs nothing and gains
+nothing on resume.
+
+**Autosave** writes `user://saves/autosave.ron` every three minutes and on
+every way out, including the window's close button. It owns that slot in
+both directions: a timer can never overwrite a save the player made, and a
+manual save is refused the name `autosave` out loud rather than quietly
+renamed.
+
+Two new headless scripts (`test_main_menu.gd`, `test_pause_menu.gd`) cover
+all of it — including a genuinely corrupt file and the three-minute timer,
+neither of which needs three minutes to test — and the real windowed scene
+chain (boot → menu → New Game / a chosen save → gameplay → ESC) was driven
+end to end with a framebuffer, because `change_scene_to_file` is the one
+thing a headless test cannot exercise.
+
 ### 2026-09-09 — A factory can be saved, and comes back still running
 
 Until this ticket nothing a player did survived closing the window: the
