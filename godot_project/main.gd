@@ -626,13 +626,35 @@ var _checkbox_style_unchecked: StyleBoxFlat
 var _checkbox_style_checked: StyleBoxFlat
 var _contract_card_style: StyleBoxFlat
 const CONTRACT_CHECKLIST_MAX_BOXES := 12 # beyond this, fall back to one box representing "complete"
-## How much of the window height the docket stack may occupy before it
-## scrolls instead of growing (see _update_contract_panel). `data/contracts.ron`
-## ships three contracts and a realistic board is a handful, so this is a
-## safety valve for a content change, not a UI the player is expected to
-## drive — it is cheaper than a compact/summary mode and never silently hides
-## an obligation off the bottom of the screen.
-const CONTRACT_LIST_MAX_HEIGHT_RATIO := 0.62
+
+# --- UI scale (the 2026-09-09 tuning pass) ---------------------------------
+## **Every pixel dimension in this HUD is measured in these two numbers.**
+##
+## The project owner's report was that the UI is "much" too small and
+## "difficult to read", which it was: the body font had been 15px since
+## milestone 5's plain money label, and every panel, slot, icon and margin
+## since had been sized against it by eye. So the fix is a real jump — half
+## as big again — rather than a token bump, and it is expressed as ONE knob
+## so the next adjustment is one number rather than another audit.
+##
+## MECHANISM: explicit constants, NOT Godot's `content_scale_factor`. The
+## engine's own stretch/scale knob is one line and scales every CanvasItem
+## uniformly, Minecraft-GUI-scale style — but this scene maps 3D to screen
+## coordinates in half a dozen places (the hover tooltip at the mouse, the
+## ghost prompt anchored through `unproject_position`, the hotbar tooltip
+## over its slot, right-drag pan deltas), and every one of them would then
+## need the factor divided back out. Scaling the numbers keeps input and
+## rendering in the same coordinate space, matches how this file is already
+## written (a base font size plus offsets), and is what the headless tests
+## that assert pixel sizes can actually check.
+##
+## `UI_SCALE` multiplies chrome — paddings, borders, separations, icon
+## squares, slot sizes, margins. `UI_FONT_BASE` is the body size the `±N`
+## font offsets scattered through this file were authored against, so
+## `_ui_font(N)` reproduces the type hierarchy that was designed at 15px at
+## whatever scale is in force.
+const UI_SCALE := 1.5
+const UI_FONT_BASE := 15
 
 # --- Voxel-rendered UI icons (UI_UX.md §5) ---------------------------------
 var _icon_cache: Dictionary = {} # asset name -> Texture2D, see _icon_for
@@ -649,20 +671,36 @@ var _shop_money_label: Label
 ## `data/shop.ron`'s file order, i.e. the intended menu order):
 ## {kind, button, icon, price_label, owned_label}.
 var _shop_slots: Array = []
+## The grid and the ScrollContainer around it, kept so `_position_shop_menu`
+## can fit the one inside the other — see `_fit_grid_scroll`.
+var _shop_grid: GridContainer
+var _shop_grid_scroll: ScrollContainer
 var _shop_open := false
-## How many icon slots fit across before wrapping. FOUR — it was three when
-## the catalog was nine kinds and read as a tidy 3x3 block; at eleven kinds
-## and a slot tall enough for a wrapped owned line, three columns made a menu
-## taller than the space above the hotbar and pushed its own footer off the
-## bottom of the screen. Four columns is 4/4/3, which is both shorter and no
-## more ragged than 3/3/3/2 was.
-const SHOP_SLOT_COLUMNS := 4
-## Tall enough for the owned line to WRAP onto a second row. It used to be
-## 152 and the affordance ("right-click to hold") ran straight out of the
-## square and over the neighbouring slot — visible only in a rendered frame,
-## which is the same lesson UI_UX.md §2b point 12 records.
-const SHOP_SLOT_SIZE := Vector2(150, 176)
-const SHOP_ICON_SIZE := Vector2(52, 52)
+## How many icon slots fit across before wrapping. **SIX**, and the number
+## has been chased by the same constraint every time: the menu has to fit in
+## the space above the hotbar. It was three when the catalog was nine kinds
+## and read as a tidy 3x3 block, then four when eleven kinds made three
+## columns too tall. At the 2026-09-09 UI scale a twelve-kind catalog in four
+## columns is three rows of half-again-bigger cards, which overran a
+## 1280x720 window by a clear 300px — so it is six columns of two rows now,
+## with each card correspondingly narrower.
+const SHOP_SLOT_COLUMNS := 6
+## One catalog card. Narrower and shorter than the pre-scale 150x176 in
+## DESIGN pixels, and still visibly bigger on screen: six columns have to fit
+## a 1280-wide window's inner width, and two rows have to fit above the
+## hotbar. What made the shorter card possible is the owned line no longer
+## wrapping — see `_update_shop_menu`.
+const SHOP_SLOT_SIZE := Vector2(128, 130) * UI_SCALE
+const SHOP_ICON_SIZE := Vector2(46, 46) * UI_SCALE
+## The ingredient market's crate, which is the same card **one line taller**.
+## The two panels are deliberately built the same way (see
+## `_build_ingredient_market`), and this is the one place they differ: a
+## market crate carries a stock line that names both a count and a unit price
+## ("In stock 64 · 1 each"), which does not fit a build card's width on one
+## line and must not be truncated — where a build card's "Owned 0" always
+## does. The market can afford the extra height because it is one row of
+## three, not two rows of six.
+const MARKET_SLOT_SIZE := Vector2(128, 152) * UI_SCALE
 ## How many catalog entries get a number key at all. Ten — 1..9 then 0, the
 ## row a Minecraft or Terraria hotbar occupies. A catalog longer than this
 ## simply leaves its tail click-only rather than inventing a second key
@@ -717,9 +755,19 @@ var _hotbar_slots: Array = []
 ## fresh StyleBoxFlat per slot per frame would be 30-odd allocations a frame
 ## for a strip that changes appearance a handful of times a minute.
 var _hotbar_styles: Dictionary = {}
-const HOTBAR_SLOT_SIZE := Vector2(64.0, 64.0)
-const HOTBAR_ICON_INSET := 13.0 # px of slot edge the icon does not use
-const HOTBAR_BOTTOM_MARGIN := 14
+## How much of `UI_SCALE` a hotbar socket actually takes. Every other piece
+## of chrome takes all of it; this one cannot, and the reason is arithmetic
+## rather than taste: twelve sockets plus their separations plus the plate's
+## own margins have to fit inside `project.godot`'s 1280-wide window, which
+## caps a socket at about 96px, and a strip filling the window edge to edge
+## has no room for the thirteenth catalog entry. 0.88 of the scale is 84px —
+## a third bigger than the 64 it was, comfortably inside the window, and it
+## leaves the same headroom the `SHOP_HOTKEY_SLOTS` note already flags as a
+## thing a longer catalog will eventually have to solve properly.
+const HOTBAR_STRIP_FIT := 0.88
+const HOTBAR_SLOT_SIZE := Vector2(64.0, 64.0) * UI_SCALE * HOTBAR_STRIP_FIT
+const HOTBAR_ICON_INSET := 13.0 * UI_SCALE # px of slot edge the icon does not use
+const HOTBAR_BOTTOM_MARGIN := int(14 * UI_SCALE)
 ## The keycodes, in slot order: 1..9 then 0, which is the row every hotbar
 ## in this genre uses and the order the digits sit on a keyboard.
 const HOTBAR_KEYCODES := [KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_0]
@@ -1956,8 +2004,8 @@ const FP_MOUSE_SENSITIVITY := 0.0025 # radians per pixel of relative mouse motio
 const FP_PITCH_LIMIT := deg_to_rad(89.0) # stop just short of looking straight up/down
 const FP_FOV := 75.0
 const FP_NEAR := 0.05 # much closer than ISO_NEAR — this mode gets right up next to machines
-const CROSSHAIR_SIZE := 14.0 # px, each bar's length
-const CROSSHAIR_THICKNESS := 2.0 # px, each bar's width
+const CROSSHAIR_SIZE := 14.0 * UI_SCALE # px, each bar's length
+const CROSSHAIR_THICKNESS := 2.0 * UI_SCALE # px, each bar's width
 
 # The **C: collect product** hint these two used to carry is gone, with the
 # key that drove it: the delivery-dock ticket deleted
@@ -1982,8 +2030,14 @@ const CROSSHAIR_THICKNESS := 2.0 # px, each bar's width
 ## being clipped behind the contract clipboard in the top-right corner — the
 ## kind of thing only a rendered frame shows (UI_UX.md §2b point 12). The
 ## build controls lead, because they are what the player does most.
-const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate    Q: hopper contents    X: remove mode    ESC: close\nE: build menu    M: ingredient market    SPACE: load hoppers    V: load tanks    WASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
-const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate    Q: hopper contents    X: remove mode    ESC: close\nE: build menu    M: ingredient market    V: load tanks    WASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
+## FOUR lines, not two, and that is a consequence of the 2026-09-09 UI-scale
+## pass rather than of new controls: at half again the font size the old
+## two-line legend ran clean off a 1280-wide window and under the contract
+## clipboard. It is grouped by what each key is FOR — build-mode verbs, the
+## panels, the two loading keys, then the camera — which is a better reading
+## order than the flat run-on it was anyway.
+const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nQ: hopper contents    X: remove mode    ESC: close\nE: build menu    M: market    SPACE: load hoppers    V: load tanks\nWASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
+const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nQ: hopper contents    X: remove mode    ESC: close\nE: build menu    M: market    V: load tanks\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
 
 
 ## The tile box the isometric camera frames at startup: whatever is placed,
@@ -2386,6 +2440,34 @@ func _build_environment() -> void:
 # HUD
 # --------------------------------------------------------------------------
 
+## `n` design pixels at the current UI scale, as a float — for content
+## margins, offsets and sizes.
+func _ui_px(n: float) -> float:
+	return round(n * UI_SCALE)
+
+
+## [`_ui_px`] for the properties Godot types as `int`: border widths, theme
+## separation constants, text outline sizes.
+func _ui_i(n: float) -> int:
+	return int(round(n * UI_SCALE))
+
+
+## [`_ui_px`] applied to both axes of a `Vector2` — icon squares, fixed slot
+## sizes, a label's offset inside its button.
+func _ui_v(v: Vector2) -> Vector2:
+	return Vector2(_ui_px(v.x), _ui_px(v.y))
+
+
+## A font size `delta` steps off the body size, at the current UI scale.
+## Every `LabelSettings` in this file goes through here, so the type
+## hierarchy (money biggest, a docket's footnote smallest) is stated once as
+## a set of offsets from [`UI_FONT_BASE`] and re-derived at whatever scale is
+## in force. The floor is a guard against a future scale small enough to
+## round a footnote out of existence, not something today's numbers reach.
+func _ui_font(delta: int = 0) -> int:
+	return maxi(8, int(round(float(UI_FONT_BASE + delta) * UI_SCALE)))
+
+
 func _build_ui() -> void:
 	var hud := CanvasLayer.new()
 	hud.name = "HUD"
@@ -2398,22 +2480,22 @@ func _build_ui() -> void:
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.06, 0.06, 0.07, 0.74)
 	style.border_color = Color(0.85, 0.63, 0.11, 0.95)
-	style.border_width_top = 3
-	style.set_content_margin_all(12.0)
+	style.border_width_top = _ui_i(3)
+	style.set_content_margin_all(_ui_px(12.0))
 
 	var panel := PanelContainer.new()
 	panel.add_theme_stylebox_override("panel", style)
-	panel.position = Vector2(16, 16)
+	panel.position = _ui_v(Vector2(16, 16))
 	hud.add_child(panel)
 
 	var rows := VBoxContainer.new()
-	rows.add_theme_constant_override("separation", 4)
+	rows.add_theme_constant_override("separation", _ui_i(4))
 	panel.add_child(rows)
 
 	var settings := LabelSettings.new()
-	settings.font_size = 15
+	settings.font_size = _ui_font()
 	settings.font_color = Color(0.92, 0.93, 0.94)
-	settings.outline_size = 4
+	settings.outline_size = _ui_i(4)
 	settings.outline_color = Color(0, 0, 0, 0.85)
 
 	_help_label = Label.new()
@@ -2476,12 +2558,12 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	var paper_style := StyleBoxFlat.new()
 	paper_style.bg_color = Color(0.87, 0.81, 0.64, 0.98) # warm off-white paper
 	paper_style.border_color = Color(0.27, 0.29, 0.32, 1.0) # steel-grey frame/clip
-	paper_style.border_width_left = 3
-	paper_style.border_width_right = 3
-	paper_style.border_width_bottom = 3
-	paper_style.border_width_top = 12 # the clip bar
-	paper_style.set_content_margin_all(12.0)
-	paper_style.content_margin_top = 18.0 # clearance under the thicker clip bar
+	paper_style.border_width_left = _ui_i(3)
+	paper_style.border_width_right = _ui_i(3)
+	paper_style.border_width_bottom = _ui_i(3)
+	paper_style.border_width_top = _ui_i(12) # the clip bar
+	paper_style.set_content_margin_all(_ui_px(10.0))
+	paper_style.content_margin_top = _ui_px(15.0) # clearance under the thicker clip bar
 
 	_contract_panel = PanelContainer.new()
 	_contract_panel.name = "ContractPanel"
@@ -2489,7 +2571,7 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	hud.add_child(_contract_panel)
 
 	var body := VBoxContainer.new()
-	body.add_theme_constant_override("separation", 6)
+	body.add_theme_constant_override("separation", _ui_i(6))
 	_contract_panel.add_child(body)
 
 	# Dark ink on paper, not the pale-text-with-black-outline style the panel
@@ -2499,7 +2581,7 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	# _build_ui() (UI_UX.md §5's own "sturdy, slightly blocky" typography
 	# call), only colour/outline change for the paper background.
 	_contract_ink_settings = LabelSettings.new()
-	_contract_ink_settings.font_size = base_settings.font_size
+	_contract_ink_settings.font_size = _ui_font()
 	_contract_ink_settings.font_color = Color(0.16, 0.13, 0.08)
 	_contract_ink_settings.outline_size = 0
 
@@ -2513,17 +2595,17 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	# one more rung: a contract's NAME is the heading of its own docket, and
 	# its cadence/tally line is deliberately the smallest thing on the panel.
 	var title_settings := LabelSettings.new()
-	title_settings.font_size = base_settings.font_size + 2
+	title_settings.font_size = _ui_font(2)
 	title_settings.font_color = _contract_ink_settings.font_color
 	title_settings.outline_size = 0
 
 	var money_settings := LabelSettings.new()
-	money_settings.font_size = base_settings.font_size + 6
+	money_settings.font_size = _ui_font(6)
 	money_settings.font_color = _contract_ink_settings.font_color
 	money_settings.outline_size = 0
 
 	_contract_name_settings = LabelSettings.new()
-	_contract_name_settings.font_size = base_settings.font_size + 1
+	_contract_name_settings.font_size = _ui_font(1)
 	_contract_name_settings.font_color = _contract_ink_settings.font_color
 	_contract_name_settings.outline_size = 0
 
@@ -2534,34 +2616,45 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	# green is the panel's weakest contrast anywhere. Small and paper-pale
 	# fixes both.
 	_checkbox_mark_settings = LabelSettings.new()
-	_checkbox_mark_settings.font_size = max(8, base_settings.font_size - 4)
+	_checkbox_mark_settings.font_size = _ui_font(-4)
 	_checkbox_mark_settings.font_color = Color(0.91, 0.88, 0.78)
 	_checkbox_mark_settings.outline_size = 0
 
 	_contract_meta_settings = LabelSettings.new()
-	_contract_meta_settings.font_size = max(9, base_settings.font_size - 2)
+	_contract_meta_settings.font_size = _ui_font(-3)
 	# A touch lighter than body ink — still well clear of the paper, but the
 	# cadence/tally line should read as a footnote on the docket, not as
 	# another checklist item.
 	_contract_meta_settings.font_color = Color(0.34, 0.29, 0.20)
 	_contract_meta_settings.outline_size = 0
 
+	# Heading and balance share one row (the same tightening the build menu
+	# and the market got in the 2026-09-09 UI-scale pass, so all three panels
+	# read the same way). At half again the type size, two short strings on
+	# two lines was a whole docket's worth of the board's height.
+	var heading := HBoxContainer.new()
+	heading.add_theme_constant_override("separation", _ui_i(12))
+	body.add_child(heading)
+
 	var title := Label.new()
 	title.label_settings = title_settings
 	title.text = "CONTRACTS"
-	body.add_child(title)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	heading.add_child(title)
 
 	# Money is shown ONCE, here, and never per docket: GAMEPLAY.md §1 allows
 	# exactly one currency, and sim_core keeps exactly one counter for it.
 	_contract_money_label = Label.new()
 	_contract_money_label.label_settings = money_settings
-	body.add_child(_contract_money_label)
+	_contract_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	heading.add_child(_contract_money_label)
 
 	# The shared delivery pool, also once. See _update_contract_dock for why
 	# this line exists at all.
 	_contract_dock_row = HBoxContainer.new()
 	_contract_dock_row.name = "DockRow"
-	_contract_dock_row.add_theme_constant_override("separation", 6)
+	_contract_dock_row.add_theme_constant_override("separation", _ui_i(6))
 	body.add_child(_contract_dock_row)
 
 	var dock_title := Label.new()
@@ -2577,14 +2670,14 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_checkbox_style_unchecked = StyleBoxFlat.new()
 	_checkbox_style_unchecked.bg_color = Color(0.80, 0.74, 0.57, 1.0) # a shade darker than the paper
 	_checkbox_style_unchecked.border_color = Color(0.27, 0.29, 0.32, 1.0)
-	_checkbox_style_unchecked.set_border_width_all(2)
+	_checkbox_style_unchecked.set_border_width_all(_ui_i(2))
 
 	_checkbox_style_checked = StyleBoxFlat.new()
 	_checkbox_style_checked.bg_color = Color(0.24, 0.42, 0.24, 1.0) # a muted, saturated "done" green —
 	# UI_UX.md §7: saturated colour reserved for meaning, and a completed
 	# checklist item is exactly that meaning, not decoration.
 	_checkbox_style_checked.border_color = Color(0.27, 0.29, 0.32, 1.0)
-	_checkbox_style_checked.set_border_width_all(2)
+	_checkbox_style_checked.set_border_width_all(_ui_i(2))
 
 	# One docket = the checkbox's own paper tone plus a steel hairline. Reusing
 	# those two existing colours is the point (see this function's header):
@@ -2592,8 +2685,8 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_card_style = StyleBoxFlat.new()
 	_contract_card_style.bg_color = Color(0.83, 0.77, 0.60, 1.0)
 	_contract_card_style.border_color = Color(0.47, 0.44, 0.38, 1.0)
-	_contract_card_style.set_border_width_all(1)
-	_contract_card_style.set_content_margin_all(8.0)
+	_contract_card_style.set_border_width_all(_ui_i(1))
+	_contract_card_style.set_content_margin_all(_ui_px(6.0))
 
 	# The dockets live in a ScrollContainer whose height is capped in
 	# _update_contract_panel — a safety valve for a future contracts.ron with
@@ -2606,7 +2699,7 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 
 	_contract_cards_box = VBoxContainer.new()
 	_contract_cards_box.name = "ContractCards"
-	_contract_cards_box.add_theme_constant_override("separation", 8)
+	_contract_cards_box.add_theme_constant_override("separation", _ui_i(5))
 	_contract_cards_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_contract_cards_scroll.add_child(_contract_cards_box)
 
@@ -2664,11 +2757,11 @@ func _build_contract_card(contract: Dictionary) -> Dictionary:
 	_contract_cards_box.add_child(panel)
 
 	var card_body := VBoxContainer.new()
-	card_body.add_theme_constant_override("separation", 4)
+	card_body.add_theme_constant_override("separation", _ui_i(4))
 	panel.add_child(card_body)
 
 	var header := HBoxContainer.new()
-	header.add_theme_constant_override("separation", 10)
+	header.add_theme_constant_override("separation", _ui_i(10))
 	card_body.add_child(header)
 
 	var name_label := Label.new()
@@ -2723,11 +2816,11 @@ func _build_contract_checklist_row(body: VBoxContainer, item_id: String, require
 	# real assets" (_icon_for) applied to the one place this panel names a
 	# specific item.
 	var header := HBoxContainer.new()
-	header.add_theme_constant_override("separation", 6)
+	header.add_theme_constant_override("separation", _ui_i(6))
 	body.add_child(header)
 
 	var icon := TextureRect.new()
-	icon.custom_minimum_size = Vector2(16, 16)
+	icon.custom_minimum_size = _ui_v(Vector2(16, 16))
 	# Without this, TextureRect's own minimum size defaults to the source
 	# texture's actual size (64x64) and wins over custom_minimum_size above —
 	# EXPAND_IGNORE_SIZE is what makes the 16x16 slot actually stick.
@@ -2741,7 +2834,7 @@ func _build_contract_checklist_row(body: VBoxContainer, item_id: String, require
 	header.add_child(progress_label)
 
 	var checklist := HBoxContainer.new()
-	checklist.add_theme_constant_override("separation", 4)
+	checklist.add_theme_constant_override("separation", _ui_i(4))
 	body.add_child(checklist)
 
 	var box_count: int = required if required <= CONTRACT_CHECKLIST_MAX_BOXES else 1
@@ -2749,7 +2842,7 @@ func _build_contract_checklist_row(body: VBoxContainer, item_id: String, require
 	for i in range(box_count):
 		var box := Panel.new()
 		box.name = "checkbox_%s_%d" % [item_id, i]
-		box.custom_minimum_size = Vector2(14, 14)
+		box.custom_minimum_size = _ui_v(Vector2(14, 14))
 		box.add_theme_stylebox_override("panel", _checkbox_style_unchecked)
 		box.set_meta("checked", false)
 
@@ -2792,11 +2885,11 @@ func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	var panel_style := StyleBoxFlat.new()
 	panel_style.bg_color = Color(0.06, 0.06, 0.07, 0.94)
 	panel_style.border_color = Color(0.85, 0.63, 0.11, 0.95)
-	panel_style.border_width_top = 4
-	panel_style.border_width_left = 2
-	panel_style.border_width_right = 2
-	panel_style.border_width_bottom = 2
-	panel_style.set_content_margin_all(16.0)
+	panel_style.border_width_top = _ui_i(4)
+	panel_style.border_width_left = _ui_i(2)
+	panel_style.border_width_right = _ui_i(2)
+	panel_style.border_width_bottom = _ui_i(2)
+	panel_style.set_content_margin_all(_ui_px(16.0))
 
 	_shop_menu = PanelContainer.new()
 	_shop_menu.name = "ShopMenu"
@@ -2805,19 +2898,27 @@ func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	hud.add_child(_shop_menu)
 
 	var body := VBoxContainer.new()
-	body.add_theme_constant_override("separation", 10)
+	body.add_theme_constant_override("separation", _ui_i(10))
 	_shop_menu.add_child(body)
 
 	var title_settings := LabelSettings.new()
-	title_settings.font_size = base_settings.font_size + 4
+	title_settings.font_size = _ui_font(4)
 	title_settings.font_color = base_settings.font_color
 	title_settings.outline_size = base_settings.outline_size
 	title_settings.outline_color = base_settings.outline_color
 
+	# Heading and balance share ONE row. They were stacked, which at the
+	# 2026-09-09 UI scale spent a whole extra line of the panel's height on
+	# two short strings — height the catalog grid below needs more.
+	var heading := HBoxContainer.new()
+	heading.add_theme_constant_override("separation", _ui_i(16))
+	body.add_child(heading)
+
 	var title := Label.new()
 	title.label_settings = title_settings
 	title.text = "BUILD MENU"
-	body.add_child(title)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	heading.add_child(title)
 
 	# Money is repeated here rather than left to the contract clipboard in
 	# the opposite screen corner. The decision a player makes in this menu is
@@ -2826,21 +2927,42 @@ func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	# number from the same snapshot — `shop_snapshot_json` carries `money`
 	# precisely so a build menu is one call — not a second counter.
 	var money_settings := LabelSettings.new()
-	money_settings.font_size = base_settings.font_size + 6
+	money_settings.font_size = _ui_font(6)
 	money_settings.font_color = Color(0.98, 0.85, 0.42) # the panel's own hazard accent
 	money_settings.outline_size = base_settings.outline_size
 	money_settings.outline_color = base_settings.outline_color
 
 	_shop_money_label = Label.new()
 	_shop_money_label.label_settings = money_settings
-	body.add_child(_shop_money_label)
+	_shop_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	heading.add_child(_shop_money_label)
+
+	# The grid lives in a ScrollContainer whose height `_position_shop_menu`
+	# fits to whatever is left above the hotbar. **This is a last resort and
+	# is meant never to engage at a normal window size**: at 1600x900 (the
+	# resolution `scripts/screenshot-scene.sh` reviews at) the whole
+	# twelve-kind catalog fits with room to spare and the scrollbar never
+	# appears. It exists because at `project.godot`'s own 1280x720 the
+	# 2026-09-09 UI scale genuinely does not leave room for two rows of cards
+	# plus a title, a balance and a footer — and of the two ways to lose that
+	# fight, a grid that scrolls a little is much better than a menu whose
+	# footer disappears under the hotbar, which is the exact failure
+	# `_position_shop_menu` was written to prevent in the first place. The
+	# same shape (and the same reasoning) as the contract clipboard's docket
+	# stack.
+	_shop_grid_scroll = ScrollContainer.new()
+	_shop_grid_scroll.name = "ShopGridScroll"
+	_shop_grid_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_shop_grid_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	body.add_child(_shop_grid_scroll)
 
 	var grid := GridContainer.new()
 	grid.name = "ShopGrid"
 	grid.columns = SHOP_SLOT_COLUMNS
-	grid.add_theme_constant_override("h_separation", 8)
-	grid.add_theme_constant_override("v_separation", 8)
-	body.add_child(grid)
+	grid.add_theme_constant_override("h_separation", _ui_i(8))
+	grid.add_theme_constant_override("v_separation", _ui_i(8))
+	_shop_grid = grid
+	_shop_grid_scroll.add_child(grid)
 
 	var snapshot: Dictionary = JSON.parse_string(sim.shop_snapshot_json())
 	var entries: Array = snapshot.get("entries", [])
@@ -2849,7 +2971,10 @@ func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 
 	var footer := Label.new()
 	footer.label_settings = base_settings
-	footer.text = "left-click (or SHIFT+its number) buys one    right-click (or just its number) puts one in your hand    E/ESC: close"
+	# Two lines since the 2026-09-09 UI scale: a Label does not wrap unless
+	# told to, so at this font size one long line would set the panel's
+	# minimum width wider than the window it has to sit in.
+	footer.text = "left-click (or SHIFT+its number) buys one\nright-click (or just its number) puts one in your hand    E/ESC: close"
 	body.add_child(footer)
 
 	_position_shop_menu()
@@ -2868,12 +2993,47 @@ func _position_shop_menu() -> void:
 	var vp := get_viewport()
 	if vp == null:
 		return
-	var reserved := HOTBAR_SLOT_SIZE.y * HOTBAR_SELECTED_SCALE + HOTBAR_BOTTOM_MARGIN * 3.0
-	if _hotbar_root != null and _hotbar_root.size.y > 0.0:
-		reserved = _hotbar_root.size.y + HOTBAR_BOTTOM_MARGIN * 2.0
+	var reserved := _hotbar_reserved_height()
 	var bounds := vp.get_visible_rect().size
+	_fit_grid_scroll(_shop_grid_scroll, _shop_grid, bounds.y - reserved - _ui_px(16.0))
 	var menu_size := _shop_menu.get_combined_minimum_size()
 	_shop_menu.position.y = max(8.0, (bounds.y - reserved - menu_size.y) * 0.5)
+
+
+## Gives `grid` as much of `available` as its panel's own chrome leaves it,
+## and no more than it actually needs.
+##
+## The chrome is MEASURED rather than assumed: ask the panel for its full
+## height with the grid at full height, subtract the grid, and what is left
+## is the title, the balance, the footer and every margin between them. That
+## is what makes this survive a reworded footer or a fifth line of heading
+## without someone remembering to re-tune a constant — the failure mode this
+## menu has hit twice already (see `SHOP_SLOT_COLUMNS`).
+## How much of the bottom of the screen the hotbar strip owns. Every panel
+## that has to stay clear of it asks here rather than repeating the sum, so
+## none of them can drift apart. Falls back to a computed estimate before the
+## strip has laid itself out, which is the state a headless run stays in.
+func _hotbar_reserved_height() -> float:
+	if _hotbar_root != null and _hotbar_root.size.y > 0.0:
+		return _hotbar_root.size.y + HOTBAR_BOTTOM_MARGIN * 2.0
+	return HOTBAR_SLOT_SIZE.y * HOTBAR_SELECTED_SCALE + HOTBAR_BOTTOM_MARGIN * 3.0
+
+
+func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float) -> void:
+	if scroll == null or grid == null:
+		return
+	var natural: float = grid.get_combined_minimum_size().y
+	scroll.custom_minimum_size.y = natural
+	var panel := scroll.get_parent()
+	while panel != null and not (panel is PanelContainer):
+		panel = panel.get_parent()
+	var chrome: float = 0.0
+	if panel != null:
+		chrome = (panel as Control).get_combined_minimum_size().y - natural
+	# A floor, so a viewport too small for even one row leaves a scrollable
+	# stub rather than a panel with no grid in it at all.
+	var cap: float = maxf(_ui_px(110.0), available - chrome)
+	scroll.custom_minimum_size.y = minf(natural, cap)
 
 
 ## One icon slot. A Button rather than a Panel so pressing it is the whole
@@ -2900,18 +3060,18 @@ func _build_shop_slot(grid: GridContainer, base_settings: LabelSettings, index: 
 	# children have to place themselves.
 	var column := VBoxContainer.new()
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	column.add_theme_constant_override("separation", 2)
+	column.add_theme_constant_override("separation", _ui_i(2))
 	column.set_anchors_preset(Control.PRESET_FULL_RECT)
-	column.offset_left = 8
-	column.offset_right = -8
-	column.offset_top = 8
-	column.offset_bottom = -8
+	column.offset_left = _ui_px(8)
+	column.offset_right = -_ui_px(8)
+	column.offset_top = _ui_px(8)
+	column.offset_bottom = -_ui_px(8)
 	button.add_child(column)
 
 	# The hotkey corner. Slots past SHOP_HOTKEY_SLOTS simply show nothing
 	# here and stay click-only, rather than inventing a second key scheme.
 	var hotkey_settings := LabelSettings.new()
-	hotkey_settings.font_size = base_settings.font_size - 3
+	hotkey_settings.font_size = _ui_font(-3)
 	hotkey_settings.font_color = Color(0.62, 0.64, 0.68)
 	hotkey_settings.outline_size = base_settings.outline_size
 	hotkey_settings.outline_color = base_settings.outline_color
@@ -2924,8 +3084,15 @@ func _build_shop_slot(grid: GridContainer, base_settings: LabelSettings, index: 
 	# hotbar slot N are one kind, so one label serves both. Since the
 	# inventory-hotbar ticket that digit no longer means "buy": it means
 	# "select", here as well as down on the strip, and SHIFT+it buys.
+	#
+	# Parented to the BUTTON and positioned in its corner rather than added
+	# to the column, exactly as the hotbar socket's own digit is. In the
+	# column it was a whole row of the card's height for one character, and
+	# at the 2026-09-09 UI scale that row was the difference between the grid
+	# fitting above the hotbar and not.
 	hotkey.text = _hotbar_key_label(index)
-	column.add_child(hotkey)
+	hotkey.position = _ui_v(Vector2(7, 3))
+	button.add_child(hotkey)
 
 	var icon := TextureRect.new()
 	icon.name = "Icon"
@@ -2949,7 +3116,7 @@ func _build_shop_slot(grid: GridContainer, base_settings: LabelSettings, index: 
 	column.add_child(name_label)
 
 	var price_settings := LabelSettings.new()
-	price_settings.font_size = base_settings.font_size
+	price_settings.font_size = _ui_font()
 	price_settings.font_color = base_settings.font_color
 	price_settings.outline_size = base_settings.outline_size
 	price_settings.outline_color = base_settings.outline_color
@@ -2962,7 +3129,7 @@ func _build_shop_slot(grid: GridContainer, base_settings: LabelSettings, index: 
 	column.add_child(price_label)
 
 	var owned_settings := LabelSettings.new()
-	owned_settings.font_size = base_settings.font_size - 2
+	owned_settings.font_size = _ui_font(-2)
 	owned_settings.font_color = Color(0.66, 0.68, 0.72)
 	owned_settings.outline_size = base_settings.outline_size
 	owned_settings.outline_color = base_settings.outline_color
@@ -2989,8 +3156,8 @@ func _build_shop_slot(grid: GridContainer, base_settings: LabelSettings, index: 
 ## rest of the HUD already uses rather than a third palette.
 func _shop_slot_style(state: String) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
-	style.set_border_width_all(3)
-	style.set_content_margin_all(6.0)
+	style.set_border_width_all(_ui_i(3))
+	style.set_content_margin_all(_ui_px(6.0))
 	match state:
 		"hover", "focus":
 			style.bg_color = Color(0.19, 0.19, 0.21, 0.98)
@@ -3058,10 +3225,16 @@ func _update_shop_menu() -> void:
 		)
 		slot["icon"].modulate = Color.WHITE if affordable else Color(0.42, 0.42, 0.45, 0.75)
 		slot["button"].disabled = not affordable
-		# The owned line carries the PLACE affordance, because that is the
-		# line whose number decides whether placing is possible at all.
+		# Just the count. The owned line used to carry the PLACE affordance
+		# ("right-click to hold") as well, and at the 2026-09-09 UI scale that
+		# sentence wraps onto a second row in every card, which costs the
+		# whole grid an extra row — more than the menu has to give above the
+		# hotbar. It is not lost: the footer one line below says it, the
+		# hotbar tooltip says it, and the number itself (which is what
+		# actually decides whether placing is possible) is still here and
+		# still recoloured.
 		var owned: int = int(entry.get("owned", 0))
-		slot["owned_label"].text = ("Owned %d  ·  right-click to hold" % owned) if owned > 0 else "Owned 0"
+		slot["owned_label"].text = "Owned %d" % owned
 		slot["owned_label"].label_settings.font_color = (
 			Color(0.98, 0.85, 0.42) if owned > 0 else Color(0.66, 0.68, 0.72)
 		)
@@ -3293,11 +3466,11 @@ func _build_ingredient_market(hud: CanvasLayer, base_settings: LabelSettings) ->
 	var panel_style := StyleBoxFlat.new()
 	panel_style.bg_color = Color(0.06, 0.06, 0.07, 0.94)
 	panel_style.border_color = Color(0.85, 0.63, 0.11, 0.95)
-	panel_style.border_width_top = 4
-	panel_style.border_width_left = 2
-	panel_style.border_width_right = 2
-	panel_style.border_width_bottom = 2
-	panel_style.set_content_margin_all(16.0)
+	panel_style.border_width_top = _ui_i(4)
+	panel_style.border_width_left = _ui_i(2)
+	panel_style.border_width_right = _ui_i(2)
+	panel_style.border_width_bottom = _ui_i(2)
+	panel_style.set_content_margin_all(_ui_px(16.0))
 
 	# Cleared, never appended to: `_ready()` genuinely runs twice under the
 	# headless `--script` harness (see `_rebuild_world`'s note and
@@ -3313,33 +3486,41 @@ func _build_ingredient_market(hud: CanvasLayer, base_settings: LabelSettings) ->
 	hud.add_child(_market_panel)
 
 	var body := VBoxContainer.new()
-	body.add_theme_constant_override("separation", 10)
+	body.add_theme_constant_override("separation", _ui_i(10))
 	_market_panel.add_child(body)
 
 	var title_settings := LabelSettings.new()
-	title_settings.font_size = base_settings.font_size + 4
+	title_settings.font_size = _ui_font(4)
 	title_settings.font_color = base_settings.font_color
 	title_settings.outline_size = base_settings.outline_size
 	title_settings.outline_color = base_settings.outline_color
 
+	# Heading and balance on one row, for `_build_shop_menu`'s reason — this
+	# panel is deliberately the other half of the same shop.
+	var heading := HBoxContainer.new()
+	heading.add_theme_constant_override("separation", _ui_i(16))
+	body.add_child(heading)
+
 	var title := Label.new()
 	title.label_settings = title_settings
 	title.text = "INGREDIENT MARKET"
-	body.add_child(title)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	heading.add_child(title)
 
 	var money_settings := LabelSettings.new()
-	money_settings.font_size = base_settings.font_size + 6
+	money_settings.font_size = _ui_font(6)
 	money_settings.font_color = Color(0.98, 0.85, 0.42)
 	money_settings.outline_size = base_settings.outline_size
 	money_settings.outline_color = base_settings.outline_color
 
 	_market_money_label = Label.new()
 	_market_money_label.label_settings = money_settings
-	body.add_child(_market_money_label)
+	_market_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	heading.add_child(_market_money_label)
 
 	var row := HBoxContainer.new()
 	row.name = "MarketRow"
-	row.add_theme_constant_override("separation", 8)
+	row.add_theme_constant_override("separation", _ui_i(8))
 	body.add_child(row)
 
 	for entry in _ingredients_snapshot().get("entries", []):
@@ -3347,7 +3528,7 @@ func _build_ingredient_market(hud: CanvasLayer, base_settings: LabelSettings) ->
 
 	var footer := Label.new()
 	footer.label_settings = base_settings
-	footer.text = "click a crate to buy %d    then SPACE loads a hopper and V loads a tank    M/ESC: close" % MARKET_CRATE
+	footer.text = "click a crate to buy %d\nthen SPACE loads a hopper and V loads a tank    M/ESC: close" % MARKET_CRATE
 	body.add_child(footer)
 
 	_position_market_panel()
@@ -3363,9 +3544,7 @@ func _position_market_panel() -> void:
 	var vp := get_viewport()
 	if vp == null:
 		return
-	var reserved := HOTBAR_SLOT_SIZE.y * HOTBAR_SELECTED_SCALE + HOTBAR_BOTTOM_MARGIN * 3.0
-	if _hotbar_root != null and _hotbar_root.size.y > 0.0:
-		reserved = _hotbar_root.size.y + HOTBAR_BOTTOM_MARGIN * 2.0
+	var reserved := _hotbar_reserved_height()
 	var bounds := vp.get_visible_rect().size
 	var panel_size := _market_panel.get_combined_minimum_size()
 	_market_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
@@ -3374,7 +3553,7 @@ func _position_market_panel() -> void:
 func _build_market_slot(row: HBoxContainer, base_settings: LabelSettings, index: int, item_id: String) -> void:
 	var button := Button.new()
 	button.name = "MarketSlot_%s" % item_id
-	button.custom_minimum_size = SHOP_SLOT_SIZE
+	button.custom_minimum_size = MARKET_SLOT_SIZE
 	button.focus_mode = Control.FOCUS_NONE
 	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
 		button.add_theme_stylebox_override(state, _shop_slot_style(state))
@@ -3383,12 +3562,12 @@ func _build_market_slot(row: HBoxContainer, base_settings: LabelSettings, index:
 
 	var column := VBoxContainer.new()
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	column.add_theme_constant_override("separation", 2)
+	column.add_theme_constant_override("separation", _ui_i(2))
 	column.set_anchors_preset(Control.PRESET_FULL_RECT)
-	column.offset_left = 8
-	column.offset_right = -8
-	column.offset_top = 8
-	column.offset_bottom = -8
+	column.offset_left = _ui_px(8)
+	column.offset_right = -_ui_px(8)
+	column.offset_top = _ui_px(8)
+	column.offset_bottom = -_ui_px(8)
 	button.add_child(column)
 
 	var icon := TextureRect.new()
@@ -3415,7 +3594,7 @@ func _build_market_slot(row: HBoxContainer, base_settings: LabelSettings, index:
 	column.add_child(name_label)
 
 	var price_settings := LabelSettings.new()
-	price_settings.font_size = base_settings.font_size
+	price_settings.font_size = _ui_font()
 	price_settings.font_color = base_settings.font_color
 	price_settings.outline_size = base_settings.outline_size
 	price_settings.outline_color = base_settings.outline_color
@@ -3429,7 +3608,7 @@ func _build_market_slot(row: HBoxContainer, base_settings: LabelSettings, index:
 	column.add_child(price_label)
 
 	var owned_settings := LabelSettings.new()
-	owned_settings.font_size = base_settings.font_size - 2
+	owned_settings.font_size = _ui_font(-2)
 	owned_settings.font_color = Color(0.66, 0.68, 0.72)
 	owned_settings.outline_size = base_settings.outline_size
 	owned_settings.outline_color = base_settings.outline_color
@@ -3486,7 +3665,11 @@ func _update_ingredient_market() -> void:
 		)
 		slot["icon"].modulate = Color.WHITE if affordable else Color(0.42, 0.42, 0.45, 0.75)
 		slot["button"].disabled = not affordable
-		slot["owned_label"].text = "In stock %d  ·  %.0f each" % [int(entry.get("owned", 0)), unit_price]
+		# Two lines, written out rather than left to autowrap: the wrap point
+		# is then the same on every crate whatever the numbers are, which a
+		# rendered frame showed matters — a ragged one-word overflow reads as
+		# a bug, a deliberate second line reads as a spec.
+		slot["owned_label"].text = "In stock %d\n%.0f each" % [int(entry.get("owned", 0)), unit_price]
 
 
 ## Buys one crate. An unaffordable or unknown purchase is a silent no-op in
@@ -3526,8 +3709,8 @@ func _build_larder(parent: VBoxContainer, base_settings: LabelSettings) -> void:
 	var plate := StyleBoxFlat.new()
 	plate.bg_color = Color(0.06, 0.06, 0.07, 0.93)
 	plate.border_color = Color(0.85, 0.63, 0.11, 0.95)
-	plate.border_width_top = 2
-	plate.set_content_margin_all(6.0)
+	plate.border_width_top = _ui_i(2)
+	plate.set_content_margin_all(_ui_px(6.0))
 
 	_larder_entries.clear() # `_ready` runs twice headlessly — see `_build_ingredient_market`
 
@@ -3540,11 +3723,11 @@ func _build_larder(parent: VBoxContainer, base_settings: LabelSettings) -> void:
 	_larder_row = HBoxContainer.new()
 	_larder_row.name = "LarderRow"
 	_larder_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_larder_row.add_theme_constant_override("separation", 14)
+	_larder_row.add_theme_constant_override("separation", _ui_i(14))
 	_larder_panel.add_child(_larder_row)
 
 	var label_settings := LabelSettings.new()
-	label_settings.font_size = base_settings.font_size - 1
+	label_settings.font_size = _ui_font(-1)
 	label_settings.font_color = Color(0.92, 0.93, 0.94)
 	label_settings.outline_size = base_settings.outline_size
 	label_settings.outline_color = base_settings.outline_color
@@ -3553,12 +3736,12 @@ func _build_larder(parent: VBoxContainer, base_settings: LabelSettings) -> void:
 		var item_id := String(entry.get("id", ""))
 		var chip := HBoxContainer.new()
 		chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		chip.add_theme_constant_override("separation", 5)
+		chip.add_theme_constant_override("separation", _ui_i(5))
 		_larder_row.add_child(chip)
 
 		var icon := TextureRect.new()
 		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		icon.custom_minimum_size = Vector2(20, 20)
+		icon.custom_minimum_size = _ui_v(Vector2(20, 20))
 		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		icon.texture = _icon_for_asset(_market_asset_for(item_id))
@@ -3572,7 +3755,7 @@ func _build_larder(parent: VBoxContainer, base_settings: LabelSettings) -> void:
 		_larder_entries[item_id] = count
 
 	var hint_settings := LabelSettings.new()
-	hint_settings.font_size = base_settings.font_size - 2
+	hint_settings.font_size = _ui_font(-2)
 	hint_settings.font_color = Color(0.66, 0.68, 0.72)
 	hint_settings.outline_size = base_settings.outline_size
 	hint_settings.outline_color = base_settings.outline_color
@@ -3650,7 +3833,7 @@ func _build_hotbar(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	# behind it unbuildable. Only the slot buttons themselves take the mouse.
 	_hotbar_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hotbar_root.alignment = BoxContainer.ALIGNMENT_CENTER
-	_hotbar_root.add_theme_constant_override("separation", 6)
+	_hotbar_root.add_theme_constant_override("separation", _ui_i(6))
 	hud.add_child(_hotbar_root)
 
 	# The larder sits at the TOP of the strip's column, above the name
@@ -3659,9 +3842,9 @@ func _build_hotbar(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_build_larder(_hotbar_root, base_settings)
 
 	var flyout_settings := LabelSettings.new()
-	flyout_settings.font_size = base_settings.font_size + 3
+	flyout_settings.font_size = _ui_font(3)
 	flyout_settings.font_color = Color(0.98, 0.85, 0.42) # the plate's hazard accent
-	flyout_settings.outline_size = base_settings.outline_size + 2
+	flyout_settings.outline_size = _ui_i(4 + 2)
 	flyout_settings.outline_color = Color(0, 0, 0, 0.9)
 
 	_hotbar_flyout = Label.new()
@@ -3679,8 +3862,8 @@ func _build_hotbar(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	var plate := StyleBoxFlat.new()
 	plate.bg_color = Color(0.06, 0.06, 0.07, 0.93)
 	plate.border_color = Color(0.85, 0.63, 0.11, 0.95)
-	plate.border_width_top = 3
-	plate.set_content_margin_all(10.0)
+	plate.border_width_top = _ui_i(3)
+	plate.set_content_margin_all(_ui_px(10.0))
 
 	_hotbar_panel = PanelContainer.new()
 	_hotbar_panel.name = "Hotbar"
@@ -3693,7 +3876,7 @@ func _build_hotbar(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	# Wide enough that a selected slot at HOTBAR_SELECTED_SCALE never laps
 	# its neighbours: 64 * 0.13 is ~8px of growth, ~4 to each side.
-	strip.add_theme_constant_override("separation", 9)
+	strip.add_theme_constant_override("separation", _ui_i(9) * HOTBAR_STRIP_FIT)
 	_hotbar_panel.add_child(strip)
 
 	var snapshot = JSON.parse_string(sim.shop_snapshot_json())
@@ -3740,7 +3923,7 @@ func _build_hotbar_slot(strip: HBoxContainer, base_settings: LabelSettings, inde
 	# The key digit, top-left. Printed on the slot rather than left to the
 	# legend: the whole claim of a hotbar is that the key is obvious.
 	var key_settings := LabelSettings.new()
-	key_settings.font_size = base_settings.font_size - 4
+	key_settings.font_size = _ui_font(-4)
 	key_settings.font_color = Color(0.62, 0.64, 0.68)
 	key_settings.outline_size = base_settings.outline_size
 	key_settings.outline_color = base_settings.outline_color
@@ -3750,15 +3933,15 @@ func _build_hotbar_slot(strip: HBoxContainer, base_settings: LabelSettings, inde
 	key_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	key_label.label_settings = key_settings
 	key_label.text = _hotbar_key_label(index)
-	key_label.position = Vector2(5, 1)
+	key_label.position = _ui_v(Vector2(5, 1))
 	button.add_child(key_label)
 
 	# The stack count, bottom-right, in Minecraft's own corner. Hazard-yellow
 	# with a heavy outline so it reads over any icon behind it.
 	var count_settings := LabelSettings.new()
-	count_settings.font_size = base_settings.font_size - 1
+	count_settings.font_size = _ui_font(-1)
 	count_settings.font_color = Color(0.98, 0.85, 0.42)
-	count_settings.outline_size = base_settings.outline_size + 1
+	count_settings.outline_size = _ui_i(4 + 1)
 	count_settings.outline_color = Color(0, 0, 0, 0.92)
 
 	var count_label := Label.new()
@@ -3766,8 +3949,8 @@ func _build_hotbar_slot(strip: HBoxContainer, base_settings: LabelSettings, inde
 	count_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	count_label.label_settings = count_settings
 	count_label.set_anchors_preset(Control.PRESET_FULL_RECT)
-	count_label.offset_right = -5
-	count_label.offset_bottom = -2
+	count_label.offset_right = -_ui_px(5)
+	count_label.offset_bottom = -_ui_px(2)
 	count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	count_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
 	button.add_child(count_label)
@@ -3776,7 +3959,7 @@ func _build_hotbar_slot(strip: HBoxContainer, base_settings: LabelSettings, inde
 	# never colour alone — it is a bigger slot, a hazard-yellow frame, a
 	# brightened key digit AND this glyph.
 	var mark_settings := LabelSettings.new()
-	mark_settings.font_size = base_settings.font_size - 3
+	mark_settings.font_size = _ui_font(-3)
 	mark_settings.font_color = Color(1.0, 0.90, 0.50)
 	mark_settings.outline_size = base_settings.outline_size
 	mark_settings.outline_color = base_settings.outline_color
@@ -3788,7 +3971,7 @@ func _build_hotbar_slot(strip: HBoxContainer, base_settings: LabelSettings, inde
 	mark.text = "\u25bc"
 	mark.visible = false
 	mark.set_anchors_preset(Control.PRESET_FULL_RECT)
-	mark.offset_top = -1
+	mark.offset_top = -_ui_px(1)
 	mark.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	mark.vertical_alignment = VERTICAL_ALIGNMENT_TOP
 	button.add_child(mark)
@@ -3814,13 +3997,13 @@ func _build_hotbar_slot(strip: HBoxContainer, base_settings: LabelSettings, inde
 ##                  state the player checks most often.
 func _hotbar_slot_style(state: String) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
-	style.set_border_width_all(3)
-	style.set_corner_radius_all(2)
+	style.set_border_width_all(_ui_i(3))
+	style.set_corner_radius_all(_ui_i(2))
 	match state:
 		"selected":
 			style.bg_color = Color(0.30, 0.24, 0.08, 0.98)
 			style.border_color = Color(1.0, 0.83, 0.24, 1.0)
-			style.set_border_width_all(4)
+			style.set_border_width_all(_ui_i(4))
 		"stocked":
 			style.bg_color = Color(0.13, 0.14, 0.16, 0.96)
 			style.border_color = Color(0.42, 0.44, 0.48, 0.95)
@@ -4016,8 +4199,8 @@ func _build_hotbar_tooltip(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.10, 0.09, 0.06, 0.96)
 	style.border_color = Color(0.85, 0.63, 0.11, 0.95)
-	style.set_border_width_all(2)
-	style.set_content_margin_all(9.0)
+	style.set_border_width_all(_ui_i(2))
+	style.set_content_margin_all(_ui_px(9.0))
 
 	_hotbar_tooltip = PanelContainer.new()
 	_hotbar_tooltip.name = "HotbarTooltip"
@@ -4028,11 +4211,11 @@ func _build_hotbar_tooltip(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 
 	var rows := VBoxContainer.new()
 	rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	rows.add_theme_constant_override("separation", 3)
+	rows.add_theme_constant_override("separation", _ui_i(3))
 	_hotbar_tooltip.add_child(rows)
 
 	var name_settings := LabelSettings.new()
-	name_settings.font_size = base_settings.font_size + 2
+	name_settings.font_size = _ui_font(2)
 	name_settings.font_color = Color(0.98, 0.85, 0.42)
 	name_settings.outline_size = base_settings.outline_size
 	name_settings.outline_color = base_settings.outline_color
@@ -4099,7 +4282,7 @@ func _position_hotbar_tooltip(index: int) -> void:
 	var button: Button = _hotbar_slots[index]["button"]
 	var size := _hotbar_tooltip.get_combined_minimum_size()
 	var anchor := button.global_position + Vector2(button.size.x / 2.0, 0.0)
-	var pos := anchor - Vector2(size.x / 2.0, size.y + 14.0)
+	var pos := anchor - Vector2(size.x / 2.0, size.y + _ui_px(14.0))
 	var vp := get_viewport()
 	if vp != null:
 		var bounds := vp.get_visible_rect().size
@@ -4609,8 +4792,8 @@ func _placement_prompt_style(valid: bool, destructive := false) -> StyleBoxFlat:
 	style.bg_color = Color(0.06, 0.06, 0.07, 0.92)
 	var ok := valid and not destructive
 	style.border_color = Color(0.35, 0.85, 0.45, 0.95) if ok else Color(0.92, 0.35, 0.30, 0.95)
-	style.set_border_width_all(3)
-	style.set_content_margin_all(10.0)
+	style.set_border_width_all(_ui_i(3))
+	style.set_content_margin_all(_ui_px(10.0))
 	return style
 
 
@@ -4642,8 +4825,8 @@ func _build_hover_tooltip(hud: CanvasLayer) -> void:
 	var hover_style := StyleBoxFlat.new()
 	hover_style.bg_color = Color(0.10, 0.09, 0.06, 0.92)
 	hover_style.border_color = Color(0.85, 0.63, 0.11, 0.95)
-	hover_style.set_border_width_all(2)
-	hover_style.set_content_margin_all(8.0)
+	hover_style.set_border_width_all(_ui_i(2))
+	hover_style.set_content_margin_all(_ui_px(8.0))
 
 	_hover_tooltip = PanelContainer.new()
 	_hover_tooltip.add_theme_stylebox_override("panel", hover_style)
@@ -4657,9 +4840,9 @@ func _build_hover_tooltip(hud: CanvasLayer) -> void:
 	hud.add_child(_hover_tooltip)
 
 	var hover_settings := LabelSettings.new()
-	hover_settings.font_size = 14
+	hover_settings.font_size = _ui_font(-1)
 	hover_settings.font_color = Color(0.95, 0.95, 0.90)
-	hover_settings.outline_size = 3
+	hover_settings.outline_size = _ui_i(3)
 	hover_settings.outline_color = Color(0, 0, 0, 0.85)
 
 	_hover_label = Label.new()
@@ -5041,7 +5224,7 @@ const HOVER_NO_TILE := Vector2i(-999999, -999999)
 ## Screen-space offset from the raw cursor position to the tooltip panel's
 ## top-left corner, so the panel doesn't sit directly under (and get
 ## re-hidden by chasing) the cursor itself.
-const HOVER_TOOLTIP_OFFSET := Vector2(18.0, 18.0)
+const HOVER_TOOLTIP_OFFSET := Vector2(18.0, 18.0) * UI_SCALE
 
 
 ## Resolves a screen-space position to the world tile beneath it: casts the
@@ -5384,17 +5567,30 @@ func _update_contract_panel() -> void:
 
 	# Cap the docket stack's height rather than letting it grow off the
 	# bottom of the screen: past the cap it scrolls. `data/contracts.ron`
-	# ships three and this never engages, which is the intent — a handful of
-	# concurrent orders is the realistic board (GAMEPLAY.md §6 names no
-	# count), so this is a safety valve for a content change rather than a
-	# compact/summary mode nobody needs yet.
-	var natural_height: float = _contract_cards_box.get_combined_minimum_size().y
+	# ships three and at a normal window size this never engages, which is
+	# the intent — a handful of concurrent orders is the realistic board
+	# (GAMEPLAY.md §6 names no count), so it is a safety valve for a content
+	# change rather than a compact/summary mode nobody needs yet.
+	#
+	# What it is capped AGAINST changed with the 2026-09-09 UI scale. It was
+	# a fixed fraction of the window height, and at half again the type size
+	# that let the board's bottom edge reach down across the larder strip. It
+	# is now the space actually left above the hotbar, measured the same way
+	# the build menu measures its own (`_fit_grid_scroll`), so the two panels
+	# can never disagree about where the usable screen ends.
+	#
 	# A headless SceneTree run has no viewport at all, and a window that has
 	# not laid out yet reports a zero rect — neither must collapse the stack
 	# to nothing, so "no viewport" means "no cap", not "a cap of zero".
 	var viewport := get_viewport()
-	var cap: float = viewport.get_visible_rect().size.y * CONTRACT_LIST_MAX_HEIGHT_RATIO if viewport != null else 0.0
-	_contract_cards_scroll.custom_minimum_size.y = min(natural_height, cap) if cap > 0.0 else natural_height
+	if viewport != null and viewport.get_visible_rect().size.y > 0.0:
+		_fit_grid_scroll(
+			_contract_cards_scroll,
+			_contract_cards_box,
+			viewport.get_visible_rect().size.y - _hotbar_reserved_height() - _ui_px(24.0)
+		)
+	else:
+		_contract_cards_scroll.custom_minimum_size.y = _contract_cards_box.get_combined_minimum_size().y
 
 	# Re-anchor every update, not just once at build time: the panel's
 	# minimum size grows once real text ("Money: 1234", "Next check in 1000
@@ -5451,11 +5647,11 @@ func _update_contract_dock(stock: Array) -> void:
 func _build_contract_dock_entry(item_id: String) -> Dictionary:
 	var row := HBoxContainer.new()
 	row.name = "dock_%s" % item_id
-	row.add_theme_constant_override("separation", 3)
+	row.add_theme_constant_override("separation", _ui_i(3))
 	_contract_dock_row.add_child(row)
 
 	var icon := TextureRect.new()
-	icon.custom_minimum_size = Vector2(14, 14)
+	icon.custom_minimum_size = _ui_v(Vector2(14, 14))
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.texture = _icon_for(item_id)

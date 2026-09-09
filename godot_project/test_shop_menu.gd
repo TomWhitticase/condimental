@@ -23,9 +23,10 @@
 #     and marks each price with the unaffordable glyph,
 #   * a REAL purchase through `issue_command_json` moves the displayed owned
 #     count, on both the click and the SHIFT+number paths,
-#   * and an OWNED slot offers the second action the "Real Placement" epic
-#     added — putting one in your hand — which enters placement mode and
-#     closes the menu.
+#   * and the menu offers the second action the "Real Placement" epic added —
+#     putting one in your hand — which enters placement mode and closes the
+#     menu. (The words moved from the owned line to the footer in the
+#     2026-09-09 UI-scale pass; the check follows the claim, not the node.)
 #
 # WHAT THE INVENTORY-HOTBAR TICKET CHANGED HERE. The number keys used to buy
 # while this menu was open; they are the hotbar's selection keys now, in every
@@ -39,6 +40,16 @@ extends SceneTree
 func _fail(msg: String) -> void:
 	printerr("SHOP_MENU_FAIL: %s" % msg)
 	quit(1)
+
+
+## Every Label in a subtree, so a check can be about what the panel SAYS
+## rather than about which node happens to say it.
+func _labels_under(node: Node, out: Array) -> Array:
+	for child in node.get_children():
+		if child is Label:
+			out.append(child)
+		_labels_under(child, out)
+	return out
 
 
 func _shop_snapshot(main) -> Dictionary:
@@ -227,11 +238,21 @@ func _initialize() -> void:
 		_fail("the displayed owned count for '%s' reads '%s', expected it to show %d" % [kind, text_after, owned_after])
 		return
 
-	# --- An OWNED slot offers the second action: put one in your hand -----
-	# The affordance is on the owned line, because that is the line whose
-	# number decides whether placing is possible at all.
-	if not text_after.to_lower().contains("right-click"):
-		_fail("an owned slot should say how to take one in hand, reads '%s'" % text_after)
+	# --- The menu offers the second action: put one in your hand ----------
+	# The affordance moved OFF the owned line in the 2026-09-09 UI-scale
+	# pass: at that font size "Owned 1 · right-click to hold" wraps onto a
+	# second row in every card, which costs the grid a whole row it does not
+	# have above the hotbar. So the count stays on the slot (it is the number
+	# that decides whether placing is possible at all) and the verb is in the
+	# footer one line below — which is what this now checks, because the
+	# claim being defended is that the menu tells you, not which label does.
+	var affordance := ""
+	for label in _labels_under(menu, []):
+		if label.text.to_lower().contains("right-click"):
+			affordance = label.text
+			break
+	if affordance == "":
+		_fail("nothing in the build menu says how to take an owned kind in hand")
 		return
 	main._place_from_slot(target)
 	if not main._in_build_mode() or main._build_kind != kind:

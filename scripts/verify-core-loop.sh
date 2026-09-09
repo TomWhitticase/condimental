@@ -165,6 +165,7 @@ run_godot_script test_machines.gd MACHINES_OK "per-kind machine models, multi-ti
 run_godot_script test_connections.gd CONNECTIONS_OK "belt/pipe-to-machine junctions, visual overhaul round 2"
 run_godot_script test_shop_menu.gd SHOP_MENU_OK "build menu grid + purchases, UI_UX.md §5"
 run_godot_script test_hotbar.gd HOTBAR_OK "always-visible hotbar, number-key selection, UI_UX.md §5"
+run_godot_script test_ui_scale.gd UI_SCALE_OK "one UI_SCALE knob, no pre-scale label, everything fits the window"
 run_godot_script test_chain_rework.gd CHAIN_REWORK_OK "1x2 mixer, piped middle, hopper contents, ingredient market"
 run_godot_script test_fill_feedback.gd FILL_FEEDBACK_OK "SPACE/V say why they did nothing, before the sim ever sees the command"
 run_godot_script test_placement.gd PLACEMENT_OK "empty world, ghost, rotation, place/remove — Real Placement ticket 2"
