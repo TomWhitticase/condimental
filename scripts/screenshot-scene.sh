@@ -55,6 +55,11 @@
 # non-origin tile: "any tile of a multi-tile machine identifies it" is the
 # claim, and hovering the origin would not show it.)
 #
+# Pass --menu to photograph the MAIN MENU instead of the game — it renders
+# menu.tscn, having first written a real save so its load list has a row in
+# it, and removes that save again afterwards. Pass --pause to open the
+# in-game pause menu (ESC) over whatever else was built.
+#
 # Pass --shop to open the build menu (docs/UI_UX.md §5) before the shot, or
 # --market to open the ingredient market — the stock half of the shop, where
 # raw ingredients are bought (the chain-rework epic).
@@ -77,7 +82,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--contracts] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--shop] [--market] [--no-hud] [--stock] [--hotbar N] [--contents N] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--contracts] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--no-hud] [--stock] [--hotbar N] [--contents N] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

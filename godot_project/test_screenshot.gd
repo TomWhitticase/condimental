@@ -76,6 +76,15 @@
 # is the only way to review the hotbar's selected state without a live
 # session, exactly as `--ghost` is for build mode.
 #
+# `--menu` photographs the MAIN MENU (`menu.tscn`) instead of the game,
+# having first written a save file so the load list has something real in it.
+# It is the only flag here that renders a different scene, because the main
+# menu IS a different scene — it is what `project.godot` opens on now.
+#
+# `--pause` builds a factory, runs it, and opens the in-game pause menu over
+# it. Like `--ghost` and `--hotbar`, it is the only way to review a panel that
+# only exists in response to a keypress.
+#
 # `--closeup TX,TY[,SIZE]` re-aims the ISOMETRIC camera at one simulation
 # tile and zooms it right in (SIZE is the orthographic width in world units,
 # default CLOSEUP_SIZE). The whole-factory shot is the right frame for "does
@@ -85,6 +94,7 @@
 extends SceneTree
 
 const Layouts = preload("res://test_layouts.gd")
+const GameSaves = preload("res://game_session.gd")
 
 ## Enough frames for shadow atlases, SSAO and glow to be resolved — a
 ## screenshot on frame 1 shows an unlit, shadowless scene and is misleading.
@@ -146,6 +156,15 @@ const CONTRACTS_REVIEW_TICK_LIMIT := 20000
 var _ghost_kind := ""
 var _ghost_blocked := false
 var _remove_mode := false
+## `--menu` renders menu.tscn rather than main.tscn; `--pause` renders the
+## in-game pause menu over a running factory. See the header.
+var _menu := false
+var _pause := false
+## The save this run writes so `--menu`'s list is not empty, and removes
+## again on the way out. Named so it cannot collide with a real save.
+const MENU_REVIEW_SLOT := "zz review shot"
+var _menu_review_path := ""
+
 ## `--closeup` target tile and orthographic width; `_closeup` gates both.
 const CLOSEUP_SIZE := 9.0
 var _closeup := false
@@ -184,7 +203,17 @@ func _initialize() -> void:
 		_ghost_kind = _string_arg(args, "--ghost-blocked")
 		_ghost_blocked = _ghost_kind != ""
 	_remove_mode = args.has("--remove-mode")
+	_menu = args.has("--menu")
+	_pause = args.has("--pause")
 	_parse_closeup(args)
+	if _menu:
+		# The load list is the half of this screen worth reviewing, so give it
+		# something to list. Written before the scene is built, because
+		# `menu.gd` reads the directory in `_ready`.
+		_write_menu_review_save()
+		_main = load("res://menu.tscn").instantiate()
+		root.add_child(_main)
+		return
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 	# NOT here: in a real (non-headless) run, add_child()'s _ready() is
@@ -532,11 +561,41 @@ func _hotbar_key_code() -> int:
 	return 0
 
 
+## Writes one real save so `--menu` photographs a list with a row in it
+## rather than the empty state. Removed again once the frame is written.
+func _write_menu_review_save() -> void:
+	var sim = SimBridge.new()
+	Layouts.build_machines_fixture(sim)
+	Layouts.stock_larder(sim)
+	for i in range(200):
+		sim.issue_command_json(JSON.stringify({"type": "fill_hopper", "amount": 64}))
+		sim.tick()
+	if GameSaves.write_slot(MENU_REVIEW_SLOT, String(sim.save_ron())) == "":
+		_menu_review_path = GameSaves.slot_path(MENU_REVIEW_SLOT)
+
+
+## `--menu` shows the LOAD view, not the three buttons: the buttons are the
+## easy half and the list is the half with layout worth checking.
+func _open_menu_load_view() -> void:
+	_main._on_load_pressed()
+
+
+## `--pause`: the in-game menu, over a factory that has been running.
+func _open_pause_menu() -> void:
+	_main._set_pause_open(true)
+
+
 func _process(_delta: float) -> bool:
 	_frames += 1
 	# Build first: every flag below is about looking at something, and since
 	# the "Real Placement" epic there is nothing to look at until one of the
 	# fixtures has been placed.
+	if _menu:
+		if _frames == 1:
+			_open_menu_load_view()
+		if _frames < WARMUP_FRAMES:
+			return false
+		return _write_frame()
 	if _frames == 1 and (_build or _fixture != ""):
 		_build_fixture()
 	if _frames == 1 and _first_person:
@@ -586,10 +645,19 @@ func _process(_delta: float) -> bool:
 		_stock_the_hotbar()
 	if _frames == 2 and _hotbar_key != "":
 		_select_hotbar_key()
+	# Last, so it draws over whatever else the flags set up — which is
+	# exactly what a review of it wants to see.
+	if _frames == 3 and _pause:
+		_open_pause_menu()
 	if _frames < WARMUP_FRAMES:
 		return false
+	return _write_frame()
 
+
+func _write_frame() -> bool:
 	var image := root.get_texture().get_image()
+	if _menu_review_path != "" and FileAccess.file_exists(_menu_review_path):
+		DirAccess.remove_absolute(_menu_review_path)
 	if image == null:
 		printerr("SCREENSHOT_FAIL: no viewport image (is this running with --headless?)")
 		return true
