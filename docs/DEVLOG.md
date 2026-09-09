@@ -34,6 +34,7 @@ below is history and should only ever be appended to.)*
 - **Conveyor splitters (DONE, both halves):** a line can fork. A `splitter` is a 1x1 buildable kind that carries product exactly like a belt tile and deals it alternately between two outputs — the tile it faces, and the tile one quarter turn clockwise from it — so one `rotate` turns both outputs together and no new command was needed. If the side that is due is blocked (or was never built) the item goes down the other one in the same tick, so a full branch never stalls the whole line and "only one output connected" needs no special case. It reaches every sink a belt's hand-off does: another belt, another splitter, a machine's inlet face, a dock. It is **drawn** as a machined diverter table set into the belt run — a bright steel plate where the rest of the line is rubber, with three open lanes and one closed rail — carrying a **next-output arrow inlaid flush in the deck**: both directions are cut into the table as grooves and one of them lights up, so which way the next item goes is a pair of positions rather than a colour, and nothing stands proud of the surface the product slides over. The arrow shows where the item will **actually** go, not the raw `next_output`: a splitter whose branch was never built reports "branch" forever while everything goes straight, and an arrow driven off that field alone would point at bare floor. Items cross a splitter drawn exactly as they cross a belt, and hover names both outputs and says "not connected" about one that was never laid.
 - **Contracts (done, both halves):** contracts are `data/contracts.ron` content and three run concurrently, each with its own mix/cadence/payout, all drawing from one shared pool of delivered stock (a box pays one contract, never two). The clipboard panel shows all of them — one paper docket card per contract on the one board, each with its own checklist, payout, countdown and delivered/missed tally, above a single shared money figure and a single "on the dock" line naming the pool they compete for.
 - **Chain rework (DONE, both halves):** the middle of the production line is **piped, not belted**, which is what a real sauce plant looks like. The mixer's output and the cooking vat's output are fluids (`recipes.ron` schema_version 3 gained `fluid_outputs`), so mix flows from the mixer to the vat and cooked ketchup from the vat to the bottler through pipe runs with no tank behind them; the bottler is where the product becomes a solid again, and the cooking vat is now the one machine on the line **no belt touches at all**. The mixer gained **sugar** as a second solid ingredient and grew to **1x2** for it — a machine accepts solid input on every tile of the edge opposite the way it points, so N solid ingredients need N tiles of inlet face or the two lanes merge onto one belt and deadlock. The aging rack is gone. **Raw ingredients cost money**: `data/ingredients.ron` prices tomato, sugar and vinegar, a `BuyIngredient` command buys them, and `SPACE`/`V` load a hopper or a tank from that bought stock — so overproduction is a real loss rather than free accumulation. On the presentation side: a hopper's contents are chosen **when it is placed** (**Q** cycles them while the ghost is up, the prompt names them in words, and the ghost carries a tinted product body), because with two raw solids the simulation can no longer infer which bin the player meant — until that landed, placing a hopper from the UI did nothing at all, silently. Buying stock has its own panel on **M** (the build menu was already as tall as the space above the hotbar allows), and a permanent larder strip above the hotbar shows what is carried so an unloadable hopper explains itself. The mixer, the cooking vat and the bottler were re-modelled with pipe nozzles where belts no longer meet them.
+- **Pipes & conveyors overhaul (in progress, 2026-09-09):** a seven-ticket Run on the `TomWhitticase/pipes-and-conveyors-overhaul` integration branch, planned in `docs/PIPES_AND_CONVEYORS_PLAN.md`. Ticket 2 (the belt model family: straights, corners, four animation frames each, a solid direction arrow) has landed on the assets side; the scene still draws the old names until ticket 5.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -49,6 +50,24 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-09 — Pipes & conveyors overhaul, ticket 2: the belt family, drawn and animated
+
+The first asset ticket of the overhaul (`docs/PIPES_AND_CONVEYORS_PLAN.md`).
+One parameterised generator now produces the whole belt family the plan
+names: a straight tile and a left and a right corner, each in four
+animation frames that differ only by the surface pattern advancing a
+quarter tile along the product path. Direction is a **solid raised yellow
+arrow** on the rubber, one per tile — a thin chevron was built first and
+the scene render showed it collapsing into an `L` under the isometric
+camera, which is now UI_UX.md §2b point 19. A corner's lane is a quarter
+annulus whose rails meet a straight's voxel for voxel, and its arrow bends
+with the belt. The belt-side junction variants (`belt_inlet`/`belt_outlet`)
+are retired — the plain tile carries the junction and the machine's hood
+does the rest — and survive only as aliases of frame 0 until ticket 5 wires
+the framed models in. The splitter's stubs lost their old cleats to match.
+`cargo test -p voxgen` grew to 15 tests; nothing under `godot_project/`
+changed.
 
 ### 2026-09-09 — The always-loaded docs were cut to a third of their size
 

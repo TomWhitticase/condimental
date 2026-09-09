@@ -165,10 +165,29 @@ DECISIONS.md Part B. There is no point 10.
 18. **A rotated placement needs no new geometry: the same mesh is spun about
     its footprint-centre origin.** The exception is point 11's junction
     art: spinning a carved +X doorway 180° puts the opening where nobody can
-    see it, visibly worse than the plain tile. So `belt_inlet`/`belt_outlet`
-    (and `pipe_inlet`) stay east-only and the other facings fall back to the
-    plain model. Known, tested, accepted; a four-directional junction pass
-    is its own art ticket.
+    see it, visibly worse than the plain tile. So `pipe_inlet` stays
+    east-only and the other facings fall back to the plain model. The belt's
+    `belt_inlet`/`belt_outlet` variants were **retired** by the pipes and
+    conveyors overhaul (point 19): the plain belt tile carries the junction
+    and the machine's own hood and doorway do the rest, at every facing.
+19. **A thin diagonal mark on the tile plane does not survive this camera;
+    a solid shape does.** The isometric view looks straight down one tile
+    diagonal, so a line along one diagonal projects to a full-length screen
+    horizontal and a line along the other to a short screen vertical: a
+    two-arm `>` chevron rendered as an `L`, and could not point anywhere at
+    any facing. The belt's direction mark is therefore a **filled** arrow
+    (wedge head, short shaft) standing one voxel proud of the rubber in
+    `hazard_yellow` (§7: a shape, in signage colour), and it reads at all
+    four facings. **Raised, not recessed**: one edge of any recess runs along
+    the sight line and shadows its own floor. Belts animate by **frames**:
+    frame `k` is the same tile with the surface pattern advanced `k` quarter
+    tiles along the path and nothing else changed; the pattern's period is
+    one tile (a shorter one makes frames coincide or run backwards). A
+    corner's surface is a quarter annulus about the tile corner between its
+    two open faces, whose pattern is stretched to a tile's worth so it
+    reaches the exit face in the same frame a straight would; its arrow
+    bends with the belt. Idlers, rails and legs are structure and never
+    move. The plain tile carries every belt-to-machine junction (point 18).
 
 ## 3. Theme & setting
 

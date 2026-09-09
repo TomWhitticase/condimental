@@ -22,6 +22,113 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-09: **Pipes & conveyors overhaul, ticket 2 of 7 (the belt model
+  family; `assets/voxels/` only, `godot_project/main.gd` deliberately
+  untouched — ticket 5 wires the models in).** The plan
+  (`docs/PIPES_AND_CONVEYORS_PLAN.md`) fixed the names, the frame scheme and
+  the corner conventions; this ticket built them and made the calls the plan
+  left open. Eight calls worth not re-litigating.
+
+  1. **One generator, twelve models.** `belt_shape(p, shape, phase)` with
+     `BeltShape::{Straight, Corner(Turn::{Left, Right})}` and `phase` in
+     `0..BELT_FRAMES` (4) is the whole family; the named `belt_f0..f3`,
+     `belt_corner_left_f0..f3` and `belt_corner_right_f0..f3` entries are a
+     macro over it, because `ASSETS` is a table of plain `fn(&Palette)`
+     pointers and a closure-per-frame would have changed every other entry
+     for nothing. `belt`, `belt_inlet` and `belt_outlet` keep generating,
+     byte-identical to `belt_f0` (pinned by a test), so the scene renders
+     unchanged until ticket 5 switches names.
+  2. **Frames differ only on the lane surface, and the test says so
+     exactly.** Frame `k` is frame 0 with every voxel in the lane at or
+     above the rubber shifted `k * BELT_FRAME_SHIFT` (8) voxels along +X,
+     modulo the tile; everything else — legs, rails, hazard stripes, idlers,
+     the return strand — is compared voxel for voxel across frames. The
+     idlers do NOT shift: on a real conveyor the belt travels and the
+     rollers stay put, and they are under the rubber in any case. The plan's
+     wording ("cleat/roller pattern") was read as "the moving surface", and
+     the surface is what moves.
+  3. **The pattern's period is one tile, so there is one arrow per tile.**
+     Four frames at a quarter tile each demand a period of exactly 32
+     voxels: the old cleats every 8 would have made all four frames
+     identical, a period of 16 makes frames 0 and 2 coincide, and any two
+     identical marks 8 or 16 voxels apart give the wagon-wheel illusion (a
+     mark that could have moved forward 8 or back 8). One mark a tile moves
+     unambiguously forward. It also means the animation is a stepped 4-frame
+     march at about 5 frames a second at sim speed — the plan's decision,
+     accepted.
+  4. **The direction mark is a solid arrow, raised, in `hazard_yellow` —
+     decided by the render.** The first cut was a thin two-arm chevron, the
+     obvious "direction chevron", and `scripts/screenshot-scene.sh
+     --closeup` showed an `L`: under the fixed `(1, 1, 1)` camera a line
+     along one tile diagonal is a full-length screen horizontal and a line
+     along the other a short screen vertical, so a 45° `>` has no facing at
+     which it reads as a `>`. A filled wedge keeps its apex from every
+     angle; that is also why the splitter's readout is a filled arrow, and
+     the shape family is now consistent. Raised one voxel rather than
+     recessed because one edge of any recess lies along the sight line and
+     shadows its own floor (the splitter's grooves get away with it because
+     their arrow is emissive). The item-overlap cost — an item drawn at the
+     surface stands one voxel into the plate — was checked in the populated
+     close-up and is a sliver under the item's foot. `hazard_yellow`
+     because it is the belt's own signage colour (the rails already wear
+     it) and UI_UX §7 lists safety yellow in the base palette, not among the
+     reserved status colours; the splitter's stubs carry no arrow at all so
+     a matte yellow mark never sits beside its lit amber one. UI_UX §2b
+     point 19 records the lesson.
+  5. **A corner is a quarter annulus about the pivot corner, centre-line
+     radius half a tile.** That makes the lane enter and leave at exactly
+     `BELT_LANE` and the curved rails meet a straight tile's rails voxel for
+     voxel at both open faces (tested), so a corner between two straights
+     is one continuous line. `Turn::Left` is fed from the plan's north face,
+     which is vox LOW Y (sim +Y is world +Z is vox -Y, the junction header's
+     rule); `Turn::Right` is built by mirroring the finished left model in
+     Y, never authored a second time. The tile's outer corner and its pivot
+     corner are bare floor by design — a curved belt on a square tile has
+     both.
+  6. **A corner's surface pattern lives in the same `(u, v)` coordinates as
+     a straight's, with `u` stretched over the quarter turn.** The arc is
+     25 voxels long on the centre line but the sim crosses it in the same 50
+     ticks as a 32-voxel straight and ticket 5's items follow the same 0..1
+     parameter, so the pattern is defined per tile-fraction, not per voxel:
+     the arrow reaches the exit face in the same frame a straight tile's
+     would, and the surface and the items on it stay in step. Length along
+     the path is in `u`, width in voxels, so the arrow is short on the
+     inside of the bend and long on the outside — it bends with the belt.
+     The corner frame test therefore checks structure equality plus the
+     circular mean of the arrow's centre-line `u` advancing 8 per frame,
+     not an exact voxel shift, which a 22.5° rotation cannot be.
+  7. **The belt-side junction variants are retired.** `belt_inlet` and
+     `belt_outlet` dressed the last tile before a machine with a static
+     steel dead-plate and kerbs. Three reasons, any one sufficient: a static
+     plate on an animated surface either freezes the pattern short of the
+     machine (a belt that visibly stops early) or has to be carved out of
+     the frame rule; point 18 already fell back to the plain tile on three
+     facings in four, so the shipped game has shown the plain tile at most
+     junctions with no complaint; and with corners a corner can be the
+     tile that meets a machine, which multiplies the variant set by three.
+     The machine-side pieces (`machine_infeed`'s hood with its brass
+     threshold, `machine_outfeed`'s doorway and lip) already bring the
+     junction to the tile boundary at `BELT_SURFACE_Z`, and the close-up of
+     the crusher's hood with a plain arrowed tile running into it confirmed
+     that they carry it. The names live on as aliases until ticket 5.
+  8. **Icons only for frame 0.** `voxicons` skips any `name_fN` with N ≥ 1:
+     an icon is a catalogue picture of a kind, and three near-identical
+     PNGs per shape would be committed for nothing to load.
+
+  Verification: `cargo test -p voxgen` grew from 9 to 15 tests (arrow on
+  every frame and pointing along the path; exact shift for straights;
+  structure + quarter-pattern advance for corners; a corner open on exactly
+  its two connected faces with a straight's rails there; every belt face
+  open above the lane; the retired aliases identical to `belt_f0`; the
+  splitter's deck at the belt's height with plain stubs). The scene was
+  rendered with `--build --populate --no-hud --closeup` for straights at
+  three facings with product on them, and once more with a temporary,
+  uncommitted `main.gd` hack drawing corner models in place of belts, which
+  is the only way to see a corner in the scene before ticket 5. **Flagged
+  for ticket 5**: re-check corners at all four facings once the scene draws
+  them for real, and the south facing of everything (the demo fixture has
+  none).
+
 - 2026-09-09: **Hopper/tank auto-fill, ticket 1 of 2 (the sim half;
   `godot_project/`, `data/` and `assets/voxels/` deliberately untouched) — a
   bin can keep itself full, and the keyboard stops being the feed
@@ -2184,6 +2291,61 @@ were only discoverable by building it:
     wrong. A machine turned away from the camera is a milder case of the
     same thing — its own doorway is still in the right place relative to its
     body, it is simply on the side you cannot see.
+
+    **Amended 2026-09-09 (the pipes and conveyors overhaul, ticket 2):** the
+    belt's `belt_inlet`/`belt_outlet` variants are retired — see point 19
+    and Part A's entry of the same date. `pipe_inlet` is unchanged by that
+    ticket.
+
+19. **A thin diagonal mark on the tile plane does not survive this camera;
+    a solid shape does (the pipes and conveyors overhaul, ticket 2).** The
+    belt family needed a direction mark that reads at a glance at all four
+    facings. The obvious mark is a chevron: two arms at 45° to the lane
+    meeting at a point, two voxels thick, in the belt's own signage yellow.
+    In the 512px preview it was a chevron. In `scripts/screenshot-scene.sh
+    --closeup` it was an `L`, on every tile, at every facing.
+
+    The reason is the camera, and it is worth stating as geometry because it
+    applies to every mark anyone draws on a horizontal surface in this
+    game: the isometric view direction is `(1, 1, 1)`, so it looks straight
+    down one of the tile's two diagonals. A line along that diagonal
+    projects to a short screen *vertical*; a line along the other diagonal
+    projects to a full-length screen *horizontal*. A `>` whose arms are the
+    two diagonals therefore becomes one long horizontal stroke and one
+    short vertical stub meeting at a corner — an `L` — and an `L` points at
+    nothing. Turning the tile does not help: whichever facing, one arm is
+    always the long one and the other the stub. No thickness fixes it either;
+    it is the arms' directions that are lost, not their width.
+
+    What survives projection is *area*. A filled wedge is a wedge from any
+    angle because its apex is its apex and its base is its base; the
+    splitter's inlaid readout is a filled arrow for the same reason, though
+    that was found by a different route (two thin arrows crossing into a
+    blob). So the belt's mark is a solid arrowhead with a short shaft,
+    sixteen voxels across the base and fourteen long, standing one voxel
+    proud of the rubber, and the close-up shows an unmistakable arrow on
+    every tile of an east-running and a west-running line side by side.
+
+    Three smaller findings from the same renders. **Raised beats recessed
+    for a mark on a running surface**: a recess is seen through its own
+    walls, and one wall always runs along the sight line and shadows the
+    floor beside it, so a recessed diagonal loses one edge entirely; a
+    plate is lit from above at every facing. **A jammed belt hides its
+    marks**: with product nose to tail only the arrow's fringe shows either
+    side of each item, which is enough to give the direction and is the
+    correct trade — the items are what the player is looking at. **The
+    item overlap is real but negligible**: an item drawn at the surface
+    height stands one voxel into a raised plate, and at scene scale that is
+    a yellow sliver under the item's foot rather than a visible clip.
+
+    Corners were checked the only way they could be before ticket 5 draws
+    them: a temporary, uncommitted edit to `main.gd` that drew the corner
+    models in place of straight belts in the demo fixture, at three
+    facings. The quarter-annulus lane, the curved striped rails and the
+    bent arrow all read as a belt turning a corner, and the bare floor at
+    the tile's outer corner and pivot corner reads as floor, not as a hole.
+    That render is not repeatable from a committed script, which is why the
+    check is flagged for ticket 5 rather than claimed as done.
 
 
 ---

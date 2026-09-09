@@ -97,6 +97,16 @@ fn which_on_path(bin: &str) -> Option<PathBuf> {
     None
 }
 
+/// `name_fN` with N >= 1 is the same asset one animation frame on (the belt
+/// family, `assets.rs`'s conveyor section). An icon is a catalogue picture
+/// of a kind, so only frame 0 gets one; rendering the rest would be three
+/// near-identical PNGs per shape that nothing ever loads.
+fn is_later_animation_frame(stem: &str) -> bool {
+    stem.rsplit_once("_f")
+        .and_then(|(_, n)| n.parse::<u32>().ok())
+        .is_some_and(|n| n >= 1)
+}
+
 fn main() {
     let root = voxels_root();
     let models_dir = root.join("models");
@@ -126,7 +136,7 @@ fn main() {
             // emitting a `pipe_fluid.liquid.png` the moment a fourth
             // material class was added in milestone 6 — exactly the drift a
             // literal list invites.
-            !stem.contains('.')
+            !stem.contains('.') && !is_later_animation_frame(stem)
         })
         .collect();
     entries.sort();

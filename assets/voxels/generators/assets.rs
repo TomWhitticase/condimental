@@ -23,12 +23,27 @@ pub struct Asset {
 
 pub const ASSETS: &[Asset] = &[
     Asset { name: "floor_tile", build: floor_tile },
+    // The belt family (the "Pipes & Conveyors Overhaul" plan's ticket 2):
+    // three shapes, `BELT_FRAMES` animation frames each, all authored for a
+    // +X product path. `belt`, `belt_inlet` and `belt_outlet` are the names
+    // the scene asks for until ticket 5 wires the framed ones in; all three
+    // are `belt_f0` (the junction variants are retired — see the conveyor
+    // section's header).
     Asset { name: "belt", build: belt },
-    // The two junction-adjacent belt variants (the "Visual overhaul round 2"
-    // epic's ticket 3). `main.gd` picks between these three per tile from the
-    // simulation's own layout — see `belt_inlet`'s doc.
     Asset { name: "belt_inlet", build: belt_inlet },
     Asset { name: "belt_outlet", build: belt_outlet },
+    Asset { name: "belt_f0", build: belt_f0 },
+    Asset { name: "belt_f1", build: belt_f1 },
+    Asset { name: "belt_f2", build: belt_f2 },
+    Asset { name: "belt_f3", build: belt_f3 },
+    Asset { name: "belt_corner_left_f0", build: belt_corner_left_f0 },
+    Asset { name: "belt_corner_left_f1", build: belt_corner_left_f1 },
+    Asset { name: "belt_corner_left_f2", build: belt_corner_left_f2 },
+    Asset { name: "belt_corner_left_f3", build: belt_corner_left_f3 },
+    Asset { name: "belt_corner_right_f0", build: belt_corner_right_f0 },
+    Asset { name: "belt_corner_right_f1", build: belt_corner_right_f1 },
+    Asset { name: "belt_corner_right_f2", build: belt_corner_right_f2 },
+    Asset { name: "belt_corner_right_f3", build: belt_corner_right_f3 },
     // Epic B's conveyor splitter and the lit arrow that says which of its two
     // outputs takes the next item. Grouped with the belts rather than with
     // the machines below because that is what a splitter is (see
@@ -134,87 +149,180 @@ pub fn floor_tile(p: &Palette) -> VoxModel {
 // ---------------------------------------------------------------------------
 // Conveyor
 // ---------------------------------------------------------------------------
+//
+// The "Pipes & Conveyors Overhaul" plan's ticket 2
+// (docs/PIPES_AND_CONVEYORS_PLAN.md). One parameterised generator produces
+// the whole belt family the plan names: a straight tile, a left corner and a
+// right corner, each in `BELT_FRAMES` animation frames. Every model is
+// authored with its product path leaving through the **+X** face and is
+// spun by Godot to the placement's facing (UI_UX.md §2b point 18), so
+// nothing in here may depend on which face the camera happens to look at —
+// every face of a belt can be the near face.
+//
+// **Animation is by frames, not UVs** (the plan's "Belt animation"). Frame
+// `k` is the same tile with its surface pattern advanced `k *
+// BELT_FRAME_SHIFT` voxels along the product path; the structure under it
+// (legs, rails, rollers, the return strand) is identical in every frame,
+// because on a real conveyor the belt moves and the idlers do not. Godot
+// shows frame `floor(tick * BELT_FRAMES / BELT_TICKS_PER_TILE) mod
+// BELT_FRAMES`, so the pattern crosses one tile in exactly the 50 ticks an
+// item does. The pattern's period along the path is therefore one tile: a
+// shorter period (the old cleats every 8 voxels) would make frames 0 and 2 —
+// or all four — identical, and a pattern that moves 8 voxels a frame with
+// features 8 or 16 apart is the wagon-wheel illusion (built and reasoned
+// through, not rendered: two marks a tile could be read as standing still
+// or running backwards). So each tile carries **one** arrow, and the
+// arrow is the cleat.
+//
+// **Direction is a shape** (UI_UX.md §7 — never colour alone): a solid
+// arrow — a wedge head and a short shaft — standing one voxel proud of the
+// rubber, in `hazard_yellow`, the same safety-signage colour the belt's
+// rails already wear. The arrow is the cleat.
+//
+// A **solid** arrow, not a two-arm chevron, and that was decided by the
+// render, not by taste (UI_UX.md §2b point 19). The first cut was a thin
+// `>` of two diagonal arms, and in the `--closeup` scene render it was an
+// `L`: the fixed isometric camera looks straight down one of the tile's
+// diagonals, so a line along one diagonal projects to a screen horizontal
+// at full length and a line along the other to a short screen vertical. A
+// 45° mark on the tile plane cannot read as a chevron from this camera at
+// any facing. A filled wedge has no lines to lose — its apex is its apex
+// from every angle — which is also why the splitter's readout is a filled
+// arrow. **Raised rather than recessed**, for the camera again: a recess
+// shows its floor only where its own wall does not shadow it, and one edge
+// of any shape always runs along the sight line; a plate is seen from
+// above at every facing. The cost is that an item drawn at
+// `BELT_SURFACE_Z + 1` stands one voxel into the plate where they overlap;
+// at scene scale that is a sliver under the item's foot (checked in the
+// `--closeup --populate` render).
+//
+// **Corners** (the plan's "Corner conventions"): a corner's running surface
+// is a quarter annulus about the tile corner between its two connected
+// faces, centre-line radius half a tile, so the lane enters and leaves at
+// exactly `BELT_LANE` and the rails meet a straight tile's rails voxel for
+// voxel. `Turn::Left` is fed from the NORTH face, which is vox **low Y**
+// (sim +Y is world +Z is vox -Y; see the junction header further down);
+// `Turn::Right` is its mirror in Y. The surface pattern on a corner lives in
+// the same `(u, v)` coordinates as on a straight — `u` runs 0..32 along the
+// path, so a quarter turn is stretched to a tile's worth of pattern and the
+// arrow reaches the exit face in the same frame a straight tile's would;
+// the sim already parameterises an item across a corner by the same 0..1
+// distance, so surface and items stay in step. The arrow's length is in
+// `u` and its width in voxels, so on the inside of the bend the head is
+// short and on the outside long: the arrow bends with the belt.
+//
+// **The belt-side junction variants are retired.** `belt_inlet` and
+// `belt_outlet` used to dress the last tile before a machine and the first
+// after it with a static steel dead-plate and kerbs. They were east-only
+// (point 18) and fell back to the plain tile on three facings out of four,
+// and a static plate on an animated surface would either freeze the pattern
+// short of the machine or have to be excluded from the frame rule; with
+// corners a corner can also be the tile that meets a machine, multiplying
+// the set again. The machine-side hood and doorway (`machine_infeed`,
+// `machine_outfeed`) already bring a threshold to the tile boundary at
+// `BELT_SURFACE_Z`, so the plain tile carries the junction. Both names keep
+// generating as byte-identical copies of `belt_f0` until ticket 5 stops
+// asking for them; `belt` itself is frame 0 for the same reason.
 
-/// One tile of rubber-belt conveyor: steel side frames and legs (shiny),
-/// brass rollers (shiny), a matte rubber running surface with cleats.
-///
-/// The metal/matte split here is the point of UI_UX.md §4 in miniature — the
-/// frame and rollers catch the light, the belt rubber does not.
+/// How many animation frames every belt shape has (the plan's
+/// `BELT_FRAMES`). `main.gd` mirrors this; change one, change both.
+pub const BELT_FRAMES: u32 = 4;
+
+/// Voxels the surface pattern advances per frame along the product path:
+/// a quarter tile, so four frames carry it exactly one tile.
+pub const BELT_FRAME_SHIFT: i32 = TILE_VOXELS as i32 / BELT_FRAMES as i32;
+
+/// The arrow cleat's top voxel: one proud of the running surface (see the
+/// section header for why raised, not recessed).
+pub const BELT_ARROW_Z: i32 = BELT_SURFACE_Z + 1;
+
+/// Where the arrow's apex sits in frame 0, in `u` (voxels along the path).
+/// Chosen so the frame-0 arrow — the one the UI icon is rendered from — is
+/// centred in its tile: it spans `u` 9..=22.
+const ARROW_APEX_U: f32 = 23.0;
+/// Length of the wedge head along the path, in `u`.
+const ARROW_HEAD_LEN: f32 = 8.0;
+/// Half-width of the wedge at its base, in voxels across the lane: the base
+/// spans `BELT_LANE` less one voxel of rubber margin each side.
+const ARROW_HEAD_HALF_WIDTH: f32 = 8.0;
+/// Length of the shaft behind the head, in `u`.
+const ARROW_SHAFT_LEN: f32 = 6.0;
+/// Half-width of the shaft, in voxels: four rows either side of the centre.
+const ARROW_SHAFT_HALF_WIDTH: f32 = 2.5;
+
+/// Which way a corner turns, named as the plan names the models. Both are
+/// authored with their output on +X; `Left` is fed from the north (vox low
+/// Y) face, `Right` from the south (vox high Y) face.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Turn {
+    Left,
+    Right,
+}
+
+/// The three belt shapes the family covers.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BeltShape {
+    Straight,
+    Corner(Turn),
+}
+
+/// Plain belt tile: frame 0 of the straight shape, under the name the scene
+/// has always asked for. Ticket 5 switches the scene to the framed names.
 pub fn belt(p: &Palette) -> VoxModel {
-    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 16]);
-    belt_body(&mut m, p);
-    m
+    belt_shape(p, BeltShape::Straight, 0)
 }
 
-/// The tile immediately **upstream of a machine** — the last belt tile before
-/// product is handed over. Distinct from a plain middle tile on purpose: this
-/// is the concrete, buildable half of the project owner's *"assets should
-/// look different depending on their orientation and what's around them"*,
-/// and a belt tile that hands off to a machine genuinely is different kit
-/// from one in the middle of a run.
-///
-/// Which tile this is comes from the simulation's own layout, never from a
-/// hardcoded "the front is -X": `main.gd` asks whether the next tile ALONG
-/// THE STAGE'S OWN TRAVEL DIRECTION (derived from `chain_layout_json`'s
-/// `belt_start_tile` -> `machine_tile`) is covered by a machine footprint.
-/// The model itself is authored for a +X run only, which is the one
-/// direction the simulation ever produces — see `sim_core/src/sim/world.rs`'s
-/// corner note, and `main.gd`'s `_belt_asset_for`, which falls back to the
-/// plain tile rather than drawing a wrong-facing end cap if that ever
-/// changes.
-///
-/// What it adds: guide rails converging toward the machine, and a bright
-/// dead-plate running out to the tile edge at exactly the height of the
-/// machine's own infeed apron ([`BELT_SURFACE_Z`]), so the two are one
-/// continuous surface across the boundary instead of two things that stop
-/// near each other.
+/// **Retired** junction variant, kept as an alias of `belt_f0` until ticket
+/// 5 stops requesting it. See the section header: the plain tile carries the
+/// junction, the machine's own hood does the rest.
 pub fn belt_inlet(p: &Palette) -> VoxModel {
-    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 16]);
-    belt_body(&mut m, p);
-    let last = TILE_VOXELS as i32 - 1;
-    let (l0, l1) = BELT_LANE;
-
-    // Transition dead-plate: no rollers under it, flush to the tile edge and
-    // exactly level with the machine's infeed apron.
-    m.cuboid((22, last), (l0, l1), (BELT_SURFACE_Z, BELT_SURFACE_Z), p.idx("steel_light"));
-    // Low guide kerbs along it. Deliberately LOW: the first version stood a
-    // full hazard-striped portal frame here, and rendered next to the
-    // machine's own infeed housing it made the junction two portals deep and
-    // a jumble of dark bars. The machine end frames the junction; the belt
-    // end should only hand over to it.
-    for y in [l0 - 1, l1 + 1] {
-        m.cuboid((22, last), (y, y), (BELT_SURFACE_Z, BELT_SURFACE_Z + 1), p.idx("steel_light"));
-    }
-    m
+    belt(p)
 }
 
-/// The tile immediately **downstream of a machine** (or of the hopper) — the
-/// belt tile a discharge lands on. The mirror of [`belt_inlet`], picked the
-/// same data-driven way.
-///
-/// What it adds: a receiving apron at the tile edge under the machine's
-/// discharge lip, and taller splash guards along the first stretch, which is
-/// the stretch a real line guards because that is where product drops rather
-/// than travels.
+/// **Retired**, as [`belt_inlet`].
 pub fn belt_outlet(p: &Palette) -> VoxModel {
-    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 16]);
-    belt_body(&mut m, p);
-    let (l0, l1) = BELT_LANE;
-
-    // Receiving plate under the machine's discharge lip, then low splash
-    // guards along the stretch product lands on rather than travels along.
-    // Kept as quiet as `belt_inlet`'s kerbs, and for the same reason.
-    m.cuboid((0, 8), (l0, l1), (BELT_SURFACE_Z, BELT_SURFACE_Z), p.idx("steel_light"));
-    for y in [l0 - 1, l1 + 1] {
-        m.cuboid((0, 8), (y, y), (BELT_SURFACE_Z, BELT_SURFACE_Z + 2), p.idx("steel_light"));
-    }
-    m
+    belt(p)
 }
 
-/// The conveyor itself, shared by all three belt assets above so a run reads
-/// as one line whatever variant a given tile draws.
-fn belt_body(m: &mut VoxModel, p: &Palette) {
+macro_rules! belt_frame_fns {
+    ($($name:ident => $shape:expr, $phase:expr;)*) => {
+        $(
+            pub fn $name(p: &Palette) -> VoxModel {
+                belt_shape(p, $shape, $phase)
+            }
+        )*
+    };
+}
+
+belt_frame_fns! {
+    belt_f0 => BeltShape::Straight, 0;
+    belt_f1 => BeltShape::Straight, 1;
+    belt_f2 => BeltShape::Straight, 2;
+    belt_f3 => BeltShape::Straight, 3;
+    belt_corner_left_f0 => BeltShape::Corner(Turn::Left), 0;
+    belt_corner_left_f1 => BeltShape::Corner(Turn::Left), 1;
+    belt_corner_left_f2 => BeltShape::Corner(Turn::Left), 2;
+    belt_corner_left_f3 => BeltShape::Corner(Turn::Left), 3;
+    belt_corner_right_f0 => BeltShape::Corner(Turn::Right), 0;
+    belt_corner_right_f1 => BeltShape::Corner(Turn::Right), 1;
+    belt_corner_right_f2 => BeltShape::Corner(Turn::Right), 2;
+    belt_corner_right_f3 => BeltShape::Corner(Turn::Right), 3;
+}
+
+/// One belt tile of `shape` at animation `phase` (`0..BELT_FRAMES`).
+pub fn belt_shape(p: &Palette, shape: BeltShape, phase: u32) -> VoxModel {
+    assert!(phase < BELT_FRAMES, "belt phase {phase} is not in 0..{BELT_FRAMES}");
+    match shape {
+        BeltShape::Straight => belt_straight(p, phase),
+        BeltShape::Corner(turn) => belt_corner(p, turn, phase),
+    }
+}
+
+/// A straight tile: the shared structure, the rubber lane, and the arrow.
+fn belt_straight(p: &Palette, phase: u32) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 16]);
     let last = TILE_VOXELS as i32 - 1;
+    let (l0, l1) = BELT_LANE;
 
     // Legs.
     for (x0, x1) in [(2, 4), (27, 29)] {
@@ -222,28 +330,174 @@ fn belt_body(m: &mut VoxModel, p: &Palette) {
             m.cuboid((x0, x1), (y0, y1), (0, 4), p.idx("steel_dark"));
         }
     }
-
+    // Return strand: the belt's lower run, between the legs. Structure, not
+    // pattern — it is what stops a side view showing bare floor under a
+    // striped rail.
+    m.cuboid((0, last), (l0 + 2, l1 - 2), (2, 2), p.idx("rubber_dark"));
     // Side frames, running the full length of the tile so consecutive tiles
     // read as one continuous line.
     for (y0, y1) in [(4, 6), (25, 27)] {
         m.cuboid((0, last), (y0, y1), (4, 8), p.idx("steel_dark"));
     }
-
-    // Hazard striping on the outer face of each frame (UI_UX.md §3).
+    // Hazard striping on the outer face of each frame (UI_UX.md §3). Both
+    // rails, because either can be the camera-facing one once the tile is
+    // turned.
     m.hazard_stripe_x((0, last), (4, 4), (5, 6), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
     m.hazard_stripe_x((0, last), (27, 27), (5, 6), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
-
-    // Rollers under the belt.
+    // Idlers under the belt. Fixed in every frame: the belt moves over
+    // them, they do not travel with it. The two nearest the faces are what
+    // shows under the rubber's end where a run stops in the open.
     for x in [4, 12, 20, 28] {
-        m.cylinder_y((x, 7), 2.5, (7, 24), p.idx("brass"));
+        m.cylinder_y((x, 7), 2.5, (l0, l1), p.idx("brass"));
     }
 
-    // Running surface + cleats.
-    m.cuboid((0, last), (7, 24), (8, 9), p.idx("rubber"));
+    // Running surface, then the arrow standing on it.
+    m.cuboid((0, last), (l0, l1), (BELT_SURFACE_Z - 1, BELT_SURFACE_Z), p.idx("rubber"));
     for x in 0..=last {
-        if x.rem_euclid(8) < 2 {
-            m.cuboid((x, x), (7, 24), (9, 9), p.idx("rubber_dark"));
+        for y in l0..=l1 {
+            let cell = straight_surface_cell(x, y).expect("lane cell");
+            if arrow_covers(&cell, phase) {
+                m.set(x, y, BELT_ARROW_Z, p.idx("hazard_yellow"));
+            }
         }
+    }
+    m
+}
+
+/// A corner tile. Built as the LEFT corner (fed from vox low Y) and
+/// mirrored in Y for the right, so the two cannot drift apart.
+fn belt_corner(p: &Palette, turn: Turn, phase: u32) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 16]);
+    let last = TILE_VOXELS as i32 - 1;
+    let (l0, l1) = BELT_LANE;
+
+    // Legs: one pair at each open face where a straight tile has its own,
+    // and one under the middle of the outer rail.
+    for (x, y) in [(27, 5), (27, 24), (5, 2), (24, 2), (12, 17)] {
+        m.cuboid((x, x + 2), (y, y + 2), (0, 4), p.idx("steel_dark"));
+    }
+    // Idlers at the two open faces, matching a straight tile's end idlers.
+    m.cylinder_y((28, 7), 2.5, (l0, l1), p.idx("brass"));
+    m.cylinder_x((3, 7), 2.5, (l0, l1), p.idx("brass"));
+
+    for x in 0..=last {
+        for y in 0..=last {
+            let (r, _) = corner_polar(x, y);
+            // Rails: the inner one hugs the pivot corner, the outer one the
+            // far corner; both meet a straight tile's rails at the faces.
+            if (4.0..7.0).contains(&r) || (25.0..28.0).contains(&r) {
+                m.cuboid((x, x), (y, y), (4, 8), p.idx("steel_dark"));
+                // Striping on the outer skin of each rail, the faces that
+                // look away from the lane.
+                if r < 5.0 || r >= 27.0 {
+                    for z in 5..=6 {
+                        let c = if (x + y + z).rem_euclid(6) < 3 { "hazard_yellow" } else { "hazard_black" };
+                        m.set(x, y, z, p.idx(c));
+                    }
+                }
+            }
+            if (9.0..23.0).contains(&r) {
+                m.set(x, y, 2, p.idx("rubber_dark"));
+            }
+            if let Some(cell) = corner_surface_cell(x, y) {
+                m.cuboid((x, x), (y, y), (BELT_SURFACE_Z - 1, BELT_SURFACE_Z), p.idx("rubber"));
+                if arrow_covers(&cell, phase) {
+                    m.set(x, y, BELT_ARROW_Z, p.idx("hazard_yellow"));
+                }
+            }
+        }
+    }
+
+    match turn {
+        Turn::Left => m,
+        Turn::Right => mirror_y(&m),
+    }
+}
+
+/// The same model reflected in Y about the tile's centre.
+fn mirror_y(m: &VoxModel) -> VoxModel {
+    let mut out = VoxModel::new(m.size);
+    let last = m.size[1] - 1;
+    for (&(x, y, z), &c) in &m.voxels {
+        out.voxels.insert((x, last - y, z), c);
+    }
+    out
+}
+
+/// Where a running-surface cell sits along and across the product path.
+///
+/// `u` runs 0..32 along the path in frame units (one voxel on a straight,
+/// a stretched quarter turn on a corner). `v` is the lateral offset of the
+/// cell centre from the lane's centre line, in voxels, positive toward vox
+/// +Y at the exit face.
+pub struct SurfaceCell {
+    pub u: f32,
+    pub v: f32,
+}
+
+/// Surface coordinates of a straight tile's cell, or `None` off the lane.
+pub fn straight_surface_cell(x: i32, y: i32) -> Option<SurfaceCell> {
+    let (l0, l1) = BELT_LANE;
+    if !(0..TILE_VOXELS as i32).contains(&x) || !(l0..=l1).contains(&y) {
+        return None;
+    }
+    Some(SurfaceCell { u: x as f32 + 0.5, v: y as f32 + 0.5 - TILE_VOXELS as f32 / 2.0 })
+}
+
+/// Polar coordinates of a cell centre about the LEFT corner's pivot, the
+/// tile corner at vox `(32, 0)`: `r` in voxels, `theta` from 0 at the
+/// entry (low-Y) face to π/2 at the exit (+X) face.
+fn corner_polar(x: i32, y: i32) -> (f32, f32) {
+    let dx = TILE_VOXELS as f32 - (x as f32 + 0.5);
+    let dy = y as f32 + 0.5;
+    ((dx * dx + dy * dy).sqrt(), dy.atan2(dx))
+}
+
+/// Surface coordinates of a LEFT corner's cell, or `None` off the lane.
+/// (The right corner is the mirror; test it through [`mirror_y`]'s
+/// inverse, which is itself.)
+pub fn corner_surface_cell(x: i32, y: i32) -> Option<SurfaceCell> {
+    let (l0, l1) = BELT_LANE;
+    let (r_in, r_out) = (l0 as f32, l1 as f32 + 1.0);
+    let (r, theta) = corner_polar(x, y);
+    if !(r_in..r_out).contains(&r) {
+        return None;
+    }
+    let quarter = std::f32::consts::FRAC_PI_2;
+    let u_per_rad = TILE_VOXELS as f32 / quarter;
+    Some(SurfaceCell { u: theta * u_per_rad, v: r - TILE_VOXELS as f32 / 2.0 })
+}
+
+/// Distance wrapped into one tile's pattern period, `-16..16`.
+fn wrap_period(d: f32) -> f32 {
+    let half = TILE_VOXELS as f32 / 2.0;
+    (d + half).rem_euclid(TILE_VOXELS as f32) - half
+}
+
+/// The arrow apex's `u` at `phase`.
+pub fn arrow_apex_u(phase: u32) -> f32 {
+    (ARROW_APEX_U + (phase as i32 * BELT_FRAME_SHIFT) as f32).rem_euclid(TILE_VOXELS as f32)
+}
+
+/// How far behind the arrow's apex a cell sits along the path, in `u`,
+/// wrapped to the pattern period (negative = ahead of the apex).
+pub fn arrow_trail_u(cell: &SurfaceCell, phase: u32) -> f32 {
+    wrap_period(arrow_apex_u(phase) - cell.u)
+}
+
+/// Does the arrow at `phase` stand on this cell? The head is a wedge that
+/// widens behind the apex — that is what makes it point the way the product
+/// goes — and the shaft a constant-width strip behind the head.
+pub fn arrow_covers(cell: &SurfaceCell, phase: u32) -> bool {
+    let trail = arrow_trail_u(cell, phase);
+    if trail < 0.0 {
+        false
+    } else if trail < ARROW_HEAD_LEN {
+        cell.v.abs() < trail / ARROW_HEAD_LEN * ARROW_HEAD_HALF_WIDTH
+    } else if trail < ARROW_HEAD_LEN + ARROW_SHAFT_LEN {
+        cell.v.abs() < ARROW_SHAFT_HALF_WIDTH
+    } else {
+        false
     }
 }
 
@@ -396,24 +650,17 @@ pub fn machine_splitter(p: &Palette) -> VoxModel {
     }
     m.cylinder_x((28, 7), 2.5, (l0, l1), p.idx("brass"));
 
-    // Running surfaces. Rubber where product travels in a straight line —
-    // the intake, the straight exit and the branch stub — with the same
-    // cleat rhythm the belt has, so the three stubs line up with whatever
-    // belt tile they are laid against.
+    // Running surfaces. Plain rubber where product travels in a straight
+    // line — the intake, the straight exit and the branch stub — at the
+    // belt's own height and lane, so the three stubs line up with whatever
+    // belt tile they are laid against. Deliberately NO arrow cleat here:
+    // the belt family's arrow says "this way", and on a splitter that is
+    // the lit arrow's job — a static yellow mark beside an amber one would
+    // be a second direction readout on the one tile that has a live one.
     for (x0, x1) in [(0, t0 - 1), (t1 + 1, last)] {
         m.cuboid((x0, x1), (l0, l1), deck, p.idx("rubber"));
-        for x in x0..=x1 {
-            if x.rem_euclid(8) < 2 {
-                m.cuboid((x, x), (l0, l1), (deck.1, deck.1), p.idx("rubber_dark"));
-            }
-        }
     }
     m.cuboid((l0, l1), (t1 + 1, last), deck, p.idx("rubber"));
-    for y in (t1 + 1)..=last {
-        if y.rem_euclid(8) < 2 {
-            m.cuboid((l0, l1), (y, y), (deck.1, deck.1), p.idx("rubber_dark"));
-        }
-    }
 
     // The diverter table itself: stainless, because it is the one part of a
     // splitter that is a mechanism rather than a surface, and it is what
@@ -2632,40 +2879,275 @@ mod tests {
     /// The junction-adjacent belt tiles must differ from a plain one, and
     /// differ at the END that faces the machine — `main.gd` picks between
     /// them per tile, so two identical models would make that choice a lie.
-    #[test]
-    fn belt_variants_differ_from_a_plain_tile_at_the_end_that_meets_a_machine() {
-        let p = palette();
-        let (plain, inlet, outlet) = (belt(&p), belt_inlet(&p), belt_outlet(&p));
-        let last = TILE_VOXELS as i32 - 1;
-        let mid = (BELT_LANE.0 + BELT_LANE.1) / 2;
+    // ----- the belt family (the "Pipes & Conveyors Overhaul" plan's ticket 2)
 
-        assert!(inlet.voxels.len() > plain.voxels.len(), "belt_inlet adds nothing");
-        assert!(outlet.voxels.len() > plain.voxels.len(), "belt_outlet adds nothing");
-        // The hand-over plate reaches the shared tile edge on the machine side.
-        assert!(inlet.filled(last, mid, BELT_SURFACE_Z), "belt_inlet's dead-plate stops short");
-        assert!(outlet.filled(0, mid, BELT_SURFACE_Z), "belt_outlet's receiving plate stops short");
-        // ... and neither dresses the end it does NOT meet a machine at.
-        assert!(!inlet.filled(0, BELT_LANE.0 - 1, BELT_SURFACE_Z + 1), "belt_inlet dressed its upstream end");
-        assert!(!outlet.filled(last, BELT_LANE.0 - 1, BELT_SURFACE_Z + 1), "belt_outlet dressed its downstream end");
+    fn belt_shapes() -> [(&'static str, BeltShape); 3] {
+        [
+            ("belt", BeltShape::Straight),
+            ("belt_corner_left", BeltShape::Corner(Turn::Left)),
+            ("belt_corner_right", BeltShape::Corner(Turn::Right)),
+        ]
     }
 
-    /// The delivery dock's own face, which the belt-junction rules above
-    /// deliberately skip (a dock has no outfeed — product leaves the world
-    /// there). Four things have to hold, and none of them are visible in a
-    /// screenshot at scene scale:
-    ///
-    ///  * the model really is 2x2 tiles wide (`data/machines.ron`'s
-    ///    footprint and this model's size are coupled — UI_UX.md §2b — so a
-    ///    footprint change with no model change would ship a dock covering a
-    ///    quarter of its own tiles);
-    ///  * the deck is solid right out to the +X footprint edge, so the
-    ///    platform reads as a platform rather than as a machine with a lip;
-    ///  * it is level with the belt that feeds it, so a case arriving does
-    ///    not step up or down at the tile boundary;
-    ///  * **both** despatch openings in the far wall are genuinely EMPTY
-    ///    holes with a back wall behind them — a dark rectangle painted on
-    ///    the wall would mesh flat and render as a sticker, which is the
-    ///    same distinction the junction tests above exist for.
+    /// Surface coordinates for any shape's cell, undoing the right corner's
+    /// mirror so both corners are judged in the left corner's frame.
+    fn surface_cell(shape: BeltShape, x: i32, y: i32) -> Option<SurfaceCell> {
+        let last = TILE_VOXELS as i32 - 1;
+        match shape {
+            BeltShape::Straight => straight_surface_cell(x, y),
+            BeltShape::Corner(Turn::Left) => corner_surface_cell(x, y),
+            BeltShape::Corner(Turn::Right) => corner_surface_cell(x, last - y),
+        }
+    }
+
+    /// The arrow's cells in a frame: everything standing at `BELT_ARROW_Z`.
+    fn arrow_cells(m: &VoxModel) -> std::collections::BTreeSet<(i32, i32)> {
+        m.voxels
+            .keys()
+            .filter(|&&(_, _, z)| z as i32 == BELT_ARROW_Z)
+            .map(|&(x, y, _)| (x as i32, y as i32))
+            .collect()
+    }
+
+    #[test]
+    fn every_belt_frame_carries_an_arrow_on_its_surface_pointing_along_the_path() {
+        let p = palette();
+        let yellow = p.idx("hazard_yellow");
+        for (name, shape) in belt_shapes() {
+            for phase in 0..BELT_FRAMES {
+                let m = belt_shape(&p, shape, phase);
+                let cells = arrow_cells(&m);
+                assert!(cells.len() >= 60, "{name} f{phase}: arrow has only {} cells", cells.len());
+                let (mut apex_cells, mut base_cells) = (0, 0);
+                for &(x, y) in &cells {
+                    assert_eq!(
+                        m.voxels.get(&(x as u32, y as u32, BELT_ARROW_Z as u32)),
+                        Some(&yellow),
+                        "{name} f{phase}: arrow cell {x},{y} is not the signage colour"
+                    );
+                    assert!(
+                        m.filled(x, y, BELT_SURFACE_Z),
+                        "{name} f{phase}: arrow cell {x},{y} floats — nothing under it at the running height"
+                    );
+                    let cell = surface_cell(shape, x, y)
+                        .unwrap_or_else(|| panic!("{name} f{phase}: arrow cell {x},{y} is off the lane"));
+                    // Pointing along the path means: no cell is ahead of the
+                    // apex, and the head only widens as it trails behind it.
+                    let trail = arrow_trail_u(&cell, phase);
+                    assert!(trail >= 0.0, "{name} f{phase}: arrow cell {x},{y} is ahead of the apex — it points backwards");
+                    assert!(
+                        trail < ARROW_HEAD_LEN + ARROW_SHAFT_LEN,
+                        "{name} f{phase}: arrow cell {x},{y} trails further than the arrow is long"
+                    );
+                    if trail < ARROW_HEAD_LEN {
+                        assert!(
+                            cell.v.abs() <= trail / ARROW_HEAD_LEN * ARROW_HEAD_HALF_WIDTH + 1e-3,
+                            "{name} f{phase}: arrow cell {x},{y} is wider than the wedge allows this close to the apex"
+                        );
+                    } else {
+                        assert!(cell.v.abs() < ARROW_SHAFT_HALF_WIDTH + 1e-3, "{name} f{phase}: shaft cell {x},{y} is off the shaft");
+                    }
+                    if trail <= 2.0 {
+                        apex_cells += 1;
+                    }
+                    if cell.v.abs() >= ARROW_HEAD_HALF_WIDTH - 1.5 {
+                        base_cells += 1;
+                    }
+                }
+                assert!(apex_cells >= 1, "{name} f{phase}: the arrow has no apex on the centre line");
+                assert!(base_cells >= 2, "{name} f{phase}: the wedge never reaches its full width — it is not a wedge");
+                // Nothing but the arrow stands above the running surface
+                // anywhere on the lane.
+                for &(x, y, z) in m.voxels.keys() {
+                    let (x, y, z) = (x as i32, y as i32, z as i32);
+                    if surface_cell(shape, x, y).is_some() {
+                        assert!(z <= BELT_ARROW_Z, "{name} f{phase}: something stands in the lane at {x},{y},{z}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_four_frames_of_a_straight_belt_differ_only_by_the_phase_shift() {
+        let p = palette();
+        let frames: Vec<VoxModel> = (0..BELT_FRAMES).map(|k| belt_shape(&p, BeltShape::Straight, k)).collect();
+        let tile = TILE_VOXELS as i32;
+        let (l0, l1) = BELT_LANE;
+        let on_lane = |x: i32, y: i32, z: i32| (l0..=l1).contains(&y) && z >= BELT_SURFACE_Z - 1 && x < tile;
+        for (k, frame) in frames.iter().enumerate() {
+            let shift = k as i32 * BELT_FRAME_SHIFT;
+            for x in 0..tile {
+                for y in 0..tile {
+                    for z in 0..16 {
+                        let expected = if on_lane(x, y, z) {
+                            frames[0].voxels.get(&(((x - shift).rem_euclid(tile)) as u32, y as u32, z as u32))
+                        } else {
+                            frames[0].voxels.get(&(x as u32, y as u32, z as u32))
+                        };
+                        assert_eq!(
+                            frame.voxels.get(&(x as u32, y as u32, z as u32)),
+                            expected,
+                            "belt f{k}: voxel {x},{y},{z} is not frame 0 shifted by {shift}"
+                        );
+                    }
+                }
+            }
+        }
+        for a in 0..frames.len() {
+            for b in (a + 1)..frames.len() {
+                assert_ne!(frames[a].voxels, frames[b].voxels, "belt f{a} and f{b} are the same model");
+            }
+        }
+    }
+
+    #[test]
+    fn the_four_frames_of_a_corner_share_a_structure_and_advance_the_arrow_a_quarter_pattern() {
+        let p = palette();
+        for turn in [Turn::Left, Turn::Right] {
+            let shape = BeltShape::Corner(turn);
+            let frames: Vec<VoxModel> = (0..BELT_FRAMES).map(|k| belt_shape(&p, shape, k)).collect();
+            let structure = |m: &VoxModel| -> Vec<((u32, u32, u32), u8)> {
+                m.voxels.iter().filter(|&(&(_, _, z), _)| (z as i32) < BELT_ARROW_Z).map(|(&k, &c)| (k, c)).collect()
+            };
+            let mut apexes = Vec::new();
+            for (k, frame) in frames.iter().enumerate() {
+                assert_eq!(structure(frame), structure(&frames[0]), "{turn:?} corner f{k}: structure differs from f0");
+                // Where the arrow actually stands, read back off the voxels:
+                // the circular mean of its centre-line cells' `u` (circular
+                // because a frame can straddle the tile edge).
+                let (mut sx, mut sy, mut n) = (0.0f32, 0.0f32, 0);
+                for c in arrow_cells(frame).into_iter().filter_map(|(x, y)| surface_cell(shape, x, y)) {
+                    if c.v.abs() < 1.0 {
+                        let a = c.u / TILE_VOXELS as f32 * std::f32::consts::TAU;
+                        sx += a.cos();
+                        sy += a.sin();
+                        n += 1;
+                    }
+                }
+                assert!(n > 0, "{turn:?} corner f{k}: no centre-line cells");
+                apexes.push(sy.atan2(sx) / std::f32::consts::TAU * TILE_VOXELS as f32);
+            }
+            for k in 1..frames.len() {
+                let advance = (apexes[k] - apexes[k - 1] + 16.0).rem_euclid(32.0) - 16.0;
+                assert!(
+                    (advance - BELT_FRAME_SHIFT as f32).abs() < 2.0,
+                    "{turn:?} corner f{k}: arrow advanced {advance} u, not {BELT_FRAME_SHIFT}"
+                );
+            }
+            for a in 0..frames.len() {
+                for b in (a + 1)..frames.len() {
+                    assert_ne!(arrow_cells(&frames[a]), arrow_cells(&frames[b]), "{turn:?} corner f{a} and f{b} share an arrow");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_corner_is_open_on_exactly_its_two_connected_faces() {
+        let p = palette();
+        let last = TILE_VOXELS as i32 - 1;
+        let (l0, l1) = BELT_LANE;
+        for turn in [Turn::Left, Turn::Right] {
+            // The plan: output on +X; Left is fed from the north (vox low
+            // Y) face, Right from the south (vox high Y) face.
+            let entry_y = match turn {
+                Turn::Left => 0,
+                Turn::Right => last,
+            };
+            let closed_y = last - entry_y;
+            for phase in 0..BELT_FRAMES {
+                let m = belt_shape(&p, BeltShape::Corner(turn), phase);
+                let name = format!("{turn:?} corner f{phase}");
+                for i in 0..=last {
+                    let in_lane = (l0..=l1).contains(&i);
+                    // Exit face (+X) and entry face carry the lane at the
+                    // belt's running height, exactly BELT_LANE wide, with
+                    // nothing standing in it.
+                    assert_eq!(m.filled(last, i, BELT_SURFACE_Z), in_lane, "{name}: +X face lane wrong at y = {i}");
+                    assert_eq!(m.filled(i, entry_y, BELT_SURFACE_Z), in_lane, "{name}: entry face lane wrong at x = {i}");
+                    for z in (BELT_ARROW_Z + 1)..16 {
+                        assert!(!m.filled(last, i, z), "{name}: +X face blocked at y = {i}, z = {z}");
+                        assert!(!m.filled(i, entry_y, z), "{name}: entry face blocked at x = {i}, z = {z}");
+                    }
+                    // The other two faces carry no belt at all.
+                    for z in 0..16 {
+                        assert!(!m.filled(0, i, z), "{name}: the -X face is not closed at y = {i}, z = {z}");
+                        assert!(!m.filled(i, closed_y, z), "{name}: the closed Y face is not closed at x = {i}, z = {z}");
+                    }
+                }
+                // Rails meet a straight tile's rails voxel for voxel at
+                // both open faces.
+                let straight = belt(&p);
+                for i in 0..=last {
+                    for z in 4..=8 {
+                        assert_eq!(
+                            m.filled(last, i, z),
+                            straight.filled(last, i, z),
+                            "{name}: +X face differs from a straight belt at y = {i}, z = {z}"
+                        );
+                        assert_eq!(
+                            m.filled(i, entry_y, z),
+                            straight.filled(last, i, z),
+                            "{name}: entry face differs from a straight belt's face at x = {i}, z = {z}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_belt_tile_is_open_above_its_lane_at_both_faces() {
+        let p = palette();
+        let last = TILE_VOXELS as i32 - 1;
+        let (l0, l1) = BELT_LANE;
+        for phase in 0..BELT_FRAMES {
+            let m = belt_shape(&p, BeltShape::Straight, phase);
+            for y in l0..=l1 {
+                for x in [0, last] {
+                    assert!(m.filled(x, y, BELT_SURFACE_Z), "belt f{phase}: lane stops short at x = {x}, y = {y}");
+                    for z in (BELT_ARROW_Z + 1)..16 {
+                        assert!(!m.filled(x, y, z), "belt f{phase}: face blocked at x = {x}, y = {y}, z = {z}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_retired_junction_variants_are_frame_zero_of_the_plain_belt() {
+        let p = palette();
+        let f0 = belt_f0(&p);
+        assert_eq!(belt(&p).voxels, f0.voxels, "`belt` is not frame 0");
+        assert_eq!(belt_inlet(&p).voxels, f0.voxels, "`belt_inlet` still dresses the tile");
+        assert_eq!(belt_outlet(&p).voxels, f0.voxels, "`belt_outlet` still dresses the tile");
+    }
+
+    #[test]
+    fn the_splitters_deck_sits_at_the_belts_running_height_with_plain_rubber_stubs() {
+        let p = palette();
+        let m = machine_splitter(&p);
+        let belt = belt(&p);
+        let (l0, l1) = BELT_LANE;
+        let last = TILE_VOXELS as i32 - 1;
+        let rubber = p.idx("rubber");
+        // Intake stub: rubber at exactly the belt's height and lane, and
+        // no cleat pattern of its own.
+        for x in 0..=3 {
+            for y in l0..=l1 {
+                assert_eq!(m.voxels.get(&(x, y as u32, BELT_SURFACE_Z as u32)), Some(&rubber), "splitter intake at {x},{y} is not plain rubber");
+                assert!(!m.filled(x as i32, y, BELT_ARROW_Z), "splitter intake carries an arrow cleat at {x},{y}");
+            }
+        }
+        // Rails identical to the belt's on the -X face.
+        for y in 0..=last {
+            for z in 4..=8 {
+                assert_eq!(m.filled(0, y, z), belt.filled(0, y, z), "splitter -X face differs from a belt at y = {y}, z = {z}");
+            }
+        }
+    }
+
     #[test]
     fn the_docks_deck_is_solid_out_to_the_platform_edge() {
         let p = palette();
