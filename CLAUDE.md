@@ -527,6 +527,133 @@ it's gone stale.
   v1 is whatever this batch merges with; after that, a field addition is a
   version bump like any other shape change.
 
+- 2026-09-09: **A tuning pass on three directly-requested things after a
+  positive playtest — the crusher's process time, the delivery dock's
+  footprint, and the size of the whole UI.** The three are independent; what
+  they share is that every one of them came off someone actually playing the
+  game rather than off a design doc. Seven calls worth not re-litigating.
+
+  (1) **The crusher takes 80 ticks, not 60, and the ORDERING of the three
+  front-end process times is the load-bearing claim.** At 60 the crush read
+  as instant next to the mixer's 90 and the vat's 240 — a stage the player
+  never sees working is a stage that does not look like it is doing
+  anything. 80 is deliberately still under the mixer, because
+  `data/recipes.ron`'s header, `data/machines.ron`'s cooking-vat note and
+  this log's own 2026-09-07 "Machines improvement ticket 2" entry all state
+  in words that crushing is the quickest of the three and the cook the
+  slowest; a number that inverted that would make three sentences false
+  in three files. So the rule is written down where the numbers are:
+  **change the numbers and the words together or not at all** (the cook is
+  3x the crush now, not 4x, and every file that said 4x says 3x). Keeping
+  the crusher faster than the stage it feeds also keeps the line's
+  bottleneck at the vat, where it was designed to be. `recipes.ron`'s
+  `schema_version` did NOT move: content changed, shape did not, which is
+  the rule the 2026-09-07 entry already recorded.
+
+  (2) **One economy test was calibrated on the old timing rather than on its
+  own claim, and that is worth knowing about the suite generally.**
+  `one_delivered_unit_pays_one_contract...` said "ship exactly one unit,
+  then stop feeding the line entirely" — but the line is still full of
+  in-flight product when the first box lands, so it goes on shipping for a
+  long while afterwards, and whether a *second* box beat the settle boundary
+  turned out to be a function of every process time in `data/recipes.ron`.
+  It passed at 60 by luck. It now **removes the dock** after the first unit
+  ships, through an ordinary player command, which makes "exactly one unit
+  is ever collected" true by construction. The general lesson: a fixture
+  that stops *supplying* a factory has not stopped the factory.
+
+  (3) **The delivery dock is 2x2, and the extra tile is spent on DEPTH.**
+  The playtest was blunt — it did not read as a loading dock — and it did
+  not: every piece that makes a loading bay legible (a raised deck a trailer
+  backs up to, a striped edge, bumpers, a despatch door under a canopy, and
+  clear apron for the goods waiting to go out) was competing for one
+  32-voxel tile, which is also why the stack of cases on its deck had to be
+  capped at two. **2x2 rather than 2x1** because UI_UX.md §2b point 16's
+  rule for this camera is "height at high y, content at low y": a dock twice
+  as wide and still one row deep would leave the despatch structure and the
+  goods fighting for the same row, buying width the layout does not need and
+  none of the depth it does. The far tile is the building now, the near tile
+  is open apron. Two things fall out that are not decoration — its inlet
+  face is **two tiles long**, so two lines can deliver into one dock (the
+  same rule that made the mixer 1x2, arriving at the other end of the line),
+  and a **square** footprint claims the same four tiles whichever way it is
+  turned, which matters most for the building at the END of a line where a
+  player turning it to meet a belt from another direction should not
+  discover the tile behind it is no longer free. The 1x1 argument that
+  survives is the one about the BUFFER ("a bay, not a warehouse", 32 units,
+  a pass-through anyway) — buffer size was simply the wrong thing to size a
+  footprint by.
+
+  (4) **Its price did not move with its footprint.** 70, unchanged, and
+  stated in `data/shop.ron` rather than left to be re-derived: price there
+  tracks what a building DOES for the player, not how many tiles it claims.
+  Only the infrastructure group is priced per tile, and the 2x2 cooking vat
+  costs 200 for the process it runs rather than for its four tiles; a dock
+  does no work at all and is still exactly one door out of the factory
+  however much apron stands round it. The extra tiles are already a real
+  cost in the currency a factory-builder actually feels, which is floor
+  space. Keeping it also leaves `sim_core/tests/shop.rs`'s starting-money-
+  against-the-bill relationship undisturbed.
+
+  (5) **The model was re-laid at 64x64, not stretched, and the despatch wall
+  had to stop short of the west corner.** Two transfer housings (one per
+  inlet tile, because a model with one would describe a mechanism narrower
+  than the simulation's), two despatch openings under one continuous canopy,
+  a bay light over each, and expansion joints scored along the tile
+  boundaries so a 64-wide slab does not read as one blank table. The
+  non-obvious bit, found by a failing voxel test rather than by eye: the FAR
+  tile's infeed hood occupies the same corner the wall wanted, and a wall
+  drawn through it is a building with a belt hood carved out of its end and
+  daylight showing through the hole — so the wall starts east of that
+  corner, which is also what a real bay looks like (the conveyor comes in at
+  the end of the building, not through the middle). The deck's waiting stock
+  is a **2x2 block of four** pallet positions now rather than a row of two:
+  the cap existed because four cases buried a one-tile building, and that
+  reason is gone.
+
+  (6) **The UI is half again as big, and the mechanism is explicit constants
+  rather than Godot's `content_scale_factor`.** The report was that the UI
+  is "much" too small and "difficult to read"; the body font had been 15px
+  since milestone 5's plain money label and roughly two dozen pixel literals
+  had accumulated around it. `main.gd` now has exactly two numbers —
+  `UI_SCALE` (1.5) and `UI_FONT_BASE` (15) — and four helpers
+  (`_ui_px`/`_ui_i`/`_ui_v`/`_ui_font`) that every font size, padding,
+  border, separation, icon square and slot size goes through. The engine's
+  own scale knob is one line and was rejected for a specific reason: this
+  scene maps 3D to screen coordinates in half a dozen places — the hover
+  tooltip at the mouse, the ghost prompt through `unproject_position`, the
+  hotbar tooltip over its slot, right-drag pan deltas — and every one of
+  them would then need the factor divided back out, in exchange for nothing
+  the constants do not already give. Scaling the numbers also keeps the
+  headless tests that assert pixel sizes meaningful.
+
+  (7) **Half again does not fit a 1280x720 window unchanged, and what gave
+  way was layout rather than type size.** The build menu is six columns of
+  two rows with a shorter card (its hotkey digit moved into the button's
+  corner, the way the hotbar socket's already was, and the "right-click to
+  hold" affordance moved to the footer that already said it — in the card it
+  wrapped onto a second row, which cost the whole grid a row it does not
+  have). All three panels put their heading and their balance on one line.
+  The control legend is four grouped lines instead of two run-on ones,
+  because at this size the old first line ran off the window and under the
+  clipboard. The clipboard's docket stack and the build menu's grid now cap
+  themselves against the space **actually left above the hotbar**, measured
+  once in `_hotbar_reserved_height()` so no two panels can disagree about
+  where the usable screen ends — replacing the clipboard's old fixed
+  fraction of window height, which at this scale reached down across the
+  larder. **Flagged, and a deliberate last resort:** at `project.godot`'s own
+  1280x720 the build-menu grid scrolls, by one part of a row; at the
+  1600x900 `scripts/screenshot-scene.sh` reviews at, and anything taller,
+  nothing scrolls at all. Of the two ways to lose that fight, a grid that
+  scrolls a little is much better than a menu whose footer disappears under
+  the hotbar, which is the exact failure `_position_shop_menu` was written
+  to prevent. One more thing that would not fit: the **hotbar socket takes
+  0.88 of the scale**, not all of it, because twelve of them plus
+  separations plus the plate's margins have to fit a 1280-wide window —
+  84px, a third bigger than the 64 it was. That is the same headroom the
+  `SHOP_HOTKEY_SLOTS` note already flags as something a longer catalog will
+  have to solve properly.
+
 - 2026-09-08: **The chain rework, ticket 2 of 2 (the Godot/assets half;
   `sim_core/src/sim/` touched in exactly one place, see (1)) — the piped
   middle, drawn, and the hopper finally placeable.** Ticket 1 left `main`
@@ -1708,7 +1835,10 @@ it's gone stale.
   stage east by one tile; height claims a second row) — anything bigger would
   dwarf the belts feeding it. (2) **Process times track the work**: crushing
   is the quickest step, the cook is 4x it, so the line has a real bottleneck
-  and the biggest machine is visibly the slow one. (3) **The fluid
+  and the biggest machine is visibly the slow one. *(The 2026-09-09 tuning
+  pass raised the crush from 60 to 80, so the cook is 3x it now — the
+  ORDERING this sentence is really about is unchanged, and is now written
+  down as a rule in `data/recipes.ron`'s own header.)* (3) **The fluid
   requirement moved from the cooked stage to the mixing stage**, which is
   where a real line adds vinegar; this needed no Rust change at all, because
   `World` builds its pipe run for "whichever recipe declares `fluid_inputs`"

@@ -306,8 +306,25 @@ were only discoverable by building it:
     as a gap, it is read as a white shelf floating in front of a blue wall;
     it is integral with the wall's head now.
 
+    **Updated 2026-09-09: the dock is 2x2, and the corollary above is why.**
+    A playtest said the one-tile version did not read as a loading dock, and
+    it did not — everything above was true of it and all of it was crammed
+    into one 32-voxel tile, which is also why the goods standing on the deck
+    had to be capped at two cases. The extra tile went into DEPTH rather
+    than width for exactly the rule this point states: the far tile is the
+    building (despatch wall, two doors, one continuous canopy, a bay light
+    over each door) and the near tile is open apron. A dock twice as wide
+    and still one row deep would have left the height and the content
+    fighting for the same row. One new wrinkle the bigger model turned up,
+    worth knowing before drawing any multi-tile building: **a machine's
+    infeed hood claims the corner of its own tile, and a wall drawn through
+    it is a hole in the building** — the far tile's hood and the despatch
+    wall wanted the same corner, and the wall now starts east of it, which
+    is also what a real bay looks like (the conveyor comes in at the end of
+    the building, not through the middle).
+
 17. **What stands on the dock is drawn from the pool, not from the dock —
-    and it is capped at two.** The dock's own buffer is a pass-through that
+    and it is capped (at four since the dock became 2x2; two before that).** The dock's own buffer is a pass-through that
     empties every tick (`sim_core::sim::dock`), so a fill gauge driven from
     it would read zero forever: the same gauge-lies-about-the-mechanism
     failure the fluid tank refused when it chose constant head over its own
@@ -317,11 +334,16 @@ were only discoverable by building it:
     with the item's own model, through the same `ITEM_MODELS` table the belt
     uses, so what waits on the dock looks like what arrived on it.
 
-    The cap is two because the deck is one tile and a case is a third of it:
-    a rendered four-slot version buried the transfer housing, the despatch
-    door and the canopy under a wall of cardboard. This is a glance-readable
-    "goods are waiting", not a readout — the exact figure is on the clipboard
-    and in the dock's own hover, neither of which is capped.
+    The cap was two because the deck was one tile and a case is a third of
+    it: a rendered four-slot version buried the transfer housing, the
+    despatch door and the canopy under a wall of cardboard. **That reason
+    went away with the 2026-09-09 footprint change** (point 16), which left
+    the whole near tile clear, so it is a two-by-two block of four pallet
+    positions now, standing in front of the building rather than on top of
+    it. The cap itself stays, and so does what it is for: this is a
+    glance-readable "goods are waiting", not a readout — the exact figure is
+    on the clipboard and in the dock's own hover, neither of which is
+    capped.
 
 18. **A rotated placement needs no new geometry — and the junction art is the
     one thing that does not survive the rotation (the "Real Placement" epic's
@@ -474,7 +496,65 @@ the row into visual noise; it is nearly opaque now, like the build menu's own
 plate. And the build menu, centred in the viewport, grew tall enough to reach
 the strip and buried **its own footer** — the one line that explains buying —
 under it; the menu is centred in the space *above* the hotbar now, and went
-from three columns to four so it fits there.
+from three columns to four so it fits there. *(Four became six with the
+2026-09-09 UI-scale pass — §5c — for the same reason: a bigger card in the
+same space.)*
+
+### 5c. Scale: how big the UI is, and the one number that says so
+
+Added by the 2026-09-09 tuning pass, and it started as a report from playing
+the game rather than as a design idea: the UI was "much" too small and
+"difficult to read". It was. The body font had been 15px since the plain
+money label milestone 5 shipped, and every panel, slot, icon square and
+margin added since had been sized against it by eye — a couple of dozen
+separate literals, none of them wrong on their own and none of them
+adjustable together.
+
+**Everything is now measured in two numbers** (`main.gd`'s `UI_SCALE`, 1.5,
+and `UI_FONT_BASE`, 15). Font sizes are stated as offsets from the base, so
+the type hierarchy designed at 15px — money biggest, a docket's cadence
+footnote smallest — is re-derived at whatever scale is in force rather than
+re-tuned. Chrome multiplies through the same knob. The next adjustment is
+one number, which is the point.
+
+**Explicit constants, not the engine's `content_scale_factor`.** Godot's own
+knob is one line and scales every CanvasItem uniformly, Minecraft-GUI-scale
+style, and it was rejected for a specific reason rather than on taste: this
+scene maps 3D to screen coordinates in half a dozen places — the hover
+tooltip at the mouse, the build-mode prompt anchored through
+`unproject_position`, the hotbar tooltip over its slot, right-drag pan
+deltas — and every one of them would then need the factor divided back out.
+Scaling the numbers keeps input and rendering in one coordinate space and
+keeps the headless tests that assert pixel sizes meaningful.
+
+**What a scale change actually costs is LAYOUT, and that is the lesson worth
+keeping.** Half again did not fit `project.godot`'s own 1280x720 window, and
+none of what gave way was type size:
+
+- the build menu went from four columns to six, with a shorter card — its
+  hotkey digit moved into the button's corner (where the hotbar socket's
+  already was) and the "right-click to hold" affordance moved to the footer
+  that already said it, because in the card it wrapped onto a second row and
+  cost the whole grid a row;
+- all three panels put their heading and their balance on one line;
+- the control legend became four grouped lines instead of two run-on ones,
+  because the old first line ran off the window and under the clipboard;
+- the contract clipboard's docket stack and the build menu's grid now cap
+  themselves against the space **actually left above the hotbar**, measured
+  in one place so no two panels can disagree about where the usable screen
+  ends — replacing a fixed fraction of window height that at this scale
+  reached down across the larder strip;
+- and the hotbar socket takes 0.88 of the scale rather than all of it,
+  because twelve of them plus separations have to fit the window's width.
+
+One thing is a deliberate last resort and is recorded as such: at 1280x720
+the build-menu grid scrolls, by about a third of a row. At 1600x900 — the
+resolution `scripts/screenshot-scene.sh` reviews at — and anything taller,
+nothing scrolls. Of the two ways to lose that fight, a grid that gives up a
+sliver is much better than a menu whose footer disappears under the hotbar,
+which is the exact failure the menu's positioning was written to prevent.
+
+---
 
 ## 6. Feedback, motion & animation
 

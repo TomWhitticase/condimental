@@ -78,6 +78,47 @@ Godot decides what file it becomes, because `user://` is Godot's.
 
 The main menu, save slots, autosave and an in-game way out are ticket 2.
 
+### 2026-09-09 — A tuning pass: a slower crusher, a dock that reads as a dock, and a UI you can read
+
+Three directly-requested changes after a positive playtest, all of them
+things you only find by playing.
+
+**The crusher takes 80 ticks instead of 60.** At 60 the crush read as
+instant beside the mixer's 90 and the vat's 240 — a stage you never see
+working. 80 keeps it the quickest of the three front-end stages and keeps
+it out-producing the mixer it feeds, so the line's bottleneck stays at the
+vat. The ordering of those three times is stated in words in three
+different files, so the rule now lives in `data/recipes.ron`'s header:
+change the numbers and the words together or not at all.
+
+**The delivery dock is 2x2.** It did not read as a loading dock at one
+tile, and it could not: the raised deck, the striped edge, the bumpers, the
+despatch door under its canopy and the apron for goods waiting to go out
+were all competing for one 32-voxel tile — which is also why the stack of
+cases on it had to be capped at two. The extra tile is spent on depth
+rather than on making the old design bigger, because on this camera
+anything tall has to stand on the far row: the far tile is the building
+now, the near tile is open apron with room for four cases. Two real
+consequences beyond how it looks — its inlet face is two tiles long, so
+two lines can deliver into one dock, and a square footprint claims the same
+tiles whichever way it is turned, which is what you want of the building at
+the end of a line. Its price deliberately did not move with it.
+
+**The UI is half again as big.** The report was that it is "much" too small
+and "difficult to read", and it was — the body font had been 15px since
+milestone 5 and a couple of dozen pixel literals had grown up around it.
+There are two numbers now, `UI_SCALE` and `UI_FONT_BASE`, and everything
+else is derived from them; explicit constants rather than the engine's own
+scale knob, because this scene maps 3D to screen coordinates in half a
+dozen places that would all then need the factor taken back out. Half again
+does not fit a 1280x720 window unchanged, so the build menu became six
+columns of two shorter cards, all three panels put their heading and
+balance on one line, the control legend became four grouped lines, and the
+clipboard and the build grid now size themselves against the space actually
+left above the hotbar rather than against a guessed fraction of the window.
+At 1600x900 nothing scrolls; at 720 the build grid gives up a sliver, which
+is much better than a menu whose footer hides under the hotbar.
+
 ### 2026-09-09 — SPACE and V say why, instead of doing nothing
 
 More real playtesting fallout: with a hopper's item choice and raw-ingredient
