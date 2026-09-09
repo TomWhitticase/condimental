@@ -641,13 +641,19 @@ it's gone stale.
   once in `_hotbar_reserved_height()` so no two panels can disagree about
   where the usable screen ends — replacing the clipboard's old fixed
   fraction of window height, which at this scale reached down across the
-  larder. **Flagged, and a deliberate last resort:** at `project.godot`'s own
-  1280x720 the build-menu grid scrolls, by one part of a row; at the
-  1600x900 `scripts/screenshot-scene.sh` reviews at, and anything taller,
-  nothing scrolls at all. Of the two ways to lose that fight, a grid that
-  scrolls a little is much better than a menu whose footer disappears under
-  the hotbar, which is the exact failure `_position_shop_menu` was written
-  to prevent. One more thing that would not fit: the **hotbar socket takes
+  larder. **Flagged, and a deliberate last resort:** at 1280x720 the
+  build-menu grid scrolls, by one part of a row; at the 1600x900
+  `scripts/screenshot-scene.sh` reviews at, and anything taller, nothing
+  scrolls at all. Of the two ways to lose that fight, a grid that scrolls a
+  little is much better than a menu whose footer disappears under the
+  hotbar, which is the exact failure `_position_shop_menu` was written to
+  prevent. **At merge the coordinator moved `project.godot`'s default window
+  from 1280x720 to 1600x900** for exactly that reason: a rendered 720-tall
+  frame showed the grid's second row cut mid-card, which reads as clipping
+  however it is documented, and 1600x900 is the size every review frame in
+  this project has been judged at anyway. It fits a 16" MacBook's
+  1728x1117-logical display with the title bar. Scrolling stays as the
+  fallback for a smaller window. One more thing that would not fit: the **hotbar socket takes
   0.88 of the scale**, not all of it, because twelve of them plus
   separations plus the plate's margins have to fit a 1280-wide window —
   84px, a third bigger than the 64 it was. That is the same headroom the

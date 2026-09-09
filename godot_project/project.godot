@@ -17,8 +17,15 @@ config/features=PackedStringArray("4.6")
 
 [display]
 
-window/size/viewport_width=1280
-window/size/viewport_height=720
+; 1600x900 since the 2026-09-09 UI-scale pass (it was 1280x720): at 1.5x the
+; build menu's grid and the contract board both have to scroll at 720 tall,
+; and a card cut in half mid-row reads as clipping. 1600x900 is the size
+; scripts/screenshot-scene.sh has always reviewed at, everything fits there
+; with room to spare, and it still fits a 16" MacBook's 1728x1117-logical
+; display with the title bar. Scrolling remains as the fallback for
+; a smaller window; it is not the intended default any more.
+window/size/viewport_width=1600
+window/size/viewport_height=900
 
 [editor_plugins]
 

@@ -18,8 +18,10 @@
 #      the whole HUD subtree is walked and its size checked against the
 #      scale, rather than a handful of named ones being spot-checked.
 #   2. **The result still FITS.** Twelve hotbar sockets, a twelve-kind build
-#      menu and a three-docket clipboard all have to sit inside
-#      `project.godot`'s own 1280x720 window with the strip along the bottom.
+#      menu and a three-docket clipboard all have to sit inside the window
+#      (`project.godot` says 1600x900 since the coordinator's merge of this
+#      pass; it was 1280x720 while it was built) with the strip along the
+#      bottom.
 #      That is arithmetic, it changes with the catalog and with the scale,
 #      and it is exactly what broke first when the scale went up — the build
 #      menu ran a clear 300px past the bottom of the screen.

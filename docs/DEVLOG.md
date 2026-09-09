@@ -117,7 +117,9 @@ balance on one line, the control legend became four grouped lines, and the
 clipboard and the build grid now size themselves against the space actually
 left above the hotbar rather than against a guessed fraction of the window.
 At 1600x900 nothing scrolls; at 720 the build grid gives up a sliver, which
-is much better than a menu whose footer hides under the hotbar.
+is much better than a menu whose footer hides under the hotbar — and the
+project's default window is 1600x900 now (it was 1280x720), so the default
+is the size at which nothing has to.
 
 ### 2026-09-09 — SPACE and V say why, instead of doing nothing
 

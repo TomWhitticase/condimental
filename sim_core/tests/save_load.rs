@@ -321,15 +321,37 @@ fn unplaced_inventory_and_bought_stock_survive() {
 #[test]
 fn a_craft_in_flight_finishes_when_it_would_have() {
     let mut world = mid_flight_world();
-    let save = world.to_save();
-    let (kind, start_tick, required) = save
-        .placements
-        .iter()
-        .find_map(|p| match &p.body {
-            SavedBody::Machine(m) => m.process.map(|(s, r)| (p.kind.clone(), s, r)),
-            _ => None,
-        })
-        .expect("the fixture has a machine mid-craft");
+    // A batch that began on this very tick is legal and mid-craft, but it
+    // has no elapsed progress to lose, so it proves less than this test is
+    // for. Which machine is in which state at the fixture's final tick is a
+    // function of every process time in `data/recipes.ron` (the 2026-09-09
+    // tuning pass moved the crusher from 60 to 80 ticks and landed exactly
+    // on that case), so rather than pin a tick count, step until some
+    // machine's batch is genuinely under way — a handful of ticks at most.
+    let mut stepped = 0;
+    let (kind, start_tick, required) = loop {
+        let now = world.current_tick();
+        let found = world
+            .to_save()
+            .placements
+            .into_iter()
+            .find_map(|p| match p.body {
+                SavedBody::Machine(m) => m
+                    .process
+                    .filter(|(start, _)| *start < now)
+                    .map(|(start, required)| (p.kind, start, required)),
+                _ => None,
+            });
+        if let Some(found) = found {
+            break found;
+        }
+        assert!(
+            stepped < 100,
+            "no machine's batch got under way within 100 ticks of the fixture's end"
+        );
+        world.tick();
+        stepped += 1;
+    };
     assert!(
         start_tick < world.current_tick(),
         "'{kind}' must have started its batch before the save"
@@ -498,7 +520,13 @@ fn a_forked_line_with_turned_placements_round_trips() {
     place(&mut world, "belt", (4, 0), Direction::East, None);
     place(&mut world, "dock", (5, 0), Direction::East, None);
     place(&mut world, "belt", (3, -1), Direction::South, None);
-    place(&mut world, "dock", (3, -2), Direction::South, None);
+    // The dock is 2x2 (the 2026-09-09 tuning pass) and a footprint's origin
+    // is its min-X/min-Y corner whichever way it faces (`machines.rs`'s
+    // module doc), so a SOUTH-facing dock fed from (3, -1) is anchored one
+    // tile further south than a 1x1 one was: it claims (3..4, -3..-2), and
+    // the tile the belt hands into, (3, -2), is on its north edge — the
+    // inlet face of something facing south.
+    place(&mut world, "dock", (3, -3), Direction::South, None);
     // A run with fluid in it that nothing taps — a `None`-fluid network,
     // which is a shape the shipped chain never has.
     place(&mut world, "fluid_tank", (0, 3), Direction::East, None);

@@ -553,6 +553,9 @@ resolution `scripts/screenshot-scene.sh` reviews at — and anything taller,
 nothing scrolls. Of the two ways to lose that fight, a grid that gives up a
 sliver is much better than a menu whose footer disappears under the hotbar,
 which is the exact failure the menu's positioning was written to prevent.
+**`project.godot`'s default window is 1600x900 since this pass** (it was
+1280x720) so that the default is the size at which nothing scrolls; the
+scrolling is what a smaller window gets.
 
 ---
 
