@@ -177,6 +177,23 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-09 **Pipes & conveyors overhaul, ticket 2 (belt model family).**
+  One generator, `belt_shape(shape, phase)`, emits `belt_f0..f3`,
+  `belt_corner_left_f0..f3`, `belt_corner_right_f0..f3`; `belt`,
+  `belt_inlet`, `belt_outlet` are byte-identical to `belt_f0` until ticket 5
+  drops the names. `BELT_FRAMES` = 4, shift = 8 voxels per frame along +X;
+  frames differ ONLY on the lane surface, pinned by an exact-shift test;
+  idlers/rails/legs never move. Pattern period = one tile (one arrow per
+  tile). Direction mark = a SOLID raised arrow in `hazard_yellow` at
+  `BELT_ARROW_Z` = `BELT_SURFACE_Z + 1`; a thin chevron became an `L` under
+  the camera (UI_UX §2b point 23). Corner = quarter annulus about the pivot
+  corner; `Left` fed from north = vox low Y, `Right` is its Y-mirror (built
+  by `mirror_y`, never authored twice); pattern coordinate `u` is stretched
+  over the quarter turn. **Belt-side junction variants retired**: the plain
+  tile carries the junction, machine hoods do the rest. Splitter stubs are
+  plain rubber (no arrow beside the lit one). `voxicons` skips `_fN` for
+  N ≥ 1. Corners were only render-checked via a temporary `main.gd` hack;
+  ticket 5 must re-check them at all four facings once it draws them.
 - 2026-09-09 **Pipe model family (Pipes & Conveyors ticket 3, assets
   only).** Shapes `pipe`/`pipe_corner`/`pipe_tee`/`pipe_cross`/`pipe_end`,
   fittings `pipe_fitting_machine`/`pipe_fitting_tank` (authored on +X,

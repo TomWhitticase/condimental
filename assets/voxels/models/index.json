@@ -3,6 +3,54 @@
     "matte",
     "metal"
   ],
+  "belt_corner_left_f0": [
+    "matte",
+    "metal"
+  ],
+  "belt_corner_left_f1": [
+    "matte",
+    "metal"
+  ],
+  "belt_corner_left_f2": [
+    "matte",
+    "metal"
+  ],
+  "belt_corner_left_f3": [
+    "matte",
+    "metal"
+  ],
+  "belt_corner_right_f0": [
+    "matte",
+    "metal"
+  ],
+  "belt_corner_right_f1": [
+    "matte",
+    "metal"
+  ],
+  "belt_corner_right_f2": [
+    "matte",
+    "metal"
+  ],
+  "belt_corner_right_f3": [
+    "matte",
+    "metal"
+  ],
+  "belt_f0": [
+    "matte",
+    "metal"
+  ],
+  "belt_f1": [
+    "matte",
+    "metal"
+  ],
+  "belt_f2": [
+    "matte",
+    "metal"
+  ],
+  "belt_f3": [
+    "matte",
+    "metal"
+  ],
   "belt_inlet": [
     "matte",
     "metal"

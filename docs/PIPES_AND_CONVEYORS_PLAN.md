@@ -120,6 +120,18 @@ visibility flips.
   midpoint to the output face's midpoint, parameterised by the sim's
   existing 0..1 distance, so nothing in the sim changes.
 
+## Decisions made by tickets (read before consuming their output)
+
+- **Ticket 2 (belts):** no belt-side junction variants. `belt_inlet` and
+  `belt_outlet` are byte-identical aliases of `belt_f0` and ticket 5 should
+  stop requesting them; the plain tile carries the junction and the
+  machine-side hood/doorway do the rest at every facing. Frame models are
+  `belt_f{0..3}`, `belt_corner_left_f{0..3}`, `belt_corner_right_f{0..3}`;
+  `BELT_FRAMES` = 4 and the arrow mark stands at `BELT_SURFACE_Z + 1`.
+  Corners were render-checked only through a temporary `main.gd` hack —
+  ticket 5 must look at them at all four facings once it draws them.
+  `voxicons` renders icons for frame 0 only.
+
 ## Coordinator notes (appended as wave 1 lands)
 
 **Merged so far:** ticket 1 (`links`), ticket 4 (instancing), ticket 3

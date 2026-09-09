@@ -9,9 +9,13 @@
 #   godot --headless --path godot_project --script test_connections.gd
 #
 # Verifies:
-#   * the three belt models (plain / inlet-adjacent / outlet-adjacent) all
-#     import as real, non-empty, DISTINCT meshes — two identical models would
-#     make the per-tile choice below a lie,
+#   * the three belt names (plain / inlet-adjacent / outlet-adjacent) all
+#     import as real, non-empty meshes and are IDENTICAL: the pipes and
+#     conveyors overhaul's ticket 2 retired the belt-side junction variants
+#     (UI_UX.md §2b point 18/23 — the plain tile carries the junction), and
+#     until ticket 5 stops asking for the old names they are aliases of
+#     `belt_f0`. A variant that differed again would mean someone re-drew a
+#     dead-plate onto an animated surface,
 #   * that choice is derived from what the tile is actually NEXT TO in the
 #     simulation's own layout: a belt facing a building takes the inlet
 #     variant, a belt fed by one takes the outlet variant, and a belt with
@@ -68,8 +72,8 @@ func _meshes(node: Node, out: Array) -> Array:
 
 
 ## Total vertex count of an asset as actually imported, used only as an
-## identity: two belt variants that produced the same number here would mean
-## the generator changed nothing between them.
+## identity: the retired belt variants must produce the same number as the
+## plain tile, because they ARE the plain tile until ticket 5 drops them.
 func _vertex_count(asset: String) -> int:
 	var node: Node3D = main._asset_node(asset)
 	var total := 0
@@ -91,17 +95,19 @@ func _run_checks() -> void:
 	Layouts.build_machines_fixture(main.sim)
 	main._rebuild_world()
 
-	# --- three real, distinct belt models ---------------------------------
-	var counts := {}
-	for asset in [main.BELT_ASSET, main.BELT_INLET_ASSET, main.BELT_OUTLET_ASSET]:
+	# --- three real belt names, one model (the variants are retired) ------
+	var plain_count := _vertex_count(main.BELT_ASSET)
+	if plain_count <= 0:
+		_fail("belt model '%s' imported nothing" % main.BELT_ASSET)
+		return
+	for asset in [main.BELT_INLET_ASSET, main.BELT_OUTLET_ASSET]:
 		var n := _vertex_count(asset)
 		if n <= 0:
 			_fail("belt model '%s' imported nothing" % asset)
 			return
-		if counts.values().has(n):
-			_fail("belt model '%s' is identical to another variant (%d vertices) — the choice below would be meaningless" % [asset, n])
+		if n != plain_count:
+			_fail("belt model '%s' differs from the plain tile (%d vs %d vertices) — the junction variants are retired aliases of belt_f0 until ticket 5" % [asset, n, plain_count])
 			return
-		counts[asset] = n
 
 	# --- the per-tile choice follows what the tile is next to -------------
 	# (0, 0) is fed by the hopper at (-1, 0) and points into the crusher at
@@ -184,5 +190,5 @@ func _run_checks() -> void:
 			])
 			return
 
-	print("CONNECTIONS_OK: 3 distinct belt models, the inlet/outlet/plain choice follows what each tile is next to in the sim's own layout, every non-east facing falls back to the plain tile (and the scene builds it, turned), and every machine reaches its footprint's full width")
+	print("CONNECTIONS_OK: 3 belt names importing one real model (junction variants retired), the inlet/outlet/plain choice follows what each tile is next to in the sim's own layout, every non-east facing falls back to the plain tile (and the scene builds it, turned), and every machine reaches its footprint's full width")
 	quit(0)
