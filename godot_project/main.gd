@@ -68,6 +68,18 @@ extends Node3D
 ## walls stop you). Both modes reuse the same single `Camera3D` node,
 ## switching its projection/position/orientation rather than swapping nodes,
 ## so "exactly one Camera3D" stays true regardless of mode.
+##
+## The save/main-menu epic's ticket 2 added the two things a session needs
+## around the factory: this scene is now entered FROM `menu.tscn` (carrying
+## the player's New Game / Load choice on the `GameSession` autoload) and it
+## has a pause menu on **ESC** with the way back out — save, quit to menu,
+## quit game — plus a three-minute autosave. All the file handling lives in
+## `game_session.gd`, because `sim_core` deliberately has none.
+
+## Where saves live and what they may be called — the same static helpers
+## `menu.gd` reads the list with, so the screen that writes a save and the
+## screen that loads one cannot disagree about either.
+const GameSaves = preload("res://game_session.gd")
 
 # --- Scale ---------------------------------------------------------------
 # UI_UX.md §2 fixes one world tile at 32x32x32 voxels. The .vox importer's
@@ -843,6 +855,60 @@ var _larder_row: HBoxContainer
 var _larder_entries: Dictionary = {} # item id -> Label
 var _larder_hint: Label
 
+# --------------------------------------------------------------------------
+# The pause menu, saving and autosave (the "Save/load + a real main menu"
+# epic, ticket 2)
+# --------------------------------------------------------------------------
+
+## **ESC opens this when nothing else is open** — Minecraft's convention, and
+## the natural next press here because ESC already closes whatever IS open
+## first (`_close_all_overlays`). So the escalation reads as one rule: ESC
+## backs out of the thing you are in, and when you are in nothing, it backs
+## out of the game.
+##
+## It is also the only way out of the running game that is not the window's
+## close button, which is what makes it worth a modal panel rather than
+## another hotkey: Save, Save & Quit to Menu, Quit to Menu and Quit Game are
+## all destructive-or-committing actions, and they belong somewhere the
+## player arrives deliberately.
+##
+## **The simulation is genuinely paused while it is up** — `_process` does
+## not tick, and `_tick_accum` is cleared on resume so the catch-up loop
+## cannot pay back a five-minute pause in one frame (which the
+## MAX_TICKS_PER_FRAME clamp would cap but not prevent). A menu that lets the
+## factory keep running while the player reads it is a menu that costs the
+## player ingredients to open.
+var _pause_menu: PanelContainer
+var _pause_open := false
+var _pause_slot_field: LineEdit
+var _pause_status: Label
+var _pause_confirm_box: VBoxContainer
+var _pause_buttons_box: VBoxContainer
+## Set while "Quit to Menu" is waiting for its confirm click. Quitting to the
+## menu throws away everything since the last save, and that is the one thing
+## in this panel with no undo — so it asks, where Save & Quit (which cannot
+## lose anything) does not.
+var _pause_confirm_quit := false
+const PAUSE_BUTTON_MIN_SIZE := Vector2(300.0, 44.0)
+
+## Which slot this session is saving to by default: the one it was loaded
+## from, or `DEFAULT_SLOT` for a new game. Kept in step with `GameSession`
+## so quitting to the menu and coming back offers the same name.
+const DEFAULT_SLOT := "factory"
+var _save_slot := DEFAULT_SLOT
+
+## **Three minutes**, the order of magnitude Factorio's own default autosave
+## uses. Long enough that a player never notices it happening, short enough
+## that a crash costs a few minutes of building rather than an evening.
+## Real seconds, not ticks: what it protects against is the process going
+## away, and the process goes away in real time.
+const AUTOSAVE_INTERVAL_SECONDS := 180.0
+var _autosave_accum := 0.0
+
+## Whether this process has already printed where saves live — see
+## `_apply_pending_session`.
+static var _printed_saves_dir := false
+
 # Hover tooltip (docs/UI_UX.md §5: "hover tooltips for recipe/machine detail
 # rather than dense always-on text") — see _tile_under_screen_pos/
 # _update_hover_tooltip below. Works in both view modes: ISOMETRIC queries
@@ -878,6 +944,11 @@ var _fp_pitch := 0.0 # radians, clamped to +/-FP_PITCH_LIMIT
 
 func _ready() -> void:
 	sim = SimBridge.new()
+	# What world this is — a fresh one, or the save the main menu picked.
+	# Everything after this point is identical either way, which is the whole
+	# reason `SimBridge` has both `new_game()` and `load_ron()` behind one
+	# long-lived bridge.
+	_apply_pending_session()
 	_load_voxel_materials()
 	_build_environment()
 	# The world the player has built — NOTHING, in a new game. This is a real
@@ -892,6 +963,83 @@ func _ready() -> void:
 	_update_contract_panel() # fill in real text/sizing before the first frame draws
 	_update_fluid_network() # show tick 0's fluid levels, not an empty pipe run
 	_apply_dirty_chunks() # render tick 0's (empty) state immediately
+	# A loaded world arrives with product mid-belt, hoppers part full and
+	# contracts part way through their windows, so every per-frame updater is
+	# run once here rather than left to the first `_process`. Two of them —
+	# the larder and the hotbar — would otherwise draw a NEW GAME's counts
+	# over a loaded game's inventory for one frame.
+	_refresh_buffers()
+	_update_hotbar()
+	_update_larder()
+	# The window's close button is the other way a session ends, and it has
+	# to autosave before the process goes away — which means intercepting it
+	# rather than letting the default close handling quit underneath us. See
+	# `_notification`.
+	if is_inside_tree():
+		get_tree().auto_accept_quit = false
+
+
+## Applies whatever `menu.tscn` armed on the `GameSession` autoload: a fresh
+## world, or the save file it already proved loads.
+##
+## Reading the pending action does NOT clear it — see `game_session.gd` for
+## why sticky rather than consumed. The `session == null` branch is what
+## keeps every headless test that instantiates `main.tscn` directly working
+## exactly as it did before this ticket: no singleton, no pending action, new
+## game.
+##
+## The load is defensive even though the menu validated the file first: the
+## file could have been deleted or truncated in the seconds between, and the
+## honest response to that is a fresh world plus a printed reason, not a
+## crash. It cannot be a silent fresh world — that is the failure this whole
+## ticket exists to avoid — so it prints, and the menu (which is where a
+## player can actually act on it) is the screen that shows the message in the
+## normal case.
+func _apply_pending_session() -> void:
+	# Print once per launch, so a developer hunting for save files does not
+	# have to know Godot's per-platform `user://` layout. Static, because
+	# every headless test calls `_ready()` a second time by hand and one line
+	# is a note where two are noise.
+	if not _printed_saves_dir:
+		_printed_saves_dir = true
+		print("Sauce Factory saves: %s" % GameSaves.resolved_saves_dir())
+	var session := _session()
+	if session == null or String(session.pending_action) != "load":
+		sim.new_game()
+		_save_slot = DEFAULT_SLOT
+		return
+	var path := String(session.pending_path)
+	var text: String = GameSaves.read_save(path)
+	var refusal: String = sim.load_ron(text) if text != "" else "could not read %s" % path
+	if refusal != "":
+		printerr("Sauce Factory: could not load %s — %s" % [path, refusal])
+		sim.new_game()
+		_save_slot = DEFAULT_SLOT
+		return
+	_save_slot = String(session.current_slot)
+	if _save_slot == "" or GameSaves.is_reserved_slot(_save_slot):
+		# A game resumed from the autosave saves to a real slot by default,
+		# not back over the autosave — the reserved-name rule applies to the
+		# prefilled suggestion too, or the very first press of Save would be
+		# refused for a name the player never typed.
+		_save_slot = DEFAULT_SLOT
+
+
+## The `GameSession` autoload, or null.
+##
+## Reached through the main loop's own root rather than through
+## `get_node("/root/GameSession")`, because this scene is instantiated
+## OUTSIDE the active scene tree by every headless test script (they
+## `add_child` it to the root window and call `_ready()` themselves), and an
+## absolute node path resolved from there is an engine error rather than a
+## null. Null is the answer this wants: no singleton, no pending action, new
+## game.
+func _session() -> Node:
+	var loop := Engine.get_main_loop()
+	if not (loop is SceneTree):
+		return null
+	var tree_root: Node = (loop as SceneTree).root
+	return tree_root.get_node_or_null("GameSession") if tree_root != null else null
 
 
 # --------------------------------------------------------------------------
@@ -2035,9 +2183,10 @@ const CROSSHAIR_THICKNESS := 2.0 * UI_SCALE # px, each bar's width
 ## two-line legend ran clean off a 1280-wide window and under the contract
 ## clipboard. It is grouped by what each key is FOR — build-mode verbs, the
 ## panels, the two loading keys, then the camera — which is a better reading
-## order than the flat run-on it was anyway.
-const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nQ: hopper contents    X: remove mode    ESC: close\nE: build menu    M: market    SPACE: load hoppers    V: load tanks\nWASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
-const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nQ: hopper contents    X: remove mode    ESC: close\nE: build menu    M: market    V: load tanks\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
+## order than the flat run-on it was anyway. ESC's entry names both of its
+## meanings (close what is open, else the pause menu — see `_anything_open`).
+const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nQ: hopper contents    X: remove mode    ESC: close / pause menu\nE: build menu    M: market    SPACE: load hoppers    V: load tanks\nWASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
+const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nQ: hopper contents    X: remove mode    ESC: close / pause menu\nE: build menu    M: market    V: load tanks\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
 
 
 ## The tile box the isometric camera frames at startup: whatever is placed,
@@ -2528,6 +2677,9 @@ func _build_ui() -> void:
 	# dark plate by the cursor, saying what the next click will do.
 	_build_placement_prompt(hud, settings)
 	_build_crosshair(hud)
+	# The way out (the save/main-menu epic's ticket 2). Last, so it draws over
+	# every other panel — it is the one modal that means the game has stopped.
+	_build_pause_menu(hud, settings)
 
 
 ## The diegetic clipboard/checklist widget (UI_UX.md §5) — the money/contract
@@ -3312,7 +3464,8 @@ func _set_shop_menu_open(open: bool) -> void:
 func _update_crosshair_visibility() -> void:
 	if _crosshair == null:
 		return
-	_crosshair.visible = _view_mode == ViewMode.FIRST_PERSON and not _shop_open and not _market_open
+	_crosshair.visible = (_view_mode == ViewMode.FIRST_PERSON
+			and not _shop_open and not _market_open and not _pause_open)
 
 
 func _toggle_shop_menu() -> void:
@@ -4439,6 +4592,15 @@ func _close_all_overlays() -> void:
 	_exit_build_mode()
 
 
+## Is there anything for ESC to close? This is what decides whether the next
+## ESC closes an overlay or opens the pause menu, and it deliberately counts
+## build/remove mode as "open": a ghost following the cursor is a state the
+## player is in, and putting it down should be the first press, not the
+## second.
+func _anything_open() -> bool:
+	return _shop_open or _market_open or _in_build_mode()
+
+
 func _in_build_mode() -> bool:
 	return _build_kind != "" or _remove_mode
 
@@ -4883,23 +5045,316 @@ func _build_crosshair(hud: CanvasLayer) -> void:
 
 
 # --------------------------------------------------------------------------
+# The pause menu (the "Save/load + a real main menu" epic, ticket 2)
+# --------------------------------------------------------------------------
+
+## The in-game menu: Resume, Save (into a named slot), Save & Quit to Menu,
+## Quit to Menu, Quit Game.
+##
+## It is the SAME plate the build menu and the market are drawn on, one step
+## more opaque, so it reads as another screen of this game rather than an
+## engine dialog — and it is centred in the whole viewport rather than in the
+## space above the hotbar, unlike those two: the game is stopped, so nothing
+## underneath it is worth keeping clear.
+##
+## A `LineEdit` for the slot name, not a fixed list of numbered slots. This
+## game has no concept of a save "profile" and no screen that would show
+## three empty boxes usefully; a name is what the player will recognise the
+## save by in the menu's list, and the list is sorted by time anyway. The
+## field prefills with `_save_slot` (whatever this session was loaded from,
+## or `DEFAULT_SLOT`), so the common case — save again over the same
+## file — is one click.
+func _build_pause_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.06, 0.06, 0.07, 0.97)
+	style.border_color = Color(0.85, 0.63, 0.11, 0.95)
+	style.border_width_top = 4
+	style.border_width_left = 2
+	style.border_width_right = 2
+	style.border_width_bottom = 2
+	style.set_content_margin_all(20.0)
+
+	_pause_menu = PanelContainer.new()
+	_pause_menu.name = "PauseMenu"
+	_pause_menu.add_theme_stylebox_override("panel", style)
+	_pause_menu.visible = false
+	hud.add_child(_pause_menu)
+
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", 12)
+	_pause_menu.add_child(body)
+
+	var title_settings := LabelSettings.new()
+	title_settings.font_size = base_settings.font_size + 8
+	title_settings.font_color = Color(0.98, 0.85, 0.42)
+	title_settings.outline_size = base_settings.outline_size
+	title_settings.outline_color = base_settings.outline_color
+
+	var title := Label.new()
+	title.label_settings = title_settings
+	title.text = "PAUSED"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	body.add_child(title)
+
+	# The one line that says the factory has actually stopped. Without it a
+	# player has to infer it from belts not moving, which is exactly the
+	# never-encode-state-invisibly problem UI_UX.md §7 is about.
+	var note := Label.new()
+	note.label_settings = base_settings
+	note.text = "the factory is stopped while this is open"
+	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	body.add_child(note)
+
+	_pause_buttons_box = VBoxContainer.new()
+	_pause_buttons_box.name = "PauseButtons"
+	_pause_buttons_box.add_theme_constant_override("separation", 8)
+	body.add_child(_pause_buttons_box)
+
+	var resume := _pause_button("ResumeButton", "RESUME")
+	resume.pressed.connect(_on_pause_resume_pressed)
+	_pause_buttons_box.add_child(resume)
+
+	var save_row := HBoxContainer.new()
+	save_row.add_theme_constant_override("separation", 8)
+	_pause_buttons_box.add_child(save_row)
+
+	_pause_slot_field = LineEdit.new()
+	_pause_slot_field.name = "SaveSlotField"
+	_pause_slot_field.placeholder_text = "save name"
+	_pause_slot_field.custom_minimum_size = Vector2(
+		PAUSE_BUTTON_MIN_SIZE.x - 110.0, PAUSE_BUTTON_MIN_SIZE.y
+	)
+	_pause_slot_field.add_theme_font_size_override("font_size", base_settings.font_size + 1)
+	save_row.add_child(_pause_slot_field)
+
+	var save_button := _pause_button("SaveButton", "SAVE")
+	save_button.custom_minimum_size = Vector2(102.0, PAUSE_BUTTON_MIN_SIZE.y)
+	save_button.pressed.connect(_on_pause_save_pressed)
+	save_row.add_child(save_button)
+
+	var save_quit := _pause_button("SaveQuitButton", "SAVE & QUIT TO MENU")
+	save_quit.pressed.connect(_on_pause_save_and_quit_pressed)
+	_pause_buttons_box.add_child(save_quit)
+
+	var quit_menu := _pause_button("QuitToMenuButton", "QUIT TO MENU")
+	quit_menu.pressed.connect(_on_pause_quit_to_menu_pressed)
+	_pause_buttons_box.add_child(quit_menu)
+
+	var quit_game := _pause_button("QuitGameButton", "QUIT GAME")
+	quit_game.pressed.connect(_on_pause_quit_game_pressed)
+	_pause_buttons_box.add_child(quit_game)
+
+	# The confirm step for Quit to Menu, in place of the buttons rather than
+	# in a dialog over them: a second modal on top of a modal is two things to
+	# dismiss, and the question is short enough to be the panel's whole
+	# content for the moment it is being asked.
+	_pause_confirm_box = VBoxContainer.new()
+	_pause_confirm_box.name = "PauseConfirm"
+	_pause_confirm_box.add_theme_constant_override("separation", 8)
+	_pause_confirm_box.visible = false
+	body.add_child(_pause_confirm_box)
+
+	var confirm_text := Label.new()
+	confirm_text.label_settings = base_settings
+	confirm_text.text = "Quit to the menu? Everything built since the last save is lost."
+	confirm_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	confirm_text.custom_minimum_size = Vector2(PAUSE_BUTTON_MIN_SIZE.x, 0.0)
+	_pause_confirm_box.add_child(confirm_text)
+
+	var confirm := _pause_button("ConfirmQuitButton", "YES, QUIT TO MENU")
+	confirm.pressed.connect(_on_pause_confirm_quit_pressed)
+	_pause_confirm_box.add_child(confirm)
+
+	var cancel := _pause_button("CancelQuitButton", "CANCEL")
+	cancel.pressed.connect(_on_pause_cancel_quit_pressed)
+	_pause_confirm_box.add_child(cancel)
+
+	# What the last action did — a save's file name, or why one was refused.
+	# Its own line inside this panel rather than the hotbar flyout, because
+	# the flyout sits at the bottom of the screen behind this plate.
+	_pause_status = Label.new()
+	_pause_status.name = "PauseStatus"
+	_pause_status.label_settings = base_settings
+	_pause_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_pause_status.custom_minimum_size = Vector2(PAUSE_BUTTON_MIN_SIZE.x, 0.0)
+	_pause_status.text = ""
+	body.add_child(_pause_status)
+
+	_position_pause_menu()
+
+
+func _pause_button(node_name: String, text: String) -> Button:
+	var button := Button.new()
+	button.name = node_name
+	button.text = text
+	button.custom_minimum_size = PAUSE_BUTTON_MIN_SIZE
+	button.focus_mode = Control.FOCUS_NONE
+	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+		button.add_theme_stylebox_override(state, _shop_slot_style(state))
+	return button
+
+
+func _position_pause_menu() -> void:
+	if _pause_menu == null:
+		return
+	_pause_menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
+
+
+## Opens or closes the pause menu, and with it the simulation's pause.
+##
+## Handing the mouse back in first-person is the same thing the build menu
+## and the market already do, and for the same reason: this panel has buttons
+## and a text field on it, and a captured mouse cannot press either.
+func _set_pause_open(open: bool) -> void:
+	if _pause_menu == null or open == _pause_open:
+		return
+	_pause_open = open
+	_pause_menu.visible = open
+	if open:
+		_pause_confirm_quit = false
+		_set_pause_confirm(false)
+		_pause_status.text = ""
+		_pause_slot_field.text = _save_slot
+		_position_pause_menu()
+	else:
+		# Whatever real time passed while the panel was up must not become
+		# simulation ticks the moment it closes — see `_process`. The clamp
+		# would cap the burst at MAX_TICKS_PER_FRAME per frame, but a long
+		# pause would still be paid back over the following frames.
+		_tick_accum = 0.0
+	if _view_mode == ViewMode.FIRST_PERSON:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
+	_update_crosshair_visibility()
+
+
+func _set_pause_confirm(confirming: bool) -> void:
+	_pause_confirm_quit = confirming
+	if _pause_buttons_box != null:
+		_pause_buttons_box.visible = not confirming
+	if _pause_confirm_box != null:
+		_pause_confirm_box.visible = confirming
+	_position_pause_menu()
+
+
+func _on_pause_resume_pressed() -> void:
+	_set_pause_open(false)
+
+
+## Writes the live world to the named slot. Returns "" on success or the
+## reason it was refused, so the two callers (Save, and Save & Quit) share
+## one rule about what a legal slot name is — including the reserved
+## `autosave` one, which is refused out loud rather than quietly renamed.
+func _save_to_slot(name: String) -> String:
+	var slot: String = GameSaves.sanitize_slot(name)
+	if slot == "":
+		return "That save needs a name."
+	if GameSaves.is_reserved_slot(slot):
+		return "'%s' is the autosave's own slot — pick another name." % GameSaves.AUTOSAVE_SLOT
+	var error: String = GameSaves.write_slot(slot, String(sim.save_ron()))
+	if error != "":
+		return error
+	_save_slot = slot
+	var session := _session()
+	if session != null:
+		session.current_slot = slot
+	return ""
+
+
+func _on_pause_save_pressed() -> void:
+	var typed := _pause_slot_field.text if _pause_slot_field != null else _save_slot
+	var error := _save_to_slot(typed)
+	if error != "":
+		_pause_status.text = error
+		return
+	_pause_status.text = "Saved to %s" % _save_slot
+	_pause_slot_field.text = _save_slot
+	# The hotbar flyout too, so the confirmation is also there after the
+	# panel closes — the same label every other "that worked" message uses.
+	_show_hotbar_flyout("Saved to %s" % _save_slot)
+
+
+func _on_pause_save_and_quit_pressed() -> void:
+	var typed := _pause_slot_field.text if _pause_slot_field != null else _save_slot
+	var error := _save_to_slot(typed)
+	if error != "":
+		_pause_status.text = error
+		return
+	# No confirm step on this one, deliberately: it cannot lose anything.
+	_quit_to_menu()
+
+
+## Quit to Menu ASKS first — it is the one button here that throws work away.
+func _on_pause_quit_to_menu_pressed() -> void:
+	_set_pause_confirm(true)
+
+
+func _on_pause_cancel_quit_pressed() -> void:
+	_set_pause_confirm(false)
+
+
+func _on_pause_confirm_quit_pressed() -> void:
+	_quit_to_menu()
+
+
+func _on_pause_quit_game_pressed() -> void:
+	_quit_game()
+
+
+## Back to `menu.tscn`, autosaving first. Arms the session for a NEW game so
+## that the menu's own New Game button cannot inherit this session's pending
+## `load` — the menu re-arms it on every choice anyway, but leaving a stale
+## action behind is the kind of thing that only shows up as "New Game loaded
+## my old factory" much later.
+func _quit_to_menu() -> void:
+	_autosave("quit to menu")
+	var session := _session()
+	if session != null:
+		session.arm_new_game()
+	_set_pause_open(false)
+	if is_inside_tree():
+		get_tree().change_scene_to_file("res://menu.tscn")
+
+
+func _quit_game() -> void:
+	_autosave("quit")
+	if is_inside_tree():
+		get_tree().quit()
+
+
+## Writes `user://saves/autosave.ron`. It NEVER touches a named slot, which
+## is the other half of the reservation `GameSaves.is_reserved_slot`
+## enforces: a timer that could overwrite the save a player deliberately made
+## is a timer that destroys work, and the whole point of an autosave is that
+## the player does not have to think about when it runs.
+##
+## `reason` is only for the flyout, and only when the player is still there
+## to read it (the timer case); a quit does not flash a message at a window
+## that is closing.
+func _autosave(reason := "") -> void:
+	var error: String = GameSaves.write_slot(
+		GameSaves.AUTOSAVE_SLOT, String(sim.save_ron()), true
+	)
+	if error != "":
+		printerr("Sauce Factory: autosave failed — %s" % error)
+		return
+	if reason == "timer":
+		_show_hotbar_flyout("Autosaved")
+
+
+## The window's close button. `auto_accept_quit` was turned off in `_ready`
+## precisely so this runs BEFORE the process goes away — the default handling
+## quits immediately and would take the last few minutes of building with it.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_quit_game()
+
+
+# --------------------------------------------------------------------------
 # Simulation driving / rendering
 # --------------------------------------------------------------------------
 
 func _process(delta: float) -> void:
-	_tick_accum += delta
-	var tick_interval := 1.0 / TICK_HZ
-	var budget := MAX_TICKS_PER_FRAME
-	while _tick_accum >= tick_interval and budget > 0:
-		_tick_accum -= tick_interval
-		budget -= 1
-		sim.tick()
-		_apply_dirty_chunks()
-	if _tick_accum >= tick_interval:
-		# Backlog beyond the budget is discarded, not carried (see
-		# MAX_TICKS_PER_FRAME): carrying it would only move the burst to the
-		# next frame.
-		_tick_accum = 0.0
+	_advance_simulation(delta)
 
 	_update_contract_panel()
 	if _shop_open:
@@ -4913,7 +5368,13 @@ func _process(delta: float) -> void:
 	_update_larder()
 	if _market_open:
 		_update_ingredient_market()
-	_update_ghost()
+	# The ghost cannot be up while paused at all — build mode counts as
+	# "open", so ESC puts it down before it opens the panel — but the hover
+	# tooltip would otherwise keep answering questions about whatever tile
+	# happens to be behind the plate. `_update_hover_tooltip` hides itself
+	# when `_pause_open`.
+	if not _pause_open:
+		_update_ghost()
 	_update_hover_tooltip()
 	if _view_mode == ViewMode.ISOMETRIC:
 		_pan_camera(delta)
@@ -4921,7 +5382,58 @@ func _process(delta: float) -> void:
 		_fp_camera_move(delta)
 
 
+## One frame's worth of simulation, and the autosave clock that runs beside
+## it. Split out of `_process` so a headless test can drive exactly this
+## without a viewport — everything else `_process` does needs one.
+##
+## **PAUSED means no ticks and no accumulation.** Clearing `_tick_accum`
+## while the panel is up (and again on the way out, in `_set_pause_open`) is
+## what makes a resume cost the factory nothing: MAX_TICKS_PER_FRAME caps how
+## much a single frame can catch up, but an accumulator that kept filling for
+## a five-minute pause would still be paid back over the frames after it.
+func _advance_simulation(delta: float) -> void:
+	if _pause_open:
+		_tick_accum = 0.0
+		return
+	_tick_accum += delta
+	_advance_autosave(delta)
+	var tick_interval := 1.0 / TICK_HZ
+	var budget := MAX_TICKS_PER_FRAME
+	while _tick_accum >= tick_interval and budget > 0:
+		_tick_accum -= tick_interval
+		budget -= 1
+		sim.tick()
+		_apply_dirty_chunks()
+	if _tick_accum >= tick_interval:
+		# Backlog beyond the budget is discarded, not carried (see
+		# MAX_TICKS_PER_FRAME): carrying it would only move the burst to the
+		# next frame.
+		_tick_accum = 0.0
+
+
+## Real seconds since the last autosave, and the write when it comes due.
+## Only called while unpaused, so a game left sitting on the pause menu
+## overnight does not autosave a state nothing has changed.
+func _advance_autosave(delta: float) -> void:
+	_autosave_accum += delta
+	if _autosave_accum < AUTOSAVE_INTERVAL_SECONDS:
+		return
+	_autosave_accum = 0.0
+	_autosave("timer")
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	# WITH THE PAUSE MENU UP, ESC is the only key the world still listens to.
+	# The game is stopped, so every other control — placing, rotating,
+	# removing, filling, panning, even TAB — would be acting on a factory the
+	# player cannot see running. The panel's own buttons are Control nodes and
+	# get their input before this handler ever sees it.
+	if _pause_open:
+		if event is InputEventKey and event.pressed and not event.echo \
+				and event.keycode == KEY_ESCAPE:
+			_set_pause_open(false)
+		return
+
 	# TAB always toggles view mode, in either mode.
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_TAB:
 		_set_view_mode(ViewMode.FIRST_PERSON if _view_mode == ViewMode.ISOMETRIC else ViewMode.ISOMETRIC)
@@ -5022,9 +5534,17 @@ func _unhandled_input(event: InputEvent) -> void:
 			_cycle_hopper_under_cursor()
 		return
 
-	# ESC closes whatever is open — see `_close_all_overlays`.
+	# ESC closes whatever is open — and when nothing IS open, opens the pause
+	# menu (the save/main-menu epic's ticket 2). One rule, escalating:
+	# ESC backs out of the thing you are in, and when you are in nothing, it
+	# backs out of the game. That is Minecraft's convention and it needed no
+	# new key, which matters on a legend that already runs the window's
+	# width.
 	if event.keycode == KEY_ESCAPE:
-		_close_all_overlays()
+		if _anything_open():
+			_close_all_overlays()
+		else:
+			_set_pause_open(true)
 		return
 
 	# R turns things: the ghost's facing while placing, and — outside
@@ -5500,11 +6020,12 @@ func _dock_hover_text(origin_key: String, direction: String) -> String:
 func _update_hover_tooltip() -> void:
 	if _hover_tooltip == null:
 		return
-	if _shop_open or _in_build_mode():
+	if _shop_open or _market_open or _pause_open or _in_build_mode():
 		# The build menu sits over the middle of the screen; a world tooltip
 		# chasing the cursor across it would just be two panels fighting. And
 		# in build mode the placement prompt is already the panel by the
-		# cursor, saying the more useful of the two things.
+		# cursor, saying the more useful of the two things. The pause menu is
+		# the same case as the build menu, one plate further forward.
 		_hover_tooltip.visible = false
 		return
 	var vp := get_viewport()
