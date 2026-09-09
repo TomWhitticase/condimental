@@ -163,6 +163,7 @@ run_godot_script test_connections.gd CONNECTIONS_OK "belt/pipe-to-machine juncti
 run_godot_script test_shop_menu.gd SHOP_MENU_OK "build menu grid + purchases, UI_UX.md §5"
 run_godot_script test_hotbar.gd HOTBAR_OK "always-visible hotbar, number-key selection, UI_UX.md §5"
 run_godot_script test_chain_rework.gd CHAIN_REWORK_OK "1x2 mixer, piped middle, hopper contents, ingredient market"
+run_godot_script test_fill_feedback.gd FILL_FEEDBACK_OK "SPACE/V say why they did nothing, before the sim ever sees the command"
 run_godot_script test_placement.gd PLACEMENT_OK "empty world, ghost, rotation, place/remove — Real Placement ticket 2"
 run_godot_script test_splitters.gd SPLITTERS_OK "splitter model, next-output arrow, items crossing, hover — Epic B ticket 2"
 

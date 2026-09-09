@@ -3149,6 +3149,64 @@ func _ingredients_snapshot() -> Dictionary:
 	return parsed if parsed is Dictionary else {}
 
 
+## id -> owned count, from `_ingredients_snapshot`'s `entries` — the one
+## lookup both fill-feedback checks below need, so it exists once.
+func _owned_ingredient_counts() -> Dictionary:
+	var owned := {}
+	for entry in _ingredients_snapshot().get("entries", []):
+		owned[String(entry.get("id", ""))] = int(entry.get("owned", 0))
+	return owned
+
+
+## Why pressing SPACE would do nothing, or "" if it would not. Checked
+## BEFORE the command reaches the sim, so a doomed fill never fires at all
+## and the player is told the actual missing thing rather than watching
+## nothing happen — `issue_command`'s silent-no-op contract is correct for
+## the SIMULATION (an impossible command changes nothing), but a game still
+## owes the player a reason, the same way Factorio's own "not enough X"
+## toasts do for exactly this kind of dead keypress.
+func _hopper_fill_blocker() -> String:
+	if _hopper_states.is_empty():
+		return "No hopper placed — buy one in the build menu (E)"
+	var owned := _owned_ingredient_counts()
+	var needed := {}
+	for snapshot in _hopper_states.values():
+		needed[String(snapshot.get("item", ""))] = true
+	for item in needed.keys():
+		if owned.get(item, 0) > 0:
+			return "" # at least one hopper can draw stock; let the sim sort out which
+	var names: Array = []
+	for item in needed.keys():
+		names.append(_item_display_name(String(item)))
+	return "No %s in stock — buy some at the Ingredient Market (M)" % ", ".join(names)
+
+
+## `_hopper_fill_blocker`'s fluid twin for V. A tank not yet feeding any pipe
+## run has no fluid id to check stock for at all (`_fluid_id_of` returns
+## "") — that is a placement/plumbing problem the message above already
+## covers ("no tank" is the closest true statement short of "not connected
+## to anything," which is real but a separate, rarer failure this does not
+## try to diagnose), so it is treated as nothing to block on here.
+func _tank_fill_blocker() -> String:
+	if _fluid_tank_states.is_empty():
+		return "No fluid tank placed — buy one in the build menu (E)"
+	var owned := _owned_ingredient_counts()
+	var needed := {}
+	for snapshot in _fluid_tank_states.values():
+		var fluid := _fluid_id_of(snapshot)
+		if fluid != "":
+			needed[fluid] = true
+	if needed.is_empty():
+		return ""
+	for item in needed.keys():
+		if owned.get(item, 0) > 0:
+			return ""
+	var names: Array = []
+	for item in needed.keys():
+		names.append(_item_display_name(String(item)))
+	return "No %s in stock — buy some at the Ingredient Market (M)" % ", ".join(names)
+
+
 func _refresh_hopper_items() -> void:
 	var snapshot := _ingredients_snapshot()
 	var items: Array = snapshot.get("hopper_items", [])
@@ -4821,23 +4879,32 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 
 	var command := ""
-	# SPACE only loads the hopper in ISOMETRIC mode — in FIRST_PERSON it's
-	# "fly up" (_fp_input_direction), and a single keypress can't mean both.
-	# Since the "Machines improvement" ticket 3 this loads raw tomatoes into
-	# the chain's hopper (clamped at its capacity); the hopper itself meters
-	# them onto the first belt, one per tick — so this key sets the SUPPLY
-	# and the machinery sets the rate. The level it changes is visible in
-	# the hopper itself (see _update_hopper) and in its hover tooltip.
+	# SPACE only loads a hopper in ISOMETRIC mode — in FIRST_PERSON it's "fly
+	# up" (_fp_input_direction), and a single keypress can't mean both. Since
+	# the chain-rework epic this draws from stock a `BuyIngredient` purchase
+	# (the ingredient market, M) paid for, clamped at the hopper's capacity;
+	# the hopper itself meters it onto its belt one per tick — so this key
+	# sets the SUPPLY and the machinery sets the rate. The level it changes
+	# is visible in the hopper itself (see _update_hopper) and in its hover
+	# tooltip. `_hopper_fill_blocker` is checked first so a doomed press (no
+	# hopper down, or nothing in stock to load) says why instead of doing
+	# nothing visibly at all.
 	if event.keycode == KEY_SPACE and _view_mode == ViewMode.ISOMETRIC:
+		var blocker := _hopper_fill_blocker()
+		if blocker != "":
+			_show_hotbar_flyout(blocker)
+			return
 		command = JSON.stringify({"type": "fill_hopper"})
-	# V is the fluid twin of SPACE (the "Visual overhaul round 2" epic).
-	# Ticket 1 replaced the pipe run's always-full off-map tap with a tank the
-	# player loads — but it added no way to load it, so the shipped scene had
-	# no vinegar at all and the chain silently stalled at the mixer with the
-	# belts past it running empty. Unlike SPACE this works in BOTH view modes,
-	# because unlike SPACE it collides with nothing (SPACE is "fly up" in
-	# first person).
+	# V is the fluid twin of SPACE. It draws from vinegar stock the market
+	# sold, into whichever tank(s) are placed, same clamp-and-meter shape as
+	# SPACE. Unlike SPACE this works in BOTH view modes, because unlike SPACE
+	# it collides with nothing (SPACE is "fly up" in first person).
+	# `_tank_fill_blocker` guards it the same way.
 	elif event.keycode == KEY_V:
+		var tank_blocker := _tank_fill_blocker()
+		if tank_blocker != "":
+			_show_hotbar_flyout(tank_blocker)
+			return
 		command = JSON.stringify({"type": "fill_fluid_tank"})
 	else:
 		return

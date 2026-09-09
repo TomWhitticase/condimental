@@ -110,6 +110,10 @@ var _hover_tank := false
 var _hover_dock := false
 var _hover_splitter := false
 var _shop := false
+## `--fill-blocked` presses SPACE on a freshly-booted (empty) world, where
+## no hopper exists at all — the exact keypress that used to do nothing
+## visible whatsoever. Photographs the flyout that now names the reason.
+var _fill_blocked := false
 ## `--market` opens the ingredient market, and `--contents N` presses Q N
 ## times on whatever ghost is up — the only way to photograph a hopper about
 ## to be placed holding something other than the first raw ingredient, which
@@ -166,6 +170,7 @@ func _initialize() -> void:
 	_hover_dock = args.has("--hover-dock")
 	_hover_splitter = args.has("--hover-splitter")
 	_shop = args.has("--shop")
+	_fill_blocked = args.has("--fill-blocked")
 	_market = args.has("--market")
 	_no_hud = args.has("--no-hud")
 	_contents = int(_string_arg(args, "--contents")) if _string_arg(args, "--contents") != "" else 0
@@ -440,6 +445,17 @@ func _open_shop_menu() -> void:
 	_main._set_shop_menu_open(true)
 
 
+## `--fill-blocked`: SPACE on an empty world, where no hopper exists at
+## all. Goes through the same `_unhandled_input` path a real keypress would,
+## not the blocker function directly, so the shot proves the flyout that
+## keypress actually produces rather than a string that merely exists.
+func _press_space() -> void:
+	var event := InputEventKey.new()
+	event.keycode = KEY_SPACE
+	event.pressed = true
+	_main._unhandled_input(event)
+
+
 ## Drives the real chain across several contract cadence boundaries, feeding
 ## it exactly the way a player does. What puts product in the shared delivery
 ## pool the contracts draw from is the delivery dock at the end of the line,
@@ -552,6 +568,8 @@ func _process(_delta: float) -> bool:
 		_enter_remove_mode()
 	if _frames == 2 and _shop:
 		_open_shop_menu()
+	if _frames == 2 and _fill_blocked:
+		_press_space()
 	if _frames == 2 and _no_hud:
 		var hud := _main.get_node_or_null("HUD")
 		if hud != null:

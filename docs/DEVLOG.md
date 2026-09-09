@@ -50,6 +50,34 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-09 — SPACE and V say why, instead of doing nothing
+
+More real playtesting fallout: with a hopper's item choice and raw-ingredient
+purchasing both landed, pressing SPACE (load hoppers) or V (load tanks) with
+no stock bought — or no hopper/tank placed at all — did *exactly nothing*,
+silently. That is `issue_command`'s correct contract for the simulation (an
+impossible command changes nothing), but a player watching a keypress do
+nothing has no way to tell "you own no sugar" from "there is no hopper" from
+"it's already full," and reported it as "how am I meant to load the hopper
+for sugar?" — a controls problem, not a missing-feature one.
+
+`_hopper_fill_blocker`/`_tank_fill_blocker` (`main.gd`) check, BEFORE the
+command ever reaches the sim, whether anything is actually placed and
+whether at least one raw item it needs is in stock — and if not, name the
+exact missing thing in the same flyout label the hotbar already uses ("No
+hopper placed — buy one in the build menu (E)" / "No tomato, sugar in stock
+— buy some at the Ingredient Market (M)"). A tank not yet feeding any pipe
+run is deliberately not blocked on stock at all — that is a plumbing gap,
+not a stock one, and this message does not try to tell the two apart.
+Already-full is left silent on purpose too: the fill bar sitting at max is
+its own answer, unlike the other two cases, which have nothing visible to
+look at.
+
+New `test_fill_feedback.gd` (marker `FILL_FEEDBACK_OK`) proves both messages
+appear at the right moments, both clear the instant real stock is bought
+(not just that the strings exist), and a real fill actually moves stock once
+unblocked — full `scripts/verify-core-loop.sh` green.
+
 ### 2026-09-08 — A placed hopper can change its mind
 
 A real gap surfaced by actually playing the demo after the chain-rework epic
