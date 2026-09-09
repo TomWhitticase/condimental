@@ -50,6 +50,51 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-09 — Pipes & Conveyors Overhaul, ticket 3: the pipe model family
+
+Assets only (`assets/voxels/`), per `docs/PIPES_AND_CONVEYORS_PLAN.md`;
+ticket 6 wires the new models into `main.gd`. Started by rendering the
+current pipe runs and listing what was actually wrong, then fixed each:
+
+1. **The liquid bled through the closed pipe as a coloured stripe** along
+   the top of every tile. The fluid slab was as wide as the bore, so its
+   side faces coincided with the tube's outer wall where the wall curves in
+   toward the crown. Fixed: the body is two voxels narrower each side
+   (`PIPE_FLUID_Y`), and a voxgen test pins every body inside its bore.
+2. **The axis was half a voxel off the tile midline** (centred on voxel 16),
+   so tiles at mixed facings stepped by a voxel at every joint and no
+   corner could have met both neighbours. Fixed: every shape is built on
+   `PIPE_C` = 15.5 with new fractional-centre primitives in `vox.rs`; the
+   profile is rounder for it (a two-voxel flat instead of three nine-wide
+   rows, which is what made the tube read as a square beam).
+3. **A run's free end was an open bore with the floor visible through it**
+   (the demo's south run, both ends). Fixed by `pipe_end`; the demo still
+   shows it until ticket 6 picks that shape from `links`.
+4. **`pipe_inlet`'s blind flange capped the +X end whatever the run did**,
+   and its branch pointed south whatever the machine did — in the fluids
+   fixture (a west-facing run) the branch stuck out over bare floor while
+   the mixer's stub met the tube's flank. The shape family replaces it
+   (corner or tee + `pipe_fitting_machine`); the deprecated tile is kept
+   generating, composed from the new parts, so the scene still renders.
+5. **The cap read as a hole.** Its brass disc faced the camera on the
+   shadow side and rendered near-black — a cap indistinguishable from the
+   open mouth it closed. Now a bright plate with brass bolt heads.
+6. **A plain tube end butting a machine's radius-4 flange showed its own
+   cut face** around the smaller ring. `pipe_fitting_machine` puts a
+   radius-6 brass flange on the pipe side that swallows the machine's.
+7. **No corner, tee or cross existed**, so neither the one-flange-per-tile
+   rule nor the sight window had anywhere to go on a turned run.
+
+Shipped: `pipe`, `pipe_corner`, `pipe_tee`, `pipe_cross`, `pipe_end`;
+`pipe_fitting_machine`, `pipe_fitting_tank` (authored on +X, overlaid by
+Godot on any open leg); one fluid body per shape. `PIPE_BORE_FLOOR_VOXELS`
+(12) and `PIPE_BORE_HEIGHT_VOXELS` (7) in `main.gd` are unchanged; the end
+body stops short of its cap, so `FLUID_END_CAP_TRIM` can go in ticket 6.
+Face convention, stated once in the pipe section header: vox low-Y is
+north. Verified with `cargo test --workspace`, `verify-core-loop.sh`, the
+model previews and closeups of every pipe run in the chain, fluids and demo
+fixtures before and after.
+
 ### 2026-09-09 — The always-loaded docs were cut to a third of their size
 
 `CLAUDE.md`, `ARCHITECTURE.md` and `UI_UX.md` had all grown past the 40k-char

@@ -169,6 +169,26 @@ DECISIONS.md Part B. There is no point 10.
     (and `pipe_inlet`) stay east-only and the other facings fall back to the
     plain model. Known, tested, accepted; a four-directional junction pass
     is its own art ticket.
+19. **A live body scaled inside a hollow shape must be strictly narrower
+    than the shape's OUTER wall at every height it can reach.** The pipe's
+    fluid slab was as wide as the bore; where the tube curves in toward
+    the crown its outer wall is that wide too, and the two z-fought as a
+    coloured stripe along every closed tile. Only a scene render with
+    liquid in the run shows it.
+20. **Anything Godot spins must be symmetric about the tile midline,
+    between voxels 15 and 16.** An integer-centred axis (voxel 16) lands
+    on the other side of the midline after a turn, so a run at mixed
+    facings steps at every joint. Use the `*_f` primitives with centre
+    15.5 for pipes, belts and junction art.
+21. **A dark accent on a camera-facing shadow-side face reads as a hole**
+    (the converse of point 11). The end cap's brass disc rendered as the
+    open mouth it closed; bolts on a bright plate keep the accent.
+22. **A composable fitting is an overlay: it keeps out of every shape's
+    sight window (tube-height hardware at x ≥ 27; leg windows at 20..26)
+    and carves its bore a little wider than the shape's so the two meshes
+    never share a surface.** `vengi` previews look from the -X/+Y corner,
+    which the game never shows, so +X-face hardware is judged only in the
+    scene.
 
 ## 3. Theme & setting
 
