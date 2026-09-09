@@ -45,19 +45,46 @@ const ERROR_INK := Color(0.97, 0.55, 0.48)
 ## can be architecture instead of trim.
 const BACKDROP := Color(0.09, 0.095, 0.105, 1.0)
 const BACKDROP_STRIPE := Color(0.13, 0.115, 0.075, 1.0)
-## Half the band's height, in pixels — sized so the panel sits inside it with
-## the floor showing above and below at the 720-line viewport this ships at.
-const BAND_HALF_HEIGHT := 190.0
+## **Every size here is measured in `main.gd`'s `UI_SCALE`**, read from that
+## script rather than repeated, so the menu and the HUD cannot drift apart
+## (the menu was written alongside the 2026-09-09 UI-scale pass and
+## reconciled with it at merge). The sizes below are member variables rather
+## than constants only because a constant cannot multiply by a value read
+## from another script; they are set once and never written again.
+const MainScript := preload("res://main.gd")
+var UI_SCALE: float = MainScript.UI_SCALE
 
-const BASE_FONT_SIZE := 15 # main.gd's own HUD size; every size here derives from it
-const TITLE_FONT_SIZE := BASE_FONT_SIZE + 33
-const SUBTITLE_FONT_SIZE := BASE_FONT_SIZE + 1
-const BUTTON_FONT_SIZE := BASE_FONT_SIZE + 5
-const BUTTON_MIN_SIZE := Vector2(260.0, 52.0)
-const PANEL_MIN_WIDTH := 560.0
+## Half the band's height, in design pixels times the scale — sized so the
+## panel sits inside it with the floor showing above and below.
+var BAND_HALF_HEIGHT: float = 190.0 * UI_SCALE
+
+## The same 15px design base `main.gd`'s `UI_FONT_BASE` uses; every font
+## size here is an offset from it, scaled — `main.gd`'s `_ui_font` rule.
+const BASE_FONT_SIZE := 15
+var BODY_FONT_SIZE: int = int(round(BASE_FONT_SIZE * UI_SCALE))
+var TITLE_FONT_SIZE: int = int(round((BASE_FONT_SIZE + 33) * UI_SCALE))
+var SUBTITLE_FONT_SIZE: int = int(round((BASE_FONT_SIZE + 1) * UI_SCALE))
+var BUTTON_FONT_SIZE: int = int(round((BASE_FONT_SIZE + 5) * UI_SCALE))
+var ROW_FONT_SIZE: int = int(round((BASE_FONT_SIZE + 2) * UI_SCALE))
+var BUTTON_MIN_SIZE: Vector2 = Vector2(260.0, 52.0) * UI_SCALE
+var PANEL_MARGIN: float = 26.0 * UI_SCALE
+var PANEL_MIN_WIDTH: float = 560.0 * UI_SCALE
+## The width left inside the panel's own margins — what every full-width
+## child (the list, the rows, the error line) is sized to.
+var PANEL_INNER_WIDTH: float = PANEL_MIN_WIDTH - PANEL_MARGIN * 2.0
 ## The load list scrolls past this height rather than pushing the panel off
 ## the screen — the same cap the contract clipboard's docket stack takes.
-const SAVE_LIST_MAX_HEIGHT := 300.0
+var SAVE_LIST_MAX_HEIGHT: float = 300.0 * UI_SCALE
+
+
+## `n` design pixels at the current scale — `main.gd`'s `_ui_px`.
+func _px(n: float) -> float:
+	return round(n * UI_SCALE)
+
+
+## `_px` for the properties Godot types as `int` — `main.gd`'s `_ui_i`.
+func _i(n: float) -> int:
+	return int(round(n * UI_SCALE))
 
 var _root_box: VBoxContainer
 var _button_box: VBoxContainer
@@ -108,9 +135,9 @@ func _build_backdrop() -> void:
 	# the first frame of this.
 	_add_band(BACKDROP_STRIPE, -BAND_HALF_HEIGHT, BAND_HALF_HEIGHT)
 	_add_band(Color(PLATE_ACCENT.r, PLATE_ACCENT.g, PLATE_ACCENT.b, 0.30),
-			-BAND_HALF_HEIGHT, -BAND_HALF_HEIGHT + 2.0)
+			-BAND_HALF_HEIGHT, -BAND_HALF_HEIGHT + _px(2.0))
 	_add_band(Color(PLATE_ACCENT.r, PLATE_ACCENT.g, PLATE_ACCENT.b, 0.30),
-			BAND_HALF_HEIGHT - 2.0, BAND_HALF_HEIGHT)
+			BAND_HALF_HEIGHT - _px(2.0), BAND_HALF_HEIGHT)
 
 
 ## A full-width horizontal band centred vertically on the screen, `top` and
@@ -132,11 +159,11 @@ func _build_panel() -> void:
 	var style := StyleBoxFlat.new()
 	style.bg_color = PLATE_BG
 	style.border_color = PLATE_ACCENT
-	style.border_width_top = 4
-	style.border_width_left = 2
-	style.border_width_right = 2
-	style.border_width_bottom = 2
-	style.set_content_margin_all(26.0)
+	style.border_width_top = _i(4)
+	style.border_width_left = _i(2)
+	style.border_width_right = _i(2)
+	style.border_width_bottom = _i(2)
+	style.set_content_margin_all(PANEL_MARGIN)
 
 	# A CenterContainer filling the screen, rather than a PRESET_CENTER on the
 	# panel itself: that preset is computed from the panel's minimum size at
@@ -158,18 +185,18 @@ func _build_panel() -> void:
 
 	_root_box = VBoxContainer.new()
 	_root_box.name = "MenuBody"
-	_root_box.add_theme_constant_override("separation", 14)
+	_root_box.add_theme_constant_override("separation", _i(14))
 	panel.add_child(_root_box)
 
 	var title := Label.new()
 	title.name = "Title"
-	title.label_settings = _settings(TITLE_FONT_SIZE, HAZARD, 6)
+	title.label_settings = _settings(TITLE_FONT_SIZE, HAZARD, _i(6))
 	title.text = "SAUCE FACTORY"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_root_box.add_child(title)
 
 	var subtitle := Label.new()
-	subtitle.label_settings = _settings(SUBTITLE_FONT_SIZE, INK_DIM, 3)
+	subtitle.label_settings = _settings(SUBTITLE_FONT_SIZE, INK_DIM, _i(3))
 	subtitle.text = "condiment production, automated"
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_root_box.add_child(subtitle)
@@ -178,7 +205,7 @@ func _build_panel() -> void:
 
 	_button_box = VBoxContainer.new()
 	_button_box.name = "MenuButtons"
-	_button_box.add_theme_constant_override("separation", 10)
+	_button_box.add_theme_constant_override("separation", _i(10))
 	_root_box.add_child(_button_box)
 
 	_new_game_button = _menu_button("NewGameButton", "NEW GAME")
@@ -201,9 +228,9 @@ func _build_panel() -> void:
 	# nowhere to print.
 	_error_label = Label.new()
 	_error_label.name = "MenuError"
-	_error_label.label_settings = _settings(BASE_FONT_SIZE, ERROR_INK, 4)
+	_error_label.label_settings = _settings(BODY_FONT_SIZE, ERROR_INK, _i(4))
 	_error_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_error_label.custom_minimum_size = Vector2(PANEL_MIN_WIDTH - 52.0, 0.0)
+	_error_label.custom_minimum_size = Vector2(PANEL_INNER_WIDTH, 0.0)
 	_error_label.visible = false
 	_root_box.add_child(_error_label)
 
@@ -211,33 +238,33 @@ func _build_panel() -> void:
 func _build_load_view() -> void:
 	_load_box = VBoxContainer.new()
 	_load_box.name = "LoadView"
-	_load_box.add_theme_constant_override("separation", 8)
+	_load_box.add_theme_constant_override("separation", _i(8))
 	_load_box.visible = false
 	_root_box.add_child(_load_box)
 
 	var heading := Label.new()
-	heading.label_settings = _settings(BUTTON_FONT_SIZE, INK, 4)
+	heading.label_settings = _settings(BUTTON_FONT_SIZE, INK, _i(4))
 	heading.text = "LOAD GAME"
 	_load_box.add_child(heading)
 
 	_empty_label = Label.new()
 	_empty_label.name = "NoSavesLabel"
-	_empty_label.label_settings = _settings(BASE_FONT_SIZE, INK_DIM, 4)
+	_empty_label.label_settings = _settings(BODY_FONT_SIZE, INK_DIM, _i(4))
 	_empty_label.text = "No saves yet — start a new game and the factory will autosave itself."
 	_empty_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_empty_label.custom_minimum_size = Vector2(PANEL_MIN_WIDTH - 52.0, 0.0)
+	_empty_label.custom_minimum_size = Vector2(PANEL_INNER_WIDTH, 0.0)
 	_load_box.add_child(_empty_label)
 
 	var scroll := ScrollContainer.new()
 	scroll.name = "SaveScroll"
-	scroll.custom_minimum_size = Vector2(PANEL_MIN_WIDTH - 52.0, 0.0)
+	scroll.custom_minimum_size = Vector2(PANEL_INNER_WIDTH, 0.0)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_load_box.add_child(scroll)
 
 	_save_rows_box = VBoxContainer.new()
 	_save_rows_box.name = "SaveRows"
 	_save_rows_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_save_rows_box.add_theme_constant_override("separation", 6)
+	_save_rows_box.add_theme_constant_override("separation", _i(6))
 	scroll.add_child(_save_rows_box)
 
 	_load_box.add_child(_rule())
@@ -264,7 +291,7 @@ func _settings(size: int, colour: Color, outline: int) -> LabelSettings:
 ## the top border of every plate — here as a rule inside one.
 func _rule() -> Panel:
 	var rule := Panel.new()
-	rule.custom_minimum_size = Vector2(0.0, 2.0)
+	rule.custom_minimum_size = Vector2(0.0, _px(2.0))
 	rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(PLATE_ACCENT.r, PLATE_ACCENT.g, PLATE_ACCENT.b, 0.55)
@@ -300,8 +327,8 @@ func _button_style(state: String) -> StyleBoxFlat:
 			style.border_color = PLATE_ACCENT
 		"disabled":
 			style.bg_color = Color(0.10, 0.10, 0.11, 0.85)
-	style.set_border_width_all(2)
-	style.set_content_margin_all(10.0)
+	style.set_border_width_all(_i(2))
+	style.set_content_margin_all(_px(10.0))
 	return style
 
 
@@ -330,9 +357,9 @@ func _apply_list_height() -> void:
 	var scroll := _load_box.get_node_or_null("SaveScroll") if _load_box != null else null
 	if scroll == null:
 		return
-	var wanted := float(_save_rows.size()) * (BUTTON_MIN_SIZE.y + 6.0)
+	var wanted := float(_save_rows.size()) * (BUTTON_MIN_SIZE.y + _px(6.0))
 	(scroll as ScrollContainer).custom_minimum_size = Vector2(
-		PANEL_MIN_WIDTH - 52.0, minf(wanted, SAVE_LIST_MAX_HEIGHT)
+		PANEL_INNER_WIDTH, minf(wanted, SAVE_LIST_MAX_HEIGHT)
 	)
 
 
@@ -345,8 +372,8 @@ func _apply_list_height() -> void:
 func _build_save_row(index: int) -> Button:
 	var row: Dictionary = _save_rows[index]
 	var button := _menu_button("SaveRow_%d" % index, "")
-	button.custom_minimum_size = Vector2(PANEL_MIN_WIDTH - 52.0, BUTTON_MIN_SIZE.y)
-	button.add_theme_font_size_override("font_size", BASE_FONT_SIZE + 2)
+	button.custom_minimum_size = Vector2(PANEL_INNER_WIDTH, BUTTON_MIN_SIZE.y)
+	button.add_theme_font_size_override("font_size", ROW_FONT_SIZE)
 	var label := String(row["slot"])
 	if bool(row["autosave"]):
 		label = "%s  (autosave)" % label

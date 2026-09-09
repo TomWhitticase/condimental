@@ -889,7 +889,10 @@ var _pause_buttons_box: VBoxContainer
 ## in this panel with no undo — so it asks, where Save & Quit (which cannot
 ## lose anything) does not.
 var _pause_confirm_quit := false
-const PAUSE_BUTTON_MIN_SIZE := Vector2(300.0, 44.0)
+## In design pixels times `UI_SCALE`, like every other fixed size in this
+## HUD (the pause menu was written alongside the 2026-09-09 UI-scale pass and
+## reconciled with it at merge).
+const PAUSE_BUTTON_MIN_SIZE := Vector2(300.0, 44.0) * UI_SCALE
 
 ## Which slot this session is saving to by default: the one it was loaded
 ## from, or `DEFAULT_SLOT` for a new game. Kept in step with `GameSession`
@@ -5068,11 +5071,11 @@ func _build_pause_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.06, 0.06, 0.07, 0.97)
 	style.border_color = Color(0.85, 0.63, 0.11, 0.95)
-	style.border_width_top = 4
-	style.border_width_left = 2
-	style.border_width_right = 2
-	style.border_width_bottom = 2
-	style.set_content_margin_all(20.0)
+	style.border_width_top = _ui_i(4)
+	style.border_width_left = _ui_i(2)
+	style.border_width_right = _ui_i(2)
+	style.border_width_bottom = _ui_i(2)
+	style.set_content_margin_all(_ui_px(20.0))
 
 	_pause_menu = PanelContainer.new()
 	_pause_menu.name = "PauseMenu"
@@ -5081,11 +5084,11 @@ func _build_pause_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	hud.add_child(_pause_menu)
 
 	var body := VBoxContainer.new()
-	body.add_theme_constant_override("separation", 12)
+	body.add_theme_constant_override("separation", _ui_i(12))
 	_pause_menu.add_child(body)
 
 	var title_settings := LabelSettings.new()
-	title_settings.font_size = base_settings.font_size + 8
+	title_settings.font_size = _ui_font(8)
 	title_settings.font_color = Color(0.98, 0.85, 0.42)
 	title_settings.outline_size = base_settings.outline_size
 	title_settings.outline_color = base_settings.outline_color
@@ -5107,7 +5110,7 @@ func _build_pause_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 
 	_pause_buttons_box = VBoxContainer.new()
 	_pause_buttons_box.name = "PauseButtons"
-	_pause_buttons_box.add_theme_constant_override("separation", 8)
+	_pause_buttons_box.add_theme_constant_override("separation", _ui_i(8))
 	body.add_child(_pause_buttons_box)
 
 	var resume := _pause_button("ResumeButton", "RESUME")
@@ -5115,20 +5118,20 @@ func _build_pause_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_pause_buttons_box.add_child(resume)
 
 	var save_row := HBoxContainer.new()
-	save_row.add_theme_constant_override("separation", 8)
+	save_row.add_theme_constant_override("separation", _ui_i(8))
 	_pause_buttons_box.add_child(save_row)
 
 	_pause_slot_field = LineEdit.new()
 	_pause_slot_field.name = "SaveSlotField"
 	_pause_slot_field.placeholder_text = "save name"
 	_pause_slot_field.custom_minimum_size = Vector2(
-		PAUSE_BUTTON_MIN_SIZE.x - 110.0, PAUSE_BUTTON_MIN_SIZE.y
+		PAUSE_BUTTON_MIN_SIZE.x - _ui_px(110.0), PAUSE_BUTTON_MIN_SIZE.y
 	)
-	_pause_slot_field.add_theme_font_size_override("font_size", base_settings.font_size + 1)
+	_pause_slot_field.add_theme_font_size_override("font_size", _ui_font(1))
 	save_row.add_child(_pause_slot_field)
 
 	var save_button := _pause_button("SaveButton", "SAVE")
-	save_button.custom_minimum_size = Vector2(102.0, PAUSE_BUTTON_MIN_SIZE.y)
+	save_button.custom_minimum_size = Vector2(_ui_px(102.0), PAUSE_BUTTON_MIN_SIZE.y)
 	save_button.pressed.connect(_on_pause_save_pressed)
 	save_row.add_child(save_button)
 
@@ -5150,7 +5153,7 @@ func _build_pause_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	# content for the moment it is being asked.
 	_pause_confirm_box = VBoxContainer.new()
 	_pause_confirm_box.name = "PauseConfirm"
-	_pause_confirm_box.add_theme_constant_override("separation", 8)
+	_pause_confirm_box.add_theme_constant_override("separation", _ui_i(8))
 	_pause_confirm_box.visible = false
 	body.add_child(_pause_confirm_box)
 
@@ -5189,6 +5192,11 @@ func _pause_button(node_name: String, text: String) -> Button:
 	button.text = text
 	button.custom_minimum_size = PAUSE_BUTTON_MIN_SIZE
 	button.focus_mode = Control.FOCUS_NONE
+	# A Button falls back to the theme's default size, not `base_settings` —
+	# a rendered frame at the 2026-09-09 scale showed these captions a clear
+	# step smaller than the body text beside them. The menu scene's buttons
+	# sit at the same offset (`menu.gd`'s BUTTON_FONT_SIZE).
+	button.add_theme_font_size_override("font_size", _ui_font(5))
 	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
 		button.add_theme_stylebox_override(state, _shop_slot_style(state))
 	return button
