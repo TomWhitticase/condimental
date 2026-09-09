@@ -34,6 +34,7 @@ below is history and should only ever be appended to.)*
 - **Conveyor splitters (DONE, both halves):** a line can fork. A `splitter` is a 1x1 buildable kind that carries product exactly like a belt tile and deals it alternately between two outputs — the tile it faces, and the tile one quarter turn clockwise from it — so one `rotate` turns both outputs together and no new command was needed. If the side that is due is blocked (or was never built) the item goes down the other one in the same tick, so a full branch never stalls the whole line and "only one output connected" needs no special case. It reaches every sink a belt's hand-off does: another belt, another splitter, a machine's inlet face, a dock. It is **drawn** as a machined diverter table set into the belt run — a bright steel plate where the rest of the line is rubber, with three open lanes and one closed rail — carrying a **next-output arrow inlaid flush in the deck**: both directions are cut into the table as grooves and one of them lights up, so which way the next item goes is a pair of positions rather than a colour, and nothing stands proud of the surface the product slides over. The arrow shows where the item will **actually** go, not the raw `next_output`: a splitter whose branch was never built reports "branch" forever while everything goes straight, and an arrow driven off that field alone would point at bare floor. Items cross a splitter drawn exactly as they cross a belt, and hover names both outputs and says "not connected" about one that was never laid.
 - **Contracts (done, both halves):** contracts are `data/contracts.ron` content and three run concurrently, each with its own mix/cadence/payout, all drawing from one shared pool of delivered stock (a box pays one contract, never two). The clipboard panel shows all of them — one paper docket card per contract on the one board, each with its own checklist, payout, countdown and delivered/missed tally, above a single shared money figure and a single "on the dock" line naming the pool they compete for.
 - **Chain rework (DONE, both halves):** the middle of the production line is **piped, not belted**, which is what a real sauce plant looks like. The mixer's output and the cooking vat's output are fluids (`recipes.ron` schema_version 3 gained `fluid_outputs`), so mix flows from the mixer to the vat and cooked ketchup from the vat to the bottler through pipe runs with no tank behind them; the bottler is where the product becomes a solid again, and the cooking vat is now the one machine on the line **no belt touches at all**. The mixer gained **sugar** as a second solid ingredient and grew to **1x2** for it — a machine accepts solid input on every tile of the edge opposite the way it points, so N solid ingredients need N tiles of inlet face or the two lanes merge onto one belt and deadlock. The aging rack is gone. **Raw ingredients cost money**: `data/ingredients.ron` prices tomato, sugar and vinegar, a `BuyIngredient` command buys them, and `SPACE`/`V` load a hopper or a tank from that bought stock — so overproduction is a real loss rather than free accumulation. On the presentation side: a hopper's contents are chosen **when it is placed** (**Q** cycles them while the ghost is up, the prompt names them in words, and the ghost carries a tinted product body), because with two raw solids the simulation can no longer infer which bin the player meant — until that landed, placing a hopper from the UI did nothing at all, silently. Buying stock has its own panel on **M** (the build menu was already as tall as the space above the hotbar allows), and a permanent larder strip above the hotbar shows what is carried so an unloadable hopper explains itself. The mixer, the cooking vat and the bottler were re-modelled with pipe nozzles where belts no longer meet them.
+- **Pipes & conveyors overhaul (IN PROGRESS, `docs/PIPES_AND_CONVEYORS_PLAN.md`):** seven tickets on one integration branch to make belts and pipes look right, read right, run fast and connect up. **Ticket 1 (sim) has landed:** every belt, splitter and pipe on the wire carries `links` — what feeds it, what it hands to, or what its pipe is joined to, per side — recorded by the topology pass so it is exact and free per tick. Tickets 2-7 (belt and pipe model families, instanced rendering, belt/pipe presentation from `links`, a bug hunt) are to do; one sim rule discrepancy (a belt feeds a machine from any side of an inlet-edge tile) is flagged for ticket 7.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -49,6 +50,37 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-09 — Pipes & conveyors overhaul, ticket 1: the sim says what is joined to what
+
+The first ticket of the overhaul planned in `docs/PIPES_AND_CONVEYORS_PLAN.md`.
+Every belt, splitter and pipe in `world_layout_json` (and in
+`query_tile_json`, for hover) now carries a `links` object: which sides
+feed a belt and what kind of thing stands there, which side it hands to,
+or which sides a pipe is joined on and whether that is another pipe, a
+machine's tap or a tank. Directions are absolute, named from the tile
+outward, and listed north/east/south/west so the shape is canonical. It is
+recorded inside `World::recompute_topology` at the moment each hand-off,
+tap and pipe adjacency is resolved, so it is exactly what the tick uses,
+never a second scan, and free per tick; every other kind's JSON is
+byte-identical to before. Tickets 5 and 6 read this to pick a straight, a
+corner, a merge, an end, a tee, a cross or a port fitting.
+
+Topology gaps filled to make it exact: the machine input tap now keeps
+the direction and tile it was found through (it discarded both), the
+output tap and the tank discharge now keep the pipe tile (they kept only
+network and segment), and pipe-to-pipe adjacency is recorded from both
+ends as it is found. `sim_core/tests/links.rs` covers every shape the plan
+names, links after `Remove`/`Rotate`, a mirror-symmetry invariant over the
+whole reference chain, and the JSON byte for byte.
+
+**Found, not fixed (for ticket 7):** the sim links a belt into a machine
+or dock when the tile it points at is on the inlet *edge*, from any side —
+so a 1x1 crusher is fed from all four sides, including through its outlet
+face, against `world.rs`'s own doc. `test_layouts.gd`'s demo line (a
+west-facing crusher fed from the south) relies on it, and fixing it would
+change what placed lines do, so the wire reports the rule as it stands
+and the links test pins it.
 
 ### 2026-09-09 — The always-loaded docs were cut to a third of their size
 
