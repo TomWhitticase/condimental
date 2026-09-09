@@ -27,7 +27,7 @@ mod common;
 
 use sim_core::sim::types::Fx;
 use sim_core::sim::{
-    ContractRegistry, DockSnapshot, MachineRegistry,
+    ContractRegistry, DockSnapshot, MachineRegistry, PlayerCommand,
     RecipeRegistry, World, reference_chain_with_budget, reference_chain_with_content_and_budget,
 };
 
@@ -317,9 +317,24 @@ fn one_delivered_unit_pays_one_contract_not_every_contract_that_wants_it() {
         BUDGET,
     ));
 
-    // Ship exactly one unit, then stop feeding the line entirely.
+    // Ship exactly one unit, then take the DOCK back off the floor so no
+    // second unit can ever reach the pool. Merely stopping the fill
+    // commands is not enough and used to pass only by luck: the line is
+    // still full of in-flight product when the first box lands, so it goes
+    // on shipping for a long while afterwards, and whether a second box
+    // beats the settle boundary is a function of every process time in
+    // `data/recipes.ron`. Removing the exit makes "exactly one unit is ever
+    // collected" true by construction — through an ordinary player command,
+    // like everything else this fixture does.
     let shipped = run_until_shipped(&mut world, 1);
     assert_eq!(shipped, 1, "the chain produces one unit at a time");
+    world.issue_command(PlayerCommand::Remove {
+        tile: the_dock(&world).tile,
+    });
+    assert!(
+        world.dock_snapshots().is_empty(),
+        "the exit must really be gone, or the pool can still grow"
+    );
 
     let target = world.current_tick() + 1000;
     while world.current_tick() < target {

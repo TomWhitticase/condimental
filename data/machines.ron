@@ -181,7 +181,7 @@
         //
         // 2x2, not 2x1, for two reasons. Thematically, a vat is the one
         // machine on this line whose bulk is the point — it holds a whole
-        // batch through the chain's longest process (240 ticks, four times
+        // batch through the chain's longest process (240 ticks, three times
         // the crush), so "it takes up real floor space and it is worth it"
         // is exactly the read we want. Mechanically, 2x2 is the smallest
         // footprint that exercises ticket 1's mechanism in *both* axes:

@@ -233,12 +233,12 @@ const MACHINE_MODEL_FALLBACK := "machine"
 ##
 ## Keyed on kind, like MACHINE_MODELS, and deliberately sparse — **empty, as
 ## the shipped content now stands.** A gauge is not a thing every machine
-## should have: the crusher's whole process is 60 ticks, one second, so a bar
-## tracking it would be a flicker, and five flickering bars along the line
-## would be noise rather than information. The rule this table encodes is
-## that a gauge earns its place when a process runs long enough that "how far
-## through is it" stops being answerable by the status lamp — which is a
-## question of TIMESCALE, not of importance.
+## should have: the crusher's whole process is 80 ticks, well under two
+## seconds, so a bar tracking it would be a flicker, and five flickering bars
+## along the line would be noise rather than information. The rule this table
+## encodes is that a gauge earns its place when a process runs long enough
+## that "how far through is it" stops being answerable by the status lamp —
+## which is a question of TIMESCALE, not of importance.
 ##
 ## Its one entry was milestone 7's `aging_rack`, a 2400-tick stage. The chain
 ## rework deleted that stage outright (ageing is not a mechanic this game
