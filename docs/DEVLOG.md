@@ -34,6 +34,7 @@ below is history and should only ever be appended to.)*
 - **Conveyor splitters (DONE, both halves):** a line can fork. A `splitter` is a 1x1 buildable kind that carries product exactly like a belt tile and deals it alternately between two outputs — the tile it faces, and the tile one quarter turn clockwise from it — so one `rotate` turns both outputs together and no new command was needed. If the side that is due is blocked (or was never built) the item goes down the other one in the same tick, so a full branch never stalls the whole line and "only one output connected" needs no special case. It reaches every sink a belt's hand-off does: another belt, another splitter, a machine's inlet face, a dock. It is **drawn** as a machined diverter table set into the belt run — a bright steel plate where the rest of the line is rubber, with three open lanes and one closed rail — carrying a **next-output arrow inlaid flush in the deck**: both directions are cut into the table as grooves and one of them lights up, so which way the next item goes is a pair of positions rather than a colour, and nothing stands proud of the surface the product slides over. The arrow shows where the item will **actually** go, not the raw `next_output`: a splitter whose branch was never built reports "branch" forever while everything goes straight, and an arrow driven off that field alone would point at bare floor. Items cross a splitter drawn exactly as they cross a belt, and hover names both outputs and says "not connected" about one that was never laid.
 - **Contracts (done, both halves):** contracts are `data/contracts.ron` content and three run concurrently, each with its own mix/cadence/payout, all drawing from one shared pool of delivered stock (a box pays one contract, never two). The clipboard panel shows all of them — one paper docket card per contract on the one board, each with its own checklist, payout, countdown and delivered/missed tally, above a single shared money figure and a single "on the dock" line naming the pool they compete for.
 - **Chain rework (DONE, both halves):** the middle of the production line is **piped, not belted**, which is what a real sauce plant looks like. The mixer's output and the cooking vat's output are fluids (`recipes.ron` schema_version 3 gained `fluid_outputs`), so mix flows from the mixer to the vat and cooked ketchup from the vat to the bottler through pipe runs with no tank behind them; the bottler is where the product becomes a solid again, and the cooking vat is now the one machine on the line **no belt touches at all**. The mixer gained **sugar** as a second solid ingredient and grew to **1x2** for it — a machine accepts solid input on every tile of the edge opposite the way it points, so N solid ingredients need N tiles of inlet face or the two lanes merge onto one belt and deadlock. The aging rack is gone. **Raw ingredients cost money**: `data/ingredients.ron` prices tomato, sugar and vinegar, a `BuyIngredient` command buys them, and `SPACE`/`V` load a hopper or a tank from that bought stock — so overproduction is a real loss rather than free accumulation. On the presentation side: a hopper's contents are chosen **when it is placed** (**Q** cycles them while the ghost is up, the prompt names them in words, and the ghost carries a tinted product body), because with two raw solids the simulation can no longer infer which bin the player meant — until that landed, placing a hopper from the UI did nothing at all, silently. Buying stock has its own panel on **M** (the build menu was already as tall as the space above the hotbar allows), and a permanent larder strip above the hotbar shows what is carried so an unloadable hopper explains itself. The mixer, the cooking vat and the bottler were re-modelled with pipe nozzles where belts no longer meet them.
+- **Pipes & conveyors overhaul (in progress, `docs/PIPES_AND_CONVEYORS_PLAN.md`):** ticket 4 landed **instanced rendering** — belts, splitters, pipes and the items riding them are `MultiMesh` instances (one per asset and material class) rather than a node each, with a 1500-tile stress fixture, a headless timing test (`test_perf.gd`) and `scripts/screenshot-scene.sh --stress`. Machines and buildings keep their nodes. The seams the belt-animation and corner tickets build on (frame sets, a caller-supplied yaw per tile, one item-positioning function) are in place and documented in `main.gd`.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -49,6 +50,49 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-09 — Pipes & conveyors overhaul, ticket 4: a thousand belts is one draw call
+
+Every belt, splitter and pipe tile used to be its own `Node3D` with a
+`MeshInstance3D` per material class, and every item on a belt a pooled
+`Node3D` moved each tick. Now every tile drawing one asset is an instance
+in one `MultiMesh` per material class (the way the floor was already drawn),
+and items live in a swap-remove pool per item asset. Machines, buildings,
+level bodies, the splitter arrow and the ghost stay nodes: they carry live
+per-instance state (a lamp swap, a scaled fill, a turning arrow) that a
+`MultiMesh` instance cannot hold. Nothing observable changed — every asset
+choice, hover, ghost, removal, per-tile item hiding and the fluid bodies are
+as they were, and `scripts/screenshot-scene.sh --populate` before and after
+is pixel-identical on the world (the only differing pixels were one
+simulation tick's worth of item travel, which two runs of the OLD renderer
+also show against each other).
+
+Measured on the new 1500-belt stress fixture (`test_layouts.gd`'s
+`build_stress_line`, which funds itself through `save_ron`/`load_ron` since
+its bill is past the starting balance):
+
+| | before | after |
+|---|---|---|
+| rendered objects in frame (`--stress`) | 7,772 | 910 |
+| draw calls in frame (`--stress`) | 204 | 174 |
+| headless `_rebuild_world`, warm | 57 ms | 38 ms |
+| headless 120 frames of `_process`, running | 867 ms (7.2 ms/frame) | 862 ms (7.2 ms/frame) |
+
+The per-frame figure did not move because it is not the scene's: profiling
+the stress line puts ~8 ms of each tick step into parsing the ~80 KB of
+chunk-snapshot JSON two dirty chunks produce, ~1 ms into the sim tick, and
+~2.4 ms into the scene's own belt loop. That is the wire's per-chunk delta
+granularity (ARCHITECTURE.md §4) reporting every belt in a chunk every tick,
+and it is milestone 8's problem, flagged here rather than worked around.
+Primitives in frame rose ~15% on the stress shot because a `MultiMesh` is
+culled as one whole; at this camera nothing is off-screen anyway.
+
+Seams for tickets 5 and 6, documented in `main.gd`'s "Instanced tiles and
+items" section: a tile's asset is a FRAME SET with `_set_tile_frame` flipping
+per-frame visibility; a tile's yaw is handed in by the caller, not derived
+from its direction; an item's position comes from one function of (tile,
+direction, distance). Tests read the scene through `_tile_instance_at`,
+`_carried_item` and `_carried_item_count` instead of node names.
 
 ### 2026-09-09 — The always-loaded docs were cut to a third of their size
 

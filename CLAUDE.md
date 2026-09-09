@@ -177,6 +177,25 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-09 **Pipes & conveyors, ticket 4 (instanced rendering).** Belts,
+  splitters, pipes and carried items are `MultiMesh` instances: one
+  `MultiMeshInstance3D` per (asset, material class) under `World/Tiles`,
+  one swap-remove pool per item asset under `World/Items`. Machines,
+  buildings, level bodies (hopper/tank/pipe fluid), the splitter arrow, dock
+  cases and the ghost STAY nodes: anything with live per-instance state
+  (material swap, scale, visibility) is a node. `_asset_for_placement` still
+  picks the asset; `_tile_frames_for` wraps it as a FRAME SET and
+  `_set_tile_frame` flips per-frame visibility (ticket 5 animates through
+  it). Per-tile yaw is supplied by the caller of `_stage_tile_instance`,
+  never derived inside. Items are positioned only by
+  `_carried_item_transform(tile, direction, distance)`; corners extend it.
+  Per-tile item hiding is kept. Tests use `_tile_instance_at`,
+  `_carried_item`, `_carried_item_count`, not node names. Stress fixture
+  `build_stress_line` (1500 belts) funds itself via `fund` (save/load money
+  patch, ceiling ~32 767 = `Fx`); `test_perf.gd` asserts generous ceilings;
+  `screenshot-scene.sh --stress` prints `SCREENSHOT_RENDER` counts. The
+  remaining per-frame cost is chunk-snapshot JSON parsing (wire, milestone
+  8), not the scene.
 - 2026-09-09 **Hopper/tank auto-fill, ticket 1 (sim).** Auto-fill runs as
   tick step 0, before tank discharge and hopper metering, so a topped-up bin
   feeds in the same tick. One fill helper per kind (`World::fill_hopper_entity`

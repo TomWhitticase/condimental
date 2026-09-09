@@ -135,16 +135,21 @@ func _run_checks() -> void:
 			_fail("a %s-facing belt drew '%s'; only east variants are authored" % [facing, fallback])
 			return
 	# And the scene really builds that fallback, not just the function.
+	# A belt is a MultiMesh instance, not a node (the pipes & conveyors
+	# overhaul's ticket 4), so the scene is asked through `_tile_instance_at`.
 	main._issue_world_command({"type": "rotate", "tile": [0, 0]})
-	var turned: Node3D = main.get_node_or_null("World/belt_0,0")
-	if turned == null:
+	var turned: Dictionary = main._tile_instance_at(Vector2i(0, 0))
+	if turned.is_empty():
 		_fail("the rotated belt vanished from the scene")
 		return
-	if _meshes(turned, []).is_empty():
+	if turned["asset"] != main.BELT_ASSET:
+		_fail("the rotated belt is drawn as '%s', expected the plain '%s'" % [turned["asset"], main.BELT_ASSET])
+		return
+	if turned["nodes"].is_empty():
 		_fail("the rotated belt rendered no meshes")
 		return
-	if absf(rad_to_deg(turned.rotation.y) - 90.0) > 0.5:
-		_fail("a south-facing belt should be turned 90 degrees, got %.1f" % rad_to_deg(turned.rotation.y))
+	if absf(rad_to_deg(float(turned["yaw"])) - 90.0) > 0.5:
+		_fail("a south-facing belt should be turned 90 degrees, got %.1f" % rad_to_deg(float(turned["yaw"])))
 		return
 
 	# --- the machines reach the tile edges their belts meet ---------------
