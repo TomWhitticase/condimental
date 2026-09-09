@@ -2106,18 +2106,30 @@ pub fn hopper_fill(p: &Palette) -> VoxModel {
 /// deck — change one, change both.
 pub const DOCK_DECK_Z: i32 = BELT_SURFACE_Z;
 
-/// `data/machines.ron`'s 1x1 `dock` — the chain's exit, where finished cases
-/// leave the factory and become money (`sim_core::sim::dock`).
+/// `data/machines.ron`'s **2x2** `dock` — the chain's exit, where finished
+/// cases leave the factory and become money (`sim_core::sim::dock`).
 ///
 /// **Why a raised platform with a despatch door, rather than another housing
 /// with a mechanism on top.** Every processing kind on this line is
 /// identified by the machinery that does its work — flywheels, an agitator,
 /// a filling gantry, a taping head. A dock does no work at all: it is
-/// a *place*, the one tile in the world that is not equipment. So it is
+/// a *place*, the one building in the world that is not equipment. So it is
 /// drawn as architecture — a poured platform at trailer-bed height, its edge
-/// striped, with a despatch opening and a canopy behind it — which is both
+/// striped, with despatch openings and a canopy behind them — which is both
 /// what a real loading bay looks like and the one silhouette on this line
 /// that could not be mistaken for a machine.
+///
+/// **It is 64x64 because its footprint is 2x2** (UI_UX.md §2's tile scale
+/// times the declared footprint, the coupling `machine_cooking_vat` and
+/// `machine_mixer` already document). The 2026-09-09 tuning pass grew it from
+/// one tile after a playtest said the one-tile version did not read as a
+/// loading dock, and the extra tile is spent on DEPTH rather than on making
+/// the old design bigger — see `data/machines.ron`'s dock note for the
+/// footprint decision. Concretely, the second row is what finally lets the
+/// two halves of a loading bay stop competing for one tile: **the far tile
+/// is the building** (despatch wall, two doors, canopy, bay lights) and
+/// **the near tile is open apron** (bumpers, striped edge, and the deck the
+/// waiting goods actually stand on — `main.gd`'s `_update_dock_stock`).
 ///
 /// **Where each piece goes is decided by the camera, exactly as the junction
 /// section above derives it.** The fixed isometric view (UI_UX.md §1) can
@@ -2125,41 +2137,55 @@ pub const DOCK_DECK_Z: i32 = BELT_SURFACE_Z;
 /// coordinates, and — the part that actually drove this layout — a sight
 /// line leaving any point travels `(+x, -y, +z)`, so anything at HIGH x and
 /// LOW y stands in front of everything behind it. That rules out the obvious
-/// design, which was tried first: a truck bay carved into the +X face. It
-/// reads beautifully on its own and it walls off the entire deck behind it,
-/// because every deck voxel's sight line has to pass through x = 28..31 on
-/// its way out. So the tall structure went to the FAR (high-y) side, where
-/// its -Y face is still square to the camera but it occludes nothing, and
-/// the deck's near half was left clear for the goods that actually stand on
-/// it (see `main.gd`'s `_update_dock_stock`).
+/// design, which was tried first on the one-tile version: a truck bay carved
+/// into the +X face. It reads beautifully on its own and it walls off the
+/// entire deck behind it, because every deck voxel's sight line has to pass
+/// through the last few +X columns on its way out. So the tall structure
+/// stands on the FAR (high-y) side, where its -Y face is still square to the
+/// camera but it occludes nothing.
+///
+/// **Two doors, not one wide one.** The width is the other half of what the
+/// bigger footprint bought, and a real bay of this size has several
+/// despatch positions rather than one enormous shutter; two openings with
+/// their own shutters and their own bay lights under one continuous canopy
+/// also give the wall a rhythm, where a single 40-voxel hole would read as a
+/// missing wall. Both are genuinely EMPTY (see this file's junction tests
+/// for why that is checked voxel by voxel rather than eyeballed).
 ///
 /// **Material** (UI_UX.md §2b point 8, "food contact is stainless, structure
 /// is painted or poured"): a dock is almost entirely structure — poured
 /// concrete deck, painted steel wall and canopy, rubber bumpers, hazard
 /// striping — so it is the least stainless building in the factory, and
 /// deliberately so. The stainless is exactly where product passes: the
-/// infeed transfer housing and its brass threshold, and the despatch
-/// opening's frame. That split is the rule doing its job rather than an
+/// infeed transfer housings and their brass thresholds, and the despatch
+/// openings' frames. That split is the rule doing its job rather than an
 /// exception to it.
 pub fn machine_dock(p: &Palette) -> VoxModel {
-    let mut m = VoxModel::tile();
-    let last = TILE_VOXELS as i32 - 1;
+    let tile = TILE_VOXELS as i32;
+    let mut m = VoxModel::new([TILE_VOXELS * 2, TILE_VOXELS * 2, TILE_VOXELS]);
+    let last = tile * 2 - 1;
     let deck = DOCK_DECK_Z;
 
     // --- The platform ------------------------------------------------------
     // A solid poured block, not a machine footing: this is the one building
     // on the line the player is meant to read as floor rather than as
-    // equipment. Flush with the tile's own edges for `machine_footing`'s
+    // equipment. Flush with the footprint's own edges for `machine_footing`'s
     // reason — the last belt tile butts straight against it.
     // Poured mid-grey with a lighter wearing surface and a dark kerb course
-    // at the bottom. The first cut made the whole block `concrete_dark`,
-    // which is right for a floor slab's *seam* and wrong for a mass this
-    // size: rendered in the scene it read as a black pit with a lit rail
-    // round it, not as a platform goods stand on.
+    // at the bottom. The first cut of the one-tile version made the whole
+    // block `concrete_dark`, which is right for a floor slab's *seam* and
+    // wrong for a mass this size: rendered in the scene it read as a black
+    // pit with a lit rail round it, not as a platform goods stand on.
     m.cuboid((0, last), (0, last), (0, 1), p.idx("concrete_dark"));
     m.cuboid((0, last), (0, last), (2, deck - 1), p.idx("concrete_light"));
     m.cuboid((1, last - 1), (1, last - 1), (2, deck - 1), p.idx("concrete"));
     m.cuboid((0, last), (0, last), (deck, deck), p.idx("concrete_light"));
+    // One expansion joint along each tile boundary, scored into the wearing
+    // surface. A 64x64 slab poured in one piece is not a thing, and without
+    // the score lines the deck reads as a single blank table at scene scale —
+    // the joints are what say "this is concrete, and it is two bays wide".
+    m.cuboid((tile - 1, tile), (0, last), (deck, deck), p.idx("concrete"));
+    m.cuboid((0, last), (tile - 1, tile), (deck, deck), p.idx("concrete"));
 
     // Edge striping on the two faces the camera can actually see. A loading
     // dock's edge is marked because the drop is the hazard, so this is
@@ -2178,68 +2204,114 @@ pub fn machine_dock(p: &Palette) -> VoxModel {
     // Rubber dock bumpers on the +X edge, where a trailer would come to rest
     // against the platform. Short (they sit below deck level), so they add a
     // recognisable piece of dock hardware to the most camera-facing face
-    // without standing between the camera and anything.
-    for (y0, y1) in [(4, 8), (23, 27)] {
+    // without standing between the camera and anything. Three of them across
+    // a bay this wide rather than the one-tile version's two, spaced so the
+    // rhythm reads as a wall of a real dock rather than as two lumps.
+    for (y0, y1) in [(6, 11), (29, 34), (52, 57)] {
         m.cuboid((last - 1, last), (y0, y1), (deck - 6, deck - 1), p.idx("rubber_dark"));
     }
 
     // --- The despatch wall, on the FAR side --------------------------------
     // Painted steel, ribbed, standing at high y so its -Y face is square to
-    // the camera and it occludes nothing on the deck in front of it.
-    m.cuboid((0, last), (26, last), (deck + 1, 27), p.idx("paint_blue"));
-    for x in (2..=30).step_by(4) {
-        m.cuboid((x, x), (26, 26), (deck + 1, 25), p.idx("steel_dark"));
+    // the camera and it occludes nothing on the apron in front of it. Its
+    // front face is at DOCK_WALL_FACE_Y; everything from there to the model's
+    // far edge is building, everything in front of it is deck.
+    //
+    // It starts at DOCK_WALL_WEST_X rather than at the model's own west edge,
+    // and that is not a stylistic inset: the FAR tile's transfer housing
+    // stands in that corner (see the junctions below), and a wall drawn
+    // through it would be a building with a belt hood carved out of its
+    // west end and daylight showing through the hole. Leaving the corner
+    // open is also what a real bay looks like — the conveyor comes in at the
+    // end of the building, not through the middle of it.
+    let wall_face_y = DOCK_WALL_FACE_Y;
+    m.cuboid((DOCK_WALL_WEST_X, last), (wall_face_y, last), (deck + 1, 27), p.idx("paint_blue"));
+    for x in (DOCK_WALL_WEST_X + 2..=62).step_by(4) {
+        m.cuboid((x, x), (wall_face_y, wall_face_y), (deck + 1, 25), p.idx("steel_dark"));
     }
 
-    // The despatch opening, carved through to a black back wall — a real
-    // hole, not a dark rectangle painted on the wall (see this file's
+    // The despatch openings, carved through to a black back wall — real
+    // holes, not dark rectangles painted on the wall (see this file's
     // junction tests for why that distinction is checked rather than
-    // eyeballed). Its floor is what a sight line entering it actually
-    // reaches (the infeed housing's doc derives that for the mirrored case),
-    // so the floor is black and the frame around it is the palette's
-    // brightest metal.
-    m.cuboid((8, 25), (24, 26), (deck + 1, 23), p.idx("steel_light"));
-    m.carve_cuboid((11, 22), (24, 30), (deck + 1, 21));
-    m.cuboid((11, 22), (last, last), (deck + 1, 21), p.idx("hazard_black"));
-    m.cuboid((11, 22), (24, 30), (deck + 1, deck + 1), p.idx("hazard_black"));
-    // Brass threshold at the lip: the same accent every other fitting
-    // product physically passes through carries.
-    m.cuboid((11, 22), (24, 24), (deck + 1, deck + 1), p.idx("brass"));
-    // The roller shutter, wound up above the opening — what says this
-    // opening is a door rather than a window.
-    m.cuboid((10, 23), (23, 24), (22, 23), p.idx("steel_dark"));
-    m.cuboid((10, 23), (23, 23), (22, 22), p.idx("steel_light"));
+    // eyeballed). Each opening's floor is what a sight line entering it
+    // actually reaches (the infeed housing's doc derives that for the
+    // mirrored case), so the floor is black and the frame around it is the
+    // palette's brightest metal.
+    for (x0, x1) in DOCK_DOOR_SPANS {
+        m.cuboid((x0 - 3, x1 + 3), (wall_face_y - 2, wall_face_y), (deck + 1, 23), p.idx("steel_light"));
+        m.carve_cuboid((x0, x1), (wall_face_y - 2, last - 1), (deck + 1, 21));
+        m.cuboid((x0, x1), (last, last), (deck + 1, 21), p.idx("hazard_black"));
+        m.cuboid((x0, x1), (wall_face_y - 2, last - 1), (deck + 1, deck + 1), p.idx("hazard_black"));
+        // Brass threshold at the lip: the same accent every other fitting
+        // product physically passes through carries.
+        m.cuboid((x0, x1), (wall_face_y - 2, wall_face_y - 2), (deck + 1, deck + 1), p.idx("brass"));
+        // The roller shutter, wound up above the opening — what says this
+        // opening is a door rather than a window.
+        m.cuboid((x0 - 1, x1 + 1), (wall_face_y - 3, wall_face_y - 2), (22, 23), p.idx("steel_dark"));
+        m.cuboid((x0 - 1, x1 + 1), (wall_face_y - 3, wall_face_y - 3), (22, 22), p.idx("steel_light"));
+    }
 
     // --- Canopy over the bay ----------------------------------------------
-    // Cantilevered off the wall toward the camera. It stops well short of
-    // the deck's near edge so the goods standing there stay in clear air.
-    // Integral with the wall's own head rather than a slab hovering over it:
-    // the first cut stood it two voxels clear on thin posts and rendered as
-    // a white shelf floating in front of a blue wall — at scene scale a gap
-    // that small is not read as a gap, it is read as two unrelated objects.
-    // Shallow, too, because every voxel it reaches toward the camera is a
-    // voxel of deck it shades, and the deck is where the goods stand.
-    m.cuboid((6, 25), (20, 26), (26, 27), p.idx("steel"));
-    m.cuboid((6, 25), (20, 20), (25, 25), p.idx("hazard_yellow"));
-    for x in [6, 25] {
-        m.cuboid((x, x), (21, 26), (24, 25), p.idx("steel_dark"));
+    // One continuous canopy over both doors, cantilevered off the wall toward
+    // the camera. It stops well short of the deck's near edge so the goods
+    // standing there stay in clear air. Integral with the wall's own head
+    // rather than a slab hovering over it: the one-tile version's first cut
+    // stood it two voxels clear on thin posts and rendered as a white shelf
+    // floating in front of a blue wall — at scene scale a gap that small is
+    // not read as a gap, it is read as two unrelated objects. Shallow, too,
+    // because every voxel it reaches toward the camera is a voxel of deck it
+    // shades, and the deck is where the goods stand.
+    let canopy_face_y = DOCK_CANOPY_FACE_Y;
+    let canopy_x = (DOCK_WALL_WEST_X + 2, 61);
+    m.cuboid(canopy_x, (canopy_face_y, wall_face_y), (26, 27), p.idx("steel"));
+    m.cuboid(canopy_x, (canopy_face_y, canopy_face_y), (25, 25), p.idx("hazard_yellow"));
+    for x in [canopy_x.0, 37, 38, canopy_x.1] {
+        m.cuboid((x, x), (canopy_face_y + 1, wall_face_y), (24, 25), p.idx("steel_dark"));
     }
 
-    // Bay light under the canopy's leading edge — hung one voxel proud of it
-    // so the canopy itself doesn't shadow it out of the frame. This is the
-    // dock's status lamp: `main.gd` swaps it green when stock is waiting to
-    // be sold and amber when the dock is clear, the same idle/running pair
-    // every machine's lamp uses.
-    m.cuboid((13, 18), (18, 19), (24, 25), p.idx("steel_light"));
-    m.cuboid((14, 17), (18, 18), (23, 24), p.idx("status_amber"));
+    // A bay light under the canopy's leading edge above each door — hung one
+    // voxel proud of it so the canopy itself doesn't shadow it out of the
+    // frame. These are the dock's status lamps: `main.gd` swaps them green
+    // when stock is waiting to be sold and amber when the deck is clear, the
+    // same idle/running pair every machine's lamp uses. Both swap together,
+    // which is correct — there is one shared delivery pool, not one per door.
+    for (x0, x1) in DOCK_DOOR_SPANS {
+        let mid = (x0 + x1) / 2;
+        m.cuboid((mid - 3, mid + 3), (canopy_face_y - 2, canopy_face_y - 1), (24, 25), p.idx("steel_light"));
+        m.cuboid((mid - 2, mid + 2), (canopy_face_y - 2, canopy_face_y - 2), (23, 24), p.idx("status_amber"));
+    }
 
-    // --- The junction ------------------------------------------------------
-    // The belt from the packer runs in on -X, through exactly the transfer
-    // housing every other machine on the line is fed through. No outfeed:
-    // nothing is downstream of the dock — product leaves the world here.
+    // --- The junctions -----------------------------------------------------
+    // A belt from the packer runs in on -X, through exactly the transfer
+    // housing every other machine on the line is fed through. TWO of them,
+    // one per tile of the inlet face: a 2x2 dock accepts on both tiles of its
+    // west edge (`data/machines.ron`'s "an inlet face is as long as the
+    // footprint" rule), so two lines really can deliver into one dock, and a
+    // model with a single housing would be describing a mechanism narrower
+    // than the one the simulation has. No outfeed on either: nothing is
+    // downstream of the dock — product leaves the world here.
     machine_infeed(&mut m, p, BELT_LANE);
+    machine_infeed(&mut m, p, (BELT_LANE.0 + tile, BELT_LANE.1 + tile));
     m
 }
+
+/// The x spans of the dock's two despatch openings, in its own voxel
+/// coordinates. Shared by the wall carve and the bay lights above them so
+/// the lamps cannot drift off the doors they belong to, and read by this
+/// file's own tests so those check the doors that exist rather than
+/// coordinates typed in twice.
+const DOCK_DOOR_SPANS: [(i32, i32); 2] = [(19, 33), (44, 58)];
+/// The x the despatch wall starts at. West of it is the corner the far
+/// tile's belt transfer housing occupies — see [`machine_dock`].
+const DOCK_WALL_WEST_X: i32 = 14;
+/// The y of the despatch wall's camera-facing face: everything from here to
+/// the model's far edge is building, everything in front of it is open deck.
+/// Roughly two thirds of the way back, so the far tile carries the structure
+/// and the near tile stays clear (see [`machine_dock`]).
+const DOCK_WALL_FACE_Y: i32 = 52;
+/// The y of the canopy's leading edge, eight voxels proud of the wall. Every
+/// voxel it reaches toward the camera is a voxel of deck it shades.
+const DOCK_CANOPY_FACE_Y: i32 = 44;
 
 // ---------------------------------------------------------------------------
 // Junction tests (the "Visual overhaul round 2" epic's ticket 3)
@@ -2355,17 +2427,19 @@ mod tests {
                 fluid_out: None,
                 last_x: tile_last,
             },
-            // The end of the line: a belt in and nothing out, because
-            // product leaves the world here (`sim_core::sim::dock`).
+            // The end of the line: belts in and nothing out, because
+            // product leaves the world here (`sim_core::sim::dock`). TWO
+            // inlets since the dock became 2x2 — its west edge is two tiles
+            // long, so both take a belt.
             Junctions {
                 name: "machine_dock",
                 model: machine_dock(p),
-                belt_inlets: vec![BELT_LANE],
-                housing_lanes: vec![BELT_LANE],
+                belt_inlets: vec![BELT_LANE, far_lane],
+                housing_lanes: vec![BELT_LANE, far_lane],
                 belt_outlet: None,
                 fluid_in: None,
                 fluid_out: None,
-                last_x: tile_last,
+                last_x: tile * 2 - 1,
             },
         ]
     }
@@ -2576,52 +2650,72 @@ mod tests {
     }
 
     /// The delivery dock's own face, which the belt-junction rules above
-    /// deliberately skip (see `NO_OUTFEED`). Three things have to hold, and
-    /// none of them are visible in a screenshot at scene scale:
+    /// deliberately skip (a dock has no outfeed — product leaves the world
+    /// there). Four things have to hold, and none of them are visible in a
+    /// screenshot at scene scale:
     ///
-    ///  * the deck is solid right out to the +X tile edge, so the platform
-    ///    reads as a platform rather than as a machine with a lip;
+    ///  * the model really is 2x2 tiles wide (`data/machines.ron`'s
+    ///    footprint and this model's size are coupled — UI_UX.md §2b — so a
+    ///    footprint change with no model change would ship a dock covering a
+    ///    quarter of its own tiles);
+    ///  * the deck is solid right out to the +X footprint edge, so the
+    ///    platform reads as a platform rather than as a machine with a lip;
     ///  * it is level with the belt that feeds it, so a case arriving does
     ///    not step up or down at the tile boundary;
-    ///  * the despatch opening in the far wall is a genuinely EMPTY hole
-    ///    with a back wall behind it — a dark rectangle painted on the wall
-    ///    would mesh flat and render as a sticker, which is the same
-    ///    distinction the junction tests above exist for.
+    ///  * **both** despatch openings in the far wall are genuinely EMPTY
+    ///    holes with a back wall behind them — a dark rectangle painted on
+    ///    the wall would mesh flat and render as a sticker, which is the
+    ///    same distinction the junction tests above exist for.
     #[test]
     fn the_docks_deck_is_solid_out_to_the_platform_edge() {
         let p = palette();
         let dock = machine_dock(&p);
-        let last = TILE_VOXELS as i32 - 1;
+        let tile = TILE_VOXELS as i32;
+        let last = tile * 2 - 1;
         let mid = (BELT_LANE.0 + BELT_LANE.1) / 2;
 
+        assert_eq!(
+            dock.size,
+            [TILE_VOXELS * 2, TILE_VOXELS * 2, TILE_VOXELS],
+            "the dock's model must be its 2x2 footprint at UI_UX.md §2's tile scale"
+        );
         assert_eq!(
             DOCK_DECK_Z, BELT_SURFACE_Z,
             "the dock's deck must stand at the belt's own running height"
         );
-        assert!(
-            dock.filled(last, mid, DOCK_DECK_Z),
-            "the deck stops short of the +X tile edge"
-        );
-        assert!(
-            !dock.filled(last, mid, DOCK_DECK_Z + 1),
-            "something stands on the platform edge at the belt's lane — the dock \
-             has no downstream conveyor, so nothing should promise one"
-        );
+        // Both tiles of the deck, at both inlet lanes: the near one the
+        // reference chain feeds, and the far one a second line could.
+        for lane_mid in [mid, mid + tile] {
+            assert!(
+                dock.filled(last, lane_mid, DOCK_DECK_Z),
+                "the deck stops short of the +X footprint edge at y = {lane_mid}"
+            );
+            assert!(
+                !dock.filled(last, lane_mid, DOCK_DECK_Z + 1),
+                "something stands on the platform edge at a belt lane — the dock \
+                 has no downstream conveyor, so nothing should promise one"
+            );
+        }
 
-        // The despatch opening: empty through the wall, with a wall behind it.
-        assert!(
-            !dock.filled(16, 27, DOCK_DECK_Z + 6),
-            "the despatch opening is filled — a painted door is not a door"
-        );
-        assert!(
-            dock.filled(16, last, DOCK_DECK_Z + 6),
-            "the despatch opening has no back wall, so it shows straight through \
-             the building"
-        );
-        assert!(
-            dock.filled(10, 26, DOCK_DECK_Z + 6),
-            "the despatch opening has no frame, so its edge is nothing"
-        );
+        // The despatch openings: empty through the wall, with a wall behind
+        // each, framed. Driven off DOCK_DOOR_SPANS rather than off literals,
+        // so moving a door moves its test with it.
+        for (x0, x1) in DOCK_DOOR_SPANS {
+            let door_mid = (x0 + x1) / 2;
+            assert!(
+                !dock.filled(door_mid, last - 3, DOCK_DECK_Z + 6),
+                "the despatch opening at x = {door_mid} is filled — a painted door is not a door"
+            );
+            assert!(
+                dock.filled(door_mid, last, DOCK_DECK_Z + 6),
+                "the despatch opening at x = {door_mid} has no back wall, so it shows \
+                 straight through the building"
+            );
+            assert!(
+                dock.filled(x0 - 2, DOCK_WALL_FACE_Y - 1, DOCK_DECK_Z + 6),
+                "the despatch opening at x = {door_mid} has no frame, so its edge is nothing"
+            );
+        }
     }
 
     /// The pipe run's two ends. Its downstream end is closed by a blind

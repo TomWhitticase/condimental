@@ -362,24 +362,36 @@ const DOCK_ASSET := "machine_dock"
 ## running height as the belt that feeds it. Change one, change both.
 const DOCK_DECK_Y := BELT_SURFACE_Y
 ## Where each waiting case stands, in the dock model's own voxel coordinates
-## (x, y) measured from its footprint's centre: side by side along the deck's
-## NEAR edge, which is where staged goods actually go and — the reason these
-## two numbers rather than any others — the one part of the deck a case can
-## stand on without hiding the building it is standing on.
+## (x, y) measured from its footprint's centre — a **two-by-two block of
+## pallet positions on the open half of the deck**, filled front row first.
 ##
-## Two slots, not one per unit the contract board can ask for. The deck is one
-## tile and a case is a third of it, so a rendered four-slot version buried
+## Three constraints pick these numbers rather than any others, and all three
+## came off rendered frames. They stand clear of the two transfer housings
+## along the west edge, which is why nothing is west of the footprint's own
+## centre line — the first cut ran them as one row starting further west and
+## the leading case was drawn straight over the housing the belt hands
+## through. They stop well short of the canopy, because a case under it is a
+## case in shadow. And the back row is far enough behind the front one that
+## neither hides the other: on this camera a sight line climbs `(+x, -y, +z)`
+## fast enough to clear a case's roof within a few voxels.
+##
+## **Four slots since the dock became 2x2** (the 2026-09-09 tuning pass). It
+## was two, and the reason was floor space rather than taste: on a one-tile
+## deck a case is a third of the tile, so a rendered four-slot version buried
 ## the transfer housing, the despatch door and the canopy under a wall of
-## cardboard — a dock you cannot see is not a better indicator than a dock
-## with two cases on it. This is a glance-readable "goods are waiting to be
-## sold", not a readout: the exact figure is on the contract clipboard (ON
-## THE DOCK) and in the dock's own hover tooltip, both of which report the
-## same pool without a cap.
+## cardboard. A 2x2 deck is four times the area with its whole near tile left
+## clear, so that constraint is gone and four cases stand in front of the
+## building instead of on top of it. It is still a glance-readable "goods are
+## waiting to be sold" rather than a readout: the exact figure is on the
+## contract clipboard (ON THE DOCK) and in the dock's own hover tooltip,
+## neither of which is capped.
 const DOCK_STOCK_OFFSETS := [
-	Vector2(1.0, -9.0),
-	Vector2(11.0, -9.0),
+	Vector2(-2.0, -22.0),
+	Vector2(12.0, -22.0),
+	Vector2(-2.0, -6.0),
+	Vector2(12.0, -6.0),
 ]
-const DOCK_STOCK_SLOTS := 2
+const DOCK_STOCK_SLOTS := 4
 
 ## Presentation-only tint per raw-ingredient item id, the same shape as
 ## FLUID_TINTS: *which* item a hopper holds is simulation data — the player

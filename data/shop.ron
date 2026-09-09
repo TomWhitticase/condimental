@@ -128,9 +128,13 @@
             id: "mixer",
             price: 100,
         ),
-        // The most expensive thing in the catalog, on purpose: the only 2x2
-        // kind, running the chain's longest process. GAMEPLAY.md §4 treats
-        // the cooker/kettle as a real capital purchase, and this is it.
+        // The most expensive thing in the catalog, on purpose: the biggest
+        // machine on the line, running the chain's longest process.
+        // GAMEPLAY.md §4 treats the cooker/kettle as a real capital
+        // purchase, and this is it. (It is no longer the only 2x2 kind —
+        // the delivery dock grew to 2x2 in the 2026-09-09 tuning pass — but
+        // it is still the only 2x2 kind that *does* anything, which is what
+        // this price is for.)
         ShopEntry(
             id: "cooking_vat",
             price: 200,
@@ -160,6 +164,16 @@
         // hopper's bin and less than any of the processing equipment, and
         // it is the one building whose value is that the line does not need
         // watching once it exists.
+        //
+        // **The 2026-09-09 tuning pass grew the dock to 2x2 and left this
+        // number alone, on purpose.** Price here tracks what a building
+        // does for the player, not how many tiles it claims: only the
+        // infrastructure group above is priced per tile, and the 2x2
+        // cooking vat costs 200 for the process it runs rather than for its
+        // four tiles. A dock does no work at all — it is still exactly one
+        // door out of the factory, however much apron stands around it —
+        // and the extra tiles are already a real cost in the only currency
+        // a factory-builder actually feels here, which is floor space.
         ShopEntry(
             id: "dock",
             price: 70,

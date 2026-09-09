@@ -125,8 +125,12 @@ fn the_dock_stands_at_the_end_of_its_own_belt_past_the_last_machine() {
         (26, 0),
         "and the dock stands immediately east of that belt's last tile"
     );
-    assert_eq!(dock.footprint.width_tiles, 1);
-    assert_eq!(dock.footprint.height_tiles, 1);
+    // 2x2 since the 2026-09-09 tuning pass (`data/machines.ron`'s dock note
+    // has the reasoning), so the building claims (26..27, 0..1) — the belt
+    // still meets it at the origin tile, which is the west edge's first
+    // tile and therefore still on its inlet face.
+    assert_eq!(dock.footprint.width_tiles, 2);
+    assert_eq!(dock.footprint.height_tiles, 2);
     assert_eq!(dock.capacity_per_item, DOCK_CAPACITY);
 }
 
@@ -162,8 +166,19 @@ fn every_tile_of_the_dock_and_its_belt_resolves() {
         other => panic!("expected the dock at {:?}, got {other:?}", dock.tile),
     }
 
+    // Every tile of the 2x2 footprint resolves to the SAME dock, at the same
+    // origin — the multi-tile rule `machine_footprints.rs` pins for machines,
+    // now exercised by a shipped building as well.
+    for tile in [(27, 0), (26, 1), (27, 1)] {
+        match world.query_tile(tile) {
+            Some(TileSnapshot::Dock { origin_tile, .. }) => {
+                assert_eq!(origin_tile, dock.tile, "{tile:?} must resolve to the dock's origin");
+            }
+            other => panic!("expected the dock at {tile:?}, got {other:?}"),
+        }
+    }
     assert!(
-        world.query_tile((27, 0)).is_none(),
+        world.query_tile((28, 0)).is_none(),
         "and nothing exists past the dock"
     );
 }
@@ -370,7 +385,7 @@ fn the_dock_json_shape_is_what_presentation_is_told_to_expect() {
     assert_eq!(dock["kind"], "dock");
     assert_eq!(
         dock["footprint"],
-        serde_json::json!({ "width_tiles": 1, "height_tiles": 1 })
+        serde_json::json!({ "width_tiles": 2, "height_tiles": 2 })
     );
     assert_eq!(dock["direction"], "east");
     assert_eq!(dock["belt_tile"], serde_json::json!([25, 0]));

@@ -602,7 +602,13 @@ fn a_line_running_west_works_exactly_like_one_running_east() {
     lay_belt(&mut world, (-1, 0), Direction::West, 3);
     build(&mut world, "crusher", (-4, 0), Direction::West);
     build(&mut world, "belt", (-5, 0), Direction::West);
-    build(&mut world, "dock", (-6, 0), Direction::West);
+    // The dock is 2x2, and a footprint's origin is its min-X/min-Y corner
+    // whichever way the building faces (`machines.rs`'s module doc), so a
+    // WEST-facing dock grows east from the tile named here. Its origin is
+    // therefore two tiles past the belt, not one: it claims (-7..-6, 0..1),
+    // and the tile the belt hands into, (-6, 0), is on its east edge — the
+    // inlet face of something facing west.
+    build(&mut world, "dock", (-7, 0), Direction::West);
 
     world.issue_command(PlayerCommand::FillHopper {
         amount: 4,

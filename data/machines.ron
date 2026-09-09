@@ -217,22 +217,62 @@
         // `PlayerCommand::CollectOutput`, which used to reach into the last
         // machine's own output buffer from nowhere.
         //
-        // 1x1, for the hopper's reasons. A loading bay at the end of one
+        // **2x2 since the 2026-09-09 tuning pass** — the second kind in this
+        // file bigger than one tile, and the only one that grew because of
+        // how it READS rather than because of what it does.
+        //
+        // It was 1x1 on the argument that "a loading bay at the end of one
         // belt is a bay, not a warehouse, and what is meant to be generous
         // about it is its *buffer* (32 units, see `DOCK_CAPACITY`), not its
-        // floor space — and the buffer is a pass-through anyway, since the
-        // dock ships everything it receives in the same tick.
+        // floor space." Everything in that sentence about the buffer still
+        // holds — the buffer is a pass-through anyway, since the dock ships
+        // everything it receives in the same tick — but the buffer was the
+        // wrong thing to size the FOOTPRINT by, and a playtest said so: at
+        // one tile the dock did not read as a loading dock. It is the one
+        // building on the line that is architecture rather than equipment
+        // (UI_UX.md §2b point 16), and everything that makes it legible as
+        // one — a raised deck a trailer backs up to, a striped edge, rubber
+        // bumpers, a despatch door under a canopy, and clear apron for the
+        // goods waiting to go out — was competing for a single 32-voxel
+        // tile. That crowding is exactly why the stack of waiting cases on
+        // its deck had to be capped at two: a fourth case buried the
+        // building it was standing on.
+        //
+        // **2x2 rather than 2x1, and DEPTH is the reason.** UI_UX.md §2b
+        // point 16's rule for this camera is "put the height at high y, put
+        // the content at low y": anything tall has to stand on the FAR row
+        // or it walls off everything behind it. A 2x1 dock is twice the
+        // frontage and still exactly one row deep, so the despatch
+        // structure and the goods standing on the deck would go on fighting
+        // for the same row — it would buy width the layout does not need
+        // and none of the depth it does. The second row is the whole point.
+        //
+        // Two things fall out of the shape, and neither is decoration.
+        // (1) Its inlet face is now **two tiles long** (see the header rule
+        // above), so two belt lines can deliver into one dock instead of
+        // having to merge upstream of it — the same property that made the
+        // mixer 1x2, arriving at the other end of the line. (2) 2x2 is
+        // **square**, so a rotated dock claims exactly the same four tiles
+        // whichever way it faces. That matters most for the building at the
+        // END of a line: a player turning it to meet a belt arriving from
+        // another direction should not discover that the tile behind it is
+        // no longer free, which is precisely what an oblong terminal
+        // building would do.
+        //
+        // Its price in `data/shop.ron` deliberately did NOT move with the
+        // footprint — see that file's own dock entry for why.
         //
         // Unlike the hopper and the tank it is placed EAST of the chain
         // rather than west, because it is the tail rather than the head. A
         // footprint straddling one of ARCHITECTURE.md §3.1's 32x32 chunk
         // boundaries is handled rather than avoided — `World::all_chunks`
         // reports every chunk anything stands in, and a footprint is
-        // reported in every chunk it overlaps — so widening a kind upstream
-        // of this one is an ordinary content decision, not a boundary risk.
+        // reported in every chunk it overlaps — which now applies to this
+        // kind itself, not only to kinds upstream of it: a two-tile-wide
+        // dock is one of the things that can land astride x = 32.
         MachineKind(
             id: "dock",
-            footprint: Footprint(width_tiles: 1, height_tiles: 1),
+            footprint: Footprint(width_tiles: 2, height_tiles: 2),
         ),
     ],
 )

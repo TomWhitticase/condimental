@@ -136,9 +136,20 @@ func _run_checks() -> void:
 		distinct.append(mesh)
 
 	# --- a hopper, a machine and a dock, each where the sim says -----------
-	var placed := {"hopper": Vector2i(-1, 0), "crusher": Vector2i(1, 0), "dock": Vector2i(5, 0)}
+	# The size beside each tile is that kind's `data/machines.ron` footprint:
+	# a body is drawn at the CENTRE of its footprint, which for a 1x1 kind is
+	# its own tile and for the 2x2 dock is the middle of the four tiles it
+	# claims. Written out rather than read back from the snapshot for
+	# `machine_footprints.rs`'s reason — a check that recomputed the position
+	# the way the code does could not catch the code being wrong.
+	var placed := {
+		"hopper": [Vector2i(-1, 0), Vector2i(1, 1)],
+		"crusher": [Vector2i(1, 0), Vector2i(1, 1)],
+		"dock": [Vector2i(5, 0), Vector2i(2, 2)],
+	}
 	for kind in placed.keys():
-		var tile: Vector2i = placed[kind]
+		var tile: Vector2i = placed[kind][0]
+		var size: Vector2i = placed[kind][1]
 		var node: Node3D = main.get_node_or_null("World/%s_%d,%d" % [kind, tile.x, tile.y])
 		if node == null:
 			_fail("no rendered node for the placed %s at %s" % [kind, str(tile)])
@@ -146,9 +157,21 @@ func _run_checks() -> void:
 		if _meshes(node, []).is_empty():
 			_fail("the placed %s rendered no meshes" % kind)
 			return
-		var expected: Vector3 = main._tile_origin(tile.x, tile.y, main.FLOOR_Y)
+		var expected: Vector3 = main._footprint_centre(tile, size, main.FLOOR_Y)
 		if not node.position.is_equal_approx(expected):
-			_fail("the %s sits at %s, expected its 1x1 tile centre %s" % [kind, str(node.position), str(expected)])
+			_fail("the %s sits at %s, expected its %dx%d footprint centre %s" % [
+				kind, str(node.position), size.x, size.y, str(expected)
+			])
+			return
+
+	# The dock is the second multi-tile kind in the shipped content (the
+	# cooking vat is the other), so hovering a NON-ORIGIN tile of it has to
+	# resolve to the same building — the claim the vat already proves for a
+	# machine, checked here for a building with no recipe behind it.
+	for tile in [Vector2i(6, 0), Vector2i(5, 1), Vector2i(6, 1)]:
+		var hover: String = main._hover_text_at_tile(tile)
+		if not hover.begins_with("delivery dock"):
+			_fail("hovering the dock's tile %s resolved to %s" % [str(tile), hover])
 			return
 
 	# --- the hopper's product body tracks its live fill --------------------
@@ -212,7 +235,7 @@ func _run_checks() -> void:
 
 	# --- hover answers for every placed kind through one mechanism --------
 	for kind in placed.keys():
-		var tile: Vector2i = placed[kind]
+		var tile: Vector2i = placed[kind][0]
 		if main._hover_text_at_tile(tile) == "":
 			_fail("hovering the placed %s at %s produced no tooltip" % [kind, str(tile)])
 			return

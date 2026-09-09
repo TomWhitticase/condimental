@@ -301,8 +301,12 @@ fn a_splitter_feeds_a_machine_and_a_dock_the_way_a_belt_does() {
     // Straight (east): a crusher, facing east so its inlet face is the tile
     // the splitter hands into.
     build(&mut world, "crusher", (1, 0), Direction::East);
-    // Branch (clockwise from east = south): a dock.
-    build(&mut world, "dock", (0, -1), Direction::East);
+    // Branch (clockwise from east = south): a dock. It is 2x2 and its origin
+    // is its min-X/min-Y corner, so it is anchored at (0, -2) and claims
+    // (0..1, -2..-1) — clear of the splitter and the crusher on row 0, with
+    // the tile the branch hands into, (0, -1), on its west edge, i.e. its
+    // inlet face.
+    build(&mut world, "dock", (0, -2), Direction::East);
     world.issue_command(PlayerCommand::BuyIngredient {
         item: "tomato".to_string(),
         quantity: 16,
