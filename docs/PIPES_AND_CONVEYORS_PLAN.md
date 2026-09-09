@@ -119,3 +119,37 @@ visibility flips.
 - Items on a belt corner follow a quarter-circle arc from the input face's
   midpoint to the output face's midpoint, parameterised by the sim's
   existing 0..1 distance, so nothing in the sim changes.
+
+## Coordinator notes (appended as wave 1 lands)
+
+**Merged so far:** ticket 1 (`links`), ticket 4 (instancing), ticket 3
+(pipe models). Read their DEVLOG entries.
+
+**For ticket 6, from ticket 3's worker (verbatim facts, verify by render):**
+
+- Face convention for the pipe shapes: **vox LOW Y = north.** `pipe_corner`
+  is open on x=31 (+X) and y=0 (north); `pipe_tee` on x=31, x=0 and y=0;
+  `pipe_end` on x=0 only (capped on +X). Fittings are authored on the +X
+  face. Every shape is centred on the 15.5 midline, so a rotation lands
+  exactly on its neighbours.
+- `PIPE_BORE_FLOOR_VOXELS` (12) and `PIPE_BORE_HEIGHT_VOXELS` (7) in
+  `main.gd` are unchanged. `pipe_fluid_end` already stops before the cap, so
+  `FLUID_END_CAP_TRIM` can be deleted.
+- Still visibly wrong until ticket 6 wires `links`: the demo's free-ended
+  south run shows open bores (needs `pipe_end`); the fluids fixture's
+  west-facing `pipe_inlet` points its branch north over bare floor (needs a
+  corner/tee plus `pipe_fitting_machine`); vat→bottler shows a bare tube end
+  at the bottler (needs the machine fitting overlay).
+- Two straight tiles facing INTO a shared boundary stack two joint flanges;
+  choose each straight tile's rotation so flanges alternate and never stack.
+- Machine nozzles (`machine_fluid_port`) are still on voxel 16, half a voxel
+  off the pipe axis; not visible, leave unless a render disagrees.
+- Ticket 4's instancing keeps pipe fluid bodies as nodes so ticket 6 can
+  decide per-shape bodies and per-instance tint; either is acceptable.
+
+**For ticket 7:** ticket 1's `resolve_sink` finding (a belt feeds a machine
+through any face of its inlet edge, including the outlet side; the demo
+layout in `test_layouts.gd` relies on it; one-condition fix
+`belt.direction == sink.direction`; `tests/links.rs` pins the current rule).
+Ticket 4's finding that ~8 ms of every tick step is chunk-snapshot JSON
+parsing on a 1500-belt line is milestone 8 scope, not this update's.
