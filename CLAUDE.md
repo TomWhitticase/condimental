@@ -177,6 +177,27 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-09 **Pipes & conveyors overhaul, ticket 1 (`links` on the wire).**
+  Every belt, splitter and pipe in `world_layout_json` (and its
+  `query_tile_json` variant) carries `links`; every other kind OMITS the key
+  (`skip_serializing_if`), so its JSON is byte-identical to before. Shape is
+  `docs/PIPES_AND_CONVEYORS_PLAN.md` "The wire contract": belt/splitter
+  `{inputs: [{from, kind}], output: {to, kind} | null}`, pipe
+  `{connections: [{to, kind}]}`; directions absolute, named from the tile
+  toward the neighbour; entries in north/east/south/west order (at most one
+  thing per side, so the order is geometry, not walk order). Recorded ONCE
+  in `World::recompute_topology` as `Topology.links`, at the moment each
+  relation is resolved — never a second adjacency scan, never per tick;
+  `world_layout`/`query_tile` look it up. A lonely belt still has
+  `{inputs: [], output: null}`. A splitter's `output` is its straight side
+  only; the branch stays in `outputs`. A pipe lists a machine or tank on
+  the ONE tile the sim taps (`machine_taps`/`machine_output_taps`/
+  `tank_discharges`), never on every touching tile. Found and deliberately
+  NOT changed (ticket 7): `resolve_sink` links a belt into a machine or
+  dock when the tile it points at is on the inlet EDGE, from any side — a
+  1x1 machine is fed from all four sides, including through its outlet
+  face; `test_layouts.gd`'s demo line depends on it. `tests/links.rs` pins
+  the current rule so a fix shows up there.
 - 2026-09-09 **Hopper/tank auto-fill, ticket 1 (sim).** Auto-fill runs as
   tick step 0, before tank discharge and hopper metering, so a topped-up bin
   feeds in the same tick. One fill helper per kind (`World::fill_hopper_entity`

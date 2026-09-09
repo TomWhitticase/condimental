@@ -241,7 +241,12 @@ impl SimBridge {
 Also on the wire today: `world_layout_json`, `economy_snapshot_json`,
 `shop_snapshot_json`, `ingredients_snapshot_json`, `fluid_snapshot_json`,
 `dock_snapshot_json`, and JSON forms of the above. Godot never sees internal
-representations, only snapshots.
+representations, only snapshots. Since the pipes & conveyors overhaul
+(ticket 1, 2026-09-09) every belt, splitter and pipe entry in
+`world_layout_json` — and its `query_tile_json` variant — carries a `links`
+object (`docs/PIPES_AND_CONVEYORS_PLAN.md`, "The wire contract") recorded
+by the topology pass itself, so Godot derives belt and pipe shapes from it
+rather than from an adjacency scan of its own (§5).
 
 **Wire format is JSON strings via `serde_json`**, not `Dictionary`/`Array`,
 to minimise the `gdext`-specific API surface (the least agent-friendly layer).

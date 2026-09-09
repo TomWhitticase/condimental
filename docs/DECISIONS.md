@@ -22,6 +22,98 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-09: **Pipes & conveyors overhaul, ticket 1 of 7 (sim only) —
+  connectivity goes on the wire as `links`, recorded by the topology pass
+  and never derived by Godot.** The overhaul's tickets 5 and 6 draw a belt
+  as a straight, a corner or a merge and a pipe as an end, a straight, a
+  corner, a tee or a cross, with port fittings where a machine or a tank
+  joins. Every one of those is a fact the sim already decides in
+  `World::recompute_topology` — which belt hands to which, which pipe tile
+  a machine taps — and the plan's ground rule is that Godot never derives a
+  fact the sim already knows. So the sim says it. Seven calls.
+
+  (1) **`links` is filled inside the topology pass, at the moment each
+  relation is resolved, and stored on `Topology` (`links: BTreeMap<Entity,
+  Links>`) — not computed on read from the relation lists.** Deriving it in
+  `world_layout` by searching `belt_to_belt`, `belt_to_sink`,
+  `source_to_belt`, `splitter_outputs`, the networks' segment links and the
+  three tap lists for every placement would be a second pass over the same
+  facts (quadratic at milestone 8's scale, and `world_layout` runs on every
+  place/remove/rotate), and it would be a second place the linking rule
+  lives. Written where the sim resolves a hand-off, the wire cannot disagree
+  with the tick, and it costs nothing per tick because nothing per tick
+  touches it. `world_layout` and `query_tile` look it up by entity.
+
+  (2) **Every belt-like entity and every pipe has an entry, empty or not;
+  no other kind has one, and on those the key is absent rather than
+  `null`.** A lonely belt reports `{"inputs": [], "output": null}` and a
+  lonely pipe `{"connections": []}`, so a consumer never special-cases a
+  missing object on a kind that is supposed to carry one. Everything else
+  serializes with `#[serde(skip_serializing_if = "Option::is_none")]`, so a
+  machine's, hopper's, tank's or dock's JSON is byte-for-byte what it was
+  before the field existed — pinned by a test that asserts the substring
+  `links` does not appear.
+
+  (3) **Entries are sorted by side — north, east, south, west,
+  `Direction`'s own order — at the end of the pass.** At most one thing can
+  stand on each side of a tile, so this is a total order and a property of
+  the geometry rather than of which placement the pass happened to walk
+  first. That is what lets `tests/links.rs` assert a merge built in two
+  placement orders reads identically and pin the whole JSON byte for byte.
+
+  (4) **A splitter's `output` is its straight side only.** The branch is
+  already on the wire as `outputs[1]`; saying it twice in two shapes is two
+  places to disagree. The receiving belts on both sides list the splitter
+  as an input, since that is what feeds them.
+
+  (5) **A pipe lists a machine or a tank on the one tile the sim actually
+  taps, not on every tile that touches the machine.** A machine draws from
+  one segment and deposits into one (`machine_taps`,
+  `machine_output_taps`); a tank discharges into one (`tank_discharges`).
+  A run laid along a machine's whole side therefore gets one port fitting,
+  on the tile fluid actually crosses. Drawing a fitting on every touching
+  tile would be art asserting a connection the sim does not make —
+  exactly the kind of Godot-derived fact the overhaul forbids.
+
+  (6) **`Links` is an untagged enum of two structs.** The two shapes share
+  no key, and the consumer already knows which it is reading from the
+  placement's `kind`, so a tag would be noise on the wire the plan does
+  not specify.
+
+  (7) **A sim rule was found that the docs contradict, and it was
+  deliberately left alone.** `resolve_sink` links a belt into a machine or
+  dock when *the tile it points at* is on the inlet edge — from whichever
+  side the belt approaches. For a 1x1 machine every side is that edge, so
+  a crusher is fed from all four sides, including through its outlet face;
+  for the 1x2 mixer facing east both tiles are on both edges. `world.rs`'s
+  module doc says "a belt pointing into a machine's flank does nothing";
+  the code checks the tile, not the approach face. The fix is one
+  condition (`belt.direction == sink.direction`, equivalently "the belt
+  stands on an inlet neighbour"), but it moves product: a placed line that
+  works today would stop, `godot_project/test_layouts.gd`'s demo line —
+  the fixture every screenshot and most headless proofs build — feeds a
+  west-facing crusher from the south and would break, and a save of such a
+  line would load and then stall. This ticket adds a readout and must not
+  change behaviour, so the wire reports the rule as it stands (a belt
+  pointing sideways into a crusher shows `output: {kind: machine}`, which
+  is true), `tests/links.rs` pins it in a test named for what it does, and
+  the decision is ticket 7's. Note the asymmetry: the *input* side is
+  already face-correct (`source_to_belt` uses `outlet_neighbours`), so a
+  belt that both points at and stands off a 1x1 machine reads as fed by
+  and feeding the same machine.
+
+  **Topology gaps that had to be filled**, all in the same pass: the
+  machine *input* tap kept only `(network, segment)` and was found with a
+  `find` over footprint tiles × directions that discarded which direction
+  hit — the direction and tile are now captured; the machine *output* tap
+  and the tank discharge likewise kept only `(network, segment)` and now
+  also yield the pipe tile; pipe-to-pipe adjacency existed only as `(i, j)`
+  segment indices walked east and north, and is now recorded from both
+  ends as it is found. Hopper→belt and machine→belt (`source_to_belt`),
+  belt→machine/dock (`belt_to_sink`) and belt→belt were already recorded
+  with enough to name the side. Nothing that existed changed shape;
+  `cargo test --workspace` and every headless Godot proof pass unchanged.
+
 - 2026-09-09: **Hopper/tank auto-fill, ticket 1 of 2 (the sim half;
   `godot_project/`, `data/` and `assets/voxels/` deliberately untouched) — a
   bin can keep itself full, and the keyboard stops being the feed
