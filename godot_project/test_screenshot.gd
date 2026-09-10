@@ -191,6 +191,8 @@ func _initialize() -> void:
 	if args.has("--stress"):
 		_fixture = "stress"
 		_populate = true
+	if args.has("--pipe-gallery"):
+		_fixture = "pipes"
 	_first_person = args.has("--first-person")
 	_hover = args.has("--hover")
 	_hover_pipe = args.has("--hover-pipe")
@@ -262,6 +264,8 @@ func _build_fixture() -> void:
 			Layouts.build_reference_line(_main.sim)
 		"stress":
 			Layouts.build_stress_line(_main.sim)
+		"pipes":
+			Layouts.build_pipe_gallery(_main.sim)
 		_:
 			Layouts.build_demo_line(_main.sim)
 	# Every fixture is stocked, whether or not this run will tick: a
@@ -373,7 +377,7 @@ func _hover_over_first_machine() -> void:
 		_hover_over_tile(tile)
 
 
-func _hover_over_pipe_inlet() -> void:
+func _hover_over_pipe() -> void:
 	var tile := _first_tile_of_kind("pipe")
 	if tile != HOVER_NONE:
 		_hover_over_tile(tile)
@@ -623,7 +627,7 @@ func _process(_delta: float) -> bool:
 	if _frames == 2 and _hover:
 		_hover_over_first_machine()
 	if _frames == 2 and _hover_pipe:
-		_hover_over_pipe_inlet()
+		_hover_over_pipe()
 	if _frames == 2 and _hover_vat:
 		_hover_over_multi_tile_machine()
 	if _frames == 2 and _hover_hopper:

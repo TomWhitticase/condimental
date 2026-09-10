@@ -77,10 +77,6 @@ pub const ASSETS: &[Asset] = &[
     Asset { name: "pipe_fluid_tee", build: pipe_fluid_tee },
     Asset { name: "pipe_fluid_cross", build: pipe_fluid_cross },
     Asset { name: "pipe_fluid_end", build: pipe_fluid_end },
-    // Deprecated one-arrangement tiles, kept generating until ticket 6
-    // composes fittings in Godot and deletes them (see their docs).
-    Asset { name: "pipe_source", build: pipe_source },
-    Asset { name: "pipe_inlet", build: pipe_inlet },
     Asset { name: "item_tomato", build: item_tomato },
     // The chain's second raw ingredient (the chain-rework epic). It needed a
     // model of its own for UI_UX.md §2b point 12's reason: `main.gd`'s
@@ -852,6 +848,9 @@ const PIPE_LEG_WINDOW: (i32, i32) = (20, 26);
 /// too high to be in its way.
 const PIPE_FITTING_X0: i32 = 27;
 const PIPE_FITTING_TOP_X0: i32 = 25;
+/// How much larger in radius every fitting part is than the tube or flange
+/// it may be overlaid on — see `pipe_fitting_machine`'s doc.
+const PIPE_FITTING_MARGIN: f32 = 1.0;
 /// The cast body where two legs meet — one radius up from the tube, so a
 /// junction has the swelling a real elbow or tee casting has and the eye
 /// reads "fitting" before it reads which legs.
@@ -942,10 +941,19 @@ pub fn pipe(p: &Palette) -> VoxModel {
 /// A plain `pipe` bores every tile through, so the last tile of a run used
 /// to be an open, unterminated tube mouth with the floor visible through it
 /// — camera-facing, and one of the most obviously wrong things in the
-/// factory once a close-up was rendered. The old fix (`pipe_inlet`'s cap)
-/// was welded to the machine-branch tile, so it capped the wrong end
-/// whenever the run's end was not that tile. This shape is the cap alone;
-/// `main.gd` puts it on any tile with exactly one connection.
+/// factory once a close-up was rendered. The old fix (a cap welded to the
+/// machine-branch tile) capped the wrong end whenever the run's end was not
+/// that tile. This shape is the cap alone; `main.gd` puts it on any tile
+/// with exactly one connection.
+///
+/// **No joint flange on the open end** (ticket 6). A straight keeps its
+/// one flange on the same side of every tile along an axis (west on an
+/// east-west run), which is what stops two neighbours stacking flanges on
+/// a shared boundary. An end has only one possible turn — its open face
+/// is dictated — so an end open to the EAST would carry its low-X flange
+/// on the very boundary the straight east of it carries its own, and the
+/// two would stack. The cap is this shape's identity; the joint is left to
+/// the neighbour.
 ///
 /// **The cap's face is bright steel with brass BOLTS, not a brass disc.**
 /// The old cap put a brass disc in the middle of the plate, and the render
@@ -959,7 +967,6 @@ pub fn pipe_end(p: &Palette) -> VoxModel {
     let last = TILE_VOXELS as i32 - 1;
     pipe_stand(&mut m, p);
     pipe_leg_x(&mut m, p, (0, last));
-    pipe_joint_flange(&mut m, p);
     pipe_bore_x(&mut m, (0, last - 2));
     pipe_window_x(&mut m, PIPE_WINDOW);
     // Blind flange over the still-solid last two voxels of tube.
@@ -1052,12 +1059,22 @@ pub fn pipe_cross(p: &Palette) -> VoxModel {
 /// the smaller ring, which is the "fittings meet machines badly" of the
 /// ticket. A flange one radius larger than the tube, in the same brass,
 /// swallows the machine's ring and the joint reads as one bolted spool.
+///
+/// **Every part of a fitting is at least one voxel of radius larger than
+/// whatever it can be overlaid on** (`PIPE_FITTING_MARGIN`, ticket 6). A
+/// fitting lands on a straight's LOW-X face too — the first tile of the
+/// run leaving a machine — where it covers the straight's own joint
+/// flange (radius `PIPE_OUTER_R + 1`). Two voxel solids z-fight wherever a
+/// voxel of the inner one is a boundary voxel of both, and a full voxel of
+/// radius margin is what guarantees every axis-neighbour of an inner voxel
+/// is inside the outer one, so no face is ever shared. The collar clears
+/// the tube by that margin and the flange clears the joint flange by it.
 pub fn pipe_fitting_machine(p: &Palette) -> VoxModel {
     let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 24]);
     let last = TILE_VOXELS as i32 - 1;
     let axis = (PIPE_C, PIPE_AXIS_Z as f32);
-    m.cylinder_x_f(axis, PIPE_OUTER_R + 1.0, (PIPE_FITTING_X0, last - 2), p.idx("steel_light"));
-    m.cylinder_x_f(axis, PIPE_OUTER_R + 1.5, (last - 1, last), p.idx("brass"));
+    m.cylinder_x_f(axis, PIPE_OUTER_R + PIPE_FITTING_MARGIN, (PIPE_FITTING_X0, last - 2), p.idx("steel_light"));
+    m.cylinder_x_f(axis, PIPE_OUTER_R + 1.0 + PIPE_FITTING_MARGIN, (last - 1, last), p.idx("brass"));
     m.carve_cylinder_x_f(axis, PIPE_BORE_R + 0.4, (PIPE_FITTING_X0, last));
     m
 }
@@ -1068,8 +1085,9 @@ pub fn pipe_fitting_machine(p: &Palette) -> VoxModel {
 /// The valve is what marks a tank connection at a glance (UI_UX.md §7 —
 /// silhouette, not colour), and it stands ON the flange rather than
 /// mid-tile because a fitting must fit on a junction shape's short leg too.
-/// The old `pipe_source` moved its valve to mid-tile so it would not stand
-/// between the camera and the joint; here the valve IS the joint hardware
+/// The old one-piece supply tile moved its valve to mid-tile so it would
+/// not stand between the camera and the joint; here the valve IS the joint
+/// hardware
 /// — a flanged valve bolted to a tank outlet is how a real tank is plumbed
 /// — and the flange's camera-facing side and the spout stay in view below
 /// the bonnet. The bonnet is kept narrow in Y (`13..18`) so a sight line
@@ -1078,8 +1096,11 @@ pub fn pipe_fitting_tank(p: &Palette) -> VoxModel {
     let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 32]);
     let last = TILE_VOXELS as i32 - 1;
     let axis = (PIPE_C, PIPE_AXIS_Z as f32);
-    m.cylinder_x_f(axis, PIPE_OUTER_R + 1.2, (PIPE_FITTING_X0, PIPE_FITTING_X0 + 1), p.idx("brass"));
-    m.cylinder_x_f(axis, PIPE_OUTER_R + 2.0, (PIPE_FITTING_X0 + 2, last), p.idx("steel_light"));
+    // Radii: the brass band clears the tube by the margin; the flange
+    // clears a straight's joint flange (`PIPE_OUTER_R + 1`) by it too, for
+    // the reason `pipe_fitting_machine` gives.
+    m.cylinder_x_f(axis, PIPE_OUTER_R + 0.2 + PIPE_FITTING_MARGIN, (PIPE_FITTING_X0, PIPE_FITTING_X0 + 1), p.idx("brass"));
+    m.cylinder_x_f(axis, PIPE_OUTER_R + 1.0 + PIPE_FITTING_MARGIN, (PIPE_FITTING_X0 + 2, last), p.idx("steel_light"));
     m.carve_cylinder_x_f(axis, PIPE_BORE_R + 0.4, (PIPE_FITTING_X0, last));
     // Valve: bonnet on the flange, cap, stem, hand wheel. The bonnet is
     // `steel`, not `steel_dark`: it stands in the tank's own shadow, and
@@ -1094,40 +1115,6 @@ pub fn pipe_fitting_tank(p: &Palette) -> VoxModel {
     m
 }
 
-// --- Deprecated one-arrangement tiles --------------------------------------
-
-/// **Deprecated — ticket 6 deletes this with `main.gd`'s `PIPE_SOURCE_ASSET`.**
-/// The tile a tank discharges into, as one merged model: a straight
-/// [`pipe`] with [`pipe_fitting_tank`] turned onto its -X face. It exists
-/// only so the scene still renders before Godot composes fittings itself,
-/// and so the tank fitting can be reviewed in a real render now. It is
-/// authored for one arrangement (the tank to the WEST) and is wrong in
-/// every other, which is the reason for its replacement.
-pub fn pipe_source(p: &Palette) -> VoxModel {
-    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 32]);
-    m.merge(&pipe(p));
-    m.merge(&pipe_fitting_tank(p).rotated_cw(2));
-    m
-}
-
-/// **Deprecated — ticket 6 deletes this with `main.gd`'s `PIPE_INLET_ASSET`.**
-/// The old machine-branch tile, now composed from the family: a
-/// [`pipe_end`] (the run's cap on +X), a branch leg out of the SOUTH face
-/// and [`pipe_fitting_machine`] turned onto it. Authored for exactly one
-/// arrangement — the run lying on the row north of the machine it feeds —
-/// and `main.gd` already falls back to a plain `pipe` elsewhere. With
-/// `links` on the wire this tile is a corner (west + south) or a tee plus a
-/// fitting, and needs no asset of its own.
-pub fn pipe_inlet(p: &Palette) -> VoxModel {
-    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 24]);
-    let last = TILE_VOXELS as i32 - 1;
-    m.merge(&pipe_end(p));
-    pipe_leg_y(&mut m, p, (16, last));
-    pipe_bore_y(&mut m, (16, last));
-    m.merge(&pipe_fitting_machine(p).rotated_cw(1));
-    m
-}
-
 // --- Fluid bodies ----------------------------------------------------------
 //
 // One per shape, each **one voxel tall**: `main.gd` scales the node
@@ -1138,8 +1125,7 @@ pub fn pipe_inlet(p: &Palette) -> VoxModel {
 // white on purpose: the per-fluid colour is live simulation data, applied
 // in Godot as an albedo tint, so one body per shape serves every fluid
 // `data/recipes.ron` ever names. Each fills its shape's bore footprint out
-// to every OPEN face and stops short of a cap, so no Godot-side trim
-// (`main.gd`'s FLUID_END_CAP_TRIM) is needed any more.
+// to every OPEN face and stops short of a cap, so Godot never trims one.
 
 const _: () = assert!(
     PIPE_BORE_Z0 + PIPE_BORE_HEIGHT <= PIPE_AXIS_Z + PIPE_OUTER_R as i32,
@@ -1457,8 +1443,8 @@ fn machine_outfeed(m: &mut VoxModel, p: &Palette, lane: (i32, i32), last: i32) {
     // Discharge lip, level with the belt beside it and running out to the
     // tile edge so there is nothing between the two.
     m.cuboid((last - 3, last), (l0, l1), (floor, floor), p.idx("steel_light"));
-    // A brass band across the head of the opening — the same accent
-    // `pipe_source`'s hand wheel and `pipe_inlet`'s branch flange carry, and
+    // A brass band across the head of the opening — the same accent the
+    // pipe fittings' flanges and the tank valve's hand wheel carry, and
     // for the same reason: it marks a fitting product actually passes
     // through. A hazard stripe was tried here first and rendered as a dark
     // bar, because half a stripe is black and this edge is the only part of
@@ -1480,13 +1466,15 @@ fn machine_outfeed(m: &mut VoxModel, p: &Palette, lane: (i32, i32), last: i32) {
 /// opening would now be a mouth with no conveyor in front of it.
 ///
 /// **It is deliberately the same fitting on both sides, and the same one
-/// `pipe_inlet`'s branch already carries**: bright steel at radius 3 with a
-/// brass flange sitting exactly on the tile boundary. That pairing is what
-/// the "Visual overhaul round 2" epic's ticket 3 found actually reads as one
-/// spool piece crossing a tile boundary rather than as two stubs a voxel
-/// apart — see `pipe_inlet`'s doc for the full argument. A plain `pipe`
-/// tile's bore is already open at both of its X faces at exactly
-/// `PIPE_AXIS_Z`, so nothing is needed on the pipe's side of these
+/// `pipe_fitting_machine` answers it with**: bright steel at radius 3 with
+/// a brass flange sitting exactly on the tile boundary. That pairing is
+/// what the "Visual overhaul round 2" epic's ticket 3 found actually reads
+/// as one spool piece crossing a tile boundary rather than as two stubs a
+/// voxel apart. The pipe's half of the joint is `pipe_fitting_machine`,
+/// which Godot overlays on whichever face of the tapping tile touches the
+/// machine (`links` says which); a plain `pipe` tile's bore is open at
+/// both of its X faces at exactly `PIPE_AXIS_Z`, so nothing more is needed
+/// on the pipe's side of these
 /// junctions: the machine's nozzle meets an open bore.
 ///
 /// `lane_y` is the nozzle's centre in this model's own Y coordinates — for a
@@ -1507,7 +1495,7 @@ enum Face {
 fn machine_fluid_port(m: &mut VoxModel, p: &Palette, lane_y: i32, face: Face, last_x: i32) {
     // How far the nozzle reaches back INTO the machine: far enough to
     // genuinely overlap whatever shell it comes out of rather than merely
-    // touching it, which is the same rule `pipe_inlet`'s branch follows.
+    // touching it, which is the same rule the pipe fittings follow.
     const REACH: i32 = 10;
     let (span, flange) = match face {
         Face::LowX => ((0, REACH), (0, 1)),
@@ -1745,7 +1733,7 @@ pub fn machine_mixer(p: &Palette) -> VoxModel {
 
     // Vinegar inlet: the stub reaching north off the sim-y = 1 half, toward
     // the pipe run the reference chain lays one row north of the footprint.
-    // Height is PIPE_AXIS_Z exactly, matching `pipe_inlet`'s branch — the
+    // Height is PIPE_AXIS_Z exactly, matching `pipe_fitting_machine` — the
     // two are one spool piece split across a tile boundary, and the pair
     // only reads as a connection because they are the same diameter, the
     // same bright steel and carry their brass flange at the same boundary.
@@ -2095,13 +2083,13 @@ pub fn fluid_tank(p: &Palette) -> VoxModel {
     }
 
     // Discharge on +X at the pipe run's own axis height (see this
-    // function's doc), reaching the tile edge so it meets `pipe_source`'s
-    // inlet flange rather than stopping short of it.
+    // function's doc), reaching the tile edge so it meets
+    // `pipe_fitting_tank`'s flange rather than stopping short of it.
     // Bright, and thick enough to see: ticket 3 found this spout rendering
     // as dark grey on the tank's own dark shell, so the one piece of
     // hardware that says "this vessel feeds the run" was invisible at scene
-    // scale. It now matches `pipe_source`'s inlet flange in both metal and
-    // diameter, and the two brass collars meet on the tile boundary.
+    // scale. It now matches `pipe_fitting_tank`'s brass band in metal, and
+    // the two meet on the tile boundary.
     m.cylinder_x((c, PIPE_AXIS_Z), 3.0, (20, last), p.idx("steel_light"));
     m.cylinder_x((c, PIPE_AXIS_Z), 4.2, (last - 1, last), p.idx("brass"));
     // Gusset under the spout, so it lands on the vessel rather than floating.
@@ -2762,7 +2750,7 @@ mod tests {
                 );
                 // The brass flange sits ON the boundary, which is what makes
                 // the machine's half and the pipe's half read as one fitting
-                // rather than as two stubs a voxel apart (`pipe_inlet`).
+                // rather than as two stubs a voxel apart (`pipe_fitting_machine`).
                 assert!(
                     j.model.filled(face_x, mid, PIPE_AXIS_Z + 4),
                     "{}: the nozzle at x = {face_x} has no flange on the tile boundary",
@@ -2914,27 +2902,6 @@ mod tests {
         }
     }
 
-    /// The pipe run's two ends. Its downstream end is closed by a blind
-    /// flange (it used to be an open bore, which is what the run "just
-    /// stopping in mid-air" actually was), and its supply end is not.
-    #[test]
-    fn the_pipe_runs_downstream_end_is_capped_and_its_supply_end_is_not() {
-        let p = palette();
-        let last = TILE_VOXELS as i32 - 1;
-        assert!(
-            !pipe(&p).filled(last, PIPE_AXIS_Y, PIPE_AXIS_Z),
-            "a mid-run pipe tile must stay bored through, or segments cannot join"
-        );
-        assert!(
-            pipe_inlet(&p).filled(last, PIPE_AXIS_Y, PIPE_AXIS_Z),
-            "the run's downstream end is still an open bore"
-        );
-        assert!(
-            !pipe_source(&p).filled(0, PIPE_AXIS_Y, PIPE_AXIS_Z),
-            "the supply end must stay open — the tank discharges into it"
-        );
-    }
-
     /// The tank/pipe and pipe/mixer joints are each one fitting split across
     /// a tile boundary, so both halves have to reach their shared edge at the
     /// same axis. This is the check that would have caught the four-voxel
@@ -2948,13 +2915,11 @@ mod tests {
             "the tank's discharge does not reach the tile edge the run starts at"
         );
         assert!(
-            pipe_inlet(&p).filled(16, last, PIPE_AXIS_Z + 5),
-            "the run's branch flange does not reach the tile edge the machine sits against"
-        );
-        assert!(
             machine_mixer(&p).filled(16, 0, PIPE_AXIS_Z),
             "the mixer's inlet stub does not reach the tile edge the run sits against"
         );
+        // The pipe's half of both joints is a fitting on the tile boundary:
+        // the family test below pins its bore and flange there.
     }
 
     // -----------------------------------------------------------------------
@@ -3112,8 +3077,8 @@ mod tests {
         let p = palette();
         let last = TILE_VOXELS as i32 - 1;
         for (name, fitting, r) in [
-            ("pipe_fitting_machine", pipe_fitting_machine(&p), PIPE_OUTER_R + 1.5),
-            ("pipe_fitting_tank", pipe_fitting_tank(&p), PIPE_OUTER_R + 2.0),
+            ("pipe_fitting_machine", pipe_fitting_machine(&p), PIPE_OUTER_R + 1.0 + PIPE_FITTING_MARGIN),
+            ("pipe_fitting_tank", pipe_fitting_tank(&p), PIPE_OUTER_R + 1.0 + PIPE_FITTING_MARGIN),
         ] {
             // The flange is centred on the tile midline, half a voxel from
             // voxel 15/16, so its reach along an axis is sqrt(r² - ¼).
@@ -3130,6 +3095,53 @@ mod tests {
             for &(x, _, z) in fitting.voxels.keys() {
                 let floor = if (z as i32) <= PIPE_AXIS_Z + PIPE_OUTER_R as i32 + 2 { PIPE_FITTING_X0 } else { PIPE_FITTING_TOP_X0 };
                 assert!(x as i32 >= floor, "{name}: hardware at x = {x}, z = {z} would cover a leg window");
+            }
+        }
+    }
+
+    /// A fitting overlaid on a straight's LOW-X face — the first tile of a
+    /// run leaving a machine, or the tile a tank discharges into — covers
+    /// the straight's own joint flange, and on its +X face it covers plain
+    /// tube. Two voxel solids z-fight wherever a voxel of both has an
+    /// outward neighbour in neither (both then expose a face on the same
+    /// plane), so every voxel the two share must have every outward
+    /// neighbour inside one of them. "Outward" is away from the pipe axis;
+    /// an inward face lies in the bore and is a ticket-3 call (`+ 0.4`).
+    /// The tile-boundary plane itself is exempt: both end there by design,
+    /// and what stands on the other side of it (the machine's nozzle, the
+    /// tank's spout) is what the render checks.
+    #[test]
+    fn a_fitting_overlaid_on_either_face_of_a_straight_shares_no_outer_surface() {
+        let p = palette();
+        let shape = pipe(&p);
+        for (name, fitting) in [
+            ("pipe_fitting_machine", pipe_fitting_machine(&p)),
+            ("pipe_fitting_tank", pipe_fitting_tank(&p)),
+        ] {
+            for turns in [0, 2] {
+                let overlay = fitting.rotated_cw(turns);
+                let mut both = shape.clone();
+                both.merge(&overlay);
+                let radial = |y: i32, z: i32| {
+                    let (dy, dz) = (y as f32 - PIPE_C, z as f32 - PIPE_AXIS_Z as f32);
+                    dy * dy + dz * dz
+                };
+                for &(x, y, z) in overlay.voxels.keys() {
+                    let (x, y, z) = (x as i32, y as i32, z as i32);
+                    if !shape.filled(x, y, z) {
+                        continue;
+                    }
+                    for (nx, ny, nz) in [(x + 1, y, z), (x - 1, y, z), (x, y + 1, z), (x, y - 1, z), (x, y, z + 1), (x, y, z - 1)] {
+                        if radial(ny, nz) < radial(y, z) || nx < 0 || nx >= TILE_VOXELS as i32 {
+                            continue;
+                        }
+                        assert!(
+                            both.filled(nx, ny, nz),
+                            "{name} turned {turns}: the shape and the fitting both expose a face at \
+                             ({x}, {y}, {z}) toward ({nx}, {ny}, {nz}) — they will z-fight there"
+                        );
+                    }
+                }
             }
         }
     }

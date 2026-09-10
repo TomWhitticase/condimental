@@ -137,38 +137,71 @@ const TICK_HZ := 30.0
 const MAX_TICKS_PER_FRAME := 8
 const VOX_DIR := "res://voxels/"
 
-# --- Fluid pipes (milestone 6, ARCHITECTURE.md §3.4/§9 item 6) -------------
-# Which voxel model draws a pipe tile. `pipe_source` is the off-map supply
-# tap (PipeSnapshot.is_source) — a different silhouette, not just a
-# different colour, per UI_UX.md §7's "never encode state in colour alone."
+# --- Fluid pipes (milestone 6; the shape family is the pipes & conveyors
+# overhaul's ticket 6, docs/PIPES_AND_CONVEYORS_PLAN.md) --------------------
+##
+## A pipe tile is drawn from three kinds of part, composed here from the
+## `links` the simulation puts on every pipe placement (`links.connections`,
+## one entry per joined side, with the KIND of thing on that side) — never
+## from geometry this file works out for itself:
+##
+##   * a SHAPE, decided by how many sides connect and how they lie: one is
+##     an end, two opposite a straight, two adjacent a corner, three a tee,
+##     four a cross (`_pipe_shape_for`);
+##   * a FLUID BODY per shape, one voxel tall and scaled to the live level
+##     exactly as before (`_fluid_body_for`);
+##   * a FITTING on every side whose connection is a machine or a tank —
+##     the pipe's half of that joint — overlaid on the shape as its own
+##     instance, turned to that side (`_pipe_fitting_for`).
+##
+## Every shape is authored with its faces where `assets/voxels/generators/
+## assets.rs`'s pipe section says (a corner joins +X and NORTH; a tee +X,
+## -X and north; an end is open on -X only), and Godot's job is to find the
+## quarter-turn count that lands those faces on the tile's connected sides.
+## That count is what `_stage_tile_instance` is handed as the yaw, so a pipe
+## tile's yaw is a property of its connections, NOT of its `direction`: a
+## straight always keeps its one joint flange on the same side of every tile
+## along an axis (west on an east-west run, north on a north-south one), so
+## two neighbours can never stack their flanges on a shared boundary — which
+## a per-tile `direction` (east on one, west on the next) did. The
+## placement's `direction` decides only which axis a pipe joined to NOTHING
+## lies along; every other pipe's axes are decided by what it is joined to.
 const PIPE_ASSET := "pipe"
-const PIPE_SOURCE_ASSET := "pipe_source"
-## The visual-overhaul pass's fix for the pipe-to-machine connection gap: the
-## one segment `fluid_snapshot_json`'s `inlet_index` names (always the run's
-## machine-adjacent end, see `sim::FluidNetwork`) draws with a branch fitting
-## reaching to the tile edge the machine sits against, instead of the plain
-## `pipe` model whose solid header sits mid-tile and left open floor between
-## it and the machine's own inlet nozzle. See `assets/voxels/generators/
-## assets.rs`'s `pipe_inlet` doc for the full reasoning, including which tile
-## edge and why.
-const PIPE_INLET_ASSET := "pipe_inlet"
+const PIPE_CORNER_ASSET := "pipe_corner"
+const PIPE_TEE_ASSET := "pipe_tee"
+const PIPE_CROSS_ASSET := "pipe_cross"
+const PIPE_END_ASSET := "pipe_end"
+const PIPE_FITTING_MACHINE_ASSET := "pipe_fitting_machine"
+const PIPE_FITTING_TANK_ASSET := "pipe_fitting_tank"
+## The liquid body for each shape, keyed by the shape's asset. One per
+## shape rather than one slab stretched about, so a corner's liquid turns
+## with its bore and an end's stops short of its cap (no Godot-side trim).
+const PIPE_FLUID_ASSETS := {
+	"pipe": "pipe_fluid",
+	"pipe_corner": "pipe_fluid_corner",
+	"pipe_tee": "pipe_fluid_tee",
+	"pipe_cross": "pipe_fluid_cross",
+	"pipe_end": "pipe_fluid_end",
+}
 const PIPE_FLUID_ASSET := "pipe_fluid"
 # Where the liquid sits inside the pipe, stated in voxels against
 # assets/voxels/generators/assets.rs's PIPE_BORE_Z0 / PIPE_BORE_HEIGHT — the
 # same mirroring BELT_SURFACE_VOXELS already does for the belt. The fluid
 # model is deliberately ONE voxel tall (see its generator doc), so scaling it
 # by `pressure * PIPE_BORE_HEIGHT_VOXELS` grows a liquid column from the bore
-# floor up, with no pivot arithmetic.
+# floor up, with no pivot arithmetic. Unchanged by the shape family (ticket
+# 3 kept every shape's bore on the same floor and crown).
 const PIPE_BORE_FLOOR_VOXELS := 12
 const PIPE_BORE_HEIGHT_VOXELS := 7
 const PIPE_BORE_FLOOR_Y := FLOOR_Y + PIPE_BORE_FLOOR_VOXELS * VOXEL_UNIT
 ## Below this fill fraction the liquid body is hidden outright rather than
 ## drawn as a sub-voxel sliver that would z-fight the bore floor.
 const FLUID_MIN_VISIBLE_PRESSURE := 0.02
-## Fraction of a tile the liquid body is shortened by on the run's closed
-## downstream end, mirroring the two-voxel blind flange `pipe_inlet` draws
-## there (2 / 32). See `_build_fluid_network`.
-const FLUID_END_CAP_TRIM := 2.0 / float(VOXELS_PER_TILE)
+## The `kind` values a pipe's `links.connections` can carry that are not
+## another pipe: each gets a fitting on that side.
+const PIPE_LINK_MACHINE := "machine"
+const PIPE_LINK_TANK := "tank"
+const PIPE_LINK_PIPE := "pipe"
 
 ## Presentation-only tint per fluid id, exactly like ITEM_MODELS above: the
 ## fluid ids themselves come from data/recipes.ron, and a fluid with no entry
@@ -544,7 +577,8 @@ var _splitter_states: Dictionary = {} # origin key -> last snapshot (outputs + n
 # rebuilt with the rest of the world; levels are re-read from the same call
 # every frame, since fluid movement deliberately dirties no chunk.
 var _pipe_tiles: Dictionary = {} # "x,y" -> Vector2i(network index, segment index), for hover
-var _pipe_roles: Dictionary = {} # "x,y" -> asset name, decided from taps/tank_tiles
+var _pipe_shapes: Dictionary = {} # "x,y" -> shape record from `_pipe_shape_for`, decided from `links`
+var _pipe_fittings: Dictionary = {} # "x,y" -> Array of fitting records from `_pipe_fitting_for`
 var _pipe_fluid_nodes: Dictionary = {} # "net:seg" -> Node3D, the liquid body in that segment
 var _last_fluid: Array = [] # last fluid snapshot array; [] when nothing is plumbed
 
@@ -1517,12 +1551,125 @@ func _is_building_tile(tile: Vector2i) -> bool:
 	return kind != BELT_KIND and kind != PIPE_KIND and kind != SPLITTER_KIND
 
 
-## Which model draws a pipe tile — the plain bore, the supply fitting where a
-## tank discharges, or the branch fitting where a machine taps the run.
-## `_pipe_roles` is filled from the fluid snapshots in `_rebuild_world`,
-## since which tile is which is a property of the network, not of the tile.
+## The shape one pipe tile draws, from the sides it is joined on.
+##
+## `faces` is the list of absolute directions in `links.connections`
+## (`"north"|"east"|"south"|"west"`, any order); `direction` is the
+## placement's own facing, consulted ONLY when nothing is joined. Returns
+## `{"asset", "fluid_asset", "turns", "yaw"}`: the shape model, its liquid
+## body, and the number of clockwise quarter turns (and the yaw that is)
+## that puts the authored openings on `faces`.
+##
+## The authored openings, in `DIRECTIONS` index terms (east 0, south 1,
+## west 2, north 3), are the pipe section header's: a corner on {0, 3}, a
+## tee on {0, 2, 3} (everything but south), an end on {2}, a straight on
+## {0, 2}. One clockwise turn adds one to every index — the same turn
+## `Direction::rotate_cw` and `VoxModel::rotated_cw` make, so what the
+## voxgen tests prove about a turned model is what this draws.
+func _pipe_shape_for(faces: Array, direction: String) -> Dictionary:
+	var joined: Array = []
+	for face in faces:
+		var index := DIRECTIONS.find(String(face))
+		if index >= 0 and not joined.has(index):
+			joined.append(index)
+	joined.sort()
+	var asset := PIPE_ASSET
+	var turns := 0
+	match joined.size():
+		0:
+			# Joined to nothing: a bare length along the axis it was placed
+			# on. The only case the placement's `direction` decides.
+			turns = 1 if direction == "north" or direction == "south" else 0
+		1:
+			# An end is authored open on west (2); turn it until west lands
+			# on the one joined side.
+			asset = PIPE_END_ASSET
+			turns = posmod(int(joined[0]) - 2, 4)
+		2:
+			var a := int(joined[0])
+			var b := int(joined[1])
+			if (a + 2) % 4 == b:
+				# Opposite sides: a straight, and always the SAME turn for
+				# an axis (see the constants' doc for the flange rule).
+				turns = 0 if a == 0 else 1
+			else:
+				# Adjacent sides: the corner is authored on (0, 3) — a side
+				# and the side one step anticlockwise of it — so the turn
+				# count is whichever joined side has the other as its
+				# anticlockwise neighbour.
+				asset = PIPE_CORNER_ASSET
+				turns = a if posmod(a - 1, 4) == b else b
+		3:
+			# A tee is authored closed on south (1); turn it until south
+			# lands on the one side that is NOT joined.
+			asset = PIPE_TEE_ASSET
+			var missing := 0
+			for index in range(4):
+				if not joined.has(index):
+					missing = index
+			turns = posmod(missing - 1, 4)
+		_:
+			asset = PIPE_CROSS_ASSET
+	return {
+		"asset": asset,
+		"fluid_asset": String(PIPE_FLUID_ASSETS.get(asset, PIPE_FLUID_ASSET)),
+		"turns": turns,
+		"yaw": deg_to_rad(float(turns) * 90.0),
+	}
+
+
+## The fitting record for one non-pipe connection: which asset stands on
+## which side, and the yaw that turns the fitting's authored +X face onto
+## that side (`DIRECTIONS` index × 90°, exactly `_direction_yaw`). `{}` for
+## a pipe-to-pipe connection, which takes no fitting.
+func _pipe_fitting_for(connection: Dictionary) -> Dictionary:
+	var kind := String(connection.get("kind", ""))
+	var to := String(connection.get("to", ""))
+	var asset := ""
+	if kind == PIPE_LINK_MACHINE:
+		asset = PIPE_FITTING_MACHINE_ASSET
+	elif kind == PIPE_LINK_TANK:
+		asset = PIPE_FITTING_TANK_ASSET
+	if asset == "" or DIRECTIONS.find(to) < 0:
+		return {}
+	return {"asset": asset, "to": to, "kind": kind, "yaw": _direction_yaw(to)}
+
+
+## The sides a pipe placement's `links` say it is joined on, as the raw
+## connection dictionaries (`{"to", "kind"}`), in the wire's own
+## north/east/south/west order. Empty for a lonely tile or a non-pipe.
+func _pipe_connections_of(placement: Dictionary) -> Array:
+	var links = placement.get("links")
+	if not (links is Dictionary):
+		return []
+	var connections = links.get("connections", [])
+	return connections if connections is Array else []
+
+
+## The shape record (`_pipe_shape_for`) of the pipe on `tile`, or `{}`.
+## Filled by `_rebuild_world` from every pipe placement's `links`.
+func _pipe_shape_at(tile: Vector2i) -> Dictionary:
+	return _pipe_shapes.get(_tile_key(tile), {})
+
+
+## The fittings (`_pipe_fitting_for`) drawn on the pipe at `tile`, in
+## north/east/south/west order; `[]` if none, or if it is not a pipe.
+func _pipe_fittings_at(tile: Vector2i) -> Array:
+	return _pipe_fittings.get(_tile_key(tile), [])
+
+
+## Which shape model draws the pipe tile at `tile`. The plain straight for
+## a tile `_rebuild_world` has not seen (there is none: every pipe placement
+## carries `links`).
 func _pipe_asset_for(tile: Vector2i) -> String:
-	return String(_pipe_roles.get(_tile_key(tile), PIPE_ASSET))
+	return String(_pipe_shape_at(tile).get("asset", PIPE_ASSET))
+
+
+## The instance key of a fitting, distinct from the tile's own key so both
+## can live in `_tile_instances` (a tile draws one shape and up to four
+## fittings).
+func _pipe_fitting_key(tile: Vector2i, to: String) -> String:
+	return "fitting:%s:%s" % [_tile_key(tile), to]
 
 
 ## Which voxel asset draws one placement. Belts and pipes have context-
@@ -1567,50 +1714,38 @@ const SPLITTER_KIND := "splitter"
 func _rebuild_world() -> void:
 	_read_world_layout()
 
-	# Pipe roles first: which tile draws a supply fitting and which a branch
-	# is a property of the NETWORK (who taps it, which tank feeds it), so it
-	# has to be known before the pipe tiles themselves are built.
+	# Pipe shapes first: which shape a tile draws, at what turn, and which
+	# fittings stand on it come straight off each placement's `links`
+	# (ticket 1 of the overhaul recorded them in the topology pass), so
+	# they are known before the tiles themselves are staged. The fluid
+	# snapshots are read alongside for `_pipe_tiles`, which hover uses to
+	# find a tile's live level in the network array.
+	_pipe_shapes.clear()
+	_pipe_fittings.clear()
+	for placement in _placements:
+		if String(placement.get("kind", "")) != PIPE_KIND:
+			continue
+		var origin := _placement_origin(placement)
+		var key := _tile_key(origin)
+		var connections := _pipe_connections_of(placement)
+		var faces: Array = []
+		var fittings: Array = []
+		for connection in connections:
+			if not (connection is Dictionary):
+				continue
+			faces.append(String(connection.get("to", "")))
+			var fitting := _pipe_fitting_for(connection)
+			if not fitting.is_empty():
+				fittings.append(fitting)
+		_pipe_shapes[key] = _pipe_shape_for(faces, _placement_direction(placement))
+		if not fittings.is_empty():
+			_pipe_fittings[key] = fittings
 	_last_fluid = _read_fluid_snapshots()
-	_pipe_roles.clear()
 	_pipe_tiles.clear()
 	for n in range(_last_fluid.size()):
-		var network: Dictionary = _last_fluid[n]
-		var segments: Array = network.get("segments", [])
-		for s in range(segments.size()):
-			var seg: Dictionary = segments[s]
-			var tile := _pair_to_tile(seg.get("tile", [0, 0]))
-			_pipe_tiles[_tile_key(tile)] = Vector2i(n, s)
-			_pipe_roles[_tile_key(tile)] = PIPE_SOURCE_ASSET if bool(seg.get("is_source", false)) else PIPE_ASSET
-		for tap in network.get("taps", []):
-			var index := int(tap.get("segment_index", -1))
-			if index < 0 or index >= segments.size():
-				continue
-			var tap_tile := _pair_to_tile(segments[index].get("tile", [0, 0]))
-			# A tapped tile that a tank also feeds keeps the supply fitting:
-			# the tank connection is the more distinctive silhouette, and the
-			# same tile being both is only reachable on a one-tile run.
-			if _pipe_roles.get(_tile_key(tap_tile), PIPE_ASSET) != PIPE_ASSET:
-				continue
-			# **And only when the branch would actually point at the machine.**
-			# `pipe_inlet`'s T-off reaches out of this tile's SOUTH edge (see
-			# its own doc for the vox-Y derivation) and caps the run's +X end
-			# with a blind flange, so it is authored for exactly one
-			# arrangement: the run lying on the row north of the machine it
-			# feeds, which is how a tank supplies the mixer.
-			#
-			# The chain rework created the other arrangement — machine-to-
-			# machine runs lying WEST-to-EAST between two machines — and there
-			# the branch would stick out at bare floor while the blind flange
-			# capped the very end the machine draws through. So those tiles
-			# fall back to the plain `pipe`, which is not a compromise: a
-			# plain tile's bore is already open at both X faces at exactly
-			# `PIPE_AXIS_Z`, and the machine's own `machine_fluid_port`
-			# nozzle meets it there. This is the same known, tested fallback
-			# the belt's east-only junction variants take (UI_UX.md §2b point
-			# 18), and a four-directional pipe-fitting pass is the same art
-			# ticket.
-			if _is_building_tile(tap_tile + Vector2i(0, -1)):
-				_pipe_roles[_tile_key(tap_tile)] = PIPE_INLET_ASSET
+		var segments: Array = _last_fluid[n].get("segments", [])
+		for i in range(segments.size()):
+			_pipe_tiles[_tile_key(_pair_to_tile(segments[i].get("tile", [0, 0])))] = Vector2i(n, i)
 
 	# Cleared and rebuilt together, never appended to: `_ready()` genuinely
 	# runs twice under the headless `--script` SceneTree harness (see
@@ -1676,10 +1811,19 @@ func _build_placement(placement: Dictionary) -> void:
 	if _is_instanced_kind(kind):
 		# A conveyor or pipe tile is one MultiMesh instance, not a node (see
 		# the "Instanced tiles and items" section). The yaw is passed
-		# separately from the placement's direction on purpose: a corner
-		# tile (ticket 5) may need to spin its model differently from the
-		# facing the simulation reports, and this is the one place that
-		# decides.
+		# separately from the placement's direction on purpose: a pipe's
+		# turn is decided by its connections, not its facing (see the pipe
+		# constants' doc), a belt corner's (ticket 5) likewise, and this is
+		# the one place that decides.
+		if kind == PIPE_KIND:
+			yaw = float(_pipe_shape_at(origin).get("yaw", yaw))
+			# The fittings are instances too — a fitting has no live state —
+			# each under its own key, turned to the side it stands on.
+			for fitting in _pipe_fittings_at(origin):
+				_stage_tile_instance(
+					[String(fitting["asset"])], _pipe_fitting_key(origin, String(fitting["to"])),
+					centre, float(fitting["yaw"])
+				)
 		_stage_tile_instance(_tile_frames_for(placement), key, centre, yaw)
 		if kind == SPLITTER_KIND:
 			# The splitter's body is instanced like a belt's, but its lit
@@ -1909,8 +2053,10 @@ func _splitter_effective_side(snapshot: Dictionary) -> int:
 ## transform and nothing else; giving one of those a material swap means a
 ## pool per material, and that is a node with extra steps. Machines and
 ## buildings are also few (tens, not thousands) and multi-tile, so nothing is
-## gained. If ticket 6 wants instanced fluid bodies, the per-instance scale
-## is already in the transform; the tint is the part to design.
+## gained. A pipe's FITTINGS (ticket 6) are instances like the shape they
+## stand on — a fitting has no live state — while its fluid body stays a
+## node: the per-instance scale would fit in a transform, but the tint is
+## per network, and a pool per fluid is a node with extra steps.
 ##
 ## **Three seams the later tickets build on** (the plan's ticket 5 and 6):
 ##
@@ -2396,19 +2542,16 @@ func _fluid_body_for(network_index: int, segment_index: int, segment: Dictionary
 		# changes when something is placed — and a placement rebuilds these.
 		return _pipe_fluid_nodes[key]
 	var tile := _pair_to_tile(segment.get("tile", [0, 0]))
-	var direction := String(segment.get("direction", "east"))
-	var node := _asset_node(PIPE_FLUID_ASSET)
-	node.name = "fluid_%s" % _tile_key(tile)
+	# The body matching the tile's SHAPE, at the shape's own turn, so a
+	# corner's liquid turns with its bore, a tee's fills its branch and an
+	# end's stops where its cap starts (each body is authored to reach only
+	# its shape's open faces — the voxgen tests pin that).
+	var shape := _pipe_shape_at(tile)
+	var fluid_asset := String(shape.get("fluid_asset", PIPE_FLUID_ASSET))
+	var node := _asset_node(fluid_asset)
+	node.name = "%s_%s" % [fluid_asset, _tile_key(tile)]
 	node.position = _tile_origin(tile.x, tile.y, PIPE_BORE_FLOOR_Y)
-	node.rotation.y = _direction_yaw(direction)
-	if _pipe_asset_for(tile) == PIPE_INLET_ASSET:
-		# `pipe_inlet` closes its downstream end with a blind flange (see its
-		# generator doc). Left full length the liquid pushes straight through
-		# it and the run reads as an open, liquid-filled cut pipe. Trimmed
-		# along the tile's OWN facing, so a turned inlet trims its own end.
-		var offset := _direction_offset(direction)
-		node.scale.x = 1.0 - FLUID_END_CAP_TRIM
-		node.position -= Vector3(float(offset.x), 0.0, float(offset.y)) * (0.5 * FLUID_END_CAP_TRIM * TILE)
+	node.rotation.y = float(shape.get("yaw", _direction_yaw(String(segment.get("direction", "east")))))
 	_tint_level_body(node, material)
 	_world_root.add_child(node)
 	_pipe_fluid_nodes[key] = node
@@ -5214,16 +5357,21 @@ func _update_ghost() -> void:
 			_ghost_valid = true
 			_ghost_reason = ""
 		# A belt's model depends on what it would sit next to, so the ghost
-		# asks the same question the built tile will.
+		# asks the same question the built tile will. A pipe's ghost shows
+		# the shape the placed pipes around the tile would give it (see
+		# `_pipe_ghost_shape`), at that shape's own turn.
 		var ghost_asset := _shop_asset_for(_build_kind)
+		var ghost_yaw := _direction_yaw(_build_direction)
 		if _build_kind == BELT_KIND:
 			ghost_asset = _belt_asset_for(tile, _build_direction)
 		elif _build_kind == PIPE_KIND:
-			ghost_asset = PIPE_ASSET
+			var ghost_shape := _pipe_ghost_shape(tile, _build_direction)
+			ghost_asset = String(ghost_shape["asset"])
+			ghost_yaw = float(ghost_shape["yaw"])
 		_rebuild_ghost_body(ghost_asset)
 		var ghost_size := _rotated_footprint(_kind_footprint(_build_kind), _build_direction)
 		_ghost_root.position = _footprint_centre(tile, ghost_size, FLOOR_Y)
-		_ghost_root.rotation.y = _direction_yaw(_build_direction)
+		_ghost_root.rotation.y = ghost_yaw
 		_tint_ghost(GHOST_TINT_VALID if _ghost_valid else GHOST_TINT_INVALID)
 		showing = true
 	else:
@@ -5255,6 +5403,24 @@ func _tint_ghost(tint: Color) -> void:
 	for child in body.get_children():
 		if child is MeshInstance3D:
 			child.set_surface_override_material(0, mat)
+
+
+## The shape a pipe placed on `tile` would take, judged from the PIPE tiles
+## already standing on its four sides — every orthogonally adjacent pipe
+## joins the same network (`sim::world`'s pipe-links doc), so that much of
+## the answer is certain before the simulation is asked. Which machine or
+## tank it would tap is not (a machine taps one tile of a run, and the
+## simulation picks which), so the ghost previews no fitting and no
+## machine-side connection; the placed tile draws them from the real
+## `links` a moment later. With no pipe beside it the ghost lies along the
+## chosen facing, exactly as the placed lonely tile will.
+func _pipe_ghost_shape(tile: Vector2i, direction: String) -> Dictionary:
+	var faces: Array = []
+	for side in DIRECTIONS:
+		var neighbour := _placement_at_tile(tile + _direction_offset(side))
+		if not neighbour.is_empty() and String(neighbour.get("kind", "")) == PIPE_KIND:
+			faces.append(side)
+	return _pipe_shape_for(faces, direction)
 
 
 ## What the prompt beside the cursor says. The glyph and the word are the
@@ -6268,32 +6434,75 @@ func _pipe_indices_at_tile(tile: Vector2i) -> Vector2i:
 	return _pipe_tiles.get(_tile_key(tile), Vector2i(-1, -1))
 
 
-## Fluid type, level and pressure for the pipe tile under the cursor. Reads
-## the live snapshot array rather than one remembered network: a world has one
-## network per connected run of pipe now, and the player can split or join
-## them by placing and removing a single tile.
+## What a pipe tile's tooltip says: what it is joined to, in words, then
+## the live level. Reads the placement's own `links` for the connections
+## and the live snapshot array for the level: a world has one network per
+## connected run of pipe, and the player can split or join them by placing
+## and removing a single tile.
+##
+## The connections line names the pipe sides ("connects west and north"),
+## then every machine or tank by its kind, as "fed by" or "feeds": a tank
+## always feeds the pipe, and a machine feeds it when this segment is one
+## the machine DEPOSITS into (`producers`) and is fed by it when the
+## machine draws from it (`taps`). Which machine is a neighbour lookup on
+## the side the link names — the wire says "machine, north", the placement
+## standing north says which machine.
 func _pipe_hover_text(tile: Vector2i, direction: String) -> String:
+	var placement := _placement_at_tile(tile)
 	var indices := _pipe_indices_at_tile(tile)
-	if indices.x < 0 or indices.x >= _last_fluid.size():
-		return "pipe\nfacing %s\nnot connected to anything" % direction
-	var network: Dictionary = _last_fluid[indices.x]
-	var segments: Array = network.get("segments", [])
-	if indices.y < 0 or indices.y >= segments.size():
-		return "pipe\nfacing %s" % direction
-	var segment: Dictionary = segments[indices.y]
-	var role := "pipe"
-	if bool(segment.get("is_source", false)):
-		role = "pipe (tank supply)"
-	elif _pipe_asset_for(tile) == PIPE_INLET_ASSET:
-		role = "pipe (machine inlet)"
-	return "%s\n%s  ·  facing %s\n%.1f / %.1f units\npressure %.0f%%" % [
-		_fluid_id_of(network) if _fluid_id_of(network) != "" else "empty run",
-		role,
-		direction,
-		float(segment.get("volume", 0.0)),
-		float(segment.get("capacity", 0.0)),
-		clampf(float(segment.get("pressure", 0.0)), 0.0, 1.0) * 100.0,
-	]
+	var network: Dictionary = {}
+	var segment: Dictionary = {}
+	if indices.x >= 0 and indices.x < _last_fluid.size():
+		network = _last_fluid[indices.x]
+		var segments: Array = network.get("segments", [])
+		if indices.y >= 0 and indices.y < segments.size():
+			segment = segments[indices.y]
+	var lines: Array = ["pipe"]
+	lines.append(_pipe_connections_text(tile, _pipe_connections_of(placement), network, indices.y, direction))
+	if not segment.is_empty():
+		lines.append("%s  ·  %.1f / %.1f units  ·  pressure %.0f%%" % [
+			_fluid_id_of(network) if _fluid_id_of(network) != "" else "empty run",
+			float(segment.get("volume", 0.0)),
+			float(segment.get("capacity", 0.0)),
+			clampf(float(segment.get("pressure", 0.0)), 0.0, 1.0) * 100.0,
+		])
+	return "\n".join(PackedStringArray(lines))
+
+
+## The connections sentence of `_pipe_hover_text`, split out so a test can
+## read it against a known layout. Parts are joined with " · ".
+func _pipe_connections_text(tile: Vector2i, connections: Array, network: Dictionary,
+		segment_index: int, direction: String) -> String:
+	var pipe_sides: Array = []
+	var parts: Array = []
+	for connection in connections:
+		if not (connection is Dictionary):
+			continue
+		var kind := String(connection.get("kind", ""))
+		var to := String(connection.get("to", ""))
+		if kind == PIPE_LINK_PIPE:
+			pipe_sides.append(to)
+			continue
+		var neighbour := _placement_at_tile(tile + _direction_offset(to))
+		var name := _kind_display_name(String(neighbour.get("kind", kind)))
+		if kind == PIPE_LINK_TANK:
+			parts.append("fed by %s" % name)
+		elif kind == PIPE_LINK_MACHINE:
+			var produced := false
+			for producer in network.get("producers", []):
+				if int(producer.get("segment_index", -1)) == segment_index:
+					produced = true
+			parts.append(("fed by %s" if produced else "feeds %s") % name)
+	if pipe_sides.is_empty():
+		parts.push_front("no pipe joined  ·  lies %s" % ("north-south" if direction == "north" or direction == "south" else "east-west"))
+	elif pipe_sides.size() == 1:
+		parts.push_front("connects %s" % pipe_sides[0])
+	else:
+		parts.push_front("connects %s and %s" % [
+			", ".join(PackedStringArray(pipe_sides.slice(0, pipe_sides.size() - 1))),
+			pipe_sides[pipe_sides.size() - 1],
+		])
+	return "  ·  ".join(PackedStringArray(parts))
 
 
 ## What one hopper's tooltip says: what it holds, how full it is, and — new

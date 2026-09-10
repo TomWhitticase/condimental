@@ -177,6 +177,27 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-09 **Pipe presentation (Pipes & Conveyors ticket 6).** A pipe
+  tile's shape, turn and fittings come from `links.connections` ONLY
+  (`_pipe_shape_for`, `_pipe_fitting_for`; `_pipe_roles` is gone). Turn
+  arithmetic in `DIRECTIONS` indices: an end is authored open west (2), a
+  corner on (east 0, north 3), a tee closed south (1); one clockwise turn
+  adds one. A straight is ALWAYS turn 0 on an east-west axis and 1 on a
+  north-south one, so joint flanges never stack; a pipe's `direction`
+  decides only a lonely tile's axis. `pipe_end` carries no joint flange
+  (its turn is dictated, so it would stack). Fittings are instances keyed
+  `fitting:x,y:side`; fluid bodies stay nodes, one asset per shape
+  (`PIPE_FLUID_ASSETS`), `FLUID_END_CAP_TRIM` deleted. Every part of a
+  fitting is `PIPE_FITTING_MARGIN` (1.0) of radius larger than anything it
+  can cover — voxgen pins it on both faces of a straight. Hover: "connects
+  west and north · fed by Fluid Tank · feeds Mixer" (tank = fed by; machine
+  in `producers` = fed by, in `taps` = feeds; the neighbour placement names
+  the kind). The pipe ghost takes its shape from adjacent PIPE placements
+  only, no fitting — reconcile with ticket 5's belt ghost in ticket 7.
+  `pipe_source`/`pipe_inlet` deleted (generators, models, icons).
+  `test_pipe_shapes.gd` runs on `build_pipe_gallery` (= `--pipe-gallery`);
+  a fixture run shows liquid only in a run tapped by a machine whose fluid
+  input is RAW (a mixer), since a tank fills from bought stock.
 - 2026-09-09 **Pipe model family (Pipes & Conveyors ticket 3, assets
   only).** Shapes `pipe`/`pipe_corner`/`pipe_tee`/`pipe_cross`/`pipe_end`,
   fittings `pipe_fitting_machine`/`pipe_fitting_tank` (authored on +X,

@@ -166,9 +166,11 @@ DECISIONS.md Part B. There is no point 10.
     its footprint-centre origin.** The exception is point 11's junction
     art: spinning a carved +X doorway 180° puts the opening where nobody can
     see it, visibly worse than the plain tile. So `belt_inlet`/`belt_outlet`
-    (and `pipe_inlet`) stay east-only and the other facings fall back to the
-    plain model. Known, tested, accepted; a four-directional junction pass
-    is its own art ticket.
+    stay east-only and the other facings fall back to the plain model.
+    Known, tested, accepted; a four-directional junction pass is its own
+    art ticket. (Pipes no longer have this gap: since the pipes & conveyors
+    overhaul a pipe tile is a shape plus overlaid fittings, each turned to
+    the side its `links` name — point 24.)
 19. **A live body scaled inside a hollow shape must be strictly narrower
     than the shape's OUTER wall at every height it can reach.** The pipe's
     fluid slab was as wide as the bore; where the tube curves in toward
@@ -189,6 +191,18 @@ DECISIONS.md Part B. There is no point 10.
     never share a surface.** `vengi` previews look from the -X/+Y corner,
     which the game never shows, so +X-face hardware is judged only in the
     scene.
+23. **A fitting overlaid on a shape must be a full voxel of radius larger
+    than anything it can cover** (`PIPE_FITTING_MARGIN`). Two voxel solids
+    z-fight wherever a voxel of both has an outward neighbour in neither;
+    a one-voxel margin puts every axis-neighbour of an inner voxel inside
+    the outer solid. Found where the machine fitting lands on a straight's
+    own joint flange; pinned by `cargo test -p voxgen` on both faces.
+24. **A pipe tile's turn is a property of what it is joined to, never of
+    its facing.** One joint flange per straight only reads as one join if
+    every tile along an axis keeps it on the same side (east-west turn 0,
+    north-south turn 1); an end's turn is dictated by its open side, so it
+    carries no joint flange at all. R on a pipe visibly changes only a tile
+    joined to nothing.
 
 ## 3. Theme & setting
 

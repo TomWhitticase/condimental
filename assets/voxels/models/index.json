@@ -130,12 +130,6 @@
   "pipe_fluid_tee": [
     "liquid"
   ],
-  "pipe_inlet": [
-    "metal"
-  ],
-  "pipe_source": [
-    "metal"
-  ],
   "pipe_tee": [
     "metal"
   ],
