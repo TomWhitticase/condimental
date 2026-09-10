@@ -50,6 +50,15 @@
   "floor_tile": [
     "matte"
   ],
+  "floor_tile_drain": [
+    "matte"
+  ],
+  "floor_tile_patch": [
+    "matte"
+  ],
+  "floor_tile_worn": [
+    "matte"
+  ],
   "fluid_tank": [
     "matte",
     "metal",

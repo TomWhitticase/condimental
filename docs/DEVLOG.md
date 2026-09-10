@@ -52,6 +52,42 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-11 — The factory floor, redesigned
+
+The project owner said the flooring tile did not fit the theme, and it did
+not: one `concrete` slab with a near-black saw-cut joint on all four edges
+and single-voxel bright speckle over it, identical on every tile in the
+world. Rendered wide, the joint read as grout and the speckle as television
+static — a tiled bathroom rather than UI_UX.md §3's poured industrial food
+plant.
+
+It is a poured floor now. Its own three concrete tones, deliberately within
+eight points of each other; broad ragged blotches on a coarse cell grid
+instead of per-voxel noise; a hairline control joint that still draws the
+tile grid §1 asks for; four models — plain, worn, patched, drained — each
+laid at a quarter turn chosen from its own coordinates, which is what stops
+four models from reading as four stamps; and trench drains in continuous
+rows, the detail that says a plant which is hosed down. The scene got
+cheaper as well as better: 1 363 384 primitives to 798 272, because broad
+low-contrast areas greedy-mesh far better than speckle, and the floor is the
+one asset whose triangle count is multiplied by the size of the world.
+
+Three iterations, each judged by looking. Two lessons general enough to keep
+(UI_UX.md §2b points 27 and 28). **The floor is authored by its value range,
+not its detail** — it is the one asset seen as thousands of copies filling
+the frame, so it must never hold the brightest pixel, which §4 reserves for
+metal. That rule broke a tie: a repair patch "should" be a paler fresh pour,
+and every paler version read as white paving slabs dropped at random, so the
+patch is darker than the floor around it. **And N models over thousands of
+tiles is still N stamps** — per-instance rotation is the free multiplier,
+and its price is that the tile's edges must be four-fold symmetric, which is
+why the joint keeps all four of its edges and was fixed by lightening its
+colour rather than by dropping two of them.
+
+The frame that found every one of these was the EMPTY world, not the demo
+chain: it is the state a new game starts in, and the only render that is
+almost entirely floor.
+
 ### 2026-09-10 — Click a hopper or a tank to configure it
 
 The presentation half of the previous entry, and the end of feeding a

@@ -22,7 +22,14 @@ pub struct Asset {
 }
 
 pub const ASSETS: &[Asset] = &[
+    // The floor family (the floor redesign). `main.gd`'s
+    // `_floor_variant_for` picks one per tile from the tile's own
+    // coordinates, so a world gets a floor with some life in it out of four
+    // models — see the factory-floor section below.
     Asset { name: "floor_tile", build: floor_tile },
+    Asset { name: "floor_tile_worn", build: floor_tile_worn },
+    Asset { name: "floor_tile_patch", build: floor_tile_patch },
+    Asset { name: "floor_tile_drain", build: floor_tile_drain },
     // The belt family (the "Pipes & Conveyors Overhaul" plan's ticket 2):
     // three shapes, `BELT_FRAMES` animation frames each, all authored for a
     // +X product path. The scene picks the shape from each tile's `links`
@@ -117,40 +124,292 @@ fn item_volume() -> VoxModel {
 // ---------------------------------------------------------------------------
 // Factory floor
 // ---------------------------------------------------------------------------
+//
+// A power-trowelled slab-on-grade in a food plant, which is a specific real
+// thing and not just "grey": one continuous pour, saw-cut into bays, falling
+// to trench drains that the place is hosed down into at the end of a shift,
+// worn where the traffic goes and cut out and re-poured where something once
+// broke. UI_UX.md §3 asks for exactly that vocabulary; the floor is the
+// largest single surface in the frame and had none of it.
+//
+// **What the first floor got wrong**, since this is a redesign and the
+// reasons are the design:
+//
+//   * It drew a dark seam around ALL FOUR sides of every tile, so a joint
+//     between two neighbours was two voxels of near-black. UI_UX.md §1 does
+//     require the grid to stay legible, but the old tile over-delivered it:
+//     a heavy border on a 32-voxel square reads as GROUT, and a floor of
+//     grouted squares reads as a bathroom, not as a factory. The joint is
+//     one voxel now, drawn on the low-X and low-Y edges only (so the shared
+//     joint between two tiles is drawn once, by one of them), in a
+//     `floor_seam` lightened from #33332F. That is a saw cut in a pour.
+//   * It speckled the surface with single voxels of `concrete_light`, four
+//     stops brighter than the ground under them. At scene scale that is
+//     television static. Aggregate in a trowelled floor is a BLOTCH, low in
+//     contrast and several voxels across, and that is also much kinder to
+//     the mesher (see [`floor_mottle`]).
+//   * Every tile in the world was the same tile. Nothing said the floor had
+//     ever been used.
+//
+// Hence a family of four rather than one model. Everything here is a fixed
+// function of position — never randomness — so regenerating a model is
+// byte-stable, and `main.gd` picks between them from tile coordinates by the
+// same rule every time (a save that is reloaded gets the floor it had).
+//
+// **The one hard constraint**: the slab is [`FLOOR_VOXELS`] thick and
+// `main.gd`'s `FLOOR_Y` puts every belt, machine and item on top of it, so
+// no floor detail may stand PROUD of the top surface. Detail here goes down
+// into the slab (the drain) or is flush with it (everything else).
 
-/// Poured-concrete floor slab, one tile. Deliberately only 3 voxels thick:
-/// the whole factory floor is tiled with this, so it is the one asset whose
-/// triangle count is multiplied by the size of the world.
-///
-/// The darker perimeter is not decoration — UI_UX.md §1 requires the world
-/// to stay "always visually legible as a grid," and a seam at the tile
-/// boundary is what actually delivers that at a fixed isometric angle.
-pub fn floor_tile(p: &Palette) -> VoxModel {
-    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 3]);
+/// Slab thickness, mirrored by `main.gd`'s `FLOOR_VOXELS`.
+const FLOOR_VOXELS: u32 = 3;
+/// The z of the floor's walking surface — the highest voxel a floor model
+/// may occupy.
+const FLOOR_TOP: i32 = FLOOR_VOXELS as i32 - 1;
+/// The trench drain's channel, in vox Y. Symmetric about the tile midline
+/// between voxels 15 and 16 (UI_UX.md §2b point 20), so a row of drains laid
+/// by `main.gd` is one continuous trench rather than a step at every joint.
+const FLOOR_DRAIN_Y: (i32, i32) = (13, 18);
+
+/// A cheap integer hash of a position, `salt` distinguishing one use of it
+/// from another. A modulo of a linear `x*a + y*b` lays its results out in
+/// obvious diagonal stripes — which is how the old speckle betrayed itself
+/// as a pattern — so the two terms are XORed, not added.
+fn floor_hash(x: i32, y: i32, salt: i64) -> i64 {
+    ((x as i64).wrapping_mul(73_856_093)
+        ^ (y as i64).wrapping_mul(19_349_663)
+        ^ salt.wrapping_mul(83_492_791))
+    .rem_euclid(1_000_003)
+}
+
+/// The bare slab: dark body, walking surface on top, nothing else. Every
+/// floor model starts here.
+fn floor_slab(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, FLOOR_VOXELS]);
     let last = TILE_VOXELS as i32 - 1;
+    m.cuboid((0, last), (0, last), (0, FLOOR_TOP - 1), p.idx("concrete_dark"));
+    m.cuboid((0, last), (0, last), (FLOOR_TOP, FLOOR_TOP), p.idx("concrete_slab"));
+    m
+}
 
-    m.cuboid((0, last), (0, last), (0, 1), p.idx("concrete_dark"));
-    m.cuboid((0, last), (0, last), (2, 2), p.idx("concrete"));
+/// Aggregate and trowel mottling: a few broad, ragged blotches a handful of
+/// points either side of the slab's own tone.
+///
+/// Laid out over a coarse cell grid with each blotch offset inside its own
+/// cell, rather than per voxel: the cell grid guarantees the blotches are
+/// spread out (a pure per-voxel hash clumps and leaves bald patches), and
+/// the offset stops the grid itself from showing. Most cells stay bare on
+/// purpose — an evenly-covered floor is a texture, and a sparsely-covered
+/// one is a surface.
+///
+/// Each blotch is built as a stack of rows of DIFFERENT lengths and offsets
+/// rather than as a rectangle, and that is not fussiness, it is the second
+/// thing the render corrected. A rectangle with its corners knocked off is a
+/// plus sign, and thirteen plus signs a tile read as confetti dropped on the
+/// floor. A ragged edge has no shape to recognise, which is what aggregate
+/// in a trowelled pour actually looks like from three metres up.
+fn floor_mottle(m: &mut VoxModel, p: &Palette, salt: i64) {
+    const CELL: i32 = 8;
+    let light = p.idx("concrete_mottle");
+    let shade = p.idx("concrete_shade");
+    let cells = TILE_VOXELS as i32 / CELL;
 
-    // Aggregate speckle: a fixed pattern, not randomness, so regenerating
-    // the model is byte-stable.
+    for cy in 0..cells {
+        for cx in 0..cells {
+            let h = floor_hash(cx, cy, salt);
+            if h % 8 >= 3 {
+                continue; // most cells are bare slab
+            }
+            let w = 4 + ((h / 7) % 4) as i32;
+            let d = 3 + ((h / 11) % 4) as i32;
+            let x0 = cx * CELL + ((h / 13) as i32) % (CELL - w).max(1);
+            let y0 = cy * CELL + ((h / 17) as i32) % (CELL - d).max(1);
+            let color = if (h / 19) % 2 == 0 { light } else { shade };
+            for row in 0..d {
+                // Each row is inset and shortened by its own hash, so the
+                // blotch's outline wanders instead of being a box.
+                let r = floor_hash(x0, y0 + row, salt ^ 0x5F5F);
+                let inset = (r % 3) as i32;
+                let trim = ((r / 3) % 3) as i32;
+                for x in x0 + inset..x0 + w - trim {
+                    m.set(x, y0 + row, FLOOR_TOP, color);
+                }
+            }
+        }
+    }
+}
+
+/// The saw-cut control joint, one voxel wide, around all four edges.
+///
+/// **Four edges, not two, and that is a decision about ROTATION rather than
+/// about the line.** Drawing it on the low-X and low-Y edges only makes each
+/// shared joint the responsibility of exactly one of the two tiles that meet
+/// there, so a joint is one voxel wide instead of two — which is tidier, and
+/// which was the first cut. But it also makes the tile four-fold
+/// ASYMMETRIC, and `main.gd` spins these slabs by a quarter turn at a time
+/// to stop several thousand copies of one model reading as a repeating
+/// texture (see `_floor_variant_for`'s neighbours). A spun asymmetric joint
+/// puts two cuts along one boundary and none along the next, which is a
+/// visible hole in the grid UI_UX.md §1 asks for.
+///
+/// Two voxels of joint is only a problem at the value the joint used to be.
+/// At `floor_seam`'s lightened tone the doubled line still reads as a
+/// hairline, and the render is what says so — which is the trade this
+/// function is making: a slightly wider cut, in exchange for a floor with no
+/// stamp in it.
+fn floor_joint(m: &mut VoxModel, p: &Palette) {
+    let last = TILE_VOXELS as i32 - 1;
+    let seam = p.idx("floor_seam");
+    for i in 0..=last {
+        m.set(i, 0, FLOOR_TOP, seam);
+        m.set(i, last, FLOOR_TOP, seam);
+        m.set(0, i, FLOOR_TOP, seam);
+        m.set(last, i, FLOOR_TOP, seam);
+    }
+}
+
+/// The floor the great majority of the world is paved with: slab, mottle,
+/// joint.
+pub fn floor_tile(p: &Palette) -> VoxModel {
+    let mut m = floor_slab(p);
+    floor_mottle(&mut m, p, 0);
+    floor_joint(&mut m, p);
+    m
+}
+
+/// A slab that has been walked and driven over: a broad darkened area of
+/// polished, ground-in traffic wear, roughly diagonal so it does not line up
+/// with anything, plus the ordinary mottling around it.
+///
+/// The wear is `concrete_shade` — the same tone the mottle already uses at
+/// blotch scale — so a worn tile beside a plain one is a change of DENSITY,
+/// not a change of colour. A wear patch that announced itself would tile as
+/// visibly as the thing it replaced.
+pub fn floor_tile_worn(p: &Palette) -> VoxModel {
+    let mut m = floor_slab(p);
+    let last = TILE_VOXELS as i32 - 1;
+    let shade = p.idx("concrete_shade");
+    let mottle = p.idx("concrete_mottle");
+
     for y in 0..=last {
         for x in 0..=last {
-            // Cheap integer hash rather than a linear expression: a modulo
-            // of `x*a + y*b` lays the speckle out in obvious diagonal
-            // stripes, which reads as a pattern instead of as aggregate.
-            let h = ((x as i64 * 73856093) ^ (y as i64 * 19349663)).rem_euclid(23);
-            if h < 2 {
-                m.set(x, y, 2, p.idx("concrete_light"));
+            // A soft-edged band across the tile: inside its core it is
+            // solid, and toward the edges the hash thins it out, which is
+            // what keeps it from having an outline.
+            let along = x + y; // constant along one screen axis
+            let core = (along - last).abs();
+            let h = floor_hash(x, y, 41);
+            let thinning = 6 + (h % 9) as i32;
+            if core < thinning {
+                m.set(x, y, FLOOR_TOP, shade);
+            } else if core < thinning + 3 && h % 3 == 0 {
+                m.set(x, y, FLOOR_TOP, mottle);
             }
         }
     }
 
-    // Tile seam.
-    for i in 0..=last {
-        for (x, y) in [(i, 0), (i, last), (0, i), (last, i)] {
-            m.set(x, y, 2, p.idx("floor_seam"));
+    floor_mottle(&mut m, p, 7);
+    floor_joint(&mut m, p);
+    m
+}
+
+/// A slab that was cut out and re-poured: a rectangle of newer concrete
+/// inside its own saw cut.
+///
+/// This is the one floor model that is deliberately RECTILINEAR. Everything
+/// else here is trying not to look man-made; a repair patch is the opposite
+/// — somebody cut a square out of this floor with a saw, and the fact that
+/// it does not match is the whole reason it reads. Used sparingly by
+/// `main.gd`: a floor with a patch on every tenth tile is a chessboard.
+///
+/// **The patch is DARKER than the slab, and that direction was decided by
+/// rendering it both ways.** Two brighter fills were tried first, on the
+/// real-world theory that a fresh pour is paler than a floor polished by
+/// traffic: `concrete_light` read as white paving slabs dropped at random,
+/// and even `concrete` — one step up, the shared mid tone — measured +16
+/// render units against the slab in an empty-world frame where the whole
+/// rest of the floor varies by two. It was the loudest thing on screen. The
+/// governing rule is UI_UX.md §4: metal is the deliberate bright exception,
+/// so **the floor must never hold the brightest pixel in the frame**, and a
+/// resurfaced bay reads perfectly well as a darker, greyer rectangle. The
+/// saw cut around it is `concrete_dark` rather than `floor_seam`, which the
+/// fill would otherwise swallow — and a cut into a repair being deeper and
+/// dirtier than a control joint is true anyway. There is one of these per
+/// ~125 tiles, so a darker line here is not the grout problem `floor_seam`
+/// was lightened to fix; that was a line on all four edges of every tile.
+pub fn floor_tile_patch(p: &Palette) -> VoxModel {
+    let mut m = floor_slab(p);
+    floor_mottle(&mut m, p, 3);
+
+    let (x0, x1) = (7, 24);
+    let (y0, y1) = (9, 25);
+    // The cut itself, then the fresh pour inside it. Cut first so the fill
+    // cannot spill over its own edge.
+    m.cuboid(
+        (x0, x1),
+        (y0, y1),
+        (FLOOR_TOP, FLOOR_TOP),
+        p.idx("concrete_dark"),
+    );
+    m.cuboid(
+        (x0 + 1, x1 - 1),
+        (y0 + 1, y1 - 1),
+        (FLOOR_TOP, FLOOR_TOP),
+        p.idx("concrete_shade"),
+    );
+    // Newer concrete is not uniform either, just newer. The flecks are the
+    // SLAB tone, so the patch is lifted toward the floor around it rather
+    // than away from it.
+    for y in y0 + 1..y1 {
+        for x in x0 + 1..x1 {
+            if floor_hash(x, y, 23) % 13 == 0 {
+                m.set(x, y, FLOOR_TOP, p.idx("concrete_slab"));
+            }
         }
+    }
+
+    floor_joint(&mut m, p);
+    m
+}
+
+/// A trench drain crossing the slab — the detail that says "food factory"
+/// rather than "warehouse" more than anything else on this floor. A plant
+/// that cooks and bottles sauce is hosed down, and the water has to go
+/// somewhere.
+///
+/// The channel runs along **+X** and is centred on the tile midline
+/// (UI_UX.md §2b point 20's voxel 15.5, so a run of these is symmetric),
+/// with its grating bars ACROSS it, on a 4-voxel period that divides the
+/// tile exactly. `main.gd` lays these in whole rows, so consecutive tiles
+/// join into one continuous trench with an unbroken bar spacing rather than
+/// a puddle per tile — a drain that stopped at a tile boundary would be a
+/// grid mark, which is what this redesign is getting rid of.
+///
+/// The channel is cut DOWN into the slab and the bars sit flush with the
+/// walking surface, per this section's one hard constraint: a belt or a
+/// machine can stand on a drain tile, exactly as it would in a real plant,
+/// without anything poking up through it.
+pub fn floor_tile_drain(p: &Palette) -> VoxModel {
+    let mut m = floor_slab(p);
+    let last = TILE_VOXELS as i32 - 1;
+    floor_mottle(&mut m, p, 11);
+    floor_joint(&mut m, p);
+
+    // Symmetric about the tile midline between voxels 15 and 16.
+    let (cy0, cy1) = FLOOR_DRAIN_Y;
+    // The concrete lip the grating sits in, then the channel void below it.
+    m.cuboid((0, last), (cy0 - 1, cy1 + 1), (FLOOR_TOP, FLOOR_TOP), p.idx("concrete_shade"));
+    m.cuboid((0, last), (cy0, cy1), (FLOOR_TOP - 1, FLOOR_TOP), p.idx("drain_grate"));
+
+    // Grating bars across the channel, flush with the walking surface. In
+    // `concrete` rather than in the mottle tone: the bars are the only part
+    // of this floor that WANT contrast with what is beside them (a grating
+    // is read by its stripes), and pinning them to the mottle would dim
+    // them every time the mottle is pulled closer to the slab.
+    let mut x = 0;
+    while x <= last {
+        m.cuboid((x, x + 1), (cy0, cy1), (FLOOR_TOP, FLOOR_TOP), p.idx("concrete"));
+        x += 4;
     }
     m
 }
@@ -3048,6 +3307,116 @@ mod tests {
                     j.name
                 );
             }
+        }
+    }
+
+    // ----- the factory floor (the floor redesign)
+
+    fn floor_models(p: &Palette) -> [(&'static str, VoxModel); 4] {
+        [
+            ("floor_tile", floor_tile(p)),
+            ("floor_tile_worn", floor_tile_worn(p)),
+            ("floor_tile_patch", floor_tile_patch(p)),
+            ("floor_tile_drain", floor_tile_drain(p)),
+        ]
+    }
+
+    /// Nothing on the floor may stand proud of the slab's top surface.
+    ///
+    /// `main.gd`'s `FLOOR_Y` puts every belt, machine and building on the
+    /// plane `FLOOR_VOXELS` high, so a single voxel of floor detail one step
+    /// taller does not read as texture — it intersects everything the player
+    /// builds. That constraint is invisible in the generator (each helper
+    /// writes `FLOOR_TOP` and looks correct on its own) and invisible in a
+    /// render until something is standing on the offending tile, which is
+    /// exactly the shape of bug a voxel-property test is for.
+    #[test]
+    fn no_floor_detail_stands_proud_of_the_slab() {
+        let p = palette();
+        for (name, m) in floor_models(&p) {
+            assert_eq!(
+                m.size,
+                [TILE_VOXELS, TILE_VOXELS, FLOOR_VOXELS],
+                "{name}: a floor tile is one tile square and FLOOR_VOXELS deep"
+            );
+            for (&(x, y, z), _) in &m.voxels {
+                assert!(
+                    z <= FLOOR_TOP as u32,
+                    "{name}: voxel at ({x}, {y}, {z}) stands above the slab's top surface"
+                );
+            }
+        }
+    }
+
+    /// The saw-cut control joint is the same on all four edges of every
+    /// floor model.
+    ///
+    /// This is what makes `main.gd`'s `_floor_yaw_steps_for` legal. Four
+    /// models laid over thousands of tiles are still only four stamps, and
+    /// the magnified render said so: every worn tile's scuff ran the same
+    /// way across the screen. The fix is to lay each slab at a hash-chosen
+    /// quarter turn, and a quarter turn is only invisible at the joint if
+    /// the joint is four-fold symmetric. An edge dropped from `floor_joint`
+    /// to halve the doubled interior line would break the grid the moment a
+    /// tile was rotated — silently, and only along some seams. Pin it here.
+    #[test]
+    fn every_rotatable_floor_tile_carries_the_same_joint_on_all_four_edges() {
+        let p = palette();
+        let seam = p.idx("floor_seam");
+        let last = TILE_VOXELS as i32 - 1;
+        for (name, m) in floor_models(&p) {
+            // The drain is the one model `_floor_yaw_steps_for` never turns,
+            // and its trench deliberately crosses the joint on two edges —
+            // a control joint does not stop a channel cut through the floor.
+            if name == "floor_tile_drain" {
+                continue;
+            }
+            for i in 0..=last {
+                for (x, y) in [(i, 0), (i, last), (0, i), (last, i)] {
+                    assert_eq!(
+                        m.voxels.get(&(x as u32, y as u32, FLOOR_TOP as u32)),
+                        Some(&seam),
+                        "{name}: the joint is broken at ({x}, {y}) — a rotated tile \
+                         would not line up with its neighbours"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The drain's channel runs straight through the tile, and it is
+    /// symmetric about the tile midline (UI_UX.md §2b point 20).
+    ///
+    /// `main.gd` lays these in whole rows so consecutive tiles join into one
+    /// trench; a channel that stopped short of either edge, or sat a voxel
+    /// off centre, would show up as a step at every tile boundary along a
+    /// run — the same failure point 20 records for pipes.
+    #[test]
+    fn the_drain_channel_crosses_the_whole_tile_on_the_midline() {
+        let p = palette();
+        let m = floor_tile_drain(&p);
+        let last = TILE_VOXELS as i32 - 1;
+        for x in 0..=last {
+            for y in FLOOR_DRAIN_Y.0..=FLOOR_DRAIN_Y.1 {
+                let mirrored = last - y;
+                assert_eq!(
+                    m.voxels.get(&(x as u32, y as u32, FLOOR_TOP as u32)),
+                    m.voxels.get(&(x as u32, mirrored as u32, FLOOR_TOP as u32)),
+                    "the drain is not symmetric about the tile midline at ({x}, {y})"
+                );
+            }
+        }
+        // The channel reaches both x faces, so a row of drains is one
+        // trench rather than a row of puddles. Neither end may be slab or
+        // joint: the tile hands the channel straight to its neighbour.
+        let mid = (FLOOR_DRAIN_Y.0 + FLOOR_DRAIN_Y.1) / 2;
+        let drain_colours = [p.idx("drain_grate"), p.idx("concrete")];
+        for x in [0, last] {
+            let here = m.voxels.get(&(x as u32, mid as u32, FLOOR_TOP as u32)).copied();
+            assert!(
+                here.is_some_and(|c| drain_colours.contains(&c)),
+                "the drain channel does not reach x = {x}, so a run of them is a row of puddles"
+            );
         }
     }
 

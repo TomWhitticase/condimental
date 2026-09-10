@@ -50,7 +50,14 @@
         (name: "concrete_dark",  rgb: "#43433F", class: "matte"),
         (name: "concrete",       rgb: "#6A6A63", class: "matte"),
         (name: "concrete_light", rgb: "#838379", class: "matte"),
-        (name: "floor_seam",     rgb: "#33332F", class: "matte"),
+        // The saw-cut control joint between one floor slab and the next.
+        // **Lightened from #33332F** by the floor redesign. Every tile draws
+        // a joint on all four of its edges, so an interior joint is two
+        // voxels of this colour; at the old value that was the loudest thing
+        // in the frame and the factory read as a tiled bathroom rather than
+        // as a poured floor. It is a hairline in the pour now, not grout.
+        // See `assets.rs`'s `floor_joint` for why the four edges stay.
+        (name: "floor_seam",     rgb: "#50504A", class: "matte"),
         (name: "drain_grate",    rgb: "#2C2C2A", class: "matte"),
 
         // --- belts ---
@@ -140,6 +147,32 @@
         // `main.gd` tints a sugar hopper's product heap with.
         (name: "sack_kraft",     rgb: "#C9B48E", class: "matte"),
         (name: "sugar_white",    rgb: "#F2F0E8", class: "matte"),
+
+        // --- the factory floor's own concrete (the floor redesign) ---
+        // The floor is the one surface that fills the whole screen, so it is
+        // the one surface whose job is to be a BACKGROUND. `concrete_slab`
+        // is a shade darker than the shared `concrete` above — which the
+        // dock deck and the machine plinths keep — so that stainless and
+        // painted housings have something to pop against (UI_UX.md §4). Its
+        // own entry rather than a change to `concrete` for exactly that
+        // reason: a plinth wants to read as part of its machine, a slab
+        // wants to read as the ground the machine stands on.
+        //
+        // `concrete_mottle`/`concrete_shade` are the pour's own variation,
+        // and they are deliberately only a few points either side of
+        // `concrete_slab`. The floor used to be speckled with
+        // `concrete_light`, far brighter, one voxel at a time; at scene
+        // scale that reads as television static, not as aggregate. Broad
+        // blotches at low contrast read as a trowelled pour — and mesh into
+        // far fewer triangles besides, which matters here and almost
+        // nowhere else, because the floor is the one asset whose triangle
+        // count is multiplied by the size of the world.
+        // How close together these three sit is the whole point, and it was
+        // set by rendering them: at a dozen points apart the blotches read
+        // as confetti scattered on the floor rather than as the floor.
+        (name: "concrete_slab",   rgb: "#5E5E57", class: "matte"),
+        (name: "concrete_mottle", rgb: "#66665F", class: "matte"),
+        (name: "concrete_shade",  rgb: "#565650", class: "matte"),
 
     ],
 )
