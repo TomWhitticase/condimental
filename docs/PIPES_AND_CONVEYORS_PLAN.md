@@ -1,6 +1,6 @@
 # Pipes & Conveyors Overhaul — plan
 
-Status: in progress (started 2026-09-09). Integration branch:
+Status: in progress (started 2026-09-09; tickets 1–6 merged by 2026-09-10 morning, ticket 7 not started). Integration branch:
 `TomWhitticase/pipes-and-conveyors-overhaul`. Built as one Orca
 orchestration Run; tickets below map 1:1 to Tasks.
 
@@ -187,3 +187,35 @@ layout in `test_layouts.gd` relies on it; one-condition fix
 `belt.direction == sink.direction`; `tests/links.rs` pins the current rule).
 Ticket 4's finding that ~8 ms of every tick step is chunk-snapshot JSON
 parsing on a 1500-belt line is milestone 8 scope, not this update's.
+
+**State at the end of 2026-09-10's first session:** tickets 1–6 are merged
+and verified on the integration branch (`cargo test --workspace`,
+`scripts/verify-core-loop.sh` with 24 headless proofs, models and icons
+regenerated with no drift). Ticket 7 is `ready` in the Run and not
+dispatched.
+
+**For ticket 7, gathered from tickets 5 and 6 and the merges:**
+
+- UI_UX §2b numbering after the merges: 23 belt arrow/frames (ticket 2),
+  24 fitting margin and 25 pipe turn (ticket 6), 26 items drawn face to face
+  (ticket 5). Every cross-reference was renumbered at merge; re-check.
+- **Ghost rules disagree and need reconciling:** ticket 5 keeps the belt
+  ghost a straight tile (a would-be corner is `preview_command`'s job, not a
+  Godot-side copy of `resolve_sink`); ticket 6 previews a pipe ghost's shape
+  from adjacent placed pipes. Pick one rule for both and record it.
+- Headless runs print `ERROR: Parameter "material" is null` (from
+  `material_get_instance_shader_parameters` in the dummy renderer) once per
+  `_rebuild_world` that frees a World subtree holding `MultiMeshInstance3D`s
+  — present since ticket 4, harmless, every proof passes. Silence it
+  properly (clear the multimesh material before freeing, or equivalent) so
+  the suite's output is clean.
+- Belt animation is a 4-frame march at sim speed (2.4 frame changes/s).
+  Nobody has watched it live; a PNG cannot judge stutter. Look at it in the
+  running scene at default zoom and decide whether `BELT_FRAMES` stays 4.
+- Ticket 5 fixed items being drawn half a tile downstream (only a corner
+  exposed it). Ticket 4's perf rebuild went 38 → 64 ms with four frame sets;
+  confirm `test_perf.gd`'s numbers with shapes + animation on.
+- A closed belt ring is legal and jams at its merge (used by the gallery).
+- The `resolve_sink` inlet-edge rule from ticket 1 is still untouched.
+- Every worktree grows an untracked `AGENTS.md` (a CLAUDE.md copy) from the
+  environment; nobody has committed it. Decide whether to `.gitignore` it.
