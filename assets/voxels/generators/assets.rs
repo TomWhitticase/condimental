@@ -25,13 +25,11 @@ pub const ASSETS: &[Asset] = &[
     Asset { name: "floor_tile", build: floor_tile },
     // The belt family (the "Pipes & Conveyors Overhaul" plan's ticket 2):
     // three shapes, `BELT_FRAMES` animation frames each, all authored for a
-    // +X product path. `belt`, `belt_inlet` and `belt_outlet` are the names
-    // the scene asks for until ticket 5 wires the framed ones in; all three
-    // are `belt_f0` (the junction variants are retired — see the conveyor
-    // section's header).
-    Asset { name: "belt", build: belt },
-    Asset { name: "belt_inlet", build: belt_inlet },
-    Asset { name: "belt_outlet", build: belt_outlet },
+    // +X product path. The scene picks the shape from each tile's `links`
+    // and the frame from the tick (ticket 5, `main.gd`'s `_belt_shape_for`
+    // and `_belt_frame_for_tick`); `belt_f0` is also the build menu's icon
+    // and the ghost. The old `belt`/`belt_inlet`/`belt_outlet` names are
+    // gone — see the conveyor section's header.
     Asset { name: "belt_f0", build: belt_f0 },
     Asset { name: "belt_f1", build: belt_f1 },
     Asset { name: "belt_f2", build: belt_f2 },
@@ -231,9 +229,13 @@ pub fn floor_tile(p: &Palette) -> VoxModel {
 // corners a corner can also be the tile that meets a machine, multiplying
 // the set again. The machine-side hood and doorway (`machine_infeed`,
 // `machine_outfeed`) already bring a threshold to the tile boundary at
-// `BELT_SURFACE_Z`, so the plain tile carries the junction. Both names keep
-// generating as byte-identical copies of `belt_f0` until ticket 5 stops
-// asking for them; `belt` itself is frame 0 for the same reason.
+// `BELT_SURFACE_Z`, so the plain tile carries the junction. Ticket 5 wired
+// the framed names into the scene and deleted the three aliases (`belt`,
+// `belt_inlet`, `belt_outlet`), their models and their icons: a belt meeting
+// a machine, hopper or dock is `belt_f0..f3` or a corner at every facing,
+// and nothing on the belt's side of the boundary is facing-specific. `belt()`
+// below stays as a Rust function only — it is what the junction tests and
+// the splitter's stubs are measured against — and is not in `ASSETS`.
 
 /// How many animation frames every belt shape has (the plan's
 /// `BELT_FRAMES`). `main.gd` mirrors this; change one, change both.
@@ -277,22 +279,11 @@ pub enum BeltShape {
     Corner(Turn),
 }
 
-/// Plain belt tile: frame 0 of the straight shape, under the name the scene
-/// has always asked for. Ticket 5 switches the scene to the framed names.
+/// The straight belt tile at rest — frame 0 of the straight shape. Not an
+/// `ASSETS` entry (the scene asks for `belt_f0`); kept as the reference the
+/// junction tests and the splitter's stubs are measured against.
 pub fn belt(p: &Palette) -> VoxModel {
     belt_shape(p, BeltShape::Straight, 0)
-}
-
-/// **Retired** junction variant, kept as an alias of `belt_f0` until ticket
-/// 5 stops requesting it. See the section header: the plain tile carries the
-/// junction, the machine's own hood does the rest.
-pub fn belt_inlet(p: &Palette) -> VoxModel {
-    belt(p)
-}
-
-/// **Retired**, as [`belt_inlet`].
-pub fn belt_outlet(p: &Palette) -> VoxModel {
-    belt(p)
 }
 
 macro_rules! belt_frame_fns {
@@ -1568,11 +1559,11 @@ fn control_panel(m: &mut VoxModel, p: &Palette, x: (i32, i32), z: (i32, i32), fa
 // of equipment built to swallow it*, with the path visible, which is what the
 // complaint was actually about.
 //
-// The belt's own half of each junction is `belt_inlet`/`belt_outlet` (see the
-// conveyor section above): the last belt tile before a machine and the first
-// one after it are genuinely different pieces of kit from a middle tile, and
-// now look it. `main.gd` picks them from the layout the simulation reports,
-// never from a hardcoded "the front is -X".
+// The belt's own half of each junction is the plain tile (see the conveyor
+// section above — the `belt_inlet`/`belt_outlet` dressings were retired by
+// the pipes & conveyors overhaul), so everything that makes a junction read
+// as a junction is on the machine's side of the boundary, built against
+// `BELT_LANE` and `BELT_SURFACE_Z` below.
 
 /// The belt's running lane in voxels, mirrored from [`belt`] — the Y span its
 /// rubber surface occupies. Every junction piece on both sides of a tile
@@ -3060,9 +3051,6 @@ mod tests {
         }
     }
 
-    /// The junction-adjacent belt tiles must differ from a plain one, and
-    /// differ at the END that faces the machine — `main.gd` picks between
-    /// them per tile, so two identical models would make that choice a lie.
     // ----- the belt family (the "Pipes & Conveyors Overhaul" plan's ticket 2)
 
     fn belt_shapes() -> [(&'static str, BeltShape); 3] {
@@ -3299,13 +3287,12 @@ mod tests {
         }
     }
 
+    /// `belt()` is what the junction and splitter tests measure against, so
+    /// it has to be the tile the scene actually draws at rest.
     #[test]
-    fn the_retired_junction_variants_are_frame_zero_of_the_plain_belt() {
+    fn the_plain_belt_is_frame_zero_of_the_straight_shape() {
         let p = palette();
-        let f0 = belt_f0(&p);
-        assert_eq!(belt(&p).voxels, f0.voxels, "`belt` is not frame 0");
-        assert_eq!(belt_inlet(&p).voxels, f0.voxels, "`belt_inlet` still dresses the tile");
-        assert_eq!(belt_outlet(&p).voxels, f0.voxels, "`belt_outlet` still dresses the tile");
+        assert_eq!(belt(&p).voxels, belt_f0(&p).voxels, "`belt` is not frame 0");
     }
 
     #[test]

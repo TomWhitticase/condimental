@@ -44,6 +44,11 @@
 # object, primitive and draw-call counts (`SCREENSHOT_RENDER`) so the cost of
 # a frame can be compared without a profiler.
 #
+# `--belt-gallery` builds the BELT GALLERY (test_layouts.gd's
+# `build_belt_gallery`: every belt shape at every facing, every belt-to-
+# building junction at every facing), the review subject for the pipes and
+# conveyors overhaul's belt presentation.
+#
 # `--populate` runs whatever has been built forward first so the screenshot
 # shows product actually moving, not an idle factory.
 #
@@ -193,6 +198,8 @@ func _initialize() -> void:
 		_populate = true
 	if args.has("--pipe-gallery"):
 		_fixture = "pipes"
+	if args.has("--belt-gallery"):
+		_fixture = "gallery"
 	_first_person = args.has("--first-person")
 	_hover = args.has("--hover")
 	_hover_pipe = args.has("--hover-pipe")
@@ -266,6 +273,8 @@ func _build_fixture() -> void:
 			Layouts.build_stress_line(_main.sim)
 		"pipes":
 			Layouts.build_pipe_gallery(_main.sim)
+		"gallery":
+			Layouts.build_belt_gallery(_main.sim)
 		_:
 			Layouts.build_demo_line(_main.sim)
 	# Every fixture is stocked, whether or not this run will tick: a

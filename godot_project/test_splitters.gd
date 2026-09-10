@@ -10,9 +10,9 @@
 # Verifies:
 #   * a placed splitter renders its own bespoke model — not the generic
 #     `machine` housing — at the tile the simulation reports,
-#   * a belt handing over TO a splitter draws the plain belt tile, not the
-#     hand-over-to-a-machine variant: a splitter is more conveyor, and
-#     `belt_inlet`'s dead-plate in front of it would be a lie,
+#   * the belts around a splitter — the one feeding it, the one it hands
+#     straight to and its branch belt — are plain straights (each is fed
+#     from behind), and the feeding belt's tooltip names the splitter,
 #   * the next-output arrow exists, points along the placement's own facing
 #     when the straight side is due, and turns exactly one quarter turn
 #     CLOCKWISE — the simulation's own `rotate_cw` — when the branch is,
@@ -119,13 +119,19 @@ func _run_checks() -> void:
 		_fail("the splitter sits at %s, expected its tile centre %s" % [str(body["position"]), str(expected)])
 		return
 
-	# --- a belt feeding a splitter is still a plain belt -------------------
-	# (1, 0) hands over to the splitter at (2, 0). If a splitter counted as a
-	# building the tile would draw `belt_inlet`, which puts a machine's
-	# dead-plate and kerbs in front of what is actually more conveyor.
-	var feeding: String = main._belt_asset_for(Vector2i(1, 0), "east")
-	if feeding != main.BELT_ASSET:
-		_fail("the belt feeding a splitter draws '%s', expected the plain '%s'" % [feeding, main.BELT_ASSET])
+	# --- the belts around a splitter are plain straights -------------------
+	# (1, 0) hands over to the splitter at (2, 0) and is fed from behind;
+	# (3, 0) is fed by the splitter from behind; the branch belt (2, -1)
+	# faces south and is fed by the splitter from the north — behind it. All
+	# three are straight, and the splitter keeps its own model.
+	var straight: Array = main._belt_frames_for_shape(main.BELT_SHAPE_STRAIGHT)
+	for tile in [Vector2i(1, 0), Vector2i(3, 0), Vector2i(2, -1)]:
+		var belt: Dictionary = main._tile_instance_at(tile)
+		if belt.is_empty() or belt["asset"] != straight[0]:
+			_fail("the belt at %s next to a splitter draws '%s', expected the plain '%s'" % [str(tile), str(belt.get("asset", "nothing")), straight[0]])
+			return
+	if not main._hover_text_at_tile(Vector2i(1, 0)).contains("hands east to a splitter"):
+		_fail("the belt feeding the splitter should say so, got: %s" % main._hover_text_at_tile(Vector2i(1, 0)).replace("\n", " / "))
 		return
 
 	# --- the arrow, and where it points before anything has moved ---------

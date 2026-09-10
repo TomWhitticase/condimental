@@ -1,8 +1,4 @@
 {
-  "belt": [
-    "matte",
-    "metal"
-  ],
   "belt_corner_left_f0": [
     "matte",
     "metal"
@@ -48,14 +44,6 @@
     "metal"
   ],
   "belt_f3": [
-    "matte",
-    "metal"
-  ],
-  "belt_inlet": [
-    "matte",
-    "metal"
-  ],
-  "belt_outlet": [
     "matte",
     "metal"
   ],

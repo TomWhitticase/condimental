@@ -25,10 +25,13 @@
 // `height_tiles` along +Y. A machine occupies the rectangle
 // `x in [origin.x, origin.x + width_tiles)`, `y in [origin.y, origin.y +
 // height_tiles)` — i.e. **the origin tile is the footprint's minimum-X,
-// minimum-Y corner**, which is also the tile its stage's belt feeds into
-// (the belt runs west to east along the origin's own row and ends on the
-// tile immediately west of it). See `sim_core/src/sim/machines.rs`'s module
-// doc for the full statement of that convention; it is what lets
+// minimum-Y corner**. (A belt used to have to run west to east into that
+// corner; since the "Real Placement" epic a machine is fed on every tile of
+// the edge opposite its facing, from a belt at any facing, and the belt is
+// drawn connected to it whichever way both point — the pipes and conveyors
+// overhaul retired the east-only belt junction art.) See
+// `sim_core/src/sim/machines.rs`'s module doc for the full statement of the
+// origin convention; it is what lets
 // presentation place a multi-tile machine unambiguously from a single
 // origin tile plus these two numbers.
 //
