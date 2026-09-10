@@ -22,6 +22,81 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-10: **Hopper/tank configuration, ticket 2 of 2 (the Godot half,
+  plus the one sim deletion ticket 1 deferred to it) — a placed hopper or
+  tank is CLICKED, and everything about it is on a panel beside it.** The
+  three global keys are gone: **SPACE** (fill every hopper), **V** (fill
+  every tank) and **Q** (cycle a hopper's contents), and with them
+  `PlayerCommand::CycleHopperItem` — `SetHopperItem` is the one way a placed
+  hopper changes its mind now, exactly as ticket 1's entry said it would be.
+  Six calls worth not re-litigating.
+
+  (1) **A left click outside build mode is the configuration click, and the
+  build click wins where both could apply.** Until now a click on the floor
+  with nothing in hand did nothing at all; it opens the panel of the hopper
+  or tank under the cursor, from any tile of its footprint. In build or
+  remove mode the click still places or removes — a click that placed a
+  belt AND opened a panel would be two answers to one gesture. The pure half
+  (`_config_click_at_tile`) is what the test drives.
+
+  (2) **The click is a toggle, only one panel ever exists, and anything
+  else closes it.** The same building again closes; a different hopper or
+  tank retargets; empty floor, any other kind, or no tile at all closes
+  outright — a panel describing something the player has stopped looking at
+  is worse than none. It also closes itself, from the per-frame poll, when
+  the build menu, the market, build mode or remove mode takes the screen, or
+  when the building it describes is removed or stops being its kind — so no
+  caller has to remember to close it. **ESC closes it FIRST** and returns:
+  it is the innermost thing on screen, and "back out of what I am in" has to
+  mean the panel rather than also dropping the ghost or reaching the pause
+  menu.
+
+  (3) **The panel reads the simulation, never a local copy.** Level, fill
+  bar, stock line, the FILL button's enabled state and the AUTO-FILL
+  switch's ON/OFF are all recomputed every frame from `hopper_snapshots_json`
+  / `fluid_tank_snapshots_json` and the ingredient ledger, so the toggle can
+  never claim a state the simulation does not have, and a level that moved
+  because the factory ate a tomato moves in the same frame. Every command
+  it issues is tile-addressed to the ONE building it is about; "fill on this
+  panel loaded the other hopper" is an explicit test failure.
+
+  (4) **FILL is disabled WITH A REASON IN WORDS**, not greyed out: "No
+  Tomato in stock — buy some at the Ingredient Market (M)", "Full — nothing
+  more will fit", and — the refusal a hopper cannot have — "Not connected to
+  a pipe run" for a tank plumbed to nothing, which has nothing to be charged
+  for. That is the DEVLOG 2026-09-09 "SPACE and V say why" lesson moved to
+  the one place it can name the one missing ingredient. The switch says
+  **AUTO-FILL: ON/OFF** in text as well as colour (UI_UX.md §7), and the
+  picker marks the chosen ingredient with a tick and the hotbar's own
+  selected-socket style, so "the thing I have chosen" looks the same
+  wherever the game asks.
+
+  (5) **It is machine-side factory UI, in the dark plate** — the build
+  menu's and the hotbar's language, deliberately not the clipboard's paper,
+  which UI_UX.md §5 reserves for orders. It stands beside the building (the
+  footprint centre projected to the screen, so it follows the camera) and
+  never on it; past the window's edge, or **past the contract clipboard's
+  left edge where the two would overlap**, it flips to the building's other
+  side — the first rendered frames put it squarely over the one readout
+  that says whether the factory is paying, which a panel about one bin has
+  no business hiding.
+
+  (6) **The test pins the mechanic, not only the widget, and one of its
+  expectations was wrong in an instructive way.** `test_config_panel.gd`
+  switches auto-fill on and ticks; the first cut expected the tank to sit
+  near full after 200 ticks and it sat at 24 of 120 — because the larder's
+  one crate of vinegar had all gone into the tank and its run, and the
+  top-ups had stopped exactly as ticket 1's call (3) says they must. The
+  test now asserts BOTH halves: a dry larder stops the top-ups with the flag
+  still armed, and a stocked one keeps the tank within a unit of full while
+  the ledger goes down. **Also swept in:** the market footer still told
+  players "then SPACE loads a hopper and V loads a tank" after both keys
+  were deleted; `test_presentation.gd` and `scripts/screenshot-scene.sh`
+  still drove SPACE and Q (`--fill-blocked` is replaced by `--config TX,TY`,
+  and `--contents N` now presses the open panel's picker slot). A deleted
+  key leaves stale copy in more places than its handler, and none of the
+  headless tests could see the footer.
+
 - 2026-09-10: **Pipes & conveyors overhaul, ticket 5 of 7 (belt
   presentation: shape from `links`, junctions at every facing, animation
   at sim speed, items through corners; `godot_project/` plus docs).** The

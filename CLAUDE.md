@@ -112,7 +112,8 @@ sauce-factory/
                            #   reserved `autosave` slot)
     main.tscn / main.gd    # the 3D scene: rebuilt from world_layout_json on
                            #   every place/remove/rotate; build mode, hotbar,
-                           #   clipboard, market, pause menu
+                           #   clipboard, market, pause menu, and the click-to-
+                           #   configure panel on a placed hopper or tank
     sim_core.gdextension   # checked in; points at gitignored bin/
     addons/                # vendored, pinned .vox importer (see VENDORED.md)
     test_*.gd              # headless proofs, each prints its own success
@@ -180,6 +181,16 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-10 **Hopper/tank configuration, ticket 2 (Godot + one sim deletion).**
+  A placed hopper or tank is CLICKED and configured on a panel beside it:
+  level, FILL (with its reason in words when refused), AUTO-FILL toggle,
+  and an item picker that retargets a PLACED hopper through `SetHopperItem`.
+  The global keys SPACE (fill hoppers), V (fill tanks) and Q (cycle hopper
+  contents) are GONE, and so is `PlayerCommand::CycleHopperItem`; a hopper
+  is placed holding the first raw item and changed on its panel. ESC, menus,
+  modes and removal close the panel; an unplumbed tank is refused.
+  `test_config_panel.gd` proves it; `screenshot-scene.sh --config TX,TY`
+  photographs it. Full record in `docs/DECISIONS.md`.
 - 2026-09-10 **Pipes & conveyors overhaul, ticket 5 (belt presentation).**
   A belt tile's shape is `_belt_shape_for(links, direction)`, pure: input
   from behind → straight (plus any flank = MERGE); exactly one flank input

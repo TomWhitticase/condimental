@@ -663,14 +663,20 @@ var _placement_label: Label
 ## about that entry.
 ##
 ## So the hopper keeps one slot, one price and one owned count, and what it
-## will be loaded with is a property of THIS PLACEMENT, cycled with **Q**
-## while the ghost is up. That also puts the decision where the player is
-## already looking (the ghost, the prompt beside it) rather than back in a
-## modal grid, and it generalizes with no Godot edit: the list comes from
+## will be loaded with is a property of THIS PLACEMENT. The list comes from
 ## `ingredients_snapshot_json`'s `hopper_items`, which is the simulation's
-## own `World::raw_items` — the same set `Place` validates against.
+## own `World::raw_items` — the same set `Place` validates against — so a
+## third ingredient needs no Godot edit.
+##
+## **A hopper is placed holding the FIRST raw ingredient, and is retargeted
+## afterwards by clicking it** (the click-to-configure ticket). Until then
+## the ghost carried a **Q**-key cycle and the choice had to be made in the
+## brief window before the click, which is the worst moment to ask for it: a
+## player who gets it wrong learns so only when the wrong product starts
+## moving, and had no way back short of picking the hopper up. One default
+## and a picker on the placed building is both fewer keys and the more
+## forgiving order.
 var _hopper_items: Array = [] # item ids a hopper may legally hold, from the sim
-var _hopper_item_index := 0
 ## The ghost's product body — a `hopper_fill` slab tinted with the chosen
 ## item, so the ghost previews WHAT the hopper will hold as well as where it
 ## goes. Colour alone would not be enough (UI_UX.md §7); the prompt names the
@@ -2780,11 +2786,18 @@ const CROSSHAIR_THICKNESS := 2.0 * UI_SCALE # px, each bar's width
 ## pass rather than of new controls: at half again the font size the old
 ## two-line legend ran clean off a 1280-wide window and under the contract
 ## clipboard. It is grouped by what each key is FOR — build-mode verbs, the
-## panels, the two loading keys, then the camera — which is a better reading
-## order than the flat run-on it was anyway. ESC's entry names both of its
-## meanings (close what is open, else the pause menu — see `_anything_open`).
-const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nQ: hopper contents    X: remove mode    ESC: close / pause menu\nE: build menu    M: market    SPACE: load hoppers    V: load tanks\nWASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
-const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nQ: hopper contents    X: remove mode    ESC: close / pause menu\nE: build menu    M: market    V: load tanks\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
+## panels, then the camera — which is a better reading order than the flat
+## run-on it was anyway. ESC's entry names both of its meanings (close what
+## is open, else the pause menu — see `_anything_open`).
+##
+## **Three keys came OFF it with the click-to-configure ticket** (Q, SPACE
+## and V), and one line replaced all three: "click a hopper or tank:
+## configure". That is the legend doing what it is for — a keybind has to be
+## listed here or it is undiscoverable, whereas a building you can click
+## announces itself on hover, so the line is a pointer rather than the only
+## way to find out.
+const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    click a hopper or tank: configure\nWASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
+const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    click a hopper or tank: configure\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
 
 
 ## The tile box the isometric camera frames at startup: whatever is placed,
@@ -3266,6 +3279,10 @@ func _build_ui() -> void:
 	# menu above — it is how a kind gets picked up now, and the menu is where
 	# more of one gets bought.
 	_build_hotbar(hud, settings)
+
+	# The panel a placed hopper or fluid tank opens when it is CLICKED — the
+	# replacement for the SPACE/V/Q keybinds. See `_config_panel`'s doc.
+	_build_config_panel(hud, settings)
 
 	# The hover tooltip (docs/UI_UX.md §5): replaces the always-on per-machine
 	# text this panel used to show — see _build_hover_tooltip/
@@ -4043,6 +4060,11 @@ func _buy_slot(index: int) -> void:
 func _set_shop_menu_open(open: bool) -> void:
 	if _shop_menu == null or open == _shop_open:
 		return
+	# One panel at a time: a building's configuration panel is anchored to a
+	# building, and leaving it up under a modal grid would leave two panels
+	# both claiming the next click.
+	if open:
+		_close_config_panel()
 	_shop_open = open
 	_shop_menu.visible = open
 	if open:
@@ -4063,7 +4085,8 @@ func _update_crosshair_visibility() -> void:
 	if _crosshair == null:
 		return
 	_crosshair.visible = (_view_mode == ViewMode.FIRST_PERSON
-			and not _shop_open and not _market_open and not _pause_open)
+			and not _shop_open and not _market_open and not _pause_open
+			and not _config_open)
 
 
 func _toggle_shop_menu() -> void:
@@ -4079,14 +4102,15 @@ func _toggle_shop_menu() -> void:
 ## may legally be placed holding, which is the simulation's own
 ## `World::raw_items` rather than anything decided here. A third raw
 ## ingredient therefore needs no Godot edit at all: it appears in the market,
-## in the larder and in the hopper's Q cycle from the data file alone.
+## in the larder and in a placed hopper's contents picker from the data
+## file alone.
 func _ingredients_snapshot() -> Dictionary:
 	var parsed = JSON.parse_string(sim.ingredients_snapshot_json())
 	return parsed if parsed is Dictionary else {}
 
 
 ## id -> owned count, from `_ingredients_snapshot`'s `entries` — the one
-## lookup both fill-feedback checks below need, so it exists once.
+## lookup the configuration panel's two fill checks need, so it exists once.
 func _owned_ingredient_counts() -> Dictionary:
 	var owned := {}
 	for entry in _ingredients_snapshot().get("entries", []):
@@ -4094,113 +4118,21 @@ func _owned_ingredient_counts() -> Dictionary:
 	return owned
 
 
-## Why pressing SPACE would do nothing, or "" if it would not. Checked
-## BEFORE the command reaches the sim, so a doomed fill never fires at all
-## and the player is told the actual missing thing rather than watching
-## nothing happen — `issue_command`'s silent-no-op contract is correct for
-## the SIMULATION (an impossible command changes nothing), but a game still
-## owes the player a reason, the same way Factorio's own "not enough X"
-## toasts do for exactly this kind of dead keypress.
-func _hopper_fill_blocker() -> String:
-	if _hopper_states.is_empty():
-		return "No hopper placed — buy one in the build menu (E)"
-	var owned := _owned_ingredient_counts()
-	var needed := {}
-	for snapshot in _hopper_states.values():
-		needed[String(snapshot.get("item", ""))] = true
-	for item in needed.keys():
-		if owned.get(item, 0) > 0:
-			return "" # at least one hopper can draw stock; let the sim sort out which
-	var names: Array = []
-	for item in needed.keys():
-		names.append(_item_display_name(String(item)))
-	return "No %s in stock — buy some at the Ingredient Market (M)" % ", ".join(names)
-
-
-## `_hopper_fill_blocker`'s fluid twin for V. A tank not yet feeding any pipe
-## run has no fluid id to check stock for at all (`_fluid_id_of` returns
-## "") — that is a placement/plumbing problem the message above already
-## covers ("no tank" is the closest true statement short of "not connected
-## to anything," which is real but a separate, rarer failure this does not
-## try to diagnose), so it is treated as nothing to block on here.
-func _tank_fill_blocker() -> String:
-	if _fluid_tank_states.is_empty():
-		return "No fluid tank placed — buy one in the build menu (E)"
-	var owned := _owned_ingredient_counts()
-	var needed := {}
-	for snapshot in _fluid_tank_states.values():
-		var fluid := _fluid_id_of(snapshot)
-		if fluid != "":
-			needed[fluid] = true
-	if needed.is_empty():
-		return ""
-	for item in needed.keys():
-		if owned.get(item, 0) > 0:
-			return ""
-	var names: Array = []
-	for item in needed.keys():
-		names.append(_item_display_name(String(item)))
-	return "No %s in stock — buy some at the Ingredient Market (M)" % ", ".join(names)
-
-
 func _refresh_hopper_items() -> void:
 	var snapshot := _ingredients_snapshot()
 	var items: Array = snapshot.get("hopper_items", [])
 	_hopper_items = items.duplicate()
-	if _hopper_items.is_empty():
-		_hopper_item_index = 0
-	else:
-		_hopper_item_index = clampi(_hopper_item_index, 0, _hopper_items.size() - 1)
 
 
-## What the hopper currently being placed will hold, or "" when the kind in
-## hand is not a hopper (or the world has no raw solids at all, which is a
-## world with no recipes and cannot happen with shipped content).
+## What the hopper currently being placed will hold — always the FIRST raw
+## ingredient, since the contents choice moved onto the placed building (see
+## `_hopper_items`). "" when the kind in hand is not a hopper, or when the
+## world has no raw solids at all, which is a world with no recipes and
+## cannot happen with shipped content.
 func _selected_hopper_item() -> String:
 	if _build_kind != HOPPER_KIND or _hopper_items.is_empty():
 		return ""
-	return String(_hopper_items[_hopper_item_index])
-
-
-## **Q** while a hopper is in hand: the next raw ingredient in the cycle.
-## Deliberately a cycle rather than a submenu — there are two ids today and
-## a handful ever, and a modal list to pick between two things is more UI
-## than the decision deserves. The name flyout announces the new choice, so
-## the key is discoverable by pressing it.
-func _cycle_hopper_item() -> void:
-	if _build_kind != HOPPER_KIND or _hopper_items.size() < 2:
-		return
-	_hopper_item_index = (_hopper_item_index + 1) % _hopper_items.size()
-	_update_ghost_fill()
-	_show_hotbar_flyout("Hopper — %s" % _item_display_name(_selected_hopper_item()))
-
-
-## `_cycle_hopper_item`'s twin for a hopper that is already on the floor,
-## the same way `_rotate_under_cursor` is `_rotate_ghost`'s: without this, a
-## hopper placed as tomato (or defaulted to it before a second raw item
-## existed) had NO way to become a sugar hopper short of picking it up and
-## placing a new one — and remembering to press Q *during* that brief
-## placement window is not something a player who already has a hopper down
-## has any reason to expect. `_issue_world_command` reruns `_refresh_buffers`
-## as part of its normal per-command redraw, so the hopper's own hover
-## tooltip already reads the new item on the next frame — no flyout needed,
-## mirroring how a rotate-in-place gives no separate confirmation either.
-func _cycle_hopper_under_cursor() -> void:
-	var tile := _ghost_target_tile()
-	if tile == HOVER_NO_TILE:
-		return
-	var placement := _placement_at_tile(tile)
-	if placement.is_empty() or String(placement.get("kind", "")) != HOPPER_KIND:
-		return
-	# The sim already no-ops a cycle with fewer than two raw items, but
-	# checking here too avoids a pointless round trip and world rebuild for
-	# a keypress that can only ever do nothing — `_refresh_hopper_items` is
-	# cheap (one JSON parse) and keeps `_hopper_items` current the same way
-	# `_hopper_hover_text` already relies on it being.
-	_refresh_hopper_items()
-	if _hopper_items.size() < 2:
-		return
-	_issue_world_command({"type": "cycle_hopper_item", "tile": [tile.x, tile.y]})
+	return String(_hopper_items[0])
 
 
 ## "tomato_paste" -> "Tomato Paste". Item ids are content, exactly as kind ids
@@ -4279,7 +4211,7 @@ func _build_ingredient_market(hud: CanvasLayer, base_settings: LabelSettings) ->
 
 	var footer := Label.new()
 	footer.label_settings = base_settings
-	footer.text = "click a crate to buy %d\nthen SPACE loads a hopper and V loads a tank    M/ESC: close" % MARKET_CRATE
+	footer.text = "click a crate to buy %d\nthen click a hopper or tank to load it    M/ESC: close" % MARKET_CRATE
 	body.add_child(footer)
 
 	_position_market_panel()
@@ -4440,6 +4372,8 @@ func _buy_ingredient_slot(index: int) -> void:
 func _set_market_open(open: bool) -> void:
 	if _market_panel == null or open == _market_open:
 		return
+	if open:
+		_close_config_panel() # see `_set_shop_menu_open`
 	_market_open = open
 	_market_panel.visible = open
 	if open:
@@ -4541,6 +4475,679 @@ func _update_larder() -> void:
 		label.label_settings.font_color = (
 			Color(0.92, 0.93, 0.94) if owned > 0 else Color(0.90, 0.52, 0.42)
 		)
+
+
+# --------------------------------------------------------------------------
+# The building configuration panel (the click-to-configure ticket)
+# --------------------------------------------------------------------------
+
+## Clicking a placed hopper or fluid tank opens this panel; everything a
+## player used to do to those buildings with the keyboard is done here now.
+##
+## WHY IT EXISTS. Three global keybinds used to configure buildings from
+## anywhere on the map: **SPACE** filled EVERY hopper in the world, **V**
+## every tank, and **Q** cycled the contents of the hopper under the cursor
+## (or of the ghost in hand). All three are gone. Every one of them had the
+## same two faults, and they get worse the moment a factory has more than one
+## of anything: the key acts on a building the player is not looking at and
+## cannot name, and the building itself advertises none of it — a hopper on
+## the floor gave no hint that it could be loaded, told to keep itself
+## loaded, or refilled with something else. The thing you configure is the
+## thing you click, which is what every builder this game borrows from does
+## with a machine that has settings.
+##
+## WHY THE DARK PLATE AND NOT THE CLIPBOARD'S PAPER. UI_UX.md §5 draws that
+## line explicitly: paper-and-clip is the diegetic motif for ORDERS and
+## checklists (a contract *is* a clipboard). This is machine-side factory UI
+## — the same family as the build menu, the ingredient market, the hotbar and
+## the hover tooltip — so it wears their near-black plate with a
+## hazard-yellow rule rather than inventing a third visual language or
+## borrowing the one that means "an order".
+var _config_panel: PanelContainer
+## The ORIGIN tile of the building being configured (any tile of a footprint
+## opens it; the origin is what is remembered, so `_placement_at_tile` can
+## re-resolve it every frame). Meaningful only while `_config_open`.
+var _config_tile := Vector2i.ZERO
+var _config_open := false
+## `HOPPER_KIND` or `FLUID_TANK_KIND` — the two kinds that have anything to
+## configure. A machine's settings are its recipe, which is content; a belt
+## has none at all.
+var _config_kind := ""
+var _config_title: Label
+var _config_title_icon: TextureRect
+var _config_level_label: Label
+var _config_level_track: Panel
+var _config_level_fill: Panel
+var _config_fill_button: Button
+var _config_fill_reason: Label
+var _config_stock_label: Label
+var _config_auto_button: Button
+var _config_auto_enabled := false
+var _config_picker_box: VBoxContainer
+var _config_picker_row: HBoxContainer
+var _config_picker_slots: Array = [] # [{item, button, mark}]
+## The panel's fixed content width. Fixed rather than derived so the level
+## bar has a width to scale against on the frame the panel opens, and so the
+## picker row does not resize the whole panel when a third ingredient ships.
+const CONFIG_PANEL_WIDTH := 260.0 * UI_SCALE
+## Where the panel sits relative to the building's projected centre — up and
+## to the right, so it stands BESIDE the thing it configures rather than on
+## top of it. `_position_config_panel` flips and clamps from here.
+const CONFIG_PANEL_OFFSET := Vector2(30.0, -40.0) * UI_SCALE
+const CONFIG_LEVEL_BAR_HEIGHT := 14.0 * UI_SCALE
+const CONFIG_PICKER_SLOT_SIZE := Vector2(58.0, 62.0) * UI_SCALE
+const CONFIG_PICKER_ICON_SIZE := Vector2(30.0, 30.0) * UI_SCALE
+
+
+func _build_config_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	# `_ready` runs twice in a headless script (once from the engine, once
+	# called directly), so the slot list is cleared rather than appended to —
+	# the same guard `_build_ingredient_market` and `_build_larder` carry.
+	_config_picker_slots.clear()
+
+	var plate := StyleBoxFlat.new()
+	plate.bg_color = Color(0.06, 0.06, 0.07, 0.96)
+	plate.border_color = Color(0.85, 0.63, 0.11, 0.95)
+	plate.border_width_top = _ui_i(4)
+	plate.border_width_left = _ui_i(2)
+	plate.border_width_right = _ui_i(2)
+	plate.border_width_bottom = _ui_i(2)
+	plate.set_content_margin_all(_ui_px(12.0))
+
+	_config_panel = PanelContainer.new()
+	_config_panel.name = "ConfigPanel"
+	_config_panel.add_theme_stylebox_override("panel", plate)
+	_config_panel.custom_minimum_size.x = CONFIG_PANEL_WIDTH
+	_config_panel.visible = false
+	hud.add_child(_config_panel)
+
+	var body := VBoxContainer.new()
+	body.name = "ConfigBody"
+	body.add_theme_constant_override("separation", _ui_i(7))
+	_config_panel.add_child(body)
+
+	# --- Title row: what this building is, and the X that closes it --------
+	var heading := HBoxContainer.new()
+	heading.add_theme_constant_override("separation", _ui_i(7))
+	body.add_child(heading)
+
+	_config_title_icon = TextureRect.new()
+	_config_title_icon.name = "ConfigTitleIcon"
+	_config_title_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_config_title_icon.custom_minimum_size = _ui_v(Vector2(24, 24))
+	_config_title_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_config_title_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	heading.add_child(_config_title_icon)
+
+	var title_settings := LabelSettings.new()
+	title_settings.font_size = _ui_font(3)
+	title_settings.font_color = Color(0.98, 0.85, 0.42)
+	title_settings.outline_size = base_settings.outline_size
+	title_settings.outline_color = base_settings.outline_color
+
+	_config_title = Label.new()
+	_config_title.name = "ConfigTitle"
+	_config_title.label_settings = title_settings
+	_config_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	heading.add_child(_config_title)
+
+	var close_button := Button.new()
+	close_button.name = "ConfigClose"
+	close_button.text = "✕"
+	close_button.focus_mode = Control.FOCUS_NONE
+	close_button.custom_minimum_size = _ui_v(Vector2(24, 22))
+	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+		close_button.add_theme_stylebox_override(state, _shop_slot_style(state))
+	close_button.pressed.connect(_close_config_panel)
+	heading.add_child(close_button)
+
+	# --- Level: the same number the hover tooltip gives, as a bar ----------
+	_config_level_label = Label.new()
+	_config_level_label.name = "ConfigLevel"
+	_config_level_label.label_settings = base_settings
+	body.add_child(_config_level_label)
+
+	var track_style := StyleBoxFlat.new()
+	track_style.bg_color = Color(0.10, 0.10, 0.12, 0.98)
+	track_style.border_color = Color(0.36, 0.38, 0.42, 0.95)
+	track_style.set_border_width_all(_ui_i(2))
+
+	_config_level_track = Panel.new()
+	_config_level_track.name = "ConfigLevelTrack"
+	_config_level_track.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_config_level_track.custom_minimum_size = Vector2(CONFIG_PANEL_WIDTH, CONFIG_LEVEL_BAR_HEIGHT)
+	_config_level_track.add_theme_stylebox_override("panel", track_style)
+	body.add_child(_config_level_track)
+
+	var bar_style := StyleBoxFlat.new()
+	bar_style.bg_color = Color(0.55, 0.78, 0.42, 0.98)
+
+	_config_level_fill = Panel.new()
+	_config_level_fill.name = "ConfigLevelFill"
+	_config_level_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_config_level_fill.add_theme_stylebox_override("panel", bar_style)
+	_config_level_track.add_child(_config_level_fill)
+
+	# --- Fill now, and the stock it draws from -----------------------------
+	var fill_row := HBoxContainer.new()
+	fill_row.add_theme_constant_override("separation", _ui_i(10))
+	body.add_child(fill_row)
+
+	_config_fill_button = Button.new()
+	_config_fill_button.name = "ConfigFill"
+	_config_fill_button.text = "FILL"
+	_config_fill_button.focus_mode = Control.FOCUS_NONE
+	_config_fill_button.custom_minimum_size = _ui_v(Vector2(88, 30))
+	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+		_config_fill_button.add_theme_stylebox_override(state, _shop_slot_style(state))
+	_config_fill_button.pressed.connect(_on_config_fill_pressed)
+	fill_row.add_child(_config_fill_button)
+
+	var stock_settings := LabelSettings.new()
+	stock_settings.font_size = _ui_font(-1)
+	stock_settings.font_color = Color(0.82, 0.84, 0.88)
+	stock_settings.outline_size = base_settings.outline_size
+	stock_settings.outline_color = base_settings.outline_color
+
+	_config_stock_label = Label.new()
+	_config_stock_label.name = "ConfigStock"
+	_config_stock_label.label_settings = stock_settings
+	_config_stock_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_config_stock_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	fill_row.add_child(_config_stock_label)
+
+	# The reason a disabled FILL gives. This is where SPACE's and V's own
+	# "why did that do nothing" messages went (DEVLOG 2026-09-09): the
+	# messages were the good half of those keys, and a button that is visibly
+	# off with the reason printed under it is a better home for them than a
+	# flyout fired by a keypress the player has to guess at.
+	var reason_settings := LabelSettings.new()
+	reason_settings.font_size = _ui_font(-1)
+	reason_settings.font_color = Color(0.90, 0.52, 0.42)
+	reason_settings.outline_size = base_settings.outline_size
+	reason_settings.outline_color = base_settings.outline_color
+
+	_config_fill_reason = Label.new()
+	_config_fill_reason.name = "ConfigFillReason"
+	_config_fill_reason.label_settings = reason_settings
+	_config_fill_reason.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_config_fill_reason.custom_minimum_size.x = CONFIG_PANEL_WIDTH
+	_config_fill_reason.visible = false
+	body.add_child(_config_fill_reason)
+
+	# --- The auto-fill toggle ----------------------------------------------
+	_config_auto_button = Button.new()
+	_config_auto_button.name = "ConfigAutoFill"
+	_config_auto_button.focus_mode = Control.FOCUS_NONE
+	_config_auto_button.custom_minimum_size = Vector2(CONFIG_PANEL_WIDTH, _ui_px(30))
+	_config_auto_button.pressed.connect(_on_config_auto_pressed)
+	body.add_child(_config_auto_button)
+	_apply_config_auto_state(false)
+
+	var note_settings := LabelSettings.new()
+	note_settings.font_size = _ui_font(-2)
+	note_settings.font_color = Color(0.66, 0.68, 0.72)
+	note_settings.outline_size = base_settings.outline_size
+	note_settings.outline_color = base_settings.outline_color
+
+	var auto_note := Label.new()
+	auto_note.name = "ConfigAutoNote"
+	auto_note.label_settings = note_settings
+	auto_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	auto_note.custom_minimum_size.x = CONFIG_PANEL_WIDTH
+	auto_note.text = "tops up from stock every tick; never buys"
+	body.add_child(auto_note)
+
+	# --- The contents picker (hoppers only) --------------------------------
+	_config_picker_box = VBoxContainer.new()
+	_config_picker_box.name = "ConfigPicker"
+	_config_picker_box.add_theme_constant_override("separation", _ui_i(4))
+	_config_picker_box.visible = false
+	body.add_child(_config_picker_box)
+
+	var picker_heading := Label.new()
+	picker_heading.label_settings = stock_settings
+	picker_heading.text = "CONTENTS"
+	_config_picker_box.add_child(picker_heading)
+
+	_config_picker_row = HBoxContainer.new()
+	_config_picker_row.name = "ConfigPickerRow"
+	_config_picker_row.add_theme_constant_override("separation", _ui_i(6))
+	_config_picker_box.add_child(_config_picker_row)
+
+	var picker_note := Label.new()
+	picker_note.name = "ConfigPickerNote"
+	picker_note.label_settings = note_settings
+	picker_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	picker_note.custom_minimum_size.x = CONFIG_PANEL_WIDTH
+	# The simulation's own rule, said out loud rather than discovered: a
+	# hopper is single-item, so there is no "half tomato, half sugar" state
+	# and `SetHopperItem` empties it (see `Hopper::retarget`).
+	picker_note.text = "switching empties the hopper"
+	_config_picker_box.add_child(picker_note)
+
+	var footer := Label.new()
+	footer.label_settings = note_settings
+	footer.text = "ESC or ✕: close    ·    click the building again to close"
+	body.add_child(footer)
+
+
+## One picker slot per raw ingredient the SIMULATION allows in a hopper
+## (`_hopper_items`, i.e. `World::raw_items` over the wire) — so a third
+## ingredient in `data/ingredients.ron` appears here with no Godot edit, the
+## same property the market and the larder already have. Rebuilt on open
+## rather than once, because the list is content and a load can change it.
+func _rebuild_config_picker() -> void:
+	if _config_picker_row == null:
+		return
+	for child in _config_picker_row.get_children():
+		_config_picker_row.remove_child(child)
+		child.queue_free()
+	_config_picker_slots.clear()
+	for index in range(_hopper_items.size()):
+		_build_config_picker_slot(index, String(_hopper_items[index]))
+
+
+func _build_config_picker_slot(index: int, item_id: String) -> void:
+	var button := Button.new()
+	button.name = "ConfigPickerSlot_%s" % item_id
+	button.focus_mode = Control.FOCUS_NONE
+	button.custom_minimum_size = CONFIG_PICKER_SLOT_SIZE
+	button.pressed.connect(_on_config_picker_pressed.bind(index))
+	_config_picker_row.add_child(button)
+
+	var column := VBoxContainer.new()
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_theme_constant_override("separation", _ui_i(1))
+	column.set_anchors_preset(Control.PRESET_FULL_RECT)
+	column.offset_left = _ui_px(4)
+	column.offset_right = -_ui_px(4)
+	column.offset_top = _ui_px(4)
+	column.offset_bottom = -_ui_px(4)
+	button.add_child(column)
+
+	var icon := TextureRect.new()
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.custom_minimum_size = CONFIG_PICKER_ICON_SIZE
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.texture = _icon_for(item_id)
+	column.add_child(icon)
+
+	var name_settings := LabelSettings.new()
+	name_settings.font_size = _ui_font(-3)
+	name_settings.font_color = Color(0.88, 0.89, 0.92)
+	name_settings.outline_size = _ui_i(4)
+	name_settings.outline_color = Color(0, 0, 0, 0.85)
+
+	var name_label := Label.new()
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	name_label.label_settings = name_settings
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	name_label.text = _item_display_name(item_id)
+	column.add_child(name_label)
+
+	# The non-colour half of the selected signal (UI_UX.md §7): the frame
+	# turns hazard-yellow exactly as the hotbar's selected socket does, AND a
+	# tick sits in the slot's corner. Either one alone answers "which one is
+	# in this hopper".
+	var mark_settings := LabelSettings.new()
+	mark_settings.font_size = _ui_font(-1)
+	mark_settings.font_color = Color(1.0, 0.83, 0.24)
+	mark_settings.outline_size = _ui_i(4)
+	mark_settings.outline_color = Color(0, 0, 0, 0.9)
+
+	var mark := Label.new()
+	mark.name = "Selected"
+	mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mark.label_settings = mark_settings
+	mark.text = "✔"
+	mark.position = _ui_v(Vector2(4, 1))
+	mark.visible = false
+	button.add_child(mark)
+
+	_config_picker_slots.append({"item": item_id, "button": button, "mark": mark})
+
+
+## Opens the panel for the building whose footprint ORIGIN is `origin`.
+func _open_config_panel(origin: Vector2i, kind: String) -> void:
+	if _config_panel == null:
+		return
+	_config_tile = origin
+	_config_kind = kind
+	_config_open = true
+	_config_picker_box.visible = kind == HOPPER_KIND
+	if kind == HOPPER_KIND:
+		_refresh_hopper_items()
+		_rebuild_config_picker()
+	# The panel is driven from the polled snapshots, so make sure they are
+	# current before the first frame it is drawn on rather than a frame late.
+	_refresh_buffers()
+	_update_config_panel()
+	# In first-person the mouse is captured and there is nothing to click a
+	# button with, so it is handed back exactly as either shop panel does.
+	if _view_mode == ViewMode.FIRST_PERSON:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_update_crosshair_visibility()
+
+
+func _close_config_panel() -> void:
+	if not _config_open:
+		return
+	_config_open = false
+	_config_kind = ""
+	if _config_panel != null:
+		_config_panel.visible = false
+	if _view_mode == ViewMode.FIRST_PERSON and not _shop_open and not _market_open:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_update_crosshair_visibility()
+
+
+## The screen point a configuration click asks about. In ISOMETRIC that is
+## always the cursor; in FIRST_PERSON it is the crosshair at screen centre —
+## EXCEPT while this panel is open, when the mouse has been handed back and
+## is a real position again.
+func _config_query_pos() -> Vector2:
+	var vp := get_viewport()
+	if vp == null:
+		return Vector2.ZERO
+	if _view_mode == ViewMode.FIRST_PERSON and not _config_open:
+		return vp.get_visible_rect().size / 2.0
+	return vp.get_mouse_position()
+
+
+## The left click OUTSIDE build mode — the click that did nothing at all
+## before this ticket. Reads the live cursor and hands to
+## `_config_click_at_tile`, which is the pure half a test drives.
+func _config_click() -> void:
+	_config_click_at_tile(_tile_under_screen_pos(_config_query_pos()))
+
+
+## What a configuration click on `tile` does. Four cases, and three of them
+## close: the same building again closes (a click is a toggle, which is what
+## makes the panel dismissable with the gesture that opened it), a different
+## hopper or tank opens that one instead (only ever one panel), and empty
+## floor or any other kind closes outright rather than leaving a panel
+## describing something the player has stopped looking at.
+func _config_click_at_tile(tile: Vector2i) -> void:
+	if tile == HOVER_NO_TILE:
+		_close_config_panel()
+		return
+	var placement := _placement_at_tile(tile)
+	var kind := String(placement.get("kind", ""))
+	if kind != HOPPER_KIND and kind != FLUID_TANK_KIND:
+		_close_config_panel()
+		return
+	var origin := _placement_origin(placement)
+	if _config_open and _config_tile == origin:
+		_close_config_panel()
+		return
+	_open_config_panel(origin, kind)
+
+
+## Repolled every frame while the panel is up, exactly like the build menu
+## and the larder: a level that moved because the factory consumed a tomato
+## has to move here in the same frame, and `auto_fill` is read back from the
+## SNAPSHOT rather than remembered locally, so the toggle can never claim a
+## state the simulation does not have.
+##
+## It is also where the panel closes itself for reasons that are not clicks:
+## the building was removed (X mode), it stopped being the kind it was, or a
+## modal panel opened over it. Checking the placement every frame means no
+## caller has to remember to close it.
+func _update_config_panel() -> void:
+	if not _config_open or _config_panel == null:
+		return
+	if _shop_open or _market_open or _in_build_mode():
+		_close_config_panel()
+		return
+	var placement := _placement_at_tile(_config_tile)
+	if placement.is_empty() or String(placement.get("kind", "")) != _config_kind:
+		_close_config_panel()
+		return
+	var key := _tile_key(_placement_origin(placement))
+	if _config_kind == HOPPER_KIND:
+		_update_config_hopper(key)
+	else:
+		_update_config_tank(key)
+	_position_config_panel()
+	_config_panel.visible = true
+
+
+func _update_config_hopper(key: String) -> void:
+	var snapshot: Dictionary = _hopper_states.get(key, {})
+	var item := String(snapshot.get("item", ""))
+	_config_title.text = "Hopper — %s" % _item_display_name(item)
+	_config_title_icon.texture = _icon_for(item)
+	_config_level_label.text = "%d / %d units" % [
+		int(snapshot.get("quantity", 0)), int(snapshot.get("capacity", 0)),
+	]
+	_set_config_level(float(snapshot.get("fill", 0.0)))
+	_config_stock_label.text = "in stock: %d" % int(_owned_ingredient_counts().get(item, 0))
+	_apply_config_fill_state(_config_hopper_fill_blocker(snapshot))
+	_apply_config_auto_state(bool(snapshot.get("auto_fill", false)))
+	_update_config_picker(item)
+
+
+func _update_config_tank(key: String) -> void:
+	var snapshot: Dictionary = _fluid_tank_states.get(key, {})
+	var fluid := _fluid_id_of(snapshot)
+	_config_title.text = "Fluid Tank — %s" % (
+		_item_display_name(fluid) if fluid != "" else "unconnected"
+	)
+	_config_title_icon.texture = _icon_for_asset(
+		_market_asset_for(fluid) if fluid != "" else FLUID_TANK_ASSET
+	)
+	_config_level_label.text = "%.1f / %.0f units" % [
+		float(snapshot.get("quantity", 0.0)), float(snapshot.get("capacity", 0.0)),
+	]
+	_set_config_level(float(snapshot.get("fill", 0.0)))
+	_config_stock_label.text = (
+		"in stock: %d" % int(_owned_ingredient_counts().get(fluid, 0)) if fluid != "" else ""
+	)
+	_apply_config_fill_state(_config_tank_fill_blocker(snapshot))
+	_apply_config_auto_state(bool(snapshot.get("auto_fill", false)))
+
+
+## Why FILL on a hopper's panel is off, or "" if it is not. The per-building
+## descendant of the old global `_hopper_fill_blocker` that **SPACE** used —
+## and strictly better than it was, because a panel is about ONE bin and can
+## therefore name the one ingredient that is missing rather than every
+## ingredient any hopper anywhere wants.
+##
+## Pure given the polled snapshot and the ingredient ledger, so a test drives
+## it directly.
+func _config_hopper_fill_blocker(snapshot: Dictionary) -> String:
+	if snapshot.is_empty():
+		return "This hopper is not reporting a level yet"
+	if int(snapshot.get("quantity", 0)) >= int(snapshot.get("capacity", 0)):
+		return "Full — nothing more will fit"
+	var item := String(snapshot.get("item", ""))
+	if int(_owned_ingredient_counts().get(item, 0)) <= 0:
+		return "No %s in stock — buy some at the Ingredient Market (M)" % _item_display_name(item)
+	return ""
+
+
+## `_config_hopper_fill_blocker`'s fluid twin, with the one refusal a hopper
+## cannot have: a tank holds no fluid id of its own, so a tank plumbed to
+## nothing has nothing to be charged FOR and cannot be filled at all (see
+## `PlayerCommand::FillFluidTank`). The old **V** message deliberately did
+## not try to diagnose that case — from a panel about one tank it is the
+## first thing worth saying.
+func _config_tank_fill_blocker(snapshot: Dictionary) -> String:
+	if snapshot.is_empty():
+		return "This tank is not reporting a level yet"
+	var fluid := _fluid_id_of(snapshot)
+	if fluid == "":
+		return "Not connected to a pipe run"
+	if float(snapshot.get("quantity", 0.0)) >= float(snapshot.get("capacity", 0.0)):
+		return "Full — nothing more will fit"
+	if int(_owned_ingredient_counts().get(fluid, 0)) <= 0:
+		return "No %s in stock — buy some at the Ingredient Market (M)" % _item_display_name(fluid)
+	return ""
+
+
+func _apply_config_fill_state(blocker: String) -> void:
+	if _config_fill_button == null:
+		return
+	_config_fill_button.disabled = blocker != ""
+	_config_fill_reason.text = blocker
+	_config_fill_reason.visible = blocker != ""
+
+
+## The toggle reads ON or OFF **in a word** as well as in its colour — the
+## whole point of UI_UX.md §7's rule, and the reason this is a labelled
+## switch rather than a coloured lamp.
+func _apply_config_auto_state(enabled: bool) -> void:
+	if _config_auto_button == null:
+		return
+	_config_auto_enabled = enabled
+	_config_auto_button.text = "AUTO-FILL:  ON" if enabled else "AUTO-FILL:  OFF"
+	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+		_config_auto_button.add_theme_stylebox_override(
+			state, _config_toggle_style(state, enabled)
+		)
+
+
+## The switch's plate. Lit green when on, recessed steel when off — the same
+## near-black/hazard palette the rest of the HUD uses, with green reserved
+## for "this is running", exactly as the ghost's green means "this click
+## builds".
+func _config_toggle_style(state: String, enabled: bool) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.set_border_width_all(_ui_i(3))
+	style.set_corner_radius_all(_ui_i(2))
+	if enabled:
+		style.bg_color = Color(0.11, 0.26, 0.14, 0.98)
+		style.border_color = Color(0.42, 0.86, 0.50, 0.98)
+	else:
+		style.bg_color = Color(0.11, 0.11, 0.13, 0.96)
+		style.border_color = Color(0.42, 0.44, 0.48, 0.95)
+	if state == "hover" or state == "pressed" or state == "focus":
+		style.bg_color = style.bg_color.lightened(0.10)
+	return style
+
+
+func _update_config_picker(current: String) -> void:
+	for slot in _config_picker_slots:
+		var selected: bool = String(slot["item"]) == current
+		slot["mark"].visible = selected
+		var button: Button = slot["button"]
+		# Literally the hotbar's own selected/stocked socket styles, so "the
+		# thing I have chosen" looks the same wherever the game asks.
+		for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+			button.add_theme_stylebox_override(
+				state, _hotbar_slot_style("selected" if selected else "stocked")
+			)
+
+
+func _set_config_level(fraction: float) -> void:
+	if _config_level_track == null or _config_level_fill == null:
+		return
+	var width: float = _config_level_track.size.x
+	if width <= 0.0:
+		width = _config_level_track.custom_minimum_size.x
+	var height: float = _config_level_track.size.y
+	if height <= 0.0:
+		height = _config_level_track.custom_minimum_size.y
+	_config_level_fill.position = Vector2.ZERO
+	_config_level_fill.size = Vector2(width * clampf(fraction, 0.0, 1.0), height)
+	_config_level_fill.visible = fraction > 0.0
+
+
+## Beside the building, never on it, and never under the hotbar. The anchor
+## is the footprint's own centre projected to the screen — the inverse of the
+## ray/plane pick that resolved the click — so the panel follows the camera
+## as it pans and zooms rather than sitting at a fixed screen position that
+## would stop being about anything.
+func _position_config_panel() -> void:
+	if _config_panel == null or _camera == null:
+		return
+	var vp := get_viewport()
+	var bounds := vp.get_visible_rect().size if vp != null else Vector2(1600, 900)
+	var size := _config_panel.get_combined_minimum_size()
+	var anchor := bounds * 0.5
+	var placement := _placement_at_tile(_config_tile)
+	if not placement.is_empty():
+		var direction := _placement_direction(placement)
+		var footprint := _rotated_footprint(
+			_footprint_size(placement.get("footprint")), direction
+		)
+		anchor = _camera.unproject_position(
+			_footprint_centre(_placement_origin(placement), footprint, BELT_SURFACE_Y)
+		)
+	var pos := anchor + CONFIG_PANEL_OFFSET
+	# The contract clipboard owns the top-right corner, and a panel drawn
+	# over it hides the one readout that says whether the factory is paying
+	# — so the clipboard's left edge is the right-hand bound wherever the
+	# two would overlap vertically, not only the window's edge. Past either
+	# bound the panel flips to the building's other side.
+	var right_bound := bounds.x
+	if _contract_panel != null and _contract_panel.visible:
+		var clip := _contract_panel.get_global_rect()
+		if pos.y < clip.end.y and pos.y + size.y > clip.position.y:
+			right_bound = minf(right_bound, clip.position.x)
+	if pos.x + size.x > right_bound:
+		pos.x = anchor.x - CONFIG_PANEL_OFFSET.x - size.x
+	pos.x = clampf(pos.x, 8.0, maxf(8.0, bounds.x - size.x - 8.0))
+	pos.y = clampf(pos.y, 8.0, maxf(8.0, bounds.y - _hotbar_reserved_height() - size.y))
+	_config_panel.position = pos
+	_config_panel.size = size
+
+
+## FILL: one deliberate load of this ONE building, which is what the two
+## global keys used to do to every building at once.
+##
+## `amount` is deliberately NOT sent. Omitting it takes the simulation's own
+## default (`HOPPER_FILL_AMOUNT` / `FLUID_TANK_FILL_AMOUNT` — a quarter of
+## the respective capacity, so a full bin is four deliberate actions), and a
+## number typed here instead would be a second copy of a constant that lives
+## next to the capacity it is derived from and would silently drift from it.
+func _on_config_fill_pressed() -> void:
+	if not _config_open:
+		return
+	_issue_config_command({
+		"type": "fill_hopper" if _config_kind == HOPPER_KIND else "fill_fluid_tank",
+		"tile": [_config_tile.x, _config_tile.y],
+	})
+
+
+func _on_config_auto_pressed() -> void:
+	if not _config_open:
+		return
+	_issue_config_command({
+		"type": "set_hopper_auto_fill" if _config_kind == HOPPER_KIND else "set_tank_auto_fill",
+		"tile": [_config_tile.x, _config_tile.y],
+		"enabled": not _config_auto_enabled,
+	})
+
+
+## The item picker. `set_hopper_item` names the ingredient outright — the
+## command that replaced `cycle_hopper_item` and the **Q** key with it: a
+## picker that already shows the choices should not have to press "next"
+## until it arrives at one.
+func _on_config_picker_pressed(index: int) -> void:
+	if not _config_open or _config_kind != HOPPER_KIND:
+		return
+	if index < 0 or index >= _config_picker_slots.size():
+		return
+	_issue_config_command({
+		"type": "set_hopper_item",
+		"tile": [_config_tile.x, _config_tile.y],
+		"item": String(_config_picker_slots[index]["item"]),
+	})
+
+
+## Issues one of the panel's four commands and redraws what they touch.
+## Deliberately NOT `_issue_world_command`: none of these places, removes or
+## rotates anything, so the whole world subtree does not need rebuilding —
+## only the polled buffers the panel and the buildings themselves draw from.
+func _issue_config_command(command: Dictionary) -> void:
+	sim.issue_command_json(JSON.stringify(command))
+	_apply_dirty_chunks()
+	_refresh_buffers()
+	_update_config_panel()
 
 
 # --------------------------------------------------------------------------
@@ -5111,12 +5718,15 @@ func _enter_build_mode(kind: String) -> void:
 	_remove_mode = false
 	_build_kind = kind
 	_build_direction = "east"
+	# The next click builds now, so a panel that was waiting for a
+	# configuration click has to go — see `_set_shop_menu_open`.
+	_close_config_panel()
 	_set_shop_menu_open(false)
 	_set_market_open(false)
 	# A hopper carries a choice as well as a facing, so the legal choices are
 	# repolled on entry (the list is the simulation's, and content can change
-	# it) and the previous pick is kept where it is still legal — a player
-	# laying two sugar hoppers should not have to press Q twice.
+	# it). The ghost takes the first of them; changing it is the placed
+	# building's own panel, not a key held during placement.
 	_refresh_hopper_items()
 	# The name flyout fires here rather than in `_select_hotbar_slot`, so
 	# every route into placement mode announces what is now in hand — the
@@ -5140,6 +5750,7 @@ func _toggle_remove_mode() -> void:
 		return
 	_build_kind = ""
 	_remove_mode = true
+	_close_config_panel()
 	_set_shop_menu_open(false)
 	_rebuild_ghost_body()
 	_update_ghost()
@@ -5168,11 +5779,18 @@ func _exit_build_mode() -> void:
 	_update_hotbar()
 
 
-## ESC's universal "close whatever is open". The scene has exactly three
-## pieces of stateful UI a player can leave standing — the build menu
-## (`_shop_open`), placement mode (`_build_kind`) and remove mode
-## (`_remove_mode`) — and one press clears all three from any combination of
-## them, which is what every builder this game borrows from does.
+## ESC's universal "close whatever is open". The scene has four pieces of
+## stateful UI a player can leave standing — the build menu (`_shop_open`),
+## the ingredient market (`_market_open`), placement mode (`_build_kind`) and
+## remove mode (`_remove_mode`) — and one press clears all of them from any
+## combination, which is what every builder this game borrows from does.
+##
+## The building configuration panel is closed here too, but ESC does not
+## REACH here while it is up: `_unhandled_input` closes that panel and
+## returns first, so "close what I am looking at" means the panel by the
+## building rather than also emptying the player's hand. The call is kept
+## here for the other routes in (E, X, the hotbar) rather than being a
+## second rule to remember.
 ##
 ## It is a separate function rather than a line added to `_exit_build_mode`
 ## on purpose: that function's other callers must NOT close the menu.
@@ -5185,6 +5803,7 @@ func _exit_build_mode() -> void:
 ## Nothing else here is a mode: the hover tooltip and the hotbar tooltip are
 ## driven by where the cursor is, and the name flyout fades on its own timer.
 func _close_all_overlays() -> void:
+	_close_config_panel()
 	_set_shop_menu_open(false)
 	_set_market_open(false)
 	_exit_build_mode()
@@ -5556,18 +6175,20 @@ func _placement_prompt_text() -> String:
 	var contents := _selected_hopper_item()
 	if contents != "":
 		kind_name = "%s — %s" % [kind_name, _item_display_name(contents)]
-	# The key that changes it is only advertised when there is more than one
-	# thing to change it to. In a world with a single raw ingredient the
-	# choice does not exist and a hint about it would be noise.
-	var contents_hint := "    Q: contents" if _hopper_items.size() > 1 and _build_kind == HOPPER_KIND else ""
+	# Where the contents are changed is only advertised when there is more
+	# than one thing to change them to. In a world with a single raw
+	# ingredient the choice does not exist and a hint about it would be noise.
+	var contents_hint := ""
+	if _build_kind == HOPPER_KIND and _hopper_items.size() > 1:
+		contents_hint = "\nclick it once placed to change its contents"
 	match _ghost_reason:
 		"none_owned":
 			return "✗ NONE OWNED  %s\nbuy one in the build menu (E)\nESC: cancel" % kind_name
 		"blocked":
-			return "✗ BLOCKED  %s  ·  facing %s\nsomething is already there\nR: rotate%s    ESC: cancel" % [
+			return "✗ BLOCKED  %s  ·  facing %s\nsomething is already there\nR: rotate    ESC: cancel%s" % [
 				kind_name, _build_direction, contents_hint
 			]
-	return "✔ PLACE  %s  ·  facing %s\nclick to build    %d left to place\nR: rotate%s    ESC: cancel" % [
+	return "✔ PLACE  %s  ·  facing %s\nclick to build    %d left to place\nR: rotate    ESC: cancel%s" % [
 		kind_name, _build_direction, owned, contents_hint
 	]
 
@@ -6010,6 +6631,7 @@ func _process(delta: float) -> void:
 	# tooltip would otherwise keep answering questions about whatever tile
 	# happens to be behind the plate. `_update_hover_tooltip` hides itself
 	# when `_pause_open`.
+	_update_config_panel()
 	if not _pause_open:
 		_update_ghost()
 	_update_hover_tooltip()
@@ -6086,8 +6708,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		# "so a future click-to-build has nothing to fight with". It does
 		# nothing outside build mode, so nothing that used to work changed.
 		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed \
-				and _in_build_mode() and not _shop_open and not _market_open:
-			_confirm_build()
+				and not _shop_open and not _market_open:
+			if _in_build_mode():
+				_confirm_build()
+			else:
+				# ...and OUTSIDE build mode the same button now configures
+				# a building (the click-to-configure ticket). The build click
+				# wins where both could apply, because a ghost following the
+				# cursor is an unmistakable statement about what a click is
+				# for; a click that placed a belt AND opened a panel would be
+				# two answers to one gesture.
+				_config_click()
 			return
 		# Right-drag panning (isometric only) — right button, not left, which
 		# is what left that button free for the click above.
@@ -6161,19 +6792,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		_toggle_market()
 		return
 
-	# Q cycles a hopper's contents: the ghost's while placing, and — outside
-	# placement mode, mirroring R's own dual-mode shape exactly — whatever
-	# hopper is under the cursor, in place. It does nothing with anything
-	# else in hand or under the cursor, which is deliberate: this is not a
-	# general "cycle variant" key looking for a second use, it is the
-	# hopper's one extra decision (`_hopper_items`) and it is advertised in
-	# the placement prompt exactly while that decision exists.
-	if event.keycode == KEY_Q:
-		if _build_kind == HOPPER_KIND:
-			_cycle_hopper_item()
-		else:
-			_cycle_hopper_under_cursor()
-		return
+	# **Q IS GONE** (the click-to-configure ticket). It cycled a hopper's
+	# contents — the ghost's while placing, and the hopper under the cursor
+	# otherwise — and both halves are now the configuration panel's item
+	# picker: a hopper is placed holding the first raw ingredient and is
+	# retargeted by clicking it. The keycode is deliberately left unbound
+	# rather than repurposed, so a player still pressing it gets nothing
+	# rather than something surprising.
 
 	# ESC closes whatever is open — and when nothing IS open, opens the pause
 	# menu (the save/main-menu epic's ticket 2). One rule, escalating:
@@ -6181,7 +6806,18 @@ func _unhandled_input(event: InputEvent) -> void:
 	# backs out of the game. That is Minecraft's convention and it needed no
 	# new key, which matters on a legend that already runs the window's
 	# width.
+	#
+	# The configuration panel is checked FIRST and returns on its own: it is
+	# the innermost thing on screen, and "close what I am looking at" has to
+	# mean the panel by the building rather than also putting down whatever
+	# is in the player's hand or falling through all the way to the pause
+	# menu. Nothing else can be open at the same time as it (see
+	# `_update_config_panel`), so this is one branch rather than an ordering
+	# to remember.
 	if event.keycode == KEY_ESCAPE:
+		if _config_open:
+			_close_config_panel()
+			return
 		if _anything_open():
 			_close_all_overlays()
 		else:
@@ -6234,42 +6870,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			_zoom_camera(1.0 + ZOOM_STEP)
 			return
 
-	var command := ""
-	# SPACE only loads a hopper in ISOMETRIC mode — in FIRST_PERSON it's "fly
-	# up" (_fp_input_direction), and a single keypress can't mean both. Since
-	# the chain-rework epic this draws from stock a `BuyIngredient` purchase
-	# (the ingredient market, M) paid for, clamped at the hopper's capacity;
-	# the hopper itself meters it onto its belt one per tick — so this key
-	# sets the SUPPLY and the machinery sets the rate. The level it changes
-	# is visible in the hopper itself (see _update_hopper) and in its hover
-	# tooltip. `_hopper_fill_blocker` is checked first so a doomed press (no
-	# hopper down, or nothing in stock to load) says why instead of doing
-	# nothing visibly at all.
-	if event.keycode == KEY_SPACE and _view_mode == ViewMode.ISOMETRIC:
-		var blocker := _hopper_fill_blocker()
-		if blocker != "":
-			_show_hotbar_flyout(blocker)
-			return
-		command = JSON.stringify({"type": "fill_hopper"})
-	# V is the fluid twin of SPACE. It draws from vinegar stock the market
-	# sold, into whichever tank(s) are placed, same clamp-and-meter shape as
-	# SPACE. Unlike SPACE this works in BOTH view modes, because unlike SPACE
-	# it collides with nothing (SPACE is "fly up" in first person).
-	# `_tank_fill_blocker` guards it the same way.
-	elif event.keycode == KEY_V:
-		var tank_blocker := _tank_fill_blocker()
-		if tank_blocker != "":
-			_show_hotbar_flyout(tank_blocker)
-			return
-		command = JSON.stringify({"type": "fill_fluid_tank"})
-	else:
-		return
-
-	sim.issue_command_json(command)
-	# Render immediately rather than waiting for the next scheduled tick —
-	# issue_command's dirty marking isn't cleared until tick() runs next,
-	# so this is safe to read right away.
-	_apply_dirty_chunks()
+	# **SPACE AND V ARE GONE TOO** (the click-to-configure ticket). SPACE
+	# filled every hopper in the world and V every tank, from anywhere, with
+	# no building selected — the two keys this whole panel replaces. FILL is
+	# a button on the building's own panel now, aimed at the one bin the
+	# player is looking at, and "keep it full" is the toggle beside it.
+	#
+	# SPACE keeps its OTHER meaning untouched: in FIRST_PERSON it is "fly up"
+	# (`_fp_input_direction` reads it directly through `Input`, not through
+	# this handler), which is exactly why the fill binding was isometric-only
+	# in the first place.
 
 
 func _apply_dirty_chunks() -> void:
@@ -6713,28 +7323,26 @@ func _pipe_connections_text(tile: Vector2i, connections: Array, network: Diction
 ## hopper facing bare ground reports `belt_tile: null`, which is an ordinary
 ## state now and exactly the mistake a player wants told about.
 ##
-## The "Q: change contents" line only appears when there is more than one
-## raw item to change it TO — same restraint the placement prompt's own
-## `contents_hint` already applies, for the same reason: a hint about a
-## choice that does not exist is noise, not help. `_hopper_items` is only
-## ever populated on entering placement mode (`_enter_build_mode`), so a
-## player who hovers an existing hopper without having placed one this
-## session would see a stale empty list — refreshed here instead, scoped to
-## exactly when it is needed rather than every frame regardless of what is
-## under the cursor.
+## Two lines changed with the click-to-configure ticket, and both are about
+## the same thing. The old "Q: change contents" hint is gone with the key,
+## replaced by **click to configure** — which is not merely the new name for
+## the old key: the panel it opens carries loading, keeping-loaded and
+## retargeting, so one line advertises all three where three keybinds
+## advertised none of them on the building itself. And `auto_fill` is
+## reported here as well as in the panel, because whether a bin looks after
+## itself is exactly the thing a player wants to check by pointing at it
+## rather than by opening something.
 func _hopper_hover_text(origin_key: String, direction: String) -> String:
 	var snapshot: Dictionary = _hopper_states.get(origin_key, {})
 	if snapshot.is_empty():
 		return "hopper\nfacing %s" % direction
-	_refresh_hopper_items()
-	var contents_hint := "\nQ: change contents" if _hopper_items.size() > 1 else ""
-	return "hopper  ·  facing %s\n%s\n%d / %d units\n%s%s" % [
+	return "hopper  ·  facing %s\n%s\n%d / %d units\n%s\nauto-fill: %s\nclick to configure" % [
 		direction,
 		String(snapshot.get("item", "raw ingredient")),
 		int(snapshot.get("quantity", 0)),
 		int(snapshot.get("capacity", 0)),
 		"unloading onto a belt" if snapshot.get("belt_tile") != null else "no belt in front of it",
-		contents_hint,
+		"on" if bool(snapshot.get("auto_fill", false)) else "off",
 	]
 
 
@@ -6744,12 +7352,13 @@ func _fluid_tank_hover_text(origin_key: String, direction: String) -> String:
 	var snapshot: Dictionary = _fluid_tank_states.get(origin_key, {})
 	if snapshot.is_empty():
 		return "fluid tank\nfacing %s" % direction
-	return "fluid tank  ·  facing %s\n%s\n%.1f / %.0f units\n%s" % [
+	return "fluid tank  ·  facing %s\n%s\n%.1f / %.0f units\n%s\nauto-fill: %s\nclick to configure" % [
 		direction,
 		_fluid_id_of(snapshot) if _fluid_id_of(snapshot) != "" else "empty",
 		float(snapshot.get("quantity", 0.0)),
 		float(snapshot.get("capacity", 0.0)),
 		"feeding a pipe run" if snapshot.get("pipe_tile") != null else "no pipe in front of it",
+		"on" if bool(snapshot.get("auto_fill", false)) else "off",
 	]
 
 
@@ -6782,12 +7391,14 @@ func _dock_hover_text(origin_key: String, direction: String) -> String:
 func _update_hover_tooltip() -> void:
 	if _hover_tooltip == null:
 		return
-	if _shop_open or _market_open or _pause_open or _in_build_mode():
+	if _shop_open or _market_open or _pause_open or _config_open or _in_build_mode():
 		# The build menu sits over the middle of the screen; a world tooltip
 		# chasing the cursor across it would just be two panels fighting. And
 		# in build mode the placement prompt is already the panel by the
 		# cursor, saying the more useful of the two things. The pause menu is
-		# the same case as the build menu, one plate further forward.
+		# the same case as the build menu, one plate further forward. The
+		# configuration panel is the same case again: it is the panel BY THE
+		# BUILDING, and it says everything the hover line points at.
 		_hover_tooltip.visible = false
 		return
 	var vp := get_viewport()

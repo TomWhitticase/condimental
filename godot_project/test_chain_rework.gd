@@ -18,13 +18,15 @@
 #   * A HOPPER CAN ACTUALLY BE PLACED. `_confirm_build` sends `item`, so the
 #     placement lands; the same click with the field stripped is refused,
 #     which is exactly the silent no-op the scene shipped with,
-#   * Q CYCLES what the hopper in hand will hold, from the simulation's own
-#     `hopper_items` list rather than from a Godot literal, the placement
-#     prompt names it in words, and the ghost carries a tinted product body so
-#     the choice is visible as well as written,
+#   * A HOPPER IN HAND HOLDS THE FIRST RAW ITEM, from the simulation's own
+#     `hopper_items` list rather than from a Godot literal — the ghost-time
+#     **Q** cycle is gone (the click-to-configure ticket), so the placement
+#     prompt names the default in words, says the contents are changed by
+#     clicking the hopper once it is down, and the ghost carries a tinted
+#     product body so the default is visible as well as written,
 #   * TOMATO AND SUGAR BOTH REACH THE FLOOR: two hoppers placed from one
-#     catalog slot, each holding what it was told to, each drawing its own
-#     product tint,
+#     catalog slot, the second RETARGETED after placement through the
+#     configuration panel's item picker, each drawing its own product tint,
 #   * THE 1x2 MIXER renders one node covering both its tiles, and hover
 #     resolves the mixer from either of them,
 #   * THE TWO MACHINE-TO-MACHINE PIPE RUNS render at the tiles the simulation
@@ -148,14 +150,20 @@ func _run_checks() -> void:
 		_fail("a hopper in hand must have chosen contents")
 		return
 	# The prompt names the contents in words — UI_UX.md §7's never-colour-
-	# alone half — and advertises the key that changes them.
+	# alone half — and says where they can be changed. That used to be "Q:";
+	# the contents key is gone (the click-to-configure ticket), so what a
+	# hopper in hand holds is `raw_items[0]` and the prompt points at the
+	# panel that changes it after the thing is on the floor.
 	main._ghost_reason = ""
 	var prompt: String = main._placement_prompt_text()
 	if not prompt.contains(main._item_display_name(first_item)):
 		_fail("the placement prompt does not name the hopper's contents: %s" % prompt)
 		return
-	if not prompt.contains("Q:"):
-		_fail("the placement prompt does not advertise the contents key: %s" % prompt)
+	if prompt.contains("Q:"):
+		_fail("the placement prompt still advertises the deleted Q key: %s" % prompt)
+		return
+	if not prompt.contains("click it once placed"):
+		_fail("the placement prompt does not say where contents are changed: %s" % prompt)
 		return
 	# ...and the ghost carries a tinted product body, so the choice is visible.
 	main._rebuild_ghost_body()
@@ -184,23 +192,44 @@ func _run_checks() -> void:
 		_fail("a hopper placed with no `item` should be refused in a two-ingredient world")
 		return
 
-	# --- 4. Q cycles, and the second hopper holds the other thing ----------
+	# --- 4. A second hopper, RETARGETED after placement --------------------
+	# Both hoppers now leave the hotbar holding the same default (there is no
+	# ghost-time cycle any more), so the second one is switched the way a
+	# player switches one: click it, then click the other ingredient in the
+	# configuration panel's picker, which issues `set_hopper_item`.
 	main._refresh_owned_counts()
 	main._enter_build_mode("hopper")
-	main._cycle_hopper_item()
-	var second_item: String = main._selected_hopper_item()
-	if second_item == first_item:
-		_fail("Q did not change the hopper's contents (still '%s')" % second_item)
-		return
 	main._ghost_tile = Vector2i(-1, 3)
 	main._ghost_valid = true
 	main._confirm_build()
-	if _hopper_item(Vector2i(-1, 3)) != second_item:
-		_fail("the second hopper holds '%s', expected '%s'" % [_hopper_item(Vector2i(-1, 3)), second_item])
+	if _hopper_item(Vector2i(-1, 3)) != first_item:
+		_fail("a freshly placed hopper should default to '%s', got '%s'" % [
+			first_item, _hopper_item(Vector2i(-1, 3))
+		])
 		return
+	main._exit_build_mode()
+
+	main._config_click_at_tile(Vector2i(-1, 3))
+	if not main._config_open:
+		_fail("clicking the second hopper did not open its configuration panel")
+		return
+	var other_index := -1
+	for index in range(main._config_picker_slots.size()):
+		if String(main._config_picker_slots[index]["item"]) != first_item:
+			other_index = index
+			break
+	if other_index < 0:
+		_fail("the picker offers only one ingredient: %s" % str(main._hopper_items))
+		return
+	main._on_config_picker_pressed(other_index)
+	var second_item: String = _hopper_item(Vector2i(-1, 3))
+	if second_item == first_item:
+		_fail("the picker did not change the hopper's contents (still '%s')" % second_item)
+		return
+	main._close_config_panel()
 	# Two hoppers, two different contents, out of ONE catalog slot — which is
 	# why the hotbar did not have to grow a slot per ingredient.
-	if _hopper_item(TOMATO_HOPPER) == _hopper_item(Vector2i(-1, 3)):
+	if _hopper_item(TOMATO_HOPPER) == second_item:
 		_fail("both hoppers ended up holding the same thing")
 		return
 	# Each draws its own product tint, so they are tellable apart on the floor.
@@ -210,7 +239,6 @@ func _run_checks() -> void:
 	if tints.size() != 2:
 		_fail("two hoppers holding different things drew the same product tint")
 		return
-	main._exit_build_mode()
 
 	# --- 5. The market and the larder --------------------------------------
 	if main._market_panel == null or main._market_slots.is_empty():
@@ -371,7 +399,7 @@ func _run_checks() -> void:
 			_fail("the mixer's inlet tile at row %d has no feed belt" % lane_y)
 			return
 
-	print("CHAIN_REWORK_OK: the aging rack is gone from every mapping, a hopper places with its contents chosen (Q cycles them, the prompt names them, the ghost shows them) while the same click without an item is refused, the market buys crates and the larder follows, and the shipped line renders a 1x2 mixer hovering from both tiles, two machine-to-machine pipe runs carrying ketchup_mix and ketchup as straights with a machine fitting at each end, the tank-fed run turning into the mixer through a fitted corner, and no belt into either piped machine")
+	print("CHAIN_REWORK_OK: the aging rack is gone from every mapping, a hopper places holding the first raw item (the prompt names it and points at the panel that changes it, the ghost shows it) while the same click without an item is refused, a placed hopper is retargeted through the panel's picker, the market buys crates and the larder follows, and the shipped line renders a 1x2 mixer hovering from both tiles, two machine-to-machine pipe runs carrying ketchup_mix and ketchup on the plain tile, the tank-fed run still on the branch fitting, and no belt into either piped machine")
 	quit(0)
 
 

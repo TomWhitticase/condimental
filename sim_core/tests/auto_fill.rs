@@ -31,9 +31,11 @@
 //!    on, stock moves out of the larder and into the factory by itself, and
 //!    the sum of the two plus everything shipped must not move.
 //!
-//! `SetHopperItem` — the explicit item picker that replaces
-//! `CycleHopperItem` — is covered here too, since it is the third command
-//! the same panel issues. `hopper.rs` covers cycling itself.
+//! `SetHopperItem` — the explicit item picker a placed hopper's panel uses —
+//! is covered here too, since it is the third command that panel issues. It
+//! is now the ONLY way a placed hopper changes its mind: the
+//! `CycleHopperItem` command this file used to point at was deleted with the
+//! **Q** keybind that was its only caller.
 
 use sim_core::sim::{
     FLUID_TANK_CAPACITY, Fx, HOPPER_CAPACITY, PlayerCommand, RecipeRegistry, TileSnapshot, World,

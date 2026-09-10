@@ -133,16 +133,19 @@ var _hover_tank := false
 var _hover_dock := false
 var _hover_splitter := false
 var _shop := false
-## `--fill-blocked` presses SPACE on a freshly-booted (empty) world, where
-## no hopper exists at all — the exact keypress that used to do nothing
-## visible whatsoever. Photographs the flyout that now names the reason.
-var _fill_blocked := false
-## `--market` opens the ingredient market, and `--contents N` presses Q N
-## times on whatever ghost is up — the only way to photograph a hopper about
-## to be placed holding something other than the first raw ingredient, which
-## is the whole point of that key.
+## `--config TX,TY` clicks the hopper or tank standing on that tile once
+## the fixture is built, so the frame shows its configuration panel — the
+## level bar, FILL with its reason when it is blocked, the AUTO-FILL switch
+## and (hoppers) the item picker. Without `--stock` the larder is empty, so
+## the panel is photographed in its blocked state, which is the more useful
+## of the two to look at.
+var _config := false
+var _config_tile := Vector2i.ZERO
+## `--market` opens the ingredient market, and `--contents N` presses the
+## open configuration panel's picker slot N (with `--config`), so a placed
+## hopper is photographed after being retargeted to another ingredient.
 var _market := false
-var _contents := 0
+var _contents := -1
 ## `--no-hud` hides the whole HUD layer. It exists for `--closeup`: the
 ## contract clipboard and the hotbar between them cover the top-right and the
 ## bottom of the frame, which is exactly where a junction lands about half
@@ -209,10 +212,15 @@ func _initialize() -> void:
 	_hover_dock = args.has("--hover-dock")
 	_hover_splitter = args.has("--hover-splitter")
 	_shop = args.has("--shop")
-	_fill_blocked = args.has("--fill-blocked")
+	var config_arg := _string_arg(args, "--config")
+	if config_arg != "":
+		var parts: PackedStringArray = config_arg.split(",")
+		if parts.size() == 2:
+			_config = true
+			_config_tile = Vector2i(int(parts[0]), int(parts[1]))
 	_market = args.has("--market")
 	_no_hud = args.has("--no-hud")
-	_contents = int(_string_arg(args, "--contents")) if _string_arg(args, "--contents") != "" else 0
+	_contents = int(_string_arg(args, "--contents")) if _string_arg(args, "--contents") != "" else -1
 	_contracts = args.has("--contracts")
 	if _contracts:
 		_fixture = "chain"
@@ -244,12 +252,17 @@ func _initialize() -> void:
 	# live here and crashed with "base object of type Nil".)
 
 
-## `--flag value` as one look-up, since every option below that takes an
-## argument takes exactly one.
+## `--flag value` (or `--flag=value`, for a value that starts with `-` and
+## would otherwise be read as another flag — a negative tile coordinate) as
+## one look-up, since every option below that takes an argument takes
+## exactly one.
 func _string_arg(args: Array, flag: String) -> String:
 	for i in range(args.size()):
-		if String(args[i]) == flag and i + 1 < args.size():
+		var arg := String(args[i])
+		if arg == flag and i + 1 < args.size():
 			return String(args[i + 1])
+		if arg.begins_with(flag + "="):
+			return arg.substr(flag.length() + 1)
 	return ""
 
 
@@ -500,15 +513,18 @@ func _open_shop_menu() -> void:
 	_main._set_shop_menu_open(true)
 
 
-## `--fill-blocked`: SPACE on an empty world, where no hopper exists at
-## all. Goes through the same `_unhandled_input` path a real keypress would,
-## not the blocker function directly, so the shot proves the flyout that
-## keypress actually produces rather than a string that merely exists.
-func _press_space() -> void:
-	var event := InputEventKey.new()
-	event.keycode = KEY_SPACE
-	event.pressed = true
-	_main._unhandled_input(event)
+## `--config TX,TY`: the click that opens a hopper's or tank's panel, driven
+## through the same tile-resolved entry point a real click reaches
+## (`_config_click_at_tile`), so the shot proves the panel a click actually
+## produces — positioned beside the building, with whichever FILL reason the
+## current larder gives — rather than a widget merely made visible.
+func _open_config_at(tile: Vector2i) -> void:
+	_main._config_click_at_tile(tile)
+	if not _main._config_open:
+		printerr("SCREENSHOT: no hopper or tank at %s to configure" % str(tile))
+		return
+	if _contents >= 0:
+		_main._on_config_picker_pressed(_contents)
 
 
 ## Drives the real chain across several contract cadence boundaries, feeding
@@ -653,24 +669,22 @@ func _process(_delta: float) -> bool:
 		_enter_remove_mode()
 	if _frames == 2 and _shop:
 		_open_shop_menu()
-	if _frames == 2 and _fill_blocked:
-		_press_space()
 	if _frames == 2 and _no_hud:
 		var hud := _main.get_node_or_null("HUD")
 		if hud != null:
 			hud.visible = false
 	if _frames == 2 and _market:
 		_main._set_market_open(true)
-	if _frames == 2 and _contents > 0:
-		for _i in range(_contents):
-			_main._cycle_hopper_item()
-		_main._update_ghost()
 	if _frames == 2 and _contracts:
 		_run_contract_cycles()
 	if _frames == 2 and _stock:
 		_stock_the_hotbar()
 	if _frames == 2 and _hotbar_key != "":
 		_select_hotbar_key()
+	# After --stock, so a stocked larder photographs FILL enabled and an
+	# empty one photographs it blocked with its reason.
+	if _frames == 2 and _config:
+		_open_config_at(_config_tile)
 	# Last, so it draws over whatever else the flags set up — which is
 	# exactly what a review of it wants to see.
 	if _frames == 3 and _pause:
