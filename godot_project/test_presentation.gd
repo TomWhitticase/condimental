@@ -158,13 +158,17 @@ func _initialize() -> void:
 		return
 
 	# --- An item fed in through the real command path gets a voxel node ----
-	# Since the "Machines improvement" ticket 3, SPACE loads the chain's
-	# hopper; the hopper unloads onto the belt on the *next* tick, so this
-	# ticks the sim a little before looking for the rendered item.
-	var key_event := InputEventKey.new()
-	key_event.keycode = KEY_SPACE
-	key_event.pressed = true
-	main._unhandled_input(key_event)
+	# Loading a hopper is a click on the building and its panel's FILL
+	# button since the hopper/tank configuration ticket (it was the global
+	# SPACE key before that); the hopper unloads onto the belt on the *next*
+	# tick, so this ticks the sim a little before looking for the rendered
+	# item.
+	main._config_click_at_tile(Vector2i(-1, 0))
+	if not main._config_open:
+		_fail("clicking the demo line's hopper did not open its configuration panel")
+		return
+	main._on_config_fill_pressed()
+	main._close_config_panel()
 
 	var item_nodes := 0
 	for i in range(10):

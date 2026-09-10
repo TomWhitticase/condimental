@@ -33,7 +33,8 @@ below is history and should only ever be appended to.)*
 
 - **Conveyor splitters (DONE, both halves):** a line can fork. A `splitter` is a 1x1 buildable kind that carries product exactly like a belt tile and deals it alternately between two outputs — the tile it faces, and the tile one quarter turn clockwise from it — so one `rotate` turns both outputs together and no new command was needed. If the side that is due is blocked (or was never built) the item goes down the other one in the same tick, so a full branch never stalls the whole line and "only one output connected" needs no special case. It reaches every sink a belt's hand-off does: another belt, another splitter, a machine's inlet face, a dock. It is **drawn** as a machined diverter table set into the belt run — a bright steel plate where the rest of the line is rubber, with three open lanes and one closed rail — carrying a **next-output arrow inlaid flush in the deck**: both directions are cut into the table as grooves and one of them lights up, so which way the next item goes is a pair of positions rather than a colour, and nothing stands proud of the surface the product slides over. The arrow shows where the item will **actually** go, not the raw `next_output`: a splitter whose branch was never built reports "branch" forever while everything goes straight, and an arrow driven off that field alone would point at bare floor. Items cross a splitter drawn exactly as they cross a belt, and hover names both outputs and says "not connected" about one that was never laid.
 - **Contracts (done, both halves):** contracts are `data/contracts.ron` content and three run concurrently, each with its own mix/cadence/payout, all drawing from one shared pool of delivered stock (a box pays one contract, never two). The clipboard panel shows all of them — one paper docket card per contract on the one board, each with its own checklist, payout, countdown and delivered/missed tally, above a single shared money figure and a single "on the dock" line naming the pool they compete for.
-- **Chain rework (DONE, both halves):** the middle of the production line is **piped, not belted**, which is what a real sauce plant looks like. The mixer's output and the cooking vat's output are fluids (`recipes.ron` schema_version 3 gained `fluid_outputs`), so mix flows from the mixer to the vat and cooked ketchup from the vat to the bottler through pipe runs with no tank behind them; the bottler is where the product becomes a solid again, and the cooking vat is now the one machine on the line **no belt touches at all**. The mixer gained **sugar** as a second solid ingredient and grew to **1x2** for it — a machine accepts solid input on every tile of the edge opposite the way it points, so N solid ingredients need N tiles of inlet face or the two lanes merge onto one belt and deadlock. The aging rack is gone. **Raw ingredients cost money**: `data/ingredients.ron` prices tomato, sugar and vinegar, a `BuyIngredient` command buys them, and `SPACE`/`V` load a hopper or a tank from that bought stock — so overproduction is a real loss rather than free accumulation. On the presentation side: a hopper's contents are chosen **when it is placed** (**Q** cycles them while the ghost is up, the prompt names them in words, and the ghost carries a tinted product body), because with two raw solids the simulation can no longer infer which bin the player meant — until that landed, placing a hopper from the UI did nothing at all, silently. Buying stock has its own panel on **M** (the build menu was already as tall as the space above the hotbar allows), and a permanent larder strip above the hotbar shows what is carried so an unloadable hopper explains itself. The mixer, the cooking vat and the bottler were re-modelled with pipe nozzles where belts no longer meet them.
+- **Chain rework (DONE, both halves):** the middle of the production line is **piped, not belted**, which is what a real sauce plant looks like. The mixer's output and the cooking vat's output are fluids (`recipes.ron` schema_version 3 gained `fluid_outputs`), so mix flows from the mixer to the vat and cooked ketchup from the vat to the bottler through pipe runs with no tank behind them; the bottler is where the product becomes a solid again, and the cooking vat is now the one machine on the line **no belt touches at all**. The mixer gained **sugar** as a second solid ingredient and grew to **1x2** for it — a machine accepts solid input on every tile of the edge opposite the way it points, so N solid ingredients need N tiles of inlet face or the two lanes merge onto one belt and deadlock. The aging rack is gone. **Raw ingredients cost money**: `data/ingredients.ron` prices tomato, sugar and vinegar, a `BuyIngredient` command buys them, and a hopper or a tank is loaded from that bought stock *(originally with the global `SPACE`/`V` keys; since the configuration panel below, from the building's own panel)* — so overproduction is a real loss rather than free accumulation. On the presentation side: a hopper's contents are chosen **when it is placed** (the ghost carries a tinted product body and the prompt names them in words; the **Q** key that cycled them is gone, replaced by the placed hopper's own picker), because with two raw solids the simulation can no longer infer which bin the player meant — until that landed, placing a hopper from the UI did nothing at all, silently. Buying stock has its own panel on **M** (the build menu was already as tall as the space above the hotbar allows), and a permanent larder strip above the hotbar shows what is carried so an unloadable hopper explains itself. The mixer, the cooking vat and the bottler were re-modelled with pipe nozzles where belts no longer meet them.
+- **Hopper/tank configuration (DONE, both halves):** nothing about feeding a factory is on the keyboard any more. A placed hopper or tank is **clicked**, and a panel beside it shows its level, a **FILL** button (disabled with its reason in words when the larder is empty, the bin is full, or the tank is plumbed to nothing), an **AUTO-FILL** switch that keeps the bin topped up from bought stock every tick — spending stock, never money, and simply pausing while the larder is dry — and, for a hopper, an item picker that retargets it in place. The click is a toggle, only one panel ever exists, ESC closes it first, and it closes itself under any menu or mode. The global **SPACE**/**V**/**Q** keys and `CycleHopperItem` are deleted. Pinned by `test_config_panel.gd`; `scripts/screenshot-scene.sh --config TX,TY` photographs it.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -49,6 +50,38 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-10 — Click a hopper or a tank to configure it
+
+The presentation half of the previous entry, and the end of feeding a
+factory from the keyboard. A left click on a placed hopper or tank — outside
+build mode, from any tile of its footprint — opens a small dark-plate panel
+beside the building: the level and a fill bar, **FILL** (one load of *this*
+bin, disabled with the reason in words when it cannot happen), the
+**AUTO-FILL** switch (ON/OFF in text as well as colour, read back off the
+simulation's own snapshot every frame), and for a hopper an item picker that
+retargets it in place. Clicking the building again closes it, clicking
+another retargets it, anything else — floor, a machine, ESC, a menu, a mode,
+the building being removed — closes it. **SPACE**, **V** and **Q** are gone
+from the legend and the handler, and `CycleHopperItem` is gone from the
+simulation with them.
+
+Two things came out of finishing it rather than building it. The headless
+proof's first expectation for auto-fill was wrong in exactly the way the
+mechanic is right: a tank switched to automatic sat at a fifth full after two
+hundred ticks because the larder's single crate of vinegar had all gone into
+the tank and its run, and the top-ups had stopped — spending stock and never
+buying is the design, so the test now checks the dry case and the stocked
+case both. And a deleted key leaves stale copy in more places than its
+handler: the market's own footer still told players to press SPACE and V,
+and two scripts still drove the dead keys. The panel also had to learn to
+step aside for the contract clipboard, which the first rendered frames showed
+it sitting squarely on top of.
+
+**With this, the whole save/load + configuration + tuning plan is landed:**
+a main menu with save slots and an autosave, a factory that comes back
+mid-craft, a slower crusher, a 2x2 dock, a UI at 1.5x, and buildings that
+are configured by clicking them.
 
 ### 2026-09-09 — A hopper or a tank can keep itself topped up
 
