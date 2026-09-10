@@ -181,6 +181,22 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-11 **Vinegar drawn as vinegar (a raw fluid's presentation).** A
+  fluid gets a `palette.ron` colour of its own (`vinegar_amber` `#AD6B23`,
+  class `liquid`) and `FLUID_TINTS[id]` IS that RGB — §2b point 5's "hue is
+  not palette data" still governs the tinted pipe body, but the value's one
+  home is the palette, because a market icon and a pipe run are seen
+  together. Amber, not clear: a colourless fluid in a stainless pipe reads
+  as an empty pipe. `FLUID_MODELS` is its OWN table beside `ITEM_MODELS`
+  (that one answers "what rides the belt", and no belt carries a fluid);
+  `_market_asset_for` and `_icon_for` check items, then fluids, then fall
+  back — before this, vinegar fell through to `PIPE_ASSET` and the market
+  offered a length of pipe. `item_vinegar` is a tall straight-sided jug and
+  is authored for **vengi's -X/+Y corner**, not the game camera's +X: a
+  fluid never appears in the scene, so the icon pass is the model's only
+  consumer (new UI_UX §2b point 27). Palette colours are APPENDED — every
+  `.vox` re-emits, only the new icon's bytes change. Full record in
+  `docs/DECISIONS.md`.
 - 2026-09-10 **Hopper/tank configuration, ticket 2 (Godot + one sim deletion).**
   A placed hopper or tank is CLICKED and configured on a panel beside it:
   level, FILL (with its reason in words when refused), AUTO-FILL toggle,

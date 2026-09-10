@@ -93,6 +93,11 @@
   "item_tomato": [
     "matte"
   ],
+  "item_vinegar": [
+    "matte",
+    "metal",
+    "liquid"
+  ],
   "machine": [
     "matte",
     "metal",
