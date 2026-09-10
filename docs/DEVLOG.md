@@ -34,7 +34,7 @@ below is history and should only ever be appended to.)*
 - **Conveyor splitters (DONE, both halves):** a line can fork. A `splitter` is a 1x1 buildable kind that carries product exactly like a belt tile and deals it alternately between two outputs — the tile it faces, and the tile one quarter turn clockwise from it — so one `rotate` turns both outputs together and no new command was needed. If the side that is due is blocked (or was never built) the item goes down the other one in the same tick, so a full branch never stalls the whole line and "only one output connected" needs no special case. It reaches every sink a belt's hand-off does: another belt, another splitter, a machine's inlet face, a dock. It is **drawn** as a machined diverter table set into the belt run — a bright steel plate where the rest of the line is rubber, with three open lanes and one closed rail — carrying a **next-output arrow inlaid flush in the deck**: both directions are cut into the table as grooves and one of them lights up, so which way the next item goes is a pair of positions rather than a colour, and nothing stands proud of the surface the product slides over. The arrow shows where the item will **actually** go, not the raw `next_output`: a splitter whose branch was never built reports "branch" forever while everything goes straight, and an arrow driven off that field alone would point at bare floor. Items cross a splitter drawn exactly as they cross a belt, and hover names both outputs and says "not connected" about one that was never laid.
 - **Contracts (done, both halves):** contracts are `data/contracts.ron` content and three run concurrently, each with its own mix/cadence/payout, all drawing from one shared pool of delivered stock (a box pays one contract, never two). The clipboard panel shows all of them — one paper docket card per contract on the one board, each with its own checklist, payout, countdown and delivered/missed tally, above a single shared money figure and a single "on the dock" line naming the pool they compete for.
 - **Chain rework (DONE, both halves):** the middle of the production line is **piped, not belted**, which is what a real sauce plant looks like. The mixer's output and the cooking vat's output are fluids (`recipes.ron` schema_version 3 gained `fluid_outputs`), so mix flows from the mixer to the vat and cooked ketchup from the vat to the bottler through pipe runs with no tank behind them; the bottler is where the product becomes a solid again, and the cooking vat is now the one machine on the line **no belt touches at all**. The mixer gained **sugar** as a second solid ingredient and grew to **1x2** for it — a machine accepts solid input on every tile of the edge opposite the way it points, so N solid ingredients need N tiles of inlet face or the two lanes merge onto one belt and deadlock. The aging rack is gone. **Raw ingredients cost money**: `data/ingredients.ron` prices tomato, sugar and vinegar, a `BuyIngredient` command buys them, and `SPACE`/`V` load a hopper or a tank from that bought stock — so overproduction is a real loss rather than free accumulation. On the presentation side: a hopper's contents are chosen **when it is placed** (**Q** cycles them while the ghost is up, the prompt names them in words, and the ghost carries a tinted product body), because with two raw solids the simulation can no longer infer which bin the player meant — until that landed, placing a hopper from the UI did nothing at all, silently. Buying stock has its own panel on **M** (the build menu was already as tall as the space above the hotbar allows), and a permanent larder strip above the hotbar shows what is carried so an unloadable hopper explains itself. The mixer, the cooking vat and the bottler were re-modelled with pipe nozzles where belts no longer meet them.
-- **Pipes & conveyors overhaul (IN PROGRESS, `docs/PIPES_AND_CONVEYORS_PLAN.md`):** seven tickets on one integration branch to make belts and pipes look right, read right, run fast and connect up. **Ticket 1 (sim) has landed:** every belt, splitter and pipe on the wire carries `links` — what feeds it, what it hands to, or what its pipe is joined to, per side — recorded by the topology pass so it is exact and free per tick. **Ticket 4 (Godot) has landed:** belts, splitters, pipes and the items riding them are `MultiMesh` instances (one per asset and material class) rather than a node each, with a 1500-tile stress fixture, a headless timing test (`test_perf.gd`) and `scripts/screenshot-scene.sh --stress`; machines and buildings keep their nodes, and the seams the belt-animation and corner tickets build on (frame sets, a caller-supplied yaw per tile, one item-positioning function) are in place in `main.gd`. **Ticket 3 (assets) has landed:** the pipe model family (straight, corner, tee, cross, end, machine/tank fittings, one fluid body per shape) on a 15.5 midline, with seven pipe rendering defects fixed at the generator. **Ticket 2 (assets) has landed:** the belt model family — straights and left/right corners in four animation frames with a solid raised direction arrow; the belt-side junction variants are retired (the plain tile carries the junction, the machine's hood does the rest). Tickets 5, 6 (presentation from `links`) and 7 (bug hunt) are to do; one sim rule discrepancy (a belt feeds a machine from any side of an inlet-edge tile) is flagged for ticket 7.
+- **Pipes & conveyors overhaul (IN PROGRESS, `docs/PIPES_AND_CONVEYORS_PLAN.md`):** seven tickets on one integration branch to make belts and pipes look right, read right, run fast and connect up. **Ticket 1 (sim) has landed:** every belt, splitter and pipe on the wire carries `links` — what feeds it, what it hands to, or what its pipe is joined to, per side — recorded by the topology pass so it is exact and free per tick. **Ticket 4 (Godot) has landed:** belts, splitters, pipes and the items riding them are `MultiMesh` instances (one per asset and material class) rather than a node each, with a 1500-tile stress fixture, a headless timing test (`test_perf.gd`) and `scripts/screenshot-scene.sh --stress`; machines and buildings keep their nodes, and the seams the belt-animation and corner tickets build on (frame sets, a caller-supplied yaw per tile, one item-positioning function) are in place in `main.gd`. **Ticket 3 (assets) has landed:** the pipe model family (straight, corner, tee, cross, end, machine/tank fittings, one fluid body per shape) on a 15.5 midline, with seven pipe rendering defects fixed at the generator. **Ticket 2 (assets) has landed:** the belt model family — straights and left/right corners in four animation frames with a solid raised direction arrow; the belt-side junction variants are retired (the plain tile carries the junction, the machine's hood does the rest). **Ticket 5 (Godot) has landed:** a belt's shape (straight, left/right corner, merge, start, end) comes from its `links`, the four-frame surface animates at item speed from the tick, items arc through corners (and are drawn face to face on every tile — they had been half a tile downstream), hover says feeds and hand-offs in words, the retired belt aliases are deleted, and a `--belt-gallery` fixture shows every shape and junction at every facing. Tickets 6 (pipe presentation from `links`) and 7 (bug hunt) are to do; one sim rule discrepancy (a belt feeds a machine from any side of an inlet-edge tile) is flagged for ticket 7.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -50,6 +50,53 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-10 — Pipes & conveyors overhaul, ticket 5: belts turn corners, run, and connect at every facing
+
+The first presentation ticket of the overhaul, consuming tickets 1, 2 and 4.
+Every belt tile now takes its SHAPE from the `links` the simulation puts on
+the wire — straight, left corner, right corner, merge, line start, line end
+— through one pure function (`_belt_shape_for`), draws the matching
+four-frame model family, and spins by its facing like every other asset (a
+corner needs no yaw of its own). The `belt`/`belt_inlet`/`belt_outlet`
+aliases, models and icons are deleted and every east-only belt comment in
+`main.gd`, `world.rs`, `machines.ron` and ARCHITECTURE.md is gone: a belt
+meeting a machine, a hopper or a dock is the plain tile at all four
+facings, and the machine's hood does the rest.
+
+The surface animates at item speed: frame `floor(tick × 4 / 50) mod 4`,
+read from the tick at the end of each simulation step, so the pause menu
+freezes it with no extra state. Items follow a quarter-circle arc through a
+corner, parameterised by the sim's own 0..1 distance — and fitting that arc
+exposed that items had always been drawn half a tile downstream (tile
+centre to next centre rather than face to face); they are face to face on
+every tile now, UI_UX.md §2b point 24. Hover says it in words (`carries
+east · turns left / fed from the west (Hopper) / hands to Crusher`, `not
+connected` where null). The build ghost stays a straight tile, on purpose:
+the would-be links of an unplaced tile are the sim's to compute
+(ARCHITECTURE.md §4's planned `preview_command`), not a Godot-side copy of
+`resolve_sink`.
+
+New: `test_belt_shapes.gd` (the shape rule at every facing, the gallery's
+eight corners at their facing's yaw, frame index and pause freeze, arc
+positions and continuity, hover), `test_layouts.gd`'s `build_belt_gallery`
+and `scripts/screenshot-scene.sh --belt-gallery` — both hands of corner and
+hopper → belt → crusher → belt → dock at all four facings, a two-flank
+merge, a line end and a lone start. Renders read at scene zoom and in
+closeups on both rings and all four machine lines, populated and idle: the
+corners' rails meet the straights, the arrows bend with the belt, a queue
+of tomatoes curves round a corner, and the first tomato stands in the
+hopper's mouth. `test_connections.gd` now asserts the retired models are
+NOT staged and that turning a fed belt re-shapes it into a corner.
+`verify-core-loop.sh` runs 22 Godot proofs; the stress line's rebuild
+went from 38 ms to 64 ms for four frame sets per belt family (still one
+draw call per set per class per frame).
+
+**Flagged, not judged:** at `TICK_HZ` 30 the four-frame march is 2.4 frame
+changes a second. A PNG cannot show stutter and this ticket had no live
+session; the number is recorded and `BELT_FRAMES` is left at four. If it
+reads as stepping in play, raising the frame count is a coordinator call
+(it multiplies MultiMeshes per belt family, not per-frame cost).
 
 ### 2026-09-09 — Pipes & conveyors overhaul, ticket 2: the belt family, drawn and animated
 

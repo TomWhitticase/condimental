@@ -22,6 +22,124 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-10: **Pipes & conveyors overhaul, ticket 5 of 7 (belt
+  presentation: shape from `links`, junctions at every facing, animation
+  at sim speed, items through corners; `godot_project/` plus docs).** The
+  plan fixed the wire contract, the frame scheme and the corner
+  conventions; tickets 1, 2 and 4 built them; this ticket consumed them.
+  Seven calls worth not re-litigating.
+
+  1. **The shape rule is one pure function of `links` and facing.**
+     `_belt_shape_for` returns one of six words — straight, corner_left,
+     corner_right, merge, start, end — and every consumer (the frame set,
+     the item path, the hover line, the tests) asks it rather than
+     re-reading `links`. The order of the rule matters and is the plan's:
+     a feed from BEHIND makes a tile straight whatever else feeds it, so a
+     flank feed on top of one is a merge and not a corner (the stress
+     line's flank hoppers, the gallery's ring hopper); exactly one flank
+     feed with nothing behind is the corner; two flanks is a merge; then
+     no feed is a START and no output an END. A lone tile is a start rather
+     than an end because it is the start of the line being laid. A feed
+     from the tile the belt points AT (a hopper facing a belt that faces it
+     back) is neither behind nor a flank, is drawn straight and is said in
+     hover; no model describes it and the sim does link it. Merge, start
+     and end all draw the straight family: ticket 2 authored no separate
+     models, and nothing on the render asked for one.
+
+  2. **Which flank is "left" was decided by the models, and it agrees with
+     the product's own left.** `belt_corner_left` is authored with its
+     output on +X and its input on vox low Y, which the importer puts at
+     world +Z, which is sim north — the side one quarter turn
+     ANTICLOCKWISE from east. Product coming from the north heads south and
+     turns to go east: facing south, east is on your left. So left corner =
+     fed from `rotate_ccw(direction)`, right corner = fed from
+     `rotate_cw(direction)`, and because a Y rotation carries that relation
+     with the mesh, **a corner needs no yaw of its own** — every belt tile
+     spins by its facing exactly as a straight does. Ticket 4's
+     caller-supplied yaw seam is kept (it costs nothing) but unused.
+
+  3. **Items are drawn face to face, and that was a half-tile bug fix, not
+     a style change.** `BeltSnapshot` measures an item's distance from the
+     tile's START (its input edge) to its END; `main.gd` had been drawing
+     distance 0 at the tile's CENTRE and distance 1 at the next tile's
+     centre. Every tile shared the offset, so a straight line looked
+     continuous — an item just appeared mid-belt instead of at the hopper's
+     mouth and vanished at a machine's centre instead of at its face — and
+     nobody saw it. A corner cannot share it: the plan's arc runs from the
+     input face's midpoint to the output face's, and drawn half a tile
+     late it would have left the tile through the wrong face. So the
+     straight run is `centre + facing * (distance - 0.5) * TILE`, the arc
+     is a quarter circle of radius half a tile about the pivot corner (the
+     tile corner the input and output faces share), and
+     `test_belt_shapes.gd` pins that a corner's end is the next tile's
+     start and the previous tile's end is the corner's start. The arc is
+     the same curve the corner model's lane is built on, so items ride the
+     rubber. The ticket said "straight tiles unchanged"; they are unchanged
+     in shape (a straight line along the facing) and moved half a tile
+     upstream in position, which the plan's own arc definition requires.
+
+  4. **The frame is a function of the tick and nothing else.**
+     `_belt_frame_for_tick(tick) = floor(tick * BELT_FRAMES /
+     BELT_TICKS_PER_TILE) mod BELT_FRAMES`, computed once at the end of
+     `_advance_simulation` from `sim.current_tick()`. Nothing is
+     accumulated, so the pause menu (which never reaches that line) freezes
+     the rubber with no extra state, a loaded save resumes on the right
+     frame, and a headless test can drive it with the same function the
+     game uses. `BELT_FRAMES` and `BELT_TICKS_PER_TILE` are mirrored as
+     constants in `main.gd` with a "change both" note, the same way
+     `BELT_SURFACE_VOXELS` mirrors the generator. **At `TICK_HZ` 30 that is
+     2.4 frame changes a second**, which a PNG cannot judge; the coordinator
+     asked for a judgement in the live scene and this ticket could not make
+     one, so the number is recorded here and the frame count is left at
+     the plan's four (a change is an `ask`). The "closest frame to the
+     exact sub-tile phase" alternative changes when the flips happen, not
+     how many there are, so it was not built either.
+
+  5. **The build ghost stays a straight tile.** The alternative — computing
+     a would-be shape for the ghost from its neighbours' `links` — means a
+     Godot-side copy of `resolve_sink`: which neighbours feed a tile that
+     does not exist yet, from which sides, including the inlet-edge rule
+     ticket 1 flagged for ticket 7. That is precisely the second adjacency
+     scan the `links` field was built to remove, and it would drift from
+     the sim's rule the first time the rule changed. The would-be links of
+     an unplaced tile are a fact the sim has not computed, and
+     ARCHITECTURE.md §4's planned `preview_command` is the mechanism for
+     asking it; when that lands the ghost reads its shape from the answer.
+     Until then the ghost's job is the tile, the facing (the arrow on the
+     straight tile) and whether the click will succeed, and the corner
+     appears the instant the tile is placed, since placing rebuilds. The
+     REMOVE ghost, which is over a placed tile, does show the real shape.
+
+  6. **The retired names are deleted, not kept as aliases.** `belt`,
+     `belt_inlet` and `belt_outlet` are out of `ASSETS`, their nine `.vox`
+     files and three icons are removed, `SHOP_MODELS["belt"]` is `belt_f0`
+     (which is what the hotbar icon and the ghost already were, by
+     content), and `test_connections.gd` asserts the old models are NOT
+     staged, so a stale lookup fails loudly instead of drawing frame 0
+     under an old name. `voxgen`'s `belt()` function stays, as the
+     reference the junction and splitter tests measure against, with a
+     test pinning it to frame 0. `_belt_asset_for` and its east-only
+     fallback are gone from `main.gd` along with every comment about
+     belt junction art being +X only; `_is_building_tile` survives because
+     the pipe-role pass still reads it until ticket 6.
+
+  7. **Hover says it in words, from the same `links`.** A belt's tooltip
+     is three lines: `belt · carries east · turns left` (the shape word only
+     when it is a corner or a merge), `fed from the west (Hopper)` (the
+     side always; the neighbour's display name when it is not another
+     conveyor, looked up from the placement actually there since a link
+     only says `machine`), and `hands to Crusher` / `hands east to the next
+     belt` / `not connected`. "Fed by nothing" is said rather than left
+     blank: an unfed line start is the commonest reason nothing is moving.
+
+  The gallery (`test_layouts.gd`'s `build_belt_gallery`, `--belt-gallery`)
+  is a clockwise ring (four right corners), an anticlockwise ring (four
+  left), hopper → belt → crusher → belt → dock at each facing, a two-flank
+  merge, a line end and a lone start; about 1,300 of the 3,000 balance.
+  A closed ring is a legal placement and runs; fed from a flank hopper it
+  fills and jams within the populate run, which is a real state and shows
+  items nose to tail round both hands of corner.
+
 - 2026-09-09: **Pipes & conveyors overhaul, ticket 2 of 7 (the belt model
   family; `assets/voxels/` only, `godot_project/main.gd` deliberately
   untouched — ticket 5 wires the models in).** The plan
@@ -2641,6 +2759,45 @@ were only discoverable by building it:
     the tile's outer corner and pivot corner reads as floor, not as a hole.
     That render is not repeatable from a committed script, which is why the
     check is flagged for ticket 5 rather than claimed as done.
+
+24. **A uniform offset in a path convention is invisible on a straight
+    line and shows up the moment the line bends** (the pipes and conveyors
+    overhaul, ticket 5).
+
+    `BeltSnapshot` gives an item's distance from the tile's start — its
+    input edge — to its end, in `[0, 1]`. `main.gd` had drawn distance 0
+    at the tile's *centre* and distance 1 at the *next* tile's centre.
+    Because every tile shared the half-tile shift, a belt-to-belt hop was
+    continuous (the sender's 1 and the receiver's 0 landed on the same
+    point), and every render of a straight line since the core-loop
+    milestone looked right. What was actually wrong: a hopper's item
+    appeared mid-belt instead of at the hopper's mouth, and a machine's
+    item vanished at the machine's centre instead of at its face, both of
+    which read as "the item went under the hood" and were never questioned.
+
+    The corner exposed it. The plan's arc runs from the input face's
+    midpoint to the output face's, and drawn half a tile late it would have
+    left the tile through the wrong face — and a corner-shaped queue of
+    tomatoes is what the gallery render shows, so the arc, not the offset,
+    was the thing to keep. Items are drawn face to face on every tile now
+    (`centre + facing * (distance - 0.5) * TILE` for a straight), and the
+    populated demo render shows the first tomato standing in the hopper's
+    mouth and the last one at the crusher's face.
+
+    The general rule: check a path convention against the tile's own
+    edges, not against its neighbours, because neighbours share the error
+    and hide it. `test_belt_shapes.gd` pins the straight run's two ends to
+    the tile's faces and a corner's ends to its neighbours' ends, which is
+    both halves of that check.
+
+    Two smaller findings from the same renders. **Both hands of corner
+    read at all four facings** with no yaw of their own (the models are
+    authored output-+X and the flank relation survives the spin), so the
+    caller-supplied-yaw seam ticket 4 left is unused. **A closed ring of
+    belts is a legal placement and runs**: fed from a flank hopper, the
+    first items go all the way round and queue back at the merge tile,
+    which is a real state and draws a smooth curve of items through the
+    corner — the arc's best proof.
 
 ## Part C — ARCHITECTURE.md §9a, full text (mobile export spike findings, 2026-09-06)
 

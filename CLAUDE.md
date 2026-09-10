@@ -117,7 +117,9 @@ sauce-factory/
     addons/                # vendored, pinned .vox importer (see VENDORED.md)
     test_*.gd              # headless proofs, each prints its own success
                            #   marker; test_layouts.gd is the shared fixture
-                           #   (builds factories through real commands)
+                           #   (builds factories through real commands;
+                           #   build_belt_gallery = every belt shape and
+                           #   junction at every facing)
     test_screenshot.gd     # NOT headless: renders the scene to a PNG
   scripts/
     lint-commit-msg.sh     # commit-msg hook
@@ -126,7 +128,8 @@ sauce-factory/
     build-voxels.sh        # regenerate .vox files + review PNGs
     screenshot-scene.sh    # render main.tscn to PNG (flags: --populate,
                            #   --contracts, --stock, --hotbar N, --no-hud,
-                           #   --closeup, --first-person, menu/pause)
+                           #   --closeup, --first-person, --stress,
+                           #   --belt-gallery, menu/pause)
   docs/                    # README.md (index), ARCHITECTURE.md, UI_UX.md,
                            #   GAMEPLAY.md, DEVLOG.md, DECISIONS.md
   .githooks/               # commit-msg + pre-commit; enable with
@@ -177,6 +180,32 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-10 **Pipes & conveyors overhaul, ticket 5 (belt presentation).**
+  A belt tile's shape is `_belt_shape_for(links, direction)`, pure: input
+  from behind → straight (plus any flank = MERGE); exactly one flank input
+  and nothing behind → corner, LEFT if fed from the anticlockwise side of
+  its facing, RIGHT from the clockwise side; two flanks → merge; no inputs
+  → START (a lone tile is a start); inputs but no output → END. Merge,
+  start and end draw the straight family; corners need NO yaw of their own
+  (authored output-+X, spun by the facing like everything else). Frame sets
+  are `<family>_f0..f3`; `BELT_FRAMES` (4) and `BELT_TICKS_PER_TILE` (50)
+  are mirrored in `main.gd`; the frame is `floor(tick*4/50) mod 4` from
+  `sim.current_tick()` at the end of `_advance_simulation`, so a pause
+  freezes it for free. **Items are drawn face to face**: distance 0 is the
+  input face's midpoint, 1 the output face's (they were centre-to-next-
+  centre, half a tile downstream); a corner's items follow a quarter circle
+  of radius half a tile about the pivot corner, and `_carried_item_transform`
+  reads the shape from `_belt_shapes`. **The belt ghost stays straight**
+  (the would-be links of an unplaced tile are the sim's to compute; ARCH §4's
+  `preview_command` is the home). Hover: `carries east · turns left / fed
+  from the west (Hopper) / hands to Crusher`, `not connected` where null.
+  The `belt`, `belt_inlet`, `belt_outlet` aliases, models and icons are
+  DELETED; `SHOP_MODELS["belt"]` is `belt_f0`; `voxgen`'s `belt()` stays
+  as the test reference only. `_belt_asset_for` is gone; `_is_building_tile`
+  survives only for the pipe roles (ticket 6). `test_layouts.gd`'s
+  `build_belt_gallery` + `--belt-gallery`: both hands of corner and every
+  belt-to-building junction at all four facings. At 30 Hz the four-frame
+  march is 2.4 frame changes a second; judged by numbers, not by eye.
 - 2026-09-09 **Pipes & conveyors overhaul, ticket 2 (belt model family).**
   One generator, `belt_shape(shape, phase)`, emits `belt_f0..f3`,
   `belt_corner_left_f0..f3`, `belt_corner_right_f0..f3`; `belt`,

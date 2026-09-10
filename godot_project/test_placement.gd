@@ -251,33 +251,29 @@ func _run_checks() -> void:
 		_fail("a north-facing 3x1 should claim 1x3 — a quarter turn swaps the extents")
 		return
 
-	# --- 6. The junction art's east-only fallback, under real placement ----
-	# The belt at (0, 0) faces east with a hopper behind it at (-1, 0): that
-	# is the one authored case, and it takes the outlet variant.
+	# --- 6. A belt's shape comes from its links, at every facing ----------
+	# The belt at (0, 0) faces east with a hopper behind it at (-1, 0): fed
+	# from behind, so the plain straight family — since the pipes and
+	# conveyors overhaul there is no junction variant to pick and nothing
+	# east-only about a belt (test_connections.gd and test_belt_shapes.gd
+	# cover the corner and re-shaping cases).
 	Layouts.build_minimal(main.sim)
 	main._rebuild_world()
-	if main._belt_asset_for(Vector2i(0, 0), "east") != main.BELT_OUTLET_ASSET:
-		_fail("an east-facing belt catching a hopper's discharge should draw the outlet variant")
+	var straight: Array = main._belt_frames_for_shape(main.BELT_SHAPE_STRAIGHT)
+	var fed: Dictionary = main._tile_instance_at(Vector2i(0, 0))
+	if fed.is_empty() or fed["asset"] != straight[0]:
+		_fail("an east-facing belt catching a hopper's discharge should draw the straight family, got %s" % str(fed.get("asset", "nothing")))
 		return
-	# The SAME tile facing any other way must fall back to the plain model
-	# rather than drawing a doorway pointing the wrong way — the known,
-	# accepted art gap this ticket does not close.
-	for facing in ["north", "south", "west"]:
-		if main._belt_asset_for(Vector2i(0, 0), facing) != main.BELT_ASSET:
-			_fail("a %s-facing belt must fall back to the plain tile, got '%s'" % [
-				facing, main._belt_asset_for(Vector2i(0, 0), facing),
-			])
-			return
-	# And the fallback is what the scene actually built for the rotated belts
-	# above, not just what the function would say: the north-facing belt at
-	# (10, 6) rendered, and it rendered the plain model.
+	# The lone rotated belts above rendered too, as straights, spun: a
+	# north-facing tile fed by nothing is a line start, drawn with the same
+	# four frames as any straight.
 	var north_belt: Dictionary = main._tile_instance_at(Vector2i(10, 6))
 	if north_belt.is_empty():
 		_fail("the north-facing belt did not render at all")
 		return
-	if north_belt["asset"] != main.BELT_ASSET or north_belt["nodes"].is_empty():
-		_fail("the north-facing belt rendered '%s' with %d meshes — the fallback model did not build" % [
-			north_belt["asset"], north_belt["nodes"].size(),
+	if north_belt["asset"] != straight[0] or north_belt["frames"] != straight or north_belt["nodes"].is_empty():
+		_fail("the north-facing belt rendered '%s' (%s) with %d meshes — expected the straight frame set" % [
+			north_belt["asset"], str(north_belt["frames"]), north_belt["nodes"].size(),
 		])
 		return
 

@@ -208,6 +208,17 @@ DECISIONS.md Part B. There is no point 10.
     reaches the exit face in the same frame a straight would; its arrow
     bends with the belt. Idlers, rails and legs are structure and never
     move. The plain tile carries every belt-to-machine junction (point 18).
+24. **A uniform offset in a path convention is invisible on a straight
+    line and shows up the moment the line bends.** Items were drawn from a
+    tile's centre to the next tile's centre — half a tile downstream of the
+    simulation's own input-face-to-output-face distance — and every render
+    of a straight line looked continuous, because every tile shared the
+    shift. A corner cannot share it: the arc has to leave through the
+    output face, and drawn half a tile late it left through the wrong one.
+    Items are now drawn face to face on every tile, so an item appears at a
+    hopper's mouth and vanishes at a machine's face. The general rule: check
+    a path convention against the tile's edges, not against its neighbours,
+    because neighbours hide a shared error.
 
 ## 3. Theme & setting
 

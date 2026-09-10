@@ -343,3 +343,114 @@ static func build_stress_line(sim) -> void:
 ## How many placements `build_stress_line` makes, so a test can assert the
 ## whole thing was affordable and legal.
 const STRESS_PLACEMENTS := STRESS_BELTS + 1 + 2 * 4 + STRESS_PIPE_RUNS * (2 + STRESS_PIPES_PER_RUN)
+
+
+## THE BELT GALLERY (the pipes & conveyors overhaul, ticket 5) — every belt
+## shape at every facing, and a belt meeting a machine, a hopper and a dock
+## at every facing, in one world. `test_belt_shapes.gd` asserts against it
+## and `scripts/screenshot-scene.sh --belt-gallery` photographs it. About
+## 1,300 of a 3,000 starting balance.
+##
+## What is on the floor, in simulation coordinates (north = +Y):
+##
+##   * A CLOCKWISE ring of twelve belts on x 0..3, y 0..3. Every corner of a
+##     clockwise loop turns RIGHT, so its four corner tiles are
+##     `belt_corner_right` at all four facings: (0,3) east, (3,3) south,
+##     (3,0) west, (0,0) north. A hopper at (1,-1) faces north onto (1,0),
+##     which is fed from behind by the ring as well, so (1,0) is a MERGE and
+##     the ring carries product (with `--populate`) round both hands of
+##     corner and jams up, which is a real state worth drawing.
+##   * An ANTICLOCKWISE ring on x 6..9, y 0..3: `belt_corner_left` at all
+##     four facings — (6,0) east, (9,0) north, (9,3) west, (6,3) south.
+##     Unfed, so its corners are photographed clean.
+##   * Four MACHINE LINES, hopper -> belt -> crusher -> belt -> dock, one
+##     per facing: east along y = 6, west along y = 9, north up x = 12,
+##     south down x = 16. Every belt-to-building junction the game has, at
+##     every facing the player can choose. (The 2x2 dock's inlet edge is the
+##     whole edge facing the belt, so each line's last belt meets the dock's
+##     origin tile.)
+##   * A T MERGE at (10,6): fed from both flanks by (10,5) facing north and
+##     (10,7) facing south, nothing behind, handing east to (11,6), which
+##     hands to nothing — a two-flank merge and a line END side by side.
+##   * A lone belt at (8,6) (a line START with no output) and a two-tile
+##     start-then-end at (8,8) -> (9,8). (Not on row 7: a belt accepts from
+##     any side, so (9,7) would hand into the merge's south-facing feeder.)
+static func build_belt_gallery(sim) -> void:
+	# The clockwise ring (right corners). Along the top row east, down the
+	# east column south, along the bottom row west, up the west column north.
+	for x in [0, 1, 2]:
+		place(sim, "belt", Vector2i(x, 3), "east")
+	place(sim, "belt", Vector2i(3, 3), "south")
+	for y in [2, 1]:
+		place(sim, "belt", Vector2i(3, y), "south")
+	place(sim, "belt", Vector2i(3, 0), "west")
+	for x in [2, 1]:
+		place(sim, "belt", Vector2i(x, 0), "west")
+	place(sim, "belt", Vector2i(0, 0), "north")
+	for y in [1, 2]:
+		place(sim, "belt", Vector2i(0, y), "north")
+	place(sim, "belt", Vector2i(0, 3), "east")
+	place(sim, "hopper", Vector2i(1, -1), "north", "tomato")
+
+	# The anticlockwise ring (left corners). Along the bottom row east, up
+	# the east column north, along the top row west, down the west column
+	# south.
+	place(sim, "belt", Vector2i(6, 0), "east")
+	for x in [7, 8]:
+		place(sim, "belt", Vector2i(x, 0), "east")
+	place(sim, "belt", Vector2i(9, 0), "north")
+	for y in [1, 2]:
+		place(sim, "belt", Vector2i(9, y), "north")
+	place(sim, "belt", Vector2i(9, 3), "west")
+	for x in [8, 7]:
+		place(sim, "belt", Vector2i(x, 3), "west")
+	place(sim, "belt", Vector2i(6, 3), "south")
+	for y in [2, 1]:
+		place(sim, "belt", Vector2i(6, y), "south")
+
+	# Machine lines, one per facing.
+	place(sim, "hopper", Vector2i(0, 6), "east", "tomato")
+	place(sim, "belt", Vector2i(1, 6), "east")
+	place(sim, "crusher", Vector2i(2, 6), "east")
+	place(sim, "belt", Vector2i(3, 6), "east")
+	place(sim, "dock", Vector2i(4, 6), "east")
+
+	place(sim, "dock", Vector2i(0, 9), "west")
+	place(sim, "belt", Vector2i(2, 9), "west")
+	place(sim, "crusher", Vector2i(3, 9), "west")
+	place(sim, "belt", Vector2i(4, 9), "west")
+	place(sim, "hopper", Vector2i(5, 9), "west", "tomato")
+
+	place(sim, "hopper", Vector2i(12, 0), "north", "tomato")
+	place(sim, "belt", Vector2i(12, 1), "north")
+	place(sim, "crusher", Vector2i(12, 2), "north")
+	place(sim, "belt", Vector2i(12, 3), "north")
+	place(sim, "dock", Vector2i(12, 4), "north")
+
+	place(sim, "dock", Vector2i(16, 0), "south")
+	place(sim, "belt", Vector2i(16, 2), "south")
+	place(sim, "crusher", Vector2i(16, 3), "south")
+	place(sim, "belt", Vector2i(16, 4), "south")
+	place(sim, "hopper", Vector2i(16, 5), "south", "tomato")
+
+	# The T merge and its dead end, the lone start, the start-then-end.
+	place(sim, "belt", Vector2i(10, 5), "north")
+	place(sim, "belt", Vector2i(10, 7), "south")
+	place(sim, "belt", Vector2i(10, 6), "east")
+	place(sim, "belt", Vector2i(11, 6), "east")
+	place(sim, "belt", Vector2i(8, 6), "east")
+	place(sim, "belt", Vector2i(8, 8), "east")
+	place(sim, "belt", Vector2i(9, 8), "east")
+
+
+## How many placements `build_belt_gallery` makes: 24 ring belts, 8 line
+## belts, 7 loose belts, 5 hoppers, 4 crushers, 4 docks.
+const BELT_GALLERY_PLACEMENTS := 24 + 8 + 7 + 5 + 4 + 4
+
+## The gallery's corner tiles by hand and facing, for tests and closeups.
+const BELT_GALLERY_RIGHT_CORNERS := {
+	"east": Vector2i(0, 3), "south": Vector2i(3, 3), "west": Vector2i(3, 0), "north": Vector2i(0, 0),
+}
+const BELT_GALLERY_LEFT_CORNERS := {
+	"east": Vector2i(6, 0), "north": Vector2i(9, 0), "west": Vector2i(9, 3), "south": Vector2i(6, 3),
+}

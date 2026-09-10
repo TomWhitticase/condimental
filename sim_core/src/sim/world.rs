@@ -133,8 +133,12 @@
 //! pipe tile, machine and building now carries a real [`Direction`] on the
 //! wire, a belt run may turn as often as the player likes, and the sim
 //! links a corner the same way it links a straight — by asking what is in
-//! the tile a belt points at. What is *not* done here is the other half
-//! that note named: rotated voxel models. Ticket 2 (presentation) owns that.
+//! the tile a belt points at. The other half that note named — rotated
+//! voxel models, and a corner that is *drawn* as a corner — is presentation:
+//! the Real Placement epic's ticket 2 spun every model by its facing, and
+//! the Pipes & Conveyors Overhaul's ticket 5 draws a belt's shape (straight,
+//! left or right corner, merge, line start, line end) from the [`Links`]
+//! below at every facing, with no east-only junction art left on the belt.
 //!
 //! **And the wire now says which way a corner turns** (the Pipes &
 //! Conveyors Overhaul, ticket 1 — `docs/PIPES_AND_CONVEYORS_PLAN.md`). Every

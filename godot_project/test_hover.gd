@@ -165,9 +165,9 @@ func _run_checks() -> void:
 			_fail("hover over %s should describe a %s, got: %s" % [str(tile), str(kinds[tile]), text])
 			return
 
-	# A ROTATED tile still identifies itself — the belt at (3, 1) faces north,
-	# which is a facing no asset was authored for (see `_belt_asset_for`), and
-	# hover must be indifferent to that.
+	# A ROTATED tile still identifies itself — the belt at (3, 1) faces north
+	# and hands into the crusher's flank, and hover must say its facing
+	# whatever shape `_belt_shape_for` gives it.
 	var north_belt: String = main._hover_text_at_tile(Vector2i(3, 1))
 	if not north_belt.contains("north"):
 		_fail("hover over the north-facing belt should say so, got: %s" % north_belt)
