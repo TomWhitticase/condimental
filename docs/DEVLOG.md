@@ -52,6 +52,44 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-11 — Numbers into bars: a UI visualisation pass over every readout
+
+The hopper panel's fill bar, added with the configuration panel, was the
+best-liked thing on screen — a level you *see* rather than a level you read
+— so this pass took that idiom everywhere the HUD was printing a raw figure
+and asked, per readout, what the figure actually means to the player.
+
+The rule it settled on is the part worth keeping: **a quantity gets a bar
+only if the simulation defines a ceiling for it.** A hopper against its
+capacity, a machine against its cycle, a countdown against its cadence, a
+price against the balance in your pocket — those are fractions, and a
+fraction is a bar. Raw stock in the larder and the balance itself are not:
+nothing says how much tomato is "full", and a bar drawn against an invented
+maximum would be a gauge that lies. They stay figures.
+
+All of it goes through one mechanism (`_build_meter`/`_set_meter`) with
+three fills that mean things rather than set moods: green is a level, amber
+is work under way, red is a cost you cannot meet or a clock nearly out.
+Where they landed: hover now draws a hopper's or tank's level, a pipe's
+pressure, a machine's cycle and its input/output buffers instead of
+listing them; each contract docket has a draining countdown in the
+clipboard's own paper and ink, reading **"8s to go"** and **"due now"**
+rather than a tick count, with ✓/✗ tallies beside it; every build-menu and
+market slot shows its price as the share of the balance it would take, and
+a full red bar when you cannot afford it; and the money figure flashes
+**+90** or **-5** under itself when something changes it, so a payout that
+lands while you are looking at the factory is an event rather than a number
+that was different last time you glanced.
+
+Two things fell out of doing it. Everything the player reads is now named
+the way a person would say it (`Boxed Ketchup`, `Fluid Tank`) — the pass
+kept finding raw wire ids like `boxed_ketchup` in headings, because a
+tooltip that echoes the JSON is invisible until you look at it as art. And
+a meter records the fraction it drew on its own node, which is how the
+headless proofs assert that a bar *moved* without ever laying out a
+viewport: `test_contract_panel.gd` watches three countdowns drain
+independently, and `test_hover.gd` checks which tiles get a meter at all.
+
 ### 2026-09-10 — Click a hopper or a tank to configure it
 
 The presentation half of the previous entry, and the end of feeding a

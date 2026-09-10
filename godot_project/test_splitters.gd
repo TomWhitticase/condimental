@@ -242,7 +242,7 @@ func _run_checks() -> void:
 
 	# --- hover ------------------------------------------------------------
 	var forked_text: String = main._hover_text_at_tile(FORKED)
-	if not forked_text.begins_with("splitter"):
+	if not forked_text.begins_with("Splitter"):
 		_fail("hovering a splitter says '%s'" % forked_text)
 		return
 	var lonely_text: String = main._hover_text_at_tile(STRAIGHT_ONLY)

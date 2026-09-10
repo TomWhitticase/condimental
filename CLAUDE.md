@@ -181,6 +181,34 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-11 **UI visualisation pass — one bar language.** A quantity is
+  drawn as a bar **only where the simulation defines its ceiling** (hopper
+  and tank level, machine cycle, pipe pressure, a contract's countdown
+  against its cadence, a price against the balance); a figure with no
+  denominator — larder stock, the balance itself — stays a number, because
+  a bar against an invented maximum is a gauge that lies. One mechanism:
+  `_build_meter(parent, width, fill, track, border, height)` returns the
+  TRACK, `_set_meter(track, fraction, fill)` sizes the fill and **records
+  `fraction` as node meta** so a headless test can prove a bar moved with no
+  viewport. Three fills, each a meaning: `METER_FILL_LEVEL` (green, how
+  full), `METER_FILL_PROGRESS` (amber, work under way), `METER_FILL_WARN`
+  (red, a cost you cannot meet or a clock nearly out) — always with a word
+  or glyph beside it (UI_UX §7). Widget state comes from
+  `_hover_panel_state(tile)`, a pure function beside the pure
+  `_hover_text_at_tile`. The docket keeps to paper + ink (no third colour,
+  UI_UX §5), reads **"8s to go" / "due now"** never ticks
+  (`_format_remaining`, ARCH §3.9), carries ✓/✗ tallies, and puts the
+  countdown, cadence and both tallies on ONE row — a second row scrolled the
+  board at 1600x900 (UI_UX §5c) — with `CONTRACT_METER_MIN_WIDTH` so the
+  expanding bar cannot be squeezed to nothing by the longest cadence text.
+  Shop/market slots draw a price as its share of money, floored at
+  `SHOP_METER_MIN_SHARE` so a cheap thing still draws something, full red
+  when unaffordable. The money figure flashes `+N`/`-N` beneath itself on
+  every change (`_flash_money_change`, the hotbar flyout's hold/fade; its
+  deadline starts one fade in the PAST, since `Time.get_ticks_msec()` is
+  small at boot). Every id the player reads goes through
+  `_kind_display_name`/`_item_display_name`, never the wire's
+  `boxed_ketchup`. Full record in `docs/DECISIONS.md`.
 - 2026-09-10 **Hopper/tank configuration, ticket 2 (Godot + one sim deletion).**
   A placed hopper or tank is CLICKED and configured on a panel beside it:
   level, FILL (with its reason in words when refused), AUTO-FILL toggle,

@@ -22,6 +22,100 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-11: **The UI visualisation pass — every readout in the HUD was
+  asked what its number MEANS, and the answers are one bar language.** The
+  fill bar that shipped on the hopper configuration panel was the readout
+  the player singled out as looking right, so this pass took that idiom
+  across the hover tooltip, the contract clipboard, the build menu, the
+  ingredient market and the money figure. Seven calls worth not
+  re-litigating.
+
+  (1) **A bar is drawn only where the SIMULATION defines the ceiling.**
+  Hopper and tank level (capacity), a machine's cycle (its recipe's
+  `time_ticks`), a pipe segment (its pressure against full), a contract's
+  countdown (against its own cadence), a price (against the money in the
+  player's pocket) — all of those are genuine fractions, and a fraction is a
+  bar. Larder stock and the balance itself are **not**: nothing in the game
+  says how many tomatoes is "full", so a bar for them would have to invent a
+  maximum, and a gauge whose full mark is fiction teaches the player a scale
+  that does not exist. They stay figures. This is the rule to apply to the
+  next readout somebody adds, not the list of the ones that exist today.
+
+  (2) **One mechanism, once.** `_build_meter(parent, width, fill, track,
+  border, height)` builds a track Panel with a fill Panel anchored inside it
+  and **returns the track**; `_set_meter(track, fraction, fill_color)` sizes
+  and colours the fill. A width of 0 means "expand to fill the row". Two
+  bars in the same HUD built two different ways would drift apart in height,
+  border and idle appearance within a ticket, which is exactly what the
+  voxel side learned about materials (UI_UX §2b point 2).
+
+  (3) **`_set_meter` records the fraction it drew on the track's own node
+  meta.** Godot lays nothing out in a headless SceneTree, so a test can
+  never read a bar's pixels; without this, "the countdown drains" could only
+  be asserted through the label beside it, which is a different value with
+  its own formatting. The meta is the drawn number itself, so
+  `test_contract_panel.gd` watches three countdowns fall independently as
+  the real simulation runs, and `test_hover.gd` asserts which tiles get a
+  meter at all. A presentation value that a headless proof can read is worth
+  the two lines it costs.
+
+  (4) **Three fills, each a meaning, never a mood.** `METER_FILL_LEVEL`
+  (green) is how full something is, `METER_FILL_PROGRESS` (amber) is work
+  under way, `METER_FILL_WARN` (red) is a cost that cannot be met or a clock
+  nearly out. Every one of them is accompanied by a word, a glyph or a
+  figure — the countdown says "due now", the missed tally says "✗ 2 missed",
+  an unaffordable slot is dimmed and marked as well as red (UI_UX §7).
+
+  (5) **The clipboard's bar is paper and ink, and its clock is in
+  seconds.** UI_UX §5 gives a docket exactly two colours (the checkbox's
+  paper tone plus a steel hairline) and this pass did not invent a third:
+  the countdown is ink on paper inside the card's own hairline, with the
+  docket's single warning red reserved for the last stretch and for a
+  non-zero missed tally. The figure beside it reads **"8s to go" / "1m 15s
+  to go" / "due now"**, never a tick count — ticks are an implementation
+  detail of ARCHITECTURE.md §3.9's fixed timestep, and a board that prints
+  them is asking the player to do the division. Two layout facts came out of
+  building it: the countdown, the cadence and both tallies share ONE row,
+  because a second row pushed the third docket off the bottom of a 1600x900
+  board (UI_UX §5c says nothing scrolls there), and the bar needs
+  `CONTRACT_METER_MIN_WIDTH` as well as `SIZE_EXPAND_FILL`, because on the
+  docket whose cadence spells out longest the expanding bar was squeezed to
+  zero — a gauge that vanishes when the text beside it grows is worse than
+  no gauge.
+
+  (6) **A price is drawn as the share of the balance it would take.** That
+  is the honest relation the player is actually deciding on, and it means
+  the same bar answers "can I afford it" (a full red bar when they cannot)
+  and "what will this cost me" (a sliver at a healthy balance). It is
+  floored at `SHOP_METER_MIN_SHARE` so that something buyable always draws
+  something; the consequence, accepted, is that at a large balance several
+  cheap kinds draw the same sliver and the numbers above them carry the
+  difference. The alternative — scaling each price against the most
+  expensive thing in the menu — makes a bar that never changes as the player
+  earns and spends, which is the one thing this readout is for.
+
+  (7) **The money figure announces what just changed it.** A contract
+  settles on its own clock while the player is looking at their factory, so
+  the only evidence of a payout was a balance that had quietly become a
+  different number by the next time they glanced at it. `+90` in green and
+  `-5` in the docket's warning ink now flash under the figure and fade, on
+  the hotbar name flyout's own hold/fade timings, because two transient
+  readouts that appear and vanish the same way are one idiom rather than
+  two. It floats over the dock line below rather than reserving a row that
+  would be empty almost always. Two traps: the deadline must start one whole
+  fade **in the past**, since `Time.get_ticks_msec()` is milliseconds since
+  the process started and a zero deadline is still inside the fade window
+  for the first second of a session (the headless proof caught exactly
+  that); and a change smaller than a whole unit must not flash, since the
+  figure above is drawn whole and a `+0` is an event the player cannot see.
+
+  One thing found rather than decided: the pass kept turning up the wire's
+  own ids in player-facing text (`boxed_ketchup` as a checklist heading,
+  `delivery dock` as a tooltip title). Everything the player reads now goes
+  through `_kind_display_name`/`_item_display_name`, and the headless tests
+  were updated to assert the display names — which is the point, because a
+  test asserting the raw id is what let them survive this long.
+
 - 2026-09-10: **Hopper/tank configuration, ticket 2 of 2 (the Godot half,
   plus the one sim deletion ticket 1 deferred to it) — a placed hopper or
   tank is CLICKED, and everything about it is on a panel beside it.** The

@@ -708,6 +708,19 @@ var _help_label: Label
 # one printed docket card per contract below it.
 var _contract_panel: PanelContainer
 var _contract_money_label: Label
+## The money figure's own flyout: what the balance just DID, held briefly and
+## faded, in the manner of the hotbar's name flyout. See
+## `_flash_money_change`.
+var _contract_money_change: Label
+## The deadline the flyout is held to. It starts one whole fade in the PAST,
+## not at zero: `Time.get_ticks_msec()` is milliseconds since the engine
+## started, so a deadline of zero is still inside the fade window for the
+## first fraction of a second of the process and would show the player a
+## ghost of a change that never happened.
+var _contract_money_change_until_msec := -MONEY_FLYOUT_FADE_MSEC
+## The balance the last poll saw. `INF` is the "no poll yet" sentinel — the
+## first frame must not report the whole starting balance as a payout.
+var _last_money := INF
 ## The shared delivery pool, shown once above the dockets. It is the
 ## player-visible face of the allocation rule: every contract below draws
 ## from THIS pile, so three checklists reading "2/2" do not mean three
@@ -723,11 +736,48 @@ var _contract_cards_scroll: ScrollContainer
 var _contract_ink_settings: LabelSettings
 var _contract_name_settings: LabelSettings
 var _contract_meta_settings: LabelSettings
+## The meta line's ink in the docket's warning colour, for the missed tally
+## only. A LabelSettings is a shared resource, so a second one is how a single
+## label on the row is coloured without recolouring the rest of it.
+var _contract_missed_settings: LabelSettings
+var _contract_gain_settings: LabelSettings
+var _contract_spend_settings: LabelSettings
 var _checkbox_mark_settings: LabelSettings
 var _checkbox_style_unchecked: StyleBoxFlat
 var _checkbox_style_checked: StyleBoxFlat
 var _contract_card_style: StyleBoxFlat
+## The build-menu slot's cost bar: shorter than a panel meter, because it is a
+## caption on a card rather than the card's subject.
+const SHOP_METER_HEIGHT := 7.0 * UI_SCALE
+## The smallest slice an affordable price is ever drawn as (see
+## `_update_shop_menu`).
+const SHOP_METER_MIN_SHARE := 0.035
 const CONTRACT_CHECKLIST_MAX_BOXES := 12 # beyond this, fall back to one box representing "complete"
+## How long the money flyout holds at full ink, and how long it takes to fade
+## after that. The hotbar's flyout numbers, deliberately: two readouts that
+## appear and vanish the same way are one idiom rather than two.
+const MONEY_FLYOUT_HOLD_MSEC := 1100
+const MONEY_FLYOUT_FADE_MSEC := 700
+## The docket's own meter skin (see the "Meters" section for the mechanism).
+## A clipboard is paper and ink, so its countdown is drawn in ink on the
+## checkbox's paper tone inside the card's own steel hairline — the two colours
+## UI_UX.md §5 allows a docket, no third one invented for a bar.
+const CONTRACT_METER_HEIGHT := 9.0 * UI_SCALE
+## The countdown bar shares its row with three short labels, so it is given a
+## floor as well as the leftover space: an expanding bar with no minimum was
+## squeezed to nothing on the docket whose cadence spells out to the longest
+## words, and a gauge that disappears when the text beside it grows is worse
+## than no gauge.
+const CONTRACT_METER_MIN_WIDTH := 64.0 * UI_SCALE
+const CONTRACT_METER_TRACK := Color(0.80, 0.74, 0.57, 1.0)
+const CONTRACT_METER_BORDER := Color(0.47, 0.44, 0.38, 1.0)
+const CONTRACT_METER_INK := Color(0.34, 0.29, 0.20, 1.0)
+## A countdown in its last stretch, and the missed tally: the docket's one
+## warning colour, and never on its own — the words "due now" and "missed" are
+## beside it (UI_UX.md §7).
+const CONTRACT_METER_DUE := Color(0.60, 0.24, 0.16, 1.0)
+## Under this much of a cadence left, the countdown is drawn as due.
+const CONTRACT_DUE_FRACTION := 0.12
 
 # --- UI scale (the 2026-09-09 tuning pass) ---------------------------------
 ## **Every pixel dimension in this HUD is measured in these two numbers.**
@@ -1009,6 +1059,16 @@ static var _printed_saves_dir := false
 # _crosshair is drawn), since the mouse is captured/hidden there.
 var _hover_tooltip: PanelContainer
 var _hover_label: Label
+## The bar under the tooltip's words, shown only for a tile that HAS a
+## quantity with a ceiling (`_hover_panel_state`), and the two buffer rows
+## that replaced the `in: tomato x8` text. See `_build_hover_tooltip`.
+var _hover_meter: Panel
+var _hover_input_row: Dictionary = {}
+var _hover_output_row: Dictionary = {}
+## The tooltip's meter is a fixed width: the panel's own width is decided by
+## its longest sentence, and a bar that grew and shrank with the text would
+## read as part of the measurement rather than as a scale.
+const HOVER_METER_WIDTH := 170.0 * UI_SCALE
 var _crosshair: Control # visible only in FIRST_PERSON — see _set_view_mode
 
 enum ViewMode { ISOMETRIC, FIRST_PERSON }
@@ -3228,6 +3288,125 @@ func _ui_font(delta: int = 0) -> int:
 	return maxi(8, int(round(float(UI_FONT_BASE + delta) * UI_SCALE)))
 
 
+# --- Meters: the one bar language ------------------------------------------
+#
+# **A quantity with a CEILING is drawn as a bar, everywhere, and it is always
+# the same bar.** The hopper/tank configuration panel got the first one and it
+# is the readout on this HUD that works best — a level is a POSITION, and a
+# position is read at a glance where "37 / 64" has to be divided first. This
+# section is that widget lifted out of the config panel so the rest of the UI
+# speaks it too: a machine's craft progress, a pipe's level, a contract's
+# countdown to its next check, what a purchase costs against the balance.
+#
+# Two rules keep it one language rather than a pile of bars:
+#
+#   * **A bar needs a real denominator.** Fill against capacity, elapsed
+#     against required, cost against balance — all genuine ceilings the
+#     simulation reports. Raw ingredient stock is deliberately NOT metered:
+#     it has no ceiling, and inventing one (a "full larder" nobody defined)
+#     would be a gauge reading a number the game does not have. Those stay
+#     figures.
+#   * **The fill colour is a MEANING, not decoration** (UI_UX.md §7), and it
+#     is never the only signal — every meter in this file is captioned with
+#     the same fact in words beside it, so the colour is the second reading
+#     rather than the first.
+const METER_HEIGHT := 14.0 * UI_SCALE
+## The dark-plate skin: what a meter looks like on the near-black factory-side
+## panels (the config panel, the hover tooltip, the build menu). The clipboard
+## passes its own paper tones instead — one mechanism, two skins, each staying
+## where its panel's palette already lives.
+const METER_TRACK_COLOR := Color(0.10, 0.10, 0.12, 0.98)
+const METER_BORDER_COLOR := Color(0.36, 0.38, 0.42, 0.95)
+## A LEVEL: how full a container is. The config panel's own green, kept so the
+## bar the rest of this borrows from did not change colour when it was shared.
+const METER_FILL_LEVEL := Color(0.55, 0.78, 0.42, 0.98)
+## WORK IN PROGRESS: a process running toward completion. The HUD's own hazard
+## amber, which already means "machinery" everywhere else on screen.
+const METER_FILL_PROGRESS := Color(0.90, 0.68, 0.16, 0.98)
+## A COST or a countdown that has nearly run out — the one meter state that is
+## a warning. Paired with a word every time it is used.
+const METER_FILL_WARN := Color(0.86, 0.38, 0.30, 0.98)
+
+
+## Builds a meter and returns its TRACK; the moving bar is the track's `Fill`
+## child, so a caller holds one node and `_set_meter` finds the other.
+##
+## `width` of 0 means "as wide as the container gives it" — the track expands
+## and `_set_meter` reads its live width, which is what lets a docket's
+## countdown and a tooltip's progress bar sit in panels whose width is decided
+## by their text.
+func _build_meter(
+	parent: Node,
+	width: float = 0.0,
+	fill_color: Color = METER_FILL_LEVEL,
+	track_color: Color = METER_TRACK_COLOR,
+	border_color: Color = METER_BORDER_COLOR,
+	height: float = METER_HEIGHT
+) -> Panel:
+	var track_style := StyleBoxFlat.new()
+	track_style.bg_color = track_color
+	track_style.border_color = border_color
+	track_style.set_border_width_all(_ui_i(2))
+
+	var track := Panel.new()
+	track.name = "Meter"
+	track.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	track.custom_minimum_size = Vector2(width, height)
+	if width <= 0.0:
+		track.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	track.add_theme_stylebox_override("panel", track_style)
+	parent.add_child(track)
+
+	var fill_style := StyleBoxFlat.new()
+	fill_style.bg_color = fill_color
+
+	var fill := Panel.new()
+	fill.name = "Fill"
+	fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fill.add_theme_stylebox_override("panel", fill_style)
+	track.add_child(fill)
+	return track
+
+
+## Drives one meter to `fraction`, optionally recolouring it (a countdown
+## turns to METER_FILL_WARN in its last stretch, a build-menu slot to it when
+## the balance will not cover the price).
+##
+## The bar is SIZED EXPLICITLY rather than anchored, the way the config panel's
+## always was: a headless run never lays a Control out, so an anchored fill
+## would report zero width in exactly the tests that check a meter moved. It
+## falls back to the track's minimum width for the same reason — the frame a
+## panel opens on, its track has a minimum size and no size yet.
+func _set_meter(track: Panel, fraction: float, fill_color: Color = Color(0, 0, 0, 0)) -> void:
+	if track == null:
+		return
+	var fill: Panel = track.get_node_or_null("Fill")
+	if fill == null:
+		return
+	var width: float = track.size.x
+	if width <= 0.0:
+		width = track.custom_minimum_size.x
+	var height: float = track.size.y
+	if height <= 0.0:
+		height = track.custom_minimum_size.y
+	var clamped := clampf(fraction, 0.0, 1.0)
+	fill.position = Vector2.ZERO
+	fill.size = Vector2(width * clamped, height)
+	fill.visible = clamped > 0.0
+	# The fraction is recorded on the track as well as drawn, because a
+	# headless test can prove a meter MOVED without a viewport: a Control that
+	# was never laid out has no width to scale, so `fill.size.x` alone can only
+	# be checked on the meters given an explicit width. This is the one number
+	# the panel was asked to show, so it is the one a test should read.
+	track.set_meta("fraction", clamped)
+	if fill_color.a > 0.0:
+		var style: StyleBoxFlat = fill.get_theme_stylebox("panel")
+		if style != null and style.bg_color != fill_color:
+			var recoloured := style.duplicate()
+			recoloured.bg_color = fill_color
+			fill.add_theme_stylebox_override("panel", recoloured)
+
+
 func _build_ui() -> void:
 	var hud := CanvasLayer.new()
 	hud.name = "HUD"
@@ -3395,6 +3574,24 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_meta_settings.font_color = Color(0.34, 0.29, 0.20)
 	_contract_meta_settings.outline_size = 0
 
+	_contract_missed_settings = LabelSettings.new()
+	_contract_missed_settings.font_size = _contract_meta_settings.font_size
+	_contract_missed_settings.font_color = CONTRACT_METER_DUE
+	_contract_missed_settings.outline_size = 0
+
+	# The flyout's two inks: the checkbox's own "done" green for money coming
+	# in, the docket's warning red for money going out. The sign in front of
+	# the figure says which either way (UI_UX.md §7).
+	_contract_gain_settings = LabelSettings.new()
+	_contract_gain_settings.font_size = _ui_font(1)
+	_contract_gain_settings.font_color = Color(0.20, 0.40, 0.20)
+	_contract_gain_settings.outline_size = 0
+
+	_contract_spend_settings = LabelSettings.new()
+	_contract_spend_settings.font_size = _ui_font(1)
+	_contract_spend_settings.font_color = CONTRACT_METER_DUE
+	_contract_spend_settings.outline_size = 0
+
 	# Heading and balance share one row (the same tightening the build menu
 	# and the market got in the 2026-09-09 UI-scale pass, so all three panels
 	# read the same way). At half again the type size, two short strings on
@@ -3416,6 +3613,25 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_money_label.label_settings = money_settings
 	_contract_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	heading.add_child(_contract_money_label)
+
+	# What the balance just did, under the balance itself. A contract settles
+	# on its own clock while the player is looking at their factory, so the
+	# only evidence a payout happened was a number that had quietly changed by
+	# the next time they looked at it. This is that event, drawn where the
+	# figure it changed lives.
+	#
+	# It is a CHILD of the money label rather than another row of the heading,
+	# positioned in `_update_contract_panel` once the label has a size: a row
+	# reserved for something that is blank most of the time would cost the
+	# board a docket's worth of height at the 1600x900 window UI_UX.md §5c
+	# measures against.
+	_contract_money_change = Label.new()
+	_contract_money_change.name = "MoneyChange"
+	_contract_money_change.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_contract_money_change.label_settings = _contract_gain_settings
+	_contract_money_change.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_contract_money_change.modulate = Color(1, 1, 1, 0)
+	_contract_money_label.add_child(_contract_money_change)
 
 	# The shared delivery pool, also once. See _update_contract_dock for why
 	# this line exists at all.
@@ -3516,6 +3732,7 @@ func _rebuild_contract_cards(contracts: Array) -> void:
 ##
 ## Returns the record `_update_contract_panel` drives it through:
 ##   {"id", "panel", "name_label", "payout_label", "meta_label",
+##    "countdown_meter", "countdown_label", "done_label", "missed_label",
 ##    "rows": {item id -> {"icon", "label", "boxes"}}}
 func _build_contract_card(contract: Dictionary) -> Dictionary:
 	var panel := PanelContainer.new()
@@ -3552,9 +3769,47 @@ func _build_contract_card(contract: Dictionary) -> Dictionary:
 		var required: int = int(pair[1])
 		rows[item_id] = _build_contract_checklist_row(card_body, item_id, required)
 
+	# The countdown, as a bar that DRAINS toward the next delivery window plus
+	# the time itself. It used to be "next check in 235 ticks", which asked the
+	# player to convert an implementation detail (ARCHITECTURE.md §3.9's fixed
+	# timestep) into a wait, and gave them no way to compare two dockets at a
+	# glance. The bar is that comparison; the words are the exact figure.
+	var countdown_row := HBoxContainer.new()
+	countdown_row.name = "Countdown"
+	countdown_row.add_theme_constant_override("separation", _ui_i(6))
+	card_body.add_child(countdown_row)
+
+	var countdown_meter := _build_meter(
+		countdown_row, CONTRACT_METER_MIN_WIDTH, CONTRACT_METER_INK,
+		CONTRACT_METER_TRACK, CONTRACT_METER_BORDER, CONTRACT_METER_HEIGHT
+	)
+	countdown_meter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	countdown_meter.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+
+	var countdown_label := Label.new()
+	countdown_label.label_settings = _contract_meta_settings
+	countdown_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	countdown_row.add_child(countdown_label)
+
+	# The cadence and the two tallies ride the SAME row as the countdown, and
+	# that is a height decision, not a taste one: a docket that grew a row made
+	# the third one scroll off a 1600x900 board, which UI_UX.md §5c says
+	# nothing should. They are three labels rather than one string so the
+	# missed count can carry the docket's warning colour on its own — with its
+	# glyph and its word, never colour alone.
 	var meta_label := Label.new()
 	meta_label.label_settings = _contract_meta_settings
-	card_body.add_child(meta_label)
+	countdown_row.add_child(meta_label)
+
+	var done_label := Label.new()
+	done_label.name = "DoneTally"
+	done_label.label_settings = _contract_meta_settings
+	countdown_row.add_child(done_label)
+
+	var missed_label := Label.new()
+	missed_label.name = "MissedTally"
+	missed_label.label_settings = _contract_meta_settings
+	countdown_row.add_child(missed_label)
 
 	return {
 		"id": String(contract.get("id", "")),
@@ -3562,6 +3817,10 @@ func _build_contract_card(contract: Dictionary) -> Dictionary:
 		"name_label": name_label,
 		"payout_label": payout_label,
 		"meta_label": meta_label,
+		"countdown_meter": countdown_meter,
+		"countdown_label": countdown_label,
+		"done_label": done_label,
+		"missed_label": missed_label,
 		"rows": rows,
 	}
 
@@ -3895,6 +4154,15 @@ func _build_shop_slot(grid: GridContainer, base_settings: LabelSettings, index: 
 	price_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(price_label)
 
+	# What this slot would cost measured against what the player HAS. "Cost 70"
+	# and "Money: 1747" are two figures in two corners of the screen, and the
+	# question the player is actually asking — can I afford this, and what will
+	# it leave me — is the relation between them. The bar is that relation:
+	# how much of the balance this one purchase takes.
+	var cost_meter := _build_meter(column, 0.0, METER_FILL_LEVEL,
+		METER_TRACK_COLOR, METER_BORDER_COLOR, SHOP_METER_HEIGHT)
+	cost_meter.name = "CostMeter"
+
 	var owned_settings := LabelSettings.new()
 	owned_settings.font_size = _ui_font(-2)
 	owned_settings.font_color = Color(0.66, 0.68, 0.72)
@@ -3914,6 +4182,7 @@ func _build_shop_slot(grid: GridContainer, base_settings: LabelSettings, index: 
 		"button": button,
 		"icon": icon,
 		"price_label": price_label,
+		"cost_meter": cost_meter,
 		"owned_label": owned_label,
 	})
 
@@ -3992,6 +4261,20 @@ func _update_shop_menu() -> void:
 		)
 		slot["icon"].modulate = Color.WHITE if affordable else Color(0.42, 0.42, 0.45, 0.75)
 		slot["button"].disabled = not affordable
+		# ...and a fourth reading of the same fact, which is the only one that
+		# says HOW unaffordable: the share of the balance this price takes,
+		# pinned full and red once it takes more than all of it. A price the
+		# balance barely notices still draws a sliver rather than nothing —
+		# an empty track next to a real price reads as a broken gauge, and
+		# "this costs almost nothing" is what the sliver means.
+		var money: float = float(snapshot.get("money", 0.0))
+		var share: float = price / money if money > 0.0 else 1.0
+		if affordable and price > 0.0:
+			share = maxf(share, SHOP_METER_MIN_SHARE)
+		_set_meter(
+			slot["cost_meter"], 1.0 if not affordable else share,
+			METER_FILL_WARN if not affordable else METER_FILL_LEVEL
+		)
 		# Just the count. The owned line used to carry the PLACE affordance
 		# ("right-click to hold") as well, and at the 2026-09-09 UI scale that
 		# sentence wraps onto a second row in every card, which costs the
@@ -4290,6 +4573,14 @@ func _build_market_slot(row: HBoxContainer, base_settings: LabelSettings, index:
 	price_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	column.add_child(price_label)
 
+	# The same cost-against-balance bar the build menu's slots carry, on the
+	# same mechanism — a crate of ingredients and a machine are both money
+	# leaving the one counter, and the player should not have to read two
+	# different pictures of it.
+	var cost_meter := _build_meter(column, 0.0, METER_FILL_LEVEL,
+		METER_TRACK_COLOR, METER_BORDER_COLOR, SHOP_METER_HEIGHT)
+	cost_meter.name = "CostMeter"
+
 	var owned_settings := LabelSettings.new()
 	owned_settings.font_size = _ui_font(-2)
 	owned_settings.font_color = Color(0.66, 0.68, 0.72)
@@ -4309,6 +4600,7 @@ func _build_market_slot(row: HBoxContainer, base_settings: LabelSettings, index:
 		"button": button,
 		"icon": icon,
 		"price_label": price_label,
+		"cost_meter": cost_meter,
 		"owned_label": owned_label,
 	})
 
@@ -4348,6 +4640,20 @@ func _update_ingredient_market() -> void:
 		)
 		slot["icon"].modulate = Color.WHITE if affordable else Color(0.42, 0.42, 0.45, 0.75)
 		slot["button"].disabled = not affordable
+		# ...and a fourth reading of the same fact, which is the only one that
+		# says HOW unaffordable: the share of the balance this price takes,
+		# pinned full and red once it takes more than all of it. A price the
+		# balance barely notices still draws a sliver rather than nothing —
+		# an empty track next to a real price reads as a broken gauge, and
+		# "this costs almost nothing" is what the sliver means.
+		var money: float = float(snapshot.get("money", 0.0))
+		var share: float = crate_price / money if money > 0.0 else 1.0
+		if affordable and crate_price > 0.0:
+			share = maxf(share, SHOP_METER_MIN_SHARE)
+		_set_meter(
+			slot["cost_meter"], 1.0 if not affordable else share,
+			METER_FILL_WARN if not affordable else METER_FILL_LEVEL
+		)
 		# Two lines, written out rather than left to autowrap: the wrap point
 		# is then the same on every crate whatever the numbers are, which a
 		# rendered frame showed matters — a ragged one-word overflow reads as
@@ -4607,26 +4913,16 @@ func _build_config_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void
 	_config_level_label.label_settings = base_settings
 	body.add_child(_config_level_label)
 
-	var track_style := StyleBoxFlat.new()
-	track_style.bg_color = Color(0.10, 0.10, 0.12, 0.98)
-	track_style.border_color = Color(0.36, 0.38, 0.42, 0.95)
-	track_style.set_border_width_all(_ui_i(2))
-
-	_config_level_track = Panel.new()
+	# The bar this panel introduced, now built by the shared `_build_meter`
+	# (see its section header): the widget did not change, it just stopped
+	# being this panel's private one so the tooltip, the clipboard and the
+	# build menu could speak the same language.
+	_config_level_track = _build_meter(
+		body, CONFIG_PANEL_WIDTH, METER_FILL_LEVEL, METER_TRACK_COLOR,
+		METER_BORDER_COLOR, CONFIG_LEVEL_BAR_HEIGHT
+	)
 	_config_level_track.name = "ConfigLevelTrack"
-	_config_level_track.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_config_level_track.custom_minimum_size = Vector2(CONFIG_PANEL_WIDTH, CONFIG_LEVEL_BAR_HEIGHT)
-	_config_level_track.add_theme_stylebox_override("panel", track_style)
-	body.add_child(_config_level_track)
-
-	var bar_style := StyleBoxFlat.new()
-	bar_style.bg_color = Color(0.55, 0.78, 0.42, 0.98)
-
-	_config_level_fill = Panel.new()
-	_config_level_fill.name = "ConfigLevelFill"
-	_config_level_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_config_level_fill.add_theme_stylebox_override("panel", bar_style)
-	_config_level_track.add_child(_config_level_fill)
+	_config_level_fill = _config_level_track.get_node("Fill")
 
 	# --- Fill now, and the stock it draws from -----------------------------
 	var fill_row := HBoxContainer.new()
@@ -5043,17 +5339,7 @@ func _update_config_picker(current: String) -> void:
 
 
 func _set_config_level(fraction: float) -> void:
-	if _config_level_track == null or _config_level_fill == null:
-		return
-	var width: float = _config_level_track.size.x
-	if width <= 0.0:
-		width = _config_level_track.custom_minimum_size.x
-	var height: float = _config_level_track.size.y
-	if height <= 0.0:
-		height = _config_level_track.custom_minimum_size.y
-	_config_level_fill.position = Vector2.ZERO
-	_config_level_fill.size = Vector2(width * clampf(fraction, 0.0, 1.0), height)
-	_config_level_fill.visible = fraction > 0.0
+	_set_meter(_config_level_track, fraction)
 
 
 ## Beside the building, never on it, and never under the hotbar. The anchor
@@ -6260,10 +6546,127 @@ func _build_hover_tooltip(hud: CanvasLayer) -> void:
 	hover_settings.outline_size = _ui_i(3)
 	hover_settings.outline_color = Color(0, 0, 0, 0.85)
 
+	# The tooltip is a COLUMN since the UI visualisation pass, not a lone
+	# label: the words, then a meter for whatever quantity this tile has that
+	# has a ceiling, then the buffers as icon chips. Which of the three appear
+	# is decided per tile by `_hover_panel_state`, and a tile with no meter and
+	# no buffers (a belt, a splitter) still shows exactly what it always did.
+	var column := VBoxContainer.new()
+	column.name = "HoverBody"
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_theme_constant_override("separation", _ui_i(5))
+	_hover_tooltip.add_child(column)
+
 	_hover_label = Label.new()
 	_hover_label.label_settings = hover_settings
 	_hover_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hover_tooltip.add_child(_hover_label)
+	column.add_child(_hover_label)
+
+	# A machine's craft progress, a hopper's or tank's level, a pipe's fill —
+	# the same bar the configuration panel puts a hopper's level on, at the
+	# cursor. Fixed width, because the panel's own width is decided by its
+	# text and a bar that changed length as the sentence above it changed
+	# would read as part of the measurement.
+	_hover_meter = _build_meter(column, HOVER_METER_WIDTH, METER_FILL_PROGRESS)
+	_hover_meter.name = "HoverMeter"
+	_hover_meter.visible = false
+
+	# The two buffer rows. `in:` and `out:` used to be printed as text
+	# ("in: tomato x8") — an item id with an underscore in it, which is the
+	# raw wire format rather than anything a player was ever told. They are
+	# now the item's OWN icon plus a count, the same voxel-rendered icons the
+	# market, the larder and the clipboard already name items with
+	# (UI_UX.md §5), so what is inside a machine is recognised rather than
+	# read.
+	_hover_input_row = _build_hover_buffer_row(column, hover_settings, "in")
+	_hover_output_row = _build_hover_buffer_row(column, hover_settings, "out")
+
+
+## One labelled row of item chips ("in" / "out"), returned as the record
+## `_update_hover_buffers` drives: `{"row", "label", "chips": [...], "empty"}`.
+##
+## The chips are POOLED rather than rebuilt: the tooltip re-reads whatever is
+## under the cursor every single frame, and freeing and re-creating a handful
+## of nodes at that rate is the one thing this panel must not do. A chip that
+## is not needed this frame is hidden, exactly the way the dock's item rows and
+## the carried-item instances already work.
+func _build_hover_buffer_row(parent: VBoxContainer, base_settings: LabelSettings, heading: String) -> Dictionary:
+	var row := HBoxContainer.new()
+	row.name = "HoverBuffer_%s" % heading
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", _ui_i(6))
+	row.visible = false
+	parent.add_child(row)
+
+	var heading_settings := LabelSettings.new()
+	heading_settings.font_size = _ui_font(-2)
+	heading_settings.font_color = Color(0.70, 0.72, 0.76)
+	heading_settings.outline_size = base_settings.outline_size
+	heading_settings.outline_color = base_settings.outline_color
+
+	var label := Label.new()
+	label.name = "Heading"
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.label_settings = heading_settings
+	label.text = heading
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(label)
+
+	# "nothing in it yet" said in words, not left as an empty row: an idle
+	# machine and a machine whose tooltip has not updated look identical
+	# otherwise.
+	var empty := Label.new()
+	empty.name = "Empty"
+	empty.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	empty.label_settings = heading_settings
+	empty.text = "empty"
+	empty.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(empty)
+
+	return {"row": row, "label": label, "chips": [], "empty": empty}
+
+
+## Fills one buffer row from `[[item_id, qty], ...]`, growing its chip pool
+## only when a machine turns out to hold more distinct items than any machine
+## hovered so far.
+func _update_hover_buffers(record: Dictionary, pairs: Array) -> void:
+	var row: HBoxContainer = record["row"]
+	var chips: Array = record["chips"]
+	for i in range(pairs.size()):
+		if i >= chips.size():
+			chips.append(_build_hover_chip(row))
+		var chip: Dictionary = chips[i]
+		chip["icon"].texture = _icon_for(String(pairs[i][0]))
+		chip["label"].text = "%d" % int(pairs[i][1])
+		chip["chip"].visible = true
+	for i in range(pairs.size(), chips.size()):
+		chips[i]["chip"].visible = false
+	record["empty"].visible = pairs.is_empty()
+	row.visible = true
+
+
+## One chip: the item's voxel icon and its count.
+func _build_hover_chip(row: HBoxContainer) -> Dictionary:
+	var chip := HBoxContainer.new()
+	chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	chip.add_theme_constant_override("separation", _ui_i(3))
+	row.add_child(chip)
+
+	var icon := TextureRect.new()
+	icon.name = "Icon"
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.custom_minimum_size = _ui_v(Vector2(18, 18))
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	chip.add_child(icon)
+
+	var label := Label.new()
+	label.name = "Count"
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.label_settings = _hover_label.label_settings
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	chip.add_child(label)
+	return {"chip": chip, "icon": icon, "label": label}
 
 
 ## A small screen-centre crosshair, shown only in FIRST_PERSON (toggled in
@@ -7094,6 +7497,86 @@ func _hover_text_at_tile(tile: Vector2i) -> String:
 	return _machine_hover_text(key, kind, direction)
 
 
+## The WIDGET half of the tooltip: what bar (if any) `tile` should show, and
+## what its buffers hold. `_hover_text_at_tile` above is the words; this is
+## everything the words are worse at.
+##
+## Returns
+##   {"meter": {"fraction", "color"} or {}, "inputs": [[id, qty]], "outputs": [...]}
+##
+## A tile only gets a meter if it has a genuine CEILING to measure against
+## (the section header on `_build_meter` states the rule): a machine's elapsed
+## ticks against its recipe's required ticks, a hopper's or tank's contents
+## against its capacity, a pipe segment's level against a full bore. A belt, a
+## splitter and the dock have no such quantity — a dock's own buffer is empty
+## by design and its lifetime total has no ceiling at all — so they get no bar
+## rather than a made-up one.
+##
+## Pure given the polled snapshots, exactly like the text half, so a test can
+## drive it with a tile and no framebuffer.
+func _hover_panel_state(tile: Vector2i) -> Dictionary:
+	var state := {"meter": {}, "inputs": [], "outputs": [], "has_buffers": false}
+	var placement := _placement_at_tile(tile)
+	if placement.is_empty():
+		return state
+	var kind := String(placement.get("kind", ""))
+	var key := _tile_key(_placement_origin(placement))
+	match kind:
+		BELT_KIND, SPLITTER_KIND, DOCK_KIND:
+			return state
+		HOPPER_KIND:
+			var hopper: Dictionary = _hopper_states.get(key, {})
+			var capacity := float(hopper.get("capacity", 0.0))
+			if capacity > 0.0:
+				state["meter"] = {
+					"fraction": float(hopper.get("quantity", 0.0)) / capacity,
+					"color": METER_FILL_LEVEL,
+				}
+			return state
+		FLUID_TANK_KIND:
+			var tank: Dictionary = _fluid_tank_states.get(key, {})
+			var tank_capacity := float(tank.get("capacity", 0.0))
+			if tank_capacity > 0.0:
+				state["meter"] = {
+					"fraction": float(tank.get("quantity", 0.0)) / tank_capacity,
+					"color": METER_FILL_LEVEL,
+				}
+			return state
+		PIPE_KIND:
+			var indices := _pipe_indices_at_tile(tile)
+			if indices.x >= 0 and indices.x < _last_fluid.size():
+				var segments: Array = _last_fluid[indices.x].get("segments", [])
+				if indices.y >= 0 and indices.y < segments.size():
+					state["meter"] = {
+						"fraction": float(segments[indices.y].get("pressure", 0.0)),
+						"color": METER_FILL_LEVEL,
+					}
+			return state
+	# Anything else is a machine: its craft progress, and both buffers.
+	var machine: Dictionary = _machine_states.get(key, {})
+	if machine.is_empty():
+		return state
+	state["has_buffers"] = true
+	state["inputs"] = machine.get("input", [])
+	state["outputs"] = machine.get("output", [])
+	var process = machine.get("process")
+	if process != null:
+		var required: int = int(process[1])
+		if required > 0:
+			var elapsed: int = clampi(sim.current_tick() - int(process[0]), 0, required)
+			state["meter"] = {
+				"fraction": float(elapsed) / float(required),
+				"color": METER_FILL_PROGRESS,
+			}
+	else:
+		# An IDLE machine still shows its (empty) track rather than dropping
+		# the bar: the row vanishing and the row reading zero are different
+		# facts, and a gauge that shows its own scale when empty is the rule
+		# MACHINE_PROGRESS_GAUGES already states for the in-world gauges.
+		state["meter"] = {"fraction": 0.0, "color": METER_FILL_PROGRESS}
+	return state
+
+
 ## What one belt's tooltip says, from its `links`: which way it carries and
 ## whether it turns, what feeds it and from which side, and what it hands to
 ## — in words, because "a belt that draws as a corner but whose arrow says
@@ -7105,7 +7588,7 @@ func _belt_hover_text(placement: Dictionary, direction: String) -> String:
 	var tile := _placement_origin(placement)
 	var links: Dictionary = placement.get("links", {})
 	var shape := _belt_shape_for(links, direction)
-	var heading := "belt  ·  carries %s" % direction
+	var heading := "%s  ·  carries %s" % [_kind_display_name(BELT_KIND), direction]
 	match shape:
 		BELT_SHAPE_CORNER_LEFT:
 			heading += "  ·  turns left"
@@ -7164,7 +7647,7 @@ func _link_neighbour_name(tile: Vector2i, side: String, link_kind: String) -> St
 func _splitter_hover_text(origin_key: String, direction: String) -> String:
 	var snapshot: Dictionary = _splitter_states.get(origin_key, {})
 	if snapshot.is_empty():
-		return "splitter\nfacing %s" % direction
+		return "%s\nfacing %s" % [_kind_display_name(SPLITTER_KIND), direction]
 	var outputs: Array = snapshot.get("outputs", [null, null])
 	var side := _splitter_effective_side(snapshot)
 	var due := SPLITTER_BRANCH if String(snapshot.get("next_output", "straight")) == "branch" else SPLITTER_STRAIGHT
@@ -7173,7 +7656,8 @@ func _splitter_hover_text(origin_key: String, direction: String) -> String:
 		next_line = "next: %s" % ("branch" if side == SPLITTER_BRANCH else "straight")
 		if side != due:
 			next_line += " (%s not connected)" % ("branch" if due == SPLITTER_BRANCH else "straight")
-	return "splitter  ·  facing %s\n%s\nstraight: %s\nbranch: %s" % [
+	return "%s  ·  facing %s\n%s\nstraight: %s\nbranch: %s" % [
+		_kind_display_name(SPLITTER_KIND),
 		direction,
 		next_line,
 		_splitter_output_text(outputs, SPLITTER_STRAIGHT),
@@ -7216,12 +7700,18 @@ func _machine_hover_text(origin_key: String, kind: String, direction: String) ->
 		# experiences — rather than in ticks, which are an implementation
 		# detail of ARCHITECTURE.md §3.9's fixed timestep.
 		progress_text = "%.0f%%  ·  %s left" % [pct, _format_remaining(required - elapsed)]
-	return "%s  ·  facing %s\n%s\nin: %s\nout: %s" % [
-		String(machine.get("recipe", kind)),
+	# The BUFFERS are no longer part of this sentence. They were printed as
+	# `in: tomato x8, sugar x1` — the wire format's own item ids, underscores
+	# and all, in a line that got longer the more a machine held. They are
+	# drawn instead as the item's icon and a count under the bar
+	# (`_hover_panel_state` / `_build_hover_buffer_row`), which is the same
+	# way every other panel in this game names an item. What stays here is
+	# what only words can say: which recipe, which way it faces, and how far
+	# through it is.
+	return "%s  ·  facing %s\n%s" % [
+		_item_display_name(String(machine.get("recipe", kind))),
 		direction,
 		progress_text,
-		_format_counts(machine.get("input", [])),
-		_format_counts(machine.get("output", [])),
 	]
 
 
@@ -7270,11 +7760,12 @@ func _pipe_hover_text(tile: Vector2i, direction: String) -> String:
 		var segments: Array = network.get("segments", [])
 		if indices.y >= 0 and indices.y < segments.size():
 			segment = segments[indices.y]
-	var lines: Array = ["pipe"]
+	var lines: Array = [_kind_display_name(PIPE_KIND)]
 	lines.append(_pipe_connections_text(tile, _pipe_connections_of(placement), network, indices.y, direction))
 	if not segment.is_empty():
+		var carried := _fluid_id_of(network)
 		lines.append("%s  ·  %.1f / %.1f units  ·  pressure %.0f%%" % [
-			_fluid_id_of(network) if _fluid_id_of(network) != "" else "empty run",
+			_item_display_name(carried) if carried != "" else "empty run",
 			float(segment.get("volume", 0.0)),
 			float(segment.get("capacity", 0.0)),
 			clampf(float(segment.get("pressure", 0.0)), 0.0, 1.0) * 100.0,
@@ -7335,10 +7826,15 @@ func _pipe_connections_text(tile: Vector2i, connections: Array, network: Diction
 func _hopper_hover_text(origin_key: String, direction: String) -> String:
 	var snapshot: Dictionary = _hopper_states.get(origin_key, {})
 	if snapshot.is_empty():
-		return "hopper\nfacing %s" % direction
-	return "hopper  ·  facing %s\n%s\n%d / %d units\n%s\nauto-fill: %s\nclick to configure" % [
+		return "%s\nfacing %s" % [_kind_display_name(HOPPER_KIND), direction]
+	# The item is named the way every other panel names it ("Tomato", not
+	# `tomato`), and the level keeps its NUMBER beside the bar below it: the
+	# bar answers "how full", the number answers "how many", and a hopper
+	# feeding a recipe that wants eight of something needs both.
+	return "%s  ·  facing %s\n%s\n%d / %d units\n%s\nauto-fill: %s\nclick to configure" % [
+		_kind_display_name(HOPPER_KIND),
 		direction,
-		String(snapshot.get("item", "raw ingredient")),
+		_item_display_name(String(snapshot.get("item", "raw ingredient"))),
 		int(snapshot.get("quantity", 0)),
 		int(snapshot.get("capacity", 0)),
 		"unloading onto a belt" if snapshot.get("belt_tile") != null else "no belt in front of it",
@@ -7351,10 +7847,12 @@ func _hopper_hover_text(origin_key: String, direction: String) -> String:
 func _fluid_tank_hover_text(origin_key: String, direction: String) -> String:
 	var snapshot: Dictionary = _fluid_tank_states.get(origin_key, {})
 	if snapshot.is_empty():
-		return "fluid tank\nfacing %s" % direction
-	return "fluid tank  ·  facing %s\n%s\n%.1f / %.0f units\n%s\nauto-fill: %s\nclick to configure" % [
+		return "%s\nfacing %s" % [_kind_display_name(FLUID_TANK_KIND), direction]
+	var fluid := _fluid_id_of(snapshot)
+	return "%s  ·  facing %s\n%s\n%.1f / %.0f units\n%s\nauto-fill: %s\nclick to configure" % [
+		_kind_display_name(FLUID_TANK_KIND),
 		direction,
-		_fluid_id_of(snapshot) if _fluid_id_of(snapshot) != "" else "empty",
+		_item_display_name(fluid) if fluid != "" else "empty",
 		float(snapshot.get("quantity", 0.0)),
 		float(snapshot.get("capacity", 0.0)),
 		"feeding a pipe run" if snapshot.get("pipe_tile") != null else "no pipe in front of it",
@@ -7373,8 +7871,9 @@ func _fluid_tank_hover_text(origin_key: String, direction: String) -> String:
 func _dock_hover_text(origin_key: String, direction: String) -> String:
 	var snapshot: Dictionary = _dock_states.get(origin_key, {})
 	if snapshot.is_empty():
-		return "delivery dock\nfacing %s" % direction
-	return "delivery dock  ·  facing %s\nships to contracts every tick\n%d shipped by this dock\nwaiting: %s" % [
+		return "%s\nfacing %s" % [_kind_display_name(DOCK_KIND), direction]
+	return "%s  ·  facing %s\nships to contracts every tick\n%d shipped by this dock\nwaiting: %s" % [
+		_kind_display_name(DOCK_KIND),
 		direction,
 		int(snapshot.get("shipped_total", 0)),
 		_format_counts(_last_dock_stock),
@@ -7416,8 +7915,32 @@ func _update_hover_tooltip() -> void:
 		_hover_tooltip.visible = false
 		return
 	_hover_label.text = text
+	_apply_hover_panel_state(_hover_panel_state(tile))
 	_hover_tooltip.position = _panel_position_near(_hover_tooltip, query_pos)
 	_hover_tooltip.visible = true
+
+
+## Shows or hides the tooltip's bar and buffer rows for whatever
+## `_hover_panel_state` reported. Split from the query above for the same
+## reason every other pair in this file is: the deciding half is pure and
+## testable, this half only touches nodes.
+func _apply_hover_panel_state(state: Dictionary) -> void:
+	var meter: Dictionary = state.get("meter", {})
+	if _hover_meter != null:
+		_hover_meter.visible = not meter.is_empty()
+		if not meter.is_empty():
+			_set_meter(_hover_meter, float(meter.get("fraction", 0.0)), meter.get("color", METER_FILL_PROGRESS))
+
+	# Only a MACHINE has buffers, and an idle one with nothing in it still has
+	# them — "this kind has no buffers" (a pipe, a belt) and "its buffers are
+	# empty" (a machine waiting for product) are different facts, so the flag
+	# decides whether the rows appear and their contents decide what they say.
+	if not bool(state.get("has_buffers", false)):
+		_hover_input_row["row"].visible = false
+		_hover_output_row["row"].visible = false
+		return
+	_update_hover_buffers(_hover_input_row, state.get("inputs", []))
+	_update_hover_buffers(_hover_output_row, state.get("outputs", []))
 
 
 ## Where a cursor-following panel goes: offset from the cursor, then kept
@@ -7448,7 +7971,10 @@ func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
 ## and its own countdown to its own next delivery check.
 func _update_contract_panel() -> void:
 	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
-	_contract_money_label.text = "Money: %.0f" % float(econ["money"])
+	var money := float(econ["money"])
+	_contract_money_label.text = "Money: %.0f" % money
+	_flash_money_change(money)
+	_update_money_flyout()
 	_update_contract_dock(econ.get("delivery_stock", []))
 
 	var contracts: Array = econ.get("contracts", [])
@@ -7505,6 +8031,61 @@ func _contract_cards_match(contracts: Array) -> bool:
 		if String(contracts[i].get("id", "")) != String(_contract_card_ids[i]):
 			return false
 	return true
+
+
+## What the balance just did, under the balance itself.
+##
+## A contract settles on its own clock while the player is looking at their
+## factory, so the only evidence a payout happened was a number that had
+## quietly changed by the next time they looked at it. This is that event,
+## drawn where the figure it changed lives: `+240` in green for money in,
+## `-70` in the docket's warning ink for money out (a purchase), held and
+## faded exactly like the hotbar's name flyout so the two read as one idiom.
+##
+## Sub-unit drift is ignored: money is fixed-point and the figure above is
+## drawn whole, so anything that would render as `+0` is not an event the
+## player can see and must not flash one.
+func _flash_money_change(money: float) -> void:
+	if _contract_money_change == null:
+		return
+	# The first poll of a session has nothing to compare against, and must
+	# not announce the starting balance as a payout.
+	if is_inf(_last_money):
+		_last_money = money
+		return
+	var delta := money - _last_money
+	_last_money = money
+	var whole := int(round(delta))
+	if whole == 0:
+		return
+	_contract_money_change.text = "+%d" % whole if whole > 0 else "%d" % whole
+	_contract_money_change.label_settings = \
+		_contract_gain_settings if whole > 0 else _contract_spend_settings
+	_contract_money_change_until_msec = Time.get_ticks_msec() + MONEY_FLYOUT_HOLD_MSEC
+
+
+## Holds the money flyout at full ink, then fades it, and keeps it sitting
+## directly under the figure it belongs to. The position is re-applied every
+## frame for the same reason the panel re-applies its preset: the money
+## label's own size only settles once it has real text in it.
+##
+## It FLOATS over the dock line below rather than taking a row of its own:
+## a reserved row would be empty for all but a second or two at a time, and
+## the two never compete for the same words — the dock line grows from the
+## left, this is pinned to the money figure's right edge.
+func _update_money_flyout() -> void:
+	if _contract_money_change == null:
+		return
+	_contract_money_change.position = Vector2(0.0, _contract_money_label.size.y)
+	_contract_money_change.size.x = _contract_money_label.size.x
+	var remaining := _contract_money_change_until_msec - Time.get_ticks_msec()
+	if remaining >= 0:
+		_contract_money_change.modulate = Color(1, 1, 1, 1)
+	elif remaining > -MONEY_FLYOUT_FADE_MSEC:
+		_contract_money_change.modulate = \
+			Color(1, 1, 1, 1.0 + float(remaining) / float(MONEY_FLYOUT_FADE_MSEC))
+	else:
+		_contract_money_change.modulate = Color(1, 1, 1, 0)
 
 
 ## The shared delivery pool, shown once above the dockets.
@@ -7572,7 +8153,7 @@ func _update_contract_card(card: Dictionary, contract: Dictionary, current_tick:
 		var row: Dictionary = rows.get(item_id, {})
 		if row.is_empty():
 			continue
-		row["label"].text = "%s  %d/%d" % [item_id, have, required]
+		row["label"].text = "%s  %d/%d" % [_item_display_name(item_id), have, required]
 
 		var boxes: Array = row["boxes"]
 		if boxes.size() == 1 and required > CONTRACT_CHECKLIST_MAX_BOXES:
@@ -7589,13 +8170,31 @@ func _update_contract_card(card: Dictionary, contract: Dictionary, current_tick:
 	# window costs that window's payout and nothing else today (GAMEPLAY.md
 	# §11 has not decided what else it should cost), so the count is the
 	# whole consequence and it should be visible.
+	var cadence: int = int(contract.get("cadence_ticks", 0))
 	var ticks_left: int = max(0, int(contract.get("next_delivery_tick", 0)) - current_tick)
-	card["meta_label"].text = "next check in %d ticks  ·  every %d  ·  %d done, %d missed" % [
-		ticks_left,
-		int(contract.get("cadence_ticks", 0)),
-		int(contract.get("deliveries_made", 0)),
-		int(contract.get("deliveries_missed", 0)),
-	]
+	# Both times are said in SECONDS, the unit the player waits in, by the same
+	# `_format_remaining` the machine tooltip uses — one clock, one wording,
+	# everywhere in the game.
+	var fraction: float = float(ticks_left) / float(cadence) if cadence > 0 else 0.0
+	var due: bool = fraction <= CONTRACT_DUE_FRACTION
+	_set_meter(
+		card["countdown_meter"], fraction,
+		CONTRACT_METER_DUE if due else CONTRACT_METER_INK
+	)
+	card["countdown_label"].text = "due now" if ticks_left <= 0 else "%s to go" % _format_remaining(ticks_left)
+	card["meta_label"].text = "every %s" % _format_remaining(cadence)
+
+	# The tallies keep their words and gain a glyph, so a completed delivery
+	# reads as the same ✓ the checklist above it uses and a missed window reads
+	# as its opposite. Colour is the missed count's second signal, never its
+	# first (UI_UX.md §7), and it is dropped entirely at zero: a docket that has
+	# never missed should not carry a red mark for it.
+	var made: int = int(contract.get("deliveries_made", 0))
+	var missed: int = int(contract.get("deliveries_missed", 0))
+	card["done_label"].text = "✓ %d done" % made
+	card["missed_label"].text = "✗ %d missed" % missed
+	card["missed_label"].label_settings = \
+		_contract_missed_settings if missed > 0 else _contract_meta_settings
 
 
 ## Swaps a checklist box's style (and its tick-mark visibility) between the

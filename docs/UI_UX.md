@@ -361,6 +361,44 @@ with the line *"the factory is stopped while this is open"* (§7: never encode
 state invisibly). **Quit to Menu asks first; Save & Quit does not.** The save
 field is a **name**, prefilled with what this session loaded from.
 
+### 5e. Numbers into bars: the one meter language
+
+A figure tells the player what a thing *is*; a bar tells them where it
+*stands*. Every readout in the HUD that has somewhere to stand is drawn as
+both — the number for the exact value, the bar for the shape of it at a
+glance.
+
+**A bar is drawn only where the simulation defines the ceiling.** Hopper and
+tank level, a machine's cycle, a pipe's pressure, a contract's countdown
+against its own cadence, a price against the money in the player's pocket:
+those are real fractions. Larder stock and the balance itself are not —
+nothing in the game says how many tomatoes is "full" — so they stay figures.
+A gauge whose full mark is invented teaches a scale that does not exist.
+
+All of them go through one pair of helpers in `main.gd` (`_build_meter` /
+`_set_meter`), so there is one bar height, one track, one hairline border
+and one empty state, and **three fills that each mean something**: green is
+a level, amber is work under way, red is a cost that cannot be met or a
+clock nearly out. Per §7 the colour is never the whole message — the
+countdown says "due now", the missed tally reads "✗ 2 missed", an
+unaffordable slot is dimmed and marked as well as red.
+
+Two consequences worth keeping:
+
+- **A docket's bar stays paper and ink.** §5 gives a contract card two
+  colours; the countdown is drawn in ink on the checkbox's paper tone, and
+  the card's single warning red is spent only on the last stretch of a
+  countdown and on a non-zero missed tally.
+- **Player-facing clocks are in seconds, never ticks**, and player-facing
+  names are display names, never the wire's ids. "1m 15s to go" and "Boxed
+  Ketchup", not "2250 ticks" and `boxed_ketchup`.
+
+One readout is a bar's opposite number: **the money figure flashes what just
+changed it** (`+90`, `-5`) beneath itself and fades, on the hotbar name
+flyout's timings. A payout arrives on a contract's clock while the player is
+looking at the factory, and a balance that only ever shows its current value
+hides every event that produced it.
+
 ## 6. Feedback, motion & animation
 
 - **Chunky, snappy animation** on voxel assets; no smooth organic motion.
