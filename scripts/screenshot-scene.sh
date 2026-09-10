@@ -16,7 +16,7 @@
 # with a pipe run heading SOUTH beside it. Three of the four facings on belts
 # and the fourth on the pipes, which makes it the right subject for reviewing
 # per-tile rotation and the junction art's east-only fallback in one frame.
-# Pass --fixture <machines|fluids|vat|splitter|chain|stress|demo> for a different one:
+# Pass --fixture <machines|fluids|vat|splitter|chain|stress|pipes|demo> for a different one:
 # `machines` (a hopper, a machine and a dock), `fluids` (a tank, a pipe run
 # and the machine tapping it), `vat` (the 2x2 cooking vat alone), `splitter`
 # (a line that FORKS — one splitter with both outputs built and a second with
@@ -42,6 +42,14 @@
 # `build_stress_line`), the fixture the instanced tile/item rendering is
 # measured on. It implies --populate, and the run prints a SCREENSHOT_RENDER
 # line with the frame's object, primitive and draw-call counts.
+#
+# Pass --pipe-gallery to build the PIPE GALLERY (test_layouts.gd's
+# `build_pipe_gallery`): every pipe shape at every turn, a tank discharging
+# into a pipe from each of four sides, a machine tapping a pipe from each
+# side, and the shipped mixer -> vat -> bottler runs — the fixture the pipe
+# presentation (the pipes & conveyors overhaul, ticket 6) is reviewed on.
+# Add --populate to see liquid standing in the fed runs, and --closeup for
+# any one joint; a whole-gallery frame is too small to judge a flange by.
 #
 # Pass --populate to run whatever was built forward first, so the shot shows
 # product moving instead of an idle factory. Pass --first-person to review
@@ -88,7 +96,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--contracts] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--no-hud] [--stock] [--hotbar N] [--contents N] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--contracts] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--no-hud] [--stock] [--hotbar N] [--contents N] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

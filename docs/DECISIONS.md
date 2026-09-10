@@ -22,6 +22,93 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-09: **Pipe presentation — "Pipes & Conveyors Overhaul" ticket 6
+  (`godot_project/main.gd`, tests, the screenshot script; the deprecated
+  `pipe_source`/`pipe_inlet` deleted from `assets/voxels/`).** Seven calls.
+
+  (1) **A pipe tile is composed from `links.connections` and nothing else.**
+  The old `_pipe_roles` read the fluid snapshot (`is_source`, tap indices)
+  and then GUESSED — "is there a building south of this tile?" — to pick one
+  of three one-arrangement models, and fell back to a plain tube for every
+  arrangement it could not express, which after the chain rework was most
+  of them. Ticket 1 put the exact joins on the wire, so the scene now
+  derives the shape (end / straight / corner / tee / cross from how many
+  sides are joined and how they lie), the turn, and a fitting per non-pipe
+  side from that one field. No adjacency scan of Godot's own, per
+  ARCHITECTURE.md §4/§5.
+
+  (2) **The turn is arithmetic on `DIRECTIONS` indices, and the tests prove
+  it on the models.** The shapes are authored where ticket 3 put them (an
+  end open west, a corner on east and north, a tee closed south) and one
+  clockwise quarter turn adds one to every index — the same turn
+  `Direction::rotate_cw`, `_direction_yaw` and `VoxModel::rotated_cw` make.
+  So "which turn lands the authored openings on the joined sides" is one
+  subtraction per shape, and voxgen's `a_corner_turned_twice_opens_west_and_south`
+  is the proof that the arithmetic and the models agree.
+
+  (3) **A straight's turn is decided per AXIS, not per tile, and a pipe's
+  `direction` decides only a lonely tile's axis.** Ticket 3 kept one joint
+  flange per straight, on its low-X end, precisely so a join reads as one
+  fitting. That holds only if every tile along a run puts its flange on the
+  same side; the old code turned each straight by its own placed
+  `direction`, so an east tile next to a west tile stacked two flanges on
+  the boundary between them. Now an east-west straight is always turn 0 and
+  a north-south one always turn 1, whatever the player pressed R to; the
+  placement's facing only matters for a pipe joined to nothing (it lies
+  along that axis), which is also the only case where R visibly does
+  anything to a pipe. Ends have a dictated turn (their one open side), so
+  an end open to the east would stack its flange against the straight east
+  of it — `pipe_end` therefore carries no joint flange; its cap is its
+  identity and the joint is the neighbour's.
+
+  (4) **Every part of a fitting is a full voxel of radius larger than
+  anything it can be overlaid on (`PIPE_FITTING_MARGIN` = 1.0).** Ticket 3
+  widened a fitting's bore by 0.4 so the two meshes "never share a
+  surface", which was true of the bore and of a fitting on a +X leg. It was
+  not true of a fitting on a straight's LOW-X face — the first tile of the
+  run leaving the mixer, and every tile a tank discharges into from the
+  east — where the fitting lands on the straight's own joint flange (radius
+  5.5) with a flange of its own at 6.0. Two voxel solids z-fight wherever a
+  voxel of both has an outward neighbour in neither, because both then
+  expose a face on the same plane; a margin of one full voxel of radius
+  guarantees every axis-neighbour of an inner voxel lies inside the outer
+  solid, so no face is shared. The machine fitting's flange went to 6.5;
+  the tank fitting already cleared it. `a_fitting_overlaid_on_either_face_of_a_straight_shares_no_outer_surface`
+  pins it for both fittings on both faces, exempting only the tile
+  boundary plane (what stands beyond it is the render's job).
+
+  (5) **Fittings are instances; fluid bodies stay nodes.** A fitting has no
+  live state, so it goes through ticket 4's `_stage_tile_instance` under
+  its own key (`fitting:x,y:side`) and costs nothing a tile does not. The
+  liquid body is scaled per frame AND tinted per network, and a pool per
+  fluid is a node with extra steps, so it stays a node — now one asset per
+  shape (`PIPE_FLUID_ASSETS`), at the shape's turn, which is what let
+  `FLUID_END_CAP_TRIM` go: each body is authored to reach only its shape's
+  open faces.
+
+  (6) **Hover names the joins in words, and "feeds"/"fed by" is read off
+  the fluid snapshot, not guessed from geometry.** The wire says "machine,
+  north"; the placement standing north says WHICH machine (`_kind_display_name`
+  of its kind); whether this pipe feeds it or is fed by it is whether the
+  segment index is in the network's `taps` (the machine draws from it) or
+  `producers` (the machine deposits into it). A tank always feeds.
+
+  (7) **The ghost previews its shape from the PIPE tiles beside it, and
+  nothing else.** Any orthogonally adjacent pipe joins the same network
+  (`sim::world`'s pipe-links doc), so that much of a hypothetical placement
+  is certain before the sim is asked; which machine or tank it would tap is
+  not (a machine taps ONE tile of a run and the sim picks it), so no
+  fitting is previewed. With no pipe beside it the ghost lies along the
+  chosen facing, exactly as the placed lonely tile will. `preview_command`
+  (ARCHITECTURE.md §4) is still the right long-term answer. Decided here
+  before ticket 5 chose the belt ghost's rule; flagged for ticket 7 to make
+  the two agree.
+
+  Also learned, for fixtures: **a tank is filled from bought stock, and only
+  a RAW fluid can be bought**, so a gallery run tapped by a bottler (whose
+  input is ketchup) stays empty however many times it is filled; the
+  gallery's fed runs are tapped by mixers (vinegar) for that reason.
+
 - 2026-09-09: **Pipes & conveyors overhaul, ticket 2 of 7 (the belt model
   family; `assets/voxels/` only, `godot_project/main.gd` deliberately
   untouched — ticket 5 wires the models in).** The plan
@@ -2642,6 +2729,27 @@ were only discoverable by building it:
     That render is not repeatable from a committed script, which is why the
     check is flagged for ticket 5 rather than claimed as done.
 
+24. **A fitting overlaid on a shape must be a full voxel of radius larger
+    than anything it can cover.** Ticket 3's "+0.4 on the bore" kept the two
+    meshes apart in the bore and on a bare +X leg; it did nothing for the
+    case ticket 6 hit first in a render — the machine fitting on the LOW-X
+    face of the run's first tile, sitting on the straight's own joint
+    flange. Two voxel solids z-fight wherever a voxel of both has an
+    outward neighbour in neither: both then expose a face on the same
+    plane. One full voxel of radius margin makes every axis-neighbour of an
+    inner voxel part of the outer solid, so no face is ever shared. Pinned
+    by `cargo test -p voxgen` for both fittings on both faces of a
+    straight; the tile-boundary plane is exempt, because what stands beyond
+    it (the machine's nozzle, the tank's spout) is what the render is for.
+
+25. **A pipe tile's turn is a property of what it is joined to, never of
+    the facing it was placed with.** The one joint flange per straight has
+    to sit on the same side of every tile along an axis, or two neighbours
+    stack theirs on a shared boundary; so an east-west straight is always
+    turn 0 and a north-south one always turn 1, and R on a pipe visibly
+    changes only a tile joined to nothing. An end's turn is dictated by its
+    one open side, so it cannot obey the rule and carries no joint flange
+    at all — the cap is its identity. Junction shapes never had one.
 ## Part C — ARCHITECTURE.md §9a, full text (mobile export spike findings, 2026-09-06)
 
 Ran against the milestone-1 scaffold, no gameplay code involved. Dev environment: macOS/arm64, Godot 4.6.3-stable (matching §1a's pin), only Xcode **Command Line Tools** installed (no Xcode.app).

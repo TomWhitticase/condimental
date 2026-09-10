@@ -165,11 +165,12 @@ DECISIONS.md Part B. There is no point 10.
 18. **A rotated placement needs no new geometry: the same mesh is spun about
     its footprint-centre origin.** The exception is point 11's junction
     art: spinning a carved +X doorway 180° puts the opening where nobody can
-    see it, visibly worse than the plain tile. So `pipe_inlet` stays
-    east-only and the other facings fall back to the plain model. The belt's
+    see it, visibly worse than the plain tile. The belt's
     `belt_inlet`/`belt_outlet` variants were **retired** by the pipes and
     conveyors overhaul (point 23): the plain belt tile carries the junction
     and the machine's own hood and doorway do the rest, at every facing.
+    Pipes no longer have this gap either: a pipe tile is a shape plus
+    overlaid fittings, each turned to the side its `links` name (point 25).
 19. **A live body scaled inside a hollow shape must be strictly narrower
     than the shape's OUTER wall at every height it can reach.** The pipe's
     fluid slab was as wide as the bore; where the tube curves in toward
@@ -208,6 +209,18 @@ DECISIONS.md Part B. There is no point 10.
     reaches the exit face in the same frame a straight would; its arrow
     bends with the belt. Idlers, rails and legs are structure and never
     move. The plain tile carries every belt-to-machine junction (point 18).
+24. **A fitting overlaid on a shape must be a full voxel of radius larger
+    than anything it can cover** (`PIPE_FITTING_MARGIN`). Two voxel solids
+    z-fight wherever a voxel of both has an outward neighbour in neither;
+    a one-voxel margin puts every axis-neighbour of an inner voxel inside
+    the outer solid. Found where the machine fitting lands on a straight's
+    own joint flange; pinned by `cargo test -p voxgen` on both faces.
+25. **A pipe tile's turn is a property of what it is joined to, never of
+    its facing.** One joint flange per straight only reads as one join if
+    every tile along an axis keeps it on the same side (east-west turn 0,
+    north-south turn 1); an end's turn is dictated by its open side, so it
+    carries no joint flange at all. R on a pipe visibly changes only a tile
+    joined to nothing.
 
 ## 3. Theme & setting
 

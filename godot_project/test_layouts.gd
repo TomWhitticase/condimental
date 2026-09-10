@@ -271,6 +271,105 @@ static func build_reference_line(sim) -> void:
 const REFERENCE_LINE_PLACEMENTS := 37
 
 
+## THE PIPE GALLERY (the pipes & conveyors overhaul, ticket 6) — the fixture
+## `test_pipe_shapes.gd` asserts and `scripts/screenshot-scene.sh
+## --pipe-gallery` photographs. Every pipe shape at every turn, from real
+## placements, in three rows (y grows north):
+##
+##   * Row 0-3: two-tile runs (an end at each turn), three-tile straights
+##     on both axes, a 2x2 ring of the four corner turns, four tees (each
+##     closed on a different side), a cross, and two lonely tiles on each
+##     axis. The first tee's run and the cross's run are each fed by a tank
+##     and tapped by a MIXER (which draws vinegar, a raw fluid the larder
+##     can stock — a bottler's ketchup cannot be bought, so a bottler-tapped
+##     tank stays empty), so liquid stands in a tee, a cross, ends and
+##     straights once the fixture is run.
+##   * Row 5-7: a tank discharging into a lone pipe from each of its four
+##     sides, then a bottler tapping a lone pipe from each of its four sides
+##     — every fitting at every turn.
+##   * Row 10-12: the shipped middle of the line at its real geometry
+##     (`sim::reference_chain`): a tank-fed vinegar run turning down into
+##     the 1x2 mixer, then mixer -> vat -> bottler through two-tile runs.
+##
+## Bill: about 1,940 of 3,000.
+static func build_pipe_gallery(sim) -> void:
+	# --- row 0-3: shapes -------------------------------------------------
+	for tile in [Vector2i(0, 0), Vector2i(1, 0)]:
+		place(sim, "pipe", tile, "east")
+	for tile in [Vector2i(3, 0), Vector2i(4, 0), Vector2i(5, 0)]:
+		place(sim, "pipe", tile, "east")
+	for tile in [Vector2i(7, 0), Vector2i(7, 1)]:
+		place(sim, "pipe", tile, "north")
+	for tile in [Vector2i(9, 0), Vector2i(9, 1), Vector2i(9, 2)]:
+		place(sim, "pipe", tile, "north")
+	for tile in [Vector2i(12, 0), Vector2i(13, 0), Vector2i(12, 1), Vector2i(13, 1)]:
+		place(sim, "pipe", tile, "east")
+	# Tees: (centre, the side it is CLOSED on) — the arm tiles are the other
+	# three neighbours. The first is fed and tapped.
+	place(sim, "fluid_tank", Vector2i(16, 1), "east")
+	place(sim, "mixer", Vector2i(18, 3), "north") # 1x2 turned: covers (18, 3) and (19, 3)
+	for tee in [[Vector2i(18, 1), "south"], [Vector2i(22, 1), "north"], [Vector2i(26, 1), "east"], [Vector2i(30, 1), "west"]]:
+		var centre: Vector2i = tee[0]
+		place(sim, "pipe", centre, "east")
+		for side in ["north", "east", "south", "west"]:
+			if side != tee[1]:
+				place(sim, "pipe", centre + _offset(side), "east")
+	# Cross, fed and tapped.
+	place(sim, "fluid_tank", Vector2i(34, 1), "east")
+	place(sim, "mixer", Vector2i(36, 3), "north")
+	place(sim, "pipe", Vector2i(36, 1), "east")
+	for side in ["north", "east", "south", "west"]:
+		place(sim, "pipe", Vector2i(36, 1) + _offset(side), "east")
+	place(sim, "pipe", Vector2i(39, 0), "east")
+	place(sim, "pipe", Vector2i(39, 2), "north")
+	# --- row 5-7: a fitting on every side ----------------------------------
+	place(sim, "fluid_tank", Vector2i(0, 6), "east")
+	place(sim, "pipe", Vector2i(1, 6), "east")
+	place(sim, "fluid_tank", Vector2i(5, 6), "west")
+	place(sim, "pipe", Vector2i(4, 6), "east")
+	place(sim, "fluid_tank", Vector2i(8, 5), "north")
+	place(sim, "pipe", Vector2i(8, 6), "east")
+	place(sim, "fluid_tank", Vector2i(11, 7), "south")
+	place(sim, "pipe", Vector2i(11, 6), "east")
+	place(sim, "bottler", Vector2i(15, 6), "east")
+	place(sim, "pipe", Vector2i(14, 6), "east")
+	place(sim, "bottler", Vector2i(18, 6), "west")
+	place(sim, "pipe", Vector2i(19, 6), "east")
+	place(sim, "bottler", Vector2i(22, 7), "north")
+	place(sim, "pipe", Vector2i(22, 6), "east")
+	place(sim, "bottler", Vector2i(25, 5), "south")
+	place(sim, "pipe", Vector2i(25, 6), "east")
+	# --- row 10-12: the shipped middle ------------------------------------
+	place(sim, "fluid_tank", Vector2i(0, 12), "east")
+	for tile in [Vector2i(1, 12), Vector2i(2, 12), Vector2i(3, 12)]:
+		place(sim, "pipe", tile, "east")
+	place(sim, "mixer", Vector2i(3, 10), "east")
+	for tile in [Vector2i(4, 10), Vector2i(5, 10)]:
+		place(sim, "pipe", tile, "east")
+	place(sim, "cooking_vat", Vector2i(6, 10), "east")
+	for tile in [Vector2i(8, 10), Vector2i(9, 10)]:
+		place(sim, "pipe", tile, "east")
+	place(sim, "bottler", Vector2i(10, 10), "east")
+
+
+## Every placement `build_pipe_gallery` makes, so a test asserting it was
+## built in full does not restate the layout.
+const PIPE_GALLERY_PLACEMENTS := 41 + 16 + 11 # rows 0-3, 5-7 and 10-12
+
+
+## Tile-space step per direction, the simulation's own convention (east +X,
+## north +Y — `sim::types::Direction::offset`).
+static func _offset(direction: String) -> Vector2i:
+	match direction:
+		"north":
+			return Vector2i(0, 1)
+		"south":
+			return Vector2i(0, -1)
+		"west":
+			return Vector2i(-1, 0)
+	return Vector2i(1, 0)
+
+
 ## Sets the balance to `amount` through the save/load boundary — the one
 ## door into a sim the presentation layer is allowed to use, and the only
 ## way a Godot fixture can be bigger than `sim::STARTING_MONEY` (3000)

@@ -180,6 +180,7 @@ run_godot_script test_save_load.gd SAVE_LOAD_OK "save_ron/load_ron/new_game acro
 run_godot_script test_main_menu.gd MAIN_MENU_OK "menu.tscn, the save list, the GameSession handoff — save/load ticket 2"
 run_godot_script test_pause_menu.gd PAUSE_MENU_OK "ESC pause menu, save slots, autosave, quit to menu — save/load ticket 2"
 run_godot_script test_perf.gd PERF_OK "instanced belts/pipes/items on the 1500-tile stress line, rebuild + 120 frames timed — pipes & conveyors ticket 4"
+run_godot_script test_pipe_shapes.gd PIPE_SHAPES_OK "pipe shape, turn, fittings and fluid body from links; pipe hover — pipes & conveyors ticket 6"
 
 echo
 echo "PASS: real placement + milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"
@@ -188,7 +189,8 @@ echo "      + belt/pipe junctions + the build menu + the inventory hotbar + the 
 echo "      piped middle, 1x2 mixer, hopper-contents choice and ingredient market"
 echo "      + the delivery dock that ends the line + save/load across the boundary"
 echo "      + the main menu, save slots, autosave and the pause menu"
-echo "      + instanced belts/pipes/items timed on the stress line,"
+echo "      + instanced belts/pipes/items timed on the stress line"
+echo "      + pipe shapes, fittings and fluid bodies from the wire's links,"
 echo "      all verified"
 echo "      headlessly (sim_core tests"
 echo "      + gdext boundary + interaction + 3D scene structure + pan/zoom + contract panel"
