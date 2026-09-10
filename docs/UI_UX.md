@@ -196,17 +196,21 @@ DECISIONS.md Part B. There is no point 10.
     diagonal, so a line along one diagonal projects to a full-length screen
     horizontal and a line along the other to a short screen vertical: a
     two-arm `>` chevron rendered as an `L`, and could not point anywhere at
-    any facing. The belt's direction mark is therefore a **filled** arrow
-    (wedge head, short shaft) standing one voxel proud of the rubber in
-    `hazard_yellow` (§7: a shape, in signage colour), and it reads at all
-    four facings. **Raised, not recessed**: one edge of any recess runs along
-    the sight line and shadows its own floor. Belts animate by **frames**:
+    any facing. The belt's mark was therefore a **filled** arrow (wedge
+    head, short shaft) in `hazard_yellow` until 2026-09-10, when the player
+    asked for the arrows to go: the mark is now a **plain cleat**, a bar of
+    dark rubber two voxels long across the lane, and the belt's direction is
+    given in words (the build prompt's `facing east`, hover's `carries
+    east`) and by the running surface itself. The camera lesson stands for
+    any mark anyone draws next. **Raised, not recessed**: one edge of any
+    recess runs along the sight line and shadows its own floor. Belts
+    animate by **frames**:
     frame `k` is the same tile with the surface pattern advanced `k` quarter
     tiles along the path and nothing else changed; the pattern's period is
     one tile (a shorter one makes frames coincide or run backwards). A
     corner's surface is a quarter annulus about the tile corner between its
     two open faces, whose pattern is stretched to a tile's worth so it
-    reaches the exit face in the same frame a straight would; its arrow
+    reaches the exit face in the same frame a straight would; its cleat
     bends with the belt. Idlers, rails and legs are structure and never
     move. The plain tile carries every belt-to-machine junction (point 18).
 24. **A fitting overlaid on a shape must be a full voxel of radius larger
