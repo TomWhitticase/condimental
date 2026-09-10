@@ -10,13 +10,16 @@ useful even if the others change:
 | [UI_UX.md](UI_UX.md) | Camera, art medium, visual theme, materials/lighting, UI style | How the game looks and feels |
 | [GAMEPLAY.md](GAMEPLAY.md) | Core loop, sauce/equipment progression, economy, contracts, staff | What the game actually is to play |
 | [DEVLOG.md](DEVLOG.md) | Current project status + a dated log of what's been done | Catching up on progress without re-deriving it from `git log` |
+| [DECISIONS.md](DECISIONS.md) | Full-text decision records (the long form of CLAUDE.md's condensed decisions log, UI_UX.md §2b and ARCHITECTURE.md §9a) | The *why* behind a rule, or the history of a change |
+| [PIPES_AND_CONVEYORS_PLAN.md](PIPES_AND_CONVEYORS_PLAN.md) | The pipes & conveyors overhaul: goals, ticket DAG, and the wire/asset contracts every ticket shares | What that update is and how its tickets fit together |
 
 The first three are authoritative design docs and are `@`-included directly
 into the root [`CLAUDE.md`](../CLAUDE.md), so any Claude Code session in this
-repo already has them loaded in full. DEVLOG.md is different in kind — a
-status tracker/history log rather than a design doc — and is deliberately
-**not** `@`-included, since it will grow without bound; check it when you
-need status or history, and append to it when you finish meaningful work.
+repo already has them loaded in full. DEVLOG.md and DECISIONS.md are different in kind — a status/history log and
+an archive of full decision records — and are deliberately **not**
+`@`-included, since both grow without bound. Check them when you need
+status, history or the reasoning behind a rule; append to them when you
+finish meaningful work or make a decision.
 This index exists for quickly orienting on the `docs/` folder itself (e.g.
 before adding a new doc, or when only skimming rather than reading
 everything).

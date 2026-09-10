@@ -13,16 +13,17 @@
 #     epic — one per connected run of placed pipe), at the tiles it reports,
 #   * every one of those pipe nodes (and every liquid body) is a real,
 #     non-empty imported voxel mesh, not a silently-missing asset,
-#   * the source segment is drawn with a different model from a plain one
-#     (UI_UX.md §7: state distinguished by more than colour),
+#   * the tile the tank discharges into carries the TANK FITTING on the
+#     tank's side, and the tile the mixer taps carries the MACHINE FITTING
+#     on the mixer's side and is drawn as a CORNER (the run turns down into
+#     the mixer) — both decided from the wire's `links` (the pipes &
+#     conveyors overhaul, ticket 6; `test_pipe_shapes.gd` covers every
+#     shape and turn),
 #   * each liquid body's vertical scale tracks its segment's live pressure,
 #     and a segment with no fluid in it is hidden outright,
 #   * hovering a pipe tile resolves to fluid info text, through the exact
 #     same _tile_under_screen_pos plane-intersection path machines use, in
 #     BOTH view modes (ISOMETRIC cursor and FIRST_PERSON crosshair),
-#   * the inlet segment (the one that actually feeds a machine) renders as
-#     the dedicated connector fitting (PIPE_INLET_ASSET), not a plain header
-#     tile — the visual-overhaul pass's fix for the pipe-to-machine seam,
 #   * the pipe run's FLUID TANK (the "Visual overhaul round 2" epic: ticket 1
 #     made it real in simulation, ticket 2 draws it) renders as a real
 #     non-empty mesh at the tile the SIMULATION reports, its liquid column
@@ -105,41 +106,53 @@ func _run_checks() -> void:
 		return
 
 	# --- one rendered pipe per segment, at the sim's own tiles ------------
-	var source_asset := ""
-	var plain_asset := ""
-	var inlet_tiles := 0
+	var tank_fittings := 0
+	var machine_fittings := 0
 	for segment in segments:
 		var pair: Array = segment["tile"]
 		var tile := Vector2i(int(pair[0]), int(pair[1]))
-		var node: Node3D = main.get_node_or_null("World/pipe_%d,%d" % [tile.x, tile.y])
-		if node == null:
+		# A pipe tile is a MultiMesh instance (the pipes & conveyors
+		# overhaul's ticket 4), read back through `_tile_instance_at`.
+		var instance: Dictionary = main._tile_instance_at(tile)
+		if instance.is_empty():
 			_fail("no rendered pipe at %s, which the simulation reports as a segment" % str(tile))
 			return
-		if _meshes(node, []).is_empty():
+		if instance["nodes"].is_empty():
 			_fail("the pipe at %s rendered no meshes — the .vox didn't import" % str(tile))
 			return
 		var expected: Vector3 = main._tile_origin(tile.x, tile.y, main.FLOOR_Y)
-		if not node.position.is_equal_approx(expected):
-			_fail("the pipe at %s is drawn at %s, expected %s" % [str(tile), str(node.position), str(expected)])
+		if not instance["position"].is_equal_approx(expected):
+			_fail("the pipe at %s is drawn at %s, expected %s" % [str(tile), str(instance["position"]), str(expected)])
 			return
 		var asset: String = main._pipe_asset_for(tile)
-		if bool(segment.get("is_source", false)):
-			source_asset = asset
-		elif asset == main.PIPE_INLET_ASSET:
-			inlet_tiles += 1
-		else:
-			plain_asset = asset
+		if instance["asset"] != asset:
+			_fail("the pipe at %s is drawn as '%s' but `_pipe_asset_for` says '%s'" % [str(tile), instance["asset"], asset])
+			return
+		for fitting in main._pipe_fittings_at(tile):
+			if String(fitting["asset"]) == main.PIPE_FITTING_TANK_ASSET:
+				tank_fittings += 1
+				if not bool(segment.get("is_source", false)) or String(fitting["to"]) != "east":
+					_fail("a tank fitting on the %s side of %s, but the tank discharges into %s from the east" % [
+						fitting["to"], str(tile), str(segments)
+					])
+					return
+			elif String(fitting["asset"]) == main.PIPE_FITTING_MACHINE_ASSET:
+				machine_fittings += 1
+				if tile != Vector2i(0, 2) or String(fitting["to"]) != "south":
+					_fail("a machine fitting on the %s side of %s; the mixer stands south of (0, 2)" % [
+						fitting["to"], str(tile)
+					])
+					return
+				if asset != main.PIPE_CORNER_ASSET:
+					_fail("the tapped tile draws '%s'; joined west and south it should be a corner" % asset)
+					return
 
-	# --- the tank's own tile is a DIFFERENT model, not just a tint --------
-	if source_asset == "":
-		_fail("no segment is marked as the tank's supply tile: %s" % str(segments))
+	# --- the tank's tile and the mixer's tile each carry their fitting -----
+	if tank_fittings != 1:
+		_fail("expected exactly one tank fitting on the run, got %d" % tank_fittings)
 		return
-	if source_asset == plain_asset:
-		_fail("the tank-fed segment draws the same model as a plain one — UI_UX.md §7 wants a shape difference")
-		return
-	# --- and the tile the machine draws from gets the branch fitting ------
-	if inlet_tiles < 1:
-		_fail("no segment drew the machine-inlet fitting even though the mixer taps the run")
+	if machine_fittings != 1:
+		_fail("expected exactly one machine fitting on the run, got %d" % machine_fittings)
 		return
 
 	# --- the liquid bodies track live pressure ---------------------------
@@ -151,7 +164,7 @@ func _run_checks() -> void:
 		return
 	for body in bodies:
 		if _meshes(body, []).is_empty():
-			_fail("a liquid body rendered no meshes — '%s' didn't import" % main.PIPE_FLUID_ASSET)
+			_fail("a liquid body rendered no meshes — '%s' didn't import" % body.name)
 			return
 		if body.visible:
 			_fail("an empty run should hide its liquid entirely, not draw a sliver")
@@ -182,6 +195,10 @@ func _run_checks() -> void:
 		return
 	if not pipe_text.contains("units") or not pipe_text.contains("pressure"):
 		_fail("the pipe tooltip should report its level and pressure, got: %s" % pipe_text)
+		return
+	var tap_text: String = main._hover_text_at_tile(Vector2i(0, 2))
+	if not tap_text.contains("connects east") or not tap_text.contains("feeds Mixer"):
+		_fail("the tapped tile's tooltip should name its pipe side and the mixer, got: %s" % tap_text)
 		return
 	# ...and through the same screen-to-tile math, in the isometric view.
 	var screen_pos: Vector2 = main._camera.unproject_position(
@@ -236,5 +253,5 @@ func _run_checks() -> void:
 		_fail("the tank tooltip should report its level, got: %s" % tank_text)
 		return
 
-	print("FLUIDS_OK: one network of %d placed segments rendered at the sim's own tiles, the tank-fed tile and the machine-inlet tile draw their own models, liquid bodies follow live pressure, and the tank and pipes both answer hover" % segments.size())
+	print("FLUIDS_OK: one network of %d placed segments rendered at the sim's own tiles, the tank-fed tile and the tapped corner carry their fittings, liquid bodies follow live pressure, and the tank and pipes both answer hover" % segments.size())
 	quit(0)

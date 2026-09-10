@@ -102,8 +102,18 @@ func _run_checks() -> void:
 	if world_root == null:
 		_fail("the World node should exist even when it is empty")
 		return
-	if world_root.get_child_count() != 0:
-		_fail("an empty world should render no placement nodes, got %d" % world_root.get_child_count())
+	# "World" always carries its two instancing containers, "Tiles" and
+	# "Items" (the pipes & conveyors overhaul's ticket 4); an empty world has
+	# nothing else under it and nothing in either.
+	for child in world_root.get_children():
+		if String(child.name) != "Tiles" and String(child.name) != "Items":
+			_fail("an empty world should render no placement nodes, got '%s'" % child.name)
+			return
+		if child.get_child_count() != 0:
+			_fail("an empty world should have no instanced %s, got %d groups" % [child.name, child.get_child_count()])
+			return
+	if main._tile_instance_at(Vector2i.ZERO).size() != 0 or main._carried_item_count() != 0:
+		_fail("an empty world should record no tile instances and draw no items")
 		return
 	if main.get_node_or_null("Floor") == null:
 		_fail("the floor must be drawn even with nothing on it — there is nowhere to build otherwise")
@@ -217,11 +227,14 @@ func _run_checks() -> void:
 	main._rebuild_world()
 	for facing in tiles.keys():
 		var tile: Vector2i = tiles[facing]
-		var node: Node3D = main.get_node_or_null("World/belt_%d,%d" % [tile.x, tile.y])
-		if node == null:
+		# A belt is a MultiMesh instance, not a node (the pipes & conveyors
+		# overhaul's ticket 4); its yaw is read back through the scene's
+		# own record of it.
+		var instance: Dictionary = main._tile_instance_at(tile)
+		if instance.is_empty():
 			_fail("no rendered belt at %s facing %s" % [str(tile), facing])
 			return
-		var got := rad_to_deg(node.rotation.y)
+		var got := rad_to_deg(float(instance["yaw"]))
 		while got < 0.0:
 			got += 360.0
 		if absf(got - float(expected_yaw[facing])) > 0.5:
@@ -238,32 +251,30 @@ func _run_checks() -> void:
 		_fail("a north-facing 3x1 should claim 1x3 — a quarter turn swaps the extents")
 		return
 
-	# --- 6. The junction art's east-only fallback, under real placement ----
-	# The belt at (0, 0) faces east with a hopper behind it at (-1, 0): that
-	# is the one authored case, and it takes the outlet variant.
+	# --- 6. A belt's shape comes from its links, at every facing ----------
+	# The belt at (0, 0) faces east with a hopper behind it at (-1, 0): fed
+	# from behind, so the plain straight family — since the pipes and
+	# conveyors overhaul there is no junction variant to pick and nothing
+	# east-only about a belt (test_connections.gd and test_belt_shapes.gd
+	# cover the corner and re-shaping cases).
 	Layouts.build_minimal(main.sim)
 	main._rebuild_world()
-	if main._belt_asset_for(Vector2i(0, 0), "east") != main.BELT_OUTLET_ASSET:
-		_fail("an east-facing belt catching a hopper's discharge should draw the outlet variant")
+	var straight: Array = main._belt_frames_for_shape(main.BELT_SHAPE_STRAIGHT)
+	var fed: Dictionary = main._tile_instance_at(Vector2i(0, 0))
+	if fed.is_empty() or fed["asset"] != straight[0]:
+		_fail("an east-facing belt catching a hopper's discharge should draw the straight family, got %s" % str(fed.get("asset", "nothing")))
 		return
-	# The SAME tile facing any other way must fall back to the plain model
-	# rather than drawing a doorway pointing the wrong way — the known,
-	# accepted art gap this ticket does not close.
-	for facing in ["north", "south", "west"]:
-		if main._belt_asset_for(Vector2i(0, 0), facing) != main.BELT_ASSET:
-			_fail("a %s-facing belt must fall back to the plain tile, got '%s'" % [
-				facing, main._belt_asset_for(Vector2i(0, 0), facing),
-			])
-			return
-	# And the fallback is what the scene actually built for the rotated belts
-	# above, not just what the function would say: the north-facing belt at
-	# (10, 6) rendered, and it rendered the plain model.
-	var north_belt: Node3D = main.get_node_or_null("World/belt_10,6")
-	if north_belt == null:
+	# The lone rotated belts above rendered too, as straights, spun: a
+	# north-facing tile fed by nothing is a line start, drawn with the same
+	# four frames as any straight.
+	var north_belt: Dictionary = main._tile_instance_at(Vector2i(10, 6))
+	if north_belt.is_empty():
 		_fail("the north-facing belt did not render at all")
 		return
-	if _meshes(north_belt, []).is_empty():
-		_fail("the north-facing belt rendered no meshes — the fallback model did not import")
+	if north_belt["asset"] != straight[0] or north_belt["frames"] != straight or north_belt["nodes"].is_empty():
+		_fail("the north-facing belt rendered '%s' (%s) with %d meshes — expected the straight frame set" % [
+			north_belt["asset"], str(north_belt["frames"]), north_belt["nodes"].size(),
+		])
 		return
 
 	# --- 7. A click places, and the scene follows --------------------------
@@ -281,7 +292,7 @@ func _run_checks() -> void:
 	if main._placements.size() != before + 1:
 		_fail("a left-click in placement mode should have added exactly one placement")
 		return
-	if main.get_node_or_null("World/belt_12,12") == null:
+	if main._tile_instance_at(Vector2i(12, 12)).is_empty():
 		_fail("the placed belt did not render")
 		return
 	if String(main._placement_at_tile(Vector2i(12, 12)).get("direction", "")) != "south":
@@ -316,7 +327,7 @@ func _run_checks() -> void:
 		_fail("remove mode over bare floor should say so")
 		return
 	main._issue_world_command({"type": "remove", "tile": [12, 12]})
-	if main.get_node_or_null("World/belt_12,12") != null:
+	if not main._tile_instance_at(Vector2i(12, 12)).is_empty():
 		_fail("the removed belt is still rendered")
 		return
 

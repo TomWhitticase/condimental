@@ -10,9 +10,9 @@
 # Verifies:
 #   * a placed splitter renders its own bespoke model — not the generic
 #     `machine` housing — at the tile the simulation reports,
-#   * a belt handing over TO a splitter draws the plain belt tile, not the
-#     hand-over-to-a-machine variant: a splitter is more conveyor, and
-#     `belt_inlet`'s dead-plate in front of it would be a lie,
+#   * the belts around a splitter — the one feeding it, the one it hands
+#     straight to and its branch belt — are plain straights (each is fed
+#     from behind), and the feeding belt's tooltip names the splitter,
 #   * the next-output arrow exists, points along the placement's own facing
 #     when the straight side is due, and turns exactly one quarter turn
 #     CLOCKWISE — the simulation's own `rotate_cw` — when the branch is,
@@ -71,8 +71,10 @@ func _meshes(node: Node, out: Array) -> Array:
 	return out
 
 
-func _splitter_node(tile: Vector2i) -> Node3D:
-	return main.get_node_or_null("World/splitter_%d,%d" % [tile.x, tile.y])
+## A splitter's body is a MultiMesh instance like a belt's (the pipes &
+## conveyors overhaul's ticket 4); only its arrow is a node.
+func _splitter_instance(tile: Vector2i) -> Dictionary:
+	return main._tile_instance_at(tile)
 
 
 func _arrow(tile: Vector2i) -> Node3D:
@@ -102,25 +104,34 @@ func _run_checks() -> void:
 	if main._shop_asset_for("splitter") == main.MACHINE_MODEL_FALLBACK:
 		_fail("the splitter kind still resolves to the generic '%s' model" % main.MACHINE_MODEL_FALLBACK)
 		return
-	var body := _splitter_node(FORKED)
-	if body == null:
-		_fail("no rendered node for the splitter placed at %s" % str(FORKED))
+	var body := _splitter_instance(FORKED)
+	if body.is_empty():
+		_fail("no rendered instance for the splitter placed at %s" % str(FORKED))
 		return
-	if _meshes(body, []).is_empty():
+	if body["asset"] != main.SPLITTER_ASSET:
+		_fail("the splitter is drawn as '%s', expected '%s'" % [body["asset"], main.SPLITTER_ASSET])
+		return
+	if body["nodes"].is_empty():
 		_fail("the placed splitter rendered no meshes — its .vox didn't import")
 		return
 	var expected: Vector3 = main._tile_origin(FORKED.x, FORKED.y, main.FLOOR_Y)
-	if not body.position.is_equal_approx(expected):
-		_fail("the splitter sits at %s, expected its tile centre %s" % [str(body.position), str(expected)])
+	if not body["position"].is_equal_approx(expected):
+		_fail("the splitter sits at %s, expected its tile centre %s" % [str(body["position"]), str(expected)])
 		return
 
-	# --- a belt feeding a splitter is still a plain belt -------------------
-	# (1, 0) hands over to the splitter at (2, 0). If a splitter counted as a
-	# building the tile would draw `belt_inlet`, which puts a machine's
-	# dead-plate and kerbs in front of what is actually more conveyor.
-	var feeding: String = main._belt_asset_for(Vector2i(1, 0), "east")
-	if feeding != main.BELT_ASSET:
-		_fail("the belt feeding a splitter draws '%s', expected the plain '%s'" % [feeding, main.BELT_ASSET])
+	# --- the belts around a splitter are plain straights -------------------
+	# (1, 0) hands over to the splitter at (2, 0) and is fed from behind;
+	# (3, 0) is fed by the splitter from behind; the branch belt (2, -1)
+	# faces south and is fed by the splitter from the north — behind it. All
+	# three are straight, and the splitter keeps its own model.
+	var straight: Array = main._belt_frames_for_shape(main.BELT_SHAPE_STRAIGHT)
+	for tile in [Vector2i(1, 0), Vector2i(3, 0), Vector2i(2, -1)]:
+		var belt: Dictionary = main._tile_instance_at(tile)
+		if belt.is_empty() or belt["asset"] != straight[0]:
+			_fail("the belt at %s next to a splitter draws '%s', expected the plain '%s'" % [str(tile), str(belt.get("asset", "nothing")), straight[0]])
+			return
+	if not main._hover_text_at_tile(Vector2i(1, 0)).contains("hands east to a splitter"):
+		_fail("the belt feeding the splitter should say so, got: %s" % main._hover_text_at_tile(Vector2i(1, 0)).replace("\n", " / "))
 		return
 
 	# --- the arrow, and where it points before anything has moved ---------
@@ -168,13 +179,7 @@ func _run_checks() -> void:
 		return
 
 	# --- items cross a splitter, drawn like items on a belt ---------------
-	var carried := false
-	for key in main._item_nodes.keys():
-		if String(key).begins_with("splitter_"):
-			var node: Node3D = main._item_nodes[key]["node"]
-			if node.visible and is_equal_approx(node.position.y, main.BELT_SURFACE_Y):
-				carried = true
-				break
+	var carried := _item_on_splitter()
 	if not carried:
 		# Not every tick has an item on the splitter; run on until one is.
 		if not _tick_until(2000, func(): return _item_on_splitter()):
@@ -195,7 +200,7 @@ func _run_checks() -> void:
 	var drawn := 0
 	for i in range(carried_there):
 		var key := "belt_%d_%d_%d" % [branch_tile.x, branch_tile.y, i]
-		if main._item_nodes.has(key) and main._item_nodes[key]["node"].visible:
+		if not main._carried_item(key).is_empty():
 			drawn += 1
 	if drawn != carried_there:
 		_fail("the branch belt carries %d items and the scene draws %d — items in a second chunk are being hidden" % [
@@ -256,10 +261,15 @@ func _run_checks() -> void:
 	quit(0)
 
 
+## Whether any drawn item is on a splitter slot, at belt-surface height —
+## the same check the belt items get, since a splitter carries exactly like
+## a belt tile.
 func _item_on_splitter() -> bool:
-	for key in main._item_nodes.keys():
-		if String(key).begins_with("splitter_") and main._item_nodes[key]["node"].visible:
-			return true
+	for key in main._item_slots.keys():
+		if String(key).begins_with("splitter_"):
+			var item: Dictionary = main._carried_item(key)
+			if not item.is_empty() and is_equal_approx(float(item["position"].y), main.BELT_SURFACE_Y):
+				return true
 	return false
 
 

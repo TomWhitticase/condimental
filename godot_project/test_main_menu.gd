@@ -254,7 +254,17 @@ func _initialize() -> void:
 		return
 	for placement in placements:
 		var pair: Array = placement["tile"]
-		var key := "%s_%d,%d" % [String(placement["kind"]), int(pair[0]), int(pair[1])]
+		var kind := String(placement["kind"])
+		var origin := Vector2i(int(pair[0]), int(pair[1]))
+		var key := "%s_%d,%d" % [kind, origin.x, origin.y]
+		# A belt or pipe is a MultiMesh instance rather than a node (the
+		# pipes & conveyors overhaul's ticket 4), so it is looked up the
+		# way the scene records it.
+		if loaded._is_instanced_kind(kind):
+			if loaded._tile_instance_at(origin).is_empty():
+				_fail("the loaded world's %s was not drawn" % key)
+				return
+			continue
 		if world_root.get_node_or_null(key) == null:
 			_fail("the loaded world's %s was not drawn" % key)
 			return

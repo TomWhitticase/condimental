@@ -133,8 +133,24 @@
 //! pipe tile, machine and building now carries a real [`Direction`] on the
 //! wire, a belt run may turn as often as the player likes, and the sim
 //! links a corner the same way it links a straight — by asking what is in
-//! the tile a belt points at. What is *not* done here is the other half
-//! that note named: rotated voxel models. Ticket 2 (presentation) owns that.
+//! the tile a belt points at. The other half that note named — rotated
+//! voxel models, and a corner that is *drawn* as a corner — is presentation:
+//! the Real Placement epic's ticket 2 spun every model by its facing, and
+//! the Pipes & Conveyors Overhaul reads shape off [`Links`] (below) in
+//! `main.gd` — ticket 6 a pipe tile's shape, turn and fittings, ticket 5 a
+//! belt's shape (straight, left or right corner, merge, line start, line
+//! end) at every facing, with no east-only junction art left on the belt.
+//!
+//! **And the wire now says which way a corner turns** (the Pipes &
+//! Conveyors Overhaul, ticket 1 — `docs/PIPES_AND_CONVEYORS_PLAN.md`). Every
+//! belt, splitter and pipe placement carries [`Links`]: what the topology
+//! pass linked into it and on which side, what it hands to, or which sides
+//! its pipe is joined on. It is recorded by [`World::recompute_topology`] at
+//! the moment each relation is resolved — the same `belt_to_belt`,
+//! `belt_to_sink`, `source_to_belt`, `splitter_outputs`, pipe adjacency and
+//! tap lists the tick reads — so a renderer drawing a corner, a tee or a
+//! port fitting from it is drawing where product actually goes, and it
+//! costs nothing per tick.
 //!
 //! This is also where `SimBridge`'s pure-logic half lives (ARCHITECTURE.md
 //! §4): `tick()`, `dirty_chunks()`/`chunk_snapshot()`, `issue_command()`,
@@ -938,22 +954,29 @@ pub struct FluidSnapshot {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TileSnapshot {
-    /// `{"kind": "belt", "direction": "east", "items_here": ["tomato"]}` —
-    /// one tile, so `items_here` is simply everything on it.
+    /// `{"kind": "belt", "direction": "east", "items_here": ["tomato"],
+    ///   "links": {"inputs": [{"from": "west", "kind": "belt"}],
+    ///             "output": {"to": "east", "kind": "machine"}}}` —
+    /// one tile, so `items_here` is simply everything on it. `links` is
+    /// exactly the placement's [`ConveyorLinks`], so hover can say what
+    /// feeds a tile and where it hands to without a second call.
     Belt {
         direction: Direction,
         items_here: Vec<ItemId>,
+        links: ConveyorLinks,
     },
     /// `{"kind": "splitter", "direction": "east",
     ///   "items_here": ["tomato"], "outputs": [[7, 0], [6, -1]],
-    ///   "next_output": "straight"}` — enough for a hover tooltip
-    /// ("Splitter — next: straight"). `outputs` and `next_output` mean
-    /// exactly what they do in [`SplitterSnapshot`].
+    ///   "next_output": "straight", "links": {...}}` — enough for a hover
+    /// tooltip ("Splitter — next: straight"). `outputs` and `next_output`
+    /// mean exactly what they do in [`SplitterSnapshot`]; `links` is the
+    /// placement's [`ConveyorLinks`] (`output` = the straight side).
     Splitter {
         direction: Direction,
         items_here: Vec<ItemId>,
         outputs: [Option<TileCoord>; 2],
         next_output: Side,
+        links: ConveyorLinks,
     },
     /// `{"kind": "machine", "machine_kind": "cooking_vat",
     ///   "direction": "east",
@@ -973,9 +996,11 @@ pub enum TileSnapshot {
     },
     /// `{"kind": "pipe", "direction": "east", "fluid": "vinegar",
     ///   "volume": 7.5, "capacity": 10.0, "pressure": 0.75,
-    ///   "is_source": false, "is_inlet": true}` — enough for a hover tooltip
-    /// without a second call. `is_inlet` is whether some machine taps this
-    /// exact tile.
+    ///   "is_source": false, "is_inlet": true,
+    ///   "links": {"connections": [{"to": "west", "kind": "pipe"}]}}` —
+    /// enough for a hover tooltip without a second call. `is_inlet` is
+    /// whether some machine taps this exact tile; `links` is the
+    /// placement's [`PipeLinks`].
     Pipe {
         direction: Direction,
         fluid: Option<FluidId>,
@@ -984,6 +1009,7 @@ pub enum TileSnapshot {
         pressure: f64,
         is_source: bool,
         is_inlet: bool,
+        links: PipeLinks,
     },
     /// `{"kind": "hopper", "direction": "east",
     ///   "footprint": {...}, "origin_tile": [-1, 0], "item": "tomato",
@@ -1031,6 +1057,133 @@ pub enum TileSnapshot {
     },
 }
 
+/// What stands on the far end of a link, for [`Links`] — the seven kinds a
+/// belt, splitter or pipe tile can be joined to, as the wire names them.
+///
+/// This is deliberately its own enum rather than a `String` kind id: a
+/// link is about *what kind of thing* is there (a machine, whichever
+/// machine), not which content id it runs, and a closed set is what lets a
+/// renderer match on it exhaustively. `BodyKind` is the private twin;
+/// the one difference in spelling is `tank` for `fluid_tank`, because the
+/// plan's wire contract names it that way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkKind {
+    Belt,
+    Splitter,
+    Hopper,
+    Machine,
+    Dock,
+    Pipe,
+    Tank,
+}
+
+impl From<BodyKind> for LinkKind {
+    fn from(body: BodyKind) -> Self {
+        match body {
+            BodyKind::Belt => LinkKind::Belt,
+            BodyKind::Splitter => LinkKind::Splitter,
+            BodyKind::Pipe => LinkKind::Pipe,
+            BodyKind::Machine => LinkKind::Machine,
+            BodyKind::Hopper => LinkKind::Hopper,
+            BodyKind::FluidTank => LinkKind::Tank,
+            BodyKind::Dock => LinkKind::Dock,
+        }
+    }
+}
+
+/// Something the topology pass links **into** a belt-like tile:
+/// `{"from": "west", "kind": "belt"}`. `from` is the absolute direction
+/// from this tile toward the neighbour that feeds it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct LinkInput {
+    pub from: Direction,
+    pub kind: LinkKind,
+}
+
+/// The sink a belt-like tile hands to: `{"to": "east", "kind": "machine"}`.
+/// `to` is the absolute direction from this tile toward the sink.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct LinkOutput {
+    pub to: Direction,
+    pub kind: LinkKind,
+}
+
+/// One thing a pipe tile is joined to: `{"to": "north", "kind": "pipe"}`.
+/// `to` is the absolute direction from this tile toward it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct PipeConnection {
+    pub to: Direction,
+    pub kind: LinkKind,
+}
+
+/// A belt's or splitter's links (the Pipes & Conveyors Overhaul, ticket 1
+/// — `docs/PIPES_AND_CONVEYORS_PLAN.md`, "The wire contract").
+///
+/// ```json
+/// { "inputs": [ {"from": "west", "kind": "belt"},
+///               {"from": "south", "kind": "hopper"} ],
+///   "output": {"to": "east", "kind": "machine"} }
+/// ```
+///
+/// `inputs` is everything the topology pass links **into** this tile — a
+/// belt or splitter pointing at it, a hopper or machine discharging onto it
+/// — in a fixed order: north, east, south, west by `from`. At most one
+/// thing can link in from each side, so that order is a property of the
+/// geometry, not of which placement the pass happened to walk first.
+/// `output` is the one sink this tile hands to, `null` when nothing that
+/// can accept an item stands where it points. For a splitter this is the
+/// **straight** output; the branch stays in [`SplitterSnapshot::outputs`].
+///
+/// These are the same links the tick uses (`Topology::belt_to_belt`,
+/// `belt_to_sink`, `source_to_belt`, `splitter_outputs`), recorded once in
+/// the same pass, so they are exact by construction: a renderer that
+/// draws a corner from `inputs` is drawing where the item will actually
+/// come from, and it costs nothing per tick.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize)]
+pub struct ConveyorLinks {
+    pub inputs: Vec<LinkInput>,
+    pub output: Option<LinkOutput>,
+}
+
+/// A pipe tile's links (same ticket).
+///
+/// ```json
+/// { "connections": [ {"to": "north", "kind": "machine"},
+///                    {"to": "east",  "kind": "pipe"},
+///                    {"to": "south", "kind": "tank"},
+///                    {"to": "west",  "kind": "pipe"} ] }
+/// ```
+///
+/// One entry per thing this tile is joined to, in north, east, south, west
+/// order: every orthogonally adjacent pipe tile in the **same** network
+/// (which, since a network *is* a connected component of adjacent pipe,
+/// is every orthogonally adjacent pipe tile); the tank whose discharge
+/// this tile is; and a machine whose input tap or output tap this exact
+/// tile is. **Only the tap tile gets the machine entry.** A machine draws
+/// from one segment and deposits into one segment (`Topology::machine_taps`
+/// / `machine_output_taps`), so a run laid along a machine's whole side
+/// connects to it on one tile, and that is the tile a port fitting belongs
+/// on — the wire reports where the fluid actually crosses, not every
+/// place the two happen to touch.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize)]
+pub struct PipeLinks {
+    pub connections: Vec<PipeConnection>,
+}
+
+/// The `links` object on a [`PlacementSnapshot`]: a belt or splitter
+/// carries [`ConveyorLinks`], a pipe carries [`PipeLinks`], and every
+/// other kind carries nothing (the field is omitted, so those placements
+/// serialize byte-for-byte as they did before the field existed).
+/// Serialized untagged — the two shapes share no field name, and a
+/// consumer already knows which it is reading from the placement's `kind`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(untagged)]
+pub enum Links {
+    Conveyor(ConveyorLinks),
+    Pipe(PipeLinks),
+}
+
 /// One placed thing, statically described — the unit
 /// [`World::world_layout`] reports.
 ///
@@ -1061,10 +1214,25 @@ pub enum TileSnapshot {
 /// `null` for everything that runs none: belts, pipes, hoppers, tanks and
 /// docks.
 ///
+/// **`links` (the Pipes & Conveyors Overhaul, ticket 1)** is present on
+/// every belt, splitter and pipe and **absent** — not `null`, absent — on
+/// every other kind, so a machine's or hopper's entry is byte-identical to
+/// what it was before the field existed. See [`Links`] for both shapes:
+///
+/// ```json
+/// { "kind": "belt", "tile": [0, 0], "direction": "east",
+///   "footprint": { "width_tiles": 1, "height_tiles": 1 },
+///   "occupies": [[0, 0]], "recipe": null,
+///   "links": { "inputs": [ {"from": "west", "kind": "hopper"} ],
+///              "output": {"to": "east", "kind": "machine"} } }
+/// ```
+///
 /// Unlike `chain_layout`, **this is not static for the life of the world** —
 /// it changes whenever the player places, rotates or removes something. Call
 /// it again after issuing any of those three commands (and after a
-/// `dirty_chunks` report, if the renderer is chunk-driven).
+/// `dirty_chunks` report, if the renderer is chunk-driven). `links` changes
+/// exactly when the rest does, since both come out of the same topology
+/// pass.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PlacementSnapshot {
     pub kind: String,
@@ -1073,6 +1241,8 @@ pub struct PlacementSnapshot {
     pub footprint: Footprint,
     pub occupies: Vec<TileCoord>,
     pub recipe: Option<RecipeId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub links: Option<Links>,
 }
 
 /// What kind of thing a placed entity is — the one component every
@@ -1153,6 +1323,14 @@ struct Topology {
     /// `(tank, network index, segment index)` for every tank discharging
     /// into a pipe.
     tank_discharges: Vec<(Entity, usize, usize)>,
+    /// **The wire's view of every relation above**, keyed on the belt,
+    /// splitter or pipe it describes: which sides feed it, which side it
+    /// hands to, or which sides its pipe is joined on (see [`Links`]).
+    /// Filled in the same pass, at the same moment each relation is
+    /// resolved, so it can never disagree with the lists the tick reads —
+    /// and never rescanned: `world_layout` and `query_tile` look it up.
+    /// Every belt-like entity and every pipe has an entry, empty or not.
+    links: BTreeMap<Entity, Links>,
 }
 
 pub struct World {
@@ -1687,6 +1865,34 @@ impl World {
                 .expect("every placement carries a BodyKind")
         };
 
+        // --- the wire's `links`: one entry per belt-like and pipe entity,
+        // seeded empty here and filled in below at the exact point each
+        // relation is resolved, so a lonely belt still reports
+        // `{"inputs": [], "output": null}` and a lonely pipe
+        // `{"connections": []}`. Sorted by side at the end of the pass.
+        let mut links: BTreeMap<Entity, Links> = BTreeMap::new();
+        for &entity in topology.belts.iter().chain(topology.splitters.iter()) {
+            links.insert(entity, Links::Conveyor(ConveyorLinks::default()));
+        }
+        for &entity in &topology.pipes {
+            links.insert(entity, Links::Pipe(PipeLinks::default()));
+        }
+        fn conveyor_links(
+            links: &mut BTreeMap<Entity, Links>,
+            entity: Entity,
+        ) -> &mut ConveyorLinks {
+            match links.get_mut(&entity) {
+                Some(Links::Conveyor(conveyor)) => conveyor,
+                _ => unreachable!("every belt-like entity was seeded with ConveyorLinks"),
+            }
+        }
+        fn pipe_links(links: &mut BTreeMap<Entity, Links>, entity: Entity) -> &mut PipeLinks {
+            match links.get_mut(&entity) {
+                Some(Links::Pipe(pipe)) => pipe,
+                _ => unreachable!("every pipe entity was seeded with PipeLinks"),
+            }
+        }
+
         // --- solid hand-offs: a belt hands to whatever it points at, and a
         // machine/hopper discharges onto whatever belt is off its outlet
         // face. Faces matter here (see this module's doc).
@@ -1719,8 +1925,17 @@ impl World {
             let Some(occupant) = resolve_sink(&topology.grid, target) else {
                 continue;
             };
-            if is_belt_like(body_of(occupant)) {
+            let occupant_body = body_of(occupant);
+            conveyor_links(&mut links, belt).output = Some(LinkOutput {
+                to: placement.direction,
+                kind: occupant_body.into(),
+            });
+            if is_belt_like(occupant_body) {
                 topology.belt_to_belt.push((belt, occupant));
+                conveyor_links(&mut links, occupant).inputs.push(LinkInput {
+                    from: placement.direction.opposite(),
+                    kind: LinkKind::Belt,
+                });
             } else {
                 topology.belt_to_sink.push((belt, occupant));
             }
@@ -1733,8 +1948,26 @@ impl World {
             let placement = self.placement_of(splitter);
             let origin = self.position_of(splitter);
             let outputs = Side::BOTH.map(|side| {
-                let target = side.direction_from(placement.direction).step(origin);
-                resolve_sink(&topology.grid, target)
+                let direction = side.direction_from(placement.direction);
+                let sink = resolve_sink(&topology.grid, direction.step(origin));
+                if let Some(occupant) = sink {
+                    let occupant_body = body_of(occupant);
+                    // The wire's `output` is the straight side only; the
+                    // branch is already on the wire as `outputs[1]`.
+                    if side == Side::Straight {
+                        conveyor_links(&mut links, splitter).output = Some(LinkOutput {
+                            to: direction,
+                            kind: occupant_body.into(),
+                        });
+                    }
+                    if is_belt_like(occupant_body) {
+                        conveyor_links(&mut links, occupant).inputs.push(LinkInput {
+                            from: direction.opposite(),
+                            kind: LinkKind::Splitter,
+                        });
+                    }
+                }
+                sink
             });
             topology.splitter_outputs.push((splitter, outputs));
         }
@@ -1754,6 +1987,10 @@ impl World {
                 .find(|&occupant| is_belt_like(body_of(occupant)));
             if let Some(belt) = outlet_belt {
                 topology.source_to_belt.push((source, belt));
+                conveyor_links(&mut links, belt).inputs.push(LinkInput {
+                    from: placement.direction.opposite(),
+                    kind: body_of(source).into(),
+                });
             }
         }
 
@@ -1815,11 +2052,28 @@ impl World {
                 .collect();
             // Each adjacency once: only look east and north, so `(i, j)`
             // never appears alongside `(j, i)`.
-            let mut links = Vec::new();
+            let mut segment_links = Vec::new();
             for (i, &tile) in component.iter().enumerate() {
                 for dir in [Direction::East, Direction::North] {
-                    if let Some(&j) = index_of.get(&dir.step(tile)) {
-                        links.push((i, j));
+                    let neighbour = dir.step(tile);
+                    if let Some(&j) = index_of.get(&neighbour) {
+                        segment_links.push((i, j));
+                        // The same adjacency, once from each end, for the
+                        // wire.
+                        let (this, _, _) = pipe_tiles[&tile];
+                        let (that, _, _) = pipe_tiles[&neighbour];
+                        pipe_links(&mut links, this)
+                            .connections
+                            .push(PipeConnection {
+                                to: dir,
+                                kind: LinkKind::Pipe,
+                            });
+                        pipe_links(&mut links, that)
+                            .connections
+                            .push(PipeConnection {
+                                to: dir.opposite(),
+                                kind: LinkKind::Pipe,
+                            });
                     }
                 }
             }
@@ -1831,7 +2085,7 @@ impl World {
             }
             topology
                 .networks
-                .push(FluidNetwork::new(None, segments, links));
+                .push(FluidNetwork::new(None, segments, segment_links));
         }
 
         // --- who taps what.
@@ -1867,8 +2121,8 @@ impl World {
                     .footprint
                     .outlet_neighbours(origin, placement.direction)
                     .into_iter()
-                    .find_map(|tile| topology.pipe_index.get(&tile).copied());
-                if let Some((network, segment)) = tap {
+                    .find_map(|tile| topology.pipe_index.get(&tile).map(|&index| (tile, index)));
+                if let Some((tile, (network, segment))) = tap {
                     if topology.networks[network].fluid.is_none() {
                         topology.networks[network].fluid = Some(fluid_id);
                     }
@@ -1876,6 +2130,15 @@ impl World {
                     topology
                         .machine_output_taps
                         .push((machine, network, segment));
+                    // The pipe stands off the outlet face, so from the pipe
+                    // the machine is back the way the machine points.
+                    let (pipe, _, _) = pipe_tiles[&tile];
+                    pipe_links(&mut links, pipe)
+                        .connections
+                        .push(PipeConnection {
+                            to: placement.direction.opposite(),
+                            kind: LinkKind::Machine,
+                        });
                 }
             }
 
@@ -1883,16 +2146,30 @@ impl World {
                 let tap = placement
                     .tiles(origin)
                     .into_iter()
-                    .flat_map(|tile| Direction::ALL.map(|dir| dir.step(tile)))
-                    .filter_map(|neighbour| topology.pipe_index.get(&neighbour).copied())
+                    .flat_map(|tile| Direction::ALL.map(|dir| (dir, dir.step(tile))))
+                    .filter_map(|(dir, neighbour)| {
+                        topology
+                            .pipe_index
+                            .get(&neighbour)
+                            .map(|&index| (dir, neighbour, index))
+                    })
                     // A machine never draws from the run it fills: that is
                     // not plumbing, it is a machine feeding itself.
-                    .find(|&(network, _)| Some(network) != output_network);
-                if let Some((network, segment)) = tap {
+                    .find(|&(_, _, (network, _))| Some(network) != output_network);
+                if let Some((dir, tile, (network, segment))) = tap {
                     if topology.networks[network].fluid.is_none() {
                         topology.networks[network].fluid = Some(fluid_id);
                     }
                     topology.machine_taps.push((machine, network, segment));
+                    // `dir` stepped from the footprint to the pipe; the
+                    // wire names the side from the pipe's point of view.
+                    let (pipe, _, _) = pipe_tiles[&tile];
+                    pipe_links(&mut links, pipe)
+                        .connections
+                        .push(PipeConnection {
+                            to: dir.opposite(),
+                            kind: LinkKind::Machine,
+                        });
                 }
             }
         }
@@ -1903,12 +2180,31 @@ impl World {
                 .footprint
                 .outlet_neighbours(origin, placement.direction)
                 .into_iter()
-                .find_map(|tile| topology.pipe_index.get(&tile).copied());
-            if let Some((network, segment)) = discharge {
+                .find_map(|tile| topology.pipe_index.get(&tile).map(|&index| (tile, index)));
+            if let Some((tile, (network, segment))) = discharge {
                 topology.networks[network].mark_source(segment);
                 topology.tank_discharges.push((tank, network, segment));
+                let (pipe, _, _) = pipe_tiles[&tile];
+                pipe_links(&mut links, pipe)
+                    .connections
+                    .push(PipeConnection {
+                        to: placement.direction.opposite(),
+                        kind: LinkKind::Tank,
+                    });
             }
         }
+
+        // A side order that is a property of the geometry (north, east,
+        // south, west — `Direction`'s own order), not of which placement the
+        // pass walked first. At most one thing can stand on each side of a
+        // tile, so this is a total order and the wire shape is canonical.
+        for entry in links.values_mut() {
+            match entry {
+                Links::Conveyor(conveyor) => conveyor.inputs.sort_by_key(|input| input.from),
+                Links::Pipe(pipe) => pipe.connections.sort_by_key(|connection| connection.to),
+            }
+        }
+        topology.links = links;
 
         self.topology = topology;
     }
@@ -2243,6 +2539,15 @@ impl World {
 
     fn body_kind(&self, entity: Entity) -> Option<BodyKind> {
         self.ecs.get::<&BodyKind>(entity).ok().map(|body| *body)
+    }
+
+    /// The wire's links for a belt or splitter — looked up, never derived,
+    /// since the topology pass recorded them (see `Topology::links`).
+    fn conveyor_links_of(&self, entity: Entity) -> ConveyorLinks {
+        match self.topology.links.get(&entity) {
+            Some(Links::Conveyor(conveyor)) => conveyor.clone(),
+            _ => unreachable!("every belt-like entity has ConveyorLinks in the topology"),
+        }
     }
 
     /// If `belt` has an item waiting at its end and `machine` has room for
@@ -2729,6 +3034,7 @@ impl World {
                         .get::<&Machine>(entity)
                         .ok()
                         .map(|machine| machine.recipe.clone()),
+                    links: self.topology.links.get(&entity).cloned(),
                     occupies: placement.tiles(origin),
                     kind: placement.kind,
                     tile: origin,
@@ -3031,6 +3337,7 @@ impl World {
                         .into_iter()
                         .map(|(item, _)| item)
                         .collect(),
+                    links: self.conveyor_links_of(entity),
                 }
             }
             BodyKind::Splitter => {
@@ -3048,6 +3355,7 @@ impl World {
                         .get::<&Splitter>(entity)
                         .expect("a splitter placement carries a Splitter")
                         .due(),
+                    links: self.conveyor_links_of(entity),
                 }
             }
             BodyKind::Machine => {
@@ -3077,6 +3385,10 @@ impl World {
                         .machine_taps
                         .iter()
                         .any(|&(_, net, seg)| net == network_index && seg == segment_index),
+                    links: match self.topology.links.get(&entity) {
+                        Some(Links::Pipe(pipe)) => pipe.clone(),
+                        _ => unreachable!("every pipe has PipeLinks in the topology"),
+                    },
                 }
             }
             BodyKind::Hopper => {

@@ -1,11 +1,9 @@
 # Sauce Factory — UI/UX & Visual Style Plan
 
-This doc is about **aesthetics and UI/UX only** — what the game looks and feels
-like to look at and interact with. It deliberately does not cover gameplay
-mechanics, recipes, progression, or how any of this is built/rendered
-under the hood — that's [docs/ARCHITECTURE.md](ARCHITECTURE.md). The two
-should be read as a pair: ARCHITECTURE.md is "how it runs and is built,"
-this doc is "how it looks and behaves to the player."
+This doc covers **aesthetics and UI/UX only** — how the game looks and
+behaves to the player. Mechanics are [GAMEPLAY.md](GAMEPLAY.md); how it is
+built is [ARCHITECTURE.md](ARCHITECTURE.md). Full decision records, including
+the long form of §2b, are in [DECISIONS.md](DECISIONS.md).
 
 ---
 
@@ -13,642 +11,394 @@ this doc is "how it looks and behaves to the player."
 
 | Aspect | Direction |
 |---|---|
-| Camera | Fixed orthographic isometric/dimetric, tile-based grid |
+| Camera | Fixed orthographic isometric, tile-based grid |
 | Art medium | Full 3D voxel models (not flat-textured cubes) |
-| Asset scale | Every tile = a 32×32×32 voxel volume, consistent across all assets |
+| Asset scale | Every tile = a 32×32×32 voxel volume |
 | Theme | Grounded, semi-realistic 21st-century industrial food factory |
-| Lighting | Real-time dynamic lighting, soft shadows, light shaders — "modded Minecraft with shaders," not photoreal |
-| Materials | Mostly matte/simple voxel materials; metals are deliberately shinier |
-| UI | Clean, simple, Minecraft-adjacent; diegetic clipboard/checklist motifs |
+| Lighting | Real-time lighting, soft shadows, light shaders — "modded Minecraft with shaders" |
+| Materials | Mostly matte; metals deliberately shinier |
+| UI | Clean, Minecraft-adjacent; diegetic clipboard/checklist motifs |
 
-Reference points for the overall feel: **Crossy Road** (chunky, readable voxel simplicity), isometric city/sim games like **The Sims** and **Townscaper**-style titles (fixed dimetric camera, dollhouse readability), **modded Minecraft with a shader pack** (voxel base + real lighting, not vanilla-flat).
-
----
+Reference points: **Crossy Road** (chunky voxel readability), **The Sims** /
+**Townscaper** (fixed dimetric dollhouse camera), **modded Minecraft with a
+shader pack** (voxel base + real lighting).
 
 ## 1. Camera & world presentation
 
-- **Fixed orthographic isometric (dimetric) camera** — no perspective distortion, consistent tile footprint on screen regardless of position. This is the classic "isometric factory/city sim" look, not a free 3D camera.
-- **Tile-based world grid**, always visually legible as a grid — the player should always be able to tell exactly which tile something occupies.
-- **Rotation**: snap-rotate the camera in 90° increments rather than free-orbit. Voxel assets are modeled with clean silhouettes from four fixed viewing angles; free rotation would expose angles that weren't art-directed for and would fight the low-poly/voxel read.
-- **Zoom**: smooth zoom is fine (it doesn't break the voxel read the way free rotation does), within a capped range so the factory stays readable at both ends.
+- **Fixed orthographic isometric camera.** No perspective, no free orbit.
+  The scene uses a true isometric `(1, 1, 1)` view direction, one constant
+  in `main.gd` (`CAMERA_DIRECTION`).
+- **Tile grid always legible**: the player can always tell which tile a
+  thing occupies.
+- **Rotation**: 90° snap only (not yet implemented). Assets are modelled for
+  four fixed angles; free rotation would expose un-art-directed angles.
+- **Zoom**: smooth, within a capped range.
 
 ## 2. Art medium: voxel models, not textured blocks
 
-This is a step up from vanilla Minecraft's approach (simple cubes with a 2D texture per face) — assets here are **full 3D voxel models**, sculpted in voxel space the way a MagicaVoxel model or a voxel-art character is, so machines, props, and scenery can have real shapes (rounded tanks, angled pipes, chamfered edges) rather than being blocky cubes with a picture on them.
+Assets are **full 3D voxel models** (MagicaVoxel-style), so machines and
+props have real shapes, not cubes with a picture on each face.
 
-- **Tile/asset scale**: one world tile corresponds to a **32×32×32 voxel volume**. This is the shared unit every asset is built against, so a machine spanning one tile, a pipe segment, and a crate all read as consistently-scaled objects sitting in the same world — the same role Minecraft's 16×16 texture grid plays for scale consistency, just applied to full voxel models instead of flat textures.
-- **Authoring**: voxel-model tools with a palette-based workflow (e.g. MagicaVoxel-style: a fixed color palette per model rather than photo-textures) keep assets visually consistent and cheap to produce/iterate on — palette swaps can restyle a whole asset without remodeling it.
-- **Silhouette-first modeling**: because the camera is fixed-angle (§1), assets should be designed to read clearly from the four snap-rotation angles specifically, not sculpted for arbitrary viewing angles.
+- **Scale**: one tile = a 32×32×32 voxel volume. A kind's model size equals
+  its `machines.ron` footprint × 32 (the 2x2 vat is 64×64, the 1x2 mixer
+  32×64). Size is content.
+- **Authoring**: palette-based; one shared palette keeps assets consistent.
+- **Silhouette-first**: design to read from the fixed camera angles.
 
-### 2a. Asset pipeline: file format, tools, and how assets actually get made
+### 2a. Asset pipeline
 
-Neither of us had prior experience with voxel-asset pipelines, so this was researched rather than guessed — findings and the resulting decision below. The extra constraint driving the decision, beyond "what do other voxel games do": **every asset needs to be creatable, editable, and viewable by Claude**, not just by a human artist in a GUI. That constraint rules out a few otherwise-reasonable options and points at a specific pipeline.
+Researched, not guessed. The driving constraint: every asset must be
+creatable, editable and viewable by Claude, not only by a human in a GUI.
 
-**Findings:**
+Findings: `.vox` (MagicaVoxel) is the de facto voxel format with an open
+spec; Godot 4 has community `.vox` importers; [`vengi`](https://github.com/vengi-voxel/vengi)
+has a headless CLI that renders a model to an isometric PNG; Rust `.vox`
+writing support is immature.
 
-- **`.vox` (MagicaVoxel) is the de facto standard voxel-model format** across the voxel-art/voxel-game ecosystem. It's a simple, openly-documented RIFF-style format (a full community spec exists at [ephtracy/voxel-model](https://github.com/ephtracy/voxel-model/blob/master/MagicaVoxel-file-format-vox.txt), plus a [Kaitai Struct spec](https://formats.kaitai.io/magicavoxel_vox/) that auto-generates parsers for most languages), with open-source encoder/decoder libraries in Rust, Python, and JS.
-- **Godot 4 already has community import plugins for `.vox`** — e.g. [Godot-MagicaVoxel-Importer-with-Extensions](https://github.com/qbradq/Godot-MagicaVoxel-Importer-with-Extensions) and [godot-vox-import](https://github.com/cschram/godot-vox-import) — which import a `.vox` file directly as a mesh or `MeshLibrary`, hierarchy and all, and are maintained against current Godot 4.x. This means `.vox` can be the actual asset format Godot imports — no bespoke conversion step needed on the engine side. Pick one specific plugin during milestone 1 and pin it like any other dependency (ARCHITECTURE.md §1a).
-- **[`vengi`](https://github.com/vengi-voxel/vengi)** is a free, open-source, actively-maintained (2026 releases, macOS/Linux/Windows builds) suite of voxel tools: an interactive editor (`vengi-voxedit`) and, more importantly for this project, a fully **headless, scriptable CLI** (`vengi-voxconvert`) that converts between ~30 voxel formats and can **render a model to a PNG thumbnail from the command line** — including an `--isometric` render mode, which happens to match this doc's fixed isometric camera (§1) exactly. Zero GUI interaction required for either job.
-- Rust `.vox` **reading** support is solid (the `vox-format` crate). Rust `.vox` **writing** support is less mature as of this research — `vox-format`'s own writer is flagged work-in-progress, with smaller alternatives (`vox_writer`, `create_vox`) also existing. This should be re-checked at implementation time rather than assumed; the format itself is simple enough (a handful of RIFF chunks) that writing a minimal encoder directly is a realistic fallback if no library is in good enough shape.
+**The pipeline:**
 
-**Decision — the pipeline:**
+1. **Source of truth is code.** Each asset is a small parameterized Rust
+   generator function built from primitives. Rust, not a second scripting
+   language.
+2. **The `.vox` file is a generated build artifact, never hand-edited.**
+   Change the generator and re-run it.
+3. **Viewing is a headless render**: render to an isometric PNG with vengi
+   and read the image. No GUI, no computer-use loop.
+4. **Escape hatch**: a one-off hand-sculpted `.vox` (in `vengi-voxedit`) may
+   be committed with no generator, clearly marked as hand-authored.
+5. **One shared, checked-in colour palette** referenced by every generator.
+   This is what keeps §4's material rule and §7's palette consistent.
 
-1. **Source of truth is code, not the binary model file.** Each voxel asset is a small, parameterized Rust generator function (e.g. `fn simmer_pot() -> VoxModel`), built from composable primitives (cuboid, cylinder, etc.). Rust, not a second scripting language, because it's already this project's primary language (ARCHITECTURE.md §1) — no reason to add Lua or anything else just for asset generation. A generator is plain text, fully diffable, and squarely in what an LLM agent is good at writing — this is the same "text is the interface" principle the rest of the project is built on, applied to art assets instead of code or scene files.
-2. **The `.vox` file is a generated build artifact, never hand-edited.** If a shape needs to change, the generator changes and gets re-run — a `.vox` file that's silently diverged from the generator that supposedly produced it is a bug waiting to bite the next session that regenerates it and wipes someone's manual tweak.
-3. **Viewing is a headless render step, not opening a GUI.** After generating or changing a model, render it to an isometric PNG thumbnail with vengi and read the resulting image (see §2b point 3 for the exact tool and flags). This is how a Claude Code session actually looks at the asset it just made and confirms it matches intent — no interactive 3D tool, and no dependency on computer-use-style GUI automation, which would be slow and imprecise for placing individual voxels anyway.
-4. **Escape hatch for genuinely hand-sculpted assets.** Not everything is worth parametrizing — a one-off detailed hero prop may just be easier for a human to sculpt directly in `vengi-voxedit`. That's fine: commit the resulting `.vox` with no generator behind it, and mark it clearly (e.g. a note next to it) as hand-authored, so nobody later goes looking for a generator that doesn't exist.
-5. **One shared, checked-in color palette**, referenced by every generator, rather than each asset inventing its own colors. This is what actually keeps the "shiny metal vs. flat everything else" material rule (§4) and the overall factory palette (§7) consistent across dozens of separately-generated assets instead of drifting per-asset.
-
-**Layout** (proposed here originally; built exactly this way during the
-visual-polish pass, so this is now descriptive, not aspirational):
+Layout (built exactly this way):
 
 ```
 assets/voxels/
-  Cargo.toml        # the `voxgen` crate — a workspace member, run with `cargo run -p voxgen`
-  palette.ron       # shared color palette — every generator references this, none invent their own
-  generators/        # Rust source: one generator per asset (or grouped by category)
-  models/             # generated .vox files — build output; never hand-edited
-  previews/            # generated PNG thumbnails for visual review — gitignored, regenerate on demand
+  Cargo.toml        # crate `voxgen` — `cargo run -p voxgen`
+  palette.ron       # shared palette: colour AND material class
+  generators/       # one generator per asset, plus vox.rs, icons.rs
+  models/           # generated .vox — committed build output
+  icons/            # generated UI icons — committed
+  previews/         # review PNGs — gitignored
 ```
 
-### 2b. How the pipeline actually turned out (built 2026-09-07)
+### 2b. How the pipeline actually turned out — rules learned by building it
 
-Everything above held up. Four things are worth writing down because they
-were only discoverable by building it:
+Point numbers are cited by code comments; keep them stable. Full narrative in
+DECISIONS.md Part B. There is no point 10.
 
-1. **No Rust crate can write the `.vox` files this pipeline needs**, so
-   `generators/vox.rs` contains a small hand-written encoder — the fallback
-   §2a already anticipated. `vox-format` is still parser-only; `vox_writer`
-   0.1.9 does write `SIZE`/`XYZI`/`RGBA` but emits **no scene-graph chunks**,
-   and the Godot importer below cannot read a file without them. The format
-   is simple enough that encoding it directly is ~150 lines with no
-   dependency risk, and it also lets us emit `MATL` material chunks.
-2. **One asset becomes one mesh per material class.** A voxel mesh imported
-   into Godot carries vertex colours but a single material, which cannot
-   satisfy §4's rule that steel is *noticeably* shinier than concrete. So
-   `voxgen` writes both a combined `name.vox` (for previews and for a human
-   opening it in an editor) and `name.<class>.vox` per material class the
-   asset uses; Godot rebuilds one `StandardMaterial3D` per class from
-   `palette.ron`'s own numbers and reassembles the asset as a node with one
-   `MeshInstance3D` per class.
-3. **Reviewing a model headlessly works, with one wrinkle**:
-   `vengi-thumbnailer -i model.vox -o out.png -s 512 --image --isometric` is
-   the incantation. `vengi-voxconvert -o out.png` is *not* — that writes one
-   PNG per Z-slice of the volume, which is not a thumbnail. And the
-   thumbnailer renders through OpenGL, so forcing `SDL_VIDEODRIVER=dummy`
-   makes it fail; it needs a real video driver even though nothing is
-   displayed. `scripts/build-voxels.sh` wraps all of this.
-4. **Godot must run `--import` twice on a cold cache.** The `.vox` importer
-   is an editor *plugin*, and a plugin is only registered on the pass after
-   the one that first scans the project — so the first import silently skips
-   every `.vox` and the second imports them all. This bites any CI setup that
-   assumes one import pass is enough.
-5. **A liquid is its own material class, not a recoloured matte one
-   (added 2026-09-07 with milestone 6's pipes).** `palette.ron`'s
-   `materials` table gained a fourth class, `liquid` — a dielectric like
-   matte, but far glossier (roughness 0.14) — because §4's "visible liquid
-   surfaces in tanks/pipes with subtle shading/reflection" is a *material*
-   property, and point (4) above already settled that material class is
-   palette data rather than a per-asset decision made in GDScript. What is
-   NOT in the palette is the fluid's hue: which liquid is in a pipe is live
-   simulation data, so the fluid model's voxels are near-white and
-   `main.gd` multiplies a per-fluid albedo tint over them (the same shape as
-   its existing item-id → model mapping). One consequence worth knowing:
-   the fluid model is deliberately **one voxel tall** and scaled vertically
-   to the segment's live fill fraction — the encoder puts a model's origin
-   at its footprint centre *at ground level* (see §2b point 1's encoder), so
-   a one-voxel slab's base is exactly its node origin and a fill level needs
-   no pivot arithmetic.
-6. **The pipe run is stainless steel, and it is modelled hollow with an
-   open inspection channel.** Steel rather than PVC because §3 names both
-   but §4 makes metals the deliberate shiny exception so machinery pops —
-   and because GAMEPLAY.md §2/§4 reserve non-standard piping material as a
-   *later* progression gate (tier 5's acid-resistant equipment), which the
-   baseline run shouldn't pre-empt. Hollow because the liquid has to be
-   *seen*: the first cut opened only the top half of the wall, and a
-   rendered-scene review showed that hid the level below roughly half fill
-   — exactly the state a player most needs to read (a draining pipe means a
-   stalling machine). The opening now starts just above the bore floor,
-   leaving side rails standing.
-7. **UI icons (§5) turned out to need a second, separate render pass from
-   the review previews above — not a smaller copy of them (built
-   2026-09-07).** The obvious-sounding shortcut was "reuse
-   `previews/*.png`, just smaller": checking the actual files first (per
-   this section's own norm of verifying rather than assuming) ruled that
-   out. `vengi-thumbnailer`'s `--image` mode always fills the whole frame
-   with an opaque solid colour — confirmed by reading its `--jsonconfig`
-   cvar dump (no background/alpha/clear-colour cvar exists at all) and by
-   rendering through both `--image --isometric` and its default
-   camera-based path and getting an identically opaque result either way.
-   A preview is also deliberately padded, full-frame, and large (512px) —
-   right for "look at the whole model," wrong for "sit in an 18px UI slot
-   next to a line of text." So icon generation is a second binary,
-   `assets/voxels/generators/icons.rs` (`cargo run -p voxgen --bin
-   voxicons`), that calls the same `vengi-thumbnailer` and then does the
-   work the tool itself has no flag for: flood-fill the background to
-   transparent from the image border inward (not a flat colour-key, so a
-   future asset using a near-black *interior* colour can't be falsely
-   keyed), crop to content, and downscale onto a small (64px) square
-   canvas. This is still "extend the existing offline pipeline" (§2a option
-   (a), not the live in-engine `SubViewport` alternative that section also
-   named) — it reuses the same external tool and the same `cargo xtask`
-   staging pattern as `models/`, just as a distinct output (`assets/voxels/
-   icons/`, committed) rather than a rename of `previews/`. First concrete
-   use: `godot_project/main.gd`'s `_icon_for`, showing the contract's
-   target item's icon next to its name in the economy readout line.
-
-8. **A machine's material split follows "food contact is stainless,
-   structure is painted or poured" (the "Machines improvement" milestone's
-   ticket 4).** The first four assets with a real machine identity — a
-   crusher, a mixer, a 2x2 cooking vat and a bulk hopper — needed a rule for
-   §4's metal exception that wasn't decided per asset, and this is it:
-   anything the product actually touches (crushing rolls, mixing vessel and
-   agitator, the vat's body and dome, the hopper's funnel and chute) is the
-   `metal` class, because in a real food plant it is stainless for exactly
-   that reason; anything that only holds those parts up (concrete plinths,
-   painted housings and skirts, hazard striping) is `matte`. The point is not
-   that steel is prettier — it is that an all-steel machine reads as flat as
-   an all-concrete one, so the matte structure is what gives the metal
-   something to pop against. Emissive stays where it already was: status
-   lamps only (§7).
-9. **Review the rendered asset, not the generator — and expect to rework
-   it.** §2a point 3 says to render and look; what building four machines
-   added is how often looking *changes the design*, not just catches a bug.
-   The crusher's rolls were originally sunk in a throat too deep for the
-   fixed isometric angle to see into (the whole reason to expose a crushing
-   mechanism is that it can be seen); the mixer's top-mounted gearbox — the
-   accurate choice — covered the agitator, so it moved to a side bracket with
-   a belt drive, which is also accurate and also legible; the cooking vat's
-   first proportions read as a sphere on a plinth. None of those are visible
-   in the generator source. Budget a rework pass per asset rather than
-   treating the first render as verification.
-11. **Only two of a machine's four vertical faces can ever be seen, and
-    that decides how a junction is drawn (the "Visual overhaul round 2"
-    epic's ticket 3).** §1's camera is fixed at a `(1, 1, 1)` view
-    direction, so the only vertical faces with any pixels on screen are the
-    ones facing +X and +Z-world. The production chain runs +X, which means a
-    machine's OUTLET face is dead-on camera-facing and its INLET face points
-    directly away — carving an inlet doorway into it, the obvious move, is
-    invisible in the only view the game ships. Nor can an inlet be saved by
-    sinking an open-topped channel into that edge: the sight line out of one
-    travels up and over the machine's own body, so anything as tall as a
-    mixing drum occludes its own inlet. The resolution is asymmetric on
-    purpose — **an outlet is a doorway on the +X face; an inlet is a hooded
-    transfer housing whose CAMERA-FACING SIDE is cut away**, so the product
-    path is shown from the side rather than through a mouth that cannot be
-    seen. Both read by value contrast (palette-brightest frame, genuinely
-    black opening, one brass threshold) rather than by detail, because at
-    scene scale a junction is a dozen pixels; a mid-grey interior renders as
-    an empty portal and a hazard stripe across the one camera-facing edge
-    renders as a dark bar, both of which were built and rejected on the
-    render. Corollary worth knowing before drawing any new junction: a
-    machine big enough to stand between its own inlet and the camera (the
-    2x2 cooking vat) needs its opening widened along the face until it
-    reaches an unoccluded corner, and a *neighbouring building* can hide a
-    correct junction outright — the vinegar tank stands one tile diagonally
-    in front of the crusher's discharge and does exactly that.
-
-12. **The full-scene render catches a class of bug no headless test can.**
-    `main.gd`'s item-id → model mapping is presentation-only with a fallback,
-    so when a milestone renamed a chain intermediate the mapping silently
-    went stale and two stages of the chain shipped *cardboard boxes* down the
-    belt where pails of sauce belonged — every structural test still passed,
-    because a box is a perfectly valid mesh. `scripts/screenshot-scene.sh`
-    is what found it. Any presentation-side lookup keyed by a content id has
-    this failure mode; the rendered scene is the only check for it.
-
+1. **The `.vox` encoder is hand-written** (`generators/vox.rs`). No Rust
+   crate writes the scene-graph chunks the Godot importer needs. ~150 lines,
+   and it also emits `MATL` chunks. The encoder puts a model's origin at its
+   footprint centre at ground level.
+2. **One asset = one mesh per material class.** An imported voxel mesh has
+   one material, so `voxgen` writes `name.vox` (preview) plus
+   `name.<class>.vox` per class; Godot rebuilds one `StandardMaterial3D` per
+   class from `materials.json` (exported from `palette.ron`).
+3. **Headless review:** `vengi-thumbnailer -i model.vox -o out.png -s 512
+   --image --isometric`. `vengi-voxconvert -o out.png` writes one PNG per
+   Z-slice, not a thumbnail. The thumbnailer needs a real video driver
+   (`SDL_VIDEODRIVER=dummy` fails). `scripts/build-voxels.sh` wraps it.
+4. **Godot needs `--import` twice on a cold cache.** The `.vox` importer is
+   an editor plugin registered only on the pass after the first scan.
+5. **A liquid is its own material class** (`liquid`, glossy dielectric,
+   roughness 0.14). The fluid's hue is NOT palette data: which liquid is in a
+   pipe is live sim data, so the fluid model is near-white and `main.gd`
+   tints it. The fluid model is **one voxel tall**, scaled vertically to the
+   live fill fraction; because of point 1's origin rule no pivot maths is
+   needed. The same mechanism draws the hopper fill, the tank level and any
+   progress gauge — do not invent another.
+6. **Pipes are stainless steel, hollow, with an open inspection channel**
+   starting just above the bore floor, so the level is visible below half
+   fill. Steel, not PVC: §4 makes metal the shiny exception, and
+   GAMEPLAY.md tier 5 reserves special piping as a later gate.
+7. **UI icons are a second render pass** (`generators/icons.rs`,
+   `cargo run -p voxgen --bin voxicons`), not shrunk previews: the
+   thumbnailer has no transparent-background option, so icons are rendered,
+   flood-filled to transparent from the border, cropped and downscaled to a
+   64px square. Output `assets/voxels/icons/`, committed.
+8. **Material rule for machines: food contact is stainless (`metal`),
+   structure is painted or poured (`matte`).** An all-steel machine reads as
+   flat; matte structure gives the metal something to pop against. Emissive
+   is for status lamps only.
+9. **Review the rendered asset, not the generator, and budget a rework
+   pass per asset.** Looking changes the design (a crusher throat too deep
+   to see into; a gearbox that hid the agitator).
+11. **Only two of a machine's four vertical faces can ever be seen: +X and
+    +Z-world.** So an OUTLET is a doorway carved through the +X face, and an
+    INLET is a hooded transfer housing whose CAMERA-FACING side is cut away
+    (a doorway on the true inlet face is invisible). Both read by value
+    contrast (brightest frame, genuinely black opening, one brass
+    threshold); a mid-grey interior or a hazard stripe fails at scene scale.
+    A machine tall enough to stand between its inlet and the camera (the 2x2
+    vat) needs its opening widened to an unoccluded corner. A neighbouring
+    building can hide a correct junction.
+12. **The full-scene render catches bugs no headless test can.** Any
+    presentation lookup keyed by a content id (`ITEM_MODELS`,
+    `MACHINE_MODELS`) has a fallback, so a stale key ships the wrong model
+    with every test green. `scripts/screenshot-scene.sh` is the check.
 13. **A process an order of magnitude longer than a craft cycle needs a
-    passive readout, and on this camera that readout has to emit its own
-    light (ARCHITECTURE.md §9 milestone 7's aging rack).** Every machine
-    already reports *running vs. idle* through its status lamp, and the hover
-    tooltip already reports progress — which is enough while every process on
-    the line is one to four seconds long. It stops being enough at 2400
-    ticks: the only question a player has about a machine that will sit
-    loaded for over a minute is "how far through is it", and an answer you
-    have to park a cursor on is not an answer you can glance at. So the rack
-    carries a **maturation gauge**: a slot in its corner post with an
-    emissive amber bar scaled to the live process fraction — the fourth use
-    of the same one-voxel-slab-scaled-every-frame mechanism the pipe liquid,
-    the hopper fill and the tank level already use (point 5 above), not a
-    fifth mechanism.
-
-    Two things about it were only discoverable by rendering it. **The gauge
-    face is permanently unlit.** §1's fixed camera means the only visible
-    vertical faces are +X and +Z-world (point 11), and on this scene's key
-    light *both* of those read as shadow side — every bright surface in a
-    machine close-up is a horizontal one. A painted or brushed-metal gauge
-    would therefore be a dark stripe on a dark column; emissive is not
-    decoration here, it is the only thing that reads. **And an empty gauge
-    has to show its own scale.** With the bar hidden below its sub-voxel
-    threshold the slot is just black, so the player cannot see how far the
-    bar still has to climb — the fix is a lit green line at the head of the
-    scale, always on: a finish line, which is a *position* rather than a
-    state encoded in colour (§7). Amber climbing toward green is the whole
-    readout.
-
-    Corollary for the next machine that wants one: this is keyed on machine
-    *kind* (`main.gd`'s `MACHINE_PROGRESS_GAUGES`) and deliberately sparse. A
-    bar tracking the crusher's 60-tick cycle would be a flicker, and five
-    flickering bars along a line is noise, not information.
-
-14. **Wood is the one deliberate exception to point 8's "food contact is
-    stainless" rule.** The aging rack's casks are oak because in a real
-    barrel-aging room the wood *is* the process, not a material someone
-    settled for — and GAMEPLAY.md §2's tier 6 names "barrel-aged" outright.
-    It is also, with the packer's cardboard, one of only two large warm
-    surfaces in the factory, so its palette entry is deliberately browner and
-    redder than `cardboard`; shape does most of the work of telling them
-    apart (a round hooped cask against a folded flat case) and hue does the
-    rest. Recorded here so a later pass doesn't "correct" the barrels to
-    steel for consistency.
-
-15. **The machine with no mechanism is a legitimate silhouette.** Every other
-    kind on this line is identified by something that moves — flywheels, an
-    agitator, a filling gantry, a taping head (points 8/9). The aging rack
-    has none, on purpose: what distinguishes it from its neighbours is that
-    it only *waits*, and a rack of sealed casks with nothing driving them is
-    the honest shape for that. Casks stand on end rather than lying in a
-    cradle for the same camera reason as everything else here — lying down,
-    a cask presents one round head and then recedes into the tile as a long
-    ridge, and four of them render as corrugation; standing, each is a
-    separate round-topped object with a visible head and bung, and four of
-    those read as four things resting.
-
-16. **The one building that is a place rather than a machine, and the
-    occlusion rule that decided its layout (the delivery-dock ticket).**
-    Every other kind on the line is equipment; the delivery dock is
-    architecture — a poured platform at trailer-bed height with a striped
-    edge, rubber bumpers, a despatch door under a canopy — because that is
-    what it *is* (GAMEPLAY.md §6's "somewhere product is sent to be sold"),
-    and because it is the only silhouette on the line that could not be
-    mistaken for another housing with a mechanism on top.
-
-    Point 11 established which faces this camera can see. What building the
-    dock added is the **corollary about depth**, which matters far more for a
-    building with an open floor than for a machine that is solid: a sight
-    line leaving any point travels `(+x, -y, +z)` in model space, so anything
-    at HIGH x and LOW y stands in front of everything behind it. The obvious
-    design — a truck bay carved into the +X face, dead-on to the camera —
-    was built first and reads beautifully on its own, and it walls off the
-    entire deck, because every deck voxel's sight line has to pass through
-    those last few columns on its way out. The tall structure therefore went
-    to the FAR (high-y) side, where its own -Y face is still square to the
-    camera and it occludes nothing, and the near half of the deck was left
-    clear for the goods that stand on it. **Rule of thumb for the next
-    building with something inside it: put the height at high y, put the
-    content at low y.**
-
-    Two smaller things came off the render and not off the generator. The
-    platform was `concrete_dark` for its whole mass on the first cut, which
-    is right for a floor slab's seam and wrong for a block this size — it
-    read as a black pit with a lit rail round it. And the canopy stood two
-    voxels clear of the wall on thin posts, which at scene scale is not read
-    as a gap, it is read as a white shelf floating in front of a blue wall;
-    it is integral with the wall's head now.
-
-    **Updated 2026-09-09: the dock is 2x2, and the corollary above is why.**
-    A playtest said the one-tile version did not read as a loading dock, and
-    it did not — everything above was true of it and all of it was crammed
-    into one 32-voxel tile, which is also why the goods standing on the deck
-    had to be capped at two cases. The extra tile went into DEPTH rather
-    than width for exactly the rule this point states: the far tile is the
-    building (despatch wall, two doors, one continuous canopy, a bay light
-    over each door) and the near tile is open apron. A dock twice as wide
-    and still one row deep would have left the height and the content
-    fighting for the same row. One new wrinkle the bigger model turned up,
-    worth knowing before drawing any multi-tile building: **a machine's
-    infeed hood claims the corner of its own tile, and a wall drawn through
-    it is a hole in the building** — the far tile's hood and the despatch
-    wall wanted the same corner, and the wall now starts east of it, which
-    is also what a real bay looks like (the conveyor comes in at the end of
-    the building, not through the middle).
-
-17. **What stands on the dock is drawn from the pool, not from the dock —
-    and it is capped (at four since the dock became 2x2; two before that).** The dock's own buffer is a pass-through that
-    empties every tick (`sim_core::sim::dock`), so a fill gauge driven from
-    it would read zero forever: the same gauge-lies-about-the-mechanism
-    failure the fluid tank refused when it chose constant head over its own
-    fill fraction. The number that is real is the economy's shared
-    `delivery_stock`, which is what the contract clipboard already labels ON
-    THE DOCK, so the deck stands one case per unit of *that* — each drawn
-    with the item's own model, through the same `ITEM_MODELS` table the belt
-    uses, so what waits on the dock looks like what arrived on it.
-
-    The cap was two because the deck was one tile and a case is a third of
-    it: a rendered four-slot version buried the transfer housing, the
-    despatch door and the canopy under a wall of cardboard. **That reason
-    went away with the 2026-09-09 footprint change** (point 16), which left
-    the whole near tile clear, so it is a two-by-two block of four pallet
-    positions now, standing in front of the building rather than on top of
-    it. The cap itself stays, and so does what it is for: this is a
-    glance-readable "goods are waiting", not a readout — the exact figure is
-    on the clipboard and in the dock's own hover, neither of which is
-    capped.
-
-18. **A rotated placement needs no new geometry — and the junction art is the
-    one thing that does not survive the rotation (the "Real Placement" epic's
-    ticket 2).** Every asset here is modelled with its product path along +X,
-    because until that epic +X was the only direction anything could face. A
-    placement facing another way is therefore just the same mesh spun about
-    its own origin — the encoder puts that origin at the model's footprint
-    centre (point 1), so the node is re-centred on the rotated rectangle and
-    nothing else changes. That covers belts, pipes, machines and buildings
-    alike.
-
-    What it does *not* cover is point 11's junction pieces, and the reason is
-    point 11 itself: an outlet is a doorway carved through the camera-facing
-    +X wall and an inlet is a hood cut open on that same visible side, so
-    spinning either 180° puts the carved side where nobody can see it and a
-    blank wall where the product path is — **visibly worse than the plain,
-    symmetric tile**. So the belt's `belt_inlet`/`belt_outlet` variants stay
-    east-only and three of the four facings a player can choose fall back to
-    the plain model. That is a known, tested, accepted gap, not an oversight:
-    a four-directional junction pass is its own art ticket, and until it
-    happens the fallback is what keeps a turned line honest rather than
-    wrong. A machine turned away from the camera is a milder case of the
-    same thing — its own doorway is still in the right place relative to its
-    body, it is simply on the side you cannot see.
+    passive gauge, and on this camera it must be emissive** (both visible
+    faces are the shadow side). An empty gauge must show its own scale: a
+    lit finish line at the top, a position rather than a colour (§7).
+    `MACHINE_PROGRESS_GAUGES` is keyed on kind and sparse: a bar on a 60-tick
+    cycle is a flicker.
+14. **Wood (`palette.ron` `oak`) is the one exception to point 8.** In a
+    barrel-aging room the wood IS the process. Do not "fix" it to steel.
+15. **A machine with no mechanism is a legitimate silhouette** when what
+    distinguishes it is that it only waits. Casks stand on end: lying down
+    they recede into the tile and read as corrugation.
+16. **A building with an open floor follows the depth rule: put the height
+    at high y, put the content at low y.** A sight line travels
+    `(+x, -y, +z)` in model space, so a tall structure on the near side walls
+    off everything behind it. The delivery dock is architecture (raised
+    platform, striped edge, bumpers, despatch doors under a canopy), with
+    the building on the FAR tile and the near tile open apron. It is 2x2
+    since 2026-09-09; the extra tile went into depth. A machine's infeed
+    hood claims its tile corner, and a wall drawn through it is a hole, so
+    the despatch wall starts east of that corner. Lessons: a large block in
+    `concrete_dark` reads as a pit; a canopy on thin posts reads as a
+    floating shelf.
+17. **What stands on the dock is drawn from `delivery_stock`, not from the
+    dock**, whose own buffer empties every tick. One case per unit, with the
+    item's own model, capped at four (a 2x2 block). The exact figure is on
+    the clipboard and in hover.
+18. **A rotated placement needs no new geometry: the same mesh is spun about
+    its footprint-centre origin.** The exception is point 11's junction
+    art: spinning a carved +X doorway 180° puts the opening where nobody can
+    see it, visibly worse than the plain tile. The belt's
+    `belt_inlet`/`belt_outlet` variants were **retired** by the pipes and
+    conveyors overhaul (point 23): the plain belt tile carries the junction
+    and the machine's own hood and doorway do the rest, at every facing.
+    Pipes no longer have this gap either: a pipe tile is a shape plus
+    overlaid fittings, each turned to the side its `links` name (point 25).
+19. **A live body scaled inside a hollow shape must be strictly narrower
+    than the shape's OUTER wall at every height it can reach.** The pipe's
+    fluid slab was as wide as the bore; where the tube curves in toward
+    the crown its outer wall is that wide too, and the two z-fought as a
+    coloured stripe along every closed tile. Only a scene render with
+    liquid in the run shows it.
+20. **Anything Godot spins must be symmetric about the tile midline,
+    between voxels 15 and 16.** An integer-centred axis (voxel 16) lands
+    on the other side of the midline after a turn, so a run at mixed
+    facings steps at every joint. Use the `*_f` primitives with centre
+    15.5 for pipes, belts and junction art.
+21. **A dark accent on a camera-facing shadow-side face reads as a hole**
+    (the converse of point 11). The end cap's brass disc rendered as the
+    open mouth it closed; bolts on a bright plate keep the accent.
+22. **A composable fitting is an overlay: it keeps out of every shape's
+    sight window (tube-height hardware at x ≥ 27; leg windows at 20..26)
+    and carves its bore a little wider than the shape's so the two meshes
+    never share a surface.** `vengi` previews look from the -X/+Y corner,
+    which the game never shows, so +X-face hardware is judged only in the
+    scene.
+23. **A thin diagonal mark on the tile plane does not survive this camera;
+    a solid shape does.** The isometric view looks straight down one tile
+    diagonal, so a line along one diagonal projects to a full-length screen
+    horizontal and a line along the other to a short screen vertical: a
+    two-arm `>` chevron rendered as an `L`, and could not point anywhere at
+    any facing. The belt's direction mark is therefore a **filled** arrow
+    (wedge head, short shaft) standing one voxel proud of the rubber in
+    `hazard_yellow` (§7: a shape, in signage colour), and it reads at all
+    four facings. **Raised, not recessed**: one edge of any recess runs along
+    the sight line and shadows its own floor. Belts animate by **frames**:
+    frame `k` is the same tile with the surface pattern advanced `k` quarter
+    tiles along the path and nothing else changed; the pattern's period is
+    one tile (a shorter one makes frames coincide or run backwards). A
+    corner's surface is a quarter annulus about the tile corner between its
+    two open faces, whose pattern is stretched to a tile's worth so it
+    reaches the exit face in the same frame a straight would; its arrow
+    bends with the belt. Idlers, rails and legs are structure and never
+    move. The plain tile carries every belt-to-machine junction (point 18).
+24. **A fitting overlaid on a shape must be a full voxel of radius larger
+    than anything it can cover** (`PIPE_FITTING_MARGIN`). Two voxel solids
+    z-fight wherever a voxel of both has an outward neighbour in neither;
+    a one-voxel margin puts every axis-neighbour of an inner voxel inside
+    the outer solid. Found where the machine fitting lands on a straight's
+    own joint flange; pinned by `cargo test -p voxgen` on both faces.
+25. **A pipe tile's turn is a property of what it is joined to, never of
+    its facing.** One joint flange per straight only reads as one join if
+    every tile along an axis keeps it on the same side (east-west turn 0,
+    north-south turn 1); an end's turn is dictated by its open side, so it
+    carries no joint flange at all. R on a pipe visibly changes only a tile
+    joined to nothing.
+26. **A uniform offset in a path convention is invisible on a straight
+    line and shows up the moment the line bends.** Items were drawn from a
+    tile's centre to the next tile's centre — half a tile downstream of the
+    simulation's own input-face-to-output-face distance — and every render
+    of a straight line looked continuous, because every tile shared the
+    shift. A corner cannot share it: the arc has to leave through the
+    output face, and drawn half a tile late it left through the wrong one.
+    Items are now drawn face to face on every tile, so an item appears at a
+    hopper's mouth and vanishes at a machine's face. The general rule: check
+    a path convention against the tile's edges, not against its neighbours,
+    because neighbours hide a shared error.
 
 ## 3. Theme & setting
 
-**A grounded, semi-realistic 21st-century industrial food factory** — stainless steel tanks, rubber conveyor belts, PVC/steel piping, poured concrete floors, hazard-stripe signage, factory floor lighting, pallets and crates, loading docks. The tone is closer to "a real bottling/food-processing plant you could actually walk into," rendered in voxels, than a whimsical toy-factory aesthetic.
-
-- Lean into real industrial visual language (safety signage, cable runs, drainage grates, steel walkways) — the voxel medium provides the charm, the setting itself should still feel plausible and researched rather than cartoonish.
-- Avoid candy-colored or overtly cutesy factory tropes — the sauce theme should come through in what the factory *produces and processes*, not in exaggerating the factory itself into a toy.
+**A grounded, semi-realistic 21st-century industrial food factory**:
+stainless tanks, rubber belts, steel piping, poured concrete, hazard
+striping, pallets, loading docks. Lean into real industrial visual language
+(signage, cable runs, grates, walkways). Avoid candy-coloured or cutesy
+factory tropes; the sauce theme comes through in what the factory processes.
 
 ## 4. Materials & lighting
 
-- **Baseline materials are simple and mostly matte**: painted metal, concrete, plastic, rubber — flat-shaded or close to it, in keeping with a voxel-art look.
-- **Metals get a deliberate exception**: stainless steel tanks, machine housings, pipes, and fittings should read as noticeably shinier/more reflective than the rest of the palette. This contrast is intentional — it's what makes the "important machinery" pop visually against the plainer floors/walls/crates, and it's also just accurate to what a real steel-and-chrome factory floor looks like.
-- **Lighting**: real-time dynamic lighting with soft shadows, mild bloom on bright highlights/emissives, and light ambient occlusion in voxel crevices for depth. Reference point is a modded-Minecraft shader pack (e.g. the Complementary/BSL family) — noticeably better and more atmospheric than flat vanilla lighting, but not aiming for path-traced photorealism.
-- **Emissive/readability elements**: status lights, indicator screens, warning strobes on machines should glow/emit — both an aesthetic touch and a functional readability signal (see §7).
-- **Atmosphere**: steam and smoke particles from cooking/heating equipment, visible liquid surfaces in tanks/pipes with subtle shading/reflection — these sell the "working factory" feeling more than static geometry alone.
+- **Baseline materials are simple and mostly matte**: painted metal,
+  concrete, plastic, rubber.
+- **Metals are the deliberate exception**: stainless tanks, housings, pipes
+  and fittings read noticeably shinier, so machinery pops.
+- **Lighting**: real-time dynamic lighting, soft shadows, mild bloom on
+  emissives, light SSAO. Reference: a modded-Minecraft shader pack, not
+  photorealism.
+- **Emissives**: status lights, screens and strobes glow — both aesthetic
+  and a readability signal (§7).
+- **Atmosphere**: steam/smoke from cooking equipment, visible liquid
+  surfaces with subtle reflection.
 
 ## 5. UI style
 
-> **Status: §5 is built.** The two screens *around* the game — the main menu
-> and the pause menu — are §5c below.
-> The contract readout is a real diegetic clipboard
-> (paper panel, steel clip bar, checkbox tick marks, voxel-rendered item
-> icons), machine/pipe detail is hover-only rather than dense always-on text,
-> the build menu is a grid of voxel-rendered icon slots that also *places*
-> what it sells (see §5a), and the hotbar — this section's last unbuilt named
-> widget — is now the primary way anything gets picked up (see §5b). The
-> scene's other readouts use the plain dark plate, deliberately — that is
-> machine-side factory UI, and the clipboard motif is reserved for orders and
+> **Status: built.** The contract readout is a diegetic clipboard; machine
+> detail is hover-only; the build menu (E) and market (M) are grids of
+> voxel-rendered icon slots; the hotbar is the primary way anything is
+> picked up (§5b); the main and pause menus are §5d. Other readouts use the
+> plain dark plate: the clipboard motif is reserved for orders and
 > checklists.
 
-- **Clean and simple, Minecraft-adjacent**: chunky panel borders, flat-shaded slot grids, a limited, consistent color palette per panel, generous hit targets. Avoid modern skeuomorphic-app UI (gradients, drop shadows everywhere, thin hairline fonts) — the UI should feel like it belongs in the same voxel world as the factory.
-- **Icons are rendered from the real assets**: item/recipe/machine icons are small isometric renders of the actual voxel models (the same asset the player sees in the world, rendered to a thumbnail), not separately-drawn 2D icon art. This keeps the UI and the world visually consistent and halves the art workload per item.
-- **Several concurrent contracts are one board of dockets, not one clipboard each** (built alongside `data/contracts.ron`'s arrival). GAMEPLAY.md §6's design pressure is that several standing orders compete for one factory's throughput, so all of them have to be legible at once. The panel keeps its single sheet and single clip bar and prints one **docket card** per contract on it — the checkbox's own paper tone plus a steel hairline, i.e. no third colour. A separate clipboard per contract repeats the frame and the clip for no new information; a single flat list of checklist rows loses which rows belong to which order as soon as two contracts want the same item. What is shared appears once, above the dockets — the money figure (there is exactly one currency, GAMEPLAY.md §1) and the delivery pool every contract draws from; what is per-contract (checklist, payout, cadence countdown, delivered/missed tally) appears on its own docket. Past a capped height the stack scrolls rather than growing off-screen.
-- **Diegetic paper-and-metal widgets**: recipe lists, orders, and objectives are framed as **clipboards and checklists** — a paper texture on a metal clipboard clip, checkbox-style tick marks for completed items — rather than flat modern list UI. This is a deliberate physical/tactile framing choice that fits the industrial setting (a factory floor clipboard, not an app notification list). [GAMEPLAY.md](GAMEPLAY.md) §6's contracts (a standing order for a sauce mix, delivered on a cadence) are the concrete, driving use case for this motif — a contract *is* a clipboard.
-- **Typography**: a simple, sturdy, slightly blocky sans-serif — readable at UI sizes, evokes stenciled factory signage/pixel fonts without tipping into illegible novelty pixel fonts.
-- **Layout conventions**: a Minecraft-style hotbar/quick-access strip along the bottom screen edge (§5b); build/recipe menus as grids of voxel-rendered icon slots; hover tooltips for recipe/machine detail rather than dense always-on text.
+- **Clean, simple, Minecraft-adjacent**: chunky panel borders, flat-shaded
+  slot grids, limited palette per panel, generous hit targets. No modern
+  skeuomorphic-app UI (gradients, drop shadows, hairline fonts).
+- **Icons are rendered from the real voxel assets** (§2b point 7), never
+  separately-drawn 2D art.
+- **Several contracts are one board of dockets, not one clipboard each.**
+  One sheet, one clip bar, one printed docket card per contract (the
+  checkbox's paper tone plus a steel hairline, no third colour). Shared
+  facts (money, the delivery pool) appear once above the dockets;
+  per-contract facts (checklist, payout, countdown, delivered/missed) on
+  each docket. Past a capped height the stack scrolls.
+- **Diegetic paper-and-metal widgets**: orders and objectives are clipboards
+  and checklists. A contract IS a clipboard.
+- **Typography**: a sturdy, slightly blocky sans-serif, readable at UI
+  sizes; not a novelty pixel font.
+- **Layout**: hotbar along the bottom (§5b); build/recipe menus as icon
+  grids; hover tooltips rather than dense always-on text.
 
 ### 5a. Build mode: the ghost, and what the next click will do
 
-The world starts empty and the player places every tile in it (the "Real
-Placement" epic), so "what will this click do" became a question the UI has to
-answer continuously. It is answered by two things at once, deliberately:
+The world starts empty and the player places every tile, so "what will this
+click do" is answered continuously by two things at once:
 
-- **A translucent tinted ghost of the real voxel model**, standing on the tile
-  under the cursor, turned to the facing the player has chosen. It is the
-  asset that will actually be built — including the belt's context-dependent
-  variant — so the ghost is a preview rather than a marker. The tint
-  *multiplies* over the model's own vertex colours rather than replacing them:
-  a flat wash reads as "a tile is involved" and loses which thing.
-- **A prompt beside the cursor** that names the kind, its facing and the
-  action in words and a glyph: **✔ PLACE**, **✗ BLOCKED**, **✗ NONE OWNED**,
-  **✔ REMOVE**. This is §7's never-colour-alone rule doing real work — the
-  glyph and the wording alone are enough to know whether the click will
-  succeed, with the tint and the panel's own border as reinforcement.
+- **A translucent tinted ghost of the real voxel model** on the tile under
+  the cursor, at the chosen facing, including the belt's context variant.
+  The tint **multiplies** over vertex colours (a flat wash loses which thing).
+- **A prompt beside the cursor** with a glyph and a word: **✔ PLACE**,
+  **✗ BLOCKED**, **✗ NONE OWNED**, **✔ REMOVE** (§7: never colour alone).
 
-Two conventions worth keeping. **Green means "this click builds"; red means
-"this click destroys, or refuses"** — so a valid removal is framed in red,
-not green, even though the click will succeed. And **removal is a mode (X),
-not a modifier-click**: it is the one destructive action in the game (what a
-removed thing was holding is destroyed), and a mode announces itself in the
-control legend and in the prompt, where a held modifier cannot.
-
-A build-menu slot carries two actions on the two mouse buttons — left-click
-buys one, right-click places one you own — rather than one button that
-changes meaning with the owned count. The latter is shorter to explain and
-worse to use: it makes buying a second of anything impossible without placing
-the first.
+Conventions: **green means "this click builds"; red means "this click
+destroys, or refuses"**, so a valid removal is red. **Removal is a mode (X),
+not a modifier-click**: it is the one destructive action, and a mode
+announces itself in the legend and the prompt. A build-menu slot has two
+actions: **left-click buys one, right-click places one you own**. A hopper's
+contents are chosen on the ghost (**Q** cycles raw items; the prompt names
+it; the ghost shows a tinted fill).
 
 ### 5b. The hotbar: what is in your hand
 
-Built with the inventory-hotbar ticket, and it changed how the game is
-played rather than only how it looks. Before it, **nothing** was reachable
-without opening the build menu first: there was no glanceable view of what
-the player was carrying, and entering placement mode meant navigating a modal
-grid every time. Minecraft, Terraria and Factorio's quickbar all answer that
-the same way — a strip of slots that is always on screen, shows what you are
-carrying, and equips a slot on a keypress — and so does this.
+An always-visible strip along the **bottom** edge, centred (the other edges
+hold the legend and the clipboard). One slot per `data/shop.ron` entry, in
+file order, built from `shop_snapshot_json`. Above it, a permanent larder
+strip shows bought raw stock; zero reads "none".
 
-**What it is.** An always-visible strip along the **bottom** edge, centred:
-§5 says "one screen edge" without saying which, all three reference games use
-the bottom, and the other edges are taken (the control legend top-left, the
-contract clipboard top-right). One slot per `data/shop.ron` entry, in that
-file's order, built from `shop_snapshot_json` exactly as the build menu is —
-so a new catalog entry appears on the strip with no Godot edit.
+1. **Fixed slots, not a packed list of what is owned.** Slot 5 must still be
+   the crusher after the last crusher is placed.
+2. **A kind you own none of is an empty socket**, not a disabled button:
+   ghosted icon, no count, recessed.
+3. **Selecting and buying are different verbs.** Number keys 1-9 and 0
+   select in any mode; the same key again puts it down (mirrors ESC).
+   Buying stays in the build menu (**E**) on left-click or SHIFT+number, and
+   SHIFT+number works **only while the menu is open**, where price and
+   balance are on screen.
 
-**Three calls worth not re-litigating.**
+Borrowed patterns: a selector bigger than its slot and a fading name flyout
+(Minecraft); a framed hover spec sheet with kind, count, price and both verbs
+(Terraria); a slot you have none of stays where it was (Factorio).
+**Selection is signalled four ways** (§7): the slot grows (a scale, not a
+position, since the container owns positions), hazard-yellow frame, a caret,
+a brightened key digit. The hotbar plate is nearly opaque (the floor showed
+through). The build menu is centred in the space **above** the hotbar so its
+footer is never buried.
 
-1. **Fixed slots, not a packed list of what is owned.** Packing reads tidier
-   and destroys the property a hotbar exists for: slot 5 has to still be the
-   crusher after the last crusher is placed, or every key the player has
-   learned renumbers itself under them.
-2. **A kind you own none of is an empty socket, not a disabled button** — the
-   icon drops to a ghost, the count disappears rather than reading "0", and
-   the slot recesses. The kind is not unavailable; the player is simply not
-   carrying one.
-3. **Selecting and buying are different verbs on different actions.** Number
-   keys 1-9 and 0 select (in either view mode, menu open or closed), and
-   pressing the selected slot's key again puts it down, mirroring ESC.
-   Buying stays in the build menu (**E**) on a slot's left click, with
-   SHIFT+number as its keyboard mirror — and that key buys *only while the
-   menu is open*, because that is the one screen where the price and the
-   balance being spent are both in front of the player. A key that spends
-   money with no prices on screen is the accident this split exists to
-   prevent.
+### 5c. Scale: how big the UI is
 
-**What was taken from where**, since the point was to bring in the patterns
-players actually praise rather than to draw a grid. From **Minecraft**: a
-selector drawn *bigger than the slot it marks*, so what is in hand is
-answerable from peripheral vision; a stack count in the slot's corner; and
-the item's name flying out above the bar on every switch, then fading. From
-**Terraria**: hover gives an item a framed spec sheet rather than a bare
-name — here the kind, what is carried, the unit price, and the two verbs,
-which is what keeps the number-key rebinding discoverable. From
-**Factorio's quickbar**: a slot you have none of stays exactly where it was.
+Everything is measured in two numbers in `main.gd`: `UI_SCALE` (1.5) and
+`UI_FONT_BASE` (15). Font sizes are offsets from the base; chrome multiplies
+through the same knob (`_ui_px/_ui_i/_ui_v/_ui_font`). **Explicit constants,
+not Godot's `content_scale_factor`**: the scene maps 3D to screen coordinates
+in half a dozen places, and each would need the factor divided back out.
 
-**Selection is signalled four ways at once**, per §7's never-colour-alone
-rule: the slot grows, its frame turns hazard-yellow, a caret appears above
-its icon, and its key digit brightens — plus the name flyout. The growth is a
-*scale*, not a position, because the row's container owns its children's
-positions and sizes but never their transforms; the same 100ms spring is what
-makes a click feel like it landed on something rather than toggling a
-boolean.
+What a scale change costs is **layout**, not type size: the build menu is six
+columns with a shorter card; panels put heading and balance on one line; the
+legend is four grouped lines; the clipboard and build grid cap themselves
+against `_hotbar_reserved_height()`; the hotbar socket takes 0.88 of the
+scale so twelve fit. `project.godot`'s window is 1600x900, where nothing
+scrolls; at 1280x720 the build grid scrolls slightly, a deliberate last
+resort over burying the footer.
 
-Two things came off a rendered frame and would not have come off the code
-(§2b point 12's lesson, again). The strip's plate was translucent enough that
-the floor's diamond tiling showed through the gaps between sockets and turned
-the row into visual noise; it is nearly opaque now, like the build menu's own
-plate. And the build menu, centred in the viewport, grew tall enough to reach
-the strip and buried **its own footer** — the one line that explains buying —
-under it; the menu is centred in the space *above* the hotbar now, and went
-from three columns to four so it fits there. *(Four became six with the
-2026-09-09 UI-scale pass — §5c — for the same reason: a bigger card in the
-same space.)*
+### 5d. The screens around the game: the main menu and the pause menu
 
-### 5c. Scale: how big the UI is, and the one number that says so
+Both are built from §5's ingredients (dark plate, hazard-yellow rule,
+outlined text), not a stock engine theme: the main menu is the first thing a
+player sees.
 
-Added by the 2026-09-09 tuning pass, and it started as a report from playing
-the game rather than as a design idea: the UI was "much" too small and
-"difficult to read". It was. The body font had been 15px since the plain
-money label milestone 5 shipped, and every panel, slot, icon square and
-margin added since had been sized against it by eye — a couple of dozen
-separate literals, none of them wrong on their own and none of them
-adjustable together.
+**Main menu**: one centred plate (a `CenterContainer`, so it re-centres when
+labels resize) with title, subtitle and New Game / Load Game / Quit over a
+backdrop with one edged hazard band. Load Game **replaces** the buttons with
+the save list. A row shows the slot name and the file's mtime (not the tick
+count, which would mean parsing every file). The autosave is listed and
+labelled. An empty list says so in a sentence.
 
-**Everything is now measured in two numbers** (`main.gd`'s `UI_SCALE`, 1.5,
-and `UI_FONT_BASE`, 15). Font sizes are stated as offsets from the base, so
-the type hierarchy designed at 15px — money biggest, a docket's cadence
-footnote smallest — is re-derived at whatever scale is in force rather than
-re-tuned. Chrome multiplies through the same knob. The next adjustment is
-one number, which is the point.
-
-**Explicit constants, not the engine's `content_scale_factor`.** Godot's own
-knob is one line and scales every CanvasItem uniformly, Minecraft-GUI-scale
-style, and it was rejected for a specific reason rather than on taste: this
-scene maps 3D to screen coordinates in half a dozen places — the hover
-tooltip at the mouse, the build-mode prompt anchored through
-`unproject_position`, the hotbar tooltip over its slot, right-drag pan
-deltas — and every one of them would then need the factor divided back out.
-Scaling the numbers keeps input and rendering in one coordinate space and
-keeps the headless tests that assert pixel sizes meaningful.
-
-**What a scale change actually costs is LAYOUT, and that is the lesson worth
-keeping.** Half again did not fit `project.godot`'s own 1280x720 window, and
-none of what gave way was type size:
-
-- the build menu went from four columns to six, with a shorter card — its
-  hotkey digit moved into the button's corner (where the hotbar socket's
-  already was) and the "right-click to hold" affordance moved to the footer
-  that already said it, because in the card it wrapped onto a second row and
-  cost the whole grid a row;
-- all three panels put their heading and their balance on one line;
-- the control legend became four grouped lines instead of two run-on ones,
-  because the old first line ran off the window and under the clipboard;
-- the contract clipboard's docket stack and the build menu's grid now cap
-  themselves against the space **actually left above the hotbar**, measured
-  in one place so no two panels can disagree about where the usable screen
-  ends — replacing a fixed fraction of window height that at this scale
-  reached down across the larder strip;
-- and the hotbar socket takes 0.88 of the scale rather than all of it,
-  because twelve of them plus separations have to fit the window's width.
-
-One thing is a deliberate last resort and is recorded as such: at 1280x720
-the build-menu grid scrolls, by about a third of a row. At 1600x900 — the
-resolution `scripts/screenshot-scene.sh` reviews at — and anything taller,
-nothing scrolls. Of the two ways to lose that fight, a grid that gives up a
-sliver is much better than a menu whose footer disappears under the hotbar,
-which is the exact failure the menu's positioning was written to prevent.
-**`project.godot`'s default window is 1600x900 since this pass** (it was
-1280x720) so that the default is the size at which nothing scrolls; the
-scrolling is what a smaller window gets.
-
----
-
-### 5c. The screens around the game: the main menu and the pause menu
-
-The last two screens this game was missing, added with save/load. Both are
-built out of §5's existing ingredients — the near-opaque dark plate, the
-hazard-yellow rule, the outlined sturdy text — rather than as a new visual
-language, and that is the point: **the main menu is the first thing a player
-sees, and a menu drawn in a stock engine theme would be the one screen in
-the game that does not look like the game.**
-
-**The main menu** is a single centred plate: title, a one-line subtitle, and
-three buttons — New Game, Load Game, Quit — over a flat industrial backdrop
-with one wide hazard band across it (edged with the same accent hairline the
-plates use, or it reads as a rendering seam rather than as paint on a
-floor). Load Game **replaces** the three buttons with the save list rather
-than opening beside them, because this is one panel and a modal list over a
-modal menu is two things to close.
-
-A save's row says two things: its slot name, and when it was last written.
-The time comes from the file's own mtime, which is honest and free; the
-save's tick count is deliberately *not* read, since drawing the list would
-then mean parsing every file in the directory, and a tick number is a worse
-answer to "which save is this" than a date is. The autosave is listed like
-any other save and **labelled** as the autosave — falling back on it is
-legitimate, being surprised by which file the game overwrites by itself is
-not. With nothing saved, the list says so in a sentence rather than showing
-an empty box.
-
-**The pause menu** is the same plate one step more opaque, centred in the
-whole viewport rather than in the space above the hotbar (unlike the build
-menu and the market): the game is stopped, so nothing underneath it is worth
-keeping clear. It says so in a line of text — *"the factory is stopped while
-this is open"* — because a stopped simulation is otherwise something the
-player has to infer from belts not moving, which is exactly the
-never-encode-state-invisibly problem §7 is about.
-
-Two conventions carried in from §5a. **Quit to Menu asks first** and Save &
-Quit does not, because the confirm step is for the one action that throws
-work away, not for every action that ends the session. And the save field is
-a **name**, not a numbered slot: this game has no save-profile concept and no
-screen that would show three empty boxes usefully, the list is sorted by time
-anyway, and the field prefills with whatever this session was loaded from so
-the common case is one click.
+**Pause menu**: the same plate, more opaque, centred in the whole viewport,
+with the line *"the factory is stopped while this is open"* (§7: never encode
+state invisibly). **Quit to Menu asks first; Save & Quit does not.** The save
+field is a **name**, prefilled with what this session loaded from.
 
 ## 6. Feedback, motion & animation
 
-- **Chunky, snappy animation** on voxel assets — simple rigs or blocky procedural motion (the same instinct as Minecraft item-entities bobbing, or Crossy Road's hopping animals) rather than smooth organic animation, which would clash with the voxel medium.
-- **UI transitions are quick and simple** — panels slide/flip open rather than easing through elaborate modern-app motion curves. A clipboard "flipping open" is a good mental model for how a UI panel should transition.
-- **Juice stays legible over spectacle**: particle effects (steam, sparks, liquid splashes, an item popping into existence on production) should read clearly even when a large factory floor has dozens of these happening at once — favor short, clear bursts over lingering elaborate effects.
+- **Chunky, snappy animation** on voxel assets; no smooth organic motion.
+- **UI transitions are quick and simple** — a clipboard flipping open.
+- **Juice stays legible over spectacle**: short clear bursts, readable with
+  dozens at once.
 
 ## 7. Color & readability
 
-- **Base palette is neutral/industrial**: steel greys, concrete tones, safety yellow/black striping, muted material colors — this is the "resting state" of the factory floor.
-- **Saturated color is reserved for meaning**: status lights, alerts, UI highlights, and selection/hover states use bright, saturated color specifically so they stand out against the neutral base — don't dilute this by using bright color decoratively elsewhere.
-- **Never encode critical state in color alone** — pair every status color with an icon or shape distinction too (a blocked machine gets both a red tint *and* a distinct icon, not just red), for basic colorblind accessibility.
+- **Base palette is neutral/industrial**: steel greys, concrete, safety
+  yellow/black, muted materials.
+- **Saturated colour is reserved for meaning**: status lights, alerts,
+  highlights, selection.
+- **Never encode critical state in colour alone**: pair every status colour
+  with a glyph, word, shape or position.
 
 ## 8. What this doc does not cover
 
-- **Gameplay mechanics, recipes, progression, balance** — a game-design concern, not an aesthetics one; see [docs/GAMEPLAY.md](GAMEPLAY.md).
-- **Simulation architecture, rendering pipeline, engine/tooling choices, data formats, performance** — see [docs/ARCHITECTURE.md](ARCHITECTURE.md).
-- **Audio direction (music, SFX, ambience)** — not decided yet; would warrant its own doc when it is.
+Gameplay and balance (GAMEPLAY.md); architecture, rendering pipeline, data
+formats (ARCHITECTURE.md); audio direction (not decided).
 
-## 9. Open questions (not yet decided)
+## 9. Open questions
 
-- Exact camera angle: true 2:1 isometric vs. a Sims-style ~3/4 dimetric — needs a side-by-side prototype before locking in, since it affects how voxel assets get modeled. **Still open, but no longer undecided in practice:** the scene currently uses a true isometric view (an equal-parts `(1, 1, 1)` view direction), chosen because it keeps voxel cubes perfectly regular on screen. It is one constant in `main.gd` (`CAMERA_DIRECTION`), so the side-by-side prototype is cheap whenever someone wants it.
-- Concrete palette values (exact hex ranges per material category), rather than the directional description in §7.
+- Exact camera angle (true 2:1 isometric vs Sims-style dimetric): in
+  practice true isometric via `CAMERA_DIRECTION`; a side-by-side is cheap.
+- Concrete palette hex ranges per material category.
 - Specific typeface.
-- Whether player-visible characters (if any) share the 32×32×32 tile scale from §2 or use a different scale for facial/readability reasons — common in voxel games (e.g. characters are often modeled at a different fidelity than environment tiles).
-- ~~Which Rust `.vox`-writing approach (§2a) ends up used~~ — **resolved
-  2026-09-07**: none of them. All three were re-checked at implementation
-  time exactly as this question asked, and none can write a file the Godot
-  importer accepts; `assets/voxels/generators/vox.rs` is a hand-written
-  encoder instead. See §2b point 1 for the specifics.
-- ~~Which specific Godot `.vox` import plugin (§2a) gets adopted~~ —
-  **resolved 2026-09-07**:
-  [qbradq/Godot-MagicaVoxel-Importer-with-Extensions](https://github.com/qbradq/Godot-MagicaVoxel-Importer-with-Extensions),
-  vendored and pinned at commit `288f1d8` (plugin v1.2) under
-  `godot_project/addons/`. The choice turned out not to be a choice: the
-  other candidate this doc named (`cschram/godot-vox-import`) now redirects
-  to that same repository, so there is one maintained Godot 4 `.vox`
-  importer, not two.
-- **Touch/mobile input is a real gap in this doc, flagged during review rather than designed here.** ARCHITECTURE.md targets PC/Mac/mobile, but §1, §5, and §6 above all implicitly assume mouse+keyboard (hover tooltips, precise clicks on hotbar slots, camera-rotation as a keypress/button). None of that transfers to touch automatically — hover has no touch equivalent, small slot grids need larger touch targets, and camera rotate/zoom need an explicit gesture mapping. Not designing this now since it's not needed until ARCHITECTURE.md milestone 10 (platform polish), but it should be resolved well before then, not discovered at that milestone.
-
----
+- Whether characters (if any) share the 32³ tile scale.
+- ~~`.vox` writer~~ — resolved: hand-written encoder (§2b point 1).
+- ~~`.vox` importer~~ — resolved: see ARCHITECTURE.md §1a.
+- **Touch/mobile input is a real gap.** Hover, small slot grids and
+  keyboard camera controls do not transfer to touch. Resolve well before
+  ARCHITECTURE.md milestone 10.
 
 ## 10. References (asset pipeline research, §2a)
 
-- [MagicaVoxel .vox file format spec — ephtracy/voxel-model](https://github.com/ephtracy/voxel-model/blob/master/MagicaVoxel-file-format-vox.txt) — the community-maintained format spec
-- [Kaitai Struct: MagicaVoxel File format](https://formats.kaitai.io/magicavoxel_vox/) — cross-language parser generator spec for `.vox`
-- [`vox-format` — crates.io](https://crates.io/crates/vox-format) — Rust `.vox` reader/writer; writer support should be re-verified before relying on it (see open questions)
-- [`vengi` — voxel-art tools (editor, thumbnailer, format converter)](https://github.com/vengi-voxel/vengi) — the headless CLI (`vengi-voxconvert`) this plan uses for format conversion and isometric PNG thumbnail rendering
-- [Godot-MagicaVoxel-Importer-with-Extensions](https://github.com/qbradq/Godot-MagicaVoxel-Importer-with-Extensions) and [godot-vox-import](https://github.com/cschram/godot-vox-import) — candidate Godot 4 `.vox` import plugins; pick one at milestone 1
+- [MagicaVoxel .vox format spec](https://github.com/ephtracy/voxel-model/blob/master/MagicaVoxel-file-format-vox.txt)
+- [Kaitai Struct: MagicaVoxel](https://formats.kaitai.io/magicavoxel_vox/)
+- [`vox-format` crate](https://crates.io/crates/vox-format) (parser-only in practice)
+- [`vengi` voxel tools](https://github.com/vengi-voxel/vengi)
+- [Godot-MagicaVoxel-Importer-with-Extensions](https://github.com/qbradq/Godot-MagicaVoxel-Importer-with-Extensions) (the other candidate, `godot-vox-import`, redirects here)

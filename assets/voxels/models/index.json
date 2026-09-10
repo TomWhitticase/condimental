@@ -1,13 +1,49 @@
 {
-  "belt": [
+  "belt_corner_left_f0": [
     "matte",
     "metal"
   ],
-  "belt_inlet": [
+  "belt_corner_left_f1": [
     "matte",
     "metal"
   ],
-  "belt_outlet": [
+  "belt_corner_left_f2": [
+    "matte",
+    "metal"
+  ],
+  "belt_corner_left_f3": [
+    "matte",
+    "metal"
+  ],
+  "belt_corner_right_f0": [
+    "matte",
+    "metal"
+  ],
+  "belt_corner_right_f1": [
+    "matte",
+    "metal"
+  ],
+  "belt_corner_right_f2": [
+    "matte",
+    "metal"
+  ],
+  "belt_corner_right_f3": [
+    "matte",
+    "metal"
+  ],
+  "belt_f0": [
+    "matte",
+    "metal"
+  ],
+  "belt_f1": [
+    "matte",
+    "metal"
+  ],
+  "belt_f2": [
+    "matte",
+    "metal"
+  ],
+  "belt_f3": [
     "matte",
     "metal"
   ],
@@ -100,13 +136,37 @@
   "pipe": [
     "metal"
   ],
+  "pipe_corner": [
+    "metal"
+  ],
+  "pipe_cross": [
+    "metal"
+  ],
+  "pipe_end": [
+    "metal"
+  ],
+  "pipe_fitting_machine": [
+    "metal"
+  ],
+  "pipe_fitting_tank": [
+    "metal"
+  ],
   "pipe_fluid": [
     "liquid"
   ],
-  "pipe_inlet": [
-    "metal"
+  "pipe_fluid_corner": [
+    "liquid"
   ],
-  "pipe_source": [
+  "pipe_fluid_cross": [
+    "liquid"
+  ],
+  "pipe_fluid_end": [
+    "liquid"
+  ],
+  "pipe_fluid_tee": [
+    "liquid"
+  ],
+  "pipe_tee": [
     "metal"
   ],
   "splitter_arrow": [

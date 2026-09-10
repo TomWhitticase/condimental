@@ -138,19 +138,42 @@ func _initialize() -> void:
 		return
 
 	# --- What is rendered matches what the simulation says is placed ------
-	# Every node under "World" is named `<kind>_<origin tile>`, so this is a
-	# direct correspondence check between `world_layout_json` and the scene —
-	# the same "Godot draws what the sim says exists" rule, now over a world
-	# the test itself built rather than one that arrived pre-made.
+	# A machine or building is a node under "World" named `<kind>_<origin
+	# tile>`; a belt, splitter or pipe is a MultiMesh instance the scene
+	# reports through `_tile_instance_at` (the pipes & conveyors overhaul's
+	# ticket 4). Either way this is a direct correspondence check between
+	# `world_layout_json` and the scene — the same "Godot draws what the sim
+	# says exists" rule, over a world the test itself built.
 	var layout: Array = JSON.parse_string(main.sim.world_layout_json())
 	if layout.is_empty():
 		_fail("world_layout_json returned nothing after the demo line was built")
 		return
+	var instanced_tiles := 0
 	for placement in layout:
 		var tile: Array = placement["tile"]
-		var node_name := "%s_%d,%d" % [String(placement["kind"]), int(tile[0]), int(tile[1])]
+		var kind := String(placement["kind"])
+		var origin := Vector2i(int(tile[0]), int(tile[1]))
+		if main._is_instanced_kind(kind):
+			var instance: Dictionary = main._tile_instance_at(origin)
+			if instance.is_empty() or instance["nodes"].is_empty():
+				_fail("no rendered instance for %s at %s — the scene is not following the sim's layout" % [kind, str(origin)])
+				return
+			instanced_tiles += 1
+			continue
+		var node_name := "%s_%d,%d" % [kind, origin.x, origin.y]
 		if main.get_node_or_null("World/" + node_name) == null:
 			_fail("no rendered node for %s — the scene is not following the sim's layout" % node_name)
+			return
+	if instanced_tiles < 1:
+		_fail("the demo line has belts and pipes, but none rendered as an instance")
+		return
+	var multimeshes := _find_all(main.get_node("World/Tiles"), "MultiMeshInstance3D", [])
+	if multimeshes.is_empty():
+		_fail("no MultiMeshInstance3D under World/Tiles — belts and pipes should be instanced")
+		return
+	for mmi in multimeshes:
+		if mmi.material_override == null or not mmi.material_override.vertex_color_use_as_albedo:
+			_fail("tile MultiMesh '%s' must carry the same per-class vertex-colour material a node would" % mmi.name)
 			return
 
 	if main.get_node_or_null("Floor") == null:
@@ -174,14 +197,15 @@ func _initialize() -> void:
 	for i in range(10):
 		main.sim.tick()
 		main._apply_dirty_chunks()
-		item_nodes = 0
-		for child in main.get_children():
-			if String(child.name).begins_with("item_"):
-				item_nodes += 1
+		item_nodes = main._carried_item_count()
 		if item_nodes > 0:
 			break
 	if item_nodes < 1:
-		_fail("a tomato metered out of the hopper produced no item node in the 3D scene")
+		_fail("a tomato metered out of the hopper produced no drawn item in the 3D scene")
+		return
+	var drawn: Dictionary = main._carried_item("belt_0_0_0")
+	if drawn.is_empty() or not is_equal_approx(float(drawn["position"].y), main.BELT_SURFACE_Y):
+		_fail("the first belt's first slot should carry the tomato at belt-surface height, got %s" % str(drawn))
 		return
 
 	print("PRESENTATION_OK: orthographic camera, %d light(s) w/ shadows, SSAO+glow, %d voxel meshes, %d placement(s), item rendered" % [

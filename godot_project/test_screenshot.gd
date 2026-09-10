@@ -36,6 +36,19 @@
 # goods standing on the dock — so the clipboard can be reviewed against a
 # working economy rather than an idle one. It implies `--fixture chain`.
 #
+# `--stress` builds the STRESS LINE (test_layouts.gd's `build_stress_line`:
+# a 1500-tile serpentine belt fed by hoppers plus three tank-fed pipe runs)
+# and runs it, for reviewing the instanced tile/item rendering the pipes &
+# conveyors overhaul's ticket 4 built, at the scale it exists for. It
+# implies `--populate`, and the shot's frame prints the rendering server's
+# object, primitive and draw-call counts (`SCREENSHOT_RENDER`) so the cost of
+# a frame can be compared without a profiler.
+#
+# `--belt-gallery` builds the BELT GALLERY (test_layouts.gd's
+# `build_belt_gallery`: every belt shape at every facing, every belt-to-
+# building junction at every facing), the review subject for the pipes and
+# conveyors overhaul's belt presentation.
+#
 # `--populate` runs whatever has been built forward first so the screenshot
 # shows product actually moving, not an idle factory.
 #
@@ -183,6 +196,13 @@ func _initialize() -> void:
 	_build = args.has("--build")
 	_fixture = _string_arg(args, "--fixture")
 	_populate = args.has("--populate")
+	if args.has("--stress"):
+		_fixture = "stress"
+		_populate = true
+	if args.has("--pipe-gallery"):
+		_fixture = "pipes"
+	if args.has("--belt-gallery"):
+		_fixture = "gallery"
 	_first_person = args.has("--first-person")
 	_hover = args.has("--hover")
 	_hover_pipe = args.has("--hover-pipe")
@@ -262,6 +282,12 @@ func _build_fixture() -> void:
 			Layouts.build_splitter_line(_main.sim)
 		"chain":
 			Layouts.build_reference_line(_main.sim)
+		"stress":
+			Layouts.build_stress_line(_main.sim)
+		"pipes":
+			Layouts.build_pipe_gallery(_main.sim)
+		"gallery":
+			Layouts.build_belt_gallery(_main.sim)
 		_:
 			Layouts.build_demo_line(_main.sim)
 	# Every fixture is stocked, whether or not this run will tick: a
@@ -373,7 +399,7 @@ func _hover_over_first_machine() -> void:
 		_hover_over_tile(tile)
 
 
-func _hover_over_pipe_inlet() -> void:
+func _hover_over_pipe() -> void:
 	var tile := _first_tile_of_kind("pipe")
 	if tile != HOVER_NONE:
 		_hover_over_tile(tile)
@@ -626,7 +652,7 @@ func _process(_delta: float) -> bool:
 	if _frames == 2 and _hover:
 		_hover_over_first_machine()
 	if _frames == 2 and _hover_pipe:
-		_hover_over_pipe_inlet()
+		_hover_over_pipe()
 	if _frames == 2 and _hover_vat:
 		_hover_over_multi_tile_machine()
 	if _frames == 2 and _hover_hopper:
@@ -680,5 +706,15 @@ func _write_frame() -> bool:
 		printerr("SCREENSHOT_FAIL: could not write %s (error %d)" % [_out, err])
 		return true
 
+	# What the frame cost the renderer, in the renderer's own terms. Objects
+	# is what instancing collapses (one MultiMesh is one object however many
+	# tiles it draws); draw calls follow it; primitives do not move, since
+	# the same voxels are drawn either way.
+	print("SCREENSHOT_RENDER: objects %d, primitives %d, draw calls %d, in frame %d" % [
+		RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_OBJECTS_IN_FRAME),
+		RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME),
+		RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME),
+		_frames,
+	])
 	print("SCREENSHOT_OK: %s (%dx%d)" % [_out, image.get_width(), image.get_height()])
 	return true

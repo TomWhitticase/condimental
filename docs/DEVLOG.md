@@ -35,6 +35,7 @@ below is history and should only ever be appended to.)*
 - **Contracts (done, both halves):** contracts are `data/contracts.ron` content and three run concurrently, each with its own mix/cadence/payout, all drawing from one shared pool of delivered stock (a box pays one contract, never two). The clipboard panel shows all of them — one paper docket card per contract on the one board, each with its own checklist, payout, countdown and delivered/missed tally, above a single shared money figure and a single "on the dock" line naming the pool they compete for.
 - **Chain rework (DONE, both halves):** the middle of the production line is **piped, not belted**, which is what a real sauce plant looks like. The mixer's output and the cooking vat's output are fluids (`recipes.ron` schema_version 3 gained `fluid_outputs`), so mix flows from the mixer to the vat and cooked ketchup from the vat to the bottler through pipe runs with no tank behind them; the bottler is where the product becomes a solid again, and the cooking vat is now the one machine on the line **no belt touches at all**. The mixer gained **sugar** as a second solid ingredient and grew to **1x2** for it — a machine accepts solid input on every tile of the edge opposite the way it points, so N solid ingredients need N tiles of inlet face or the two lanes merge onto one belt and deadlock. The aging rack is gone. **Raw ingredients cost money**: `data/ingredients.ron` prices tomato, sugar and vinegar, a `BuyIngredient` command buys them, and a hopper or a tank is loaded from that bought stock *(originally with the global `SPACE`/`V` keys; since the configuration panel below, from the building's own panel)* — so overproduction is a real loss rather than free accumulation. On the presentation side: a hopper's contents are chosen **when it is placed** (the ghost carries a tinted product body and the prompt names them in words; the **Q** key that cycled them is gone, replaced by the placed hopper's own picker), because with two raw solids the simulation can no longer infer which bin the player meant — until that landed, placing a hopper from the UI did nothing at all, silently. Buying stock has its own panel on **M** (the build menu was already as tall as the space above the hotbar allows), and a permanent larder strip above the hotbar shows what is carried so an unloadable hopper explains itself. The mixer, the cooking vat and the bottler were re-modelled with pipe nozzles where belts no longer meet them.
 - **Hopper/tank configuration (DONE, both halves):** nothing about feeding a factory is on the keyboard any more. A placed hopper or tank is **clicked**, and a panel beside it shows its level, a **FILL** button (disabled with its reason in words when the larder is empty, the bin is full, or the tank is plumbed to nothing), an **AUTO-FILL** switch that keeps the bin topped up from bought stock every tick — spending stock, never money, and simply pausing while the larder is dry — and, for a hopper, an item picker that retargets it in place. The click is a toggle, only one panel ever exists, ESC closes it first, and it closes itself under any menu or mode. The global **SPACE**/**V**/**Q** keys and `CycleHopperItem` are deleted. Pinned by `test_config_panel.gd`; `scripts/screenshot-scene.sh --config TX,TY` photographs it.
+- **Pipes & conveyors overhaul (IN PROGRESS — six of seven tickets merged, `docs/PIPES_AND_CONVEYORS_PLAN.md` has the ticket-7 hand-off notes):** seven tickets on one integration branch to make belts and pipes look right, read right, run fast and connect up. **Ticket 1 (sim) has landed:** every belt, splitter and pipe on the wire carries `links` — what feeds it, what it hands to, or what its pipe is joined to, per side — recorded by the topology pass so it is exact and free per tick. **Ticket 4 (Godot) has landed:** belts, splitters, pipes and the items riding them are `MultiMesh` instances (one per asset and material class) rather than a node each, with a 1500-tile stress fixture, a headless timing test (`test_perf.gd`) and `scripts/screenshot-scene.sh --stress`; machines and buildings keep their nodes, and the seams the belt-animation and corner tickets build on (frame sets, a caller-supplied yaw per tile, one item-positioning function) are in place in `main.gd`. **Ticket 3 (assets) has landed:** the pipe model family (straight, corner, tee, cross, end, machine/tank fittings, one fluid body per shape) on a 15.5 midline, with seven pipe rendering defects fixed at the generator. **Ticket 2 (assets) has landed:** the belt model family — straights and left/right corners in four animation frames with a solid raised direction arrow; the belt-side junction variants are retired (the plain tile carries the junction, the machine's hood does the rest). **Ticket 6 (Godot) has landed:** every pipe tile draws its shape (end, straight, corner, tee, cross), its turn, its machine/tank fittings and its per-shape liquid body from the wire's `links` alone; hover names a pipe's connections in words; the one-arrangement `pipe_source`/`pipe_inlet` tiles are deleted; `test_pipe_shapes.gd` and `scripts/screenshot-scene.sh --pipe-gallery` cover every shape at every turn. **Ticket 5 (Godot) has landed:** a belt's shape (straight, left/right corner, merge, start, end) comes from its `links`, the four-frame surface animates at item speed from the tick, items arc through corners (and are drawn face to face on every tile — they had been half a tile downstream), hover says feeds and hand-offs in words, the retired belt aliases are deleted, and a `--belt-gallery` fixture shows every shape and junction at every facing. Ticket 7 (gallery bug hunt and docs close-out) is to do; one sim rule discrepancy (a belt feeds a machine from any side of an inlet-edge tile) is flagged for ticket 7.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -82,6 +83,236 @@ it sitting squarely on top of.
 a main menu with save slots and an autosave, a factory that comes back
 mid-craft, a slower crusher, a 2x2 dock, a UI at 1.5x, and buildings that
 are configured by clicking them.
+### 2026-09-10 — Pipes & conveyors overhaul, ticket 5: belts turn corners, run, and connect at every facing
+
+The first presentation ticket of the overhaul, consuming tickets 1, 2 and 4.
+Every belt tile now takes its SHAPE from the `links` the simulation puts on
+the wire — straight, left corner, right corner, merge, line start, line end
+— through one pure function (`_belt_shape_for`), draws the matching
+four-frame model family, and spins by its facing like every other asset (a
+corner needs no yaw of its own). The `belt`/`belt_inlet`/`belt_outlet`
+aliases, models and icons are deleted and every east-only belt comment in
+`main.gd`, `world.rs`, `machines.ron` and ARCHITECTURE.md is gone: a belt
+meeting a machine, a hopper or a dock is the plain tile at all four
+facings, and the machine's hood does the rest.
+
+The surface animates at item speed: frame `floor(tick × 4 / 50) mod 4`,
+read from the tick at the end of each simulation step, so the pause menu
+freezes it with no extra state. Items follow a quarter-circle arc through a
+corner, parameterised by the sim's own 0..1 distance — and fitting that arc
+exposed that items had always been drawn half a tile downstream (tile
+centre to next centre rather than face to face); they are face to face on
+every tile now, UI_UX.md §2b point 26. Hover says it in words (`carries
+east · turns left / fed from the west (Hopper) / hands to Crusher`, `not
+connected` where null). The build ghost stays a straight tile, on purpose:
+the would-be links of an unplaced tile are the sim's to compute
+(ARCHITECTURE.md §4's planned `preview_command`), not a Godot-side copy of
+`resolve_sink`.
+
+New: `test_belt_shapes.gd` (the shape rule at every facing, the gallery's
+eight corners at their facing's yaw, frame index and pause freeze, arc
+positions and continuity, hover), `test_layouts.gd`'s `build_belt_gallery`
+and `scripts/screenshot-scene.sh --belt-gallery` — both hands of corner and
+hopper → belt → crusher → belt → dock at all four facings, a two-flank
+merge, a line end and a lone start. Renders read at scene zoom and in
+closeups on both rings and all four machine lines, populated and idle: the
+corners' rails meet the straights, the arrows bend with the belt, a queue
+of tomatoes curves round a corner, and the first tomato stands in the
+hopper's mouth. `test_connections.gd` now asserts the retired models are
+NOT staged and that turning a fed belt re-shapes it into a corner.
+`verify-core-loop.sh` runs 22 Godot proofs; the stress line's rebuild
+went from 38 ms to 64 ms for four frame sets per belt family (still one
+draw call per set per class per frame).
+
+**Flagged, not judged:** at `TICK_HZ` 30 the four-frame march is 2.4 frame
+changes a second. A PNG cannot show stutter and this ticket had no live
+session; the number is recorded and `BELT_FRAMES` is left at four. If it
+reads as stepping in play, raising the frame count is a coordinator call
+(it multiplies MultiMeshes per belt family, not per-frame cost).
+### 2026-09-09 — Pipes & Conveyors Overhaul, ticket 6: a pipe is drawn from what it is joined to
+
+The Godot half of the pipe family (`docs/PIPES_AND_CONVEYORS_PLAN.md`,
+ticket 6), built on tickets 1 (`links`), 3 (the models) and 4 (instancing).
+`main.gd` no longer decides a pipe tile's model from the fluid snapshot's
+`is_source`/tap indices plus a "is there a building south of it" guess
+(`_pipe_roles`, which could only ever draw one arrangement and fell back
+to a plain tube everywhere else). Every pipe placement's `links.connections`
+now decides three things at once: the SHAPE (one side joined is an end, two
+opposite a straight, two adjacent a corner, three a tee, four a cross), the
+quarter-TURN that lands the authored openings on the joined sides, and a
+machine or tank FITTING on every side whose connection is one — overlaid
+as its own instance, turned to that side. The liquid body is the one
+authored for that shape, at the same turn, so a corner's liquid turns with
+its bore and an end's stops at its cap; the Godot-side end trim is gone.
+Hover says it in words: *connects west · feeds Mixer*, *connects east ·
+fed by Fluid Tank*. The deprecated `pipe_source`/`pipe_inlet` generators,
+models and icons are deleted.
+
+Two calls the render forced. (1) A straight's turn is decided per AXIS,
+not per tile: its one joint flange must sit on the same side of every tile
+along a run or two neighbours stack flanges on a shared boundary, so a
+pipe's `direction` now decides only which way a pipe joined to nothing
+lies. The end, whose turn is dictated by its single open side, would stack
+too, so `pipe_end` lost its joint flange. (2) A fitting landing on a
+straight's low-X face (the first tile leaving the mixer) covered the
+straight's own joint flange and the two voxel solids shared boundary
+faces; every part of a fitting is now a full voxel of radius larger than
+anything it can cover (`PIPE_FITTING_MARGIN`), pinned by a voxgen test
+that overlays both fittings on both faces of a straight.
+
+Verified with `cargo test --workspace`, `scripts/verify-core-loop.sh`
+(including the new `test_pipe_shapes.gd`: 52 pipe tiles, every shape at
+every turn, 18 fittings, one body per shape, hover, the ghost), and about
+twenty closeups of the new `--pipe-gallery` fixture plus the demo, fluids
+and chain fixtures read at scene zoom and up close. Flagged for ticket 7:
+the pipe ghost previews its shape from neighbouring PIPE tiles only (no
+fitting — the sim picks the tap tile), decided here before ticket 5 chose
+the belt ghost's rule; the two should agree.
+
+### 2026-09-09 — Pipes & conveyors overhaul, ticket 2: the belt family, drawn and animated
+
+The first asset ticket of the overhaul (`docs/PIPES_AND_CONVEYORS_PLAN.md`).
+One parameterised generator now produces the whole belt family the plan
+names: a straight tile and a left and a right corner, each in four
+animation frames that differ only by the surface pattern advancing a
+quarter tile along the product path. Direction is a **solid raised yellow
+arrow** on the rubber, one per tile — a thin chevron was built first and
+the scene render showed it collapsing into an `L` under the isometric
+camera, which is now UI_UX.md §2b point 23. A corner's lane is a quarter
+annulus whose rails meet a straight's voxel for voxel, and its arrow bends
+with the belt. The belt-side junction variants (`belt_inlet`/`belt_outlet`)
+are retired — the plain tile carries the junction and the machine's hood
+does the rest — and survive only as aliases of frame 0 until ticket 5 wires
+the framed models in. The splitter's stubs lost their old cleats to match.
+`cargo test -p voxgen` grew to 15 tests; nothing under `godot_project/`
+changed.
+### 2026-09-09 — Pipes & Conveyors Overhaul, ticket 3: the pipe model family
+
+Assets only (`assets/voxels/`), per `docs/PIPES_AND_CONVEYORS_PLAN.md`;
+ticket 6 wires the new models into `main.gd`. Started by rendering the
+current pipe runs and listing what was actually wrong, then fixed each:
+
+1. **The liquid bled through the closed pipe as a coloured stripe** along
+   the top of every tile. The fluid slab was as wide as the bore, so its
+   side faces coincided with the tube's outer wall where the wall curves in
+   toward the crown. Fixed: the body is two voxels narrower each side
+   (`PIPE_FLUID_Y`), and a voxgen test pins every body inside its bore.
+2. **The axis was half a voxel off the tile midline** (centred on voxel 16),
+   so tiles at mixed facings stepped by a voxel at every joint and no
+   corner could have met both neighbours. Fixed: every shape is built on
+   `PIPE_C` = 15.5 with new fractional-centre primitives in `vox.rs`; the
+   profile is rounder for it (a two-voxel flat instead of three nine-wide
+   rows, which is what made the tube read as a square beam).
+3. **A run's free end was an open bore with the floor visible through it**
+   (the demo's south run, both ends). Fixed by `pipe_end`; the demo still
+   shows it until ticket 6 picks that shape from `links`.
+4. **`pipe_inlet`'s blind flange capped the +X end whatever the run did**,
+   and its branch pointed south whatever the machine did — in the fluids
+   fixture (a west-facing run) the branch stuck out over bare floor while
+   the mixer's stub met the tube's flank. The shape family replaces it
+   (corner or tee + `pipe_fitting_machine`); the deprecated tile is kept
+   generating, composed from the new parts, so the scene still renders.
+5. **The cap read as a hole.** Its brass disc faced the camera on the
+   shadow side and rendered near-black — a cap indistinguishable from the
+   open mouth it closed. Now a bright plate with brass bolt heads.
+6. **A plain tube end butting a machine's radius-4 flange showed its own
+   cut face** around the smaller ring. `pipe_fitting_machine` puts a
+   radius-6 brass flange on the pipe side that swallows the machine's.
+7. **No corner, tee or cross existed**, so neither the one-flange-per-tile
+   rule nor the sight window had anywhere to go on a turned run.
+
+Shipped: `pipe`, `pipe_corner`, `pipe_tee`, `pipe_cross`, `pipe_end`;
+`pipe_fitting_machine`, `pipe_fitting_tank` (authored on +X, overlaid by
+Godot on any open leg); one fluid body per shape. `PIPE_BORE_FLOOR_VOXELS`
+(12) and `PIPE_BORE_HEIGHT_VOXELS` (7) in `main.gd` are unchanged; the end
+body stops short of its cap, so `FLUID_END_CAP_TRIM` can go in ticket 6.
+Face convention, stated once in the pipe section header: vox low-Y is
+north. Verified with `cargo test --workspace`, `verify-core-loop.sh`, the
+model previews and closeups of every pipe run in the chain, fluids and demo
+fixtures before and after.
+### 2026-09-09 — Pipes & conveyors overhaul, ticket 4: a thousand belts is one draw call
+
+Every belt, splitter and pipe tile used to be its own `Node3D` with a
+`MeshInstance3D` per material class, and every item on a belt a pooled
+`Node3D` moved each tick. Now every tile drawing one asset is an instance
+in one `MultiMesh` per material class (the way the floor was already drawn),
+and items live in a swap-remove pool per item asset. Machines, buildings,
+level bodies, the splitter arrow and the ghost stay nodes: they carry live
+per-instance state (a lamp swap, a scaled fill, a turning arrow) that a
+`MultiMesh` instance cannot hold. Nothing observable changed — every asset
+choice, hover, ghost, removal, per-tile item hiding and the fluid bodies are
+as they were, and `scripts/screenshot-scene.sh --populate` before and after
+is pixel-identical on the world (the only differing pixels were one
+simulation tick's worth of item travel, which two runs of the OLD renderer
+also show against each other).
+
+Measured on the new 1500-belt stress fixture (`test_layouts.gd`'s
+`build_stress_line`, which funds itself through `save_ron`/`load_ron` since
+its bill is past the starting balance):
+
+| | before | after |
+|---|---|---|
+| rendered objects in frame (`--stress`) | 7,772 | 910 |
+| draw calls in frame (`--stress`) | 204 | 174 |
+| headless `_rebuild_world`, warm | 57 ms | 38 ms |
+| headless 120 frames of `_process`, running | 867 ms (7.2 ms/frame) | 862 ms (7.2 ms/frame) |
+
+The per-frame figure did not move because it is not the scene's: profiling
+the stress line puts ~8 ms of each tick step into parsing the ~80 KB of
+chunk-snapshot JSON two dirty chunks produce, ~1 ms into the sim tick, and
+~2.4 ms into the scene's own belt loop. That is the wire's per-chunk delta
+granularity (ARCHITECTURE.md §4) reporting every belt in a chunk every tick,
+and it is milestone 8's problem, flagged here rather than worked around.
+Primitives in frame rose ~15% on the stress shot because a `MultiMesh` is
+culled as one whole; at this camera nothing is off-screen anyway.
+
+Seams for tickets 5 and 6, documented in `main.gd`'s "Instanced tiles and
+items" section: a tile's asset is a FRAME SET with `_set_tile_frame` flipping
+per-frame visibility; a tile's yaw is handed in by the caller, not derived
+from its direction; an item's position comes from one function of (tile,
+direction, distance). Tests read the scene through `_tile_instance_at`,
+`_carried_item` and `_carried_item_count` instead of node names.
+### 2026-09-09 — Pipes & conveyors overhaul, ticket 1: the sim says what is joined to what
+
+The first ticket of the overhaul planned in `docs/PIPES_AND_CONVEYORS_PLAN.md`.
+Every belt, splitter and pipe in `world_layout_json` (and in
+`query_tile_json`, for hover) now carries a `links` object: which sides
+feed a belt and what kind of thing stands there, which side it hands to,
+or which sides a pipe is joined on and whether that is another pipe, a
+machine's tap or a tank. Directions are absolute, named from the tile
+outward, and listed north/east/south/west so the shape is canonical. It is
+recorded inside `World::recompute_topology` at the moment each hand-off,
+tap and pipe adjacency is resolved, so it is exactly what the tick uses,
+never a second scan, and free per tick; every other kind's JSON is
+byte-identical to before. Tickets 5 and 6 read this to pick a straight, a
+corner, a merge, an end, a tee, a cross or a port fitting.
+
+Topology gaps filled to make it exact: the machine input tap now keeps
+the direction and tile it was found through (it discarded both), the
+output tap and the tank discharge now keep the pipe tile (they kept only
+network and segment), and pipe-to-pipe adjacency is recorded from both
+ends as it is found. `sim_core/tests/links.rs` covers every shape the plan
+names, links after `Remove`/`Rotate`, a mirror-symmetry invariant over the
+whole reference chain, and the JSON byte for byte.
+
+**Found, not fixed (for ticket 7):** the sim links a belt into a machine
+or dock when the tile it points at is on the inlet *edge*, from any side —
+so a 1x1 crusher is fed from all four sides, including through its outlet
+face, against `world.rs`'s own doc. `test_layouts.gd`'s demo line (a
+west-facing crusher fed from the south) relies on it, and fixing it would
+change what placed lines do, so the wire reports the rule as it stands
+and the links test pins it.
+
+### 2026-09-09 — The always-loaded docs were cut to a third of their size
+
+`CLAUDE.md`, `ARCHITECTURE.md` and `UI_UX.md` had all grown past the 40k-char
+per-file budget (160k, 52k and 52k). Every decision record that lived in
+`CLAUDE.md`'s log, the long form of `UI_UX.md` §2b and `ARCHITECTURE.md`
+§9a moved verbatim into a new `docs/DECISIONS.md`, which is not
+`@`-included. What stays loaded is the **rule** each record produced, in
+condensed form, under the same section and point numbers code comments
+cite. The three files are now 28k, 19.5k and 18k. New decisions: condensed
+rule in the loaded doc, full reasoning in DECISIONS.md.
 
 ### 2026-09-09 — A hopper or a tank can keep itself topped up
 

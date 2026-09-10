@@ -23,12 +23,25 @@ pub struct Asset {
 
 pub const ASSETS: &[Asset] = &[
     Asset { name: "floor_tile", build: floor_tile },
-    Asset { name: "belt", build: belt },
-    // The two junction-adjacent belt variants (the "Visual overhaul round 2"
-    // epic's ticket 3). `main.gd` picks between these three per tile from the
-    // simulation's own layout — see `belt_inlet`'s doc.
-    Asset { name: "belt_inlet", build: belt_inlet },
-    Asset { name: "belt_outlet", build: belt_outlet },
+    // The belt family (the "Pipes & Conveyors Overhaul" plan's ticket 2):
+    // three shapes, `BELT_FRAMES` animation frames each, all authored for a
+    // +X product path. The scene picks the shape from each tile's `links`
+    // and the frame from the tick (ticket 5, `main.gd`'s `_belt_shape_for`
+    // and `_belt_frame_for_tick`); `belt_f0` is also the build menu's icon
+    // and the ghost. The old `belt`/`belt_inlet`/`belt_outlet` names are
+    // gone — see the conveyor section's header.
+    Asset { name: "belt_f0", build: belt_f0 },
+    Asset { name: "belt_f1", build: belt_f1 },
+    Asset { name: "belt_f2", build: belt_f2 },
+    Asset { name: "belt_f3", build: belt_f3 },
+    Asset { name: "belt_corner_left_f0", build: belt_corner_left_f0 },
+    Asset { name: "belt_corner_left_f1", build: belt_corner_left_f1 },
+    Asset { name: "belt_corner_left_f2", build: belt_corner_left_f2 },
+    Asset { name: "belt_corner_left_f3", build: belt_corner_left_f3 },
+    Asset { name: "belt_corner_right_f0", build: belt_corner_right_f0 },
+    Asset { name: "belt_corner_right_f1", build: belt_corner_right_f1 },
+    Asset { name: "belt_corner_right_f2", build: belt_corner_right_f2 },
+    Asset { name: "belt_corner_right_f3", build: belt_corner_right_f3 },
     // Epic B's conveyor splitter and the lit arrow that says which of its two
     // outputs takes the next item. Grouped with the belts rather than with
     // the machines below because that is what a splitter is (see
@@ -62,10 +75,21 @@ pub const ASSETS: &[Asset] = &[
     // player-loadable building, this ticket draws it).
     Asset { name: "fluid_tank", build: fluid_tank },
     Asset { name: "fluid_tank_fill", build: fluid_tank_fill },
+    // The pipe family ("Pipes & Conveyors Overhaul" ticket 3): shapes, the
+    // fittings Godot overlays on any open leg, and one fluid body per shape.
+    // See the pipe section's header for the face convention.
     Asset { name: "pipe", build: pipe },
-    Asset { name: "pipe_source", build: pipe_source },
-    Asset { name: "pipe_inlet", build: pipe_inlet },
+    Asset { name: "pipe_corner", build: pipe_corner },
+    Asset { name: "pipe_tee", build: pipe_tee },
+    Asset { name: "pipe_cross", build: pipe_cross },
+    Asset { name: "pipe_end", build: pipe_end },
+    Asset { name: "pipe_fitting_machine", build: pipe_fitting_machine },
+    Asset { name: "pipe_fitting_tank", build: pipe_fitting_tank },
     Asset { name: "pipe_fluid", build: pipe_fluid },
+    Asset { name: "pipe_fluid_corner", build: pipe_fluid_corner },
+    Asset { name: "pipe_fluid_tee", build: pipe_fluid_tee },
+    Asset { name: "pipe_fluid_cross", build: pipe_fluid_cross },
+    Asset { name: "pipe_fluid_end", build: pipe_fluid_end },
     Asset { name: "item_tomato", build: item_tomato },
     // The chain's second raw ingredient (the chain-rework epic). It needed a
     // model of its own for UI_UX.md §2b point 12's reason: `main.gd`'s
@@ -134,87 +158,173 @@ pub fn floor_tile(p: &Palette) -> VoxModel {
 // ---------------------------------------------------------------------------
 // Conveyor
 // ---------------------------------------------------------------------------
+//
+// The "Pipes & Conveyors Overhaul" plan's ticket 2
+// (docs/PIPES_AND_CONVEYORS_PLAN.md). One parameterised generator produces
+// the whole belt family the plan names: a straight tile, a left corner and a
+// right corner, each in `BELT_FRAMES` animation frames. Every model is
+// authored with its product path leaving through the **+X** face and is
+// spun by Godot to the placement's facing (UI_UX.md §2b point 18), so
+// nothing in here may depend on which face the camera happens to look at —
+// every face of a belt can be the near face.
+//
+// **Animation is by frames, not UVs** (the plan's "Belt animation"). Frame
+// `k` is the same tile with its surface pattern advanced `k *
+// BELT_FRAME_SHIFT` voxels along the product path; the structure under it
+// (legs, rails, rollers, the return strand) is identical in every frame,
+// because on a real conveyor the belt moves and the idlers do not. Godot
+// shows frame `floor(tick * BELT_FRAMES / BELT_TICKS_PER_TILE) mod
+// BELT_FRAMES`, so the pattern crosses one tile in exactly the 50 ticks an
+// item does. The pattern's period along the path is therefore one tile: a
+// shorter period (the old cleats every 8 voxels) would make frames 0 and 2 —
+// or all four — identical, and a pattern that moves 8 voxels a frame with
+// features 8 or 16 apart is the wagon-wheel illusion (built and reasoned
+// through, not rendered: two marks a tile could be read as standing still
+// or running backwards). So each tile carries **one** arrow, and the
+// arrow is the cleat.
+//
+// **Direction is a shape** (UI_UX.md §7 — never colour alone): a solid
+// arrow — a wedge head and a short shaft — standing one voxel proud of the
+// rubber, in `hazard_yellow`, the same safety-signage colour the belt's
+// rails already wear. The arrow is the cleat.
+//
+// A **solid** arrow, not a two-arm chevron, and that was decided by the
+// render, not by taste (UI_UX.md §2b point 23). The first cut was a thin
+// `>` of two diagonal arms, and in the `--closeup` scene render it was an
+// `L`: the fixed isometric camera looks straight down one of the tile's
+// diagonals, so a line along one diagonal projects to a screen horizontal
+// at full length and a line along the other to a short screen vertical. A
+// 45° mark on the tile plane cannot read as a chevron from this camera at
+// any facing. A filled wedge has no lines to lose — its apex is its apex
+// from every angle — which is also why the splitter's readout is a filled
+// arrow. **Raised rather than recessed**, for the camera again: a recess
+// shows its floor only where its own wall does not shadow it, and one edge
+// of any shape always runs along the sight line; a plate is seen from
+// above at every facing. The cost is that an item drawn at
+// `BELT_SURFACE_Z + 1` stands one voxel into the plate where they overlap;
+// at scene scale that is a sliver under the item's foot (checked in the
+// `--closeup --populate` render).
+//
+// **Corners** (the plan's "Corner conventions"): a corner's running surface
+// is a quarter annulus about the tile corner between its two connected
+// faces, centre-line radius half a tile, so the lane enters and leaves at
+// exactly `BELT_LANE` and the rails meet a straight tile's rails voxel for
+// voxel. `Turn::Left` is fed from the NORTH face, which is vox **low Y**
+// (sim +Y is world +Z is vox -Y; see the junction header further down);
+// `Turn::Right` is its mirror in Y. The surface pattern on a corner lives in
+// the same `(u, v)` coordinates as on a straight — `u` runs 0..32 along the
+// path, so a quarter turn is stretched to a tile's worth of pattern and the
+// arrow reaches the exit face in the same frame a straight tile's would;
+// the sim already parameterises an item across a corner by the same 0..1
+// distance, so surface and items stay in step. The arrow's length is in
+// `u` and its width in voxels, so on the inside of the bend the head is
+// short and on the outside long: the arrow bends with the belt.
+//
+// **The belt-side junction variants are retired.** `belt_inlet` and
+// `belt_outlet` used to dress the last tile before a machine and the first
+// after it with a static steel dead-plate and kerbs. They were east-only
+// (point 18) and fell back to the plain tile on three facings out of four,
+// and a static plate on an animated surface would either freeze the pattern
+// short of the machine or have to be excluded from the frame rule; with
+// corners a corner can also be the tile that meets a machine, multiplying
+// the set again. The machine-side hood and doorway (`machine_infeed`,
+// `machine_outfeed`) already bring a threshold to the tile boundary at
+// `BELT_SURFACE_Z`, so the plain tile carries the junction. Ticket 5 wired
+// the framed names into the scene and deleted the three aliases (`belt`,
+// `belt_inlet`, `belt_outlet`), their models and their icons: a belt meeting
+// a machine, hopper or dock is `belt_f0..f3` or a corner at every facing,
+// and nothing on the belt's side of the boundary is facing-specific. `belt()`
+// below stays as a Rust function only — it is what the junction tests and
+// the splitter's stubs are measured against — and is not in `ASSETS`.
 
-/// One tile of rubber-belt conveyor: steel side frames and legs (shiny),
-/// brass rollers (shiny), a matte rubber running surface with cleats.
-///
-/// The metal/matte split here is the point of UI_UX.md §4 in miniature — the
-/// frame and rollers catch the light, the belt rubber does not.
+/// How many animation frames every belt shape has (the plan's
+/// `BELT_FRAMES`). `main.gd` mirrors this; change one, change both.
+pub const BELT_FRAMES: u32 = 4;
+
+/// Voxels the surface pattern advances per frame along the product path:
+/// a quarter tile, so four frames carry it exactly one tile.
+pub const BELT_FRAME_SHIFT: i32 = TILE_VOXELS as i32 / BELT_FRAMES as i32;
+
+/// The arrow cleat's top voxel: one proud of the running surface (see the
+/// section header for why raised, not recessed).
+pub const BELT_ARROW_Z: i32 = BELT_SURFACE_Z + 1;
+
+/// Where the arrow's apex sits in frame 0, in `u` (voxels along the path).
+/// Chosen so the frame-0 arrow — the one the UI icon is rendered from — is
+/// centred in its tile: it spans `u` 9..=22.
+const ARROW_APEX_U: f32 = 23.0;
+/// Length of the wedge head along the path, in `u`.
+const ARROW_HEAD_LEN: f32 = 8.0;
+/// Half-width of the wedge at its base, in voxels across the lane: the base
+/// spans `BELT_LANE` less one voxel of rubber margin each side.
+const ARROW_HEAD_HALF_WIDTH: f32 = 8.0;
+/// Length of the shaft behind the head, in `u`.
+const ARROW_SHAFT_LEN: f32 = 6.0;
+/// Half-width of the shaft, in voxels: four rows either side of the centre.
+const ARROW_SHAFT_HALF_WIDTH: f32 = 2.5;
+
+/// Which way a corner turns, named as the plan names the models. Both are
+/// authored with their output on +X; `Left` is fed from the north (vox low
+/// Y) face, `Right` from the south (vox high Y) face.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Turn {
+    Left,
+    Right,
+}
+
+/// The three belt shapes the family covers.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BeltShape {
+    Straight,
+    Corner(Turn),
+}
+
+/// The straight belt tile at rest — frame 0 of the straight shape. Not an
+/// `ASSETS` entry (the scene asks for `belt_f0`); kept as the reference the
+/// junction tests and the splitter's stubs are measured against.
 pub fn belt(p: &Palette) -> VoxModel {
-    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 16]);
-    belt_body(&mut m, p);
-    m
+    belt_shape(p, BeltShape::Straight, 0)
 }
 
-/// The tile immediately **upstream of a machine** — the last belt tile before
-/// product is handed over. Distinct from a plain middle tile on purpose: this
-/// is the concrete, buildable half of the project owner's *"assets should
-/// look different depending on their orientation and what's around them"*,
-/// and a belt tile that hands off to a machine genuinely is different kit
-/// from one in the middle of a run.
-///
-/// Which tile this is comes from the simulation's own layout, never from a
-/// hardcoded "the front is -X": `main.gd` asks whether the next tile ALONG
-/// THE STAGE'S OWN TRAVEL DIRECTION (derived from `chain_layout_json`'s
-/// `belt_start_tile` -> `machine_tile`) is covered by a machine footprint.
-/// The model itself is authored for a +X run only, which is the one
-/// direction the simulation ever produces — see `sim_core/src/sim/world.rs`'s
-/// corner note, and `main.gd`'s `_belt_asset_for`, which falls back to the
-/// plain tile rather than drawing a wrong-facing end cap if that ever
-/// changes.
-///
-/// What it adds: guide rails converging toward the machine, and a bright
-/// dead-plate running out to the tile edge at exactly the height of the
-/// machine's own infeed apron ([`BELT_SURFACE_Z`]), so the two are one
-/// continuous surface across the boundary instead of two things that stop
-/// near each other.
-pub fn belt_inlet(p: &Palette) -> VoxModel {
+macro_rules! belt_frame_fns {
+    ($($name:ident => $shape:expr, $phase:expr;)*) => {
+        $(
+            pub fn $name(p: &Palette) -> VoxModel {
+                belt_shape(p, $shape, $phase)
+            }
+        )*
+    };
+}
+
+belt_frame_fns! {
+    belt_f0 => BeltShape::Straight, 0;
+    belt_f1 => BeltShape::Straight, 1;
+    belt_f2 => BeltShape::Straight, 2;
+    belt_f3 => BeltShape::Straight, 3;
+    belt_corner_left_f0 => BeltShape::Corner(Turn::Left), 0;
+    belt_corner_left_f1 => BeltShape::Corner(Turn::Left), 1;
+    belt_corner_left_f2 => BeltShape::Corner(Turn::Left), 2;
+    belt_corner_left_f3 => BeltShape::Corner(Turn::Left), 3;
+    belt_corner_right_f0 => BeltShape::Corner(Turn::Right), 0;
+    belt_corner_right_f1 => BeltShape::Corner(Turn::Right), 1;
+    belt_corner_right_f2 => BeltShape::Corner(Turn::Right), 2;
+    belt_corner_right_f3 => BeltShape::Corner(Turn::Right), 3;
+}
+
+/// One belt tile of `shape` at animation `phase` (`0..BELT_FRAMES`).
+pub fn belt_shape(p: &Palette, shape: BeltShape, phase: u32) -> VoxModel {
+    assert!(phase < BELT_FRAMES, "belt phase {phase} is not in 0..{BELT_FRAMES}");
+    match shape {
+        BeltShape::Straight => belt_straight(p, phase),
+        BeltShape::Corner(turn) => belt_corner(p, turn, phase),
+    }
+}
+
+/// A straight tile: the shared structure, the rubber lane, and the arrow.
+fn belt_straight(p: &Palette, phase: u32) -> VoxModel {
     let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 16]);
-    belt_body(&mut m, p);
     let last = TILE_VOXELS as i32 - 1;
     let (l0, l1) = BELT_LANE;
-
-    // Transition dead-plate: no rollers under it, flush to the tile edge and
-    // exactly level with the machine's infeed apron.
-    m.cuboid((22, last), (l0, l1), (BELT_SURFACE_Z, BELT_SURFACE_Z), p.idx("steel_light"));
-    // Low guide kerbs along it. Deliberately LOW: the first version stood a
-    // full hazard-striped portal frame here, and rendered next to the
-    // machine's own infeed housing it made the junction two portals deep and
-    // a jumble of dark bars. The machine end frames the junction; the belt
-    // end should only hand over to it.
-    for y in [l0 - 1, l1 + 1] {
-        m.cuboid((22, last), (y, y), (BELT_SURFACE_Z, BELT_SURFACE_Z + 1), p.idx("steel_light"));
-    }
-    m
-}
-
-/// The tile immediately **downstream of a machine** (or of the hopper) — the
-/// belt tile a discharge lands on. The mirror of [`belt_inlet`], picked the
-/// same data-driven way.
-///
-/// What it adds: a receiving apron at the tile edge under the machine's
-/// discharge lip, and taller splash guards along the first stretch, which is
-/// the stretch a real line guards because that is where product drops rather
-/// than travels.
-pub fn belt_outlet(p: &Palette) -> VoxModel {
-    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 16]);
-    belt_body(&mut m, p);
-    let (l0, l1) = BELT_LANE;
-
-    // Receiving plate under the machine's discharge lip, then low splash
-    // guards along the stretch product lands on rather than travels along.
-    // Kept as quiet as `belt_inlet`'s kerbs, and for the same reason.
-    m.cuboid((0, 8), (l0, l1), (BELT_SURFACE_Z, BELT_SURFACE_Z), p.idx("steel_light"));
-    for y in [l0 - 1, l1 + 1] {
-        m.cuboid((0, 8), (y, y), (BELT_SURFACE_Z, BELT_SURFACE_Z + 2), p.idx("steel_light"));
-    }
-    m
-}
-
-/// The conveyor itself, shared by all three belt assets above so a run reads
-/// as one line whatever variant a given tile draws.
-fn belt_body(m: &mut VoxModel, p: &Palette) {
-    let last = TILE_VOXELS as i32 - 1;
 
     // Legs.
     for (x0, x1) in [(2, 4), (27, 29)] {
@@ -222,28 +332,174 @@ fn belt_body(m: &mut VoxModel, p: &Palette) {
             m.cuboid((x0, x1), (y0, y1), (0, 4), p.idx("steel_dark"));
         }
     }
-
+    // Return strand: the belt's lower run, between the legs. Structure, not
+    // pattern — it is what stops a side view showing bare floor under a
+    // striped rail.
+    m.cuboid((0, last), (l0 + 2, l1 - 2), (2, 2), p.idx("rubber_dark"));
     // Side frames, running the full length of the tile so consecutive tiles
     // read as one continuous line.
     for (y0, y1) in [(4, 6), (25, 27)] {
         m.cuboid((0, last), (y0, y1), (4, 8), p.idx("steel_dark"));
     }
-
-    // Hazard striping on the outer face of each frame (UI_UX.md §3).
+    // Hazard striping on the outer face of each frame (UI_UX.md §3). Both
+    // rails, because either can be the camera-facing one once the tile is
+    // turned.
     m.hazard_stripe_x((0, last), (4, 4), (5, 6), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
     m.hazard_stripe_x((0, last), (27, 27), (5, 6), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
-
-    // Rollers under the belt.
+    // Idlers under the belt. Fixed in every frame: the belt moves over
+    // them, they do not travel with it. The two nearest the faces are what
+    // shows under the rubber's end where a run stops in the open.
     for x in [4, 12, 20, 28] {
-        m.cylinder_y((x, 7), 2.5, (7, 24), p.idx("brass"));
+        m.cylinder_y((x, 7), 2.5, (l0, l1), p.idx("brass"));
     }
 
-    // Running surface + cleats.
-    m.cuboid((0, last), (7, 24), (8, 9), p.idx("rubber"));
+    // Running surface, then the arrow standing on it.
+    m.cuboid((0, last), (l0, l1), (BELT_SURFACE_Z - 1, BELT_SURFACE_Z), p.idx("rubber"));
     for x in 0..=last {
-        if x.rem_euclid(8) < 2 {
-            m.cuboid((x, x), (7, 24), (9, 9), p.idx("rubber_dark"));
+        for y in l0..=l1 {
+            let cell = straight_surface_cell(x, y).expect("lane cell");
+            if arrow_covers(&cell, phase) {
+                m.set(x, y, BELT_ARROW_Z, p.idx("hazard_yellow"));
+            }
         }
+    }
+    m
+}
+
+/// A corner tile. Built as the LEFT corner (fed from vox low Y) and
+/// mirrored in Y for the right, so the two cannot drift apart.
+fn belt_corner(p: &Palette, turn: Turn, phase: u32) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 16]);
+    let last = TILE_VOXELS as i32 - 1;
+    let (l0, l1) = BELT_LANE;
+
+    // Legs: one pair at each open face where a straight tile has its own,
+    // and one under the middle of the outer rail.
+    for (x, y) in [(27, 5), (27, 24), (5, 2), (24, 2), (12, 17)] {
+        m.cuboid((x, x + 2), (y, y + 2), (0, 4), p.idx("steel_dark"));
+    }
+    // Idlers at the two open faces, matching a straight tile's end idlers.
+    m.cylinder_y((28, 7), 2.5, (l0, l1), p.idx("brass"));
+    m.cylinder_x((3, 7), 2.5, (l0, l1), p.idx("brass"));
+
+    for x in 0..=last {
+        for y in 0..=last {
+            let (r, _) = corner_polar(x, y);
+            // Rails: the inner one hugs the pivot corner, the outer one the
+            // far corner; both meet a straight tile's rails at the faces.
+            if (4.0..7.0).contains(&r) || (25.0..28.0).contains(&r) {
+                m.cuboid((x, x), (y, y), (4, 8), p.idx("steel_dark"));
+                // Striping on the outer skin of each rail, the faces that
+                // look away from the lane.
+                if r < 5.0 || r >= 27.0 {
+                    for z in 5..=6 {
+                        let c = if (x + y + z).rem_euclid(6) < 3 { "hazard_yellow" } else { "hazard_black" };
+                        m.set(x, y, z, p.idx(c));
+                    }
+                }
+            }
+            if (9.0..23.0).contains(&r) {
+                m.set(x, y, 2, p.idx("rubber_dark"));
+            }
+            if let Some(cell) = corner_surface_cell(x, y) {
+                m.cuboid((x, x), (y, y), (BELT_SURFACE_Z - 1, BELT_SURFACE_Z), p.idx("rubber"));
+                if arrow_covers(&cell, phase) {
+                    m.set(x, y, BELT_ARROW_Z, p.idx("hazard_yellow"));
+                }
+            }
+        }
+    }
+
+    match turn {
+        Turn::Left => m,
+        Turn::Right => mirror_y(&m),
+    }
+}
+
+/// The same model reflected in Y about the tile's centre.
+fn mirror_y(m: &VoxModel) -> VoxModel {
+    let mut out = VoxModel::new(m.size);
+    let last = m.size[1] - 1;
+    for (&(x, y, z), &c) in &m.voxels {
+        out.voxels.insert((x, last - y, z), c);
+    }
+    out
+}
+
+/// Where a running-surface cell sits along and across the product path.
+///
+/// `u` runs 0..32 along the path in frame units (one voxel on a straight,
+/// a stretched quarter turn on a corner). `v` is the lateral offset of the
+/// cell centre from the lane's centre line, in voxels, positive toward vox
+/// +Y at the exit face.
+pub struct SurfaceCell {
+    pub u: f32,
+    pub v: f32,
+}
+
+/// Surface coordinates of a straight tile's cell, or `None` off the lane.
+pub fn straight_surface_cell(x: i32, y: i32) -> Option<SurfaceCell> {
+    let (l0, l1) = BELT_LANE;
+    if !(0..TILE_VOXELS as i32).contains(&x) || !(l0..=l1).contains(&y) {
+        return None;
+    }
+    Some(SurfaceCell { u: x as f32 + 0.5, v: y as f32 + 0.5 - TILE_VOXELS as f32 / 2.0 })
+}
+
+/// Polar coordinates of a cell centre about the LEFT corner's pivot, the
+/// tile corner at vox `(32, 0)`: `r` in voxels, `theta` from 0 at the
+/// entry (low-Y) face to π/2 at the exit (+X) face.
+fn corner_polar(x: i32, y: i32) -> (f32, f32) {
+    let dx = TILE_VOXELS as f32 - (x as f32 + 0.5);
+    let dy = y as f32 + 0.5;
+    ((dx * dx + dy * dy).sqrt(), dy.atan2(dx))
+}
+
+/// Surface coordinates of a LEFT corner's cell, or `None` off the lane.
+/// (The right corner is the mirror; test it through [`mirror_y`]'s
+/// inverse, which is itself.)
+pub fn corner_surface_cell(x: i32, y: i32) -> Option<SurfaceCell> {
+    let (l0, l1) = BELT_LANE;
+    let (r_in, r_out) = (l0 as f32, l1 as f32 + 1.0);
+    let (r, theta) = corner_polar(x, y);
+    if !(r_in..r_out).contains(&r) {
+        return None;
+    }
+    let quarter = std::f32::consts::FRAC_PI_2;
+    let u_per_rad = TILE_VOXELS as f32 / quarter;
+    Some(SurfaceCell { u: theta * u_per_rad, v: r - TILE_VOXELS as f32 / 2.0 })
+}
+
+/// Distance wrapped into one tile's pattern period, `-16..16`.
+fn wrap_period(d: f32) -> f32 {
+    let half = TILE_VOXELS as f32 / 2.0;
+    (d + half).rem_euclid(TILE_VOXELS as f32) - half
+}
+
+/// The arrow apex's `u` at `phase`.
+pub fn arrow_apex_u(phase: u32) -> f32 {
+    (ARROW_APEX_U + (phase as i32 * BELT_FRAME_SHIFT) as f32).rem_euclid(TILE_VOXELS as f32)
+}
+
+/// How far behind the arrow's apex a cell sits along the path, in `u`,
+/// wrapped to the pattern period (negative = ahead of the apex).
+pub fn arrow_trail_u(cell: &SurfaceCell, phase: u32) -> f32 {
+    wrap_period(arrow_apex_u(phase) - cell.u)
+}
+
+/// Does the arrow at `phase` stand on this cell? The head is a wedge that
+/// widens behind the apex — that is what makes it point the way the product
+/// goes — and the shaft a constant-width strip behind the head.
+pub fn arrow_covers(cell: &SurfaceCell, phase: u32) -> bool {
+    let trail = arrow_trail_u(cell, phase);
+    if trail < 0.0 {
+        false
+    } else if trail < ARROW_HEAD_LEN {
+        cell.v.abs() < trail / ARROW_HEAD_LEN * ARROW_HEAD_HALF_WIDTH
+    } else if trail < ARROW_HEAD_LEN + ARROW_SHAFT_LEN {
+        cell.v.abs() < ARROW_SHAFT_HALF_WIDTH
+    } else {
+        false
     }
 }
 
@@ -396,24 +652,17 @@ pub fn machine_splitter(p: &Palette) -> VoxModel {
     }
     m.cylinder_x((28, 7), 2.5, (l0, l1), p.idx("brass"));
 
-    // Running surfaces. Rubber where product travels in a straight line —
-    // the intake, the straight exit and the branch stub — with the same
-    // cleat rhythm the belt has, so the three stubs line up with whatever
-    // belt tile they are laid against.
+    // Running surfaces. Plain rubber where product travels in a straight
+    // line — the intake, the straight exit and the branch stub — at the
+    // belt's own height and lane, so the three stubs line up with whatever
+    // belt tile they are laid against. Deliberately NO arrow cleat here:
+    // the belt family's arrow says "this way", and on a splitter that is
+    // the lit arrow's job — a static yellow mark beside an amber one would
+    // be a second direction readout on the one tile that has a live one.
     for (x0, x1) in [(0, t0 - 1), (t1 + 1, last)] {
         m.cuboid((x0, x1), (l0, l1), deck, p.idx("rubber"));
-        for x in x0..=x1 {
-            if x.rem_euclid(8) < 2 {
-                m.cuboid((x, x), (l0, l1), (deck.1, deck.1), p.idx("rubber_dark"));
-            }
-        }
     }
     m.cuboid((l0, l1), (t1 + 1, last), deck, p.idx("rubber"));
-    for y in (t1 + 1)..=last {
-        if y.rem_euclid(8) < 2 {
-            m.cuboid((l0, l1), (y, y), (deck.1, deck.1), p.idx("rubber_dark"));
-        }
-    }
 
     // The diverter table itself: stainless, because it is the one part of a
     // splitter that is a mechanism rather than a surface, and it is what
@@ -657,7 +906,7 @@ pub fn item_sugar(p: &Palette) -> VoxModel {
 /// name still referred to `tomato_sauce`, an item id the "Machines
 /// improvement" epic's ticket 2 deleted. A presentation-side name that
 /// silently outlives the content id it describes is exactly the failure
-/// UI_UX.md §2b point 10 records, so it is worth not keeping one around.
+/// UI_UX.md §2b point 12 records, so it is worth not keeping one around.
 pub fn item_paste_pail(p: &Palette) -> VoxModel {
     pail(p, "pail_grey", "liquid_paste", "brass")
 }
@@ -734,270 +983,441 @@ pub fn item_box(p: &Palette) -> VoxModel {
 }
 
 // ---------------------------------------------------------------------------
-// Fluid pipes (milestone 6 — ARCHITECTURE.md §3.4, §9 item 6)
+// Fluid pipes (milestone 6 — ARCHITECTURE.md §3.4; the shape family is the
+// "Pipes & Conveyors Overhaul" ticket 3, docs/PIPES_AND_CONVEYORS_PLAN.md)
 // ---------------------------------------------------------------------------
 //
 // Material call, made deliberately rather than left ambiguous: this run is
-// **stainless steel, material class `metal`** (`pipe_grey`/`steel_*`/
-// `brass`), not PVC. Two reasons, both from the docs rather than taste.
-// UI_UX.md §3 lists "stainless steel tanks ... PVC/steel piping" as the
+// **stainless steel, material class `metal`** (`steel_*`/`brass`), not PVC.
+// UI_UX.md §3 lists "stainless steel tanks ... steel piping" as the
 // setting's visual language and §4 makes metals the deliberate shiny
 // exception so "important machinery pops" — a pipe run feeding a machine is
 // exactly that, and a matte plastic run would visually sink into the
-// concrete floor it stands on. And GAMEPLAY.md §2/§4 reserve non-standard
+// concrete floor it stands on. GAMEPLAY.md §2/§4 reserve non-standard
 // piping material as a *later* gate (tier 5's acid-resistant equipment), so
-// the baseline run should read as ordinary food-grade stainless.
+// the baseline run reads as ordinary food-grade stainless.
 //
-// The pipe is hollow, with an open sight section cut through the top of its
-// middle span. That opening is what makes UI_UX.md §4's "visible liquid
-// surfaces in tanks/pipes" literally true here: the fluid body
-// (`pipe_fluid`, below) sits in the bore and is seen through it from the
-// fixed isometric angle, which looks down on the +Y (model +Z) face.
+// **THE FAMILY.** A pipe tile is drawn from three kinds of part, and
+// `main.gd` (ticket 6) composes them from the `links` the sim puts on the
+// wire, never from geometry it works out itself:
+//
+//   * a SHAPE — `pipe` (straight), `pipe_corner`, `pipe_tee`, `pipe_cross`,
+//     `pipe_end` — decided by how many faces connect and how they lie;
+//   * a FLUID BODY per shape — `pipe_fluid`, `pipe_fluid_corner`, ... — one
+//     voxel tall, filling that shape's bore footprint, scaled to the live
+//     level (UI_UX.md §2b point 5);
+//   * zero or more FITTINGS — `pipe_fitting_machine`, `pipe_fitting_tank` —
+//     authored on the +X face and overlaid, rotated, on whichever face
+//     touches a machine or a tank.
+//
+// **COORDINATES, stated once because the plan and this file name the same
+// face two ways.** Every asset is authored with its product path along +X
+// (east). The plan's corner conventions say a corner joins "+X and +Y
+// (north)" *in tile space*. Tile-space north is sim +y, which is world +Z,
+// which the vox importer maps from vox **LOW Y** (this file's junction
+// header derives that; `machine_mixer`'s vinegar stub reaches its north
+// neighbour through y = 0). So in the coordinates below:
+//
+//     +X face  = x = 31 = east          -X face = x = 0  = west
+//     y = 0    = NORTH (camera-facing)  y = 31  = SOUTH
+//
+// `pipe_corner` is open on x = 31 and y = 0; `pipe_tee` on x = 31, x = 0
+// and y = 0; `pipe_end` on x = 0 only. Both of a corner's openings are
+// therefore on faces the fixed camera can see (§2b point 11), which is why
+// the plan chose that pair. Godot turns a shape by `Direction::rotate_cw`
+// quarter turns, `(dx, dy) -> (-dy, dx)` here — `VoxModel::rotated_cw` is
+// the same turn and is what the tests below use.
+//
+// **THE AXIS IS ON THE TILE'S MIDLINE, BETWEEN VOXELS 15 AND 16.** The run
+// used to be centred on voxel 16, half a voxel south of the midline, and
+// that was invisible while every tile faced east. It is not invisible now:
+// Godot spins a tile about its footprint centre, so an east tile's axis sat
+// at y = 16, a west tile's at y = 15, a south tile's at x = 15 and a north
+// tile's at x = 16 — a run at mixed facings stepped by a voxel at every
+// joint, and no corner could ever have met both of its neighbours. Every
+// shape here is built on `PIPE_C` = 15.5 with the `*_f` primitives, so a
+// turned tile lands on exactly the voxels its neighbour expects. The
+// machines' own nozzles (`machine_fluid_port`, `fluid_tank`'s spout) still
+// sit on voxel 16; a radius-3 nozzle half a voxel off inside a six-wide bore
+// is not a step anyone can see, and moving them is a machine-art change
+// this ticket does not make.
 
-/// Voxel geometry shared by every pipe tile, so a plain segment, the tank
-/// connection and the machine inlet read as one continuous run. Numbers here
-/// are mirrored by `main.gd`'s PIPE_* constants (stated in voxels, converted
-/// there) — change one, change the other.
-const PIPE_AXIS_Y: i32 = 16;
+/// The tile midline in voxel-index units: the pipe's axis on both
+/// horizontal axes. See the section header for why it is not 16.
+const PIPE_C: f32 = 15.5;
+/// Height of the axis. Shared with every machine nozzle and the tank spout,
+/// which is what makes a pipe tile meet them without an elbow.
 const PIPE_AXIS_Z: i32 = 15;
+/// The Y voxel a MACHINE'S nozzle is centred on (`machine_fluid_port`,
+/// `fluid_tank`). The pipe's own axis is [`PIPE_C`]; this integer survives
+/// for the machine generators and the junction tests, which build nozzles
+/// with the integer-centred primitives.
+pub const PIPE_AXIS_Y: i32 = 16;
 const PIPE_OUTER_R: f32 = 4.5;
 const PIPE_BORE_R: f32 = 3.0;
-/// Bore floor / ceiling in voxels, derived from the two above. The fluid
-/// body's base sits on `PIPE_BORE_Z0` and it can rise `PIPE_BORE_HEIGHT`.
+/// Bore floor and height in voxels, mirrored by `main.gd`'s
+/// PIPE_BORE_FLOOR_VOXELS / PIPE_BORE_HEIGHT_VOXELS — change one, change
+/// the other. Unchanged by the shape family: a full column still rises from
+/// z = 12 to the crown.
 const PIPE_BORE_Z0: i32 = PIPE_AXIS_Z - 3;
 const PIPE_BORE_HEIGHT: i32 = 7;
-/// Bore half-width, in Y — the fluid body is this wide too.
-const PIPE_BORE_Y0: i32 = PIPE_AXIS_Y - 3;
-const PIPE_BORE_Y1: i32 = PIPE_AXIS_Y + 3;
-/// The sight section: where the wall is cut away so the liquid inside can
-/// actually be seen. See `pipe_body` for why it is a short framed window
-/// rather than the full-length open channel it used to be.
+/// The bore's widest row (at axis height) — what a sight window is cut to.
+const PIPE_BORE_Y: (i32, i32) = (13, 18);
+/// The fluid body's width, **narrower than the bore**. The old body was as
+/// wide as the bore and its side faces coincided with the tube's OUTER wall
+/// where the wall curves in toward the crown, so a coloured stripe
+/// z-fought its way through the closed pipe along the top of every tile —
+/// the single most visible pipe bug in a rendered factory. Two voxels
+/// narrower on each side keeps every face of a full column strictly inside
+/// wall material except where the window has genuinely been cut away.
+const PIPE_FLUID_Y: (i32, i32) = (14, 17);
+/// The sight window on a straight tile and an end, in X: an in-line sight
+/// glass, short so most of the tile is closed tube (see `pipe_body`).
 const PIPE_WINDOW: (i32, i32) = (11, 20);
+/// The sight window on a corner, a tee and a cross: on the +X leg, between
+/// the hub and where a fitting may stand. Every junction shape has a +X
+/// leg, so the window is in the same place on all three.
+const PIPE_LEG_WINDOW: (i32, i32) = (20, 26);
+/// Fittings keep every voxel at tube height east of this X, so a fitting
+/// overlaid on a shape's +X leg never fills that leg's window
+/// ([`PIPE_LEG_WINDOW`] ends at 26). Hardware standing ABOVE the tube (the
+/// tank valve's hand wheel) may reach two voxels further west: a sight line
+/// out of a window rises one voxel per voxel of travel, and the wheel is
+/// too high to be in its way.
+const PIPE_FITTING_X0: i32 = 27;
+const PIPE_FITTING_TOP_X0: i32 = 25;
+/// How much larger in radius every fitting part is than the tube or flange
+/// it may be overlaid on — see `pipe_fitting_machine`'s doc.
+const PIPE_FITTING_MARGIN: f32 = 1.0;
+/// The cast body where two legs meet — one radius up from the tube, so a
+/// junction has the swelling a real elbow or tee casting has and the eye
+/// reads "fitting" before it reads which legs.
+const PIPE_HUB_R: f32 = PIPE_OUTER_R + 1.0;
 
-/// Draws the steel run itself into `m`, with its sight opening spanning
-/// `window` in X. Everything is carved *after* it is drawn: a face is only
-/// culled when its neighbour is genuinely absent, so a bore filled with an
-/// "air" colour would still mesh as a solid plug (see `VoxModel::erase`).
-///
-/// **This is a redesign** (the "Visual overhaul round 2" epic's ticket 2 —
-/// the project owner's review said "the pipes look kind of weird", and
-/// rendering the whole scene rather than the model alone showed exactly
-/// why). Three things were wrong, all of them only visible at scene scale:
-///
-/// 1. **Ring clutter.** Every tile carried a wide flange at *both* ends plus
-///    two brass collars mid-span, so a join between two tiles stacked four
-///    voxels of oversized ring and the run read as a row of bobbins rather
-///    than as one pipe. There is now one flange, at the tile's low-X end
-///    only, so a join shows exactly one — and the collars are thin, in the
-///    same steel as the run, and used for one job: framing the window.
-///    Brass is gone from the run entirely; it survives only on
-///    `pipe_source`'s hand wheel and `pipe_inlet`'s branch, where a single
-///    gold accent marks a *fitting a player operates or a machine draws
-///    from* rather than decorating every tile.
-/// 2. **The sight opening ate the silhouette.** Cutting the top wall away
-///    across 14 of 32 voxels left a half-open trough with two rails, which
-///    from the fixed isometric angle does not read as a tube at all. It is
-///    now a short framed window (`PIPE_WINDOW`) — an in-line sight glass,
-///    which is a real thing on a real food line — so most of each tile is
-///    closed pipe and the run has a continuous round back to read along.
-///    The window still starts just above the bore floor, which is the part
-///    of the previous design that was right and is kept: a level below half
-///    fill is exactly the state a player most needs to see.
-/// 3. **The trestle was heavier than the pipe.** Two dark four-voxel legs
-///    per tile out-massed the run they carried. One centred stand per tile
-///    now does it, with a base plate and a saddle, which also spaces the
-///    supports one tile apart like a real pipe rack.
-fn pipe_body(m: &mut VoxModel, p: &Palette, window: (i32, i32)) {
-    // Support stand: one per tile, centred, with a footplate and a saddle
-    // the run sits in. `steel`, NOT `steel_dark`: at scene scale the fixed
-    // isometric camera sees these posts edge-on and a dark metal facing away
-    // from the key light renders very nearly black, so the first version's
-    // dark stands were visually heavier than the pipe they carried — the
-    // stand read and the run did not.
+/// The support stand every one-tile shape stands on: one per tile, centred,
+/// footplate + post + saddle. `steel`, NOT `steel_dark`: at scene scale the
+/// fixed isometric camera sees these posts edge-on and a dark metal facing
+/// away from the key light renders very nearly black, so dark stands were
+/// visually heavier than the pipe they carried.
+fn pipe_stand(m: &mut VoxModel, p: &Palette) {
     m.cuboid((13, 18), (13, 18), (0, 0), p.idx("steel"));
     m.cuboid((14, 17), (15, 16), (1, 8), p.idx("steel"));
     m.cuboid((13, 18), (12, 19), (9, 10), p.idx("steel"));
-
-    // The run. Full tile length, so consecutive tiles butt into one line.
-    //
-    // `steel_light` — the BRIGHTEST metal in the palette, and the flange
-    // below is the darker one, which is the reverse of how a fitting is
-    // usually picked out. That inversion is deliberate and was arrived at
-    // by rendering the factory rather than the model: a pipe is a long thin
-    // horizontal object seen side-on, so almost all of it is curved wall
-    // facing away from the key light, and in `steel` it simply disappeared
-    // between the belt beside it and the floor under it. Making the *tube*
-    // the bright, continuous thing is what lets the eye follow the run from
-    // the tank to the mixer, which is the one job this asset has. (An
-    // earlier pass had already ruled out the darker `pipe_grey` here for a
-    // milder version of the same reason.)
-    m.cylinder_x((PIPE_AXIS_Y, PIPE_AXIS_Z), PIPE_OUTER_R, (0, TILE_VOXELS as i32 - 1), p.idx("steel_light"));
-    // One bolted flange, at the low-X end only — so a join between two
-    // tiles reads as a single fitting instead of two stacked ones, and so
-    // there is exactly ONE bright ring per tile. An earlier cut also put
-    // thin collars either side of the sight window; rendered in the factory
-    // that put three pale rings on every tile and the run went straight
-    // back to reading as a row of bobbins, which is the exact fault this
-    // redesign exists to remove. The window's own cut edges mark it well
-    // enough without them.
-    m.cylinder_x((PIPE_AXIS_Y, PIPE_AXIS_Z), PIPE_OUTER_R + 1.0, (0, 1), p.idx("steel"));
-
-    // Hollow it out, then cut the sight window through the top wall,
-    // leaving the side rails standing. The cut starts just above the bore
-    // FLOOR, not at the crown: cutting only the top half was the first
-    // version of this and it hid the liquid below roughly half fill, which
-    // is exactly the state a player most needs to read (a draining pipe
-    // means a stalling machine).
-    let top = m.size[2] as i32 - 1;
-    let window_floor = PIPE_BORE_Z0 + 1;
-    m.carve_cylinder_x((PIPE_AXIS_Y, PIPE_AXIS_Z), PIPE_BORE_R, (0, TILE_VOXELS as i32 - 1));
-    m.carve_cuboid(window, (PIPE_BORE_Y0, PIPE_BORE_Y1), (window_floor, top));
 }
 
-/// A plain length of pipe: one tile of the run.
+/// A leg of tube along +X from `x.0` to `x.1`, solid. The bore is carved
+/// afterwards by the shape, once, so legs and hub hollow out together.
+///
+/// `steel_light` — the BRIGHTEST metal in the palette. A pipe is a long thin
+/// horizontal object seen side-on, so almost all of it is curved wall
+/// facing away from the key light, and in `steel` it simply disappeared
+/// between the belt beside it and the floor under it. Making the *tube*
+/// the bright, continuous thing is what lets the eye follow the run.
+fn pipe_leg_x(m: &mut VoxModel, p: &Palette, x: (i32, i32)) {
+    m.cylinder_x_f((PIPE_C, PIPE_AXIS_Z as f32), PIPE_OUTER_R, x, p.idx("steel_light"));
+}
+
+/// The +Y twin of [`pipe_leg_x`].
+fn pipe_leg_y(m: &mut VoxModel, p: &Palette, y: (i32, i32)) {
+    m.cylinder_y_f((PIPE_C, PIPE_AXIS_Z as f32), PIPE_OUTER_R, y, p.idx("steel_light"));
+}
+
+/// Cuts the sight window through the top of a +X leg over `x`: the bore's
+/// full width, from just above the bore FLOOR to the crown, leaving the
+/// side rails standing. Starting at the floor rather than at the crown is
+/// deliberate: a level below half fill is exactly the state a player most
+/// needs to read (a draining pipe means a stalling machine).
+fn pipe_window_x(m: &mut VoxModel, x: (i32, i32)) {
+    let top = m.size[2] as i32 - 1;
+    m.carve_cuboid(x, PIPE_BORE_Y, (PIPE_BORE_Z0 + 1, top));
+}
+
+/// The bore of a +X leg, then whatever else the shape carves.
+fn pipe_bore_x(m: &mut VoxModel, x: (i32, i32)) {
+    m.carve_cylinder_x_f((PIPE_C, PIPE_AXIS_Z as f32), PIPE_BORE_R, x);
+}
+
+fn pipe_bore_y(m: &mut VoxModel, y: (i32, i32)) {
+    m.carve_cylinder_y_f((PIPE_C, PIPE_AXIS_Z as f32), PIPE_BORE_R, y);
+}
+
+/// One bolted flange at the low-X end only — so a join between two straight
+/// tiles reads as a single fitting instead of two stacked ones, and so there
+/// is exactly ONE ring per tile. An earlier cut put collars either side of
+/// the window as well; rendered in the factory that put three pale rings on
+/// every tile and the run read as a row of bobbins. Junction shapes carry
+/// no end flange at all: their hub is their identity, and a flange on a leg
+/// would stack against a neighbour's half the time.
+fn pipe_joint_flange(m: &mut VoxModel, p: &Palette) {
+    m.cylinder_x_f((PIPE_C, PIPE_AXIS_Z as f32), PIPE_OUTER_R + 1.0, (0, 1), p.idx("steel"));
+}
+
+/// A plain length of pipe: one tile of the run, open on both X faces.
+///
+/// The redesign history worth keeping (the "Visual overhaul round 2" epic's
+/// ticket 2, from a full-scene render): ring clutter fixed by one flange
+/// per tile; a full-length open trough replaced by a short framed window
+/// so the run has a continuous round back to read along; one centred stand
+/// instead of two heavy legs. This ticket moved the axis onto the tile
+/// midline (section header) and narrowed the fluid body (`PIPE_FLUID_Y`);
+/// the profile is rounder for it — a midline axis gives the tube a two-
+/// voxel flat at the equator instead of three nine-wide rows, which is the
+/// difference between a pipe and a square beam at scene scale.
 pub fn pipe(p: &Palette) -> VoxModel {
     let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 24]);
-    pipe_body(&mut m, p, PIPE_WINDOW);
+    let last = TILE_VOXELS as i32 - 1;
+    pipe_stand(&mut m, p);
+    pipe_leg_x(&mut m, p, (0, last));
+    pipe_joint_flange(&mut m, p);
+    pipe_bore_x(&mut m, (0, last));
+    pipe_window_x(&mut m, PIPE_WINDOW);
     m
 }
 
-/// The run's **supply end** — `PipeSegment::is_source` in the simulation,
-/// which since the "Visual overhaul round 2" epic's ticket 1 means only
-/// "the tile the fluid tank discharges into", not "an off-map tap that is
-/// always full".
+/// A run's END: open on -X only, the +X face closed by a blind flange.
 ///
-/// So this asset is a *connection*, not a vessel. It used to carry a
-/// stainless header vessel of its own, which made sense when the supply
-/// genuinely came from nowhere — but the vessel is now a real building
-/// standing on the neighbouring tile (`fluid_tank`), and drawing a second
-/// one here would say there are two. What marks this tile instead is the
-/// hardware a real supply connection has and the rest of the run doesn't: a
-/// heavy inlet flange on the **-X** face (the side the tank stands on —
-/// `World::with_machines` places the tank one tile west of `segments[0]`)
-/// and an isolation valve with a hand wheel standing above the run.
+/// A plain `pipe` bores every tile through, so the last tile of a run used
+/// to be an open, unterminated tube mouth with the floor visible through it
+/// — camera-facing, and one of the most obviously wrong things in the
+/// factory once a close-up was rendered. The old fix (a cap welded to the
+/// machine-branch tile) capped the wrong end whenever the run's end was not
+/// that tile. This shape is the cap alone; `main.gd` puts it on any tile
+/// with exactly one connection.
 ///
-/// That keeps UI_UX.md §7's "never encode state in colour alone" satisfied
-/// by silhouette, which is what the previous vessel was doing too — this
-/// version just stops duplicating a building that now exists.
-pub fn pipe_source(p: &Palette) -> VoxModel {
-    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 32]);
-    // Window shifted downstream so the valve doesn't stand over it.
-    pipe_body(&mut m, p, (22, 29));
-
-    // Heavy inlet flange facing the tank, wider than a plain tile join so
-    // the supply end is identifiable from any of the four snap angles — and,
-    // since the "Visual overhaul round 2" epic's ticket 3, in the palette's
-    // brightest metal: this is one half of the tank-to-run joint (the tank's
-    // discharge spout is the other), and the pair was previously dark grey
-    // hardware on a dark grey shell in the one place a player needs to see
-    // that the tank is actually plumbed into the line.
-    m.cylinder_x((PIPE_AXIS_Y, PIPE_AXIS_Z), PIPE_OUTER_R + 2.0, (0, 2), p.idx("steel_light"));
-    m.cylinder_x((PIPE_AXIS_Y, PIPE_AXIS_Z), PIPE_OUTER_R + 1.2, (3, 4), p.idx("brass"));
-    // Re-open the bore those two rings just plugged. `pipe_body` carves the
-    // bore before returning, so anything drawn afterwards fills it back in —
-    // and this end is the one the tank actually discharges THROUGH, so a
-    // solid plug here is both wrong and something the liquid body (which
-    // spans the whole tile) would poke out of. Found by the junction tests
-    // at the bottom of this file, not by eye.
-    m.carve_cylinder_x((PIPE_AXIS_Y, PIPE_AXIS_Z), PIPE_BORE_R, (0, 4));
-
-    // Isolation valve: a bonnet straddling the run, a stem, and a brass
-    // hand wheel — the one thing on this tile a player would reach for, and
-    // the only place brass survives on the run's own hardware (see
-    // `pipe_body`'s doc). Moved to mid-tile in ticket 3: it used to stand at
-    // x = 7..12, i.e. directly over the tank joint, so the one fitting that
-    // says "the tank feeds this run" was photographed behind a valve body.
-    m.cuboid((13, 18), (12, 19), (PIPE_AXIS_Z, 22), p.idx("steel_dark"));
-    m.cuboid((14, 17), (13, 18), (23, 24), p.idx("steel_light"));
-    m.cuboid((15, 16), (15, 16), (25, 27), p.idx("steel_dark"));
-    m.cylinder_z((15, 16), 4.0, (28, 28), p.idx("brass"));
-    m.carve_cylinder_z((15, 16), 2.0, (28, 28));
-    m
-}
-
-/// The one pipe segment that actually feeds a machine — `FluidNetwork`'s
-/// `inlet_index` (see `world.rs`), always the run's machine-adjacent end.
+/// **No joint flange on the open end** (ticket 6). A straight keeps its
+/// one flange on the same side of every tile along an axis (west on an
+/// east-west run), which is what stops two neighbours stacking flanges on
+/// a shared boundary. An end has only one possible turn — its open face
+/// is dictated — so an end open to the EAST would carry its low-X flange
+/// on the very boundary the straight east of it carries its own, and the
+/// two would stack. The cap is this shape's identity; the joint is left to
+/// the neighbour.
 ///
-/// **The connection this fixes**, found during the visual-overhaul pass: a
-/// plain `pipe` tile's solid header sits mid-tile (its bore is centred on
-/// `PIPE_AXIS_Y`, several voxels in from either edge — see `pipe_body`), so
-/// the run's last segment and the machine tile beside it left a real gap of
-/// open floor between the header's own surface and the machine's inlet
-/// nozzle, even though the two tiles are adjacent. This is the fitting that
-/// closes it: a branch T-off the header, reaching out to this tile's own
-/// edge at the SAME axis height (`PIPE_AXIS_Z`) the machine's inlet nozzle
-/// targets (see `machine_mixer`'s vinegar inlet) — no elbow needed, since
-/// both tiles sit on the floor and the header's axis height already matches
-/// the nozzle height once the two are deliberately kept in sync.
-///
-/// Which tile edge: **high local Y** (`last`), not low. `main.gd` places
-/// tiles at `(sim_x, sim_y) -> world (sim_x, sim_y) * TILE`, and the vox
-/// importer maps a model's low-Y face to the *higher*-world-Z-facing side of
-/// the tile (see `machine_mixer`'s own doc for the derivation, applied there
-/// to reach its north neighbour). The inlet pipe segment's machine neighbour
-/// sits at the *lower* sim-y (south of it — `world.rs` puts the pipe run
-/// north of the machine it feeds), so it's this tile's *high*-Y face that
-/// borders the machine, the mirror image of the mixer's own -Y-facing stub.
-pub fn pipe_inlet(p: &Palette) -> VoxModel {
+/// **The cap's face is bright steel with brass BOLTS, not a brass disc.**
+/// The old cap put a brass disc in the middle of the plate, and the render
+/// showed a black hole: the +X face is camera-facing but on the shadow side
+/// of the key light, and brass there reads as near-black — a cap that
+/// looked exactly like the open mouth it existed to close. Small brass
+/// bolt heads on a pale plate keep the "fitting" accent without giving the
+/// eye a dark circle to read as a bore.
+pub fn pipe_end(p: &Palette) -> VoxModel {
     let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 24]);
-    pipe_body(&mut m, p, PIPE_WINDOW);
-
     let last = TILE_VOXELS as i32 - 1;
-    // Branch stub + flange, reaching from inside the header's own bore
-    // (well past its outer surface, so the two solids genuinely overlap
-    // rather than merely touching) out to the tile edge the machine sits
-    // against.
-    //
-    // **Sized and coloured to match `machine_mixer`'s stub exactly** (the
-    // "Visual overhaul round 2" epic's ticket 3). The first version was a
-    // 2.2-radius `pipe_grey` stub meeting a 2.2-radius `pipe_grey` stub, and
-    // rendering the junction showed the pair as an indistinct dark lump
-    // between a bright pipe and a blue machine skirt rather than as one
-    // spool piece crossing a tile boundary. Bright steel with a brass flange
-    // right on the boundary is what makes the two halves read as one
-    // fitting; the flange sits at the boundary on BOTH sides, so the joint
-    // shows a single brass collar rather than two rings a voxel apart.
-    m.cylinder_y((16, PIPE_AXIS_Z), 3.0, (16, last), p.idx("steel_light"));
-    m.cylinder_y((16, PIPE_AXIS_Z), 4.0, (last - 1, last), p.idx("brass"));
-
-    // **A blind flange closing the run's downstream end.** The run used to
-    // simply stop: `pipe_body` bores every tile through from x = 0 to x = 31,
-    // so the last segment's +X face was an open, unterminated tube mouth —
-    // camera-facing, and one of the most obviously wrong things in the whole
-    // factory once a close-up was actually rendered. A pipe run ends in a
-    // blank flange, so this one does.
-    // Bright plate with a brass ring on it, NOT plain `steel`: the end face
-    // is a vertical surface the camera looks straight at and the key light
-    // does not reach, so the first cut rendered as an unreadable black stump
-    // capping the run — the same lesson `pipe_body` records about the tube
-    // itself.
-    m.cylinder_x((PIPE_AXIS_Y, PIPE_AXIS_Z), PIPE_OUTER_R + 1.0, (last - 1, last), p.idx("steel_light"));
-    m.cylinder_x((PIPE_AXIS_Y, PIPE_AXIS_Z), PIPE_BORE_R + 0.5, (last, last), p.idx("brass"));
+    pipe_stand(&mut m, p);
+    pipe_leg_x(&mut m, p, (0, last));
+    pipe_bore_x(&mut m, (0, last - 2));
+    pipe_window_x(&mut m, PIPE_WINDOW);
+    // Blind flange over the still-solid last two voxels of tube.
+    m.cylinder_x_f((PIPE_C, PIPE_AXIS_Z as f32), PIPE_OUTER_R + 1.0, (last - 1, last), p.idx("steel_light"));
+    for (y, z) in [(15, PIPE_AXIS_Z + 4), (16, PIPE_AXIS_Z + 4), (15, PIPE_AXIS_Z - 4), (16, PIPE_AXIS_Z - 4), (11, PIPE_AXIS_Z), (20, PIPE_AXIS_Z)] {
+        m.set(last, y, z, p.idx("brass"));
+    }
     m
 }
 
-/// The fluid itself — one tile of liquid sitting in the bore.
-///
-/// Deliberately **one voxel tall**: `main.gd` scales this node vertically to
-/// the segment's live fill fraction, and a one-voxel slab scaled to N voxels
-/// is geometrically the same box as an N-voxel column, with none of the
-/// pivot arithmetic a taller model would need (the encoder puts a model's
-/// origin at its footprint centre *at ground level*, so a slab's base is
-/// exactly its node origin — see `vox::encode`). Near-white on purpose: the
-/// per-fluid colour is live simulation data, applied in Godot as an albedo
-/// tint over these vertices, so this one model serves every fluid
-/// `data/recipes.ron` ever names.
-pub fn pipe_fluid(p: &Palette) -> VoxModel {
-    // `main.gd` mirrors PIPE_BORE_Z0/PIPE_BORE_HEIGHT to place and scale
-    // this slab, so the one thing worth asserting here is that a full
-    // column still fits inside the run's wall rather than poking out of it.
-    debug_assert!(
-        PIPE_BORE_Z0 + PIPE_BORE_HEIGHT <= PIPE_AXIS_Z + PIPE_OUTER_R as i32,
-        "a full fluid column would rise above the pipe wall"
-    );
-    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 1]);
+/// The junction shapes' shared centre: the cast hub, hollowed with the
+/// legs. Each shape draws its legs solid first, calls this, then carves its
+/// leg bores — the hub's cavity joins them.
+fn pipe_hub(m: &mut VoxModel, p: &Palette) {
+    m.sphere_f((PIPE_C, PIPE_C, PIPE_AXIS_Z as f32), PIPE_HUB_R, p.idx("steel_light"));
+}
+
+fn pipe_hub_bore(m: &mut VoxModel) {
+    m.carve_sphere_f((PIPE_C, PIPE_C, PIPE_AXIS_Z as f32), PIPE_BORE_R);
+}
+
+/// An elbow: open on +X (east) and y = 0 (north). See the section header
+/// for the face convention, and why both openings are on camera-visible
+/// faces. The window sits on the +X leg ([`PIPE_LEG_WINDOW`]); its top is
+/// visible from above at every rotation, and a sight line leaving it on
+/// the camera's diagonal clears the hub even when this leg points away.
+pub fn pipe_corner(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 24]);
     let last = TILE_VOXELS as i32 - 1;
-    m.cuboid((0, last), (PIPE_BORE_Y0, PIPE_BORE_Y1), (0, 0), p.idx("fluid_pale"));
+    pipe_stand(&mut m, p);
+    pipe_leg_x(&mut m, p, (13, last));
+    pipe_leg_y(&mut m, p, (0, 18));
+    pipe_hub(&mut m, p);
+    pipe_bore_x(&mut m, (13, last));
+    pipe_bore_y(&mut m, (0, 18));
+    pipe_hub_bore(&mut m);
+    pipe_window_x(&mut m, PIPE_LEG_WINDOW);
+    m
+}
+
+/// A tee: open on +X, -X and y = 0 (north) — a straight run with a branch
+/// toward the camera.
+pub fn pipe_tee(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 24]);
+    let last = TILE_VOXELS as i32 - 1;
+    pipe_stand(&mut m, p);
+    pipe_leg_x(&mut m, p, (0, last));
+    pipe_leg_y(&mut m, p, (0, 18));
+    pipe_hub(&mut m, p);
+    pipe_bore_x(&mut m, (0, last));
+    pipe_bore_y(&mut m, (0, 18));
+    pipe_hub_bore(&mut m);
+    pipe_window_x(&mut m, PIPE_LEG_WINDOW);
+    m
+}
+
+/// A cross: open on all four faces.
+pub fn pipe_cross(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 24]);
+    let last = TILE_VOXELS as i32 - 1;
+    pipe_stand(&mut m, p);
+    pipe_leg_x(&mut m, p, (0, last));
+    pipe_leg_y(&mut m, p, (0, last));
+    pipe_hub(&mut m, p);
+    pipe_bore_x(&mut m, (0, last));
+    pipe_bore_y(&mut m, (0, last));
+    pipe_hub_bore(&mut m);
+    pipe_window_x(&mut m, PIPE_LEG_WINDOW);
+    m
+}
+
+// --- Fittings --------------------------------------------------------------
+//
+// A fitting is the pipe's half of a joint with something that is not a
+// pipe. Both are authored on the +X face, occupy only the last few voxels
+// of a leg (`PIPE_FITTING_X0`), and are hollow at the bore so the liquid
+// runs to the tile boundary. Godot overlays one as its own node, turned to
+// the connected face — never merged into the shape — so a straight, a
+// corner and a tee all take the same fitting on any open leg.
+//
+// Their bore is carved a little wider than the shape's (`+ 0.4`) on
+// purpose: an overlay's inner faces then sit *inside* the shape's wall
+// material rather than coinciding with its bore surface, so the two meshes
+// never z-fight where the bore is visible.
+
+/// The joint with a machine's `machine_fluid_port`: a bright collar and a
+/// heavy brass flange right on the tile boundary. The machine's own nozzle
+/// carries a brass flange at radius 4 on its side of the boundary; a plain
+/// tube end (radius 4.5) butting that showed its own flat cut face around
+/// the smaller ring, which is the "fittings meet machines badly" of the
+/// ticket. A flange one radius larger than the tube, in the same brass,
+/// swallows the machine's ring and the joint reads as one bolted spool.
+///
+/// **Every part of a fitting is at least one voxel of radius larger than
+/// whatever it can be overlaid on** (`PIPE_FITTING_MARGIN`, ticket 6). A
+/// fitting lands on a straight's LOW-X face too — the first tile of the
+/// run leaving a machine — where it covers the straight's own joint
+/// flange (radius `PIPE_OUTER_R + 1`). Two voxel solids z-fight wherever a
+/// voxel of the inner one is a boundary voxel of both, and a full voxel of
+/// radius margin is what guarantees every axis-neighbour of an inner voxel
+/// is inside the outer one, so no face is ever shared. The collar clears
+/// the tube by that margin and the flange clears the joint flange by it.
+pub fn pipe_fitting_machine(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 24]);
+    let last = TILE_VOXELS as i32 - 1;
+    let axis = (PIPE_C, PIPE_AXIS_Z as f32);
+    m.cylinder_x_f(axis, PIPE_OUTER_R + PIPE_FITTING_MARGIN, (PIPE_FITTING_X0, last - 2), p.idx("steel_light"));
+    m.cylinder_x_f(axis, PIPE_OUTER_R + 1.0 + PIPE_FITTING_MARGIN, (last - 1, last), p.idx("brass"));
+    m.carve_cylinder_x_f(axis, PIPE_BORE_R + 0.4, (PIPE_FITTING_X0, last));
+    m
+}
+
+/// The joint with a `fluid_tank`'s discharge spout: the heaviest flange on
+/// the line, with an isolation valve and a brass hand wheel standing on it.
+///
+/// The valve is what marks a tank connection at a glance (UI_UX.md §7 —
+/// silhouette, not colour), and it stands ON the flange rather than
+/// mid-tile because a fitting must fit on a junction shape's short leg too.
+/// The old one-piece supply tile moved its valve to mid-tile so it would
+/// not stand between the camera and the joint; here the valve IS the joint
+/// hardware
+/// — a flanged valve bolted to a tank outlet is how a real tank is plumbed
+/// — and the flange's camera-facing side and the spout stay in view below
+/// the bonnet. The bonnet is kept narrow in Y (`13..18`) so a sight line
+/// leaving a leg window on the camera's diagonal passes it.
+pub fn pipe_fitting_tank(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 32]);
+    let last = TILE_VOXELS as i32 - 1;
+    let axis = (PIPE_C, PIPE_AXIS_Z as f32);
+    // Radii: the brass band clears the tube by the margin; the flange
+    // clears a straight's joint flange (`PIPE_OUTER_R + 1`) by it too, for
+    // the reason `pipe_fitting_machine` gives.
+    m.cylinder_x_f(axis, PIPE_OUTER_R + 0.2 + PIPE_FITTING_MARGIN, (PIPE_FITTING_X0, PIPE_FITTING_X0 + 1), p.idx("brass"));
+    m.cylinder_x_f(axis, PIPE_OUTER_R + 1.0 + PIPE_FITTING_MARGIN, (PIPE_FITTING_X0 + 2, last), p.idx("steel_light"));
+    m.carve_cylinder_x_f(axis, PIPE_BORE_R + 0.4, (PIPE_FITTING_X0, last));
+    // Valve: bonnet on the flange, cap, stem, hand wheel. The bonnet is
+    // `steel`, not `steel_dark`: it stands in the tank's own shadow, and
+    // the first render showed a dark bonnet as a black block against the
+    // tank's dark base (the same lesson as the pipe stands).
+    m.cuboid((PIPE_FITTING_X0, last), (13, 18), (PIPE_AXIS_Z + 1, PIPE_AXIS_Z + 8), p.idx("steel"));
+    m.cuboid((PIPE_FITTING_X0 + 1, last - 1), (14, 17), (PIPE_AXIS_Z + 9, PIPE_AXIS_Z + 10), p.idx("steel_light"));
+    m.cuboid((29, 29), (15, 16), (PIPE_AXIS_Z + 11, PIPE_AXIS_Z + 12), p.idx("steel_dark"));
+    m.cylinder_z_f((28.5, PIPE_C), 3.5, (PIPE_AXIS_Z + 13, PIPE_AXIS_Z + 13), p.idx("brass"));
+    m.carve_cylinder_z_f((28.5, PIPE_C), 1.6, (PIPE_AXIS_Z + 13, PIPE_AXIS_Z + 13));
+    m.cuboid((28, 29), (15, 16), (PIPE_AXIS_Z + 13, PIPE_AXIS_Z + 13), p.idx("brass"));
+    m
+}
+
+// --- Fluid bodies ----------------------------------------------------------
+//
+// One per shape, each **one voxel tall**: `main.gd` scales the node
+// vertically to the segment's live fill fraction, and a one-voxel slab
+// scaled to N voxels is geometrically the same box as an N-voxel column,
+// with none of the pivot arithmetic a taller model would need (the encoder
+// puts a model's origin at its footprint centre at ground level). Near-
+// white on purpose: the per-fluid colour is live simulation data, applied
+// in Godot as an albedo tint, so one body per shape serves every fluid
+// `data/recipes.ron` ever names. Each fills its shape's bore footprint out
+// to every OPEN face and stops short of a cap, so Godot never trims one.
+
+const _: () = assert!(
+    PIPE_BORE_Z0 + PIPE_BORE_HEIGHT <= PIPE_AXIS_Z + PIPE_OUTER_R as i32,
+    "a full fluid column would rise above the pipe wall"
+);
+
+fn pipe_fluid_slab() -> VoxModel {
+    VoxModel::new([TILE_VOXELS, TILE_VOXELS, 1])
+}
+
+/// A +X leg of liquid over `x`.
+fn pipe_fluid_x(m: &mut VoxModel, p: &Palette, x: (i32, i32)) {
+    m.cuboid(x, PIPE_FLUID_Y, (0, 0), p.idx("fluid_pale"));
+}
+
+fn pipe_fluid_y(m: &mut VoxModel, p: &Palette, y: (i32, i32)) {
+    m.cuboid(PIPE_FLUID_Y, y, (0, 0), p.idx("fluid_pale"));
+}
+
+/// The liquid in a straight [`pipe`].
+pub fn pipe_fluid(p: &Palette) -> VoxModel {
+    let mut m = pipe_fluid_slab();
+    pipe_fluid_x(&mut m, p, (0, TILE_VOXELS as i32 - 1));
+    m
+}
+
+/// The liquid in a [`pipe_corner`].
+pub fn pipe_fluid_corner(p: &Palette) -> VoxModel {
+    let mut m = pipe_fluid_slab();
+    pipe_fluid_x(&mut m, p, (PIPE_FLUID_Y.0, TILE_VOXELS as i32 - 1));
+    pipe_fluid_y(&mut m, p, (0, PIPE_FLUID_Y.1));
+    m
+}
+
+/// The liquid in a [`pipe_tee`].
+pub fn pipe_fluid_tee(p: &Palette) -> VoxModel {
+    let mut m = pipe_fluid_slab();
+    pipe_fluid_x(&mut m, p, (0, TILE_VOXELS as i32 - 1));
+    pipe_fluid_y(&mut m, p, (0, PIPE_FLUID_Y.1));
+    m
+}
+
+/// The liquid in a [`pipe_cross`].
+pub fn pipe_fluid_cross(p: &Palette) -> VoxModel {
+    let mut m = pipe_fluid_slab();
+    pipe_fluid_x(&mut m, p, (0, TILE_VOXELS as i32 - 1));
+    pipe_fluid_y(&mut m, p, (0, TILE_VOXELS as i32 - 1));
+    m
+}
+
+/// The liquid in a [`pipe_end`]: stops where the blind flange starts.
+pub fn pipe_fluid_end(p: &Palette) -> VoxModel {
+    let mut m = pipe_fluid_slab();
+    pipe_fluid_x(&mut m, p, (0, TILE_VOXELS as i32 - 3));
     m
 }
 
@@ -1139,11 +1559,11 @@ fn control_panel(m: &mut VoxModel, p: &Palette, x: (i32, i32), z: (i32, i32), fa
 // of equipment built to swallow it*, with the path visible, which is what the
 // complaint was actually about.
 //
-// The belt's own half of each junction is `belt_inlet`/`belt_outlet` (see the
-// conveyor section above): the last belt tile before a machine and the first
-// one after it are genuinely different pieces of kit from a middle tile, and
-// now look it. `main.gd` picks them from the layout the simulation reports,
-// never from a hardcoded "the front is -X".
+// The belt's own half of each junction is the plain tile (see the conveyor
+// section above — the `belt_inlet`/`belt_outlet` dressings were retired by
+// the pipes & conveyors overhaul), so everything that makes a junction read
+// as a junction is on the machine's side of the boundary, built against
+// `BELT_LANE` and `BELT_SURFACE_Z` below.
 
 /// The belt's running lane in voxels, mirrored from [`belt`] — the Y span its
 /// rubber surface occupies. Every junction piece on both sides of a tile
@@ -1261,8 +1681,8 @@ fn machine_outfeed(m: &mut VoxModel, p: &Palette, lane: (i32, i32), last: i32) {
     // Discharge lip, level with the belt beside it and running out to the
     // tile edge so there is nothing between the two.
     m.cuboid((last - 3, last), (l0, l1), (floor, floor), p.idx("steel_light"));
-    // A brass band across the head of the opening — the same accent
-    // `pipe_source`'s hand wheel and `pipe_inlet`'s branch flange carry, and
+    // A brass band across the head of the opening — the same accent the
+    // pipe fittings' flanges and the tank valve's hand wheel carry, and
     // for the same reason: it marks a fitting product actually passes
     // through. A hazard stripe was tried here first and rendered as a dark
     // bar, because half a stripe is black and this edge is the only part of
@@ -1284,13 +1704,15 @@ fn machine_outfeed(m: &mut VoxModel, p: &Palette, lane: (i32, i32), last: i32) {
 /// opening would now be a mouth with no conveyor in front of it.
 ///
 /// **It is deliberately the same fitting on both sides, and the same one
-/// `pipe_inlet`'s branch already carries**: bright steel at radius 3 with a
-/// brass flange sitting exactly on the tile boundary. That pairing is what
-/// the "Visual overhaul round 2" epic's ticket 3 found actually reads as one
-/// spool piece crossing a tile boundary rather than as two stubs a voxel
-/// apart — see `pipe_inlet`'s doc for the full argument. A plain `pipe`
-/// tile's bore is already open at both of its X faces at exactly
-/// `PIPE_AXIS_Z`, so nothing is needed on the pipe's side of these
+/// `pipe_fitting_machine` answers it with**: bright steel at radius 3 with
+/// a brass flange sitting exactly on the tile boundary. That pairing is
+/// what the "Visual overhaul round 2" epic's ticket 3 found actually reads
+/// as one spool piece crossing a tile boundary rather than as two stubs a
+/// voxel apart. The pipe's half of the joint is `pipe_fitting_machine`,
+/// which Godot overlays on whichever face of the tapping tile touches the
+/// machine (`links` says which); a plain `pipe` tile's bore is open at
+/// both of its X faces at exactly `PIPE_AXIS_Z`, so nothing more is needed
+/// on the pipe's side of these
 /// junctions: the machine's nozzle meets an open bore.
 ///
 /// `lane_y` is the nozzle's centre in this model's own Y coordinates — for a
@@ -1311,7 +1733,7 @@ enum Face {
 fn machine_fluid_port(m: &mut VoxModel, p: &Palette, lane_y: i32, face: Face, last_x: i32) {
     // How far the nozzle reaches back INTO the machine: far enough to
     // genuinely overlap whatever shell it comes out of rather than merely
-    // touching it, which is the same rule `pipe_inlet`'s branch follows.
+    // touching it, which is the same rule the pipe fittings follow.
     const REACH: i32 = 10;
     let (span, flange) = match face {
         Face::LowX => ((0, REACH), (0, 1)),
@@ -1549,7 +1971,7 @@ pub fn machine_mixer(p: &Palette) -> VoxModel {
 
     // Vinegar inlet: the stub reaching north off the sim-y = 1 half, toward
     // the pipe run the reference chain lays one row north of the footprint.
-    // Height is PIPE_AXIS_Z exactly, matching `pipe_inlet`'s branch — the
+    // Height is PIPE_AXIS_Z exactly, matching `pipe_fitting_machine` — the
     // two are one spool piece split across a tile boundary, and the pair
     // only reads as a connection because they are the same diameter, the
     // same bright steel and carry their brass flange at the same boundary.
@@ -1899,13 +2321,13 @@ pub fn fluid_tank(p: &Palette) -> VoxModel {
     }
 
     // Discharge on +X at the pipe run's own axis height (see this
-    // function's doc), reaching the tile edge so it meets `pipe_source`'s
-    // inlet flange rather than stopping short of it.
+    // function's doc), reaching the tile edge so it meets
+    // `pipe_fitting_tank`'s flange rather than stopping short of it.
     // Bright, and thick enough to see: ticket 3 found this spout rendering
     // as dark grey on the tank's own dark shell, so the one piece of
     // hardware that says "this vessel feeds the run" was invisible at scene
-    // scale. It now matches `pipe_source`'s inlet flange in both metal and
-    // diameter, and the two brass collars meet on the tile boundary.
+    // scale. It now matches `pipe_fitting_tank`'s brass band in metal, and
+    // the two meet on the tile boundary.
     m.cylinder_x((c, PIPE_AXIS_Z), 3.0, (20, last), p.idx("steel_light"));
     m.cylinder_x((c, PIPE_AXIS_Z), 4.2, (last - 1, last), p.idx("brass"));
     // Gusset under the spout, so it lands on the vessel rather than floating.
@@ -2566,7 +2988,7 @@ mod tests {
                 );
                 // The brass flange sits ON the boundary, which is what makes
                 // the machine's half and the pipe's half read as one fitting
-                // rather than as two stubs a voxel apart (`pipe_inlet`).
+                // rather than as two stubs a voxel apart (`pipe_fitting_machine`).
                 assert!(
                     j.model.filled(face_x, mid, PIPE_AXIS_Z + 4),
                     "{}: the nozzle at x = {face_x} has no flange on the tile boundary",
@@ -2629,43 +3051,274 @@ mod tests {
         }
     }
 
-    /// The junction-adjacent belt tiles must differ from a plain one, and
-    /// differ at the END that faces the machine — `main.gd` picks between
-    /// them per tile, so two identical models would make that choice a lie.
-    #[test]
-    fn belt_variants_differ_from_a_plain_tile_at_the_end_that_meets_a_machine() {
-        let p = palette();
-        let (plain, inlet, outlet) = (belt(&p), belt_inlet(&p), belt_outlet(&p));
-        let last = TILE_VOXELS as i32 - 1;
-        let mid = (BELT_LANE.0 + BELT_LANE.1) / 2;
+    // ----- the belt family (the "Pipes & Conveyors Overhaul" plan's ticket 2)
 
-        assert!(inlet.voxels.len() > plain.voxels.len(), "belt_inlet adds nothing");
-        assert!(outlet.voxels.len() > plain.voxels.len(), "belt_outlet adds nothing");
-        // The hand-over plate reaches the shared tile edge on the machine side.
-        assert!(inlet.filled(last, mid, BELT_SURFACE_Z), "belt_inlet's dead-plate stops short");
-        assert!(outlet.filled(0, mid, BELT_SURFACE_Z), "belt_outlet's receiving plate stops short");
-        // ... and neither dresses the end it does NOT meet a machine at.
-        assert!(!inlet.filled(0, BELT_LANE.0 - 1, BELT_SURFACE_Z + 1), "belt_inlet dressed its upstream end");
-        assert!(!outlet.filled(last, BELT_LANE.0 - 1, BELT_SURFACE_Z + 1), "belt_outlet dressed its downstream end");
+    fn belt_shapes() -> [(&'static str, BeltShape); 3] {
+        [
+            ("belt", BeltShape::Straight),
+            ("belt_corner_left", BeltShape::Corner(Turn::Left)),
+            ("belt_corner_right", BeltShape::Corner(Turn::Right)),
+        ]
     }
 
-    /// The delivery dock's own face, which the belt-junction rules above
-    /// deliberately skip (a dock has no outfeed — product leaves the world
-    /// there). Four things have to hold, and none of them are visible in a
-    /// screenshot at scene scale:
-    ///
-    ///  * the model really is 2x2 tiles wide (`data/machines.ron`'s
-    ///    footprint and this model's size are coupled — UI_UX.md §2b — so a
-    ///    footprint change with no model change would ship a dock covering a
-    ///    quarter of its own tiles);
-    ///  * the deck is solid right out to the +X footprint edge, so the
-    ///    platform reads as a platform rather than as a machine with a lip;
-    ///  * it is level with the belt that feeds it, so a case arriving does
-    ///    not step up or down at the tile boundary;
-    ///  * **both** despatch openings in the far wall are genuinely EMPTY
-    ///    holes with a back wall behind them — a dark rectangle painted on
-    ///    the wall would mesh flat and render as a sticker, which is the
-    ///    same distinction the junction tests above exist for.
+    /// Surface coordinates for any shape's cell, undoing the right corner's
+    /// mirror so both corners are judged in the left corner's frame.
+    fn surface_cell(shape: BeltShape, x: i32, y: i32) -> Option<SurfaceCell> {
+        let last = TILE_VOXELS as i32 - 1;
+        match shape {
+            BeltShape::Straight => straight_surface_cell(x, y),
+            BeltShape::Corner(Turn::Left) => corner_surface_cell(x, y),
+            BeltShape::Corner(Turn::Right) => corner_surface_cell(x, last - y),
+        }
+    }
+
+    /// The arrow's cells in a frame: everything standing at `BELT_ARROW_Z`.
+    fn arrow_cells(m: &VoxModel) -> std::collections::BTreeSet<(i32, i32)> {
+        m.voxels
+            .keys()
+            .filter(|&&(_, _, z)| z as i32 == BELT_ARROW_Z)
+            .map(|&(x, y, _)| (x as i32, y as i32))
+            .collect()
+    }
+
+    #[test]
+    fn every_belt_frame_carries_an_arrow_on_its_surface_pointing_along_the_path() {
+        let p = palette();
+        let yellow = p.idx("hazard_yellow");
+        for (name, shape) in belt_shapes() {
+            for phase in 0..BELT_FRAMES {
+                let m = belt_shape(&p, shape, phase);
+                let cells = arrow_cells(&m);
+                assert!(cells.len() >= 60, "{name} f{phase}: arrow has only {} cells", cells.len());
+                let (mut apex_cells, mut base_cells) = (0, 0);
+                for &(x, y) in &cells {
+                    assert_eq!(
+                        m.voxels.get(&(x as u32, y as u32, BELT_ARROW_Z as u32)),
+                        Some(&yellow),
+                        "{name} f{phase}: arrow cell {x},{y} is not the signage colour"
+                    );
+                    assert!(
+                        m.filled(x, y, BELT_SURFACE_Z),
+                        "{name} f{phase}: arrow cell {x},{y} floats — nothing under it at the running height"
+                    );
+                    let cell = surface_cell(shape, x, y)
+                        .unwrap_or_else(|| panic!("{name} f{phase}: arrow cell {x},{y} is off the lane"));
+                    // Pointing along the path means: no cell is ahead of the
+                    // apex, and the head only widens as it trails behind it.
+                    let trail = arrow_trail_u(&cell, phase);
+                    assert!(trail >= 0.0, "{name} f{phase}: arrow cell {x},{y} is ahead of the apex — it points backwards");
+                    assert!(
+                        trail < ARROW_HEAD_LEN + ARROW_SHAFT_LEN,
+                        "{name} f{phase}: arrow cell {x},{y} trails further than the arrow is long"
+                    );
+                    if trail < ARROW_HEAD_LEN {
+                        assert!(
+                            cell.v.abs() <= trail / ARROW_HEAD_LEN * ARROW_HEAD_HALF_WIDTH + 1e-3,
+                            "{name} f{phase}: arrow cell {x},{y} is wider than the wedge allows this close to the apex"
+                        );
+                    } else {
+                        assert!(cell.v.abs() < ARROW_SHAFT_HALF_WIDTH + 1e-3, "{name} f{phase}: shaft cell {x},{y} is off the shaft");
+                    }
+                    if trail <= 2.0 {
+                        apex_cells += 1;
+                    }
+                    if cell.v.abs() >= ARROW_HEAD_HALF_WIDTH - 1.5 {
+                        base_cells += 1;
+                    }
+                }
+                assert!(apex_cells >= 1, "{name} f{phase}: the arrow has no apex on the centre line");
+                assert!(base_cells >= 2, "{name} f{phase}: the wedge never reaches its full width — it is not a wedge");
+                // Nothing but the arrow stands above the running surface
+                // anywhere on the lane.
+                for &(x, y, z) in m.voxels.keys() {
+                    let (x, y, z) = (x as i32, y as i32, z as i32);
+                    if surface_cell(shape, x, y).is_some() {
+                        assert!(z <= BELT_ARROW_Z, "{name} f{phase}: something stands in the lane at {x},{y},{z}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_four_frames_of_a_straight_belt_differ_only_by_the_phase_shift() {
+        let p = palette();
+        let frames: Vec<VoxModel> = (0..BELT_FRAMES).map(|k| belt_shape(&p, BeltShape::Straight, k)).collect();
+        let tile = TILE_VOXELS as i32;
+        let (l0, l1) = BELT_LANE;
+        let on_lane = |x: i32, y: i32, z: i32| (l0..=l1).contains(&y) && z >= BELT_SURFACE_Z - 1 && x < tile;
+        for (k, frame) in frames.iter().enumerate() {
+            let shift = k as i32 * BELT_FRAME_SHIFT;
+            for x in 0..tile {
+                for y in 0..tile {
+                    for z in 0..16 {
+                        let expected = if on_lane(x, y, z) {
+                            frames[0].voxels.get(&(((x - shift).rem_euclid(tile)) as u32, y as u32, z as u32))
+                        } else {
+                            frames[0].voxels.get(&(x as u32, y as u32, z as u32))
+                        };
+                        assert_eq!(
+                            frame.voxels.get(&(x as u32, y as u32, z as u32)),
+                            expected,
+                            "belt f{k}: voxel {x},{y},{z} is not frame 0 shifted by {shift}"
+                        );
+                    }
+                }
+            }
+        }
+        for a in 0..frames.len() {
+            for b in (a + 1)..frames.len() {
+                assert_ne!(frames[a].voxels, frames[b].voxels, "belt f{a} and f{b} are the same model");
+            }
+        }
+    }
+
+    #[test]
+    fn the_four_frames_of_a_corner_share_a_structure_and_advance_the_arrow_a_quarter_pattern() {
+        let p = palette();
+        for turn in [Turn::Left, Turn::Right] {
+            let shape = BeltShape::Corner(turn);
+            let frames: Vec<VoxModel> = (0..BELT_FRAMES).map(|k| belt_shape(&p, shape, k)).collect();
+            let structure = |m: &VoxModel| -> Vec<((u32, u32, u32), u8)> {
+                m.voxels.iter().filter(|&(&(_, _, z), _)| (z as i32) < BELT_ARROW_Z).map(|(&k, &c)| (k, c)).collect()
+            };
+            let mut apexes = Vec::new();
+            for (k, frame) in frames.iter().enumerate() {
+                assert_eq!(structure(frame), structure(&frames[0]), "{turn:?} corner f{k}: structure differs from f0");
+                // Where the arrow actually stands, read back off the voxels:
+                // the circular mean of its centre-line cells' `u` (circular
+                // because a frame can straddle the tile edge).
+                let (mut sx, mut sy, mut n) = (0.0f32, 0.0f32, 0);
+                for c in arrow_cells(frame).into_iter().filter_map(|(x, y)| surface_cell(shape, x, y)) {
+                    if c.v.abs() < 1.0 {
+                        let a = c.u / TILE_VOXELS as f32 * std::f32::consts::TAU;
+                        sx += a.cos();
+                        sy += a.sin();
+                        n += 1;
+                    }
+                }
+                assert!(n > 0, "{turn:?} corner f{k}: no centre-line cells");
+                apexes.push(sy.atan2(sx) / std::f32::consts::TAU * TILE_VOXELS as f32);
+            }
+            for k in 1..frames.len() {
+                let advance = (apexes[k] - apexes[k - 1] + 16.0).rem_euclid(32.0) - 16.0;
+                assert!(
+                    (advance - BELT_FRAME_SHIFT as f32).abs() < 2.0,
+                    "{turn:?} corner f{k}: arrow advanced {advance} u, not {BELT_FRAME_SHIFT}"
+                );
+            }
+            for a in 0..frames.len() {
+                for b in (a + 1)..frames.len() {
+                    assert_ne!(arrow_cells(&frames[a]), arrow_cells(&frames[b]), "{turn:?} corner f{a} and f{b} share an arrow");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_corner_is_open_on_exactly_its_two_connected_faces() {
+        let p = palette();
+        let last = TILE_VOXELS as i32 - 1;
+        let (l0, l1) = BELT_LANE;
+        for turn in [Turn::Left, Turn::Right] {
+            // The plan: output on +X; Left is fed from the north (vox low
+            // Y) face, Right from the south (vox high Y) face.
+            let entry_y = match turn {
+                Turn::Left => 0,
+                Turn::Right => last,
+            };
+            let closed_y = last - entry_y;
+            for phase in 0..BELT_FRAMES {
+                let m = belt_shape(&p, BeltShape::Corner(turn), phase);
+                let name = format!("{turn:?} corner f{phase}");
+                for i in 0..=last {
+                    let in_lane = (l0..=l1).contains(&i);
+                    // Exit face (+X) and entry face carry the lane at the
+                    // belt's running height, exactly BELT_LANE wide, with
+                    // nothing standing in it.
+                    assert_eq!(m.filled(last, i, BELT_SURFACE_Z), in_lane, "{name}: +X face lane wrong at y = {i}");
+                    assert_eq!(m.filled(i, entry_y, BELT_SURFACE_Z), in_lane, "{name}: entry face lane wrong at x = {i}");
+                    for z in (BELT_ARROW_Z + 1)..16 {
+                        assert!(!m.filled(last, i, z), "{name}: +X face blocked at y = {i}, z = {z}");
+                        assert!(!m.filled(i, entry_y, z), "{name}: entry face blocked at x = {i}, z = {z}");
+                    }
+                    // The other two faces carry no belt at all.
+                    for z in 0..16 {
+                        assert!(!m.filled(0, i, z), "{name}: the -X face is not closed at y = {i}, z = {z}");
+                        assert!(!m.filled(i, closed_y, z), "{name}: the closed Y face is not closed at x = {i}, z = {z}");
+                    }
+                }
+                // Rails meet a straight tile's rails voxel for voxel at
+                // both open faces.
+                let straight = belt(&p);
+                for i in 0..=last {
+                    for z in 4..=8 {
+                        assert_eq!(
+                            m.filled(last, i, z),
+                            straight.filled(last, i, z),
+                            "{name}: +X face differs from a straight belt at y = {i}, z = {z}"
+                        );
+                        assert_eq!(
+                            m.filled(i, entry_y, z),
+                            straight.filled(last, i, z),
+                            "{name}: entry face differs from a straight belt's face at x = {i}, z = {z}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_belt_tile_is_open_above_its_lane_at_both_faces() {
+        let p = palette();
+        let last = TILE_VOXELS as i32 - 1;
+        let (l0, l1) = BELT_LANE;
+        for phase in 0..BELT_FRAMES {
+            let m = belt_shape(&p, BeltShape::Straight, phase);
+            for y in l0..=l1 {
+                for x in [0, last] {
+                    assert!(m.filled(x, y, BELT_SURFACE_Z), "belt f{phase}: lane stops short at x = {x}, y = {y}");
+                    for z in (BELT_ARROW_Z + 1)..16 {
+                        assert!(!m.filled(x, y, z), "belt f{phase}: face blocked at x = {x}, y = {y}, z = {z}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// `belt()` is what the junction and splitter tests measure against, so
+    /// it has to be the tile the scene actually draws at rest.
+    #[test]
+    fn the_plain_belt_is_frame_zero_of_the_straight_shape() {
+        let p = palette();
+        assert_eq!(belt(&p).voxels, belt_f0(&p).voxels, "`belt` is not frame 0");
+    }
+
+    #[test]
+    fn the_splitters_deck_sits_at_the_belts_running_height_with_plain_rubber_stubs() {
+        let p = palette();
+        let m = machine_splitter(&p);
+        let belt = belt(&p);
+        let (l0, l1) = BELT_LANE;
+        let last = TILE_VOXELS as i32 - 1;
+        let rubber = p.idx("rubber");
+        // Intake stub: rubber at exactly the belt's height and lane, and
+        // no cleat pattern of its own.
+        for x in 0..=3 {
+            for y in l0..=l1 {
+                assert_eq!(m.voxels.get(&(x, y as u32, BELT_SURFACE_Z as u32)), Some(&rubber), "splitter intake at {x},{y} is not plain rubber");
+                assert!(!m.filled(x as i32, y, BELT_ARROW_Z), "splitter intake carries an arrow cleat at {x},{y}");
+            }
+        }
+        // Rails identical to the belt's on the -X face.
+        for y in 0..=last {
+            for z in 4..=8 {
+                assert_eq!(m.filled(0, y, z), belt.filled(0, y, z), "splitter -X face differs from a belt at y = {y}, z = {z}");
+            }
+        }
+    }
+
     #[test]
     fn the_docks_deck_is_solid_out_to_the_platform_edge() {
         let p = palette();
@@ -2718,27 +3371,6 @@ mod tests {
         }
     }
 
-    /// The pipe run's two ends. Its downstream end is closed by a blind
-    /// flange (it used to be an open bore, which is what the run "just
-    /// stopping in mid-air" actually was), and its supply end is not.
-    #[test]
-    fn the_pipe_runs_downstream_end_is_capped_and_its_supply_end_is_not() {
-        let p = palette();
-        let last = TILE_VOXELS as i32 - 1;
-        assert!(
-            !pipe(&p).filled(last, PIPE_AXIS_Y, PIPE_AXIS_Z),
-            "a mid-run pipe tile must stay bored through, or segments cannot join"
-        );
-        assert!(
-            pipe_inlet(&p).filled(last, PIPE_AXIS_Y, PIPE_AXIS_Z),
-            "the run's downstream end is still an open bore"
-        );
-        assert!(
-            !pipe_source(&p).filled(0, PIPE_AXIS_Y, PIPE_AXIS_Z),
-            "the supply end must stay open — the tank discharges into it"
-        );
-    }
-
     /// The tank/pipe and pipe/mixer joints are each one fitting split across
     /// a tile boundary, so both halves have to reach their shared edge at the
     /// same axis. This is the check that would have caught the four-voxel
@@ -2752,12 +3384,234 @@ mod tests {
             "the tank's discharge does not reach the tile edge the run starts at"
         );
         assert!(
-            pipe_inlet(&p).filled(16, last, PIPE_AXIS_Z),
-            "the run's branch does not reach the tile edge the machine sits against"
-        );
-        assert!(
             machine_mixer(&p).filled(16, 0, PIPE_AXIS_Z),
             "the mixer's inlet stub does not reach the tile edge the run sits against"
         );
+        // The pipe's half of both joints is a fitting on the tile boundary:
+        // the family test below pins its bore and flange there.
+    }
+
+    // -----------------------------------------------------------------------
+    // The pipe family ("Pipes & Conveyors Overhaul" ticket 3)
+    // -----------------------------------------------------------------------
+
+    /// Which faces of a one-tile shape carry an open bore, in the vox
+    /// coordinates the pipe section's header fixes.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum PipeFace {
+        /// x = 31.
+        East,
+        /// x = 0.
+        West,
+        /// y = 0 — camera-facing.
+        North,
+        /// y = 31.
+        South,
+    }
+
+    const ALL_FACES: [PipeFace; 4] = [PipeFace::East, PipeFace::West, PipeFace::North, PipeFace::South];
+
+    /// The voxel of `face`'s boundary plane at `(along, up)`, where `along`
+    /// is the in-plane horizontal index and `up` the Z.
+    fn on_face(face: PipeFace, along: i32, up: i32) -> (i32, i32, i32) {
+        let last = TILE_VOXELS as i32 - 1;
+        match face {
+            PipeFace::East => (last, along, up),
+            PipeFace::West => (0, along, up),
+            PipeFace::North => (along, 0, up),
+            PipeFace::South => (along, last, up),
+        }
+    }
+
+    /// A face is OPEN when the bore's centre pair on the boundary plane is
+    /// empty AND the tube wall stands either side of it at axis height —
+    /// i.e. there is genuinely a tube reaching this face with a hole in it.
+    /// A capped end fails the first half; a face no leg reaches fails the
+    /// second. Both are "closed" for the purpose of a joint.
+    fn face_open(m: &VoxModel, face: PipeFace) -> bool {
+        let z = PIPE_AXIS_Z;
+        let bore_empty = [15, 16].iter().all(|&a| {
+            let (x, y, zz) = on_face(face, a, z);
+            !m.filled(x, y, zz)
+        });
+        let wall_present = [11, 20].iter().all(|&a| {
+            let (x, y, zz) = on_face(face, a, z);
+            m.filled(x, y, zz)
+        });
+        bore_empty && wall_present
+    }
+
+    /// Every shape with the faces the plan declares for it, and its fluid
+    /// body. The table IS the plan's "Corner conventions"; a shape that
+    /// drifts from it fails here before Godot ever rotates it wrong.
+    fn pipe_shapes(p: &Palette) -> Vec<(&'static str, VoxModel, VoxModel, Vec<PipeFace>)> {
+        use PipeFace::*;
+        vec![
+            ("pipe", pipe(p), pipe_fluid(p), vec![East, West]),
+            ("pipe_corner", pipe_corner(p), pipe_fluid_corner(p), vec![East, North]),
+            ("pipe_tee", pipe_tee(p), pipe_fluid_tee(p), vec![East, West, North]),
+            ("pipe_cross", pipe_cross(p), pipe_fluid_cross(p), vec![East, West, North, South]),
+            ("pipe_end", pipe_end(p), pipe_fluid_end(p), vec![West]),
+        ]
+    }
+
+    #[test]
+    fn every_pipe_shape_is_open_exactly_on_its_declared_faces() {
+        let p = palette();
+        for (name, shape, _, open) in pipe_shapes(&p) {
+            for face in ALL_FACES {
+                assert_eq!(
+                    face_open(&shape, face),
+                    open.contains(&face),
+                    "{name}: face {face:?} should be {}",
+                    if open.contains(&face) { "open" } else { "closed" }
+                );
+            }
+        }
+    }
+
+    /// The plan's rotation rule, proved on the corner: two clockwise quarter
+    /// turns take (+X, north) to (-X, south), so a corner whose neighbours
+    /// are west and south is this model turned twice — which is what
+    /// `main.gd` will do to it.
+    #[test]
+    fn a_corner_turned_twice_opens_west_and_south() {
+        let p = palette();
+        let turned = pipe_corner(&p).rotated_cw(2);
+        assert!(face_open(&turned, PipeFace::West) && face_open(&turned, PipeFace::South));
+        assert!(!face_open(&turned, PipeFace::East) && !face_open(&turned, PipeFace::North));
+        let once = pipe_corner(&p).rotated_cw(1);
+        assert!(face_open(&once, PipeFace::South) && face_open(&once, PipeFace::East), "one CW turn: +X -> south, north -> east");
+    }
+
+    /// Each fluid body lies inside its shape's bore: every voxel of the slab
+    /// has empty bore above it at axis height (the bore's widest row), it
+    /// reaches every open face and it stops short of every closed one.
+    #[test]
+    fn every_fluid_body_lies_inside_its_shapes_bore_and_reaches_only_open_faces() {
+        let p = palette();
+        for (name, shape, fluid, open) in pipe_shapes(&p) {
+            assert_eq!(fluid.size[2], 1, "{name}: the fluid body must be one voxel tall");
+            for &(x, y, _) in fluid.voxels.keys() {
+                for z in PIPE_BORE_Z0 + 1..=PIPE_AXIS_Z {
+                    assert!(
+                        !shape.filled(x as i32, y as i32, z),
+                        "{name}: fluid at ({x}, {y}) is inside the shape's wall at z = {z}"
+                    );
+                }
+            }
+            for face in ALL_FACES {
+                let reaches = [15, 16].iter().any(|&a| {
+                    let (x, y, _) = on_face(face, a, 0);
+                    fluid.filled(x, y, 0)
+                });
+                assert_eq!(
+                    reaches,
+                    open.contains(&face),
+                    "{name}: the fluid body {} reach face {face:?}",
+                    if open.contains(&face) { "must" } else { "must not" }
+                );
+            }
+        }
+    }
+
+    /// Every shape shows its liquid: the sight window is a genuinely empty
+    /// column over the bore, from just above the bore floor to the top of
+    /// the model, on a leg every shape has (+X for the junctions, mid-tile
+    /// for the straight and the end).
+    #[test]
+    fn every_pipe_shape_has_a_sight_window_cut_to_the_top() {
+        let p = palette();
+        for (name, shape, _, _) in pipe_shapes(&p) {
+            let window = if name == "pipe" || name == "pipe_end" { PIPE_WINDOW } else { PIPE_LEG_WINDOW };
+            let top = shape.size[2] as i32 - 1;
+            for x in window.0..=window.1 {
+                for y in PIPE_BORE_Y.0..=PIPE_BORE_Y.1 {
+                    for z in PIPE_BORE_Z0 + 1..=top {
+                        assert!(!shape.filled(x, y, z), "{name}: window voxel ({x}, {y}, {z}) is not empty");
+                    }
+                }
+            }
+            // ...and it is a window, not a missing wall: the tube is still
+            // there just outside it, either side.
+            assert!(shape.filled(window.0 - 1, PIPE_BORE_Y.0, PIPE_AXIS_Z + 3) || shape.filled(window.1 + 1, PIPE_BORE_Y.0, PIPE_AXIS_Z + 3), "{name}: no tube wall frames the window");
+        }
+    }
+
+    /// A fitting's flange sits ON the tile boundary at the pipe's axis
+    /// height, its bore is open there, and it keeps clear of the leg window
+    /// so it can be overlaid on any shape's +X leg.
+    #[test]
+    fn a_fittings_flange_sits_on_the_tile_boundary_at_pipe_axis_height() {
+        let p = palette();
+        let last = TILE_VOXELS as i32 - 1;
+        for (name, fitting, r) in [
+            ("pipe_fitting_machine", pipe_fitting_machine(&p), PIPE_OUTER_R + 1.0 + PIPE_FITTING_MARGIN),
+            ("pipe_fitting_tank", pipe_fitting_tank(&p), PIPE_OUTER_R + 1.0 + PIPE_FITTING_MARGIN),
+        ] {
+            // The flange is centred on the tile midline, half a voxel from
+            // voxel 15/16, so its reach along an axis is sqrt(r² - ¼).
+            let reach = (r * r - 0.25).sqrt().floor() as i32;
+            for (y, z) in [(15, PIPE_AXIS_Z + reach), (16, PIPE_AXIS_Z - reach), (15 - reach, PIPE_AXIS_Z), (16 + reach, PIPE_AXIS_Z)] {
+                assert!(fitting.filled(last, y, z), "{name}: flange does not reach ({y}, {z}) on the boundary");
+            }
+            // Checked on the UNDERSIDE: the tank fitting's valve stands on
+            // top of its flange.
+            assert!(!fitting.filled(last, 15, PIPE_AXIS_Z - reach - 1), "{name}: flange is larger than its documented radius");
+            for a in [15, 16] {
+                assert!(!fitting.filled(last, a, PIPE_AXIS_Z), "{name}: the bore is plugged at the boundary");
+            }
+            for &(x, _, z) in fitting.voxels.keys() {
+                let floor = if (z as i32) <= PIPE_AXIS_Z + PIPE_OUTER_R as i32 + 2 { PIPE_FITTING_X0 } else { PIPE_FITTING_TOP_X0 };
+                assert!(x as i32 >= floor, "{name}: hardware at x = {x}, z = {z} would cover a leg window");
+            }
+        }
+    }
+
+    /// A fitting overlaid on a straight's LOW-X face — the first tile of a
+    /// run leaving a machine, or the tile a tank discharges into — covers
+    /// the straight's own joint flange, and on its +X face it covers plain
+    /// tube. Two voxel solids z-fight wherever a voxel of both has an
+    /// outward neighbour in neither (both then expose a face on the same
+    /// plane), so every voxel the two share must have every outward
+    /// neighbour inside one of them. "Outward" is away from the pipe axis;
+    /// an inward face lies in the bore and is a ticket-3 call (`+ 0.4`).
+    /// The tile-boundary plane itself is exempt: both end there by design,
+    /// and what stands on the other side of it (the machine's nozzle, the
+    /// tank's spout) is what the render checks.
+    #[test]
+    fn a_fitting_overlaid_on_either_face_of_a_straight_shares_no_outer_surface() {
+        let p = palette();
+        let shape = pipe(&p);
+        for (name, fitting) in [
+            ("pipe_fitting_machine", pipe_fitting_machine(&p)),
+            ("pipe_fitting_tank", pipe_fitting_tank(&p)),
+        ] {
+            for turns in [0, 2] {
+                let overlay = fitting.rotated_cw(turns);
+                let mut both = shape.clone();
+                both.merge(&overlay);
+                let radial = |y: i32, z: i32| {
+                    let (dy, dz) = (y as f32 - PIPE_C, z as f32 - PIPE_AXIS_Z as f32);
+                    dy * dy + dz * dz
+                };
+                for &(x, y, z) in overlay.voxels.keys() {
+                    let (x, y, z) = (x as i32, y as i32, z as i32);
+                    if !shape.filled(x, y, z) {
+                        continue;
+                    }
+                    for (nx, ny, nz) in [(x + 1, y, z), (x - 1, y, z), (x, y + 1, z), (x, y - 1, z), (x, y, z + 1), (x, y, z - 1)] {
+                        if radial(ny, nz) < radial(y, z) || nx < 0 || nx >= TILE_VOXELS as i32 {
+                            continue;
+                        }
+                        assert!(
+                            both.filled(nx, ny, nz),
+                            "{name} turned {turns}: the shape and the fitting both expose a face at \
+                             ({x}, {y}, {z}) toward ({nx}, {ny}, {nz}) — they will z-fight there"
+                        );
+                    }
+                }
+            }
+        }
     }
 }

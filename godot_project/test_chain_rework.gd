@@ -30,9 +30,10 @@
 #   * THE 1x2 MIXER renders one node covering both its tiles, and hover
 #     resolves the mixer from either of them,
 #   * THE TWO MACHINE-TO-MACHINE PIPE RUNS render at the tiles the simulation
-#     reports, carry the fluid the recipe names, and draw the PLAIN pipe tile
-#     rather than `pipe_inlet` — whose branch and blind flange are authored
-#     for a run lying north of the machine it feeds, which these are not,
+#     reports, carry the fluid the recipe names, and draw plain straights
+#     with a MACHINE FITTING on the side each machine stands (from `links`,
+#     the pipes & conveyors overhaul's ticket 6), while the tank-fed vinegar
+#     run turns down into the mixer through a CORNER with its fitting south,
 #   * THE INGREDIENT MARKET is a real panel on M with one slot per priced
 #     ingredient, a click buys a crate, and the larder strip follows the
 #     stock it bought.
@@ -331,36 +332,48 @@ func _run_checks() -> void:
 			_fail("hover at %s should resolve the mixer's recipe, got '%s'" % [str(tile), hover])
 			return
 
-	# Both machine-to-machine runs exist, carry the right fluid, and draw the
-	# PLAIN tile: `pipe_inlet`'s branch reaches south and its blind flange
-	# caps the +X end, which is wrong on a run a machine draws through from
-	# the east (see `_rebuild_world`'s pipe-role note).
+	# Both machine-to-machine runs exist, carry the right fluid, and draw two
+	# plain straights: the first with the machine fitting on its WEST side
+	# (the machine it leaves), the second with one on its EAST (the machine
+	# it feeds) — each decided from the tile's own `links`.
 	for pair in [[MIX_RUN, "ketchup_mix"], [KETCHUP_RUN, "ketchup"]]:
-		for tile in pair[0]:
+		var run: Array = pair[0]
+		for i in range(run.size()):
+			var tile: Vector2i = run[i]
 			if _placement_kind_on(line, tile) != "pipe":
 				_fail("no pipe at %s — the piped middle of the chain is missing" % str(tile))
 				return
-			if line.get_node_or_null("World/pipe_%d,%d" % [tile.x, tile.y]) == null:
+			if line._tile_instance_at(tile).is_empty():
 				_fail("the pipe at %s was not rendered" % str(tile))
 				return
 			if line._pipe_asset_for(tile) != line.PIPE_ASSET:
-				_fail("the pipe at %s drew '%s'; a machine-to-machine run takes the plain tile" % [
+				_fail("the pipe at %s drew '%s'; a machine-to-machine run is straight" % [
 					str(tile), line._pipe_asset_for(tile)
 				])
 				return
-		if _fluid_on(line, pair[0][0]) != pair[1]:
+			var fittings: Array = line._pipe_fittings_at(tile)
+			var side := "west" if i == 0 else "east"
+			if fittings.size() != 1 or String(fittings[0]["asset"]) != line.PIPE_FITTING_MACHINE_ASSET \
+					or String(fittings[0]["to"]) != side:
+				_fail("the pipe at %s should carry one machine fitting on its %s side, got %s" % [
+					str(tile), side, str(fittings)
+				])
+				return
+		if _fluid_on(line, run[0]) != pair[1]:
 			_fail("the run at %s carries '%s', expected '%s'" % [
-				str(pair[0][0]), _fluid_on(line, pair[0][0]), pair[1]
+				str(run[0]), _fluid_on(line, run[0]), pair[1]
 			])
 			return
 
-	# ...while the TANK-fed vinegar run still gets the branch fitting, because
-	# that run really does lie north of the machine it feeds. This is the
-	# fallback being a fallback rather than a blanket downgrade.
+	# ...while the TANK-fed vinegar run, which lies north of the mixer and
+	# turns down into it, ends in a corner with the machine fitting south.
 	var vinegar_tap := Vector2i(9, 2)
-	if line._pipe_asset_for(vinegar_tap) != line.PIPE_INLET_ASSET:
-		_fail("the vinegar run's machine-adjacent tile drew '%s', expected the branch fitting" % \
-			line._pipe_asset_for(vinegar_tap))
+	if line._pipe_asset_for(vinegar_tap) != line.PIPE_CORNER_ASSET:
+		_fail("the vinegar run's tapped tile drew '%s', expected a corner" % line._pipe_asset_for(vinegar_tap))
+		return
+	var tap_fittings: Array = line._pipe_fittings_at(vinegar_tap)
+	if tap_fittings.size() != 1 or String(tap_fittings[0]["to"]) != "south":
+		_fail("the vinegar tap should carry one fitting on its south side, got %s" % str(tap_fittings))
 		return
 
 	# Neither the vat nor the bottler has a feed belt any more, which is the

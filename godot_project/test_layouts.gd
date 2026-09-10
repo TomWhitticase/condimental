@@ -269,3 +269,287 @@ static func build_reference_line(sim) -> void:
 ## How many placements `build_reference_line` makes. Stated once here so a
 ## test asserting the line was built in full does not restate the layout.
 const REFERENCE_LINE_PLACEMENTS := 37
+
+
+## THE PIPE GALLERY (the pipes & conveyors overhaul, ticket 6) — the fixture
+## `test_pipe_shapes.gd` asserts and `scripts/screenshot-scene.sh
+## --pipe-gallery` photographs. Every pipe shape at every turn, from real
+## placements, in three rows (y grows north):
+##
+##   * Row 0-3: two-tile runs (an end at each turn), three-tile straights
+##     on both axes, a 2x2 ring of the four corner turns, four tees (each
+##     closed on a different side), a cross, and two lonely tiles on each
+##     axis. The first tee's run and the cross's run are each fed by a tank
+##     and tapped by a MIXER (which draws vinegar, a raw fluid the larder
+##     can stock — a bottler's ketchup cannot be bought, so a bottler-tapped
+##     tank stays empty), so liquid stands in a tee, a cross, ends and
+##     straights once the fixture is run.
+##   * Row 5-7: a tank discharging into a lone pipe from each of its four
+##     sides, then a bottler tapping a lone pipe from each of its four sides
+##     — every fitting at every turn.
+##   * Row 10-12: the shipped middle of the line at its real geometry
+##     (`sim::reference_chain`): a tank-fed vinegar run turning down into
+##     the 1x2 mixer, then mixer -> vat -> bottler through two-tile runs.
+##
+## Bill: about 1,940 of 3,000.
+static func build_pipe_gallery(sim) -> void:
+	# --- row 0-3: shapes -------------------------------------------------
+	for tile in [Vector2i(0, 0), Vector2i(1, 0)]:
+		place(sim, "pipe", tile, "east")
+	for tile in [Vector2i(3, 0), Vector2i(4, 0), Vector2i(5, 0)]:
+		place(sim, "pipe", tile, "east")
+	for tile in [Vector2i(7, 0), Vector2i(7, 1)]:
+		place(sim, "pipe", tile, "north")
+	for tile in [Vector2i(9, 0), Vector2i(9, 1), Vector2i(9, 2)]:
+		place(sim, "pipe", tile, "north")
+	for tile in [Vector2i(12, 0), Vector2i(13, 0), Vector2i(12, 1), Vector2i(13, 1)]:
+		place(sim, "pipe", tile, "east")
+	# Tees: (centre, the side it is CLOSED on) — the arm tiles are the other
+	# three neighbours. The first is fed and tapped.
+	place(sim, "fluid_tank", Vector2i(16, 1), "east")
+	place(sim, "mixer", Vector2i(18, 3), "north") # 1x2 turned: covers (18, 3) and (19, 3)
+	for tee in [[Vector2i(18, 1), "south"], [Vector2i(22, 1), "north"], [Vector2i(26, 1), "east"], [Vector2i(30, 1), "west"]]:
+		var centre: Vector2i = tee[0]
+		place(sim, "pipe", centre, "east")
+		for side in ["north", "east", "south", "west"]:
+			if side != tee[1]:
+				place(sim, "pipe", centre + _offset(side), "east")
+	# Cross, fed and tapped.
+	place(sim, "fluid_tank", Vector2i(34, 1), "east")
+	place(sim, "mixer", Vector2i(36, 3), "north")
+	place(sim, "pipe", Vector2i(36, 1), "east")
+	for side in ["north", "east", "south", "west"]:
+		place(sim, "pipe", Vector2i(36, 1) + _offset(side), "east")
+	place(sim, "pipe", Vector2i(39, 0), "east")
+	place(sim, "pipe", Vector2i(39, 2), "north")
+	# --- row 5-7: a fitting on every side ----------------------------------
+	place(sim, "fluid_tank", Vector2i(0, 6), "east")
+	place(sim, "pipe", Vector2i(1, 6), "east")
+	place(sim, "fluid_tank", Vector2i(5, 6), "west")
+	place(sim, "pipe", Vector2i(4, 6), "east")
+	place(sim, "fluid_tank", Vector2i(8, 5), "north")
+	place(sim, "pipe", Vector2i(8, 6), "east")
+	place(sim, "fluid_tank", Vector2i(11, 7), "south")
+	place(sim, "pipe", Vector2i(11, 6), "east")
+	place(sim, "bottler", Vector2i(15, 6), "east")
+	place(sim, "pipe", Vector2i(14, 6), "east")
+	place(sim, "bottler", Vector2i(18, 6), "west")
+	place(sim, "pipe", Vector2i(19, 6), "east")
+	place(sim, "bottler", Vector2i(22, 7), "north")
+	place(sim, "pipe", Vector2i(22, 6), "east")
+	place(sim, "bottler", Vector2i(25, 5), "south")
+	place(sim, "pipe", Vector2i(25, 6), "east")
+	# --- row 10-12: the shipped middle ------------------------------------
+	place(sim, "fluid_tank", Vector2i(0, 12), "east")
+	for tile in [Vector2i(1, 12), Vector2i(2, 12), Vector2i(3, 12)]:
+		place(sim, "pipe", tile, "east")
+	place(sim, "mixer", Vector2i(3, 10), "east")
+	for tile in [Vector2i(4, 10), Vector2i(5, 10)]:
+		place(sim, "pipe", tile, "east")
+	place(sim, "cooking_vat", Vector2i(6, 10), "east")
+	for tile in [Vector2i(8, 10), Vector2i(9, 10)]:
+		place(sim, "pipe", tile, "east")
+	place(sim, "bottler", Vector2i(10, 10), "east")
+
+
+## Every placement `build_pipe_gallery` makes, so a test asserting it was
+## built in full does not restate the layout.
+const PIPE_GALLERY_PLACEMENTS := 41 + 16 + 11 # rows 0-3, 5-7 and 10-12
+
+
+## Tile-space step per direction, the simulation's own convention (east +X,
+## north +Y — `sim::types::Direction::offset`).
+static func _offset(direction: String) -> Vector2i:
+	match direction:
+		"north":
+			return Vector2i(0, 1)
+		"south":
+			return Vector2i(0, -1)
+		"west":
+			return Vector2i(-1, 0)
+	return Vector2i(1, 0)
+
+
+## Sets the balance to `amount` through the save/load boundary — the one
+## door into a sim the presentation layer is allowed to use, and the only
+## way a Godot fixture can be bigger than `sim::STARTING_MONEY` (3000)
+## allows without a Rust test seam. `save_ron` writes money as raw `Fx`
+## bits (`money_bits: N`, I16F16, so N = amount * 65536); the text is
+## rewritten and loaded back. `Fx` saturates near 32 767, so that is the
+## ceiling. Everything else in the world survives the round trip unchanged,
+## which the save/load lockstep test is what guarantees.
+static func fund(sim, amount: int) -> void:
+	var text: String = sim.save_ron()
+	var regex := RegEx.new()
+	regex.compile("money_bits:\\s*-?\\d+")
+	var bits: int = mini(amount, 32767) * 65536
+	var patched := regex.sub(text, "money_bits: %d" % bits)
+	var error: String = sim.load_ron(patched)
+	if error != "":
+		push_error("fund(): load_ron refused the patched save: %s" % error)
+
+
+## THE STRESS LINE (the pipes & conveyors overhaul, ticket 4) — the fixture
+## `test_perf.gd` times and `scripts/screenshot-scene.sh --stress`
+## photographs. Big on purpose, where every other fixture here is small: it
+## exists to make per-tile rendering costs visible, and a thousand tiles is
+## where a node per tile stops being free.
+##
+## A serpentine of STRESS_ROWS x STRESS_COLUMNS belts: even rows run east,
+## odd rows run west, and the last tile of every row turns north into the
+## next one — so the whole thing is ONE line of 1500 conveyor tiles with a
+## corner at each end of each row, on three of the four facings. Fed by a
+## hopper at its head and by hoppers on the free flanks of the first and last
+## rows, so product enters at several points and the belts near the feeds
+## carry items from the first few hundred ticks. Beside it, three tank-fed
+## pipe runs, each tapped by a mixer so the run carries vinegar and its
+## liquid bodies have something to show.
+##
+## Its bill (about 8,500) is far past a new game's balance, so it funds
+## itself through `fund` first. The line's tail hands to nothing, so the last
+## row backs up over time — a jammed stretch is a realistic thing to draw.
+const STRESS_ROWS := 30
+const STRESS_COLUMNS := 50
+const STRESS_BELTS := STRESS_ROWS * STRESS_COLUMNS
+const STRESS_PIPE_RUNS := 3
+const STRESS_PIPES_PER_RUN := 8
+const STRESS_FLANK_HOPPER_COLUMNS := [10, 20, 30, 40]
+
+static func build_stress_line(sim) -> void:
+	fund(sim, 32000)
+	sim.issue_command_json(JSON.stringify({"type": "purchase", "kind": "belt", "quantity": STRESS_BELTS}))
+	for row in range(STRESS_ROWS):
+		var eastward := row % 2 == 0
+		for column in range(STRESS_COLUMNS):
+			var x := column if eastward else STRESS_COLUMNS - 1 - column
+			var last := column == STRESS_COLUMNS - 1
+			var direction := "north" if last else ("east" if eastward else "west")
+			sim.issue_command_json(JSON.stringify({
+				"type": "place", "kind": "belt", "tile": [x, row], "direction": direction,
+			}))
+	place(sim, "hopper", Vector2i(-1, 0), "east", "tomato")
+	for column in STRESS_FLANK_HOPPER_COLUMNS:
+		place(sim, "hopper", Vector2i(column, -1), "north", "tomato")
+		place(sim, "hopper", Vector2i(column, STRESS_ROWS), "south", "sugar")
+	for run in range(STRESS_PIPE_RUNS):
+		var y := STRESS_ROWS + 4 + run * 3
+		place(sim, "fluid_tank", Vector2i(-1, y), "east")
+		for x in range(STRESS_PIPES_PER_RUN):
+			place(sim, "pipe", Vector2i(x, y), "east")
+		place(sim, "mixer", Vector2i(STRESS_PIPES_PER_RUN, y), "east")
+
+
+## How many placements `build_stress_line` makes, so a test can assert the
+## whole thing was affordable and legal.
+const STRESS_PLACEMENTS := STRESS_BELTS + 1 + 2 * 4 + STRESS_PIPE_RUNS * (2 + STRESS_PIPES_PER_RUN)
+
+
+## THE BELT GALLERY (the pipes & conveyors overhaul, ticket 5) — every belt
+## shape at every facing, and a belt meeting a machine, a hopper and a dock
+## at every facing, in one world. `test_belt_shapes.gd` asserts against it
+## and `scripts/screenshot-scene.sh --belt-gallery` photographs it. About
+## 1,300 of a 3,000 starting balance.
+##
+## What is on the floor, in simulation coordinates (north = +Y):
+##
+##   * A CLOCKWISE ring of twelve belts on x 0..3, y 0..3. Every corner of a
+##     clockwise loop turns RIGHT, so its four corner tiles are
+##     `belt_corner_right` at all four facings: (0,3) east, (3,3) south,
+##     (3,0) west, (0,0) north. A hopper at (1,-1) faces north onto (1,0),
+##     which is fed from behind by the ring as well, so (1,0) is a MERGE and
+##     the ring carries product (with `--populate`) round both hands of
+##     corner and jams up, which is a real state worth drawing.
+##   * An ANTICLOCKWISE ring on x 6..9, y 0..3: `belt_corner_left` at all
+##     four facings — (6,0) east, (9,0) north, (9,3) west, (6,3) south.
+##     Unfed, so its corners are photographed clean.
+##   * Four MACHINE LINES, hopper -> belt -> crusher -> belt -> dock, one
+##     per facing: east along y = 6, west along y = 9, north up x = 12,
+##     south down x = 16. Every belt-to-building junction the game has, at
+##     every facing the player can choose. (The 2x2 dock's inlet edge is the
+##     whole edge facing the belt, so each line's last belt meets the dock's
+##     origin tile.)
+##   * A T MERGE at (10,6): fed from both flanks by (10,5) facing north and
+##     (10,7) facing south, nothing behind, handing east to (11,6), which
+##     hands to nothing — a two-flank merge and a line END side by side.
+##   * A lone belt at (8,6) (a line START with no output) and a two-tile
+##     start-then-end at (8,8) -> (9,8). (Not on row 7: a belt accepts from
+##     any side, so (9,7) would hand into the merge's south-facing feeder.)
+static func build_belt_gallery(sim) -> void:
+	# The clockwise ring (right corners). Along the top row east, down the
+	# east column south, along the bottom row west, up the west column north.
+	for x in [0, 1, 2]:
+		place(sim, "belt", Vector2i(x, 3), "east")
+	place(sim, "belt", Vector2i(3, 3), "south")
+	for y in [2, 1]:
+		place(sim, "belt", Vector2i(3, y), "south")
+	place(sim, "belt", Vector2i(3, 0), "west")
+	for x in [2, 1]:
+		place(sim, "belt", Vector2i(x, 0), "west")
+	place(sim, "belt", Vector2i(0, 0), "north")
+	for y in [1, 2]:
+		place(sim, "belt", Vector2i(0, y), "north")
+	place(sim, "belt", Vector2i(0, 3), "east")
+	place(sim, "hopper", Vector2i(1, -1), "north", "tomato")
+
+	# The anticlockwise ring (left corners). Along the bottom row east, up
+	# the east column north, along the top row west, down the west column
+	# south.
+	place(sim, "belt", Vector2i(6, 0), "east")
+	for x in [7, 8]:
+		place(sim, "belt", Vector2i(x, 0), "east")
+	place(sim, "belt", Vector2i(9, 0), "north")
+	for y in [1, 2]:
+		place(sim, "belt", Vector2i(9, y), "north")
+	place(sim, "belt", Vector2i(9, 3), "west")
+	for x in [8, 7]:
+		place(sim, "belt", Vector2i(x, 3), "west")
+	place(sim, "belt", Vector2i(6, 3), "south")
+	for y in [2, 1]:
+		place(sim, "belt", Vector2i(6, y), "south")
+
+	# Machine lines, one per facing.
+	place(sim, "hopper", Vector2i(0, 6), "east", "tomato")
+	place(sim, "belt", Vector2i(1, 6), "east")
+	place(sim, "crusher", Vector2i(2, 6), "east")
+	place(sim, "belt", Vector2i(3, 6), "east")
+	place(sim, "dock", Vector2i(4, 6), "east")
+
+	place(sim, "dock", Vector2i(0, 9), "west")
+	place(sim, "belt", Vector2i(2, 9), "west")
+	place(sim, "crusher", Vector2i(3, 9), "west")
+	place(sim, "belt", Vector2i(4, 9), "west")
+	place(sim, "hopper", Vector2i(5, 9), "west", "tomato")
+
+	place(sim, "hopper", Vector2i(12, 0), "north", "tomato")
+	place(sim, "belt", Vector2i(12, 1), "north")
+	place(sim, "crusher", Vector2i(12, 2), "north")
+	place(sim, "belt", Vector2i(12, 3), "north")
+	place(sim, "dock", Vector2i(12, 4), "north")
+
+	place(sim, "dock", Vector2i(16, 0), "south")
+	place(sim, "belt", Vector2i(16, 2), "south")
+	place(sim, "crusher", Vector2i(16, 3), "south")
+	place(sim, "belt", Vector2i(16, 4), "south")
+	place(sim, "hopper", Vector2i(16, 5), "south", "tomato")
+
+	# The T merge and its dead end, the lone start, the start-then-end.
+	place(sim, "belt", Vector2i(10, 5), "north")
+	place(sim, "belt", Vector2i(10, 7), "south")
+	place(sim, "belt", Vector2i(10, 6), "east")
+	place(sim, "belt", Vector2i(11, 6), "east")
+	place(sim, "belt", Vector2i(8, 6), "east")
+	place(sim, "belt", Vector2i(8, 8), "east")
+	place(sim, "belt", Vector2i(9, 8), "east")
+
+
+## How many placements `build_belt_gallery` makes: 24 ring belts, 8 line
+## belts, 7 loose belts, 5 hoppers, 4 crushers, 4 docks.
+const BELT_GALLERY_PLACEMENTS := 24 + 8 + 7 + 5 + 4 + 4
+
+## The gallery's corner tiles by hand and facing, for tests and closeups.
+const BELT_GALLERY_RIGHT_CORNERS := {
+	"east": Vector2i(0, 3), "south": Vector2i(3, 3), "west": Vector2i(3, 0), "north": Vector2i(0, 0),
+}
+const BELT_GALLERY_LEFT_CORNERS := {
+	"east": Vector2i(6, 0), "north": Vector2i(9, 0), "west": Vector2i(9, 3), "south": Vector2i(6, 3),
+}
