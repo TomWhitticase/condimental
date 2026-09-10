@@ -219,3 +219,13 @@ dispatched.
 - The `resolve_sink` inlet-edge rule from ticket 1 is still untouched.
 - Every worktree grows an untracked `AGENTS.md` (a CLAUDE.md copy) from the
   environment; nobody has committed it. Decide whether to `.gitignore` it.
+- **Launching the real game after `cargo xtask` needs Godot's two `--import`
+  passes** (`godot --headless --path godot_project --import`, twice): xtask
+  restages `godot_project/voxels/` and drops every `.import` sidecar, so a
+  windowed launch straight after it draws no meshes at all
+  (`floor_tile mesh missing`). The headless scripts already do this; make
+  `cargo xtask` do it too (or print the reminder) so a demo cannot start
+  blank. Demo saves for Load Game (`demo line`, `full chain`,
+  `belt gallery`, `pipe gallery`) were generated on 2026-09-10 with a
+  throwaway script built on `test_layouts.gd`; a committed
+  `scripts/make-demo-saves.sh` would be worth having.
