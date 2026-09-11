@@ -1051,6 +1051,12 @@ func _ready() -> void:
 	# over it, and everything else appears as the player puts it there.
 	_rebuild_world()
 	_build_camera()
+	# The game's first sound (`audio.gd`), built before the UI because the
+	# pause menu's SOUND switch reads its state to caption itself. Synthesised
+	# here rather than loaded: the waveforms are code, not committed `.wav`
+	# blobs — see that file's header for why.
+	_audio = FactoryAudio.new()
+	_audio.setup(self)
 	_build_ui()
 	_build_ghost_layer()
 	_refresh_owned_counts()
@@ -1966,6 +1972,11 @@ func _build_placement(placement: Dictionary) -> void:
 				"slots": _build_dock_slots(origin, size, yaw),
 				"lamp": lamp,
 				"stocked": true,
+				# Where a payout's coins are thrown from — the deck's centre,
+				# recorded once here rather than re-derived from the slot
+				# positions, which are laid out for four cases and are not
+				# obliged to stay symmetric about it.
+				"anchor": _footprint_centre(origin, size, DOCK_DECK_Y),
 			}
 		_:
 			# A machine: a recipe-running kind. Its status lamp and (for the
@@ -3295,6 +3306,12 @@ func _build_ui() -> void:
 	# The way out (the save/main-menu epic's ticket 2). Last, so it draws over
 	# every other panel — it is the one modal that means the game has stopped.
 	_build_pause_menu(hud, settings)
+	# The payout celebration (the "make earning money feel like something"
+	# ticket). Last of all, and its "+N" is the last child of the HUD, so the
+	# one thing that only appears for a second draws over every panel that is
+	# permanently there.
+	_build_payout_feedback(hud)
+	_update_sound_button()
 
 
 ## The diegetic clipboard/checklist widget (UI_UX.md §5) — the money/contract
@@ -3543,6 +3560,10 @@ func _build_contract_card(contract: Dictionary) -> Dictionary:
 	var payout_label := Label.new()
 	payout_label.label_settings = _contract_name_settings
 	payout_label.text = "+%d" % int(contract.get("payout", 0))
+	# The figure kept beside the text, because the PAID stamp overwrites the
+	# text for a beat when this contract settles and has to put it back
+	# afterwards without re-reading a snapshot.
+	payout_label.set_meta("payout", int(contract.get("payout", 0)))
 	payout_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	header.add_child(payout_label)
 
@@ -6367,6 +6388,15 @@ func _build_pause_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	resume.pressed.connect(_on_pause_resume_pressed)
 	_pause_buttons_box.add_child(resume)
 
+	# The game's first sound arrived with the payout celebration, so the first
+	# way to switch it off arrives with it too — on the one screen a player
+	# already opens to change how the session behaves, rather than as a
+	# keybind nobody would find. Its caption says ON or OFF in words rather
+	# than looking pressed, per UI_UX.md §7.
+	_pause_sound_button = _pause_button("SoundButton", "SOUND: ON")
+	_pause_sound_button.pressed.connect(_on_pause_sound_pressed)
+	_pause_buttons_box.add_child(_pause_sound_button)
+
 	var save_row := HBoxContainer.new()
 	save_row.add_theme_constant_override("separation", _ui_i(8))
 	_pause_buttons_box.add_child(save_row)
@@ -6632,6 +6662,10 @@ func _process(delta: float) -> void:
 	# happens to be behind the plate. `_update_hover_tooltip` hides itself
 	# when `_pause_open`.
 	_update_config_panel()
+	# After `_update_contract_panel`, which is what DETECTS a payout: this
+	# only advances what that started, so a burst is visible on the same
+	# frame it fires rather than one frame later.
+	_update_payout_feedback()
 	if not _pause_open:
 		_update_ghost()
 	_update_hover_tooltip()
@@ -7459,6 +7493,15 @@ func _update_contract_panel() -> void:
 	for i in range(min(contracts.size(), _contract_cards.size())):
 		_update_contract_card(_contract_cards[i], contracts[i], current_tick)
 
+	# The two moments money is involved in, detected from the snapshot this
+	# function already had to parse (see the payout-feedback section's header
+	# for why a `deliveries_made` delta is the right signal and a `money`
+	# delta is not). Both are detected HERE rather than inside
+	# `_update_dock_stock`, which stays a pure function of its arguments so a
+	# test can keep driving it directly.
+	_detect_dock_arrivals(econ.get("delivery_stock", []), current_tick)
+	_detect_payouts(contracts, current_tick)
+
 	# Cap the docket stack's height rather than letting it grow off the
 	# bottom of the screen: past the cap it scrolls. `data/contracts.ron`
 	# ships three and at a normal window size this never engages, which is
@@ -7673,3 +7716,530 @@ func _format_counts(pairs: Array) -> String:
 	for pair in pairs:
 		parts.append("%s x%d" % [pair[0], int(pair[1])])
 	return ", ".join(parts)
+
+
+# --------------------------------------------------------------------------
+# Payout feedback: what earning money looks and sounds like
+# --------------------------------------------------------------------------
+
+## Money arrives in this game through exactly ONE channel — a contract
+## settling at its cadence boundary and paying out (`sim/economy.rs`) — and
+## until now it arrived silently: a number on the clipboard went up between
+## two frames. This section is the celebration of that moment, plus a much
+## smaller cue for the frequent moment that leads to it (a finished case
+## reaching the dock).
+##
+## # How the moment is detected, and why no sim change was needed
+##
+## `economy_snapshot_json` already carries per-contract `deliveries_made`
+## alongside `payout`, so a payout is a RISE in that counter between two
+## polls of a snapshot this scene reads every frame anyway. That is strictly
+## better than watching `money` go up, for three reasons: money also moves
+## when the player buys something, the delta alone cannot say WHICH docket to
+## stamp, and a rise of two means two windows settled and should be
+## celebrated as `2 x payout` rather than as one event. So nothing crosses
+## the `gdext` boundary that did not already (ARCHITECTURE.md §4 is
+## untouched), and the detection is a Godot-side poll.
+##
+## The counters are SEEDED on the first poll and fire nothing (`_payout_seen`
+## starts empty). That is what keeps loading a save — which arrives with
+## `deliveries_made` already at 40 — from opening with forty coin bursts.
+##
+## # Why the animation clock is the simulation tick, not the wall clock
+##
+## Every timed thing in here reads `sim.current_tick()`, not
+## `Time.get_ticks_msec()`. Three things fall out of that and all three are
+## wanted:
+##
+## 1. **It pauses with the game.** UI_UX.md §5d's pause menu says "the
+##    factory is stopped while this is open"; a coin still arcing over a
+##    stopped factory would contradict the sentence.
+## 2. **A screenshot is reproducible.** `MAX_TICKS_PER_FRAME` already clamps
+##    catch-up so two `scripts/screenshot-scene.sh` runs are byte-identical
+##    (the visual-overhaul-r2 decision); anchoring to the tick puts this
+##    effect inside that guarantee instead of outside it, so `--payout` can
+##    photograph the same frame of the same burst twice.
+## 3. **A headless test can assert it.** The whole effect is a pure function
+##    of `current_tick - start_tick`, so a test drives it by ticking rather
+##    than by sleeping.
+##
+## The cost is that motion updates at TICK_HZ (30) rather than at the frame
+## rate. That is not a compromise here — UI_UX.md §6 asks for "chunky, snappy
+## animation ... no smooth organic motion", and the belts already march at
+## four frames per fifty ticks.
+##
+## # What fires, and where each piece is anchored
+##
+## | Where | What | Why there |
+## |---|---|---|
+## | World, every dock | a burst of spinning coins | the goods left from there |
+## | Clipboard, money line | a scale punch, and a rising "+N" | the number that changed |
+## | Clipboard, paying docket | its payout reads PAID | which order paid |
+## | Speakers | the payout chime (`audio.gd`) | — |
+##
+## The "+N" is deliberately NOT anchored to the dock. One payout is one
+## number, and with two docks a per-dock flyout would read as two payouts of
+## N; the coins can be per-dock (they are goods, and every dock ships the
+## same shared pool — `_update_dock_stock`'s own rule) but the figure cannot.
+## Anchoring it to the money label also means it can never be off screen, and
+## that it works in first-person view where a dock may be behind the player.
+
+## The asset a burst throws. Modelled midline-symmetric on purpose so this
+## can spin it about world Y without stepping (UI_UX.md §2b point 20), and
+## carrying an emissive face because both faces this camera can see are the
+## shadow side (point 13).
+const COIN_ASSET := "coin"
+
+## How many coin nodes exist at once, ever. A hard pool rather than a
+## spawn-per-payout, so a factory running for an hour allocates nothing after
+## its first payout, and so UI_UX.md §6's "readable with dozens at once" is a
+## property of the code rather than a hope.
+const COIN_POOL := 24
+
+## One coin per this much money, so a 90 pays out visibly bigger than a 24
+## without either becoming a screenful.
+const COIN_PER_MONEY := 9.0
+const COIN_MIN := 3
+const COIN_MAX_PER_DOCK := 10
+
+## A burst's whole life, in ticks. ~1.1s at TICK_HZ: long enough to read as
+## an arc, short enough that a second payout never lands on the first.
+const COIN_FLIGHT_TICKS := 34
+
+## The ballistic constants, **in tiles** over the flight. Launch beats gravity
+## early and loses to it at the end, so a coin is falling, and already
+## shrinking away, when it goes: it peaks at `LAUNCH^2 / (4 * GRAVITY)` = 1.06
+## tiles up, 46% of the way through, and passes back down through 0.4 tiles
+## below the deck as it vanishes.
+##
+## Measured in TILE and not in bare world units, which is the mistake the
+## first render of this caught: at 3.0 and 3.4 raw the peak was a fifth of a
+## tile and the whole burst read as one gold lump sitting on the deck. Every
+## distance a player compares against the factory has to be in the factory's
+## own unit.
+const COIN_LAUNCH := 4.6 * TILE
+const COIN_GRAVITY := 5.0 * TILE
+## Outward drift over the flight, again in tiles, so the burst opens out
+## instead of stacking. This has a floor set by arithmetic, not by taste: a
+## coin is COIN_SCALE wide, so N coins on a circle of radius r only stay
+## separate while `TAU * r / N` exceeds it. At 10 a dock and 0.25 tiles each,
+## anything under about 0.4 tiles of final radius is a solid ring.
+const COIN_SPREAD := 1.15 * TILE
+## How much the launch varies coin to coin, as a fraction either side of 1.
+## A fan thrown at one speed is a ring; a fountain has coins at different
+## heights. Derived from the coin's index, never from `randf()`, so a
+## screenshot of a burst is reproducible.
+const COIN_LIFT_VARY := 0.28
+## Turns about world Y over the flight. Not a whole number: the point of the
+## spin is that a coin catches the light edge-on and face-on alternately, and
+## an integer count would have every coin land showing the same face.
+const COIN_SPINS := 2.5
+## The coin model is a third of a tile; this shrinks it a little further so a
+## burst of ten does not hide the dock it came from (§6 again — juice stays
+## legible over spectacle).
+const COIN_SCALE := 0.8
+## Fractions of the flight spent growing in and shrinking out.
+const COIN_GROW := 0.12
+const COIN_SHRINK := 0.30
+
+## The money line's punch: how long, and how much bigger it gets at the peak.
+## A scale rather than a position, because the clipboard's container owns
+## positions — the same rule the hotbar's selected slot follows.
+const MONEY_PUNCH_TICKS := 14
+const MONEY_PUNCH_SCALE := 0.34
+## What it flashes to on the way. Signage amber, and paired with the punch,
+## the "+N" and the PAID stamp rather than carrying the meaning alone (§7).
+const MONEY_PUNCH_COLOR := Color(1.0, 0.78, 0.22)
+
+## The "+N" flyout: how long it lives, and how far it rises over that.
+const PAYOUT_FLYOUT_TICKS := 40
+const PAYOUT_FLYOUT_RISE := 26.0
+
+## How long a paid docket's payout figure reads PAID instead of "+90".
+const PAYOUT_STAMP_TICKS := 45
+
+## The dock case pop: a new case scales up from nothing over this many ticks.
+## Much shorter than a payout's anything — this fires every few seconds on a
+## running line, so it has to be over before it is noticed as an animation.
+const DOCK_POP_TICKS := 7
+const DOCK_POP_OVERSHOOT := 0.35
+
+## Sound, and the cues it knows. Preloaded (not a `class_name`) for the same
+## reason `GameSaves` is.
+const FactoryAudio = preload("res://audio.gd")
+
+var _audio # FactoryAudio, built in _ready
+
+## Contract id -> the `deliveries_made` this scene last saw. Empty means
+## "not seeded yet", which is what makes the first poll silent.
+var _payout_seen: Dictionary = {}
+
+## The pool. Each entry is `{"node": Node3D, "start_tick": int,
+## "origin": Vector3, "dir": Vector3}`; `start_tick` < 0 means free.
+var _coins: Array = []
+var _coin_root: Node3D
+var _coin_next := 0
+
+var _payout_flyout: Label
+var _payout_flyout_tick := -1
+var _money_punch_tick := -1
+## Contract id -> the tick it last paid, for the PAID stamp.
+var _payout_stamp_ticks: Dictionary = {}
+
+## The total on the dock last seen, and the pop that a rise in it started.
+## -1 means not seeded (so a loaded save's full dock is silent).
+var _dock_stock_seen := -1
+var _dock_pop_tick := -1
+var _dock_pop_slot := -1
+
+## The pause menu's sound switch (built in `_build_pause_menu`).
+var _pause_sound_button: Button
+
+## Test seams. A dummy audio driver makes "was a sound heard" unanswerable
+## and a headless run has no eyes, so what a test asserts on is how many
+## payouts were celebrated and for how much in total.
+var payout_events := 0
+var payout_total := 0
+
+
+## Builds the coin pool and the "+N" label. Called once from `_build_ui`.
+##
+## The coins hang off a node of the SCENE, not off `_world_root`: that
+## subtree is thrown away and rebuilt on every place/remove/rotate
+## (`_rebuild_world`), and a player who builds a belt while a payout is in
+## the air should not see the burst blink out. Both roots sit at the scene
+## origin, so world coordinates mean the same thing in either.
+func _build_payout_feedback(hud: CanvasLayer) -> void:
+	var existing := get_node_or_null("Feedback")
+	if existing != null:
+		# `_ready` genuinely runs twice under the headless `--script` harness
+		# (see `_rebuild_world`'s note), and a second pool would leave the
+		# first one's nodes orphaned in the tree.
+		remove_child(existing)
+		existing.free()
+	_coin_root = Node3D.new()
+	_coin_root.name = "Feedback"
+	add_child(_coin_root)
+
+	_coins.clear()
+	_coin_next = 0
+	for i in range(COIN_POOL):
+		var node := _asset_node(COIN_ASSET)
+		node.name = "coin_%d" % i
+		node.visible = false
+		_coin_root.add_child(node)
+		_coins.append({"node": node, "start_tick": -1, "origin": Vector3.ZERO,
+			"dir": Vector3.ZERO, "lift": 1.0})
+
+	var flyout_settings := LabelSettings.new()
+	flyout_settings.font_size = _ui_font(9)
+	flyout_settings.font_color = MONEY_PUNCH_COLOR
+	flyout_settings.outline_size = _ui_i(6)
+	flyout_settings.outline_color = Color(0, 0, 0, 0.92)
+
+	_payout_flyout = Label.new()
+	_payout_flyout.name = "PayoutFlyout"
+	_payout_flyout.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_payout_flyout.label_settings = flyout_settings
+	_payout_flyout.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_payout_flyout.modulate = Color(1, 1, 1, 0)
+	hud.add_child(_payout_flyout)
+
+
+## Compares this frame's contract snapshots against the last frame's and
+## fires the celebration for any window that settled in between.
+##
+## Several contracts can settle on the same tick (`Economy::tick` returns a
+## LIST of paid contracts) and several ticks can run in one frame
+## (MAX_TICKS_PER_FRAME is 8), so this must handle both a rise of more than
+## one on a single contract and rises on more than one contract — which it
+## does by summing, and celebrating once. Two chimes and two flyouts for
+## what the player experiences as one payment would read as a bug.
+func _detect_payouts(contracts: Array, current_tick: int) -> void:
+	var seeding: bool = _payout_seen.is_empty()
+	var earned := 0
+	var paid_ids: Array[String] = []
+	var live: Dictionary = {}
+
+	for entry in contracts:
+		if not (entry is Dictionary):
+			continue
+		var id := String(entry.get("id", ""))
+		var made := int(entry.get("deliveries_made", 0))
+		live[id] = made
+		if seeding:
+			continue
+		# A contract this scene has not seen before (a save from a different
+		# board is refused by `load_ron`, so in practice this is a new
+		# `contracts.ron`) is seeded rather than treated as having just paid
+		# `made` times.
+		if not _payout_seen.has(id):
+			continue
+		var windows: int = made - int(_payout_seen[id])
+		if windows <= 0:
+			continue
+		earned += int(round(float(entry.get("payout", 0)))) * windows
+		paid_ids.append(id)
+
+	_payout_seen = live
+	if seeding or earned <= 0:
+		return
+	_fire_payout(earned, paid_ids, current_tick)
+
+
+## One payment, celebrated. Split from detection so a test can call it
+## directly with a known figure.
+func _fire_payout(amount: int, paid_ids: Array, current_tick: int) -> void:
+	payout_events += 1
+	payout_total += amount
+
+	_money_punch_tick = current_tick
+	_payout_flyout_tick = current_tick
+	if _payout_flyout != null:
+		_payout_flyout.text = "+%d" % amount
+	for id in paid_ids:
+		_payout_stamp_ticks[String(id)] = current_tick
+	_burst_coins(amount, current_tick)
+	if _audio != null:
+		_audio.play(FactoryAudio.PAYOUT)
+
+
+## Throws coins off every dock.
+##
+## Every dock, because every dock displays the same shared pool the payment
+## consumed (`_update_dock_stock`'s doc states that rule once) — showing the
+## money leave one arbitrarily-chosen door would be the scene disagreeing
+## with itself. The budget is SPLIT across them rather than repeated, so a
+## player with four docks gets a payout that reads as one payment from a
+## bigger factory and not as four payments.
+func _burst_coins(amount: int, current_tick: int) -> void:
+	var docks: Array = _dock_nodes.keys()
+	if docks.is_empty() or _coins.is_empty():
+		return
+
+	var budget: int = clampi(int(round(float(amount) / COIN_PER_MONEY)), COIN_MIN, COIN_POOL)
+	var per_dock: int = clampi(int(floor(float(budget) / float(docks.size()))), 1, COIN_MAX_PER_DOCK)
+	# Deterministic, evenly spaced directions rather than `randf()`: an even
+	# fan looks more like a fountain than a random one does, and it keeps a
+	# screenshot reproducible. The whole fan is rotated by a figure derived
+	# from the tick, so two payouts in a row are not the identical picture.
+	var base: float = TAU * (float(current_tick % 16) / 16.0)
+
+	for key in docks:
+		var nodes: Dictionary = _dock_nodes[key]
+		var anchor: Vector3 = nodes.get("anchor", Vector3.ZERO)
+		for i in range(per_dock):
+			var angle: float = base + TAU * float(i) / float(per_dock)
+			# The lift walks a coprime step around a small cycle, so adjacent
+			# coins in the fan never get adjacent heights and the pattern does
+			# not repeat within one dock's worth.
+			var lift: float = 1.0 + COIN_LIFT_VARY * (float((i * 3) % 7) / 3.0 - 1.0)
+			_launch_coin(anchor, Vector3(cos(angle), 0.0, sin(angle)), lift, current_tick)
+
+
+func _launch_coin(origin: Vector3, dir: Vector3, lift: float, current_tick: int) -> void:
+	# Round-robin, so an overflowing burst steals the OLDEST coin in flight
+	# rather than refusing to draw. A stolen coin at the end of a fade is
+	# invisible; a burst that silently shrinks under load is not.
+	var coin: Dictionary = _coins[_coin_next]
+	_coin_next = (_coin_next + 1) % _coins.size()
+	coin["start_tick"] = current_tick
+	coin["origin"] = origin
+	coin["dir"] = dir
+	coin["lift"] = lift
+
+
+## Advances every live piece of feedback. Called once per frame from
+## `_process`, after the simulation has been advanced, so `current_tick` is
+## this frame's.
+func _update_payout_feedback() -> void:
+	var current_tick: int = sim.current_tick()
+	_update_coins(current_tick)
+	_update_money_punch(current_tick)
+	_update_payout_flyout(current_tick)
+	_update_payout_stamps(current_tick)
+	_update_dock_pop(current_tick)
+
+
+func _update_coins(current_tick: int) -> void:
+	for coin in _coins:
+		var start: int = int(coin["start_tick"])
+		var node: Node3D = coin["node"]
+		if start < 0:
+			continue
+		var phase: float = float(current_tick - start) / float(COIN_FLIGHT_TICKS)
+		if phase < 0.0 or phase >= 1.0:
+			coin["start_tick"] = -1
+			node.visible = false
+			continue
+		var origin: Vector3 = coin["origin"]
+		var dir: Vector3 = coin["dir"]
+		var lift: float = float(coin.get("lift", 1.0))
+		var height: float = COIN_LAUNCH * lift * phase - COIN_GRAVITY * phase * phase
+		node.position = origin + dir * (COIN_SPREAD * phase) + Vector3(0.0, height, 0.0)
+		node.rotation.y = phase * TAU * COIN_SPINS
+		var grow: float = clampf(phase / COIN_GROW, 0.0, 1.0)
+		var shrink: float = clampf((1.0 - phase) / COIN_SHRINK, 0.0, 1.0)
+		node.scale = Vector3.ONE * (COIN_SCALE * grow * shrink)
+		node.visible = true
+
+
+## How many coins are in the air. The headless test's one window onto the
+## world half of this effect.
+func _active_coin_count() -> int:
+	var count := 0
+	for coin in _coins:
+		if int(coin["start_tick"]) >= 0:
+			count += 1
+	return count
+
+
+## The money line's punch, and the amber it flashes through on the way back.
+## The pivot is its RIGHT edge, so the number grows leftward into the
+## clipboard instead of pushing out past the panel's border.
+func _update_money_punch(current_tick: int) -> void:
+	if _contract_money_label == null:
+		return
+	var age: int = current_tick - _money_punch_tick
+	if _money_punch_tick < 0 or age < 0 or age >= MONEY_PUNCH_TICKS:
+		if _money_punch_tick >= 0:
+			_money_punch_tick = -1
+			_contract_money_label.scale = Vector2.ONE
+			_contract_money_label.modulate = Color(1, 1, 1, 1)
+		return
+	var t: float = float(age) / float(MONEY_PUNCH_TICKS)
+	var fall: float = (1.0 - t) * (1.0 - t)
+	_contract_money_label.pivot_offset = Vector2(
+		_contract_money_label.size.x, _contract_money_label.size.y * 0.5
+	)
+	_contract_money_label.scale = Vector2.ONE * (1.0 + MONEY_PUNCH_SCALE * fall)
+	_contract_money_label.modulate = Color(1, 1, 1, 1).lerp(MONEY_PUNCH_COLOR, fall)
+
+
+## The rising "+N", parked over the money line it belongs to. Positioned
+## every frame rather than once, because the clipboard re-anchors itself
+## every frame too (its minimum size grows with its own text).
+func _update_payout_flyout(current_tick: int) -> void:
+	if _payout_flyout == null:
+		return
+	var age: int = current_tick - _payout_flyout_tick
+	if _payout_flyout_tick < 0 or age < 0 or age >= PAYOUT_FLYOUT_TICKS:
+		_payout_flyout.modulate = Color(1, 1, 1, 0)
+		return
+	var t: float = float(age) / float(PAYOUT_FLYOUT_TICKS)
+	if _contract_money_label != null and _contract_money_label.is_inside_tree():
+		# Size it from its own text FIRST. This Label is parented straight to
+		# the CanvasLayer rather than to a container, so nothing else ever sets
+		# its size: it stays at Control's default and the right-alignment below
+		# lines the flyout's left edge up with the money figure's right edge,
+		# which puts "+90" off the side of the screen. The first render of this
+		# is what found it.
+		_payout_flyout.size = _payout_flyout.get_minimum_size()
+		var anchor := _contract_money_label.get_global_rect()
+		_payout_flyout.position = Vector2(
+			anchor.position.x + anchor.size.x - _payout_flyout.size.x,
+			# It rises OUT OF the money line, not from above it. The clipboard
+			# is anchored to the top-right corner, so the money figure sits
+			# about fifty pixels from the top edge and there is simply not
+			# PAYOUT_FLYOUT_RISE of room above it — the first render of this
+			# had "+90" half off the top of the screen. Starting level with the
+			# counter's bottom edge and rising through it spends the same
+			# travel entirely inside the viewport, and by the time the figure
+			# crosses the number it announces it is down to a fifth alpha.
+			anchor.position.y + anchor.size.y * 0.9 - _ui_px(PAYOUT_FLYOUT_RISE) * t
+		)
+	# Full strength for the first third, then out — a figure that starts
+	# fading immediately is a figure that is never quite readable.
+	_payout_flyout.modulate = Color(1, 1, 1, clampf((1.0 - t) / 0.66, 0.0, 1.0))
+
+
+## The paying docket's payout figure, which reads PAID for a beat instead of
+## "+90". A word, not a colour wash (UI_UX.md §7), and on the one number that
+## just became true rather than on a new widget the docket has no room for.
+func _update_payout_stamps(current_tick: int) -> void:
+	for i in range(min(_contract_cards.size(), _contract_card_ids.size())):
+		var card: Dictionary = _contract_cards[i]
+		var label: Label = card.get("payout_label")
+		if label == null:
+			continue
+		var id := String(_contract_card_ids[i])
+		var stamped: bool = _payout_stamp_ticks.has(id)
+		if stamped:
+			var age: int = current_tick - int(_payout_stamp_ticks[id])
+			if age < 0 or age >= PAYOUT_STAMP_TICKS:
+				_payout_stamp_ticks.erase(id)
+				stamped = false
+		if stamped:
+			if label.text != "PAID":
+				label.text = "PAID"
+				label.modulate = MONEY_PUNCH_COLOR
+		elif label.text == "PAID":
+			label.text = "+%d" % int(label.get_meta("payout", 0))
+			label.modulate = Color(1, 1, 1, 1)
+
+
+## Notices a case landing on the dock and pops it in.
+##
+## The pool's total rising IS a case arriving: `delivery_stock` only goes up
+## when a dock ships into it, and only goes down when a contract consumes a
+## mix. This is far more frequent than a payout, so what it gets is a
+## seven-tick scale pop and a wooden knock, not a burst — see `audio.gd`'s
+## note on why the delivery cue is deliberately small.
+func _detect_dock_arrivals(stock: Array, current_tick: int) -> void:
+	var total := 0
+	for pair in stock:
+		if pair is Array and pair.size() >= 2:
+			total += int(pair[1])
+	var previous: int = _dock_stock_seen
+	_dock_stock_seen = total
+	if previous < 0 or total <= previous:
+		return
+	# The case that appeared is the last visible one; past the deck's slot
+	# count nothing new is drawn, so nothing should pop either.
+	_dock_pop_slot = mini(total, DOCK_STOCK_SLOTS) - 1
+	_dock_pop_tick = current_tick
+	if _audio != null:
+		_audio.play(FactoryAudio.DELIVERY)
+
+
+func _update_dock_pop(current_tick: int) -> void:
+	if _dock_pop_tick < 0 or _dock_pop_slot < 0:
+		return
+	var age: int = current_tick - _dock_pop_tick
+	var done: bool = age < 0 or age >= DOCK_POP_TICKS
+	var pop := Vector3.ONE
+	if not done:
+		# Overshoot and settle: a case that grows straight to its size reads
+		# as appearing, and one that overshoots reads as landing.
+		var t: float = float(age) / float(DOCK_POP_TICKS)
+		pop = Vector3.ONE * (1.0 + DOCK_POP_OVERSHOOT * sin(PI * t))
+	for key in _dock_nodes.keys():
+		var slots: Array = _dock_nodes[key].get("slots", [])
+		if _dock_pop_slot < slots.size():
+			(slots[_dock_pop_slot] as Node3D).scale = pop
+	if done:
+		_dock_pop_tick = -1
+		_dock_pop_slot = -1
+
+
+## Whether anything is audible, and the pause-menu caption that says so.
+## Session-scoped on purpose: this is the game's FIRST sound, and a persisted
+## audio setting belongs with the rest of a settings screen this project does
+## not have yet, not smuggled into the save format.
+func _toggle_sound() -> void:
+	if _audio == null:
+		return
+	_audio.enabled = not _audio.enabled
+	_update_sound_button()
+
+
+## The switch says ON or OFF in words, not by looking pressed (UI_UX.md §7).
+func _update_sound_button() -> void:
+	if _pause_sound_button == null:
+		return
+	var on: bool = _audio != null and _audio.enabled
+	_pause_sound_button.text = "SOUND: ON" if on else "SOUND: OFF"
+
+
+func _on_pause_sound_pressed() -> void:
+	_toggle_sound()

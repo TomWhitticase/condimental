@@ -169,6 +169,23 @@ var _stock := false
 ## fill it.
 const CONTRACTS_REVIEW_DOCK_UNITS := 1
 const CONTRACTS_REVIEW_TICK_LIMIT := 20000
+## `--payout` photographs the celebration a contract payout fires: the coin
+## burst over the dock, the "+N" over the money line and the PAID stamp on the
+## docket that paid. This is the one review the payout work actually needs —
+## `test_payout_feedback.gd` can prove every number, and cannot say whether ten
+## coins over a dock read as a fountain or as a mess (UI_UX.md §2b point 12).
+##
+## Like `--contracts` it waits for the EVENT, not for a tick count: the first
+## payout lands at tick 2500 against today's cadences and process times, and a
+## hardcoded count would quietly go back to photographing an empty apron the
+## day one of those moves.
+var _payout := false
+const PAYOUT_REVIEW_TICK_LIMIT := 20000
+## Where in the burst's arc to stop the clock, as a fraction of
+## COIN_FLIGHT_TICKS. Past `COIN_GROW` so the coins are at full size, and near
+## the top of the flight, which is where the fan reads as a fountain rather
+## than as a pile on the deck.
+const PAYOUT_REVIEW_PHASE := 0.5
 var _ghost_kind := ""
 var _ghost_blocked := false
 var _remove_mode := false
@@ -223,6 +240,9 @@ func _initialize() -> void:
 	_contents = int(_string_arg(args, "--contents")) if _string_arg(args, "--contents") != "" else -1
 	_contracts = args.has("--contracts")
 	if _contracts:
+		_fixture = "chain"
+	_payout = args.has("--payout")
+	if _payout:
 		_fixture = "chain"
 	_hotbar_key = _string_arg(args, "--hotbar")
 	_stock = args.has("--stock")
@@ -544,6 +564,53 @@ func _run_contract_cycles() -> void:
 	_main._update_contract_panel()
 
 
+## Runs the shipped line until a contract genuinely pays, then stops the clock
+## partway through the burst it fires.
+##
+## The line is put on AUTOMATIC rather than hand-fed a command a tick: the two
+## raw solids and the raw fluid all have to keep arriving for 2500 ticks, and
+## `stock_larder` buys only the solids, so the vinegar is bought explicitly
+## here. A line that stalls halfway photographs as a factory with nothing on
+## its dock and no payout at all.
+func _run_to_payout() -> void:
+	Layouts.fund(_main.sim, 30000)
+	Layouts.stock(_main.sim, "vinegar", 1000)
+	for tile in [Vector2i(-1, 0), Vector2i(4, 1)]:
+		_main.sim.issue_command_json(JSON.stringify({
+			"type": "set_hopper_auto_fill", "tile": [tile.x, tile.y], "enabled": true}))
+	_main.sim.issue_command_json(JSON.stringify({
+		"type": "set_tank_auto_fill", "tile": [5, 2], "enabled": true}))
+
+	for i in range(PAYOUT_REVIEW_TICK_LIMIT):
+		_main.sim.tick()
+		_main._update_contract_panel()
+		if _main.payout_events > 0:
+			break
+	if _main.payout_events == 0:
+		printerr("SCREENSHOT_NOTE: --payout ran %d ticks without a contract paying"
+			% PAYOUT_REVIEW_TICK_LIMIT)
+
+	# Advance to the chosen point in the arc. The whole effect is a function of
+	# `sim.current_tick()`, so "hold the frame mid-burst" is ticking the
+	# simulation, not sleeping — which is also why two runs of this flag give
+	# the identical picture.
+	for i in range(int(_main.COIN_FLIGHT_TICKS * PAYOUT_REVIEW_PHASE)):
+		_main.sim.tick()
+	_main._apply_dirty_chunks()
+	_main._refresh_buffers()
+	_main._update_fluid_network()
+	_main._update_contract_panel()
+	_main._update_payout_feedback()
+	# Then FREEZE the scene. Every other flag sets up a state that persists
+	# (a board, an open menu, a hovered tile), so the WARMUP_FRAMES the shot
+	# waits out cost them nothing; a burst lasts COIN_FLIGHT_TICKS (34) and
+	# `main._process` advances up to MAX_TICKS_PER_FRAME (8) a frame, so 43
+	# more frames of it would leave an empty apron to photograph. Holding the
+	# scene still is what "hold the frame mid-burst" means here, and the
+	# review wants a still anyway.
+	_main.set_process(false)
+
+
 func _contract_board_is_mixed() -> bool:
 	var econ: Dictionary = JSON.parse_string(_main.sim.economy_snapshot_json())
 	var stock := 0
@@ -677,6 +744,8 @@ func _process(_delta: float) -> bool:
 		_main._set_market_open(true)
 	if _frames == 2 and _contracts:
 		_run_contract_cycles()
+	if _frames == 2 and _payout:
+		_run_to_payout()
 	if _frames == 2 and _stock:
 		_stock_the_hotbar()
 	if _frames == 2 and _hotbar_key != "":

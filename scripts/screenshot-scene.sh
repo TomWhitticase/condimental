@@ -31,6 +31,15 @@
 # back with `sim::STARTING_MONEY`'s rise from 200 to 3000: under the old
 # balance no fixture could reach a factory that earns anything.
 #
+# Pass --payout to build that same line, run it until a contract genuinely
+# pays out, and hold the frame partway through the celebration that fires:
+# the coin burst over the dock, the rising "+N" over the money line, the
+# money figure mid-punch and the paying docket reading PAID. This is the one
+# check the payout work needs eyes on — test_payout_feedback.gd can prove
+# every number and cannot say whether the burst reads as a fountain.
+# It implies --fixture chain, and it FREEZES the scene once the frame is set
+# up, since a burst is over in 34 ticks and the shot's warm-up is longer.
+#
 # Pass --stock to buy an assorted kit (belts, pipes, a hopper, a tank, a
 # machine or two) so the hotbar shows carried sockets, multi-digit counts and
 # empty sockets side by side, and --hotbar N to press hotbar key N for real —
@@ -112,7 +121,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--contracts] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--no-hud] [--stock] [--hotbar N] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--contracts] [--payout] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--no-hud] [--stock] [--hotbar N] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

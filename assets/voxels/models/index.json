@@ -47,6 +47,10 @@
     "matte",
     "metal"
   ],
+  "coin": [
+    "metal",
+    "emissive"
+  ],
   "floor_tile": [
     "matte"
   ],

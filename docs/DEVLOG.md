@@ -36,6 +36,7 @@ below is history and should only ever be appended to.)*
 - **Chain rework (DONE, both halves):** the middle of the production line is **piped, not belted**, which is what a real sauce plant looks like. The mixer's output and the cooking vat's output are fluids (`recipes.ron` schema_version 3 gained `fluid_outputs`), so mix flows from the mixer to the vat and cooked ketchup from the vat to the bottler through pipe runs with no tank behind them; the bottler is where the product becomes a solid again, and the cooking vat is now the one machine on the line **no belt touches at all**. The mixer gained **sugar** as a second solid ingredient and grew to **1x2** for it — a machine accepts solid input on every tile of the edge opposite the way it points, so N solid ingredients need N tiles of inlet face or the two lanes merge onto one belt and deadlock. The aging rack is gone. **Raw ingredients cost money**: `data/ingredients.ron` prices tomato, sugar and vinegar, a `BuyIngredient` command buys them, and a hopper or a tank is loaded from that bought stock *(originally with the global `SPACE`/`V` keys; since the configuration panel below, from the building's own panel)* — so overproduction is a real loss rather than free accumulation. On the presentation side: a hopper's contents are chosen **when it is placed** (the ghost carries a tinted product body and the prompt names them in words; the **Q** key that cycled them is gone, replaced by the placed hopper's own picker), because with two raw solids the simulation can no longer infer which bin the player meant — until that landed, placing a hopper from the UI did nothing at all, silently. Buying stock has its own panel on **M** (the build menu was already as tall as the space above the hotbar allows), and a permanent larder strip above the hotbar shows what is carried so an unloadable hopper explains itself. The mixer, the cooking vat and the bottler were re-modelled with pipe nozzles where belts no longer meet them.
 - **Hopper/tank configuration (DONE, both halves):** nothing about feeding a factory is on the keyboard any more. A placed hopper or tank is **clicked**, and a panel beside it shows its level, a **FILL** button (disabled with its reason in words when the larder is empty, the bin is full, or the tank is plumbed to nothing), an **AUTO-FILL** switch that keeps the bin topped up from bought stock every tick — spending stock, never money, and simply pausing while the larder is dry — and, for a hopper, an item picker that retargets it in place. The click is a toggle, only one panel ever exists, ESC closes it first, and it closes itself under any menu or mode. The global **SPACE**/**V**/**Q** keys and `CycleHopperItem` are deleted. Pinned by `test_config_panel.gd`; `scripts/screenshot-scene.sh --config TX,TY` photographs it.
 - **Pipes & conveyors overhaul (IN PROGRESS — six of seven tickets merged, `docs/PIPES_AND_CONVEYORS_PLAN.md` has the ticket-7 hand-off notes):** seven tickets on one integration branch to make belts and pipes look right, read right, run fast and connect up. **Ticket 1 (sim) has landed:** every belt, splitter and pipe on the wire carries `links` — what feeds it, what it hands to, or what its pipe is joined to, per side — recorded by the topology pass so it is exact and free per tick. **Ticket 4 (Godot) has landed:** belts, splitters, pipes and the items riding them are `MultiMesh` instances (one per asset and material class) rather than a node each, with a 1500-tile stress fixture, a headless timing test (`test_perf.gd`) and `scripts/screenshot-scene.sh --stress`; machines and buildings keep their nodes, and the seams the belt-animation and corner tickets build on (frame sets, a caller-supplied yaw per tile, one item-positioning function) are in place in `main.gd`. **Ticket 3 (assets) has landed:** the pipe model family (straight, corner, tee, cross, end, machine/tank fittings, one fluid body per shape) on a 15.5 midline, with seven pipe rendering defects fixed at the generator. **Ticket 2 (assets) has landed:** the belt model family — straights and left/right corners in four animation frames with a solid raised direction arrow; the belt-side junction variants are retired (the plain tile carries the junction, the machine's hood does the rest). **Ticket 6 (Godot) has landed:** every pipe tile draws its shape (end, straight, corner, tee, cross), its turn, its machine/tank fittings and its per-shape liquid body from the wire's `links` alone; hover names a pipe's connections in words; the one-arrangement `pipe_source`/`pipe_inlet` tiles are deleted; `test_pipe_shapes.gd` and `scripts/screenshot-scene.sh --pipe-gallery` cover every shape at every turn. **Ticket 5 (Godot) has landed:** a belt's shape (straight, left/right corner, merge, start, end) comes from its `links`, the four-frame surface animates at item speed from the tick, items arc through corners (and are drawn face to face on every tile — they had been half a tile downstream), hover says feeds and hand-offs in words, the retired belt aliases are deleted, and a `--belt-gallery` fixture shows every shape and junction at every facing. Ticket 7 (gallery bug hunt and docs close-out) is to do; one sim rule discrepancy (a belt feeds a machine from any side of an inlet-edge tile) is flagged for ticket 7.
+- **Payout juice, and the project's first audio (done):** earning money is now an event rather than a number quietly going up. When a contract settles, coins fountain up over every dock, the money counter punches up in scale and flashes amber, a "+N" rises out of it and the docket that paid is stamped **PAID**; a case landing on the dock gets a much smaller cue (a pop and a quiet knock), because that happens constantly and a payout happens every thousand-odd ticks. It needed **no simulation change at all** — Godot notices a payout by watching each contract's `deliveries_made` for a rise in the snapshot it already polls. The whole celebration is clocked off `sim.current_tick()`, so it pauses with the game and a screenshot run stays reproducible. **Sound exists now**, and it is synthesised in GDScript at runtime (`godot_project/audio.gd`) rather than shipped as `.wav` files — which settles UI_UX.md §8's open audio question as *feedback-only, procedurally generated*, with a SOUND switch on the pause menu.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -51,6 +52,56 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-11 — Earning money is an event now (and the game makes noise)
+
+A directly-requested pass with a simple brief: *"whenever we earn money i
+want some cool animation or particle effect and maybe a sound effect too. i
+want this game to be super satisfying to play like how crossy road is."*
+
+Money arrives through exactly one channel — a contract settling at its
+cadence boundary — and at cadences of 1000-2500 ticks that is rare enough to
+deserve a real celebration. A payout now fires four things at once: a
+fountain of coins arcing up over every dock, the money counter punching up in
+scale and flashing amber, a "+N" rising out of the money line, and a **PAID**
+stamp on the docket that paid. The frequent moment underneath it — a case
+landing on the dock — gets a deliberately small cue instead: the case pops in
+with a short overshoot and a quiet knock plays. Two sizes of feedback for two
+frequencies.
+
+**No simulation change was needed, and none was made.** Godot notices a
+payout by watching each contract's `deliveries_made` for a rise in the
+`economy_snapshot_json` it already polls every frame; the first poll after a
+rebuild or a load seeds silently, so loading a save with forty deliveries
+behind it does not throw forty celebrations. The whole thing is clocked off
+`sim.current_tick()` rather than wall time, so it freezes when the game is
+paused and a fixed-tick screenshot run is still reproducible.
+
+**The game has sound for the first time**, and the sounds are *code*: a small
+`audio.gd` synthesises each cue into an `AudioStreamWAV` at runtime instead
+of the repo carrying `.wav` binaries, the same way `assets/voxels/generators/`
+makes the models code. That is deterministic enough for a test to assert two
+renders of a cue are byte-identical, and it settles UI_UX.md §8's long-open
+"audio direction (not decided)" as **feedback-only sound, procedurally
+generated** — no music, no ambience, with a SOUND switch on the pause menu.
+
+Two bugs were found by the rendered frame that every headless assertion had
+passed straight through (UI_UX.md §2b point 12 again). The coin arc was
+scaled in raw world units while a tile is 3.2 of them, so its peak was a
+fifth of a tile and its spread was narrower than a coin: ten coins drew as
+one gold lump sitting on the deck. And the "+N" flyout is parented to the HUD
+`CanvasLayer`, so nothing ever set its size, and right-aligning a zero-width
+label put the text off the edge of the screen — then, once fixed, off the top
+of it, because a top-right clipboard leaves no headroom above the money
+figure to rise into. Both are recorded as rules: every distance in a 3D
+effect is measured in `TILE`, and a flyout rises *out of* the thing it
+announces.
+
+`test_payout_feedback.gd` proves the structure (seeding, one event per poll
+however many windows settled, the totals, the decay of every element back to
+nothing, the dock cue, audio determinism) and `scripts/screenshot-scene.sh
+--payout` freezes the scene partway through a real burst so the look can be
+judged. Full record in `docs/DECISIONS.md`.
 
 ### 2026-09-10 — Click a hopper or a tank to configure it
 

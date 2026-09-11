@@ -22,6 +22,121 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-11: **Payout feedback — what earning money looks and sounds like,
+  and the project's first audio.** Money arrives through exactly one channel
+  (a contract settling at its cadence boundary, `sim/economy.rs`) and it
+  arrived silently: a number on the clipboard went up between two frames. The
+  brief was Crossy Road's kind of satisfaction, so the moment now gets a coin
+  burst off every dock, a scale-and-amber punch on the money line, a rising
+  "+N", a PAID stamp on the docket that paid, and a two-note chime; the far
+  more frequent moment it leads to (a case landing on the dock) gets a
+  seven-tick pop and a wooden knock. Eight calls worth recording.
+
+  (1) **The moment is detected by POLLING per-contract `deliveries_made`
+  deltas out of `economy_snapshot_json`, so the sim did not change at all.**
+  That snapshot already carries `deliveries_made` beside `payout`, and
+  `_update_contract_panel` already parses it every frame, so a rise in the
+  counter between two polls IS a payout. Strictly better than watching
+  `money`, for three reasons: money also moves when the player buys
+  something; a money delta cannot name WHICH docket to stamp; and a rise of
+  two means two windows settled and should read as `2 x payout` in ONE
+  celebration. Nothing new crosses the `gdext` boundary, so ARCHITECTURE.md
+  §4's wire contract is untouched. The first poll of a world SEEDS silently —
+  loading a save whose contracts have delivered forty times must not fire
+  forty celebrations — and a contract seen for the first time is seeded
+  rather than treated as having just paid `deliveries_made` times.
+
+  (2) **The animation clock is `sim.current_tick()`, never
+  `Time.get_ticks_msec()`.** Three things follow and all three are wanted.
+  It PAUSES WITH THE GAME, so UI_UX.md §5d's "the factory is stopped while
+  this is open" is not contradicted by a coin arcing over a stopped factory.
+  It stays inside `MAX_TICKS_PER_FRAME`'s existing byte-identical-screenshot
+  guarantee (the visual-overhaul-r2 decision) instead of outside it, so
+  `--payout` photographs the same burst twice. And it makes the whole effect
+  a pure function of `current_tick - start_tick`, which is why the headless
+  test drives it by TICKING rather than by sleeping. The cost is that motion
+  updates at TICK_HZ (30) rather than at frame rate, which is not a
+  compromise for a game whose belts already march at four frames per fifty
+  ticks (UI_UX.md §6: "chunky, snappy ... no smooth organic motion").
+
+  (3) **Every distance in the burst is measured in TILE, not in bare world
+  units.** This is the mistake the first render caught and it is the entry's
+  most transferable lesson. The ballistic constants were tuned in the
+  abstract at 3.0 and 3.4, which put the peak a fifth of a tile up and the
+  outward spread (1.1) BELOW the width of a coin (0.8) — so ten coins with
+  ten distinct directions rendered as one gold lump sitting on the deck, and
+  every headless assertion about them passed. There is even a floor set by
+  arithmetic rather than by taste: N coins on a circle of radius r stay
+  separate only while `TAU * r / N` exceeds the coin's own width. Any
+  distance a player compares against the factory has to be in the factory's
+  unit.
+
+  (4) **The coin pool is fixed (24), hand-driven and deterministic — not
+  `GPUParticles3D` and not `randf()`.** A hard pool means a factory running
+  for an hour allocates nothing after its first payout, and an overflowing
+  burst steals the OLDEST coin in flight rather than refusing to draw (a
+  stolen coin at the end of a fade is invisible; a burst that silently
+  shrinks under load is not). Directions are an evenly spaced fan whose whole
+  rotation is derived from the tick, and each coin's launch varies by a
+  function of its index — a fan thrown at one speed is a ring, a fountain has
+  coins at different heights — so two payouts in a row are not the identical
+  picture and a screenshot is still reproducible. The pool hangs off a
+  scene-level `Feedback` node, NOT off `_world_root`, which is thrown away
+  and rebuilt on every place/remove/rotate: a player who lays a belt while a
+  payout is in the air keeps their burst.
+
+  (5) **The "+N" is anchored to the money label, not to a dock.** One payment
+  is one number; with two docks a per-dock flyout would read as two payouts
+  of N. Coins can be per-dock because they are goods and every dock ships
+  into the same shared pool, and a dock can legitimately be off screen or
+  behind the player in first-person, where the clipboard never is. Its two
+  bugs were both render-only: parented straight to the CanvasLayer, nothing
+  ever set its size, so right-alignment used a width of zero and put "+90"
+  off the side of the screen; and the clipboard is anchored to the top-right
+  corner, so there is no `PAYOUT_FLYOUT_RISE` of room ABOVE the money figure
+  and the flyout rises out THROUGH it instead, down to a fifth alpha by the
+  time it crosses.
+
+  (6) **Sound is synthesised in GDScript, not committed as `.wav` files.**
+  This is UI_UX.md §2a's voxel argument applied to audio: that section's
+  driving constraint was that every asset be creatable and editable by
+  Claude and not only by a human in a GUI, and a recorded `.wav` is an opaque
+  blob only its author can regenerate. A few hundred samples of arithmetic
+  are diffable and tunable by changing a number, and `AudioStreamWAV` takes
+  raw PCM so no file need exist. Noise transients run off an explicit LCG
+  rather than `randf()`, so two runs of `verify-core-loop.sh` differ in
+  nothing at all. The limit is stated rather than discovered later: this buys
+  arcade tones and not recorded material, and a future music/ambience layer
+  would want real files. **This resolves UI_UX.md §8's open "audio direction"
+  question, narrowly:** sound here is FEEDBACK, not a score or an ambience
+  bed — it fires on the moments the player is meant to feel and is silent
+  otherwise, which is what keeps a factory that runs for an hour from
+  becoming an hour of noise. The payout is two rising notes over a low thump
+  (an interval reads as an event where a single tone reads as a
+  notification); the delivery knock is a fifth of its length and well under
+  half its level, because it fires every few seconds on a working line.
+
+  (7) **`preload`, not `class_name`.** `audio.gd` is reached by
+  `const FactoryAudio = preload("res://audio.gd")`, the way `game_session.gd`
+  and `test_layouts.gd` already are. A `class_name` is only registered after
+  an editor scan, so a headless `--script` run against a cold `.godot/` would
+  not find it — which is precisely how every test in this project runs.
+
+  (8) **What the two verifications each cover.**
+  `godot_project/test_payout_feedback.gd` (`PAYOUT_FEEDBACK_OK`, in
+  `verify-core-loop.sh`) proves the numbers end to end: a real payout on the
+  shipped line at tick 2500 fires exactly one celebration for the paying
+  docket's own payout, a two-window and a two-contract delta each celebrate
+  ONCE for the summed amount, an unchanged board is silent, everything decays
+  back to exactly nothing, dock arrivals get the small cue and never the big
+  one, and the synthesis is byte-identical run to run.
+  `scripts/screenshot-scene.sh --payout` is the eyes, and it earned its place
+  immediately by finding (3) and (5) with every one of those assertions
+  green — UI_UX.md §2b point 12, again. It waits for the EVENT rather than a
+  tick count (a hardcoded 2500 would quietly photograph an empty apron the
+  day a cadence moved) and then FREEZES the scene, because a burst is over in
+  34 ticks and the shot's own warm-up is 45 frames.
+
 - 2026-09-10: **Hopper/tank configuration, ticket 2 of 2 (the Godot half,
   plus the one sim deletion ticket 1 deferred to it) — a placed hopper or
   tank is CLICKED, and everything about it is on a panel beside it.** The
