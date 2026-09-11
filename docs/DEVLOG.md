@@ -53,6 +53,35 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-11 — Vinegar looks like vinegar
+
+A small directly-requested art pass with one real bug inside it. Vinegar is
+one of the three raw ingredients the player buys, and it had no model at all
+— so `_market_asset_for`'s fallback answered for it, and the ingredient
+market, the larder strip and the hopper picker all showed the player **a
+length of pipe** where the thing they were buying should be. Its colour
+existed only as one `FLUID_TINTS` gold in `main.gd`, which at scene scale
+read as cooking oil rather than an acid.
+
+Now: `palette.ron` has `vinegar_amber` (`#AD6B23`, the `liquid` class) and
+`vinegar_glass`, appended so no existing model re-indexes; `main.gd`'s tint
+for vinegar *is* that RGB, so the pipe run, the tank's sight window and the
+market icon are one colour with one home. `item_vinegar` is a tall,
+straight-sided jug with a cream wrap-around label, a steel cap and a moulded
+ear, routed through a new `FLUID_MODELS` table — deliberately not extra keys
+in `ITEM_MODELS`, which is about what rides a belt, and a fluid never does.
+
+Amber rather than the honest colourless, because a clear fluid behind a
+stainless inspection window is indistinguishable from an empty pipe; malt
+vinegar is amber and real, so legibility and honesty agreed. The one
+genuinely new pipeline rule came out of the render loop (UI_UX §2b point 27):
+the jug's label was authored on the faces the game camera sees and was
+invisible in its own icon, because `vengi-thumbnailer` looks from the
+opposite (-X/+Y) corner — and a fluid never appears in the scene at all, so
+the icon is this model's only consumer. `item_box` turns out to have had the
+same invisible-label problem all along. Verified with `cargo test -p voxgen`,
+`scripts/verify-core-loop.sh` and three scene renders (market panel, pipe
+run, tank).
 ### 2026-09-11 — The factory floor, redesigned
 
 The project owner said the flooring tile did not fit the theme, and it did

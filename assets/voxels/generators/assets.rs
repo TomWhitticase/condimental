@@ -104,6 +104,13 @@ pub const ASSETS: &[Asset] = &[
     // entry ships bulk produce down the belt in sealed cardboard and every
     // structural test still passes.
     Asset { name: "item_sugar", build: item_sugar },
+    // The chain's THIRD raw ingredient, and the first *fluid* with a model
+    // of its own. Nothing carries vinegar on a belt, so this is not a belt
+    // item — it is what a shipment of the stuff looks like where the player
+    // handles it as stock (`main.gd`'s FLUID_MODELS: the market slot and the
+    // larder chip), both of which used to borrow the pipe's icon and so read
+    // as "a pipe" rather than as vinegar.
+    Asset { name: "item_vinegar", build: item_vinegar },
     Asset { name: "item_paste_pail", build: item_paste_pail },
     Asset { name: "item_mix_pail", build: item_mix_pail },
     Asset { name: "item_ketchup_pail", build: item_ketchup_pail },
@@ -1134,6 +1141,107 @@ pub fn item_sugar(p: &Palette) -> VoxModel {
     for (x, y) in [(2, 6), (13, 9), (7, 3), (11, 12)] {
         m.set(x, y, 0, p.idx("sugar_white"));
     }
+    m
+}
+
+/// One jug of vinegar — the chain's third raw ingredient, and the only one
+/// that is a *fluid*.
+///
+/// Nothing carries vinegar on a belt (it is bought, poured into a tank and
+/// piped), so unlike `item_tomato`/`item_sugar` this model exists purely for
+/// the places the player handles the stuff as stock: the market slot and the
+/// larder chip. Both used to fall through to the pipe's own icon — UI_UX.md
+/// §2b point 12's failure in its quiet form, where nothing is *wrong* but
+/// there is no way to tell the ingredient from the plumbing.
+///
+/// **A jug, not a bottle**, deliberately: `item_bottle` (finished ketchup) is
+/// already a tall capped cylinder, and at 16 voxels two capped cylinders a
+/// hue apart are one object drawn twice. This one is squat and bellied with
+/// a pouring bail, which reads as a bulk ingredient arriving rather than a
+/// product leaving.
+///
+/// The liquid stops a band below the shoulder and glass carries on above it
+/// — the same "you are looking INTO a container" trick `pail` plays, since a
+/// jug filled to its cap is just an amber block.
+///
+/// **Which way it faces is the one thing this asset does differently from
+/// every other item, and it is not an oversight.** The rest are authored for
+/// the *game's* camera, which only ever sees +X and low Y (UI_UX.md §2b
+/// point 11); `vengi`'s previewer looks from the opposite corner (point 22),
+/// which is why `item_box`'s shipping labels are invisible in its own icon.
+/// For a model whose ONLY consumer is that render — vinegar cannot ride a
+/// belt, so nothing else ever draws it — the previewer's corner IS the
+/// camera, so the bail hangs off **-X** and the label wraps the belly all
+/// the way round. Put either on the game-facing side and the icon is a bare
+/// amber pot. If vinegar ever becomes something a belt carries, this
+/// choice, not the model, is what has to be revisited.
+///
+/// The label is painted onto whichever voxels are actually on the surface at
+/// its height, so it hugs the belly's curve instead of standing off it as a
+/// slab, and it is `label_cream` rather than printed dark: a dark accent on
+/// a face turned toward the viewer reads as a hole (UI_UX.md §2b point 21).
+pub fn item_vinegar(p: &Palette) -> VoxModel {
+    let mut m = item_volume();
+    let glass = p.idx("vinegar_glass");
+    let amber = p.idx("vinegar_amber");
+
+    // The vessel: a tucked foot, a tall straight belly, and a shoulder that
+    // curves into the neck. **Tall and straightish rather than squat and
+    // round**, which is a consequence of the camera and not a style choice:
+    // an isometric view looks down, so a squat object shows the viewer
+    // mostly its own lid. The first cut was a fat ovoid and its icon was a
+    // pale glass plate with a rim of amber around it — the liquid, which is
+    // the entire point of the asset, was the smallest thing in the picture.
+    m.cylinder_z((8, 8), 3.8, (0, 0), glass);
+    m.cylinder_z((8, 8), 4.2, (1, 8), glass);
+    m.cylinder_z((8, 8), 3.8, (9, 9), glass);
+    m.cylinder_z((8, 8), 3.2, (10, 10), glass);
+    m.cylinder_z((8, 8), 2.4, (11, 11), glass);
+    // Everything below the fill line is the liquid; the glass above it is
+    // the headspace that says the jug is a container and not a solid.
+    for z in 0..=9 {
+        for y in 0..ITEM_VOXELS as i32 {
+            for x in 0..ITEM_VOXELS as i32 {
+                if m.filled(x, y, z) {
+                    m.set(x, y, z, amber);
+                }
+            }
+        }
+    }
+    // Neck and screw cap. The cap is the one small bright metal thing on the
+    // item, at the top of the silhouette where it does the most work to
+    // separate a jug from `item_bottle`'s tall cylinder.
+    m.cylinder_z((8, 8), 1.5, (12, 13), glass);
+    m.cylinder_z((8, 8), 2.2, (14, 15), p.idx("steel_light"));
+
+    // The wrap-around label: every voxel of the belly's surface across three
+    // rows. A surface voxel is one with an empty neighbour to its side —
+    // testing sideways only, so the band never creeps over the shoulder.
+    let cream = p.idx("label_cream");
+    for z in 4..=5 {
+        for y in 0..ITEM_VOXELS as i32 {
+            for x in 0..ITEM_VOXELS as i32 {
+                if !m.filled(x, y, z) {
+                    continue;
+                }
+                let exposed = !m.filled(x + 1, y, z)
+                    || !m.filled(x - 1, y, z)
+                    || !m.filled(x, y + 1, z)
+                    || !m.filled(x, y - 1, z);
+                if exposed {
+                    m.set(x, y, z, cream);
+                }
+            }
+        }
+    }
+
+    // The moulded ear, from the shoulder back down onto the belly on the -X
+    // side (see this function's doc for why that side). Glass, not steel: a
+    // second bright metal part would compete with the cap, and the cap is
+    // doing the work of topping the silhouette.
+    m.cuboid((3, 5), (8, 8), (9, 9), glass);
+    m.cuboid((3, 3), (8, 8), (6, 9), glass);
+    m.cuboid((3, 4), (8, 8), (6, 6), glass);
     m
 }
 

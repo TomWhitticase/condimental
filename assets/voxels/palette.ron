@@ -148,6 +148,28 @@
         (name: "sack_kraft",     rgb: "#C9B48E", class: "matte"),
         (name: "sugar_white",    rgb: "#F2F0E8", class: "matte"),
 
+        // --- vinegar, the chain's one RAW fluid ---
+        // The chain's third raw ingredient had no colour of its own at all:
+        // its hue lived only in `main.gd`'s FLUID_TINTS, as a pale gold that
+        // read as cooking oil or lager in the pipe run, and as *nothing* in
+        // the market, where a fluid borrowed the pipe's own icon. Both are
+        // fixed by giving it the same treatment `liquid_mix`/`liquid_ketchup`
+        // already get: one colour here, named once, used by every place
+        // vinegar appears (the jug in `item_vinegar`, and the tint main.gd
+        // multiplies over `fluid_pale` in a pipe or a tank — those two
+        // numbers are kept equal on purpose, so the stock you buy and the
+        // liquid in the run are recognizably the same substance).
+        // A cider/malt AMBER rather than clear: distilled vinegar is nearly
+        // colourless, and a colourless fluid in a stainless pipe is an empty
+        // pipe. Amber is what a player reads as vinegar, and it is far
+        // enough round the wheel from `liquid_mix`'s red-orange to stay
+        // tellable apart on the same row of the factory.
+        (name: "vinegar_amber",  rgb: "#AD6B23", class: "liquid"),
+        // The headspace above the fill line and the vessel's own glass. A
+        // touch greener and darker than `glass_pale` (which is the ketchup
+        // bottle's), so the two glass items on this line are not the same
+        // object in two colours.
+        (name: "vinegar_glass",  rgb: "#B3C6BC", class: "matte"),
         // --- the factory floor's own concrete (the floor redesign) ---
         // The floor is the one surface that fills the whole screen, so it is
         // the one surface whose job is to be a BACKGROUND. `concrete_slab`

@@ -106,7 +106,12 @@ DECISIONS.md Part B. There is no point 10.
    tints it. The fluid model is **one voxel tall**, scaled vertically to the
    live fill fraction; because of point 1's origin rule no pivot maths is
    needed. The same mechanism draws the hopper fill, the tank level and any
-   progress gauge — do not invent another.
+   progress gauge — do not invent another. **The tint value itself is
+   palette data even though the model's hue is not:** a fluid that also has
+   a still model (vinegar's jug, point 27) would otherwise be one colour in
+   `palette.ron` and another in `main.gd`, and the two are seen side by side
+   the moment a market icon sits above a pipe. `FLUID_TINTS[id]` is the
+   palette entry's RGB, written as such in a comment beside it.
 6. **Pipes are stainless steel, hollow, with an open inspection channel**
    starting just above the bore floor, so the level is visible below half
    fill. Steel, not PVC: §4 makes metal the shiny exception, and
@@ -232,6 +237,20 @@ DECISIONS.md Part B. There is no point 10.
     hopper's mouth and vanishes at a machine's face. The general rule: check
     a path convention against the tile's edges, not against its neighbours,
     because neighbours hide a shared error.
+27. **A model whose only consumer is the icon pass must be authored for
+    vengi's camera, not the game's.** Point 11 ("only +X and +Z-world are
+    ever seen") is a rule about the *scene*; point 7's icon render goes
+    through `vengi-thumbnailer`, which looks from the **-X/+Y** corner
+    (point 22) — the two cameras see opposite sides of the same model. An
+    asset that appears in both places has to read from both: `item_box`'s
+    label, authored on the faces the game shows, is invisible in its own
+    icon, and nobody noticed because the icon still read as a box. A
+    **fluid** is the pure case of the other extreme: a fluid never rides a
+    belt and is never placed, so its model exists only to be an icon, and
+    its label, handle and fill line belong on the faces vengi shows. Decide
+    which cameras a new model will actually meet before deciding where its
+    detail goes, and render it to check — a face nobody sees is the same
+    cost as one nobody drew.
 27. **The floor is the one surface whose job is to be a background, so it
     is authored by its VALUE RANGE, not by its detail.** Every other asset
     is judged alone; the floor is judged as thousands of copies filling the

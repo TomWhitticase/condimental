@@ -241,7 +241,14 @@ const PIPE_LINK_PIPE := "pipe"
 ## here still renders (in a neutral pale blue) rather than vanishing. The
 ## voxel model is near-white so this multiplies cleanly over it.
 const FLUID_TINTS := {
-	"vinegar": Color(0.87, 0.75, 0.31),
+	# `palette.ron`'s `vinegar_amber` (#AD6B23), and equal to it on purpose:
+	# the jug of stock in the market and the liquid in the run are the same
+	# substance, so they are the same number in the one file that owns
+	# colour. It used to be a pale gold picked here and nowhere else, which
+	# read as cooking oil in a stainless pipe — vinegar is amber, and an
+	# amber that dark is also further from `hazard_yellow` than a gold is,
+	# so a full pipe no longer reads as signage.
+	"vinegar": Color(0.678, 0.420, 0.137),
 	# The two fluids the chain rework put in the pipes: the mixer's uncooked
 	# blend and the vat's finished ketchup. They are deliberately a shade
 	# apart rather than one red — the two runs stand a few tiles from each
@@ -548,6 +555,19 @@ const ITEM_MODELS := {
 	"boxed_ketchup": "item_box",
 }
 const ITEM_MODEL_FALLBACK := "item_box"
+
+## What a FLUID looks like when the player handles it as stock rather than as
+## a body in a pipe — the market slot and the larder chip (`_market_asset_for`).
+##
+## Deliberately its own table rather than more keys on ITEM_MODELS: that one
+## answers "what rides the belt", and no belt can carry a fluid, so a fluid
+## put in there would be a promise the simulation cannot keep. This one
+## answers a different question — what a *shipment* of it looks like — and a
+## fluid with no entry still falls through to the pipe it travels in, which
+## is where every fluid stood before vinegar got a jug of its own.
+const FLUID_MODELS := {
+	"vinegar": "item_vinegar",
+}
 
 ## Which voxel model's icon stands for each *buildable kind* in the build
 ## menu (the "Shop & Inventory" epic's ticket 2). This is the kind-id twin of
@@ -4813,8 +4833,9 @@ func _build_market_slot(row: HBoxContainer, base_settings: LabelSettings, index:
 	# The item's OWN model, through the same ITEM_MODELS table the belt draws
 	# with — so a crate of tomatoes in the market is the tomato that runs
 	# down the line, which is UI_UX.md §5's "icons are rendered from the real
-	# assets" rule doing its job. A fluid has no item model and falls through
-	# to the pipe, which is what it arrives in.
+	# assets" rule doing its job. A fluid goes through FLUID_MODELS instead —
+	# the jug it is bought in — and one with no jug still falls through to the
+	# pipe it travels in.
 	icon.texture = _icon_for_asset(_market_asset_for(item_id))
 	column.add_child(icon)
 
@@ -4874,11 +4895,14 @@ func _build_market_slot(row: HBoxContainer, base_settings: LabelSettings, index:
 
 
 ## Which voxel model's icon stands for an ingredient. `ITEM_MODELS` for a
-## solid; a fluid has no item model at all, so it borrows the pipe it
-## travels in — which is also how the player will actually handle it.
+## solid, then FLUID_MODELS for a fluid the player buys by the jug; a fluid
+## with neither still borrows the pipe it travels in, which is where all of
+## them stood before vinegar was drawn.
 func _market_asset_for(item_id: String) -> String:
 	if ITEM_MODELS.has(item_id):
 		return ITEM_MODELS[item_id]
+	if FLUID_MODELS.has(item_id):
+		return FLUID_MODELS[item_id]
 	return PIPE_ASSET
 
 
@@ -8985,6 +9009,11 @@ func _set_checkbox_checked(box: Panel, checked: bool) -> void:
 ## regenerated), still returns a real, non-null Texture2D: a plain
 ## placeholder swatch, never null and never a silently-broken texture.
 func _icon_for(item_id: String) -> Texture2D:
+	if FLUID_MODELS.has(item_id):
+		# A fluid has no belt model to drift from, but it does have a jug —
+		# and the shipping-box fallback below would otherwise draw a contract
+		# line for a fluid as a crate of it.
+		return _icon_for_asset(FLUID_MODELS[item_id])
 	return _icon_for_asset(ITEM_MODELS.get(item_id, ITEM_MODEL_FALLBACK))
 
 

@@ -22,6 +22,59 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-11: **Vinegar looks like vinegar — a raw fluid gets a palette
+  colour of its own, a model, and a route to the icon.** Vinegar shipped
+  with neither: no entry in any model table, so `_market_asset_for` fell
+  through to `PIPE_ASSET` and the ingredient market, the larder strip and
+  the hopper picker all offered the player *a length of pipe* to buy; and
+  no colour anywhere but a single `FLUID_TINTS` gold in `main.gd`, which at
+  scene scale read as cooking oil. Four calls.
+
+  (1) **A fluid's hue belongs in `palette.ron` even though a fluid model's
+  hue does not.** §2b point 5's rule stands — the *pipe's* fluid body is
+  near-white and tinted, because which liquid is in a pipe is live sim
+  data — but the tint's authoritative value is now a palette entry
+  (`vinegar_amber`, `#AD6B23`, class `liquid`), and `FLUID_TINTS["vinegar"]`
+  is that RGB with a comment saying so. The moment a fluid has a still model
+  as well, the two are seen together: the market icon sits a few centimetres
+  from the pipe run it fills. Two independent definitions of one colour is a
+  divergence waiting for someone to tweak one of them.
+
+  (2) **Amber, not clear.** Real distilled vinegar is colourless, and
+  colourless in a stainless pipe with an inspection window is indistinguish-
+  able from an empty pipe — the player would read a working line as a broken
+  one. Malt/cider vinegar is amber and real, so the honest option and the
+  legible one coincide. The first attempt (`#C07A28`) read orange enough to
+  be mistaken for the tomato stages one tile away, and was darkened after a
+  scene render, not after looking at the swatch.
+
+  (3) **`FLUID_MODELS` is a separate table from `ITEM_MODELS`, not a couple
+  of extra keys in it.** `ITEM_MODELS` answers "what does this look like
+  riding a belt", and no belt can carry a fluid; a fluid's model exists for
+  the market slot, the larder chip and the icon pass. Keeping them apart
+  means neither table's fallback can quietly answer the other's question —
+  which is exactly the bug being fixed, `_market_asset_for` reaching
+  `PIPE_ASSET` because the only table it consulted was about belts.
+  `_market_asset_for` and `_icon_for` both check `ITEM_MODELS`, then
+  `FLUID_MODELS`, then fall back.
+
+  (4) **A model whose only consumer is the icon renderer is authored for
+  vengi's camera** (new §2b point 27). The jug's label and moulded ear were
+  first put on the faces the *game* camera sees, per point 11, and were
+  invisible in the rendered icon: `vengi-thumbnailer` looks from the -X/+Y
+  corner (point 22), the opposite side. Confirmed by rendering `item_box`,
+  whose own labels are missing from its own icon for the same reason. Since
+  vinegar is a fluid it can never appear in the scene at all, so the icon is
+  its *only* consumer and the detail was re-authored for that corner. Two
+  more shape lessons from the same render loop: a squat ovoid jug read as "a
+  pale plate with a rim of amber" under the isometric icon angle and had to
+  become tall and straight-sided, and the fill line has to sit well below the
+  shoulder or the glass above it reads as a cap.
+
+  Palette entries were **appended**, never reordered (that re-indexes every
+  `.vox`), and the proof is in the diff: all 132 models show as modified
+  because the palette is embedded in each, and `item_vinegar.png` is the only
+  icon whose bytes changed.
 - 2026-09-11: **The factory floor, redesigned — the one asset that is
   authored by its value range rather than by its detail.** The project
   owner's note was that the flooring tile did not fit the theme. It did not:
