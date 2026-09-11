@@ -277,6 +277,26 @@ factory tropes; the sauce theme comes through in what the factory processes.
   each docket. Past a capped height the stack scrolls.
 - **Diegetic paper-and-metal widgets**: orders and objectives are clipboards
   and checklists. A contract IS a clipboard.
+- **The contracts board (C) is a dark-plate menu of paper offers.** What is
+  running lives on the clipboard; what is for sale lives on the board, a
+  menu like the build menu and the market (centred above the hotbar, one
+  modal at a time), whose rows are the clipboard's own docket card with the
+  terms in words and one SIGN button that names the price. A SIGN button on
+  the clipboard would make every running order look like a thing to click.
+  The button says what a click will do or why it will not (**SIGNED**, **✗
+  SIGN · 150**), and a lost offer says **LOST — sign it again**.
+- **A docket says how it is doing and whether it is in danger, four ways at
+  once** (§7): a status line with a glyph and words (**✔ READY**, **⚠ AT
+  RISK — 1 short, 70% of the window gone**, **⚠ LAST CHANCE — miss this
+  check and it is LOST**), the draining countdown bar of §5e for the time
+  half, strike pips (one per strike the contract allows, filled as misses
+  run, the rule in words beside them) and a heavier border in the state's
+  colour. The
+  docket stays paper, ink, its done-green and its one warning red; at-risk
+  and last-chance share the red and are told apart by their words, border
+  weight and pips. A lost or signed contract is announced in one line along
+  the top edge, and an empty clipboard says "press C" rather than showing a
+  money figure over nothing.
 - **Typography**: a sturdy, slightly blocky sans-serif, readable at UI
   sizes; not a novelty pixel font.
 - **Layout**: hotbar along the bottom (§5b); build/recipe menus as icon

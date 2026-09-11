@@ -164,6 +164,7 @@ run_godot_script test_interaction.gd INTERACTION_OK "keyboard input -> SimBridge
 run_godot_script test_presentation.gd PRESENTATION_OK "UI_UX.md §1/§2/§4 scene structure"
 run_godot_script test_camera_nav.gd CAMERA_NAV_OK "pan/zoom, UI_UX.md §1"
 run_godot_script test_contract_panel.gd CONTRACT_PANEL_OK "contract clipboard, one docket per contract, UI_UX.md §5"
+run_godot_script test_contract_board.gd CONTRACT_BOARD_OK "contracts board (C), signing, strikes, loss and re-signing — the contract-board epic"
 run_godot_script test_icons.gd ICONS_OK "_icon_for, UI_UX.md §5"
 run_godot_script test_hover.gd HOVER_OK "machine hover tooltips, UI_UX.md §5"
 run_godot_script test_fluids.gd FLUIDS_OK "pipe rendering + fluid hover, milestone 6"

@@ -84,7 +84,10 @@
 #
 # Pass --shop to open the build menu (docs/UI_UX.md §5) before the shot, or
 # --market to open the ingredient market — the stock half of the shop, where
-# raw ingredients are bought (the chain-rework epic).
+# raw ingredients are bought (the chain-rework epic) — or --board to open the
+# CONTRACTS BOARD, where contracts are signed and lost ones signed again (the
+# contract-board epic). --contracts signs every offer before it runs the
+# line, so the clipboard photographs the whole board competing.
 #
 # Pass --no-hud to hide the HUD entirely. Closeups are for reviewing whether
 # a belt or a pipe actually meets a machine, and the contract clipboard and
@@ -112,7 +115,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--contracts] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--no-hud] [--stock] [--hotbar N] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--contracts] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--board] [--no-hud] [--stock] [--hotbar N] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

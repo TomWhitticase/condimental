@@ -115,6 +115,115 @@ matches what code comments and data files cite.
   through `_kind_display_name`/`_item_display_name`, and the headless tests
   were updated to assert the display names — which is the point, because a
   test asserting the raw id is what let them survive this long.
+- 2026-09-10: **The contract board — contracts are signed, struck and
+  lost.** The request: start with one basic contract, buy bigger and more
+  complex ones as the factory grows, lose a contract that is not fulfilled
+  and have to buy it back, never hold two of one contract, and show on the
+  clipboard how well each order is being filled and when it is in danger.
+  Eight calls worth not re-litigating.
+
+  (1) **`contracts.ron` is a board of offers, and the file went to schema
+  2.** Three fields were added — `price`, `strikes`, `starter` — and a v1
+  file is rejected, not defaulted: a file that says nothing about what a
+  contract costs or when it is lost has no honest default for either, and
+  the loader inventing one would put the answer to a design question in a
+  `serde(default)`. `price` and `strikes` must be at least 1 (a free-to-
+  recover contract cannot be lost in any sense that matters; a zero-strike
+  contract can never be lost at all, which is v1's contract and v1 is gone
+  on purpose), and at least one offer must be a `starter`, so a new game is
+  never a factory with nobody to sell to.
+
+  (2) **The economy owns the board and the active list is a subset of
+  it.** `Economy` now holds a clone of the `ContractRegistry` beside
+  `contracts: Vec<ActiveContract>`. Signing needs an offer's terms at
+  command time and nothing else in `World` keeps a registry after
+  construction; a clone of four structs is cheaper than threading a
+  reference through every constructor. `World::new` activates the
+  starters only.
+
+  (3) **One signature per offer, enforced where money moves.**
+  `Economy::try_sign` refuses an already-active id before it touches the
+  balance. The alternative — let a player stack several copies of a
+  lucrative order — is the "double a line's income for free" failure the
+  allocation rule already closes for goods, opened again one level up.
+  The command path drops the `SignRefusal` on the floor (every refused
+  command is a silent no-op); the enum exists so tests and a UI can say
+  why.
+
+  (4) **Strikes are consecutive, a payout forgives, and losing is the
+  whole penalty.** GAMEPLAY §11 had three candidates: immediate loss, a
+  grace period, a reputation meter. Immediate loss makes the starter
+  unplayable (a first line WILL miss a window while it is being built);
+  a reputation meter is a second number to explain and a second thing to
+  balance. A run of `strikes` missed windows is a grace period counted in
+  the contract's own units. Consecutive rather than cumulative because a
+  cumulative count is a fuse that only burns down, turning every long game
+  into a certain loss; a factory that recovers should be forgiven and only
+  one that keeps failing should lose the customer. No fine on top of the
+  loss: the fee to sign again is already printed on the board, and a
+  second penalty number would be one more thing the docket has to say.
+  A re-signed contract remembers nothing (new agreement, zero counters);
+  the board remembers how many times it was lost (`Economy::losses`), for
+  the row's "lost twice before" note and nothing else.
+
+  (5) **A signed contract takes its file-order rank.** The scarcity
+  tiebreak is `contracts.ron` order (the contracts ticket 1 rule); if a
+  signature appended to the list instead, priority would depend on the
+  order a player happened to buy things in, and a save/load would have to
+  preserve that history. `insert_in_board_order` is the one insertion, used
+  by signing and by the restore path, so a loaded game is in the same
+  order a played one is.
+
+  (6) **`Economy::tick` returns events, not indices.** It used to return
+  the paid contracts' indices; with removal inside the loop an index is
+  meaningless a line later. `ContractEvent::{Paid, Missed, Lost}` in settle
+  order, `Lost` always following the `Missed` that caused it. `World::tick`
+  discards them — the snapshot is the wire and Godot diffs it — but the
+  unit tests read them, and a future sound cue will.
+
+  (7) **Save schema stays 1; the active list is restored exactly.** Two new
+  fields are `#[serde(default)]` (the auto-fill flag's precedent): an old
+  save's every other field means what it did, and an old save with all
+  three contracts active is a legal state (they were signed before signing
+  existed). The load path now CLEARS the empty world's starters before
+  inserting the saved list, since "the starter is not in the save" now
+  means "the player lost it", not "the board changed". Consequently
+  `SaveError::MissingContract` is deleted: a board offer the save does not
+  name is unsigned, not an error. The other direction — an active id the
+  board does not offer — is still refused, and so is the same id active
+  twice (`DuplicateContract`).
+
+  (8) **Presentation: a menu for what is for sale, a docket for what is
+  running, and danger said four ways.** The board is a dark-plate menu on
+  **C** (the key the delivery-dock ticket freed; opening a menu changes
+  nothing, which is what `test_interaction.gd` still asserts of it), with
+  the clipboard's paper docket as its row and one SIGN button naming the
+  price — SIGNED / ✗ SIGN · 150 / LOST — sign it again. It is not a section
+  of the clipboard because a SIGN button beside running orders makes every
+  docket look clickable. The docket gained a status line (✔ READY / ⚠ AT
+  RISK / ⚠ LAST CHANCE, with "N short" and the window percentage), strike
+  pips with the rule in words, and a heavier border in the
+  state's colour, from one pure function (`_contract_risk_for`) the test
+  drives directly. "At risk" is short with half the window gone
+  (`CONTRACT_RISK_FRACTION`); "last chance" is short with the next miss
+  losing it, however early. The docket keeps to paper, ink, its done-green
+  and ONE warning red — at-risk and last-chance share the red and are told
+  apart by words, border weight and pips — because the concurrent UI
+  visualisation pass had just pinned "no third colour" on the card and a
+  hazard amber would have been exactly that. The wire has no loss event,
+  so the clipboard diffs active ids between polls and announces "✗ CONTRACT
+  LOST: <name> — sign it again on the board (C)" (first poll only primes,
+  so a loaded save is not read as a string of losses), and an empty
+  clipboard says "press C" rather than showing money over nothing.
+
+  Shipped content: four rungs — the unchanged starter (3 strikes, 40 to
+  re-sign), the diner and stall orders (2 and 1 strikes, 150 and 60) and a
+  new regional grocer (6 boxes / 4000 ticks / +210, 400 to sign, 2 strikes)
+  whose demand one line cannot carry beside the other three, which is
+  GAMEPLAY §6's pull toward a second line made concrete. All placeholders
+  per GAMEPLAY §10. Built on branch `TomWhitticase/contract-board` in its
+  own worktree because the `anthias` worktree had a live concurrent
+  session in `main.gd`.
 
 - 2026-09-10: **Hopper/tank configuration, ticket 2 of 2 (the Godot half,
   plus the one sim deletion ticket 1 deferred to it) — a placed hopper or

@@ -413,6 +413,20 @@ pub enum PlayerCommand {
     /// [`super::hopper::Hopper::retarget`] — the contents go, the
     /// [`super::hopper::Hopper::auto_fill`] flag stays.
     SetHopperItem { tile: TileCoord, item: ItemId },
+    /// Signs the contract board's offer `id` (the contract-board epic; see
+    /// [`Economy::try_sign`]): debits its price from the one money counter
+    /// and activates it with a fresh clock. `data/contracts.ron` is a board
+    /// of offers, and a new game starts with only its `starter`s running;
+    /// this is how the player takes on more — and how they take back a
+    /// contract they lost by missing its `strikes` windows in a row, at the
+    /// same price again.
+    ///
+    /// **One signature per offer.** A silent no-op, changing nothing at
+    /// all, on an id the board does not list, on an offer that is already
+    /// active, and on a fee the balance does not cover — the universal
+    /// all-or-nothing rule every other command here follows. No chunk is
+    /// dirtied: a contract is not a tile.
+    SignContract { id: String },
     /// Turns automatic top-up on or off for the hopper at `tile` (see
     /// [`super::hopper::Hopper::auto_fill`]): while it is on, `World::tick`
     /// refills that hopper to capacity out of the player's **bought stock**,
@@ -498,6 +512,9 @@ enum PlayerCommandDto {
     /// both required: only the player knows which hopper and which
     /// ingredient.
     SetHopperItem { tile: TileCoord, item: ItemId },
+    /// `{"type": "sign_contract", "id": "diner_supply"}` — `id` required:
+    /// only the player knows which offer they are taking.
+    SignContract { id: String },
     /// `{"type": "set_hopper_auto_fill", "tile": [-1, 0], "enabled": true}`
     /// — `enabled` optional, defaulting to `true`, because a panel's toggle
     /// sends the state it wants and "turn it on" is the one this command
@@ -569,6 +586,7 @@ impl From<PlayerCommandDto> for PlayerCommand {
             PlayerCommandDto::SetHopperItem { tile, item } => {
                 PlayerCommand::SetHopperItem { tile, item }
             }
+            PlayerCommandDto::SignContract { id } => PlayerCommand::SignContract { id },
             PlayerCommandDto::SetHopperAutoFill { tile, enabled } => {
                 PlayerCommand::SetHopperAutoFill { tile, enabled }
             }
@@ -2481,8 +2499,11 @@ impl World {
 
         // 7. Contracts. Not tied to any tile, so it doesn't participate in
         // dirty-chunk tracking; Godot reads economy state via its own
-        // always-fresh snapshot instead.
-        self.economy.tick(self.tick_count);
+        // always-fresh snapshot instead. A contract lost here (its strikes
+        // used up) simply stops appearing in that snapshot's `contracts` and
+        // reads `active: false` on its `board`; the events are not kept —
+        // the snapshot is the wire, and a UI diffs it.
+        let _ = self.economy.tick(self.tick_count);
     }
 
     /// Step 0 of [`World::tick`]: tops every auto-filling hopper and tank up
@@ -2783,6 +2804,13 @@ impl World {
             }
             PlayerCommand::Rotate { tile } => {
                 self.try_rotate(tile);
+            }
+            PlayerCommand::SignContract { id } => {
+                // Every refusal (`SignRefusal`) is the same silent no-op as
+                // an unaffordable `Purchase`; the economy already spends
+                // all-or-nothing. No chunk is dirtied — a contract is not a
+                // tile, and Godot reads the board off `economy_snapshot`.
+                let _ = self.economy.try_sign(&id, self.tick_count);
             }
             PlayerCommand::SetHopperItem { tile, item } => {
                 self.try_set_hopper_item(tile, &item);

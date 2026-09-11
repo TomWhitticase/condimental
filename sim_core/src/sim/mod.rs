@@ -24,7 +24,8 @@ pub mod world;
 pub use contracts::{Contract, ContractRegistry};
 pub use dock::{DOCK_CAPACITY, DOCK_KIND, Dock};
 pub use economy::{
-    ActiveContract, ContractSnapshot, Economy, EconomySnapshot, STARTING_MONEY,
+    ActiveContract, ContractEvent, ContractOfferSnapshot, ContractSnapshot, Economy,
+    EconomySnapshot, STARTING_MONEY, SignRefusal,
 };
 pub use fluid::{
     FLUID_TANK_CAPACITY, FLUID_TANK_FILL_AMOUNT, FLUID_TANK_KIND, FluidNetwork, FluidTank,

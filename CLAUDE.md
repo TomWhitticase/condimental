@@ -66,7 +66,9 @@ sauce-factory/
     ingredients.ron        # unit price of each RAW ingredient (solid+fluid)
     shop.ron               # price per BUILDABLE kind: every machines.ron kind
                            #   plus belt/pipe tiles. Must cover every kind
-    contracts.ron          # contract board: id, name, mix, cadence, payout.
+    contracts.ron          # contract BOARD (schema 2): id, name, mix, cadence,
+                           #   payout, price, strikes, starter. Only starters
+                           #   run in a new game; the rest are signed (C).
                            #   List order = priority when contracts compete
   sim_core/                # Rust crate, crate-type cdylib + rlib
     src/lib.rs             # the ONLY file that touches gdext (ARCH §4).
@@ -87,8 +89,10 @@ sauce-factory/
       shop.rs              #   ShopCatalog + OwnedEquipment. Money is NOT here
       contracts.rs         #   ContractRegistry
       dock.rs              #   Dock: pass-through into Economy every tick
-      economy.rs           #   Economy: money (Fx), Vec<ActiveContract>, one
-                           #     shared delivery_buffer, STARTING_MONEY
+      economy.rs           #   Economy: money (Fx), the board, the ACTIVE
+                           #     Vec<ActiveContract>, one shared
+                           #     delivery_buffer, losses, STARTING_MONEY;
+                           #     try_sign + strikes/loss in tick
       world.rs             #   hecs::World of placed things. World::new builds
                            #     NOTHING. Place/Remove/Rotate; topology
                            #     recomputed only on those, never per tick
@@ -98,7 +102,8 @@ sauce-factory/
     tests/                 # headless integration tests, one file per concern
                            #   (core_loop, placement, machine_footprints,
                            #   fluid_production, ingredients, economy, dock,
-                           #   save_load, shop, auto_fill; common/mod.rs
+                           #   contract_board, save_load, shop, auto_fill;
+                           #   common/mod.rs
                            #   keeps hoppers/tank fed for long runs)
   xtask/                   # `cargo xtask`: build sim_core, copy the lib to
                            #   godot_project/bin/, stage models to
@@ -112,8 +117,9 @@ sauce-factory/
                            #   reserved `autosave` slot)
     main.tscn / main.gd    # the 3D scene: rebuilt from world_layout_json on
                            #   every place/remove/rotate; build mode, hotbar,
-                           #   clipboard, market, pause menu, and the click-to-
-                           #   configure panel on a placed hopper or tank
+                           #   clipboard, market, contracts board (C), pause
+                           #   menu, and the click-to-configure panel on a
+                           #   placed hopper or tank
     sim_core.gdextension   # checked in; points at gitignored bin/
     addons/                # vendored, pinned .vox importer (see VENDORED.md)
     test_*.gd              # headless proofs, each prints its own success
@@ -128,7 +134,7 @@ sauce-factory/
     verify-core-loop.sh    # cargo test + every headless Godot proof
     build-voxels.sh        # regenerate .vox files + review PNGs
     screenshot-scene.sh    # render main.tscn to PNG (flags: --populate,
-                           #   --contracts, --stock, --hotbar N, --no-hud,
+                           #   --contracts, --board, --stock, --hotbar N, --no-hud,
                            #   --closeup, --first-person, --stress,
                            #   --belt-gallery, menu/pause)
   docs/                    # README.md (index), ARCHITECTURE.md, UI_UX.md,
@@ -209,6 +215,40 @@ Do not re-litigate these without a good reason.
   small at boot). Every id the player reads goes through
   `_kind_display_name`/`_item_display_name`, never the wire's
   `boxed_ketchup`. Full record in `docs/DECISIONS.md`.
+- 2026-09-10 **Contract board: contracts are signed, struck and lost.**
+  `contracts.ron` is `schema_version` 2 (v1 rejected): every contract gains
+  `price` (≥ 1), `strikes` (≥ 1) and optional `starter`; at least one
+  starter. A new game runs ONLY the starters (shipped: one, `corner_shop`);
+  `PlayerCommand::SignContract { id }` (`{"type": "sign_contract"}`) buys an
+  offer via `Economy::try_sign` — refused silently for an unknown id, an
+  offer ALREADY ACTIVE (one of each, never two) or an unaffordable fee. A
+  signed contract is inserted at its FILE-ORDER rank (`insert_in_board_order`),
+  so priority never depends on signing order. `Economy::tick` returns
+  `Vec<ContractEvent>` (`Paid`/`Missed`/`Lost`); a miss bumps
+  `consecutive_misses`, a payout zeroes it, reaching `strikes` REMOVES the
+  contract that tick and bumps `Economy::losses`; re-signing costs the price
+  again and starts a clean record. Losing is the whole penalty (GAMEPLAY §11
+  decided). `Economy` owns the board (`board()`); the snapshot gains `board`
+  (every offer: `active`, `affordable`, `times_lost`, `starter`…) and per
+  active contract `satisfied`, `window_start_tick`, `price`,
+  `consecutive_misses`, `strikes`. Save: schema stays 1 (`#[serde(default)]`
+  on `consecutive_misses` and `contracts_lost`); the active list is a SUBSET
+  of the board, restored exactly (starters cleared first), an unknown active
+  id or a duplicate is an error, an unsigned offer is not
+  (`MissingContract` deleted). Godot: **C** opens the CONTRACTS BOARD (dark
+  plate, paper offer rows, one SIGN button each; E/M/C mutually exclusive;
+  `_board_open` joins every modal guard); the docket gains a status line,
+  strike pips and a state border (the §5e countdown meter is the time half)
+  from the pure `_contract_risk_for` →
+  `ready`/`ok`/`risk` (≥ `CONTRACT_RISK_FRACTION` 0.5 elapsed, short)/
+  `last_chance` (next miss loses it); a docket keeps to paper, ink, done-
+  green and ONE warning red. Loss/signature is announced by diffing active
+  ids between polls (`_announce_contract_changes`; first poll only primes);
+  an empty clipboard says "press C". Shipped board: 4 rungs; the top one
+  exceeds one line's throughput on purpose. Tests: `tests/contract_board.rs`,
+  `test_contract_board.gd`; `test_contract_panel.gd` signs every offer first;
+  `screenshot-scene.sh --board`, and `--contracts` signs all. Full record in
+  `docs/DECISIONS.md`.
 - 2026-09-10 **Hopper/tank configuration, ticket 2 (Godot + one sim deletion).**
   A placed hopper or tank is CLICKED and configured on a panel beside it:
   level, FILL (with its reason in words when refused), AUTO-FILL toggle,

@@ -64,12 +64,14 @@ fn single_contract_world() -> World {
         .map(|(item, qty)| format!("(\"{item}\", {qty})"))
         .collect();
     let text = format!(
-        r#"(schema_version: 1, contracts: [Contract(id: "{}", name: "{}", mix: [{}], cadence_ticks: {}, payout: {}),],)"#,
+        r#"(schema_version: 2, contracts: [Contract(id: "{}", name: "{}", mix: [{}], cadence_ticks: {}, payout: {}, price: {}, strikes: {}, starter: true),],)"#,
         c.id,
         c.name,
         mix.join(", "),
         c.cadence_ticks,
         c.payout.to_num::<u32>(),
+        c.price.to_num::<u32>(),
+        c.strikes,
     );
     stocked(reference_chain_with_content_and_budget(
         recipes(),
@@ -225,11 +227,11 @@ fn several_contracts_settle_independently_against_one_real_chain() {
     let slow_cadence: u64 = 15_000;
     let board = format!(
         r#"(
-            schema_version: 1,
+            schema_version: 2,
             contracts: [
-                Contract(id: "quick", name: "Quick", mix: [("{final_item}", 1)], cadence_ticks: {quick_cadence}, payout: 10),
-                Contract(id: "slow", name: "Slow", mix: [("{final_item}", 2)], cadence_ticks: {slow_cadence}, payout: 35),
-                Contract(id: "impossible", name: "Impossible", mix: [("ketchup", 5)], cadence_ticks: {quick_cadence}, payout: 999),
+                Contract(id: "quick", name: "Quick", mix: [("{final_item}", 1)], cadence_ticks: {quick_cadence}, payout: 10, price: 1, strikes: 100, starter: true),
+                Contract(id: "slow", name: "Slow", mix: [("{final_item}", 2)], cadence_ticks: {slow_cadence}, payout: 35, price: 1, strikes: 100, starter: true),
+                Contract(id: "impossible", name: "Impossible", mix: [("ketchup", 5)], cadence_ticks: {quick_cadence}, payout: 999, price: 1, strikes: 100, starter: true),
             ],
         )"#
     );
@@ -303,10 +305,10 @@ fn one_delivered_unit_pays_one_contract_not_every_contract_that_wants_it() {
     // scarcity tiebreak).
     let board = format!(
         r#"(
-            schema_version: 1,
+            schema_version: 2,
             contracts: [
-                Contract(id: "first", name: "First", mix: [("{final_item}", 1)], cadence_ticks: 1000, payout: 10),
-                Contract(id: "second", name: "Second", mix: [("{final_item}", 1)], cadence_ticks: 1000, payout: 10),
+                Contract(id: "first", name: "First", mix: [("{final_item}", 1)], cadence_ticks: 1000, payout: 10, price: 1, strikes: 100, starter: true),
+                Contract(id: "second", name: "Second", mix: [("{final_item}", 1)], cadence_ticks: 1000, payout: 10, price: 1, strikes: 100, starter: true),
             ],
         )"#
     );
@@ -365,11 +367,21 @@ fn the_economy_snapshot_reports_one_entry_per_shipped_contract() {
     let snapshot = world.economy_snapshot();
     let board = contracts();
 
-    assert_eq!(snapshot.contracts.len(), board.len());
-    assert!(snapshot.contracts.len() >= 2, "several contracts must ship");
+    // Active = the board's starters only (the contract-board epic: the rest
+    // are signed); the whole board rides along beside them.
     let ids: Vec<&str> = snapshot.contracts.iter().map(|c| c.id.as_str()).collect();
-    let expected: Vec<&str> = board.ordered().iter().map(|c| c.id.as_str()).collect();
-    assert_eq!(ids, expected, "snapshot order must match contracts.ron order");
+    let expected: Vec<&str> = board.starters().map(|c| c.id.as_str()).collect();
+    assert_eq!(ids, expected, "a new world's active contracts are the starters, in contracts.ron order");
+    assert_eq!(snapshot.board.len(), board.len());
+    assert!(snapshot.board.len() >= 2, "several contracts must ship, to be signed");
+    let offered: Vec<&str> = snapshot.board.iter().map(|o| o.id.as_str()).collect();
+    let all: Vec<&str> = board.ordered().iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(offered, all, "board order must match contracts.ron order");
+    for offer in &snapshot.board {
+        assert_eq!(offer.active, offer.starter, "in a new world exactly the starters are active");
+        assert!(offer.price > 0.0);
+        assert!(offer.strikes >= 1);
+    }
 
     assert_eq!(snapshot.money, 0.0);
     assert!(
@@ -386,6 +398,7 @@ fn the_economy_snapshot_reports_one_entry_per_shipped_contract() {
     // And it must actually serialize to the JSON the bridge hands Godot.
     let json = serde_json::to_string(&snapshot).expect("EconomySnapshot must serialize");
     assert!(json.contains("\"contracts\":["), "{json}");
+    assert!(json.contains("\"board\":["), "{json}");
     assert!(json.contains("\"delivery_stock\""), "{json}");
     assert!(
         !json.contains("contract_mix"),

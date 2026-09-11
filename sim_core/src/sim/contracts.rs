@@ -22,6 +22,16 @@
 //! first. A deterministic tiebreak is required by ARCHITECTURE.md §3.9;
 //! this is that tiebreak, and it is stated in `contracts.ron` itself too so
 //! whoever edits the file knows reordering it changes behaviour.
+//!
+//! # The file is a board of offers, not the active list (schema 2)
+//!
+//! Since the contract-board epic (2026-09-10) a contract in this file is
+//! something the player can *sign*, for its `price`, and can *lose*, after
+//! `strikes` consecutive missed windows. Only the contracts flagged
+//! `starter` are active when a new game begins; the rest wait on the board.
+//! Which contracts are active right now, and how each is doing, is
+//! [`super::economy`]'s state — this module still only answers "what does
+//! the content say", and the three new fields are content like the others.
 
 use serde::Deserialize;
 
@@ -30,17 +40,20 @@ use super::types::{Fx, ItemId};
 
 /// The schema version this build of sim_core understands. Bump this and
 /// reject/migrate on mismatch (ARCHITECTURE.md §4) whenever [`Contract`]'s
-/// data shape changes in a way older data can't satisfy — adding
-/// GAMEPLAY.md §11's still-undecided penalty terms will be the first such
-/// change.
+/// data shape changes in a way older data can't satisfy.
 ///
-/// v1 is this file's first version. Mismatched data is **rejected, not
+/// v1 was this file's first version: mix, cadence and payout only, every
+/// contract active from tick 0. **v2 (2026-09-10, the contract-board epic)
+/// added `price`, `strikes` and `starter`** — the penalty terms GAMEPLAY.md
+/// §11 had left open, now decided as "lose the contract, buy it back". A v1
+/// file has no answer for what a contract costs or when it is lost, so it
+/// is rejected rather than defaulted. Mismatched data is **rejected, not
 /// migrated**, for exactly the reason
 /// [`super::recipe::CURRENT_SCHEMA_VERSION`] gives: `contracts.ron` is
 /// bundled into the binary at compile time, so there is one such file and
 /// it is updated in the same commit as this constant — a version mismatch
 /// means data and binary have drifted apart, which deserves a loud error.
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 /// A standing agreement: a fixed item mix, delivered in full on a recurring
 /// cadence, for a fixed payout each time (GAMEPLAY.md §6).
@@ -69,6 +82,20 @@ pub struct Contract {
     /// Payout per satisfied delivery, fixed-point (§3.9 — money is shared,
     /// persisted simulation state, so never a float).
     pub payout: Fx,
+    /// What signing it costs — debited from the one money counter by
+    /// `PlayerCommand::SignContract`, and again every time it is signed
+    /// after being lost. Never zero (the loader refuses it): a contract
+    /// that is free to recover cannot be lost in any sense that matters.
+    pub price: Fx,
+    /// How many windows may be missed **in a row** before the contract is
+    /// lost. `1` means a single miss loses it. A paid window resets the
+    /// count. Never zero (the loader refuses it): a contract that can never
+    /// be lost is v1's contract, and v1 is gone on purpose.
+    pub strikes: u32,
+    /// Active from the first tick of a new game, without being signed and
+    /// without a fee. The board must have at least one, so a new game is
+    /// never a factory with nobody to sell to.
+    pub starter: bool,
 }
 
 /// The on-disk shape. Separate from [`Contract`] for one reason: `payout`
@@ -88,6 +115,12 @@ struct ContractDef {
     mix: Vec<(ItemId, u32)>,
     cadence_ticks: u64,
     payout: u32,
+    price: u32,
+    strikes: u32,
+    /// Optional in the file — most contracts are offers, so the common
+    /// case is the one that needs no line.
+    #[serde(default)]
+    starter: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -132,6 +165,23 @@ pub enum ContractLoadError {
     ZeroPayout {
         id: String,
     },
+    /// A contract that costs nothing to sign. Losing it would cost nothing
+    /// either, which makes `strikes` decorative; refused so the board's
+    /// terms always mean something.
+    ZeroPrice {
+        id: String,
+    },
+    /// A contract that is lost after zero consecutive misses — i.e. never,
+    /// since the check runs only when a miss is counted. Either the author
+    /// meant 1 or meant "unlosable", and the second is not a thing this
+    /// board offers.
+    ZeroStrikes {
+        id: String,
+    },
+    /// A board with no `starter` contract. A new game would begin with no
+    /// active contract at all — a factory with nobody to sell to until the
+    /// player finds the board, which is a bad first minute, not content.
+    NoStarter,
     /// A contract asks for an item no recipe in `recipes.ron` produces —
     /// so nothing could ever satisfy it. Reported the same way
     /// [`super::machines::MachineLoadError::UnknownKindInRecipe`] reports a
@@ -192,6 +242,21 @@ impl std::fmt::Display for ContractLoadError {
                 "contracts.ron contract '{id}' pays 0 — it would consume delivered stock and \
                  pay nothing for it, which is a data-entry slip rather than a contract"
             ),
+            ContractLoadError::ZeroPrice { id } => write!(
+                f,
+                "contracts.ron contract '{id}' has price 0 — a contract that is free to sign \
+                 is free to lose, so its strikes would mean nothing; price it"
+            ),
+            ContractLoadError::ZeroStrikes { id } => write!(
+                f,
+                "contracts.ron contract '{id}' has strikes 0 — it could never be lost; use 1 \
+                 for 'one miss loses it'"
+            ),
+            ContractLoadError::NoStarter => write!(
+                f,
+                "contracts.ron marks no contract `starter: true` — a new game would begin \
+                 with nothing to deliver against; flag at least one"
+            ),
             ContractLoadError::UnproducibleItem {
                 contract,
                 item,
@@ -209,12 +274,13 @@ impl std::fmt::Display for ContractLoadError {
 
 impl std::error::Error for ContractLoadError {}
 
-/// The contracts a world starts with, in `contracts.ron` file order.
+/// The whole contract board, in `contracts.ron` file order — what a new
+/// game starts with (the `starter`s) and everything else it can sign.
 ///
 /// Unlike [`super::machines::MachineRegistry`] (a pure lookup table) and
 /// like [`RecipeRegistry`], order here is meaningful — see this module's
 /// doc.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ContractRegistry {
     contracts: Vec<Contract>,
 }
@@ -258,13 +324,25 @@ impl ContractRegistry {
             if def.payout == 0 {
                 return Err(ContractLoadError::ZeroPayout { id: def.id });
             }
+            if def.price == 0 {
+                return Err(ContractLoadError::ZeroPrice { id: def.id });
+            }
+            if def.strikes == 0 {
+                return Err(ContractLoadError::ZeroStrikes { id: def.id });
+            }
             contracts.push(Contract {
                 id: def.id,
                 name: def.name,
                 mix: def.mix,
                 cadence_ticks: def.cadence_ticks,
                 payout: Fx::from_num(def.payout),
+                price: Fx::from_num(def.price),
+                strikes: def.strikes,
+                starter: def.starter,
             });
+        }
+        if !contracts.iter().any(|c| c.starter) {
+            return Err(ContractLoadError::NoStarter);
         }
         Ok(Self { contracts })
     }
@@ -286,6 +364,17 @@ impl ContractRegistry {
 
     pub fn get(&self, id: &str) -> Option<&Contract> {
         self.contracts.iter().find(|c| c.id == id)
+    }
+
+    /// Where `id` sits in file order — the priority rank a signed contract
+    /// takes in the active list, whenever it is signed.
+    pub fn position(&self, id: &str) -> Option<usize> {
+        self.contracts.iter().position(|c| c.id == id)
+    }
+
+    /// The contracts active in a new game, in file order.
+    pub fn starters(&self) -> impl Iterator<Item = &Contract> {
+        self.contracts.iter().filter(|c| c.starter)
     }
 
     pub fn len(&self) -> usize {
@@ -341,7 +430,7 @@ mod tests {
     use super::*;
 
     const EXAMPLE: &str = r#"(
-        schema_version: 1,
+        schema_version: 2,
         contracts: [
             Contract(
                 id: "small",
@@ -349,6 +438,9 @@ mod tests {
                 mix: [("boxed_ketchup", 2)],
                 cadence_ticks: 1000,
                 payout: 50,
+                price: 40,
+                strikes: 3,
+                starter: true,
             ),
             Contract(
                 id: "big",
@@ -356,6 +448,8 @@ mod tests {
                 mix: [("boxed_ketchup", 3), ("bottled_ketchup", 1)],
                 cadence_ticks: 2500,
                 payout: 90,
+                price: 150,
+                strikes: 2,
             ),
         ],
     )"#;
@@ -376,6 +470,13 @@ mod tests {
         assert_eq!(big.name, "Big Order");
         assert_eq!(big.cadence_ticks, 2500);
         assert_eq!(big.payout, Fx::from_num(90));
+        assert_eq!(big.price, Fx::from_num(150));
+        assert_eq!(big.strikes, 2);
+        assert!(!big.starter, "`starter` defaults to false when the line is absent");
+        assert!(registry.get("small").unwrap().starter);
+        assert_eq!(registry.position("big"), Some(1));
+        let starters: Vec<&str> = registry.starters().map(|c| c.id.as_str()).collect();
+        assert_eq!(starters, vec!["small"]);
         assert_eq!(
             big.mix,
             vec![
@@ -413,20 +514,35 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_schema_version() {
-        let text = EXAMPLE.replacen("schema_version: 1", "schema_version: 99", 1);
+        let text = EXAMPLE.replacen("schema_version: 2", "schema_version: 99", 1);
         let err = ContractRegistry::from_ron_str(&text).unwrap_err();
         assert!(matches!(
             err,
             ContractLoadError::UnsupportedSchemaVersion {
                 found: 99,
-                supported: 1
+                supported: 2
             }
         ));
     }
 
+    /// A v1 file — the shape before signing fees and strikes existed — has
+    /// no answer for either, so it is refused outright rather than loaded
+    /// with invented terms. (It trips the parser on the missing fields
+    /// before the version check is reached; either way it does not load.)
+    #[test]
+    fn rejects_a_schema_1_file_rather_than_defaulting_its_terms() {
+        let text = r#"(schema_version: 1, contracts: [Contract(id: "a", name: "A", mix: [("boxed_ketchup", 1)], cadence_ticks: 100, payout: 5)])"#;
+        assert!(ContractRegistry::from_ron_str(text).is_err());
+        // And a v1 version stamp on an otherwise complete file is refused
+        // by the version check itself.
+        let stamped = EXAMPLE.replacen("schema_version: 2", "schema_version: 1", 1);
+        let err = ContractRegistry::from_ron_str(&stamped).unwrap_err();
+        assert!(matches!(err, ContractLoadError::UnsupportedSchemaVersion { found: 1, .. }));
+    }
+
     #[test]
     fn rejects_a_file_with_no_contracts_at_all() {
-        let err = ContractRegistry::from_ron_str("(schema_version: 1, contracts: [])").unwrap_err();
+        let err = ContractRegistry::from_ron_str("(schema_version: 2, contracts: [])").unwrap_err();
         assert!(matches!(err, ContractLoadError::NoContracts));
         assert!(err.to_string().contains("no contracts"));
     }
@@ -483,6 +599,35 @@ mod tests {
             ContractLoadError::ZeroPayout { ref id } => assert_eq!(id, "small"),
             other => panic!("expected ZeroPayout, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rejects_a_zero_price() {
+        let text = EXAMPLE.replacen("price: 40", "price: 0", 1);
+        let err = ContractRegistry::from_ron_str(&text).unwrap_err();
+        match err {
+            ContractLoadError::ZeroPrice { ref id } => assert_eq!(id, "small"),
+            other => panic!("expected ZeroPrice, got {other:?}"),
+        }
+        assert!(err.to_string().contains("price 0"));
+    }
+
+    #[test]
+    fn rejects_zero_strikes() {
+        let text = EXAMPLE.replacen("strikes: 3", "strikes: 0", 1);
+        let err = ContractRegistry::from_ron_str(&text).unwrap_err();
+        match err {
+            ContractLoadError::ZeroStrikes { ref id } => assert_eq!(id, "small"),
+            other => panic!("expected ZeroStrikes, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_a_board_with_no_starter() {
+        let text = EXAMPLE.replacen("starter: true,", "", 1);
+        let err = ContractRegistry::from_ron_str(&text).unwrap_err();
+        assert!(matches!(err, ContractLoadError::NoStarter));
+        assert!(err.to_string().contains("starter"));
     }
 
     #[test]

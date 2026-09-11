@@ -155,6 +155,8 @@ var _contents := -1
 ## --hover-*); a junction shot does not need it in frame.
 var _no_hud := false
 var _contracts := false
+## `--board` opens the contracts board menu (the contract-board epic).
+var _board := false
 var _hotbar_key := ""
 var _stock := false
 ## `--contracts` waits for a STATE, not a tick count: a fixed count drifts
@@ -219,6 +221,7 @@ func _initialize() -> void:
 			_config = true
 			_config_tile = Vector2i(int(parts[0]), int(parts[1]))
 	_market = args.has("--market")
+	_board = args.has("--board")
 	_no_hud = args.has("--no-hud")
 	_contents = int(_string_arg(args, "--contents")) if _string_arg(args, "--contents") != "" else -1
 	_contracts = args.has("--contracts")
@@ -532,6 +535,12 @@ func _open_config_at(tile: Vector2i) -> void:
 ## pool the contracts draw from is the delivery dock at the end of the line,
 ## not a command issued from here.
 func _run_contract_cycles() -> void:
+	# A new game runs the starter only (the contract-board epic); the review
+	# frame wants the whole board competing, so sign every offer first — the
+	# full line costs 1087 of the 3000 start, which covers the signatures.
+	for offer in JSON.parse_string(_main.sim.economy_snapshot_json()).get("board", []):
+		if not bool(offer.get("active", false)):
+			_main.sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": String(offer["id"])}))
 	for i in range(CONTRACTS_REVIEW_TICK_LIMIT):
 		_main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
 		_main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
@@ -675,6 +684,8 @@ func _process(_delta: float) -> bool:
 			hud.visible = false
 	if _frames == 2 and _market:
 		_main._set_market_open(true)
+	if _frames == 2 and _board:
+		_main._set_contract_board_open(true)
 	if _frames == 2 and _contracts:
 		_run_contract_cycles()
 	if _frames == 2 and _stock:

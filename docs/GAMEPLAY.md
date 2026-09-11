@@ -265,6 +265,30 @@ Everything in this doc should be **content**, not simulation code, per [ARCHITEC
   is whole units, so an automatic top-up asks only for the whole units it can
   take — a manual fill rounds a part unit up to a whole one, which is fair
   for one keypress and would bankrupt a player sixty times a second.)
+- **Contracts are signed, and can be lost (the contract-board epic,
+  2026-09-10 — this decides §11's "what happens when a delivery interval is
+  missed").** `data/contracts.ron` (schema 2) is a **board of offers**, not
+  the list of what is running. A new game activates only the offers marked
+  `starter` — the shipped board has exactly one, the corner-shop order — and
+  every other contract is **signed** from the contracts board (the **C**
+  key) for its `price`, out of the one money counter §1 allows. **One
+  signature per offer**: an active contract cannot be signed again, so a
+  player can never hold two copies of one order and double a line's income
+  for free — the same "goods are credited once" principle as the allocation
+  rule above, applied to the contracts themselves. A contract that misses
+  `strikes` windows **in a row** is **lost**: it leaves the active list, its
+  record is forgotten, and it goes back on the board at full price; a paid
+  window resets the run of misses, so a factory that recovers is forgiven and
+  only one that keeps failing loses the customer. Losing IS the penalty —
+  there is no fine on top, because the fee to get the order back is already
+  a number printed on the board. A signed contract takes its **file-order**
+  position in the active list whatever order it was signed in, so the
+  scarcity tiebreak never depends on player history. The shipped ladder is
+  four rungs: the starter, two mid-tier orders, and a top rung one line's
+  throughput cannot carry beside the others — which is §6's pull toward a
+  second line, made concrete. Still open: a reputation score gating higher
+  tiers (§11), and cancelling a contract voluntarily (not offered; losing
+  one is the only way off the clipboard).
 - **Money and active-contract state's architectural home (resolved at milestone 5, 2026-09-06):** both live as plain fields on a new `sim_core::sim::economy::Economy` struct, owned directly by `World` and advanced once per tick — not a new ECS component/entity, since milestone 5 has exactly one money counter and one active contract (no per-entity multiplicity to justify ECS machinery yet). `money` is a single fixed-point (`Fx`) counter, per ARCHITECTURE.md §3.9. The one hardcoded `Contract` (fixed mix/cadence/payout, named constants in `economy.rs`) is checked against an accumulating `delivery_buffer` `Inventory` at its cadence boundary (`Economy::tick`), which is where `World::issue_command(PlayerCommand::CollectOutput)` then deposited collected product instead of discarding it — this was milestone 5's "delivery mechanism." (**Superseded 2026-09-08 by the delivery dock**, two bullets up: that command no longer exists and the pool is filled by a building at the chain's tail instead. The pool itself, and everything about how contracts settle against it, is unchanged.) Exposed to Godot as a `SimBridge::economy_snapshot_json` JSON snapshot (money, contract mix, per-item progress, cadence), same pattern as the existing chunk/tile/layout snapshots. **Superseded in part on 2026-09-08:** `contracts.ron` data-file loading and multiple concurrent contracts have since landed — `Economy` now holds a `Vec<ActiveContract>` (each with its own cadence clock and delivery counters) plus one shared `delivery_buffer`, and `economy_snapshot_json` returns an array of contracts rather than one inline. The `Economy`-as-a-plain-field-on-`World` call above was unaffected and still stands: several contracts are a `Vec` inside the one struct, not a reason for ECS machinery. **Still explicitly deferred:** contract-loss/reputation penalties on a missed cadence window (a miss today just skips that window's payout and keeps the contract active — see this doc's own open question below), and the `StaffPools` resource — all future work, per GAMEPLAY.md §6/§9's original fuller design and the milestone-5 task's own scope note.
 
 ---
@@ -282,7 +306,7 @@ Everything in this doc should be **content**, not simulation code, per [ARCHITEC
 ## 11. Open questions (not yet decided)
 
 - Does a secondary spot-market/"sell excess at a flat lower rate" mechanic exist alongside contracts, or is contract delivery the *only* way to convert product into money? Affects how punishing overproduction is.
-- What exactly happens when a delivery interval is missed once — immediate contract loss, a grace period, a reputation meter that only loses the contract after repeated misses?
+- ~~What exactly happens when a delivery interval is missed once — immediate contract loss, a grace period, a reputation meter that only loses the contract after repeated misses?~~ **Decided 2026-09-10 (§9, the contract-board bullet):** a grace period counted in strikes — `strikes` consecutive missed windows lose the contract, a paid window resets the count, and a lost contract is bought back at its listed price. No reputation meter yet.
 - Is there a reputation/trust score gating access to higher-tier contracts, separate from equipment-tier gating?
 - When staff demand exceeds headcount in a category, which machines lose out — player-set priority, first-come-first-served, or proportional throttling across all of them?
 - Is there a one-time recruiting/training cost on top of the recurring per-head wage, and can headcount be reduced (firing) freely or with a penalty/delay?

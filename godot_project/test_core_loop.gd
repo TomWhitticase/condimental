@@ -244,7 +244,7 @@ func _initialize() -> void:
 
 	# --- The economy's wire shape (milestone 5, then contracts-as-data). ----
 	var econ = JSON.parse_string(sim.economy_snapshot_json())
-	if econ == null or not econ.has("money") or not econ.has("delivery_stock") or not econ.has("contracts"):
+	if econ == null or not econ.has("money") or not econ.has("delivery_stock") or not econ.has("contracts") or not econ.has("board"):
 		_fail("economy_snapshot_json did not return the expected shape: %s" % str(econ))
 		return
 	var contracts: Array = econ["contracts"]
@@ -252,7 +252,7 @@ func _initialize() -> void:
 		_fail("economy_snapshot_json reported no contracts at all: %s" % str(econ))
 		return
 	for contract in contracts:
-		for field in ["id", "name", "mix", "progress", "cadence_ticks", "next_delivery_tick", "payout", "deliveries_made", "deliveries_missed"]:
+		for field in ["id", "name", "mix", "progress", "satisfied", "cadence_ticks", "window_start_tick", "next_delivery_tick", "payout", "price", "deliveries_made", "deliveries_missed", "consecutive_misses", "strikes"]:
 			if not contract.has(field):
 				_fail("contract '%s' is missing '%s': %s" % [str(contract.get("id", "?")), field, str(contract)])
 				return

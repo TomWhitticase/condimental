@@ -11,6 +11,17 @@
 // mismatched version rather than silently misreading a changed shape, the
 // same way `recipes.ron`'s and `machines.ron`'s loaders do.
 //
+// SCHEMA 2 (2026-09-10, the contract-board epic): this file is a BOARD OF
+// OFFERS, not the list of what is running. A new game starts with only the
+// contracts marked `starter: true` active; every other contract here is an
+// offer the player SIGNS from the contracts board (the C key) for its
+// `price`, out of the one money counter. A contract that misses `strikes`
+// windows IN A ROW is LOST — it leaves the active list and goes back on the
+// board, and the player has to pay its price again to get it back. One
+// signature per contract: a contract is either on the board or active,
+// never both and never twice. v1 files (no `price`/`strikes`, all contracts
+// active from tick 0) are rejected, not migrated.
+//
 // WHAT A CONTRACT IS (GAMEPLAY.md §6). A standing agreement to supply a
 // `mix` of items every `cadence_ticks` ticks, for `payout` money each time
 // the mix is delivered in full. It is deliberately NOT a spot market: the
@@ -18,13 +29,29 @@
 // whole reason the game rewards a factory that can hold several different
 // lines running at once rather than one maximally-profitable one.
 //
-// FILE ORDER IS PRIORITY. Every contract draws from ONE shared pool of
-// collected-but-undelivered stock (see `sim_core/src/sim/economy.rs`'s
+// FILE ORDER IS PRIORITY. Every active contract draws from ONE shared pool
+// of collected-but-undelivered stock (see `sim_core/src/sim/economy.rs`'s
 // module doc for the full allocation rule and why it is the way it is). When
 // two contracts fall due on the same tick and there isn't enough stock for
 // both, the one listed FIRST here is filled first. That is a deterministic
 // tiebreak (ARCHITECTURE.md §3.9), not a coincidence of iteration order —
-// reordering this list genuinely changes who gets paid under scarcity.
+// reordering this list genuinely changes who gets paid under scarcity. A
+// contract signed later still takes its FILE position in the active list,
+// so signing order never changes priority.
+//
+// FIELDS, per contract:
+//   id            stable content id (save files and tests key on it)
+//   name          what the player reads
+//   mix           [(item, quantity)] required per delivery, all-or-nothing
+//   cadence_ticks how often the mix is checked
+//   payout        money per satisfied window
+//   price         money to sign it (and to sign it AGAIN after losing it);
+//                 at least 1, so a lost contract is never free to recover
+//   strikes       consecutive missed windows that lose the contract; at
+//                 least 1 (1 = a single miss loses it). A paid window resets
+//                 the count to zero.
+//   starter       (optional, default false) active in a new game without
+//                 being signed. At least one contract must be a starter.
 //
 // EVERY CONTRACT BELOW ASKS FOR `boxed_ketchup`, AND THAT IS NOT A DESIGN
 // STATEMENT. GAMEPLAY.md §6's mixes are meant to name several *different*
@@ -32,64 +59,82 @@
 // sellable product, and the delivery dock at the chain's tail only ever
 // receives what that one line's final stage makes, so any contract naming a
 // different item would be permanently unsatisfiable content rather than
-// interesting content. The multi-item `mix` shape is fully implemented and tested —
-// what is missing is a second sauce line to point it at, which is future
-// content work (GAMEPLAY.md §2's tier table), not a limitation of this file.
-// What the three below DO create today is the real thing this ticket is
-// for: three independent cadences competing for one line's throughput.
+// interesting content. The multi-item `mix` shape is fully implemented and
+// tested — what is missing is a second sauce line to point it at, which is
+// future content work (GAMEPLAY.md §2's tier table), not a limitation of
+// this file. What the four below DO create today: a ladder of commitment
+// (bigger orders, stiffer terms, better rates) on one line's throughput,
+// and a top rung one line cannot carry alone.
 //
 // BALANCE NOTE. The shipped chain's bottleneck is the 240-tick cooking vat,
 // so steady-state throughput is roughly one `boxed_ketchup` per ~245 ticks,
-// i.e. about 4.0 per 1000 ticks. The three contracts below demand 2.0 + 1.2
-// + 0.67 = ~3.87 per 1000 ticks combined. That is deliberately just inside
-// capacity: a factory kept fed (hopper topped up, vinegar tank topped up)
-// can serve all three, and one left to run dry starts missing windows. Rates
-// per unit rise with commitment — the small, frequent order pays worst per
-// box, the big infrequent one pays best.
-//
-// PENALTY TERMS ARE NOT HERE YET, ON PURPOSE. GAMEPLAY.md §9 lists them as
-// part of this file's eventual shape, but GAMEPLAY.md §11 still has "what
-// exactly happens when a delivery interval is missed" as an open question
-// (immediate loss / grace period / reputation meter). A missed window today
-// costs that window's payout and nothing else. Adding a `penalty` field
-// nothing reads would be inventing an answer to that question in data;
-// it lands here — with a `schema_version` bump — once the question is
-// actually decided.
+// i.e. about 4.0 per 1000 ticks. The first three contracts demand 2.0 + 1.2
+// + 0.67 = ~3.87 per 1000 ticks combined — deliberately just inside one
+// line's capacity. The fourth adds 1.5 per 1000 on top, which one line
+// cannot serve: holding all four means a second line, which is the whole
+// point of GAMEPLAY.md §6 (contracts pull the factory outward). Signing
+// fees are sized against the reference line's 1087 bill and the 3000
+// starting balance: the mid-tier pairs are a window or two of payout each,
+// the top rung is a real capital decision. All placeholders per GAMEPLAY.md
+// §10; change them here and in the prose above together.
 (
-    schema_version: 1,
+    schema_version: 2,
     contracts: [
         // The starter order: exactly milestone 5's hardcoded contract
         // (2 boxes every 1000 ticks for 50), kept numerically identical so
         // that the first thing a new player — and the full-chain integration
-        // test — sees is unchanged by this file's arrival.
+        // test — sees is unchanged by this file's arrival. Three strikes: a
+        // new player's first line WILL miss its first window or two while it
+        // is being built, and losing the only contract before the first
+        // box ships would be a dead start, not a lesson. Cheap to get back.
         Contract(
             id: "corner_shop",
             name: "Corner Shop Standing Order",
             mix: [("boxed_ketchup", 2)],
             cadence_ticks: 1000,
             payout: 50,
+            price: 40,
+            strikes: 3,
+            starter: true,
         ),
         // The reason to keep the line running rather than babysitting one
         // window: a bigger box count on a much slower cadence, at the best
-        // per-unit rate on the board (30/box).
+        // per-unit rate on the board so far (30/box). Two strikes.
         Contract(
             id: "diner_supply",
             name: "Roadside Diner Group",
             mix: [("boxed_ketchup", 3)],
             cadence_ticks: 2500,
             payout: 90,
+            price: 150,
+            strikes: 2,
         ),
         // The small, awkward one: a single box on a cadence that lines up
         // with neither of the others, at the worst per-unit rate (24/box).
         // Its job is to be the order that gets squeezed out when the line
         // stalls — which is exactly the pressure a single contract could
-        // never create.
+        // never create. ONE strike: a stall holder who misses once is gone.
         Contract(
             id: "market_stall",
             name: "Saturday Market Stall",
             mix: [("boxed_ketchup", 1)],
             cadence_ticks: 1500,
             payout: 24,
+            price: 60,
+            strikes: 1,
+        ),
+        // The top rung: six boxes a window at the best rate on the board
+        // (35/box), on a cadence long enough to bank them — and a demand one
+        // line cannot carry alongside the other three. Two strikes, and an
+        // expensive signature to lose.
+        Contract(
+            id: "regional_grocer",
+            name: "Regional Grocer Chain",
+            mix: [("boxed_ketchup", 6)],
+            cadence_ticks: 4000,
+            payout: 210,
+            price: 400,
+            strikes: 2,
         ),
     ],
 )

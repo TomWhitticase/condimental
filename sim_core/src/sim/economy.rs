@@ -54,8 +54,44 @@
 //! 2. **Undelivered stock is never destroyed.** A missed window leaves the
 //!    pool untouched, so what was delivered still counts toward the next
 //!    window (of that contract or any other). A miss costs that window's
-//!    payout and nothing more — contract loss and reputation penalties are
-//!    GAMEPLAY.md §11's explicitly open question, not decided here.
+//!    payout — and, since the contract-board epic, a **strike**.
+//!
+//! # Signing and losing contracts (the contract-board epic, 2026-09-10)
+//!
+//! This answers the question GAMEPLAY.md §11 had left open ("what exactly
+//! happens when a delivery interval is missed"), and it answers it the
+//! Factorio way rather than the reputation-meter way: **a contract is a
+//! thing you buy, and a thing you can lose.**
+//!
+//! - `data/contracts.ron` is a **board of offers**. A new game activates
+//!   only the offers flagged `starter`; everything else is signed by the
+//!   player through [`Economy::try_sign`] (the `SignContract` command) for
+//!   the offer's `price`, out of the same money counter everything else
+//!   debits. **One signature per offer**: signing an active contract is
+//!   refused, so a player can never hold two of one contract and double a
+//!   line's income for free — the same "goods are never credited twice"
+//!   principle as the allocation rule above, applied to the contracts
+//!   themselves.
+//! - A contract that misses `strikes` windows **in a row** is **lost**: it
+//!   leaves the active list at that settle, its counters are forgotten,
+//!   and the board offers it again at full price. A paid window resets
+//!   the run of misses to zero, so a factory that recovers is forgiven;
+//!   only a factory that keeps failing loses the customer. Consecutive
+//!   rather than cumulative because a cumulative count is a fuse that can
+//!   only ever burn down, which turns every long game into a certain loss.
+//! - A signed contract takes its **file-order position** in the active
+//!   list, whatever order it was signed in, so the scarcity tiebreak above
+//!   is still `contracts.ron`'s and never depends on player history.
+//! - Losing is the whole penalty. There is no fine on top: the fee to get
+//!   the contract back IS the fine, and it is a number already printed on
+//!   the board rather than a second one to explain. A reputation score
+//!   gating higher tiers stays open (GAMEPLAY.md §11).
+//!
+//! The economy owns the board (a clone of the registry) because signing
+//! needs the offer's terms at command time and nothing else in `World`
+//! holds a registry after construction.
+
+use std::collections::BTreeMap;
 
 use super::contracts::{Contract, ContractRegistry};
 use super::inventory::Inventory;
@@ -126,22 +162,59 @@ pub struct ActiveContract {
     pub next_delivery_tick: u64,
     /// How many cadence windows this contract has been paid for.
     pub deliveries_made: u32,
-    /// How many cadence windows passed with the mix unsatisfied. Counted
-    /// but not yet acted on: GAMEPLAY.md §11 has not decided what a miss
-    /// costs beyond the payout, so this is the number that mechanic will
-    /// read when it lands, and presentation can already show it.
+    /// How many cadence windows passed with the mix unsatisfied, over the
+    /// life of this signature.
     pub deliveries_missed: u32,
+    /// Missed windows **in a row**. Zeroed by a paid window; reaching
+    /// `contract.strikes` loses the contract (module doc). This, not
+    /// `deliveries_missed`, is what "at risk" means.
+    pub consecutive_misses: u32,
 }
 
 impl ActiveContract {
-    fn new(contract: Contract) -> Self {
+    /// A fresh signature at `tick`: first window ends one cadence later,
+    /// every counter at zero. A re-signed contract is a new agreement and
+    /// remembers nothing of the one that was lost.
+    pub fn signed_at(contract: Contract, tick: u64) -> Self {
         Self {
-            next_delivery_tick: contract.cadence_ticks,
+            next_delivery_tick: tick + contract.cadence_ticks,
             contract,
             deliveries_made: 0,
             deliveries_missed: 0,
+            consecutive_misses: 0,
         }
     }
+
+    /// The tick this contract's current window began — the other end of
+    /// the countdown, so a gauge can show elapsed as a fraction.
+    pub fn window_start_tick(&self) -> u64 {
+        self.next_delivery_tick
+            .saturating_sub(self.contract.cadence_ticks)
+    }
+}
+
+/// What settling did to one contract on one tick — the return of
+/// [`Economy::tick`], so a caller (or a test) never has to diff the active
+/// list by index to learn that something was paid or dropped. `Lost` always
+/// follows the `Missed` that caused it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContractEvent {
+    Paid { id: String },
+    Missed { id: String, consecutive_misses: u32 },
+    Lost { id: String },
+}
+
+/// Why [`Economy::try_sign`] did nothing. The command path drops this on
+/// the floor (every refused command is a silent no-op), but the reason is
+/// worth having for tests and for any UI that wants to say it in words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignRefusal {
+    /// No such id on the board.
+    Unknown,
+    /// Already active — one signature per offer.
+    AlreadySigned,
+    /// The fee is more than the balance; nothing moved.
+    CannotAfford,
 }
 
 /// Money plus every active contract's delivery state. Owned directly by
@@ -152,31 +225,31 @@ pub struct Economy {
     /// Fixed-point money counter (ARCHITECTURE.md §3.9 — shared, persisted
     /// simulation state, so never a float).
     pub money: Fx,
+    /// The whole board of offers, in `contracts.ron` order (module doc:
+    /// "Signing and losing contracts"). Content, so read-only.
+    board: ContractRegistry,
     /// Every contract currently running, in `contracts.ron` file order,
-    /// which is also the priority order under scarcity (module doc).
+    /// which is also the priority order under scarcity (module doc). A
+    /// subset of `board`; never holds one id twice.
     pub contracts: Vec<ActiveContract>,
     /// The ONE shared pool of delivered-but-not-yet-shipped product that
     /// every contract draws from (module doc's allocation rule) — the
     /// number the UI calls "on the dock", and since the delivery-dock ticket
     /// that is literally true: it is filled by [`super::dock::Dock`], the
     /// building at the chain's tail, which ships whatever arrives on its
-    /// belt into here every tick. (Until that ticket it was filled by
-    /// `World::issue_command(PlayerCommand::CollectOutput)`, a keypress that
-    /// reached into the last machine's own output buffer; that command is
-    /// gone. This field's meaning and shape did not change — only who fills
-    /// it.)
+    /// belt into here every tick.
     pub delivery_buffer: Inventory,
+    /// How many times each offer has been lost, by id — absent means never.
+    /// A `BTreeMap` so iteration (and the save) is deterministic. Kept so
+    /// the board can say "lost twice" beside an offer; nothing in the
+    /// settle logic reads it.
+    pub losses: BTreeMap<String, u32>,
 }
 
 /// A presentation-facing snapshot of economy state (ARCHITECTURE.md §4/§5) —
-/// what Godot needs to render a money counter and a contract clipboard per
-/// active contract, never the internal `Inventory` representation.
-///
-/// **Shape changed when contracts became data.** It used to carry one
-/// contract inline (`contract_mix` / `contract_progress` / `cadence_ticks` /
-/// `next_delivery_tick` as top-level fields). Those are gone; per-contract
-/// fields now live in [`ContractSnapshot`] inside the `contracts` array.
-/// `money` is unchanged and is still a single value.
+/// what Godot needs to render a money counter, a contract clipboard per
+/// active contract and the board of offers, never the internal `Inventory`
+/// representation.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct EconomySnapshot {
     /// `f64` is fine here — same rule as `BeltSnapshot`'s item positions:
@@ -189,8 +262,12 @@ pub struct EconomySnapshot {
     /// show for "what's on the dock," as opposed to a contract's own
     /// clamped `progress`.
     pub delivery_stock: Vec<(ItemId, u32)>,
-    /// Every active contract, in priority order.
+    /// Every **active** contract, in priority order.
     pub contracts: Vec<ContractSnapshot>,
+    /// Every offer on the board, in file order, active or not — what the
+    /// contracts board menu is built from, the way `shop_snapshot_json`'s
+    /// `entries` build the build menu.
+    pub board: Vec<ContractOfferSnapshot>,
 }
 
 /// One active contract, as presentation sees it.
@@ -207,20 +284,53 @@ pub struct ContractSnapshot {
     /// rather than "7/2" when stock exceeds the ask. Same item order as
     /// `mix`, so the two zip positionally.
     pub progress: Vec<(ItemId, u32)>,
+    /// Whether the pool holds the whole mix right now — i.e. whether the
+    /// window would pay if it ended this tick. Derived here rather than in
+    /// Godot so the two can never disagree about "all-or-nothing".
+    pub satisfied: bool,
     pub cadence_ticks: u64,
+    /// The tick the current window began; with `next_delivery_tick` this
+    /// is the whole countdown, both ends.
+    pub window_start_tick: u64,
     pub next_delivery_tick: u64,
     /// Payout per satisfied delivery. `f64` for the same presentation-only
     /// reason as `money`.
     pub payout: f64,
+    /// What it cost to sign — and will cost again if it is lost.
+    pub price: f64,
     pub deliveries_made: u32,
     pub deliveries_missed: u32,
+    /// Missed windows in a row; the contract is lost when this reaches
+    /// `strikes`.
+    pub consecutive_misses: u32,
+    pub strikes: u32,
+}
+
+/// One offer on the board, active or not.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ContractOfferSnapshot {
+    pub id: String,
+    pub name: String,
+    pub mix: Vec<(ItemId, u32)>,
+    pub cadence_ticks: u64,
+    pub payout: f64,
+    pub price: f64,
+    pub strikes: u32,
+    pub starter: bool,
+    /// Currently signed. An active offer cannot be signed again.
+    pub active: bool,
+    /// Whether the fee is within the current balance — the same "one is
+    /// buyable right now" flag `shop_snapshot_json` gives each kind.
+    pub affordable: bool,
+    /// How many times this offer has been lost and gone back on the board.
+    pub times_lost: u32,
 }
 
 impl Economy {
-    /// Builds the live economy from loaded contract content. The registry's
-    /// order is preserved, because it is the scarcity tiebreak.
-    /// Starts at **zero** money — an `Economy` is a ledger, and an empty
-    /// ledger is the honest default. A new *game* starts at
+    /// Builds the live economy from a loaded contract board: the board's
+    /// `starter` contracts are active from tick 0, everything else waits to
+    /// be signed. Starts at **zero** money — an `Economy` is a ledger, and
+    /// an empty ledger is the honest default. A new *game* starts at
     /// [`STARTING_MONEY`], which `World` applies through
     /// [`Economy::with_money`]; keeping that decision one layer up is what
     /// lets a test build an economy in isolation without a starting balance
@@ -237,15 +347,16 @@ impl Economy {
         Self {
             money,
             contracts: contracts
-                .ordered()
-                .iter()
+                .starters()
                 .cloned()
-                .map(ActiveContract::new)
+                .map(|c| ActiveContract::signed_at(c, 0))
                 .collect(),
+            board: contracts.clone(),
             // Unbounded per-item capacity: this is an accumulating ledger of
             // "delivered, awaiting a contract check," not a
             // physical-space-limited buffer like a machine's input/output.
             delivery_buffer: Inventory::new(u32::MAX),
+            losses: BTreeMap::new(),
         }
     }
 
@@ -255,11 +366,14 @@ impl Economy {
         Self::new(&ContractRegistry::bundled())
     }
 
+    /// The board of offers this economy was built from, in file order.
+    pub fn board(&self) -> &ContractRegistry {
+        &self.board
+    }
+
     /// Adds finished product into the shared delivery pool — called from
     /// [`super::dock::Dock::ship_into`], once per tick, for whatever the
-    /// chain's delivery dock received that tick. (It was the
-    /// `CollectOutput` command's handler before the delivery-dock ticket;
-    /// the call is identical, it just isn't a player action any more.)
+    /// chain's delivery dock received that tick.
     pub fn deposit(&mut self, item: &str, qty: u32) {
         self.delivery_buffer.add(item, qty);
     }
@@ -267,15 +381,14 @@ impl Economy {
     /// Spends `amount` if there is enough money, and reports whether it
     /// did. **All or nothing:** on `false` not a single unit has moved, so
     /// a caller can check-and-spend in one step without ever leaving a
-    /// half-applied transaction behind ("Shop & Inventory" epic, ticket 1 —
-    /// `World::issue_command`'s `Purchase` arm is the only caller).
+    /// half-applied transaction behind ("Shop & Inventory" epic, ticket 1).
     ///
     /// This is the *only* way money leaves the economy, and it lives here
     /// rather than on the shop for the reason `sim::shop`'s module doc
     /// gives: GAMEPLAY.md §1 allows exactly one currency, so there is
-    /// exactly one counter, and a purchase debits the same field a contract
-    /// delivery credits. A non-positive `amount` is refused rather than
-    /// treated as a free purchase.
+    /// exactly one counter, and a purchase — or a contract signature —
+    /// debits the same field a contract delivery credits. A non-positive
+    /// `amount` is refused rather than treated as a free purchase.
     pub fn try_spend(&mut self, amount: Fx) -> bool {
         if amount <= Fx::ZERO || self.money < amount {
             return false;
@@ -284,36 +397,103 @@ impl Economy {
         true
     }
 
+    /// Signs the board's offer `id` at `current_tick`: debits its price,
+    /// activates it with a fresh clock (first window ends one cadence from
+    /// now) and zero counters, and slots it into the active list at its
+    /// **file-order** position so priority under scarcity stays the
+    /// board's. Refuses — changing nothing — an unknown id, an offer that is
+    /// already active (one signature per offer, module doc) and a fee the
+    /// balance does not cover.
+    pub fn try_sign(&mut self, id: &str, current_tick: u64) -> Result<(), SignRefusal> {
+        let Some(contract) = self.board.get(id).cloned() else {
+            return Err(SignRefusal::Unknown);
+        };
+        if self.is_active(id) {
+            return Err(SignRefusal::AlreadySigned);
+        }
+        if !self.try_spend(contract.price) {
+            return Err(SignRefusal::CannotAfford);
+        }
+        self.insert_in_board_order(ActiveContract::signed_at(contract, current_tick));
+        Ok(())
+    }
+
+    /// Whether the offer `id` is currently signed.
+    pub fn is_active(&self, id: &str) -> bool {
+        self.contracts.iter().any(|c| c.contract.id == id)
+    }
+
+    /// How many times the offer `id` has been lost.
+    pub fn times_lost(&self, id: &str) -> u32 {
+        self.losses.get(id).copied().unwrap_or(0)
+    }
+
+    /// Puts `active` into the list at the board's rank for its id — after
+    /// every active contract listed earlier in the file, before every one
+    /// listed later. Also the restore path's insertion, so a loaded save
+    /// ends up in the same order a played game would.
+    pub(super) fn insert_in_board_order(&mut self, active: ActiveContract) {
+        let rank = self.rank(&active.contract.id);
+        let at = self
+            .contracts
+            .iter()
+            .position(|c| self.rank(&c.contract.id) > rank)
+            .unwrap_or(self.contracts.len());
+        self.contracts.insert(at, active);
+    }
+
+    fn rank(&self, id: &str) -> usize {
+        self.board.position(id).unwrap_or(usize::MAX)
+    }
+
+    /// Whether the shared pool holds every line of `contract`'s mix.
+    fn mix_satisfied(&self, contract: &Contract) -> bool {
+        contract
+            .mix
+            .iter()
+            .all(|(item, qty)| self.delivery_buffer.has_at_least(item, *qty))
+    }
+
     /// Advances every active contract's own cadence clock and settles any
     /// that fall due on `current_tick`. For each such contract:
     ///
     /// - **Satisfied** (the shared pool holds its full mix): consumes the
     ///   mix from the pool, pays out, advances that contract's
-    ///   `next_delivery_tick` by its own cadence.
+    ///   `next_delivery_tick` by its own cadence, and clears its run of
+    ///   misses.
     /// - **Not satisfied:** a missed window — no money changes hands and
     ///   nothing is consumed, but the cadence still advances rather than
-    ///   re-checking every tick forever.
+    ///   re-checking every tick forever — and one more consecutive miss.
+    ///   If that reaches the contract's `strikes`, the contract is **lost**:
+    ///   removed from the active list before this call returns, counted in
+    ///   `losses`, back on the board.
     ///
     /// Contracts are settled in priority order (module doc), so when two
     /// fall due together and stock covers only one, the earlier-listed one
-    /// takes it. Returns the indices of the contracts that were paid, in
-    /// that same order — empty when nothing fell due or nothing was
-    /// satisfiable.
-    pub fn tick(&mut self, current_tick: u64) -> Vec<usize> {
-        let mut paid = Vec::new();
+    /// takes it. Returns what happened, in that same order — empty when
+    /// nothing fell due.
+    pub fn tick(&mut self, current_tick: u64) -> Vec<ContractEvent> {
+        let mut events = Vec::new();
+        let mut lost: Vec<usize> = Vec::new();
         for i in 0..self.contracts.len() {
             if current_tick < self.contracts[i].next_delivery_tick {
                 continue;
             }
             self.contracts[i].next_delivery_tick += self.contracts[i].contract.cadence_ticks;
+            let id = self.contracts[i].contract.id.clone();
 
-            let satisfied = self.contracts[i]
-                .contract
-                .mix
-                .iter()
-                .all(|(item, qty)| self.delivery_buffer.has_at_least(item, *qty));
-            if !satisfied {
-                self.contracts[i].deliveries_missed += 1;
+            if !self.mix_satisfied(&self.contracts[i].contract) {
+                let active = &mut self.contracts[i];
+                active.deliveries_missed += 1;
+                active.consecutive_misses += 1;
+                events.push(ContractEvent::Missed {
+                    id: id.clone(),
+                    consecutive_misses: active.consecutive_misses,
+                });
+                if active.consecutive_misses >= active.contract.strikes {
+                    lost.push(i);
+                    events.push(ContractEvent::Lost { id });
+                }
                 continue;
             }
 
@@ -322,14 +502,20 @@ impl Economy {
             }
             self.money += self.contracts[i].contract.payout;
             self.contracts[i].deliveries_made += 1;
-            paid.push(i);
+            self.contracts[i].consecutive_misses = 0;
+            events.push(ContractEvent::Paid { id });
         }
-        paid
+        // Highest index first, so earlier removals never shift a later one.
+        for &i in lost.iter().rev() {
+            let gone = self.contracts.remove(i);
+            *self.losses.entry(gone.contract.id).or_insert(0) += 1;
+        }
+        events
     }
 
     /// The active contract with the given content id, if any — the lookup
-    /// tests and future command handling ("deliver to *this* contract")
-    /// want, without exposing the `Vec`'s indices as an API.
+    /// tests and command handling want, without exposing the `Vec`'s
+    /// indices as an API.
     pub fn contract(&self, id: &str) -> Option<&ActiveContract> {
         self.contracts.iter().find(|c| c.contract.id == id)
     }
@@ -353,11 +539,34 @@ impl Economy {
                             (item.clone(), self.delivery_buffer.count(item).min(*required))
                         })
                         .collect(),
+                    satisfied: self.mix_satisfied(&active.contract),
                     cadence_ticks: active.contract.cadence_ticks,
+                    window_start_tick: active.window_start_tick(),
                     next_delivery_tick: active.next_delivery_tick,
                     payout: active.contract.payout.to_num::<f64>(),
+                    price: active.contract.price.to_num::<f64>(),
                     deliveries_made: active.deliveries_made,
                     deliveries_missed: active.deliveries_missed,
+                    consecutive_misses: active.consecutive_misses,
+                    strikes: active.contract.strikes,
+                })
+                .collect(),
+            board: self
+                .board
+                .ordered()
+                .iter()
+                .map(|offer| ContractOfferSnapshot {
+                    id: offer.id.clone(),
+                    name: offer.name.clone(),
+                    mix: offer.mix.clone(),
+                    cadence_ticks: offer.cadence_ticks,
+                    payout: offer.payout.to_num::<f64>(),
+                    price: offer.price.to_num::<f64>(),
+                    strikes: offer.strikes,
+                    starter: offer.starter,
+                    active: self.is_active(&offer.id),
+                    affordable: self.money >= offer.price,
+                    times_lost: self.times_lost(&offer.id),
                 })
                 .collect(),
         }
@@ -368,17 +577,20 @@ impl Economy {
 mod tests {
     use super::*;
 
-    /// Two contracts on deliberately different cadences, both wanting the
-    /// same item, plus a third wanting something the fixture never
-    /// delivers. Written inline rather than read from `contracts.ron` so
-    /// these unit tests keep testing `Economy`'s behaviour rather than the
-    /// current balance of shipped content.
+    /// Two starter contracts on deliberately different cadences, both
+    /// wanting the same item, a third starter wanting something the fixture
+    /// never delivers (with enough strikes that it is never lost inside a
+    /// test that is not about losing), and one unsigned offer. Written
+    /// inline rather than read from `contracts.ron` so these unit tests keep
+    /// testing `Economy`'s behaviour rather than the current balance of
+    /// shipped content.
     const FIXTURE: &str = r#"(
-        schema_version: 1,
+        schema_version: 2,
         contracts: [
-            Contract(id: "fast", name: "Fast", mix: [("boxed_ketchup", 2)], cadence_ticks: 100, payout: 50),
-            Contract(id: "slow", name: "Slow", mix: [("boxed_ketchup", 3)], cadence_ticks: 250, payout: 90),
-            Contract(id: "impossible", name: "Impossible", mix: [("chilli_mayo", 1)], cadence_ticks: 100, payout: 500),
+            Contract(id: "fast", name: "Fast", mix: [("boxed_ketchup", 2)], cadence_ticks: 100, payout: 50, price: 10, strikes: 2, starter: true),
+            Contract(id: "offer", name: "Offer", mix: [("boxed_ketchup", 1)], cadence_ticks: 150, payout: 20, price: 30, strikes: 1),
+            Contract(id: "slow", name: "Slow", mix: [("boxed_ketchup", 3)], cadence_ticks: 250, payout: 90, price: 20, strikes: 3, starter: true),
+            Contract(id: "impossible", name: "Impossible", mix: [("chilli_mayo", 1)], cadence_ticks: 100, payout: 500, price: 5, strikes: 1000, starter: true),
         ],
     )"#;
 
@@ -386,11 +598,34 @@ mod tests {
         Economy::new(&ContractRegistry::from_ron_str(FIXTURE).expect("fixture must load"))
     }
 
+    fn active_ids(econ: &Economy) -> Vec<&str> {
+        econ.contracts.iter().map(|c| c.contract.id.as_str()).collect()
+    }
+
+    fn paid(events: &[ContractEvent]) -> Vec<&str> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                ContractEvent::Paid { id } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn only_starters_are_active_in_a_new_economy_and_the_rest_wait_on_the_board() {
+        let econ = fixture();
+        assert_eq!(active_ids(&econ), vec!["fast", "slow", "impossible"]);
+        assert!(!econ.is_active("offer"));
+        assert_eq!(econ.board().len(), 4, "the board still lists every offer");
+    }
+
     #[test]
     fn each_contract_starts_with_its_own_first_boundary_at_its_own_cadence() {
         let econ = fixture();
         assert_eq!(econ.contract("fast").unwrap().next_delivery_tick, 100);
         assert_eq!(econ.contract("slow").unwrap().next_delivery_tick, 250);
+        assert_eq!(econ.contract("slow").unwrap().window_start_tick(), 0);
     }
 
     #[test]
@@ -406,10 +641,11 @@ mod tests {
         let mut econ = fixture();
         econ.deposit("boxed_ketchup", 5);
 
-        // t=100: only "fast" is due ("slow" runs to 250).
-        let paid = econ.tick(100);
+        // t=100: "fast" is due and paid; "impossible" is due and missed;
+        // "slow" runs to 250.
+        let events = econ.tick(100);
 
-        assert_eq!(paid, vec![0], "only the 100-tick contract should have settled");
+        assert_eq!(paid(&events), vec!["fast"], "only the 100-tick contract should have settled");
         assert_eq!(econ.money, Fx::from_num(50));
         assert_eq!(
             econ.delivery_buffer.count("boxed_ketchup"),
@@ -417,6 +653,7 @@ mod tests {
             "exactly the paid contract's mix must leave the shared pool"
         );
         assert_eq!(econ.contract("fast").unwrap().next_delivery_tick, 200);
+        assert_eq!(econ.contract("fast").unwrap().window_start_tick(), 100);
         assert_eq!(
             econ.contract("slow").unwrap().next_delivery_tick,
             250,
@@ -457,9 +694,6 @@ mod tests {
         let mut econ = fixture();
         econ.deposit("boxed_ketchup", 2); // enough for "fast" alone
 
-        // Settled in one call at t=500, which is past both contracts' first
-        // boundaries — so both are due on the same tick, competing for the
-        // same two boxes.
         econ.tick(500);
 
         assert_eq!(
@@ -508,6 +742,7 @@ mod tests {
             impossible.deliveries_missed, 10,
             "a 100-tick contract must have missed every one of its ten windows"
         );
+        assert_eq!(impossible.consecutive_misses, 10);
         assert!(
             econ.contract("fast").unwrap().deliveries_made > 0,
             "an unsatisfiable contract must not stall the ones that can be filled"
@@ -515,10 +750,15 @@ mod tests {
     }
 
     #[test]
-    fn a_missed_delivery_can_still_pay_out_once_enough_accumulates_by_a_later_boundary() {
+    fn a_missed_delivery_can_still_pay_out_once_enough_accumulates_and_a_paid_window_clears_the_strike() {
         let mut econ = fixture();
         econ.deposit("boxed_ketchup", 1); // short by one for "fast"
-        assert!(econ.tick(100).is_empty());
+        let events = econ.tick(100);
+        assert!(paid(&events).is_empty());
+        assert!(events.contains(&ContractEvent::Missed {
+            id: "fast".to_string(),
+            consecutive_misses: 1
+        }));
         assert_eq!(econ.money, Fx::from_num(0));
         assert_eq!(
             econ.delivery_buffer.count("boxed_ketchup"),
@@ -526,15 +766,142 @@ mod tests {
             "a miss must not destroy what was delivered"
         );
         assert_eq!(econ.contract("fast").unwrap().deliveries_missed, 1);
+        assert_eq!(econ.contract("fast").unwrap().consecutive_misses, 1);
+        assert!(econ.is_active("fast"), "one miss is one short of 'fast''s two strikes");
 
         econ.deposit("boxed_ketchup", 1); // the missing unit arrives later
-        assert_eq!(econ.tick(200), vec![0]);
+        assert_eq!(paid(&econ.tick(200)), vec!["fast"]);
         assert_eq!(econ.money, Fx::from_num(50));
+        assert_eq!(
+            econ.contract("fast").unwrap().consecutive_misses,
+            0,
+            "a paid window forgives the run of misses"
+        );
+        assert_eq!(econ.contract("fast").unwrap().deliveries_missed, 1, "the lifetime tally stays");
     }
 
     #[test]
-    fn snapshot_reports_one_entry_per_contract_with_progress_clamped_to_the_ask() {
+    fn missing_strikes_windows_in_a_row_loses_the_contract_and_puts_it_back_on_the_board() {
         let mut econ = fixture();
+        // Nothing delivered: "fast" (2 strikes) misses at 100 and is lost at 200.
+        let first = econ.tick(100);
+        assert!(!first.contains(&ContractEvent::Lost { id: "fast".to_string() }));
+        assert!(econ.is_active("fast"));
+
+        let second = econ.tick(200);
+        let lost_at = second
+            .iter()
+            .position(|e| *e == ContractEvent::Lost { id: "fast".to_string() })
+            .expect("'fast' must be lost on its second consecutive miss");
+        assert_eq!(
+            second[lost_at - 1],
+            ContractEvent::Missed { id: "fast".to_string(), consecutive_misses: 2 },
+            "Lost always follows the Missed that caused it"
+        );
+        assert!(!econ.is_active("fast"), "a lost contract leaves the active list on that tick");
+        assert_eq!(active_ids(&econ), vec!["slow", "impossible"]);
+        assert_eq!(econ.times_lost("fast"), 1);
+        assert_eq!(econ.times_lost("slow"), 0);
+
+        let snap = econ.snapshot();
+        let offer = snap.board.iter().find(|o| o.id == "fast").unwrap();
+        assert!(!offer.active);
+        assert_eq!(offer.times_lost, 1);
+
+        // Later ticks must not keep settling a contract that is gone.
+        for t in 201..=1000u64 {
+            for e in econ.tick(t) {
+                assert!(
+                    !matches!(&e, ContractEvent::Missed { id, .. } | ContractEvent::Paid { id } if id == "fast"),
+                    "a lost contract must not settle again: {e:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_contract_with_one_strike_is_lost_on_its_first_miss() {
+        let mut econ = fixture();
+        econ.money = Fx::from_num(100);
+        econ.try_sign("offer", 0).unwrap();
+        assert!(econ.is_active("offer"));
+        let events = econ.tick(150);
+        assert!(events.contains(&ContractEvent::Lost { id: "offer".to_string() }));
+        assert!(!econ.is_active("offer"));
+    }
+
+    #[test]
+    fn signing_debits_the_price_starts_a_fresh_clock_and_takes_the_boards_position() {
+        let mut econ = fixture();
+        econ.money = Fx::from_num(100);
+
+        assert_eq!(econ.try_sign("offer", 40), Ok(()));
+        assert_eq!(econ.money, Fx::from_num(70), "the fee is the offer's price");
+        let signed = econ.contract("offer").expect("now active");
+        assert_eq!(signed.next_delivery_tick, 190, "first window ends one cadence after signing");
+        assert_eq!(signed.window_start_tick(), 40);
+        assert_eq!(signed.deliveries_made, 0);
+        assert_eq!(signed.consecutive_misses, 0);
+        assert_eq!(
+            active_ids(&econ),
+            vec!["fast", "offer", "slow", "impossible"],
+            "a contract signed last still sits at its file-order rank — priority is the board's"
+        );
+    }
+
+    #[test]
+    fn an_offer_can_be_signed_once_only_while_it_is_active() {
+        let mut econ = fixture();
+        econ.money = Fx::from_num(1000);
+        assert_eq!(econ.try_sign("offer", 0), Ok(()));
+        assert_eq!(
+            econ.try_sign("offer", 0),
+            Err(SignRefusal::AlreadySigned),
+            "one signature per offer"
+        );
+        assert_eq!(econ.money, Fx::from_num(970), "a refused signature costs nothing");
+        assert_eq!(econ.contracts.iter().filter(|c| c.contract.id == "offer").count(), 1);
+        assert_eq!(
+            econ.try_sign("fast", 0),
+            Err(SignRefusal::AlreadySigned),
+            "a starter is active too, and just as unsignable"
+        );
+    }
+
+    #[test]
+    fn signing_is_refused_whole_when_unaffordable_or_unknown() {
+        let mut econ = fixture();
+        econ.money = Fx::from_num(29);
+        assert_eq!(econ.try_sign("offer", 0), Err(SignRefusal::CannotAfford));
+        assert_eq!(econ.money, Fx::from_num(29));
+        assert!(!econ.is_active("offer"));
+        assert_eq!(econ.try_sign("midnight_kebab_van", 0), Err(SignRefusal::Unknown));
+        assert_eq!(econ.money, Fx::from_num(29));
+    }
+
+    #[test]
+    fn a_lost_contract_is_signed_again_at_full_price_and_remembers_nothing() {
+        let mut econ = fixture();
+        econ.money = Fx::from_num(100);
+        // Lose "fast": two misses in a row.
+        econ.tick(100);
+        econ.tick(200);
+        assert!(!econ.is_active("fast"));
+
+        assert_eq!(econ.try_sign("fast", 250), Ok(()));
+        assert_eq!(econ.money, Fx::from_num(90), "the starter's price applies when it is re-signed");
+        let again = econ.contract("fast").unwrap();
+        assert_eq!(again.next_delivery_tick, 350);
+        assert_eq!(again.deliveries_missed, 0, "a new signature is a new agreement");
+        assert_eq!(again.consecutive_misses, 0);
+        assert_eq!(active_ids(&econ), vec!["fast", "slow", "impossible"], "back at its file rank");
+        assert_eq!(econ.times_lost("fast"), 1, "but the board remembers it was lost");
+    }
+
+    #[test]
+    fn snapshot_reports_active_contracts_and_the_whole_board() {
+        let mut econ = fixture();
+        econ.money = Fx::from_num(25);
         econ.deposit("boxed_ketchup", 7); // more than any single mix wants
 
         let snap = econ.snapshot();
@@ -550,9 +917,14 @@ mod tests {
             vec![("boxed_ketchup".to_string(), 2)],
             "progress must be clamped to the required quantity, not the raw stock"
         );
+        assert!(fast.satisfied);
         assert_eq!(fast.cadence_ticks, 100);
+        assert_eq!(fast.window_start_tick, 0);
         assert_eq!(fast.next_delivery_tick, 100);
         assert_eq!(fast.payout, 50.0);
+        assert_eq!(fast.price, 10.0);
+        assert_eq!(fast.strikes, 2);
+        assert_eq!(fast.consecutive_misses, 0);
 
         let impossible = &snap.contracts[2];
         assert_eq!(
@@ -560,15 +932,30 @@ mod tests {
             vec![("chilli_mayo".to_string(), 0)],
             "an item with no stock reads zero, and still appears in progress"
         );
+        assert!(!impossible.satisfied);
+
+        let ids: Vec<&str> = snap.board.iter().map(|o| o.id.as_str()).collect();
+        assert_eq!(ids, vec!["fast", "offer", "slow", "impossible"], "the board is in file order");
+        let offer = &snap.board[1];
+        assert!(!offer.active);
+        assert!(!offer.starter);
+        assert_eq!(offer.price, 30.0);
+        assert!(!offer.affordable, "25 in the bank does not cover a 30 fee");
+        assert!(snap.board[0].active);
+        assert!(snap.board[0].starter);
+        assert!(snap.board[0].affordable, "affordability is reported for active offers too");
+        assert_eq!(offer.times_lost, 0);
     }
 
     #[test]
     fn the_bundled_contracts_build_a_working_economy() {
         let econ = Economy::bundled();
-        assert!(
-            econ.contracts.len() >= 2,
-            "shipped content must have several concurrent contracts"
+        assert_eq!(
+            econ.contracts.len(),
+            1,
+            "a new game starts with exactly one contract — the starter — and buys the rest"
         );
+        assert!(econ.board().len() > econ.contracts.len(), "there must be something to buy");
         assert_eq!(econ.money, Fx::from_num(0));
         for active in &econ.contracts {
             assert_eq!(
