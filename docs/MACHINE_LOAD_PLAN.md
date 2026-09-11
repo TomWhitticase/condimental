@@ -240,6 +240,45 @@ the condensed decision entry, and merges to `main`.
 
 *(appended by the coordinator as tickets land)*
 
+### Ticket 1 (sim) — landed 2026-09-11
+
+- **The wire is exactly as written above.** `load` keys: `working`,
+  `starved`, `blocked`, `observed`, `window`, `percent`, `status`; `stall`
+  is `null` or `{kind, item}` with the six kinds spelled as listed. The
+  same two objects ride `chunk_snapshot_json`'s `machines` entries and
+  `query_tile_json`'s `"machine"` tile (the tile variant did not go through
+  `machine_snapshot`, so it was given the fields explicitly). Rust names:
+  `sim::WorkState`, `sim::StallKind`, `sim::MachineLoadSnapshot`,
+  `sim::MachineLoadEntry`, `sim::LOAD_WINDOW_TICKS` (600).
+- **`observed` is not `window`, even on a machine that has run for
+  minutes.** The ring clears a whole bucket the tick after it fills, so a
+  warmed-up window observes between 571 and 600 ticks. Use `window` for
+  the "of the last 10 s" wording (`window / TICK_HZ`), and `percent` /
+  `status` for the verdict; never compare `observed` to `window`.
+- **`stall` is a per-tick fact and is `null` more often than not on a
+  blocked machine.** A blocked crusher is mid-craft on most ticks (its
+  batch is not yet complete, so it is not yet "held"), and reports a stall
+  only on the ticks a finished batch is being held. Hover should keep the
+  last non-null reason while `status` is unchanged rather than flickering
+  between "output full" and nothing, or say only the status when the reason
+  is `null`. Likewise a `working` machine may momentarily report
+  `{"kind": "input", ...}` on a deposit tick.
+- **The bottleneck fixture needs ~8000 ticks, not 1500.** With 8-slot
+  buffers and a belt or pipe run between every pair of machines, the
+  shipped line backs up at the vat's pace: the vat reads `working` from
+  about tick 1500, the mixer `blocked` from about 3500, the crusher
+  `blocked` from about 7000; the bottler and packer are `starved`
+  throughout. `build_bottleneck_line` should tick ≥ 8000 (with hopper and
+  tank auto-fill on) before a screenshot expects red–red–green–amber–amber.
+  `sim_core/tests/machine_load.rs` settles at 8000 and asserts over a full
+  window after that.
+- **Load changes never dirty a chunk.** Poll `machine_load_snapshots_json`;
+  do not wait for `dirty_chunks` to redraw a lens. A test pins this.
+- **Save:** `SavedMachine.load` (`#[serde(default)]`, schema 1). A save
+  from before this ticket loads with every window empty (`status`
+  `starved`, `observed` 0) until the machines have ticked; a loaded save
+  from after it shows its lights on frame one.
+
 ## Coordinator notes
 
 *(appended as work lands)*

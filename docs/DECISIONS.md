@@ -22,6 +22,99 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-11: **Machine load, ticket 1 (sim) — the bottleneck readout the
+  simulation owns.** The player asked to see, at a glance, which machines
+  are flat out and which are waiting, so the bottleneck in a line is
+  legible. `docs/MACHINE_LOAD_PLAN.md` is the plan; this ticket is its
+  `sim_core` half. Eight calls worth recording.
+
+  (1) **A window, not a flag, and the sim owns it.** `Machine::tick` clears
+  `process` on the tick a batch lands and starts the next on the tick
+  after, so an instantaneous "is it working" flickers once per cycle. The
+  readout is therefore a `LoadWindow` on every `Machine`: a ring of
+  `LOAD_BUCKETS` (20) buckets of `LOAD_BUCKET_TICKS` (30) ticks, a 600-tick
+  window, integers only (ARCHITECTURE.md §3.9 — tick counts need no `Fx`).
+  It lives in Rust because a rolling window in GDScript would be gameplay
+  logic in the presentation layer, would not survive a save and could not
+  be tested headlessly (ARCHITECTURE.md §1's hard rule).
+
+  (2) **Exactly one `WorkState` per tick, and the completion tick counts as
+  work.** Started, advanced or *deposited* → `Working`; nothing started →
+  `Starved`; finished and held on a full output or pipe → `Blocked`. The
+  deposit tick is the one that matters: with it counted as work, a machine
+  fed and drained without interruption reads exactly 100 %, tick after
+  tick, and `FULL_LOAD_PERCENT` (95) is a genuine threshold with a real
+  margin for a line that hiccups, rather than a fudge that hides the
+  mechanism's own one-tick gap. A unit test asserts no non-working tick is
+  ever recorded on such a machine. (A machine whose recipe is missing —
+  which `World` refuses to place — records `Starved`, so the "exactly one"
+  rule has no exception.)
+
+  (3) **`status` is derived in one place, and Godot reads the word.**
+  `LoadWindow::status`: nothing observed → `starved`; working share ≥ 95 %
+  → `working`; otherwise `starved` if `starved >= blocked` (a tie reads
+  starved), else `blocked`. It is serialized as the string on the wire, and
+  the presentation layer is told not to re-derive it from the counts, so
+  the threshold has exactly one home. `percent` is `working * 100 /
+  observed`, 0 when nothing has been observed.
+
+  (4) **The ring clears a whole bucket the tick after it fills**, so a
+  warmed-up window's `observed` oscillates between 571 and 600 rather than
+  sitting at 600. That is the cheap ring (no per-tick subtraction of a
+  departing tick), and it is what ticket 3 must expect: `observed` is a
+  denominator, not a progress bar, and `window` (600) is on the wire beside
+  it for the "of the last 10 s" wording.
+
+  (5) **Load never dirties a chunk.** It changes every tick on every
+  machine; a per-tick dirty would defeat ARCHITECTURE.md §4's per-chunk
+  delta rule. It gets the treatment fluid movement and tank auto-fill get:
+  a light polled endpoint, `SimBridge::machine_load_snapshots_json`,
+  returning `[{tile, load, stall}]` — one per recipe-running machine, in the
+  topology's stable tile order, nothing else — and the identical `load` and
+  `stall` objects riding `MachineSnapshot` (chunk snapshots) and
+  `query_tile_json`'s machine variant, which did *not* go through
+  `machine_snapshot` and now carries the same fields explicitly. A test
+  pins that a starving machine's growing window dirties nothing.
+
+  (6) **The stall reason is computed at snapshot time, never per tick.** It
+  is a question ("why is this machine waiting right now?"), not state, so
+  `World::machine_stall` asks the questions `Machine::tick` asks — enough of
+  each solid input? a tap that can supply each fluid? room for each output?
+  — read-only, against the same `machine_taps`/`machine_output_taps` the
+  tick would hand the machine. First shortfall only, in recipe order, solids
+  before fluids: idle → `input`, `fluid_input` (tap exists, cannot supply),
+  `no_supply_pipe` (recipe wants a fluid, no tap); complete-and-held →
+  `output`, `fluid_output`, `no_outlet_pipe`; mid-craft, or idle with
+  everything it needs (it starts next tick) → `null`. It describes *this
+  tick*, independently of the window's `status`: a blocked crusher is
+  mid-craft on some ticks and reports `null` on them. The kinds serialize
+  in `snake_case` as the plan's exact words.
+
+  (7) **Save: the raw ring, `#[serde(default)]`, schema stays 1.**
+  `SavedMachine.load` is the bucket triples plus the cursor, verbatim, so a
+  loaded window is bit-identical to the saved one — the 2600-tick lockstep
+  test compares chunk snapshots, which now carry `load`, so a window that
+  failed to survive a load would show up there with no new test. An absent
+  or empty ring loads as a fresh window (a pre-window save still loads,
+  like `SavedHopper::auto_fill`); a ring that is not exactly 20 buckets,
+  has its cursor outside it, or holds an over-full bucket is refused as
+  `SaveError::BadLoadWindow`, because `LoadWindow` cannot produce one.
+  Restore goes through `LoadWindow::restore` (`pub(crate)`), never a public
+  setter.
+
+  (8) **The shipped line takes about 7000 ticks to back up to the crusher,
+  not the plan's 1500.** The vat is flat out from ~1500 and the bottler and
+  packer are starved from the start, but each machine holds 8 of its
+  output and there is a belt or pipe run between every pair, and all of
+  that fills at the vat's pace (one craft per 240 ticks) before the mixer
+  (~3500) and then the crusher (~7000) stall. `tests/machine_load.rs`
+  settles 8000 ticks, then *watches* one full window: status is asserted on
+  every tick of it, and a stall kind is asserted as the only reason a
+  machine ever gave over the window, never at one sampled tick — a stall is
+  a per-tick fact, and a test that samples it once is a coin flip. Ticket
+  3's `build_bottleneck_line` needs the same patience (≥ 8000 ticks), or
+  it will photograph a green crusher.
+
 - 2026-09-11: **Payout feedback — what earning money looks and sounds like,
   and the project's first audio.** Money arrives through exactly one channel
   (a contract settling at its cadence boundary, `sim/economy.rs`) and it

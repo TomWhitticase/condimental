@@ -242,7 +242,10 @@ Also on the wire today (`economy_snapshot_json` carries the whole contract
 `board` beside the active `contracts` since the contract-board epic, and
 `sign_contract` is a command): `world_layout_json`, `economy_snapshot_json`,
 `shop_snapshot_json`, `ingredients_snapshot_json`, `fluid_snapshot_json`,
-`dock_snapshot_json`, and JSON forms of the above. Godot never sees internal
+`dock_snapshot_json`, `machine_load_snapshots_json` (the machine-load epic,
+2026-09-11: every recipe-running machine's rolling load window, `status`
+and `stall` reason, polled because it changes every tick and dirties
+nothing), and JSON forms of the above. Godot never sees internal
 representations, only snapshots. Since the pipes & conveyors overhaul
 (ticket 1, 2026-09-09) every belt, splitter and pipe entry in
 `world_layout_json` — and its `query_tile_json` variant — carries a `links`

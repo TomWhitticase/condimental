@@ -193,6 +193,34 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-11 **Machine load, ticket 1 (sim).** Every recipe-running
+  machine owns a `LoadWindow` (`machine.rs`): a ring of `LOAD_BUCKETS` (20)
+  buckets of `LOAD_BUCKET_TICKS` (30) — a 600-tick window, integers only,
+  no `Fx`. `Machine::tick` records EXACTLY ONE `WorkState` per tick:
+  started/advanced/DEPOSITED → `Working`; nothing started → `Starved`;
+  finished but held → `Blocked`. **The completion tick counts as work**, so
+  a fed-and-drained machine reads exactly 100 % with no per-cycle dip
+  (unit-tested); `status()` is `working` at ≥ `FULL_LOAD_PERCENT` (95),
+  else `starved` ≥ `blocked` on a tie, and `starved` when nothing has been
+  observed. A warmed ring clears a whole bucket the tick after it fills, so
+  `observed` sits in `(570, 600]`. **The load never dirties a chunk**
+  (polled, like fluid): `machine_load_snapshots_json` returns
+  `[{tile, load, stall}]` per machine in topology order; the identical
+  `load`/`stall` ride `MachineSnapshot` and `query_tile`'s machine variant.
+  `stall` is computed at SNAPSHOT time from the machine's taps, never per
+  tick: first shortfall in recipe order, solids before fluids — `input`,
+  `fluid_input`, `no_supply_pipe` when idle; `output`, `fluid_output`,
+  `no_outlet_pipe` only when a batch is complete and held; `null` mid-craft
+  or when it starts next tick. `WorkState`/`StallKind` serialize as the
+  plan's exact words; Godot reads `status`, never re-derives it. Save:
+  `SavedMachine.load` is the raw ring + cursor with `#[serde(default)]`
+  (schema stays 1; empty = fresh window; a non-ring is `BadLoadWindow`).
+  **The shipped line takes ~7000 ticks, not 1500, to back up to the
+  crusher** (8-slot buffers and a run between every pair fill at the vat's
+  pace: mixer blocked from ~3500, crusher from ~7000); `tests/machine_load.rs`
+  settles 8000 ticks and asserts status over a full window, and a stall is a
+  per-tick fact asserted as "the only reason ever given", never at one
+  sampled tick. Full record in `docs/DECISIONS.md`.
 - 2026-09-11 **Payout feedback — what earning money looks and sounds like.**
   A payout is detected ENTIRELY in Godot, by polling each contract's
   `deliveries_made` in `economy_snapshot_json` for a rise: no sim change, no
