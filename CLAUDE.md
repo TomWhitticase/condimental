@@ -187,6 +187,16 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-10 **Belt arrows removed.** The belt's raised `hazard_yellow`
+  direction arrow is gone at the player's request; the moving mark is a
+  **plain cleat** (`rubber_dark`, two voxels along the path, lane width
+  less one voxel each side, still one voxel proud: `BELT_CLEAT_Z`,
+  `cleat_covers`). The cleat exists only so the four frames differ and the
+  belt visibly runs; direction is in words (`✔ PLACE Belt · facing east`,
+  hover `carries east`), not on the tile. Nothing in signage colour may
+  stand on the running surface (`cargo test -p voxgen` pins it). Only the
+  twelve belt models and three belt icons changed; the splitter's
+  next-output arrow is a different readout and stays.
 - 2026-09-11 **Vinegar drawn as vinegar (a raw fluid's presentation).** A
   fluid gets a `palette.ron` colour of its own (`vinegar_amber` `#AD6B23`,
   class `liquid`) and `FLUID_TINTS[id]` IS that RGB — §2b point 5's "hue is

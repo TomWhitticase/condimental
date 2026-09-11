@@ -127,7 +127,9 @@ visibility flips.
   stop requesting them; the plain tile carries the junction and the
   machine-side hood/doorway do the rest at every facing. Frame models are
   `belt_f{0..3}`, `belt_corner_left_f{0..3}`, `belt_corner_right_f{0..3}`;
-  `BELT_FRAMES` = 4 and the arrow mark stands at `BELT_SURFACE_Z + 1`.
+  `BELT_FRAMES` = 4 and the moving mark stands at `BELT_SURFACE_Z + 1`
+  (an arrow until 2026-09-10, a plain rubber cleat since, at the player's
+  request).
   Corners were render-checked only through a temporary `main.gd` hack —
   ticket 5 must look at them at all four facings once it draws them.
   `voxicons` renders icons for frame 0 only.
@@ -155,9 +157,10 @@ visibility flips.
   at default zoom in the real scene, and if it reads as stutter, prefer
   showing the frame closest to the exact sub-tile phase over changing the
   frame count (a change to BELT_FRAMES is an `ask`).
-- The straight tile's arrow reads at all four facings in ticket 2's
+- The straight tile's arrow read at all four facings in ticket 2's
   close-ups; the south facing was never rendered — include it in the belt
-  gallery.
+  gallery. (The arrow was removed on 2026-09-10; the cleat that replaced it
+  is what to look at now.)
 
 **For ticket 6, from ticket 3's worker (verbatim facts, verify by render):**
 
@@ -196,7 +199,7 @@ dispatched.
 
 **For ticket 7, gathered from tickets 5 and 6 and the merges:**
 
-- UI_UX §2b numbering after the merges: 23 belt arrow/frames (ticket 2),
+- UI_UX §2b numbering after the merges: 23 belt mark/frames (ticket 2),
   24 fitting margin and 25 pipe turn (ticket 6), 26 items drawn face to face
   (ticket 5). Every cross-reference was renumbered at merge; re-check.
 - **Ghost rules disagree and need reconciling:** ticket 5 keeps the belt

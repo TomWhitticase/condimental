@@ -22,6 +22,44 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-10: **Belt arrows removed — the belt's moving mark is a plain
+  cleat, and direction is said in words.** The pipes and conveyors
+  overhaul's ticket 2 put a solid `hazard_yellow` arrow on every belt tile
+  (Part B point 23 records why it was solid and raised). The player looked
+  at the running game and asked for the arrows to go, so they are gone.
+  Three things about how.
+
+  **The mark was not simply deleted, because it was also the animation.**
+  Frame `k` of a belt is frame 0 with the surface pattern advanced a
+  quarter tile, and the arrow was the whole of that pattern; delete it and
+  all four frames are byte-identical, so the belt stops running with every
+  test still green — the exact-shift test only says frames must differ by
+  the shift, and identical frames do. The arrow is therefore replaced by
+  the least mark that keeps the frames distinct: a **cleat**, a bar of
+  `rubber_dark` two voxels long across the lane, one voxel proud of the
+  rubber (raised for the same camera reason as before), a voxel short of
+  the rubber's edge on each side. It is what a real cleated conveyor belt
+  wears and it is not signage. `BELT_ARROW_Z`/`arrow_covers` became
+  `BELT_CLEAT_Z`/`cleat_covers`; the `SurfaceCell` machinery and the
+  corner's stretched `u` are unchanged, so the cleat bends round a corner
+  exactly as the arrow did.
+
+  **Direction is said, not drawn.** UI_UX.md §7 wants every meaning
+  carried by a shape, a word or a position, never colour alone; the arrow
+  was the shape. Its job is already done in words in two places — the
+  build prompt names the ghost's facing (`✔ PLACE  Belt  ·  facing east`)
+  and a placed tile's hover says `carries east · turns left` — and a
+  running line shows it by moving. So nothing in the Godot layer changed
+  for this; only a comment that said the ghost showed its facing by the
+  arrow. The one loss is that a lone, idle straight tile no longer shows
+  which way it faces from its model alone; hover does, and R turns it.
+
+  **The scope is the belt family only.** The splitter's inlaid next-output
+  arrow is a different readout (which of two outputs takes the next item,
+  a live fact per tile) and stays. `cargo test -p voxgen` now asserts no
+  signage colour stands anywhere on a belt's running surface, so an arrow
+  cannot quietly come back. Twelve `.vox` models and three icons changed
+  and nothing else in `models/` or `icons/` did.
 - 2026-09-11: **Vinegar looks like vinegar — a raw fluid gets a palette
   colour of its own, a model, and a route to the icon.** Vinegar shipped
   with neither: no entry in any model table, so `_market_asset_for` fell
@@ -3262,6 +3300,15 @@ were only discoverable by building it:
     the tile's outer corner and pivot corner reads as floor, not as a hole.
     That render is not repeatable from a committed script, which is why the
     check is flagged for ticket 5 rather than claimed as done.
+
+    **Amended 2026-09-10: the arrow itself is gone.** The player asked for
+    the belt arrows to be removed, and the mark is now a plain cleat — a
+    bar of dark rubber two voxels long across the lane, still raised one
+    voxel for the reason above — whose only job is to make the four frames
+    differ so the belt visibly runs (Part A, 2026-09-10 "Belt arrows
+    removed"). Direction is given in words by the build prompt and by
+    hover. Everything this point records about the camera still holds for
+    the next mark anyone draws on a horizontal surface.
 
 24. **A fitting overlaid on a shape must be a full voxel of radius larger
     than anything it can cover.** Ticket 3's "+0.4 on the bore" kept the two

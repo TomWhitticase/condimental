@@ -7087,8 +7087,8 @@ func _update_ghost() -> void:
 		# exists to avoid. The right home for a would-be shape is
 		# ARCHITECTURE.md §4's planned `preview_command`, a validation pass
 		# the sim answers; when it lands the ghost reads its shape from it.
-		# Until then the ghost's job is the tile, the facing (the arrow on
-		# the straight tile) and whether the click will succeed; the corner
+		# Until then the ghost's job is the tile, the facing (named in the
+		# prompt's `facing east`) and whether the click will succeed; the corner
 		# appears the instant the tile is placed, since placing rebuilds.
 		# A pipe's ghost, by ticket 6's rule, shows the shape the placed pipes
 		# around the tile would give it (see `_pipe_ghost_shape`), at that

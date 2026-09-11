@@ -446,30 +446,25 @@ pub fn floor_tile_drain(p: &Palette) -> VoxModel {
 // or all four — identical, and a pattern that moves 8 voxels a frame with
 // features 8 or 16 apart is the wagon-wheel illusion (built and reasoned
 // through, not rendered: two marks a tile could be read as standing still
-// or running backwards). So each tile carries **one** arrow, and the
-// arrow is the cleat.
+// or running backwards). So each tile carries **one** cleat.
 //
-// **Direction is a shape** (UI_UX.md §7 — never colour alone): a solid
-// arrow — a wedge head and a short shaft — standing one voxel proud of the
-// rubber, in `hazard_yellow`, the same safety-signage colour the belt's
-// rails already wear. The arrow is the cleat.
-//
-// A **solid** arrow, not a two-arm chevron, and that was decided by the
-// render, not by taste (UI_UX.md §2b point 23). The first cut was a thin
-// `>` of two diagonal arms, and in the `--closeup` scene render it was an
-// `L`: the fixed isometric camera looks straight down one of the tile's
-// diagonals, so a line along one diagonal projects to a screen horizontal
-// at full length and a line along the other to a short screen vertical. A
-// 45° mark on the tile plane cannot read as a chevron from this camera at
-// any facing. A filled wedge has no lines to lose — its apex is its apex
-// from every angle — which is also why the splitter's readout is a filled
-// arrow. **Raised rather than recessed**, for the camera again: a recess
-// shows its floor only where its own wall does not shadow it, and one edge
-// of any shape always runs along the sight line; a plate is seen from
-// above at every facing. The cost is that an item drawn at
-// `BELT_SURFACE_Z + 1` stands one voxel into the plate where they overlap;
-// at scene scale that is a sliver under the item's foot (checked in the
-// `--closeup --populate` render).
+// **The cleat is a plain transverse bar of dark rubber**, two voxels long
+// along the path, one voxel proud of the running surface, a voxel short of
+// the rubber's edge on each side — the moulded cleat a real conveyor belt
+// wears, and nothing more. Until 2026-09-10 it was a solid `hazard_yellow`
+// direction arrow (a filled wedge with a short shaft; a thin chevron had
+// rendered as an `L` under this camera, UI_UX.md §2b point 23) and the
+// player asked for the arrows to go. What the arrow said — which way the
+// tile carries — is said in words instead: the build prompt names the
+// ghost's facing (`✔ PLACE  Belt  ·  facing east`) and a placed tile's
+// hover says `carries east`; a running line shows it by moving. The
+// cleat's job is only to make the frames differ, so the belt visibly runs.
+// **Raised rather than recessed**, for the camera: a recess shows its floor
+// only where its own wall does not shadow it, and one edge of any shape
+// always runs along the sight line; a bar is seen from above at every
+// facing. The cost is that an item drawn at `BELT_SURFACE_Z + 1` stands
+// one voxel into the cleat where they overlap; at scene scale that is a
+// sliver under the item's foot.
 //
 // **Corners** (the plan's "Corner conventions"): a corner's running surface
 // is a quarter annulus about the tile corner between its two connected
@@ -480,11 +475,11 @@ pub fn floor_tile_drain(p: &Palette) -> VoxModel {
 // `Turn::Right` is its mirror in Y. The surface pattern on a corner lives in
 // the same `(u, v)` coordinates as on a straight — `u` runs 0..32 along the
 // path, so a quarter turn is stretched to a tile's worth of pattern and the
-// arrow reaches the exit face in the same frame a straight tile's would;
+// cleat reaches the exit face in the same frame a straight tile's would;
 // the sim already parameterises an item across a corner by the same 0..1
-// distance, so surface and items stay in step. The arrow's length is in
-// `u` and its width in voxels, so on the inside of the bend the head is
-// short and on the outside long: the arrow bends with the belt.
+// distance, so surface and items stay in step. The cleat's length is in
+// `u` and its width in voxels, so on the inside of the bend it is thin and
+// on the outside wide: the cleat bends with the belt.
 //
 // **The belt-side junction variants are retired.** `belt_inlet` and
 // `belt_outlet` used to dress the last tile before a machine and the first
@@ -511,23 +506,19 @@ pub const BELT_FRAMES: u32 = 4;
 /// a quarter tile, so four frames carry it exactly one tile.
 pub const BELT_FRAME_SHIFT: i32 = TILE_VOXELS as i32 / BELT_FRAMES as i32;
 
-/// The arrow cleat's top voxel: one proud of the running surface (see the
+/// The cleat's top voxel: one proud of the running surface (see the
 /// section header for why raised, not recessed).
-pub const BELT_ARROW_Z: i32 = BELT_SURFACE_Z + 1;
+pub const BELT_CLEAT_Z: i32 = BELT_SURFACE_Z + 1;
 
-/// Where the arrow's apex sits in frame 0, in `u` (voxels along the path).
-/// Chosen so the frame-0 arrow — the one the UI icon is rendered from — is
-/// centred in its tile: it spans `u` 9..=22.
-const ARROW_APEX_U: f32 = 23.0;
-/// Length of the wedge head along the path, in `u`.
-const ARROW_HEAD_LEN: f32 = 8.0;
-/// Half-width of the wedge at its base, in voxels across the lane: the base
-/// spans `BELT_LANE` less one voxel of rubber margin each side.
-const ARROW_HEAD_HALF_WIDTH: f32 = 8.0;
-/// Length of the shaft behind the head, in `u`.
-const ARROW_SHAFT_LEN: f32 = 6.0;
-/// Half-width of the shaft, in voxels: four rows either side of the centre.
-const ARROW_SHAFT_HALF_WIDTH: f32 = 2.5;
+/// Where the cleat's leading edge sits in frame 0, in `u` (voxels along
+/// the path). Chosen so the frame-0 cleat — the one the UI icon is rendered
+/// from — is centred in its tile: it covers the cells at `u` 15.5 and 16.5.
+const CLEAT_LEAD_U: f32 = 17.0;
+/// Length of the cleat along the path, in `u`.
+const CLEAT_LEN: f32 = 2.0;
+/// Half-width of the cleat, in voxels across the lane: it spans `BELT_LANE`
+/// less one voxel of rubber margin each side.
+const CLEAT_HALF_WIDTH: f32 = 8.0;
 
 /// Which way a corner turns, named as the plan names the models. Both are
 /// authored with their output on +X; `Left` is fed from the north (vox low
@@ -586,7 +577,7 @@ pub fn belt_shape(p: &Palette, shape: BeltShape, phase: u32) -> VoxModel {
     }
 }
 
-/// A straight tile: the shared structure, the rubber lane, and the arrow.
+/// A straight tile: the shared structure, the rubber lane, and the cleat.
 fn belt_straight(p: &Palette, phase: u32) -> VoxModel {
     let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 16]);
     let last = TILE_VOXELS as i32 - 1;
@@ -619,13 +610,13 @@ fn belt_straight(p: &Palette, phase: u32) -> VoxModel {
         m.cylinder_y((x, 7), 2.5, (l0, l1), p.idx("brass"));
     }
 
-    // Running surface, then the arrow standing on it.
+    // Running surface, then the cleat standing on it.
     m.cuboid((0, last), (l0, l1), (BELT_SURFACE_Z - 1, BELT_SURFACE_Z), p.idx("rubber"));
     for x in 0..=last {
         for y in l0..=l1 {
             let cell = straight_surface_cell(x, y).expect("lane cell");
-            if arrow_covers(&cell, phase) {
-                m.set(x, y, BELT_ARROW_Z, p.idx("hazard_yellow"));
+            if cleat_covers(&cell, phase) {
+                m.set(x, y, BELT_CLEAT_Z, p.idx("rubber_dark"));
             }
         }
     }
@@ -669,8 +660,8 @@ fn belt_corner(p: &Palette, turn: Turn, phase: u32) -> VoxModel {
             }
             if let Some(cell) = corner_surface_cell(x, y) {
                 m.cuboid((x, x), (y, y), (BELT_SURFACE_Z - 1, BELT_SURFACE_Z), p.idx("rubber"));
-                if arrow_covers(&cell, phase) {
-                    m.set(x, y, BELT_ARROW_Z, p.idx("hazard_yellow"));
+                if cleat_covers(&cell, phase) {
+                    m.set(x, y, BELT_CLEAT_Z, p.idx("rubber_dark"));
                 }
             }
         }
@@ -742,31 +733,22 @@ fn wrap_period(d: f32) -> f32 {
     (d + half).rem_euclid(TILE_VOXELS as f32) - half
 }
 
-/// The arrow apex's `u` at `phase`.
-pub fn arrow_apex_u(phase: u32) -> f32 {
-    (ARROW_APEX_U + (phase as i32 * BELT_FRAME_SHIFT) as f32).rem_euclid(TILE_VOXELS as f32)
+/// The cleat's leading edge's `u` at `phase`.
+pub fn cleat_lead_u(phase: u32) -> f32 {
+    (CLEAT_LEAD_U + (phase as i32 * BELT_FRAME_SHIFT) as f32).rem_euclid(TILE_VOXELS as f32)
 }
 
-/// How far behind the arrow's apex a cell sits along the path, in `u`,
-/// wrapped to the pattern period (negative = ahead of the apex).
-pub fn arrow_trail_u(cell: &SurfaceCell, phase: u32) -> f32 {
-    wrap_period(arrow_apex_u(phase) - cell.u)
+/// How far behind the cleat's leading edge a cell sits along the path, in
+/// `u`, wrapped to the pattern period (negative = ahead of the edge).
+pub fn cleat_trail_u(cell: &SurfaceCell, phase: u32) -> f32 {
+    wrap_period(cleat_lead_u(phase) - cell.u)
 }
 
-/// Does the arrow at `phase` stand on this cell? The head is a wedge that
-/// widens behind the apex — that is what makes it point the way the product
-/// goes — and the shaft a constant-width strip behind the head.
-pub fn arrow_covers(cell: &SurfaceCell, phase: u32) -> bool {
-    let trail = arrow_trail_u(cell, phase);
-    if trail < 0.0 {
-        false
-    } else if trail < ARROW_HEAD_LEN {
-        cell.v.abs() < trail / ARROW_HEAD_LEN * ARROW_HEAD_HALF_WIDTH
-    } else if trail < ARROW_HEAD_LEN + ARROW_SHAFT_LEN {
-        cell.v.abs() < ARROW_SHAFT_HALF_WIDTH
-    } else {
-        false
-    }
+/// Does the cleat at `phase` stand on this cell? A constant-width bar
+/// `CLEAT_LEN` long behind its leading edge.
+pub fn cleat_covers(cell: &SurfaceCell, phase: u32) -> bool {
+    let trail = cleat_trail_u(cell, phase);
+    (0.0..CLEAT_LEN).contains(&trail) && cell.v.abs() < CLEAT_HALF_WIDTH
 }
 
 // ---------------------------------------------------------------------------
@@ -3549,68 +3531,65 @@ mod tests {
         }
     }
 
-    /// The arrow's cells in a frame: everything standing at `BELT_ARROW_Z`.
-    fn arrow_cells(m: &VoxModel) -> std::collections::BTreeSet<(i32, i32)> {
+    /// The cleat's cells in a frame: everything standing at `BELT_CLEAT_Z`.
+    fn cleat_cells(m: &VoxModel) -> std::collections::BTreeSet<(i32, i32)> {
         m.voxels
             .keys()
-            .filter(|&&(_, _, z)| z as i32 == BELT_ARROW_Z)
+            .filter(|&&(_, _, z)| z as i32 == BELT_CLEAT_Z)
             .map(|&(x, y, _)| (x as i32, y as i32))
             .collect()
     }
 
+    /// The cleat is a plain bar across the lane in belt rubber: no signage
+    /// colour anywhere on the running surface (the arrows were removed on
+    /// 2026-09-10 at the player's request), a bar that is short along the
+    /// path and spans the lane less its margin, and nothing else standing
+    /// above the rubber.
     #[test]
-    fn every_belt_frame_carries_an_arrow_on_its_surface_pointing_along_the_path() {
+    fn every_belt_frame_carries_a_plain_cleat_bar_across_its_lane_and_no_arrow() {
         let p = palette();
+        let dark = p.idx("rubber_dark");
         let yellow = p.idx("hazard_yellow");
         for (name, shape) in belt_shapes() {
             for phase in 0..BELT_FRAMES {
                 let m = belt_shape(&p, shape, phase);
-                let cells = arrow_cells(&m);
-                assert!(cells.len() >= 60, "{name} f{phase}: arrow has only {} cells", cells.len());
-                let (mut apex_cells, mut base_cells) = (0, 0);
+                let cells = cleat_cells(&m);
+                assert!(cells.len() >= 16, "{name} f{phase}: cleat has only {} cells", cells.len());
+                let (mut near_edge, mut inner) = (0, 0);
                 for &(x, y) in &cells {
                     assert_eq!(
-                        m.voxels.get(&(x as u32, y as u32, BELT_ARROW_Z as u32)),
-                        Some(&yellow),
-                        "{name} f{phase}: arrow cell {x},{y} is not the signage colour"
+                        m.voxels.get(&(x as u32, y as u32, BELT_CLEAT_Z as u32)),
+                        Some(&dark),
+                        "{name} f{phase}: cleat cell {x},{y} is not belt rubber"
                     );
                     assert!(
                         m.filled(x, y, BELT_SURFACE_Z),
-                        "{name} f{phase}: arrow cell {x},{y} floats — nothing under it at the running height"
+                        "{name} f{phase}: cleat cell {x},{y} floats — nothing under it at the running height"
                     );
                     let cell = surface_cell(shape, x, y)
-                        .unwrap_or_else(|| panic!("{name} f{phase}: arrow cell {x},{y} is off the lane"));
-                    // Pointing along the path means: no cell is ahead of the
-                    // apex, and the head only widens as it trails behind it.
-                    let trail = arrow_trail_u(&cell, phase);
-                    assert!(trail >= 0.0, "{name} f{phase}: arrow cell {x},{y} is ahead of the apex — it points backwards");
+                        .unwrap_or_else(|| panic!("{name} f{phase}: cleat cell {x},{y} is off the lane"));
+                    let trail = cleat_trail_u(&cell, phase);
                     assert!(
-                        trail < ARROW_HEAD_LEN + ARROW_SHAFT_LEN,
-                        "{name} f{phase}: arrow cell {x},{y} trails further than the arrow is long"
+                        (0.0..CLEAT_LEN).contains(&trail),
+                        "{name} f{phase}: cleat cell {x},{y} is outside the bar along the path"
                     );
-                    if trail < ARROW_HEAD_LEN {
-                        assert!(
-                            cell.v.abs() <= trail / ARROW_HEAD_LEN * ARROW_HEAD_HALF_WIDTH + 1e-3,
-                            "{name} f{phase}: arrow cell {x},{y} is wider than the wedge allows this close to the apex"
-                        );
-                    } else {
-                        assert!(cell.v.abs() < ARROW_SHAFT_HALF_WIDTH + 1e-3, "{name} f{phase}: shaft cell {x},{y} is off the shaft");
+                    assert!(cell.v.abs() < CLEAT_HALF_WIDTH, "{name} f{phase}: cleat cell {x},{y} reaches the rubber's edge");
+                    if cell.v.abs() >= CLEAT_HALF_WIDTH - 1.5 {
+                        near_edge += 1;
                     }
-                    if trail <= 2.0 {
-                        apex_cells += 1;
-                    }
-                    if cell.v.abs() >= ARROW_HEAD_HALF_WIDTH - 1.5 {
-                        base_cells += 1;
+                    if cell.v.abs() < 1.0 {
+                        inner += 1;
                     }
                 }
-                assert!(apex_cells >= 1, "{name} f{phase}: the arrow has no apex on the centre line");
-                assert!(base_cells >= 2, "{name} f{phase}: the wedge never reaches its full width — it is not a wedge");
-                // Nothing but the arrow stands above the running surface
-                // anywhere on the lane.
-                for &(x, y, z) in m.voxels.keys() {
+                assert!(near_edge >= 2, "{name} f{phase}: the cleat does not span the lane");
+                assert!(inner >= 1, "{name} f{phase}: the cleat has a gap on the centre line");
+                // Nothing on the running surface, or above it, is signage
+                // colour, and nothing but the cleat stands above the rubber.
+                for (&(x, y, z), &c) in &m.voxels {
                     let (x, y, z) = (x as i32, y as i32, z as i32);
-                    if surface_cell(shape, x, y).is_some() {
-                        assert!(z <= BELT_ARROW_Z, "{name} f{phase}: something stands in the lane at {x},{y},{z}");
+                    if surface_cell(shape, x, y).is_some() && z >= BELT_SURFACE_Z {
+                        assert_ne!(c, yellow, "{name} f{phase}: a signage-colour mark at {x},{y},{z} — an arrow is back");
+                        assert!(z <= BELT_CLEAT_Z, "{name} f{phase}: something stands in the lane at {x},{y},{z}");
                     }
                 }
             }
@@ -3651,22 +3630,22 @@ mod tests {
     }
 
     #[test]
-    fn the_four_frames_of_a_corner_share_a_structure_and_advance_the_arrow_a_quarter_pattern() {
+    fn the_four_frames_of_a_corner_share_a_structure_and_advance_the_cleat_a_quarter_pattern() {
         let p = palette();
         for turn in [Turn::Left, Turn::Right] {
             let shape = BeltShape::Corner(turn);
             let frames: Vec<VoxModel> = (0..BELT_FRAMES).map(|k| belt_shape(&p, shape, k)).collect();
             let structure = |m: &VoxModel| -> Vec<((u32, u32, u32), u8)> {
-                m.voxels.iter().filter(|&(&(_, _, z), _)| (z as i32) < BELT_ARROW_Z).map(|(&k, &c)| (k, c)).collect()
+                m.voxels.iter().filter(|&(&(_, _, z), _)| (z as i32) < BELT_CLEAT_Z).map(|(&k, &c)| (k, c)).collect()
             };
             let mut apexes = Vec::new();
             for (k, frame) in frames.iter().enumerate() {
                 assert_eq!(structure(frame), structure(&frames[0]), "{turn:?} corner f{k}: structure differs from f0");
-                // Where the arrow actually stands, read back off the voxels:
+                // Where the cleat actually stands, read back off the voxels:
                 // the circular mean of its centre-line cells' `u` (circular
                 // because a frame can straddle the tile edge).
                 let (mut sx, mut sy, mut n) = (0.0f32, 0.0f32, 0);
-                for c in arrow_cells(frame).into_iter().filter_map(|(x, y)| surface_cell(shape, x, y)) {
+                for c in cleat_cells(frame).into_iter().filter_map(|(x, y)| surface_cell(shape, x, y)) {
                     if c.v.abs() < 1.0 {
                         let a = c.u / TILE_VOXELS as f32 * std::f32::consts::TAU;
                         sx += a.cos();
@@ -3681,12 +3660,12 @@ mod tests {
                 let advance = (apexes[k] - apexes[k - 1] + 16.0).rem_euclid(32.0) - 16.0;
                 assert!(
                     (advance - BELT_FRAME_SHIFT as f32).abs() < 2.0,
-                    "{turn:?} corner f{k}: arrow advanced {advance} u, not {BELT_FRAME_SHIFT}"
+                    "{turn:?} corner f{k}: cleat advanced {advance} u, not {BELT_FRAME_SHIFT}"
                 );
             }
             for a in 0..frames.len() {
                 for b in (a + 1)..frames.len() {
-                    assert_ne!(arrow_cells(&frames[a]), arrow_cells(&frames[b]), "{turn:?} corner f{a} and f{b} share an arrow");
+                    assert_ne!(cleat_cells(&frames[a]), cleat_cells(&frames[b]), "{turn:?} corner f{a} and f{b} share a cleat");
                 }
             }
         }
@@ -3715,7 +3694,7 @@ mod tests {
                     // nothing standing in it.
                     assert_eq!(m.filled(last, i, BELT_SURFACE_Z), in_lane, "{name}: +X face lane wrong at y = {i}");
                     assert_eq!(m.filled(i, entry_y, BELT_SURFACE_Z), in_lane, "{name}: entry face lane wrong at x = {i}");
-                    for z in (BELT_ARROW_Z + 1)..16 {
+                    for z in (BELT_CLEAT_Z + 1)..16 {
                         assert!(!m.filled(last, i, z), "{name}: +X face blocked at y = {i}, z = {z}");
                         assert!(!m.filled(i, entry_y, z), "{name}: entry face blocked at x = {i}, z = {z}");
                     }
@@ -3756,7 +3735,7 @@ mod tests {
             for y in l0..=l1 {
                 for x in [0, last] {
                     assert!(m.filled(x, y, BELT_SURFACE_Z), "belt f{phase}: lane stops short at x = {x}, y = {y}");
-                    for z in (BELT_ARROW_Z + 1)..16 {
+                    for z in (BELT_CLEAT_Z + 1)..16 {
                         assert!(!m.filled(x, y, z), "belt f{phase}: face blocked at x = {x}, y = {y}, z = {z}");
                     }
                 }
@@ -3785,7 +3764,7 @@ mod tests {
         for x in 0..=3 {
             for y in l0..=l1 {
                 assert_eq!(m.voxels.get(&(x, y as u32, BELT_SURFACE_Z as u32)), Some(&rubber), "splitter intake at {x},{y} is not plain rubber");
-                assert!(!m.filled(x as i32, y, BELT_ARROW_Z), "splitter intake carries an arrow cleat at {x},{y}");
+                assert!(!m.filled(x as i32, y, BELT_CLEAT_Z), "splitter intake carries a belt cleat at {x},{y}");
             }
         }
         // Rails identical to the belt's on the -X face.
