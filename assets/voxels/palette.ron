@@ -196,5 +196,29 @@
         (name: "concrete_mottle", rgb: "#66665F", class: "matte"),
         (name: "concrete_shade",  rgb: "#565650", class: "matte"),
 
+        // --- the andon stack light (the machine-load epic, ticket 2) ---
+        // A stack light is three lenses and ONE of them lit, so the two
+        // that are not lit need a colour of their own: the same hue as the
+        // `status_*` emissive above it, taken down to a dark matte, so the
+        // tower still reads as green-amber-red from top to bottom and the
+        // lit lens is told apart by POSITION in that stack as well as by
+        // its glow (UI_UX.md §7: never colour alone). Dark enough that a
+        // dead lens does not compete with a live one under the glow pass,
+        // light enough not to vanish into the `hazard_black` housing bands
+        // between them — a dead lens must still read as a lens, or the
+        // tower is a pole with one blob on it. Class `matte`, deliberately:
+        // an unlit lens that still emitted would be a lamp half on.
+        (name: "status_green_off", rgb: "#1E4A2A", class: "matte"),
+        (name: "status_amber_off", rgb: "#5C4212", class: "matte"),
+        (name: "status_red_off",   rgb: "#5A1B16", class: "matte"),
+        // The pole the lenses stand on. Painted, not stainless: UI_UX.md
+        // §2b point 8's rule (food contact is steel, structure is paint)
+        // and a signal post is structure. A mid grey rather than the
+        // housings' `paint_blue`, so a post bolted to a blue skirt is
+        // still a separate object, and rather than a black — a dark column
+        // against a body's shadow-side face reads as a gap in that face
+        // (point 21).
+        (name: "paint_grey",      rgb: "#7A8088", class: "matte"),
+
     ],
 )

@@ -117,6 +117,15 @@ fn is_motion_overlay(stem: &str) -> bool {
     stem.contains("_motion_f")
 }
 
+/// An `andon_*` stack light (`assets.rs`'s "Andon stack light" section) is
+/// a readout the scene stands beside a machine, not a thing the player can
+/// buy: nothing in `data/shop.ron` names it, so no hotbar slot, build-menu
+/// card or market row will ever ask for its picture. Skipped for the same
+/// reason a motion overlay is — an icon is a catalogue picture of a KIND.
+fn is_andon(stem: &str) -> bool {
+    stem.starts_with("andon_")
+}
+
 fn main() {
     let root = voxels_root();
     let models_dir = root.join("models");
@@ -146,7 +155,10 @@ fn main() {
             // emitting a `pipe_fluid.liquid.png` the moment a fourth
             // material class was added in milestone 6 — exactly the drift a
             // literal list invites.
-            !stem.contains('.') && !is_later_animation_frame(stem) && !is_motion_overlay(stem)
+            !stem.contains('.')
+                && !is_later_animation_frame(stem)
+                && !is_motion_overlay(stem)
+                && !is_andon(stem)
         })
         .collect();
     entries.sort();
