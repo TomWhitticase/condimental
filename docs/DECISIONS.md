@@ -22,6 +22,100 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-11: **Machine load, ticket 3 — the stack lights in the scene.**
+  The Godot half of the machine-load epic (`docs/MACHINE_LOAD_PLAN.md`):
+  ticket 1's numbers and ticket 2's models become a light beside every
+  machine and a line in its hover. Eight calls.
+
+  (1) **Where the light stands is derived from the camera, not picked.**
+  `CAMERA_DIRECTION` is where the camera sits relative to its focus, so a
+  footprint's visible corner is its far edge on every axis the camera is
+  positive on. `ANDON_CORNER` is `(sign(x), sign(z))` of that vector on
+  tile axes (`_footprint_centre` maps tile y to world z) — `(1, 1)` for the
+  shipped camera — and `_andon_tile` applies it to the ROTATED footprint.
+  The constant reads the camera so that the day UI_UX §9's camera question
+  is settled the other way, the lights move with it and nobody has to
+  remember they exist. The post's own offset into the corner of that tile
+  is authored into the model (ticket 2: model +X / low Y, which is world
+  +X / +Z); the node stands at the tile's centre at yaw 0 and is never
+  rotated, per ticket 2's rule.
+
+  (2) **Three nodes, siblings of the body, visibility-flipped.** Exactly
+  the motion-overlay arrangement: `body.get_node_or_null("emissive")` must
+  keep finding the machine's own lamp, and a status changes at most once a
+  bucket, so building all three once and toggling `visible` is cheaper
+  and simpler than swapping meshes. `_set_machine_andon` is a no-op on the
+  same status and leaves the light as it was on a status no model exists
+  for — a dark tower would say "not measured" about a machine that is.
+
+  (3) **Height by footprint, as ticket 2 said.** `size == Vector2i.ONE`
+  gets `_short`, anything else `_tall`. `size` is the rotated footprint,
+  which is the right one: a turned 1x2 is still not 1x1.
+
+  (4) **Polled on the sim's clock, from `_advance_simulation`, and once
+  per rebuild.** `LOAD_POLL_TICKS` (30) equals the sim's bucket, the
+  finest grain the verdict can change at, so polling faster would re-read
+  the same answer. The due check is against `sim.current_tick()`, not a
+  frame count: a burst of catch-up ticks in one frame still polls on
+  schedule, and a paused game (no ticks, and the early return never reaches
+  the poll) never polls at all — `test_machine_load.gd` moves the sim on
+  underneath a "paused" scene and proves the lights stay put. The rebuild
+  poll sits after `_seed_machine_states` and is what makes a loaded save
+  light up on frame one: `SavedMachine.load` arrives full, and the
+  `_ready` path is a rebuild. `test_screenshot.gd`'s populate loop bypasses
+  `_advance_simulation` and so polls once at its end, for the same reason
+  it advances the belt and motion frames itself.
+
+  (5) **Godot never re-derives `status`, and hover remembers the last
+  reason.** The lens is the wire's `status` string; the counts are never
+  compared here. Ticket 1 warned that `stall` is a per-tick fact, `null`
+  on most ticks of a blocked machine (it is mid-craft on most of them), so
+  `_machine_load[key].reason` holds the last non-null stall while the
+  status is unchanged and is forgotten on a status change, because it was
+  the old status's reason. The test ticks a settled crusher 300 times and
+  asserts its reason is never dropped. This is UI_UX §2b point 30.
+
+  (6) **The hover line, in the plan's language, with one number the plan
+  got wrong.** `flat out  ·  100% of the last 20s`, `starved  ·  38% busy
+  ·  waiting for Sugar`, `blocked  ·  61% busy  ·  output full`. The
+  seconds are `load.window / TICK_HZ`, as the plan required — and that is
+  **20 s**, not the "10s" the plan wrote, because the sim's 600-tick window
+  is ten seconds at ARCHITECTURE §3.9's nominal 60 Hz and twenty at the
+  30 Hz this scene actually runs (§5e: player-facing clocks are at the
+  rate the game runs). Six stall kinds have six phrasings; an unknown kind
+  says nothing rather than guessing; items go through
+  `_item_display_name`. A machine with a status and no remembered reason
+  says only the status and the number.
+
+  (7) **The hover panel gets a second bar, and it is green.** The plan
+  made the bar optional if it did not crowd the progress bar; the render
+  (`--bottleneck --hover`) shows an amber progress bar over a green load
+  bar under three lines of text, and it reads. Green (`METER_FILL_LEVEL`)
+  because §5e's rule is that a bar's colour is its meaning: the load is a
+  level against a real ceiling (100 % of the window), not work under way
+  (amber is the batch's progress, directly above it) and not a warning.
+  The status word in the text says which way a low level is failing.
+  `_hover_panel_state` returns it as `load_meter`, empty for anything but
+  a machine, and `_apply_hover_panel_state` records the fraction as node
+  meta like every other meter.
+
+  (8) **The fixture is the reference line on auto-fill, settled for 8000
+  ticks.** `build_bottleneck_line` funds itself to 8000, buys 400 of every
+  raw ingredient plus 300 tomatoes (the crusher runs flat out for the first
+  ~7000 ticks filling every buffer with paste, four tomatoes a craft, and a
+  first render showed the larder down to 16), switches both hoppers and the
+  tank to auto-fill through the real commands, and ticks
+  `BOTTLENECK_SETTLE_TICKS` = 8000 — ticket 1's measured number, not the
+  plan's 1500. `BOTTLENECK_MACHINES` pins red · red · green · amber ·
+  amber by origin tile. The render verdict, stated for the coordinator:
+  in the closeup the tall stack on the vat reads unambiguously (green lit,
+  two dark lenses below, black bands between); at the whole-line
+  auto-framing a lit lens is a 2–3 px dot whose colour is tellable apart
+  (red on the crusher and mixer, green on the vat, amber on the bottler
+  and packer) but whose position on the post needs one step of scroll
+  zoom. Nothing on the Godot side would change that — the posts are
+  unoccluded at every machine — so it is reported, not patched.
+
 - 2026-09-11: **Machine load, ticket 2 — the andon stack-light models.**
   The machine-load epic (`docs/MACHINE_LOAD_PLAN.md`) shows a machine's
   load as an industrial andon beside it: a post carrying three lenses,
@@ -3986,6 +4080,21 @@ were only discoverable by building it:
     the lens ring's size: `VoxModel::set` clips silently at the volume, so a
     ring about a point two voxels from two edges has radius two at most, or
     it is flat on exactly the faces the camera sees.
+30. **A per-tick fact shown beside a windowed verdict has to be held across
+    the ticks it is absent.** The machine-load wire carries two things about
+    a machine: `status`, a verdict over the last 600 ticks, and `stall`, the
+    reason it is waiting THIS tick — and the second is `null` on most ticks
+    of a machine the first calls blocked, because a blocked machine is
+    mid-craft on most ticks and is only "held" on the ones a finished batch
+    has nowhere to go. A hover that printed exactly this poll's `stall`
+    beside a `status` that had not changed would read "blocked · output
+    full" one second and "blocked" the next, which looks like the reason
+    going away when it has not. The scene keeps the last non-null reason
+    while the status holds and forgets it when the status changes (it was
+    the old status's reason), and a test ticks a settled crusher through
+    hundreds of polls and asserts the reason is never dropped. The general
+    form: when one polled field explains another, the explanation's
+    lifetime is the explained thing's, not the poll's.
 
 ## Part C — ARCHITECTURE.md §9a, full text (mobile export spike findings, 2026-09-06)
 

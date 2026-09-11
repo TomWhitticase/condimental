@@ -1,6 +1,7 @@
 # Machine Load Indicator — plan
 
-Status: in progress (started 2026-09-11). Integration branch:
+Status: **done** (started and finished 2026-09-11; all three tickets
+landed). Integration branch:
 `TomWhitticase/machine-load-indicator`, worktree
 `orca/workspaces/sauce-factory/sheepshead`. Built as one Orca orchestration
 Run; the three tickets below map 1:1 to Tasks.
@@ -312,6 +313,36 @@ the condensed decision entry, and merges to `main`.
 - **No icon** for any `andon_*` model (`icons.rs`'s `is_andon`).
 - **`VoxModel::rotated_cw`** now turns non-square models (X/Y extents swap
   per odd turn).
+
+### Ticket 3 (Godot) — landed 2026-09-11
+
+- **Nodes:** `_build_machine_andon` stands `andon_<key>_<status>` for each
+  of `ANDON_STATUSES` (`working`, `starved`, `blocked`) as siblings of the
+  body under `World`, at the centre of `_andon_tile(origin, rotated size)`,
+  yaw 0, `_short` for a 1x1 footprint and `_tall` otherwise; recorded in
+  `_machine_andons[key] = {lenses, status, height, tile}`.
+- **Corner:** `ANDON_CORNER = (sign(CAMERA_DIRECTION.x),
+  sign(CAMERA_DIRECTION.z))` on tile axes = `(1, 1)`: the far tile on both
+  axes (vat at (12,0) → light on (13,1); mixer at (9,0) → (9,1)).
+- **Polling:** `_poll_machine_load` every `LOAD_POLL_TICKS` (30) of SIM
+  time from the end of `_advance_simulation`, and once in `_rebuild_world`
+  after `_seed_machine_states`. `_machine_load[key] = {load, stall, reason,
+  status}`; `reason` is the last non-null stall while the status holds.
+  `_set_machine_andon` flips visibility only on a change.
+- **Hover:** `_machine_load_text` appends one line to `_machine_hover_text`
+  in the plan's language; **the window reads 20 s** (`600 / TICK_HZ 30`),
+  not 10 s. `_hover_panel_state` gains `load_meter` (green level bar,
+  `_hover_load_meter`), drawn under the progress bar.
+- **Fixture:** `build_bottleneck_line` — reference line, hoppers and tank
+  on auto-fill, funded to 8000, 400 of each raw + 300 tomatoes, settled
+  `BOTTLENECK_SETTLE_TICKS` = 8000; `BOTTLENECK_MACHINES` pins the five
+  statuses. `test_machine_load.gd` (in `verify-core-loop.sh`);
+  `screenshot-scene.sh --bottleneck` (implies `--populate`, whose loop
+  polls the load at its end).
+- **Render verdict:** the closeup reads unambiguously. At the whole-line
+  auto-framing a lit lens is a 2–3 px dot: the colours are tellable apart,
+  the position on the post needs one step of zoom. No Godot-side cause
+  (nothing occludes a post on the shipped line); left for the coordinator.
 
 ## Coordinator notes
 

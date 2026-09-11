@@ -142,7 +142,7 @@ sauce-factory/
                            #   --no-hud, --closeup, --first-person, --stress,
                            #   --contracts, --board, --stock, --hotbar N, --no-hud,
                            #   --closeup, --first-person, --stress,
-                           #   --belt-gallery, menu/pause)
+                           #   --belt-gallery, --bottleneck, menu/pause)
   docs/                    # README.md (index), ARCHITECTURE.md, UI_UX.md,
                            #   GAMEPLAY.md, DEVLOG.md, DECISIONS.md
   .githooks/               # commit-msg + pre-commit; enable with
@@ -193,6 +193,40 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-11 **Machine load, ticket 3 (Godot).** Every recipe-running
+  machine stands its andon (`_build_machine_andon`) as THREE sibling nodes
+  of the body — one per status model, like the motion frames — on the
+  footprint's **camera-visible corner tile**, yaw 0, one visible.
+  `ANDON_CORNER` is `sign(CAMERA_DIRECTION.x), sign(CAMERA_DIRECTION.z)`
+  (tile axes; world Z is tile Y), derived, not chosen: `(1, 1)`, so the
+  2x2 vat's light is on (13,1) and the 1x2 mixer's on its north tile.
+  Height by footprint: `_short` for 1x1, `_tall` otherwise. **Godot never
+  derives status**: `_poll_machine_load` reads
+  `machine_load_snapshots_json` every `LOAD_POLL_TICKS` (30) of SIM time
+  from the end of `_advance_simulation` (a pause polls nothing), and once
+  in `_rebuild_world` after `_seed_machine_states`, so a loaded save shows
+  its lights on the first frame; `_set_machine_andon` flips visibility only
+  on a change. `_machine_load[key]` keeps `load`, this tick's `stall` and
+  the **last non-null `reason` while the status holds** (a blocked
+  machine's stall is `null` on most ticks; hover must not flicker). Hover
+  gains one line: `flat out  ·  100% of the last 20s` / `starved  ·  38%
+  busy  ·  waiting for Sugar` / `blocked  ·  61% busy  ·  output full`;
+  the seconds are `window / TICK_HZ` (**20 s at TICK_HZ 30**, not the
+  plan's "10s", which assumed 60 Hz); items through `_item_display_name`;
+  an unknown stall kind says nothing. The hover panel adds a second bar,
+  `_hover_load_meter` (green, `METER_FILL_LEVEL`: a level with a real
+  ceiling), under the amber progress bar; `_hover_panel_state` returns it
+  as `load_meter`. Fixture `build_bottleneck_line` (reference line, both
+  hoppers and the tank on auto-fill, 400 of everything + 300 tomatoes,
+  funded to 8000, ticked `BOTTLENECK_SETTLE_TICKS` = 8000): red · red ·
+  green · amber · amber, pinned by `BOTTLENECK_MACHINES`.
+  `test_machine_load.gd` proves it (its `_fail` withholds the marker rather
+  than relying on `quit(1)`, which a later `quit(0)` overrides);
+  `screenshot-scene.sh --bottleneck` (implies `--populate`, whose loop now
+  polls the load once at its end) renders it. Render verdict: the closeup
+  reads unambiguously; at the whole-line auto-framing a lit lens is a
+  2–3 px dot whose colour is tellable and whose position needs one step of
+  zoom. Full record in `docs/DECISIONS.md`.
 - 2026-09-11 **Machine load, ticket 2 (andon assets).** Six models, two
   heights: `andon_working_short`/`andon_starved_short`/`andon_blocked_short`
   for 1x1 kinds and `andon_working_tall`/`_starved_tall`/`_blocked_tall` for

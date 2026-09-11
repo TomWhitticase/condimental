@@ -49,6 +49,11 @@
 # building junction at every facing), the review subject for the pipes and
 # conveyors overhaul's belt presentation.
 #
+# `--bottleneck` builds the BOTTLENECK LINE (test_layouts.gd's
+# `build_bottleneck_line`: the reference line on auto-fill, run until it has
+# backed up behind the cooking vat), the fixture the machine-load epic's
+# stack lights are reviewed on. Implies `--populate`.
+#
 # `--populate` runs whatever has been built forward first so the screenshot
 # shows product actually moving, not an idle factory.
 #
@@ -222,6 +227,9 @@ func _initialize() -> void:
 		_fixture = "pipes"
 	if args.has("--belt-gallery"):
 		_fixture = "gallery"
+	if args.has("--bottleneck"):
+		_fixture = "bottleneck"
+		_populate = true
 	_first_person = args.has("--first-person")
 	_hover = args.has("--hover")
 	_hover_pipe = args.has("--hover-pipe")
@@ -311,6 +319,8 @@ func _build_fixture() -> void:
 			Layouts.build_pipe_gallery(_main.sim)
 		"gallery":
 			Layouts.build_belt_gallery(_main.sim)
+		"bottleneck":
+			Layouts.build_bottleneck_line(_main.sim)
 		_:
 			Layouts.build_demo_line(_main.sim)
 	# Every fixture is stocked, whether or not this run will tick: a
@@ -494,6 +504,10 @@ func _run_chain_forward() -> void:
 	_main._apply_dirty_chunks()
 	_main._refresh_buffers()
 	_main._update_fluid_network()
+	# The stack lights are polled from `_advance_simulation` too, which this
+	# loop bypasses; read them once here so the shot shows the settled
+	# verdicts, not the ones the rebuild saw before the run.
+	_main._poll_machine_load()
 
 
 ## Enters placement mode with the cursor parked somewhere the ghost reads as
