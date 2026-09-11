@@ -340,6 +340,17 @@ DECISIONS.md Part B. There is no point 10.
     the lens ring's size: `VoxModel::set` clips silently at the volume, so a
     ring about a point two voxels from two edges has radius two at most, or
     it is flat on exactly the faces the camera sees.
+30. **A per-tick fact shown beside a windowed verdict has to be held across
+    the ticks it is absent.** The load wire carries a `status` judged over
+    the last 600 ticks and a `stall` that is this tick's reason — `null` on
+    most ticks of a blocked machine, which is mid-craft on most of them. A
+    hover printing exactly this poll's `stall` beside an unchanged `status`
+    flickers between "blocked · output full" and "blocked", which reads as
+    the reason going away. The scene keeps the last non-null reason while
+    the status holds and forgets it when the status changes, and a test
+    asserts it is never dropped across hundreds of polls. When one polled
+    field explains another, the explanation's lifetime is the explained
+    thing's, not the poll's.
 
 ## 3. Theme & setting
 
@@ -405,6 +416,20 @@ factory tropes; the sauce theme comes through in what the factory processes.
   weight and pips. A lost or signed contract is announced in one line along
   the top edge, and an empty clipboard says "press C" rather than showing a
   money figure over nothing.
+- **A machine's load is read in the world, from its stack light, and in
+  words from its hover** (the machine-load epic, 2026-09-11). Every
+  recipe-running machine has an andon on its camera-visible corner: green
+  lit is flat out, amber is starved, red is blocked — colour AND position
+  on the post (§7), the industrial convention (§3), never rotated with the
+  machine. A line reads as a line: the machine whose light is green while
+  the lights after it are amber and the lights before it are red is the
+  bottleneck, and that is visible across the whole floor without hovering
+  anything. Hover adds the number and the reason, in one line under the
+  progress line — `flat out · 100% of the last 20s`, `starved · 38% busy ·
+  waiting for Sugar`, `blocked · 61% busy · output full` — and a second bar
+  in the §5e language: green, the share of the window spent working, under
+  the amber progress bar. The words are the readout; the light and the bar
+  are the same fact at two distances.
 - **Typography**: a sturdy, slightly blocky sans-serif, readable at UI
   sizes; not a novelty pixel font.
 - **Layout**: hotbar along the bottom (§5b); build/recipe menus as icon
