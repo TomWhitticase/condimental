@@ -22,6 +22,104 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-11: **Machine load, ticket 2 — the andon stack-light models.**
+  The machine-load epic (`docs/MACHINE_LOAD_PLAN.md`) shows a machine's
+  load as an industrial andon beside it: a post carrying three lenses,
+  green over amber over red, one lit. This ticket built the models in
+  `voxgen` only; ticket 1 owns the number, ticket 3 stands the light in the
+  scene. Seven calls, each made by a test or a render rather than a guess.
+
+  (1) **Two heights, not one, and the render decided it.** The plan's
+  default was a single post whose lens stack clears every machine body
+  (the vat's steam stack reaches z 47, so a lens bottom of 48 and a 64-voxel
+  model), with two heights as the fallback "if the render shows one tall
+  post absurd beside a 1x1 crusher". Both were composed beside a crusher, a
+  vat and a packer and thumbnailed. At 64 voxels the post is two and a half
+  crushers tall and the stack floats a whole machine's height above the
+  body it is bolted to — a lamp-post, not a machine's own light — while the
+  same stack at a lens bottom of 32 (clearing the generic housing's
+  exhaust at z 31, the tallest 1x1 feature) reads as part of the machine.
+  So: `andon_<status>_short` for 1x1 kinds, `andon_<status>_tall` for any
+  larger footprint, one generator `andon(p, lit, lens_bottom)` behind both,
+  and Godot picks by footprint. The cost is stated honestly: the lights no
+  longer sit in one band across the floor, and a short stack's RED lens
+  (z 32..35) can be clipped by a vat standing directly camera-side of and
+  adjacent to a 1x1 machine; the amber and green cannot, and the tall stack
+  is never occluded. `the_andon_lenses_stand_above_every_machine_body` pins
+  both bottoms above their bodies AND within one lens height of them, so
+  neither can quietly grow into a mast again.
+
+  (2) **The post is inset exactly one voxel, and that number is a test, not
+  a taste.** A machine's plinth is flush with its tile edge
+  (`machine_footing`), so a post ON the edge puts its outer faces on the
+  plinth's and z-fights there (UI_UX §2b point 24). One voxel in, the post's
+  column runs down THROUGH the plinth and the painted skirt — which is what
+  "bolted to the machine's corner" looks like — and every voxel it shares
+  with a body is buried, the post itself covering the one side the skirt
+  does not. Two voxels in would put the post's +X face on the painted
+  skirt's own +X face (`machine_footing_rect` stops the skirt at
+  `xhi - 2`) and the fight comes back. The test
+  `the_andon_post_shares_no_exposed_face_with_any_machine_body_at_any_facing`
+  overlays the post's column on the +X/low-Y corner tile of every body
+  (generic, crusher, mixer, vat, bottler, packer) turned all four ways and
+  asserts that wherever a post voxel and a body voxel coincide, every face
+  either would expose is covered by one of them. It also asserts the post
+  DOES enter the plinth — a post that avoided every body would pass the
+  first check by standing on bare floor.
+
+  (3) **The test moved two machine features, by one voxel each.** The
+  crusher's drive motor stood on its far (+Y) shoulder at y 25..30, one
+  voxel from the edge — turned 180° that is the andon's corner at the
+  andon's inset, and the motor's face lay on the post's face. It stops at
+  29 now; the post passes through it. The packer's control panel sat at
+  x 5..14, which put its green lamp at x 0..2; turned 90° the lamp lands
+  one voxel in from +X, on the post. The panel is centred at (11, 20) like
+  every other 1x1 kind's. Neither is visible in a preview; both were found
+  only by the test. The general lesson is recorded as UI_UX §2b point 29.
+
+  (4) **`VoxModel::rotated_cw` now turns an oblong model.** It asserted a
+  square footprint; the mixer is 32x64 and is a body the post stands on.
+  The generalisation swaps the X and Y extents on every odd turn — exactly
+  what `machines.rs` says a rotated footprint does — and is the identity
+  the old code was for a square.
+
+  (5) **Every lens is a ring, the widest ring that fits.** The post is never
+  rotated (a lamp on a rotated face is a lamp nobody sees, point 18), so a
+  lens facing one way would be a lamp nobody sees from the other three. Each
+  lens is `cylinder_z_f` of radius 2 about the post's centre — a rounded
+  5x5 — and the radius is the largest possible, not a chosen one: the post
+  centre is two voxels from the +X edge and two from the low-Y edge, and
+  `VoxModel::set` silently clips anything past the volume, which would
+  flatten the ring on exactly the two faces the camera sees. A test pins
+  that every lens stands proud of the post on all four sides, is at least 4
+  wide and 3 tall (4, as built), stays inside the tile, and has a
+  `hazard_black` band between it and the next.
+
+  (6) **Unlit lenses are dark matte versions of their colour, never black.**
+  Three new palette entries, `status_green_off`/`status_amber_off`/
+  `status_red_off`, each the hue of its `status_*` emissive taken down to a
+  dark matte. A tower with three black bands and one lit one is a pole with
+  a blob on it; with the dead lenses still faintly their colour the tower
+  reads as green-amber-red top to bottom and the lit lens is told apart by
+  its PLACE in that order as well as by its glow (UI_UX §7: never colour
+  alone). Class `matte`, because an unlit lens that emitted would be a lamp
+  half on. `an_andon_lights_exactly_one_lens_and_it_is_the_right_one_in_the_right_place`
+  pins one emissive colour per model, in the band the model is named for,
+  with the other two bands wholly their `_off` colour.
+
+  (7) **The post is painted grey, and there is no icon.** `paint_grey` is a
+  fourth new palette entry: structure is paint, not stainless (§2b point 8);
+  not the housings' `paint_blue`, so a post bolted to a blue skirt stays a
+  separate object; not black, because a dark column against a body's
+  shadow-side face reads as a gap in that face (point 21). Nothing in
+  `shop.ron` names an andon, so `icons.rs` skips `andon_*` the way it skips
+  motion overlays (`is_andon`). Palette colours are APPENDED, so every
+  `.vox` re-emits (only the index bytes change), and the icon pass
+  refreshed five icons whose bodies had changed on earlier branches without
+  a re-render (crusher, packer, mixer, bottler, floor tile) and wrote four
+  that had never been committed (coin and the three floor variants) — all
+  committed here, since `icons/` is committed build output.
+
 - 2026-09-11: **Payout feedback — what earning money looks and sounds like,
   and the project's first audio.** Money arrives through exactly one channel
   (a contract settling at its cadence boundary, `sim/economy.rs`) and it
@@ -3777,7 +3875,25 @@ were only discoverable by building it:
     plane, so a single voxel of floor detail one step taller intersects
     everything the player builds, and it is invisible in every render until
     something happens to stand on the offending tile.
-
+29. **A free-standing thing at a fixed place on a tile meets every body at
+    every facing, and a face one voxel from a tile edge is a face one voxel
+    from EVERY edge once the body turns.** The andon post stands at the
+    tile's +X/low-Y corner, inset one voxel, and never rotates; the
+    machines it is bolted to do. Two features that had sat harmlessly at
+    the far side of their bodies — the crusher's motor one voxel from its
+    +Y edge, the packer's status lamp one voxel from its -X edge — landed
+    exactly on the post's own faces when the body was turned, and z-fought
+    it (point 24) in a way no preview could show, because a preview shows
+    one facing. The rule: an overlay that does not turn with its host is
+    checked against the host turned all four ways, by a test, not by eye;
+    and the check is on co-located voxels with a face exposed by both, which
+    is the whole of point 24 in one predicate. The corollary for the inset
+    itself: on the tile edge it fights the flush plinth, two in it fights
+    the painted skirt, so one voxel is a pinned number and not a choice —
+    the post passes THROUGH a body and never fights one. The last lesson is
+    the lens ring's size: `VoxModel::set` clips silently at the volume, so a
+    ring about a point two voxels from two edges has radius two at most, or
+    it is flat on exactly the faces the camera sees.
 
 ## Part C — ARCHITECTURE.md §9a, full text (mobile export spike findings, 2026-09-06)
 

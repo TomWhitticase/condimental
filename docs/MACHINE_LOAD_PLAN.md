@@ -240,6 +240,41 @@ the condensed decision entry, and merges to `main`.
 
 *(appended by the coordinator as tickets land)*
 
+### Ticket 2 (assets) — landed 2026-09-11
+
+- **Model names (six, two heights):** `andon_working_short`,
+  `andon_starved_short`, `andon_blocked_short` for a **1x1** footprint;
+  `andon_working_tall`, `andon_starved_tall`, `andon_blocked_tall` for
+  **anything larger** (the 1x2 mixer, the 2x2 vat, any future kind). Ticket
+  3 picks by footprint. There is no plain `andon_<status>`.
+- **Why two heights:** rendered beside a crusher, a vat and a packer. At the
+  single height the plan proposed (lens bottom 48, clearing the vat's stack
+  at z 47) the post is 64 voxels — two and a half crushers tall, the stack
+  floating a whole machine above the body. The short stack reads as bolted
+  to the machine. Cost, stated: a short stack's red lens (z 32..35) can be
+  clipped by a vat standing directly camera-side of and adjacent to a 1x1
+  machine; amber and green cannot be, and the tall stack never is.
+- **Post:** 3x3 voxels, `paint_grey` (new palette entry), at the tile's
+  +X/low-Y corner **inset 1 voxel** (`ANDON_INSET`): column x 28..30,
+  y 1..3 in model space. It runs from z 0 (through the plinth) to the
+  collar. Never rotate it; place it at yaw 0 on the camera-visible corner
+  tile of the footprint.
+- **Lenses:** rounded 5x5 rings (`cylinder_z_f` radius 2 about (29, 2)),
+  **4 voxels tall**, one `hazard_black` band between, a 2-voxel collar below
+  and a 2-voxel cap above. From the bottom: red, amber, green.
+  Short: red 32..35, amber 37..40, green 42..45, model height 48.
+  Tall: red 48..51, amber 53..56, green 58..61, model height 64.
+  (`andon_lens_z(lens_bottom, i)` in `assets.rs` is the one definition.)
+- **Material classes:** `matte` + `emissive` only (per-class files
+  `andon_*.matte.vox` and `andon_*.emissive.vox`; the emissive part is the
+  lit lens alone, so the glow pass lights exactly one ring).
+- **Bodies nudged:** the crusher's motor now ends at y 29 (was 30) and the
+  packer's control panel is centred at (11, 20) (was (5, 14)); both had a
+  face on the post's inset when turned. Their icons re-rendered.
+- **No icon** for any `andon_*` model (`icons.rs`'s `is_andon`).
+- **`VoxModel::rotated_cw`** now turns non-square models (X/Y extents swap
+  per odd turn).
+
 ## Coordinator notes
 
 *(appended as work lands)*

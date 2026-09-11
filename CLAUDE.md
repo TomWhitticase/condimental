@@ -193,6 +193,36 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-11 **Machine load, ticket 2 (andon assets).** Six models, two
+  heights: `andon_working_short`/`andon_starved_short`/`andon_blocked_short`
+  for 1x1 kinds and `andon_working_tall`/`_starved_tall`/`_blocked_tall` for
+  any larger footprint — ticket 3 picks by footprint. One generator,
+  `andon(p, lit, lens_bottom)`; the plan's single height was rendered beside
+  a crusher and rejected (a 64-voxel post is two and a half crushers tall
+  and the stack floats a whole machine above the body); on the vat only the
+  tall one clears the stack (z 47). A 3x3 `paint_grey` post (new palette
+  entry: painted structure, §2b point 8; grey not black, point 21) stands
+  at the tile's +X/low-Y corner **inset exactly one voxel**
+  (`ANDON_INSET`): on the edge it fights the flush plinth, two in it fights
+  the painted skirt's own face. The post runs from z 0 THROUGH the plinth;
+  a body may be passed through, never fought — a voxgen test overlays the
+  post on every machine body at all four facings and asserts no shared
+  exposed face. That test moved two body features by a voxel each: the
+  crusher's motor (y 25..29, was ..30) and the packer's control panel
+  (centred at (11, 20), was (5, 14)), both of which landed on the post's
+  inset when turned. **The post is never rotated**, so every lens is a RING
+  (rounded 5x5, `cylinder_z_f` radius 2, the widest that stays inside the
+  tile — `VoxModel::set` clips at the edge, on exactly the faces the camera
+  sees), 4 tall, one `hazard_black` band between. Red lens bottom is 32
+  (short) / 48 (tall), pinned `> tallest body` (1x1 bodies / all bodies) and
+  within one lens height of it. Unlit lenses are dark matte versions of the
+  three status colours (`status_green_off`/`_amber_off`/`_red_off`, new
+  palette entries), never black — the tower must read as a tower. Only
+  `matte` + one `emissive` colour per model; heights 48/64 (even, point 27).
+  `VoxModel::rotated_cw` now turns an oblong footprint (the mixer). No icon
+  (`icons.rs`'s `is_andon`). Palette colours appended → every `.vox`
+  re-emitted; the crusher/packer/mixer/bottler/floor icons and the
+  previously uncommitted coin/floor-variant icons are refreshed too.
 - 2026-09-11 **Payout feedback — what earning money looks and sounds like.**
   A payout is detected ENTIRELY in Godot, by polling each contract's
   `deliveries_made` in `economy_snapshot_json` for a rise: no sim change, no

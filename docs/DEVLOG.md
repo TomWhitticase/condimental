@@ -47,6 +47,7 @@ below is history and should only ever be appended to.)*
 - **Machine animations (done):** every processing machine has a visible moving mechanism — the crusher's toothed rolls and flywheels, the mixer's ribbon, the cooking vat's agitator spider, the bottler's plunging nozzles and capping chuck, the packer's taping carriage, and a drive spider on the generic housing for any kind without a model of its own. Drawn as a four-frame motion overlay on the machine's own footprint (the moving parts are cut out of the bodies, not duplicated, so nothing z-fights), advanced from the tick beside the belt animation so the pause menu freezes it. **It runs only while the machine is actually working**: `Machine::tick` keeps the process of a machine that has finished but is blocked on a full output, so the gate is `elapsed < required` rather than `process != null` — which makes a lit status lamp over a still machine mean "the thing downstream is full". One pace for every kind (a cycle per 30 ticks); the belt carries speed.
 - **Payout juice, and the project's first audio (done):** earning money is now an event rather than a number quietly going up. When a contract settles, coins fountain up over every dock, the money counter punches up in scale and flashes amber, a "+N" rises out of it and the docket that paid is stamped **PAID**; a case landing on the dock gets a much smaller cue (a pop and a quiet knock), because that happens constantly and a payout happens every thousand-odd ticks. It needed **no simulation change at all** — Godot notices a payout by watching each contract's `deliveries_made` for a rise in the snapshot it already polls. The whole celebration is clocked off `sim.current_tick()`, so it pauses with the game and a screenshot run stays reproducible. **Sound exists now**, and it is synthesised in GDScript at runtime (`godot_project/audio.gd`) rather than shipped as `.wav` files — which settles UI_UX.md §8's open audio question as *feedback-only, procedurally generated*, with a SOUND switch on the pause menu.
 - **Pipes & conveyors overhaul (IN PROGRESS — six of seven tickets merged, `docs/PIPES_AND_CONVEYORS_PLAN.md` has the ticket-7 hand-off notes):** seven tickets on one integration branch to make belts and pipes look right, read right, run fast and connect up. **Ticket 1 (sim) has landed:** every belt, splitter and pipe on the wire carries `links` — what feeds it, what it hands to, or what its pipe is joined to, per side — recorded by the topology pass so it is exact and free per tick. **Ticket 4 (Godot) has landed:** belts, splitters, pipes and the items riding them are `MultiMesh` instances (one per asset and material class) rather than a node each, with a 1500-tile stress fixture, a headless timing test (`test_perf.gd`) and `scripts/screenshot-scene.sh --stress`; machines and buildings keep their nodes, and the seams the belt-animation and corner tickets build on (frame sets, a caller-supplied yaw per tile, one item-positioning function) are in place in `main.gd`. **Ticket 3 (assets) has landed:** the pipe model family (straight, corner, tee, cross, end, machine/tank fittings, one fluid body per shape) on a 15.5 midline, with seven pipe rendering defects fixed at the generator. **Ticket 2 (assets) has landed:** the belt model family — straights and left/right corners in four animation frames with a solid raised direction arrow *(replaced by a plain rubber cleat on 2026-09-10 at the player's request — see the log)*; the belt-side junction variants are retired (the plain tile carries the junction, the machine's hood does the rest). **Ticket 6 (Godot) has landed:** every pipe tile draws its shape (end, straight, corner, tee, cross), its turn, its machine/tank fittings and its per-shape liquid body from the wire's `links` alone; hover names a pipe's connections in words; the one-arrangement `pipe_source`/`pipe_inlet` tiles are deleted; `test_pipe_shapes.gd` and `scripts/screenshot-scene.sh --pipe-gallery` cover every shape at every turn. **Ticket 5 (Godot) has landed:** a belt's shape (straight, left/right corner, merge, start, end) comes from its `links`, the four-frame surface animates at item speed from the tick, items arc through corners (and are drawn face to face on every tile — they had been half a tile downstream), hover says feeds and hand-offs in words, the retired belt aliases are deleted, and a `--belt-gallery` fixture shows every shape and junction at every facing. Ticket 7 (gallery bug hunt and docs close-out) is to do; one sim rule discrepancy (a belt feeds a machine from any side of an inlet-edge tile) is flagged for ticket 7.
+- **Machine load indicator (IN PROGRESS, `docs/MACHINE_LOAD_PLAN.md`):** a sim-owned load window per machine, an andon stack light beside it, hover words. **Ticket 2 (assets) has landed:** six `andon_*` models (three statuses in a short and a tall height), pinned by voxgen tests against every machine body at every facing. Tickets 1 (sim) and 3 (Godot) are the rest.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -62,6 +63,26 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-11 — The andon stack lights exist (machine load, ticket 2)
+
+The machine-load epic's asset half: six voxel models of an industrial
+andon — a painted post with a green, an amber and a red lens ring, one lit —
+that ticket 3 will stand at the camera-visible corner of every processing
+machine so the bottleneck can be read across the floor. Two heights rather
+than the plan's one, because the render said so: a single post tall enough
+to clear the cooking vat was two and a half crushers high, so 1x1 kinds get
+a short stack and larger footprints the tall one, picked by footprint.
+
+The interesting work was in the tests, not the model. The post is never
+rotated but the machines are, so a voxgen test overlays the post on every
+machine body at all four facings and fails on any face the two would draw
+in the same place; it found two body features (the crusher's motor, the
+packer's lamp) sitting exactly one voxel from a far edge — invisible in any
+preview, and a z-fight the moment that machine was turned. Both moved a
+voxel. `VoxModel::rotated_cw` learned to turn an oblong model for the
+mixer's sake. Full record in `docs/DECISIONS.md`; the camera lesson is
+UI_UX.md §2b point 29.
 
 ### 2026-09-11 — Six feature branches consolidated into one playable main
 
