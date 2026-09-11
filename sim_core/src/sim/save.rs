@@ -112,7 +112,7 @@ use super::economy::ActiveContract;
 use super::fluid::{FLUID_TANK_KIND, FluidTank};
 use super::hopper::{HOPPER_KIND, Hopper};
 use super::inventory::Inventory;
-use super::machine::{Machine, TimedProcess};
+use super::machine::{LOAD_BUCKETS, LoadBucket, LoadWindow, Machine, TimedProcess};
 use super::machines::MachineRegistry;
 use super::recipe::RecipeRegistry;
 use super::splitter::{SPLITTER_KIND, Side, Splitter};
@@ -253,6 +253,28 @@ pub struct SavedMachine {
     /// any — absolute ticks, so it survives against the restored
     /// [`SaveData::tick_count`] exactly.
     pub process: Option<(u64, u64)>,
+    /// The machine's load window (`sim::machine::LoadWindow`), stored as
+    /// its raw ring so a loaded window is identical to the saved one and
+    /// the lockstep test's chunk snapshots — which now carry `load` —
+    /// stay byte-equal across a round trip. `#[serde(default)]` because it
+    /// was added to `schema_version` 1 rather than bumping it, like
+    /// `SavedHopper::auto_fill`: a save without it loads with a fresh,
+    /// empty window, which is what a machine that has observed nothing
+    /// reads as anyway.
+    #[serde(default)]
+    pub load: SavedLoad,
+}
+
+/// A [`LoadWindow`](super::machine::LoadWindow)'s ring, verbatim: one
+/// `(working, starved, blocked)` triple per bucket in storage order, and
+/// the cursor. Empty `buckets` is the "no window saved" default and
+/// restores as a fresh window; a non-empty ring that is not exactly
+/// `LOAD_BUCKETS` long, or whose cursor is outside it, or with a bucket
+/// over `LOAD_BUCKET_TICKS`, is refused as corrupt.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedLoad {
+    pub buckets: Vec<(u32, u32, u32)>,
+    pub cursor: usize,
 }
 
 /// A hopper's chosen contents and how much of them it holds. `item` is what
@@ -390,6 +412,13 @@ pub enum SaveError {
         held: String,
         capacity: String,
     },
+    /// A machine's saved load ring is not one `LoadWindow` could have
+    /// written: wrong length, cursor outside it, or an over-full bucket.
+    BadLoadWindow {
+        tile: TileCoord,
+        buckets: usize,
+        cursor: usize,
+    },
 }
 
 impl std::fmt::Display for SaveError {
@@ -463,6 +492,15 @@ impl std::fmt::Display for SaveError {
             } => write!(
                 f,
                 "the {what} at {tile:?} holds {held}, more than its capacity of {capacity}"
+            ),
+            SaveError::BadLoadWindow {
+                tile,
+                buckets,
+                cursor,
+            } => write!(
+                f,
+                "the machine at {tile:?} has a load window of {buckets} bucket(s) with cursor \
+                 {cursor}, which is not a ring of {LOAD_BUCKETS}"
             ),
         }
     }
@@ -584,6 +622,15 @@ impl World {
                         input: machine.input.slots().to_vec(),
                         output: machine.output.slots().to_vec(),
                         process: machine.process.map(|p| (p.start_tick, p.required_ticks)),
+                        load: SavedLoad {
+                            buckets: machine
+                                .load
+                                .buckets()
+                                .iter()
+                                .map(|b| (b.working, b.starved, b.blocked))
+                                .collect(),
+                            cursor: machine.load.cursor(),
+                        },
                     })
                 }
             };
@@ -946,6 +993,7 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                     "machine output",
                     placement.tile,
                 )?;
+                let load = restore_load(&saved.load, placement.tile)?;
                 let mut machine = world
                     .ecs_mut()
                     .get::<&mut Machine>(entity)
@@ -958,6 +1006,7 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                         start_tick,
                         required_ticks,
                     });
+                machine.load = load;
             }
             SavedBody::Hopper(saved) => {
                 let mut hopper = world
@@ -1038,6 +1087,29 @@ fn restore_belt(world: &mut World, entity: hecs::Entity, saved: &SavedBelt) {
             BeltSegment::restore(length, min_spacing, &positions, saved.frontier as usize),
         )
         .expect("the entity was just placed");
+}
+
+/// A saved ring back into a [`LoadWindow`]: empty means "never saved",
+/// which is a fresh window; anything else must be a ring `LoadWindow` could
+/// have produced (see [`SavedLoad`]).
+fn restore_load(saved: &SavedLoad, tile: TileCoord) -> Result<LoadWindow, SaveError> {
+    if saved.buckets.is_empty() {
+        return Ok(LoadWindow::new());
+    }
+    let buckets: Vec<LoadBucket> = saved
+        .buckets
+        .iter()
+        .map(|&(working, starved, blocked)| LoadBucket {
+            working,
+            starved,
+            blocked,
+        })
+        .collect();
+    LoadWindow::restore(&buckets, saved.cursor).ok_or(SaveError::BadLoadWindow {
+        tile,
+        buckets: saved.buckets.len(),
+        cursor: saved.cursor,
+    })
 }
 
 fn check_capacity(
@@ -1277,10 +1349,52 @@ mod tests {
             input: vec![("tomato".to_string(), 9_999)],
             output: Vec::new(),
             process: None,
+            load: SavedLoad::default(),
         });
         let message = refusal(data);
         assert!(message.contains("9999"), "{message}");
         assert!(message.contains("capacity"), "{message}");
+    }
+
+    #[test]
+    fn a_load_ring_that_is_not_a_ring_is_refused_and_a_missing_one_is_fresh() {
+        let mut data = a_save();
+        let crusher = data
+            .placements
+            .iter_mut()
+            .find(|p| p.kind == "crusher")
+            .expect("the reference chain has a crusher");
+        let SavedBody::Machine(machine) = &mut crusher.body else {
+            panic!("a crusher saves as a machine");
+        };
+        machine.load = SavedLoad {
+            buckets: vec![(1, 0, 0); 3],
+            cursor: 0,
+        };
+        let message = refusal(data);
+        assert!(message.contains("load window"), "{message}");
+        assert!(message.contains("3 bucket"), "{message}");
+
+        // A save written before the window existed carries no `load` at
+        // all; it must still parse (`#[serde(default)]`) and come back with
+        // an empty window rather than being refused.
+        let legacy: SavedMachine = ron::from_str("(input: [], output: [], process: None)")
+            .expect("a pre-load-window machine record still parses");
+        assert_eq!(legacy.load, SavedLoad::default());
+        let mut data = a_save();
+        for placement in &mut data.placements {
+            if let SavedBody::Machine(machine) = &mut placement.body {
+                machine.load = SavedLoad::default();
+            }
+        }
+        let world = load(data).expect("an absent ring is a fresh window, not an error");
+        assert!(
+            world
+                .machine_load_snapshots()
+                .iter()
+                .all(|entry| entry.load.observed == 0),
+            "every machine comes back with nothing observed"
+        );
     }
 
     #[test]
