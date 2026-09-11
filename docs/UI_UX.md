@@ -321,6 +321,25 @@ DECISIONS.md Part B. There is no point 10.
     under the player. The one model that must NOT be turned is the one whose
     feature spans tiles: a row of trench drains is a trench only while every
     tile lays its channel on the same axis.
+29. **A free-standing thing at a fixed place on a tile meets every body at
+    every facing, and a face one voxel from a tile edge is a face one voxel
+    from EVERY edge once the body turns.** The andon post stands at the
+    tile's +X/low-Y corner, inset one voxel, and never rotates; the
+    machines it is bolted to do. Two features that had sat harmlessly at
+    the far side of their bodies — the crusher's motor one voxel from its
+    +Y edge, the packer's status lamp one voxel from its -X edge — landed
+    exactly on the post's own faces when the body was turned, and z-fought
+    it (point 24) in a way no preview could show, because a preview shows
+    one facing. The rule: an overlay that does not turn with its host is
+    checked against the host turned all four ways, by a test, not by eye;
+    and the check is on co-located voxels with a face exposed by both, which
+    is the whole of point 24 in one predicate. The corollary for the inset
+    itself: on the tile edge it fights the flush plinth, two in it fights
+    the painted skirt, so one voxel is a pinned number and not a choice —
+    the post passes THROUGH a body and never fights one. The last lesson is
+    the lens ring's size: `VoxModel::set` clips silently at the volume, so a
+    ring about a point two voxels from two edges has radius two at most, or
+    it is flat on exactly the faces the camera sees.
 
 ## 3. Theme & setting
 
