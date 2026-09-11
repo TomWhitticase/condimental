@@ -458,6 +458,16 @@ func _run_chain_forward() -> void:
 			# as empty while the simulation held eight tomatoes on it, which
 			# is exactly the kind of lie this whole script exists to catch.
 			_main._apply_dirty_chunks()
+			# The two animations the tick drives. `main.gd` advances both at
+			# the end of `_advance_simulation`, which this loop deliberately
+			# does not go through (it wants ticks without a frame's worth of
+			# input, camera and UI work), so without these two lines every
+			# screenshot ever taken shows belt frame 0 and every machine's
+			# mechanism at rest — an idle-looking factory photographed in the
+			# middle of a run, which is the same lie the comment above is
+			# about. Both read the tick, so the shot stays reproducible.
+			_main._update_belt_frame()
+			_main._update_machine_motion()
 	_main._apply_dirty_chunks()
 	_main._refresh_buffers()
 	_main._update_fluid_network()

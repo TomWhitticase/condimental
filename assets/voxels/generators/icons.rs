@@ -107,6 +107,16 @@ fn is_later_animation_frame(stem: &str) -> bool {
         .is_some_and(|n| n >= 1)
 }
 
+/// A `*_motion_fN` overlay (`assets.rs`'s "Machine motion" section) is half a
+/// machine, not a machine: a handful of flywheel spokes or a ribbon, drawn on
+/// top of a body that carries the rest. Frame 0 is skipped along with the
+/// others — the rule above keeps one icon per animated thing because that one
+/// is a picture of the thing, and a spider of four spokes floating on nothing
+/// is not a picture of the generic machine.
+fn is_motion_overlay(stem: &str) -> bool {
+    stem.contains("_motion_f")
+}
+
 fn main() {
     let root = voxels_root();
     let models_dir = root.join("models");
@@ -136,7 +146,7 @@ fn main() {
             // emitting a `pipe_fluid.liquid.png` the moment a fourth
             // material class was added in milestone 6 — exactly the drift a
             // literal list invites.
-            !stem.contains('.') && !is_later_animation_frame(stem)
+            !stem.contains('.') && !is_later_animation_frame(stem) && !is_motion_overlay(stem)
         })
         .collect();
     entries.sort();

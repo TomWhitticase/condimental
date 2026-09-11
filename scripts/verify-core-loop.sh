@@ -182,6 +182,7 @@ run_godot_script test_pause_menu.gd PAUSE_MENU_OK "ESC pause menu, save slots, a
 run_godot_script test_perf.gd PERF_OK "instanced belts/pipes/items on the 1500-tile stress line, rebuild + 120 frames timed — pipes & conveyors ticket 4"
 run_godot_script test_pipe_shapes.gd PIPE_SHAPES_OK "pipe shape, turn, fittings and fluid body from links; pipe hover — pipes & conveyors ticket 6"
 run_godot_script test_belt_shapes.gd BELT_SHAPES_OK "belt shape from links at every facing, frame from tick, corner item arcs, belt hover — pipes & conveyors ticket 5"
+run_godot_script test_machine_motion.gd MACHINE_MOTION_OK "machine motion overlays: frames per kind, frame from the machine's own elapsed ticks, and motion only while it is actually working"
 
 echo
 echo "PASS: real placement + milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"

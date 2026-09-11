@@ -22,6 +22,131 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-11: **Machine animations — every processing machine has a moving
+  mechanism, and it moves only while the machine is actually working.**
+  Six calls worth not re-litigating.
+
+  (1) **A machine is animated by a separate MOTION MODEL in four frames,
+  not by regenerating its body and not by rotating a node.** The belt family
+  already answers "how does a voxel thing move" (UI_UX.md §2b point 23):
+  emit the same asset in `MACHINE_FRAMES` arrangements, stand them all in
+  the scene, show one. The alternatives were both worse. Spinning a child
+  node in GDScript gives smooth organic motion, which §6 explicitly does not
+  want, and it would put un-art-directed angles on screen at every frame —
+  the same reason §1 forbids a free camera. Folding the mechanism into the
+  body means five machine models become twenty, and every future edit to a
+  machine's shell has to be made four times. So: `<machine>_motion_f0..f3`,
+  cut on the machine's own footprint, and `main.gd` builds four sibling
+  nodes at the body's position and yaw with `visible = k == 0`. Siblings
+  rather than children for the reason the progress gauge is one —
+  `body.get_node_or_null("emissive")` must keep finding the machine's own
+  status lamp, not a lamp inside an overlay.
+
+  (2) **The moving parts are CUT OUT of the body, not duplicated into the
+  overlay.** This is the call that actually cost geometry: the crusher lost
+  the outer skin of its rolls, the mixer its ribbon, the vat its agitator,
+  the bottler its nozzles and chuck, the packer its taping head. The reason
+  is point 24 — two voxel solids z-fight wherever a voxel of both has an
+  outward neighbour in neither — and a z-fight at scene scale reads as a
+  texture seam, not as a bug anyone goes looking for. Disjointness is
+  arranged by construction (`cylinder_*` fills `d <= r` and `arm_cells`
+  fills `inner < d <= outer`, so a core and an annulus about one axis are
+  provably disjoint) and then PINNED: a voxgen test walks every voxel of
+  every frame of every family against its body. It is the test most likely
+  to be broken by a later tweak to either half, which is exactly why it
+  exists.
+
+  (3) **Every motion volume is an EVEN number of voxels tall.**
+  `vox::encode` lifts a model by `model.size[2] / 2` in whole voxels, and
+  that is integer division, so a 33-tall overlay sits half a voxel below a
+  34-tall body and the two meet along a seam instead of a face. Found as a
+  latent bug in the generic `machine_motion` before it ever rendered, and
+  now stated as a rule with a test behind it rather than as a fact about one
+  model.
+
+  (4) **The four frames must differ CONSECUTIVELY, not pairwise.** The first
+  version of the test asserted that no two of the four frames were the same
+  model, and the bottler failed it: its plunge is a there-and-back offset
+  table (`BOTTLER_PLUNGE = [0, -1, -2, -1]`), so f1 and f3 are the same pose
+  — which is what a reciprocating part honestly does. The fix considered and
+  rejected was to add a spinning capping chuck so all four differ; the
+  generator's own doc already records that a bottling line plunges rather
+  than spins, and inventing a rotation to satisfy a test is the test writing
+  the art. So the rule is the one that actually matters — the mechanism
+  never stands still for a frame while it is meant to be working — checked
+  round the loop so the last frame is compared with frame 0 too, plus a
+  second, stronger test (`a_turning_machine_shows_four_different_angles`)
+  for the four `spin`-driven families, where four distinct angles genuinely
+  must hold or the fold count and `MACHINE_FRAMES` divide each other.
+
+  (5) **The gate is `process != null` AND `0 <= elapsed < required`, not
+  `process != null`.** This is the single piece of simulation knowledge the
+  whole feature turns on. `Machine::tick` (`sim_core/src/sim/machine.rs`)
+  clears `self.process` only once the finished goods have somewhere to go: a
+  machine that has completed its batch and is blocked on a full output
+  buffer or a full pipe KEEPS its process and retries every tick. Reading
+  that as "running" would leave a jammed factory full of machines cheerfully
+  turning with nowhere to put anything — the opposite of what the player
+  needs to see. Splitting it the other way gives a genuinely useful pair
+  with the status lamp, which is unchanged: the lamp says "has a batch", the
+  mechanism says "is turning", and **lamp lit with nothing turning means the
+  thing downstream is full**. Neither signal says that alone. The elapsed
+  count is derived from `current_tick()` rather than from a snapshot, for
+  the reason `_machine_progress` already is: a machine dirties its chunk
+  when its state CHANGES, so nothing arrives during a process.
+
+  (6) **One pace for every kind: `MACHINE_TICKS_PER_CYCLE` = 30.** A
+  machine's own process length is the obvious driver and is wrong — the
+  crusher's 80 ticks against the vat's 240 reads as two factories running at
+  different speeds rather than one factory with a slow cook in it, and the
+  cook already states its length through the product backing up behind it.
+  The pace says "working", not "working this fast"; the belt is what carries
+  speed. Judged by the numbers rather than by eye, the way the belt's march
+  was: 30 ticks at `TICK_HZ` 30 is four frame changes a second against the
+  belt surface's 2.4 (`BELT_TICKS_PER_TILE` 50 over `BELT_FRAMES` 4), so a
+  mechanism reads as busier than the rubber it feeds, and a fifth of a
+  second a frame is the chunky end of UI_UX.md §6 rather than a blur. The
+  frame comes from the machine's OWN elapsed ticks rather than from the
+  global tick, so a mechanism starts its cycle at frame 0 the moment work
+  starts instead of joining a factory-wide beat part way through.
+
+  Four smaller things, recorded so they are not rediscovered.
+  **`_update_machine_motion` is called only from `_advance_simulation`**,
+  beside `_update_belt_frame` and for the same reason: the paused
+  early-return never reaches it, so the pause menu stops the machinery for
+  free and a headless test that never ticks sees frame 0.
+  **The mixer's ribbon spans `MIXER_RIBBON_Y` (rows 20..43) rather than the
+  drum's full length** — the voxgen disjointness test found that a flight at
+  `MIXER_RIBBON_R` passes straight through two feed throats and the
+  discharge nozzle. Shortening the ribbon rather than thinning it everywhere
+  keeps the flights out at the drum wall where the sight window (y 24..39)
+  actually shows them turning, so what the player can see is unchanged.
+  **The crusher is excluded from the constant-mass test**: its teeth are
+  culled below `CRUSHER_POCKET_FLOOR_Z`, so a tooth turning down into the
+  nip leaves the model — which is exactly what it does to the player's view
+  of it, since below that line it is inside the frame.
+  **A `*_motion_fN` overlay gets no catalogue icon** (`icons.rs`'s
+  `is_motion_overlay`, alongside the existing `_fN`-for-N≥1 skip): a spider
+  of four spokes floating on nothing is not a picture of a machine.
+
+  **No steam.** It was the obvious addition for the cooking vat and it is
+  wrong twice over: a puff is mass a stopped vat should not have, and a
+  frozen cloud over a cold vat states the opposite of what the lamp says.
+
+  Two things the work turned up outside its own scope. **`test_screenshot.gd`
+  never advanced the belt frame**, because its populate loop calls
+  `sim.tick()` directly rather than going through `_advance_simulation` — so
+  every scene screenshot ever taken has photographed belt frame 0, an
+  idle-looking factory in the middle of a run, which is precisely the lie
+  that loop's own `_apply_dirty_chunks`-every-tick comment is about. It now
+  calls `_update_belt_frame()` and `_update_machine_motion()` there; both
+  read the tick, so shots stay reproducible. And **the vengi preview of a
+  rigid-translation frame is byte-identical to frame 0's** (the packer's),
+  because the thumbnailer crops to the model's bounding box — a preview
+  artefact, not a still mechanism; in the scene the volume is fixed and the
+  carriage really travels. Point 22's warning about vengi's camera, in
+  another form: judge a translation in the scene.
+
 - 2026-09-10: **Hopper/tank configuration, ticket 2 of 2 (the Godot half,
   plus the one sim deletion ticket 1 deferred to it) — a placed hopper or
   tank is CLICKED, and everything about it is on a panel beside it.** The
@@ -2980,6 +3105,88 @@ were only discoverable by building it:
     first items go all the way round and queue back at the merge tile,
     which is a real state and draws a smooth curve of items through the
     corner — the arc's best proof.
+
+27. **A machine is animated by a separate motion model in `MACHINE_FRAMES`
+    arrangements, and the moving parts are cut out of the body rather than
+    duplicated into the overlay** (the machine-animations pass).
+
+    Point 23 answered "how does a voxel thing move" for a tile; this is the
+    same answer for something that is not one. `voxgen` emits
+    `<machine>_motion_f0..f3` for each kind — the crusher's roll teeth and
+    twin flywheels, the mixer's ribbon flights, the vat's agitator spider,
+    the bottler's nozzles and capping chuck, the packer's taping carriage,
+    and a drive spider on the generic housing's crown for any kind that has
+    no model of its own. Each is cut on the machine's own footprint, so both
+    models put their origin at footprint centre at ground level (point 1) and
+    Godot needs no offset at all: four sibling nodes at the body's position
+    and yaw, exactly one visible, and a frame change is two visibility flips.
+
+    The moving parts are **removed from the body**, not copied. Point 24's
+    rule is why: two voxel solids z-fight wherever a voxel of both has an
+    outward neighbour in neither, and a z-fight at scene scale reads as a
+    texture seam rather than as a bug. Disjointness is arranged by
+    construction — `cylinder_*` fills `d <= r` while `arm_cells` fills
+    `inner < d <= outer`, so a core and an annulus about one axis cannot
+    share a cell — and then pinned by a test that walks every voxel of every
+    frame of every family against its body. That test is what found the
+    mixer's ribbon passing through both feed throats and the discharge
+    nozzle; the fix was to run the ribbon only through rows 20..43, which are
+    the rows the sight window (y 24..39) shows, rather than to thin the
+    flights away from the drum wall where the window displays them.
+
+    Two rules the models themselves have to obey. **Every motion volume is
+    an even number of voxels tall**, because `vox::encode` lifts a model by
+    `size[2] / 2` in *whole* voxels, so an odd height sinks the overlay half
+    a voxel and it meets the body along a seam instead of a face. **The
+    frames must differ consecutively, not pairwise**: a reciprocating part
+    passes through the same pose on the way out and the way back
+    (`BOTTLER_PLUNGE` is `[0, -1, -2, -1]`, so f1 and f3 coincide), and the
+    property that actually matters is that the mechanism never stands still
+    for a frame while it is meant to be working. Four distinct angles is a
+    separate, stronger test, applied to the four families a rotation drives.
+
+28. **Motion means "working", and working is narrower than "has a batch"**
+    (the same pass).
+
+    `Machine::tick` clears a machine's `process` only once the finished
+    goods have somewhere to go, so a machine that has completed its batch and
+    is blocked on a full output keeps its process and retries every tick.
+    Animating on `process != null` would therefore leave a jammed factory
+    full of machines cheerfully turning with nowhere to put anything. The
+    mechanism turns on `0 <= elapsed < required` instead, which leaves the
+    status lamp saying "has a batch" and the mechanism saying "is turning" —
+    and **lamp lit with nothing turning is the readout for "the thing
+    downstream is full"**, which neither signal gives on its own. §7's rule
+    about never encoding state in one channel, arrived at from the other
+    direction: two channels that disagree are themselves information.
+
+    The pace is one cycle per 30 ticks for every kind. Driving it from a
+    machine's own process length is the obvious choice and is wrong: the
+    crusher's 80 ticks against the vat's 240 reads as two factories at
+    different speeds rather than one factory with a slow cook in it, and how
+    long a stage takes is already stated by the product backing up behind it.
+    The pace says "working", not "working this fast"; the belt carries speed.
+    By the numbers, the way point 23's march was judged: 30 ticks at 30 Hz is
+    four frame changes a second against the belt surface's 2.4, so a
+    mechanism reads as busier than the rubber it feeds, and a fifth of a
+    second a frame is the chunky end of §6 rather than a blur. The frame
+    comes from the machine's own elapsed ticks, not the global tick, so a
+    mechanism starts at frame 0 when work starts instead of joining a
+    factory-wide beat part way through.
+
+    **No steam**, though the cooking vat is the obvious place for it: a puff
+    is mass a stopped vat should not have, and a frozen cloud over a cold vat
+    states the opposite of what the lamp says.
+
+    One finding about the review tool itself, which belongs here because
+    point 12 is about exactly this. **`test_screenshot.gd`'s populate loop
+    calls `sim.tick()` directly**, not `_advance_simulation`, so it never
+    advanced the belt frame — every scene screenshot ever taken photographed
+    belt frame 0, an idle-looking factory in the middle of a run. It now
+    advances both animations there. And a vengi preview of a frame that is a
+    rigid translation of frame 0 is byte-identical to it, because the
+    thumbnailer crops to the bounding box: judge a translation in the scene,
+    which is point 22's warning about vengi's camera in another form.
 
 ## Part C — ARCHITECTURE.md §9a, full text (mobile export spike findings, 2026-09-06)
 

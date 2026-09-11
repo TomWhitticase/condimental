@@ -103,15 +103,51 @@
     "metal",
     "emissive"
   ],
+  "machine_bottler_motion_f0": [
+    "metal"
+  ],
+  "machine_bottler_motion_f1": [
+    "metal"
+  ],
+  "machine_bottler_motion_f2": [
+    "metal"
+  ],
+  "machine_bottler_motion_f3": [
+    "metal"
+  ],
   "machine_cooking_vat": [
     "matte",
     "metal",
     "emissive"
   ],
+  "machine_cooking_vat_motion_f0": [
+    "metal"
+  ],
+  "machine_cooking_vat_motion_f1": [
+    "metal"
+  ],
+  "machine_cooking_vat_motion_f2": [
+    "metal"
+  ],
+  "machine_cooking_vat_motion_f3": [
+    "metal"
+  ],
   "machine_crusher": [
     "matte",
     "metal",
     "emissive"
+  ],
+  "machine_crusher_motion_f0": [
+    "metal"
+  ],
+  "machine_crusher_motion_f1": [
+    "metal"
+  ],
+  "machine_crusher_motion_f2": [
+    "metal"
+  ],
+  "machine_crusher_motion_f3": [
+    "metal"
   ],
   "machine_dock": [
     "matte",
@@ -123,10 +159,46 @@
     "metal",
     "emissive"
   ],
+  "machine_mixer_motion_f0": [
+    "metal"
+  ],
+  "machine_mixer_motion_f1": [
+    "metal"
+  ],
+  "machine_mixer_motion_f2": [
+    "metal"
+  ],
+  "machine_mixer_motion_f3": [
+    "metal"
+  ],
+  "machine_motion_f0": [
+    "metal"
+  ],
+  "machine_motion_f1": [
+    "metal"
+  ],
+  "machine_motion_f2": [
+    "metal"
+  ],
+  "machine_motion_f3": [
+    "metal"
+  ],
   "machine_packer": [
     "matte",
     "metal",
     "emissive"
+  ],
+  "machine_packer_motion_f0": [
+    "metal"
+  ],
+  "machine_packer_motion_f1": [
+    "metal"
+  ],
+  "machine_packer_motion_f2": [
+    "metal"
+  ],
+  "machine_packer_motion_f3": [
+    "metal"
   ],
   "machine_splitter": [
     "matte",

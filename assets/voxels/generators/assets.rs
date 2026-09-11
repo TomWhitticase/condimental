@@ -68,6 +68,36 @@ pub const ASSETS: &[Asset] = &[
     // The chain's exit (the delivery-dock ticket): the tile finished cases
     // leave the world through. Not a processing kind — see `machine_dock`.
     Asset { name: "machine_dock", build: machine_dock },
+    // The motion overlays: one small model per processing kind holding only
+    // the parts that move, in `MACHINE_FRAMES` arrangements, drawn over the
+    // body by `main.gd` only while the machine is actually mid-process. See
+    // the "Machine motion" section for the rules every family here follows.
+    // The generic `machine` gets one too, for the reason it gets junction
+    // hardware: a kind with no bespoke model must still look like it works.
+    Asset { name: "machine_motion_f0", build: machine_motion_f0 },
+    Asset { name: "machine_motion_f1", build: machine_motion_f1 },
+    Asset { name: "machine_motion_f2", build: machine_motion_f2 },
+    Asset { name: "machine_motion_f3", build: machine_motion_f3 },
+    Asset { name: "machine_crusher_motion_f0", build: machine_crusher_motion_f0 },
+    Asset { name: "machine_crusher_motion_f1", build: machine_crusher_motion_f1 },
+    Asset { name: "machine_crusher_motion_f2", build: machine_crusher_motion_f2 },
+    Asset { name: "machine_crusher_motion_f3", build: machine_crusher_motion_f3 },
+    Asset { name: "machine_mixer_motion_f0", build: machine_mixer_motion_f0 },
+    Asset { name: "machine_mixer_motion_f1", build: machine_mixer_motion_f1 },
+    Asset { name: "machine_mixer_motion_f2", build: machine_mixer_motion_f2 },
+    Asset { name: "machine_mixer_motion_f3", build: machine_mixer_motion_f3 },
+    Asset { name: "machine_cooking_vat_motion_f0", build: machine_cooking_vat_motion_f0 },
+    Asset { name: "machine_cooking_vat_motion_f1", build: machine_cooking_vat_motion_f1 },
+    Asset { name: "machine_cooking_vat_motion_f2", build: machine_cooking_vat_motion_f2 },
+    Asset { name: "machine_cooking_vat_motion_f3", build: machine_cooking_vat_motion_f3 },
+    Asset { name: "machine_bottler_motion_f0", build: machine_bottler_motion_f0 },
+    Asset { name: "machine_bottler_motion_f1", build: machine_bottler_motion_f1 },
+    Asset { name: "machine_bottler_motion_f2", build: machine_bottler_motion_f2 },
+    Asset { name: "machine_bottler_motion_f3", build: machine_bottler_motion_f3 },
+    Asset { name: "machine_packer_motion_f0", build: machine_packer_motion_f0 },
+    Asset { name: "machine_packer_motion_f1", build: machine_packer_motion_f1 },
+    Asset { name: "machine_packer_motion_f2", build: machine_packer_motion_f2 },
+    Asset { name: "machine_packer_motion_f3", build: machine_packer_motion_f3 },
     Asset { name: "hopper", build: hopper },
     Asset { name: "hopper_fill", build: hopper_fill },
     // The pipe run's supply vessel and the liquid column inside it (the
@@ -1453,6 +1483,67 @@ pub fn pipe_fluid_end(p: &Palette) -> VoxModel {
 // `machine()` on purpose: they should read as members of one factory, not as
 // four unrelated props.
 
+
+// --- Where each machine is cut into a fixed half and a moving half ---------
+//
+// Every number below is read from TWO places — the body generator and the
+// matching `*_motion` overlay in the "Machine motion" section — which is
+// exactly why it is a named constant rather than a literal in each. The
+// radii come in core/outer pairs on purpose: `cylinder_*` fills `d <= r` and
+// `arm_cells` fills `inner < d <= outer`, so a fixed core of radius R and a
+// moving annulus starting at the same R interlock and never share a voxel
+// (UI_UX.md §2b point 24 is the same problem seen from the other side).
+
+/// The crusher's flywheel hub, which stays with the body, and the radius its
+/// spokes reach out to.
+const CRUSHER_HUB_R: f32 = 1.8;
+const CRUSHER_SPOKE_R: f32 = 5.0;
+/// The crushing rolls: a smooth core on the body, teeth in the annulus out
+/// to the diameter the rolls have always had. Widening the OUTER radius is
+/// not free — at 4.0 a tooth just clears the feed pocket's east wall.
+const CRUSHER_ROLL_CORE_R: f32 = 3.0;
+const CRUSHER_ROLL_R: f32 = 4.0;
+const CRUSHER_ROLL_Y: (i32, i32) = (9, 22);
+/// The floor of the carved feed pocket. Below it the rolls are inside the
+/// crusher's own frame, so that is where the teeth stop.
+const CRUSHER_POCKET_FLOOR_Z: i32 = 17;
+
+/// The mixer drum's axis, and the ribbon agitator wound about it: radius,
+/// and how many opposed flights it has (which is the fold its animation
+/// closes on).
+const MIXER_DRUM_X: i32 = 17;
+const MIXER_DRUM_Z: i32 = 18;
+const MIXER_RIBBON_R: f32 = 7.0;
+/// The rows of the drum the ribbon runs through. NOT the drum's full length,
+/// and the voxgen tests are what found why: two feed throats and the
+/// discharge nozzle reach in through the drum wall, and a flight at
+/// [`MIXER_RIBBON_R`] passes straight through all three. Those rows are also
+/// the ones the sight window (y 24..39) does not show, so what the player
+/// can see of the ribbon is unchanged — a shorter ribbon here, rather than a
+/// thinner one everywhere, keeps the flights out at the wall where the
+/// window shows them turning.
+const MIXER_RIBBON_Y: (i32, i32) = (20, 43);
+const MIXER_RIBBON_FLIGHTS: u32 = 2;
+
+/// The bottler's three stations: two filled, one capped.
+const BOTTLER_FILL_X: [i32; 2] = [8, 16];
+const BOTTLER_CAP_X: i32 = 24;
+const BOTTLER_NOZZLE_R: f32 = 1.4;
+/// The capping spindle the body hangs off the beam, and the chuck that rides
+/// down it. Core and annulus, as above.
+const BOTTLER_SPINDLE_R: f32 = 1.4;
+const BOTTLER_CHUCK_R: f32 = 3.2;
+/// How far the filling and capping heads are down on each frame. There and
+/// back, so the cycle closes the way a rotation does.
+const BOTTLER_PLUNGE: [i32; MACHINE_FRAMES as usize] = [0, -1, -2, -1];
+
+/// The packer's taping carriage: its X offset per frame, and the tape roll
+/// it carries. The roll clears the stand at its far end only because it is
+/// this narrow and this low — see `machine_packer_motion`.
+const PACKER_TRAVEL: [i32; MACHINE_FRAMES as usize] = [0, 3, 6, 3];
+const PACKER_ROLL_Z: i32 = 23;
+const PACKER_ROLL_R: f32 = 2.5;
+
 /// Plinth, hazard skirt and painted base skirt, shared by every machine
 /// below so the family reads as one factory. `span` is the inclusive
 /// footprint the plinth covers — callers pass the full tile/footprint
@@ -1804,8 +1895,13 @@ pub fn machine_crusher(p: &Palette) -> VoxModel {
     // counter-rotating rolls rather than as one drum — dark steel was the
     // first choice and, in the rendered scene, sank into the frame's own
     // shadow so only one roll was legible.
-    m.cylinder_y((12, 16), 4.0, (9, 22), p.idx("steel_light"));
-    m.cylinder_y((20, 16), 4.0, (9, 22), p.idx("brass"));
+    //
+    // Only the smooth CORE is drawn here: the teeth that make a roll read as
+    // turning belong to `machine_crusher_motion`, in the annulus this core
+    // stops at, and a roll drawn out to its full radius here would z-fight
+    // every one of them.
+    m.cylinder_y((12, 16), CRUSHER_ROLL_CORE_R, CRUSHER_ROLL_Y, p.idx("steel_light"));
+    m.cylinder_y((20, 16), CRUSHER_ROLL_CORE_R, CRUSHER_ROLL_Y, p.idx("brass"));
 
     // The identity of the machine: two big driven flywheels standing proud
     // of the camera-facing (-Y) face, on the roll shafts.
@@ -1820,10 +1916,14 @@ pub fn machine_crusher(p: &Palette) -> VoxModel {
     // so anything that has to be legible on a camera-facing face has to
     // carry its own albedo. The guard is now a narrow strip along the top
     // of the wheels only.
+    //
+    // The wheels are a bright FACE and a brass hub here; the dark web between
+    // them became four spokes in `machine_crusher_motion`, which is what
+    // makes them visibly turn. A running crusher and a stopped one differ in
+    // where those spokes point, not in whether they exist.
     for x in [12, 20] {
         m.cylinder_y((x, 16), 7.0, (3, 4), p.idx("steel_light"));
-        m.cylinder_y((x, 16), 5.0, (2, 3), p.idx("steel_dark"));
-        m.cylinder_y((x, 16), 1.8, (2, 5), p.idx("brass"));
+        m.cylinder_y((x, 16), CRUSHER_HUB_R, (1, 5), p.idx("brass"));
     }
     m.cuboid((5, 27), (3, 5), (23, 24), p.idx("steel_light"));
 
@@ -1914,22 +2014,20 @@ pub fn machine_mixer(p: &Palette) -> VoxModel {
     // its axis at x = 17 so its west wall stands clear of the two feed
     // housings (which reach x = 8) and its east wall reaches far enough to
     // carry the discharge nozzle.
-    const DRUM_X: i32 = 17;
-    const DRUM_Z: i32 = 18;
-    m.cylinder_y((DRUM_X, DRUM_Z), 11.0, (5, last_y - 5), p.idx("steel"));
+    m.cylinder_y((MIXER_DRUM_X, MIXER_DRUM_Z), 11.0, (5, last_y - 5), p.idx("steel"));
     // Bands, the same seam language every other vessel on the line carries.
     for y in [9, 26, 37, 54] {
-        m.cylinder_y((DRUM_X, DRUM_Z), 11.6, (y, y), p.idx("steel_light"));
+        m.cylinder_y((MIXER_DRUM_X, MIXER_DRUM_Z), 11.6, (y, y), p.idx("steel_light"));
     }
     // Dished ends, so the drum is a vessel rather than a length of duct.
     for (y, r) in [(4, 9.0f32), (3, 6.5), (last_y - 4, 9.0), (last_y - 3, 6.5)] {
-        m.cylinder_y((DRUM_X, DRUM_Z), r, (y, y), p.idx("steel_light"));
+        m.cylinder_y((MIXER_DRUM_X, MIXER_DRUM_Z), r, (y, y), p.idx("steel_light"));
     }
 
     // Hollow it, then cut the sight window through the crown — `pipe_body`'s
     // trick, for `pipe_body`'s reason: an open trough reads as a gutter, a
     // framed window reads as a vessel you can see into.
-    m.carve_cylinder_y((DRUM_X, DRUM_Z), 9.0, (5, last_y - 5));
+    m.carve_cylinder_y((MIXER_DRUM_X, MIXER_DRUM_Z), 9.0, (5, last_y - 5));
     // A SHORT window, not a long one. The first cut ran it two thirds of the
     // drum's length and the rendered factory showed the ribbon flights along
     // almost the whole vessel — which at scene scale reads as corrugation, a
@@ -1937,28 +2035,15 @@ pub fn machine_mixer(p: &Palette) -> VoxModel {
     // tile is enough to show the agitator turning and leaves the drum's own
     // round back to read along, exactly the trade `pipe_body` records about
     // the pipe run's sight glass.
-    m.carve_cuboid((DRUM_X - 5, DRUM_X + 5), (24, last_y - 24), (DRUM_Z + 1, 29));
+    m.carve_cuboid((MIXER_DRUM_X - 5, MIXER_DRUM_X + 5), (24, last_y - 24), (MIXER_DRUM_Z + 1, 29));
 
-    // Ribbon agitator: a shaft down the drum's axis with a helical ribbon
-    // wound round it, drawn as a run of short chords stepping in angle. This
-    // is the part the window exists to show, so it sits high in the drum
-    // where the sight line reaches it.
-    m.cylinder_y((DRUM_X, DRUM_Z), 1.8, (4, last_y - 4), p.idx("steel_light"));
-    for y in 8..=(last_y - 8) {
-        // One full turn every 16 voxels; the ribbon is two opposed flights.
-        let phase = (y as f32) * std::f32::consts::TAU / 16.0;
-        for half in [0.0f32, std::f32::consts::PI] {
-            let a = phase + half;
-            let dx = (a.cos() * 7.0).round() as i32;
-            let dz = (a.sin() * 7.0).round() as i32;
-            m.cuboid(
-                (DRUM_X + dx - 1, DRUM_X + dx + 1),
-                (y, y),
-                (DRUM_Z + dz - 1, DRUM_Z + dz + 1),
-                p.idx("steel_dark"),
-            );
-        }
-    }
+    // Ribbon agitator: a shaft down the drum's axis, carrying a helical
+    // ribbon. This is the part the window exists to show, so it sits high in
+    // the drum where the sight line reaches it — and it is also the part that
+    // has to TURN, so only the shaft is here. The ribbon itself is
+    // `machine_mixer_motion`, wound about this same axis at
+    // `MIXER_RIBBON_R`, well clear of both the shaft and the drum wall.
+    m.cylinder_y((MIXER_DRUM_X, MIXER_DRUM_Z), 1.8, (4, last_y - 4), p.idx("steel_light"));
 
     // Drive end: a motor and gearbox on the far (+Y) end of the shaft.
     // Far, not near, and that is the camera again: `control_panel`'s own doc
@@ -1967,7 +2052,7 @@ pub fn machine_mixer(p: &Palette) -> VoxModel {
     // sight window this machine is identified by.
     m.cuboid((11, 23), (last_y - 7, last_y - 1), (10, 22), p.idx("paint_blue"));
     m.cuboid((11, 23), (last_y - 7, last_y - 1), (23, 23), p.idx("steel_dark"));
-    m.cylinder_y((DRUM_X, DRUM_Z), 4.0, (last_y - 8, last_y - 6), p.idx("brass"));
+    m.cylinder_y((MIXER_DRUM_X, MIXER_DRUM_Z), 4.0, (last_y - 8, last_y - 6), p.idx("brass"));
 
     // Vinegar inlet: the stub reaching north off the sim-y = 1 half, toward
     // the pipe run the reference chain lays one row north of the footprint.
@@ -1975,9 +2060,9 @@ pub fn machine_mixer(p: &Palette) -> VoxModel {
     // two are one spool piece split across a tile boundary, and the pair
     // only reads as a connection because they are the same diameter, the
     // same bright steel and carry their brass flange at the same boundary.
-    m.cylinder_y((DRUM_X - 1, PIPE_AXIS_Z), 3.0, (0, 9), p.idx("steel_light"));
-    m.cylinder_y((DRUM_X - 1, PIPE_AXIS_Z), 4.0, (0, 1), p.idx("brass"));
-    m.cuboid((DRUM_X - 2, DRUM_X), (2, 7), (9, PIPE_AXIS_Z - 3), p.idx("steel_dark"));
+    m.cylinder_y((MIXER_DRUM_X - 1, PIPE_AXIS_Z), 3.0, (0, 9), p.idx("steel_light"));
+    m.cylinder_y((MIXER_DRUM_X - 1, PIPE_AXIS_Z), 4.0, (0, 1), p.idx("brass"));
+    m.cuboid((MIXER_DRUM_X - 2, MIXER_DRUM_X), (2, 7), (9, PIPE_AXIS_Z - 3), p.idx("steel_dark"));
 
     // The two feed chutes: a hooded transfer housing per inlet tile, then a
     // short throat from each up into the drum's crown, so what arrives on
@@ -1987,7 +2072,7 @@ pub fn machine_mixer(p: &Palette) -> VoxModel {
     for lane in [near_lane, origin_lane] {
         let mid = (lane.0 + lane.1) / 2;
         m.cuboid((6, 10), (mid - 3, mid + 3), (BELT_SURFACE_Z, 24), p.idx("steel_light"));
-        m.cuboid((10, DRUM_X - 6), (mid - 2, mid + 2), (22, 24), p.idx("steel_light"));
+        m.cuboid((10, MIXER_DRUM_X - 6), (mid - 2, mid + 2), (22, 24), p.idx("steel_light"));
     }
 
     // The liquid discharge, on the outlet face at the origin row.
@@ -2130,16 +2215,20 @@ pub fn machine_bottler(p: &Palette) -> VoxModel {
     }
     m.cuboid((5, 27), (21, 24), (26, 28), p.idx("paint_blue"));
     m.cuboid((5, 27), (21, 21), (26, 28), p.idx("steel_dark"));
-    for x in [8, 16] {
+    // Only the HANGERS are structure. The nozzles that hang off them are
+    // `machine_bottler_motion`'s, because a filling nozzle that never moves
+    // is a spout.
+    for x in BOTTLER_FILL_X {
         m.cuboid((x - 1, x + 1), (15, 22), (25, 26), p.idx("steel_light"));
-        m.cylinder_z((x, 16), 1.4, (20, 25), p.idx("steel_light"));
     }
 
     // Capping head over the last bottle: a brass rotary chuck on a stem off
     // the beam — the "sealing" half of "bottling and sealing".
+    // The arm and the fixed SPINDLE under it; the brass chuck that runs down
+    // that spindle onto the bottle is `machine_bottler_motion`'s, cut as a
+    // ring around it so the two never share a voxel.
     m.cuboid((23, 25), (16, 22), (25, 26), p.idx("steel_light"));
-    m.cylinder_z((24, 16), 3.2, (22, 24), p.idx("brass"));
-    m.cylinder_z((24, 16), 1.4, (20, 22), p.idx("steel_dark"));
+    m.cylinder_z((BOTTLER_CAP_X, 16), BOTTLER_SPINDLE_R, (22, 25), p.idx("steel_dark"));
 
     // The chain rework made this the stage where the product stops being a
     // fluid: liquid ketchup is drawn from the pipe run touching this machine
@@ -2196,10 +2285,11 @@ pub fn machine_packer(p: &Palette) -> VoxModel {
     // roll, reaching in from the back so it doesn't block the open case.
     // The stand stops at x = 27 rather than 28 so it clears the discharge
     // housing added below, which occupies the last four columns.
+    // The stand and the beam only. What hangs off the beam — the taping head
+    // and its tape roll — is one carriage that traverses the case's seam, so
+    // it is `machine_packer_motion`'s and nothing here.
     m.cuboid((25, 27), (23, 26), (12, 27), p.idx("steel"));
     m.cuboid((16, 27), (18, 26), (26, 27), p.idx("steel_light"));
-    m.cylinder_y((19, 24), 3.0, (19, 25), p.idx("brass"));
-    m.cuboid((16, 18), (18, 25), (22, 24), p.idx("steel_dark"));
 
     // Infeed AND outfeed. The packer used to have no discharge at all,
     // because it was the chain's last stage and the player lifted finished
@@ -2212,6 +2302,335 @@ pub fn machine_packer(p: &Palette) -> VoxModel {
     machine_outfeed(&mut m, p, BELT_LANE, TILE_VOXELS as i32 - 1);
 
     control_panel(&mut m, p, (5, 14), (3, 7), 2);
+    m
+}
+
+// ---------------------------------------------------------------------------
+// Machine motion (the machine-animation pass)
+// ---------------------------------------------------------------------------
+//
+// Every processing kind on the line gets a **motion overlay**: a small model
+// with the same X/Y footprint as the machine's body, holding only the parts
+// that move, in `MACHINE_FRAMES` arrangements. Godot stands all four frames
+// on the machine's tile as siblings of the body and shows exactly one
+// (`main.gd`'s `_update_machine_motion`), which is the belt family's own
+// mechanism (UI_UX.md §2b point 23) applied to something that is not a tile.
+//
+// Four rules hold for every family here, and the voxgen tests pin all four:
+//
+//  1. **The mechanism is a rearrangement, not an appearance.** Frame 0 is
+//     the machine at rest and is always drawn, so a stopped machine still
+//     has its flywheels, its ribbon and its taping head — the animation adds
+//     no part that was not already there. That is why steam was left out:
+//     a puff is mass a stopped vat should not have, and a frozen cloud over
+//     a cold vat states the opposite of what the lamp says. What the tests
+//     pin is that CONSECUTIVE frames differ, not that all four do: a
+//     reciprocating part honestly passes through the same pose twice a
+//     cycle (the bottler's plunge is down, half, up, half), and only a
+//     turning part must be at four different angles.
+//  2. **The overlay's voxels are disjoint from the body's.** Two voxel
+//     solids z-fight wherever they share a cell (UI_UX.md §2b point 24), so
+//     anything that moves is REMOVED from the body and lives only here — the
+//     crusher's flywheel spokes and roll teeth, the mixer's ribbon, the
+//     bottler's nozzles and capping chuck, the packer's taping carriage.
+//     Where a moving part turns inside a fixed one the two are cut as a core
+//     and an annulus about the same axis (`cylinder_*` fills `d <= r`,
+//     [`arm_cells`] fills `inner < d <= outer`), so they interlock without
+//     ever sharing a cell.
+//  3. **The cycle closes exactly.** An `n`-fold feature advances one `n`th
+//     of a turn spread over `MACHINE_FRAMES` frames ([`spin`]), so frame
+//     `MACHINE_FRAMES` IS frame 0 and a running machine never jumps
+//     backwards. A linear travel (the packer's carriage, the bottler's
+//     plunge) uses a there-and-back offset table of the same length, for the
+//     same reason.
+//  4. **The volume may be TALLER than the body, never wider.** `vox::encode`
+//     lifts a model by half its own height, so the volume's floor lands on
+//     the ground whatever `size[2]` is, but its X/Y centring is the
+//     footprint's — the vat's drive coupling therefore stands above a 48-
+//     voxel body in a 56-voxel volume and still lines up with it. That lift
+//     is `size[2] / 2` in WHOLE voxels, so an ODD height sinks the model
+//     half a voxel and the overlay meets the body along a seam instead of a
+//     face: every volume here is even, and a test says so.
+//
+// Frames are also deliberately UNIFORM across kinds: `MACHINE_FRAMES` frames
+// per cycle for every machine, with the pace set once in `main.gd`
+// (`MACHINE_TICKS_PER_CYCLE`). A per-kind speed would make the fast crusher
+// and the slow vat look like different factories.
+
+/// Animation frames in one machine's motion cycle. Mirrored by `main.gd`'s
+/// `MACHINE_FRAMES`; change one, change both. Four, like the belt: enough
+/// for a turn to read as a turn, few enough that each frame is a pose
+/// somebody chose (UI_UX.md §6's chunky, snappy motion).
+pub const MACHINE_FRAMES: u32 = 4;
+
+/// How far a `fold`-fold feature has turned by frame `phase`: one `fold`th
+/// of a full turn, divided into `MACHINE_FRAMES` steps. Frame
+/// `MACHINE_FRAMES` therefore lands exactly back on frame 0's arrangement,
+/// which is what makes the loop seamless rather than nearly seamless.
+fn spin(phase: u32, fold: u32) -> f32 {
+    std::f32::consts::TAU / fold as f32 * phase as f32 / MACHINE_FRAMES as f32
+}
+
+/// The cells of `count` evenly spaced arms lying in the annulus `radii`
+/// about `center`, the first arm's centreline at `angle` radians.
+///
+/// Axis-agnostic on purpose: the caller decides what the two coordinates
+/// mean — `(x, z)` for a wheel on a horizontal shaft (the crusher's
+/// flywheels, drawn along Y), `(x, y)` for a drive spider on a vertical one
+/// (the vat's coupling). That is the same freedom `cylinder_x/y/z` give,
+/// expressed once.
+///
+/// `thickness` is an arm's half-width measured along the ARC, in voxels, so
+/// an arm is the same width at the hub as at the rim. Measuring it in
+/// radians instead would fan every arm into a wedge, and a wedge of spokes
+/// is a disc.
+///
+/// The inner radius is meant to be exactly the radius of whatever the body
+/// draws on the same axis: `cylinder_*` fills `d <= r` and this fills
+/// `inner < d <= outer`, so a core and the arms turning around it cannot
+/// share a voxel (rule 2 in this section's header).
+fn arm_cells(
+    center: (i32, i32),
+    radii: (f32, f32),
+    count: u32,
+    thickness: f32,
+    angle: f32,
+) -> Vec<(i32, i32)> {
+    use std::f32::consts::{PI, TAU};
+    let (r_in, r_out) = radii;
+    let span = (r_out + 1.0).ceil() as i32;
+    let step = TAU / count as f32;
+    let mut cells = Vec::new();
+    for v in (center.1 - span)..=(center.1 + span) {
+        for u in (center.0 - span)..=(center.0 + span) {
+            let (du, dv) = ((u - center.0) as f32, (v - center.1) as f32);
+            let d2 = du * du + dv * dv;
+            if d2 <= r_in * r_in || d2 > r_out * r_out {
+                continue;
+            }
+            let d = d2.sqrt();
+            let a = dv.atan2(du);
+            for k in 0..count {
+                let mut delta = (a - (angle + step * k as f32)).rem_euclid(TAU);
+                if delta > PI {
+                    delta -= TAU;
+                }
+                if delta.abs() * d <= thickness {
+                    cells.push((u, v));
+                    break;
+                }
+            }
+        }
+    }
+    cells
+}
+
+macro_rules! machine_motion_fns {
+    ($($name:ident => $build:ident, $phase:expr;)*) => {
+        $(
+            pub fn $name(p: &Palette) -> VoxModel {
+                $build(p, $phase)
+            }
+        )*
+    };
+}
+
+machine_motion_fns! {
+    machine_motion_f0 => machine_motion, 0;
+    machine_motion_f1 => machine_motion, 1;
+    machine_motion_f2 => machine_motion, 2;
+    machine_motion_f3 => machine_motion, 3;
+    machine_crusher_motion_f0 => machine_crusher_motion, 0;
+    machine_crusher_motion_f1 => machine_crusher_motion, 1;
+    machine_crusher_motion_f2 => machine_crusher_motion, 2;
+    machine_crusher_motion_f3 => machine_crusher_motion, 3;
+    machine_mixer_motion_f0 => machine_mixer_motion, 0;
+    machine_mixer_motion_f1 => machine_mixer_motion, 1;
+    machine_mixer_motion_f2 => machine_mixer_motion, 2;
+    machine_mixer_motion_f3 => machine_mixer_motion, 3;
+    machine_cooking_vat_motion_f0 => machine_cooking_vat_motion, 0;
+    machine_cooking_vat_motion_f1 => machine_cooking_vat_motion, 1;
+    machine_cooking_vat_motion_f2 => machine_cooking_vat_motion, 2;
+    machine_cooking_vat_motion_f3 => machine_cooking_vat_motion, 3;
+    machine_bottler_motion_f0 => machine_bottler_motion, 0;
+    machine_bottler_motion_f1 => machine_bottler_motion, 1;
+    machine_bottler_motion_f2 => machine_bottler_motion, 2;
+    machine_bottler_motion_f3 => machine_bottler_motion, 3;
+    machine_packer_motion_f0 => machine_packer_motion, 0;
+    machine_packer_motion_f1 => machine_packer_motion, 1;
+    machine_packer_motion_f2 => machine_packer_motion, 2;
+    machine_packer_motion_f3 => machine_packer_motion, 3;
+}
+
+/// The generic [`machine`]'s moving part: a four-armed drive spider on the
+/// crown of its dome.
+///
+/// The fallback kind needs one for the reason its junction hardware does —
+/// a kind added to `data/machines.ron` with no bespoke model still has to
+/// look like it is working when it is (UI_UX.md §2b point 12's fallback
+/// rule, applied to motion). The spider sits on TOP because that is the one
+/// surface this camera looks straight down at, and because the dome's crown
+/// is the only part of the generic body nothing else stands on: the whole
+/// overlay lives above the body's own volume, so it removes nothing.
+pub fn machine_motion(p: &Palette, phase: u32) -> VoxModel {
+    // 34 voxels tall to hold 33 voxels of dome and spider, and the EVEN
+    // number is the point rather than the spare row: see this section's
+    // rule 4.
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 34]);
+    let c = (16, 16);
+    m.cylinder_z(c, 2.6, (30, 32), p.idx("brass"));
+    for (u, v) in arm_cells(c, (2.6, 7.5), 4, 1.6, spin(phase, 4)) {
+        m.cuboid((u, u), (v, v), (30, 31), p.idx("steel_light"));
+    }
+    m
+}
+
+/// The crusher's moving parts: the two flywheels' spokes and the teeth on
+/// the two crushing rolls, all four on the same two shafts and therefore at
+/// the same two angles.
+///
+/// **The rolls counter-rotate**, which is what a twin-roll crusher does and
+/// the reason both wheels are worth animating at all: two wheels turning the
+/// same way read as one wheel drawn twice. `sense` is that mirror.
+///
+/// The spokes stand at y = 1..2, one voxel PROUD of the bright wheel face
+/// the body keeps at y = 3..4, so the dark arms read against it. This is the
+/// camera-facing side, where UI_UX.md §2b point 11's value-contrast rule
+/// applies: an unlit face carries its own albedo or it carries nothing.
+///
+/// The teeth are cut only where the body's feed pocket is genuinely open
+/// (z >= [`CRUSHER_POCKET_FLOOR_Z`]). Below that the rolls are buried in the
+/// crusher's own frame, so a tooth there would be a moving part inside a
+/// solid — invisible, and z-fighting with the frame it is inside. Eight
+/// teeth on a four-step shaft is deliberate: the teeth turn through half a
+/// pitch a frame while the spokes turn through a quarter of theirs, which is
+/// two features on one shaft rather than two shafts.
+pub fn machine_crusher_motion(p: &Palette, phase: u32) -> VoxModel {
+    let mut m = VoxModel::tile();
+    for (x, sense, tooth) in [(12i32, 1.0f32, "steel_light"), (20, -1.0, "brass")] {
+        let angle = sense * spin(phase, 4);
+        for (u, v) in arm_cells((x, 16), (CRUSHER_HUB_R, CRUSHER_SPOKE_R), 4, 1.7, angle) {
+            m.cuboid((u, u), (1, 2), (v, v), p.idx("steel_dark"));
+        }
+        for (u, v) in arm_cells((x, 16), (CRUSHER_ROLL_CORE_R, CRUSHER_ROLL_R), 8, 1.0, angle) {
+            if v < CRUSHER_POCKET_FLOOR_Z {
+                continue;
+            }
+            m.cuboid((u, u), CRUSHER_ROLL_Y, (v, v), p.idx(tooth));
+        }
+    }
+    m
+}
+
+/// The mixer's moving part: the whole ribbon agitator, advanced a quarter of
+/// its own period per frame.
+///
+/// It is the same helix `machine_mixer` used to draw inline, with [`spin`]
+/// added to its phase — a ribbon blender's flights are two opposed screws,
+/// so the pattern's period is half a turn and a quarter of that per frame
+/// closes the loop (this section's rule 3). Turning the helix looks like
+/// translating it along the drum, which is exactly what a ribbon does to the
+/// batch inside; nothing needs to move along Y to say so.
+///
+/// Only the stretch under the drum's sight window is ever seen, but the
+/// whole length is drawn: the window is a hole in a round vessel, and which
+/// flights show through it changes with each of the four facings.
+pub fn machine_mixer_motion(p: &Palette, phase: u32) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS * 2, 30]);
+    let advance = spin(phase, MIXER_RIBBON_FLIGHTS);
+    for y in MIXER_RIBBON_Y.0..=MIXER_RIBBON_Y.1 {
+        // One full turn every 16 voxels; the ribbon is two opposed flights.
+        let base = (y as f32) * std::f32::consts::TAU / 16.0 + advance;
+        for half in [0.0f32, std::f32::consts::PI] {
+            let a = base + half;
+            let dx = (a.cos() * MIXER_RIBBON_R).round() as i32;
+            let dz = (a.sin() * MIXER_RIBBON_R).round() as i32;
+            m.cuboid(
+                (MIXER_DRUM_X + dx - 1, MIXER_DRUM_X + dx + 1),
+                (y, y),
+                (MIXER_DRUM_Z + dz - 1, MIXER_DRUM_Z + dz + 1),
+                p.idx("steel_dark"),
+            );
+        }
+    }
+    m
+}
+
+/// The vat's moving part: the agitator's drive coupling, standing on the
+/// gearbox at the top of the tallest machine in the factory.
+///
+/// The vat is the one kind whose mechanism is entirely INSIDE it — a
+/// jacketed vessel with an agitator in the sauce — so the honest thing to
+/// animate is the drive that turns it, and the top of the gearbox is where a
+/// real one couples. It is also, on this camera, the most visible square
+/// inch of the whole machine: the vat is 48 voxels tall and the player is
+/// looking down at it.
+///
+/// Nothing is removed from the body for it. The coupling sits at z >= 48,
+/// above the body's own 48-voxel volume, in a volume 8 voxels taller — see
+/// this section's rule 4 for why that still lands on the ground correctly.
+pub fn machine_cooking_vat_motion(p: &Palette, phase: u32) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS * 2, TILE_VOXELS * 2, 56]);
+    let c = (TILE_VOXELS as i32, TILE_VOXELS as i32);
+    m.cylinder_z(c, 4.0, (48, 51), p.idx("brass"));
+    for (u, v) in arm_cells(c, (4.0, 11.0), 4, 1.8, spin(phase, 4)) {
+        m.cuboid((u, u), (v, v), (48, 49), p.idx("steel_light"));
+    }
+    m
+}
+
+/// The bottler's moving parts: the two filling nozzles and the capping
+/// chuck, plunging together.
+///
+/// **A plunge, not a spin**, and that is the camera's call rather than the
+/// machine's. A rotary chuck the size of this one (radius 3.2) turns through
+/// a voxel and a half per frame, which at scene scale is a shimmer; the same
+/// parts dropping two voxels onto a bottle mouth is unmistakable, and it is
+/// what a bottling line visibly does. [`BOTTLER_PLUNGE`] is a there-and-back
+/// table, so the cycle closes like a rotation does.
+///
+/// The chuck is an ANNULUS around the fixed spindle the body hangs off the
+/// beam, so it slides down over the bottle's neck without either solid ever
+/// sharing a voxel with the other — the same core-and-annulus cut the
+/// crusher's rolls use. `arm_cells` with one arm 64 voxels wide is a full
+/// ring: the count/thickness pair says "every cell of the annulus" without a
+/// second primitive that would mean exactly this one.
+pub fn machine_bottler_motion(p: &Palette, phase: u32) -> VoxModel {
+    let mut m = VoxModel::tile();
+    let drop = BOTTLER_PLUNGE[phase as usize];
+    // The two filling nozzles, hanging off the gantry beam over the first
+    // two bottles. They lengthen rather than detach: the top stays on its
+    // hanger at z = 24 and the tip reaches down.
+    for x in BOTTLER_FILL_X {
+        m.cylinder_z((x, 16), BOTTLER_NOZZLE_R, (22 + drop, 24), p.idx("steel_light"));
+    }
+    // The capping chuck, riding the body's spindle down over the last
+    // bottle's neck.
+    for (u, v) in arm_cells((BOTTLER_CAP_X, 16), (BOTTLER_SPINDLE_R, BOTTLER_CHUCK_R), 1, 64.0, 0.0) {
+        m.cuboid((u, u), (v, v), (21 + drop, 22 + drop), p.idx("brass"));
+    }
+    m
+}
+
+/// The packer's moving part: the taping carriage — the head and the tape
+/// roll it carries — running down the case's seam and back.
+///
+/// A packing station is a table, so there is no wheel on it to turn; what it
+/// does is drive a taping head along a case. [`PACKER_TRAVEL`] is the
+/// carriage's X offset per frame, three voxels a step and back again, which
+/// is the largest, plainest motion of any machine on the line and belongs on
+/// the shortest machine — the packer has no silhouette to carry a subtler
+/// one.
+///
+/// The roll is narrower and lower than the one it replaces (four voxels of
+/// width at z 21..25, not seven at 21..27) for one reason: at the far end of
+/// its travel the old roll passed straight through both the stand beside it
+/// and the beam above it.
+pub fn machine_packer_motion(p: &Palette, phase: u32) -> VoxModel {
+    let mut m = VoxModel::tile();
+    let dx = PACKER_TRAVEL[phase as usize];
+    m.cuboid((16 + dx, 18 + dx), (18, 25), (22, 24), p.idx("steel_dark"));
+    m.cylinder_y((19 + dx, PACKER_ROLL_Z), PACKER_ROLL_R, (19, 22), p.idx("brass"));
     m
 }
 
@@ -3611,6 +4030,254 @@ mod tests {
                         );
                     }
                 }
+            }
+        }
+    }
+
+
+    // -----------------------------------------------------------------------
+    // Machine motion
+    // -----------------------------------------------------------------------
+    //
+    // The four rules the "Machine motion" section's header states, one test
+    // each. They are worth having as tests rather than as a render check for
+    // the same reason the junction tests above are: an overlay that shares a
+    // voxel with the body it sits on z-fights, and a z-fight at scene scale
+    // looks like a texture seam, not like a bug someone would go looking for.
+
+    /// Every machine that has a body and a motion overlay, paired.
+    fn motion_families(p: &Palette) -> Vec<(&'static str, VoxModel, Vec<VoxModel>)> {
+        let frames = |f: fn(&Palette, u32) -> VoxModel| {
+            (0..MACHINE_FRAMES).map(|k| f(p, k)).collect::<Vec<_>>()
+        };
+        vec![
+            ("machine", machine(p), frames(machine_motion)),
+            ("machine_crusher", machine_crusher(p), frames(machine_crusher_motion)),
+            ("machine_mixer", machine_mixer(p), frames(machine_mixer_motion)),
+            (
+                "machine_cooking_vat",
+                machine_cooking_vat(p),
+                frames(machine_cooking_vat_motion),
+            ),
+            ("machine_bottler", machine_bottler(p), frames(machine_bottler_motion)),
+            ("machine_packer", machine_packer(p), frames(machine_packer_motion)),
+        ]
+    }
+
+    /// Rule 2: a motion frame never shares a cell with the body it is drawn
+    /// over. This is the one that actually costs geometry — it is why the
+    /// crusher's rolls lost their outer millimetre, the mixer its ribbon and
+    /// the packer its taping head — so it is also the one most likely to be
+    /// quietly broken by a later tweak to either half.
+    #[test]
+    fn a_motion_frame_shares_no_voxel_with_its_machine_body() {
+        let p = palette();
+        for (name, body, frames) in motion_families(&p) {
+            for (k, frame) in frames.iter().enumerate() {
+                for &cell in frame.voxels.keys() {
+                    assert!(
+                        !body.voxels.contains_key(&cell),
+                        "{name}_motion_f{k} and {name} both fill {cell:?} — they will z-fight"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Rule 4: the overlay is centred on the same footprint as the body, so
+    /// it lands on the machine's tiles rather than beside them. Height is
+    /// deliberately NOT pinned: `vox::encode` lifts a model by half its own
+    /// height, so a taller volume still has its floor on the ground, which
+    /// is what lets the vat's drive coupling stand above a body that has no
+    /// room left for it.
+    #[test]
+    fn a_motion_frame_has_its_machine_s_footprint() {
+        let p = palette();
+        for (name, body, frames) in motion_families(&p) {
+            for (k, frame) in frames.iter().enumerate() {
+                assert_eq!(
+                    (frame.size[0], frame.size[1]),
+                    (body.size[0], body.size[1]),
+                    "{name}_motion_f{k} is not on {name}'s footprint"
+                );
+            }
+        }
+    }
+
+    /// Rule 4's other half, and the reason the generic machine's spider
+    /// lives in a 34-voxel volume: `encode` lifts a model by `size[2] / 2`
+    /// in whole voxels, so an odd volume sinks half a voxel. Cheap to get
+    /// wrong, invisible in a preview render (which centres whatever it is
+    /// given), and in the scene it is a seam along the join.
+    #[test]
+    fn a_motion_volume_has_an_even_height() {
+        let p = palette();
+        for (name, _, frames) in motion_families(&p) {
+            for (k, frame) in frames.iter().enumerate() {
+                assert_eq!(
+                    frame.size[2] % 2,
+                    0,
+                    "{name}_motion_f{k} is {} voxels tall, an odd number, so it will sit half a \
+                     voxel low",
+                    frame.size[2]
+                );
+            }
+        }
+    }
+
+    /// Rule 1, half of it: every frame is a real arrangement of parts, so a
+    /// machine at rest (frame 0, always drawn) is never a machine with a
+    /// hole where its mechanism should be.
+    #[test]
+    fn every_motion_frame_holds_something() {
+        let p = palette();
+        for (name, _, frames) in motion_families(&p) {
+            for (k, frame) in frames.iter().enumerate() {
+                assert!(!frame.is_empty(), "{name}_motion_f{k} is empty");
+            }
+        }
+    }
+
+    /// ...and the other half: the machine never stands still for a frame
+    /// while it is meant to be working. Stated as CONSECUTIVE frames rather
+    /// than all four, and the difference is rule 1's: a plunge passes
+    /// through its half-way pose on the way down and again on the way up, so
+    /// the bottler's f1 and f3 are legitimately the same model. Two frames
+    /// that coincide side by side are not — that is a stutter, the same
+    /// failure the belt family's pattern-period rule avoids (UI_UX.md §2b
+    /// point 23). Checked round the loop, so the last frame is compared with
+    /// frame 0 too.
+    #[test]
+    fn consecutive_motion_frames_of_one_machine_differ() {
+        let p = palette();
+        for (name, _, frames) in motion_families(&p) {
+            for a in 0..frames.len() {
+                let b = (a + 1) % frames.len();
+                assert_ne!(
+                    frames[a].voxels, frames[b].voxels,
+                    "{name}_motion_f{a} and {name}_motion_f{b} are the same model, so the \
+                     mechanism stops for a frame"
+                );
+            }
+        }
+    }
+
+    /// A turning family has the stronger property: four frames, four
+    /// different angles. A repeat here would mean the fold count and
+    /// [`MACHINE_FRAMES`] divide each other, so the mechanism completes its
+    /// symmetry early and the last frames of the cycle are wasted.
+    #[test]
+    fn a_turning_machine_shows_four_different_angles() {
+        let p = palette();
+        for (name, build) in TURNING_MOTION {
+            let frames: Vec<VoxModel> = (0..MACHINE_FRAMES).map(|k| build(&p, k)).collect();
+            for a in 0..frames.len() {
+                for b in (a + 1)..frames.len() {
+                    assert_ne!(
+                        frames[a].voxels, frames[b].voxels,
+                        "{name}_motion_f{a} and {name}_motion_f{b} are at the same angle"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The families whose mechanism turns, as opposed to travelling: every
+    /// rule stated in terms of an angle applies to exactly these.
+    const TURNING_MOTION: [(&str, fn(&Palette, u32) -> VoxModel); 4] = [
+        ("machine", machine_motion),
+        ("machine_crusher", machine_crusher_motion),
+        ("machine_mixer", machine_mixer_motion),
+        ("machine_cooking_vat", machine_cooking_vat_motion),
+    ];
+
+    /// Rule 3, for the families driven by [`spin`]: one more frame lands
+    /// exactly back on frame 0, so the loop closes instead of jumping.
+    /// Asserted by asking the generator for phase `MACHINE_FRAMES` — the
+    /// frame after the last one — rather than by trusting the arithmetic.
+    #[test]
+    fn a_turning_motion_cycle_closes_on_frame_zero() {
+        let p = palette();
+        for (name, build) in TURNING_MOTION {
+            assert_eq!(
+                build(&p, MACHINE_FRAMES).voxels,
+                build(&p, 0).voxels,
+                "{name}'s motion does not close: frame {MACHINE_FRAMES} differs from frame 0"
+            );
+        }
+    }
+
+    /// Rule 3, for the two families driven by an offset table instead of an
+    /// angle: there and back, starting at rest. A table that ran 0, 1, 2, 3
+    /// would snap back to 0 on the frame after the last, which reads as the
+    /// carriage being yanked home.
+    #[test]
+    fn a_travelling_motion_cycle_is_there_and_back() {
+        for (name, table) in [
+            ("bottler plunge", BOTTLER_PLUNGE),
+            ("packer travel", PACKER_TRAVEL),
+        ] {
+            assert_eq!(table[0], 0, "{name} does not start at rest");
+            let n = MACHINE_FRAMES as usize;
+            for k in 1..n {
+                assert_eq!(
+                    table[k], table[n - k],
+                    "{name} is not symmetric about its midpoint, so its cycle does not close"
+                );
+            }
+        }
+    }
+
+    /// A turning mechanism is the SAME mechanism at a different angle, so
+    /// its voxel count may wobble with the grid but must not drift: a frame
+    /// that gained or lost a fifth of its mass is a part appearing, not a
+    /// part turning (rule 1).
+    ///
+    /// Two exclusions, both of them real motion rather than an appearance.
+    /// The bottler's and packer's parts travel, and a nozzle reaching down
+    /// is longer than a nozzle at rest. The crusher's teeth are culled at
+    /// [`CRUSHER_POCKET_FLOOR_Z`], so a tooth turning down into the nip
+    /// leaves the model — which is exactly what a tooth turning down into
+    /// the nip does to the player's view of it, since below that line it is
+    /// inside the frame.
+    #[test]
+    fn a_turning_motion_frame_keeps_its_mass() {
+        let p = palette();
+        for (name, build) in TURNING_MOTION {
+            if name == "machine_crusher" {
+                continue;
+            }
+            let counts: Vec<usize> =
+                (0..MACHINE_FRAMES).map(|k| build(&p, k).voxels.len()).collect();
+            let lo = *counts.iter().min().unwrap() as f32;
+            let hi = *counts.iter().max().unwrap() as f32;
+            assert!(
+                hi <= lo * 1.2,
+                "{name}'s motion frames vary in size too much to be one mechanism turning: {counts:?}"
+            );
+        }
+    }
+
+    /// The crusher's teeth stay inside the feed pocket the body carves.
+    /// Stated separately from the disjointness test above because it is the
+    /// REASON that test passes for this kind, and because the pocket is a
+    /// hole in a solid frame: a tooth a voxel too far east is not merely
+    /// hidden, it is inside the frame's east wall.
+    #[test]
+    fn the_crushers_teeth_stay_in_its_feed_pocket() {
+        let p = palette();
+        for k in 0..MACHINE_FRAMES {
+            for &(x, y, z) in machine_crusher_motion(&p, k).voxels.keys() {
+                let (x, y, z) = (x as i32, y as i32, z as i32);
+                // The flywheel spokes are the model's other half; they live
+                // on the camera-facing face, outside the pocket entirely.
+                if y <= 2 {
+                    continue;
+                }
+                assert!(
+                    (8..=23).contains(&x) && (9..=22).contains(&y) && z >= CRUSHER_POCKET_FLOOR_Z,
+                    "crusher tooth at ({x}, {y}, {z}) on frame {k} is outside the carved pocket"
+                );
             }
         }
     }

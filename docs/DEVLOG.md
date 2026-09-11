@@ -35,6 +35,7 @@ below is history and should only ever be appended to.)*
 - **Contracts (done, both halves):** contracts are `data/contracts.ron` content and three run concurrently, each with its own mix/cadence/payout, all drawing from one shared pool of delivered stock (a box pays one contract, never two). The clipboard panel shows all of them — one paper docket card per contract on the one board, each with its own checklist, payout, countdown and delivered/missed tally, above a single shared money figure and a single "on the dock" line naming the pool they compete for.
 - **Chain rework (DONE, both halves):** the middle of the production line is **piped, not belted**, which is what a real sauce plant looks like. The mixer's output and the cooking vat's output are fluids (`recipes.ron` schema_version 3 gained `fluid_outputs`), so mix flows from the mixer to the vat and cooked ketchup from the vat to the bottler through pipe runs with no tank behind them; the bottler is where the product becomes a solid again, and the cooking vat is now the one machine on the line **no belt touches at all**. The mixer gained **sugar** as a second solid ingredient and grew to **1x2** for it — a machine accepts solid input on every tile of the edge opposite the way it points, so N solid ingredients need N tiles of inlet face or the two lanes merge onto one belt and deadlock. The aging rack is gone. **Raw ingredients cost money**: `data/ingredients.ron` prices tomato, sugar and vinegar, a `BuyIngredient` command buys them, and a hopper or a tank is loaded from that bought stock *(originally with the global `SPACE`/`V` keys; since the configuration panel below, from the building's own panel)* — so overproduction is a real loss rather than free accumulation. On the presentation side: a hopper's contents are chosen **when it is placed** (the ghost carries a tinted product body and the prompt names them in words; the **Q** key that cycled them is gone, replaced by the placed hopper's own picker), because with two raw solids the simulation can no longer infer which bin the player meant — until that landed, placing a hopper from the UI did nothing at all, silently. Buying stock has its own panel on **M** (the build menu was already as tall as the space above the hotbar allows), and a permanent larder strip above the hotbar shows what is carried so an unloadable hopper explains itself. The mixer, the cooking vat and the bottler were re-modelled with pipe nozzles where belts no longer meet them.
 - **Hopper/tank configuration (DONE, both halves):** nothing about feeding a factory is on the keyboard any more. A placed hopper or tank is **clicked**, and a panel beside it shows its level, a **FILL** button (disabled with its reason in words when the larder is empty, the bin is full, or the tank is plumbed to nothing), an **AUTO-FILL** switch that keeps the bin topped up from bought stock every tick — spending stock, never money, and simply pausing while the larder is dry — and, for a hopper, an item picker that retargets it in place. The click is a toggle, only one panel ever exists, ESC closes it first, and it closes itself under any menu or mode. The global **SPACE**/**V**/**Q** keys and `CycleHopperItem` are deleted. Pinned by `test_config_panel.gd`; `scripts/screenshot-scene.sh --config TX,TY` photographs it.
+- **Machine animations (done):** every processing machine has a visible moving mechanism — the crusher's toothed rolls and flywheels, the mixer's ribbon, the cooking vat's agitator spider, the bottler's plunging nozzles and capping chuck, the packer's taping carriage, and a drive spider on the generic housing for any kind without a model of its own. Drawn as a four-frame motion overlay on the machine's own footprint (the moving parts are cut out of the bodies, not duplicated, so nothing z-fights), advanced from the tick beside the belt animation so the pause menu freezes it. **It runs only while the machine is actually working**: `Machine::tick` keeps the process of a machine that has finished but is blocked on a full output, so the gate is `elapsed < required` rather than `process != null` — which makes a lit status lamp over a still machine mean "the thing downstream is full". One pace for every kind (a cycle per 30 ticks); the belt carries speed.
 - **Pipes & conveyors overhaul (IN PROGRESS — six of seven tickets merged, `docs/PIPES_AND_CONVEYORS_PLAN.md` has the ticket-7 hand-off notes):** seven tickets on one integration branch to make belts and pipes look right, read right, run fast and connect up. **Ticket 1 (sim) has landed:** every belt, splitter and pipe on the wire carries `links` — what feeds it, what it hands to, or what its pipe is joined to, per side — recorded by the topology pass so it is exact and free per tick. **Ticket 4 (Godot) has landed:** belts, splitters, pipes and the items riding them are `MultiMesh` instances (one per asset and material class) rather than a node each, with a 1500-tile stress fixture, a headless timing test (`test_perf.gd`) and `scripts/screenshot-scene.sh --stress`; machines and buildings keep their nodes, and the seams the belt-animation and corner tickets build on (frame sets, a caller-supplied yaw per tile, one item-positioning function) are in place in `main.gd`. **Ticket 3 (assets) has landed:** the pipe model family (straight, corner, tee, cross, end, machine/tank fittings, one fluid body per shape) on a 15.5 midline, with seven pipe rendering defects fixed at the generator. **Ticket 2 (assets) has landed:** the belt model family — straights and left/right corners in four animation frames with a solid raised direction arrow; the belt-side junction variants are retired (the plain tile carries the junction, the machine's hood does the rest). **Ticket 6 (Godot) has landed:** every pipe tile draws its shape (end, straight, corner, tee, cross), its turn, its machine/tank fittings and its per-shape liquid body from the wire's `links` alone; hover names a pipe's connections in words; the one-arrangement `pipe_source`/`pipe_inlet` tiles are deleted; `test_pipe_shapes.gd` and `scripts/screenshot-scene.sh --pipe-gallery` cover every shape at every turn. **Ticket 5 (Godot) has landed:** a belt's shape (straight, left/right corner, merge, start, end) comes from its `links`, the four-frame surface animates at item speed from the tick, items arc through corners (and are drawn face to face on every tile — they had been half a tile downstream), hover says feeds and hand-offs in words, the retired belt aliases are deleted, and a `--belt-gallery` fixture shows every shape and junction at every facing. Ticket 7 (gallery bug hunt and docs close-out) is to do; one sim rule discrepancy (a belt feeds a machine from any side of an inlet-edge tile) is flagged for ticket 7.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
@@ -51,6 +52,58 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-11 — The machines move, and only while they are working
+
+Until now a running factory and a jammed one looked the same: the product on
+the belts moved, and every machine it passed through stood perfectly still.
+Each of the six processing kinds now has a **motion overlay** — a second
+voxel model on the machine's own footprint, emitted in four frames, standing
+beside the body in the scene with one frame visible at a time. The crusher
+turns twin toothed rolls behind a pair of flywheels, the mixer turns its
+ribbon flights inside the drum where the sight window shows them, the
+cooking vat turns an agitator spider on its crown, the bottler plunges two
+filling nozzles and a capping chuck, the packer runs a taping carriage along
+the case, and any kind with no model of its own gets a drive spider on the
+generic housing — so a machine added to `data/machines.ron` visibly *runs*
+before anyone edits a Godot file, which is the same fallback rule the
+machine models themselves follow.
+
+The parts that move were **cut out of the bodies** rather than copied into
+the overlays, because two voxel solids that overlap z-fight and a z-fight at
+scene scale reads as a texture seam rather than as a bug. A voxgen test
+walks every voxel of every frame against its body to keep it that way, and
+it is what found the mixer's ribbon passing straight through both feed
+throats and the discharge nozzle.
+
+The other half of the request is the more interesting one. A mechanism turns
+only while the machine is **genuinely working** — not merely while it holds
+a batch. `Machine::tick` clears a machine's process only once the finished
+goods have somewhere to go, so a machine that has finished and is blocked on
+a full output keeps its process and retries every tick; animating on that
+would have left a jammed factory full of machines cheerfully turning with
+nowhere to put anything. Gating the motion on `elapsed < required` instead
+leaves the status lamp saying "has a batch" and the mechanism saying "is
+turning", and **a lit lamp over a still machine now means the thing
+downstream is full** — a diagnosis the player could not previously read off
+the floor at all. Everything runs at one pace (a cycle per 30 ticks) whatever
+its process length, because the pace is meant to say "working", not "working
+this fast"; the belt is what carries speed. The frame comes from the
+machine's own elapsed ticks, so a mechanism starts from rest when work
+starts, and the whole thing is advanced from `_advance_simulation` beside the
+belt, so the pause menu freezes it for free.
+
+Two things turned up along the way. `test_screenshot.gd`'s populate loop
+ticks the simulation directly rather than going through the per-frame path,
+so it had **never** advanced the belt frame either — every scene screenshot
+ever taken has photographed an idle-looking factory in the middle of a run.
+It drives both animations now. And the vengi preview of a frame that is a
+rigid translation of frame 0 is byte-identical to it, because the thumbnailer
+crops to the bounding box: a translation has to be judged in the scene, which
+is UI_UX.md §2b point 22's warning about vengi's camera wearing a different
+hat. Proved by `test_machine_motion.gd` (frames per kind, the frame from the
+machine's own elapsed ticks, and motion only while it is actually working)
+and reviewed in a rendered scene. Rules in UI_UX.md §2b points 27-28.
 
 ### 2026-09-10 — Click a hopper or a tank to configure it
 
