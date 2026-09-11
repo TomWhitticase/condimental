@@ -247,6 +247,20 @@ Everything in this doc should be **content**, not simulation code, per [ARCHITEC
   design pressure §6 chooses contracts over a spot market to create, and it
   makes §11's open question about a secondary spot market a live one rather
   than a theoretical one.
+- **The contract board is sized so the next line always has an order to
+  go after (added 2026-09-11).** §6's pull — invest earnings to become
+  eligible for more demand — needs the board to ask for more than one line
+  can make, and the first three contracts did not: together they absorbed
+  a single line's output almost exactly, so a second line was pure
+  overproduction. `data/contracts.ron` is now written in tiers measured
+  against one line's throughput (one unit per cycle of the slowest
+  recipe): a *starter tier* one kept-fed line can just serve, and a
+  *growth tier* of larger, slower orders worth about four more lines, at
+  per-box rates that rise with the size of the order. Priority stays
+  smallest first so a beginner's income is never eaten by an order they
+  have not built for. Until a second sauce exists every order is still
+  ketchup, so the tiering is in *size and cadence* rather than in mix; the
+  mixed orders this section describes are what a second line unlocks.
 - **A hopper or a tank can keep itself topped up, and that still spends
   stock rather than money (added 2026-09-09).** Loading a bin was two global
   keybinds, so keeping a factory fed was something the player did with their

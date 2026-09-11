@@ -181,6 +181,20 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-11 **Contract board sized in lines' worth of demand.** The board
+  is eight contracts: the original three are a STARTER TIER that one
+  kept-fed line can just serve (~3.9 boxes/1000 ticks against ~4.1
+  capacity), and five larger, slower orders are a GROWTH TIER (~17.7/1000)
+  so a second, third and fourth line always have an order to go after.
+  Per-box payout never falls as order size rises (24/box for one box up to
+  40/box for the 20-box pallet). File order stays smallest first: under
+  scarcity the starter orders settle before the big ones. Both rules are
+  pinned in `contracts.rs` against the chain's slowest recipe, not literals.
+  Two contracts MAY share a cadence; `test_contract_panel.gd` checks each
+  docket names its own. `CONTRACT_CHECKLIST_MAX_BOXES` (12) already caps
+  the checkbox row, so the pallet draws one box. Content only; no
+  `schema_version` bump. Every order is still `boxed_ketchup` until a
+  second sauce exists.
 - 2026-09-10 **Hopper/tank configuration, ticket 2 (Godot + one sim deletion).**
   A placed hopper or tank is CLICKED and configured on a panel beside it:
   level, FILL (with its reason in words when refused), AUTO-FILL toggle,

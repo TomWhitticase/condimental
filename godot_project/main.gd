@@ -7461,10 +7461,11 @@ func _update_contract_panel() -> void:
 
 	# Cap the docket stack's height rather than letting it grow off the
 	# bottom of the screen: past the cap it scrolls. `data/contracts.ron`
-	# ships three and at a normal window size this never engages, which is
-	# the intent — a handful of concurrent orders is the realistic board
-	# (GAMEPLAY.md §6 names no count), so it is a safety valve for a content
-	# change rather than a compact/summary mode nobody needs yet.
+	# shipped three when this was written and never engaged the cap at a
+	# normal window size; since 2026-09-11 it ships eight (a growth tier
+	# for the second line onward) and the stack DOES scroll at 1600x900 —
+	# the safety valve this was built as is now the ordinary case. A
+	# compact/summary mode is the next step if the board grows again.
 	#
 	# What it is capped AGAINST changed with the 2026-09-09 UI scale. It was
 	# a fixed fraction of the window height, and at half again the type size

@@ -411,6 +411,68 @@ mod tests {
         );
     }
 
+    /// The board-sizing rule `data/contracts.ron`'s balance note states
+    /// (2026-09-11): the first three contracts — the starter tier — fit
+    /// inside ONE line's throughput, and the board as a whole asks for
+    /// several lines' worth, so a second line always has an order to go
+    /// after. Measured against the chain's own bottleneck (the slowest
+    /// recipe) rather than a literal, so a tuning pass that changes the
+    /// vat's cook time moves the expectation with it.
+    ///
+    /// Also pins the per-box rate rule from the same note: a bigger order
+    /// never pays worse per box than a smaller one.
+    #[test]
+    fn the_bundled_board_is_a_starter_tier_within_one_line_plus_a_growth_tier_beyond_it() {
+        let board = ContractRegistry::bundled();
+        let recipes = bundled_recipes();
+        let bottleneck_ticks = recipes
+            .ordered()
+            .iter()
+            .map(|r| r.time_ticks)
+            .max()
+            .expect("the chain has recipes") as f64;
+        // One line's steady state: one finished unit per bottleneck cycle.
+        let one_line_per_1000 = 1000.0 / bottleneck_ticks;
+        let demand_per_1000 = |c: &Contract| -> f64 {
+            let boxes: u32 = c.mix.iter().map(|(_, q)| q).sum();
+            boxes as f64 * 1000.0 / c.cadence_ticks as f64
+        };
+
+        let contracts = board.ordered();
+        let starter: f64 = contracts.iter().take(3).map(demand_per_1000).sum();
+        let whole: f64 = contracts.iter().map(demand_per_1000).sum();
+        assert!(
+            starter <= one_line_per_1000,
+            "the starter tier ({starter:.2}/1000 ticks) must be servable by one line \
+             ({one_line_per_1000:.2}/1000 ticks)"
+        );
+        assert!(
+            whole >= 3.0 * one_line_per_1000,
+            "the whole board ({whole:.2}/1000 ticks) must ask for several lines' worth \
+             ({one_line_per_1000:.2}/1000 ticks each), or a second line has nothing to sell to"
+        );
+
+        // Bigger orders pay at least as well per box.
+        let mut by_size: Vec<(u32, f64)> = contracts
+            .iter()
+            .map(|c| {
+                let boxes: u32 = c.mix.iter().map(|(_, q)| q).sum();
+                (boxes, c.payout.to_num::<f64>() / boxes as f64)
+            })
+            .collect();
+        by_size.sort_by(|a, b| a.0.cmp(&b.0));
+        for pair in by_size.windows(2) {
+            assert!(
+                pair[1].1 >= pair[0].1,
+                "a {}-box order pays {:.1}/box, less than a {}-box order's {:.1}/box",
+                pair[1].0,
+                pair[1].1,
+                pair[0].0,
+                pair[0].1
+            );
+        }
+    }
+
     #[test]
     fn rejects_unsupported_schema_version() {
         let text = EXAMPLE.replacen("schema_version: 1", "schema_version: 99", 1);

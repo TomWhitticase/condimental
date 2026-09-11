@@ -178,11 +178,25 @@ func _initialize() -> void:
 		_fail("expected exactly one money readout on the clipboard, found %d — money is a single shared counter (GAMEPLAY.md §1)" % money_labels)
 		return
 
-	var meta_texts: Dictionary = {}
-	for card in main._contract_cards:
-		meta_texts[String(card["meta_label"].text)] = true
-	if meta_texts.size() < main._contract_cards.size():
-		_fail("dockets share an identical cadence line — each contract clocks independently, so its countdown must be its own")
+	# Each docket's cadence line must be ITS contract's, not a shared one.
+	# Two contracts MAY share a cadence (since 2026-09-11's growth tier the
+	# shipped board has two at 1500 and two at 2000), so this cannot demand
+	# every line be unique: it checks each card against its own snapshot,
+	# and that cards on different cadences print different lines.
+	var cadence_lines: Dictionary = {}
+	for i in range(main._contract_cards.size()):
+		var text := String(main._contract_cards[i]["meta_label"].text)
+		var own_cadence := int(contracts[i].get("cadence_ticks", 0))
+		if not text.contains("every %d" % own_cadence):
+			_fail("docket %d's cadence line (%s) does not name its own cadence of %d" % [i, text, own_cadence])
+			return
+		cadence_lines[own_cadence] = cadence_lines.get(own_cadence, {})
+		cadence_lines[own_cadence][text] = true
+	var distinct_cadences: Dictionary = {}
+	for c in contracts:
+		distinct_cadences[int(c.get("cadence_ticks", 0))] = true
+	if cadence_lines.size() != distinct_cadences.size():
+		_fail("dockets on different cadences share a cadence line — each contract clocks independently, so its countdown must be its own")
 		return
 
 	# Countdowns must actually count DOWN, independently, as the sim runs.
