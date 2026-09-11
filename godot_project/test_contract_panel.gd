@@ -28,6 +28,10 @@
 #   * money appears ONCE (a single shared counter, GAMEPLAY.md §1) while each
 #     card's countdown is its OWN — verified by driving the real simulation
 #     forward and asserting the cards' countdowns diverge,
+#   * the money figure flashes what just CHANGED it (a purchase is driven
+#     through a real command and the flyout must show a visible, correctly
+#     inked debit), since a balance that only shows its current value hides
+#     every payout that arrived while the player was looking elsewhere,
 #   * and the single-contract case still renders correctly, driven through
 #     `_rebuild_contract_cards` with a one-contract array so the regression
 #     the multi-contract work could plausibly cause is actually covered.
@@ -79,6 +83,11 @@ func _initialize() -> void:
 	for offer in JSON.parse_string(main.sim.economy_snapshot_json()).get("board", []):
 		if not bool(offer.get("active", false)):
 			main.sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": String(offer["id"])}))
+	main._update_contract_panel()
+	# The signatures just spent money, which the money flyout announces; let
+	# that flash expire so the flyout assertions further down start from
+	# nothing showing, as they were written to.
+	main._contract_money_change_until_msec = Time.get_ticks_msec() - main.MONEY_FLYOUT_HOLD_MSEC - main.MONEY_FLYOUT_FADE_MSEC - 1
 	main._update_contract_panel()
 	var econ: Dictionary = JSON.parse_string(main.sim.economy_snapshot_json())
 	var contracts: Array = econ.get("contracts", [])
@@ -188,10 +197,37 @@ func _initialize() -> void:
 
 	var meta_texts: Dictionary = {}
 	for card in main._contract_cards:
-		meta_texts[String(card["meta_label"].text)] = true
+		meta_texts["%s|%s" % [card["meta_label"].text, card["countdown_label"].text]] = true
 	if meta_texts.size() < main._contract_cards.size():
 		_fail("dockets share an identical cadence line — each contract clocks independently, so its countdown must be its own")
 		return
+
+	# The countdown is a DRAINING BAR as well as a figure (the UI visualisation
+	# pass), and the figure is in seconds, not in ticks — ticks are an
+	# implementation detail of ARCHITECTURE.md §3.9's fixed timestep and this
+	# panel is the player's clock.
+	for card in main._contract_cards:
+		var countdown_text: String = String(card["countdown_label"].text)
+		if countdown_text.contains("tick"):
+			_fail("the docket countdown still prints ticks: %s" % countdown_text)
+			return
+		if not (countdown_text.ends_with("to go") or countdown_text == "due now"):
+			_fail("the docket countdown should read as a wait, got: %s" % countdown_text)
+			return
+		if card["countdown_meter"] == null or not card["countdown_meter"].has_meta("fraction"):
+			_fail("the docket has no countdown meter driven by _set_meter")
+			return
+		# Every tally carries a glyph as well as its word (UI_UX.md §7).
+		if not String(card["done_label"].text).begins_with("✓"):
+			_fail("the delivered tally should be a glyph and a word, got: %s" % card["done_label"].text)
+			return
+		if not String(card["missed_label"].text).begins_with("✗"):
+			_fail("the missed tally should be a glyph and a word, got: %s" % card["missed_label"].text)
+			return
+		# Never missed, so the warning colour is not spent on it yet.
+		if card["missed_label"].label_settings != main._contract_meta_settings:
+			_fail("a docket that has missed nothing must not carry the warning ink")
+			return
 
 	# Countdowns must actually count DOWN, independently, as the sim runs.
 	var before: Array = _countdowns(main)
@@ -201,7 +237,7 @@ func _initialize() -> void:
 	var after: Array = _countdowns(main)
 	for i in range(before.size()):
 		if after[i] >= before[i]:
-			_fail("docket %d's countdown did not advance with the simulation (%d -> %d)" % [i, before[i], after[i]])
+			_fail("docket %d's countdown did not advance with the simulation (%f -> %f)" % [i, before[i], after[i]])
 			return
 
 	# --- The shared dock pool is surfaced, and tracks real deliveries -----
@@ -226,6 +262,28 @@ func _initialize() -> void:
 		_fail("delivered '%s' but the dock readout has no entry for it" % delivered_item)
 		return
 
+	# --- The money figure announces what it just did ----------------------
+	# A payout lands on its own clock while the player is looking at the
+	# factory, so a balance that only ever shows its current value hides
+	# every event that changed it. Spending is the half a test can drive
+	# deterministically: buy one belt and the flyout must say so.
+	main._update_contract_panel()
+	if main._contract_money_change.modulate.a > 0.0:
+		_fail("the money flyout is showing with nothing having changed the balance")
+		return
+	main.sim.issue_command_json(JSON.stringify({"type": "purchase", "kind": "belt"}))
+	main._update_contract_panel()
+	var flyout_text: String = String(main._contract_money_change.text)
+	if not flyout_text.begins_with("-"):
+		_fail("a purchase should flash a debit on the money figure, got: %s" % flyout_text)
+		return
+	if main._contract_money_change.modulate.a <= 0.0:
+		_fail("the money flyout flashed nothing visible for a purchase")
+		return
+	if main._contract_money_change.label_settings != main._contract_spend_settings:
+		_fail("a debit must be inked as a debit, not as a payout")
+		return
+
 	# --- The single-contract case still renders --------------------------
 	# The regression this ticket could plausibly cause is the OPPOSITE of the
 	# one it fixes, so drive the builder with a one-contract array directly.
@@ -246,11 +304,17 @@ func _initialize() -> void:
 		_fail("single-contract docket: expected %d checkbox(es), found %d" % [expected_single, only_boxes.size()])
 		return
 	main._update_contract_card(only_card, contracts[0], main.sim.current_tick())
-	if not String(only_card["meta_label"].text).contains("next check in"):
+	if String(only_card["countdown_label"].text) == "":
 		_fail("single-contract docket has no countdown line")
 		return
+	# The checklist names its item the way the rest of the UI names it —
+	# "Boxed Ketchup", not the wire format's `boxed_ketchup`.
+	var only_row_text: String = String(only_card["rows"][only_item]["label"].text)
+	if not only_row_text.begins_with(main._item_display_name(only_item)):
+		_fail("the checklist should name its item, got: %s" % only_row_text)
+		return
 
-	print("CONTRACT_PANEL_OK: ContractPanel is a distinct node with %d docket(s) — one per contract, per-contract checkboxes and countdowns, one shared money readout and one shared dock line; the single-contract case still renders" % contracts.size())
+	print("CONTRACT_PANEL_OK: ContractPanel is a distinct node with %d docket(s) — one per contract, per-contract checkboxes and draining countdown bars read in seconds, glyph tallies, named items, one shared money readout that flashes what it just did and one shared dock line; the single-contract case still renders" % contracts.size())
 	quit(0)
 
 
@@ -265,11 +329,11 @@ func _count_money_labels(node: Node) -> int:
 	return found
 
 
+## How full each docket's countdown bar stands. Read from the meter rather
+## than parsed back out of a label: the bar IS the countdown now, and a
+## fraction is the number the panel was actually asked to draw.
 func _countdowns(main) -> Array:
 	var out: Array = []
 	for card in main._contract_cards:
-		var text: String = String(card["meta_label"].text)
-		# "next check in N ticks  ·  ..." — N is the second-to-last token of
-		# the first segment.
-		out.append(int(text.split(" ticks")[0].split("in ")[1]))
+		out.append(float(card["countdown_meter"].get_meta("fraction", 0.0)))
 	return out

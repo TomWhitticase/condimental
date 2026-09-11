@@ -33,7 +33,7 @@ below is history and should only ever be appended to.)*
 
 - **Conveyor splitters (DONE, both halves):** a line can fork. A `splitter` is a 1x1 buildable kind that carries product exactly like a belt tile and deals it alternately between two outputs — the tile it faces, and the tile one quarter turn clockwise from it — so one `rotate` turns both outputs together and no new command was needed. If the side that is due is blocked (or was never built) the item goes down the other one in the same tick, so a full branch never stalls the whole line and "only one output connected" needs no special case. It reaches every sink a belt's hand-off does: another belt, another splitter, a machine's inlet face, a dock. It is **drawn** as a machined diverter table set into the belt run — a bright steel plate where the rest of the line is rubber, with three open lanes and one closed rail — carrying a **next-output arrow inlaid flush in the deck**: both directions are cut into the table as grooves and one of them lights up, so which way the next item goes is a pair of positions rather than a colour, and nothing stands proud of the surface the product slides over. The arrow shows where the item will **actually** go, not the raw `next_output`: a splitter whose branch was never built reports "branch" forever while everything goes straight, and an arrow driven off that field alone would point at bare floor. Items cross a splitter drawn exactly as they cross a belt, and hover names both outputs and says "not connected" about one that was never laid.
 - **Contracts (done, both halves):** contracts are `data/contracts.ron` content and three run concurrently, each with its own mix/cadence/payout, all drawing from one shared pool of delivered stock (a box pays one contract, never two). The clipboard panel shows all of them — one paper docket card per contract on the one board, each with its own checklist, payout, countdown and delivered/missed tally, above a single shared money figure and a single "on the dock" line naming the pool they compete for.
-- **Contract board (DONE, both halves, 2026-09-10):** contracts are **signed and can be lost**. A new game runs one basic contract; the rest of `data/contracts.ron` (schema 2, now four offers with `price`, `strikes` and `starter`) is a board the player buys from on **C**, one of each contract only. A contract that misses its strikes in a row is lost — it leaves the clipboard, is announced, and goes back on the board to be signed again at its price. Each docket now says how it is doing and whether it is in danger: a status line (✔ READY / ⚠ AT RISK / ⚠ LAST CHANCE), a window bar, strike pips and a state border. The top offer exceeds one line's throughput beside the others, by design. Built on branch `TomWhitticase/contract-board`.
+- **Contract board (DONE, both halves, 2026-09-10):** contracts are **signed and can be lost**. A new game runs one basic contract; the rest of `data/contracts.ron` (schema 2, now four offers with `price`, `strikes` and `starter`) is a board the player buys from on **C**, one of each contract only. A contract that misses its strikes in a row is lost — it leaves the clipboard, is announced, and goes back on the board to be signed again at its price. Each docket now says how it is doing and whether it is in danger: a status line (✔ READY / ⚠ AT RISK / ⚠ LAST CHANCE), strike pips and a state border beside the countdown bar. The top offer exceeds one line's throughput beside the others, by design. Built on branch `TomWhitticase/contract-board`.
 - **Chain rework (DONE, both halves):** the middle of the production line is **piped, not belted**, which is what a real sauce plant looks like. The mixer's output and the cooking vat's output are fluids (`recipes.ron` schema_version 3 gained `fluid_outputs`), so mix flows from the mixer to the vat and cooked ketchup from the vat to the bottler through pipe runs with no tank behind them; the bottler is where the product becomes a solid again, and the cooking vat is now the one machine on the line **no belt touches at all**. The mixer gained **sugar** as a second solid ingredient and grew to **1x2** for it — a machine accepts solid input on every tile of the edge opposite the way it points, so N solid ingredients need N tiles of inlet face or the two lanes merge onto one belt and deadlock. The aging rack is gone. **Raw ingredients cost money**: `data/ingredients.ron` prices tomato, sugar and vinegar, a `BuyIngredient` command buys them, and a hopper or a tank is loaded from that bought stock *(originally with the global `SPACE`/`V` keys; since the configuration panel below, from the building's own panel)* — so overproduction is a real loss rather than free accumulation. On the presentation side: a hopper's contents are chosen **when it is placed** (the ghost carries a tinted product body and the prompt names them in words; the **Q** key that cycled them is gone, replaced by the placed hopper's own picker), because with two raw solids the simulation can no longer infer which bin the player meant — until that landed, placing a hopper from the UI did nothing at all, silently. Buying stock has its own panel on **M** (the build menu was already as tall as the space above the hotbar allows), and a permanent larder strip above the hotbar shows what is carried so an unloadable hopper explains itself. The mixer, the cooking vat and the bottler were re-modelled with pipe nozzles where belts no longer meet them.
 - **Hopper/tank configuration (DONE, both halves):** nothing about feeding a factory is on the keyboard any more. A placed hopper or tank is **clicked**, and a panel beside it shows its level, a **FILL** button (disabled with its reason in words when the larder is empty, the bin is full, or the tank is plumbed to nothing), an **AUTO-FILL** switch that keeps the bin topped up from bought stock every tick — spending stock, never money, and simply pausing while the larder is dry — and, for a hopper, an item picker that retargets it in place. The click is a toggle, only one panel ever exists, ESC closes it first, and it closes itself under any menu or mode. The global **SPACE**/**V**/**Q** keys and `CycleHopperItem` are deleted. Pinned by `test_config_panel.gd`; `scripts/screenshot-scene.sh --config TX,TY` photographs it.
 - **Pipes & conveyors overhaul (IN PROGRESS — six of seven tickets merged, `docs/PIPES_AND_CONVEYORS_PLAN.md` has the ticket-7 hand-off notes):** seven tickets on one integration branch to make belts and pipes look right, read right, run fast and connect up. **Ticket 1 (sim) has landed:** every belt, splitter and pipe on the wire carries `links` — what feeds it, what it hands to, or what its pipe is joined to, per side — recorded by the topology pass so it is exact and free per tick. **Ticket 4 (Godot) has landed:** belts, splitters, pipes and the items riding them are `MultiMesh` instances (one per asset and material class) rather than a node each, with a 1500-tile stress fixture, a headless timing test (`test_perf.gd`) and `scripts/screenshot-scene.sh --stress`; machines and buildings keep their nodes, and the seams the belt-animation and corner tickets build on (frame sets, a caller-supplied yaw per tile, one item-positioning function) are in place in `main.gd`. **Ticket 3 (assets) has landed:** the pipe model family (straight, corner, tee, cross, end, machine/tank fittings, one fluid body per shape) on a 15.5 midline, with seven pipe rendering defects fixed at the generator. **Ticket 2 (assets) has landed:** the belt model family — straights and left/right corners in four animation frames with a solid raised direction arrow; the belt-side junction variants are retired (the plain tile carries the junction, the machine's hood does the rest). **Ticket 6 (Godot) has landed:** every pipe tile draws its shape (end, straight, corner, tee, cross), its turn, its machine/tank fittings and its per-shape liquid body from the wire's `links` alone; hover names a pipe's connections in words; the one-arrangement `pipe_source`/`pipe_inlet` tiles are deleted; `test_pipe_shapes.gd` and `scripts/screenshot-scene.sh --pipe-gallery` cover every shape at every turn. **Ticket 5 (Godot) has landed:** a belt's shape (straight, left/right corner, merge, start, end) comes from its `links`, the four-frame surface animates at item speed from the tick, items arc through corners (and are drawn face to face on every tile — they had been half a tile downstream), hover says feeds and hand-offs in words, the retired belt aliases are deleted, and a `--belt-gallery` fixture shows every shape and junction at every facing. Ticket 7 (gallery bug hunt and docs close-out) is to do; one sim rule discrepancy (a belt feeds a machine from any side of an inlet-edge tile) is flagged for ticket 7.
@@ -53,6 +53,43 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-11 — Numbers into bars: a UI visualisation pass over every readout
+
+The hopper panel's fill bar, added with the configuration panel, was the
+best-liked thing on screen — a level you *see* rather than a level you read
+— so this pass took that idiom everywhere the HUD was printing a raw figure
+and asked, per readout, what the figure actually means to the player.
+
+The rule it settled on is the part worth keeping: **a quantity gets a bar
+only if the simulation defines a ceiling for it.** A hopper against its
+capacity, a machine against its cycle, a countdown against its cadence, a
+price against the balance in your pocket — those are fractions, and a
+fraction is a bar. Raw stock in the larder and the balance itself are not:
+nothing says how much tomato is "full", and a bar drawn against an invented
+maximum would be a gauge that lies. They stay figures.
+
+All of it goes through one mechanism (`_build_meter`/`_set_meter`) with
+three fills that mean things rather than set moods: green is a level, amber
+is work under way, red is a cost you cannot meet or a clock nearly out.
+Where they landed: hover now draws a hopper's or tank's level, a pipe's
+pressure, a machine's cycle and its input/output buffers instead of
+listing them; each contract docket has a draining countdown in the
+clipboard's own paper and ink, reading **"8s to go"** and **"due now"**
+rather than a tick count, with ✓/✗ tallies beside it; every build-menu and
+market slot shows its price as the share of the balance it would take, and
+a full red bar when you cannot afford it; and the money figure flashes
+**+90** or **-5** under itself when something changes it, so a payout that
+lands while you are looking at the factory is an event rather than a number
+that was different last time you glanced.
+
+Two things fell out of doing it. Everything the player reads is now named
+the way a person would say it (`Boxed Ketchup`, `Fluid Tank`) — the pass
+kept finding raw wire ids like `boxed_ketchup` in headings, because a
+tooltip that echoes the JSON is invisible until you look at it as art. And
+a meter records the fraction it drew on its own node, which is how the
+headless proofs assert that a bar *moved* without ever laying out a
+viewport: `test_contract_panel.gd` watches three countdowns drain
+independently, and `test_hover.gd` checks which tiles get a meter at all.
 ### 2026-09-10 — Contracts are signed, struck and lost
 
 The contracts system stopped being three orders that exist from tick 0
@@ -70,7 +107,7 @@ missed deliveries (a strike-counted grace period; no reputation meter yet).
 On the clipboard each docket now answers the two questions a player asks
 of an order: a status line in words with a glyph (READY, AT RISK with the
 shortfall and the share of the window gone, LAST CHANCE when the next miss
-loses it), a window bar, one strike pip per strike the contract allows,
+loses it), one strike pip per strike the contract allows,
 and a heavier border in the state's colour — never colour alone. An empty
 clipboard says "press C". The shipped board gained a fourth rung, a
 regional grocer whose six boxes every 4000 ticks one line cannot carry

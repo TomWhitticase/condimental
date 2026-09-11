@@ -21,8 +21,8 @@
 #     click is refused — one of each contract, never two;
 #   * `_contract_risk_for` — the pure half of the docket's status — sorts a
 #     contract into ready / ok / at risk / last chance from the snapshot's own
-#     fields, and the docket shows each state as a glyph AND words AND a bar
-#     position AND a border, never colour alone;
+#     fields, and the docket shows each state as a glyph AND words AND strike
+#     pips AND a border, never colour alone;
 #   * a contract left unserved for its strikes is LOST for real: it leaves the
 #     clipboard, the announcement line says so, the board offers it again
 #     with a LOST note, and signing it again costs its price;
@@ -256,8 +256,8 @@ func _initialize() -> void:
 		if String(card["status_label"].text) == "":
 			_fail("docket '%s' has no status line" % card["id"])
 			return
-		if not card["window_track"].has_meta("fraction"):
-			_fail("docket '%s' has no window bar driven by _set_contract_bar" % card["id"])
+		if not card["countdown_meter"].has_meta("fraction"):
+			_fail("docket '%s' has no countdown bar driven by _set_meter" % card["id"])
 			return
 		var strikes := 0
 		for contract in _econ(main)["contracts"]:
@@ -280,8 +280,8 @@ func _initialize() -> void:
 	if String(card0["state"]) != "risk" or not String(card0["status_label"].text).begins_with("⚠ AT RISK"):
 		_fail("70%% through and short should read '⚠ AT RISK', got '%s'" % card0["status_label"].text)
 		return
-	if not is_equal_approx(float(card0["window_track"].get_meta("fraction")), 0.8):
-		_fail("the window bar should stand at 0.8, reads %s" % str(card0["window_track"].get_meta("fraction")))
+	if not is_equal_approx(float(card0["countdown_meter"].get_meta("fraction")), 0.2):
+		_fail("the countdown bar should have drained to 0.2, reads %s" % str(card0["countdown_meter"].get_meta("fraction")))
 		return
 	if card0["panel"].get_theme_stylebox("panel") != main._contract_card_style_risk:
 		_fail("an at-risk docket should carry the at-risk border")

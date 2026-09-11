@@ -170,7 +170,7 @@ func _run_checks() -> void:
 	# machine, checked here for a building with no recipe behind it.
 	for tile in [Vector2i(6, 0), Vector2i(5, 1), Vector2i(6, 1)]:
 		var hover: String = main._hover_text_at_tile(tile)
-		if not hover.begins_with("delivery dock"):
+		if not hover.begins_with("Dock"):
 			_fail("hovering the dock's tile %s resolved to %s" % [str(tile), hover])
 			return
 
@@ -260,7 +260,7 @@ func _run_checks() -> void:
 	# exists because a machine can be bigger than one tile.
 	var far_corner := Vector2i(1, 1)
 	var far_text: String = vat_scene._hover_text_at_tile(far_corner)
-	if not far_text.begins_with("ketchup"):
+	if not far_text.begins_with("Ketchup"):
 		_fail("the vat's far corner %s should identify the vat, got: %s" % [str(far_corner), far_text])
 		return
 	if vat_scene._hover_text_at_tile(Vector2i(1, 2)) != "":

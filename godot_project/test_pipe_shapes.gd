@@ -296,7 +296,7 @@ func _run_checks() -> void:
 	}
 	for tile in cases.keys():
 		var text: String = main._hover_text_at_tile(tile)
-		if not text.begins_with("pipe"):
+		if not text.begins_with("Pipe"):
 			_fail("hovering %s should describe a pipe, got: %s" % [str(tile), text])
 			return
 		for phrase in cases[tile]:

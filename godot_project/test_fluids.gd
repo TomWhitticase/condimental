@@ -190,7 +190,7 @@ func _run_checks() -> void:
 	var probe_pair: Array = segments[0]["tile"]
 	var probe := Vector2i(int(probe_pair[0]), int(probe_pair[1]))
 	var pipe_text: String = main._hover_text_at_tile(probe)
-	if not pipe_text.contains("pipe"):
+	if not pipe_text.contains("Pipe"):
 		_fail("hovering a pipe tile should describe a pipe, got: %s" % pipe_text)
 		return
 	if not pipe_text.contains("units") or not pipe_text.contains("pressure"):
@@ -246,7 +246,7 @@ func _run_checks() -> void:
 
 	# --- hover: the tank answers through the same one mechanism ----------
 	var tank_text: String = main._hover_text_at_tile(tank_tile)
-	if not tank_text.begins_with("fluid tank"):
+	if not tank_text.begins_with("Fluid Tank"):
 		_fail("hovering the tank should describe it, got: %s" % tank_text)
 		return
 	if not tank_text.contains("units"):

@@ -13,10 +13,13 @@
 #     recipe lookup (_machine_recipe_at_tile) finds that stage's machine,
 #   * a screen position clearly off in open floor (far outside the chain's
 #     footprint) resolves to a tile with no machine on it,
-#   * _machine_hover_text returns the live recipe/progress/input/output text
-#     for a hovered stage, and "" for a recipe id that isn't hovering
-#     anything (the sentinel _update_hover_tooltip checks to decide whether
-#     to show the tooltip at all),
+#   * _machine_hover_text returns the live recipe/facing/progress text for a
+#     hovered stage, and "" for a tile that isn't hovering anything (the
+#     sentinel _update_hover_tooltip checks to decide whether to show the
+#     tooltip at all),
+#   * _hover_panel_state — the WIDGET half, added by the UI visualisation
+#     pass — reports a progress meter and both buffers for a machine, a
+#     level meter for a hopper, and neither for a belt or open floor,
 #   * the SAME _tile_under_screen_pos math also resolves correctly through a
 #     FIRST_PERSON perspective camera aimed at a known machine — proving the
 #     crosshair-driven hover works, not just the isometric cursor-driven one,
@@ -137,12 +140,12 @@ func _run_checks() -> void:
 		_fail("tile %s should resolve to the crusher, got %s" % [str(resolved_tile), str(placement)])
 		return
 
+	# The tooltip names the recipe the way every other panel in the game names
+	# an item — "Tomato Paste", not the wire format's `tomato_paste` — since
+	# the UI visualisation pass (docs/UI_UX.md §5).
 	var hover_text: String = main._hover_text_at_tile(resolved_tile)
-	if hover_text == "" or not hover_text.begins_with("tomato_paste"):
-		_fail("hover text over the crusher should start with its recipe id, got: %s" % hover_text)
-		return
-	if not hover_text.contains("in:") or not hover_text.contains("out:"):
-		_fail("machine hover text should include input/output buffer contents, got: %s" % hover_text)
+	if hover_text == "" or not hover_text.begins_with("Tomato Paste"):
+		_fail("hover text over the crusher should start with its recipe's display name, got: %s" % hover_text)
 		return
 	# Which way it faces is a fact only placement created, and one the player
 	# can change — so the tooltip has to carry it.
@@ -150,14 +153,54 @@ func _run_checks() -> void:
 		_fail("machine hover text should report the facing the player gave it, got: %s" % hover_text)
 		return
 
+	# --- The WIDGET half: buffers and the progress bar -----------------------
+	# The buffers left the sentence and became icon chips under a bar, so what
+	# is asserted is the pure state `_apply_hover_panel_state` draws from, not
+	# a substring of the text. A machine ALWAYS reports `has_buffers` (an
+	# empty crusher and a pipe are different facts, and only the flag says
+	# which), and always offers a meter — an idle machine's reads zero rather
+	# than vanishing.
+	var machine_state: Dictionary = main._hover_panel_state(resolved_tile)
+	if not bool(machine_state.get("has_buffers", false)):
+		_fail("a machine's hover state should report buffers, got: %s" % str(machine_state))
+		return
+	if not (machine_state.get("inputs") is Array) or not (machine_state.get("outputs") is Array):
+		_fail("a machine's hover state should carry both buffers as arrays, got: %s" % str(machine_state))
+		return
+	var machine_meter: Dictionary = machine_state.get("meter", {})
+	if machine_meter.is_empty():
+		_fail("a machine's hover state should always carry a progress meter, got: %s" % str(machine_state))
+		return
+	var machine_fraction := float(machine_meter.get("fraction", -1.0))
+	if machine_fraction < 0.0 or machine_fraction > 1.0:
+		_fail("a machine's progress fraction should be a 0..1 level, got: %s" % str(machine_meter))
+		return
+
+	# A hopper is metered against its real capacity; a belt has no ceiling to
+	# measure and deliberately gets no bar and no buffer rows at all.
+	var hopper_state: Dictionary = main._hover_panel_state(Vector2i(-1, 0))
+	if hopper_state.get("meter", {}).is_empty():
+		_fail("a hopper's hover state should meter its level against capacity, got: %s" % str(hopper_state))
+		return
+	if bool(hopper_state.get("has_buffers", false)):
+		_fail("a hopper has no machine buffers to show, got: %s" % str(hopper_state))
+		return
+	var belt_state: Dictionary = main._hover_panel_state(Vector2i(1, 0))
+	if not belt_state.get("meter", {}).is_empty() or bool(belt_state.get("has_buffers", false)):
+		_fail("a belt has neither a metered quantity nor buffers, got: %s" % str(belt_state))
+		return
+	if not main._hover_panel_state(Vector2i(0, 20)).get("meter", {}).is_empty():
+		_fail("open floor should produce no meter at all")
+		return
+
 	# --- Every other placed kind answers through the same one entry point ---
 	# A pipe's tooltip leads with the fluid it carries (or "empty run"), so
 	# these are `contains` rather than `begins_with` — the point is that each
 	# kind identifies itself, not that they all use one sentence shape.
 	var kinds := {
-		Vector2i(1, 0): "belt",
-		Vector2i(-1, 0): "hopper",
-		Vector2i(5, 2): "pipe",
+		Vector2i(1, 0): "Belt",
+		Vector2i(-1, 0): "Hopper",
+		Vector2i(5, 2): "Pipe",
 	}
 	for tile in kinds.keys():
 		var text: String = main._hover_text_at_tile(tile)
@@ -225,5 +268,5 @@ func _run_checks() -> void:
 		_fail("crosshair should be hidden in ISOMETRIC mode")
 		return
 
-	print("HOVER_OK: screen-to-tile resolution finds the right machine in both view modes, every placed kind answers through one entry point, a rotated tile reports its facing, open floor finds none, looking up in first-person finds no tile, crosshair visibility tracks view mode")
+	print("HOVER_OK: screen-to-tile resolution finds the right machine in both view modes, every placed kind answers through one entry point and names itself the way the rest of the UI does, a machine reports buffers and a progress meter while a belt reports neither, a rotated tile reports its facing, open floor finds none, looking up in first-person finds no tile, crosshair visibility tracks view mode")
 	quit(0)
