@@ -187,6 +187,35 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-11 **Factory floor redesign.** The floor is a BACKGROUND surface
+  and is authored by its value range, not its detail (UI_UX §2b points 27,
+  28). Its own palette entries — `concrete_slab`/`concrete_mottle`/
+  `concrete_shade`, deliberately within eight points of each other — not the
+  shared `concrete`, which the dock deck and machine plinths keep. Variation
+  is broad ragged blotches on a coarse 8-voxel cell grid, most cells bare;
+  NEVER per-voxel speckle (it read as static, and blotches greedy-mesh far
+  cheaper: 1 363 384 → 798 272 primitives). **The floor must never hold the
+  brightest pixel in the frame** — §4 reserves that for metal — so the
+  repair patch is `concrete_shade`, DARKER than the slab, saw-cut in
+  `concrete_dark`. Four models (`floor_tile`, `_worn`, `_patch`, `_drain`)
+  picked by `main.gd`'s `_floor_variant_for(tx, tz)`, each laid at a
+  hash-chosen quarter turn by `_floor_yaw_steps_for` — four stamps repeat
+  visibly, rotation fixes it free. **That is why `floor_joint` keeps its cut
+  on all FOUR edges**: a rotatable tile's edges must be four-fold symmetric
+  or seams step; the doubled interior line was fixed by lightening
+  `floor_seam` (`#33332F` → `#50504A`), not by dropping edges. Variant and
+  turn are pure functions of (tx, tz) — `_build_floor` runs on every
+  place/remove and must not repave. Drains are laid in whole rows
+  (`posmod(tz + 4, 9) == 0`, phased off row 0) and are the one model never
+  turned; their grating bars stay `concrete` because a grating is the one
+  part of this floor that wants contrast. `_floor_node` is a `Node3D` named
+  `"Floor"` parenting one `MultiMeshInstance3D` per variant (the name is
+  asserted by `test_placement.gd`/`test_presentation.gd`); the whole floor
+  stays in the `matte` class because `material_override` is set on it.
+  Three voxgen tests pin: nothing stands proud of the slab top (`FLOOR_Y`
+  puts everything else on that plane), identical joints on all four edges of
+  every rotatable model, drain channel crossing the whole tile on the
+  midline. Judged by rendering the EMPTY world, not the fixture.
 - 2026-09-11 **UI visualisation pass — one bar language.** A quantity is
   drawn as a bar **only where the simulation defines its ceiling** (hopper
   and tank level, machine cycle, pipe pressure, a contract's countdown

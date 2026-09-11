@@ -232,6 +232,44 @@ DECISIONS.md Part B. There is no point 10.
     hopper's mouth and vanishes at a machine's face. The general rule: check
     a path convention against the tile's edges, not against its neighbours,
     because neighbours hide a shared error.
+27. **The floor is the one surface whose job is to be a background, so it
+    is authored by its VALUE RANGE, not by its detail.** Every other asset
+    is judged alone; the floor is judged as thousands of copies filling the
+    frame, and at that scale anything with contrast becomes the loudest
+    thing in the picture. Three failures, each found only by rendering an
+    empty world (the state a new game starts in, and almost entirely
+    floor): a near-black joint on all four tile edges read as bathroom
+    grout, not a poured slab; single-voxel `concrete_light` speckle read as
+    television static; and a repair patch filled with the shared `concrete`
+    tone measured +16 render units against a floor whose whole variation
+    was ±2, so it read as white paving slabs dropped at random. The rules
+    that came out of it: keep the pour's own tones within a few points of
+    each other (§7's neutral base is a *narrow* band here, not just a
+    desaturated one); make variation BROAD and low-contrast — blotches with
+    wandering outlines, never per-voxel noise, which also greedy-meshes into
+    far fewer triangles on the one asset whose triangle count multiplies by
+    the size of the world; and **never let the floor hold the brightest
+    pixel in the frame**, because §4 reserves that for metal. A feature that
+    genuinely wants contrast (a drain grating read by its stripes) is the
+    exception and should be a real object, not a texture.
+28. **N models laid over thousands of tiles is still only N stamps; the
+    multiplier is per-instance rotation, and it is only free if the tile's
+    edges are four-fold symmetric.** Four floor variants looked varied in
+    isolation and repeated visibly in a magnified render — every worn tile's
+    scuff ran the same way across the screen, every plain tile carried its
+    blotches in the same spots. Laying each instance at a quarter turn chosen
+    by a hash of its coordinates breaks all of that at once, at no asset
+    cost. The constraint it imposes is on the EDGE: whatever the tile draws
+    at its border must survive a quarter turn, or the seam steps wherever two
+    differently-turned tiles meet — the same failure point 20 records for an
+    integer-centred axis. So the saw-cut joint stays on all four edges even
+    though that doubles an interior line, and the joint's colour was
+    lightened until the doubled line still read as a hairline. The choice of
+    variant and of turn must be a pure function of the tile coordinate, so a
+    reloaded save is not repaved and a rebuild does not reshuffle the floor
+    under the player. The one model that must NOT be turned is the one whose
+    feature spans tiles: a row of trench drains is a trench only while every
+    tile lays its channel on the same axis.
 
 ## 3. Theme & setting
 

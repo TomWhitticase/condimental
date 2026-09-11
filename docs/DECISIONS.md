@@ -22,6 +22,92 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-11: **The factory floor, redesigned — the one asset that is
+  authored by its value range rather than by its detail.** The project
+  owner's note was that the flooring tile did not fit the theme. It did not:
+  a `concrete` slab with a `#33332F` saw-cut joint on all four edges and
+  single-voxel `concrete_light` speckle scattered over it, identical on
+  every tile of the world. Rendered wide, the joint read as bathroom grout
+  and the speckle as television static — a tiled bathroom, not UI_UX.md §3's
+  poured industrial food plant. Five calls, each of which was made by
+  looking at a render and none of which is obvious from the generator.
+
+  (1) **The floor gets its own concrete, and the three tones sit within
+  eight points of each other.** `concrete_slab` / `concrete_mottle` /
+  `concrete_shade` are new `palette.ron` entries rather than a change to the
+  shared `concrete`, because the dock deck and the machine plinths want to
+  read as part of their machine while a slab wants to read as the ground the
+  machine stands on. `concrete_slab` is a shade darker than `concrete` so
+  stainless and painted housings have something to pop against (§4). How
+  CLOSE the three sit is the decision: a first pass put them a dozen points
+  apart and the render came back reading as confetti scattered on the floor
+  rather than as the floor.
+
+  (2) **Variation is broad blotches, never per-voxel noise — and that is
+  also the cheap option.** `floor_mottle` works on a coarse 8-voxel cell
+  grid, leaves most cells bare slab, and builds each blotch as rows of
+  differing length and inset so its outline wanders (a rectangle with its
+  corners knocked off renders as a plus sign). Beyond looking like a
+  trowelled pour instead of static, broad low-contrast areas greedy-mesh
+  into far fewer triangles: the scene render went from 1 363 384 primitives
+  to 798 272, a 41% cut, on the one asset whose triangle count is multiplied
+  by the size of the world.
+
+  (3) **Four models, and per-instance rotation is what makes them look like
+  more than four.** `floor_tile`, `floor_tile_worn`, `floor_tile_patch` and
+  `floor_tile_drain`, chosen in `main.gd` by `_floor_variant_for(tx, tz)`.
+  A magnified crop of the first four-model version showed the obvious
+  thing in hindsight: four stamps are still four stamps, every worn tile's
+  scuff running the same way across the screen. `_floor_yaw_steps_for` lays
+  each slab at a hash-chosen quarter turn, which fixes all of it at no asset
+  cost. **The price is that the tile's edges must be four-fold symmetric**,
+  so `floor_joint` keeps its saw cut on all four edges even though that
+  makes an interior joint two voxels wide — and `floor_seam` was lightened
+  `#33332F` → `#50504A` until the doubled line still read as a hairline. Two
+  edges instead of four would have halved the line and broken every seam the
+  moment a tile turned. **Both the variant and the turn are pure functions
+  of (tx, tz)**, because `_build_floor` runs on every place and remove: a
+  hashed-on-nothing floor would repave itself under the player and come back
+  different from a save.
+
+  (4) **The drain is laid in whole ROWS, not scattered.** A trench drain is
+  the detail that says "a plant that is hosed down" rather than "warehouse",
+  and it only says it if consecutive tiles join into one trench —
+  `posmod(tz + 4, 9) == 0`, phased so no drain crosses tile row 0, where an
+  empty world is framed and a player lays their first belt. It is the one
+  model `_floor_yaw_steps_for` never turns, since a rotated tile in a row
+  would put its channel across the trench. Its grating bars are the one part
+  of this floor that WANT contrast (a grating is read by its stripes), so
+  they stay pinned to `concrete` rather than to the mottle tone, which is
+  pulled toward the slab whenever the floor is quietened. It also finally
+  uses `drain_grate`, a palette colour that had been defined and never
+  drawn.
+
+  (5) **The repair patch is DARKER than the slab, and that direction was
+  decided by measuring a render.** A patch should read as somebody having
+  cut a rectangle out of this floor with a saw, and the real-world instinct
+  is that a fresh pour is paler than a floor polished by traffic. Filled
+  with `concrete_light` it read as white paving slabs; filled with
+  `concrete`, one step up, it still measured +16 render units against a
+  floor whose entire remaining variation was ±2 — the loudest thing on
+  screen. It is `concrete_shade` now, about eleven units DOWN, with its saw
+  cut in `concrete_dark` (which `floor_seam` would otherwise be too close
+  to swallow). The governing rule is §4: metal is the deliberate bright
+  exception, so the floor must never hold the brightest pixel in the frame.
+  A dark cut is fine here precisely because there is one per ~125 tiles —
+  the grout problem in (3) was a dark line on all four edges of *every*
+  tile. Frequency was cut with it (`FLOOR_PATCH_IN` 41 → 97).
+
+  Recorded as UI_UX.md §2b points 27 and 28. Three voxgen property tests
+  pin what a render cannot re-check by itself: nothing on the floor stands
+  proud of the slab's top surface (`main.gd`'s `FLOOR_Y` puts everything
+  else on that plane, so one voxel too tall intersects every belt and
+  machine the player builds, and it is invisible until something stands on
+  the offending tile); every rotatable model carries the identical joint on
+  all four edges; and the drain's channel crosses the whole tile,
+  symmetric about the midline. The whole floor stays in the `matte`
+  material class, because `_build_floor` sets `material_override` on the
+  multimeshes.
 - 2026-09-11: **The UI visualisation pass — every readout in the HUD was
   asked what its number MEANS, and the answers are one bar language.** The
   fill bar that shipped on the hopper configuration panel was the readout
@@ -3183,6 +3269,96 @@ were only discoverable by building it:
     first items go all the way round and queue back at the merge tile,
     which is a real state and draws a smooth curve of items through the
     corner — the arc's best proof.
+
+27. **The floor is the one surface whose job is to be a background, so it
+    is authored by its VALUE RANGE, not by its detail.**
+
+    Every other asset in this pipeline is designed by looking at one copy
+    of it. The floor is never seen that way: it is seen as thousands of
+    copies filling the frame, with everything else standing on top. At that
+    scale anything carrying contrast becomes the loudest thing in the
+    picture, and three separate versions of this floor failed in exactly
+    that way before one worked. The frame that found each of them was the
+    EMPTY world — no fixture, no machines — which is both the state a new
+    game starts in and the only render that is almost entirely floor.
+
+    The near-black `#33332F` control joint, drawn on all four edges of
+    every tile so that an interior joint was two voxels of it, read as
+    grout: the factory looked like a tiled bathroom rather than a poured
+    slab. Single-voxel `concrete_light` speckle, at a dozen points above
+    the slab tone, read as television static. And the repair patch, filled
+    with the shared `concrete` mid tone on the sound real-world theory that
+    a fresh pour is paler than a floor polished by traffic, measured +16
+    render units against a floor whose entire remaining variation was ±2 —
+    a scatter of white paving slabs across the plant.
+
+    What came out of it, in order of how often it will apply again:
+
+    - Keep the surface's own tones within a few points of each other. §7's
+      "neutral/industrial" is a *narrow* band here, not merely a desaturated
+      one. `concrete_slab`/`concrete_mottle`/`concrete_shade` span eight
+      points in total, and the first attempt at a dozen points read as
+      confetti scattered on the floor rather than as the floor.
+    - Make variation broad and low-contrast: blotches on a coarse cell grid,
+      most cells left bare, each blotch built from rows of differing length
+      and inset so its outline wanders. A rectangle with its corners knocked
+      off renders as a plus sign, which is its own kind of pattern. This is
+      also the cheap option — broad flat areas greedy-mesh into far fewer
+      triangles than per-voxel noise, and this is the one asset whose
+      triangle count is multiplied by the size of the world (1 363 384
+      primitives before, 798 272 after).
+    - **Never let the floor hold the brightest pixel in the frame.** §4
+      reserves that for metal, and it is what makes machinery pop. When the
+      render and the real-world instinct disagree about which way a feature
+      should go, this rule breaks the tie: the repair patch is darker than
+      the floor around it.
+    - A feature that genuinely wants contrast is the exception, and it
+      should be a real object rather than a texture. The trench drain's
+      grating is read by its stripes, so its bars stay pinned to `concrete`
+      instead of to the mottle tone, which gets pulled toward the slab every
+      time the floor is quietened.
+
+28. **N models laid over thousands of tiles is still only N stamps; the
+    multiplier is per-instance rotation, and it is only free if the tile's
+    edges are four-fold symmetric.**
+
+    Four floor variants — plain, worn, patched, drained — looked varied in
+    isolation and in the wide shot. A magnified crop said otherwise: every
+    worn tile's scuff ran the same way across the screen, every plain tile
+    carried its blotches in identical spots, and once seen it could not be
+    unseen. Laying each instance at a quarter turn chosen by a hash of its
+    tile coordinate breaks all of it at once, at zero asset cost, and it is
+    the correction that made this floor work.
+
+    The constraint it imposes is on the EDGE. Whatever a tile draws at its
+    border has to survive a quarter turn, or the seam steps wherever two
+    differently-turned tiles meet — the same class of failure point 20
+    records for an integer-centred axis, and just as invisible until the
+    exact pair of neighbours occurs. So the saw-cut joint stays on all four
+    edges of every rotatable model even though that makes an interior joint
+    two voxels wide, and the fix for the doubled line is its VALUE, not its
+    geometry: `floor_seam` was lightened until two voxels of it still read
+    as a hairline. Dropping to two edges to halve the line is the tempting
+    trade and it is the wrong one.
+
+    Two corollaries. **The variant and the turn must both be pure functions
+    of the tile coordinate**, because the scene rebuilds its whole World
+    subtree on every place and remove (ARCHITECTURE.md §5): anything hashed
+    on iteration order or on a counter would repave the floor under the
+    player mid-build and come back different from a save. **The one model
+    that must not be turned is the one whose feature spans tiles** — a row
+    of trench drains is a trench only while every tile lays its channel on
+    the same axis, so the drain always returns turn 0.
+
+    What a property test can carry from here, and a render cannot re-check
+    by itself: that every rotatable model's four edges really are identical
+    (`every_rotatable_floor_tile_carries_the_same_joint_on_all_four_edges`),
+    and that nothing on the floor stands proud of the slab's top surface —
+    `main.gd`'s `FLOOR_Y` puts every belt, machine and building on that
+    plane, so a single voxel of floor detail one step taller intersects
+    everything the player builds, and it is invisible in every render until
+    something happens to stand on the offending tile.
+
 
 ## Part C — ARCHITECTURE.md §9a, full text (mobile export spike findings, 2026-09-06)
 

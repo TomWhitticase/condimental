@@ -121,6 +121,39 @@ const FLOOR_GROUND_MARGIN_Z := 24
 # tiles to lay a first line across without immediately panning.
 const EMPTY_WORLD_FRAME_TILES := 14
 
+# --------------------------------------------------------------------------
+# The factory floor's variants (the floor redesign)
+# --------------------------------------------------------------------------
+#
+# `assets.rs`'s factory-floor section builds four slab models; which one a
+# tile gets is decided HERE, from the tile's own coordinates, because that is
+# the only place the coordinates exist. The rule is a pure function of
+# (tx, tz) — no randomness and no stored state — so the same world always
+# draws the same floor, a reloaded save is not repaved, and the floor does
+# not shuffle itself every time `_build_floor` runs (which is every time
+# anything is placed or removed).
+#
+# Frequencies are deliberately low. The plain slab is the floor; the rest are
+# incident. A variant that shows up on every tenth tile stops being an
+# incident and becomes a chequerboard, which is the failure mode this whole
+# redesign exists to fix.
+const FLOOR_ASSET_PLAIN := "floor_tile"
+const FLOOR_ASSET_WORN := "floor_tile_worn"
+const FLOOR_ASSET_PATCH := "floor_tile_patch"
+const FLOOR_ASSET_DRAIN := "floor_tile_drain"
+## Trench drains run in unbroken LINES, one tile row deep, every this many
+## rows — a drain is plumbing, and plumbing runs somewhere. Scattering single
+## drain tiles by hash would read as potholes.
+const FLOOR_DRAIN_ROW_PITCH := 9
+## Offset of those rows, chosen so no drain crosses tile row 0 — the origin
+## is where an empty world is framed and where a player lays their first
+## belt, and it should be plain floor.
+const FLOOR_DRAIN_ROW_PHASE := 4
+## One tile in this many is worn, and one in this many is a repair patch
+## (of the tiles that are not drains).
+const FLOOR_WORN_IN := 7
+const FLOOR_PATCH_IN := 97
+
 const TICK_HZ := 30.0
 ## Never advance more than this many simulation ticks in one frame, and drop
 ## whatever backlog is left rather than paying it back later.
@@ -563,7 +596,7 @@ var _placements: Array = [] # world_layout_json, parsed, in the simulation's own
 var _by_origin: Dictionary = {} # "x,y" of a placement's ORIGIN -> its layout dict
 var _occupancy: Dictionary = {} # "x,y" of ANY covered tile -> that placement's origin key
 var _world_root: Node3D
-var _floor_node: MultiMeshInstance3D
+var _floor_node: Node3D # parent of one MultiMeshInstance3D per floor variant
 var _floor_bounds := Rect2i(0, 0, -1, -1) # tile bounds the floor mesh currently covers
 var _frame_bounds := Rect2i(0, 0, 0, 0) # tile bounds the camera framed at startup
 ## A buildable kind's DECLARED (unrotated) footprint, learned from any
@@ -1612,10 +1645,61 @@ func _world_tile_bounds() -> Rect2i:
 	return Rect2i(min_tile, max_tile - min_tile)
 
 
-## The poured-concrete factory floor. Drawn as one `MultiMeshInstance3D`
-## rather than one node per tile: the floor is the only asset whose instance
-## count scales with the size of the world, so it is the one worth batching.
-## The tile's darker perimeter is what keeps the grid legible (UI_UX.md §1).
+## Which of `assets.rs`'s four floor slabs paves the tile at (`tx`, `tz`).
+##
+## A pure function of the coordinates and nothing else — see the
+## FLOOR_ASSET_* constants for why that matters. Drains are decided first and
+## win outright: they are a continuous line across the world, and a worn tile
+## punched out of the middle of one would break the trench.
+func _floor_variant_for(tx: int, tz: int) -> String:
+	if posmod(tz + FLOOR_DRAIN_ROW_PHASE, FLOOR_DRAIN_ROW_PITCH) == 0:
+		return FLOOR_ASSET_DRAIN
+	# The same XOR hash the generators use, and for the same reason: a
+	# modulo of a linear combination of tx and tz lays its results out in
+	# diagonal stripes, which the isometric camera looks straight down.
+	var h: int = _floor_hash(tx, tz)
+	if h % FLOOR_PATCH_IN == 0:
+		return FLOOR_ASSET_PATCH
+	if h % FLOOR_WORN_IN == 0:
+		return FLOOR_ASSET_WORN
+	return FLOOR_ASSET_PLAIN
+
+
+## The same XOR hash `assets.rs`'s `floor_hash` uses, and for the same
+## reason: a modulo of a linear combination of tx and tz lays its results out
+## in diagonal stripes, and the isometric camera looks straight down a
+## diagonal.
+func _floor_hash(tx: int, tz: int) -> int:
+	return absi((tx * 73856093) ^ (tz * 19349663))
+
+
+## The quarter turn a floor slab is laid at, in `DIRECTIONS` index steps.
+##
+## Four models over several thousand tiles is still only four stamps, and a
+## magnified render showed them plainly: every worn tile's scuff ran the same
+## way across the screen and every plain tile carried its blotches in the
+## same places, which is a repeating texture however good one tile of it
+## looks. Turning the model costs a `Basis` and nothing else, and it is the
+## reason `assets.rs`'s `floor_joint` cuts all four edges rather than two.
+##
+## The DRAIN is the exception and is always laid square: its channel has to
+## stay on one axis or a row of them stops being a trench and becomes a row
+## of holes.
+func _floor_yaw_steps_for(tx: int, tz: int, variant: String) -> int:
+	if variant == FLOOR_ASSET_DRAIN:
+		return 0
+	return (_floor_hash(tx, tz) / 3) % 4
+
+
+## The poured-concrete factory floor. Drawn as one `MultiMeshInstance3D` per
+## slab variant under a `Floor` parent, rather than one node per tile: the
+## floor is the only asset whose instance count scales with the size of the
+## world, so it is the one worth batching. Four multimeshes is four draw
+## calls for the whole ground plane, which is still nothing.
+##
+## The tile's saw-cut joint is what keeps the grid legible (UI_UX.md §1); the
+## variants are what keep several thousand tiles of it from reading as
+## squared paper. Which tile gets which is `_floor_variant_for`.
 ##
 ## Its extent follows the placed world rather than a fixed chain length, and
 ## it is rebuilt only when those bounds actually change — which for an empty
@@ -1627,39 +1711,51 @@ func _build_floor() -> void:
 		return
 	_floor_bounds = bounds
 
-	var mesh := _mesh_for("floor_tile")
-	if mesh == null:
-		push_warning("floor_tile mesh missing — skipping floor")
-		return
-
 	var x_from := bounds.position.x - FLOOR_GROUND_MARGIN_X
 	var x_to := bounds.position.x + bounds.size.x + FLOOR_GROUND_MARGIN_X
 	var z_from := bounds.position.y - FLOOR_GROUND_MARGIN_Z
 	var z_to := bounds.position.y + bounds.size.y + FLOOR_GROUND_MARGIN_Z
 
-	var multimesh := MultiMesh.new()
-	multimesh.transform_format = MultiMesh.TRANSFORM_3D
-	multimesh.mesh = mesh
-	multimesh.instance_count = (x_to - x_from + 1) * (z_to - z_from + 1)
-
-	var i := 0
+	# Bucket the tiles by variant first: a MultiMesh's instance count has to
+	# be set before its transforms are written, so the tiles have to be
+	# counted before any of them can be placed.
+	var by_variant := {}
 	for tz in range(z_from, z_to + 1):
 		for tx in range(x_from, x_to + 1):
-			multimesh.set_instance_transform(i, Transform3D(Basis(), _tile_origin(tx, tz, 0.0)))
-			i += 1
+			var variant := _floor_variant_for(tx, tz)
+			if not by_variant.has(variant):
+				by_variant[variant] = []
+			var basis := Basis(Vector3.UP, deg_to_rad(90.0 * _floor_yaw_steps_for(tx, tz, variant)))
+			by_variant[variant].append(Transform3D(basis, _tile_origin(tx, tz, 0.0)))
 
 	if _floor_node != null:
 		remove_child(_floor_node)
 		_floor_node.free()
-	_floor_node = MultiMeshInstance3D.new()
+	_floor_node = Node3D.new()
 	_floor_node.name = "Floor"
-	_floor_node.multimesh = multimesh
-	# The floor takes shadows from the machinery but casts none of its own.
-	_floor_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_floor_node)
+
 	var floor_material = _class_materials.get("matte", null)
-	if floor_material != null:
-		_floor_node.material_override = floor_material
+	for variant in by_variant:
+		var mesh := _mesh_for(variant)
+		if mesh == null:
+			push_warning("%s mesh missing — skipping those floor tiles" % variant)
+			continue
+		var placements: Array = by_variant[variant]
+		var multimesh := MultiMesh.new()
+		multimesh.transform_format = MultiMesh.TRANSFORM_3D
+		multimesh.mesh = mesh
+		multimesh.instance_count = placements.size()
+		for i in placements.size():
+			multimesh.set_instance_transform(i, placements[i])
+		var node := MultiMeshInstance3D.new()
+		node.name = variant
+		node.multimesh = multimesh
+		# The floor takes shadows from the machinery but casts none of its own.
+		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		if floor_material != null:
+			node.material_override = floor_material
+		_floor_node.add_child(node)
 
 
 ## The opposite side to `direction` — where a straight belt's feed comes
