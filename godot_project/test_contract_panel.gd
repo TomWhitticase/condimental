@@ -72,10 +72,18 @@ func _initialize() -> void:
 		return
 
 	# --- One docket per reported contract, in the same order --------------
+	# Since the contract-board epic a new game runs ONE contract (the board's
+	# starter) and the rest are signed; this proof is about several dockets
+	# on one board, so sign every offer first, through the real command, the
+	# way the board menu does (test_contract_board.gd covers the menu itself).
+	for offer in JSON.parse_string(main.sim.economy_snapshot_json()).get("board", []):
+		if not bool(offer.get("active", false)):
+			main.sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": String(offer["id"])}))
+	main._update_contract_panel()
 	var econ: Dictionary = JSON.parse_string(main.sim.economy_snapshot_json())
 	var contracts: Array = econ.get("contracts", [])
 	if contracts.size() < 2:
-		_fail("economy_snapshot_json reported %d contract(s) — this test needs the shipped multi-contract data/contracts.ron to prove anything" % contracts.size())
+		_fail("economy_snapshot_json reported %d contract(s) after signing every offer — this test needs the shipped multi-contract data/contracts.ron to prove anything" % contracts.size())
 		return
 	if main._contract_cards.size() != contracts.size():
 		_fail("expected %d docket card(s), found %d" % [contracts.size(), main._contract_cards.size()])

@@ -82,11 +82,13 @@ func _initialize() -> void:
 				_fail("the control legend still offers the removed '%s' control: %s" % [fragment, legend])
 				return
 
-	# C is GONE (the delivery-dock ticket). `PlayerCommand::CollectOutput` no
-	# longer exists sim-side, so the key was removed here rather than left to
-	# send a command `issue_command_json` would silently drop — a control that
-	# quietly does nothing is worse than no control. Both halves are checked,
-	# exactly as they are for SPACE/V/Q above.
+	# "Collect" is GONE (the delivery-dock ticket). `PlayerCommand::CollectOutput`
+	# no longer exists sim-side, so the key was removed here rather than left
+	# to send a command `issue_command_json` would silently drop. C has since
+	# been given its natural meaning — it opens the CONTRACTS BOARD (the
+	# contract-board epic) — and that is a menu, so pressing it must still
+	# change nothing in the economy or on the dock. Both halves are checked,
+	# exactly as they are for SPACE/V/Q above, plus the board opening.
 	for legend in [main.ISO_HELP_TEXT, main.FP_HELP_TEXT]:
 		if legend.to_lower().contains("collect"):
 			_fail("the control legend still offers the removed collect-product control: %s" % legend)
@@ -102,6 +104,13 @@ func _initialize() -> void:
 		return
 	if main.sim.dock_snapshots_json() != dock_before:
 		_fail("pressing C changed the dock — the collect-product command was supposed to be gone")
+		return
+	if not main._board_open:
+		_fail("pressing C should open the contracts board")
+		return
+	main._unhandled_input(c_event) # and close it again, so the keys below are not under a modal
+	if main._board_open:
+		_fail("a second C should close the contracts board")
 		return
 
 	# --- The three build-mode keys (the "Real Placement" epic's ticket 2) ---
@@ -202,7 +211,7 @@ func _initialize() -> void:
 	# One key that still DOES reach the simulation, so this file keeps proving
 	# what it was written for: E through `_unhandled_input` opens the menu
 	# built from `shop_snapshot_json`, and the rotate above moved a real tile.
-	print("INTERACTION_OK: C, SPACE, V and Q are all gone from both the legend and the key handler (a stocked hopper stayed at %d units and kept its contents), X/ESC/R drive build mode and rotate a real tile through SimBridge, E (not B) opens the build menu, and one ESC closes the menu and either mode from any combination" % after)
+	print("INTERACTION_OK: SPACE, V and Q are all gone from both the legend and the key handler, C opens the contracts board and touches nothing (a stocked hopper stayed at %d units and kept its contents), X/ESC/R drive build mode and rotate a real tile through SimBridge, E (not B) opens the build menu, and one ESC closes the menu and either mode from any combination" % after)
 	quit(0)
 
 

@@ -169,6 +169,13 @@ impl SimBridge {
     /// two tickets: product leaves the factory through a dock building and
     /// arrives through a hopper. Sending either is a silent no-op.
     ///
+    /// **`sign_contract` is new with the contract-board epic**:
+    /// `{"type": "sign_contract", "id": "diner_supply"}` takes an offer off
+    /// `economy_snapshot_json`'s `board` for its `price`, out of the same
+    /// money everything else spends. A silent no-op on an unknown id, an
+    /// offer that is already active (one signature per offer), or a fee the
+    /// balance does not cover.
+    ///
     /// **Two changes from the chain-rework epic**, both of which a caller
     /// has to consume:
     ///
@@ -414,6 +421,33 @@ impl SimBridge {
     /// which is also the priority order when two contracts fall due
     /// together and stock covers only one (see `sim::economy`'s module doc
     /// for the full allocation rule).
+    ///
+    /// **The contract-board epic (2026-09-10) added to this, without
+    /// removing anything.** `contracts` now lists only the ACTIVE contracts
+    /// — a new game has just the board's starter(s) — and each entry also
+    /// carries `"satisfied": false` (would the window pay if it ended now),
+    /// `"window_start_tick": 0` (the other end of the countdown),
+    /// `"price": 40.0` (what it costs to sign, or re-sign after losing it),
+    /// `"consecutive_misses": 0` and `"strikes": 3` (it is LOST when the
+    /// first reaches the second). Beside `contracts` sits `"board"`: every
+    /// offer in `data/contracts.ron`, in file order, active or not —
+    ///
+    /// ```json
+    /// "board": [
+    ///   {"id": "corner_shop", "name": "Corner Shop Standing Order",
+    ///    "mix": [["boxed_ketchup", 2]], "cadence_ticks": 1000,
+    ///    "payout": 50.0, "price": 40.0, "strikes": 3, "starter": true,
+    ///    "active": true, "affordable": true, "times_lost": 0},
+    ///   ...
+    /// ]
+    /// ```
+    ///
+    /// — which is what a contracts menu is built from, the way
+    /// `shop_snapshot_json`'s `entries` build the build menu. A contract
+    /// that is lost simply stops appearing in `contracts` and reads
+    /// `"active": false` (with `times_lost` bumped) on the board; there is
+    /// no event on the wire, so a UI that wants to announce a loss diffs
+    /// the ids between two polls.
     #[func]
     fn economy_snapshot_json(&self) -> GString {
         let snapshot = self.world.economy_snapshot();

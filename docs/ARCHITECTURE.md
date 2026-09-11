@@ -238,7 +238,9 @@ impl SimBridge {
 }
 ```
 
-Also on the wire today: `world_layout_json`, `economy_snapshot_json`,
+Also on the wire today (`economy_snapshot_json` carries the whole contract
+`board` beside the active `contracts` since the contract-board epic, and
+`sign_contract` is a command): `world_layout_json`, `economy_snapshot_json`,
 `shop_snapshot_json`, `ingredients_snapshot_json`, `fluid_snapshot_json`,
 `dock_snapshot_json`, and JSON forms of the above. Godot never sees internal
 representations, only snapshots. Since the pipes & conveyors overhaul

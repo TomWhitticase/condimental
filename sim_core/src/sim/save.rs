@@ -108,6 +108,7 @@ use serde::{Deserialize, Serialize};
 use super::belt::BeltSegment;
 use super::contracts::ContractRegistry;
 use super::dock::{DOCK_KIND, Dock};
+use super::economy::ActiveContract;
 use super::fluid::{FLUID_TANK_KIND, FluidTank};
 use super::hopper::{HOPPER_KIND, Hopper};
 use super::inventory::Inventory;
@@ -162,10 +163,18 @@ pub struct SaveData {
     /// The economy's one shared delivery pool, in its own slot order (see
     /// [`Inventory::slots`]).
     pub delivery_stock: Vec<(ItemId, u32)>,
-    /// Per-contract clocks and counters, in the world's contract order.
-    /// Only the *state* — a contract's mix, cadence and payout are content
-    /// (`data/contracts.ron`) and are matched by id on load.
+    /// Every **active** contract's clock and counters, in the world's
+    /// contract order. Only the *state* — a contract's mix, cadence, price
+    /// and strikes are content (`data/contracts.ron`) and are matched by id
+    /// on load. Since the contract-board epic this is a SUBSET of the board:
+    /// what is not listed here is on the board unsigned, so a loaded world
+    /// activates exactly these and nothing else — not the board's starters.
     pub contracts: Vec<SavedContract>,
+    /// How many times each offer has been lost, by id (the board's "lost
+    /// twice" note). Absent in saves from before the contract-board epic,
+    /// which is the same as never.
+    #[serde(default)]
+    pub contracts_lost: Vec<(String, u32)>,
 }
 
 /// One placed thing: what it is, where it stands, which way it faces, and
@@ -287,6 +296,12 @@ pub struct SavedContract {
     pub next_delivery_tick: u64,
     pub deliveries_made: u32,
     pub deliveries_missed: u32,
+    /// Missed windows in a row (the strike count). Defaulted for saves from
+    /// before the contract-board epic — `schema_version` stays 1 with a
+    /// `#[serde(default)]`, the auto-fill flag's precedent, because an old
+    /// save's every other field means exactly what it did.
+    #[serde(default)]
+    pub consecutive_misses: u32,
 }
 
 /// Why a save could not be loaded. Every variant names the thing that is
@@ -352,16 +367,19 @@ pub enum SaveError {
     UnknownIngredient {
         id: String,
     },
-    /// A contract id this build's `data/contracts.ron` does not have.
+    /// An active contract id this build's `data/contracts.ron` does not
+    /// offer. Only this direction is an error: since the contract-board
+    /// epic the active list is a subset of the board, so a board offer the
+    /// save does not name is simply unsigned — a new offer added to the
+    /// board is content the player has not bought yet, not a changed
+    /// board. (Before the epic both directions were refused, because every
+    /// board entry was always active.)
     UnknownContract {
         id: String,
     },
-    /// A contract this build has that the save says nothing about. Both
-    /// directions are errors for one reason: a contract board that has
-    /// changed under a save means its economy state cannot be faithfully
-    /// restored, and quietly starting the new contract from scratch would
-    /// hide that.
-    MissingContract {
+    /// The same active contract listed twice. One signature per offer is
+    /// the rule the economy enforces, so a save that breaks it is corrupt.
+    DuplicateContract {
         id: String,
     },
     /// A buffer, bin, tank or pipe holding more than it can. A hand-edited
@@ -432,10 +450,10 @@ impl std::fmt::Display for SaveError {
                 "the save carries state for contract '{id}', which data/contracts.ron does \
                  not define in this build"
             ),
-            SaveError::MissingContract { id } => write!(
+            SaveError::DuplicateContract { id } => write!(
                 f,
-                "the save carries no state for contract '{id}', which this build's \
-                 data/contracts.ron defines — the contract board changed under this save"
+                "the save lists contract '{id}' as active twice — a contract can be signed \
+                 once at a time"
             ),
             SaveError::OverCapacity {
                 what,
@@ -604,7 +622,14 @@ impl World {
                     next_delivery_tick: active.next_delivery_tick,
                     deliveries_made: active.deliveries_made,
                     deliveries_missed: active.deliveries_missed,
+                    consecutive_misses: active.consecutive_misses,
                 })
+                .collect(),
+            contracts_lost: self
+                .economy()
+                .losses
+                .iter()
+                .map(|(id, count)| (id.clone(), *count))
                 .collect(),
         }
     }
@@ -774,20 +799,24 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
         })?;
     }
 
-    // The contract board has to match this build's, both ways — see
-    // `SaveError::MissingContract` for why one direction is not enough.
-    for saved in &data.contracts {
-        if world.economy().contract(&saved.id).is_none() {
+    // Every active contract has to be an offer this build's board makes,
+    // and none may be active twice — see `SaveError::UnknownContract` for
+    // why the other direction (an offer the save does not name) is fine.
+    for (i, saved) in data.contracts.iter().enumerate() {
+        if world.economy().board().get(&saved.id).is_none() {
             return Err(SaveError::UnknownContract {
                 id: saved.id.clone(),
             });
         }
-    }
-    for active in &world.economy().contracts {
-        if !data.contracts.iter().any(|c| c.id == active.contract.id) {
-            return Err(SaveError::MissingContract {
-                id: active.contract.id.clone(),
+        if data.contracts[..i].iter().any(|c| c.id == saved.id) {
+            return Err(SaveError::DuplicateContract {
+                id: saved.id.clone(),
             });
+        }
+    }
+    for (id, _) in &data.contracts_lost {
+        if world.economy().board().get(id).is_none() {
+            return Err(SaveError::UnknownContract { id: id.clone() });
         }
     }
     Ok(())
@@ -1054,16 +1083,28 @@ fn restore_ledgers(world: &mut World, data: &SaveData) {
     let contracts = data.contracts.clone();
     let economy = world.economy_mut();
     economy.delivery_buffer = Inventory::restore(u32::MAX, delivery_stock);
+    // The active list is EXACTLY the save's. The empty world was built with
+    // the board's starters running (that is what a new game is); a save
+    // that lost a starter, or signed an offer, says so by listing exactly
+    // what is active, so the starters are cleared rather than merged.
+    economy.contracts.clear();
     for saved in &contracts {
-        let active = economy
-            .contracts
-            .iter_mut()
-            .find(|active| active.contract.id == saved.id)
-            .expect("validate() proved every saved contract id exists");
+        let contract = economy
+            .board()
+            .get(&saved.id)
+            .cloned()
+            .expect("validate() proved every saved contract id is on the board");
+        let mut active = ActiveContract::signed_at(contract, 0);
         active.next_delivery_tick = saved.next_delivery_tick;
         active.deliveries_made = saved.deliveries_made;
         active.deliveries_missed = saved.deliveries_missed;
+        active.consecutive_misses = saved.consecutive_misses;
+        // Board order, not save order — the same insertion signing uses,
+        // so the loaded list's priority is the board's whatever the file
+        // says.
+        economy.insert_in_board_order(active);
     }
+    economy.losses = data.contracts_lost.iter().cloned().collect();
 }
 
 #[cfg(test)]
@@ -1258,17 +1299,112 @@ mod tests {
     }
 
     #[test]
-    fn a_contract_board_that_has_changed_under_the_save_is_refused_both_ways() {
+    fn an_active_contract_the_board_does_not_offer_is_refused_but_an_unsigned_offer_is_not() {
         let mut data = a_save();
         data.contracts[0].id = "midnight_kebab_van".to_string();
         let message = refusal(data);
         assert!(message.contains("midnight_kebab_van"), "{message}");
 
         let mut data = a_save();
-        let dropped = data.contracts.remove(0);
+        data.contracts_lost.push(("midnight_kebab_van".to_string(), 1));
         let message = refusal(data);
-        assert!(message.contains(&dropped.id), "{message}");
-        assert!(message.contains("carries no state"), "{message}");
+        assert!(message.contains("midnight_kebab_van"), "{message}");
+
+        // The other direction: a save that names NO active contract is a
+        // player who lost their starter and has not re-signed it — it loads,
+        // and it loads with nothing active rather than with the starters
+        // quietly re-activated.
+        let mut data = a_save();
+        data.contracts.clear();
+        let world = load(data).expect("an empty active list is a legal state");
+        assert!(world.economy().contracts.is_empty());
+        assert!(
+            world.economy().board().len() > 0,
+            "the board is content and is still there to sign from"
+        );
+    }
+
+    #[test]
+    fn the_same_contract_active_twice_is_refused() {
+        let mut data = a_save();
+        let dup = data.contracts[0].clone();
+        data.contracts.push(dup);
+        let message = refusal(data);
+        assert!(message.contains("twice"), "{message}");
+    }
+
+    #[test]
+    fn signed_lost_and_strike_state_survives_a_round_trip_in_board_order() {
+        let mut world = reference_chain(recipes());
+        world.restore_money(Fx::from_num(1000));
+        // Sign every offer, so the active list is longer than the starters.
+        let ids: Vec<String> = world
+            .economy()
+            .board()
+            .ordered()
+            .iter()
+            .map(|c| c.id.clone())
+            .collect();
+        for id in ids.iter().rev() {
+            let _ = world.economy_mut().try_sign(id, 0);
+        }
+        let board_order: Vec<String> = world
+            .economy()
+            .contracts
+            .iter()
+            .map(|c| c.contract.id.clone())
+            .collect();
+        assert_eq!(board_order, ids, "signing in reverse still yields board order");
+        // Nothing is ever delivered, so every contract is missing windows.
+        // Run until exactly the quickest-to-lose offer is gone (the one
+        // with the smallest cadence x strikes), which leaves the others
+        // active — some of them with a strike on the record.
+        let last = world
+            .economy()
+            .board()
+            .ordered()
+            .iter()
+            .min_by_key(|c| c.cadence_ticks * u64::from(c.strikes))
+            .unwrap()
+            .clone();
+        for _ in 0..(last.cadence_ticks * u64::from(last.strikes) + 1) {
+            world.tick();
+        }
+        assert!(!world.economy().is_active(&last.id), "the fixture must have lost one");
+        assert_eq!(world.economy().times_lost(&last.id), 1);
+        assert!(
+            !world.economy().contracts.is_empty(),
+            "the fixture must have kept at least one contract active"
+        );
+        let struck: Vec<(String, u32)> = world
+            .economy()
+            .contracts
+            .iter()
+            .map(|c| (c.contract.id.clone(), c.consecutive_misses))
+            .collect();
+        assert!(
+            struck.iter().any(|(_, misses)| *misses > 0),
+            "against the shipped board a surviving contract has a strike by now: {struck:?}"
+        );
+
+        let loaded = World::from_save(world.to_save(), recipes()).expect("must load");
+        let loaded_ids: Vec<String> = loaded
+            .economy()
+            .contracts
+            .iter()
+            .map(|c| c.contract.id.clone())
+            .collect();
+        let expected: Vec<String> = ids.iter().filter(|id| **id != last.id).cloned().collect();
+        assert_eq!(loaded_ids, expected, "exactly the saved active set, in board order");
+        assert_eq!(loaded.economy().times_lost(&last.id), 1);
+        let loaded_struck: Vec<(String, u32)> = loaded
+            .economy()
+            .contracts
+            .iter()
+            .map(|c| (c.contract.id.clone(), c.consecutive_misses))
+            .collect();
+        assert_eq!(loaded_struck, struck, "strike counts come back exactly");
+        assert_eq!(loaded.to_save(), world.to_save(), "and a second save is identical");
     }
 
     #[test]

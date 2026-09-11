@@ -926,6 +926,71 @@ var _market_money_label: Label
 ## {id, button, icon, price_label, owned_label}.
 var _market_slots: Array = []
 var _market_open := false
+
+# --- The contracts board (the contract-board epic, 2026-09-10) -------------
+# `data/contracts.ron` is a board of OFFERS since its schema 2: a new game
+# runs only its starter, and every other contract is SIGNED here for its
+# price. A contract that misses its strikes in a row is LOST and comes back
+# here to be signed again, at the same price. Built from
+# `economy_snapshot_json`'s `board` array the way the build menu is built
+# from `shop_snapshot_json`'s entries: one row per offer, in file (=
+# priority) order, nothing hardcoded — a fifth contract in the file is a
+# fifth row with no Godot edit.
+#
+# It is a dark-plate MENU (opened on C, centred above the hotbar like the
+# build menu and the market) whose rows are paper dockets: the plate is menu
+# chrome, an offer is an order, and UI_UX.md §5 reserves the paper for
+# exactly that. It is a menu rather than a section of the clipboard because
+# the clipboard is what is RUNNING and this is what is FOR SALE; putting a
+# SIGN button on the board of running orders would make every docket look
+# like a thing to click.
+var _board_panel: PanelContainer
+var _board_money_label: Label
+var _board_scroll: ScrollContainer
+var _board_box: VBoxContainer
+var _board_rows: Array = [] # Array[Dictionary], see _build_contract_board_row
+var _board_row_ids: Array = []
+var _board_open := false
+## The active contract ids the clipboard saw on its last poll. The wire has
+## no "contract lost" event — a lost contract simply stops being listed and
+## reads `active: false` on the board — so the announcement is a diff of two
+## polls. `_known_active_primed` is false until the first poll after a scene
+## build, so a loaded save's missing contracts are not announced as losses.
+var _known_active_contract_ids: Array = []
+var _known_active_primed := false
+## The one-line announcement under the top edge ("✗ CONTRACT LOST: ...",
+## "✔ SIGNED: ..."). Held, then faded, like the hotbar's name flyout — the
+## same idiom because it is the same kind of thing: a sentence about what
+## just changed, gone once it has been read.
+var _contract_notice: Label
+var _contract_notice_until_msec := 0
+const CONTRACT_NOTICE_HOLD_MSEC := 6000
+const CONTRACT_NOTICE_FADE_MSEC := 900
+## A docket is AT RISK once this much of its window has passed unfilled. Half:
+## early enough that a player can still do something about it, late enough
+## that a freshly-started window is not shouting.
+const CONTRACT_RISK_FRACTION := 0.5
+## The docket's state colours (UI_UX.md §7: saturated colour is meaning, and
+## never alone — every use below sits beside a glyph and a word). A docket
+## is paper and ink plus the two colours it already has: the checkbox's own
+## "done" green for READY, and ONE warning red for both AT RISK and LAST
+## CHANCE — the two are told apart by their words, their border weight and
+## the strike pips, not by a third hue the clipboard does not own.
+const CONTRACT_READY_COLOR := Color(0.24, 0.42, 0.24, 1.0)
+const CONTRACT_RISK_COLOR := Color(0.70, 0.20, 0.14, 1.0)
+const CONTRACT_LAST_CHANCE_COLOR := Color(0.70, 0.20, 0.14, 1.0)
+## The window bar: how much of the current cadence window has elapsed, as a
+## POSITION under the checklist (a countdown in words is beside it).
+const CONTRACT_BAR_HEIGHT := 7.0
+var _contract_card_style_ready: StyleBoxFlat
+var _contract_card_style_risk: StyleBoxFlat
+var _contract_card_style_last_chance: StyleBoxFlat
+var _contract_warn_settings: LabelSettings
+var _contract_ready_settings: LabelSettings
+var _contract_empty_label: Label
+var _contract_hint_label: Label
+var _strike_style_empty: StyleBoxFlat
+var _strike_style_struck: StyleBoxFlat
 ## How many units one click buys. TEN, not one: the crusher eats four
 ## tomatoes per craft and a hopper holds sixty-four, so buying by ones would
 ## be sixteen clicks to fill one bin and the panel would be a chore rather
@@ -2796,8 +2861,8 @@ const CROSSHAIR_THICKNESS := 2.0 * UI_SCALE # px, each bar's width
 ## listed here or it is undiscoverable, whereas a building you can click
 ## announces itself on hover, so the line is a pointer rather than the only
 ## way to find out.
-const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    click a hopper or tank: configure\nWASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
-const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    click a hopper or tank: configure\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
+const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    click a hopper or tank: configure\nWASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
+const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    click a hopper or tank: configure\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
 
 
 ## The tile box the isometric camera frames at startup: whatever is placed,
@@ -3273,6 +3338,7 @@ func _build_ui() -> void:
 	# voxel-rendered icon slots." Hidden until E is pressed.
 	_build_shop_menu(hud, settings)
 	_build_ingredient_market(hud, settings)
+	_build_contract_board(hud, settings)
 
 	# UI_UX.md §5's LAST unbuilt named widget: "a Minecraft-style hotbar/
 	# quick-access strip along one screen edge." Always visible, unlike the
@@ -3446,6 +3512,29 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_checkbox_style_checked.border_color = Color(0.27, 0.29, 0.32, 1.0)
 	_checkbox_style_checked.set_border_width_all(_ui_i(2))
 
+	# Strike pips: the checkbox's geometry at half size, and the checkbox's
+	# paper when empty; struck ones fill with the clipboard's one red. A
+	# strike is the OPPOSITE of a tick, drawn in the same language.
+	_strike_style_empty = StyleBoxFlat.new()
+	_strike_style_empty.bg_color = Color(0.80, 0.74, 0.57, 1.0)
+	_strike_style_empty.border_color = Color(0.27, 0.29, 0.32, 1.0)
+	_strike_style_empty.set_border_width_all(_ui_i(2))
+	_strike_style_struck = StyleBoxFlat.new()
+	_strike_style_struck.bg_color = CONTRACT_LAST_CHANCE_COLOR
+	_strike_style_struck.border_color = Color(0.27, 0.29, 0.32, 1.0)
+	_strike_style_struck.set_border_width_all(_ui_i(2))
+
+	# The two inks a docket's status line can switch to. Same size as the
+	# body ink, only the colour changes — and only ever beside a glyph.
+	_contract_warn_settings = LabelSettings.new()
+	_contract_warn_settings.font_size = _ui_font()
+	_contract_warn_settings.font_color = CONTRACT_LAST_CHANCE_COLOR
+	_contract_warn_settings.outline_size = 0
+	_contract_ready_settings = LabelSettings.new()
+	_contract_ready_settings.font_size = _ui_font()
+	_contract_ready_settings.font_color = CONTRACT_READY_COLOR
+	_contract_ready_settings.outline_size = 0
+
 	# One docket = the checkbox's own paper tone plus a steel hairline. Reusing
 	# those two existing colours is the point (see this function's header):
 	# separation without a third palette.
@@ -3454,6 +3543,20 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_card_style.border_color = Color(0.47, 0.44, 0.38, 1.0)
 	_contract_card_style.set_border_width_all(_ui_i(1))
 	_contract_card_style.set_content_margin_all(_ui_px(6.0))
+	# The docket's border thickens and takes the state colour when there is
+	# something to say (the contract-board epic): ready, at risk, or one miss
+	# from lost. The paper itself never changes — a red card would read as a
+	# different kind of card; a red RULE around the same card reads as the
+	# same order in trouble.
+	_contract_card_style_ready = _contract_card_style.duplicate()
+	_contract_card_style_ready.border_color = CONTRACT_READY_COLOR
+	_contract_card_style_ready.set_border_width_all(_ui_i(2))
+	_contract_card_style_risk = _contract_card_style.duplicate()
+	_contract_card_style_risk.border_color = CONTRACT_RISK_COLOR
+	_contract_card_style_risk.set_border_width_all(_ui_i(2))
+	_contract_card_style_last_chance = _contract_card_style.duplicate()
+	_contract_card_style_last_chance.border_color = CONTRACT_LAST_CHANCE_COLOR
+	_contract_card_style_last_chance.set_border_width_all(_ui_i(3))
 
 	# The dockets live in a ScrollContainer whose height is capped in
 	# _update_contract_panel — a safety valve for a future contracts.ron with
@@ -3470,11 +3573,49 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_cards_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_contract_cards_scroll.add_child(_contract_cards_box)
 
+	# A board with nothing running says so in a sentence, and says what to do
+	# about it. Since the contract-board epic that is a reachable state — a
+	# player who loses their only contract has no income and no docket, and
+	# an empty paper with a money figure on it would not tell them why.
+	_contract_empty_label = Label.new()
+	_contract_empty_label.name = "NoContracts"
+	_contract_empty_label.label_settings = _contract_ink_settings
+	_contract_empty_label.text = "no contracts — nothing to deliver against\npress C to sign one from the board"
+	_contract_empty_label.visible = false
+	body.add_child(_contract_empty_label)
+
+	# And the way to the board is printed on the clipboard itself, because the
+	# clipboard is where a player looks when they want more orders.
+	_contract_hint_label = Label.new()
+	_contract_hint_label.name = "BoardHint"
+	_contract_hint_label.label_settings = _contract_meta_settings
+	_contract_hint_label.text = "C: contracts board — sign more orders"
+	body.add_child(_contract_hint_label)
+
 	# One docket per active contract, read live from economy_snapshot_json
 	# rather than assumed — nothing here hardcodes how many contracts exist,
 	# what they ask for, or what they pay.
 	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
 	_rebuild_contract_cards(econ.get("contracts", []))
+	_known_active_contract_ids.clear()
+	_known_active_primed = false
+
+	# The announcement line: a lone outlined label along the top edge, in the
+	# HUD's own hazard accent, that the clipboard's poll fills when a contract
+	# is signed or lost. In the HUD layer, not the panel, so it can sit over
+	# the middle of the screen where a player mid-build is looking.
+	var notice_settings := LabelSettings.new()
+	notice_settings.font_size = _ui_font(3)
+	notice_settings.font_color = Color(0.98, 0.85, 0.42)
+	notice_settings.outline_size = _ui_i(6)
+	notice_settings.outline_color = Color(0, 0, 0, 0.9)
+	_contract_notice = Label.new()
+	_contract_notice.name = "ContractNotice"
+	_contract_notice.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_contract_notice.label_settings = notice_settings
+	_contract_notice.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_contract_notice.modulate = Color(1, 1, 1, 0)
+	hud.add_child(_contract_notice)
 
 	# Anchored to the top-right corner with a fixed margin, sized to its own
 	# content — independent of however tall the machine-line panel ends up
@@ -3552,6 +3693,39 @@ func _build_contract_card(contract: Dictionary) -> Dictionary:
 		var required: int = int(pair[1])
 		rows[item_id] = _build_contract_checklist_row(card_body, item_id, required)
 
+	# How well the window is being filled, in words, and the window itself as
+	# a bar (the contract-board epic). These two lines are the docket's answer
+	# to "am I going to make this delivery" — the checklist above says what is
+	# in, this says what is short and how much time is left to fix it.
+	var status_label := Label.new()
+	status_label.name = "Status"
+	status_label.label_settings = _contract_ink_settings
+	card_body.add_child(status_label)
+
+	var window_track := _build_contract_bar(card_body)
+
+	# Strikes: one pip per miss the contract forgives, filled as misses run,
+	# with the rule in words beside them. A contract's strikes are content, so
+	# the row is as long as `contracts.ron` says.
+	var strike_row := HBoxContainer.new()
+	strike_row.name = "Strikes"
+	strike_row.add_theme_constant_override("separation", _ui_i(4))
+	card_body.add_child(strike_row)
+	var strike_pips: Array = []
+	for i in range(max(1, int(contract.get("strikes", 1)))):
+		var pip := Panel.new()
+		pip.name = "strike_%d" % i
+		pip.custom_minimum_size = _ui_v(Vector2(10, 10))
+		pip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		pip.add_theme_stylebox_override("panel", _strike_style_empty)
+		pip.set_meta("struck", false)
+		strike_row.add_child(pip)
+		strike_pips.append(pip)
+	var strike_label := Label.new()
+	strike_label.name = "StrikeLabel"
+	strike_label.label_settings = _contract_meta_settings
+	strike_row.add_child(strike_label)
+
 	var meta_label := Label.new()
 	meta_label.label_settings = _contract_meta_settings
 	card_body.add_child(meta_label)
@@ -3562,6 +3736,11 @@ func _build_contract_card(contract: Dictionary) -> Dictionary:
 		"name_label": name_label,
 		"payout_label": payout_label,
 		"meta_label": meta_label,
+		"status_label": status_label,
+		"window_track": window_track,
+		"strike_pips": strike_pips,
+		"strike_label": strike_label,
+		"state": "",
 		"rows": rows,
 	}
 
@@ -4085,7 +4264,7 @@ func _update_crosshair_visibility() -> void:
 	if _crosshair == null:
 		return
 	_crosshair.visible = (_view_mode == ViewMode.FIRST_PERSON
-			and not _shop_open and not _market_open and not _pause_open
+			and not _shop_open and not _market_open and not _board_open and not _pause_open
 			and not _config_open)
 
 
@@ -4385,6 +4564,458 @@ func _set_market_open(open: bool) -> void:
 
 func _toggle_market() -> void:
 	_set_market_open(not _market_open)
+
+
+# --------------------------------------------------------------------------
+# The contracts board (the contract-board epic) — see `_board_panel`'s doc
+# --------------------------------------------------------------------------
+
+## Builds the board menu. The market's shape (dark plate, heading and balance
+## on one row, a footer naming the verbs) with a scrolling column of paper
+## offer dockets between them. Rows come from `economy_snapshot_json`'s
+## `board`, in file order.
+func _build_contract_board(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.06, 0.06, 0.07, 0.94)
+	panel_style.border_color = Color(0.85, 0.63, 0.11, 0.95)
+	panel_style.border_width_top = _ui_i(4)
+	panel_style.border_width_left = _ui_i(2)
+	panel_style.border_width_right = _ui_i(2)
+	panel_style.border_width_bottom = _ui_i(2)
+	panel_style.set_content_margin_all(_ui_px(16.0))
+
+	# Cleared, never appended to — `_ready()` runs twice under the headless
+	# harness (see `_build_ingredient_market`).
+	_board_rows.clear()
+	_board_row_ids.clear()
+
+	_board_panel = PanelContainer.new()
+	_board_panel.name = "ContractBoard"
+	_board_panel.add_theme_stylebox_override("panel", panel_style)
+	_board_panel.visible = false
+	hud.add_child(_board_panel)
+
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", _ui_i(10))
+	_board_panel.add_child(body)
+
+	var title_settings := LabelSettings.new()
+	title_settings.font_size = _ui_font(4)
+	title_settings.font_color = base_settings.font_color
+	title_settings.outline_size = base_settings.outline_size
+	title_settings.outline_color = base_settings.outline_color
+
+	var heading := HBoxContainer.new()
+	heading.add_theme_constant_override("separation", _ui_i(16))
+	body.add_child(heading)
+
+	var title := Label.new()
+	title.label_settings = title_settings
+	title.text = "CONTRACTS BOARD"
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	heading.add_child(title)
+
+	# Money on the menu where the decision is made, for `_build_shop_menu`'s
+	# reason: "can I afford this signature" should not need a glance across
+	# the screen.
+	var money_settings := LabelSettings.new()
+	money_settings.font_size = _ui_font(6)
+	money_settings.font_color = Color(0.98, 0.85, 0.42)
+	money_settings.outline_size = base_settings.outline_size
+	money_settings.outline_color = base_settings.outline_color
+
+	_board_money_label = Label.new()
+	_board_money_label.label_settings = money_settings
+	_board_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	heading.add_child(_board_money_label)
+
+	_board_scroll = ScrollContainer.new()
+	_board_scroll.name = "BoardScroll"
+	_board_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_board_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	body.add_child(_board_scroll)
+
+	_board_box = VBoxContainer.new()
+	_board_box.name = "BoardRows"
+	_board_box.add_theme_constant_override("separation", _ui_i(6))
+	_board_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_board_scroll.add_child(_board_box)
+
+	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
+	_rebuild_board_rows(econ.get("board", []))
+
+	var footer := Label.new()
+	footer.label_settings = base_settings
+	footer.text = "click SIGN to take an order — one of each, never two\nmiss its strikes in a row and it is lost: it comes back here to be signed again    C/ESC: close"
+	body.add_child(footer)
+
+	_position_contract_board()
+
+
+## Centred in the space above the hotbar, by `_position_shop_menu`'s
+## arithmetic and for its reason (the footer must stay on screen).
+func _position_contract_board() -> void:
+	if _board_panel == null:
+		return
+	_board_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
+	var vp := get_viewport()
+	if vp == null:
+		return
+	var reserved := _hotbar_reserved_height()
+	var bounds := vp.get_visible_rect().size
+	_fit_grid_scroll(_board_scroll, _board_box, bounds.y - reserved - _ui_px(16.0))
+	var panel_size := _board_panel.get_combined_minimum_size()
+	_board_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
+
+
+## Rebuilds the offer rows from a `board` array. The board is content and
+## never changes length at runtime, but it is rebuilt through the same guard
+## the clipboard uses so a content change cannot leave stale rows behind.
+func _rebuild_board_rows(board: Array) -> void:
+	for row in _board_rows:
+		var panel: Node = row["panel"]
+		if is_instance_valid(panel):
+			if panel.get_parent() != null:
+				panel.get_parent().remove_child(panel)
+			panel.queue_free()
+	_board_rows.clear()
+	_board_row_ids.clear()
+	for index in range(board.size()):
+		_board_rows.append(_build_contract_board_row(board[index], index))
+		_board_row_ids.append(String(board[index].get("id", "")))
+
+
+func _board_rows_match(board: Array) -> bool:
+	if board.size() != _board_row_ids.size():
+		return false
+	for i in range(board.size()):
+		if String(board[i].get("id", "")) != String(_board_row_ids[i]):
+			return false
+	return true
+
+
+## One offer: a paper docket (the clipboard's card style — an offer is an
+## order that is not yet yours) with the terms in words and one SIGN button.
+## Returns `{"id", "panel", "name_label", "terms_label", "status_label",
+## "sign_button"}` for `_update_contract_board` to drive.
+func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
+	var panel := PanelContainer.new()
+	panel.name = "Offer_%s" % String(offer.get("id", "?"))
+	panel.add_theme_stylebox_override("panel", _contract_card_style)
+	_board_box.add_child(panel)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", _ui_i(12))
+	panel.add_child(row)
+
+	var text_col := VBoxContainer.new()
+	text_col.add_theme_constant_override("separation", _ui_i(3))
+	text_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(text_col)
+
+	var name_label := Label.new()
+	name_label.name = "OfferName"
+	name_label.label_settings = _contract_name_settings
+	name_label.text = String(offer.get("name", offer.get("id", "?")))
+	text_col.add_child(name_label)
+
+	# The mix, with the item's real icon (UI_UX.md §5) and its display name,
+	# then the cadence, the payout and the strike rule — every term a player
+	# is agreeing to, on the offer, before they click.
+	var mix_row := HBoxContainer.new()
+	mix_row.add_theme_constant_override("separation", _ui_i(6))
+	text_col.add_child(mix_row)
+	var parts: Array = []
+	for pair in offer.get("mix", []):
+		var item_id: String = String(pair[0])
+		var icon := TextureRect.new()
+		icon.custom_minimum_size = _ui_v(Vector2(16, 16))
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.texture = _icon_for(item_id)
+		mix_row.add_child(icon)
+		parts.append("%d × %s" % [int(pair[1]), _item_display_name(item_id)])
+	var terms_label := Label.new()
+	terms_label.name = "OfferTerms"
+	terms_label.label_settings = _contract_ink_settings
+	terms_label.text = "%s every %d ticks  ·  pays +%d  ·  lost after %d missed in a row" % [
+		", ".join(PackedStringArray(parts)),
+		int(offer.get("cadence_ticks", 0)),
+		int(offer.get("payout", 0)),
+		int(offer.get("strikes", 1)),
+	]
+	mix_row.add_child(terms_label)
+
+	var status_label := Label.new()
+	status_label.name = "OfferStatus"
+	status_label.label_settings = _contract_meta_settings
+	text_col.add_child(status_label)
+
+	var sign_button := Button.new()
+	sign_button.name = "Sign_%s" % String(offer.get("id", "?"))
+	sign_button.focus_mode = Control.FOCUS_NONE
+	sign_button.custom_minimum_size = _ui_v(Vector2(128, 44))
+	sign_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	sign_button.add_theme_font_size_override("font_size", _ui_font(1))
+	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+		sign_button.add_theme_stylebox_override(state, _shop_slot_style(state))
+	sign_button.pressed.connect(_sign_contract_offer.bind(index))
+	row.add_child(sign_button)
+
+	return {
+		"id": String(offer.get("id", "")),
+		"panel": panel,
+		"name_label": name_label,
+		"terms_label": terms_label,
+		"status_label": status_label,
+		"sign_button": sign_button,
+	}
+
+
+## Reads the board off the economy snapshot and drives every row: the button
+## says what a click will do (SIGN · price), or why it will do nothing
+## (SIGNED — one of each; ✗ — the fee is more than the balance), with the
+## same three never-colour-alone signals the build menu uses.
+func _update_contract_board() -> void:
+	if _board_panel == null:
+		return
+	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
+	var board: Array = econ.get("board", [])
+	if not _board_rows_match(board):
+		_rebuild_board_rows(board)
+	_board_money_label.text = "Money: %.0f" % float(econ.get("money", 0.0))
+
+	for i in range(min(board.size(), _board_rows.size())):
+		var offer: Dictionary = board[i]
+		var row: Dictionary = _board_rows[i]
+		var price: int = int(offer.get("price", 0))
+		var active: bool = bool(offer.get("active", false))
+		var affordable: bool = bool(offer.get("affordable", false))
+		var lost: int = int(offer.get("times_lost", 0))
+		var button: Button = row["sign_button"]
+		var status: Label = row["status_label"]
+		var lost_note := ""
+		if lost > 0:
+			lost_note = "  ·  lost %d time%s before" % [lost, "" if lost == 1 else "s"]
+		if active:
+			button.text = "SIGNED"
+			button.disabled = true
+			status.text = "✔ signed and running — it is on your clipboard" + lost_note
+			row["panel"].add_theme_stylebox_override("panel", _contract_card_style_ready)
+		elif not affordable:
+			button.text = "✗ SIGN · %d" % price
+			button.disabled = true
+			status.text = "✗ can't afford — the signature costs %d" % price + lost_note
+			row["panel"].add_theme_stylebox_override("panel", _contract_card_style)
+		else:
+			button.text = "SIGN · %d" % price
+			button.disabled = false
+			if lost > 0:
+				status.text = "✗ LOST — sign it again for %d" % price + lost_note
+				row["panel"].add_theme_stylebox_override("panel", _contract_card_style_last_chance)
+			else:
+				status.text = "available — %d to sign" % price
+				row["panel"].add_theme_stylebox_override("panel", _contract_card_style)
+	_position_contract_board()
+
+
+## Signs one offer. A refused signature (already held, unaffordable) is a
+## silent no-op in the simulation, so the only thing to do afterwards is
+## re-read — the clipboard too, so the new docket appears on the same frame.
+func _sign_contract_offer(index: int) -> void:
+	if index < 0 or index >= _board_rows.size():
+		return
+	sim.issue_command_json(JSON.stringify({
+		"type": "sign_contract",
+		"id": String(_board_rows[index]["id"]),
+	}))
+	_update_contract_board()
+	_update_contract_panel()
+
+
+func _set_contract_board_open(open: bool) -> void:
+	if _board_panel == null or open == _board_open:
+		return
+	if open:
+		_close_config_panel() # see `_set_shop_menu_open`
+	_board_open = open
+	_board_panel.visible = open
+	if open:
+		_update_contract_board()
+	if _view_mode == ViewMode.FIRST_PERSON:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
+	_update_crosshair_visibility()
+
+
+func _toggle_contract_board() -> void:
+	_set_contract_board_open(not _board_open)
+
+
+## The pure half of a docket's status (the contract-board epic): how far
+## through its window a contract is, how many units it is short, and which
+## of four states that puts it in —
+##
+##   "ready"        the pool holds the whole mix; the next check pays
+##   "last_chance"  short, and the next miss loses the contract
+##   "risk"         short, with CONTRACT_RISK_FRACTION of the window gone
+##   "ok"           short, but early in the window
+##
+## `satisfied` is the simulation's own all-or-nothing verdict (the wire
+## carries it so the two can never disagree); everything else is arithmetic
+## on the same snapshot the docket draws from. Returns
+## `{"level", "elapsed", "short", "satisfied"}`.
+func _contract_risk_for(contract: Dictionary, current_tick: int) -> Dictionary:
+	var cadence: int = max(1, int(contract.get("cadence_ticks", 1)))
+	var next_tick: int = int(contract.get("next_delivery_tick", 0))
+	var start: int = int(contract.get("window_start_tick", next_tick - cadence))
+	var elapsed := clampf(float(current_tick - start) / float(cadence), 0.0, 1.0)
+	var short := 0
+	var mix: Array = contract.get("mix", [])
+	var progress: Array = contract.get("progress", [])
+	for i in range(mix.size()):
+		var have: int = int(progress[i][1]) if i < progress.size() else 0
+		short += max(0, int(mix[i][1]) - have)
+	var satisfied: bool = bool(contract.get("satisfied", short == 0))
+	var misses: int = int(contract.get("consecutive_misses", 0))
+	var strikes: int = max(1, int(contract.get("strikes", 1)))
+	var level := "ok"
+	if satisfied:
+		level = "ready"
+	elif misses + 1 >= strikes:
+		level = "last_chance"
+	elif elapsed >= CONTRACT_RISK_FRACTION:
+		level = "risk"
+	return {"level": level, "elapsed": elapsed, "short": short, "satisfied": satisfied}
+
+
+func _contract_state_color(level: String) -> Color:
+	match level:
+		"ready":
+			return CONTRACT_READY_COLOR
+		"risk":
+			return CONTRACT_RISK_COLOR
+		"last_chance":
+			return CONTRACT_LAST_CHANCE_COLOR
+	return Color(0.34, 0.29, 0.20, 1.0) # the clipboard's meta ink
+
+
+func _contract_card_style_for(level: String) -> StyleBoxFlat:
+	match level:
+		"ready":
+			return _contract_card_style_ready
+		"risk":
+			return _contract_card_style_risk
+		"last_chance":
+			return _contract_card_style_last_chance
+	return _contract_card_style
+
+
+## The docket's window bar: a track in the checkbox's paper tone with a fill
+## that grows as the window elapses. The same explicit-sizing mechanism as
+## the configuration panel's level bar — a headless run never lays a Control
+## out, so an anchored fill would read zero width in exactly the test that
+## checks it moved. Returns the TRACK; the fill is its `Fill` child, and the
+## fraction is recorded on the track as `fraction` so a test can read it.
+func _build_contract_bar(parent: Node) -> Panel:
+	var track_style := StyleBoxFlat.new()
+	track_style.bg_color = Color(0.80, 0.74, 0.57, 1.0)
+	track_style.border_color = Color(0.47, 0.44, 0.38, 1.0)
+	track_style.set_border_width_all(_ui_i(1))
+	var track := Panel.new()
+	track.name = "WindowBar"
+	track.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	track.custom_minimum_size = _ui_v(Vector2(120, CONTRACT_BAR_HEIGHT))
+	track.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	track.add_theme_stylebox_override("panel", track_style)
+	parent.add_child(track)
+
+	var fill_style := StyleBoxFlat.new()
+	fill_style.bg_color = Color(0.34, 0.29, 0.20, 1.0)
+	var fill := Panel.new()
+	fill.name = "Fill"
+	fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fill.add_theme_stylebox_override("panel", fill_style)
+	track.add_child(fill)
+	return track
+
+
+func _set_contract_bar(track: Panel, fraction: float, color: Color) -> void:
+	if track == null:
+		return
+	var fill: Panel = track.get_node_or_null("Fill")
+	if fill == null:
+		return
+	var width: float = track.size.x
+	if width <= 0.0:
+		width = track.custom_minimum_size.x
+	var height: float = track.size.y
+	if height <= 0.0:
+		height = track.custom_minimum_size.y
+	var clamped := clampf(fraction, 0.0, 1.0)
+	fill.position = Vector2.ZERO
+	fill.size = Vector2(width * clamped, height)
+	fill.visible = clamped > 0.0
+	track.set_meta("fraction", clamped)
+	var style: StyleBoxFlat = fill.get_theme_stylebox("panel")
+	if style != null and style.bg_color != color:
+		var recoloured: StyleBoxFlat = style.duplicate()
+		recoloured.bg_color = color
+		fill.add_theme_stylebox_override("panel", recoloured)
+
+
+func _set_strike_pip(pip: Panel, struck: bool) -> void:
+	if bool(pip.get_meta("struck", false)) == struck:
+		return
+	pip.set_meta("struck", struck)
+	pip.add_theme_stylebox_override("panel", _strike_style_struck if struck else _strike_style_empty)
+
+
+## Diffs the active list against the last poll and announces what changed:
+## a contract that vanished was LOST (the simulation drops it the tick its
+## strikes run out), one that appeared was SIGNED. The first poll after a
+## scene build only primes the list, so a loaded save is not read as a
+## string of losses.
+func _announce_contract_changes(contracts: Array, board: Array) -> void:
+	var ids: Array = []
+	for contract in contracts:
+		ids.append(String(contract.get("id", "")))
+	if _known_active_primed:
+		for id in _known_active_contract_ids:
+			if not ids.has(id):
+				_show_contract_notice("✗ CONTRACT LOST: %s — sign it again on the board (C)" % _board_name_for(String(id), board))
+		for id in ids:
+			if not _known_active_contract_ids.has(id):
+				_show_contract_notice("✔ SIGNED: %s" % _board_name_for(String(id), board))
+	_known_active_contract_ids = ids
+	_known_active_primed = true
+
+
+func _board_name_for(id: String, board: Array) -> String:
+	for offer in board:
+		if String(offer.get("id", "")) == id:
+			return String(offer.get("name", id))
+	return id
+
+
+func _show_contract_notice(text: String) -> void:
+	if _contract_notice == null:
+		return
+	_contract_notice.text = text
+	_contract_notice_until_msec = Time.get_ticks_msec() + CONTRACT_NOTICE_HOLD_MSEC
+	_contract_notice.modulate = Color(1, 1, 1, 1)
+	_contract_notice.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_MINSIZE, _ui_i(18))
+
+
+func _update_contract_notice() -> void:
+	if _contract_notice == null:
+		return
+	var remaining := _contract_notice_until_msec - Time.get_ticks_msec()
+	if remaining >= 0:
+		_contract_notice.modulate = Color(1, 1, 1, 1)
+	elif remaining > -CONTRACT_NOTICE_FADE_MSEC:
+		_contract_notice.modulate = Color(1, 1, 1, 1.0 + float(remaining) / float(CONTRACT_NOTICE_FADE_MSEC))
+	else:
+		_contract_notice.modulate = Color(1, 1, 1, 0)
 
 
 ## The larder strip: one chip per raw ingredient, above the hotbar. Built
@@ -4839,7 +5470,7 @@ func _close_config_panel() -> void:
 	_config_kind = ""
 	if _config_panel != null:
 		_config_panel.visible = false
-	if _view_mode == ViewMode.FIRST_PERSON and not _shop_open and not _market_open:
+	if _view_mode == ViewMode.FIRST_PERSON and not _shop_open and not _market_open and not _board_open:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_update_crosshair_visibility()
 
@@ -4899,7 +5530,7 @@ func _config_click_at_tile(tile: Vector2i) -> void:
 func _update_config_panel() -> void:
 	if not _config_open or _config_panel == null:
 		return
-	if _shop_open or _market_open or _in_build_mode():
+	if _shop_open or _market_open or _board_open or _in_build_mode():
 		_close_config_panel()
 		return
 	var placement := _placement_at_tile(_config_tile)
@@ -5723,6 +6354,7 @@ func _enter_build_mode(kind: String) -> void:
 	_close_config_panel()
 	_set_shop_menu_open(false)
 	_set_market_open(false)
+	_set_contract_board_open(false)
 	# A hopper carries a choice as well as a facing, so the legal choices are
 	# repolled on entry (the list is the simulation's, and content can change
 	# it). The ghost takes the first of them; changing it is the placed
@@ -5806,6 +6438,7 @@ func _close_all_overlays() -> void:
 	_close_config_panel()
 	_set_shop_menu_open(false)
 	_set_market_open(false)
+	_set_contract_board_open(false)
 	_exit_build_mode()
 
 
@@ -5815,7 +6448,7 @@ func _close_all_overlays() -> void:
 ## player is in, and putting it down should be the first press, not the
 ## second.
 func _anything_open() -> bool:
-	return _shop_open or _market_open or _in_build_mode()
+	return _shop_open or _market_open or _board_open or _in_build_mode()
 
 
 func _in_build_mode() -> bool:
@@ -6626,6 +7259,9 @@ func _process(delta: float) -> void:
 	_update_larder()
 	if _market_open:
 		_update_ingredient_market()
+	if _board_open:
+		_update_contract_board()
+	_update_contract_notice()
 	# The ghost cannot be up while paused at all — build mode counts as
 	# "open", so ESC puts it down before it opens the panel — but the hover
 	# tooltip would otherwise keep answering questions about whatever tile
@@ -6708,7 +7344,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		# "so a future click-to-build has nothing to fight with". It does
 		# nothing outside build mode, so nothing that used to work changed.
 		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed \
-				and not _shop_open and not _market_open:
+				and not _shop_open and not _market_open and not _board_open:
 			if _in_build_mode():
 				_confirm_build()
 			else:
@@ -6747,7 +7383,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if _view_mode == ViewMode.ISOMETRIC:
 			if _iso_dragging:
 				_apply_drag_pan(event.relative)
-		elif not _shop_open and not _market_open:
+		elif not _shop_open and not _market_open and not _board_open:
 			# With either shop panel up in first-person the mouse is visible
 			# and is being used to click slots — swinging the camera with it
 			# too would make the panel unusable.
@@ -6777,6 +7413,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			# reason: one modal screen at a time, so ESC and a second press
 			# of either key always leave the player somewhere definite.
 			_set_market_open(false)
+			_set_contract_board_open(false)
 		_toggle_shop_menu()
 		return
 
@@ -6789,7 +7426,23 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not _market_open:
 			_exit_build_mode()
 			_set_shop_menu_open(false)
+			_set_contract_board_open(false)
 		_toggle_market()
+		return
+
+	# C opens the CONTRACTS BOARD — where orders are signed, and signed again
+	# after being lost (the contract-board epic). The delivery-dock ticket
+	# freed this key ("collect") and left it unbound so a stale habit did
+	# nothing surprising; a board of contracts is its natural meaning, and
+	# opening a menu changes nothing in the simulation, which is what
+	# test_interaction.gd still asserts of the key. One modal at a time, as
+	# E and M already are with each other.
+	if event.keycode == KEY_C:
+		if not _board_open:
+			_exit_build_mode()
+			_set_shop_menu_open(false)
+			_set_market_open(false)
+		_toggle_contract_board()
 		return
 
 	# **Q IS GONE** (the click-to-configure ticket). It cycled a hopper's
@@ -7391,7 +8044,7 @@ func _dock_hover_text(origin_key: String, direction: String) -> String:
 func _update_hover_tooltip() -> void:
 	if _hover_tooltip == null:
 		return
-	if _shop_open or _market_open or _pause_open or _config_open or _in_build_mode():
+	if _shop_open or _market_open or _board_open or _pause_open or _config_open or _in_build_mode():
 		# The build menu sits over the middle of the screen; a world tooltip
 		# chasing the cursor across it would just be two panels fighting. And
 		# in build mode the placement prompt is already the panel by the
@@ -7452,8 +8105,13 @@ func _update_contract_panel() -> void:
 	_update_contract_dock(econ.get("delivery_stock", []))
 
 	var contracts: Array = econ.get("contracts", [])
+	_announce_contract_changes(contracts, econ.get("board", []))
 	if not _contract_cards_match(contracts):
 		_rebuild_contract_cards(contracts)
+	# Nothing running is a real state now (the contract-board epic): say so,
+	# and hide the empty stack rather than leaving a zero-height scroller.
+	_contract_empty_label.visible = contracts.is_empty()
+	_contract_cards_scroll.visible = not contracts.is_empty()
 
 	var current_tick: int = sim.current_tick()
 	for i in range(min(contracts.size(), _contract_cards.size())):
@@ -7596,6 +8254,49 @@ func _update_contract_card(card: Dictionary, contract: Dictionary, current_tick:
 		int(contract.get("deliveries_made", 0)),
 		int(contract.get("deliveries_missed", 0)),
 	]
+
+	# How well the window is being filled, and whether the contract is in
+	# danger (the contract-board epic). Every state is a glyph, words, a bar
+	# position and a border colour together — never the colour alone
+	# (UI_UX.md §7). `_contract_risk_for` is the pure half the test drives.
+	var risk := _contract_risk_for(contract, current_tick)
+	var level: String = risk["level"]
+	var short: int = risk["short"]
+	var percent: int = int(round(float(risk["elapsed"]) * 100.0))
+	var status: Label = card["status_label"]
+	match level:
+		"ready":
+			status.text = "✔ READY — pays +%d at the next check" % int(contract.get("payout", 0))
+			status.label_settings = _contract_ready_settings
+		"last_chance":
+			status.text = "⚠ LAST CHANCE — %d short; miss this check and it is LOST" % short
+			status.label_settings = _contract_warn_settings
+		"risk":
+			status.text = "⚠ AT RISK — %d short, %d%% of the window gone" % [short, percent]
+			status.label_settings = _contract_warn_settings
+		_:
+			status.text = "%d short — %d%% of the window gone" % [short, percent]
+			status.label_settings = _contract_ink_settings
+	_set_contract_bar(card["window_track"], float(risk["elapsed"]), _contract_state_color(level))
+	if String(card.get("state", "")) != level:
+		card["state"] = level
+		card["panel"].add_theme_stylebox_override("panel", _contract_card_style_for(level))
+
+	var misses: int = int(contract.get("consecutive_misses", 0))
+	var strikes: int = max(1, int(contract.get("strikes", 1)))
+	var pips: Array = card["strike_pips"]
+	for i in range(pips.size()):
+		_set_strike_pip(pips[i], i < misses)
+	var strike_label: Label = card["strike_label"]
+	if misses <= 0:
+		strike_label.text = "no strikes · lost after %d missed in a row" % strikes
+		strike_label.label_settings = _contract_meta_settings
+	elif misses + 1 >= strikes:
+		strike_label.text = "✗ %d of %d strikes — one more miss loses it" % [misses, strikes]
+		strike_label.label_settings = _contract_warn_settings
+	else:
+		strike_label.text = "✗ %d of %d strikes" % [misses, strikes]
+		strike_label.label_settings = _contract_warn_settings
 
 
 ## Swaps a checklist box's style (and its tick-mark visibility) between the
