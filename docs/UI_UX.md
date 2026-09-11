@@ -515,6 +515,35 @@ hides every event that produced it.
 - **Juice stays legible over spectacle**: short clear bursts, readable with
   dozens at once.
 
+### 6a. Earning money — the one moment the game celebrates (built 2026-09-11)
+
+Money arrives through exactly one channel: a contract settling at its cadence
+boundary. That is rare (cadences are 1000-2500 ticks at 30 Hz), so it gets a
+real celebration, while the frequent moment beneath it — a case landing on
+the dock — gets a small cue. Two sizes of feedback for two frequencies; the
+rare one would be exhausting at the frequent one's rate, and the frequent
+one's cue would be an anticlimax for a payout.
+
+- **A payout fires four things at once** (§7: never one channel alone): a
+  fountain of coins over every dock, the money counter punching up in scale
+  and flashing amber, a "+N" rising out of the money line, and a **PAID**
+  stamp on the docket that paid. Say it in a shape, a position, a colour and
+  a word, and it still reads when the player was looking elsewhere.
+- **A dock arrival gets one small cue**: the arriving case pops in with a
+  short overshoot, and a quiet knock plays. Nothing that competes.
+- **The animation clock is the simulation tick, never wall time.** A pause
+  freezes the celebration for free (§5d: the factory is stopped while this is
+  open), and a screenshot run of a fixed tick count is still reproducible.
+- **Every distance in a 3D burst is measured in `TILE`.** The first render of
+  this had the coin arc in raw world units: a peak a fifth of a tile high and
+  a spread narrower than a coin, so ten coins drew as one lump on the deck.
+  Anything the player compares against the factory is measured in the
+  factory's own unit (§2b point 12 again — headless tests all passed).
+- **Randomness is derived from an index, not from `randf()`.** A fan of
+  coins needs varied heights to read as a fountain rather than a ring, and
+  a deterministic variation gives that without making a review screenshot
+  unrepeatable.
+
 ## 7. Color & readability
 
 - **Base palette is neutral/industrial**: steel greys, concrete, safety
@@ -527,7 +556,21 @@ hides every event that produced it.
 ## 8. What this doc does not cover
 
 Gameplay and balance (GAMEPLAY.md); architecture, rendering pipeline, data
-formats (ARCHITECTURE.md); audio direction (not decided).
+formats (ARCHITECTURE.md).
+
+**Audio direction — decided 2026-09-11**, by building the first sounds (§6a).
+Sound in this game is **feedback, not a soundtrack**: a cue fires because
+something happened that the player needs to know about, and there is no
+ambient bed, no music and no idle machine loop. Every sound is
+**synthesised in GDScript at runtime** into an `AudioStreamWAV`
+(`godot_project/audio.gd`) rather than committed as a `.wav` binary — a
+waveform written as code is diffable, reviewable and tweakable the same way
+`assets/voxels/generators/` makes the models code (§2a point 1), and it is
+deterministic, so a test can assert two renders of a cue are byte-identical.
+A SOUND ON/OFF switch lives on the pause menu. What is still undecided is
+whether a later, larger soundscape (machine loops, room tone) stays
+synthesised or moves to recorded samples; that question lands when there is
+something to loop.
 
 ## 9. Open questions
 

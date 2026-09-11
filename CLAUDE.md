@@ -117,6 +117,10 @@ sauce-factory/
                            #   reserved `autosave` slot)
     main.tscn / main.gd    # the 3D scene: rebuilt from world_layout_json on
                            #   every place/remove/rotate; build mode, hotbar,
+                           #   clipboard, market, pause menu, and the click-to-
+                           #   configure panel on a placed hopper or tank
+    audio.gd               # every sound, SYNTHESISED into AudioStreamWAV at
+                           #   runtime; no .wav binaries. Reached by preload
                            #   clipboard, market, contracts board (C), pause
                            #   menu, and the click-to-configure panel on a
                            #   placed hopper or tank
@@ -134,6 +138,8 @@ sauce-factory/
     verify-core-loop.sh    # cargo test + every headless Godot proof
     build-voxels.sh        # regenerate .vox files + review PNGs
     screenshot-scene.sh    # render main.tscn to PNG (flags: --populate,
+                           #   --contracts, --payout, --stock, --hotbar N,
+                           #   --no-hud, --closeup, --first-person, --stress,
                            #   --contracts, --board, --stock, --hotbar N, --no-hud,
                            #   --closeup, --first-person, --stress,
                            #   --belt-gallery, menu/pause)
@@ -187,6 +193,36 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-11 **Payout feedback — what earning money looks and sounds like.**
+  A payout is detected ENTIRELY in Godot, by polling each contract's
+  `deliveries_made` in `economy_snapshot_json` for a rise: no sim change, no
+  new wire field. The first poll after a rebuild or a load SEEDS silently, so
+  loading a save with 40 deliveries behind it does not throw 40 celebrations.
+  Several windows settling at once, or two contracts paying in one poll, are
+  ONE event whose total is summed. **The clock is `sim.current_tick()`, never
+  `Time.get_ticks_msec()`**: the celebration pauses with the game, stays
+  inside `MAX_TICKS_PER_FRAME`'s byte-identical-screenshot guarantee, and is a
+  pure function a headless test drives by ticking. **Every distance in the
+  burst is a multiple of `TILE`** — the first render caught `COIN_LAUNCH`/
+  `COIN_GRAVITY`/`COIN_SPREAD` in raw world units, which made a 0.2-tile arc
+  and a spread narrower than a coin: ten coins as one gold lump. Coins are a
+  FIXED pool of `COIN_POOL` (24) `MeshInstance3D`s hand-animated on a
+  `Feedback` node at SCENE level (not under `World`, which `_rebuild_world`
+  frees), never `GPUParticles3D`; fan angle and per-coin lift come from the
+  coin's index, never `randf()`, so a burst screenshot is reproducible. The
+  "+N" flyout is a Label parented to the HUD `CanvasLayer`, so nothing sizes
+  it — it sizes itself from `get_minimum_size()` and rises OUT OF the money
+  counter, there being no `PAYOUT_FLYOUT_RISE` of headroom above a top-right
+  clipboard. Both of those were render-found (UI_UX §2b point 12), invisible
+  to every headless assertion. Audio is SYNTHESISED into an
+  `AudioStreamWAV` at runtime (`godot_project/audio.gd`, reached by
+  `preload`, not `class_name`) — no committed `.wav` binaries, deterministic,
+  and it settles UI_UX §8's open audio question as *feedback-only sound,
+  procedurally generated*. A dock arrival gets the small cue (one knock,
+  a case pop); a payout gets the chime, the coins, the money punch and a PAID
+  stamp on the docket that paid. `test_payout_feedback.gd` proves every
+  number; `screenshot-scene.sh --payout` is the one review that can say
+  whether the burst reads as a fountain.
 - 2026-09-11 **Machine animations (UI_UX.md §2b points 27-28).** Every
   processing machine has a MOTION OVERLAY: `<machine>_motion_f0..f3` on the
   body's own footprint, four sibling nodes at the body's position and yaw,

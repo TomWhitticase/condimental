@@ -146,6 +146,10 @@ pub const ASSETS: &[Asset] = &[
     Asset { name: "item_ketchup_pail", build: item_ketchup_pail },
     Asset { name: "item_bottle", build: item_bottle },
     Asset { name: "item_box", build: item_box },
+    // The coin a paid contract throws off the dock (the payout-feedback
+    // ticket). Not an item and not a building — the one asset in this list
+    // that never occupies a tile.
+    Asset { name: "coin", build: coin },
 ];
 
 /// Items are modelled at half a tile so a finished bottle reads as an object
@@ -1360,6 +1364,53 @@ pub fn item_box(p: &Palette) -> VoxModel {
     m.cuboid((9, 12), (2, 2), (4, 8), p.idx("label_cream"));
     m
 }
+
+// ---------------------------------------------------------------------------
+// Payout feedback
+// ---------------------------------------------------------------------------
+
+/// The coin a paid contract throws off the dock ("money feels like money").
+///
+/// Small on purpose — half an item, a quarter of a tile — because a dozen of
+/// these arrive at once and UI_UX.md §6 asks juice to stay legible over
+/// spectacle: a burst of tile-sized coins would hide the factory it is
+/// celebrating.
+///
+/// Two material classes rather than one, in three concentric rings, and both
+/// classes are doing a job. The `brass` ring (class `metal`) is UI_UX.md
+/// §4's deliberate shiny exception and is what makes a coin catch the light
+/// as it tumbles; the lit outer rim and centre pip are `status_amber`
+/// (class `emissive`), for UI_UX.md §2b point 13's reason — both faces this
+/// camera can see are the shadow side, so anything that has to read as a
+/// *signal* rather than as scenery has to emit, and a coin means a contract
+/// just paid. Rings rather than a lit face over a brass rim: at ten voxels
+/// a solid inner disc renders as a square (checked in a preview, twice),
+/// and it is the ring that says "coin" anyway.
+///
+/// The disc's axis is the vox **Y** axis, which the importer maps to world
+/// **+Z** — one of the two directions this camera can see a face from
+/// (§2b point 11) — so a coin at rest shows its face and a coin spun about
+/// world Y flashes edge-on and back. Its centre sits on the volume midline
+/// (`COIN_C`, between voxels 3 and 4) for §2b point 20's reason: `main.gd`
+/// spins these, and an integer-centred axis wobbles off the pivot instead of
+/// turning about it.
+pub fn coin(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([COIN_VOXELS, COIN_VOXELS, COIN_VOXELS]);
+    m.cylinder_y_f((COIN_C, COIN_C), 4.4, (4, 5), p.idx("status_amber"));
+    m.cylinder_y_f((COIN_C, COIN_C), 3.2, (4, 5), p.idx("brass"));
+    m.cylinder_y_f((COIN_C, COIN_C), 1.6, (4, 5), p.idx("status_amber"));
+    m
+}
+
+/// A coin's volume, in voxels: under a third of a tile, well under
+/// [`ITEM_VOXELS`]. Ten rather than eight because eight is where a voxel
+/// disc stops reading as round and starts reading as a square with the
+/// corners knocked off — checked in a preview render, not assumed.
+const COIN_VOXELS: u32 = 10;
+
+/// The midline of that volume — between voxels 4 and 5 (UI_UX.md §2b point
+/// 20). Not 5.
+const COIN_C: f32 = (COIN_VOXELS as f32 - 1.0) / 2.0;
 
 // ---------------------------------------------------------------------------
 // Fluid pipes (milestone 6 — ARCHITECTURE.md §3.4; the shape family is the
@@ -3523,6 +3574,7 @@ const DOCK_CANOPY_FACE_Y: i32 = 44;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::palette::MaterialClass;
 
     fn palette() -> Palette {
         Palette::load()
@@ -4490,6 +4542,41 @@ mod tests {
         }
     }
 
+    /// The coin is round about the volume MIDLINE, not about a voxel
+    /// (UI_UX.md §2b point 20). `main.gd` spins these about world Y as they
+    /// fly, and a disc centred on voxel 4 would orbit its own pivot rather
+    /// than turn on the spot — the same defect that made pipe runs step at
+    /// every joint. A 180° turn is the cheapest complete statement of that
+    /// symmetry: it maps x to `COIN_VOXELS - 1 - x`, so an off-midline disc
+    /// cannot survive it.
+    #[test]
+    fn coin_is_symmetric_about_its_midline() {
+        let coin = coin(&palette());
+        assert_eq!(
+            coin.voxels,
+            coin.rotated_cw(2).voxels,
+            "the coin must be unchanged by a half turn about its own centre"
+        );
+    }
+
+    /// A coin has to be BOTH shiny and lit: the brass rim is UI_UX.md §4's
+    /// metal exception (it catches the light while tumbling) and the amber
+    /// face is §2b point 13's emissive rule (both faces this camera sees are
+    /// the shadow side, and a payout is a signal, not scenery). Losing
+    /// either class would still render a coin-shaped object and still pass
+    /// every structural test, so the split is pinned here.
+    #[test]
+    fn coin_carries_both_a_metal_rim_and_an_emissive_face() {
+        let p = palette();
+        let coin = coin(&p);
+        for class in [MaterialClass::Metal, MaterialClass::Emissive] {
+            assert!(
+                !coin.filter_class(&p, class).is_empty(),
+                "the coin must have voxels in the {:?} class",
+                class
+            );
+        }
+    }
 
     // -----------------------------------------------------------------------
     // Machine motion
