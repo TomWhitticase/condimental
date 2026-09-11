@@ -351,6 +351,50 @@ const MACHINE_MODELS := {
 }
 const MACHINE_MODEL_FALLBACK := "machine"
 
+## Which MOTION OVERLAY draws each kind's moving parts (the machine-animation
+## pass; `assets.rs`'s "Machine motion" section is the other half of this).
+##
+## A machine's body no longer contains the parts that move: the crusher's
+## flywheel spokes and roll teeth, the mixer's ribbon, the bottler's nozzles
+## and capping chuck, the packer's taping carriage are all in a separate
+## model with the same footprint, drawn in `MACHINE_FRAMES` arrangements.
+## This scene stands all of them on the machine's tiles as siblings of the
+## body and shows exactly one — the belt family's own frame mechanism
+## (UI_UX.md §2b point 23) applied to something that is not a tile.
+##
+## Keyed on kind and fallen through exactly like MACHINE_MODELS, for the same
+## load-bearing reason: a kind added to `data/machines.ron` must draw, and
+## must visibly RUN, without a Godot edit first. The fallback overlay is a
+## drive spider on the generic housing's crown.
+const MACHINE_MOTION_MODELS := {
+	"crusher": "machine_crusher_motion",
+	"mixer": "machine_mixer_motion",
+	"cooking_vat": "machine_cooking_vat_motion",
+	"bottler": "machine_bottler_motion",
+	"packer": "machine_packer_motion",
+}
+const MACHINE_MOTION_FALLBACK := "machine_motion"
+
+## Frames in one machine's motion cycle. Mirrors `voxgen`'s `MACHINE_FRAMES`
+## (`assets.rs`); change one, change both.
+const MACHINE_FRAMES := 4
+## Ticks one full motion cycle takes, for EVERY kind.
+##
+## Uniform on purpose, and it is the one number here that is a judgement
+## rather than a fact about the models. A machine's own process length would
+## be the obvious driver — the crusher's 80 ticks against the vat's 240 — but
+## that reads as two factories running at different speeds rather than as one
+## factory with a slow cook in it, and the cook already states its length
+## through the product backing up behind it. So the pace says "working", not
+## "working this fast", and the belt is what carries speed.
+##
+## 30 ticks at TICK_HZ 30 is four frame changes a second, against the belt
+## surface's 2.4 (`BELT_TICKS_PER_TILE` 50 over `BELT_FRAMES` 4). Judged by
+## the numbers rather than by eye, the same way the belt's march was: a
+## mechanism should read as busier than the rubber it feeds, and a fifth of a
+## second a frame is the chunky end of UI_UX.md §6 rather than a blur.
+const MACHINE_TICKS_PER_CYCLE := 30
+
 ## Which machine kinds draw a live PROGRESS GAUGE beside their model, and
 ## which asset that gauge's moving bar is (ARCHITECTURE.md §9 milestone 7).
 ##
@@ -633,6 +677,7 @@ var _machine_states: Dictionary = {} # origin key -> last machine snapshot dict
 var _machine_lamps: Dictionary = {} # origin key -> MeshInstance3D (emissive mesh)
 var _machine_gauges: Dictionary = {} # origin key -> Node3D, the live progress bar (see MACHINE_PROGRESS_GAUGES)
 var _machine_running: Dictionary = {} # origin key -> bool, to avoid redundant swaps
+var _machine_motion: Dictionary = {} # origin key -> {"frames": Array[Node3D], "frame": int, "family": String}, see MACHINE_MOTION_MODELS
 ## --- Instanced tiles and carried items (pipes & conveyors overhaul, ticket 4) ---
 ## Belts, splitters and pipes are not nodes: each is one instance in a
 ## MultiMesh shared by every tile drawing the same asset, and the items
@@ -2093,6 +2138,7 @@ func _rebuild_world() -> void:
 	_machine_lamps.clear()
 	_machine_gauges.clear()
 	_machine_running.clear()
+	_machine_motion.clear()
 	_splitter_nodes.clear()
 	_splitter_states.clear()
 	_belt_shapes.clear()
@@ -2223,6 +2269,7 @@ func _build_placement(placement: Dictionary) -> void:
 				gauge.visible = false
 				_world_root.add_child(gauge)
 				_machine_gauges[key] = gauge
+			_build_machine_motion(key, kind, centre, yaw)
 
 
 ## One of the one-voxel-tall bodies this scene scales every frame to show a
@@ -2938,6 +2985,103 @@ func _update_machine_gauges() -> void:
 		gauge.visible = fraction > MACHINE_GAUGE_MIN_VISIBLE
 		if gauge.visible:
 			gauge.scale.y = fraction * float(MACHINE_GAUGE_HEIGHT_VOXELS)
+
+
+## Stands this machine's motion overlay on its tiles: `MACHINE_FRAMES`
+## sibling nodes at the body's own position and facing, all but frame 0
+## hidden. Siblings rather than children of the body for the reason the
+## progress gauge is one — `body.get_node_or_null("emissive")` must keep
+## finding the machine's own status lamp, not a lamp inside an overlay.
+##
+## Built once per placement and never rebuilt: a frame swap is two visibility
+## flips, which is what makes `_update_machine_motion` cheap enough to run
+## every simulation step for every machine on the map.
+func _build_machine_motion(key: String, kind: String, centre: Vector3, yaw: float) -> void:
+	var family := String(MACHINE_MOTION_MODELS.get(kind, MACHINE_MOTION_FALLBACK))
+	var frames: Array = []
+	for k in range(MACHINE_FRAMES):
+		var frame := _asset_node("%s_f%d" % [family, k])
+		frame.name = "motion_%s_f%d" % [key, k]
+		# The same position as the body, not a computed offset: `voxgen`
+		# gives every overlay the body's own footprint and puts both models'
+		# origins at footprint centre, ground level (UI_UX.md §2b point 1),
+		# so anything else here would be undoing that agreement.
+		frame.position = centre
+		frame.rotation.y = yaw
+		frame.visible = k == 0
+		_world_root.add_child(frame)
+		frames.append(frame)
+	# The family is kept beside the nodes rather than recomputed: it is what
+	# a test (and a future hover readout) asks to find out WHICH overlay a
+	# kind fell through to, and the fallback is the whole point of asking.
+	_machine_motion[key] = {"frames": frames, "frame": 0, "family": family}
+
+
+## How many ticks of WORK the machine at `origin_key` has done on its current
+## batch, or -1 when it is not working.
+##
+## "Working" is deliberately narrower than "has a process", and this is the
+## one piece of sim knowledge this whole feature turns on. `Machine::tick`
+## (`sim_core/src/sim/machine.rs`) clears `process` only once it can actually
+## put the finished goods somewhere: a machine that has finished its batch
+## and is blocked on a full output buffer or a full pipe KEEPS its process
+## and retries every tick. So `process != null` means "has a batch", which is
+## what the status lamp already says, and `elapsed < required` means "is
+## turning". Reading the first as the second would leave a jammed factory
+## full of machines cheerfully running with nowhere to put anything — the
+## exact opposite of what the player needs to see.
+##
+## Derived from `current_tick()` rather than from a snapshot, like
+## `_machine_progress` above and for that section's reason: a machine dirties
+## its chunk when its state CHANGES, so nothing arrives during a process.
+func _machine_work_elapsed(origin_key: String) -> int:
+	if not _machine_states.has(origin_key):
+		return -1
+	var process = _machine_states[origin_key].get("process")
+	if process == null:
+		return -1
+	var required: int = int(process[1])
+	var elapsed: int = sim.current_tick() - int(process[0])
+	if elapsed < 0 or elapsed >= required:
+		return -1
+	return elapsed
+
+
+## Which frame a mechanism `elapsed` ticks into its batch shows. Driven by
+## the machine's OWN elapsed ticks rather than by the global tick (which is
+## what drives the belt), so every mechanism starts its cycle from frame 0 at
+## the moment work starts, instead of joining a factory-wide beat part way
+## through. Pure, so it is directly testable.
+func _motion_frame_for_elapsed(elapsed: int) -> int:
+	if elapsed < 0:
+		return 0
+	return posmod((elapsed * MACHINE_FRAMES) / MACHINE_TICKS_PER_CYCLE, MACHINE_FRAMES)
+
+
+## Shows the frame each machine's mechanism currently calls for. Called from
+## `_advance_simulation` and nowhere else, exactly like `_update_belt_frame`:
+## the paused early-return never reaches it, so the pause menu stops the
+## machinery for free, and a headless test that never ticks sees frame 0.
+##
+## An idle or blocked machine is put back to frame 0 — its parts stay on the
+## machine (they are the same solid the body had before this pass), they
+## simply stop. Paired with the status lamp that is a two-part readout the
+## player can act on: lamp on and nothing turning means the thing downstream
+## is full.
+func _update_machine_motion() -> void:
+	for origin_key in _machine_motion.keys():
+		var motion: Dictionary = _machine_motion[origin_key]
+		var frame := _motion_frame_for_elapsed(_machine_work_elapsed(origin_key))
+		if frame == int(motion.get("frame", 0)):
+			continue
+		var frames: Array = motion["frames"]
+		var previous: Node3D = frames[int(motion["frame"])]
+		if previous != null:
+			previous.visible = false
+		var current: Node3D = frames[frame]
+		if current != null:
+			current.visible = true
+		motion["frame"] = frame
 
 
 func _set_machine_running(origin_key: String, running: bool) -> void:
@@ -7788,10 +7932,12 @@ func _advance_simulation(delta: float) -> void:
 		# MAX_TICKS_PER_FRAME): carrying it would only move the burst to the
 		# next frame.
 		_tick_accum = 0.0
-	# The belt surface follows the tick, so it is advanced here and nowhere
-	# else: the paused early-return above never reaches this line, which is
-	# what freezes the rubber with the pause menu up.
+	# The belt surface and the machines' mechanisms both follow the tick, so
+	# they are advanced here and nowhere else: the paused early-return above
+	# never reaches these lines, which is what freezes the rubber and stops
+	# the machinery with the pause menu up.
 	_update_belt_frame()
+	_update_machine_motion()
 
 
 ## Real seconds since the last autosave, and the write when it comes due.

@@ -241,6 +241,34 @@ DECISIONS.md Part B. There is no point 10.
     hopper's mouth and vanishes at a machine's face. The general rule: check
     a path convention against the tile's edges, not against its neighbours,
     because neighbours hide a shared error.
+27. **A machine is animated by a separate motion model in `MACHINE_FRAMES`
+    arrangements, and the moving parts are CUT OUT of the body rather than
+    duplicated into the overlay.** Point 23's frame mechanism applied to
+    something that is not a tile: the crusher's roll teeth and flywheels,
+    the mixer's ribbon, the vat's agitator spider, the bottler's nozzles and
+    capping chuck and the packer's taping carriage all live in
+    `<machine>_motion_f0..f3`, cut on the machine's own footprint so the
+    overlay and the body share an origin and Godot needs no offset. All four
+    stand beside the body as siblings and exactly one is visible. Two voxel
+    solids that overlap z-fight (point 24), so the body cannot keep a copy
+    of what moves; `cargo test -p voxgen` compares every overlay voxel
+    against its body. Every motion volume is an EVEN number of voxels tall,
+    because `vox::encode` lifts a model by `size[2] / 2` in whole voxels and
+    an odd height sinks the overlay half a voxel into the body it sits on.
+    The frames must differ CONSECUTIVELY, not pairwise: a part that
+    reciprocates passes through the same pose on the way out and on the way
+    back, and only a turning part has to show four distinct angles.
+28. **Motion means "working", and working is narrower than "has a batch".**
+    A mechanism turns only while `0 <= elapsed < required`, so a machine
+    that has finished and is blocked on a full output stands still while its
+    status lamp stays lit — lamp on and nothing turning is the readout for
+    "the thing downstream is full", which neither signal gives alone. The
+    pace is one cycle per 30 ticks for EVERY kind: driving it from a
+    machine's own process length would make the 240-tick vat read as a
+    different factory from the 80-tick crusher, and how long a stage takes
+    is already stated by the product backing up behind it. **No steam,
+    deliberately** — a puff is mass a stopped vat should not have, and a
+    frozen cloud over a cold vat states the opposite of what the lamp says.
 27. **A model whose only consumer is the icon pass must be authored for
     vengi's camera, not the game's.** Point 11 ("only +X and +Z-world are
     ever seen") is a rule about the *scene*; point 7's icon render goes

@@ -187,6 +187,32 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-11 **Machine animations (UI_UX.md §2b points 27-28).** Every
+  processing machine has a MOTION OVERLAY: `<machine>_motion_f0..f3` on the
+  body's own footprint, four sibling nodes at the body's position and yaw,
+  one visible. The moving parts are CUT OUT of the body, never duplicated —
+  two voxel solids that overlap z-fight (point 24) — and a voxgen test
+  compares every overlay voxel against its body. Every motion volume is an
+  EVEN height (`vox::encode` lifts by `size[2] / 2` in whole voxels; an odd
+  one sinks half a voxel). Frames must differ CONSECUTIVELY, not pairwise: a
+  reciprocating part repeats a pose (`BOTTLER_PLUNGE` is `[0,-1,-2,-1]`), and
+  only the `spin`-driven families must show four angles. **The gate is
+  `process != null AND 0 <= elapsed < required`, not `process != null`**:
+  `Machine::tick` keeps the process of a machine finished-but-blocked on a
+  full output, so `process` is what the LAMP says ("has a batch") and
+  `elapsed < required` is what the MECHANISM says ("is turning") — lamp lit
+  with nothing turning reads as "downstream is full". `MACHINE_TICKS_PER_CYCLE`
+  is 30 for EVERY kind (pace says "working", not "working this fast"; the
+  belt carries speed); the frame comes from the machine's OWN elapsed, so a
+  mechanism starts at frame 0 when work starts, and `_update_machine_motion`
+  is called only from `_advance_simulation`, so pause freezes it for free.
+  Mixer ribbon spans `MIXER_RIBBON_Y` (20..43) only — the full drum length
+  runs the flights through two feed throats and the discharge nozzle.
+  Motion overlays get no catalogue icon (`icons.rs`'s `is_motion_overlay`).
+  No steam: a puff is mass a stopped vat should not have.
+  `test_machine_motion.gd` proves it; `test_screenshot.gd` now advances belt
+  AND machine frames in its populate loop, so screenshots stop photographing
+  an idle-looking factory mid-run.
 - 2026-09-10 **Belt arrows removed.** The belt's raised `hazard_yellow`
   direction arrow is gone at the player's request; the moving mark is a
   **plain cleat** (`rubber_dark`, two voxels along the path, lane width
