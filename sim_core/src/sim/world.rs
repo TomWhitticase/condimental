@@ -175,7 +175,7 @@ use super::hopper::{HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, HOPPER_KIND, Hopper};
 use super::ingredients::{
     DEFAULT_BUY_QUANTITY, Ingredients, IngredientsSnapshot, raw_ingredient_ids,
 };
-use super::machine::Machine;
+use super::machine::{LOAD_WINDOW_TICKS, LoadWindow, Machine, WorkState};
 use super::machines::{Footprint, MachineRegistry};
 use super::recipe::{Recipe, RecipeRegistry};
 use super::shop::{DEFAULT_PURCHASE_QUANTITY, Shop, ShopSnapshot};
@@ -728,6 +728,12 @@ pub struct SplitterSnapshot {
 /// chunks still learns about a machine whose origin is off-screen. The cost
 /// is that a consumer stitching several chunk snapshots together must key
 /// machines by `tile` and de-duplicate, not blindly concatenate.
+///
+/// `load` and `stall` (the machine-load epic, 2026-09-11) are the bottleneck
+/// readout — see [`MachineLoadSnapshot`] and [`Stall`]. **They change every
+/// tick without dirtying the chunk**, so a chunk-driven renderer sees them
+/// only when something else dirties the machine; poll
+/// [`World::machine_load_snapshots`] for a live view.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct MachineSnapshot {
     pub tile: TileCoord,
@@ -740,6 +746,102 @@ pub struct MachineSnapshot {
     pub process: Option<(u64, u64)>,
     pub input: Vec<(ItemId, u32)>,
     pub output: Vec<(ItemId, u32)>,
+    pub load: MachineLoadSnapshot,
+    pub stall: Option<Stall>,
+}
+
+/// What share of the recent past a machine spent working, starved or
+/// blocked — the [`super::machine::LoadWindow`]'s totals, plus the verdict
+/// the sim draws from them. The one fact behind the andon stack light.
+///
+/// ```json
+/// {"working": 540, "starved": 60, "blocked": 0, "observed": 600,
+///  "window": 600, "percent": 90, "status": "starved"}
+/// ```
+///
+/// - `working`/`starved`/`blocked` are tick counts over the window;
+///   `observed` is their sum, at most `window`
+///   ([`super::machine::LOAD_WINDOW_TICKS`]). A machine placed a moment ago
+///   has observed only the ticks since.
+/// - `percent` is `working * 100 / observed` in whole percent (0 when
+///   nothing has been observed).
+/// - `status` is `"working"`, `"starved"` or `"blocked"` by
+///   [`super::machine::LoadWindow::status`]'s rule. **Godot reads this word;
+///   it never re-derives it from the counts**, so the threshold lives in
+///   exactly one place.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct MachineLoadSnapshot {
+    pub working: u32,
+    pub starved: u32,
+    pub blocked: u32,
+    pub observed: u32,
+    pub window: u32,
+    pub percent: u32,
+    pub status: WorkState,
+}
+
+impl MachineLoadSnapshot {
+    fn of(load: &LoadWindow) -> Self {
+        Self {
+            working: load.working(),
+            starved: load.starved(),
+            blocked: load.blocked(),
+            observed: load.observed(),
+            window: LOAD_WINDOW_TICKS,
+            percent: load.percent(),
+            status: load.status(),
+        }
+    }
+}
+
+/// Why a machine is waiting *right now* — a structured fact for Godot to
+/// phrase, computed at snapshot time from the machine's buffers, its recipe
+/// and its fluid taps (never per tick: it is a question, not state).
+///
+/// ```json
+/// {"kind": "input",          "item": "sugar"}    // solid input short
+/// {"kind": "fluid_input",    "item": "vinegar"}  // tap exists, cannot supply
+/// {"kind": "no_supply_pipe", "item": "vinegar"}  // recipe wants fluid, no tap
+/// {"kind": "output",         "item": "ketchup"}  // finished, solid output full
+/// {"kind": "fluid_output",   "item": "ketchup"}  // finished, outlet pipe cannot accept
+/// {"kind": "no_outlet_pipe", "item": "ketchup"}  // finished, deposits, no tap
+/// ```
+///
+/// It describes **this tick's** situation, independently of the window's
+/// `status`: a machine may be `working` over the last ten seconds and
+/// momentarily short of sugar. Only the first shortfall is reported, in
+/// recipe order, solids before fluids. A machine mid-craft, or idle with
+/// everything it needs (it starts next tick), has no stall — `null`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Stall {
+    pub kind: StallKind,
+    pub item: String,
+}
+
+/// The six ways a machine can be waiting — see [`Stall`]. Serialized in
+/// `snake_case`, exactly as listed there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StallKind {
+    Input,
+    FluidInput,
+    NoSupplyPipe,
+    Output,
+    FluidOutput,
+    NoOutletPipe,
+}
+
+/// One entry of [`World::machine_load_snapshots`]: the machine's origin
+/// tile (its key in every other snapshot), its load and its stall.
+///
+/// ```json
+/// {"tile": [4, 0], "load": {...}, "stall": {"kind": "input", "item": "tomato"}}
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct MachineLoadEntry {
+    pub tile: TileCoord,
+    pub load: MachineLoadSnapshot,
+    pub stall: Option<Stall>,
 }
 
 /// One pipe tile, for rendering (milestone 6 — ARCHITECTURE.md §3.4).
@@ -1000,10 +1102,16 @@ pub enum TileSnapshot {
     ///   "direction": "east",
     ///   "footprint": {"width_tiles": 2, "height_tiles": 2},
     ///   "origin_tile": [14, 0], "recipe": "ketchup",
-    ///   "process": [120, 240]}`
+    ///   "process": [120, 240],
+    ///   "load": {"working": 600, "starved": 0, "blocked": 0,
+    ///            "observed": 600, "window": 600, "percent": 100,
+    ///            "status": "working"},
+    ///   "stall": null}`
     ///
     /// `machine_kind` is spelled out rather than reusing `kind`, which this
-    /// enum already spends on its own variant tag.
+    /// enum already spends on its own variant tag. `load` and `stall` are
+    /// the same objects [`MachineSnapshot`] carries, so hover can say how
+    /// loaded a machine is and why it waits without a second call.
     Machine {
         machine_kind: String,
         direction: Direction,
@@ -1011,6 +1119,8 @@ pub enum TileSnapshot {
         origin_tile: TileCoord,
         recipe: RecipeId,
         process: Option<(u64, u64)>,
+        load: MachineLoadSnapshot,
+        stall: Option<Stall>,
     },
     /// `{"kind": "pipe", "direction": "east", "fluid": "vinegar",
     ///   "volume": 7.5, "capacity": 10.0, "pressure": 0.75,
@@ -3091,6 +3201,33 @@ impl World {
             .collect()
     }
 
+    /// Every recipe-running machine's load and stall, in the topology's
+    /// stable (tile) order — one [`MachineLoadEntry`] per machine, keyed by
+    /// origin tile; never a hopper, tank or dock, which run no recipe.
+    ///
+    /// **Poll this; do not wait for a dirty chunk.** A load window changes
+    /// every tick on every machine, so dirtying for it would defeat the
+    /// per-chunk delta rule (ARCHITECTURE.md §4) — the same treatment fluid
+    /// movement gets. It carries nothing but the readout, so polling it
+    /// every few ticks is cheap. `ChunkSnapshot` and `query_tile` carry the
+    /// identical `load`/`stall` objects for a consumer that already has one.
+    pub fn machine_load_snapshots(&self) -> Vec<MachineLoadEntry> {
+        self.topology
+            .machines
+            .iter()
+            .map(|&machine| {
+                let body = self.ecs.get::<&Machine>(machine).unwrap();
+                let load = MachineLoadSnapshot::of(&body.load);
+                drop(body);
+                MachineLoadEntry {
+                    tile: self.position_of(machine),
+                    load,
+                    stall: self.machine_stall(machine),
+                }
+            })
+            .collect()
+    }
+
     /// Every fluid tank in the world, in tile order — placement plus live
     /// level.
     ///
@@ -3250,6 +3387,79 @@ impl World {
             process: body.process.map(|p| (p.start_tick, p.required_ticks)),
             input: body.input.iter().cloned().collect(),
             output: body.output.iter().cloned().collect(),
+            load: MachineLoadSnapshot::of(&body.load),
+            stall: self.machine_stall(machine),
+        }
+    }
+
+    /// Why `machine` is waiting at this moment, if it is — see [`Stall`] for
+    /// the rule. Read-only: it asks the same questions `Machine::tick` asks
+    /// (enough input? a tap that can supply? room to deposit?) against the
+    /// same taps `tick` would hand it, without moving anything.
+    fn machine_stall(&self, machine: Entity) -> Option<Stall> {
+        let body = self.ecs.get::<&Machine>(machine).ok()?;
+        let recipe = self.recipes.get(&body.recipe)?;
+        let tap_of = |taps: &[(Entity, usize, usize)]| {
+            taps.iter()
+                .find(|&&(entity, _, _)| entity == machine)
+                .map(|&(_, network, segment)| (network, segment))
+        };
+        let stall = |kind: StallKind, item: &str| {
+            Some(Stall {
+                kind,
+                item: item.to_string(),
+            })
+        };
+        match body.process {
+            None => {
+                for (item, qty) in &recipe.inputs {
+                    if !body.input.has_at_least(item, *qty) {
+                        return stall(StallKind::Input, item);
+                    }
+                }
+                let tap = tap_of(&self.topology.machine_taps);
+                for (fluid, units) in &recipe.fluid_inputs {
+                    match tap {
+                        None => return stall(StallKind::NoSupplyPipe, fluid),
+                        Some((network, segment)) => {
+                            if !self.topology.networks[network].can_supply_at(
+                                segment,
+                                fluid,
+                                Fx::from_num(*units),
+                            ) {
+                                return stall(StallKind::FluidInput, fluid);
+                            }
+                        }
+                    }
+                }
+                None
+            }
+            Some(process) => {
+                if !process.is_complete(self.tick_count) {
+                    return None;
+                }
+                for (item, qty) in &recipe.outputs {
+                    if !body.output.has_room_for(item, *qty) {
+                        return stall(StallKind::Output, item);
+                    }
+                }
+                let tap = tap_of(&self.topology.machine_output_taps);
+                for (fluid, units) in &recipe.fluid_outputs {
+                    match tap {
+                        None => return stall(StallKind::NoOutletPipe, fluid),
+                        Some((network, segment)) => {
+                            if !self.topology.networks[network].can_accept_at(
+                                segment,
+                                fluid,
+                                Fx::from_num(*units),
+                            ) {
+                                return stall(StallKind::FluidOutput, fluid);
+                            }
+                        }
+                    }
+                }
+                None
+            }
         }
     }
 
@@ -3395,6 +3605,11 @@ impl World {
                     origin_tile: origin,
                     recipe: body.recipe.clone(),
                     process: body.process.map(|p| (p.start_tick, p.required_ticks)),
+                    load: MachineLoadSnapshot::of(&body.load),
+                    stall: {
+                        drop(body);
+                        self.machine_stall(entity)
+                    },
                 }
             }
             BodyKind::Pipe => {

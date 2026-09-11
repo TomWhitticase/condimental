@@ -1,10 +1,203 @@
 //! `Machine` (ARCHITECTURE.md §3.2) and the generic `TimedProcess` pattern
 //! (§3.5) it uses to run a recipe over many ticks.
 
+use serde::{Deserialize, Serialize};
+
 use super::fluid::FluidTap;
 use super::inventory::Inventory;
 use super::recipe::RecipeRegistry;
 use super::types::{Fx, RecipeId};
+
+/// How many ticks one bucket of the [`LoadWindow`] accumulates before the
+/// ring advances — half a second at Godot's 30 Hz tick rate. Integers
+/// throughout (ARCHITECTURE.md §3.9): the window is tick counts, and the
+/// percentage is integer arithmetic over them.
+pub const LOAD_BUCKET_TICKS: u32 = 30;
+/// How many buckets the ring holds: twenty half-seconds, a ten-second
+/// window. Long enough that the one-tick gap `Machine::tick` leaves between
+/// a deposit and the next start is invisible, short enough that a
+/// bottleneck that has just moved shows up while the player is watching.
+pub const LOAD_BUCKETS: usize = 20;
+/// The whole window, in ticks — what `observed` climbs toward.
+pub const LOAD_WINDOW_TICKS: u32 = LOAD_BUCKET_TICKS * LOAD_BUCKETS as u32;
+/// A working share (in percent of the observed window) at or above this
+/// reads as `working` — flat out. A machine fed and drained without
+/// interruption reads exactly 100 (see [`WorkState`]'s counting rule), so
+/// the margin below it is for a line that hiccups, not for the mechanism.
+pub const FULL_LOAD_PERCENT: u32 = 95;
+
+/// What a machine did with one tick — the one fact [`Machine::tick`] records
+/// into its [`LoadWindow`] every time it runs, and the vocabulary of the
+/// window's `status`. The counting rule, from `docs/MACHINE_LOAD_PLAN.md`:
+///
+/// | At entry to `tick`                  | Happened                       | Recorded  |
+/// |-------------------------------------|--------------------------------|-----------|
+/// | no process                          | a craft started                | `Working` |
+/// | no process                          | nothing started                | `Starved` |
+/// | process running, not complete       | timer advanced                 | `Working` |
+/// | process complete                    | output deposited, cleared      | `Working` |
+/// | process complete                    | held (output or pipe full)     | `Blocked` |
+///
+/// **The completion tick counts as work.** `Machine::tick` clears
+/// `process` on the tick a batch lands and starts the next on the tick
+/// after, so a saturated machine is briefly "idle" once per cycle; counting
+/// the deposit as work is what makes a continuously fed and drained machine
+/// read exactly 100 %, with no dip, and lets `FULL_LOAD_PERCENT` be a real
+/// threshold rather than a fudge for the mechanism's own gap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkState {
+    Working,
+    Starved,
+    Blocked,
+}
+
+impl WorkState {
+    /// The wire's word for this state — the string `MachineLoadSnapshot::status`
+    /// carries, which Godot reads as-is and never re-derives from the counts.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WorkState::Working => "working",
+            WorkState::Starved => "starved",
+            WorkState::Blocked => "blocked",
+        }
+    }
+}
+
+/// One bucket of the ring: how many of its ticks went to each state.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoadBucket {
+    pub working: u32,
+    pub starved: u32,
+    pub blocked: u32,
+}
+
+impl LoadBucket {
+    fn total(&self) -> u32 {
+        self.working + self.starved + self.blocked
+    }
+}
+
+/// A rolling record of what a machine did over the last
+/// [`LOAD_WINDOW_TICKS`] ticks: a ring of [`LOAD_BUCKETS`] buckets, each
+/// holding [`LOAD_BUCKET_TICKS`] ticks' worth of [`WorkState`] counts. The
+/// current bucket fills until it holds a bucket's worth, then the cursor
+/// advances and the bucket it lands on is cleared — so totals always cover
+/// the last ten seconds and the partial current one, never more.
+///
+/// It exists because an instantaneous "is it working" flag flickers (see
+/// [`WorkState`]) and because the player's question is *"is this machine the
+/// bottleneck"*, which is a question about a stretch of time. The sim owns
+/// it rather than Godot (ARCHITECTURE.md §1's hard rule): it is
+/// deterministic, it survives a save (`save.rs`'s `SavedMachine`), and it is
+/// tested headlessly here. Nothing about it dirties a chunk — it changes
+/// every tick on every machine, so it is a polled readout
+/// (`World::machine_load_snapshots`), like fluid.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadWindow {
+    buckets: [LoadBucket; LOAD_BUCKETS],
+    cursor: usize,
+}
+
+impl Default for LoadWindow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LoadWindow {
+    pub fn new() -> Self {
+        Self {
+            buckets: [LoadBucket::default(); LOAD_BUCKETS],
+            cursor: 0,
+        }
+    }
+
+    /// Records one tick's state. Called exactly once per `Machine::tick`.
+    pub fn record(&mut self, state: WorkState) {
+        if self.buckets[self.cursor].total() >= LOAD_BUCKET_TICKS {
+            self.cursor = (self.cursor + 1) % LOAD_BUCKETS;
+            self.buckets[self.cursor] = LoadBucket::default();
+        }
+        let bucket = &mut self.buckets[self.cursor];
+        match state {
+            WorkState::Working => bucket.working += 1,
+            WorkState::Starved => bucket.starved += 1,
+            WorkState::Blocked => bucket.blocked += 1,
+        }
+    }
+
+    pub fn working(&self) -> u32 {
+        self.buckets.iter().map(|b| b.working).sum()
+    }
+
+    pub fn starved(&self) -> u32 {
+        self.buckets.iter().map(|b| b.starved).sum()
+    }
+
+    pub fn blocked(&self) -> u32 {
+        self.buckets.iter().map(|b| b.blocked).sum()
+    }
+
+    /// Ticks the window has seen: `working + starved + blocked`, at most
+    /// [`LOAD_WINDOW_TICKS`].
+    pub fn observed(&self) -> u32 {
+        self.buckets.iter().map(LoadBucket::total).sum()
+    }
+
+    /// The working share of the observed window, in whole percent; 0 when
+    /// nothing has been observed.
+    pub fn percent(&self) -> u32 {
+        (self.working() * 100)
+            .checked_div(self.observed())
+            .unwrap_or(0)
+    }
+
+    /// The window's verdict: `Starved` before anything has happened;
+    /// `Working` when the working share is at least [`FULL_LOAD_PERCENT`];
+    /// otherwise whichever of starved and blocked took more ticks, starved
+    /// on a tie.
+    pub fn status(&self) -> WorkState {
+        let observed = self.observed();
+        if observed == 0 {
+            return WorkState::Starved;
+        }
+        if self.working() * 100 >= FULL_LOAD_PERCENT * observed {
+            return WorkState::Working;
+        }
+        if self.starved() >= self.blocked() {
+            WorkState::Starved
+        } else {
+            WorkState::Blocked
+        }
+    }
+
+    /// The raw ring, oldest-to-newest is *not* the order — it is the ring's
+    /// storage order with [`LoadWindow::cursor`] marking the current bucket.
+    /// For `save.rs`, which stores the ring as-is so a loaded window is
+    /// bit-identical to the saved one.
+    pub fn buckets(&self) -> &[LoadBucket; LOAD_BUCKETS] {
+        &self.buckets
+    }
+
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    /// Rebuilds a window from a saved ring. `None` if the ring is not
+    /// exactly [`LOAD_BUCKETS`] long, the cursor is outside it, or any
+    /// bucket holds more than [`LOAD_BUCKET_TICKS`] ticks — none of which
+    /// `buckets()`/`cursor()` can produce, so all of which mean a corrupt
+    /// or hand-edited save. Restore-only: the tick path records, it never
+    /// writes the ring wholesale.
+    pub(crate) fn restore(buckets: &[LoadBucket], cursor: usize) -> Option<Self> {
+        let buckets: [LoadBucket; LOAD_BUCKETS] = buckets.try_into().ok()?;
+        if cursor >= LOAD_BUCKETS || buckets.iter().any(|b| b.total() > LOAD_BUCKET_TICKS) {
+            return None;
+        }
+        Some(Self { buckets, cursor })
+    }
+}
 
 /// A tick-counted long-running process (ARCHITECTURE.md §3.5). Progress is
 /// always a function of `(current_tick - start_tick)` vs `required_ticks` —
@@ -28,6 +221,10 @@ pub struct Machine {
     pub input: Inventory,
     pub output: Inventory,
     pub process: Option<TimedProcess>,
+    /// What this machine did with each of the last [`LOAD_WINDOW_TICKS`]
+    /// ticks — the bottleneck readout. Written once per [`Machine::tick`],
+    /// read by `World::machine_load_snapshots`; never dirties a chunk.
+    pub load: LoadWindow,
 }
 
 impl Machine {
@@ -37,6 +234,7 @@ impl Machine {
             input: Inventory::new(input_capacity),
             output: Inventory::new(output_capacity),
             process: None,
+            load: LoadWindow::new(),
         }
     }
 
@@ -76,6 +274,11 @@ impl Machine {
     /// dropped or spilled. So a full pipe backs a machine up exactly the way
     /// a full output buffer does, which is the same back-pressure rule the
     /// belt follows.
+    ///
+    /// Every call records exactly one [`WorkState`] into `self.load`, by
+    /// the table on that type — including the completion tick, which counts
+    /// as work. The load is a readout, not a change: it never contributes
+    /// to the returned `changed` flag.
     pub fn tick(
         &mut self,
         current_tick: u64,
@@ -85,8 +288,15 @@ impl Machine {
     ) -> bool {
         let mut changed = false;
         let Some(recipe) = recipes.get(&self.recipe) else {
+            // A machine with no recipe can never start, which is a
+            // permanent starve; `World` refuses to place one, so this is
+            // for completeness of the "exactly one state per tick" rule.
+            self.load.record(WorkState::Starved);
             return false;
         };
+        // Starved until something below says otherwise: a tick that starts
+        // nothing and completes nothing is a tick spent waiting for input.
+        let mut state = WorkState::Starved;
 
         if self.process.is_none() {
             let has_inputs = recipe
@@ -120,11 +330,16 @@ impl Machine {
                     required_ticks: recipe.time_ticks,
                 });
                 changed = true;
+                state = WorkState::Working;
             }
         }
 
         if let Some(process) = self.process {
-            if process.is_complete(current_tick) {
+            if !process.is_complete(current_tick) {
+                // The timer advanced (or a craft started this very tick):
+                // the mechanism is turning.
+                state = WorkState::Working;
+            } else {
                 let has_room = recipe
                     .outputs
                     .iter()
@@ -158,13 +373,17 @@ impl Machine {
                     }
                     self.process = None;
                     changed = true;
+                    state = WorkState::Working;
+                } else {
+                    // Finished but blocked on a full output buffer or a
+                    // full pipe — retried next tick, same back-pressure
+                    // idea as the belt.
+                    state = WorkState::Blocked;
                 }
-                // else: finished but blocked on a full output buffer or a
-                // full pipe — retried next tick, same back-pressure idea as
-                // the belt.
             }
         }
 
+        self.load.record(state);
         changed
     }
 }
@@ -506,5 +725,150 @@ mod tests {
         }
 
         assert!(machine.process.is_none(), "vinegar recipe must not run on a water pipe");
+    }
+
+    // ---- the load window (machine-load epic) -------------------------------
+
+    #[test]
+    fn load_ring_wraps_and_clears_so_observed_never_exceeds_the_window() {
+        let mut window = LoadWindow::new();
+        assert_eq!(window.observed(), 0);
+        assert_eq!(window.percent(), 0);
+        assert_eq!(window.status(), WorkState::Starved, "nothing observed reads starved");
+
+        for _ in 0..LOAD_WINDOW_TICKS * 3 {
+            window.record(WorkState::Working);
+        }
+        assert_eq!(window.observed(), LOAD_WINDOW_TICKS, "three windows' worth still fit in one");
+        assert_eq!(window.working(), LOAD_WINDOW_TICKS);
+        assert_eq!(window.percent(), 100);
+        assert_eq!(window.status(), WorkState::Working);
+
+        // One full window of starving pushes every working tick out.
+        for _ in 0..LOAD_WINDOW_TICKS {
+            window.record(WorkState::Starved);
+        }
+        assert_eq!(window.working(), 0, "the ring forgets what is more than a window old");
+        assert_eq!(window.starved(), LOAD_WINDOW_TICKS);
+        assert_eq!(window.status(), WorkState::Starved);
+
+        // The tick after a full ring clears one whole bucket before counting.
+        window.record(WorkState::Blocked);
+        assert_eq!(window.observed(), LOAD_WINDOW_TICKS - LOAD_BUCKET_TICKS + 1);
+        assert_eq!(window.blocked(), 1);
+        assert_eq!(window.starved(), LOAD_WINDOW_TICKS - LOAD_BUCKET_TICKS);
+    }
+
+    #[test]
+    fn load_status_follows_the_full_load_threshold_and_the_tiebreak() {
+        let mut window = LoadWindow::new();
+        // 95 working + 5 starved of 100 = exactly the threshold: working.
+        for _ in 0..95 {
+            window.record(WorkState::Working);
+        }
+        for _ in 0..5 {
+            window.record(WorkState::Starved);
+        }
+        assert_eq!(window.percent(), FULL_LOAD_PERCENT);
+        assert_eq!(window.status(), WorkState::Working);
+
+        // One more starved tick drops it below, and starved wins the tie
+        // against blocked.
+        window.record(WorkState::Starved);
+        assert_eq!(window.status(), WorkState::Starved);
+        for _ in 0..6 {
+            window.record(WorkState::Blocked);
+        }
+        assert_eq!(window.starved(), 6);
+        assert_eq!(window.blocked(), 6);
+        assert_eq!(window.status(), WorkState::Starved, "a tie reads starved");
+        window.record(WorkState::Blocked);
+        assert_eq!(window.status(), WorkState::Blocked);
+    }
+
+    #[test]
+    fn load_window_restores_only_a_ring_it_could_have_written() {
+        let mut window = LoadWindow::new();
+        for _ in 0..(LOAD_BUCKET_TICKS * 7 + 3) {
+            window.record(WorkState::Working);
+        }
+        let restored = LoadWindow::restore(window.buckets(), window.cursor())
+            .expect("its own ring restores");
+        assert_eq!(restored, window);
+
+        assert!(LoadWindow::restore(&window.buckets()[..LOAD_BUCKETS - 1], 0).is_none());
+        assert!(LoadWindow::restore(window.buckets(), LOAD_BUCKETS).is_none());
+        let mut over = *window.buckets();
+        over[0].working = LOAD_BUCKET_TICKS + 1;
+        assert!(LoadWindow::restore(&over, 0).is_none());
+    }
+
+    /// The counting rule's reason to exist: the completion tick counts as
+    /// work, so a machine that is fed and drained without interruption reads
+    /// exactly 100 % with no one-tick dip per cycle.
+    #[test]
+    fn a_continuously_fed_and_drained_machine_reads_exactly_full_load() {
+        let recipes = registry();
+        let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
+        for tick in 0..LOAD_WINDOW_TICKS as u64 * 2 {
+            let short = 10 - machine.input.count("tomato").min(10);
+            machine.input.add("tomato", short);
+            let made = machine.output.count("tomato_sauce");
+            machine.output.remove("tomato_sauce", made);
+            machine.tick(tick, &recipes, None, None);
+            assert_eq!(
+                machine.load.starved() + machine.load.blocked(),
+                0,
+                "tick {tick}: a fed and drained machine never records a non-working tick"
+            );
+        }
+        assert_eq!(machine.load.observed(), LOAD_WINDOW_TICKS);
+        assert_eq!(machine.load.percent(), 100);
+        assert_eq!(machine.load.status(), WorkState::Working);
+    }
+
+    #[test]
+    fn a_machine_that_is_never_fed_reads_starved() {
+        let recipes = registry();
+        let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
+        for tick in 0..50 {
+            machine.tick(tick, &recipes, None, None);
+        }
+        assert_eq!(machine.load.starved(), 50);
+        assert_eq!(machine.load.working(), 0);
+        assert_eq!(machine.load.percent(), 0);
+        assert_eq!(machine.load.status(), WorkState::Starved);
+    }
+
+    #[test]
+    fn a_machine_held_on_a_full_output_reads_blocked() {
+        let recipes = registry();
+        let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
+        for tick in 0..LOAD_WINDOW_TICKS as u64 * 2 {
+            let short = 10 - machine.input.count("tomato").min(10);
+            machine.input.add("tomato", short);
+            machine.tick(tick, &recipes, None, None);
+        }
+        assert!(machine.process.is_some(), "the last batch is finished and held");
+        assert_eq!(machine.output.count("tomato_sauce"), 10, "output is brim full");
+        assert_eq!(machine.load.starved(), 0, "it was never short of tomatoes");
+        assert_eq!(machine.load.status(), WorkState::Blocked);
+        assert!(machine.load.blocked() > machine.load.working());
+    }
+
+    /// The fluid side of the same rule: a finished batch with nowhere to go.
+    #[test]
+    fn a_machine_held_on_a_full_outlet_pipe_reads_blocked() {
+        let recipes = producer_registry();
+        let mut machine = Machine::new("ketchup".into(), 10, 10);
+        let mut inflow = one_tile_network("ketchup_mix", 10, 10);
+        let mut outflow = one_tile_network("ketchup", 10, 10); // brim full
+        for tick in 0..100 {
+            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)));
+        }
+        // Ticks 0..=4 working (start + 4 advancing), then held from tick 5 on.
+        assert_eq!(machine.load.working(), 5);
+        assert_eq!(machine.load.blocked(), 95);
+        assert_eq!(machine.load.status(), WorkState::Blocked);
     }
 }
