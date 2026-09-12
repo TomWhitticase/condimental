@@ -413,15 +413,21 @@ impl VoxModel {
     /// applies and the same one Godot applies to a placement, so what this
     /// returns is exactly what the scene shows for a rotated tile. In vox
     /// coordinates that is `(dx, dy) -> (-dy, dx)`: the +X face goes to
-    /// the +Y (south) face. Requires a square footprint.
+    /// the +Y (south) face.
+    ///
+    /// An oblong footprint (the 1x2 mixer) turns too: its X and Y extents
+    /// swap on every odd turn, exactly as `machines.rs` says a rotated
+    /// footprint keeps its origin corner and swaps extents. The andon test
+    /// (`assets.rs`) is what needed this — it stands the stack light at the
+    /// camera-visible corner of every body at every facing, and the mixer
+    /// is a body.
     pub fn rotated_cw(&self, turns: u32) -> VoxModel {
-        assert_eq!(self.size[0], self.size[1], "rotated_cw needs a square footprint");
         let mut out = self.clone();
-        let last = self.size[0] - 1;
         for _ in 0..(turns % 4) {
-            let mut next = VoxModel::new(out.size);
+            let last_y = out.size[1] - 1;
+            let mut next = VoxModel::new([out.size[1], out.size[0], out.size[2]]);
             for (&(x, y, z), &idx) in &out.voxels {
-                next.voxels.insert((last - y, x, z), idx);
+                next.voxels.insert((last_y - y, x, z), idx);
             }
             out = next;
         }

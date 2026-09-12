@@ -308,6 +308,41 @@ impl SimBridge {
         GString::from(json.as_str())
     }
 
+    /// Every recipe-running machine's load and stall, JSON-serialized as an
+    /// **array** of `sim::MachineLoadEntry` — one per machine (never a
+    /// hopper, tank or dock), keyed by origin tile, in the topology's
+    /// stable order:
+    ///
+    /// ```json
+    /// [{"tile": [4, 0],
+    ///   "load": {"working": 540, "starved": 60, "blocked": 0,
+    ///            "observed": 600, "window": 600, "percent": 90,
+    ///            "status": "starved"},
+    ///   "stall": {"kind": "input", "item": "sugar"}}]
+    /// ```
+    ///
+    /// `load` is the machine's rolling window over the last `window` ticks
+    /// (`sim::LOAD_WINDOW_TICKS`), `percent` its working share, and
+    /// `status` the sim's verdict — `"working"`, `"starved"` or
+    /// `"blocked"` — which Godot reads as a word and never re-derives from
+    /// the counts. `stall` is why it is waiting *this tick* (`null` when it
+    /// is not): `kind` is one of `input`, `fluid_input`, `no_supply_pipe`,
+    /// `output`, `fluid_output`, `no_outlet_pipe`, and `item` names the
+    /// item or fluid. See `docs/MACHINE_LOAD_PLAN.md`, "The wire contract".
+    ///
+    /// **Poll it — do not wait for a dirty chunk.** A load window changes
+    /// every tick on every machine and deliberately dirties nothing, the
+    /// same rule as fluid movement; polling every few ticks is cheap, since
+    /// this carries nothing else. `chunk_snapshot_json`'s `machines` and
+    /// `query_tile_json`'s `"machine"` tile carry the identical `load` and
+    /// `stall` objects for hover.
+    #[func]
+    fn machine_load_snapshots_json(&self) -> GString {
+        let snapshots = self.world.machine_load_snapshots();
+        let json = serde_json::to_string(&snapshots).expect("MachineLoadEntry list must serialize");
+        GString::from(json.as_str())
+    }
+
     /// Every fluid tank in the world, JSON-serialized as an **array** of
     /// `sim::FluidTankSnapshot`:
     ///

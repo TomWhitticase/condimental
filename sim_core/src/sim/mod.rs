@@ -49,9 +49,13 @@ pub use shop::{
 };
 pub use splitter::{SPLITTER_KIND, Side, Splitter};
 pub use types::{Direction, Fx, decode_chunk_id, encode_chunk_id};
+pub use machine::{
+    FULL_LOAD_PERCENT, LOAD_BUCKET_TICKS, LOAD_BUCKETS, LOAD_WINDOW_TICKS, LoadWindow, WorkState,
+};
 pub use world::{
     BELT_KIND, BeltSnapshot, ChunkSnapshot, ConveyorLinks, DockSnapshot, FluidSnapshot,
     FluidTankSnapshot, FluidTapSnapshot, HopperSnapshot, LinkInput, LinkKind, LinkOutput, Links,
-    MachineSnapshot, PIPE_KIND, PipeConnection, PipeLinks, PipeSnapshot, PlacementSnapshot,
-    PlayerCommand, SplitterSnapshot, TileSnapshot, World, command_from_json,
+    MachineLoadEntry, MachineLoadSnapshot, MachineSnapshot, PIPE_KIND, PipeConnection, PipeLinks,
+    PipeSnapshot, PlacementSnapshot, PlayerCommand, SplitterSnapshot, Stall, StallKind,
+    TileSnapshot, World, command_from_json,
 };

@@ -271,6 +271,56 @@ static func build_reference_line(sim) -> void:
 const REFERENCE_LINE_PLACEMENTS := 37
 
 
+## THE BOTTLENECK LINE (the machine-load epic, ticket 3) — the fixture
+## `test_machine_load.gd` asserts and `scripts/screenshot-scene.sh
+## --bottleneck` photographs: the reference line, with every hopper and the
+## tank switched to auto-fill and the larder stocked deep enough to keep
+## them fed, run until it has backed up behind its slowest stage.
+##
+## The 240-tick cooking vat is that stage, so a settled line reads, from
+## the stack lights, red · red · green · amber · amber: the crusher and
+## mixer BLOCKED (their output has nowhere to go), the vat WORKING (flat
+## out), the bottler and packer STARVED (the vat cannot feed them fast
+## enough). That is the picture the whole epic exists to show.
+##
+## It takes ~8000 ticks, not the ~1500 one might guess from the vat's
+## cycle: every machine holds 8 of its output, there is a belt or pipe run
+## between each pair, and all of that fills at the vat's pace before the
+## mixer (from ~3500) and then the crusher (from ~7000) stall
+## (`sim_core/tests/machine_load.rs` measured it; its settle constant and
+## this one say the same number). The stock is sized for that run with
+## room to spare: the crusher runs flat out for those first ~7000 ticks
+## filling every buffer with paste, four tomatoes a craft, so tomatoes get
+## an extra crate on top of the shared amount.
+const BOTTLENECK_SETTLE_TICKS := 8000
+const BOTTLENECK_STOCK := 400
+const BOTTLENECK_EXTRA_TOMATOES := 300
+const BOTTLENECK_MACHINES := {
+	"4,0": "blocked", # crusher
+	"9,0": "blocked", # mixer
+	"12,0": "working", # cooking vat
+	"16,0": "starved", # bottler
+	"21,0": "starved", # packer
+}
+
+static func build_bottleneck_line(sim) -> void:
+	build_reference_line(sim)
+	# The line's bill leaves ~1900; the stock below is ~2000 at the shipped
+	# prices (tomato 1, sugar 3, vinegar 2 per unit), so top the balance up.
+	fund(sim, 8000)
+	stock_larder(sim, BOTTLENECK_STOCK)
+	stock(sim, "tomato", BOTTLENECK_EXTRA_TOMATOES)
+	for tile in [Vector2i(-1, 0), Vector2i(4, 1)]:
+		sim.issue_command_json(JSON.stringify({
+			"type": "set_hopper_auto_fill", "tile": [tile.x, tile.y], "enabled": true,
+		}))
+	sim.issue_command_json(JSON.stringify({
+		"type": "set_tank_auto_fill", "tile": [5, 2], "enabled": true,
+	}))
+	for i in range(BOTTLENECK_SETTLE_TICKS):
+		sim.tick()
+
+
 ## THE PIPE GALLERY (the pipes & conveyors overhaul, ticket 6) — the fixture
 ## `test_pipe_shapes.gd` asserts and `scripts/screenshot-scene.sh
 ## --pipe-gallery` photographs. Every pipe shape at every turn, from real

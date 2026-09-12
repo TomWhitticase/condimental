@@ -1,4 +1,28 @@
 {
+  "andon_blocked_short": [
+    "matte",
+    "emissive"
+  ],
+  "andon_blocked_tall": [
+    "matte",
+    "emissive"
+  ],
+  "andon_starved_short": [
+    "matte",
+    "emissive"
+  ],
+  "andon_starved_tall": [
+    "matte",
+    "emissive"
+  ],
+  "andon_working_short": [
+    "matte",
+    "emissive"
+  ],
+  "andon_working_tall": [
+    "matte",
+    "emissive"
+  ],
   "belt_corner_left_f0": [
     "matte",
     "metal"

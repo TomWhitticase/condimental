@@ -68,6 +68,14 @@
 # (they are at (0,0), (3,0), (3,3), (0,3) for right turns and (6,0), (9,0),
 # (9,3), (6,3) for left) to judge one junction.
 #
+# Pass --bottleneck to build the BOTTLENECK LINE (test_layouts.gd's
+# `build_bottleneck_line`): the whole shipped line with its hoppers and tank
+# on auto-fill, run until it has backed up behind the 240-tick cooking vat,
+# so the andon stack lights read red · red · green · amber · amber along
+# the line — the fixture the machine-load indicator is reviewed on. It
+# implies --populate. Add --hover to put the crusher's load line and load bar
+# in the tooltip, or --closeup on a machine to judge one stack light.
+#
 # Pass --populate to run whatever was built forward first, so the shot shows
 # product moving instead of an idle factory. Pass --first-person to review
 # that camera mode's lighting/skybox instead of the default isometric one.
@@ -124,7 +132,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--contracts] [--payout] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--board] [--no-hud] [--stock] [--hotbar N] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--bottleneck] [--contracts] [--payout] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--board] [--no-hud] [--stock] [--hotbar N] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
