@@ -324,6 +324,31 @@ Everything in this doc should be **content**, not simulation code, per [ARCHITEC
   removed on 2026-09-12 — the owner did not like the poles — so seeing the
   bottleneck without hovering is an open question again, for a different
   visual answer if one is wanted.*
+- **Staff pools are real, as a capacity check and a wage bill (the staff
+  pools MVP, ticket 1, 2026-09-12 — `docs/STAFF_POOLS_PLAN.md`).** §7's
+  model is implemented exactly as written: four categories in a new
+  `data/staff.ron` (manufacturing, maintenance, packaging, logistics), each
+  a hired headcount and a wage per head per pay period; every kind in
+  `data/machines.ron` (now schema 2) declares the crew it needs *while
+  running*, and the dock needs a logistics head to ship. **Architectural
+  home:** `sim_core::sim::staff::StaffPools`, a plain field on `World`
+  beside `Economy` — not an ECS component, for the same reason money is
+  not: four aggregate counters, nothing per entity. Each tick the pools
+  reset to headcount and machines claim their whole crew in the
+  simulation's stable machine order (docks after them); a machine refused
+  its crew does not run that tick, keeps its inputs and its progress
+  (a paused craft resumes where it stopped), and reads *starved* with a
+  `staff` reason — understaffed is a kind of starved, no fourth state. §5's
+  third cost axis is live: on payday the bill is paid out of the one money
+  counter, one head at a time in `staff.ron` order, and the first head that
+  cannot be paid, and every one after it, leaves. A new game starts with a
+  crew sized to the shipped line (the relationship is pinned by a test), so
+  the *second* line is what makes the player hire. **MVP-provisional
+  answers to §11, each open to revision:** allocation under a shortfall is
+  first-come in stable order (the same machine goes short every tick; no
+  player-set priority yet); there is no recruiting fee; firing is free and
+  immediate; an unpaid head leaves (no debt, no strike, no reputation
+  meter). Maintenance exists with zero demand until something corrodes.
 - **Money and active-contract state's architectural home (resolved at milestone 5, 2026-09-06):** both live as plain fields on a new `sim_core::sim::economy::Economy` struct, owned directly by `World` and advanced once per tick — not a new ECS component/entity, since milestone 5 has exactly one money counter and one active contract (no per-entity multiplicity to justify ECS machinery yet). `money` is a single fixed-point (`Fx`) counter, per ARCHITECTURE.md §3.9. The one hardcoded `Contract` (fixed mix/cadence/payout, named constants in `economy.rs`) is checked against an accumulating `delivery_buffer` `Inventory` at its cadence boundary (`Economy::tick`), which is where `World::issue_command(PlayerCommand::CollectOutput)` then deposited collected product instead of discarding it — this was milestone 5's "delivery mechanism." (**Superseded 2026-09-08 by the delivery dock**, two bullets up: that command no longer exists and the pool is filled by a building at the chain's tail instead. The pool itself, and everything about how contracts settle against it, is unchanged.) Exposed to Godot as a `SimBridge::economy_snapshot_json` JSON snapshot (money, contract mix, per-item progress, cadence), same pattern as the existing chunk/tile/layout snapshots. **Superseded in part on 2026-09-08:** `contracts.ron` data-file loading and multiple concurrent contracts have since landed — `Economy` now holds a `Vec<ActiveContract>` (each with its own cadence clock and delivery counters) plus one shared `delivery_buffer`, and `economy_snapshot_json` returns an array of contracts rather than one inline. The `Economy`-as-a-plain-field-on-`World` call above was unaffected and still stands: several contracts are a `Vec` inside the one struct, not a reason for ECS machinery. **Still explicitly deferred:** contract-loss/reputation penalties on a missed cadence window (a miss today just skips that window's payout and keeps the contract active — see this doc's own open question below), and the `StaffPools` resource — all future work, per GAMEPLAY.md §6/§9's original fuller design and the milestone-5 task's own scope note.
 
 ---
@@ -343,7 +368,7 @@ Everything in this doc should be **content**, not simulation code, per [ARCHITEC
 - Does a secondary spot-market/"sell excess at a flat lower rate" mechanic exist alongside contracts, or is contract delivery the *only* way to convert product into money? Affects how punishing overproduction is.
 - ~~What exactly happens when a delivery interval is missed once — immediate contract loss, a grace period, a reputation meter that only loses the contract after repeated misses?~~ **Decided 2026-09-10 (§9, the contract-board bullet):** a grace period counted in strikes — `strikes` consecutive missed windows lose the contract, a paid window resets the count, and a lost contract is bought back at its listed price. No reputation meter yet.
 - Is there a reputation/trust score gating access to higher-tier contracts, separate from equipment-tier gating?
-- When staff demand exceeds headcount in a category, which machines lose out — player-set priority, first-come-first-served, or proportional throttling across all of them?
-- Is there a one-time recruiting/training cost on top of the recurring per-head wage, and can headcount be reduced (firing) freely or with a penalty/delay?
+- When staff demand exceeds headcount in a category, which machines lose out — player-set priority, first-come-first-served, or proportional throttling across all of them? **MVP-provisional (2026-09-12, §9's staff-pools bullet):** first-come in the simulation's stable machine order, so the same machine is always the one short; player-set priority is the expected replacement and needs no wire change.
+- Is there a one-time recruiting/training cost on top of the recurring per-head wage, and can headcount be reduced (firing) freely or with a penalty/delay? **MVP-provisional (2026-09-12):** no recruiting fee, free and immediate firing, and a head that cannot be paid on payday leaves. All three are placeholders for the balancing pass, not decisions.
 - Are perishability (spoilage) and corrosion (durability) modeled as full ECS components with their own tick-based decay, or as simpler flags/costs? Needs a decision before tier 4/5 implementation starts.
 - Exact tier list beyond the six in §2 (this doc's tiers are illustrative of the *shape* of progression, not necessarily the final content list), and the actual catalog of derived sauces/variants — both are a game-design task, not an architecture or gameplay-systems one.

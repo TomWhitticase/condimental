@@ -22,6 +22,292 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-12: **Staff pools MVP, ticket 3 — the Godot half.** The plan's
+  "Presentation" section (`docs/STAFF_POOLS_PLAN.md`) built as written,
+  with the coordinator's amendment that the andon bullet is void. The
+  calls worth recording:
+
+  1. **The panel reads; it does not compute.** Every figure on a row —
+     `headcount`, `wage`, `demand`, `assigned`, `short` — is the wire's
+     own, and the row's words and bar are a pure function of the category
+     dictionary (`_staff_row_state`), so `test_staff_panel.gd` proves the
+     panel against `staff_snapshot_json` with no viewport. The one
+     exception is deliberate and was put to the coordinator first: the
+     footer's `wages N / period` is the UPCOMING bill, which the wire does
+     not carry (`last_bill` is what the last payday paid: 0 before the
+     first, stale after a hire). It is `Σ headcount × wage`
+     (`_staff_bill`) — the payday rule applied to numbers the snapshot
+     already holds, the same kind of arithmetic as the shop meter's
+     price ÷ money — and explicitly NOT a second opinion on any fact the
+     sim reports. Recorded as such: if the payday rule ever stops being
+     "every head at its wage" (a recruiting fee, a per-period bonus), a
+     sim-side `next_bill` is the cleaner home and this sum is the thing to
+     delete.
+  2. **The meter is `assigned / demand`, red when short, with the two
+     numbers printed on the track.** GAMEPLAY.md §10 asked for a gauge
+     per category; §5e says a bar is drawn only where the sim defines the
+     ceiling, and `demand` is that ceiling — what the factory asked for
+     on the last tick. So a fully staffed idle line reads `0 / 0` on an
+     empty bar (nobody asked), not `4 / 4` (a bar of headcount against an
+     invented full mark would be the gauge that lies). The numbers sit ON
+     the track (a Label child anchored full-rect over the fill) so the
+     bar is never colour alone; `2 short` in words stands beside it in the
+     warning colour, and the bar turns `METER_FILL_WARN` only while
+     `short > 0` — a demand the player cannot meet is the §5e meaning of
+     red.
+  3. **"nothing to maintain yet" is keyed on the category id.** A row
+     whose headcount and demand are both 0 could belong to any category;
+     the sentence says what maintenance is FOR, so a generic rule would
+     print it for a logistics crew the player had just fired.
+     `STAFF_IDLE_NOTES` holds one entry and a fired-out logistics row
+     keeps its (empty) `0 / 0` meter.
+  4. **Polling is on the load's cadence but on its own stamp.** The plan
+     says every `LOAD_POLL_TICKS` from `_advance_simulation` and "buttons
+     re-poll at once". Sharing `_load_polled_tick` would make every HIRE
+     shift the machine-load cadence; `_staff_polled_tick` is separate, and
+     `_poll_staff` also runs once per `_rebuild_world` (a loaded save
+     reads its crew before the first frame — the machine-load precedent)
+     and once on open. The poll is cheap enough (four categories, one
+     JSON) that it runs whether or not the panel is up, which is what lets
+     the panel open on the last poll instead of an empty plate.
+  5. **The crew is read once per rebuild from `query_tile_json`.**
+     `_machine_states` is overwritten by every chunk snapshot, and
+     `MachineSnapshot` does not carry `crew` (it is content, not state),
+     so hover keeps a separate `_crews` map, seeded in `_seed_crews` for
+     every recipe-running machine AND every dock, exactly as
+     `_seed_machine_states` is. A category is printed as its id
+     (`crew: 2 manufacturing`, `short of manufacturing staff`), a plain
+     word, not through `_item_display_name`, which would capitalise it
+     into a proper noun mid-sentence. The dock's "held · short of
+     logistics staff" names the category from the DOCK'S crew: the wire's
+     `understaffed` is a bare bool, and the crew on the same tile snapshot
+     is the only place the sim says which category that is.
+  6. **The panel had to lose a line per row, and the build-menu card had
+     to lose its slack.** The first render of the panel scrolled at
+     1600x900 with the fourth category cut off: three text lines per row
+     plus stacked buttons. `hired 4  ·  wage 2 / head / period` on one
+     line and HIRE beside FIRE brought it to four rows on one plate, the
+     §5c lesson again (a scale costs layout). The card: `crew: 2
+     manufacturing` at `_ui_font(-3)` CLIPPED at "manufacturi" on the
+     128-wide card, and the fix could not be a taller card, because the
+     build menu's two-row grid is capped against the hotbar and a taller
+     row scrolls it. So the card is 144 wide (the text fits at the
+     `test_ui_scale.gd` floor, `_ui_font(-4)`), 138 tall, and its column's
+     inset went 8 → 2 and separation 2 → 0 — the crew line was paid for
+     out of the card's own padding. `--staff` implies `--populate` for
+     the same reason the first render taught: an unrun line reads `0 / 0`
+     on every meter, which is true and useless as a review frame.
+  7. **No click sound.** The plan says use an existing UI click if
+     `audio.gd` has one; it has the payout chime and the delivery knock
+     and nothing else, and synthesising a new cue was outside the ticket.
+     Noted here so the next audio pass knows the buttons are silent by
+     omission, not by decision.
+  8. **The andon assertion became a hover assertion.** The stack lights
+     were removed on `main` while this epic was in flight; the proof
+     asserts the wire's `{kind: staff, item: manufacturing}` stall, the
+     load record's `starved`, the hover's `▲ starved · 0% busy · short of
+     manufacturing staff` and `crew: 2 manufacturing`, and the load bar's
+     amber colour — every channel the removed light had, on the panel that
+     replaced it.
+
+- 2026-09-12: **Staff pools MVP, ticket 1 — the simulation half.**
+  GAMEPLAY.md §7's staff pools and §5's third cost axis, built as
+  `docs/STAFF_POOLS_PLAN.md` specifies (its "The data" and "The wire
+  contract" sections are the spec; ticket 3 consumes that wire unchanged).
+  Eleven calls, several of them the plan's and restated here because the
+  code now depends on them.
+
+  (1) **A plain field, not ECS.** `sim::staff::StaffPools` sits on `World`
+  beside `Economy`: four aggregate counters (headcount, available, demand,
+  assigned per category) and a payday clock. Nothing is per entity, so
+  ECS machinery would be shape without content — the same call `Economy`
+  made at milestone 5. This closes ARCHITECTURE.md §11's "`StaffPools`
+  has no ECS shape" by saying it needs none.
+
+  (2) **The claim lives inside `Machine::tick`, and is made only on a tick
+  the machine would otherwise have worked.** `Machine::tick` first decides
+  what the tick WOULD do (start, advance, deposit, blocked, idle) without
+  touching a buffer or a tap, then asks for the crew only for the three
+  working plans. That is what makes the plan's precedence rule true by
+  construction rather than by a check: a machine with no sugar or a full
+  output never asks, so a `staff` stall can never mask an `input` or
+  `output` one, and `machine_stall` reports it strictly after the six
+  older kinds find nothing. The signature grew by one argument,
+  `crew: Option<CrewRequest<'_>>` (the kind's `staff` slice plus `&mut
+  StaffPools`); `None` is "asks for nobody", which every unit test and
+  every crew-less kind uses.
+
+  (3) **A refused mid-craft machine pauses by moving `start_tick` forward
+  one tick.** ARCHITECTURE.md §3.5 defines progress as `current_tick -
+  start_tick`, and Godot's progress bar reads exactly those two numbers,
+  so "elapsed stands still" is expressed in the one representation that
+  already exists rather than a second `elapsed` field that could drift
+  from it. Because the snapshot's `process` changes on every paused tick,
+  the pause is reported as a change (the chunk is dirtied) — the same
+  per-tick rate an auto-filling hopper already dirties at, and only while
+  understaffed, which is a state the player is expected to fix. Progress
+  is never lost; `tests/staff.rs` proves the craft finishes exactly
+  `required - elapsed` ticks after the crew returns.
+
+  (4) **Understaffed is a kind of starved.** The window records `Starved`
+  and the andon shows amber; the new `StallKind::Staff` (`item` = the
+  category id) is what distinguishes it. No fourth `WorkState`: a machine
+  waiting on people is waiting on a resource. `Machine::refused_by` holds
+  the category for exactly one tick, cleared at the top of the next, so it
+  is a per-tick fact like every other stall — and Godot's hover already
+  holds the last non-null reason (UI_UX §2b point 30).
+
+  (5) **The first short category in the CREW's order is the one named.**
+  A kind's `staff` list order is content (`machines.ron`), so a
+  multi-category kind's refusal reason is the content author's choice, not
+  the catalog's order or the pools' iteration order.
+
+  (6) **A dock asks only when it holds something, and `understaffed` is
+  the verdict of the last such tick.** An empty dock has nothing to ship
+  and nobody to ask for, so it neither counts toward demand nor changes
+  its flag; the flag therefore reads true while the boxes wait, through
+  the empty ticks between arrivals, and flips back on the tick something
+  ships. A refused dock keeps its buffer (32 per item), then `try_absorb`
+  refuses and the belt backs up — mass conservation as before, pinned by
+  a test that counts what waited on the dock and sees exactly that many
+  ship the tick the head is back.
+
+  (7) **Payday pays heads one at a time, in `staff.ron` order, through
+  `Economy::try_spend`, and the first refusal fires that head and every
+  wage-earning head after it.** `try_spend` stays the only debit and stays
+  all-or-nothing per call; there is no debt (GAMEPLAY §1's one counter
+  does not go negative) and no cliff at money 0 (the heads the balance
+  covers stay). The walk-out is a line down the file, not a per-head
+  affordability test — a cheaper head later in the file leaves too — so
+  the panel can say "N left unpaid" as one fact. A zero-wage head never
+  leaves. File order is therefore a design choice: manufacturing first so
+  a factory that must lose someone loses its shipping clerk before its
+  cook. `next_payday_tick` starts at one period (tick 1000) and the
+  boundary test is `tick_count >= next_payday_tick`, `Economy::tick`'s
+  own convention.
+
+  (8) **Hire is free and never refused; fire is free and immediate.**
+  GAMEPLAY §11's recruiting-fee and firing questions answered "no, for
+  now", marked MVP-provisional in GAMEPLAY §9 and §11. The one staff figure
+  on the ledger is the wage bill, so the panel shows one number. Neither
+  command dirties a chunk (a head is not a tile); both are silent no-ops
+  for an unknown category, and fire at zero — the `Purchase` convention.
+
+  (9) **`machines.ron` is schema 2 with a REQUIRED `staff` list, and the
+  version is checked off a header before the shape.** Required, not
+  defaulted, because an omitted crew must be a loader error, not a silent
+  zero (the `recipes.ron` v2 → v3 precedent). Checking the version first
+  is new to this loader (save.rs already did it): a v1 file has no `staff`
+  and would otherwise be reported as "missing field", which sends the
+  reader to the wrong fix. A crew naming an unknown category, listing one
+  twice, or asking for zero is a TEST failure
+  (`StaffCatalog::validate_machines`, the `validate_covers` pattern), so a
+  test fixture may build a registry the catalog does not cover.
+
+  (10) **Save: `SaveData.staff: Option<SavedStaff>`, plus `refused_by` on
+  the machine and `understaffed` on the dock, all `#[serde(default)]`,
+  schema stays 1.** `None` is the pre-epic save, which loads with the
+  starting crew and a payday one period from ITS tick (not from zero, or
+  an old save would owe a year of wages on load). The per-tick tallies
+  are deliberately not saved — the first tick after a load recomputes
+  them exactly, like the topology — so the staff snapshot is compared in
+  lockstep from the first tick on, while everything else is compared
+  before it. A category the map omits keeps its starting headcount, so a
+  category added to `staff.ron` after a save was written starts as a new
+  game would; an id the catalog does not know is a corrupt save.
+
+  (11) **A broke factory has no staff, and the test fixtures say so
+  honestly.** Every long-running fixture used to stock up and run on
+  exactly zero money; at the first payday that factory now loses its whole
+  crew and stops, which is the mechanic working. Rather than soften payday,
+  `tests/common` gained `WAGE_RESERVE` (300 periods of the starting crew's
+  bill, a literal pinned against the data by `tests/staff.rs` the way
+  `STOCK_COST` is pinned) and `wages_paid(world)`, read off the payday
+  clock; fixtures fund themselves with the reserve and the assertions that
+  said "money is exactly the payouts" now say "earnings are exactly the
+  payouts", where earnings are the balance plus wages paid minus the
+  reserve. The Godot proofs needed no change: a new game's 3000 covers
+  wages for far longer than any proof runs, and nothing on the wire they
+  read changed shape.
+- 2026-09-12: **Staff pools, ticket 2 — the four staff-category icons.**
+  The asset half of the staff-pools epic (`docs/STAFF_POOLS_PLAN.md`,
+  "The icons"): four voxel models in `assets/voxels/generators/assets.rs`
+  that exist only to be rendered by `voxicons` into
+  `assets/voxels/icons/staff_<category>.png` for ticket 3's staff panel.
+  Six calls.
+
+  (1) **Each icon is the tool the category holds, never a person.**
+  GAMEPLAY.md §7 is explicit that staff are an abstract capacity, not
+  NPCs; a figure on the panel would promise a person who is not in the
+  simulation. Manufacturing is a **hard hat** (the floor-worker's badge);
+  maintenance a **double open-ended spanner**; packaging a **taped carton
+  with the roll of tape lying on its lid**; logistics a **pallet jack**.
+  The four were also chosen to have four *different outlines* — a low
+  dome on a disc, a long flat bar with notched ends, a cube, a tall thing
+  with two prongs — because the panel shows them in a row of four at 64 px
+  and the reader tells them apart by silhouette before colour or detail
+  (UI_UX.md §2 "silhouette-first"; the plan's own "silhouette test, not a
+  detail test"). The carton is deliberately not just a box: a box alone is
+  `item_box`, which is the *product*; the roll on the lid is what turns it
+  into the people who seal it.
+
+  (2) **Colour is the plan's rule, with one small extension and no new
+  palette entry.** Hard hat and tape are `hazard_yellow` — the one signage
+  colour, reserved for meaning (UI_UX.md §7), and also simply what a hard
+  hat and a roll of packing tape are. Spanner and jack are class `metal`
+  (`steel_light` bodies, a `steel` stamp band down the spanner's shaft,
+  `steel_dark` for the jack's pump housing) so they catch the light like
+  every other tool here (§4). The carton is `cardboard`/`cardboard_dark`
+  like `item_box`, with a `label_cream` shipping label. The extension: the
+  jack's four wheels and two grips are `rubber_dark` — a jack's wheels are
+  polyurethane, not steel, and the dark accents under the forks are what
+  make them read as *off the ground*. The test therefore pins "the jack has
+  metal and no signage colour", not "the jack is all metal"; the spanner IS
+  pinned all metal. Every colour needed already had a job in
+  `palette.ron`, so nothing was appended and no other `.vox` re-emitted —
+  the diff is exactly nine new model files, four icons and `index.json`.
+
+  (3) **Authored for vengi's camera, not the game's.** UI_UX.md §2b point
+  27's rule from the vinegar jug: a model whose only consumer is the icon
+  pass is seen from `vengi-thumbnailer`'s **-X/+Y** corner, never from the
+  scene's +X/+Z. So the hard hat's peak points at -X; the carton's tape
+  turns down the +Y face and its label sits on the -X face; the jack's
+  forks point at -X, where nothing stands in front of them, and its housing
+  and tiller rise at the far +X end where a tall part hides nothing
+  (point 16's depth rule, applied to the other camera). Nothing here is
+  symmetric about a tile midline, on purpose — nothing ever spins these.
+
+  (4) **Registered like the coin.** Entries in `ASSETS` after `coin`, each
+  a `VoxModel::tile()`, no footprint, no `machines.ron`/`shop.ron` row, no
+  `icons.rs` exclusion (they are exactly what the icon pass is for), no
+  Godot change (ticket 3 reads `res://voxels/icons/staff_<id>.png` after
+  `cargo xtask` stages `icons/`). The names are `staff_` + the
+  `data/staff.ron` category id so ticket 3 can build the path from the
+  wire's `id` and never needs a lookup table; a fifth category is a fifth
+  generator with the same naming.
+
+  (5) **The rework pass was needed, and by the hat.** The spanner, carton
+  and jack read at 64 px on the dark plate on the first render. The hard
+  hat had every part a hard hat has — brim, front peak, domed crown, a
+  crest over the top — and read as a bell (a jelly mould with ribs): its
+  crown stood 14 voxels high on a radius of 11 with a squared-off
+  superellipse profile, and the vertical risers of the stacked slices
+  became ribbing. Making the crown a plain ellipse 9 high on a radius of 12
+  — wider than tall — and dropping the second crest fixed it with fewer
+  voxels. The lesson is UI_UX.md §2b point 31: at icon scale an object is
+  identified by the *proportion* of its parts, not their presence. The
+  other rework was test-found before any render: the first spanner's jaw
+  slot was as deep as the head was long, so the lower lip vanished and the
+  head was a fork; `spanner_jaws_are_open` failed, the head was widened
+  (radius 7.5) and the slot shortened to five voxels.
+
+  (6) **What the tests pin.** `staff_models_are_non_empty_and_fit_one_tile`:
+  exactly the four names, in `staff.ron` category order, each non-empty,
+  each a 32³ volume, every voxel inside it (`VoxModel::set` clips silently,
+  point 29, so an overreaching generator would otherwise lose voxels
+  without a word). `staff_icons_use_the_planned_materials`: the classes
+  and the yellow, per (2). `spanner_jaws_are_open`: the jaws are empty
+  voxels, not a darker colour, for point 11's reason.
 - 2026-09-12: **Machine load: the stack lights come down; the hover panel
   is the readout.** After playing with ticket 3's andon stack lights the
   owner did not like how the poles looked and asked for the signals "just
@@ -4185,6 +4471,23 @@ were only discoverable by building it:
     hundreds of polls and asserts the reason is never dropped. The general
     form: when one polled field explains another, the explanation's
     lifetime is the explained thing's, not the poll's.
+31. **At icon scale an object is identified by the proportion of its
+    parts, not by their presence.** The staff-pools epic's hard hat icon:
+    the first generator drew a brim, a longer peak at the front, a domed
+    crown and a crest over the top — the complete inventory of a hard hat
+    — and the rendered 64 px icon was a bell, or a jelly mould with ribs.
+    The crown stood 14 voxels high on a radius of 11 with a squared-off
+    superellipse profile, so the object was taller than it was wide, and
+    the vertical risers of its stacked slices read as ribbing. Lowering the
+    crown to a plain ellipse 9 high on a radius of 12 and dropping the
+    second crest — fewer voxels, fewer features — made it a hard hat at
+    once. The rule: below a certain size the eye reads an outline's
+    proportions and nothing else, and every correct detail on a wrong ratio
+    is wasted. The working corollary: look at the icon at its real size on
+    the real dark plate BEFORE looking at the 512 px preview, because the
+    preview shows the detail, which is what the eye lands on, and the
+    detail is not what the icon is read by. Point 9 already budgets a
+    rework pass per asset; this is what the pass is usually for.
 
 ## Part C — ARCHITECTURE.md §9a, full text (mobile export spike findings, 2026-09-06)
 

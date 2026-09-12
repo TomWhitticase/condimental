@@ -251,9 +251,16 @@ fn raw_content(id: &str, raw: &str, recipes: &RecipeRegistry) -> u32 {
 /// axis is real rather than nominal.
 #[test]
 fn running_the_line_both_consumes_bought_stock_and_earns_contract_money() {
-    let mut world = reference_chain_with_budget(recipes(), common::STOCK_COST);
+    // Stock plus a wage reserve: 30 000 ticks is thirty paydays, and a broke
+    // factory loses its crew at the first one (the staff pools MVP epic).
+    let mut world =
+        reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE);
     common::stock_up(&mut world);
-    assert_eq!(world.money(), Fx::ZERO, "it spent the whole budget on stock");
+    assert_eq!(
+        world.money(),
+        Fx::from_num(common::WAGE_RESERVE),
+        "it spent the whole budget on stock, bar the wage reserve"
+    );
     let stocked = [
         world.owned_ingredient("tomato"),
         world.owned_ingredient("sugar"),
@@ -272,7 +279,7 @@ fn running_the_line_both_consumes_bought_stock_and_earns_contract_money() {
         );
     }
     assert!(
-        world.money() > Fx::ZERO,
+        world.money() + common::wages_paid(&world) > Fx::from_num(common::WAGE_RESERVE),
         "...and contract deliveries must pay for it"
     );
 }

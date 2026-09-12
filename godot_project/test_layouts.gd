@@ -321,6 +321,58 @@ static func build_bottleneck_line(sim) -> void:
 		sim.tick()
 
 
+## THE UNDERSTAFFED LINE (the staff pools MVP, ticket 3) — the fixture
+## `test_staff_panel.gd` asserts and `scripts/screenshot-scene.sh
+## --understaffed` photographs: the reference line, hoppers and tank on
+## auto-fill, with two manufacturing heads FIRED. The shipped crew is sized
+## to the line (4 manufacturing: crusher 1, mixer 1, vat 2), and the claim
+## is per tick in stable machine order, so with two gone the crusher and
+## the mixer take the two that are left every tick and the cooking vat is
+## the machine refused — the same one every tick, by design
+## (`docs/STAFF_POOLS_PLAN.md`, "Per tick, in stable order"). The line is
+## run until the sim reports that refusal on the vat's tile, which takes a
+## few hundred ticks (the vat asks only when it has a batch to start, and
+## the first paste has to reach it), and is capped rather than open-ended
+## so a sim change that stops it ever happening fails the test instead of
+## hanging it.
+const UNDERSTAFFED_VAT := Vector2i(12, 0)
+const UNDERSTAFFED_CATEGORY := "manufacturing"
+const UNDERSTAFFED_FIRED := 2
+const UNDERSTAFFED_MAX_TICKS := 4000
+
+static func build_understaffed_line(sim) -> void:
+	build_reference_line(sim)
+	# Funded and stocked like the bottleneck line, for its reason: the
+	# line's bill leaves too little for a deep larder.
+	fund(sim, 8000)
+	stock_larder(sim, BOTTLENECK_STOCK)
+	for tile in [Vector2i(-1, 0), Vector2i(4, 1)]:
+		sim.issue_command_json(JSON.stringify({
+			"type": "set_hopper_auto_fill", "tile": [tile.x, tile.y], "enabled": true,
+		}))
+	sim.issue_command_json(JSON.stringify({
+		"type": "set_tank_auto_fill", "tile": [5, 2], "enabled": true,
+	}))
+	for i in range(UNDERSTAFFED_FIRED):
+		sim.issue_command_json(JSON.stringify({"type": "fire", "category": UNDERSTAFFED_CATEGORY}))
+	for i in range(UNDERSTAFFED_MAX_TICKS):
+		sim.tick()
+		if understaffed_stall(sim, UNDERSTAFFED_VAT) == UNDERSTAFFED_CATEGORY:
+			return
+
+
+## The category the machine on `tile` was refused on the last tick, off
+## `query_tile_json`'s `stall`, or "" when its stall is anything else.
+static func understaffed_stall(sim, tile: Vector2i) -> String:
+	var parsed = JSON.parse_string(sim.query_tile_json(tile.x, tile.y))
+	if not (parsed is Dictionary):
+		return ""
+	var stall = parsed.get("stall")
+	if stall is Dictionary and String(stall.get("kind", "")) == "staff":
+		return String(stall.get("item", ""))
+	return ""
+
+
 ## THE PIPE GALLERY (the pipes & conveyors overhaul, ticket 6) — the fixture
 ## `test_pipe_shapes.gd` asserts and `scripts/screenshot-scene.sh
 ## --pipe-gallery` photographs. Every pipe shape at every turn, from real

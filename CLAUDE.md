@@ -61,8 +61,9 @@ sauce-factory/
                            #   schema_version; loaders reject a mismatch
     recipes.ron            # recipes; embedded via include_str!. Header states
                            #   the process-time ordering rule (see log)
-    machines.ron           # kind -> footprint (width_tiles, height_tiles).
-                           #   Also where per-kind staff/power belong later
+    machines.ron           # kind -> footprint (width_tiles, height_tiles) and
+                           #   the REQUIRED staff crew (schema 2). Power
+                           #   belongs here later too
     ingredients.ron        # unit price of each RAW ingredient (solid+fluid)
     shop.ron               # price per BUILDABLE kind: every machines.ron kind
                            #   plus belt/pipe tiles. Must cover every kind
@@ -70,6 +71,10 @@ sauce-factory/
                            #   payout, price, strikes, starter. Only starters
                            #   run in a new game; the rest are signed (C).
                            #   List order = priority when contracts compete
+    staff.ron              # staff categories (schema 1): id, name, wage,
+                           #   starting_headcount, + pay_period_ticks. File
+                           #   order = panel order = PAYDAY order. machines.ron
+                           #   (schema 2) names a crew per kind from these
   sim_core/                # Rust crate, crate-type cdylib + rlib
     src/lib.rs             # the ONLY file that touches gdext (ARCH §4).
                            #   JSON-string wire format via serde_json
@@ -84,6 +89,9 @@ sauce-factory/
                            #     (min-X/min-Y corner) and rotation convention
       fluid.rs             #   FluidNetwork, FluidTank, pressure equalize
       splitter.rs          #   Splitter (round-robin cursor only)
+      staff.rs             #   StaffCatalog + StaffPools: per-tick crew
+                           #     claims in stable order, payday, hire/fire.
+                           #     A plain field on World, like Economy
       ingredients.rs       #   IngredientCatalog + OwnedIngredients; owns
                            #     raw_ingredient_ids (the one definition of raw)
       shop.rs              #   ShopCatalog + OwnedEquipment. Money is NOT here
@@ -102,9 +110,9 @@ sauce-factory/
     tests/                 # headless integration tests, one file per concern
                            #   (core_loop, placement, machine_footprints,
                            #   fluid_production, ingredients, economy, dock,
-                           #   contract_board, save_load, shop, auto_fill;
-                           #   common/mod.rs
-                           #   keeps hoppers/tank fed for long runs)
+                           #   contract_board, save_load, shop, auto_fill,
+                           #   staff; common/mod.rs keeps hoppers/tank fed
+                           #   for long runs and funds WAGE_RESERVE)
   xtask/                   # `cargo xtask`: build sim_core, copy the lib to
                            #   godot_project/bin/, stage models to
                            #   godot_project/voxels/ (both gitignored)
@@ -117,7 +125,8 @@ sauce-factory/
                            #   reserved `autosave` slot)
     main.tscn / main.gd    # the 3D scene: rebuilt from world_layout_json on
                            #   every place/remove/rotate; build mode, hotbar,
-                           #   clipboard, market, pause menu, and the click-to-
+                           #   clipboard, market, contracts board (C), staff
+                           #   panel (H), pause menu, and the click-to-
                            #   configure panel on a placed hopper or tank
     audio.gd               # every sound, SYNTHESISED into AudioStreamWAV at
                            #   runtime; no .wav binaries. Reached by preload
@@ -142,7 +151,8 @@ sauce-factory/
                            #   --no-hud, --closeup, --first-person, --stress,
                            #   --contracts, --board, --stock, --hotbar N, --no-hud,
                            #   --closeup, --first-person, --stress,
-                           #   --belt-gallery, --bottleneck, menu/pause)
+                           #   --belt-gallery, --bottleneck, --staff,
+                           #   --understaffed, menu/pause)
   docs/                    # README.md (index), ARCHITECTURE.md, UI_UX.md,
                            #   GAMEPLAY.md, DEVLOG.md, DECISIONS.md
   .githooks/               # commit-msg + pre-commit; enable with
@@ -193,6 +203,110 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-12 **Staff pools MVP, ticket 3 (Godot).** **H** opens the STAFF
+  panel (`_build_staff_panel`): a plain dark plate like the market and the
+  board, one row per `staff_snapshot_json` category in wire order (ticket
+  2's icon at `res://voxels/icons/staff_<id>.png`, name, `hired N  ·  wage
+  N / head / period`, an `assigned / demand` meter with the two numbers
+  PRINTED ON the track, `N short` in the warning colour beside a red bar,
+  HIRE and FIRE with FIRE disabled at 0), footer `wages N / period  ·  next
+  payday in Ns` (+ `✗ N left unpaid last payday` only when non-zero).
+  **Godot derives nothing the sim knows**: `demand`/`assigned`/`short`/
+  `headcount` are read, never recomputed; the ONE sum is the footer's
+  upcoming bill, `Σ headcount × wage` (`_staff_bill`), arithmetic on wire
+  numbers by the shop-meter precedent — a sim-side `next_bill` is the
+  cleaner home if the payday rule ever stops being "every head at its
+  wage". Rows are pure (`_staff_row_state`, `_staff_footer_text`) so the
+  proof needs no viewport. Maintenance reads `nothing to maintain yet`
+  in place of its meter while headcount and demand are 0
+  (`STAFF_IDLE_NOTES`, keyed on the id, not a generic "idle"). Polled on
+  its OWN stamp (`_staff_polled_tick`) every `LOAD_POLL_TICKS` from
+  `_advance_simulation` (a pause polls nothing), once per rebuild, once on
+  open, and at once after HIRE/FIRE, so a button's immediate re-read
+  never shifts the load's cadence. E/M/C/H are mutually exclusive and
+  `_staff_open` joins every modal guard. No click sound: `audio.gd` has
+  only the payout and delivery cues and nothing new is synthesised.
+  Hover: `_crews` (origin key → `crew`, from `query_tile_json` at rebuild,
+  machines AND docks) gives `crew: 2 manufacturing` as the last line;
+  stall kind `staff` reads `short of manufacturing staff` (the category
+  is a plain word, not an item id); an `understaffed` dock adds `held  ·
+  short of logistics staff`, the category from ITS crew. The build-menu
+  card shows the crew under the price; fitting it cost the card two
+  numbers (`SHOP_SLOT_SIZE` 128x130 → 144x138, inner inset 8 → 2,
+  separation 2 → 0) because a taller card scrolls the two-row grid at
+  1600x900 (UI_UX.md §2b point 32). Fixture `build_understaffed_line`
+  (reference line, auto-fill, `fire manufacturing` twice, ticked until
+  `query_tile_json` on the vat reports the `staff` stall, capped at
+  `UNDERSTAFFED_MAX_TICKS`): the crusher and mixer take the two heads
+  left in stable order and the vat is the one refused. The andon bullet
+  is void (the poles are gone): `test_staff_panel.gd` asserts the wire's
+  stall, the hover's `▲ starved · … · short of manufacturing staff` and
+  the amber load bar. `screenshot-scene.sh --staff` (implies
+  `--populate`, so meters read a line asking for its crew) and
+  `--understaffed` (hover on the vat). Full record in `docs/DECISIONS.md`.
+- 2026-09-12 **Staff pools MVP, ticket 1 (sim).** Staff are four aggregate
+  pools (`data/staff.ron`, schema 1: `pay_period_ticks`, categories with
+  `id`/`name`/`wage`/`starting_headcount`; loader `StaffCatalog` rejects a
+  bad version, no categories, a duplicate id, an empty name, a zero period;
+  a zero wage is legal). `data/machines.ron` is **schema 2**: every kind
+  has a REQUIRED `staff: [(category, count)]` (hopper/tank/splitter `[]`,
+  crusher/mixer 1 manufacturing, vat 2, bottler/packer 1 packaging, dock 1
+  logistics); the version is checked off a header before the shape, so a
+  v1 file says "wrong version", not "missing field". A crew naming an
+  unknown category, twice, or with count 0 is a TEST failure
+  (`StaffCatalog::validate_machines`), not a construction panic. `World`
+  owns `StaffPools` as a plain field like `Economy`. **The tick:** pools
+  reset after fluid; each machine, in `topology.machines` order, claims its
+  kind's WHOLE crew inside `Machine::tick` (new `crew: Option<CrewRequest>`
+  arg) only on a tick it would otherwise record `Working` — a refused
+  machine takes nothing, records `Starved`, remembers the first short
+  category (`Machine::refused_by`, crew-list order) and, if mid-craft,
+  shifts `start_tick` forward one (elapsed stands still; reported as a
+  change since Godot derives progress from `start_tick`); a dock claims
+  only when it holds something, a refused dock holds and reads
+  `understaffed`. Stable order means the SAME machine goes short every
+  tick — the shipped line short one manufacturing head idles the vat (last
+  in tile order), never the crusher or mixer. **Payday** after the economy
+  tick: at `next_payday_tick` heads are paid one at a time in `staff.ron`
+  order via `Economy::try_spend`; the first refusal fires that head and
+  every wage-earning head after it (a zero-wage head stays); `last_bill`,
+  `walked_out_last_payday` recorded; clock `+= pay_period_ticks`. Hire is
+  free and never refused for a known category; fire at 0 / unknown
+  category = silent no-op; neither dirties a chunk. **Wire:**
+  `staff_snapshot_json` (plan shape; `demand`/`assigned`/`short` are the
+  LAST tick's; `money` repeated); `StallKind::Staff` with `item` = category,
+  reported only after the six older kinds find nothing; `crew` on
+  `query_tile_json`'s machine and dock variants and every
+  `shop_snapshot_json` entry; `DockSnapshot.understaffed`. **Save:**
+  `SaveData.staff: Option<SavedStaff>` (`#[serde(default)]`; `None` = a
+  pre-epic save → starting crew, payday one period from its tick),
+  `SavedMachine.refused_by`, `SavedDock.understaffed`, schema stays 1;
+  per-tick tallies are not saved (the first tick recomputes them). **A
+  broke factory has no staff, so every long-running test fixture funds
+  itself with `tests/common`'s `WAGE_RESERVE`** (300 periods of the starting
+  crew's bill, pinned by `tests/staff.rs`) and asserts *earnings* (balance
+  + `wages_paid` − reserve) where it used to assert money. Full record in
+  `docs/DECISIONS.md`.
+- 2026-09-12 **Staff pools, ticket 2 (icons).** Four UI-only voxel props
+  in `assets.rs`'s "Staff category icons" section, registered after `coin`
+  and never placed: `staff_manufacturing` (a hard hat), `staff_maintenance`
+  (a double open-ended spanner, lying flat), `staff_packaging` (a taped
+  carton with the roll of tape on its lid), `staff_logistics` (a pallet
+  jack: forks toward the camera, tiller leaning back). Named
+  `staff_<category id>` so ticket 3 builds the icon path from the wire's
+  `id` with no lookup table. One-tile volume each, **authored for vengi's
+  -X/+Y camera** (UI_UX §2b point 27, the vinegar precedent): the icon pass
+  is their only consumer. Colours are the plan's — hat and tape
+  `hazard_yellow`, spanner and jack `metal` (`steel_light`/`steel`/
+  `steel_dark`, with the jack's wheels and grips `rubber_dark`), carton
+  `cardboard` — and **no palette entry was added**, so no other `.vox`
+  re-emitted. The tool, never a person (GAMEPLAY §7). Rework pass: the hard
+  hat read as a bell until its crown was made wider than tall (`HAT_H` 9 on
+  `HAT_R` 12, a plain ellipse, one crest); at 64 px an object is its
+  proportions, not its detail (new UI_UX §2b point 31). Tests pin the four
+  names in category order, non-empty, every voxel inside 32³, the plan's
+  material classes, and genuinely open spanner jaws. `icons.rs` needs no
+  exclusion. Full record in `docs/DECISIONS.md`.
 - 2026-09-12 **Machine load: the stack-light poles are REMOVED; the hover
   panel is the indicator.** A playtest verdict on looks alone — a pole
   beside every machine was not wanted — so the six `andon_*` models, their

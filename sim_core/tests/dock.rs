@@ -42,7 +42,15 @@ use sim_core::sim::{
 
 /// Exactly `common::stock_up`'s ingredient bill, so a stocked world starts
 /// with a factory, a full larder and zero money.
-const BUDGET: u32 = common::STOCK_COST;
+/// Stock plus a wage reserve: these fixtures run for many paydays.
+const BUDGET: u32 = common::STOCK_COST + common::WAGE_RESERVE;
+
+/// What the factory has earned: the balance less what it started with
+/// after stocking up, with the wages it has paid since added back.
+fn earned(world: &World) -> sim_core::sim::types::Fx {
+    world.money() + common::wages_paid(world)
+        - sim_core::sim::types::Fx::from_num(common::WAGE_RESERVE)
+}
 
 fn recipes() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
@@ -250,7 +258,7 @@ fn the_chain_ships_and_earns_with_no_player_command_but_refilling() {
         .map(|(_, qty)| *qty)
         .sum();
     assert!(
-        stock > 0 || world.money() > sim_core::sim::types::Fx::ZERO,
+        stock > 0 || earned(&world) > sim_core::sim::types::Fx::ZERO,
         "every shipped box must be either waiting in the shared pool or already spent \
          paying a contract — never nowhere"
     );
@@ -270,7 +278,7 @@ fn the_chain_ships_and_earns_with_no_player_command_but_refilling() {
     }
 
     assert!(
-        world.money() > sim_core::sim::types::Fx::ZERO,
+        earned(&world) > sim_core::sim::types::Fx::ZERO,
         "an unattended-but-supplied factory must earn money now that the dock delivers \
          for the player"
     );

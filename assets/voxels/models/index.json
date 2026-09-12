@@ -261,5 +261,18 @@
   ],
   "splitter_arrow": [
     "emissive"
+  ],
+  "staff_logistics": [
+    "matte",
+    "metal"
+  ],
+  "staff_maintenance": [
+    "metal"
+  ],
+  "staff_manufacturing": [
+    "matte"
+  ],
+  "staff_packaging": [
+    "matte"
   ]
 }

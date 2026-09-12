@@ -18,6 +18,7 @@ pub mod reference;
 pub mod save;
 pub mod shop;
 pub mod splitter;
+pub mod staff;
 pub mod types;
 pub mod world;
 
@@ -48,6 +49,10 @@ pub use shop::{
     ShopSnapshot,
 };
 pub use splitter::{SPLITTER_KIND, Side, Splitter};
+pub use staff::{
+    CategoryPool, CrewEntry, CrewRequest, PaydayReport, StaffCatalog, StaffCategory,
+    StaffCategorySnapshot, StaffLoadError, StaffPools, StaffSnapshot, crew_entries,
+};
 pub use types::{Direction, Fx, decode_chunk_id, encode_chunk_id};
 pub use machine::{
     FULL_LOAD_PERCENT, LOAD_BUCKET_TICKS, LOAD_BUCKETS, LOAD_WINDOW_TICKS, LoadWindow, WorkState,
