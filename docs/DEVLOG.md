@@ -64,6 +64,26 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-12 — The staff categories have faces (staff pools, ticket 2)
+
+The staff-pools epic's asset half (`docs/STAFF_POOLS_PLAN.md`): four voxel
+props, one per category, rendered through the icon pass so ticket 3's
+staff panel has a picture beside each name — a hard hat for manufacturing,
+a double open-ended spanner for maintenance, a taped carton with the roll
+of tape on its lid for packaging, a pallet jack for logistics. Each is the
+tool the category holds rather than a person, because GAMEPLAY.md §7's
+staff are a capacity, not NPCs, and the four were picked to have four
+different outlines. Registered like the coin — in `ASSETS`, never placed,
+no footprint — and authored for vengi's camera, since the icon is their
+only consumer. No palette change, so nothing else re-emitted.
+
+Three read at 64 px on the dark plate first time; the hard hat read as a
+bell until its crown was made wider than tall — UI_UX §2b point 9's
+budgeted rework pass earning its keep, and the lesson is the new point 31.
+A voxgen test pins the four names in category order, non-empty, inside
+32³, the plan's material classes, and that the spanner's jaws are open.
+Full record in `docs/DECISIONS.md`.
+
 ### 2026-09-11 — The bottleneck is visible (machine load, ticket 3)
 
 The machine-load epic is complete. Every processing machine stands an

@@ -193,6 +193,26 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-12 **Staff pools, ticket 2 (icons).** Four UI-only voxel props
+  in `assets.rs`'s "Staff category icons" section, registered after `coin`
+  and never placed: `staff_manufacturing` (a hard hat), `staff_maintenance`
+  (a double open-ended spanner, lying flat), `staff_packaging` (a taped
+  carton with the roll of tape on its lid), `staff_logistics` (a pallet
+  jack: forks toward the camera, tiller leaning back). Named
+  `staff_<category id>` so ticket 3 builds the icon path from the wire's
+  `id` with no lookup table. One-tile volume each, **authored for vengi's
+  -X/+Y camera** (UI_UX §2b point 27, the vinegar precedent): the icon pass
+  is their only consumer. Colours are the plan's — hat and tape
+  `hazard_yellow`, spanner and jack `metal` (`steel_light`/`steel`/
+  `steel_dark`, with the jack's wheels and grips `rubber_dark`), carton
+  `cardboard` — and **no palette entry was added**, so no other `.vox`
+  re-emitted. The tool, never a person (GAMEPLAY §7). Rework pass: the hard
+  hat read as a bell until its crown was made wider than tall (`HAT_H` 9 on
+  `HAT_R` 12, a plain ellipse, one crest); at 64 px an object is its
+  proportions, not its detail (new UI_UX §2b point 31). Tests pin the four
+  names in category order, non-empty, every voxel inside 32³, the plan's
+  material classes, and genuinely open spanner jaws. `icons.rs` needs no
+  exclusion. Full record in `docs/DECISIONS.md`.
 - 2026-09-11 **Machine load, ticket 3 (Godot).** Every recipe-running
   machine stands its andon (`_build_machine_andon`) as THREE sibling nodes
   of the body — one per status model, like the motion frames — on the
