@@ -377,4 +377,10 @@ DEVLOG's status line, and merges to `main`.
 
 ## Coordinator notes
 
-*(appended as work lands)*
+- 2026-09-12: `main` removed the in-world andon stack lights (commit
+  `da292b6`, "the hover panel is the indicator") while tickets 1 and 2 were
+  in flight; merged into the integration branch before ticket 3 started
+  in earnest. **Ticket 3 amendment:** the "Presentation" section's andon
+  bullet is void — there is no floor light to assert. The understaffed
+  proof asserts the hover panel's load line (`starved` status, the
+  `staff` reason naming the category) and the wire, nothing on the floor.
