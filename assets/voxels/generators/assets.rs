@@ -150,6 +150,14 @@ pub const ASSETS: &[Asset] = &[
     // ticket). Not an item and not a building — the one asset in this list
     // that never occupies a tile.
     Asset { name: "coin", build: coin },
+    // The staff-category icons (the staff-pools epic, ticket 2): four more
+    // props that never occupy a tile, one per `data/staff.ron` category,
+    // drawn only to be rendered by `voxicons` for the staff panel. See the
+    // "Staff category icons" section.
+    Asset { name: "staff_manufacturing", build: staff_manufacturing },
+    Asset { name: "staff_maintenance", build: staff_maintenance },
+    Asset { name: "staff_packaging", build: staff_packaging },
+    Asset { name: "staff_logistics", build: staff_logistics },
     // The andon stack lights (the machine-load epic, ticket 2): one model
     // per lit lens. Stood beside a machine by the scene, never bought, so
     // no icon (`icons.rs`'s `is_andon`). See the "Andon stack light"
@@ -1421,6 +1429,212 @@ const COIN_VOXELS: u32 = 10;
 /// The midline of that volume — between voxels 4 and 5 (UI_UX.md §2b point
 /// 20). Not 5.
 const COIN_C: f32 = (COIN_VOXELS as f32 - 1.0) / 2.0;
+
+// ---------------------------------------------------------------------------
+// Staff category icons (the staff-pools epic, ticket 2 —
+// docs/STAFF_POOLS_PLAN.md, "The icons")
+// ---------------------------------------------------------------------------
+//
+// Four UI props, one per `data/staff.ron` category, so the staff panel
+// (ticket 3) can put a picture beside each name: a hard hat for
+// manufacturing, an open-ended spanner for maintenance, a taped carton with
+// its roll of tape for packaging, a pallet jack for logistics. Each is the
+// tool the category holds, not a person — GAMEPLAY.md §7 is explicit that
+// staff are a capacity, not NPCs, and a figure would promise a person who
+// is not in the simulation. UI_UX.md §5 wants every icon rendered from a
+// real voxel asset, never drawn flat, so these are voxel models like the
+// coin: registered in `ASSETS`, given no footprint, never placed.
+//
+// **Authored for vengi's camera, not the game's** (UI_UX.md §2b point 27,
+// the vinegar jug's precedent): the icon pass is the only thing that ever
+// looks at these, and `vengi-thumbnailer` looks from the **-X/+Y** corner,
+// so a face meant to be seen goes on x = 0, on y = 31, or on top. Nothing
+// here is symmetric about a tile midline on purpose — nothing spins these.
+//
+// **Silhouette first, at 64 px, against a dark plate.** A staff icon is
+// read at a glance in a row of four; it has to be tellable from its
+// neighbours by outline alone. So each object is the *whole* object and
+// lies the way its outline is widest to an isometric camera — the spanner
+// flat, the carton square-on, the jack forks-forward — and detail is spent
+// only where it changes the outline (the hat's brim and crest, the jaw
+// slots, the roll on the lid, the tiller).
+//
+// **Colour is the plan's** (UI_UX.md §7): the hard hat and the tape are
+// `hazard_yellow`, the one signage colour, which is also what a hard hat and
+// a roll of packing tape actually are; the spanner and the jack are `metal`
+// so they catch the light the way every other tool in this factory does
+// (§4); the carton is `cardboard`, matte, like `item_box`. Nothing new was
+// added to `palette.ron` — every colour needed already had a job here.
+
+/// **Manufacturing: a hard hat.** A domed crown on a brim, with a peak at
+/// the front and a raised crest over the top. The crest and the brim are
+/// what stop it being a yellow egg at 64 px: a plain dome from above is a
+/// disc, and a disc says "coin" in this UI. The peak points at the camera
+/// (-X), so the brim reads as a brim and not as a flat rim all round.
+///
+/// The crown is a low elliptical dome, wider than tall (see `HAT_H` for the
+/// bell it was before). One colour, no stripe or badge: a hard hat is a
+/// hard hat by shape.
+pub fn staff_manufacturing(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::tile();
+    let yellow = p.idx("hazard_yellow");
+    // The brim: a flat disc with a longer peak on the camera-facing -X side.
+    m.cylinder_z_f(HAT_C, HAT_BRIM_R, (0, 1), yellow);
+    m.cylinder_z_f((HAT_C.0 - HAT_PEAK, HAT_C.1), HAT_BRIM_R - 1.5, (0, 1), yellow);
+    // The crown, sliced: an elliptical profile, wider than it is tall, with
+    // one crest running front to back a voxel proud of the shell.
+    for z in HAT_BASE_Z..=HAT_BASE_Z + HAT_H {
+        let t = (z - HAT_BASE_Z) as f32 / HAT_H as f32;
+        let f = (1.0 - t * t).max(0.0).sqrt();
+        m.cylinder_z_f(HAT_C, HAT_R * f, (z, z), yellow);
+        let rc = (HAT_R + 1.0) * f;
+        let lo = (HAT_C.0 - rc).round() as i32;
+        let hi = (HAT_C.0 + rc).round() as i32;
+        m.cuboid((lo, hi), (14, 17), (z, z), yellow);
+    }
+    m
+}
+
+/// The hard hat's centre on the tile plane (between voxels 15 and 16, so
+/// the crest is two voxels either side of it).
+const HAT_C: (f32, f32) = (15.5, 15.5);
+const HAT_BRIM_R: f32 = 14.5;
+/// How far the peak's disc is pushed toward -X past the crown's centre.
+const HAT_PEAK: f32 = 5.0;
+const HAT_R: f32 = 12.0;
+const HAT_BASE_Z: i32 = 2;
+/// The crown's height above the brim. **Wider than tall, by a lot**: the
+/// first cut stood 14 high on a radius of 11 with a squared-off
+/// (superellipse) profile, and its icon was a bell — a jelly mould with
+/// ribs. A hard hat's crown is a low dome; at 64 px it is the proportion
+/// of crown to brim that says "hat", not the ribbing.
+const HAT_H: i32 = 9;
+
+/// **Maintenance: an open-ended spanner.** A double-ender lying flat, the
+/// classic tool-icon silhouette: a straight shaft with a round head and an
+/// open jaw at each end. Flat, not standing, because from above the jaws
+/// are what say "spanner", and on edge it is a bar. The two jaws are offset
+/// to opposite sides, the way a real double open-ender's are angled, which
+/// also breaks the mirror symmetry that made the first cut read as a
+/// dumbbell.
+///
+/// Stainless (`steel_light`, class `metal`) with a `steel` stamp band down
+/// the shaft's top — the one darker line a forged spanner's I-section
+/// gives it.
+pub fn staff_maintenance(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::tile();
+    let light = p.idx("steel_light");
+    let steel = p.idx("steel");
+    let z = (0, SPANNER_THICK - 1);
+    m.cuboid((8, 23), (12, 19), z, light);
+    m.cylinder_z_f((7.5, 15.5), SPANNER_HEAD_R, z, light);
+    m.cylinder_z_f((24.5, 15.5), SPANNER_HEAD_R, z, light);
+    // The jaws: a slot cut in from each end, each offset a voxel to its own
+    // side. Shallower than the head is long, so both lips survive to the
+    // mouth and the outline is a C, not a fork.
+    m.carve_cuboid((0, 5), (12, 16), z);
+    m.carve_cuboid((26, 31), (15, 19), z);
+    // The stamp band along the shaft's top face.
+    m.cuboid((10, 21), (14, 17), (z.1, z.1), steel);
+    m
+}
+
+const SPANNER_THICK: i32 = 4;
+const SPANNER_HEAD_R: f32 = 7.5;
+
+/// **Packaging: a taped carton with the roll of tape on its lid.** The
+/// carton is `item_box`'s cardboard at twice the scale, its lid seam sealed
+/// with a strip of `hazard_yellow` tape that turns down the +Y face (the one
+/// vengi sees), and the roll lies flat on the lid at the camera's corner:
+/// a ring of tape on a cardboard core with a hole through it. The roll is
+/// the whole reason the icon is not just a box: a box alone is `item_box`,
+/// which is the *product*, and this icon has to mean the people who seal
+/// it. Yellow tape rather than the box's brown, for the same reason.
+pub fn staff_packaging(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::tile();
+    let card = p.idx("cardboard");
+    let dark = p.idx("cardboard_dark");
+    let tape = p.idx("hazard_yellow");
+    let (b0, b1) = CARTON;
+    m.cuboid(CARTON, CARTON, (0, CARTON_TOP), card);
+    // The lid's flap seam, and the fold lines where the flaps meet the sides.
+    m.cuboid((15, 16), CARTON, (CARTON_TOP, CARTON_TOP), dark);
+    m.cuboid(CARTON, (b0, b0), (CARTON_TOP, CARTON_TOP), dark);
+    m.cuboid(CARTON, (b1, b1), (CARTON_TOP, CARTON_TOP), dark);
+    // The sealing tape over the seam, turned down both ends.
+    m.cuboid((13, 18), CARTON, (CARTON_TOP, CARTON_TOP), tape);
+    m.cuboid((13, 18), (b1, b1), (CARTON_TOP - 8, CARTON_TOP), tape);
+    m.cuboid((13, 18), (b0, b0), (CARTON_TOP - 8, CARTON_TOP), tape);
+    // A shipping label on the -X face, which vengi also sees.
+    m.cuboid((b0, b0), (7, 13), (5, 11), p.idx("label_cream"));
+    // The roll, lying on the lid at the camera's corner.
+    let roll_z = (CARTON_TOP + 1, CARTON_TOP + ROLL_HEIGHT);
+    m.cylinder_z_f(ROLL_C, ROLL_R, roll_z, tape);
+    m.cylinder_z_f(ROLL_C, ROLL_CORE_R, roll_z, card);
+    m.carve_cylinder_z_f(ROLL_C, ROLL_HOLE_R, roll_z);
+    m
+}
+
+const CARTON: (i32, i32) = (3, 28);
+const CARTON_TOP: i32 = 17;
+const ROLL_C: (f32, f32) = (9.5, 21.5);
+const ROLL_R: f32 = 6.5;
+const ROLL_CORE_R: f32 = 3.4;
+const ROLL_HOLE_R: f32 = 2.2;
+const ROLL_HEIGHT: i32 = 4;
+
+/// **Logistics: a pallet jack.** Two forks, a pump housing on its steer
+/// wheels, and a tiller with a T-handle. Forks toward the camera (-X) so
+/// they are the widest thing in the outline and nothing stands in front of
+/// them; the housing and the tiller rise at the far end, where a tall part
+/// hides nothing (UI_UX.md §2b point 16's depth rule, applied to vengi's
+/// camera). The tiller leans back over the housing rather than standing
+/// plumb — a vertical post over two bars reads as a lamppost on a sledge.
+///
+/// Forks and tiller `steel_light`, housing `steel_dark`, all class `metal`;
+/// the four wheels and the two grips are `rubber_dark`, because a jack's
+/// wheels are the one part of it that is not steel and the dark accents are
+/// what make the forks read as *off the ground*.
+pub fn staff_logistics(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::tile();
+    let light = p.idx("steel_light");
+    let steel = p.idx("steel");
+    let dark = p.idx("steel_dark");
+    let rubber = p.idx("rubber_dark");
+    // Load wheels first, so a fork drawn over one keeps its own colour.
+    for &(y0, y1) in &FORK_Y {
+        let yc = (y0 + y1) as f32 / 2.0;
+        m.cylinder_x_f((yc, 1.5), 1.6, (4, 7), rubber);
+        m.cuboid((2, FORK_X1), (y0, y1), (2, 5), light);
+        // A tapered tip.
+        m.cuboid((0, 1), (y0 + 1, y1 - 1), (2, 4), light);
+    }
+    // The carriage that joins the forks, and the pump housing behind it.
+    m.cuboid((FORK_X1 - 2, FORK_X1 + 2), (FORK_Y[0].0, FORK_Y[1].1), (2, 7), steel);
+    m.cuboid((FORK_X1 + 1, FORK_X1 + 5), (11, 20), (0, 12), dark);
+    // Steer wheels either side of the housing.
+    m.cylinder_y_f((FORK_X1 as f32 + 3.5, 2.5), 2.5, (8, 10), rubber);
+    m.cylinder_y_f((FORK_X1 as f32 + 3.5, 2.5), 2.5, (21, 23), rubber);
+    // The tiller: a 2x2 arm leaning back from the housing top to the handle.
+    for k in 0..TILLER_RISE {
+        let x = FORK_X1 + 3 + (k * TILLER_LEAN) / TILLER_RISE;
+        m.cuboid((x, x + 1), (14, 17), (13 + k, 13 + k), light);
+    }
+    let top = 13 + TILLER_RISE;
+    let hx = FORK_X1 + 2 + TILLER_LEAN;
+    m.cuboid((hx, hx + 2), (6, 25), (top, top + 2), light);
+    m.cuboid((hx, hx + 2), (6, 8), (top, top + 2), rubber);
+    m.cuboid((hx, hx + 2), (23, 25), (top, top + 2), rubber);
+    m
+}
+
+/// The two forks' Y spans; the tips point at -X.
+const FORK_Y: [(i32, i32); 2] = [(5, 10), (21, 26)];
+/// Where the forks end and the carriage begins.
+const FORK_X1: i32 = 23;
+const TILLER_RISE: i32 = 12;
+/// How far (+X) the tiller's top sits behind its foot: the lean.
+const TILLER_LEAN: i32 = 3;
 
 // ---------------------------------------------------------------------------
 // Fluid pipes (milestone 6 — ARCHITECTURE.md §3.4; the shape family is the
@@ -5206,5 +5420,97 @@ mod tests {
             assert!(m.filter_class(&p, MaterialClass::Metal).is_empty(), "{light} has metal in it");
             assert!(m.filter_class(&p, MaterialClass::Liquid).is_empty(), "{light} has liquid in it");
         }
+    }
+
+    // -- Staff category icons (the staff-pools epic, ticket 2) -----------
+
+    fn staff_assets() -> Vec<&'static Asset> {
+        ASSETS.iter().filter(|a| a.name.starts_with("staff_")).collect()
+    }
+
+    /// The four category props exist, are not empty, and are authored in
+    /// the one-tile volume like every other icon-bearing prop. `VoxModel::set`
+    /// clips silently at the volume (UI_UX.md §2b point 29), so a generator
+    /// that reached past 32 would lose voxels without a word — the voxel
+    /// bounds check is what turns that into a failure.
+    #[test]
+    fn staff_models_are_non_empty_and_fit_one_tile() {
+        let p = palette();
+        let staff = staff_assets();
+        let names: Vec<&str> = staff.iter().map(|a| a.name).collect();
+        assert_eq!(
+            names,
+            [
+                "staff_manufacturing",
+                "staff_maintenance",
+                "staff_packaging",
+                "staff_logistics"
+            ],
+            "one staff icon per data/staff.ron category, in category order"
+        );
+        for asset in staff {
+            let m = (asset.build)(&p);
+            assert!(!m.is_empty(), "{} is empty", asset.name);
+            assert_eq!(m.size, [TILE_VOXELS; 3], "{} is not a 32^3 volume", asset.name);
+            for &(x, y, z) in m.voxels.keys() {
+                assert!(
+                    x < TILE_VOXELS && y < TILE_VOXELS && z < TILE_VOXELS,
+                    "{} has a voxel outside its volume at ({x}, {y}, {z})",
+                    asset.name
+                );
+            }
+        }
+    }
+
+    /// The plan's colour rule (docs/STAFF_POOLS_PLAN.md, "The icons"): the
+    /// hard hat and the tape are `hazard_yellow`, the spanner and the jack
+    /// are `metal`, the carton is `matte`. A repaint that kept every
+    /// silhouette would still pass the test above, so pin the classes.
+    #[test]
+    fn staff_icons_use_the_planned_materials() {
+        let p = palette();
+        let yellow = p.idx("hazard_yellow");
+        let has_yellow = |m: &VoxModel| m.voxels.values().any(|&c| c == yellow);
+
+        let hat = staff_manufacturing(&p);
+        assert!(has_yellow(&hat), "the hard hat is hazard_yellow");
+        assert!(
+            hat.filter_class(&p, MaterialClass::Metal).is_empty(),
+            "a hard hat has no steel on it"
+        );
+
+        let spanner = staff_maintenance(&p);
+        assert!(
+            spanner.filter_class(&p, MaterialClass::Matte).is_empty(),
+            "the spanner is all metal"
+        );
+        assert!(!spanner.filter_class(&p, MaterialClass::Metal).is_empty());
+
+        let carton = staff_packaging(&p);
+        assert!(has_yellow(&carton), "the tape is hazard_yellow");
+        assert!(
+            carton.filter_class(&p, MaterialClass::Metal).is_empty(),
+            "a carton has no steel on it"
+        );
+
+        let jack = staff_logistics(&p);
+        assert!(
+            !jack.filter_class(&p, MaterialClass::Metal).is_empty(),
+            "the jack's forks and tiller are metal"
+        );
+        assert!(!has_yellow(&jack), "the jack carries no signage colour");
+    }
+
+    /// The spanner's jaws are genuinely open — empty voxels, not a darker
+    /// colour — for the same reason the machines' doorways are (UI_UX.md
+    /// §2b point 11): a filled slot meshes as a solid head and the tool
+    /// reads as a dumbbell.
+    #[test]
+    fn spanner_jaws_are_open() {
+        let m = staff_maintenance(&palette());
+        assert!(!m.filled(2, 14, 0), "the -X jaw is open at its mouth");
+        assert!(m.filled(2, 11, 0) && m.filled(2, 18, 0), "the -X jaw has two lips");
+        assert!(!m.filled(29, 17, 0), "the +X jaw is open at its mouth");
+        assert!(m.filled(29, 14, 0) && m.filled(29, 21, 0), "the +X jaw has two lips");
     }
 }
