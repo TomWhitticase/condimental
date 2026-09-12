@@ -125,7 +125,8 @@ sauce-factory/
                            #   reserved `autosave` slot)
     main.tscn / main.gd    # the 3D scene: rebuilt from world_layout_json on
                            #   every place/remove/rotate; build mode, hotbar,
-                           #   clipboard, market, pause menu, and the click-to-
+                           #   clipboard, market, contracts board (C), staff
+                           #   panel (H), pause menu, and the click-to-
                            #   configure panel on a placed hopper or tank
     audio.gd               # every sound, SYNTHESISED into AudioStreamWAV at
                            #   runtime; no .wav binaries. Reached by preload
@@ -150,7 +151,8 @@ sauce-factory/
                            #   --no-hud, --closeup, --first-person, --stress,
                            #   --contracts, --board, --stock, --hotbar N, --no-hud,
                            #   --closeup, --first-person, --stress,
-                           #   --belt-gallery, --bottleneck, menu/pause)
+                           #   --belt-gallery, --bottleneck, --staff,
+                           #   --understaffed, menu/pause)
   docs/                    # README.md (index), ARCHITECTURE.md, UI_UX.md,
                            #   GAMEPLAY.md, DEVLOG.md, DECISIONS.md
   .githooks/               # commit-msg + pre-commit; enable with
@@ -201,6 +203,47 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-12 **Staff pools MVP, ticket 3 (Godot).** **H** opens the STAFF
+  panel (`_build_staff_panel`): a plain dark plate like the market and the
+  board, one row per `staff_snapshot_json` category in wire order (ticket
+  2's icon at `res://voxels/icons/staff_<id>.png`, name, `hired N  ·  wage
+  N / head / period`, an `assigned / demand` meter with the two numbers
+  PRINTED ON the track, `N short` in the warning colour beside a red bar,
+  HIRE and FIRE with FIRE disabled at 0), footer `wages N / period  ·  next
+  payday in Ns` (+ `✗ N left unpaid last payday` only when non-zero).
+  **Godot derives nothing the sim knows**: `demand`/`assigned`/`short`/
+  `headcount` are read, never recomputed; the ONE sum is the footer's
+  upcoming bill, `Σ headcount × wage` (`_staff_bill`), arithmetic on wire
+  numbers by the shop-meter precedent — a sim-side `next_bill` is the
+  cleaner home if the payday rule ever stops being "every head at its
+  wage". Rows are pure (`_staff_row_state`, `_staff_footer_text`) so the
+  proof needs no viewport. Maintenance reads `nothing to maintain yet`
+  in place of its meter while headcount and demand are 0
+  (`STAFF_IDLE_NOTES`, keyed on the id, not a generic "idle"). Polled on
+  its OWN stamp (`_staff_polled_tick`) every `LOAD_POLL_TICKS` from
+  `_advance_simulation` (a pause polls nothing), once per rebuild, once on
+  open, and at once after HIRE/FIRE, so a button's immediate re-read
+  never shifts the load's cadence. E/M/C/H are mutually exclusive and
+  `_staff_open` joins every modal guard. No click sound: `audio.gd` has
+  only the payout and delivery cues and nothing new is synthesised.
+  Hover: `_crews` (origin key → `crew`, from `query_tile_json` at rebuild,
+  machines AND docks) gives `crew: 2 manufacturing` as the last line;
+  stall kind `staff` reads `short of manufacturing staff` (the category
+  is a plain word, not an item id); an `understaffed` dock adds `held  ·
+  short of logistics staff`, the category from ITS crew. The build-menu
+  card shows the crew under the price; fitting it cost the card two
+  numbers (`SHOP_SLOT_SIZE` 128x130 → 144x138, inner inset 8 → 2,
+  separation 2 → 0) because a taller card scrolls the two-row grid at
+  1600x900 (UI_UX.md §2b point 32). Fixture `build_understaffed_line`
+  (reference line, auto-fill, `fire manufacturing` twice, ticked until
+  `query_tile_json` on the vat reports the `staff` stall, capped at
+  `UNDERSTAFFED_MAX_TICKS`): the crusher and mixer take the two heads
+  left in stable order and the vat is the one refused. The andon bullet
+  is void (the poles are gone): `test_staff_panel.gd` asserts the wire's
+  stall, the hover's `▲ starved · … · short of manufacturing staff` and
+  the amber load bar. `screenshot-scene.sh --staff` (implies
+  `--populate`, so meters read a line asking for its crew) and
+  `--understaffed` (hover on the vat). Full record in `docs/DECISIONS.md`.
 - 2026-09-12 **Staff pools MVP, ticket 1 (sim).** Staff are four aggregate
   pools (`data/staff.ron`, schema 1: `pay_period_ticks`, categories with
   `id`/`name`/`wage`/`starting_headcount`; loader `StaffCatalog` rejects a

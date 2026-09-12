@@ -375,6 +375,26 @@ DEVLOG's status line, and merges to `main`.
 - Reviewed at 1x and 3x on a dark plate; the hard hat was reworked once
   (its first crown read as a bell). UI_UX §2b point 31 records the lesson.
 
+### Ticket 3 (Godot) — landed 2026-09-12
+
+- Built as "Presentation" specifies, with the coordinator's andon
+  amendment (below). `main.gd`: `_build_staff_panel` and friends, `H`,
+  `_staff_open` in every modal guard, `_poll_staff` on its own stamp at
+  `LOAD_POLL_TICKS`, `_crews` seeded from `query_tile_json` per rebuild
+  for machines and docks, `staff` in `_stall_reason_text`, the crew line
+  on machine and dock hover and on the build-menu card.
+- The footer's `wages N / period` is `Σ headcount × wage` in GDScript
+  (`_staff_bill`) — confirmed with the coordinator as arithmetic on wire
+  numbers (the shop-meter precedent), not a derived fact. A sim-side
+  `next_bill` is the cleaner home if the payday rule ever changes.
+- `audio.gd` has no UI click; the buttons are silent (nothing synthesised).
+- Fixture `test_layouts.gd`'s `build_understaffed_line` +
+  `understaffed_stall`; proof `test_staff_panel.gd` (`STAFF_PANEL_OK`);
+  `screenshot-scene.sh --staff` (implies `--populate`) and
+  `--understaffed`. The panel's rows were compacted and the build-menu
+  card resized (`SHOP_SLOT_SIZE` 144x138, tighter inset) after the first
+  renders — UI_UX.md §2b point 32.
+
 ## Coordinator notes
 
 - 2026-09-12: `main` removed the in-world andon stack lights (commit
