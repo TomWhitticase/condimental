@@ -337,7 +337,17 @@ DEVLOG's status line, and merges to `main`.
 
 ## Decisions made by tickets (read before consuming their output)
 
-*(appended by the coordinator as tickets land)*
+### Ticket 2 (icons) — landed 2026-09-12
+
+- Icon files are `assets/voxels/icons/staff_<category id>.png`, so ticket 3
+  builds the path from the wire's `id` with no lookup table.
+- Four UI-only props in `assets.rs` ("Staff category icons", registered
+  after `coin`, never placed): hard hat (`hazard_yellow`), double
+  open-ended spanner (`metal`), carton with `hazard_yellow` tape and a
+  tape roll on the lid (`matte`), pallet jack (steel with `rubber_dark`
+  wheels and grips, so it is `metal` + `matte`). No palette change.
+- Reviewed at 1x and 3x on a dark plate; the hard hat was reworked once
+  (its first crown read as a bell). UI_UX §2b point 31 records the lesson.
 
 ## Coordinator notes
 
