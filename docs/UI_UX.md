@@ -426,7 +426,7 @@ factory tropes; the sauce theme comes through in what the factory processes.
   amber, red). What follows describes the removed lights as they were
   built, kept because the reasoning about corners and colours still
   applies to whatever floor-wide readout replaces them, if one does.
-  *Originally:* every Every
+  *Originally:* every
   recipe-running machine has an andon on its camera-visible corner: green
   lit is flat out, amber is starved, red is blocked — colour AND position
   on the post (§7), the industrial convention (§3), never rotated with the
