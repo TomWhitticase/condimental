@@ -1,0 +1,954 @@
+//! Staff pools (the staff pools MVP epic, `docs/STAFF_POOLS_PLAN.md`;
+//! GAMEPLAY.md §5, §7, §9, §11), proved end to end against the shipped
+//! data through the same `World` API `SimBridge` exposes.
+//!
+//! What is pinned here, in the order the plan states it: the shipped
+//! content agrees with itself (every crew names a real category; the
+//! starting crew IS the reference line's summed crew); a fed line runs at
+//! full load on that crew with no `staff` stall anywhere; a shortfall lands
+//! on exactly the LAST machine in stable order that needs the short
+//! category, and nowhere else; a paused machine loses no progress; a
+//! refused dock holds and loses nothing; payday debits the whole bill on
+//! the boundary and fires the unpaid in file order; the commands round-trip
+//! through JSON; a kind with no crew never asks; and all of it survives a
+//! save. `staff.rs`'s own unit tests cover the catalog's rejection rules,
+//! the claim arithmetic and the zero-wage head, which needs a catalog the
+//! shipped `World` does not offer a seam for.
+
+mod common;
+
+use sim_core::sim::save::SavedStaff;
+use sim_core::sim::types::Fx;
+use sim_core::sim::{
+    ContractRegistry, MachineRegistry, PlayerCommand, RecipeRegistry, STARTING_MONEY, StaffCatalog,
+    StaffLoadError, StaffPools, StallKind, TileSnapshot, WorkState, World, command_from_json,
+    reference_chain, reference_chain_with_budget,
+};
+
+fn recipes() -> RecipeRegistry {
+    RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
+        .expect("bundled data/recipes.ron must parse")
+}
+
+/// The reference line, stocked and funded for many paydays, kept fed every
+/// tick for `ticks` ticks — long enough that every machine has work, short
+/// enough that none has backed up yet (the vat blocks the mixer only from
+/// about tick 3500; see `tests/machine_load.rs`).
+fn running_line(ticks: u32) -> World {
+    let mut world =
+        reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE);
+    common::stock_up(&mut world);
+    for _ in 0..ticks {
+        common::supply(&mut world);
+        world.tick();
+    }
+    world
+}
+
+fn tile_of(world: &World, kind: &str) -> (i32, i32) {
+    world
+        .world_layout()
+        .iter()
+        .find(|p| p.kind == kind)
+        .unwrap_or_else(|| panic!("the reference chain places a {kind}"))
+        .tile
+}
+
+fn stall_of(world: &World, tile: (i32, i32)) -> Option<(StallKind, String)> {
+    world
+        .machine_load_snapshots()
+        .into_iter()
+        .find(|e| e.tile == tile)
+        .unwrap_or_else(|| panic!("no machine at {tile:?}"))
+        .stall
+        .map(|s| (s.kind, s.item))
+}
+
+fn status_of(world: &World, tile: (i32, i32)) -> WorkState {
+    world
+        .machine_load_snapshots()
+        .into_iter()
+        .find(|e| e.tile == tile)
+        .unwrap()
+        .load
+        .status
+}
+
+/// `(elapsed, required)` of the machine's current craft, from the wire's
+/// `process`.
+fn progress_of(world: &World, tile: (i32, i32)) -> Option<(u64, u64)> {
+    match world.query_tile(tile)? {
+        TileSnapshot::Machine { process, .. } => {
+            process.map(|(start, required)| (world.current_tick() - start, required))
+        }
+        _ => None,
+    }
+}
+
+fn hire(world: &mut World, category: &str) {
+    world.issue_command(PlayerCommand::Hire {
+        category: category.to_string(),
+    });
+}
+
+fn fire(world: &mut World, category: &str) {
+    world.issue_command(PlayerCommand::Fire {
+        category: category.to_string(),
+    });
+}
+
+fn headcount(world: &World, category: &str) -> u32 {
+    world.staff().headcount(category)
+}
+
+// ---------------------------------------------------------------------
+// The content agrees with itself
+// ---------------------------------------------------------------------
+
+#[test]
+fn the_shipped_crews_name_only_shipped_categories() {
+    StaffCatalog::bundled()
+        .validate_machines(&MachineRegistry::bundled())
+        .expect("every machines.ron crew line names a staff.ron category, once, with a count");
+}
+
+#[test]
+fn validate_machines_rejects_an_unknown_category_a_duplicate_and_a_zero_count() {
+    let registry = |staff: &str| {
+        MachineRegistry::from_ron_str(&format!(
+            r#"(schema_version: 2, machines: [
+                MachineKind(id: "cooker", footprint: Footprint(width_tiles: 1, height_tiles: 1), staff: {staff}),
+            ])"#
+        ))
+        .unwrap()
+    };
+    let catalog = StaffCatalog::bundled();
+    assert!(catalog.validate_machines(&registry("[]")).is_ok());
+    assert!(
+        catalog
+            .validate_machines(&registry(r#"[("manufacturing", 1)]"#))
+            .is_ok()
+    );
+    assert!(matches!(
+        catalog.validate_machines(&registry(r#"[("plumbers", 1)]"#)),
+        Err(StaffLoadError::UnknownCategoryInMachine { .. })
+    ));
+    assert!(matches!(
+        catalog.validate_machines(&registry(r#"[("manufacturing", 1), ("manufacturing", 2)]"#)),
+        Err(StaffLoadError::DuplicateCategoryInMachine { .. })
+    ));
+    assert!(matches!(
+        catalog.validate_machines(&registry(r#"[("manufacturing", 0)]"#)),
+        Err(StaffLoadError::ZeroCrewCount { .. })
+    ));
+}
+
+/// The starting crew is sized to the reference line the way `STARTING_MONEY`
+/// is sized to its bill: for every category, `staff.ron`'s
+/// `starting_headcount` equals the summed `machines.ron` crew of the kinds
+/// the line places. Computed from the data, never from literals, so a
+/// re-crewed kind or a new stage moves the expectation with it.
+#[test]
+fn the_starting_crew_is_exactly_the_reference_chains_summed_crew() {
+    let world = reference_chain(recipes());
+    let catalog = StaffCatalog::bundled();
+    for category in catalog.categories() {
+        let demanded: u32 = world
+            .world_layout()
+            .iter()
+            .flat_map(|p| world.crew_of_kind(&p.kind).to_vec())
+            .filter(|(c, _)| *c == category.id)
+            .map(|(_, n)| n)
+            .sum();
+        assert_eq!(
+            category.starting_headcount, demanded,
+            "staff.ron's starting {} must equal the reference chain's summed demand",
+            category.id
+        );
+    }
+    assert!(
+        catalog
+            .categories()
+            .iter()
+            .any(|c| c.starting_headcount > 0),
+        "the line is not crewed by nobody"
+    );
+}
+
+/// `tests/common`'s `WAGE_RESERVE` is a literal every long fixture funds
+/// itself with; pin it against the data so a wage change is loud.
+#[test]
+fn the_test_wage_reserve_matches_the_starting_crews_bill() {
+    let pools = StaffPools::bundled();
+    assert_eq!(
+        u64::from(common::WAGE_RESERVE),
+        u64::from(pools.bill_per_period()) * common::WAGE_PERIODS,
+        "common::WAGE_RESERVE must equal the starting crew's bill per period x WAGE_PERIODS"
+    );
+}
+
+// ---------------------------------------------------------------------
+// A fed line on the starting crew
+// ---------------------------------------------------------------------
+
+#[test]
+fn a_fed_reference_chain_runs_on_the_starting_crew_with_no_staff_stall_anywhere() {
+    let mut world = running_line(200);
+    let mut ever_staff_stalled = Vec::new();
+    for _ in 0..2_800 {
+        common::supply(&mut world);
+        world.tick();
+        for entry in world.machine_load_snapshots() {
+            if matches!(&entry.stall, Some(s) if s.kind == StallKind::Staff) {
+                ever_staff_stalled.push((world.current_tick(), entry.tile));
+            }
+        }
+        let snapshot = world.staff_snapshot();
+        for c in &snapshot.categories {
+            assert_eq!(
+                c.short,
+                0,
+                "{} short at tick {}",
+                c.id,
+                world.current_tick()
+            );
+            assert_eq!(c.assigned, c.demand);
+            assert!(c.assigned <= c.headcount);
+        }
+    }
+    assert!(
+        ever_staff_stalled.is_empty(),
+        "the starting crew covers the line; staff stalls: {ever_staff_stalled:?}"
+    );
+    // The crusher is the machine nothing upstream can starve and nothing
+    // downstream has yet blocked: flat out.
+    assert_eq!(
+        status_of(&world, tile_of(&world, "crusher")),
+        WorkState::Working
+    );
+    // On a tick when everything asks, the whole starting crew is at work.
+    let snapshot = world.staff_snapshot();
+    let by_id = |id: &str| {
+        snapshot
+            .categories
+            .iter()
+            .find(|c| c.id == id)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(by_id("manufacturing").assigned, 4);
+    assert!(by_id("packaging").assigned <= 2);
+    assert_eq!(by_id("maintenance").demand, 0);
+    // The dock asks only on a tick it holds something; over the window it
+    // shipped, so logistics was asked for at least once.
+    assert!(world.dock_snapshots()[0].shipped_total > 0);
+}
+
+// ---------------------------------------------------------------------
+// A shortfall lands on the last machine in stable order
+// ---------------------------------------------------------------------
+
+/// Firing one manufacturing head leaves three for a crusher (1), a mixer
+/// (1) and a vat (2) claiming in tile order: the vat, LAST, is the one
+/// refused — every tick, naming manufacturing — and the other two never are.
+#[test]
+fn firing_one_manufacturing_head_idles_exactly_the_last_manufacturing_machine() {
+    let mut world = running_line(1_500);
+    let crusher = tile_of(&world, "crusher");
+    let mixer = tile_of(&world, "mixer");
+    let vat = tile_of(&world, "cooking_vat");
+    assert!(
+        crusher.0 < mixer.0 && mixer.0 < vat.0,
+        "stable order is tile order"
+    );
+    for tile in [crusher, mixer, vat] {
+        assert_eq!(
+            status_of(&world, tile),
+            WorkState::Working,
+            "{tile:?} before"
+        );
+    }
+
+    fire(&mut world, "manufacturing");
+    assert_eq!(headcount(&world, "manufacturing"), 3);
+
+    let mut vat_refusals = 0;
+    for _ in 0..120 {
+        common::supply(&mut world);
+        world.tick();
+        for tile in [crusher, mixer] {
+            assert!(
+                !matches!(stall_of(&world, tile), Some((StallKind::Staff, _))),
+                "{tile:?} must never go short: it claims before the vat"
+            );
+        }
+        match stall_of(&world, vat) {
+            Some((StallKind::Staff, category)) => {
+                assert_eq!(category, "manufacturing");
+                vat_refusals += 1;
+            }
+            other => panic!("the vat must be refused every tick it would work, got {other:?}"),
+        }
+        let snapshot = world.staff_snapshot();
+        let manufacturing = snapshot
+            .categories
+            .iter()
+            .find(|c| c.id == "manufacturing")
+            .unwrap();
+        assert_eq!(
+            (
+                manufacturing.demand,
+                manufacturing.assigned,
+                manufacturing.short
+            ),
+            (4, 2, 2)
+        );
+    }
+    assert_eq!(vat_refusals, 120);
+    assert_eq!(
+        status_of(&world, vat),
+        WorkState::Starved,
+        "understaffed IS a kind of starved"
+    );
+    assert_eq!(status_of(&world, crusher), WorkState::Working);
+    assert_eq!(status_of(&world, mixer), WorkState::Working);
+    // Hover's `crew` for the vat.
+    match world.query_tile(vat) {
+        Some(TileSnapshot::Machine { crew, stall, .. }) => {
+            assert_eq!(crew.len(), 1);
+            assert_eq!(
+                (crew[0].category.as_str(), crew[0].count),
+                ("manufacturing", 2)
+            );
+            assert_eq!(stall.unwrap().kind, StallKind::Staff);
+        }
+        other => panic!("expected the vat, got {other:?}"),
+    }
+}
+
+/// A paused craft keeps its elapsed time exactly, and finishes the same
+/// number of ticks after the crew returns as it had left to run.
+#[test]
+fn hiring_the_head_back_resumes_the_paused_craft_with_no_lost_progress() {
+    let mut world = running_line(1_500);
+    let vat = tile_of(&world, "cooking_vat");
+    // Make sure the vat is genuinely mid-craft when it loses its crew.
+    while !matches!(progress_of(&world, vat), Some((elapsed, required)) if elapsed > 10 && elapsed + 10 < required)
+    {
+        common::supply(&mut world);
+        world.tick();
+    }
+    let (elapsed_at_fire, required) = progress_of(&world, vat).unwrap();
+
+    fire(&mut world, "manufacturing");
+    for _ in 0..100 {
+        common::supply(&mut world);
+        world.tick();
+        assert_eq!(
+            progress_of(&world, vat),
+            Some((elapsed_at_fire, required)),
+            "a paused craft's elapsed time stands still"
+        );
+    }
+
+    hire(&mut world, "manufacturing");
+    assert_eq!(headcount(&world, "manufacturing"), 4);
+    let remaining = required - elapsed_at_fire;
+    for step in 1..remaining {
+        common::supply(&mut world);
+        world.tick();
+        assert_eq!(
+            progress_of(&world, vat),
+            Some((elapsed_at_fire + step, required)),
+            "after the crew returns the craft advances one tick per tick"
+        );
+        assert!(!matches!(
+            stall_of(&world, vat),
+            Some((StallKind::Staff, _))
+        ));
+    }
+    // The completion tick: `elapsed == required` deposits and clears the
+    // process (the vat's outlet pipe has room in a running line).
+    common::supply(&mut world);
+    world.tick();
+    assert!(
+        progress_of(&world, vat).is_none() || progress_of(&world, vat).unwrap().0 < elapsed_at_fire,
+        "the batch landed exactly when it would have, less the pause"
+    );
+}
+
+// ---------------------------------------------------------------------
+// The dock
+// ---------------------------------------------------------------------
+
+/// Without its logistics head the dock holds what arrives: the shared pool
+/// stops growing, the boxes pile on the dock (and then the belt), nothing
+/// vanishes, and it all ships once the head is back.
+#[test]
+fn firing_the_logistics_head_makes_the_dock_hold_and_loses_nothing() {
+    let mut world = running_line(2_500);
+    let dock = world.dock_snapshots()[0].clone();
+    assert!(dock.shipped_total > 0, "the line reaches the dock by now");
+    assert!(!dock.understaffed);
+
+    let shipped_before = dock.shipped_total;
+    let stock_before = world.economy_snapshot().delivery_stock.clone();
+    fire(&mut world, "logistics");
+    assert_eq!(headcount(&world, "logistics"), 0);
+
+    for _ in 0..1_200 {
+        common::supply(&mut world);
+        world.tick();
+    }
+    let held = world.dock_snapshots()[0].clone();
+    assert_eq!(
+        held.shipped_total, shipped_before,
+        "nothing shipped while understaffed"
+    );
+    assert!(held.understaffed, "the dock says why");
+    let on_dock: u32 = held.contents.iter().map(|(_, q)| q).sum();
+    assert!(
+        on_dock > 0,
+        "arriving boxes wait on the dock rather than disappearing"
+    );
+    assert!(on_dock <= held.capacity_per_item);
+    // The pool moves only downward (contracts consume it), never up.
+    let stock_now = world.economy_snapshot().delivery_stock;
+    let total = |stock: &[(String, u32)]| stock.iter().map(|(_, q)| q).sum::<u32>();
+    assert!(total(&stock_now) <= total(&stock_before));
+    match world.query_tile(held.tile) {
+        Some(TileSnapshot::Dock {
+            crew, understaffed, ..
+        }) => {
+            assert!(understaffed);
+            assert_eq!((crew[0].category.as_str(), crew[0].count), ("logistics", 1));
+        }
+        other => panic!("expected the dock, got {other:?}"),
+    }
+    let snapshot = world.staff_snapshot();
+    let logistics = snapshot
+        .categories
+        .iter()
+        .find(|c| c.id == "logistics")
+        .unwrap();
+    assert_eq!(
+        (
+            logistics.headcount,
+            logistics.demand,
+            logistics.assigned,
+            logistics.short
+        ),
+        (0, 1, 0, 1)
+    );
+
+    hire(&mut world, "logistics");
+    common::supply(&mut world);
+    world.tick();
+    let shipping = world.dock_snapshots()[0].clone();
+    assert_eq!(
+        shipping.shipped_total,
+        shipped_before + on_dock,
+        "everything that waited on the dock ships the tick the crew is back"
+    );
+    assert!(!shipping.understaffed);
+    assert!(shipping.contents.iter().all(|(_, q)| *q == 0));
+}
+
+// ---------------------------------------------------------------------
+// Payday
+// ---------------------------------------------------------------------
+
+#[test]
+fn payday_debits_the_whole_bill_on_the_boundary_and_every_period_after() {
+    let mut world = World::new(recipes());
+    let pools = world.staff();
+    let period = pools.catalog().pay_period_ticks();
+    let bill = Fx::from_num(pools.bill_per_period());
+    assert!(bill > Fx::ZERO);
+    assert_eq!(pools.next_payday_tick(), period);
+    let start = Fx::from_num(STARTING_MONEY);
+
+    while world.current_tick() < period - 1 {
+        world.tick();
+    }
+    assert_eq!(world.money(), start, "nothing is owed before the boundary");
+    world.tick();
+    assert_eq!(world.current_tick(), period);
+    assert_eq!(
+        world.money(),
+        start - bill,
+        "the whole bill leaves on the payday tick"
+    );
+    let snapshot = world.staff_snapshot();
+    assert_eq!(snapshot.next_payday_tick, 2 * period);
+    assert_eq!(snapshot.last_bill, world.staff().bill_per_period());
+    assert_eq!(snapshot.walked_out_last_payday, 0);
+    assert_eq!(snapshot.money, (start - bill).to_num::<f64>());
+
+    for _ in 0..period {
+        world.tick();
+    }
+    assert_eq!(
+        world.money(),
+        start - bill - bill,
+        "and again one period later"
+    );
+    assert_eq!(world.staff().next_payday_tick(), 3 * period);
+    // Every head is still on the books: the bill was met.
+    for c in StaffCatalog::bundled().categories() {
+        assert_eq!(headcount(&world, &c.id), c.starting_headcount);
+    }
+}
+
+/// With money for only some of the heads, the first head that cannot be
+/// paid leaves, and so does every one after it — down `staff.ron` in file
+/// order across categories — and the panel is told how many.
+#[test]
+fn heads_that_cannot_be_paid_leave_in_staff_ron_order() {
+    let catalog = StaffCatalog::bundled();
+    let period = catalog.pay_period_ticks();
+    // Enough for the first two manufacturing wages and part of the third.
+    let manufacturing_wage = catalog.get("manufacturing").unwrap().wage;
+    let money = 2 * manufacturing_wage + 1;
+    let mut world = World::with_content_and_money(
+        recipes(),
+        MachineRegistry::bundled(),
+        ContractRegistry::bundled(),
+        Fx::from_num(money),
+    );
+    let bill = world.staff().bill_per_period();
+    assert!(bill > money, "the fixture must be unable to meet the bill");
+
+    for _ in 0..period {
+        world.tick();
+    }
+    assert_eq!(
+        world.money(),
+        Fx::from_num(1),
+        "two wages paid, then nothing more"
+    );
+    assert_eq!(headcount(&world, "manufacturing"), 2);
+    assert_eq!(headcount(&world, "maintenance"), 0);
+    assert_eq!(
+        headcount(&world, "packaging"),
+        0,
+        "every wage-earner after the refusal leaves"
+    );
+    assert_eq!(headcount(&world, "logistics"), 0);
+    let snapshot = world.staff_snapshot();
+    let total_start: u32 = catalog
+        .categories()
+        .iter()
+        .map(|c| c.starting_headcount)
+        .sum();
+    assert_eq!(snapshot.walked_out_last_payday, total_start - 2);
+    assert_eq!(snapshot.last_bill, 2 * manufacturing_wage);
+
+    // Hiring is free, so a head can be put back with no money at all; the
+    // next payday then finds 1 money against a wage of 2 and everyone who
+    // earns a wage leaves.
+    hire(&mut world, "logistics");
+    assert_eq!(world.money(), Fx::from_num(1));
+    for _ in 0..period {
+        world.tick();
+    }
+    assert_eq!(headcount(&world, "manufacturing"), 0);
+    assert_eq!(headcount(&world, "logistics"), 0);
+    assert_eq!(world.staff_snapshot().walked_out_last_payday, 3);
+    assert_eq!(world.staff_snapshot().last_bill, 0);
+    assert_eq!(world.money(), Fx::from_num(1));
+}
+
+// ---------------------------------------------------------------------
+// The commands
+// ---------------------------------------------------------------------
+
+#[test]
+fn hire_and_fire_round_trip_through_json_and_dirty_no_chunk() {
+    let mut world = reference_chain(recipes());
+    world.tick();
+    let before = headcount(&world, "packaging");
+
+    let hire =
+        command_from_json(r#"{"type": "hire", "category": "packaging"}"#).expect("hire parses");
+    assert!(matches!(&hire, PlayerCommand::Hire { category } if category == "packaging"));
+    let dirty_before = world.dirty_chunks().to_vec();
+    world.issue_command(hire);
+    assert_eq!(headcount(&world, "packaging"), before + 1);
+    assert_eq!(
+        world.dirty_chunks(),
+        dirty_before.as_slice(),
+        "hire dirties no chunk"
+    );
+
+    let fire =
+        command_from_json(r#"{"type": "fire", "category": "packaging"}"#).expect("fire parses");
+    assert!(matches!(&fire, PlayerCommand::Fire { category } if category == "packaging"));
+    world.issue_command(fire);
+    assert_eq!(headcount(&world, "packaging"), before);
+    assert_eq!(
+        world.dirty_chunks(),
+        dirty_before.as_slice(),
+        "fire dirties no chunk"
+    );
+
+    // Silent no-ops: fire at zero, and either with an unknown category.
+    assert_eq!(headcount(&world, "maintenance"), 0);
+    world.issue_command(
+        command_from_json(r#"{"type": "fire", "category": "maintenance"}"#).unwrap(),
+    );
+    assert_eq!(headcount(&world, "maintenance"), 0);
+    world.issue_command(command_from_json(r#"{"type": "hire", "category": "plumbers"}"#).unwrap());
+    world.issue_command(command_from_json(r#"{"type": "fire", "category": "plumbers"}"#).unwrap());
+    let snapshot = world.staff_snapshot();
+    assert_eq!(snapshot.categories.len(), 4, "no category was invented");
+    assert!(
+        command_from_json(r#"{"type": "hire"}"#).is_none(),
+        "category is required"
+    );
+    // Hiring is free.
+    let money = world.money();
+    world.issue_command(PlayerCommand::Hire {
+        category: "manufacturing".to_string(),
+    });
+    assert_eq!(world.money(), money);
+}
+
+// ---------------------------------------------------------------------
+// A kind with no crew
+// ---------------------------------------------------------------------
+
+/// A kind with `staff: []` never asks: a world whose kinds all have an
+/// empty list ships with nobody on the books and never reports a `staff`
+/// stall. (On the shipped registry the hopper, tank and splitter are the
+/// crew-less kinds; the fed-line test above sees exactly the three recipe
+/// machines' four heads in `demand`, never a fifth for the hopper.)
+#[test]
+fn a_machine_with_no_crew_never_asks() {
+    let text = include_str!("../../data/machines.ron")
+        .lines()
+        .map(|line| {
+            if line.trim_start().starts_with("staff:") {
+                "            staff: [],".to_string()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let uncrewed = MachineRegistry::from_ron_str(&text).unwrap();
+    let mut world = sim_core::sim::reference_chain_with_content_and_budget(
+        recipes(),
+        uncrewed,
+        ContractRegistry::bundled(),
+        common::STOCK_COST,
+    );
+    common::stock_up(&mut world);
+    for c in StaffCatalog::bundled().categories() {
+        for _ in 0..c.starting_headcount {
+            fire(&mut world, &c.id);
+        }
+    }
+    assert_eq!(world.staff().bill_per_period(), 0);
+    for _ in 0..2_500 {
+        common::supply(&mut world);
+        world.tick();
+        for entry in world.machine_load_snapshots() {
+            assert!(
+                !matches!(&entry.stall, Some(s) if s.kind == StallKind::Staff),
+                "a kind with staff: [] never asks, so it is never refused"
+            );
+        }
+        for c in &world.staff_snapshot().categories {
+            assert_eq!((c.demand, c.assigned, c.short), (0, 0, 0));
+        }
+    }
+    assert!(
+        world.dock_snapshots()[0].shipped_total > 0,
+        "the line ships unstaffed"
+    );
+    assert!(!world.dock_snapshots()[0].understaffed);
+    assert_eq!(world.staff_snapshot().last_bill, 0);
+    assert_eq!(world.staff_snapshot().walked_out_last_payday, 0);
+}
+
+// ---------------------------------------------------------------------
+// The wire
+// ---------------------------------------------------------------------
+
+#[test]
+fn staff_snapshot_json_has_the_documented_shape_in_staff_ron_order() {
+    // Far enough in that every machine has asked (tick 1200: one payday
+    // behind it, the line running), so the printed sample is a live one.
+    let world = running_line(1_200);
+    // Printed so `cargo test --test staff -- --nocapture` shows a real one.
+    println!(
+        "{}",
+        serde_json::to_string(&world.staff_snapshot()).unwrap()
+    );
+    let json = serde_json::to_value(world.staff_snapshot()).unwrap();
+    let mut keys: Vec<&str> = json
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        vec![
+            "categories",
+            "last_bill",
+            "money",
+            "next_payday_tick",
+            "pay_period_ticks",
+            "walked_out_last_payday"
+        ]
+    );
+    assert_eq!(json["pay_period_ticks"], 1000);
+    assert_eq!(json["next_payday_tick"], 2000);
+    assert_eq!(json["last_bill"], 14);
+    assert_eq!(json["money"], world.money().to_num::<f64>());
+    let ids: Vec<&str> = json["categories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, StaffCatalog::bundled().category_ids());
+    for c in json["categories"].as_array().unwrap() {
+        let mut keys: Vec<&str> = c.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            vec![
+                "assigned",
+                "demand",
+                "headcount",
+                "id",
+                "name",
+                "short",
+                "wage"
+            ]
+        );
+        assert_eq!(
+            c["short"].as_u64().unwrap(),
+            c["demand"].as_u64().unwrap() - c["assigned"].as_u64().unwrap()
+        );
+    }
+}
+
+#[test]
+fn crew_rides_query_tile_and_the_shop_snapshot_and_the_stall_kind_spells_staff() {
+    let world = reference_chain(recipes());
+    let shop = serde_json::to_value(world.shop_snapshot()).unwrap();
+    let entry = |kind: &str| {
+        shop["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["kind"] == kind)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(entry("belt")["crew"], serde_json::json!([]));
+    assert_eq!(entry("hopper")["crew"], serde_json::json!([]));
+    assert_eq!(
+        entry("cooking_vat")["crew"],
+        serde_json::json!([{"category": "manufacturing", "count": 2}])
+    );
+    assert_eq!(
+        entry("dock")["crew"],
+        serde_json::json!([{"category": "logistics", "count": 1}])
+    );
+    let vat =
+        serde_json::to_value(world.query_tile(tile_of(&world, "cooking_vat")).unwrap()).unwrap();
+    assert_eq!(
+        vat["crew"],
+        serde_json::json!([{"category": "manufacturing", "count": 2}])
+    );
+    let dock = serde_json::to_value(world.query_tile(tile_of(&world, "dock")).unwrap()).unwrap();
+    assert_eq!(
+        dock["crew"],
+        serde_json::json!([{"category": "logistics", "count": 1}])
+    );
+    assert_eq!(dock["understaffed"], false);
+    let dock_snapshot = serde_json::to_value(&world.dock_snapshots()[0]).unwrap();
+    assert_eq!(dock_snapshot["understaffed"], false);
+    assert_eq!(serde_json::to_value(StallKind::Staff).unwrap(), "staff");
+}
+
+/// A `staff` stall is reported only when nothing older applies: an idle
+/// machine with no input reads `input`, never `staff`, even with nobody
+/// hired.
+#[test]
+fn a_staff_stall_never_masks_an_input_shortfall() {
+    let mut world = reference_chain(recipes());
+    for c in StaffCatalog::bundled().categories() {
+        for _ in 0..c.starting_headcount {
+            fire(&mut world, &c.id);
+        }
+    }
+    for _ in 0..50 {
+        world.tick();
+    }
+    let crusher = tile_of(&world, "crusher");
+    assert_eq!(
+        stall_of(&world, crusher).map(|(k, _)| k),
+        Some(StallKind::Input),
+        "an unfed crusher wants tomatoes, not people"
+    );
+    for c in &world.staff_snapshot().categories {
+        assert_eq!(
+            c.demand, 0,
+            "a machine that would not have worked asks for nobody"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------
+// Save / load
+// ---------------------------------------------------------------------
+
+fn fingerprint(world: &World) -> String {
+    let mut out = format!("tick={}\n", world.current_tick());
+    out.push_str(&serde_json::to_string(&world.world_layout()).unwrap());
+    out.push_str(&serde_json::to_string(&world.machine_load_snapshots()).unwrap());
+    out.push_str(&serde_json::to_string(&world.dock_snapshots()).unwrap());
+    out.push_str(&serde_json::to_string(&world.economy_snapshot()).unwrap());
+    out.push_str(&serde_json::to_string(&world.hopper_snapshots()).unwrap());
+    out.push_str(&serde_json::to_string(&world.fluid_snapshots()).unwrap());
+    for chunk in world.all_chunks() {
+        out.push_str(&serde_json::to_string(&world.chunk_snapshot(chunk)).unwrap());
+    }
+    out
+}
+
+/// A world with a fired head, a mid-craft machine paused for want of it and
+/// a payday already behind it comes back identical and stays identical in
+/// lockstep — including the staff snapshot from the first tick on.
+#[test]
+fn a_fired_head_and_a_paused_craft_survive_a_save() {
+    let mut original = running_line(1_500);
+    let vat = tile_of(&original, "cooking_vat");
+    fire(&mut original, "manufacturing");
+    for _ in 0..60 {
+        common::supply(&mut original);
+        original.tick();
+    }
+    assert_eq!(
+        stall_of(&original, vat).map(|(k, _)| k),
+        Some(StallKind::Staff),
+        "the fixture must be saving a refused machine"
+    );
+    assert!(
+        progress_of(&original, vat).is_some(),
+        "...that is mid-craft"
+    );
+    assert!(
+        original.staff().next_payday_tick() > 1_000,
+        "...after a payday"
+    );
+
+    let text = original.to_save_ron();
+    assert!(text.contains("staff: Some("), "the pools are in the file");
+    assert!(text.contains("refused_by: Some(\"manufacturing\")"));
+    let mut loaded = World::from_save_ron(&text, recipes()).expect("the save must load");
+
+    assert_eq!(loaded.staff().headcount("manufacturing"), 3);
+    assert_eq!(
+        loaded.staff().next_payday_tick(),
+        original.staff().next_payday_tick()
+    );
+    assert_eq!(loaded.staff().last_bill(), original.staff().last_bill());
+    assert_eq!(fingerprint(&loaded), fingerprint(&original));
+    assert_eq!(
+        stall_of(&loaded, vat).map(|(k, _)| k),
+        Some(StallKind::Staff),
+        "the refusal is back before the first tick"
+    );
+
+    for step in 0..1_200 {
+        common::supply(&mut original);
+        common::supply(&mut loaded);
+        original.tick();
+        loaded.tick();
+        assert_eq!(
+            fingerprint(&loaded),
+            fingerprint(&original),
+            "diverged at step {step}"
+        );
+        assert_eq!(
+            serde_json::to_string(&loaded.staff_snapshot()).unwrap(),
+            serde_json::to_string(&original.staff_snapshot()).unwrap(),
+            "staff snapshots diverged at step {step}"
+        );
+    }
+    assert_eq!(original.to_save_ron(), loaded.to_save_ron());
+}
+
+/// A save written before the epic has no `staff` at all: it loads with the
+/// starting crew and a payday one period from its own tick, and an
+/// understaffed flag or refused category it never had reads false / none.
+#[test]
+fn a_pre_epic_save_loads_with_the_starting_crew_and_a_payday_one_period_out() {
+    let world = running_line(1_234);
+    let mut save = world.to_save();
+    save.staff = None;
+    let text = save.to_ron();
+    assert!(!text.contains("staff: Some("));
+    let loaded = World::from_save_ron(&text, recipes()).unwrap();
+    let catalog = StaffCatalog::bundled();
+    for c in catalog.categories() {
+        assert_eq!(loaded.staff().headcount(&c.id), c.starting_headcount);
+    }
+    assert_eq!(
+        loaded.staff().next_payday_tick(),
+        1_234 + catalog.pay_period_ticks()
+    );
+    assert_eq!(loaded.staff().last_bill(), 0);
+    assert_eq!(loaded.staff().walked_out_last_payday(), 0);
+
+    // And the strict form of "not there": the keys removed from the text.
+    // Cut `key: value,` (or `key: value` before a closing paren) wherever
+    // either key appears, whatever the RON's line breaks.
+    fn without(text: &str, key: &str) -> String {
+        let mut out = text.to_string();
+        while let Some(i) = out.find(key) {
+            let rest = &out[i..];
+            let stop = rest.find([',', ')']).expect("a field ends");
+            let end = if rest.as_bytes()[stop] == b',' {
+                stop + 1
+            } else {
+                stop
+            };
+            out = format!("{}{}", &out[..i], &rest[end..]);
+        }
+        out
+    }
+    let stripped = without(
+        &without(&world.to_save_ron(), "understaffed:"),
+        "refused_by:",
+    );
+    assert!(!stripped.contains("understaffed") && !stripped.contains("refused_by"));
+    let loaded = World::from_save_ron(&stripped, recipes()).expect("defaults fill the gaps");
+    assert_eq!(loaded.dock_snapshots().len(), 1);
+    assert!(!loaded.dock_snapshots()[0].understaffed);
+    for entry in loaded.machine_load_snapshots() {
+        assert!(!matches!(entry.stall, Some(s) if s.kind == StallKind::Staff));
+    }
+}
+
+#[test]
+fn a_save_naming_an_unknown_staff_category_is_refused() {
+    let world = running_line(10);
+    let mut save = world.to_save();
+    let staff: &mut SavedStaff = save.staff.as_mut().unwrap();
+    staff.headcount.insert("plumbers".to_string(), 3);
+    let message = World::from_save_ron(&save.to_ron(), recipes())
+        .err()
+        .expect("an unknown category is a corrupt save")
+        .to_string();
+    assert!(message.contains("plumbers"), "{message}");
+    assert!(message.contains("staff.ron"), "{message}");
+}

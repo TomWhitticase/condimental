@@ -1,0 +1,58 @@
+// Staff content (GAMEPLAY.md §7 "Staff — a resource pool, not NPCs" and
+// §5's third cost axis, "staff wages — recurring upkeep"). Data, never
+// hardcoded in sim_core, exactly like `recipes.ron`, `machines.ron` and
+// `shop.ron`; the loader is `sim_core::sim::staff::StaffCatalog`.
+//
+// `schema_version` follows ARCHITECTURE.md §4's data-file versioning rule:
+// the loader rejects a mismatched version rather than silently misreading a
+// changed shape. Content changes (a wage, a headcount, a new category) never
+// bump it.
+//
+// WHAT THIS FILE IS FOR. Staff are an aggregate capacity per CATEGORY, not
+// people walking the floor (GAMEPLAY.md §7). Every machine kind in
+// `data/machines.ron` declares the crew it needs *while running* from the
+// categories defined here; each tick the simulation resets every category
+// to its hired headcount and lets machines claim their whole crew in stable
+// order, so a factory short of people has the LAST machines in that order
+// standing idle (`docs/STAFF_POOLS_PLAN.md`, "Why it is shaped this way").
+//
+// THE FOUR CATEGORIES ARE GAMEPLAY.md §7's, deliberately not more: each one
+// gates a different stage a sauce passes through, so a shortfall reads
+// clearly — manufacturing idles the machines, packaging backs product up
+// in front of the bottler, logistics leaves boxes standing on the dock.
+// `maintenance` exists with nothing to maintain yet (nothing corrodes
+// until GAMEPLAY.md's tier 5), so it starts at zero and no machine asks
+// for it; it is here so the panel and the save already know the shape.
+//
+// ORDER MATTERS TWICE. This is the order the staff panel lists categories
+// in, and it is the PAYDAY order: on payday heads are paid one at a time
+// down this list, and the first head that cannot be paid — and every head
+// after it — leaves. Manufacturing is first because a factory that must
+// lose someone should lose its shipping clerk before its cook.
+//
+// NUMBERS. `wage` is whole money units per head per `pay_period_ticks`.
+// Everything is a placeholder in the sense GAMEPLAY.md §10 means (the
+// balancing pass owns the figures), but the SHAPE is deliberate:
+//
+//   1. The starting crew is sized to the shipped reference line — the
+//      summed `staff` of its kinds in `machines.ron` (crusher 1 + mixer 1
+//      + vat 2 manufacturing; bottler 1 + packer 1 packaging; dock 1
+//      logistics) — the same way `STARTING_MONEY` is sized to that line's
+//      bill. A first factory runs without a visit to the staff panel and
+//      the SECOND line is what makes the player hire.
+//      `sim_core/tests/staff.rs` pins that relationship, not the literals.
+//   2. The whole crew costs 14 per 1000 ticks against the starter contract's
+//      payouts, so wages are felt from the first payday without being able
+//      to sink a line that is delivering.
+//   3. One flat wage: the categories differ by what they gate, not yet by
+//      what they cost. A zero wage is legal content (a volunteer category).
+(
+    schema_version: 1,
+    pay_period_ticks: 1000,
+    categories: [
+        StaffCategory(id: "manufacturing", name: "Manufacturing", wage: 2, starting_headcount: 4),
+        StaffCategory(id: "maintenance",   name: "Maintenance",   wage: 2, starting_headcount: 0),
+        StaffCategory(id: "packaging",     name: "Packaging",     wage: 2, starting_headcount: 2),
+        StaffCategory(id: "logistics",     name: "Logistics",     wage: 2, starting_headcount: 1),
+    ],
+)

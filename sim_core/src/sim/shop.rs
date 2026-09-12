@@ -40,6 +40,7 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
+use super::staff::CrewEntry;
 use super::types::Fx;
 
 /// The schema version this build of sim_core understands. Bump this and
@@ -379,7 +380,10 @@ impl Shop {
     /// Builds the presentation snapshot — see [`ShopSnapshot`] for the exact
     /// JSON shape. `money` is passed in rather than read from a field
     /// because this type deliberately doesn't own one.
-    pub fn snapshot(&self, money: Fx) -> ShopSnapshot {
+    /// `crew_of` answers "what crew does this kind need" — `World` passes
+    /// its machine registry's `staff` list; a kind the registry does not
+    /// know (belt, pipe) answers empty.
+    pub fn snapshot(&self, money: Fx, crew_of: impl Fn(&str) -> Vec<CrewEntry>) -> ShopSnapshot {
         ShopSnapshot {
             money: money.to_num::<f64>(),
             entries: self
@@ -391,6 +395,7 @@ impl Shop {
                     price: entry.price_money().to_num::<f64>(),
                     owned: self.owned.count(&entry.id),
                     affordable: money >= entry.price_money(),
+                    crew: crew_of(&entry.id),
                 })
                 .collect(),
         }
@@ -439,6 +444,11 @@ pub struct ShopEntrySnapshot {
     /// in exactly one place; a menu buying several at once should compare
     /// `money` against `price * quantity` itself.
     pub affordable: bool,
+    /// The crew this kind needs while running (`machines.ron`'s `staff`,
+    /// the staff pools MVP epic), for the build-menu card. Empty for a kind
+    /// that asks for nobody — and for the belt and pipe, which are not
+    /// machine kinds at all.
+    pub crew: Vec<CrewEntry>,
 }
 
 #[cfg(test)]
@@ -611,7 +621,7 @@ mod tests {
     fn snapshot_lists_every_entry_in_file_order_with_affordability() {
         let mut shop = Shop::new(ShopCatalog::from_ron_str(EXAMPLE).unwrap());
         shop.owned.add("belt", 2);
-        let snapshot = shop.snapshot(Fx::from_num(10));
+        let snapshot = shop.snapshot(Fx::from_num(10), |_| Vec::new());
 
         assert_eq!(snapshot.money, 10.0);
         assert_eq!(snapshot.entries.len(), 2);
@@ -631,7 +641,7 @@ mod tests {
     #[test]
     fn affordability_is_inclusive_of_exactly_enough_money() {
         let shop = Shop::new(ShopCatalog::from_ron_str(EXAMPLE).unwrap());
-        let snapshot = shop.snapshot(Fx::from_num(75));
+        let snapshot = shop.snapshot(Fx::from_num(75), |_| Vec::new());
         let crusher = snapshot
             .entries
             .iter()

@@ -91,25 +91,33 @@ fn price_of(kind: &str) -> Fx {
 /// by a single payout" reasoning above still holds — while cutting the tick
 /// count (and this file's wall time) by more than half.
 fn world_with_earned_money() -> World {
-    let mut world = reference_chain_with_budget(recipes(), common::STOCK_COST);
+    let mut world =
+        reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE);
     common::stock_up(&mut world);
+    // The fixture holds exactly its wage reserve (the staff pools MVP epic:
+    // a broke factory loses its crew at the first payday), so "earned" is
+    // the balance with that reserve taken out and the wages paid put back.
     assert_eq!(
         world.money(),
-        Fx::ZERO,
-        "the fixture must start broke, or 'earned money' would not mean earned"
+        Fx::from_num(common::WAGE_RESERVE),
+        "the fixture must start with nothing but its wage reserve, or 'earned money' \
+         would not mean earned"
     );
+    let earned = |world: &World| {
+        world.money() + common::wages_paid(world) - Fx::from_num(common::WAGE_RESERVE)
+    };
     const MIN_MONEY: i64 = 50;
 
     for _ in 0..2_000_000u32 {
         common::supply(&mut world);
         world.tick();
-        if world.money() >= Fx::from_num(MIN_MONEY) {
+        if earned(&world) >= Fx::from_num(MIN_MONEY) {
             break;
         }
     }
 
     assert!(
-        world.money() >= Fx::from_num(MIN_MONEY),
+        earned(&world) >= Fx::from_num(MIN_MONEY),
         "the chain must earn at least {MIN_MONEY} money before this test can spend it \
          (got {})",
         world.money()
@@ -321,9 +329,10 @@ fn shop_snapshot_json_has_the_documented_shape() {
         fields.sort();
         assert_eq!(
             fields,
-            vec!["affordable", "kind", "owned", "price"],
-            "each entry has exactly these four fields"
+            vec!["affordable", "crew", "kind", "owned", "price"],
+            "each entry has exactly these five fields (`crew` since the staff pools MVP epic)"
         );
+        assert!(entry["crew"].is_array(), "crew is the kind's staff list, empty for a tile");
         assert!(entry["kind"].is_string());
         assert!(
             entry["price"].as_f64().unwrap() >= 1.0,

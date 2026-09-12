@@ -136,6 +136,13 @@ pub const DOCK_CAPACITY: u32 = 32;
 pub struct Dock {
     buffer: Inventory,
     shipped_total: u32,
+    /// Whether this dock was refused its crew on the last tick it held
+    /// something to ship (the staff pools MVP epic). Updated only on such
+    /// ticks — an empty dock keeps the verdict of its last loaded one — so
+    /// hover can say "held · short of logistics staff" while the belt
+    /// behind it backs up. On the wire as `DockSnapshot::understaffed`;
+    /// saved (`save.rs`).
+    understaffed: bool,
 }
 
 impl Dock {
@@ -143,6 +150,7 @@ impl Dock {
         Self {
             buffer: Inventory::new(capacity_per_item),
             shipped_total: 0,
+            understaffed: false,
         }
     }
 
@@ -157,11 +165,25 @@ impl Dock {
         capacity_per_item: u32,
         contents: Vec<(ItemId, u32)>,
         shipped_total: u32,
+        understaffed: bool,
     ) -> Self {
         Self {
             buffer: Inventory::restore(capacity_per_item, contents),
             shipped_total,
+            understaffed,
         }
+    }
+
+    pub fn understaffed(&self) -> bool {
+        self.understaffed
+    }
+
+    /// `World::tick`'s step 6 records the crew verdict here on every tick
+    /// the dock held something to ship: `true` when the claim was refused
+    /// (the buffer is held; at capacity the belt backs up, so nothing is
+    /// lost), `false` when it shipped.
+    pub(crate) fn set_understaffed(&mut self, refused: bool) {
+        self.understaffed = refused;
     }
 
     /// Every slot on the dock, empties included — the save side of
