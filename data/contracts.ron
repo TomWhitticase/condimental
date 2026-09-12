@@ -62,31 +62,71 @@
 // interesting content. The multi-item `mix` shape is fully implemented and
 // tested — what is missing is a second sauce line to point it at, which is
 // future content work (GAMEPLAY.md §2's tier table), not a limitation of
-// this file. What the four below DO create today: a ladder of commitment
-// (bigger orders, stiffer terms, better rates) on one line's throughput,
-// and a top rung one line cannot carry alone.
+// this file. What the board below DOES create today is the real thing: a
+// ladder of commitment (bigger orders, stiffer terms, better rates) whose
+// bottom rungs one line can carry and whose top rungs keep asking for one
+// more line.
 //
-// BALANCE NOTE. The shipped chain's bottleneck is the 240-tick cooking vat,
-// so steady-state throughput is roughly one `boxed_ketchup` per ~245 ticks,
-// i.e. about 4.0 per 1000 ticks. The first three contracts demand 2.0 + 1.2
-// + 0.67 = ~3.87 per 1000 ticks combined — deliberately just inside one
-// line's capacity. The fourth adds 1.5 per 1000 on top, which one line
-// cannot serve: holding all four means a second line, which is the whole
-// point of GAMEPLAY.md §6 (contracts pull the factory outward). Signing
-// fees are sized against the reference line's 1087 bill and the 3000
-// starting balance: the mid-tier pairs are a window or two of payout each,
-// the top rung is a real capital decision. All placeholders per GAMEPLAY.md
-// §10; change them here and in the prose above together.
+// BALANCE NOTE (rewritten 2026-09-11, when the board grew from four
+// contracts to nine — the growth tier was written against the three-contract
+// board and merged with the board-of-offers' fourth on 2026-09-12). The
+// shipped chain's bottleneck is the 240-tick cooking vat, so ONE line's
+// steady-state throughput is roughly one `boxed_ketchup` per ~245 ticks,
+// i.e. about 4.0 per 1000 ticks. The board is sized in that unit — "lines'
+// worth of demand":
+//
+//   starter tier   (corner_shop + diner_supply + market_stall)  ~3.9 / 1000
+//   growth tier    (the six orders below them)                 ~19.2 / 1000
+//   whole board                                                ~23.0 / 1000
+//
+// The starter tier is deliberately just inside ONE line's capacity: a
+// first factory kept fed (hoppers and tank on auto-fill) can serve all
+// three, and one left to run dry starts missing windows. Everything past
+// it is what the second, third, fourth and fifth line are FOR. Before the
+// growth tier existed, the board absorbed one line's output and a little
+// more, so the money a first line earned bought a second line that had
+// almost nothing to sell to — the game stalled at exactly the point where a
+// factory-builder should be taking off. Now the whole board takes nearly
+// six lines, so there is always an order that the next line can go after,
+// and a fully built-out board is a real target rather than a ceiling
+// reached in the first ten minutes.
+//
+// Rates per box RISE WITH COMMITMENT, on every tier: the small, frequent
+// order pays worst per box (24) and the big, slow pallet order pays best
+// (40). Big orders are also the ones that are impossible to serve from a
+// single line — a 20-box pallet on a 5000-tick cadence needs a whole line
+// devoted to it — so a better per-box rate is the reward for building the
+// capacity to reach it, and a player who cannot yet fill it loses that
+// window's payout and, after `strikes` misses in a row, the contract.
+//
+// PRIORITY ORDER IS SMALLEST FIRST, on purpose. When several orders fall
+// due on the same tick (every 60 000 ticks every cadence on the board lines
+// up), the starter orders are filled before the growth tier gets a look
+// in — so a first factory's income is never eaten by a pallet order the
+// player has not built for, and a big order that CAN be filled still is,
+// out of whatever the small ones left. Within the growth tier the order
+// again runs small to large.
+//
+// Signing fees are sized against the reference line's 1087 bill and the
+// 3000 starting balance: the mid-tier orders cost a window or two of their
+// own payout, the top rungs are a real capital decision. All placeholders
+// per GAMEPLAY.md §10; change them here and in the prose above together.
+//
+// A box that no contract has ordered is still ingredients turned into
+// unsold stock (`data/ingredients.ron`, ~11 per box), so a line built
+// beyond the board's demand is still a loss — the board grew, the rule did
+// not.
 (
     schema_version: 2,
     contracts: [
-        // The starter order: exactly milestone 5's hardcoded contract
-        // (2 boxes every 1000 ticks for 50), kept numerically identical so
-        // that the first thing a new player — and the full-chain integration
-        // test — sees is unchanged by this file's arrival. Three strikes: a
-        // new player's first line WILL miss its first window or two while it
-        // is being built, and losing the only contract before the first
-        // box ships would be a dead start, not a lesson. Cheap to get back.
+        // --- The starter tier ---
+        // Exactly milestone 5's hardcoded contract (2 boxes every 1000
+        // ticks for 50), kept numerically identical so that the first thing
+        // a new player — and the full-chain integration test — sees is
+        // unchanged by this file's arrival. Three strikes: a new player's
+        // first line WILL miss its first window or two while it is being
+        // built, and losing the only contract before the first box ships
+        // would be a dead start, not a lesson. Cheap to get back.
         Contract(
             id: "corner_shop",
             name: "Corner Shop Standing Order",
@@ -98,8 +138,8 @@
             starter: true,
         ),
         // The reason to keep the line running rather than babysitting one
-        // window: a bigger box count on a much slower cadence, at the best
-        // per-unit rate on the board so far (30/box). Two strikes.
+        // window: a bigger box count on a much slower cadence, at a better
+        // per-unit rate (30/box). Two strikes.
         Contract(
             id: "diner_supply",
             name: "Roadside Diner Group",
@@ -123,10 +163,29 @@
             price: 60,
             strikes: 1,
         ),
-        // The top rung: six boxes a window at the best rate on the board
-        // (35/box), on a cadence long enough to bank them — and a demand one
-        // line cannot carry alongside the other three. Two strikes, and an
-        // expensive signature to lose.
+
+        // --- The growth tier ---
+        // Everything from here down is more than one line can serve
+        // alongside the starter tier, by design: it is the demand a second,
+        // third, fourth and fifth line are built to meet. Small to large,
+        // per the priority rule in the header.
+
+        // A steady institutional order: four boxes on the market stall's
+        // cadence, at a rate a shade above the diner's (32/box). The first
+        // order a second line makes reachable — a line and a half serves
+        // the starter tier and this. Two strikes.
+        Contract(
+            id: "school_canteens",
+            name: "District School Canteens",
+            mix: [("boxed_ketchup", 4)],
+            cadence_ticks: 1500,
+            payout: 128,
+            price: 200,
+            strikes: 2,
+        ),
+        // Six boxes a window at 35/box, on a cadence long enough to bank
+        // them — a demand one line cannot carry alongside the starter tier.
+        // Two strikes, and an expensive signature to lose.
         Contract(
             id: "regional_grocer",
             name: "Regional Grocer Chain",
@@ -134,6 +193,55 @@
             cadence_ticks: 4000,
             payout: 210,
             price: 400,
+            strikes: 2,
+        ),
+        // The same six boxes on half the cadence (36/box) — three quarters
+        // of a line on its own.
+        Contract(
+            id: "wholesale_grocer",
+            name: "Wholesale Grocer Depot",
+            mix: [("boxed_ketchup", 6)],
+            cadence_ticks: 2000,
+            payout: 216,
+            price: 350,
+            strikes: 2,
+        ),
+        // A whole line's worth on a 2000-tick cadence (36/box): the order
+        // that justifies a line of its own.
+        Contract(
+            id: "burger_franchise",
+            name: "Burger Franchise Commissary",
+            mix: [("boxed_ketchup", 8)],
+            cadence_ticks: 2000,
+            payout: 288,
+            price: 500,
+            strikes: 2,
+        ),
+        // Also a whole line's worth, but in bigger, slower batches (38/box):
+        // twelve boxes must be standing on the dock at once, so the shared
+        // pool has to be allowed to build up rather than skimmed by the
+        // starter orders — which is what listing it AFTER them costs the
+        // player, and what the higher rate pays for.
+        Contract(
+            id: "stadium_concessions",
+            name: "Stadium Concessions",
+            mix: [("boxed_ketchup", 12)],
+            cadence_ticks: 3000,
+            payout: 456,
+            price: 750,
+            strikes: 2,
+        ),
+        // The pallet order: twenty boxes every 5000 ticks at the best rate
+        // on the board (40/box). A whole line's throughput, held back for
+        // 5000 ticks — the endgame order on this board until a second sauce
+        // exists to write a mixed order for.
+        Contract(
+            id: "export_pallet",
+            name: "Export Pallet Order",
+            mix: [("boxed_ketchup", 20)],
+            cadence_ticks: 5000,
+            payout: 800,
+            price: 1200,
             strikes: 2,
         ),
     ],

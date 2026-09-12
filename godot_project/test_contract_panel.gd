@@ -195,11 +195,27 @@ func _initialize() -> void:
 		_fail("expected exactly one money readout on the clipboard, found %d — money is a single shared counter (GAMEPLAY.md §1)" % money_labels)
 		return
 
-	var meta_texts: Dictionary = {}
-	for card in main._contract_cards:
-		meta_texts["%s|%s" % [card["meta_label"].text, card["countdown_label"].text]] = true
-	if meta_texts.size() < main._contract_cards.size():
-		_fail("dockets share an identical cadence line — each contract clocks independently, so its countdown must be its own")
+	# Each docket's cadence line must be ITS contract's, not a shared one.
+	# Two contracts MAY share a cadence (since 2026-09-11's growth tier the
+	# shipped board has two at 1500 and two at 2000), so this cannot demand
+	# every line be unique: it checks each card against its own snapshot —
+	# the line is printed in seconds through `_format_remaining`, so the
+	# expectation goes through the same formatter — and that cards on
+	# different cadences print different lines.
+	var cadence_lines: Dictionary = {}
+	for i in range(main._contract_cards.size()):
+		var text := String(main._contract_cards[i]["meta_label"].text)
+		var own_cadence := int(contracts[i].get("cadence_ticks", 0))
+		var expected := "every %s" % main._format_remaining(own_cadence)
+		if text != expected:
+			_fail("docket %d's cadence line is '%s', expected '%s' for its own cadence of %d ticks" % [i, text, expected, own_cadence])
+			return
+		cadence_lines[text] = true
+	var distinct_cadences: Dictionary = {}
+	for c in contracts:
+		distinct_cadences[int(c.get("cadence_ticks", 0))] = true
+	if cadence_lines.size() != distinct_cadences.size():
+		_fail("dockets on different cadences share a cadence line — each contract clocks independently, so its countdown must be its own")
 		return
 
 	# The countdown is a DRAINING BAR as well as a figure (the UI visualisation

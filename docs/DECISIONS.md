@@ -924,6 +924,60 @@ matches what code comments and data files cite.
   own worktree because the `anthias` worktree had a live concurrent
   session in `main.gd`.
 
+- 2026-09-11: **The contract board is sized in lines' worth of demand — a
+  starter tier one line can serve, plus a growth tier for every line after
+  it.** The trigger was a playtest that ran out of game: money arrived only
+  through the three shipped contracts, which together asked for ~3.9
+  boxes per 1000 ticks against a single line's ~4.1, so a first line
+  earned enough to build a second and the second had nothing to sell to.
+  Overproduction is a real loss here (an unordered box is ~11 of
+  ingredients spent for nothing), so a second line was not merely useless
+  but negative. Five calls.
+
+  (1) **Demand is measured in the throughput of one line, and the board
+  has to exceed it by several lines.** One line's steady state is one unit
+  per bottleneck cycle (the 240-tick vat), so the unit is "boxes per 1000
+  ticks" and the board is sized as tiers of it: starter ~3.9, growth
+  ~19.2, whole board ~23.0 — nearly six lines. The number is not
+  sacred; the RULE is that the board must always leave the next line an
+  order to go after, and `contracts.rs` pins it against the slowest
+  recipe's `time_ticks` so a tuning pass on the vat moves the expectation
+  rather than breaking it. A content change, not a sim change.
+
+  (2) **The starter tier is the original three contracts, unchanged.** A
+  new player's first ten minutes are the most-tested part of the game and
+  nothing about them moved; the growth tier is appended after them.
+
+  (3) **Per-box rate rises with order size, on every tier.** The shipped
+  three already did this (24/box for one box, 30/box for three); the
+  growth tier continues it to 40/box for the 20-box pallet. A big order
+  is the one a single line cannot serve — twelve or twenty boxes have to
+  stand on the dock at once — so the better rate is the reward for having
+  built the capacity, and the test pins "never worse per box for a bigger
+  order" rather than the literal figures.
+
+  (4) **Priority stays smallest first.** File order is the allocation
+  tiebreak under scarcity, and every cadence on the board coincides every
+  30 000 ticks. Listing the pallet order first would let it eat twenty
+  boxes a beginner had accumulated for the corner shop; listing it last
+  means a big order that CAN be filled still is, out of what the small
+  ones left, and a player who cannot fill it loses nothing but that
+  window's payout (a miss still has no other cost — GAMEPLAY.md §11).
+
+  (5) **Two contracts may share a cadence.** The old panel test demanded
+  every docket's cadence line be unique, which was a proxy for "each
+  docket's countdown is its own"; with two orders at 1500 and two at 2000
+  it checks the real property instead — each card names its own contract's
+  cadence, and cards on different cadences print different lines.
+
+  Consequences noted rather than fixed: the clipboard's docket stack now
+  scrolls at 1600x900 (three and a bit dockets visible), so the cap that
+  was built as a safety valve is the ordinary case and a compact board is
+  the next UI step; and every order is still `boxed_ketchup`, so the
+  mixed-sauce orders GAMEPLAY.md §6 describes still wait on a second
+  sauce line. Money is `Fx` (I16F16, ceiling ~32 767) and a five-line
+  board earns toward that ceiling in minutes rather than hours — a
+  pre-existing limit this makes nearer.
 - 2026-09-10: **Hopper/tank configuration, ticket 2 of 2 (the Godot half,
   plus the one sim deletion ticket 1 deferred to it) — a placed hopper or
   tank is CLICKED, and everything about it is on a panel beside it.** The

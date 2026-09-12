@@ -1450,8 +1450,10 @@ mod tests {
     #[test]
     fn signed_lost_and_strike_state_survives_a_round_trip_in_board_order() {
         let mut world = reference_chain(recipes());
-        world.restore_money(Fx::from_num(1000));
         // Sign every offer, so the active list is longer than the starters.
+        // Funded from the board's own signing fees rather than a literal, so
+        // a bigger (or dearer) board cannot silently leave offers unsigned
+        // and turn the assertion below into a comparison of two short lists.
         let ids: Vec<String> = world
             .economy()
             .board()
@@ -1459,6 +1461,13 @@ mod tests {
             .iter()
             .map(|c| c.id.clone())
             .collect();
+        let signing_bill = world
+            .economy()
+            .board()
+            .ordered()
+            .iter()
+            .fold(Fx::from_num(0), |sum, c| sum + c.price);
+        world.restore_money(signing_bill + Fx::from_num(100));
         for id in ids.iter().rev() {
             let _ = world.economy_mut().try_sign(id, 0);
         }
