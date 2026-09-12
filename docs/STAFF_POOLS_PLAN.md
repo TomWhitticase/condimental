@@ -1,6 +1,6 @@
 # Staff Pools MVP — plan
 
-Status: in progress (started 2026-09-12). Integration branch:
+Status: done (started and merged 2026-09-12; all three tickets landed). Integration branch:
 `TomWhitticase/staff-pools-mvp`, branched from `main` at `8cee800`. Built as
 one Orca orchestration Run; the tickets below map 1:1 to Tasks.
 
