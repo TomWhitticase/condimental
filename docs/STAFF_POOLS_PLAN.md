@@ -337,6 +337,32 @@ DEVLOG's status line, and merges to `main`.
 
 ## Decisions made by tickets (read before consuming their output)
 
+### Ticket 1 (sim) — landed 2026-09-12
+
+- Everything in "The data" and "The wire contract" above is built as
+  written; the real `staff_snapshot_json` at tick 1200 on the reference
+  line is byte-for-byte the plan's shape (`money` included).
+- `Machine::tick` gained `crew: Option<CrewRequest>`; a refused machine
+  records `Starved`, sets `refused_by` (the category), and, mid-craft,
+  **pauses by shifting `start_tick` forward one tick**, which is reported
+  as a change — so a paused machine dirties its chunk every tick (same
+  rate as an auto-filling hopper; Godot's progress bar reads `start_tick`).
+- `DockSnapshot.understaffed`, `SavedMachine.refused_by`,
+  `SavedDock.understaffed` and `SaveData.staff: Option<SavedStaff>` are all
+  `#[serde(default)]`; `demand`/`assigned` are NOT saved (recomputed on the
+  first tick after load), so the staff snapshot is compared from tick 1.
+- `machines.ron`'s loader reads the version off a header first, so a v1
+  file fails as "wrong version", not "missing field `staff`".
+- **A broke factory loses its crew at the first payday**, which changed
+  the long zero-money test fixtures: `tests/common/mod.rs` has
+  `WAGE_RESERVE` (300 periods of the shipped bill, pinned against the data
+  by `tests/staff.rs`) and `wages_paid()`; money assertions there are
+  expressed as earnings. Godot fixtures start at 3000 and were untouched.
+- Stall precedence: `staff` is reported only after the six older kinds
+  find nothing, so it never masks an input or output shortfall.
+- Docs landed with the ticket: DEVLOG, CLAUDE.md, DECISIONS Part A (eleven
+  calls), GAMEPLAY §9/§11, ARCHITECTURE §4/§11.
+
 ### Ticket 2 (icons) — landed 2026-09-12
 
 - Icon files are `assets/voxels/icons/staff_<category id>.png`, so ticket 3
