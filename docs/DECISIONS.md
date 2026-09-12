@@ -220,6 +220,41 @@ matches what code comments and data files cite.
   without a word). `staff_icons_use_the_planned_materials`: the classes
   and the yellow, per (2). `spanner_jaws_are_open`: the jaws are empty
   voxels, not a darker colour, for point 11's reason.
+- 2026-09-12: **Machine load: the stack lights come down; the hover panel
+  is the readout.** After playing with ticket 3's andon stack lights the
+  owner did not like how the poles looked and asked for the signals "just
+  on the UI elements (the hover overlays)". The in-world half of the epic
+  is removed outright rather than hidden behind a toggle: the six
+  `andon_*` models, the `andon()` generator and its voxgen tests, the
+  `is_andon` icon rule, and every andon node, constant and function in
+  `main.gd`. The four palette entries the lights added (`status_*_off`,
+  `paint_grey`) are deliberately KEPT: removing a palette entry shifts
+  every index after it and re-emits every `.vox` in the repo for no
+  visible change. Two things the andon work changed stay because they are
+  improvements on their own: `VoxModel::rotated_cw` turning an oblong
+  footprint, and the crusher's motor and the packer's control panel at the
+  positions the corner test moved them to.
+
+  What replaces the light is a stronger hover: the load line leads with a
+  status glyph (`●` working, `▲` starved, `■` blocked) as well as the
+  word, so the status is a shape beside a colour (UI_UX.md §7) even in a
+  monochrome screenshot, and the load bar under the amber progress bar is
+  filled in the STATUS colour rather than a fixed green — green working,
+  amber starved, red blocked, the three colours the lenses used — so the
+  tooltip is the andon now. The sim half (ticket 1), the polling cadence,
+  the remembered reason and the bottleneck fixture are untouched;
+  `test_machine_load.gd` asserts records, glyphs and colours instead of
+  lenses and pins that NO `andon_*` node exists under `World`, so the
+  removal cannot quietly regress.
+
+  Recorded honestly rather than papered over: GAMEPLAY.md §9's stated goal
+  was to see the bottleneck "across a whole factory without hovering each
+  machine", and a hover-only readout does not do that. It is an open
+  thread again (a toggleable HUD badge per machine, a status tint on the
+  machine's own lamp, a floor decal — not a pole), to be answered when the
+  player asks for it, not before. UI_UX.md §2b point 29's lesson (an
+  overlay that does not turn with its host is checked against the host
+  turned all four ways) outlives its example.
 
 - 2026-09-11: **Machine load, ticket 3 — the stack lights in the scene.**
   The Godot half of the machine-load epic (`docs/MACHINE_LOAD_PLAN.md`):

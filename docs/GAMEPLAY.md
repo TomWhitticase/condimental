@@ -318,9 +318,12 @@ Everything in this doc should be **content**, not simulation code, per [ARCHITEC
   a later staffing or power constraint (§7) would have to explain itself
   against. The design point is **bottleneck legibility**: the machine that
   reads *working* while everything after it reads *starved* and everything
-  before it reads *blocked* is the one to duplicate, and a player should be
-  able to see that across a whole factory without hovering each machine
-  (UI_UX.md's andon stack lights, ticket 3, draw it).
+  before it reads *blocked* is the one to duplicate. It is read by hovering
+  a machine (the hover panel's load line and status-coloured bar). *The
+  in-world stack lights that showed it across the whole floor at once were
+  removed on 2026-09-12 — the owner did not like the poles — so seeing the
+  bottleneck without hovering is an open question again, for a different
+  visual answer if one is wanted.*
 - **Staff pools are real, as a capacity check and a wage bill (the staff
   pools MVP, ticket 1, 2026-09-12 — `docs/STAFF_POOLS_PLAN.md`).** §7's
   model is implemented exactly as written: four categories in a new

@@ -323,9 +323,9 @@ DECISIONS.md Part B. There is no point 10.
     tile lays its channel on the same axis.
 29. **A free-standing thing at a fixed place on a tile meets every body at
     every facing, and a face one voxel from a tile edge is a face one voxel
-    from EVERY edge once the body turns.** The andon post stands at the
-    tile's +X/low-Y corner, inset one voxel, and never rotates; the
-    machines it is bolted to do. Two features that had sat harmlessly at
+    from EVERY edge once the body turns.** The andon post (removed on
+    2026-09-12 — the lesson stands) stood at the tile's +X/low-Y corner,
+    inset one voxel, and never rotated; the machines it was bolted to do. Two features that had sat harmlessly at
     the far side of their bodies — the crusher's motor one voxel from its
     +Y edge, the packer's status lamp one voxel from its -X edge — landed
     exactly on the post's own faces when the body was turned, and z-fought
@@ -425,8 +425,17 @@ factory tropes; the sauce theme comes through in what the factory processes.
   weight and pips. A lost or signed contract is announced in one line along
   the top edge, and an empty clipboard says "press C" rather than showing a
   money figure over nothing.
-- **A machine's load is read in the world, from its stack light, and in
-  words from its hover** (the machine-load epic, 2026-09-11). Every
+- **A machine's load is read from its hover, and only there** (the
+  machine-load epic, 2026-09-11; **amended 2026-09-12**). The in-world
+  andon stack lights this bullet was written about were removed after a
+  playtest — the owner did not like a pole beside every machine — and
+  the hover panel is the whole indicator now: the load line leads with a
+  status GLYPH and word (● flat out, ▲ starved, ■ blocked — three shapes,
+  §7) and the load bar under it is filled in the status colour (green,
+  amber, red). What follows describes the removed lights as they were
+  built, kept because the reasoning about corners and colours still
+  applies to whatever floor-wide readout replaces them, if one does.
+  *Originally:* every
   recipe-running machine has an andon on its camera-visible corner: green
   lit is flat out, amber is starved, red is blocked — colour AND position
   on the post (§7), the industrial convention (§3), never rotated with the

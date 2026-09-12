@@ -395,37 +395,22 @@ const MACHINE_FRAMES := 4
 ## second a frame is the chunky end of UI_UX.md §6 rather than a blur.
 const MACHINE_TICKS_PER_CYCLE := 30
 
-## --- The andon stack light (the machine-load epic, ticket 3) ---------------
+## --- The machine load readout (the machine-load epic, ticket 3; moved
+## --- off the floor and into the hover panel on 2026-09-12) ---------------
 ##
-## Every recipe-running machine stands an industrial stack light beside it:
-## a post with three lenses, green over amber over red, one lit. Which one
-## is the simulation's own verdict on the machine's last ten seconds
+## A machine's load is the simulation's own verdict on its last ten seconds
 ## (`machine_load_snapshots_json`'s `status`: `working`, `starved` or
-## `blocked`) — this file never re-derives it from the counts. The three
-## statuses are the three models, one per lit lens, and this list is also
-## the order the sim spells them, so it is the one place the words live.
-const ANDON_STATUSES := ["working", "starved", "blocked"]
-## `voxgen` ships the stack at two heights (`andon_<status>_short` and
-## `andon_<status>_tall`, `assets.rs`'s "Andon" section): the short one
-## for a 1x1 footprint, whose lens stack clears every 1x1 body, and the
-## tall one for anything larger, whose stack clears the 2x2 vat. Chosen by
-## footprint, here, exactly as ticket 2's note says.
-const ANDON_HEIGHT_SHORT := "short"
-const ANDON_HEIGHT_TALL := "tall"
-## Which corner of a footprint the light stands on, as a sign per tile
-## axis: +1 for the footprint's far (max) edge on that axis, -1 for its
-## origin edge. It is the corner the CAMERA can see, and it is derived from
-## `CAMERA_DIRECTION` rather than chosen: that vector is where the camera
-## SITS relative to what it looks at, so a face is visible only if it
-## points toward the camera on that axis — +X world is +X tile, and +Z
-## world is +Y tile (`_footprint_centre` maps tile y to world z). UI_UX.md
-## §2b point 11 is the same fact stated for a model's faces; this is it for
-## a footprint's tiles. The post itself sits in the corner of that TILE
-## nearest the camera by the same rule (ticket 2 authored it at model +X /
-## low Y, which is world +X / +Z), and is never rotated: a lens on the far
-## side of a turned machine would be a lamp nobody sees (point 18).
-const ANDON_CORNER := Vector2i(int(signf(CAMERA_DIRECTION.x)), int(signf(CAMERA_DIRECTION.z)))
-## How often the lights are re-read from the simulation, in ticks. Load is
+## `blocked`) — this file never re-derives it from the counts. It is READ
+## BY HOVERING the machine: the tooltip's load line leads with a status
+## glyph and word, and the load bar under it takes the status colour. It
+## used to stand in the world as well, as an andon stack light beside every
+## machine; those poles were removed after a playtest (the owner did not
+## like how they looked), and the hover panel is now the one place the
+## status lives. The glyphs are shapes as well as colours (UI_UX.md §7),
+## and this table is also the order the sim spells the statuses, so it is
+## the one place the words live.
+const LOAD_STATUS_GLYPHS := {"working": "●", "starved": "▲", "blocked": "■"}
+## How often the load is re-read from the simulation, in ticks. Load is
 ## polled rather than dirtied (ARCHITECTURE.md §4: it changes on every
 ## machine every tick), and one bucket of the sim's window (`LOAD_BUCKET_TICKS`,
 ## 30) is the finest grain the verdict can change at, so polling faster
@@ -715,9 +700,8 @@ var _machine_lamps: Dictionary = {} # origin key -> MeshInstance3D (emissive mes
 var _machine_gauges: Dictionary = {} # origin key -> Node3D, the live progress bar (see MACHINE_PROGRESS_GAUGES)
 var _machine_running: Dictionary = {} # origin key -> bool, to avoid redundant swaps
 var _machine_motion: Dictionary = {} # origin key -> {"frames": Array[Node3D], "frame": int, "family": String}, see MACHINE_MOTION_MODELS
-## The machine-load epic (ticket 3). Both keyed on origin tile like the rest;
-## see "The andon stack light" below for the shape of each record.
-var _machine_andons: Dictionary = {} # origin key -> {"lenses": {status: Node3D}, "status": String, "height": String, "tile": Vector2i}
+## The machine-load epic (ticket 3). Keyed on origin tile like the rest; see
+## "The machine load readout" above and `_poll_machine_load` for the record.
 var _machine_load: Dictionary = {} # origin key -> {"load": {...}, "stall": Dictionary|null, "reason": Dictionary|null, "status": String}
 var _load_polled_tick := -1 # sim tick of the last `_poll_machine_load`; -1 = never
 ## --- Instanced tiles and carried items (pipes & conveyors overhaul, ticket 4) ---
@@ -2188,7 +2172,6 @@ func _rebuild_world() -> void:
 	_machine_gauges.clear()
 	_machine_running.clear()
 	_machine_motion.clear()
-	_machine_andons.clear()
 	_machine_load.clear()
 	_splitter_nodes.clear()
 	_splitter_states.clear()
@@ -2226,10 +2209,10 @@ func _rebuild_world() -> void:
 	_build_floor()
 	_seed_machine_states()
 	_seed_splitter_states()
-	# The stack lights, once, right now — not on the next poll tick. A
+	# The load records, once, right now — not on the next poll tick. A
 	# rebuild is also what a LOADED game goes through in `_ready`, and a
-	# loaded factory's windows arrive full (`SavedMachine.load`), so its
-	# lights are correct on the first frame drawn rather than a second in.
+	# loaded factory's windows arrive full (`SavedMachine.load`), so a hover
+	# on the first frame drawn reads the right status rather than nothing.
 	_poll_machine_load()
 	_refresh_buffers()
 
@@ -2331,7 +2314,6 @@ func _build_placement(placement: Dictionary) -> void:
 				_world_root.add_child(gauge)
 				_machine_gauges[key] = gauge
 			_build_machine_motion(key, kind, centre, yaw)
-			_build_machine_andon(key, origin, size)
 
 
 ## One of the one-voxel-tall bodies this scene scales every frame to show a
@@ -3146,64 +3128,7 @@ func _update_machine_motion() -> void:
 		motion["frame"] = frame
 
 
-## The tile of a footprint the camera can see the corner of — where its
-## stack light stands. `size` is the ROTATED footprint (what the placement
-## actually covers), and ANDON_CORNER says which edge on each axis.
-func _andon_tile(origin: Vector2i, size: Vector2i) -> Vector2i:
-	return Vector2i(
-		origin.x + (size.x - 1 if ANDON_CORNER.x > 0 else 0),
-		origin.y + (size.y - 1 if ANDON_CORNER.y > 0 else 0)
-	)
-
-
-## Stands this machine's andon on its camera-visible corner tile: one node
-## per status model, all at yaw 0, none visible until the first poll says
-## which. Siblings of the body for the reason the gauge and the motion
-## overlays are — `body.get_node_or_null("emissive")` must keep finding the
-## machine's own status lamp, not a lit lens.
-##
-## The three are built once and only ever have their visibility flipped,
-## like the motion frames: a status changes at most once a bucket and most
-## polls change nothing, so `_poll_machine_load` is a loop of comparisons.
-func _build_machine_andon(key: String, origin: Vector2i, size: Vector2i) -> void:
-	var height := ANDON_HEIGHT_SHORT if size == Vector2i.ONE else ANDON_HEIGHT_TALL
-	var tile := _andon_tile(origin, size)
-	var lenses := {}
-	for status in ANDON_STATUSES:
-		var node := _asset_node("andon_%s_%s" % [status, height])
-		node.name = "andon_%s_%s" % [key, status]
-		# A 1x1 model at the centre of its one tile, ground level, exactly
-		# as the encoder placed its origin (UI_UX.md §2b point 1) — the post's
-		# offset into the corner is authored into the model.
-		node.position = _footprint_centre(tile, Vector2i.ONE, FLOOR_Y)
-		node.rotation.y = 0.0
-		node.visible = false
-		_world_root.add_child(node)
-		lenses[status] = node
-	_machine_andons[key] = {"lenses": lenses, "status": "", "height": height, "tile": tile}
-
-
-## Shows the one lens `status` names on the machine at `origin_key`, if that
-## is a change. A status the sim spells that no model exists for leaves the
-## light as it was rather than dark: a dark tower says "not measured", which
-## would be a lie about a machine that is.
-func _set_machine_andon(origin_key: String, status: String) -> void:
-	if not _machine_andons.has(origin_key):
-		return
-	var andon: Dictionary = _machine_andons[origin_key]
-	if String(andon.get("status", "")) == status:
-		return
-	var lenses: Dictionary = andon["lenses"]
-	if not lenses.has(status):
-		return
-	var previous := String(andon.get("status", ""))
-	if lenses.has(previous):
-		lenses[previous].visible = false
-	lenses[status].visible = true
-	andon["status"] = status
-
-
-## Whether the lights are due a re-read: never read yet, or LOAD_POLL_TICKS
+## Whether the load is due a re-read: never read yet, or LOAD_POLL_TICKS
 ## of simulation since the last one. Against the sim's clock, not a frame
 ## count, so a burst of catch-up ticks in one frame still polls on schedule
 ## and a paused game (no ticks) never polls at all.
@@ -3211,8 +3136,8 @@ func _machine_load_poll_due() -> bool:
 	return _load_polled_tick < 0 or sim.current_tick() - _load_polled_tick >= LOAD_POLL_TICKS
 
 
-## Re-reads every machine's load and stall from the simulation and flips
-## whichever lenses changed. The hover record keeps the LAST reason the sim
+## Re-reads every machine's load and stall from the simulation into the
+## records the hover panel draws from. The record keeps the LAST reason the sim
 ## gave while the status holds: a stall is a per-tick fact and is `null` on
 ## most ticks of a blocked machine (it is mid-craft on most of them; the
 ## reason appears only on the ticks a finished batch is held), so a hover
@@ -3242,7 +3167,6 @@ func _poll_machine_load() -> void:
 		record["stall"] = stall
 		record["status"] = status
 		_machine_load[key] = record
-		_set_machine_andon(key, status)
 
 
 ## The stall reason in words. Item ids go through `_item_display_name` like
@@ -3268,15 +3192,19 @@ func _stall_reason_text(stall) -> String:
 	return ""
 
 
-## The load line of a machine's hover text — status, share of the window
-## spent working, and (for a machine that is waiting) why:
-##   `flat out · 100% of the last 10s`
-##   `starved · 38% busy · waiting for Sugar`
-##   `blocked · 61% busy · output full`
-## The "10s" is the sim's own window over TICK_HZ, never typed here, so a
-## retuned `LOAD_BUCKETS` reads right without a Godot edit. Empty when the
-## machine has not been polled (a kind the sim does not measure). Pure given
-## `_machine_load`, so a test drives it with a record.
+## The load line of a machine's hover text — a status glyph and word, the
+## share of the window spent working, and (for a machine that is waiting)
+## why:
+##   `● flat out · 100% of the last 10s`
+##   `▲ starved · 38% busy · waiting for Sugar`
+##   `■ blocked · 61% busy · output full`
+## The glyph is the indicator's SHAPE (a lit lens, a warning triangle, a
+## stop block) so the status is never carried by the bar's colour alone
+## (UI_UX.md §7). The "10s" is the sim's own window over TICK_HZ, never
+## typed here, so a retuned `LOAD_BUCKETS` reads right without a Godot
+## edit. Empty when the machine has not been polled (a kind the sim does
+## not measure). Pure given `_machine_load`, so a test drives it with a
+## record.
 func _machine_load_text(origin_key: String) -> String:
 	if not _machine_load.has(origin_key):
 		return ""
@@ -3284,10 +3212,12 @@ func _machine_load_text(origin_key: String) -> String:
 	var load: Dictionary = record.get("load", {})
 	var status := String(record.get("status", ""))
 	var percent := int(load.get("percent", 0))
+	var glyph := String(LOAD_STATUS_GLYPHS.get(status, ""))
+	var lead := "%s " % glyph if glyph != "" else ""
 	if status == "working":
 		var window_seconds := int(round(float(load.get("window", 0)) / TICK_HZ))
-		return "flat out  ·  %d%% of the last %ds" % [percent, window_seconds]
-	var line := "%s  ·  %d%% busy" % [status, percent]
+		return "%sflat out  ·  %d%% of the last %ds" % [lead, percent, window_seconds]
+	var line := "%s%s  ·  %d%% busy" % [lead, status, percent]
 	var reason := _stall_reason_text(record.get("reason"))
 	if reason != "":
 		line += "  ·  %s" % reason
@@ -7649,12 +7579,14 @@ func _build_hover_tooltip(hud: CanvasLayer) -> void:
 	_hover_meter.name = "HoverMeter"
 	_hover_meter.visible = false
 
-	# A machine's LOAD — the share of the sim's window it spent working, the
-	# number its stack light summarises (the machine-load epic). A real
-	# fraction with a real ceiling (§5e's rule), drawn as a level in the
-	# level colour under the amber progress bar: the two answer different
-	# questions ("how far through this batch" / "how busy lately") and the
-	# words above carry which is which. Only a machine ever shows it.
+	# A machine's LOAD — the share of the sim's window it spent working (the
+	# machine-load epic). A real fraction with a real ceiling (§5e's rule),
+	# drawn as a bar under the amber progress bar and filled in the STATUS
+	# colour (green working, amber starved, red blocked — the same three the
+	# in-world stack lights used before they were removed, so the tooltip
+	# is the andon now): the two bars answer different questions ("how far
+	# through this batch" / "how busy lately") and the words above carry
+	# which is which. Only a machine ever shows it.
 	_hover_load_meter = _build_meter(column, HOVER_METER_WIDTH, METER_FILL_LEVEL)
 	_hover_load_meter.name = "HoverLoadMeter"
 	_hover_load_meter.visible = false
@@ -8181,8 +8113,8 @@ func _advance_simulation(delta: float) -> void:
 	# the machinery with the pause menu up.
 	_update_belt_frame()
 	_update_machine_motion()
-	# The stack lights follow the tick the same way, so the pause menu's
-	# early return above freezes them too: a light that changed while the
+	# The load records follow the tick the same way, so the pause menu's
+	# early return above freezes them too: a status that changed while the
 	# factory was stopped would be reporting a factory that is not running.
 	if _machine_load_poll_due():
 		_poll_machine_load()
@@ -8704,15 +8636,29 @@ func _hover_panel_state(tile: Vector2i) -> Dictionary:
 		# MACHINE_PROGRESS_GAUGES already states for the in-world gauges.
 		state["meter"] = {"fraction": 0.0, "color": METER_FILL_PROGRESS}
 	# The load bar: the sim's `percent` over its own window, once polled.
-	# A level (green), not progress: the question it answers is "how busy",
-	# and the status word beside it in the text says which way it is failing.
+	# Filled in the STATUS colour — green working, amber starved, red
+	# blocked — which with the glyph and word in the text above it is the
+	# whole indicator; the question it answers is "how busy", and the colour
+	# says which way it is failing.
 	if _machine_load.has(key):
 		var load: Dictionary = _machine_load[key].get("load", {})
 		state["load_meter"] = {
 			"fraction": clampf(float(load.get("percent", 0)) / 100.0, 0.0, 1.0),
-			"color": METER_FILL_LEVEL,
+			"color": _load_status_color(String(_machine_load[key].get("status", ""))),
 		}
 	return state
+
+
+## The status colour of the hover's load bar: the three lens colours the
+## removed stack lights used, kept as meaning (UI_UX.md §7: saturated colour
+## is reserved for state), never as the only carrier of it.
+func _load_status_color(status: String) -> Color:
+	match status:
+		"starved":
+			return METER_FILL_PROGRESS
+		"blocked":
+			return METER_FILL_WARN
+	return METER_FILL_LEVEL
 
 
 ## What one belt's tooltip says, from its `links`: which way it carries and
@@ -8851,9 +8797,10 @@ func _machine_hover_text(origin_key: String, kind: String, direction: String) ->
 		direction,
 		progress_text,
 	]
-	# The load line (the machine-load epic): what the stack light beside the
-	# machine is saying, in words, with the number and the reason the light
-	# cannot carry. Only present once the sim has been polled for it.
+	# The load line (the machine-load epic): the machine's status as a glyph
+	# and a word, the share of the window it spent working, and the reason
+	# it is waiting if it is. This IS the indicator — there is no light on
+	# the floor. Only present once the sim has been polled for it.
 	var load_text := _machine_load_text(origin_key)
 	if load_text != "":
 		text += "\n%s" % load_text

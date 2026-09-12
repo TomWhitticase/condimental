@@ -52,7 +52,7 @@
 # `--bottleneck` builds the BOTTLENECK LINE (test_layouts.gd's
 # `build_bottleneck_line`: the reference line on auto-fill, run until it has
 # backed up behind the cooking vat), the fixture the machine-load epic's
-# stack lights are reviewed on. Implies `--populate`.
+# hover readout is reviewed on (with `--hover`). Implies `--populate`.
 #
 # `--populate` runs whatever has been built forward first so the screenshot
 # shows product actually moving, not an idle factory.
@@ -504,9 +504,9 @@ func _run_chain_forward() -> void:
 	_main._apply_dirty_chunks()
 	_main._refresh_buffers()
 	_main._update_fluid_network()
-	# The stack lights are polled from `_advance_simulation` too, which this
-	# loop bypasses; read them once here so the shot shows the settled
-	# verdicts, not the ones the rebuild saw before the run.
+	# The load records are polled from `_advance_simulation` too, which this
+	# loop bypasses; read them once here so a hover in the shot shows the
+	# settled verdicts, not the ones the rebuild saw before the run.
 	_main._poll_machine_load()
 
 
