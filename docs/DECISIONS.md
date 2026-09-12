@@ -22,6 +22,126 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-12: **Staff pools MVP, ticket 1 — the simulation half.**
+  GAMEPLAY.md §7's staff pools and §5's third cost axis, built as
+  `docs/STAFF_POOLS_PLAN.md` specifies (its "The data" and "The wire
+  contract" sections are the spec; ticket 3 consumes that wire unchanged).
+  Eleven calls, several of them the plan's and restated here because the
+  code now depends on them.
+
+  (1) **A plain field, not ECS.** `sim::staff::StaffPools` sits on `World`
+  beside `Economy`: four aggregate counters (headcount, available, demand,
+  assigned per category) and a payday clock. Nothing is per entity, so
+  ECS machinery would be shape without content — the same call `Economy`
+  made at milestone 5. This closes ARCHITECTURE.md §11's "`StaffPools`
+  has no ECS shape" by saying it needs none.
+
+  (2) **The claim lives inside `Machine::tick`, and is made only on a tick
+  the machine would otherwise have worked.** `Machine::tick` first decides
+  what the tick WOULD do (start, advance, deposit, blocked, idle) without
+  touching a buffer or a tap, then asks for the crew only for the three
+  working plans. That is what makes the plan's precedence rule true by
+  construction rather than by a check: a machine with no sugar or a full
+  output never asks, so a `staff` stall can never mask an `input` or
+  `output` one, and `machine_stall` reports it strictly after the six
+  older kinds find nothing. The signature grew by one argument,
+  `crew: Option<CrewRequest<'_>>` (the kind's `staff` slice plus `&mut
+  StaffPools`); `None` is "asks for nobody", which every unit test and
+  every crew-less kind uses.
+
+  (3) **A refused mid-craft machine pauses by moving `start_tick` forward
+  one tick.** ARCHITECTURE.md §3.5 defines progress as `current_tick -
+  start_tick`, and Godot's progress bar reads exactly those two numbers,
+  so "elapsed stands still" is expressed in the one representation that
+  already exists rather than a second `elapsed` field that could drift
+  from it. Because the snapshot's `process` changes on every paused tick,
+  the pause is reported as a change (the chunk is dirtied) — the same
+  per-tick rate an auto-filling hopper already dirties at, and only while
+  understaffed, which is a state the player is expected to fix. Progress
+  is never lost; `tests/staff.rs` proves the craft finishes exactly
+  `required - elapsed` ticks after the crew returns.
+
+  (4) **Understaffed is a kind of starved.** The window records `Starved`
+  and the andon shows amber; the new `StallKind::Staff` (`item` = the
+  category id) is what distinguishes it. No fourth `WorkState`: a machine
+  waiting on people is waiting on a resource. `Machine::refused_by` holds
+  the category for exactly one tick, cleared at the top of the next, so it
+  is a per-tick fact like every other stall — and Godot's hover already
+  holds the last non-null reason (UI_UX §2b point 30).
+
+  (5) **The first short category in the CREW's order is the one named.**
+  A kind's `staff` list order is content (`machines.ron`), so a
+  multi-category kind's refusal reason is the content author's choice, not
+  the catalog's order or the pools' iteration order.
+
+  (6) **A dock asks only when it holds something, and `understaffed` is
+  the verdict of the last such tick.** An empty dock has nothing to ship
+  and nobody to ask for, so it neither counts toward demand nor changes
+  its flag; the flag therefore reads true while the boxes wait, through
+  the empty ticks between arrivals, and flips back on the tick something
+  ships. A refused dock keeps its buffer (32 per item), then `try_absorb`
+  refuses and the belt backs up — mass conservation as before, pinned by
+  a test that counts what waited on the dock and sees exactly that many
+  ship the tick the head is back.
+
+  (7) **Payday pays heads one at a time, in `staff.ron` order, through
+  `Economy::try_spend`, and the first refusal fires that head and every
+  wage-earning head after it.** `try_spend` stays the only debit and stays
+  all-or-nothing per call; there is no debt (GAMEPLAY §1's one counter
+  does not go negative) and no cliff at money 0 (the heads the balance
+  covers stay). The walk-out is a line down the file, not a per-head
+  affordability test — a cheaper head later in the file leaves too — so
+  the panel can say "N left unpaid" as one fact. A zero-wage head never
+  leaves. File order is therefore a design choice: manufacturing first so
+  a factory that must lose someone loses its shipping clerk before its
+  cook. `next_payday_tick` starts at one period (tick 1000) and the
+  boundary test is `tick_count >= next_payday_tick`, `Economy::tick`'s
+  own convention.
+
+  (8) **Hire is free and never refused; fire is free and immediate.**
+  GAMEPLAY §11's recruiting-fee and firing questions answered "no, for
+  now", marked MVP-provisional in GAMEPLAY §9 and §11. The one staff figure
+  on the ledger is the wage bill, so the panel shows one number. Neither
+  command dirties a chunk (a head is not a tile); both are silent no-ops
+  for an unknown category, and fire at zero — the `Purchase` convention.
+
+  (9) **`machines.ron` is schema 2 with a REQUIRED `staff` list, and the
+  version is checked off a header before the shape.** Required, not
+  defaulted, because an omitted crew must be a loader error, not a silent
+  zero (the `recipes.ron` v2 → v3 precedent). Checking the version first
+  is new to this loader (save.rs already did it): a v1 file has no `staff`
+  and would otherwise be reported as "missing field", which sends the
+  reader to the wrong fix. A crew naming an unknown category, listing one
+  twice, or asking for zero is a TEST failure
+  (`StaffCatalog::validate_machines`, the `validate_covers` pattern), so a
+  test fixture may build a registry the catalog does not cover.
+
+  (10) **Save: `SaveData.staff: Option<SavedStaff>`, plus `refused_by` on
+  the machine and `understaffed` on the dock, all `#[serde(default)]`,
+  schema stays 1.** `None` is the pre-epic save, which loads with the
+  starting crew and a payday one period from ITS tick (not from zero, or
+  an old save would owe a year of wages on load). The per-tick tallies
+  are deliberately not saved — the first tick after a load recomputes
+  them exactly, like the topology — so the staff snapshot is compared in
+  lockstep from the first tick on, while everything else is compared
+  before it. A category the map omits keeps its starting headcount, so a
+  category added to `staff.ron` after a save was written starts as a new
+  game would; an id the catalog does not know is a corrupt save.
+
+  (11) **A broke factory has no staff, and the test fixtures say so
+  honestly.** Every long-running fixture used to stock up and run on
+  exactly zero money; at the first payday that factory now loses its whole
+  crew and stops, which is the mechanic working. Rather than soften payday,
+  `tests/common` gained `WAGE_RESERVE` (300 periods of the starting crew's
+  bill, a literal pinned against the data by `tests/staff.rs` the way
+  `STOCK_COST` is pinned) and `wages_paid(world)`, read off the payday
+  clock; fixtures fund themselves with the reserve and the assertions that
+  said "money is exactly the payouts" now say "earnings are exactly the
+  payouts", where earnings are the balance plus wages paid minus the
+  reserve. The Godot proofs needed no change: a new game's 3000 covers
+  wages for far longer than any proof runs, and nothing on the wire they
+  read changed shape.
+
 - 2026-09-11: **Machine load, ticket 3 — the stack lights in the scene.**
   The Godot half of the machine-load epic (`docs/MACHINE_LOAD_PLAN.md`):
   ticket 1's numbers and ticket 2's models become a light beside every

@@ -245,7 +245,12 @@ Also on the wire today (`economy_snapshot_json` carries the whole contract
 `dock_snapshot_json`, `machine_load_snapshots_json` (the machine-load epic,
 2026-09-11: every recipe-running machine's rolling load window, `status`
 and `stall` reason, polled because it changes every tick and dirties
-nothing), and JSON forms of the above. Godot never sees internal
+nothing), `staff_snapshot_json` (the staff pools MVP, 2026-09-12: per
+category headcount, the last tick's `demand`/`assigned`/`short`, the payday
+clock and bill, polled for the same reason; `hire`/`fire` are commands,
+`stall` gained a `staff` kind, machine and dock tile snapshots and shop
+entries carry `crew`, the dock snapshot `understaffed`), and JSON forms of
+the above. Godot never sees internal
 representations, only snapshots. Since the pipes & conveyors overhaul
 (ticket 1, 2026-09-09) every belt, splitter and pipe entry in
 `world_layout_json` — and its `query_tile_json` variant — carries a `links`
@@ -417,7 +422,10 @@ is the last east-only asset, ticket 6's to retire).
 
 Still open:
 
-- `StaffPools` (GAMEPLAY.md §7) has no ECS shape.
+- ~~`StaffPools` (GAMEPLAY.md §7) has no ECS shape.~~ Resolved 2026-09-12
+  (the staff pools MVP): it is not an ECS shape at all — `sim::staff::
+  StaffPools`, a plain field on `World` beside `Economy`, four aggregate
+  counters reset and claimed in stable order each tick (GAMEPLAY.md §9).
 - Spoilage and corrosion components (GAMEPLAY.md §9) — needed before tiers
   4/5.
 - iOS export viability — re-run the spike with full Xcode (§9a).

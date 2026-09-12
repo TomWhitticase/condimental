@@ -48,6 +48,7 @@ below is history and should only ever be appended to.)*
 - **Payout juice, and the project's first audio (done):** earning money is now an event rather than a number quietly going up. When a contract settles, coins fountain up over every dock, the money counter punches up in scale and flashes amber, a "+N" rises out of it and the docket that paid is stamped **PAID**; a case landing on the dock gets a much smaller cue (a pop and a quiet knock), because that happens constantly and a payout happens every thousand-odd ticks. It needed **no simulation change at all** — Godot notices a payout by watching each contract's `deliveries_made` for a rise in the snapshot it already polls. The whole celebration is clocked off `sim.current_tick()`, so it pauses with the game and a screenshot run stays reproducible. **Sound exists now**, and it is synthesised in GDScript at runtime (`godot_project/audio.gd`) rather than shipped as `.wav` files — which settles UI_UX.md §8's open audio question as *feedback-only, procedurally generated*, with a SOUND switch on the pause menu.
 - **Pipes & conveyors overhaul (IN PROGRESS — six of seven tickets merged, `docs/PIPES_AND_CONVEYORS_PLAN.md` has the ticket-7 hand-off notes):** seven tickets on one integration branch to make belts and pipes look right, read right, run fast and connect up. **Ticket 1 (sim) has landed:** every belt, splitter and pipe on the wire carries `links` — what feeds it, what it hands to, or what its pipe is joined to, per side — recorded by the topology pass so it is exact and free per tick. **Ticket 4 (Godot) has landed:** belts, splitters, pipes and the items riding them are `MultiMesh` instances (one per asset and material class) rather than a node each, with a 1500-tile stress fixture, a headless timing test (`test_perf.gd`) and `scripts/screenshot-scene.sh --stress`; machines and buildings keep their nodes, and the seams the belt-animation and corner tickets build on (frame sets, a caller-supplied yaw per tile, one item-positioning function) are in place in `main.gd`. **Ticket 3 (assets) has landed:** the pipe model family (straight, corner, tee, cross, end, machine/tank fittings, one fluid body per shape) on a 15.5 midline, with seven pipe rendering defects fixed at the generator. **Ticket 2 (assets) has landed:** the belt model family — straights and left/right corners in four animation frames with a solid raised direction arrow *(replaced by a plain rubber cleat on 2026-09-10 at the player's request — see the log)*; the belt-side junction variants are retired (the plain tile carries the junction, the machine's hood does the rest). **Ticket 6 (Godot) has landed:** every pipe tile draws its shape (end, straight, corner, tee, cross), its turn, its machine/tank fittings and its per-shape liquid body from the wire's `links` alone; hover names a pipe's connections in words; the one-arrangement `pipe_source`/`pipe_inlet` tiles are deleted; `test_pipe_shapes.gd` and `scripts/screenshot-scene.sh --pipe-gallery` cover every shape at every turn. **Ticket 5 (Godot) has landed:** a belt's shape (straight, left/right corner, merge, start, end) comes from its `links`, the four-frame surface animates at item speed from the tick, items arc through corners (and are drawn face to face on every tile — they had been half a tile downstream), hover says feeds and hand-offs in words, the retired belt aliases are deleted, and a `--belt-gallery` fixture shows every shape and junction at every facing. Ticket 7 (gallery bug hunt and docs close-out) is to do; one sim rule discrepancy (a belt feeds a machine from any side of an inlet-edge tile) is flagged for ticket 7.
 - **Machine load indicator (DONE, all three tickets, 2026-09-11; plan: `docs/MACHINE_LOAD_PLAN.md`):** the player can see which machines are flat out and which are waiting, and so where the bottleneck is, across the whole floor. The simulation measures each machine's load over a rolling 600-tick window and reports `working`/`starved`/`blocked` with a percentage and the reason it is waiting, on the wire (`machine_load_snapshots_json`, plus the same fields on chunk and tile snapshots) and in the save (ticket 1). Six `andon_*` stack-light models — three statuses in a short and a tall height — are pinned by voxgen tests against every machine body at every facing (ticket 2). Every recipe-running machine now stands one on its camera-visible corner, lit to the sim's own verdict, polled on the tick (a pause freezes it; a loaded save lights up on its first frame); hover gains a line in words (`blocked · 61% busy · output full`) and a load bar; `test_layouts.gd`'s `build_bottleneck_line` settles the shipped line behind the cooking vat so it reads red · red · green · amber · amber, and `scripts/screenshot-scene.sh --bottleneck` photographs it (ticket 3).
+- **Staff pools MVP (IN PROGRESS — ticket 1 of 3 landed, 2026-09-12; plan: `docs/STAFF_POOLS_PLAN.md`):** the factory needs people, and people cost money every period (GAMEPLAY.md §5, §7). **Ticket 1 (sim) has landed:** four staff categories in `data/staff.ron`, a required crew per kind in `data/machines.ron` (now schema 2), per-tick whole-crew claims in stable machine order (a machine short of its crew pauses where it is and reads *starved* with a `staff` reason; a dock without its logistics head holds), payday out of the one money counter with the unpaid leaving in file order, free `hire`/`fire` commands, `staff_snapshot_json`, `crew` on tile and shop snapshots, `understaffed` on the dock, and all of it in the save. Tickets 2 (category icons) and 3 (the **H** staff panel, hover, fixture, proof) are to do.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -63,6 +64,33 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-12 — The factory needs people (staff pools, ticket 1)
+
+The simulation half of the staff pools MVP. Staff are GAMEPLAY.md §7's
+aggregate pools, not people on the floor: `data/staff.ron` defines four
+categories with a wage and a starting headcount, every kind in
+`data/machines.ron` now declares the crew it needs while running (the
+file went to schema 2 so an omitted crew is a loader error), and each
+tick every machine claims its whole crew in the simulation's stable order
+before it works. A machine that cannot get its crew takes nothing, pauses
+exactly where it is and reads *starved* with a new `staff` stall naming
+the short category — so the shipped line one manufacturing head short
+idles the cooking vat, last in order, and nothing else. The dock needs a
+logistics head to ship and holds, without losing a box, without one.
+Wages are paid every pay period out of the one money counter, one head at
+a time in file order, and the first head that cannot be paid — and every
+one after it — leaves; hiring and firing are free commands. The starting
+crew is exactly the reference line's summed demand, pinned by a test
+against the data rather than by literals, so a first factory runs without
+a visit to the staff panel and wages bite from the first payday.
+
+One consequence reached every long-running test fixture: a factory with
+no money now has no staff, so fixtures that used to stock up and run
+broke fund themselves with a wage reserve and assert what they *earned*
+rather than what they hold. Nothing on the wire Godot already reads
+changed shape — it only gained keys — and the Godot proofs still pass.
+Tickets 2 (icons) and 3 (the staff panel) follow.
 
 ### 2026-09-11 — The bottleneck is visible (machine load, ticket 3)
 

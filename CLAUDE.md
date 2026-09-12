@@ -61,8 +61,9 @@ sauce-factory/
                            #   schema_version; loaders reject a mismatch
     recipes.ron            # recipes; embedded via include_str!. Header states
                            #   the process-time ordering rule (see log)
-    machines.ron           # kind -> footprint (width_tiles, height_tiles).
-                           #   Also where per-kind staff/power belong later
+    machines.ron           # kind -> footprint (width_tiles, height_tiles) and
+                           #   the REQUIRED staff crew (schema 2). Power
+                           #   belongs here later too
     ingredients.ron        # unit price of each RAW ingredient (solid+fluid)
     shop.ron               # price per BUILDABLE kind: every machines.ron kind
                            #   plus belt/pipe tiles. Must cover every kind
@@ -70,6 +71,10 @@ sauce-factory/
                            #   payout, price, strikes, starter. Only starters
                            #   run in a new game; the rest are signed (C).
                            #   List order = priority when contracts compete
+    staff.ron              # staff categories (schema 1): id, name, wage,
+                           #   starting_headcount, + pay_period_ticks. File
+                           #   order = panel order = PAYDAY order. machines.ron
+                           #   (schema 2) names a crew per kind from these
   sim_core/                # Rust crate, crate-type cdylib + rlib
     src/lib.rs             # the ONLY file that touches gdext (ARCH §4).
                            #   JSON-string wire format via serde_json
@@ -84,6 +89,9 @@ sauce-factory/
                            #     (min-X/min-Y corner) and rotation convention
       fluid.rs             #   FluidNetwork, FluidTank, pressure equalize
       splitter.rs          #   Splitter (round-robin cursor only)
+      staff.rs             #   StaffCatalog + StaffPools: per-tick crew
+                           #     claims in stable order, payday, hire/fire.
+                           #     A plain field on World, like Economy
       ingredients.rs       #   IngredientCatalog + OwnedIngredients; owns
                            #     raw_ingredient_ids (the one definition of raw)
       shop.rs              #   ShopCatalog + OwnedEquipment. Money is NOT here
@@ -102,9 +110,9 @@ sauce-factory/
     tests/                 # headless integration tests, one file per concern
                            #   (core_loop, placement, machine_footprints,
                            #   fluid_production, ingredients, economy, dock,
-                           #   contract_board, save_load, shop, auto_fill;
-                           #   common/mod.rs
-                           #   keeps hoppers/tank fed for long runs)
+                           #   contract_board, save_load, shop, auto_fill,
+                           #   staff; common/mod.rs keeps hoppers/tank fed
+                           #   for long runs and funds WAGE_RESERVE)
   xtask/                   # `cargo xtask`: build sim_core, copy the lib to
                            #   godot_project/bin/, stage models to
                            #   godot_project/voxels/ (both gitignored)
@@ -193,6 +201,49 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-12 **Staff pools MVP, ticket 1 (sim).** Staff are four aggregate
+  pools (`data/staff.ron`, schema 1: `pay_period_ticks`, categories with
+  `id`/`name`/`wage`/`starting_headcount`; loader `StaffCatalog` rejects a
+  bad version, no categories, a duplicate id, an empty name, a zero period;
+  a zero wage is legal). `data/machines.ron` is **schema 2**: every kind
+  has a REQUIRED `staff: [(category, count)]` (hopper/tank/splitter `[]`,
+  crusher/mixer 1 manufacturing, vat 2, bottler/packer 1 packaging, dock 1
+  logistics); the version is checked off a header before the shape, so a
+  v1 file says "wrong version", not "missing field". A crew naming an
+  unknown category, twice, or with count 0 is a TEST failure
+  (`StaffCatalog::validate_machines`), not a construction panic. `World`
+  owns `StaffPools` as a plain field like `Economy`. **The tick:** pools
+  reset after fluid; each machine, in `topology.machines` order, claims its
+  kind's WHOLE crew inside `Machine::tick` (new `crew: Option<CrewRequest>`
+  arg) only on a tick it would otherwise record `Working` — a refused
+  machine takes nothing, records `Starved`, remembers the first short
+  category (`Machine::refused_by`, crew-list order) and, if mid-craft,
+  shifts `start_tick` forward one (elapsed stands still; reported as a
+  change since Godot derives progress from `start_tick`); a dock claims
+  only when it holds something, a refused dock holds and reads
+  `understaffed`. Stable order means the SAME machine goes short every
+  tick — the shipped line short one manufacturing head idles the vat (last
+  in tile order), never the crusher or mixer. **Payday** after the economy
+  tick: at `next_payday_tick` heads are paid one at a time in `staff.ron`
+  order via `Economy::try_spend`; the first refusal fires that head and
+  every wage-earning head after it (a zero-wage head stays); `last_bill`,
+  `walked_out_last_payday` recorded; clock `+= pay_period_ticks`. Hire is
+  free and never refused for a known category; fire at 0 / unknown
+  category = silent no-op; neither dirties a chunk. **Wire:**
+  `staff_snapshot_json` (plan shape; `demand`/`assigned`/`short` are the
+  LAST tick's; `money` repeated); `StallKind::Staff` with `item` = category,
+  reported only after the six older kinds find nothing; `crew` on
+  `query_tile_json`'s machine and dock variants and every
+  `shop_snapshot_json` entry; `DockSnapshot.understaffed`. **Save:**
+  `SaveData.staff: Option<SavedStaff>` (`#[serde(default)]`; `None` = a
+  pre-epic save → starting crew, payday one period from its tick),
+  `SavedMachine.refused_by`, `SavedDock.understaffed`, schema stays 1;
+  per-tick tallies are not saved (the first tick recomputes them). **A
+  broke factory has no staff, so every long-running test fixture funds
+  itself with `tests/common`'s `WAGE_RESERVE`** (300 periods of the starting
+  crew's bill, pinned by `tests/staff.rs`) and asserts *earnings* (balance
+  + `wages_paid` − reserve) where it used to assert money. Full record in
+  `docs/DECISIONS.md`.
 - 2026-09-11 **Machine load, ticket 3 (Godot).** Every recipe-running
   machine stands its andon (`_build_machine_andon`) as THREE sibling nodes
   of the body — one per status model, like the motion frames — on the
