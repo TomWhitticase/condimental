@@ -71,10 +71,11 @@
 # Pass --bottleneck to build the BOTTLENECK LINE (test_layouts.gd's
 # `build_bottleneck_line`): the whole shipped line with its hoppers and tank
 # on auto-fill, run until it has backed up behind the 240-tick cooking vat,
-# so the andon stack lights read red · red · green · amber · amber along
-# the line — the fixture the machine-load indicator is reviewed on. It
-# implies --populate. Add --hover to put the crusher's load line and load bar
-# in the tooltip, or --closeup on a machine to judge one stack light.
+# so the machines read blocked · blocked · working · starved · starved
+# along the line — the fixture the machine-load indicator is reviewed on.
+# It implies --populate. Add --hover to put the crusher's load line (glyph,
+# word, number, reason) and status-coloured load bar in the tooltip, which
+# is where the indicator lives since the stack-light poles were removed.
 #
 # Pass --populate to run whatever was built forward first, so the shot shows
 # product moving instead of an idle factory. Pass --first-person to review

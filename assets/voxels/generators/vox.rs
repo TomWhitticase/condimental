@@ -417,10 +417,11 @@ impl VoxModel {
     ///
     /// An oblong footprint (the 1x2 mixer) turns too: its X and Y extents
     /// swap on every odd turn, exactly as `machines.rs` says a rotated
-    /// footprint keeps its origin corner and swaps extents. The andon test
-    /// (`assets.rs`) is what needed this — it stands the stack light at the
-    /// camera-visible corner of every body at every facing, and the mixer
-    /// is a body.
+    /// footprint keeps its origin corner and swaps extents. The andon-post
+    /// test in `assets.rs` was what first needed this (it stood a prop at
+    /// the camera-visible corner of every body at every facing, and the
+    /// mixer is a body); the poles are gone, the rotation stays for any
+    /// test that turns a body.
     pub fn rotated_cw(&self, turns: u32) -> VoxModel {
         let mut out = self.clone();
         for _ in 0..(turns % 4) {

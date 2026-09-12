@@ -193,6 +193,25 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-12 **Machine load: the stack-light poles are REMOVED; the hover
+  panel is the indicator.** A playtest verdict on looks alone — a pole
+  beside every machine was not wanted — so the six `andon_*` models, their
+  generator section and voxel tests, `icons.rs`'s `is_andon`, and the three
+  sibling nodes per machine (`_build_machine_andon`, `_set_machine_andon`,
+  `_andon_tile`, `ANDON_*`) are gone. Kept, unchanged: the sim's load
+  window and wire (ticket 1), `_poll_machine_load` on the tick (frozen by
+  the pause menu, run on every rebuild so a loaded game reads right on
+  its first frame), and the hover's load line and bar. What changed in the
+  hover is that it now carries the whole indicator, never by colour alone
+  (UI_UX.md §7): the load line leads with a status glyph and word
+  (`LOAD_STATUS_GLYPHS`: ● flat out, ▲ starved, ■ blocked) and the load
+  bar is filled in the status colour (`_load_status_color`: the meter's
+  own level/amber/warn colours). `test_machine_load.gd` now asserts the
+  records, the glyphs, the colours, and that NO `andon_*` node stands in
+  the world. Floor-wide bottleneck legibility is an open thread again
+  (GAMEPLAY.md §9); if it comes back it should be an overlay or a HUD
+  list, not the poles. `palette.ron`'s `status_*_off` colours stay so no
+  other `.vox` shifts.
 - 2026-09-11 **Machine load, ticket 3 (Godot).** Every recipe-running
   machine stands its andon (`_build_machine_andon`) as THREE sibling nodes
   of the body — one per status model, like the motion frames — on the
