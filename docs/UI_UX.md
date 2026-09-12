@@ -351,6 +351,15 @@ DECISIONS.md Part B. There is no point 10.
     asserts it is never dropped across hundreds of polls. When one polled
     field explains another, the explanation's lifetime is the explained
     thing's, not the poll's.
+31. **At icon scale an object is identified by the proportion of its
+    parts, not by their presence.** The hard hat's first cut had every
+    part a hard hat has — brim, front peak, domed crown, a crest over the
+    top — and its 64 px icon was a bell, because the crown stood taller
+    than it was wide; correct detail on a wrong ratio reads as the wrong
+    thing. A low crown, wider than tall, fixed it with fewer voxels and
+    fewer features. So judge an icon at its real size on the real plate
+    before judging the preview: the preview shows detail, which is what the
+    eye lands on and not what the icon is read by.
 
 ## 3. Theme & setting
 

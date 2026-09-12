@@ -22,6 +22,86 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-12: **Staff pools, ticket 2 — the four staff-category icons.**
+  The asset half of the staff-pools epic (`docs/STAFF_POOLS_PLAN.md`,
+  "The icons"): four voxel models in `assets/voxels/generators/assets.rs`
+  that exist only to be rendered by `voxicons` into
+  `assets/voxels/icons/staff_<category>.png` for ticket 3's staff panel.
+  Six calls.
+
+  (1) **Each icon is the tool the category holds, never a person.**
+  GAMEPLAY.md §7 is explicit that staff are an abstract capacity, not
+  NPCs; a figure on the panel would promise a person who is not in the
+  simulation. Manufacturing is a **hard hat** (the floor-worker's badge);
+  maintenance a **double open-ended spanner**; packaging a **taped carton
+  with the roll of tape lying on its lid**; logistics a **pallet jack**.
+  The four were also chosen to have four *different outlines* — a low
+  dome on a disc, a long flat bar with notched ends, a cube, a tall thing
+  with two prongs — because the panel shows them in a row of four at 64 px
+  and the reader tells them apart by silhouette before colour or detail
+  (UI_UX.md §2 "silhouette-first"; the plan's own "silhouette test, not a
+  detail test"). The carton is deliberately not just a box: a box alone is
+  `item_box`, which is the *product*; the roll on the lid is what turns it
+  into the people who seal it.
+
+  (2) **Colour is the plan's rule, with one small extension and no new
+  palette entry.** Hard hat and tape are `hazard_yellow` — the one signage
+  colour, reserved for meaning (UI_UX.md §7), and also simply what a hard
+  hat and a roll of packing tape are. Spanner and jack are class `metal`
+  (`steel_light` bodies, a `steel` stamp band down the spanner's shaft,
+  `steel_dark` for the jack's pump housing) so they catch the light like
+  every other tool here (§4). The carton is `cardboard`/`cardboard_dark`
+  like `item_box`, with a `label_cream` shipping label. The extension: the
+  jack's four wheels and two grips are `rubber_dark` — a jack's wheels are
+  polyurethane, not steel, and the dark accents under the forks are what
+  make them read as *off the ground*. The test therefore pins "the jack has
+  metal and no signage colour", not "the jack is all metal"; the spanner IS
+  pinned all metal. Every colour needed already had a job in
+  `palette.ron`, so nothing was appended and no other `.vox` re-emitted —
+  the diff is exactly nine new model files, four icons and `index.json`.
+
+  (3) **Authored for vengi's camera, not the game's.** UI_UX.md §2b point
+  27's rule from the vinegar jug: a model whose only consumer is the icon
+  pass is seen from `vengi-thumbnailer`'s **-X/+Y** corner, never from the
+  scene's +X/+Z. So the hard hat's peak points at -X; the carton's tape
+  turns down the +Y face and its label sits on the -X face; the jack's
+  forks point at -X, where nothing stands in front of them, and its housing
+  and tiller rise at the far +X end where a tall part hides nothing
+  (point 16's depth rule, applied to the other camera). Nothing here is
+  symmetric about a tile midline, on purpose — nothing ever spins these.
+
+  (4) **Registered like the coin.** Entries in `ASSETS` after `coin`, each
+  a `VoxModel::tile()`, no footprint, no `machines.ron`/`shop.ron` row, no
+  `icons.rs` exclusion (they are exactly what the icon pass is for), no
+  Godot change (ticket 3 reads `res://voxels/icons/staff_<id>.png` after
+  `cargo xtask` stages `icons/`). The names are `staff_` + the
+  `data/staff.ron` category id so ticket 3 can build the path from the
+  wire's `id` and never needs a lookup table; a fifth category is a fifth
+  generator with the same naming.
+
+  (5) **The rework pass was needed, and by the hat.** The spanner, carton
+  and jack read at 64 px on the dark plate on the first render. The hard
+  hat had every part a hard hat has — brim, front peak, domed crown, a
+  crest over the top — and read as a bell (a jelly mould with ribs): its
+  crown stood 14 voxels high on a radius of 11 with a squared-off
+  superellipse profile, and the vertical risers of the stacked slices
+  became ribbing. Making the crown a plain ellipse 9 high on a radius of 12
+  — wider than tall — and dropping the second crest fixed it with fewer
+  voxels. The lesson is UI_UX.md §2b point 31: at icon scale an object is
+  identified by the *proportion* of its parts, not their presence. The
+  other rework was test-found before any render: the first spanner's jaw
+  slot was as deep as the head was long, so the lower lip vanished and the
+  head was a fork; `spanner_jaws_are_open` failed, the head was widened
+  (radius 7.5) and the slot shortened to five voxels.
+
+  (6) **What the tests pin.** `staff_models_are_non_empty_and_fit_one_tile`:
+  exactly the four names, in `staff.ron` category order, each non-empty,
+  each a 32³ volume, every voxel inside it (`VoxModel::set` clips silently,
+  point 29, so an overreaching generator would otherwise lose voxels
+  without a word). `staff_icons_use_the_planned_materials`: the classes
+  and the yellow, per (2). `spanner_jaws_are_open`: the jaws are empty
+  voxels, not a darker colour, for point 11's reason.
+
 - 2026-09-11: **Machine load, ticket 3 — the stack lights in the scene.**
   The Godot half of the machine-load epic (`docs/MACHINE_LOAD_PLAN.md`):
   ticket 1's numbers and ticket 2's models become a light beside every
@@ -4149,6 +4229,23 @@ were only discoverable by building it:
     hundreds of polls and asserts the reason is never dropped. The general
     form: when one polled field explains another, the explanation's
     lifetime is the explained thing's, not the poll's.
+31. **At icon scale an object is identified by the proportion of its
+    parts, not by their presence.** The staff-pools epic's hard hat icon:
+    the first generator drew a brim, a longer peak at the front, a domed
+    crown and a crest over the top — the complete inventory of a hard hat
+    — and the rendered 64 px icon was a bell, or a jelly mould with ribs.
+    The crown stood 14 voxels high on a radius of 11 with a squared-off
+    superellipse profile, so the object was taller than it was wide, and
+    the vertical risers of its stacked slices read as ribbing. Lowering the
+    crown to a plain ellipse 9 high on a radius of 12 and dropping the
+    second crest — fewer voxels, fewer features — made it a hard hat at
+    once. The rule: below a certain size the eye reads an outline's
+    proportions and nothing else, and every correct detail on a wrong ratio
+    is wasted. The working corollary: look at the icon at its real size on
+    the real dark plate BEFORE looking at the 512 px preview, because the
+    preview shows the detail, which is what the eye lands on, and the
+    detail is not what the icon is read by. Point 9 already budgets a
+    rework pass per asset; this is what the pass is usually for.
 
 ## Part C — ARCHITECTURE.md §9a, full text (mobile export spike findings, 2026-09-06)
 
