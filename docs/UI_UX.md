@@ -361,6 +361,21 @@ DECISIONS.md Part B. There is no point 10.
     before judging the preview: the preview shows detail, which is what the
     eye lands on and not what the icon is read by.
 
+32. **A fixed-size card clips a label without complaint, and a taller
+    card is not always available to fix it.** The build-menu card gained
+    one line (`crew: 2 manufacturing`) and the first render cut it at
+    "manufacturi" on the right and pushed `Owned 0` off the bottom; every
+    headless test read the full string and passed (point 12 again — a
+    Label's text is intact whatever the card shows of it). The obvious fix,
+    a taller card, made the two-row grid scroll, because the menu is capped
+    against the hotbar (§5c), and a wider card alone left the bottom line
+    clipped. What worked was paying for the line out of the card's own
+    slack: two less inset top and bottom, no separation, the smallest font
+    step the scale allows, and a card wide enough for the longest crew
+    string. The rule: a new line on a card that lives in a capped grid is
+    bought from the card's padding, not from the grid's height, and the
+    check is the rendered frame at the shipped window size.
+
 ## 3. Theme & setting
 
 **A grounded, semi-realistic 21st-century industrial food factory**:
@@ -425,6 +440,24 @@ factory tropes; the sauce theme comes through in what the factory processes.
   weight and pips. A lost or signed contract is announced in one line along
   the top edge, and an empty clipboard says "press C" rather than showing a
   money figure over nothing.
+- **The staff panel (H) is the same dark-plate menu, one row per
+  category** (the staff pools MVP, ticket 3, 2026-09-12). Icon, name,
+  `hired 4  ·  wage 2 / head / period`, then the §5e bar that this panel
+  earns: `assigned / demand` — what the factory asked for on the last tick
+  is the simulation's own ceiling, so the bar is honest, and it reads
+  `0 / 0` on an idle line rather than headcount against an invented full
+  mark. The two numbers are printed ON the bar, `2 short` stands beside it
+  in the one warning red while the bar is red (§7: position, digits, word,
+  colour), and HIRE / FIRE are the build menu's own buttons, FIRE disabled
+  at zero. The footer carries the upcoming bill, the payday countdown in
+  seconds (§5e: never ticks) and, only when it happened, `✗ 3 left unpaid
+  last payday`. A category nothing asks for yet says so in a sentence
+  (`nothing to maintain yet`) in place of an empty bar. E, M, C and H are
+  one modal at a time; ESC closes whichever is up. Being short is also
+  read where it bites: a refused machine's hover says `▲ starved · … ·
+  short of manufacturing staff` over its `crew: 2 manufacturing` line, a
+  refused dock says `held · short of logistics staff`, and a build-menu
+  card says a kind's crew under its price.
 - **A machine's load is read from its hover, and only there** (the
   machine-load epic, 2026-09-11; **amended 2026-09-12**). The in-world
   andon stack lights this bullet was written about were removed after a

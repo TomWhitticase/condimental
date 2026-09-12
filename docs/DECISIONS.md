@@ -22,6 +22,94 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-12: **Staff pools MVP, ticket 3 — the Godot half.** The plan's
+  "Presentation" section (`docs/STAFF_POOLS_PLAN.md`) built as written,
+  with the coordinator's amendment that the andon bullet is void. The
+  calls worth recording:
+
+  1. **The panel reads; it does not compute.** Every figure on a row —
+     `headcount`, `wage`, `demand`, `assigned`, `short` — is the wire's
+     own, and the row's words and bar are a pure function of the category
+     dictionary (`_staff_row_state`), so `test_staff_panel.gd` proves the
+     panel against `staff_snapshot_json` with no viewport. The one
+     exception is deliberate and was put to the coordinator first: the
+     footer's `wages N / period` is the UPCOMING bill, which the wire does
+     not carry (`last_bill` is what the last payday paid: 0 before the
+     first, stale after a hire). It is `Σ headcount × wage`
+     (`_staff_bill`) — the payday rule applied to numbers the snapshot
+     already holds, the same kind of arithmetic as the shop meter's
+     price ÷ money — and explicitly NOT a second opinion on any fact the
+     sim reports. Recorded as such: if the payday rule ever stops being
+     "every head at its wage" (a recruiting fee, a per-period bonus), a
+     sim-side `next_bill` is the cleaner home and this sum is the thing to
+     delete.
+  2. **The meter is `assigned / demand`, red when short, with the two
+     numbers printed on the track.** GAMEPLAY.md §10 asked for a gauge
+     per category; §5e says a bar is drawn only where the sim defines the
+     ceiling, and `demand` is that ceiling — what the factory asked for
+     on the last tick. So a fully staffed idle line reads `0 / 0` on an
+     empty bar (nobody asked), not `4 / 4` (a bar of headcount against an
+     invented full mark would be the gauge that lies). The numbers sit ON
+     the track (a Label child anchored full-rect over the fill) so the
+     bar is never colour alone; `2 short` in words stands beside it in the
+     warning colour, and the bar turns `METER_FILL_WARN` only while
+     `short > 0` — a demand the player cannot meet is the §5e meaning of
+     red.
+  3. **"nothing to maintain yet" is keyed on the category id.** A row
+     whose headcount and demand are both 0 could belong to any category;
+     the sentence says what maintenance is FOR, so a generic rule would
+     print it for a logistics crew the player had just fired.
+     `STAFF_IDLE_NOTES` holds one entry and a fired-out logistics row
+     keeps its (empty) `0 / 0` meter.
+  4. **Polling is on the load's cadence but on its own stamp.** The plan
+     says every `LOAD_POLL_TICKS` from `_advance_simulation` and "buttons
+     re-poll at once". Sharing `_load_polled_tick` would make every HIRE
+     shift the machine-load cadence; `_staff_polled_tick` is separate, and
+     `_poll_staff` also runs once per `_rebuild_world` (a loaded save
+     reads its crew before the first frame — the machine-load precedent)
+     and once on open. The poll is cheap enough (four categories, one
+     JSON) that it runs whether or not the panel is up, which is what lets
+     the panel open on the last poll instead of an empty plate.
+  5. **The crew is read once per rebuild from `query_tile_json`.**
+     `_machine_states` is overwritten by every chunk snapshot, and
+     `MachineSnapshot` does not carry `crew` (it is content, not state),
+     so hover keeps a separate `_crews` map, seeded in `_seed_crews` for
+     every recipe-running machine AND every dock, exactly as
+     `_seed_machine_states` is. A category is printed as its id
+     (`crew: 2 manufacturing`, `short of manufacturing staff`), a plain
+     word, not through `_item_display_name`, which would capitalise it
+     into a proper noun mid-sentence. The dock's "held · short of
+     logistics staff" names the category from the DOCK'S crew: the wire's
+     `understaffed` is a bare bool, and the crew on the same tile snapshot
+     is the only place the sim says which category that is.
+  6. **The panel had to lose a line per row, and the build-menu card had
+     to lose its slack.** The first render of the panel scrolled at
+     1600x900 with the fourth category cut off: three text lines per row
+     plus stacked buttons. `hired 4  ·  wage 2 / head / period` on one
+     line and HIRE beside FIRE brought it to four rows on one plate, the
+     §5c lesson again (a scale costs layout). The card: `crew: 2
+     manufacturing` at `_ui_font(-3)` CLIPPED at "manufacturi" on the
+     128-wide card, and the fix could not be a taller card, because the
+     build menu's two-row grid is capped against the hotbar and a taller
+     row scrolls it. So the card is 144 wide (the text fits at the
+     `test_ui_scale.gd` floor, `_ui_font(-4)`), 138 tall, and its column's
+     inset went 8 → 2 and separation 2 → 0 — the crew line was paid for
+     out of the card's own padding. `--staff` implies `--populate` for
+     the same reason the first render taught: an unrun line reads `0 / 0`
+     on every meter, which is true and useless as a review frame.
+  7. **No click sound.** The plan says use an existing UI click if
+     `audio.gd` has one; it has the payout chime and the delivery knock
+     and nothing else, and synthesising a new cue was outside the ticket.
+     Noted here so the next audio pass knows the buttons are silent by
+     omission, not by decision.
+  8. **The andon assertion became a hover assertion.** The stack lights
+     were removed on `main` while this epic was in flight; the proof
+     asserts the wire's `{kind: staff, item: manufacturing}` stall, the
+     load record's `starved`, the hover's `▲ starved · 0% busy · short of
+     manufacturing staff` and `crew: 2 manufacturing`, and the load bar's
+     amber colour — every channel the removed light had, on the panel that
+     replaced it.
+
 - 2026-09-12: **Staff pools MVP, ticket 1 — the simulation half.**
   GAMEPLAY.md §7's staff pools and §5's third cost axis, built as
   `docs/STAFF_POOLS_PLAN.md` specifies (its "The data" and "The wire
