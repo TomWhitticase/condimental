@@ -145,20 +145,20 @@ fn chain_on(kinds: &[&str]) -> RecipeRegistry {
 /// no shipped kind is 3 wide or 30 wide — and the recipes remain synthetic.
 fn kinds(entries: &[(&str, i32, i32)]) -> MachineRegistry {
     let mut body: String = concat!(
-        "MachineKind(id: \"hopper\", footprint: Footprint(width_tiles: 1, height_tiles: 1)),",
-        "MachineKind(id: \"fluid_tank\", footprint: Footprint(width_tiles: 1, height_tiles: 1)),",
-        "MachineKind(id: \"dock\", footprint: Footprint(width_tiles: 1, height_tiles: 1)),",
+        "MachineKind(id: \"hopper\", footprint: Footprint(width_tiles: 1, height_tiles: 1), staff: []),",
+        "MachineKind(id: \"fluid_tank\", footprint: Footprint(width_tiles: 1, height_tiles: 1), staff: []),",
+        "MachineKind(id: \"dock\", footprint: Footprint(width_tiles: 1, height_tiles: 1), staff: []),",
     )
     .to_string();
     body += &entries
         .iter()
         .map(|(id, w, h)| {
             format!(
-                "MachineKind(id: \"{id}\", footprint: Footprint(width_tiles: {w}, height_tiles: {h})),"
+                "MachineKind(id: \"{id}\", footprint: Footprint(width_tiles: {w}, height_tiles: {h}), staff: []),"
             )
         })
         .collect::<String>();
-    MachineRegistry::from_ron_str(&format!("( schema_version: 1, machines: [{body}] )"))
+    MachineRegistry::from_ron_str(&format!("( schema_version: 2, machines: [{body}] )"))
         .expect("generated machine text must parse")
 }
 

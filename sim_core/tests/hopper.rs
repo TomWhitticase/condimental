@@ -40,6 +40,8 @@
 //! Mass conservation across the whole chain *through* the hoppers is covered
 //! in `core_loop.rs`, which counts hopper contents as mass in the system.
 
+mod common;
+
 use sim_core::sim::{
     Direction, HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, HOPPER_KIND, HopperSnapshot, PlayerCommand,
     RecipeRegistry, World, command_from_json, reference_chain, reference_chain_with_budget,
@@ -47,7 +49,7 @@ use sim_core::sim::{
 
 /// Enough money for any stock this file buys, and no more than the shop
 /// bill it sits on top of — see `reference_chain_with_budget`.
-const BUDGET: u32 = 400;
+const BUDGET: u32 = 400 + common::WAGE_RESERVE;
 
 fn recipes() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))

@@ -94,12 +94,12 @@ fn funded(recipes: RecipeRegistry) -> World {
 /// down.
 fn oblong_kinds() -> MachineRegistry {
     MachineRegistry::from_ron_str(
-        r#"( schema_version: 1, machines: [
-            MachineKind(id: "hopper",      footprint: Footprint(width_tiles: 1, height_tiles: 1)),
-            MachineKind(id: "fluid_tank",  footprint: Footprint(width_tiles: 1, height_tiles: 1)),
-            MachineKind(id: "dock",        footprint: Footprint(width_tiles: 1, height_tiles: 1)),
-            MachineKind(id: "crusher",     footprint: Footprint(width_tiles: 3, height_tiles: 1)),
-            MachineKind(id: "packer",      footprint: Footprint(width_tiles: 1, height_tiles: 1)),
+        r#"( schema_version: 2, machines: [
+            MachineKind(id: "hopper",      footprint: Footprint(width_tiles: 1, height_tiles: 1), staff: []),
+            MachineKind(id: "fluid_tank",  footprint: Footprint(width_tiles: 1, height_tiles: 1), staff: []),
+            MachineKind(id: "dock",        footprint: Footprint(width_tiles: 1, height_tiles: 1), staff: []),
+            MachineKind(id: "crusher",     footprint: Footprint(width_tiles: 3, height_tiles: 1), staff: []),
+            MachineKind(id: "packer",      footprint: Footprint(width_tiles: 1, height_tiles: 1), staff: []),
         ] )"#,
     )
     .expect("generated machine text must parse")

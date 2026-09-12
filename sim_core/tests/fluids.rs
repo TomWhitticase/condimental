@@ -40,7 +40,7 @@ use sim_core::sim::{
 
 /// Exactly `common::stock_up`'s bill, so a stocked world has a factory, a
 /// full larder and zero money.
-const BUDGET: u32 = common::STOCK_COST;
+const BUDGET: u32 = common::STOCK_COST + common::WAGE_RESERVE;
 
 /// The reference chain, funded and stocked. Ingredients cost money since the
 /// chain-rework epic (GAMEPLAY.md §5), so a fixture that fills anything has

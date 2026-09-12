@@ -39,7 +39,7 @@ const WATCH_TICKS: u32 = LOAD_WINDOW_TICKS;
 
 /// The reference chain, stocked, kept fed every tick, run until it settles.
 fn settled_line() -> World {
-    let mut world = reference_chain_with_budget(recipes(), common::STOCK_COST);
+    let mut world = reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE);
     common::stock_up(&mut world);
     for _ in 0..SETTLE_TICKS {
         common::supply(&mut world);

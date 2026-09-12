@@ -84,7 +84,16 @@ fn single_contract_world() -> World {
 /// Exactly `common::stock_up`'s ingredient bill — so a stocked world has a
 /// factory, a full larder and **zero money**, which is the baseline every
 /// payout assertion below is measured against.
-const BUDGET: u32 = common::STOCK_COST;
+/// Stock plus a wage reserve (the staff pools MVP epic): every fixture here
+/// runs past a payday, and a broke factory loses its crew. `earned` below
+/// is what the assertions compare — the balance with the reserve taken out
+/// and the wages paid put back — so "money is exactly the payouts" still
+/// means exactly that.
+const BUDGET: u32 = common::STOCK_COST + common::WAGE_RESERVE;
+
+fn earned(world: &World) -> Fx {
+    world.money() + common::wages_paid(world) - Fx::from_num(common::WAGE_RESERVE)
+}
 
 /// Buys the raw ingredients a long run needs. `reference_chain*` spends
 /// exactly its shop bill and leaves only the budget it was given, and
@@ -158,7 +167,7 @@ fn full_chain_delivers_against_a_contract_and_pays_out_exactly_that_contracts_pa
     }
 
     assert_eq!(
-        world.money(),
+        earned(&world),
         payout,
         "money must increase by exactly one contract payout once the mix is delivered"
     );
@@ -187,7 +196,7 @@ fn money_stays_zero_through_a_cadence_boundary_with_nothing_delivered() {
     }
 
     assert_eq!(
-        world.money(),
+        earned(&world),
         Fx::from_num(0),
         "money must not increase when the delivered mix doesn't satisfy any contract"
     );
@@ -285,7 +294,7 @@ fn several_contracts_settle_independently_against_one_real_chain() {
     // 'impossible' pays 999; if it had ever paid, this would be nowhere near.
     let expected = Fx::from_num(quick.deliveries_made * 10 + slow.deliveries_made * 35);
     assert_eq!(
-        world.money(),
+        earned(&world),
         expected,
         "money must be exactly the sum of the payouts that actually settled"
     );
@@ -344,7 +353,7 @@ fn one_delivered_unit_pays_one_contract_not_every_contract_that_wants_it() {
     }
 
     assert_eq!(
-        world.money(),
+        earned(&world),
         Fx::from_num(10),
         "one box must pay exactly one contract — if stock were credited to every matching \
          contract this would read 20, which is the free-money bug the shared-pool rule exists \
@@ -383,7 +392,7 @@ fn the_economy_snapshot_reports_one_entry_per_shipped_contract() {
         assert!(offer.strikes >= 1);
     }
 
-    assert_eq!(snapshot.money, 0.0);
+    assert_eq!(snapshot.money, f64::from(common::WAGE_RESERVE), "stocked, untouched: the reserve");
     assert!(
         snapshot.delivery_stock.is_empty(),
         "a fresh world has delivered nothing yet"

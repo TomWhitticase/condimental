@@ -83,6 +83,8 @@
 //! has, so conservation is an exact equality there too, not an epsilon
 //! comparison.
 
+mod common;
+
 use sim_core::sim::{
     BeltSnapshot, DockSnapshot, Fx, MachineSnapshot, PlayerCommand, RecipeRegistry,
     TileSnapshot, World, reference_chain_with_budget,
@@ -90,7 +92,7 @@ use sim_core::sim::{
 
 /// Enough money to buy the stock this file loads, on top of the shop bill
 /// the fixture already spends.
-const BUDGET: u32 = 400;
+const BUDGET: u32 = 400 + common::WAGE_RESERVE;
 
 fn recipes() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
