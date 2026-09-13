@@ -2333,9 +2333,42 @@ func _rebuild_world() -> void:
 	# on the first frame drawn reads the right status rather than nothing.
 	_poll_machine_load()
 	_refresh_buffers()
+	_reread_every_chunk()
 	# Everything above was rebuilt; the next frame must read every snapshot
 	# again whatever the revision says (a new game's world starts at 0).
 	_polled_revision = -1
+
+
+## Draws every chunk's FULL snapshot — carried items, machine states,
+## splitter arrows — after a rebuild has emptied the item pools. A rebuild
+## is followed by `_apply_dirty_chunks`, but that reads only the chunks the
+## simulation reports dirty, which after a place/remove/rotate is the chunk
+## that changed: on a factory spanning two chunks, every item on a belt in
+## the OTHER chunk vanished from the scene until it next moved, and on a
+## backed-up belt that is never (the quality pass, 2026-09-13; found by
+## reading, proved in test_splitters.gd on its cross-chunk branch). The
+## chunks are computed from the placements the layout just gave, the same
+## 32-tile grid the sim packs into its chunk ids (`sim::encode_chunk_id`).
+func _reread_every_chunk() -> void:
+	var seen := {}
+	for placement in _placements:
+		for pair in placement.get("occupies", []):
+			if not (pair is Array) or pair.size() < 2:
+				continue
+			var chunk := Vector2i(_chunk_coord(int(pair[0])), _chunk_coord(int(pair[1])))
+			if seen.has(chunk):
+				continue
+			seen[chunk] = true
+			var packed: int = (chunk.x << 32) | (chunk.y & 0xFFFFFFFF)
+			var parsed = JSON.parse_string(sim.chunk_snapshot_json(packed))
+			if parsed != null:
+				_render_snapshot(parsed)
+
+
+## Which 32-tile chunk a tile coordinate falls in, on one axis — floored
+## division, so -1 is in chunk -1 (`sim::chunk_of`).
+func _chunk_coord(t: int) -> int:
+	return (t - posmod(t, CHUNK_TILES)) / CHUNK_TILES
 
 
 ## Builds the node (or nodes) for one placement: its body at the centre of
@@ -9801,6 +9834,8 @@ func _direction_world(direction: String) -> Vector3:
 ## a phantom tile no player could see). Callers get an explicit "no tile"
 ## value rather than a Vector2i(0, 0) that could also be a real tile.
 const HOVER_NO_TILE := Vector2i(-999999, -999999)
+## The simulation's chunk edge in tiles (ARCHITECTURE.md §3.1, `sim::CHUNK_SIZE`).
+const CHUNK_TILES := 32
 ## Screen-space offset from the raw cursor position to the tooltip panel's
 ## top-left corner, so the panel doesn't sit directly under (and get
 ## re-hidden by chasing) the cursor itself.
