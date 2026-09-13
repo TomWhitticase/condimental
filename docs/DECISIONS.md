@@ -22,6 +22,143 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-13: **Quality pass, ticket 1 (sim): staffing — no silent
+  walk-out, no free dodge — and the money ceiling.** The brief
+  (`docs/QUALITY_PASS_PLAN.md`) carried the diagnosis: the staff pools
+  MVP's payday paid heads one at a time in `staff.ron` order and FIRED the
+  first head it could not pay and every head after it, with nothing but
+  `walked_out_last_payday` in a panel footer to say so. A player who spent
+  down on equipment before a payday lost most of their crew and read
+  `hired 0`. That is the "kept having to hire staff I never fired" report,
+  and it was a design bug. Eight calls, each with the alternative it beat.
+
+  1. **An unpaid head is idled, not fired; it leaves only if unpaid
+     twice.** The line rule stays — the first head the money does not
+     reach, and every head after it down the file, goes without — but
+     "goes without" now means *unpaid*: still hired, not at its post until
+     the next payday (`StaffPools::reset` hands out `headcount - unpaid`),
+     so the machines it crewed starve with the existing `staff` stall and
+     the panel can print `N unpaid`. A head unpaid at the next payday as
+     well leaves; a covered payday clears the arrears. This is the contract
+     board's strikes (a paid window resets the count; `strikes` misses in
+     a row lose the contract) applied to people, with two strikes. The
+     alternatives: keep firing but announce it (still sudden — a whole
+     line stops with no chance to react); allow debt (GAMEPLAY §1 has one
+     non-negative counter, and a negative balance is a second mechanic);
+     three or more strikes (a factory that cannot pay for three periods is
+     not a factory in trouble, it is a factory with no income, and every
+     extra period of idle heads is a period the panel reads as broken).
+     Arrears do not stack: a head in arrears is owed ONE wage at the next
+     payday, not two — the period it was unpaid for is the period it did
+     not work, so the debt is already settled in labour, and stacking
+     would make the second payday harder to meet than the first, which is
+     the cliff again one period later.
+  2. **Back pay is settled first.** Within a category, the money reaches
+     the fired heads' notice, then the heads in arrears, then the rest.
+     So a factory that can pay some of its crew clears the heads it
+     already owes before it lets a fresh one go unpaid, and "leaves if
+     unpaid twice" means the money genuinely did not reach that head
+     twice. The alternative — counting by position, so whoever is left
+     unpaid is assumed to be the same head — lost a head in exactly the
+     case where the player had found the money for it. A consequence,
+     documented rather than fixed: a factory that can pay half its crew
+     every period keeps everyone, half of them idle, indefinitely. That is
+     half the labour for half the wage, which is fair, and the panel shows
+     it.
+  3. **A head is owed for any period it was employed in any part of**
+     (`CategoryPool::owed`: set to headcount at each payday, `+1` on hire,
+     unchanged on fire). The payday bills `owed`, not `headcount`. This is
+     what closes "fire everyone the tick before payday, hire them back the
+     tick after": the bill is byte-identical to not having fired, and the
+     test says so. Hiring one tick before payday likewise bills that head
+     in full — a period is the unit, and a head that worked any of it is
+     paid for it. The alternative, pro-rating by ticks employed, is
+     honest but is a second clock per head in a system whose whole design
+     is four aggregate counters; and it still leaves the dodge half open
+     (fire at tick 1, hire at tick 999, pay for two ticks). Notice pay is
+     settled before the heads still on the books (call 2), so being broke
+     does not dodge it either: the fired head's wage is the first thing
+     the money reaches.
+  4. **A hire is refused unless the balance covers the next bill plus the
+     new head's wage** (`StaffPools::can_hire`; a refused hire is a silent
+     no-op like every other refusal, and the wire's per-category
+     `can_hire` says so ahead). Without this, calls 1 and 3 opened a worse
+     hole than they closed: hire N heads with no money, let them work a
+     period, let them go unpaid, fire them (still owed, but you cannot pay
+     and they are gone), hire N fresh ones — free labour for the cost of
+     clicking. "You cannot hire someone you could not pay" is one rule,
+     legible on the button, and it is also the honest one: the panel
+     already prints the bill and the balance side by side. What it does
+     not prevent is hiring with the money and then spending it, which is
+     the reported case — and that path now warns first (call 5) and idles
+     rather than fires (call 1).
+  5. **The wire warns before and announces after.** `staff_snapshot_json`
+     gains `next_bill` (`Σ owed × wage` — what the payday will actually
+     take, fired heads included), `shortfall` (how far `money` falls short
+     of it, whole units rounded up, 0 when covered), `unpaid_last_payday`
+     (hired heads the last payday's money did not reach), and per category
+     `owed`, `unpaid`, `left_last_payday` (who left, by category — the
+     announcement's text) and `can_hire`. `walked_out_last_payday` keeps
+     its name and its meaning — how many LEFT — because every reader
+     (`main.gd`'s footer, `test_staff_panel.gd`) means exactly that, and
+     only the rule for leaving changed. Godot's `_staff_bill`
+     (`Σ headcount × wage`) is now the run rate, not the bill: the
+     staff-panel ticket had flagged a sim-side `next_bill` as the cleaner
+     home "if the payday rule ever stops being every head at its wage",
+     and it has.
+  6. **Save: four fields under `#[serde(default)]`, schema 1, and an
+     impossible state is refused.** `SavedStaff` gains `unpaid`, `owed`,
+     `left_last_payday` (maps by category id, like `headcount`) and
+     `unpaid_last_payday`. A save from the MVP loads with nobody in
+     arrears and every head owed exactly its headcount — a paid-up crew,
+     which is what an MVP save could only have been between paydays. More
+     in arrears than hired, or fewer owed than hired, cannot come out of
+     the tick path and is `SaveError::BadStaff` with a reason, the
+     production ledger's precedent. The 1200-step lockstep test compares
+     the staff snapshot every tick with a crew in arrears.
+  7. **Money is `Money`, `fixed`'s `I48F16`, its own type beside `Fx`.**
+     `I16F16` tops out around 32 767; `data/contracts.ron`'s board pays
+     about 23 boxes' worth per 1000 ticks across five lines, which reaches
+     the ceiling in minutes of play. A probe settled what happens there:
+     the `fixed` crate's operators overflow like the primitive integers',
+     so a payout at the top PANICS in a debug build — the profile
+     `cargo xtask` ships by default — and wraps to a negative balance in
+     release. The task allowed "make saturation visible on the wire" as a
+     minimum; that would have left a game whose savings stop at a number
+     it never explains. Widening is the fix, and the choice of `I48F16`
+     over an integer or `I32F32` is deliberate: the SAME 16 fractional
+     bits mean a saved `money_bits` written as `Fx` bits (an `i32`, which
+     RON prints as a plain integer) reads back as the same balance through
+     the new `MoneyBits(i64)`, `test_layouts.gd`'s `fund` patch
+     (`amount * 65536`) is still exactly right, and every whole-number
+     price and wage converts losslessly. Not widening `Fx` itself: belt
+     positions and pipe volumes are fine at 16 bits and are the hot path.
+     `Economy::tick` credits with `saturating_add` regardless of width,
+     and a unit test pins a payout at `Money::MAX - 1` landing on
+     `Money::MAX`, not a panic and not a wrap. `Shop::cost_of` and
+     `Ingredients::cost_of` keep refusing an unrepresentable total, now
+     via `checked_from_num` against the 2^47 ceiling (a `u32::MAX`
+     purchase of a shipped price is representable and simply
+     unaffordable, which the tests now say).
+  8. **The audit's verdicts.** Checked and sound: the machine claim order
+     is `(y, x, id)`-sorted at every topology rebuild, so removing and
+     replacing a machine cannot move it up the queue; a removed machine
+     loses its contents and its load window and refunds its price, a
+     rearrangement, not a gain; a contract has one signature, a first
+     window a full cadence from signing, no refund on loss and a
+     re-signing fee, so sign/lose/re-sign loops only cost; auto-fill moves
+     bought stock in whole units and never touches money; the dock is a
+     bounded pass-through into an unbounded pool whose `Inventory::add`
+     saturates. Balance, written into `data/staff.ron`'s header: the
+     starting crew equals the reference line's summed crew (pinned); one
+     kept-fed line clears about 60 a period on the starter tier before
+     wages of 14 — a quarter of the margin, felt and survivable. Listed
+     for later tickets, not changed here: a removed hopper or tank
+     destroys the stock in it with no warning (ticket 5, a prompt);
+     `test_layouts.gd`'s `fund` clamps at 32 767 (test-only, ticket 3's if
+     a fixture needs more); the maintenance category is a pure cost until
+     something corrodes (the panel already says so).
+
 - 2026-09-12: **Music and a full set of sound effects.** Requested
   directly ("add some nice music and sound effect"). It reverses one half
   of the 2026-09-11 audio decision — "no music" — and keeps the other
