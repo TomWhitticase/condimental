@@ -18,8 +18,8 @@ pub mod reference;
 pub mod save;
 pub mod shop;
 pub mod splitter;
-pub mod stats;
 pub mod staff;
+pub mod stats;
 pub mod types;
 pub mod world;
 
@@ -38,6 +38,9 @@ pub use ingredients::{
     DEFAULT_BUY_QUANTITY, IngredientCatalog, IngredientEntry, IngredientSnapshot, Ingredients,
     IngredientsSnapshot, OwnedIngredients, raw_ingredient_ids,
 };
+pub use machine::{
+    FULL_LOAD_PERCENT, LOAD_BUCKET_TICKS, LOAD_BUCKETS, LOAD_WINDOW_TICKS, LoadWindow, WorkState,
+};
 pub use machines::{Footprint, MachineKind, MachineRegistry};
 pub use recipe::{Recipe, RecipeRegistry};
 pub use reference::{
@@ -50,18 +53,16 @@ pub use shop::{
     ShopSnapshot,
 };
 pub use splitter::{SPLITTER_KIND, Side, Splitter};
+pub use staff::{
+    CategoryPool, CrewEntry, CrewRequest, PaydayReport, StaffCatalog, StaffCategory,
+    StaffCategorySnapshot, StaffLoadError, StaffPools, StaffRestore, StaffRestoreError,
+    StaffSnapshot, crew_entries,
+};
 pub use stats::{
     ItemStats, ItemStatsSnapshot, ProductionLedger, ProductionSnapshot, STAT_BUCKETS,
     STAT_WINDOW_COUNT, STAT_WINDOWS, StatKind, StatWindow, WindowSnapshot,
 };
-pub use staff::{
-    CategoryPool, CrewEntry, CrewRequest, PaydayReport, StaffCatalog, StaffCategory,
-    StaffCategorySnapshot, StaffLoadError, StaffPools, StaffSnapshot, crew_entries,
-};
 pub use types::{Direction, Fx, decode_chunk_id, encode_chunk_id};
-pub use machine::{
-    FULL_LOAD_PERCENT, LOAD_BUCKET_TICKS, LOAD_BUCKETS, LOAD_WINDOW_TICKS, LoadWindow, WorkState,
-};
 pub use world::{
     BELT_KIND, BeltSnapshot, ChunkSnapshot, ConveyorLinks, DockSnapshot, FluidSnapshot,
     FluidTankSnapshot, FluidTapSnapshot, HopperSnapshot, LinkInput, LinkKind, LinkOutput, Links,

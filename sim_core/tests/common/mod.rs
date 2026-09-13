@@ -42,8 +42,9 @@ pub const STOCK_COST: u32 = 5500;
 
 /// How many pay periods of the STARTING crew's wages a long-running fixture
 /// holds in reserve (the staff pools MVP epic). A fixture that stocks up
-/// and is left with nothing loses its whole crew at the first payday — a
-/// factory with no money has no staff, which is the mechanic, not a bug —
+/// and is left with nothing has its whole crew unpaid and idle after the
+/// first payday and gone after the second — a factory with no money has
+/// no staff, which is the mechanic, not a bug —
 /// so every fixture that ticks past a payday funds itself with
 /// [`WAGE_RESERVE`] on top of what it spends. 300 periods covers the
 /// longest loop in these files (200 000 ticks in `fluids.rs`).
@@ -64,9 +65,10 @@ pub const WAGE_RESERVE: u32 = 4200;
 pub fn wages_paid(world: &World) -> Fx {
     let staff = world.staff();
     assert_eq!(
-        staff.walked_out_last_payday(),
-        0,
-        "wages_paid() assumes the starting crew is intact — fund the fixture with WAGE_RESERVE"
+        (staff.walked_out_last_payday(), staff.unpaid_last_payday()),
+        (0, 0),
+        "wages_paid() assumes the starting crew is intact and paid — fund the fixture with \
+         WAGE_RESERVE"
     );
     let bill = u64::from(staff.bill_per_period());
     let period = staff.catalog().pay_period_ticks();

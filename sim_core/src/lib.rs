@@ -593,17 +593,23 @@ impl SimBridge {
     /// draws, in one poll:
     ///
     /// ```json
-    /// {"pay_period_ticks": 1000, "next_payday_tick": 3000, "last_bill": 14,
-    ///  "walked_out_last_payday": 0, "money": 2986.0,
+    /// {"pay_period_ticks": 1000, "next_payday_tick": 3000,
+    ///  "next_bill": 14, "shortfall": 0,
+    ///  "last_bill": 14, "unpaid_last_payday": 0, "walked_out_last_payday": 0,
+    ///  "money": 2986.0,
     ///  "categories": [
     ///    {"id": "manufacturing", "name": "Manufacturing", "headcount": 4,
-    ///     "wage": 2, "demand": 4, "assigned": 4, "short": 0},
+    ///     "wage": 2, "owed": 4, "unpaid": 0, "left_last_payday": 0,
+    ///     "can_hire": true, "demand": 4, "assigned": 4, "short": 0},
     ///    {"id": "maintenance",   "name": "Maintenance",   "headcount": 0,
-    ///     "wage": 2, "demand": 0, "assigned": 0, "short": 0},
+    ///     "wage": 2, "owed": 0, "unpaid": 0, "left_last_payday": 0,
+    ///     "can_hire": true, "demand": 0, "assigned": 0, "short": 0},
     ///    {"id": "packaging",     "name": "Packaging",     "headcount": 2,
-    ///     "wage": 2, "demand": 2, "assigned": 2, "short": 0},
+    ///     "wage": 2, "owed": 2, "unpaid": 0, "left_last_payday": 0,
+    ///     "can_hire": true, "demand": 2, "assigned": 2, "short": 0},
     ///    {"id": "logistics",     "name": "Logistics",     "headcount": 1,
-    ///     "wage": 2, "demand": 1, "assigned": 1, "short": 0}]}
+    ///     "wage": 2, "owed": 1, "unpaid": 0, "left_last_payday": 0,
+    ///     "can_hire": true, "demand": 1, "assigned": 1, "short": 0}]}
     /// ```
     ///
     /// `categories` is in `data/staff.ron` order (the panel order and the
@@ -614,6 +620,25 @@ impl SimBridge {
     /// `money` is repeated here as `shop_snapshot_json` repeats it.
     /// `next_payday_tick` is in sim ticks; the panel turns it into seconds
     /// against `current_tick()`.
+    ///
+    /// **The quality pass's fields (2026-09-13), for warning BEFORE a
+    /// payday and announcing AFTER it.** `next_bill` is what the next
+    /// payday will charge — every head employed for any part of the
+    /// period, fired or not (notice pay), `Σ owed × wage` — and
+    /// `shortfall` is how far `money` falls short of it (0 when covered):
+    /// while it is non-zero, heads will go unpaid at the payday. After a
+    /// payday, `unpaid_last_payday` is how many hired heads the money did
+    /// not reach and `walked_out_last_payday` how many of them LEFT
+    /// (unpaid there and at the payday before). Per category: `owed`
+    /// (heads the next payday bills), `unpaid` (heads in arrears — still
+    /// hired, NOT working, gone if unpaid again; the row should say so in
+    /// words), `left_last_payday` (who left, for the announcement), and
+    /// `can_hire` (whether a `hire` would be accepted with this balance:
+    /// it must cover `next_bill` plus the category's wage — a refused
+    /// hire is a silent no-op like every other refusal, so read this to
+    /// mark the button). Read `next_bill` for the footer's bill: the
+    /// `Σ headcount × wage` Godot used to compute is the run rate, not
+    /// what the payday will take.
     ///
     /// **Poll it — do not wait for a dirty chunk.** The tallies change
     /// every tick and dirty nothing, the `machine_load_snapshots_json`
@@ -659,8 +684,7 @@ impl SimBridge {
     #[func]
     fn ingredients_snapshot_json(&self) -> GString {
         let snapshot = self.world.ingredients_snapshot();
-        let json =
-            serde_json::to_string(&snapshot).expect("IngredientsSnapshot must serialize");
+        let json = serde_json::to_string(&snapshot).expect("IngredientsSnapshot must serialize");
         GString::from(json.as_str())
     }
 
@@ -731,4 +755,3 @@ impl SimBridge {
         self.world = World::new(load_bundled_recipes());
     }
 }
-
