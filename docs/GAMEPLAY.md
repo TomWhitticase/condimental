@@ -341,14 +341,27 @@ Everything in this doc should be **content**, not simulation code, per [ARCHITEC
   `staff` reason — understaffed is a kind of starved, no fourth state. §5's
   third cost axis is live: on payday the bill is paid out of the one money
   counter, one head at a time in `staff.ron` order, and the first head that
-  cannot be paid, and every one after it, leaves. A new game starts with a
-  crew sized to the shipped line (the relationship is pinned by a test), so
-  the *second* line is what makes the player hire. **MVP-provisional
-  answers to §11, each open to revision:** allocation under a shortfall is
-  first-come in stable order (the same machine goes short every tick; no
-  player-set priority yet); there is no recruiting fee; firing is free and
-  immediate; an unpaid head leaves (no debt, no strike, no reputation
-  meter). Maintenance exists with zero demand until something corrodes.
+  cannot be paid, and every one after it, goes **unpaid** (rewritten by the
+  quality pass, 2026-09-13 — the MVP fired them on the spot, silently, and
+  players reported "having to hire staff I never fired"). An unpaid head
+  stays hired but does not work until the next payday; unpaid there as
+  well, it leaves; a covered payday clears the arrears — the contract
+  board's strikes, applied to people, and the wire says the next bill and
+  the shortfall ahead of time so the panel can warn. A head is owed for any
+  period it was employed in any part of (a head fired before payday is
+  still billed at it, notice pay; a head hired before payday is billed at
+  it), and a hire is refused while the balance could not cover the next
+  bill plus the new wage — so nothing done with HIRE and FIRE changes what
+  a period's employment costs, and nobody works a period for free. A new
+  game starts with a crew sized to the shipped line (the relationship is
+  pinned by a test), so the *second* line is what makes the player hire.
+  **MVP-provisional answers to §11, each open to revision:** allocation
+  under a shortfall is first-come in stable order (the same machine goes
+  short every tick; no player-set priority yet); there is no recruiting
+  fee; firing is free and immediate but the fired head's period is still
+  paid; an unpaid head is idled once and gone the second time (no debt, no
+  reputation meter). Maintenance exists with zero demand until something
+  corrodes.
 - **Money and active-contract state's architectural home (resolved at milestone 5, 2026-09-06):** both live as plain fields on a new `sim_core::sim::economy::Economy` struct, owned directly by `World` and advanced once per tick — not a new ECS component/entity, since milestone 5 has exactly one money counter and one active contract (no per-entity multiplicity to justify ECS machinery yet). `money` is a single fixed-point (`Fx`) counter, per ARCHITECTURE.md §3.9. The one hardcoded `Contract` (fixed mix/cadence/payout, named constants in `economy.rs`) is checked against an accumulating `delivery_buffer` `Inventory` at its cadence boundary (`Economy::tick`), which is where `World::issue_command(PlayerCommand::CollectOutput)` then deposited collected product instead of discarding it — this was milestone 5's "delivery mechanism." (**Superseded 2026-09-08 by the delivery dock**, two bullets up: that command no longer exists and the pool is filled by a building at the chain's tail instead. The pool itself, and everything about how contracts settle against it, is unchanged.) Exposed to Godot as a `SimBridge::economy_snapshot_json` JSON snapshot (money, contract mix, per-item progress, cadence), same pattern as the existing chunk/tile/layout snapshots. **Superseded in part on 2026-09-08:** `contracts.ron` data-file loading and multiple concurrent contracts have since landed — `Economy` now holds a `Vec<ActiveContract>` (each with its own cadence clock and delivery counters) plus one shared `delivery_buffer`, and `economy_snapshot_json` returns an array of contracts rather than one inline. The `Economy`-as-a-plain-field-on-`World` call above was unaffected and still stands: several contracts are a `Vec` inside the one struct, not a reason for ECS machinery. **Still explicitly deferred:** contract-loss/reputation penalties on a missed cadence window (a miss today just skips that window's payout and keeps the contract active — see this doc's own open question below), and the `StaffPools` resource — all future work, per GAMEPLAY.md §6/§9's original fuller design and the milestone-5 task's own scope note.
 
 ---
@@ -369,6 +382,6 @@ Everything in this doc should be **content**, not simulation code, per [ARCHITEC
 - ~~What exactly happens when a delivery interval is missed once — immediate contract loss, a grace period, a reputation meter that only loses the contract after repeated misses?~~ **Decided 2026-09-10 (§9, the contract-board bullet):** a grace period counted in strikes — `strikes` consecutive missed windows lose the contract, a paid window resets the count, and a lost contract is bought back at its listed price. No reputation meter yet.
 - Is there a reputation/trust score gating access to higher-tier contracts, separate from equipment-tier gating?
 - When staff demand exceeds headcount in a category, which machines lose out — player-set priority, first-come-first-served, or proportional throttling across all of them? **MVP-provisional (2026-09-12, §9's staff-pools bullet):** first-come in the simulation's stable machine order, so the same machine is always the one short; player-set priority is the expected replacement and needs no wire change.
-- Is there a one-time recruiting/training cost on top of the recurring per-head wage, and can headcount be reduced (firing) freely or with a penalty/delay? **MVP-provisional (2026-09-12):** no recruiting fee, free and immediate firing, and a head that cannot be paid on payday leaves. All three are placeholders for the balancing pass, not decisions.
+- Is there a one-time recruiting/training cost on top of the recurring per-head wage, and can headcount be reduced (firing) freely or with a penalty/delay? **MVP-provisional (2026-09-12), amended by the quality pass (2026-09-13):** no recruiting fee, but a hire needs the balance to cover the next bill plus the new wage; firing is free and immediate, but the fired head is still paid for the period it worked any part of (notice pay); a head that cannot be paid on payday is idled, not lost, and leaves only if the next payday cannot pay it either. Still placeholders for the balancing pass, not decisions.
 - Are perishability (spoilage) and corrosion (durability) modeled as full ECS components with their own tick-based decay, or as simpler flags/costs? Needs a decision before tier 4/5 implementation starts.
 - Exact tier list beyond the six in §2 (this doc's tiers are illustrative of the *shape* of progression, not necessarily the final content list), and the actual catalog of derived sauces/variants — both are a game-design task, not an architecture or gameplay-systems one.

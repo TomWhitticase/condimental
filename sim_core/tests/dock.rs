@@ -47,9 +47,9 @@ const BUDGET: u32 = common::STOCK_COST + common::WAGE_RESERVE;
 
 /// What the factory has earned: the balance less what it started with
 /// after stocking up, with the wages it has paid since added back.
-fn earned(world: &World) -> sim_core::sim::types::Fx {
+fn earned(world: &World) -> sim_core::sim::types::Money {
     world.money() + common::wages_paid(world)
-        - sim_core::sim::types::Fx::from_num(common::WAGE_RESERVE)
+        - sim_core::sim::types::Money::from_num(common::WAGE_RESERVE)
 }
 
 fn recipes() -> RecipeRegistry {
@@ -258,7 +258,7 @@ fn the_chain_ships_and_earns_with_no_player_command_but_refilling() {
         .map(|(_, qty)| *qty)
         .sum();
     assert!(
-        stock > 0 || earned(&world) > sim_core::sim::types::Fx::ZERO,
+        stock > 0 || earned(&world) > sim_core::sim::types::Money::ZERO,
         "every shipped box must be either waiting in the shared pool or already spent \
          paying a contract — never nowhere"
     );
@@ -278,7 +278,7 @@ fn the_chain_ships_and_earns_with_no_player_command_but_refilling() {
     }
 
     assert!(
-        earned(&world) > sim_core::sim::types::Fx::ZERO,
+        earned(&world) > sim_core::sim::types::Money::ZERO,
         "an unattended-but-supplied factory must earn money now that the dock delivers \
          for the player"
     );

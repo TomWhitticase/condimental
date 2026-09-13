@@ -204,6 +204,31 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-13 **Quality pass, ticket 1 (sim): no silent walk-out, no free
+  dodge, no money overflow.** The payday rule (`staff.rs`) no longer fires
+  the unpaid: a head the money does not reach is **unpaid** — hired, idle
+  until the next payday (`reset` gives `headcount - unpaid`), gone only if
+  unpaid again; a covered payday clears the arrears, back pay first. The
+  line rule stands (the first refusal leaves every head after it unpaid).
+  **Notice pay:** `CategoryPool::owed` counts every head employed for any
+  part of the period (starts at headcount, `hire` adds, `fire` does not
+  subtract), the payday bills `owed`, fired heads first, so firing before
+  payday changes nothing. **A hire is refused unless
+  `money >= next_bill + wage`** (`can_hire`) — you cannot hire someone you
+  could not pay. Wire (`staff_snapshot_json`): `next_bill`, `shortfall`
+  (0 when covered), `unpaid_last_payday`, per category `owed`/`unpaid`/
+  `left_last_payday`/`can_hire`; `walked_out_last_payday` keeps its name
+  and meaning (how many LEFT). Godot should read `next_bill` for the bill
+  (its `Σ headcount × wage` is the run rate). Save: `SavedStaff` gains
+  `unpaid`/`owed`/`left_last_payday`/`unpaid_last_payday` under
+  `#[serde(default)]`, schema 1; more unpaid than hired or fewer owed than
+  hired is `SaveError::BadStaff`. **Money is `types::Money` (`I48F16`)**,
+  not `Fx`: same 16 fractional bits (old `money_bits` read unchanged,
+  `MoneyBits(i64)`), 48 integer bits; `I16F16`'s 32 767 was minutes away
+  and a payout there PANICS in debug / wraps in release; `Economy::tick`
+  credits with `saturating_add`; `cost_of` refuses a total past `Money`
+  via `checked_from_num`. Audit verdicts in the DEVLOG entry; full record
+  in `docs/DECISIONS.md`.
 - 2026-09-13 **Production stats — the P screen (both halves).** Factorio's
   production GUI. Sim: a `ProductionLedger` on `World` (`sim/stats.rs`)
   counts per item/fluid id what a recipe DEPOSITS at craft completion

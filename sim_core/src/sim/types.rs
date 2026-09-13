@@ -14,6 +14,20 @@
 /// needs.
 pub type Fx = fixed::types::I16F16;
 
+/// The money type: fixed-point like [`Fx`] (ARCHITECTURE.md §3.9), with the
+/// SAME 16 fractional bits but 48 integer bits (the quality pass,
+/// 2026-09-13). `Fx`'s ceiling is about 32 767, and a five-line board earns
+/// that in minutes; at the ceiling a payout PANICS in a debug build (the
+/// `fixed` crate's operators overflow like the primitive integers') and
+/// wraps to a negative balance in release. Money is the one value in the
+/// simulation that only ever grows, so it gets its own width: about
+/// 1.4 × 10¹⁴ whole units. The identical fractional width means a saved
+/// `money_bits` written as `Fx` bits reads back as the same value, and
+/// every price and wage authored as a whole number converts losslessly.
+/// `Economy::tick` still credits a payout with a saturating add, so the
+/// balance can never wrap whatever the width.
+pub type Money = fixed::types::I48F16;
+
 /// A raw or finished item's content id (e.g. "tomato", "tomato_sauce").
 /// Matches the string ids used in `recipes.ron` (ARCHITECTURE.md §3.6).
 pub type ItemId = String;

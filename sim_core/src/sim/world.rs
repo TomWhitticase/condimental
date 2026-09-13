@@ -180,9 +180,9 @@ use super::machines::{Footprint, MachineRegistry};
 use super::recipe::{Recipe, RecipeRegistry};
 use super::shop::{DEFAULT_PURCHASE_QUANTITY, Shop, ShopSnapshot};
 use super::splitter::{SPLITTER_KIND, Side, Splitter};
-use super::stats::{ProductionLedger, ProductionSnapshot, StatKind};
 use super::staff::{CrewEntry, CrewRequest, StaffPools, StaffSnapshot, crew_entries};
-use super::types::{ChunkId, Direction, FluidId, Fx, ItemId, RecipeId, TileCoord, chunk_of};
+use super::stats::{ProductionLedger, ProductionSnapshot, StatKind};
+use super::types::{ChunkId, Direction, FluidId, Fx, ItemId, Money, RecipeId, TileCoord, chunk_of};
 
 /// The buildable-kind id (`data/shop.ron`) of one tile of conveyor.
 ///
@@ -519,16 +519,25 @@ enum PlayerCommandDto {
         item: Option<ItemId>,
     },
     /// `{"type": "remove", "tile": [4, 0]}`.
-    Remove { tile: TileCoord },
+    Remove {
+        tile: TileCoord,
+    },
     /// `{"type": "rotate", "tile": [4, 0]}`.
-    Rotate { tile: TileCoord },
+    Rotate {
+        tile: TileCoord,
+    },
     /// `{"type": "set_hopper_item", "tile": [-1, 0], "item": "sugar"}` —
     /// both required: only the player knows which hopper and which
     /// ingredient.
-    SetHopperItem { tile: TileCoord, item: ItemId },
+    SetHopperItem {
+        tile: TileCoord,
+        item: ItemId,
+    },
     /// `{"type": "sign_contract", "id": "diner_supply"}` — `id` required:
     /// only the player knows which offer they are taking.
-    SignContract { id: String },
+    SignContract {
+        id: String,
+    },
     /// `{"type": "set_hopper_auto_fill", "tile": [-1, 0], "enabled": true}`
     /// — `enabled` optional, defaulting to `true`, because a panel's toggle
     /// sends the state it wants and "turn it on" is the one this command
@@ -1606,7 +1615,7 @@ impl World {
         machines: MachineRegistry,
         contracts: ContractRegistry,
     ) -> Self {
-        Self::with_content_and_money(recipes, machines, contracts, Fx::from_num(STARTING_MONEY))
+        Self::with_content_and_money(recipes, machines, contracts, Money::from_num(STARTING_MONEY))
     }
 
     /// [`World::with_content`], but starting from a chosen balance instead
@@ -1622,7 +1631,7 @@ impl World {
         recipes: RecipeRegistry,
         machines: MachineRegistry,
         contracts: ContractRegistry,
-        money: Fx,
+        money: Money,
     ) -> Self {
         let ordered = recipes.ordered();
         assert!(
@@ -1692,7 +1701,7 @@ impl World {
 
     /// Current money balance (ARCHITECTURE.md §3.9: fixed-point, never a
     /// float, since it's shared/persisted simulation state).
-    pub fn money(&self) -> Fx {
+    pub fn money(&self) -> Money {
         self.economy.money
     }
 
@@ -1727,8 +1736,9 @@ impl World {
     /// The shop catalog, the player's owned counts and their current money
     /// in one object — see [`ShopSnapshot`] for the exact JSON shape.
     pub fn shop_snapshot(&self) -> ShopSnapshot {
-        self.shop
-            .snapshot(self.economy.money, |kind| crew_entries(self.crew_of_kind(kind)))
+        self.shop.snapshot(self.economy.money, |kind| {
+            crew_entries(self.crew_of_kind(kind))
+        })
     }
 
     /// The staff pools: headcounts, the last tick's demand and the payday
@@ -1746,9 +1756,7 @@ impl World {
     /// The crew `kind` needs while running: its `machines.ron` `staff`
     /// list, empty for a kind the registry does not know (belt, pipe).
     pub fn crew_of_kind(&self, kind: &str) -> &[(String, u32)] {
-        self.machines
-            .get(kind)
-            .map_or(&[], |k| k.staff.as_slice())
+        self.machines.get(kind).map_or(&[], |k| k.staff.as_slice())
     }
 
     /// The raw-ingredient market plus the stock the player owns and their
@@ -2499,7 +2507,9 @@ impl World {
     ///    are belt tiles with a choice at the end (see
     ///    [`super::splitter`]), so product crosses one at belt speed.
     /// 2b. **Staff pools reset** (the staff pools MVP epic): every category
-    ///    is back at its headcount with nothing asked for yet.
+    ///    is back at its headcount less its heads in arrears (the quality
+    ///    pass: an unpaid head stays hired but does not work), with nothing
+    ///    asked for yet.
     /// 3. **Machines run** — start a craft, or deposit a finished one. In
     ///    `topology.machines` order each machine that would work this tick
     ///    first claims its kind's whole crew from the pools; a refused
@@ -2527,9 +2537,12 @@ impl World {
     ///    after it, so everything this tick recorded sits in the bucket that
     ///    was current while it happened.
     /// 8. **Payday** (`StaffPools::tick`): on the tick the clock reaches
-    ///    `next_payday_tick`, wages are paid one head at a time out of the
-    ///    one money counter, and the first head that cannot be paid — and
-    ///    every one after it — leaves.
+    ///    `next_payday_tick`, every head owed for the period — fired ones
+    ///    included, notice pay first — is paid one at a time out of the one
+    ///    money counter. The first head the money does not reach, and every
+    ///    one after it, is UNPAID: still hired, idle until the next payday,
+    ///    and gone if that one cannot pay it either (the quality pass; see
+    ///    `staff.rs`'s module doc).
     ///
     /// Steps 4 and 5 are the same two phases the fixed chain always had
     /// ("belt to machine, then everything onto a belt"); what changed is
@@ -2779,8 +2792,8 @@ impl World {
         self.production.tick();
 
         // 8. Payday. Not tied to any tile either; Godot polls
-        // `staff_snapshot`. A head who leaves unpaid simply is not there
-        // when the pools reset next tick.
+        // `staff_snapshot`. A head left unpaid is simply not available when
+        // the pools reset next tick; one who leaves is not there at all.
         let _ = self.staff.tick(self.tick_count, &mut self.economy);
     }
 
@@ -3100,10 +3113,12 @@ impl World {
                 self.try_set_tank_auto_fill(tile, enabled);
             }
             // Neither dirties a chunk: a head is not a tile. Both are silent
-            // about an unknown category, and `Fire` about an empty pool,
-            // the `Purchase` convention.
+            // about an unknown category, `Hire` about a balance that could
+            // not pay the next bill plus the new wage (the quality pass:
+            // you cannot hire someone you could not pay), and `Fire` about
+            // an empty pool — the `Purchase` convention.
             PlayerCommand::Hire { category } => {
-                self.staff.hire(&category);
+                self.staff.hire(&category, self.economy.money);
             }
             PlayerCommand::Fire { category } => {
                 self.staff.fire(&category);
@@ -3939,7 +3954,7 @@ impl World {
     /// has to do so twice: once to fund each rebuild purchase, and once at
     /// the end to install the saved balance, so those purchases cannot leak
     /// into it.
-    pub(super) fn restore_money(&mut self, money: Fx) {
+    pub(super) fn restore_money(&mut self, money: Money) {
         self.economy.money = money;
     }
 

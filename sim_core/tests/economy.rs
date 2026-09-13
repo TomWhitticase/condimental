@@ -25,7 +25,7 @@
 
 mod common;
 
-use sim_core::sim::types::Fx;
+use sim_core::sim::types::Money;
 use sim_core::sim::{
     ContractRegistry, DockSnapshot, MachineRegistry, PlayerCommand,
     RecipeRegistry, World, reference_chain_with_budget, reference_chain_with_content_and_budget,
@@ -91,8 +91,8 @@ fn single_contract_world() -> World {
 /// means exactly that.
 const BUDGET: u32 = common::STOCK_COST + common::WAGE_RESERVE;
 
-fn earned(world: &World) -> Fx {
-    world.money() + common::wages_paid(world) - Fx::from_num(common::WAGE_RESERVE)
+fn earned(world: &World) -> Money {
+    world.money() + common::wages_paid(world) - Money::from_num(common::WAGE_RESERVE)
 }
 
 /// Buys the raw ingredients a long run needs. `reference_chain*` spends
@@ -197,7 +197,7 @@ fn money_stays_zero_through_a_cadence_boundary_with_nothing_delivered() {
 
     assert_eq!(
         earned(&world),
-        Fx::from_num(0),
+        Money::from_num(0),
         "money must not increase when the delivered mix doesn't satisfy any contract"
     );
     for active in &world.economy().contracts {
@@ -292,7 +292,7 @@ fn several_contracts_settle_independently_against_one_real_chain() {
     assert!(impossible.deliveries_missed >= 2);
 
     // 'impossible' pays 999; if it had ever paid, this would be nowhere near.
-    let expected = Fx::from_num(quick.deliveries_made * 10 + slow.deliveries_made * 35);
+    let expected = Money::from_num(quick.deliveries_made * 10 + slow.deliveries_made * 35);
     assert_eq!(
         earned(&world),
         expected,
@@ -354,7 +354,7 @@ fn one_delivered_unit_pays_one_contract_not_every_contract_that_wants_it() {
 
     assert_eq!(
         earned(&world),
-        Fx::from_num(10),
+        Money::from_num(10),
         "one box must pay exactly one contract — if stock were credited to every matching \
          contract this would read 20, which is the free-money bug the shared-pool rule exists \
          to prevent"

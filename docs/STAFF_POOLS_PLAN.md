@@ -58,13 +58,32 @@ provisionally, as marked.
   to hire and nothing to fire (GAMEPLAY §11, answered provisionally: "no,
   for now — wages are the cost"), so the only staff number on the ledger
   is the wage bill, and the panel can show it as one figure.
-- **A head you cannot pay leaves.** On payday the bill is paid one head
-  at a time, in `staff.ron` category order, through `Economy::try_spend`
-  (still the only debit, still all-or-nothing per call). The first head
-  that cannot be paid, and every head after it, leaves. Softer than "the
-  whole crew walks out" (a cliff at money 0) and stricter than debt
-  (which §1 does not allow — there is one money counter and it does not
-  go negative). The panel says how many left.
+- **A head you cannot pay goes unpaid, and leaves only if it happens
+  twice** (rewritten by the quality pass, 2026-09-13; the MVP rule was
+  "the first head that cannot be paid, and every head after it, leaves",
+  and it produced the "I kept having to hire staff I never fired" report:
+  a factory that spent down before a payday lost most of its crew
+  silently). On payday the bill is paid one head at a time, in `staff.ron`
+  category order, through `Economy::try_spend` (still the only debit,
+  still all-or-nothing per call). The first head that cannot be paid, and
+  every head after it, is **unpaid**: still hired, but not at its post
+  until the next payday — its machines starve with a `staff` stall, the
+  panel says `N unpaid`. A head unpaid at the next payday as well leaves;
+  a payday that covers it clears the arrears. The contract board's
+  strikes, applied to people. Before the payday the wire says what it
+  will cost (`next_bill`) and how far short the balance is (`shortfall`),
+  so the panel warns first. Softer than a cliff at money 0, stricter than
+  debt (which §1 does not allow — one counter, never negative).
+- **Nothing the player does with HIRE and FIRE changes what a period's
+  employment costs** (the quality pass). A head is owed for any period it
+  was employed in any part of: a head fired before payday is still billed
+  at that payday (notice pay, and it is paid before the heads still on the
+  books, so being broke does not dodge it either); a head hired just
+  before payday is billed at it. That closes "fire everyone the tick
+  before payday, hire them back after". And a hire is refused while the
+  balance cannot cover the next bill plus the new head's wage — you cannot
+  hire someone you could not pay — which closes "hire with no money, let
+  them work a period, let them walk".
 - **A new game starts with a crew sized to the shipped line**, the same
   way `STARTING_MONEY` is sized to the reference chain's bill. A first
   factory therefore runs without a visit to the staff panel, wages bite
@@ -156,11 +175,14 @@ literals — the `tests/shop.rs` pattern.
 {"type": "fire", "category": "manufacturing"}
 ```
 
-Each moves one head. `hire` is free and never refused for a known
-category. `fire` at headcount 0, and either with an unknown category, is a
-silent no-op (the `Purchase` convention). Neither dirties a chunk. (Match
-the exact `type` spelling to how `command_from_json` names the existing
-commands — `snake_case` of the variant.)
+Each moves one head. `hire` is free at the moment of hiring but refused
+(a silent no-op; the wire's per-category `can_hire` says so ahead) unless
+the balance covers the next bill plus the new head's wage — the quality
+pass's rule; the MVP never refused it. `fire` at headcount 0, and either
+with an unknown category, is a silent no-op (the `Purchase` convention).
+A fired head is still owed for the period (notice pay). Neither dirties a
+chunk. (Match the exact `type` spelling to how `command_from_json` names
+the existing commands — `snake_case` of the variant.)
 
 ### The tick
 
@@ -184,11 +206,18 @@ Order, inside `World::tick`:
    to ship. A refused dock holds its buffer (32 per item, then the belt
    backs up — mass conservation as today) and remembers it was refused.
 5. **Payday**, after the economy's own tick: when `tick_count` reaches
-   `next_payday_tick`, pay heads one at a time in `staff.ron` order via
-   `Economy::try_spend(wage)`; the first refusal fires that head and every
-   head after it across all remaining categories. Record `last_bill` (what
-   was actually paid) and `walked_out_last_payday`. Then
-   `next_payday_tick += pay_period_ticks`. A zero-wage head always stays.
+   `next_payday_tick`, pay every OWED head one at a time in `staff.ron`
+   order via `Economy::try_spend(wage)` — within a category the fired
+   heads' notice first, then the heads in arrears, then the rest. The
+   first refusal leaves that head and every head after it, across all
+   remaining categories, **unpaid** (as of the quality pass; the MVP fired
+   them). A head in arrears the money did not reach leaves; a head unpaid
+   for the first time stays in arrears and is not available next period
+   (step 2 resets `available` to `headcount - unpaid`). Record `last_bill`
+   (what was actually paid), `unpaid_last_payday` and
+   `walked_out_last_payday` (who left), reset every `owed` to its
+   headcount, then `next_payday_tick += pay_period_ticks`. A zero-wage head
+   is never unpaid.
 
 The claim is per tick and per machine; a machine mid-craft that loses its
 crew (the player fired someone) pauses where it is and resumes when a crew
@@ -203,17 +232,24 @@ dirties nothing, like `machine_load_snapshots_json`):
 {
   "pay_period_ticks": 1000,
   "next_payday_tick": 3000,
+  "next_bill": 14,
+  "shortfall": 0,
   "last_bill": 14,
+  "unpaid_last_payday": 0,
   "walked_out_last_payday": 0,
   "money": 2986.0,
   "categories": [
     {"id": "manufacturing", "name": "Manufacturing", "headcount": 4, "wage": 2,
+     "owed": 4, "unpaid": 0, "left_last_payday": 0, "can_hire": true,
      "demand": 4, "assigned": 4, "short": 0},
     {"id": "maintenance",   "name": "Maintenance",   "headcount": 0, "wage": 2,
+     "owed": 0, "unpaid": 0, "left_last_payday": 0, "can_hire": true,
      "demand": 0, "assigned": 0, "short": 0},
     {"id": "packaging",     "name": "Packaging",     "headcount": 2, "wage": 2,
+     "owed": 2, "unpaid": 0, "left_last_payday": 0, "can_hire": true,
      "demand": 2, "assigned": 2, "short": 0},
     {"id": "logistics",     "name": "Logistics",     "headcount": 1, "wage": 2,
+     "owed": 1, "unpaid": 0, "left_last_payday": 0, "can_hire": true,
      "demand": 1, "assigned": 1, "short": 0}
   ]
 }
@@ -222,6 +258,18 @@ dirties nothing, like `machine_load_snapshots_json`):
 `demand`, `assigned`, `short` (= `demand - assigned`) describe the LAST
 completed tick. `money` is repeated here (as `shop_snapshot_json` does) so
 the panel needs one poll.
+
+The quality pass (2026-09-13) added, so a panel can warn BEFORE a payday
+and announce AFTER it: `next_bill` (what the next payday will charge,
+`Σ owed × wage` — fired heads included), `shortfall` (how far `money`
+falls short of it, 0 when covered), `unpaid_last_payday` (hired heads the
+last payday's money did not reach), and per category `owed`, `unpaid`
+(in arrears: hired, not working, gone if unpaid again), `left_last_payday`
+(who left, by category) and `can_hire` (whether a `hire` would be
+accepted with this balance). `walked_out_last_payday` still means what
+it meant — how many LEFT at the last payday — under the new rule for
+leaving. The footer's bill should read `next_bill`, not `Σ headcount ×
+wage` (that is the run rate; after a fire the two differ).
 
 `MachineSnapshot` (chunk snapshots, `query_tile_json`,
 `machine_load_snapshots_json`) — `stall` gains one kind:
@@ -251,7 +299,11 @@ on the last tick it had something to ship).
 next_payday_tick, last_bill, walked_out_last_payday }` with
 `#[serde(default)]` (a pre-epic save loads with the starting crew and a
 payday `pay_period_ticks` from its tick). `schema_version` stays 1, like
-`auto_fill` and the load ring. The machine's "refused category" and the
+`auto_fill` and the load ring. The quality pass added `unpaid`, `owed`
+and `left_last_payday` (each a `BTreeMap<String, u32>`) and
+`unpaid_last_payday`, all `#[serde(default)]`: an MVP save loads with
+nobody in arrears and every head owed. More in arrears than hired, or
+fewer owed than hired, is a corrupt save (`SaveError::BadStaff`). The machine's "refused category" and the
 dock's `understaffed` flag are saved too (`#[serde(default)]`), because
 the 2600-tick lockstep test compares every snapshot every tick and both
 appear in snapshots.
@@ -394,6 +446,24 @@ DEVLOG's status line, and merges to `main`.
   `--understaffed`. The panel's rows were compacted and the build-menu
   card resized (`SHOP_SLOT_SIZE` 144x138, tighter inset) after the first
   renders — UI_UX.md §2b point 32.
+
+### The quality pass, ticket 1 (sim) — 2026-09-13
+
+- The MVP's payday rule fired the first unpaid head and every head after
+  it, silently; that was the "kept having to hire" report. Replaced by
+  the arrears rule above ("A head you cannot pay goes unpaid…"), notice
+  pay, and the hire refusal. `walked_out_last_payday` keeps its name and
+  its meaning (how many LEFT). The wire, the save and `staff.ron`'s header
+  are updated in this doc where they are stated; `sim_core/tests/staff.rs`
+  reproduces the report and pins every rule (the fire-before-payday test
+  shows the bill unchanged). Full record: `docs/DECISIONS.md` Part A,
+  2026-09-13 "Staffing: no silent walk-out, no free dodge".
+- Ticket 4 (Godot) should: read `next_bill` for the footer (drop
+  `_staff_bill`), warn on `shortfall > 0` before the payday, print
+  `N unpaid` on a row with `unpaid > 0` (those heads are not working —
+  the row's meter will show the shortfall as `short`), announce
+  `left_last_payday` per category when `next_payday_tick` moves, and mark
+  HIRE from `can_hire` (a refused hire is silent, as ever).
 
 ## Coordinator notes
 
