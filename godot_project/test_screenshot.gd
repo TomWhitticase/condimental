@@ -64,6 +64,10 @@
 # vat, so its hover reads `starved · short of manufacturing staff` and
 # `crew: 2 manufacturing`. Implies `--populate`.
 #
+# `--production` builds the bottleneck line and opens the PRODUCTION panel
+# (P) over it — the production-stats epic's screen, reviewed on a line
+# with every stage counted and a contract paid. Implies `--populate`.
+#
 # `--populate` runs whatever has been built forward first so the screenshot
 # shows product actually moving, not an idle factory.
 #
@@ -173,6 +177,10 @@ var _contracts := false
 ## `--board` opens the contracts board menu (the contract-board epic).
 var _board := false
 var _staff := false
+## `--production` opens the PRODUCTION panel (P) over the settled bottleneck
+## line — the fixture with every stage counted and a contract paid, so the
+## rows, rates, bars and the all-time exit show something.
+var _production := false
 var _understaffed := false
 var _hotbar_key := ""
 var _stock := false
@@ -245,6 +253,10 @@ func _initialize() -> void:
 	_staff = args.has("--staff")
 	if _staff:
 		_fixture = "chain"
+		_populate = true
+	_production = args.has("--production")
+	if _production:
+		_fixture = "bottleneck"
 		_populate = true
 	_understaffed = args.has("--understaffed")
 	if _understaffed:
@@ -801,6 +813,8 @@ func _process(_delta: float) -> bool:
 		_main._set_contract_board_open(true)
 	if _frames == 2 and _staff:
 		_main._set_staff_open(true)
+	if _frames == 2 and _production:
+		_main._set_production_open(true)
 	if _frames == 2 and _understaffed:
 		_hover_over_tile(Layouts.UNDERSTAFFED_VAT)
 	if _frames == 2 and _contracts:

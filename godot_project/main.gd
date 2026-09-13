@@ -1157,6 +1157,33 @@ var _staff_polled_tick := -1 # sim tick of the last `_poll_staff`; -1 = never
 ## `query_tile_json`'s `crew` — the kind's `machines.ron` requirement, read
 ## once per rebuild for hover's "crew: 2 manufacturing" line.
 var _crews: Dictionary = {}
+
+# --- The PRODUCTION panel (the production-stats epic; Factorio's P screen) --
+# What the factory has MADE and USED, per item and fluid, over one of the
+# simulation's rolling windows or for all time — read straight off
+# `production_snapshot_json`. Godot SORTS and FORMATS (which row comes first,
+# a count as a per-minute rate, a count as a share of the longest bar); the
+# sim COUNTS, and nothing here re-derives a count from anything else.
+var _production_panel: PanelContainer
+var _production_scroll: ScrollContainer
+var _production_rows_box: VBoxContainer
+var _production_rows: Array = [] # Array[Dictionary], see _build_production_row
+var _production_window_buttons: Array = [] # one Button per window, plus "all"
+var _production_window_label: Label
+var _production_empty_label: Label
+var _production_footer_label: Label
+var _production_open := false
+## Which window the panel shows: an index into the snapshot's `windows`, or
+## `PRODUCTION_ALL_TIME` for the lifetime totals. Opens on the minute.
+var _production_window := 1
+## The last `production_snapshot_json` read, parsed; `{}` until the first
+## poll. Polled only while the panel is up (unlike the staff pools it
+## carries nothing any other readout needs), on the load's cadence.
+var _production_snapshot: Dictionary = {}
+var _production_polled_tick := -1
+const PRODUCTION_ALL_TIME := -1
+const PRODUCTION_METER_WIDTH := 150.0 * UI_SCALE
+const PRODUCTION_ICON_SIZE := Vector2(36, 36) * UI_SCALE
 const STAFF_METER_WIDTH := 150.0 * UI_SCALE
 const STAFF_METER_HEIGHT := 20.0 * UI_SCALE
 const STAFF_ICON_SIZE := Vector2(40, 40) * UI_SCALE
@@ -3370,8 +3397,8 @@ const CROSSHAIR_THICKNESS := 2.0 * UI_SCALE # px, each bar's width
 ## listed here or it is undiscoverable, whereas a building you can click
 ## announces itself on hover, so the line is a pointer rather than the only
 ## way to find out.
-const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    H: staff    click a hopper or tank: configure\nWASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
-const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    H: staff    click a hopper or tank: configure\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
+const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    H: staff    P: production    click a hopper or tank: configure\nWASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
+const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    H: staff    P: production    click a hopper or tank: configure\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
 
 
 ## The tile box the isometric camera frames at startup: whatever is placed,
@@ -3968,6 +3995,7 @@ func _build_ui() -> void:
 	_build_ingredient_market(hud, settings)
 	_build_contract_board(hud, settings)
 	_build_staff_panel(hud, settings)
+	_build_production_panel(hud, settings)
 
 	# UI_UX.md §5's LAST unbuilt named widget: "a Minecraft-style hotbar/
 	# quick-access strip along one screen edge." Always visible, unlike the
@@ -5032,7 +5060,7 @@ func _update_crosshair_visibility() -> void:
 		return
 	_crosshair.visible = (_view_mode == ViewMode.FIRST_PERSON
 			and not _shop_open and not _market_open and not _board_open and not _staff_open
-			and not _pause_open and not _config_open)
+			and not _production_open and not _pause_open and not _config_open)
 
 
 func _toggle_shop_menu() -> void:
@@ -6140,6 +6168,416 @@ func _toggle_staff_panel() -> void:
 	_set_staff_open(not _staff_open)
 
 
+# --------------------------------------------------------------------------
+# The PRODUCTION panel (the production-stats epic — Factorio's P screen)
+# --------------------------------------------------------------------------
+
+## Builds the panel: a heading with the window selector, a scrolling list
+## of one row per item the ledger has counted, and a footer that says what
+## is counted. The same dark plate as the staff panel and the build menu
+## (UI_UX.md §5: machine-side factory UI; the clipboard's paper is for
+## orders), centred in the space above the hotbar for the same reason.
+func _build_production_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.06, 0.06, 0.07, 0.94)
+	panel_style.border_color = Color(0.85, 0.63, 0.11, 0.95)
+	panel_style.border_width_top = _ui_i(4)
+	panel_style.border_width_left = _ui_i(2)
+	panel_style.border_width_right = _ui_i(2)
+	panel_style.border_width_bottom = _ui_i(2)
+	panel_style.set_content_margin_all(_ui_px(16.0))
+
+	# Cleared, never appended to: `_ready()` runs twice under the headless
+	# harness (see `_build_ingredient_market`).
+	_production_rows.clear()
+	_production_window_buttons.clear()
+
+	_production_panel = PanelContainer.new()
+	_production_panel.name = "ProductionPanel"
+	_production_panel.add_theme_stylebox_override("panel", panel_style)
+	_production_panel.visible = false
+	hud.add_child(_production_panel)
+
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", _ui_i(10))
+	_production_panel.add_child(body)
+
+	var title_settings := LabelSettings.new()
+	title_settings.font_size = _ui_font(4)
+	title_settings.font_color = base_settings.font_color
+	title_settings.outline_size = base_settings.outline_size
+	title_settings.outline_color = base_settings.outline_color
+
+	var heading := HBoxContainer.new()
+	heading.add_theme_constant_override("separation", _ui_i(16))
+	body.add_child(heading)
+
+	var title := Label.new()
+	title.label_settings = title_settings
+	title.text = "PRODUCTION"
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	heading.add_child(title)
+
+	# The window selector: one button per window the SIM keeps, in its
+	# order, plus "all time". Built from the snapshot's `windows` rather
+	# than typed here, so a retuned `STAT_WINDOWS` reads right without a
+	# Godot edit — which is why the panel polls once before building.
+	_poll_production()
+	var selector := HBoxContainer.new()
+	selector.name = "Windows"
+	selector.add_theme_constant_override("separation", _ui_i(4))
+	heading.add_child(selector)
+	var windows: Array = _production_snapshot.get("windows", [])
+	for index in range(windows.size()):
+		_build_production_window_button(selector, base_settings, index, "last %s" % String(windows[index].get("id", "?")))
+	_build_production_window_button(selector, base_settings, PRODUCTION_ALL_TIME, "all time")
+
+	# The column captions, once, over the list — MADE and USED are the two
+	# halves of every row and naming them per row would be noise.
+	var captions := HBoxContainer.new()
+	captions.add_theme_constant_override("separation", _ui_i(14))
+	body.add_child(captions)
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(PRODUCTION_ICON_SIZE.x + _ui_px(14.0) + _ui_px(150.0), 0.0)
+	captions.add_child(spacer)
+	for caption in ["MADE", "USED"]:
+		var label := Label.new()
+		label.label_settings = _staff_meta_settings()
+		label.text = caption
+		label.custom_minimum_size = Vector2(PRODUCTION_METER_WIDTH, 0.0)
+		captions.add_child(label)
+
+	_production_scroll = ScrollContainer.new()
+	_production_scroll.name = "ProductionScroll"
+	_production_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_production_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	body.add_child(_production_scroll)
+
+	_production_rows_box = VBoxContainer.new()
+	_production_rows_box.name = "ProductionRows"
+	_production_rows_box.add_theme_constant_override("separation", _ui_i(6))
+	_production_rows_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_production_scroll.add_child(_production_rows_box)
+
+	# What the list says when the window holds nothing: a sentence, not an
+	# empty box (UI_UX.md §5c's rule for the save list).
+	_production_empty_label = Label.new()
+	_production_empty_label.name = "ProductionEmpty"
+	_production_empty_label.label_settings = base_settings
+	_production_empty_label.custom_minimum_size = Vector2(_ui_px(520.0), 0.0)
+	body.add_child(_production_empty_label)
+
+	_production_window_label = Label.new()
+	_production_window_label.name = "ProductionWindow"
+	_production_window_label.label_settings = _staff_meta_settings()
+	body.add_child(_production_window_label)
+
+	_production_footer_label = Label.new()
+	_production_footer_label.name = "ProductionFooter"
+	_production_footer_label.label_settings = base_settings
+	_production_footer_label.text = "counted when a craft starts (used) and a batch lands (made); a paid order uses what it ships    ·    P/ESC: close"
+	body.add_child(_production_footer_label)
+
+	_update_production_panel()
+	_position_production_panel()
+
+
+## One window button. The selected one wears the hotbar's selected-socket
+## style, the rest its stocked style — "the thing I have chosen" looks the
+## same wherever the game asks (the configuration panel's picker made the
+## same call).
+func _build_production_window_button(parent: Node, base_settings: LabelSettings, index: int, caption: String) -> void:
+	var button := Button.new()
+	button.name = "Window_%s" % ("all" if index == PRODUCTION_ALL_TIME else str(index))
+	button.text = caption
+	button.focus_mode = Control.FOCUS_NONE
+	button.custom_minimum_size = _ui_v(Vector2(74, 28))
+	button.add_theme_font_size_override("font_size", base_settings.font_size)
+	button.pressed.connect(_on_production_window_pressed.bind(index))
+	parent.add_child(button)
+	_production_window_buttons.append({"index": index, "button": button})
+
+
+func _on_production_window_pressed(index: int) -> void:
+	_set_production_window(index)
+
+
+## Selects a window (an index into the snapshot's `windows`, or
+## `PRODUCTION_ALL_TIME`) and redraws. A test drives it directly.
+func _set_production_window(index: int) -> void:
+	var count: int = _production_snapshot.get("windows", []).size()
+	if index != PRODUCTION_ALL_TIME and (index < 0 or index >= count):
+		return
+	_production_window = index
+	_update_production_panel()
+
+
+## Centred in the space above the hotbar, by `_position_staff_panel`'s
+## arithmetic and for its reason (the footer must stay on screen).
+func _position_production_panel() -> void:
+	if _production_panel == null:
+		return
+	_production_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
+	var vp := get_viewport()
+	if vp == null:
+		return
+	var reserved := _hotbar_reserved_height()
+	var bounds := vp.get_visible_rect().size
+	_fit_grid_scroll(_production_scroll, _production_rows_box, bounds.y - reserved - _ui_px(16.0))
+	var panel_size := _production_panel.get_combined_minimum_size()
+	_production_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
+
+
+func _production_poll_due() -> bool:
+	return _production_polled_tick < 0 or sim.current_tick() - _production_polled_tick >= LOAD_POLL_TICKS
+
+
+## Re-reads `production_snapshot_json`. On opening, and on the load's cadence
+## while the panel is up; a snapshot is the whole ledger's sums, so it is
+## not read while nothing shows it.
+func _poll_production() -> void:
+	_production_polled_tick = sim.current_tick()
+	var parsed = JSON.parse_string(sim.production_snapshot_json())
+	if parsed is Dictionary:
+		_production_snapshot = parsed
+
+
+## A count over an observed span, as a per-minute rate in words:
+## `12.0/min`. Divides by what was actually OBSERVED of the window, never
+## by the window's nominal length (the wire's own rule), so a factory ten
+## seconds old reads its true rate rather than a sixth of it. "" for a
+## window nothing has been observed of, so a caller prints the count alone.
+func _production_rate_text(count: int, observed_ticks: int) -> String:
+	if observed_ticks <= 0:
+		return ""
+	var minutes: float = float(observed_ticks) / TICK_HZ / 60.0
+	return "%.1f/min" % (float(count) / minutes)
+
+
+## The window's caption for the line under the list: `last 5s`, `last 1m`,
+## `all time`, with how much of a young window has been seen (`last 1m
+## (32s so far)`), because a rate over a window the factory has not lived
+## through yet is a rate over what it has.
+func _production_window_text(snapshot: Dictionary, window: int) -> String:
+	if window == PRODUCTION_ALL_TIME:
+		return "all time"
+	var windows: Array = snapshot.get("windows", [])
+	if window < 0 or window >= windows.size():
+		return ""
+	var entry: Dictionary = windows[window]
+	var text := "last %s" % String(entry.get("id", "?"))
+	var observed := int(entry.get("observed", 0))
+	var ticks := int(entry.get("ticks", 0))
+	if observed < ticks:
+		text += "  (%s so far)" % _format_remaining(observed)
+	return text
+
+
+## The rows for one window, SORTED and FORMATTED from the snapshot — the
+## Godot half of the wire's contract ("the sim only counts"). One entry per
+## id with anything made or used in the window, biggest first (made plus
+## used, then id, so the order is stable between polls), each with the two
+## counts, their rates, and each count as a share of the LARGEST count on
+## the list so the bars compare across rows the way Factorio's do. Pure
+## given the snapshot, so a test drives it with a literal.
+func _production_rows_for(snapshot: Dictionary, window: int) -> Array:
+	var windows: Array = snapshot.get("windows", [])
+	var observed := 0
+	if window != PRODUCTION_ALL_TIME:
+		if window < 0 or window >= windows.size():
+			return []
+		observed = int(windows[window].get("observed", 0))
+	var rows: Array = []
+	for item in snapshot.get("items", []):
+		if not (item is Dictionary):
+			continue
+		var made: int
+		var used: int
+		if window == PRODUCTION_ALL_TIME:
+			made = int(item.get("produced_total", 0))
+			used = int(item.get("consumed_total", 0))
+		else:
+			var produced: Array = item.get("produced", [])
+			var consumed: Array = item.get("consumed", [])
+			made = int(produced[window]) if window < produced.size() else 0
+			used = int(consumed[window]) if window < consumed.size() else 0
+		if made == 0 and used == 0:
+			continue
+		rows.append({
+			"id": String(item.get("id", "")),
+			"kind": String(item.get("kind", "item")),
+			"name": _item_display_name(String(item.get("id", ""))),
+			"made": made,
+			"used": used,
+			"made_rate": _production_rate_text(made, observed) if window != PRODUCTION_ALL_TIME else "",
+			"used_rate": _production_rate_text(used, observed) if window != PRODUCTION_ALL_TIME else "",
+		})
+	rows.sort_custom(func(a, b):
+		var ta: int = a["made"] + a["used"]
+		var tb: int = b["made"] + b["used"]
+		if ta != tb:
+			return ta > tb
+		return String(a["id"]) < String(b["id"]))
+	var largest := 0
+	for row in rows:
+		largest = max(largest, max(int(row["made"]), int(row["used"])))
+	for row in rows:
+		row["made_fraction"] = float(row["made"]) / float(largest) if largest > 0 else 0.0
+		row["used_fraction"] = float(row["used"]) / float(largest) if largest > 0 else 0.0
+	return rows
+
+
+## What a count prints ON its bar: the count, and the rate after it when
+## there is one — `96  ·  32.0/min`, or `96` on the all-time view.
+func _production_count_text(count: int, rate: String) -> String:
+	if rate == "":
+		return str(count)
+	return "%d  ·  %s" % [count, rate]
+
+
+## One item: its icon and name, then MADE and USED, each a bar with the
+## count and rate printed on it. Returns `{"id", "panel", "name_label",
+## "made_meter", "made_label", "used_meter", "used_label"}` for
+## `_update_production_panel` to drive. Rows are rebuilt only when the SET
+## of ids changes (a new intermediate appearing), and re-filled otherwise.
+func _build_production_row(row_state: Dictionary) -> Dictionary:
+	var id := String(row_state.get("id", "?"))
+	var panel := PanelContainer.new()
+	panel.name = "Production_%s" % id
+	panel.add_theme_stylebox_override("panel", _staff_row_style())
+	_production_rows_box.add_child(panel)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", _ui_i(14))
+	panel.add_child(row)
+
+	var icon := TextureRect.new()
+	icon.name = "Icon"
+	icon.custom_minimum_size = PRODUCTION_ICON_SIZE
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	icon.texture = _icon_for(id)
+	row.add_child(icon)
+
+	var text_col := VBoxContainer.new()
+	text_col.add_theme_constant_override("separation", _ui_i(2))
+	text_col.custom_minimum_size = Vector2(_ui_px(150.0), 0.0)
+	text_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(text_col)
+
+	var name_label := Label.new()
+	name_label.name = "Name"
+	name_label.label_settings = _contract_name_settings_dark()
+	name_label.text = String(row_state.get("name", id))
+	text_col.add_child(name_label)
+
+	var kind_label := Label.new()
+	kind_label.name = "Kind"
+	kind_label.label_settings = _staff_meta_settings()
+	kind_label.text = String(row_state.get("kind", "item"))
+	text_col.add_child(kind_label)
+
+	var made := _build_production_meter(row, "Made", METER_FILL_LEVEL)
+	var used := _build_production_meter(row, "Used", METER_FILL_PROGRESS)
+
+	return {
+		"id": id, "panel": panel, "name_label": name_label,
+		"made_meter": made["meter"], "made_label": made["label"],
+		"used_meter": used["meter"], "used_label": used["label"],
+	}
+
+
+## A bar with its digits printed on it (position AND digits, UI_UX.md §7),
+## the staff meter's arrangement.
+func _build_production_meter(parent: Node, caption: String, fill_color: Color) -> Dictionary:
+	var column := VBoxContainer.new()
+	column.name = caption
+	column.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	parent.add_child(column)
+	var meter := _build_meter(column, PRODUCTION_METER_WIDTH, fill_color, METER_TRACK_COLOR, METER_BORDER_COLOR, STAFF_METER_HEIGHT)
+	meter.name = "%sMeter" % caption
+	var label := Label.new()
+	label.name = "%sLabel" % caption
+	label.label_settings = _staff_meter_settings()
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	meter.add_child(label)
+	return {"meter": meter, "label": label}
+
+
+func _production_rows_match(rows: Array) -> bool:
+	if rows.size() != _production_rows.size():
+		return false
+	for i in range(rows.size()):
+		if String(rows[i]["id"]) != String(_production_rows[i]["id"]):
+			return false
+	return true
+
+
+func _rebuild_production_rows(rows: Array) -> void:
+	for row in _production_rows:
+		var panel: Node = row["panel"]
+		if is_instance_valid(panel):
+			if panel.get_parent() != null:
+				panel.get_parent().remove_child(panel)
+			panel.queue_free()
+	_production_rows.clear()
+	for row_state in rows:
+		_production_rows.append(_build_production_row(row_state))
+
+
+## Redraws the panel from the last poll: the selected window's rows, the
+## selector's highlight, the window caption, the empty-list sentence. Runs
+## every frame while open (a bar moves as a craft lands) and on opening.
+func _update_production_panel() -> void:
+	if _production_panel == null:
+		return
+	var rows := _production_rows_for(_production_snapshot, _production_window)
+	if not _production_rows_match(rows):
+		_rebuild_production_rows(rows)
+	for i in range(min(rows.size(), _production_rows.size())):
+		var state: Dictionary = rows[i]
+		var row: Dictionary = _production_rows[i]
+		_set_meter(row["made_meter"], float(state["made_fraction"]), METER_FILL_LEVEL)
+		row["made_label"].text = _production_count_text(int(state["made"]), String(state["made_rate"]))
+		_set_meter(row["used_meter"], float(state["used_fraction"]), METER_FILL_PROGRESS)
+		row["used_label"].text = _production_count_text(int(state["used"]), String(state["used_rate"]))
+	for entry in _production_window_buttons:
+		var selected: bool = int(entry["index"]) == _production_window
+		var button: Button = entry["button"]
+		for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+			button.add_theme_stylebox_override(state, _hotbar_slot_style("selected" if selected else "stocked"))
+	_production_window_label.text = _production_window_text(_production_snapshot, _production_window)
+	var empty := rows.is_empty()
+	_production_scroll.visible = not empty
+	_production_empty_label.visible = empty
+	if empty:
+		_production_empty_label.text = "nothing made or used %s — a running machine will show here" % _production_window_text(_production_snapshot, _production_window)
+	_position_production_panel()
+
+
+func _set_production_open(open: bool) -> void:
+	if _production_panel == null or open == _production_open:
+		return
+	if open:
+		_close_config_panel() # see `_set_shop_menu_open`
+	_production_open = open
+	_production_panel.visible = open
+	if open:
+		_poll_production()
+		_update_production_panel()
+	if _view_mode == ViewMode.FIRST_PERSON:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
+	_update_crosshair_visibility()
+
+
+func _toggle_production_panel() -> void:
+	_set_production_open(not _production_open)
+
+
 ## Reads the crew every placed machine and dock needs, from
 ## `query_tile_json`, once per rebuild — `_seed_machine_states`'s twin.
 ## A crew is content (the kind's `machines.ron` requirement) and never
@@ -6757,7 +7195,7 @@ func _close_config_panel() -> void:
 	if _config_panel != null:
 		_config_panel.visible = false
 	if _view_mode == ViewMode.FIRST_PERSON and not _shop_open and not _market_open \
-			and not _board_open and not _staff_open:
+			and not _board_open and not _staff_open and not _production_open:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_update_crosshair_visibility()
 
@@ -6817,7 +7255,8 @@ func _config_click_at_tile(tile: Vector2i) -> void:
 func _update_config_panel() -> void:
 	if not _config_open or _config_panel == null:
 		return
-	if _shop_open or _market_open or _board_open or _staff_open or _in_build_mode():
+	if _shop_open or _market_open or _board_open or _staff_open or _production_open \
+			or _in_build_mode():
 		_close_config_panel()
 		return
 	var placement := _placement_at_tile(_config_tile)
@@ -7633,6 +8072,7 @@ func _enter_build_mode(kind: String) -> void:
 	_set_market_open(false)
 	_set_contract_board_open(false)
 	_set_staff_open(false)
+	_set_production_open(false)
 	# A hopper carries a choice as well as a facing, so the legal choices are
 	# repolled on entry (the list is the simulation's, and content can change
 	# it). The ghost takes the first of them; changing it is the placed
@@ -7718,6 +8158,7 @@ func _close_all_overlays() -> void:
 	_set_market_open(false)
 	_set_contract_board_open(false)
 	_set_staff_open(false)
+	_set_production_open(false)
 	_exit_build_mode()
 
 
@@ -7727,7 +8168,8 @@ func _close_all_overlays() -> void:
 ## player is in, and putting it down should be the first press, not the
 ## second.
 func _anything_open() -> bool:
-	return _shop_open or _market_open or _board_open or _staff_open or _in_build_mode()
+	return (_shop_open or _market_open or _board_open or _staff_open or _production_open
+			or _in_build_mode())
 
 
 func _in_build_mode() -> bool:
@@ -8680,6 +9122,8 @@ func _process(delta: float) -> void:
 		_update_contract_board()
 	if _staff_open:
 		_update_staff_panel()
+	if _production_open:
+		_update_production_panel()
 	_update_contract_notice()
 	# The ghost cannot be up while paused at all — build mode counts as
 	# "open", so ESC puts it down before it opens the panel — but the hover
@@ -8742,6 +9186,10 @@ func _advance_simulation(delta: float) -> void:
 	# panel shows last-tick demand, and a paused factory has no last tick.
 	if _staff_poll_due():
 		_poll_staff()
+	# The production ledger only while its panel is up: nothing else reads
+	# it, and a closed panel re-reads on opening.
+	if _production_open and _production_poll_due():
+		_poll_production()
 
 
 ## Real seconds since the last autosave, and the write when it comes due.
@@ -8778,7 +9226,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		# "so a future click-to-build has nothing to fight with". It does
 		# nothing outside build mode, so nothing that used to work changed.
 		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed \
-				and not _shop_open and not _market_open and not _board_open and not _staff_open:
+				and not _shop_open and not _market_open and not _board_open and not _staff_open \
+				and not _production_open:
 			if _in_build_mode():
 				_confirm_build()
 			else:
@@ -8817,7 +9266,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		if _view_mode == ViewMode.ISOMETRIC:
 			if _iso_dragging:
 				_apply_drag_pan(event.relative)
-		elif not _shop_open and not _market_open and not _board_open and not _staff_open:
+		elif not _shop_open and not _market_open and not _board_open and not _staff_open \
+				and not _production_open:
 			# With either shop panel up in first-person the mouse is visible
 			# and is being used to click slots — swinging the camera with it
 			# too would make the panel unusable.
@@ -8849,6 +9299,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_set_market_open(false)
 			_set_contract_board_open(false)
 			_set_staff_open(false)
+			_set_production_open(false)
 		_toggle_shop_menu()
 		return
 
@@ -8863,6 +9314,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_set_shop_menu_open(false)
 			_set_contract_board_open(false)
 			_set_staff_open(false)
+			_set_production_open(false)
 		_toggle_market()
 		return
 
@@ -8879,6 +9331,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_set_shop_menu_open(false)
 			_set_market_open(false)
 			_set_staff_open(false)
+			_set_production_open(false)
 		_toggle_contract_board()
 		return
 
@@ -8892,7 +9345,23 @@ func _unhandled_input(event: InputEvent) -> void:
 			_set_shop_menu_open(false)
 			_set_market_open(false)
 			_set_contract_board_open(false)
+			_set_production_open(false)
 		_toggle_staff_panel()
+		return
+
+	# P opens the PRODUCTION panel — what the factory has made and used, per
+	# item, over a rolling window or for all time (the production-stats
+	# epic; Factorio's P screen, and P for the same reason). A readout with
+	# no verb on it: it changes nothing in the simulation. One modal at a
+	# time with E, M, C and H, for E's reason.
+	if event.keycode == KEY_P:
+		if not _production_open:
+			_exit_build_mode()
+			_set_shop_menu_open(false)
+			_set_market_open(false)
+			_set_contract_board_open(false)
+			_set_staff_open(false)
+		_toggle_production_panel()
 		return
 
 	# **Q IS GONE** (the click-to-configure ticket). It cycled a hopper's
@@ -9639,7 +10108,8 @@ func _dock_hover_text(origin_key: String, direction: String) -> String:
 func _update_hover_tooltip() -> void:
 	if _hover_tooltip == null:
 		return
-	if _shop_open or _market_open or _board_open or _staff_open or _pause_open or _config_open or _in_build_mode():
+	if _shop_open or _market_open or _board_open or _staff_open or _production_open \
+			or _pause_open or _config_open or _in_build_mode():
 		# The build menu sits over the middle of the screen; a world tooltip
 		# chasing the cursor across it would just be two panels fighting. And
 		# in build mode the placement prompt is already the panel by the
