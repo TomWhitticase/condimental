@@ -18,6 +18,7 @@ pub mod reference;
 pub mod save;
 pub mod shop;
 pub mod splitter;
+pub mod stats;
 pub mod types;
 pub mod world;
 
@@ -42,12 +43,16 @@ pub use reference::{
     reference_chain, reference_chain_with, reference_chain_with_budget,
     reference_chain_with_content_and_budget,
 };
-pub use save::{SAVE_SCHEMA_VERSION, SaveData, SaveError};
+pub use save::{SAVE_SCHEMA_VERSION, SaveData, SaveError, SavedItemStats, SavedProduction};
 pub use shop::{
     DEFAULT_PURCHASE_QUANTITY, OwnedEquipment, Shop, ShopCatalog, ShopEntry, ShopEntrySnapshot,
     ShopSnapshot,
 };
 pub use splitter::{SPLITTER_KIND, Side, Splitter};
+pub use stats::{
+    ItemStats, ItemStatsSnapshot, ProductionLedger, ProductionSnapshot, STAT_BUCKETS,
+    STAT_WINDOW_COUNT, STAT_WINDOWS, StatKind, StatWindow, WindowSnapshot,
+};
 pub use types::{Direction, Fx, decode_chunk_id, encode_chunk_id};
 pub use machine::{
     FULL_LOAD_PERCENT, LOAD_BUCKET_TICKS, LOAD_BUCKETS, LOAD_WINDOW_TICKS, LoadWindow, WorkState,

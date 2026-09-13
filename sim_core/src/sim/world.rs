@@ -166,7 +166,7 @@ use hecs::Entity;
 use super::belt::BeltSegment;
 use super::contracts::ContractRegistry;
 use super::dock::{DOCK_CAPACITY, DOCK_KIND, Dock};
-use super::economy::{Economy, EconomySnapshot, STARTING_MONEY};
+use super::economy::{ContractEvent, Economy, EconomySnapshot, STARTING_MONEY};
 use super::fluid::{
     FLUID_TANK_CAPACITY, FLUID_TANK_FILL_AMOUNT, FLUID_TANK_KIND, FluidNetwork, FluidTank,
     FluidTap, PipeSegment,
@@ -180,6 +180,7 @@ use super::machines::{Footprint, MachineRegistry};
 use super::recipe::{Recipe, RecipeRegistry};
 use super::shop::{DEFAULT_PURCHASE_QUANTITY, Shop, ShopSnapshot};
 use super::splitter::{SPLITTER_KIND, Side, Splitter};
+use super::stats::{ProductionLedger, ProductionSnapshot, StatKind};
 use super::types::{ChunkId, Direction, FluidId, Fx, ItemId, RecipeId, TileCoord, chunk_of};
 
 /// The buildable-kind id (`data/shop.ron`) of one tile of conveyor.
@@ -1505,6 +1506,12 @@ pub struct World {
     /// their reason: one per world.
     ingredients: Ingredients,
     topology: Topology,
+    /// What the factory made and used, per item, over several rolling
+    /// windows and for all time (the production-stats epic, `stats.rs`).
+    /// Written by `Machine::tick` and by a contract payout in step 7 of
+    /// [`World::tick`]; read by [`World::production_snapshot`]. Polled,
+    /// never dirtying a chunk, like the load window.
+    production: ProductionLedger,
 }
 
 /// How far an item advances along a belt tile per tick. Unchanged from the
@@ -1628,6 +1635,7 @@ impl World {
             shop: Shop::bundled(),
             ingredients: Ingredients::bundled(),
             topology: Topology::default(),
+            production: ProductionLedger::new(),
         }
     }
 
@@ -1653,6 +1661,20 @@ impl World {
     /// dirty-tracking to consult first.
     pub fn economy_snapshot(&self) -> EconomySnapshot {
         self.economy.snapshot()
+    }
+
+    /// The production ledger — what the factory has made and used, per
+    /// item, over the rolling windows in `stats::STAT_WINDOWS` and for all
+    /// time. Read-only; it is written by the tick, never by a caller.
+    pub fn production(&self) -> &ProductionLedger {
+        &self.production
+    }
+
+    /// The presentation-facing view of [`World::production`] — see
+    /// [`ProductionSnapshot`] for the JSON shape. **Poll this**; it changes
+    /// every tick a machine runs and deliberately dirties nothing.
+    pub fn production_snapshot(&self) -> ProductionSnapshot {
+        self.production.snapshot()
     }
 
     /// The shop catalog, the player's owned counts and their current money
@@ -2422,7 +2444,11 @@ impl World {
     ///    shared delivery pool — in the same tick it arrived, because a dock
     ///    is a pass-through (see [`super::dock`]) and the pool is what
     ///    contracts settle against below.
-    /// 7. **Contracts settle**, one cadence check per active contract.
+    /// 7. **Contracts settle**, one cadence check per active contract. A
+    ///    contract that pays records its mix in the production ledger as
+    ///    consumed — the factory's exit — and the ledger's clock advances
+    ///    last, so everything this tick recorded sits in the bucket that
+    ///    was current while it happened.
     ///
     /// Steps 4 and 5 are the same two phases the fixed chain always had
     /// ("belt to machine, then everything onto a belt"); what changed is
@@ -2518,7 +2544,13 @@ impl World {
                     ),
                     (None, None) => (None, None),
                 };
-                body.tick(self.tick_count, &self.recipes, fluid_in, fluid_out)
+                body.tick(
+                    self.tick_count,
+                    &self.recipes,
+                    fluid_in,
+                    fluid_out,
+                    &mut self.production,
+                )
             };
             if changed {
                 self.mark_placement_dirty(machine);
@@ -2612,8 +2644,21 @@ impl World {
         // always-fresh snapshot instead. A contract lost here (its strikes
         // used up) simply stops appearing in that snapshot's `contracts` and
         // reads `active: false` on its `board`; the events are not kept —
-        // the snapshot is the wire, and a UI diffs it.
-        let _ = self.economy.tick(self.tick_count);
+        // the snapshot is the wire, and a UI diffs it. What IS kept from the
+        // events is the one thing no snapshot can reconstruct afterwards:
+        // a payout took its mix out of the pool, which is the factory's
+        // exit and so its consumption of the finished product.
+        let events = self.economy.tick(self.tick_count);
+        for event in &events {
+            if let ContractEvent::Paid { id } = event {
+                if let Some(contract) = self.economy.board().get(id) {
+                    for (item, qty) in &contract.mix {
+                        self.production.record_consumed(item, StatKind::Item, *qty);
+                    }
+                }
+            }
+        }
+        self.production.tick();
     }
 
     /// Step 0 of [`World::tick`]: tops every auto-filling hopper and tank up
@@ -3745,6 +3790,12 @@ impl World {
     /// into it.
     pub(super) fn restore_money(&mut self, money: Fx) {
         self.economy.money = money;
+    }
+
+    /// Installs a loaded production ledger wholesale. Restore-only, like
+    /// every other `restore_*`: the tick path records, it never replaces.
+    pub(super) fn restore_production(&mut self, ledger: ProductionLedger) {
+        self.production = ledger;
     }
 
     pub(super) fn restore_tick_count(&mut self, tick: u64) {

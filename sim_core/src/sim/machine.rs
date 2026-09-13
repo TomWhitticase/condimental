@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use super::fluid::FluidTap;
 use super::inventory::Inventory;
 use super::recipe::RecipeRegistry;
+use super::stats::{ProductionLedger, StatKind};
 use super::types::{Fx, RecipeId};
 
 /// How many ticks one bucket of the [`LoadWindow`] accumulates before the
@@ -279,12 +280,20 @@ impl Machine {
     /// the table on that type — including the completion tick, which counts
     /// as work. The load is a readout, not a change: it never contributes
     /// to the returned `changed` flag.
+    ///
+    /// `ledger` is the world's production ledger (the production-stats
+    /// epic, `stats.rs`): a craft that starts records its solid and fluid
+    /// inputs as consumed, a batch that lands records its outputs as
+    /// produced, at the two points that already move them — so the ledger
+    /// can never disagree with the inventories. A batch held on a full
+    /// output records nothing until it lands.
     pub fn tick(
         &mut self,
         current_tick: u64,
         recipes: &RecipeRegistry,
         fluid_in: Option<FluidTap<'_>>,
         fluid_out: Option<FluidTap<'_>>,
+        ledger: &mut ProductionLedger,
     ) -> bool {
         let mut changed = false;
         let Some(recipe) = recipes.get(&self.recipe) else {
@@ -315,9 +324,11 @@ impl Machine {
             if has_inputs && has_fluids {
                 for (item, qty) in &recipe.inputs {
                     self.input.remove(item, *qty);
+                    ledger.record_consumed(item, StatKind::Item, *qty);
                 }
                 if let Some(mut tap) = fluid_in {
                     for (id, units) in &recipe.fluid_inputs {
+                        ledger.record_consumed(id, StatKind::Fluid, *units);
                         let drawn = tap.draw(id, Fx::from_num(*units));
                         debug_assert!(
                             drawn,
@@ -360,9 +371,11 @@ impl Machine {
                 if has_room && has_fluid_room {
                     for (item, qty) in &recipe.outputs {
                         self.output.add(item, *qty);
+                        ledger.record_produced(item, StatKind::Item, *qty);
                     }
                     if let Some(mut tap) = fluid_out {
                         for (id, units) in &recipe.fluid_outputs {
+                            ledger.record_produced(id, StatKind::Fluid, *units);
                             let deposited = tap.deposit(id, Fx::from_num(*units));
                             debug_assert!(
                                 deposited,
@@ -414,11 +427,12 @@ mod tests {
 
     #[test]
     fn stays_idle_without_enough_input() {
+        let mut ledger = ProductionLedger::new();
         let recipes = registry();
         let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
         machine.input.add("tomato", 2);
         for tick in 0..20 {
-            machine.tick(tick, &recipes, None, None);
+            machine.tick(tick, &recipes, None, None, &mut ledger);
         }
         assert!(machine.process.is_none());
         assert_eq!(machine.output.count("tomato_sauce"), 0);
@@ -426,16 +440,17 @@ mod tests {
 
     #[test]
     fn runs_a_full_craft_cycle() {
+        let mut ledger = ProductionLedger::new();
         let recipes = registry();
         let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
         machine.input.add("tomato", 4);
 
-        machine.tick(0, &recipes, None, None); // consumes input, starts process
+        machine.tick(0, &recipes, None, None, &mut ledger); // consumes input, starts process
         assert_eq!(machine.input.count("tomato"), 0);
         assert!(machine.process.is_some());
 
         for tick in 1..10 {
-            machine.tick(tick, &recipes, None, None);
+            machine.tick(tick, &recipes, None, None, &mut ledger);
             assert_eq!(
                 machine.output.count("tomato_sauce"),
                 0,
@@ -443,21 +458,22 @@ mod tests {
             );
         }
 
-        machine.tick(10, &recipes, None, None); // required_ticks elapsed
+        machine.tick(10, &recipes, None, None, &mut ledger); // required_ticks elapsed
         assert_eq!(machine.output.count("tomato_sauce"), 1);
         assert!(machine.process.is_none());
     }
 
     #[test]
     fn holds_finished_output_when_buffer_is_full() {
+        let mut ledger = ProductionLedger::new();
         let recipes = registry();
         let mut machine = Machine::new("tomato_sauce".into(), 10, 1);
         machine.output.add("tomato_sauce", 1); // pre-fill the only slot
         machine.input.add("tomato", 4);
 
-        machine.tick(0, &recipes, None, None);
+        machine.tick(0, &recipes, None, None, &mut ledger);
         for tick in 1..=10 {
-            machine.tick(tick, &recipes, None, None);
+            machine.tick(tick, &recipes, None, None, &mut ledger);
         }
         // Blocked: process completed but couldn't deposit, so it must
         // still be holding, not silently dropping the crafted item.
@@ -465,7 +481,7 @@ mod tests {
         assert_eq!(machine.output.count("tomato_sauce"), 1);
 
         machine.output.remove("tomato_sauce", 1);
-        machine.tick(11, &recipes, None, None);
+        machine.tick(11, &recipes, None, None, &mut ledger);
         assert_eq!(machine.output.count("tomato_sauce"), 1);
         assert!(machine.process.is_none());
     }
@@ -533,6 +549,7 @@ mod tests {
 
     #[test]
     fn never_crafts_with_plenty_of_solid_input_but_no_fluid() {
+        let mut ledger = ProductionLedger::new();
         let recipes = fluid_registry();
         let mut machine = Machine::new("ketchup".into(), 10, 10);
         machine.input.add("tomato_sauce", 10);
@@ -540,7 +557,7 @@ mod tests {
 
         for tick in 0..500 {
             network.tick();
-            machine.tick(tick, &recipes, Some(tap(&mut network, 0)), None);
+            machine.tick(tick, &recipes, Some(tap(&mut network, 0)), None, &mut ledger);
         }
 
         assert!(machine.process.is_none(), "must never start a craft without its fluid");
@@ -554,12 +571,13 @@ mod tests {
 
     #[test]
     fn never_crafts_when_no_network_is_connected_at_all() {
+        let mut ledger = ProductionLedger::new();
         let recipes = fluid_registry();
         let mut machine = Machine::new("ketchup".into(), 10, 10);
         machine.input.add("tomato_sauce", 10);
 
         for tick in 0..500 {
-            machine.tick(tick, &recipes, None, None);
+            machine.tick(tick, &recipes, None, None, &mut ledger);
         }
 
         assert!(machine.process.is_none());
@@ -568,13 +586,14 @@ mod tests {
 
     #[test]
     fn crafts_and_consumes_fluid_once_the_network_can_supply_it() {
+        let mut ledger = ProductionLedger::new();
         let recipes = fluid_registry();
         let mut machine = Machine::new("ketchup".into(), 10, 10);
         machine.input.add("tomato_sauce", 1);
         let (mut network, mut tank) = supplied_network();
         let before = network.segments()[1].volume;
 
-        machine.tick(0, &recipes, Some(tap(&mut network, 1)), None);
+        machine.tick(0, &recipes, Some(tap(&mut network, 1)), None, &mut ledger);
         assert!(machine.process.is_some(), "craft must start once fluid is available");
         assert_eq!(
             network.segments()[1].volume,
@@ -585,7 +604,7 @@ mod tests {
         for tick in 1..=10 {
             network.discharge_from_tank(&mut tank, 0);
             network.tick();
-            machine.tick(tick, &recipes, Some(tap(&mut network, 1)), None);
+            machine.tick(tick, &recipes, Some(tap(&mut network, 1)), None, &mut ledger);
         }
         assert_eq!(machine.output.count("ketchup"), 1);
     }
@@ -626,12 +645,13 @@ mod tests {
 
     #[test]
     fn deposits_its_fluid_output_into_the_outlet_network_on_completion() {
+        let mut ledger = ProductionLedger::new();
         let recipes = producer_registry();
         let mut machine = Machine::new("ketchup".into(), 10, 10);
         let mut inflow = one_tile_network("ketchup_mix", 10, 4);
         let mut outflow = one_tile_network("ketchup", 10, 0);
 
-        machine.tick(0, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)));
+        machine.tick(0, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)), &mut ledger);
         assert!(machine.process.is_some(), "a fluid-only input must start a craft");
         assert_eq!(
             inflow.segments()[0].volume,
@@ -645,7 +665,7 @@ mod tests {
         );
 
         for tick in 1..=5 {
-            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)));
+            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)), &mut ledger);
         }
         assert!(machine.process.is_none());
         assert_eq!(outflow.segments()[0].volume, Fx::from_num(1));
@@ -655,13 +675,14 @@ mod tests {
     /// a full pipe must back the machine up, not spill.
     #[test]
     fn holds_a_finished_batch_when_the_outlet_pipe_is_full() {
+        let mut ledger = ProductionLedger::new();
         let recipes = producer_registry();
         let mut machine = Machine::new("ketchup".into(), 10, 10);
         let mut inflow = one_tile_network("ketchup_mix", 10, 4);
         let mut outflow = one_tile_network("ketchup", 10, 10); // brim full
 
         for tick in 0..=5 {
-            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)));
+            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)), &mut ledger);
         }
         assert!(
             machine.process.is_some(),
@@ -671,19 +692,20 @@ mod tests {
 
         // Make room, and the very next tick the held batch lands.
         outflow.draw_at(0, "ketchup", Fx::from_num(2));
-        machine.tick(6, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)));
+        machine.tick(6, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)), &mut ledger);
         assert!(machine.process.is_none());
         assert_eq!(outflow.segments()[0].volume, Fx::from_num(9));
     }
 
     #[test]
     fn never_completes_a_fluid_producing_craft_with_no_outlet_network_at_all() {
+        let mut ledger = ProductionLedger::new();
         let recipes = producer_registry();
         let mut machine = Machine::new("ketchup".into(), 10, 10);
         let mut inflow = one_tile_network("ketchup_mix", 10, 10);
 
         for tick in 0..500 {
-            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), None);
+            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), None, &mut ledger);
         }
         assert!(
             machine.process.is_some(),
@@ -698,13 +720,14 @@ mod tests {
 
     #[test]
     fn refuses_to_deposit_into_a_network_carrying_the_wrong_fluid() {
+        let mut ledger = ProductionLedger::new();
         let recipes = producer_registry();
         let mut machine = Machine::new("ketchup".into(), 10, 10);
         let mut inflow = one_tile_network("ketchup_mix", 10, 10);
         let mut outflow = one_tile_network("water", 10, 0);
 
         for tick in 0..500 {
-            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)));
+            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)), &mut ledger);
         }
         assert!(machine.process.is_some());
         assert_eq!(outflow.segments()[0].volume, Fx::ZERO);
@@ -712,6 +735,7 @@ mod tests {
 
     #[test]
     fn refuses_a_network_carrying_the_wrong_fluid() {
+        let mut ledger = ProductionLedger::new();
         let recipes = fluid_registry();
         let mut machine = Machine::new("ketchup".into(), 10, 10);
         machine.input.add("tomato_sauce", 10);
@@ -721,7 +745,7 @@ mod tests {
         for tick in 0..500 {
             network.discharge_from_tank(&mut tank, 0);
             network.tick();
-            machine.tick(tick, &recipes, Some(tap(&mut network, 1)), None);
+            machine.tick(tick, &recipes, Some(tap(&mut network, 1)), None, &mut ledger);
         }
 
         assert!(machine.process.is_none(), "vinegar recipe must not run on a water pipe");
@@ -808,6 +832,7 @@ mod tests {
     /// exactly 100 % with no one-tick dip per cycle.
     #[test]
     fn a_continuously_fed_and_drained_machine_reads_exactly_full_load() {
+        let mut ledger = ProductionLedger::new();
         let recipes = registry();
         let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
         for tick in 0..LOAD_WINDOW_TICKS as u64 * 2 {
@@ -815,7 +840,7 @@ mod tests {
             machine.input.add("tomato", short);
             let made = machine.output.count("tomato_sauce");
             machine.output.remove("tomato_sauce", made);
-            machine.tick(tick, &recipes, None, None);
+            machine.tick(tick, &recipes, None, None, &mut ledger);
             assert_eq!(
                 machine.load.starved() + machine.load.blocked(),
                 0,
@@ -829,10 +854,11 @@ mod tests {
 
     #[test]
     fn a_machine_that_is_never_fed_reads_starved() {
+        let mut ledger = ProductionLedger::new();
         let recipes = registry();
         let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
         for tick in 0..50 {
-            machine.tick(tick, &recipes, None, None);
+            machine.tick(tick, &recipes, None, None, &mut ledger);
         }
         assert_eq!(machine.load.starved(), 50);
         assert_eq!(machine.load.working(), 0);
@@ -842,12 +868,13 @@ mod tests {
 
     #[test]
     fn a_machine_held_on_a_full_output_reads_blocked() {
+        let mut ledger = ProductionLedger::new();
         let recipes = registry();
         let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
         for tick in 0..LOAD_WINDOW_TICKS as u64 * 2 {
             let short = 10 - machine.input.count("tomato").min(10);
             machine.input.add("tomato", short);
-            machine.tick(tick, &recipes, None, None);
+            machine.tick(tick, &recipes, None, None, &mut ledger);
         }
         assert!(machine.process.is_some(), "the last batch is finished and held");
         assert_eq!(machine.output.count("tomato_sauce"), 10, "output is brim full");
@@ -859,16 +886,70 @@ mod tests {
     /// The fluid side of the same rule: a finished batch with nowhere to go.
     #[test]
     fn a_machine_held_on_a_full_outlet_pipe_reads_blocked() {
+        let mut ledger = ProductionLedger::new();
         let recipes = producer_registry();
         let mut machine = Machine::new("ketchup".into(), 10, 10);
         let mut inflow = one_tile_network("ketchup_mix", 10, 10);
         let mut outflow = one_tile_network("ketchup", 10, 10); // brim full
         for tick in 0..100 {
-            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)));
+            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)), &mut ledger);
         }
         // Ticks 0..=4 working (start + 4 advancing), then held from tick 5 on.
         assert_eq!(machine.load.working(), 5);
         assert_eq!(machine.load.blocked(), 95);
         assert_eq!(machine.load.status(), WorkState::Blocked);
+    }
+
+    #[test]
+    fn a_craft_records_its_inputs_as_consumed_and_its_outputs_as_produced() {
+        let recipes = registry();
+        let mut ledger = ProductionLedger::new();
+        let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
+        machine.input.add("tomato", 4);
+
+        machine.tick(0, &recipes, None, None, &mut ledger);
+        // Consumed at the start, in the recipe's own quantity; nothing made
+        // yet.
+        assert_eq!(ledger.consumed_total("tomato"), 4);
+        assert_eq!(ledger.produced_total("tomato_sauce"), 0);
+        for tick in 1..10 {
+            machine.tick(tick, &recipes, None, None, &mut ledger);
+        }
+        assert_eq!(ledger.produced_total("tomato_sauce"), 0, "not before it lands");
+        machine.tick(10, &recipes, None, None, &mut ledger);
+        assert_eq!(ledger.produced_total("tomato_sauce"), 1);
+        assert_eq!(ledger.consumed_total("tomato"), 4, "starting is the only consumption");
+        assert_eq!(ledger.kind_of("tomato"), Some(StatKind::Item));
+    }
+
+    #[test]
+    fn a_batch_held_on_a_full_output_is_recorded_only_when_it_lands() {
+        let recipes = registry();
+        let mut ledger = ProductionLedger::new();
+        let mut machine = Machine::new("tomato_sauce".into(), 10, 1);
+        machine.output.add("tomato_sauce", 1);
+        machine.input.add("tomato", 4);
+        for tick in 0..=20 {
+            machine.tick(tick, &recipes, None, None, &mut ledger);
+        }
+        assert!(machine.process.is_some(), "held");
+        assert_eq!(ledger.produced_total("tomato_sauce"), 0);
+        machine.output.remove("tomato_sauce", 1);
+        machine.tick(21, &recipes, None, None, &mut ledger);
+        assert_eq!(ledger.produced_total("tomato_sauce"), 1);
+    }
+
+    #[test]
+    fn fluids_are_recorded_as_fluids_in_the_recipe_s_whole_units() {
+        let recipes = fluid_registry();
+        let mut ledger = ProductionLedger::new();
+        let (mut network, _tank) = supplied_network();
+        let mut machine = Machine::new("ketchup".into(), 10, 10);
+        machine.input.add("tomato_sauce", 1);
+        machine.tick(0, &recipes, Some(tap(&mut network, 1)), None, &mut ledger);
+        assert!(machine.process.is_some(), "the fixture must be able to start");
+        assert_eq!(ledger.consumed_total("vinegar"), 2);
+        assert_eq!(ledger.kind_of("vinegar"), Some(StatKind::Fluid));
+        assert_eq!(ledger.consumed_total("tomato_sauce"), 1);
     }
 }

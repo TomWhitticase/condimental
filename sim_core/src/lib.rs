@@ -343,6 +343,34 @@ impl SimBridge {
         GString::from(json.as_str())
     }
 
+    /// What the factory has MADE and USED, per item and fluid, over the
+    /// rolling windows in `sim::STAT_WINDOWS` and for all time — the
+    /// production-stats epic's wire (the **P** screen). One
+    /// `sim::ProductionSnapshot`:
+    ///
+    /// ```json
+    /// {"windows": [{"id": "5s", "ticks": 150, "observed": 150},
+    ///              {"id": "1m", "ticks": 1800, "observed": 1800}, ...],
+    ///  "items": [{"id": "tomato", "kind": "item",
+    ///             "produced": [0, 0, 0, 0], "consumed": [8, 96, 96, 96],
+    ///             "produced_total": 0, "consumed_total": 96}, ...]}
+    /// ```
+    ///
+    /// `windows` is in shortest-first order with how much of each has
+    /// actually been observed (a rate divides by that, not by the window);
+    /// every `produced`/`consumed` array is in the same order. `items`
+    /// lists every id ever recorded, sorted by id — Godot sorts by count
+    /// and formats; the sim only counts. `kind` is `"item"` or `"fluid"`.
+    ///
+    /// **Poll it — do not wait for a dirty chunk.** It changes on every
+    /// craft and deliberately dirties nothing, like the load window.
+    #[func]
+    fn production_snapshot_json(&self) -> GString {
+        let snapshot = self.world.production_snapshot();
+        let json = serde_json::to_string(&snapshot).expect("ProductionSnapshot must serialize");
+        GString::from(json.as_str())
+    }
+
     /// Every fluid tank in the world, JSON-serialized as an **array** of
     /// `sim::FluidTankSnapshot`:
     ///

@@ -116,6 +116,7 @@ use super::machine::{LOAD_BUCKETS, LoadBucket, LoadWindow, Machine, TimedProcess
 use super::machines::MachineRegistry;
 use super::recipe::RecipeRegistry;
 use super::splitter::{SPLITTER_KIND, Side, Splitter};
+use super::stats::{ItemStats, ProductionLedger, STAT_BUCKETS, STAT_WINDOW_COUNT, StatKind};
 use super::types::{Direction, Fx, ItemId, TileCoord};
 use super::world::{BELT_KIND, PIPE_KIND, PlayerCommand, World};
 
@@ -175,6 +176,38 @@ pub struct SaveData {
     /// which is the same as never.
     #[serde(default)]
     pub contracts_lost: Vec<(String, u32)>,
+    /// The production ledger (`sim::stats::ProductionLedger`), rings
+    /// verbatim, so a loaded factory's P screen reads exactly what the
+    /// saved one did. `#[serde(default)]` for the same reason as
+    /// `SavedMachine::load`: an older save loads with an empty ledger,
+    /// which is what a factory nothing has been counted for reads as.
+    #[serde(default)]
+    pub production: SavedProduction,
+}
+
+/// A [`ProductionLedger`]'s whole state: one clock per window, its age, and
+/// every id's rings and totals in id order. Empty `cursor` is the "nothing
+/// saved" default and restores as a fresh ledger; anything else must be a
+/// state the tick path could have produced (`ProductionLedger::restore`),
+/// or the save is refused.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedProduction {
+    pub cursor: Vec<usize>,
+    pub ticks_into_bucket: Vec<u32>,
+    pub age: u64,
+    pub items: Vec<SavedItemStats>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedItemStats {
+    pub id: ItemId,
+    pub kind: StatKind,
+    /// One ring per window, in `STAT_WINDOWS` order, each `STAT_BUCKETS`
+    /// long.
+    pub produced: Vec<Vec<u32>>,
+    pub consumed: Vec<Vec<u32>>,
+    pub produced_total: u64,
+    pub consumed_total: u64,
 }
 
 /// One placed thing: what it is, where it stands, which way it faces, and
@@ -419,6 +452,12 @@ pub enum SaveError {
         buckets: usize,
         cursor: usize,
     },
+    /// The saved production ledger is not one `ProductionLedger` could
+    /// have written: a wrong number of windows or buckets, a cursor outside
+    /// its ring, a clock at or past its bucket, or an id listed twice.
+    BadProductionLedger {
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for SaveError {
@@ -502,6 +541,9 @@ impl std::fmt::Display for SaveError {
                 "the machine at {tile:?} has a load window of {buckets} bucket(s) with cursor \
                  {cursor}, which is not a ring of {LOAD_BUCKETS}"
             ),
+            SaveError::BadProductionLedger { detail } => {
+                write!(f, "the production ledger is corrupt: {detail}")
+            }
         }
     }
 }
@@ -678,6 +720,7 @@ impl World {
                 .iter()
                 .map(|(id, count)| (id.clone(), *count))
                 .collect(),
+            production: saved_production(self.production()),
         }
     }
 
@@ -750,6 +793,7 @@ impl World {
         rebuild_structure(&mut world, &data)?;
         restore_bodies(&mut world, &data)?;
         restore_ledgers(&mut world, &data);
+        world.restore_production(restore_production(&data.production)?);
 
         world.restore_tick_count(data.tick_count);
         world.restore_money(data.money_bits.value());
@@ -1109,6 +1153,85 @@ fn restore_load(saved: &SavedLoad, tile: TileCoord) -> Result<LoadWindow, SaveEr
         tile,
         buckets: saved.buckets.len(),
         cursor: saved.cursor,
+    })
+}
+
+fn saved_production(ledger: &ProductionLedger) -> SavedProduction {
+    SavedProduction {
+        cursor: ledger.cursor().to_vec(),
+        ticks_into_bucket: ledger.ticks_into_bucket().to_vec(),
+        age: ledger.age(),
+        items: ledger
+            .items()
+            .iter()
+            .map(|(id, stats)| SavedItemStats {
+                id: id.clone(),
+                kind: stats.kind,
+                produced: stats.produced.iter().map(|ring| ring.to_vec()).collect(),
+                consumed: stats.consumed.iter().map(|ring| ring.to_vec()).collect(),
+                produced_total: stats.produced_total,
+                consumed_total: stats.consumed_total,
+            })
+            .collect(),
+    }
+}
+
+fn restore_production(saved: &SavedProduction) -> Result<ProductionLedger, SaveError> {
+    if saved.cursor.is_empty() {
+        return Ok(ProductionLedger::new());
+    }
+    let bad = |detail: String| SaveError::BadProductionLedger { detail };
+    let cursor: [usize; STAT_WINDOW_COUNT] = saved.cursor.as_slice().try_into().map_err(|_| {
+        bad(format!(
+            "{} window cursor(s), not {STAT_WINDOW_COUNT}",
+            saved.cursor.len()
+        ))
+    })?;
+    let ticks_into_bucket: [u32; STAT_WINDOW_COUNT] =
+        saved.ticks_into_bucket.as_slice().try_into().map_err(|_| {
+            bad(format!(
+                "{} window clock(s), not {STAT_WINDOW_COUNT}",
+                saved.ticks_into_bucket.len()
+            ))
+        })?;
+    let mut items = std::collections::BTreeMap::new();
+    for item in &saved.items {
+        let rings = |rings: &Vec<Vec<u32>>, what: &str| -> Result<[[u32; STAT_BUCKETS]; STAT_WINDOW_COUNT], SaveError> {
+            if rings.len() != STAT_WINDOW_COUNT {
+                return Err(bad(format!(
+                    "'{}' has {} {what} ring(s), not {STAT_WINDOW_COUNT}",
+                    item.id,
+                    rings.len()
+                )));
+            }
+            let mut out = [[0u32; STAT_BUCKETS]; STAT_WINDOW_COUNT];
+            for (w, ring) in rings.iter().enumerate() {
+                out[w] = ring.as_slice().try_into().map_err(|_| {
+                    bad(format!(
+                        "'{}' {what} ring {w} has {} bucket(s), not {STAT_BUCKETS}",
+                        item.id,
+                        ring.len()
+                    ))
+                })?;
+            }
+            Ok(out)
+        };
+        let stats = ItemStats {
+            kind: item.kind,
+            produced: rings(&item.produced, "produced")?,
+            consumed: rings(&item.consumed, "consumed")?,
+            produced_total: item.produced_total,
+            consumed_total: item.consumed_total,
+        };
+        if items.insert(item.id.clone(), stats).is_some() {
+            return Err(bad(format!("'{}' is listed twice", item.id)));
+        }
+    }
+    ProductionLedger::restore(items, cursor, ticks_into_bucket, saved.age).ok_or_else(|| {
+        bad(format!(
+            "cursor {:?} / clock {:?} is not a state the ledger can be in",
+            saved.cursor, saved.ticks_into_bucket
+        ))
     })
 }
 
