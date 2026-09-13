@@ -3693,10 +3693,11 @@ func _set_view_mode(mode: int) -> void:
 		_camera.fov = FP_FOV
 		_camera.near = FP_NEAR
 		_camera.keep_aspect = Camera3D.KEEP_HEIGHT
-		# ...unless the build menu is up, which needs the cursor (see
-		# _set_shop_menu_open); closing it recaptures.
-		if not _shop_open:
-			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		# ...unless a panel is up and needs the cursor. This used to check
+		# the build menu alone, so TAB with the market, board, staff or
+		# production panel (or a configuration panel) open captured the
+		# mouse under a panel full of buttons (the quality pass, 2026-09-13).
+		_apply_fp_mouse_mode()
 		_update_fp_camera_transform()
 		if _help_label != null:
 			_help_label.text = FP_HELP_TEXT
@@ -5108,12 +5109,31 @@ func _set_shop_menu_open(open: bool) -> void:
 ## screen in exactly the case where there is no real cursor. With either shop
 ## panel up the mouse is handed back (above), and leaving the crosshair drawn
 ## would park a stray mark on top of a slot.
+## Whether something on screen wants the cursor: any of the five modal
+## panels, the configuration panel or the pause menu. The one answer the
+## first-person mouse capture and the crosshair both read.
+func _fp_mouse_free() -> bool:
+	return _modal_open() or _config_open or _pause_open
+
+
+## Any of the five modal panels (E, M, C, H, P) is up. Build mode is not a
+## modal — see `_anything_open` for the version that counts it.
+func _modal_open() -> bool:
+	return _shop_open or _market_open or _board_open or _staff_open or _production_open
+
+
+## In first-person the mouse is captured for looking around unless a panel
+## wants it (`_fp_mouse_free`); in isometric it is always visible.
+func _apply_fp_mouse_mode() -> void:
+	if _view_mode != ViewMode.FIRST_PERSON:
+		return
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if _fp_mouse_free() else Input.MOUSE_MODE_CAPTURED
+
+
 func _update_crosshair_visibility() -> void:
 	if _crosshair == null:
 		return
-	_crosshair.visible = (_view_mode == ViewMode.FIRST_PERSON
-			and not _shop_open and not _market_open and not _board_open and not _staff_open
-			and not _production_open and not _pause_open and not _config_open)
+	_crosshair.visible = _view_mode == ViewMode.FIRST_PERSON and not _fp_mouse_free()
 
 
 func _toggle_shop_menu() -> void:
@@ -8181,7 +8201,15 @@ func _toggle_remove_mode() -> void:
 	_build_kind = ""
 	_remove_mode = true
 	_close_config_panel()
+	# Every modal, not only the build menu: X with the market or the board
+	# up used to put a red ghost under the panel and leave both open (the
+	# quality pass, 2026-09-13). Entering a mode closes them, as E/M/C/H/P
+	# close each other.
 	_set_shop_menu_open(false)
+	_set_market_open(false)
+	_set_contract_board_open(false)
+	_set_staff_open(false)
+	_set_production_open(false)
 	_rebuild_ghost_body()
 	_update_ghost()
 	# Remove mode replaces placement mode, so the strip has nothing selected
@@ -8270,7 +8298,17 @@ func _rotate_ghost() -> void:
 ## from any other builder expects, and it is free — `PlayerCommand::Rotate`
 ## resolves from any tile of a footprint and keeps the thing's contents.
 func _rotate_under_cursor() -> void:
-	var tile := _ghost_target_tile()
+	_rotate_tile(_ghost_target_tile())
+
+
+## R's rotation of a placed thing, given the tile. **Not under a modal**:
+## with a panel up the cursor is over the panel, and R used to turn
+## whatever stood behind it — an action the player could not see (the
+## quality pass, 2026-09-13). Split from `_rotate_under_cursor` so a
+## headless test can name the tile.
+func _rotate_tile(tile: Vector2i) -> void:
+	if _modal_open():
+		return
 	if tile == HOVER_NO_TILE:
 		return
 	if _placement_at_tile(tile).is_empty():
@@ -9064,14 +9102,16 @@ func _set_pause_open(open: bool) -> void:
 		_pause_status.text = ""
 		_pause_slot_field.text = _save_slot
 		_position_pause_menu()
+		# A drag in progress when ESC is pressed never sees its release
+		# (the pause branch of `_unhandled_input` swallows it) — see `_input`.
+		_iso_dragging = false
 	else:
 		# Whatever real time passed while the panel was up must not become
 		# simulation ticks the moment it closes — see `_process`. The clamp
 		# would cap the burst at MAX_TICKS_PER_FRAME per frame, but a long
 		# pause would still be paid back over the following frames.
 		_tick_accum = 0.0
-	if _view_mode == ViewMode.FIRST_PERSON:
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
+	_apply_fp_mouse_mode()
 	_update_crosshair_visibility()
 
 
@@ -9350,6 +9390,21 @@ func _advance_autosave(delta: float) -> void:
 		return
 	_autosave_accum = 0.0
 	_autosave("timer")
+
+
+## Sees every input BEFORE the GUI does, and takes exactly one thing from
+## it: a right-button RELEASE ends a drag-pan whatever is under the cursor.
+## The press stays in `_unhandled_input` (a right click ON a panel must not
+## start a drag), but a drag that ENDS over a panel with a mouse filter —
+## the hotbar, the clipboard, a docket — has its release consumed by that
+## panel and never reaches `_unhandled_input`, so `_iso_dragging` stayed
+## true and the camera followed every mouse movement until the next right
+## click (the quality pass, 2026-09-13). The same release is also lost
+## when the pause menu opens mid-drag, hence `_set_pause_open` clears it.
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT \
+			and not event.pressed:
+		_iso_dragging = false
 
 
 func _unhandled_input(event: InputEvent) -> void:
