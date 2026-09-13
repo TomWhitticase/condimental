@@ -1465,6 +1465,13 @@ struct Topology {
     docks: Vec<Entity>,
     /// A belt hands off to the belt (or splitter) it points at.
     belt_to_belt: Vec<(Entity, Entity)>,
+    /// The same relation as `belt_to_belt`, indexed like `belts`: entry
+    /// `i` is what `belts[i]` hands to if that is a belt or a splitter,
+    /// else `None`. The belt tick reads the receiver's room at its start
+    /// through this (`belt.rs`'s "the footprint does not stop at the belt's
+    /// end"), and a per-belt search of `belt_to_belt` every tick would be
+    /// quadratic in the line's length.
+    belt_ahead: Vec<Option<Entity>>,
     /// **The one one-to-many relation in this simulation**: a splitter and
     /// the two things standing on its output tiles — straight-through
     /// first, then the branch one quarter turn clockwise (see
@@ -1532,6 +1539,12 @@ pub struct World {
     raw_items: Vec<ItemId>,
     tick_count: u64,
     belt_speed: Fx,
+    /// Scratch for the belt tick: how much room each carrier's downstream
+    /// carrier has at its start, read for every belt and splitter BEFORE
+    /// any of them moves (`BeltSegment::tick_toward`'s order-independence
+    /// rule). Indexed like `topology.belts` then `topology.splitters`;
+    /// cleared, not reallocated, every tick, like `dirty`.
+    room_ahead: Vec<Fx>,
     /// Chunks touched since the start of the current `tick()` call. Cleared
     /// (not reallocated) at the start of every `tick()` — see `tick`'s doc
     /// comment and ARCHITECTURE.md §4's "Delta granularity" note. A
@@ -1568,13 +1581,33 @@ const BELT_SPEED_TILES_PER_TICK: f64 = 0.02;
 /// One placed belt tile is one unit of belt. (`belt.rs` requires
 /// `speed <= min_spacing`, which the two constants above and below satisfy.)
 const BELT_TILE_LENGTH: f64 = 1.0;
-const ITEM_MIN_SPACING_TILES: f64 = 0.25;
+/// The closest two items on a belt can stand, centre to centre, and so how
+/// many a fully compressed tile holds: **two**, one every half tile, since
+/// the quality pass of 2026-09-13 (it was a quarter tile, four to five per
+/// tile). Chosen by rendering: items are modelled at half a tile
+/// (`assets.rs`'s `ITEM_VOXELS`, the widest — the box — 12 of 32 voxels),
+/// so a quarter-tile spacing drew a jammed lane as one continuous bar of
+/// product, and at a half tile a jammed lane reads as a queue of separate
+/// objects with a few voxels of belt showing between each pair. Wider still
+/// read as a trickle. The belt's speed is unchanged — only the spacing moved
+/// — so a belt now carries `BELT_SPEED_TILES_PER_TICK / this` items per
+/// tick at most: one every 25 ticks, forty per thousand, still well over
+/// what the shipped line's slowest stage asks of it (`tests/core_loop.rs`
+/// pins that the line's rate is the vat's, not the belt's). Exact in `Fx`.
+/// Stated in prose in CLAUDE.md's decisions log and `docs/DECISIONS.md`;
+/// change them together.
+const ITEM_MIN_SPACING_TILES: f64 = 0.5;
 const MACHINE_INPUT_CAPACITY: u32 = 8;
 const MACHINE_OUTPUT_CAPACITY: u32 = 8;
 /// Volume one pipe tile holds, in whole fluid units.
 const PIPE_SEGMENT_CAPACITY: i32 = 10;
 
 impl World {
+    /// [`ITEM_MIN_SPACING_TILES`] as the `Fx` every belt is built with.
+    fn item_min_spacing(&self) -> Fx {
+        Fx::from_num(ITEM_MIN_SPACING_TILES)
+    }
+
     /// An **empty** world: no belts, no machines, no buildings, and
     /// [`STARTING_MONEY`] in the bank. Everything in a factory is something
     /// the player buys ([`PlayerCommand::Purchase`]) and places
@@ -1676,6 +1709,7 @@ impl World {
             raw_items,
             tick_count: 0,
             belt_speed: Fx::from_num(BELT_SPEED_TILES_PER_TICK),
+            room_ahead: Vec::new(),
             dirty: Vec::new(),
             economy: Economy::with_money(&contracts, money),
             shop: Shop::bundled(),
@@ -2137,7 +2171,8 @@ impl World {
                 BodyKind::Pipe | BodyKind::Hopper | BodyKind::FluidTank => None,
             }
         };
-        for &belt in &topology.belts {
+        topology.belt_ahead = vec![None; topology.belts.len()];
+        for (index, &belt) in topology.belts.iter().enumerate() {
             let placement = self.placement_of(belt);
             let target = placement.direction.step(self.position_of(belt));
             let Some(occupant) = resolve_sink(&topology.grid, target) else {
@@ -2150,6 +2185,7 @@ impl World {
             });
             if is_belt_like(occupant_body) {
                 topology.belt_to_belt.push((belt, occupant));
+                topology.belt_ahead[index] = Some(occupant);
                 conveyor_links(&mut links, occupant).inputs.push(LinkInput {
                     from: placement.direction.opposite(),
                     kind: LinkKind::Belt,
@@ -2559,21 +2595,58 @@ impl World {
         // 2. Belts — and splitters, which carry their contents in an
         // ordinary belt segment (`splitter.rs`) so that product crosses one
         // in exactly the time it would cross the belt tile it replaced.
+        //
+        // Every carrier's front item stops short of its end by whatever
+        // footprint the item at the start of the NEXT carrier still claims
+        // (`belt.rs`, "the footprint does not stop at the belt's end").
+        // The rooms are all read before any carrier moves, so the outcome
+        // is the same whatever order the carriers are visited in — which is
+        // what lets a save that was rebuilt in a different placement order
+        // stay in lockstep with the world it was taken from.
         let belts = std::mem::take(&mut self.topology.belts);
         let splitters = std::mem::take(&mut self.topology.splitters);
-        for &carrier in belts.iter().chain(splitters.iter()) {
+        let belt_ahead = std::mem::take(&mut self.topology.belt_ahead);
+        let splitter_outputs = std::mem::take(&mut self.topology.splitter_outputs);
+        let room_at_start = |world: &Self, carrier: Option<Entity>| -> Option<Fx> {
+            let carrier = carrier?;
+            world
+                .ecs
+                .get::<&BeltSegment>(carrier)
+                .ok()
+                .map(|segment| segment.room_at_start())
+        };
+        self.room_ahead.clear();
+        for index in 0..belts.len() {
+            let room = room_at_start(self, belt_ahead[index]);
+            self.room_ahead.push(room.unwrap_or(self.item_min_spacing()));
+        }
+        for (index, _) in splitters.iter().enumerate() {
+            // A splitter's item goes to whichever side takes it, so the
+            // room that matters is the roomier side's; neither side being
+            // a carrier is the "nothing past the end" case, like a belt
+            // into a machine.
+            let (_, outputs) = splitter_outputs[index];
+            let room = outputs
+                .iter()
+                .filter_map(|&output| room_at_start(self, output))
+                .max();
+            self.room_ahead.push(room.unwrap_or(self.item_min_spacing()));
+        }
+        for (index, &carrier) in belts.iter().chain(splitters.iter()).enumerate() {
             let moved = {
                 let mut segment = self
                     .ecs
                     .get::<&mut BeltSegment>(carrier)
                     .expect("a belt or splitter placement carries a BeltSegment");
-                segment.tick(self.belt_speed)
+                segment.tick_toward(self.belt_speed, self.room_ahead[index])
             };
             if moved {
                 let tile = self.position_of(carrier);
                 self.mark_dirty(tile);
             }
         }
+        self.topology.splitter_outputs = splitter_outputs;
+        self.topology.belt_ahead = belt_ahead;
         self.topology.splitters = splitters;
 
         // 3. Machines.

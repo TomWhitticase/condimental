@@ -246,14 +246,19 @@ fn mass_is_conserved_when_both_outputs_are_backed_up() {
 /// One output connected: everything goes down it. This falls out of the
 /// offer loop rather than being a special case — a side with nothing on it
 /// is a side that always refuses (see `splitter.rs`'s module doc).
+///
+/// Eight units on a four-tile run: a jammed tile holds two items at the
+/// half-tile spacing (`belt.rs`'s module doc — an item at a tile's start
+/// is no longer also at the previous tile's end), so eight is exactly what
+/// the run can hold with nothing left standing on the splitter.
 #[test]
 fn a_splitter_with_only_the_straight_output_sends_everything_down_it() {
-    let mut j = Junction::build(4, 0, 12);
+    let mut j = Junction::build(4, 0, 8);
     for _ in 0..3000 {
         j.world.tick();
     }
-    assert_eq!(items_on(&j.world, &j.straight), 12);
-    assert_eq!(j.total(), 12);
+    assert_eq!(items_on(&j.world, &j.straight), 8);
+    assert_eq!(j.total(), 8);
 }
 
 /// The mirror of the test above, and the one that proves the fallback is a
@@ -262,12 +267,12 @@ fn a_splitter_with_only_the_straight_output_sends_everything_down_it() {
 /// what a fresh splitter offers first.
 #[test]
 fn a_splitter_with_only_the_branch_output_sends_everything_down_it() {
-    let mut j = Junction::build(0, 4, 12);
+    let mut j = Junction::build(0, 4, 8);
     for _ in 0..3000 {
         j.world.tick();
     }
-    assert_eq!(items_on(&j.world, &j.branch), 12);
-    assert_eq!(j.total(), 12);
+    assert_eq!(items_on(&j.world, &j.branch), 8);
+    assert_eq!(j.total(), 8);
 }
 
 /// No outputs at all: the splitter fills up, the hopper stops being able to
@@ -396,7 +401,8 @@ fn rotating_a_splitter_turns_both_outputs_together() {
 /// branch used to go.
 #[test]
 fn rotating_a_splitter_reroutes_what_it_carries() {
-    let mut j = Junction::build(3, 3, 8);
+    // Six: what a jammed three-tile run holds at two items a tile.
+    let mut j = Junction::build(3, 3, 6);
     // One clockwise turn: east becomes south, so what was the branch run is
     // now the straight-through and what was the straight run is neither.
     j.world.issue_command(PlayerCommand::Rotate { tile: (0, 0) });
@@ -411,10 +417,10 @@ fn rotating_a_splitter_reroutes_what_it_carries() {
     );
     assert_eq!(
         items_on(&j.world, &j.branch),
-        8,
+        6,
         "a south-facing splitter's straight-through output is the south run"
     );
-    assert_eq!(j.total(), 8);
+    assert_eq!(j.total(), 6);
 }
 
 /// Place/Remove refuse and apply exactly as they do for every other kind

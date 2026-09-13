@@ -22,6 +22,98 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-13: **Belt item spacing is half a tile, and a belt's front item
+  respects the next tile's footprint (quality pass, ticket 2).** The
+  project owner's playtest note: items on conveyors are too close
+  together.
+
+  1. **The one number, and why a half.** `ITEM_MIN_SPACING_TILES` in
+     `world.rs` is the only place the shipped spacing is set (every belt
+     and splitter tile is built with it; the unit fixtures in `belt.rs`,
+     `hopper.rs` and `dock.rs` carry their own local 0.25 and test the
+     mechanism, not the number). It was 0.25 and is 0.5. Items are
+     modelled at half a tile (`assets.rs`'s `ITEM_VOXELS` = 16; the widest,
+     the box, is 12 voxels across), so at a quarter-tile spacing two
+     neighbours overlapped by half their width and the baseline render of
+     the bottleneck line's tomato lane was one continuous red bar with a
+     stem every few voxels. The candidates were judged by rendering, not
+     arithmetic: at a half tile the closeup shows every tomato and every
+     sugar sack standing on its own patch of belt with a few voxels of
+     rubber between each pair, the jammed sugar lane still reads as a
+     queue, and at default zoom both feed lanes read as rows of separate
+     dots. Three quarters would leave a jammed four-tile lane holding five
+     items, which is a trickle, and 0.4 leaves the box 0.8 of a voxel from
+     its neighbour, which does not fix the complaint. The item models and
+     `main.gd`'s `_carried_item_transform` did not need to move.
+  2. **Speed unchanged, so throughput per belt halves and the line's does
+     not.** A tile is still crossed in 50 ticks; a belt now takes one item
+     per 25 ticks (forty per thousand) instead of one per 12.5. The
+     shipped line's slowest stage, the 240-tick vat, asks its tomato lane
+     for about seventeen per thousand, so the reference line's steady
+     output measured 41–42 boxes per 10 000 ticks before and after,
+     against `data/contracts.ron`'s ~4.1 per thousand. No contract or
+     recipe was touched.
+  3. **The packing bug the old number hid.** A belt tile's front item
+     stores its distance to the tile's END and ran right up to it, while
+     the tile ahead could hold an item at its START — the same physical
+     point, since items are drawn face to face. A jammed line therefore
+     held five items per tile at a quarter spacing (0, ¼, ½, ¾ and 1) and
+     drew one of them twice at every boundary. Invisible while the
+     spacing was narrower than the items; at a half tile it would have
+     been a doubled item every tile. So a belt's front item now respects
+     the footprint of what stands on the tile ahead: `BeltSegment::
+     tick_toward(speed, room_ahead)` holds it `min_spacing - room_ahead`
+     short of the end while that is positive, where `room_ahead` is the
+     downstream segment's new `room_at_start()` (the whole length when
+     empty, else the back item's distance from the start — the very
+     quantity `try_spawn` already measured). The hop is unchanged: the
+     receiver still accepts at `min_spacing` of room, and now the sender
+     reaches its end at exactly that moment. `tick(speed)` is
+     `tick_toward(speed, min_spacing)`, and a belt into a machine or dock,
+     or into nothing, uses it. A jammed tile holds exactly `1 / spacing`
+     items.
+  4. **Order-independent by construction.** `World::tick` reads every
+     carrier's downstream room BEFORE any carrier moves, into a reused
+     buffer (`World::room_ahead`), through `Topology.belt_ahead` — the
+     `belt_to_belt` relation indexed like `belts`, recorded in the same
+     loop that resolves it, because a per-belt search of `belt_to_belt`
+     every tick would be quadratic in the line's length and the stress
+     fixture is 1500 belts. A splitter uses the roomier of its two outputs
+     (its item goes to whichever side takes it). Reading pre-tick state
+     means a belt's result never depends on whether its receiver was
+     visited first, which matters because topology order is placement
+     order and a loaded save rebuilds in save order: the lockstep test in
+     `tests/save_load.rs` still compares every snapshot every tick. The
+     cost is one tick of latency the first time an item crosses a boundary
+     in a moving queue, so the item behind settles `speed` (a fiftieth of
+     a tile) looser than the spacing; each item pays it once and no
+     throughput changes.
+  5. **Knock-on: the crusher is belt-limited, and that is reported, not
+     tuned.** The crusher's recipe takes four tomatoes per 80 ticks; one
+     lane now delivers four per 100. Until the line backs up the crusher
+     reads `starved · waiting for Tomato` about a fifth of the time and
+     the mixer behind it gets one paste per 100 ticks against its 90-tick
+     craft. The vat is the bottleneck so nothing downstream changes, but
+     the line takes longer to back up (the crusher reads blocked from
+     ~8300 ticks, was ~7000; `tests/machine_load.rs`'s `SETTLE_TICKS` and
+     `test_layouts.gd`'s `BOTTLENECK_SETTLE_TICKS` are 10 000 and say
+     why), and the staff pools' "short one manufacturing head idles the
+     vat" now holds on the ticks the crusher and mixer both claim — on a
+     tick the crusher waits for a tomato it claims nobody and the vat's
+     two heads are free, which is the same first-come rule read the other
+     way. `tests/staff.rs` asserts refused ticks outnumber run ticks and
+     the crusher's only reason is ever its input; the paused-craft test
+     fires three heads so the vat genuinely cannot run. The splitter
+     fixtures count what a jammed run holds now (8 on four tiles, 6 on
+     three), and `test_machine_load.gd`'s "a real status change, polled on
+     the tick" section watches the vat instead of the crusher, because the
+     vat is the one machine a fed line drives to `working` and holds
+     there. Whether the crusher's recipe should be re-timed to the lane
+     (100 ticks, or five tomatoes) is a balance question, ticket 1's,
+     flagged in the report and in DEVLOG.
+  6. **What did not change.** Belt speed, `BELT_TICKS_PER_TILE` and the
+     four-frame surface animation, item scale, the corner arc, the save
+     schema (positions are saved, not gaps), the wire.
 - 2026-09-12: **Music and a full set of sound effects.** Requested
   directly ("add some nice music and sound effect"). It reverses one half
   of the 2026-09-11 audio decision — "no music" — and keeps the other
