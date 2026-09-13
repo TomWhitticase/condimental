@@ -203,7 +203,11 @@ single-threaded pass after all parallel passes complete.
 
 **Fixed-point, not floats, for all shared, persisted or replayable
 simulation state** (positions, counts, volumes, power, progress). The `Fx`
-type is `fixed`'s `I16F16`. Bit-identical floats across x86_64 and ARM64 is
+type is `fixed`'s `I16F16`; **money is `Money`, `fixed`'s `I48F16`** (the
+quality pass, 2026-09-13: the same 16 fractional bits, 48 integer bits —
+`I16F16`'s ceiling of about 32 767 was reachable in minutes by a five-line
+board, and at the ceiling a payout panics in a debug build and wraps to a
+negative balance in release; a payout is a saturating add on top). Bit-identical floats across x86_64 and ARM64 is
 an unsolved problem; fixed-point is one integer type threaded from the
 start. Floats are fine for Godot-side presentation values that never feed
 back into the sim.
@@ -249,7 +253,10 @@ nothing), `staff_snapshot_json` (the staff pools MVP, 2026-09-12: per
 category headcount, the last tick's `demand`/`assigned`/`short`, the payday
 clock and bill, polled for the same reason; `hire`/`fire` are commands,
 `stall` gained a `staff` kind, machine and dock tile snapshots and shop
-entries carry `crew`, the dock snapshot `understaffed`), `production_snapshot_json`
+entries carry `crew`, the dock snapshot `understaffed`; the quality pass,
+2026-09-13, added `next_bill`, `shortfall`, `unpaid_last_payday` and per
+category `owed`/`unpaid`/`left_last_payday`/`can_hire`, so a panel can warn
+before a payday and announce after it), `production_snapshot_json`
 (the production-stats epic, 2026-09-13: per item and fluid, what recipes
 MADE and USED over the sim's rolling windows and for all time, plus what
 a paying contract took from the pool — the P screen's wire, polled for

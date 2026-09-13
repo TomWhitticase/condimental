@@ -26,7 +26,7 @@
 //! §7).
 
 use sim_core::sim::machines::MachineRegistry;
-use sim_core::sim::types::{Fx, TileCoord};
+use sim_core::sim::types::{Money, TileCoord};
 use sim_core::sim::{
     ContractRegistry, Direction, HOPPER_CAPACITY, PlayerCommand, RecipeRegistry, SPLITTER_KIND,
     Side, TileSnapshot, World, command_from_json,
@@ -61,7 +61,7 @@ fn funded() -> World {
         one_stage(),
         MachineRegistry::bundled(),
         ContractRegistry::bundled(),
-        Fx::from_num(20_000),
+        Money::from_num(20_000),
     )
 }
 

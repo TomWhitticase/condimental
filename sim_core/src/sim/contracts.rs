@@ -36,7 +36,7 @@
 use serde::Deserialize;
 
 use super::recipe::RecipeRegistry;
-use super::types::{Fx, ItemId};
+use super::types::{Money, ItemId};
 
 /// The schema version this build of sim_core understands. Bump this and
 /// reject/migrate on mismatch (ARCHITECTURE.md §4) whenever [`Contract`]'s
@@ -81,12 +81,12 @@ pub struct Contract {
     pub cadence_ticks: u64,
     /// Payout per satisfied delivery, fixed-point (§3.9 — money is shared,
     /// persisted simulation state, so never a float).
-    pub payout: Fx,
+    pub payout: Money,
     /// What signing it costs — debited from the one money counter by
     /// `PlayerCommand::SignContract`, and again every time it is signed
     /// after being lost. Never zero (the loader refuses it): a contract
     /// that is free to recover cannot be lost in any sense that matters.
-    pub price: Fx,
+    pub price: Money,
     /// How many windows may be missed **in a row** before the contract is
     /// lost. `1` means a single miss loses it. A paid window resets the
     /// count. Never zero (the loader refuses it): a contract that can never
@@ -99,7 +99,7 @@ pub struct Contract {
 }
 
 /// The on-disk shape. Separate from [`Contract`] for one reason: `payout`
-/// is authored as a whole number of money units and converted to [`Fx`]
+/// is authored as a whole number of money units and converted to [`Money`]
 /// once, here, at load time — so no float ever reaches simulation state
 /// (ARCHITECTURE.md §3.9) and no data file has to know what fixed-point is.
 /// When fractional prices are eventually needed, this field changes shape
@@ -335,8 +335,8 @@ impl ContractRegistry {
                 name: def.name,
                 mix: def.mix,
                 cadence_ticks: def.cadence_ticks,
-                payout: Fx::from_num(def.payout),
-                price: Fx::from_num(def.price),
+                payout: Money::from_num(def.payout),
+                price: Money::from_num(def.price),
                 strikes: def.strikes,
                 starter: def.starter,
             });
@@ -469,8 +469,8 @@ mod tests {
         let big = registry.get("big").expect("looked up by id");
         assert_eq!(big.name, "Big Order");
         assert_eq!(big.cadence_ticks, 2500);
-        assert_eq!(big.payout, Fx::from_num(90));
-        assert_eq!(big.price, Fx::from_num(150));
+        assert_eq!(big.payout, Money::from_num(90));
+        assert_eq!(big.price, Money::from_num(150));
         assert_eq!(big.strikes, 2);
         assert!(!big.starter, "`starter` defaults to false when the line is absent");
         assert!(registry.get("small").unwrap().starter);

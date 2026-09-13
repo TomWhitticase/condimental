@@ -28,7 +28,7 @@
 //! §7).
 
 use sim_core::sim::machines::MachineRegistry;
-use sim_core::sim::types::Fx;
+use sim_core::sim::types::Money;
 use sim_core::sim::{
     ContractRegistry, Direction, HOPPER_CAPACITY, PlayerCommand, RecipeRegistry, TileSnapshot,
     World, command_from_json,
@@ -73,7 +73,7 @@ fn funded(recipes: RecipeRegistry) -> World {
         recipes,
         MachineRegistry::bundled(),
         ContractRegistry::bundled(),
-        Fx::from_num(20_000),
+        Money::from_num(20_000),
     );
     for item in ["tomato", "sugar", "vinegar"] {
         world.issue_command(PlayerCommand::BuyIngredient {
@@ -371,7 +371,7 @@ fn rotating_into_a_collision_is_refused_where_the_unrotated_footprint_fits() {
         one_stage(),
         oblong_kinds(),
         ContractRegistry::bundled(),
-        Fx::from_num(20_000),
+        Money::from_num(20_000),
     );
     build(&mut world, "crusher", (0, 0), Direction::East);
     // The crusher covers (0,0), (1,0), (2,0). Nothing is north of it yet, so
@@ -634,7 +634,7 @@ fn a_belt_pointing_at_the_wrong_face_feeds_nothing() {
         one_stage(),
         oblong_kinds(),
         ContractRegistry::bundled(),
-        Fx::from_num(20_000),
+        Money::from_num(20_000),
     );
     world.issue_command(PlayerCommand::BuyIngredient {
         item: "tomato".to_string(),

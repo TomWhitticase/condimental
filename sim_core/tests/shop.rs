@@ -30,7 +30,7 @@
 
 mod common;
 
-use sim_core::sim::types::Fx;
+use sim_core::sim::types::Money;
 use sim_core::sim::{
     MachineRegistry, PlayerCommand, RecipeRegistry, ShopCatalog, World,
     command_from_json, reference_chain, reference_chain_with_budget,
@@ -48,7 +48,7 @@ fn world() -> World {
 /// The unit price of a kind, straight from the shipped catalog — so this
 /// file asserts against `data/shop.ron`'s own numbers rather than hardcoding
 /// prices a balancing pass is expected to change.
-fn price_of(kind: &str) -> Fx {
+fn price_of(kind: &str) -> Money {
     ShopCatalog::bundled()
         .get(kind)
         .unwrap_or_else(|| panic!("data/shop.ron must price '{kind}'"))
@@ -99,25 +99,25 @@ fn world_with_earned_money() -> World {
     // the balance with that reserve taken out and the wages paid put back.
     assert_eq!(
         world.money(),
-        Fx::from_num(common::WAGE_RESERVE),
+        Money::from_num(common::WAGE_RESERVE),
         "the fixture must start with nothing but its wage reserve, or 'earned money' \
          would not mean earned"
     );
     let earned = |world: &World| {
-        world.money() + common::wages_paid(world) - Fx::from_num(common::WAGE_RESERVE)
+        world.money() + common::wages_paid(world) - Money::from_num(common::WAGE_RESERVE)
     };
     const MIN_MONEY: i64 = 50;
 
     for _ in 0..2_000_000u32 {
         common::supply(&mut world);
         world.tick();
-        if earned(&world) >= Fx::from_num(MIN_MONEY) {
+        if earned(&world) >= Money::from_num(MIN_MONEY) {
             break;
         }
     }
 
     assert!(
-        earned(&world) >= Fx::from_num(MIN_MONEY),
+        earned(&world) >= Money::from_num(MIN_MONEY),
         "the chain must earn at least {MIN_MONEY} money before this test can spend it \
          (got {})",
         world.money()
@@ -146,7 +146,7 @@ fn contract_earnings_buy_equipment_and_the_owned_count_goes_up() {
 
     assert_eq!(
         world.money(),
-        before - price * Fx::from_num(2),
+        before - price * Money::from_num(2),
         "money must fall by exactly quantity * unit price"
     );
     assert_eq!(world.owned_count("belt"), 2);
@@ -175,7 +175,7 @@ fn repeated_purchases_of_several_kinds_accumulate_independently() {
     assert_eq!(world.owned_count("crusher"), 0, "unbought kinds stay at 0");
     assert_eq!(
         world.money(),
-        before - price_of("belt") * Fx::from_num(4) - price_of("pipe") * Fx::from_num(2),
+        before - price_of("belt") * Money::from_num(4) - price_of("pipe") * Money::from_num(2),
         "every purchase debits the same single money counter"
     );
 }
@@ -187,14 +187,14 @@ fn an_unaffordable_purchase_changes_neither_money_nor_inventory() {
     // A reference-chain world has spent its whole bill, and the cooking vat
     // is the most expensive kind in the catalog, so this can never succeed.
     let mut world = world();
-    assert_eq!(world.money(), Fx::ZERO);
+    assert_eq!(world.money(), Money::ZERO);
 
     world.issue_command(PlayerCommand::Purchase {
         kind: "cooking_vat".to_string(),
         quantity: 1,
     });
 
-    assert_eq!(world.money(), Fx::ZERO, "no money may be spent");
+    assert_eq!(world.money(), Money::ZERO, "no money may be spent");
     assert_eq!(world.owned_count("cooking_vat"), 0, "nothing may be owned");
 }
 
@@ -433,7 +433,7 @@ fn a_fresh_world_is_empty_and_holds_only_starting_money() {
     assert!(world.all_chunks().is_empty());
     assert_eq!(
         world.money(),
-        Fx::from_num(sim_core::sim::STARTING_MONEY),
+        Money::from_num(sim_core::sim::STARTING_MONEY),
         "and with exactly the documented starting balance"
     );
     let snapshot = world.shop_snapshot();
@@ -472,7 +472,7 @@ fn a_fresh_world_is_empty_and_holds_only_starting_money() {
 /// wrong once.
 #[test]
 fn starting_money_covers_the_reference_chain_with_room_to_spare() {
-    let starting = Fx::from_num(sim_core::sim::STARTING_MONEY);
+    let starting = Money::from_num(sim_core::sim::STARTING_MONEY);
 
     // The bill, summed off the shipped catalog rather than restated: one
     // placement is one purchased unit (a belt tile, a pipe tile, a machine,
@@ -481,7 +481,7 @@ fn starting_money_covers_the_reference_chain_with_room_to_spare() {
     let bill = world()
         .world_layout()
         .iter()
-        .fold(Fx::ZERO, |acc, p| acc + price_of(&p.kind));
+        .fold(Money::ZERO, |acc, p| acc + price_of(&p.kind));
 
     assert!(
         starting > bill,
@@ -489,7 +489,7 @@ fn starting_money_covers_the_reference_chain_with_room_to_spare() {
          against a {bill} bill"
     );
     assert!(
-        starting > bill * Fx::from_num(2.5),
+        starting > bill * Money::from_num(2.5),
         "and with real room left over, not just barely: {starting} against a {bill} bill"
     );
 }

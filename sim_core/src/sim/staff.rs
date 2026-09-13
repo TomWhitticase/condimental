@@ -51,14 +51,14 @@
 //! a cliff. A zero-wage head is never unpaid and never leaves.
 //!
 //! Integers throughout except the money itself, which is the economy's
-//! `Fx` (ARCHITECTURE.md §3.9). Pools are a `Vec` in file order — the panel
+//! `Money` (ARCHITECTURE.md §3.9). Pools are a `Vec` in file order — the panel
 //! order and the payday order — never a hash map.
 
 use serde::{Deserialize, Serialize};
 
 use super::economy::Economy;
 use super::machines::MachineRegistry;
-use super::types::Fx;
+use super::types::Money;
 
 /// The `schema_version` this build reads. Content changes never bump it.
 const CURRENT_SCHEMA_VERSION: u32 = 1;
@@ -497,8 +497,8 @@ impl StaffPools {
     /// How far `money` falls short of [`next_bill`](Self::next_bill), in
     /// whole units rounded up; zero when the bill is covered. The number
     /// the panel warns with BEFORE a payday.
-    pub fn shortfall(&self, money: Fx) -> u32 {
-        let bill = Fx::saturating_from_num(self.next_bill());
+    pub fn shortfall(&self, money: Money) -> u32 {
+        let bill = Money::saturating_from_num(self.next_bill());
         if money >= bill {
             0
         } else {
@@ -509,11 +509,11 @@ impl StaffPools {
     /// Whether `hire(category)` would be accepted with `money` in hand:
     /// the category is known and the balance covers the next bill plus
     /// the new head's wage. You cannot hire someone you could not pay.
-    pub fn can_hire(&self, category: &str, money: Fx) -> bool {
+    pub fn can_hire(&self, category: &str, money: Money) -> bool {
         let Some(c) = self.catalog.get(category) else {
             return false;
         };
-        let needed = Fx::saturating_from_num(self.next_bill().saturating_add(c.wage));
+        let needed = Money::saturating_from_num(self.next_bill().saturating_add(c.wage));
         money >= needed
     }
 
@@ -571,7 +571,7 @@ impl StaffPools {
     /// `headcount`). Refused — `false`, nothing changed — for an unknown
     /// category or when [`can_hire`](Self::can_hire) says the balance
     /// could not pay it. A new head is at work from the next tick.
-    pub fn hire(&mut self, category: &str, money: Fx) -> bool {
+    pub fn hire(&mut self, category: &str, money: Money) -> bool {
         if !self.can_hire(category, money) {
             return false;
         }
@@ -635,7 +635,7 @@ impl StaffPools {
                 pool.owed = pool.headcount;
                 continue;
             }
-            let wage = Fx::from_num(category.wage);
+            let wage = Money::from_num(category.wage);
             let mut paid_heads = 0u32;
             for _ in 0..pool.owed {
                 if !refused && economy.try_spend(wage) {
@@ -674,7 +674,7 @@ impl StaffPools {
     }
 
     /// The wire's view — see [`StaffSnapshot`].
-    pub fn snapshot(&self, money: Fx) -> StaffSnapshot {
+    pub fn snapshot(&self, money: Money) -> StaffSnapshot {
         StaffSnapshot {
             pay_period_ticks: self.catalog.pay_period_ticks,
             next_payday_tick: self.next_payday_tick,
@@ -879,7 +879,7 @@ mod tests {
     fn economy_with(money: u32) -> Economy {
         Economy::with_money(
             &crate::sim::contracts::ContractRegistry::bundled(),
-            Fx::from_num(money),
+            Money::from_num(money),
         )
     }
 
@@ -1029,7 +1029,7 @@ mod tests {
     #[test]
     fn hire_and_fire_move_one_head_and_refuse_the_impossible() {
         let mut pools = StaffPools::new(catalog());
-        let rich = Fx::from_num(1000);
+        let rich = Money::from_num(1000);
         assert!(pools.hire("cooks", rich));
         assert_eq!(pools.headcount("cooks"), 3);
         assert!(!pools.hire("plumbers", rich));
@@ -1047,29 +1047,29 @@ mod tests {
         let mut pools = StaffPools::new(catalog());
         // Bill 11; a cook is 3 more: 14 is the line.
         assert_eq!(pools.next_bill(), 11);
-        assert!(!pools.can_hire("cooks", Fx::from_num(13)));
-        assert!(!pools.hire("cooks", Fx::from_num(13)));
+        assert!(!pools.can_hire("cooks", Money::from_num(13)));
+        assert!(!pools.hire("cooks", Money::from_num(13)));
         assert_eq!(
             pools.headcount("cooks"),
             2,
             "a refused hire changes nothing"
         );
-        assert!(pools.can_hire("cooks", Fx::from_num(14)));
-        assert!(pools.hire("cooks", Fx::from_num(14)));
+        assert!(pools.can_hire("cooks", Money::from_num(14)));
+        assert!(pools.hire("cooks", Money::from_num(14)));
         assert_eq!(pools.next_bill(), 14);
         // A volunteer costs nothing extra, but the bill itself must still
         // be covered.
-        assert!(!pools.can_hire("volunteers", Fx::from_num(13)));
-        assert!(pools.can_hire("volunteers", Fx::from_num(14)));
-        assert!(!pools.can_hire("plumbers", Fx::from_num(1_000)));
-        assert_eq!(pools.shortfall(Fx::from_num(14)), 0);
-        assert_eq!(pools.shortfall(Fx::from_num(13)), 1);
+        assert!(!pools.can_hire("volunteers", Money::from_num(13)));
+        assert!(pools.can_hire("volunteers", Money::from_num(14)));
+        assert!(!pools.can_hire("plumbers", Money::from_num(1_000)));
+        assert_eq!(pools.shortfall(Money::from_num(14)), 0);
+        assert_eq!(pools.shortfall(Money::from_num(13)), 1);
         assert_eq!(
-            pools.shortfall(Fx::from_num(12.5)),
+            pools.shortfall(Money::from_num(12.5)),
             2,
             "a part unit short is a whole unit short"
         );
-        assert_eq!(pools.shortfall(Fx::ZERO), 14);
+        assert_eq!(pools.shortfall(Money::ZERO), 14);
     }
 
     /// Notice pay: a head is owed for any period it was employed in any
@@ -1087,7 +1087,7 @@ mod tests {
         assert_eq!(pools.pool("cooks").unwrap().owed, 2);
         let report = pools.tick(100, &mut economy).unwrap();
         assert_eq!(report.paid, 11, "the bill is unchanged by the firing");
-        assert_eq!(economy.money, Fx::from_num(89));
+        assert_eq!(economy.money, Money::from_num(89));
         assert_eq!((report.unpaid, report.left), (0, 0));
         assert_eq!(
             pools.next_bill(),
@@ -1100,7 +1100,7 @@ mod tests {
         assert_eq!(pools.next_bill(), 5);
         let report = pools.tick(200, &mut economy).unwrap();
         assert_eq!(report.paid, 5);
-        assert_eq!(economy.money, Fx::from_num(84));
+        assert_eq!(economy.money, Money::from_num(84));
     }
 
     /// Notice pay is paid FIRST, so a broke factory cannot dodge it by
@@ -1126,7 +1126,7 @@ mod tests {
         let mut pools = StaffPools::new(catalog());
         let mut economy = economy_with(100);
         assert_eq!(pools.tick(99, &mut economy), None);
-        assert_eq!(economy.money, Fx::from_num(100));
+        assert_eq!(economy.money, Money::from_num(100));
         let report = pools.tick(100, &mut economy).expect("payday at 100");
         assert_eq!(
             report,
@@ -1136,14 +1136,14 @@ mod tests {
                 left: 0,
             }
         );
-        assert_eq!(economy.money, Fx::from_num(89));
+        assert_eq!(economy.money, Money::from_num(89));
         assert_eq!(pools.last_bill(), 11);
         assert_eq!(pools.unpaid_last_payday(), 0);
         assert_eq!(pools.walked_out_last_payday(), 0);
         assert_eq!(pools.next_payday_tick(), 200);
         assert_eq!(pools.tick(101, &mut economy), None);
         assert!(pools.tick(200, &mut economy).is_some());
-        assert_eq!(economy.money, Fx::from_num(78));
+        assert_eq!(economy.money, Money::from_num(78));
     }
 
     /// The first unpaid head and every wage-earner after it are UNPAID,
@@ -1172,7 +1172,7 @@ mod tests {
         assert_eq!(pools.pool("drivers").unwrap().unpaid, 1);
         assert_eq!(pools.pool("volunteers").unwrap().unpaid, 0);
         assert_eq!(pools.unpaid(), 2);
-        assert_eq!(economy.money, Fx::from_num(1));
+        assert_eq!(economy.money, Money::from_num(1));
         assert_eq!(pools.unpaid_last_payday(), 2);
         assert_eq!(pools.walked_out_last_payday(), 0);
         assert_eq!(pools.last_bill(), 3);
@@ -1196,7 +1196,7 @@ mod tests {
         // the cook the money did reach stays. Back pay is settled first,
         // so the 3 pays the cook who was in arrears — the OTHER cook is
         // now the unpaid one, and nobody has been unpaid twice.
-        economy.money = Fx::from_num(3);
+        economy.money = Money::from_num(3);
         let report = pools.tick(200, &mut economy).unwrap();
         assert_eq!(report.paid, 3);
         assert_eq!(report.unpaid, 2, "the other cook and the driver");
@@ -1217,7 +1217,7 @@ mod tests {
         assert_eq!(pools.pool("drivers").unwrap().left_last_payday, 0);
 
         // Paid in full at the fourth: the arrears clear and everyone works.
-        economy.money = Fx::from_num(100);
+        economy.money = Money::from_num(100);
         let report = pools.tick(400, &mut economy).unwrap();
         assert_eq!((report.paid, report.unpaid, report.left), (3, 0, 0));
         assert_eq!(pools.unpaid(), 0);
@@ -1262,7 +1262,7 @@ mod tests {
         pools.reset();
         pools.claim(&crew(&[("cooks", 2), ("drivers", 1)])).unwrap();
         pools.claim(&crew(&[("cooks", 1)])).unwrap_err();
-        let snap = pools.snapshot(Fx::from_num(42));
+        let snap = pools.snapshot(Money::from_num(42));
         assert_eq!(snap.money, 42.0);
         assert_eq!(snap.pay_period_ticks, 100);
         assert_eq!(snap.next_payday_tick, 100);
@@ -1286,7 +1286,7 @@ mod tests {
             (2, 0, 0)
         );
         assert!(cooks.can_hire, "42 covers 11 + 3");
-        let poor = pools.snapshot(Fx::from_num(10));
+        let poor = pools.snapshot(Money::from_num(10));
         assert_eq!(poor.shortfall, 1);
         assert!(!poor.categories[0].can_hire);
         let json = serde_json::to_value(&snap).unwrap();

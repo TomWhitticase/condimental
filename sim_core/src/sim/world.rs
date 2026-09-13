@@ -182,7 +182,7 @@ use super::shop::{DEFAULT_PURCHASE_QUANTITY, Shop, ShopSnapshot};
 use super::splitter::{SPLITTER_KIND, Side, Splitter};
 use super::staff::{CrewEntry, CrewRequest, StaffPools, StaffSnapshot, crew_entries};
 use super::stats::{ProductionLedger, ProductionSnapshot, StatKind};
-use super::types::{ChunkId, Direction, FluidId, Fx, ItemId, RecipeId, TileCoord, chunk_of};
+use super::types::{ChunkId, Direction, FluidId, Fx, ItemId, Money, RecipeId, TileCoord, chunk_of};
 
 /// The buildable-kind id (`data/shop.ron`) of one tile of conveyor.
 ///
@@ -1615,7 +1615,7 @@ impl World {
         machines: MachineRegistry,
         contracts: ContractRegistry,
     ) -> Self {
-        Self::with_content_and_money(recipes, machines, contracts, Fx::from_num(STARTING_MONEY))
+        Self::with_content_and_money(recipes, machines, contracts, Money::from_num(STARTING_MONEY))
     }
 
     /// [`World::with_content`], but starting from a chosen balance instead
@@ -1631,7 +1631,7 @@ impl World {
         recipes: RecipeRegistry,
         machines: MachineRegistry,
         contracts: ContractRegistry,
-        money: Fx,
+        money: Money,
     ) -> Self {
         let ordered = recipes.ordered();
         assert!(
@@ -1701,7 +1701,7 @@ impl World {
 
     /// Current money balance (ARCHITECTURE.md §3.9: fixed-point, never a
     /// float, since it's shared/persisted simulation state).
-    pub fn money(&self) -> Fx {
+    pub fn money(&self) -> Money {
         self.economy.money
     }
 
@@ -3954,7 +3954,7 @@ impl World {
     /// has to do so twice: once to fund each rebuild purchase, and once at
     /// the end to install the saved balance, so those purchases cannot leak
     /// into it.
-    pub(super) fn restore_money(&mut self, money: Fx) {
+    pub(super) fn restore_money(&mut self, money: Money) {
         self.economy.money = money;
     }
 

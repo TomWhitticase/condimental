@@ -41,7 +41,7 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 
 use super::staff::CrewEntry;
-use super::types::Fx;
+use super::types::Money;
 
 /// The schema version this build of sim_core understands. Bump this and
 /// reject/migrate on mismatch (ARCHITECTURE.md §4) whenever [`ShopEntry`]'s
@@ -62,7 +62,7 @@ pub const DEFAULT_PURCHASE_QUANTITY: u32 = 1;
 
 /// One purchasable kind and its price.
 ///
-/// `price` is a plain integer, not an `Fx`, for the reason
+/// `price` is a plain integer, not an `Money`, for the reason
 /// [`super::recipe::Recipe::fluid_inputs`] gives for its own quantities:
 /// content is authored in whole units, and keeping the data file
 /// integer-only means no float ever appears on the content path at all
@@ -89,8 +89,8 @@ pub struct ShopEntry {
 impl ShopEntry {
     /// This entry's price as fixed-point money, ready to compare against
     /// [`super::economy::Economy::money`].
-    pub fn price_money(&self) -> Fx {
-        Fx::from_num(self.price)
+    pub fn price_money(&self) -> Money {
+        Money::from_num(self.price)
     }
 }
 
@@ -358,23 +358,21 @@ impl Shop {
 
     /// What `quantity` of `kind` costs, or `None` if the kind isn't priced
     /// (an unknown kind), the quantity is zero (nothing to buy), or the
-    /// total would exceed what [`Fx`] can represent.
+    /// total would exceed what [`Money`] can represent.
     ///
-    /// That last case is not paranoia: `Fx` is `I16F16`, so money saturates
-    /// somewhere around 32767, and a purchase quantity is a `u32` arriving
-    /// from JSON. Computing the total in `i64` first and refusing to
-    /// represent an out-of-range one keeps a silly quantity a plain no-op
-    /// instead of a saturated total that could look affordable.
-    pub fn cost_of(&self, kind: &str, quantity: u32) -> Option<Fx> {
+    /// That last case is not paranoia: a purchase quantity is a `u32`
+    /// arriving from JSON, and a total past what [`Money`] holds (about
+    /// 1.4 × 10¹⁴ since the quality pass widened it from `I16F16`) must be
+    /// refused rather than saturated into something that could look
+    /// affordable. Computing the total in `i64` first and asking
+    /// `checked_from_num` keeps a silly quantity a plain no-op.
+    pub fn cost_of(&self, kind: &str, quantity: u32) -> Option<Money> {
         if quantity == 0 {
             return None;
         }
         let entry = self.catalog.get(kind)?;
         let total = entry.price.checked_mul(i64::from(quantity))?;
-        if total > i64::from(Fx::MAX.int().to_num::<i32>()) {
-            return None;
-        }
-        Some(Fx::from_num(total))
+        Money::checked_from_num(total)
     }
 
     /// Builds the presentation snapshot — see [`ShopSnapshot`] for the exact
@@ -383,7 +381,7 @@ impl Shop {
     /// `crew_of` answers "what crew does this kind need" — `World` passes
     /// its machine registry's `staff` list; a kind the registry does not
     /// know (belt, pipe) answers empty.
-    pub fn snapshot(&self, money: Fx, crew_of: impl Fn(&str) -> Vec<CrewEntry>) -> ShopSnapshot {
+    pub fn snapshot(&self, money: Money, crew_of: impl Fn(&str) -> Vec<CrewEntry>) -> ShopSnapshot {
         ShopSnapshot {
             money: money.to_num::<f64>(),
             entries: self
@@ -602,9 +600,9 @@ mod tests {
     #[test]
     fn cost_of_multiplies_the_unit_price() {
         let shop = Shop::new(ShopCatalog::from_ron_str(EXAMPLE).unwrap());
-        assert_eq!(shop.cost_of("belt", 1), Some(Fx::from_num(5)));
-        assert_eq!(shop.cost_of("belt", 4), Some(Fx::from_num(20)));
-        assert_eq!(shop.cost_of("crusher", 2), Some(Fx::from_num(150)));
+        assert_eq!(shop.cost_of("belt", 1), Some(Money::from_num(5)));
+        assert_eq!(shop.cost_of("belt", 4), Some(Money::from_num(20)));
+        assert_eq!(shop.cost_of("crusher", 2), Some(Money::from_num(150)));
     }
 
     #[test]
@@ -612,16 +610,28 @@ mod tests {
         let shop = Shop::new(ShopCatalog::from_ron_str(EXAMPLE).unwrap());
         assert_eq!(shop.cost_of("fermenter", 1), None);
         assert_eq!(shop.cost_of("belt", 0), None);
-        // 5 * u32::MAX is far past what I16F16 can hold, so it is refused
-        // rather than saturated into something that might look affordable.
-        assert_eq!(shop.cost_of("belt", u32::MAX), None);
+        // 5 * u32::MAX fits `Money` (the quality pass widened it) and is
+        // simply unaffordable; 40000 * u32::MAX is past its 2^47 ceiling and
+        // is refused rather than saturated into something that might look
+        // affordable.
+        assert_eq!(
+            shop.cost_of("belt", u32::MAX),
+            Some(Money::from_num(5i64 * i64::from(u32::MAX)))
+        );
+        let dear = Shop::new(
+            ShopCatalog::from_ron_str(
+                r#"(schema_version: 1, entries: [ShopEntry(id: "fortress", price: 40000)])"#,
+            )
+            .unwrap(),
+        );
+        assert_eq!(dear.cost_of("fortress", u32::MAX), None);
     }
 
     #[test]
     fn snapshot_lists_every_entry_in_file_order_with_affordability() {
         let mut shop = Shop::new(ShopCatalog::from_ron_str(EXAMPLE).unwrap());
         shop.owned.add("belt", 2);
-        let snapshot = shop.snapshot(Fx::from_num(10), |_| Vec::new());
+        let snapshot = shop.snapshot(Money::from_num(10), |_| Vec::new());
 
         assert_eq!(snapshot.money, 10.0);
         assert_eq!(snapshot.entries.len(), 2);
@@ -641,7 +651,7 @@ mod tests {
     #[test]
     fn affordability_is_inclusive_of_exactly_enough_money() {
         let shop = Shop::new(ShopCatalog::from_ron_str(EXAMPLE).unwrap());
-        let snapshot = shop.snapshot(Fx::from_num(75), |_| Vec::new());
+        let snapshot = shop.snapshot(Money::from_num(75), |_| Vec::new());
         let crusher = snapshot
             .entries
             .iter()

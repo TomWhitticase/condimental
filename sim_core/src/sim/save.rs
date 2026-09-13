@@ -79,10 +79,12 @@
 //! purchase costs real money, so the loading world is funded one item at a
 //! time and the **saved** balance is installed at the very end — the
 //! rebuild's spending can therefore never leak into what the player has.
-//! Funding per item rather than pricing the whole bill up front also keeps
-//! an arbitrarily large factory loadable: `Fx` saturates around 32 767, so a
-//! single up-front bill for a few thousand belt tiles would not fit in the
-//! money counter even though every individual price does.
+//! Funding per item rather than pricing the whole bill up front also kept
+//! an arbitrarily large factory loadable while money was `Fx` (which
+//! saturates around 32 767, so a single up-front bill for a few thousand
+//! belt tiles would not have fit); money is [`Money`] now, 2^47 wide, and
+//! the per-item funding stays because it is still the simplest correct
+//! way to keep the rebuild's spending out of the saved balance.
 //!
 //! # What is deliberately not in the file
 //!
@@ -120,7 +122,7 @@ use super::recipe::RecipeRegistry;
 use super::splitter::{SPLITTER_KIND, Side, Splitter};
 use super::staff::{StaffPools, StaffRestore, StaffRestoreError};
 use super::stats::{ItemStats, ProductionLedger, STAT_BUCKETS, STAT_WINDOW_COUNT, StatKind};
-use super::types::{Direction, Fx, ItemId, TileCoord};
+use super::types::{Direction, Fx, ItemId, Money, TileCoord};
 use super::world::{BELT_KIND, PIPE_KIND, PlayerCommand, World};
 
 /// The save format's version. Bumped whenever the shape below changes;
@@ -148,6 +150,26 @@ impl FxBits {
     }
 }
 
+/// The balance as its raw [`Money`] (`I48F16`) bits — [`FxBits`]'s rule for
+/// the one value wider than `Fx` (the quality pass, 2026-09-13). `Money`
+/// has the same 16 fractional bits, so a save written when money was `Fx`
+/// (an `i32`, which RON prints as the same plain integer) reads back as the
+/// same balance; and `test_layouts.gd`'s `fund` patch, which writes
+/// `amount * 65536`, is still exactly right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct MoneyBits(pub i64);
+
+impl MoneyBits {
+    pub fn of(value: Money) -> Self {
+        Self(value.to_bits())
+    }
+
+    pub fn value(self) -> Money {
+        Money::from_bits(self.0)
+    }
+}
+
 /// One whole saved world. See the module doc for what is here and what is
 /// deliberately derived instead.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,7 +178,7 @@ pub struct SaveData {
     /// The absolute tick the world was saved on — every
     /// [`TimedProcess::start_tick`] below is measured against it.
     pub tick_count: u64,
-    pub money_bits: FxBits,
+    pub money_bits: MoneyBits,
     /// Everything on the floor, in tile order (the world's own placement
     /// order), so two saves of one world are byte-identical.
     pub placements: Vec<SavedPlacement>,
@@ -757,7 +779,7 @@ impl World {
         SaveData {
             schema_version: SAVE_SCHEMA_VERSION,
             tick_count: self.current_tick(),
-            money_bits: FxBits::of(self.money()),
+            money_bits: MoneyBits::of(self.money()),
             placements,
             owned_equipment: self
                 .shop()
@@ -867,7 +889,7 @@ impl World {
         // An empty world first, so every validation below can be asked of
         // the real content registries rather than of a second copy of the
         // rules. Its starting money is irrelevant and is overwritten.
-        let mut world = World::with_content_and_money(recipes, machines, contracts, Fx::ZERO);
+        let mut world = World::with_content_and_money(recipes, machines, contracts, Money::ZERO);
 
         validate(&world, &data)?;
         rebuild_structure(&mut world, &data)?;
@@ -1105,7 +1127,7 @@ fn check_item(
 
 /// Half one of a load: buy and place every saved thing through the real
 /// commands (module doc). Funded one item at a time, so an arbitrarily large
-/// factory loads even though its total bill would not fit in `Fx`.
+/// factory loads whatever its total bill (which once had to fit in `Fx`).
 fn rebuild_structure(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
     for (index, placement) in data.placements.iter().enumerate() {
         let price = world
@@ -1753,8 +1775,8 @@ mod tests {
             .board()
             .ordered()
             .iter()
-            .fold(Fx::from_num(0), |sum, c| sum + c.price);
-        world.restore_money(signing_bill + Fx::from_num(100));
+            .fold(Money::from_num(0), |sum, c| sum + c.price);
+        world.restore_money(signing_bill + Money::from_num(100));
         for id in ids.iter().rev() {
             let _ = world.economy_mut().try_sign(id, 0);
         }

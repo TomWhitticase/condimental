@@ -12,7 +12,7 @@ mod common;
 
 use sim_core::sim::types::Direction;
 use sim_core::sim::{
-    ContractRegistry, Fx, LOAD_BUCKET_TICKS, LOAD_WINDOW_TICKS, MachineRegistry, PlayerCommand, RecipeRegistry,
+    ContractRegistry, Money, LOAD_BUCKET_TICKS, LOAD_WINDOW_TICKS, MachineRegistry, PlayerCommand, RecipeRegistry,
     StallKind, TileSnapshot, WorkState, World, reference_chain_with_budget,
 };
 
@@ -281,7 +281,7 @@ fn a_machine_placed_and_never_fed_reads_starved_for_its_first_input() {
         recipes(),
         MachineRegistry::bundled(),
         ContractRegistry::bundled(),
-        Fx::from_num(5_000),
+        Money::from_num(5_000),
     );
     world.issue_command(PlayerCommand::Purchase {
         kind: "crusher".to_string(),
@@ -325,7 +325,7 @@ fn an_unplumbed_machine_names_the_missing_pipe() {
         recipes(),
         MachineRegistry::bundled(),
         ContractRegistry::bundled(),
-        Fx::from_num(5_000),
+        Money::from_num(5_000),
     );
     for kind in ["bottler", "cooking_vat"] {
         world.issue_command(PlayerCommand::Purchase {
@@ -371,7 +371,7 @@ fn a_changing_load_dirties_nothing() {
         recipes(),
         MachineRegistry::bundled(),
         ContractRegistry::bundled(),
-        Fx::from_num(5_000),
+        Money::from_num(5_000),
     );
     world.issue_command(PlayerCommand::Purchase {
         kind: "crusher".to_string(),

@@ -62,7 +62,7 @@ pub use stats::{
     ItemStats, ItemStatsSnapshot, ProductionLedger, ProductionSnapshot, STAT_BUCKETS,
     STAT_WINDOW_COUNT, STAT_WINDOWS, StatKind, StatWindow, WindowSnapshot,
 };
-pub use types::{Direction, Fx, decode_chunk_id, encode_chunk_id};
+pub use types::{Direction, Fx, Money, decode_chunk_id, encode_chunk_id};
 pub use world::{
     BELT_KIND, BeltSnapshot, ChunkSnapshot, ConveyorLinks, DockSnapshot, FluidSnapshot,
     FluidTankSnapshot, FluidTapSnapshot, HopperSnapshot, LinkInput, LinkKind, LinkOutput, Links,

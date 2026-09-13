@@ -20,8 +20,8 @@
 
 mod common;
 
-use sim_core::sim::save::{FxBits, SavedStaff};
-use sim_core::sim::types::Fx;
+use sim_core::sim::save::{MoneyBits, SavedStaff};
+use sim_core::sim::types::Money;
 use sim_core::sim::{
     ContractRegistry, MachineRegistry, PlayerCommand, RecipeRegistry, STARTING_MONEY, StaffCatalog,
     StaffLoadError, StaffPools, StallKind, TileSnapshot, WorkState, World, command_from_json,
@@ -466,10 +466,10 @@ fn payday_debits_the_whole_bill_on_the_boundary_and_every_period_after() {
     let mut world = World::new(recipes());
     let pools = world.staff();
     let period = pools.catalog().pay_period_ticks();
-    let bill = Fx::from_num(pools.bill_per_period());
-    assert!(bill > Fx::ZERO);
+    let bill = Money::from_num(pools.bill_per_period());
+    assert!(bill > Money::ZERO);
     assert_eq!(pools.next_payday_tick(), period);
-    let start = Fx::from_num(STARTING_MONEY);
+    let start = Money::from_num(STARTING_MONEY);
 
     while world.current_tick() < period - 1 {
         world.tick();
@@ -510,7 +510,7 @@ fn empty_world_with_money(money: u32) -> World {
         recipes(),
         MachineRegistry::bundled(),
         ContractRegistry::bundled(),
-        Fx::from_num(money),
+        Money::from_num(money),
     )
 }
 
@@ -519,7 +519,7 @@ fn empty_world_with_money(money: u32) -> World {
 /// earn it — and proves the pools came back identical on the way.
 fn with_money(world: &World, money: u32) -> World {
     let mut save = world.to_save();
-    save.money_bits = FxBits::of(Fx::from_num(money));
+    save.money_bits = MoneyBits::of(Money::from_num(money));
     let loaded = World::from_save_ron(&save.to_ron(), recipes()).expect("the save must load");
     let mut expected = world.staff_snapshot();
     let mut actual = loaded.staff_snapshot();
@@ -583,7 +583,7 @@ fn a_factory_that_cannot_pay_is_warned_then_idled_and_loses_its_crew_only_at_the
     }
     assert_eq!(
         world.money(),
-        Fx::from_num(1),
+        Money::from_num(1),
         "two wages paid, then nothing more"
     );
     for c in catalog.categories() {
@@ -626,7 +626,7 @@ fn a_factory_that_cannot_pay_is_warned_then_idled_and_loses_its_crew_only_at_the
     assert!(!world.staff_snapshot().categories[3].can_hire);
     hire(&mut world, "logistics");
     assert_eq!(headcount(&world, "logistics"), 1);
-    assert_eq!(world.money(), Fx::from_num(1));
+    assert_eq!(world.money(), Money::from_num(1));
 
     // Branch A — SECOND PAYDAY still broke: the heads in arrears leave, by
     // category, and the panel is told who; the two paid manufacturing heads
@@ -663,7 +663,7 @@ fn a_factory_that_cannot_pay_is_warned_then_idled_and_loses_its_crew_only_at_the
     }
     assert_eq!(headcount(&broke, "manufacturing"), 0);
     assert_eq!(broke.staff_snapshot().walked_out_last_payday, 2);
-    assert_eq!(broke.money(), Fx::from_num(1));
+    assert_eq!(broke.money(), Money::from_num(1));
 
     // Branch B — money arrives before the second payday: the bill is met,
     // the arrears clear, everyone is back at work and nobody left.
@@ -672,7 +672,7 @@ fn a_factory_that_cannot_pay_is_warned_then_idled_and_loses_its_crew_only_at_the
     while recovered.current_tick() < 2 * period {
         recovered.tick();
     }
-    assert_eq!(recovered.money(), Fx::from_num(100 - bill));
+    assert_eq!(recovered.money(), Money::from_num(100 - bill));
     for c in catalog.categories() {
         assert_eq!(headcount(&recovered, &c.id), c.starting_headcount);
         assert_eq!(unpaid(&recovered, &c.id), 0);
@@ -721,7 +721,7 @@ fn firing_everyone_the_tick_before_payday_leaves_the_bill_unchanged() {
     assert_eq!(world.current_tick(), period);
     assert_eq!(
         world.money(),
-        Fx::from_num(1_000 - bill),
+        Money::from_num(1_000 - bill),
         "the bill is exactly what keeping them would have cost"
     );
     let snapshot = world.staff_snapshot();
@@ -751,7 +751,7 @@ fn firing_everyone_the_tick_before_payday_leaves_the_bill_unchanged() {
     world.tick();
     assert_eq!(
         world.money(),
-        Fx::from_num(1_000 - 2 * bill - packaging_wage),
+        Money::from_num(1_000 - 2 * bill - packaging_wage),
         "two periods of wages, plus the head hired one tick before payday"
     );
 }
@@ -773,7 +773,7 @@ fn notice_pay_is_settled_before_the_heads_still_hired() {
     }
     assert_eq!(
         world.money(),
-        Fx::ZERO,
+        Money::ZERO,
         "the one wage went to the fired head"
     );
     assert_eq!(headcount(&world, "manufacturing"), 3, "nobody left");
@@ -842,7 +842,7 @@ fn hire_and_fire_round_trip_through_json_and_dirty_no_chunk() {
     let mut broke = reference_chain(recipes());
     assert_eq!(
         broke.money(),
-        Fx::ZERO,
+        Money::ZERO,
         "the plain reference chain spends its whole budget"
     );
     let before = headcount(&broke, "manufacturing");

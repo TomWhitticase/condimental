@@ -16,7 +16,7 @@
 //!    1x2). [`supply`] tops up every hopper and the tank, which is all a
 //!    running line needs.
 
-use sim_core::sim::types::Fx;
+use sim_core::sim::types::Money;
 use sim_core::sim::{FLUID_TANK_CAPACITY, HOPPER_CAPACITY, PlayerCommand, World};
 
 /// A long run's worth of every raw ingredient the shipped chain needs.
@@ -62,7 +62,7 @@ pub const WAGE_RESERVE: u32 = 4200;
 /// it asserts; a payday count is read off the payday clock, so it needs no
 /// bookkeeping of its own.
 #[allow(dead_code)]
-pub fn wages_paid(world: &World) -> Fx {
+pub fn wages_paid(world: &World) -> Money {
     let staff = world.staff();
     assert_eq!(
         (staff.walked_out_last_payday(), staff.unpaid_last_payday()),
@@ -73,7 +73,7 @@ pub fn wages_paid(world: &World) -> Fx {
     let bill = u64::from(staff.bill_per_period());
     let period = staff.catalog().pay_period_ticks();
     let paydays = staff.next_payday_tick() / period - 1;
-    Fx::from_num(bill * paydays)
+    Money::from_num(bill * paydays)
 }
 
 /// Buys `quantity` of `item`, asserting it was affordable — an unaffordable
@@ -102,7 +102,7 @@ pub fn stock_up(world: &mut World) {
     buy(world, "vinegar", VINEGAR_UNITS);
     assert_eq!(
         before - world.money(),
-        Fx::from_num(STOCK_COST),
+        Money::from_num(STOCK_COST),
         "STOCK_COST must match what data/ingredients.ron actually charges for \
          {TOMATO_UNITS} tomato + {SUGAR_UNITS} sugar + {VINEGAR_UNITS} vinegar"
     );
