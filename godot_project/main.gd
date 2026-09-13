@@ -704,6 +704,17 @@ var _machine_motion: Dictionary = {} # origin key -> {"frames": Array[Node3D], "
 ## "The machine load readout" above and `_poll_machine_load` for the record.
 var _machine_load: Dictionary = {} # origin key -> {"load": {...}, "stall": Dictionary|null, "reason": Dictionary|null, "status": String}
 var _load_polled_tick := -1 # sim tick of the last `_poll_machine_load`; -1 = never
+## --- The per-frame poll gate (the quality pass, 2026-09-13) ---
+## Every snapshot `_process` reads is a function of the simulation's state,
+## which only a tick or a command moves — `sim.revision()` counts both —
+## and of the viewport, the hotbar's selection and which modal is up, which
+## decide where and whether a panel is drawn. When none of those moved since
+## the last poll, the frame between two ticks has nothing new to read, so
+## the JSON parses are skipped (`_wire_changed`). -1 = never polled.
+var _polled_revision := -1
+var _polled_viewport := Vector2.ZERO
+var _polled_selected := -1
+var _polled_modals := -1
 ## --- Instanced tiles and carried items (pipes & conveyors overhaul, ticket 4) ---
 ## Belts, splitters and pipes are not nodes: each is one instance in a
 ## MultiMesh shared by every tile drawing the same asset, and the items
@@ -2322,6 +2333,9 @@ func _rebuild_world() -> void:
 	# on the first frame drawn reads the right status rather than nothing.
 	_poll_machine_load()
 	_refresh_buffers()
+	# Everything above was rebuilt; the next frame must read every snapshot
+	# again whatever the revision says (a new game's world starts at 0).
+	_polled_revision = -1
 
 
 ## Builds the node (or nodes) for one placement: its body at the centre of
@@ -2885,7 +2899,7 @@ func _carried_item(key: String) -> Dictionary:
 ## waiting on an event that never comes (see `SimBridge`'s own docs). The
 ## hopper and dock could be chunk-driven and are polled with them for one
 ## code path rather than two.
-func _refresh_buffers() -> void:
+func _refresh_buffers(econ: Dictionary = {}) -> void:
 	_hopper_states.clear()
 	for snapshot in _read_snapshot_array(sim.hopper_snapshots_json()):
 		var key := _tile_key(_pair_to_tile(snapshot.get("tile")))
@@ -2923,8 +2937,11 @@ func _refresh_buffers() -> void:
 	for snapshot in _read_snapshot_array(sim.dock_snapshots_json()):
 		_dock_states[_tile_key(_pair_to_tile(snapshot.get("tile")))] = snapshot
 
-	var econ = JSON.parse_string(sim.economy_snapshot_json())
-	_last_dock_stock = econ.get("delivery_stock", []) if econ is Dictionary else []
+	# The economy is parsed by the caller when it already has it (a frame's
+	# poll reads it once for the clipboard, the deck and the board).
+	if econ.is_empty():
+		econ = _read_economy()
+	_last_dock_stock = econ.get("delivery_stock", [])
 	_update_dock_stock(_last_dock_stock)
 
 
@@ -5637,10 +5654,11 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 ## says what a click will do (SIGN · price), or why it will do nothing
 ## (SIGNED — one of each; ✗ — the fee is more than the balance), with the
 ## same three never-colour-alone signals the build menu uses.
-func _update_contract_board() -> void:
+func _update_contract_board(econ: Dictionary = {}) -> void:
 	if _board_panel == null:
 		return
-	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
+	if econ.is_empty():
+		econ = _read_economy()
 	var board: Array = econ.get("board", [])
 	if not _board_rows_match(board):
 		_rebuild_board_rows(board)
@@ -9192,24 +9210,35 @@ func _notification(what: int) -> void:
 func _process(delta: float) -> void:
 	_advance_simulation(delta)
 
-	_update_contract_panel()
-	if _shop_open:
-		# Only while it's up: money the running factory earns should make a
-		# slot go from unaffordable to affordable while the player watches.
-		_update_shop_menu()
-	_update_fluid_network()
-	_refresh_buffers()
+	# The snapshot readers run only when something they read could have
+	# changed (see `_wire_changed`); the wall-clock fades they also drive run
+	# every frame regardless, in the `else` branch, so a flyout keeps fading
+	# on the frames between ticks and under the pause menu.
+	if _wire_changed():
+		# One parse of the economy for the clipboard, the dock deck and the
+		# board, which all used to parse it themselves on the same frame.
+		var econ := _read_economy()
+		_update_contract_panel(econ)
+		if _shop_open:
+			# Only while it's up: money the running factory earns should make a
+			# slot go from unaffordable to affordable while the player watches.
+			_update_shop_menu()
+		_update_fluid_network()
+		_refresh_buffers(econ)
+		_update_hotbar()
+		_update_larder()
+		if _market_open:
+			_update_ingredient_market()
+		if _board_open:
+			_update_contract_board(econ)
+		if _staff_open:
+			_update_staff_panel()
+		if _production_open:
+			_update_production_panel()
+	else:
+		_update_money_flyout()
+		_update_hotbar_flyout()
 	_update_machine_gauges()
-	_update_hotbar()
-	_update_larder()
-	if _market_open:
-		_update_ingredient_market()
-	if _board_open:
-		_update_contract_board()
-	if _staff_open:
-		_update_staff_panel()
-	if _production_open:
-		_update_production_panel()
 	_update_contract_notice()
 	# The ghost cannot be up while paused at all — build mode counts as
 	# "open", so ESC puts it down before it opens the panel — but the hover
@@ -9276,6 +9305,40 @@ func _advance_simulation(delta: float) -> void:
 	# it, and a closed panel re-reads on opening.
 	if _production_open and _production_poll_due():
 		_poll_production()
+
+
+## Whether anything a `_process` poll reads could differ from the last
+## poll: the simulation's revision (every tick and every command, refused
+## or not), the viewport's size (every panel positions against it), the
+## hotbar's selection (a key press, not a command) and which modal is open
+## (a panel opening must read on that frame, not the next tick's). Records
+## the new stamps when it says yes. A frame between two ticks with nothing
+## pressed says no, which at 60 Hz against a 30 Hz tick is every other frame.
+func _wire_changed() -> bool:
+	var revision: int = sim.revision()
+	var vp := get_viewport()
+	var viewport := vp.get_visible_rect().size if vp != null else Vector2.ZERO
+	var selected := _hotbar_selected_index()
+	var modals := (
+		(1 if _shop_open else 0) | (2 if _market_open else 0) | (4 if _board_open else 0)
+		| (8 if _staff_open else 0) | (16 if _production_open else 0)
+		| (32 if _pause_open else 0) | (64 if _config_open else 0)
+	)
+	if revision == _polled_revision and viewport == _polled_viewport \
+			and selected == _polled_selected and modals == _polled_modals:
+		return false
+	_polled_revision = revision
+	_polled_viewport = viewport
+	_polled_selected = selected
+	_polled_modals = modals
+	return true
+
+
+## `economy_snapshot_json`, parsed once for everything on a frame that
+## reads it; `{}` if the wire returned nothing parseable.
+func _read_economy() -> Dictionary:
+	var parsed = JSON.parse_string(sim.economy_snapshot_json())
+	return parsed if parsed is Dictionary else {}
 
 
 ## Real seconds since the last autosave, and the write when it comes due.
@@ -9540,10 +9603,21 @@ func _unhandled_input(event: InputEvent) -> void:
 	# in the first place.
 
 
+## Re-reads every chunk the simulation reports dirty. It reads the chunk's
+## DELTA — only the belts and splitters whose contents moved and the
+## machines whose state changed, and the whole chunk after a place, remove,
+## rotate or load (`sim::World::chunk_delta`) — not the full snapshot: on a
+## running line some belt in every chunk moves every tick, so the full
+## snapshot re-sent every belt in the chunk, most of them empty, thirty
+## times a second, and parsing and re-drawing them cost about 12 ms of a
+## 33 ms tick against the simulation's own 1 ms (the quality pass,
+## 2026-09-13; docs/DECISIONS.md). `_render_snapshot` is unchanged: a tile
+## absent from a delta is a tile that did not change, and a tile present is
+## drawn exactly as a full snapshot's would be.
 func _apply_dirty_chunks() -> void:
 	var dirty: PackedInt64Array = sim.dirty_chunk_ids()
 	for chunk_id in dirty:
-		var parsed = JSON.parse_string(sim.chunk_snapshot_json(chunk_id))
+		var parsed = JSON.parse_string(sim.chunk_delta_json(chunk_id))
 		if parsed != null:
 			_render_snapshot(parsed)
 
@@ -10279,9 +10353,10 @@ func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
 ## the one shared money figure, the one shared dock pool, and then EVERY
 ## active contract's own docket — its checklist boxes, its numeric progress
 ## and its own countdown to its own next delivery check.
-func _update_contract_panel() -> void:
-	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
-	var money := float(econ["money"])
+func _update_contract_panel(econ: Dictionary = {}) -> void:
+	if econ.is_empty():
+		econ = _read_economy()
+	var money := float(econ.get("money", 0.0))
 	_contract_money_label.text = "Money: %.0f" % money
 	_flash_money_change(money)
 	_update_money_flyout()
