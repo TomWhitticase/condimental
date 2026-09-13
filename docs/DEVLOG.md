@@ -115,6 +115,39 @@ without saying so (a legibility item for ticket 5); a factory that can pay
 only half its crew keeps everyone at half labour indefinitely (fair, and
 documented); `test_layouts.gd`'s `fund` still clamps at 32 767 (test-only,
 ticket 3's if it wants it). Full record: `docs/DECISIONS.md` Part A.
+### 2026-09-13 — Items on belts stand apart (quality pass, ticket 2)
+
+The project owner's playtest note was that items on conveyors were too
+close together. They were: an item is modelled at half a tile and the
+belt's minimum spacing was a quarter, so a fed lane drew as one continuous
+bar of product. The spacing is now **half a tile** — the one constant in
+`world.rs`, chosen by rendering the bottleneck line at default zoom and
+close up: at a half tile every tomato and sack stands on visible belt and a
+jammed lane still reads as a queue; wider read as a trickle. Belt speed is
+unchanged, so a belt now carries one item per 25 ticks instead of one per
+12.5, still more than twice what the shipped line's slowest stage asks of
+it, and the reference line's steady output is the same 41–42 boxes per
+10 000 ticks before and after.
+
+Widening the spacing exposed a packing bug the old number had hidden: a
+belt's front item ran right up to its end while the next tile could hold
+an item at its start, the same point, so a jammed line held five items per
+tile with one of them drawn twice at every boundary. The front item now
+keeps the spacing behind whatever stands at the start of the tile ahead
+(`BeltSegment::tick_toward`, fed a pre-tick snapshot of every downstream
+room so the outcome is independent of visiting order), and a jammed tile
+holds exactly two.
+
+One knock-on worth the coordinator's eye: the crusher wants four tomatoes
+per 80 ticks and one lane now delivers four per 100, so the crusher is
+belt-limited (reads `starved · waiting for Tomato` about a fifth of the
+time until the line backs up, which now takes ~8300 ticks instead of
+~7000), and the mixer behind it runs at the crusher's pace. Nothing
+downstream notices, since the vat is the bottleneck, but the staffing
+rule "the line short one manufacturing head idles the vat" is now "on the
+ticks the crusher and mixer both claim"; on a tick the crusher waits for a
+tomato, the vat gets its crew. The tests say so; whether the crusher's
+recipe should be re-timed is ticket 1's call and was not made here.
 
 ### 2026-09-13 — The P screen: what the factory made and used
 

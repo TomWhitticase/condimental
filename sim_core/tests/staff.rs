@@ -223,13 +223,28 @@ fn a_fed_reference_chain_runs_on_the_starting_crew_with_no_staff_stall_anywhere(
         ever_staff_stalled.is_empty(),
         "the starting crew covers the line; staff stalls: {ever_staff_stalled:?}"
     );
-    // The crusher is the machine nothing upstream can starve and nothing
-    // downstream has yet blocked: flat out.
-    assert_eq!(
-        status_of(&world, tile_of(&world, "crusher")),
-        WorkState::Working
+    // The crusher is the machine nothing upstream can starve of anything
+    // but tomatoes and nothing downstream has yet blocked. Since the
+    // half-tile item spacing (the quality pass, 2026-09-13) its one lane
+    // delivers four tomatoes per 100 ticks against an 80-tick craft, so it
+    // is belt-limited: the only reason it ever gives is its input, never
+    // staff.
+    let crusher = tile_of(&world, "crusher");
+    assert!(
+        matches!(
+            stall_of(&world, crusher),
+            None | Some((StallKind::Input, _))
+        ),
+        "the crusher waits for tomatoes or for nothing: {:?}",
+        stall_of(&world, crusher)
     );
-    // On a tick when everything asks, the whole starting crew is at work.
+    assert!(
+        status_of(&world, crusher) == WorkState::Working
+            || status_of(&world, crusher) == WorkState::Starved,
+        "belt-limited, not blocked"
+    );
+    // On a tick when everything asks, the whole starting crew is at work;
+    // on a tick the crusher is waiting for a tomato it asks for nobody.
     let snapshot = world.staff_snapshot();
     let by_id = |id: &str| {
         snapshot
@@ -239,7 +254,11 @@ fn a_fed_reference_chain_runs_on_the_starting_crew_with_no_staff_stall_anywhere(
             .unwrap()
             .clone()
     };
-    assert_eq!(by_id("manufacturing").assigned, 4);
+    assert!(
+        by_id("manufacturing").assigned == 4 || by_id("manufacturing").assigned == 3,
+        "{:?}",
+        by_id("manufacturing")
+    );
     assert!(by_id("packaging").assigned <= 2);
     assert_eq!(by_id("maintenance").demand, 0);
     // The dock asks only on a tick it holds something; over the window it
@@ -264,18 +283,35 @@ fn firing_one_manufacturing_head_idles_exactly_the_last_manufacturing_machine() 
         crusher.0 < mixer.0 && mixer.0 < vat.0,
         "stable order is tile order"
     );
-    for tile in [crusher, mixer, vat] {
-        assert_eq!(
-            status_of(&world, tile),
-            WorkState::Working,
-            "{tile:?} before"
+    assert_eq!(status_of(&world, vat), WorkState::Working, "the vat before");
+    // The crusher is the one machine a single lane cannot saturate since
+    // the half-tile item spacing (the quality pass, 2026-09-13): a belt
+    // delivers four tomatoes per 100 ticks and its craft takes 80, so it
+    // waits for a tomato about a fifth of the time, and the mixer behind
+    // it gets one paste per 100 ticks against its 90-tick craft. Both read
+    // `starved` for an INPUT before the line backs up — never for staff.
+    for tile in [crusher, mixer] {
+        assert!(
+            matches!(
+                stall_of(&world, tile),
+                None | Some((StallKind::Input, _))
+            ),
+            "{tile:?} before: belt-limited at most, got {:?}",
+            stall_of(&world, tile)
         );
     }
 
     fire(&mut world, "manufacturing");
     assert_eq!(headcount(&world, "manufacturing"), 3);
 
+    // The rule under test: on every tick all three would work, the vat —
+    // last in tile order — is the one refused, and the two before it are
+    // never short. On a tick the crusher or the mixer is waiting for its
+    // input it claims nothing, and then the vat's two heads ARE free: the
+    // vat runs on exactly those ticks, which is the same first-come rule
+    // read the other way round.
     let mut vat_refusals = 0;
+    let mut vat_runs = 0;
     for _ in 0..120 {
         common::supply(&mut world);
         world.tick();
@@ -285,37 +321,55 @@ fn firing_one_manufacturing_head_idles_exactly_the_last_manufacturing_machine() 
                 "{tile:?} must never go short: it claims before the vat"
             );
         }
-        match stall_of(&world, vat) {
-            Some((StallKind::Staff, category)) => {
-                assert_eq!(category, "manufacturing");
-                vat_refusals += 1;
-            }
-            other => panic!("the vat must be refused every tick it would work, got {other:?}"),
-        }
         let snapshot = world.staff_snapshot();
         let manufacturing = snapshot
             .categories
             .iter()
             .find(|c| c.id == "manufacturing")
             .unwrap();
-        assert_eq!(
-            (
-                manufacturing.demand,
-                manufacturing.assigned,
-                manufacturing.short
-            ),
-            (4, 2, 2)
+        let tally = (
+            manufacturing.demand,
+            manufacturing.assigned,
+            manufacturing.short,
         );
+        match stall_of(&world, vat) {
+            Some((StallKind::Staff, category)) => {
+                assert_eq!(category, "manufacturing");
+                assert_eq!(tally, (4, 2, 2), "crusher and mixer claimed, the vat refused");
+                vat_refusals += 1;
+            }
+            None => {
+                assert_eq!(tally.2, 0, "a machine stood aside, so the vat ran: {tally:?}");
+                assert!(tally.0 <= 3, "{tally:?}");
+                vat_runs += 1;
+            }
+            other => panic!("the vat is refused or it runs, got {other:?}"),
+        }
     }
-    assert_eq!(vat_refusals, 120);
+    assert!(
+        vat_refusals > vat_runs,
+        "the vat is the one short on most ticks: refused {vat_refusals}, ran {vat_runs}"
+    );
     assert_eq!(
         status_of(&world, vat),
         WorkState::Starved,
         "understaffed IS a kind of starved"
     );
-    assert_eq!(status_of(&world, crusher), WorkState::Working);
-    assert_eq!(status_of(&world, mixer), WorkState::Working);
-    // Hover's `crew` for the vat.
+    for tile in [crusher, mixer] {
+        assert!(
+            !matches!(stall_of(&world, tile), Some((StallKind::Staff, _))),
+            "{tile:?} is belt-limited at most, never staff-limited"
+        );
+    }
+    // Hover's `crew` for the vat, on a tick it was refused (the last tick
+    // of the loop may be one the vat ran on).
+    for _ in 0..20 {
+        if matches!(stall_of(&world, vat), Some((StallKind::Staff, _))) {
+            break;
+        }
+        common::supply(&mut world);
+        world.tick();
+    }
     match world.query_tile(vat) {
         Some(TileSnapshot::Machine { crew, stall, .. }) => {
             assert_eq!(crew.len(), 1);
@@ -343,7 +397,15 @@ fn hiring_the_head_back_resumes_the_paused_craft_with_no_lost_progress() {
     }
     let (elapsed_at_fire, required) = progress_of(&world, vat).unwrap();
 
-    fire(&mut world, "manufacturing");
+    // Three heads, not one: with one gone the vat still runs on the ticks
+    // the belt-limited crusher or mixer stands aside (see the test above),
+    // and this test is about a craft that is genuinely PAUSED. With one
+    // head left the crusher or the mixer takes it and the vat's two are
+    // never free.
+    for _ in 0..3 {
+        fire(&mut world, "manufacturing");
+    }
+    assert_eq!(headcount(&world, "manufacturing"), 1);
     for _ in 0..100 {
         common::supply(&mut world);
         world.tick();
@@ -354,7 +416,9 @@ fn hiring_the_head_back_resumes_the_paused_craft_with_no_lost_progress() {
         );
     }
 
-    hire(&mut world, "manufacturing");
+    for _ in 0..3 {
+        hire(&mut world, "manufacturing");
+    }
     assert_eq!(headcount(&world, "manufacturing"), 4);
     let remaining = required - elapsed_at_fire;
     for step in 1..remaining {
