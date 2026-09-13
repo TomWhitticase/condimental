@@ -67,6 +67,42 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-13 — Quality pass, ticket 3: presentation bugs and performance
+
+No new features (`docs/QUALITY_PASS_PLAN.md`). Measured first on the
+1500-belt stress line (`test_perf.gd`, debug `sim_core`): 8.4 ms a frame,
+of which the tick path was 7.2 — each dirty chunk's snapshot re-sent every
+belt in the chunk (78 KB a tick, most of it empty belts) and the scene
+parsed and re-drew all of them. The sim now offers a **chunk delta**
+(`chunk_delta_json`: only what changed, the whole chunk after a structural
+change) and a **revision counter** (`revision()`: ticks plus commands), and
+`_process` polls its snapshots only on frames where the revision, the
+viewport, the selection or the open modal moved. After: 2.1 ms a frame,
+2.2 ms a tick for `_apply_dirty_chunks`, 12 KB a tick. Draw calls
+unchanged (188 on the stress frame).
+
+| stress line | before | after |
+|---|---|---|
+| `_process` per frame | 8.4 ms | 2.1 ms |
+| `_apply_dirty_chunks` per tick | 12.3 ms | 2.2 ms |
+| wire bytes per tick | 78 KB | 12 KB |
+| warm `_rebuild_world` | 70 ms | 80 ms (re-reads every chunk, see below) |
+| objects / primitives / draw calls | 867 / 4.56 M / 187 | 873 / 4.56 M / 188 |
+
+Bugs fixed, each with a headless proof: items on belts in another chunk
+vanished after any place/remove/rotate until they next moved (a rebuild
+now re-reads every occupied chunk; `test_splitters.gd`); a right-drag
+whose release landed on a panel or the pause menu panned the camera
+forever (`_input` ends it; `test_camera_nav.gd`); TAB into first-person
+captured the mouse under the market/board/staff/production/config panel
+(one `_fp_mouse_free` decision; same test); R rotated the tile behind an
+open panel and X entered remove mode under one (`test_interaction.gd`);
+the production panel rebuilt five styleboxes per window button on every
+update. Every screenshot flag was rendered and read. Left for ticket 5:
+the legend's third line runs under the clipboard on every screen. Left
+and reported: the 336 KB layout parse that is half of a rebuild on 1500
+tiles, and that every number here is on a debug build of the sim.
+
 ### 2026-09-13 — The P screen: what the factory made and used
 
 Factorio's production statistics, both halves. The simulation half had

@@ -225,6 +225,9 @@ impl SimBridge {
     pub fn chunk_snapshot(&self, id: ChunkId) -> ChunkSnapshot;
     pub fn issue_command(&mut self, cmd: PlayerCommand);
     pub fn query_tile(&self, pos: TileCoord) -> Option<TileSnapshot>;
+    // The quality pass (2026-09-13): the tick path's read, and the poll gate.
+    pub fn chunk_delta(&self, id: ChunkId) -> ChunkSnapshot; // what changed in the chunk
+    pub fn revision(&self) -> u64;                           // ticks + commands so far
     // Save/load (built 2026-09-09). RON text both ways; file I/O is Godot's.
     // load_ron returns "" on success or a human-readable reason, leaving
     // the live world untouched on failure.
@@ -269,6 +272,15 @@ to minimise the `gdext`-specific API surface (the least agent-friendly layer).
 across FFI every tick shows up as frame spikes at milestone 8's scale.
 `dirty_chunks()` returns a reused buffer. Consequence: fluid movement and
 tank auto-fill deliberately dirty nothing; those readouts are polled.
+**What a dirty chunk's read carries is a delta (the quality pass,
+2026-09-13):** `chunk_delta_json(chunk)` is the chunk snapshot cut down to
+the belts/splitters whose contents changed and the bodies whose state did
+since the dirty set was last cleared, and the whole snapshot after a
+place/remove/rotate/load touched the chunk. The call is still one per
+chunk; `chunk_snapshot_json` stays the full read (a rebuild reads it for
+every occupied chunk). `revision()` counts ticks plus commands so the
+presentation layer polls its snapshots only on frames where something
+could have moved.
 
 **Undo/redo (planned):** a bounded Rust-side stack of
 `(command, inverse_command)` pairs, not a Godot-side snapshot diff.
