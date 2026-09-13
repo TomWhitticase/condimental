@@ -165,3 +165,45 @@ status for the whole pass and reconcile CLAUDE.md's decisions log.
 ## Coordinator notes
 
 (Appended per merged ticket.)
+
+### Tickets 1 and 2 merged (1cd331a) — read before ticket 4 or 5
+
+**Ticket 1 (staffing sim, e32e0f1..53a5f91).** The payday rule is the
+contract board's two strikes applied to people: a head the money does not
+reach is UNPAID — still hired, not at its post until the next payday (its
+machines starve with the existing `staff` stall) — and LEAVES only if unpaid
+at the next payday too; a covered payday clears arrears, back pay settles
+first, arrears never stack. Notice pay closes the dodge: a head employed for
+any part of a period is owed for it (fired heads' notice is billed first),
+so firing everyone the tick before payday bills identically. **Hiring is
+refused unless `money >= next_bill + wage`** (otherwise hire-work-fire on an
+empty balance is free labour); a refused hire is a silent no-op on the wire.
+Money is `types::Money = I48F16` now (a payout at the old I16F16 ceiling
+panicked in debug builds); save `money_bits` reads unchanged. NEW on
+`staff_snapshot_json`: top-level `next_bill`, `shortfall` (0 when covered),
+`unpaid_last_payday`; per category `owed`, `unpaid`, `left_last_payday`,
+`can_hire`. `walked_out_last_payday` keeps its meaning (how many LEFT).
+
+For ticket 4, verbatim from the worker: read `next_bill` for the footer's
+bill (drop `_staff_bill`, which is now the run rate and differs after a
+fire); warn on `shortfall > 0` before `next_payday_tick`; a row with
+`unpaid > 0` should say `N unpaid · not working` (its meter shows the
+shortfall as short); announce `left_last_payday` per category when
+`next_payday_tick` moves, and `unpaid_last_payday` as "N went unpaid";
+mark HIRE from `can_hire` and SAY WHY it is refused ("next payday needs 14,
+you have 10"); `test_staff_panel.gd`'s literal snapshots need the new keys.
+
+**Ticket 2 (belt gaps, 3f22340).** `ITEM_MIN_SPACING_TILES` is 0.5 (was
+0.25). Widening it exposed a packing bug — a belt's front item stood on
+the tile boundary where the next tile's first item also stood, drawn twice
+at every boundary — fixed with a pre-tick snapshot of downstream room
+(`Topology.belt_ahead`). Belt speed and models untouched. Reference-line
+throughput unchanged (vat-limited). **Consequence, accepted by the
+coordinator, not retuned:** one hopper lane now delivers 4 tomatoes per
+100 ticks against the crusher's 80-tick craft, so a single-lane crusher is
+belt-limited (~80 % busy, reads `▲ starved · waiting for Tomato` the rest
+of the time). That is a true readout of a real constraint — a lane has a
+throughput, as in Factorio — and the vat is still the line's bottleneck.
+The recipe-ordering rule (crusher quickest, vat slowest) stays; the
+crusher was NOT slowed to 100 ticks. Ticket 5: the hover already says why;
+check nothing in the docs still claims a lane saturates a crusher.
