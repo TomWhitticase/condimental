@@ -24,7 +24,7 @@ mod common;
 
 use sim_core::sim::save::{SaveData, SavedBody};
 use sim_core::sim::types::Fx;
-use sim_core::sim::{PlayerCommand, RecipeRegistry, World, reference_chain_with_budget};
+use sim_core::sim::{SavedProduction, PlayerCommand, RecipeRegistry, World, reference_chain_with_budget};
 
 fn recipes() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
@@ -80,6 +80,10 @@ fn fingerprint(world: &World) -> String {
     push(
         "ingredients",
         serde_json::to_string(&world.ingredients_snapshot()).unwrap(),
+    );
+    push(
+        "production",
+        serde_json::to_string(&world.production_snapshot()).unwrap(),
     );
     for chunk in world.all_chunks() {
         push(
@@ -699,4 +703,45 @@ fn a_forked_line_with_turned_placements_round_trips() {
         );
     }
     assert_eq!(loaded.to_save_ron(), world.to_save_ron());
+}
+
+/// The production ledger (the production-stats epic) rides the save as its
+/// raw rings — `fingerprint` above carries `production_snapshot`, so the
+/// lockstep test already pins the round trip. Two edges beyond that: a save
+/// from before the ledger existed (no `production` field at all) loads as
+/// an empty ledger rather than being refused, and a ledger the tick path
+/// could not have written is refused with a reason that names it.
+#[test]
+fn a_save_without_a_production_ledger_loads_empty_and_a_corrupt_one_is_refused() {
+    let world = mid_flight_world();
+    assert!(
+        !world.production_snapshot().items.is_empty(),
+        "the fixture must have counted something"
+    );
+
+    let mut data = world.to_save();
+    data.production = SavedProduction::default();
+    let loaded = World::from_save(data.clone(), recipes()).expect("an old save must still load");
+    assert!(loaded.production_snapshot().items.is_empty());
+    assert_eq!(loaded.production().age(), 0);
+
+    // And the field genuinely is optional in the file, not just defaultable
+    // in the struct: strip it out of the RON text and load that.
+    let text = data.to_ron();
+    let start = text.find("production:").expect("the save names the field");
+    let end = text[start..].find("),
+").expect("the empty ledger is one tuple") + start + 3;
+    let without = format!("{}{}", &text[..start], &text[end..]);
+    assert!(!without.contains("production"), "{without}");
+    World::from_save_ron(&without, recipes()).expect("a save with no ledger field must load");
+
+    let mut corrupt = world.to_save();
+    corrupt.production.cursor = vec![99; corrupt.production.cursor.len()];
+    let Err(error) = World::from_save(corrupt, recipes()) else {
+        panic!("a cursor outside the ring must be refused");
+    };
+    assert!(
+        error.to_string().contains("production ledger"),
+        "unhelpful: {error}"
+    );
 }

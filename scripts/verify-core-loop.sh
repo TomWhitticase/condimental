@@ -187,6 +187,7 @@ run_godot_script test_payout_feedback.gd PAYOUT_FEEDBACK_OK "the payout celebrat
 run_godot_script test_machine_motion.gd MACHINE_MOTION_OK "machine motion overlays: frames per kind, frame from the machine's own elapsed ticks, and motion only while it is actually working"
 run_godot_script test_machine_load.gd MACHINE_LOAD_OK "machine load in the hover panel (glyph, word, status-coloured bar), polled on the tick, right on the first frame of a load, and NO poles on the floor — the machine-load epic, ticket 3 as amended"
 run_godot_script test_staff_panel.gd STAFF_PANEL_OK "the staff panel (H): rows from staff_snapshot_json, HIRE/FIRE through the real commands, an understaffed machine and dock in hover, one modal at a time — the staff pools MVP, ticket 3"
+run_godot_script test_production_stats.gd PRODUCTION_STATS_OK "the production panel (P): rows sorted and formatted from production_snapshot_json, windows and all time, a running line counted, one modal at a time, polled only while open — the production-stats epic"
 run_godot_script test_audio.gd AUDIO_OK "sound effects for every player action and the looping music track: streams deterministic and unclipped, cues fired from the handlers that know the outcome, the score ducked under the pause menu — audio, 2026-09-12"
 
 echo

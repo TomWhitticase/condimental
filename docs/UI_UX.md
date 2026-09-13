@@ -440,6 +440,20 @@ factory tropes; the sauce theme comes through in what the factory processes.
   weight and pips. A lost or signed contract is announced in one line along
   the top edge, and an empty clipboard says "press C" rather than showing a
   money figure over nothing.
+- **The production panel (P) is the same dark-plate menu, one row per
+  item the factory has touched** (the production-stats epic, 2026-09-13 —
+  Factorio's P screen, and P for the same reason). A window selector in
+  the heading (the sim's own windows, `last 5s` to `last 1h`, plus `all
+  time`), then rows biggest first: the item's own icon and name, and two
+  §5e bars side by side — MADE in the level green, USED in the amber — each
+  with its count and per-minute rate printed on it, scaled against the
+  largest count on the list so a glance across rows says which item moves
+  most. A caption under the list names the window and, while the factory
+  is younger than it, how much has actually been seen (`last 10m (32s so
+  far)`), because the rate is over that. An empty window is a sentence,
+  not an empty box. The footer says what counts: a craft starting is
+  "used", a batch landing is "made", a paid order uses what it ships —
+  buying and filling are not production and never appear here.
 - **The staff panel (H) is the same dark-plate menu, one row per
   category** (the staff pools MVP, ticket 3, 2026-09-12). Icon, name,
   `hired 4  ·  wage 2 / head / period`, then the §5e bar that this panel

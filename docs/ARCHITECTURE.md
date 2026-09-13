@@ -249,7 +249,11 @@ nothing), `staff_snapshot_json` (the staff pools MVP, 2026-09-12: per
 category headcount, the last tick's `demand`/`assigned`/`short`, the payday
 clock and bill, polled for the same reason; `hire`/`fire` are commands,
 `stall` gained a `staff` kind, machine and dock tile snapshots and shop
-entries carry `crew`, the dock snapshot `understaffed`), and JSON forms of
+entries carry `crew`, the dock snapshot `understaffed`), `production_snapshot_json`
+(the production-stats epic, 2026-09-13: per item and fluid, what recipes
+MADE and USED over the sim's rolling windows and for all time, plus what
+a paying contract took from the pool — the P screen's wire, polled for
+the same reason and saved with the world), and JSON forms of
 the above. Godot never sees internal
 representations, only snapshots. Since the pipes & conveyors overhaul
 (ticket 1, 2026-09-09) every belt, splitter and pipe entry in
