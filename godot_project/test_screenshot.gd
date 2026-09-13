@@ -52,7 +52,17 @@
 # `--bottleneck` builds the BOTTLENECK LINE (test_layouts.gd's
 # `build_bottleneck_line`: the reference line on auto-fill, run until it has
 # backed up behind the cooking vat), the fixture the machine-load epic's
-# stack lights are reviewed on. Implies `--populate`.
+# hover readout is reviewed on (with `--hover`). Implies `--populate`.
+#
+# `--staff` builds the reference line, runs it (implies `--populate`, so the
+# meters read a line that is asking for its crew rather than `0 / 0`) and
+# opens the STAFF panel (H) over it, the fixture the staff pools MVP's panel
+# is reviewed on. `--understaffed`
+# builds the UNDERSTAFFED LINE (test_layouts.gd's `build_understaffed_line`:
+# the reference line on auto-fill with two manufacturing heads fired, run
+# until the cooking vat is refused its crew) and parks the cursor on the
+# vat, so its hover reads `starved · short of manufacturing staff` and
+# `crew: 2 manufacturing`. Implies `--populate`.
 #
 # `--populate` runs whatever has been built forward first so the screenshot
 # shows product actually moving, not an idle factory.
@@ -162,6 +172,8 @@ var _no_hud := false
 var _contracts := false
 ## `--board` opens the contracts board menu (the contract-board epic).
 var _board := false
+var _staff := false
+var _understaffed := false
 var _hotbar_key := ""
 var _stock := false
 ## `--contracts` waits for a STATE, not a tick count: a fixed count drifts
@@ -229,6 +241,14 @@ func _initialize() -> void:
 		_fixture = "gallery"
 	if args.has("--bottleneck"):
 		_fixture = "bottleneck"
+		_populate = true
+	_staff = args.has("--staff")
+	if _staff:
+		_fixture = "chain"
+		_populate = true
+	_understaffed = args.has("--understaffed")
+	if _understaffed:
+		_fixture = "understaffed"
 		_populate = true
 	_first_person = args.has("--first-person")
 	_hover = args.has("--hover")
@@ -321,6 +341,8 @@ func _build_fixture() -> void:
 			Layouts.build_belt_gallery(_main.sim)
 		"bottleneck":
 			Layouts.build_bottleneck_line(_main.sim)
+		"understaffed":
+			Layouts.build_understaffed_line(_main.sim)
 		_:
 			Layouts.build_demo_line(_main.sim)
 	# Every fixture is stocked, whether or not this run will tick: a
@@ -504,9 +526,9 @@ func _run_chain_forward() -> void:
 	_main._apply_dirty_chunks()
 	_main._refresh_buffers()
 	_main._update_fluid_network()
-	# The stack lights are polled from `_advance_simulation` too, which this
-	# loop bypasses; read them once here so the shot shows the settled
-	# verdicts, not the ones the rebuild saw before the run.
+	# The load records are polled from `_advance_simulation` too, which this
+	# loop bypasses; read them once here so a hover in the shot shows the
+	# settled verdicts, not the ones the rebuild saw before the run.
 	_main._poll_machine_load()
 
 
@@ -777,6 +799,10 @@ func _process(_delta: float) -> bool:
 		_main._set_market_open(true)
 	if _frames == 2 and _board:
 		_main._set_contract_board_open(true)
+	if _frames == 2 and _staff:
+		_main._set_staff_open(true)
+	if _frames == 2 and _understaffed:
+		_hover_over_tile(Layouts.UNDERSTAFFED_VAT)
 	if _frames == 2 and _contracts:
 		_run_contract_cycles()
 	if _frames == 2 and _payout:

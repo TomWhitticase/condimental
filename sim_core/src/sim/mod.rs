@@ -19,6 +19,7 @@ pub mod save;
 pub mod shop;
 pub mod splitter;
 pub mod stats;
+pub mod staff;
 pub mod types;
 pub mod world;
 
@@ -52,6 +53,10 @@ pub use splitter::{SPLITTER_KIND, Side, Splitter};
 pub use stats::{
     ItemStats, ItemStatsSnapshot, ProductionLedger, ProductionSnapshot, STAT_BUCKETS,
     STAT_WINDOW_COUNT, STAT_WINDOWS, StatKind, StatWindow, WindowSnapshot,
+};
+pub use staff::{
+    CategoryPool, CrewEntry, CrewRequest, PaydayReport, StaffCatalog, StaffCategory,
+    StaffCategorySnapshot, StaffLoadError, StaffPools, StaffSnapshot, crew_entries,
 };
 pub use types::{Direction, Fx, decode_chunk_id, encode_chunk_id};
 pub use machine::{

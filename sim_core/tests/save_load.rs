@@ -103,7 +103,7 @@ fn fingerprint(world: &World) -> String {
 /// [`assert_mid_flight`]): a fixture that quietly stopped exercising a
 /// mid-craft machine would turn the whole file green while proving less.
 fn mid_flight_world() -> World {
-    let mut world = reference_chain_with_budget(recipes(), common::STOCK_COST);
+    let mut world = reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE);
     common::stock_up(&mut world);
     for _ in 0..3000 {
         common::supply(&mut world);
@@ -235,7 +235,7 @@ fn a_saved_factory_comes_back_running_state_identical() {
 /// forward-compatibility note — nothing has shipped with a save file yet.
 #[test]
 fn auto_fill_survives_a_save_and_keeps_working_after_the_load() {
-    let mut original = reference_chain_with_budget(recipes(), common::STOCK_COST);
+    let mut original = reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE);
     common::stock_up(&mut original);
     for hopper in original.hopper_snapshots() {
         original.issue_command(PlayerCommand::SetHopperAutoFill {
@@ -296,7 +296,7 @@ fn auto_fill_survives_a_save_and_keeps_working_after_the_load() {
 /// automatic.
 #[test]
 fn a_mixed_set_of_auto_fill_flags_round_trips_exactly() {
-    let mut world = reference_chain_with_budget(recipes(), common::STOCK_COST);
+    let mut world = reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE);
     common::stock_up(&mut world);
 
     // One hopper on, one off; the tank on.
@@ -549,14 +549,17 @@ fn a_save_from_another_build_and_a_file_that_is_not_a_save_are_both_refused() {
 /// percentage fee), a decimal round trip would start losing a bit per save.
 #[test]
 fn money_survives_to_the_bit() {
-    let mut world = reference_chain_with_budget(recipes(), common::STOCK_COST + 137);
+    let mut world = reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE + 137);
     common::stock_up(&mut world);
     for _ in 0..1200 {
         common::supply(&mut world);
         world.tick();
     }
     let money = world.money();
-    assert!(money >= Fx::from_num(137), "the fixture must hold money");
+    assert!(
+        money >= Fx::from_num(137),
+        "the fixture must hold money (it started with 137 over its stock and wage reserve)"
+    );
 
     let loaded = World::from_save_ron(&world.to_save_ron(), recipes()).unwrap();
     assert_eq!(loaded.money().to_bits(), money.to_bits());

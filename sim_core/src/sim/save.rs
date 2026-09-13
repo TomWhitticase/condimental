@@ -103,6 +103,8 @@
 //! schema version stayed at 1. After this batch ships, a field addition is a
 //! version bump like any other shape change.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::belt::BeltSegment;
@@ -115,6 +117,7 @@ use super::inventory::Inventory;
 use super::machine::{LOAD_BUCKETS, LoadBucket, LoadWindow, Machine, TimedProcess};
 use super::machines::MachineRegistry;
 use super::recipe::RecipeRegistry;
+use super::staff::StaffPools;
 use super::splitter::{SPLITTER_KIND, Side, Splitter};
 use super::stats::{ItemStats, ProductionLedger, STAT_BUCKETS, STAT_WINDOW_COUNT, StatKind};
 use super::types::{Direction, Fx, ItemId, TileCoord};
@@ -183,6 +186,13 @@ pub struct SaveData {
     /// which is what a factory nothing has been counted for reads as.
     #[serde(default)]
     pub production: SavedProduction,
+    /// The staff pools (the staff pools MVP epic). `#[serde(default)]`
+    /// under the same rule as `auto_fill`: a pre-epic save has no pools and
+    /// loads with the starting crew and a payday one period from its tick.
+    /// The per-tick tallies (`demand`, `assigned`) are not here — the first
+    /// tick after a load recomputes them, like the topology.
+    #[serde(default)]
+    pub staff: Option<SavedStaff>,
 }
 
 /// A [`ProductionLedger`]'s whole state: one clock per window, its age, and
@@ -208,6 +218,17 @@ pub struct SavedItemStats {
     pub consumed: Vec<Vec<u32>>,
     pub produced_total: u64,
     pub consumed_total: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedStaff {
+    /// Every category's headcount, keyed by id. A category the map does not
+    /// name keeps its starting headcount (`StaffPools::restore`); an id the
+    /// catalog does not know is [`SaveError::UnknownStaffCategory`].
+    pub headcount: BTreeMap<String, u32>,
+    pub next_payday_tick: u64,
+    pub last_bill: u32,
+    pub walked_out_last_payday: u32,
 }
 
 /// One placed thing: what it is, where it stands, which way it faces, and
@@ -296,6 +317,12 @@ pub struct SavedMachine {
     /// reads as anyway.
     #[serde(default)]
     pub load: SavedLoad,
+    /// `Machine::refused_by` — the category that refused this machine its
+    /// crew on the saved tick, if any. Saved because it shows in the
+    /// machine's snapshot as the `staff` stall, which the lockstep test
+    /// compares before the first post-load tick. `#[serde(default)]`.
+    #[serde(default)]
+    pub refused_by: Option<String>,
 }
 
 /// A [`LoadWindow`](super::machine::LoadWindow)'s ring, verbatim: one
@@ -342,6 +369,10 @@ pub struct SavedTank {
 pub struct SavedDock {
     pub contents: Vec<(ItemId, u32)>,
     pub shipped_total: u32,
+    /// `Dock::understaffed`, for the same reason as the machine's
+    /// `refused_by`. `#[serde(default)]`.
+    #[serde(default)]
+    pub understaffed: bool,
 }
 
 /// One contract's live state, matched to content by `id` on load.
@@ -366,6 +397,10 @@ pub struct SavedContract {
 #[derive(Debug)]
 pub enum SaveError {
     Parse(ron::error::SpannedError),
+    /// The save names a staff category `data/staff.ron` does not define.
+    UnknownStaffCategory {
+        id: String,
+    },
     UnsupportedSchemaVersion {
         found: u32,
         supported: u32,
@@ -464,6 +499,10 @@ impl std::fmt::Display for SaveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SaveError::Parse(e) => write!(f, "failed to parse the save file: {e}"),
+            SaveError::UnknownStaffCategory { id } => write!(
+                f,
+                "the save names staff category '{id}', which data/staff.ron does not define"
+            ),
             SaveError::UnsupportedSchemaVersion { found, supported } => write!(
                 f,
                 "save schema_version {found} is not supported by this build (supports \
@@ -653,6 +692,7 @@ impl World {
                     SavedBody::Dock(SavedDock {
                         contents: dock.slots().to_vec(),
                         shipped_total: dock.shipped_total(),
+                        understaffed: dock.understaffed(),
                     })
                 }
                 _ => {
@@ -673,6 +713,7 @@ impl World {
                                 .collect(),
                             cursor: machine.load.cursor(),
                         },
+                        refused_by: machine.refused_by.clone(),
                     })
                 }
             };
@@ -721,6 +762,12 @@ impl World {
                 .map(|(id, count)| (id.clone(), *count))
                 .collect(),
             production: saved_production(self.production()),
+            staff: Some(SavedStaff {
+                headcount: self.staff().headcounts().into_iter().collect(),
+                next_payday_tick: self.staff().next_payday_tick(),
+                last_bill: self.staff().last_bill(),
+                walked_out_last_payday: self.staff().walked_out_last_payday(),
+            }),
         }
     }
 
@@ -794,6 +841,7 @@ impl World {
         restore_bodies(&mut world, &data)?;
         restore_ledgers(&mut world, &data);
         world.restore_production(restore_production(&data.production)?);
+        restore_staff(&mut world, &data)?;
 
         world.restore_tick_count(data.tick_count);
         world.restore_money(data.money_bits.value());
@@ -910,6 +958,53 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
             return Err(SaveError::UnknownContract { id: id.clone() });
         }
     }
+    let staff_catalog = world.staff().catalog();
+    if let Some(staff) = &data.staff {
+        for id in staff.headcount.keys() {
+            if staff_catalog.get(id).is_none() {
+                return Err(SaveError::UnknownStaffCategory { id: id.clone() });
+            }
+        }
+    }
+    for placement in &data.placements {
+        if let SavedBody::Machine(machine) = &placement.body {
+            if let Some(id) = &machine.refused_by {
+                if staff_catalog.get(id).is_none() {
+                    return Err(SaveError::UnknownStaffCategory { id: id.clone() });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The pools: the save's headcounts and payday clock, or — for a pre-epic
+/// save — the starting crew with a payday one period from the saved tick.
+fn restore_staff(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
+    let catalog = world.staff().catalog().clone();
+    let pools = match &data.staff {
+        Some(saved) => {
+            let headcount: Vec<(String, u32)> = saved
+                .headcount
+                .iter()
+                .map(|(id, count)| (id.clone(), *count))
+                .collect();
+            StaffPools::restore(
+                catalog,
+                &headcount,
+                saved.next_payday_tick,
+                saved.last_bill,
+                saved.walked_out_last_payday,
+            )
+            .map_err(|id| SaveError::UnknownStaffCategory { id })?
+        }
+        None => {
+            let period = catalog.pay_period_ticks();
+            StaffPools::restore(catalog, &[], data.tick_count + period, 0, 0)
+                .expect("an empty headcount list names no unknown category")
+        }
+    };
+    world.restore_staff(pools);
     Ok(())
 }
 
@@ -1051,6 +1146,7 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                         required_ticks,
                     });
                 machine.load = load;
+                machine.refused_by = saved.refused_by.clone();
             }
             SavedBody::Hopper(saved) => {
                 let mut hopper = world
@@ -1102,7 +1198,12 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                     .ecs_mut()
                     .insert_one(
                         entity,
-                        Dock::restore(capacity, saved.contents.clone(), saved.shipped_total),
+                        Dock::restore(
+                            capacity,
+                            saved.contents.clone(),
+                            saved.shipped_total,
+                            saved.understaffed,
+                        ),
                     )
                     .expect("the entity was just placed");
             }
@@ -1473,6 +1574,7 @@ mod tests {
             output: Vec::new(),
             process: None,
             load: SavedLoad::default(),
+            refused_by: None,
         });
         let message = refusal(data);
         assert!(message.contains("9999"), "{message}");

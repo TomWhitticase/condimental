@@ -323,9 +323,9 @@ DECISIONS.md Part B. There is no point 10.
     tile lays its channel on the same axis.
 29. **A free-standing thing at a fixed place on a tile meets every body at
     every facing, and a face one voxel from a tile edge is a face one voxel
-    from EVERY edge once the body turns.** The andon post stands at the
-    tile's +X/low-Y corner, inset one voxel, and never rotates; the
-    machines it is bolted to do. Two features that had sat harmlessly at
+    from EVERY edge once the body turns.** The andon post (removed on
+    2026-09-12 — the lesson stands) stood at the tile's +X/low-Y corner,
+    inset one voxel, and never rotated; the machines it was bolted to do. Two features that had sat harmlessly at
     the far side of their bodies — the crusher's motor one voxel from its
     +Y edge, the packer's status lamp one voxel from its -X edge — landed
     exactly on the post's own faces when the body was turned, and z-fought
@@ -351,6 +351,30 @@ DECISIONS.md Part B. There is no point 10.
     asserts it is never dropped across hundreds of polls. When one polled
     field explains another, the explanation's lifetime is the explained
     thing's, not the poll's.
+31. **At icon scale an object is identified by the proportion of its
+    parts, not by their presence.** The hard hat's first cut had every
+    part a hard hat has — brim, front peak, domed crown, a crest over the
+    top — and its 64 px icon was a bell, because the crown stood taller
+    than it was wide; correct detail on a wrong ratio reads as the wrong
+    thing. A low crown, wider than tall, fixed it with fewer voxels and
+    fewer features. So judge an icon at its real size on the real plate
+    before judging the preview: the preview shows detail, which is what the
+    eye lands on and not what the icon is read by.
+
+32. **A fixed-size card clips a label without complaint, and a taller
+    card is not always available to fix it.** The build-menu card gained
+    one line (`crew: 2 manufacturing`) and the first render cut it at
+    "manufacturi" on the right and pushed `Owned 0` off the bottom; every
+    headless test read the full string and passed (point 12 again — a
+    Label's text is intact whatever the card shows of it). The obvious fix,
+    a taller card, made the two-row grid scroll, because the menu is capped
+    against the hotbar (§5c), and a wider card alone left the bottom line
+    clipped. What worked was paying for the line out of the card's own
+    slack: two less inset top and bottom, no separation, the smallest font
+    step the scale allows, and a card wide enough for the longest crew
+    string. The rule: a new line on a card that lives in a capped grid is
+    bought from the card's padding, not from the grid's height, and the
+    check is the rendered frame at the shipped window size.
 
 ## 3. Theme & setting
 
@@ -416,8 +440,35 @@ factory tropes; the sauce theme comes through in what the factory processes.
   weight and pips. A lost or signed contract is announced in one line along
   the top edge, and an empty clipboard says "press C" rather than showing a
   money figure over nothing.
-- **A machine's load is read in the world, from its stack light, and in
-  words from its hover** (the machine-load epic, 2026-09-11). Every
+- **The staff panel (H) is the same dark-plate menu, one row per
+  category** (the staff pools MVP, ticket 3, 2026-09-12). Icon, name,
+  `hired 4  ·  wage 2 / head / period`, then the §5e bar that this panel
+  earns: `assigned / demand` — what the factory asked for on the last tick
+  is the simulation's own ceiling, so the bar is honest, and it reads
+  `0 / 0` on an idle line rather than headcount against an invented full
+  mark. The two numbers are printed ON the bar, `2 short` stands beside it
+  in the one warning red while the bar is red (§7: position, digits, word,
+  colour), and HIRE / FIRE are the build menu's own buttons, FIRE disabled
+  at zero. The footer carries the upcoming bill, the payday countdown in
+  seconds (§5e: never ticks) and, only when it happened, `✗ 3 left unpaid
+  last payday`. A category nothing asks for yet says so in a sentence
+  (`nothing to maintain yet`) in place of an empty bar. E, M, C and H are
+  one modal at a time; ESC closes whichever is up. Being short is also
+  read where it bites: a refused machine's hover says `▲ starved · … ·
+  short of manufacturing staff` over its `crew: 2 manufacturing` line, a
+  refused dock says `held · short of logistics staff`, and a build-menu
+  card says a kind's crew under its price.
+- **A machine's load is read from its hover, and only there** (the
+  machine-load epic, 2026-09-11; **amended 2026-09-12**). The in-world
+  andon stack lights this bullet was written about were removed after a
+  playtest — the owner did not like a pole beside every machine — and
+  the hover panel is the whole indicator now: the load line leads with a
+  status GLYPH and word (● flat out, ▲ starved, ■ blocked — three shapes,
+  §7) and the load bar under it is filled in the status colour (green,
+  amber, red). What follows describes the removed lights as they were
+  built, kept because the reasoning about corners and colours still
+  applies to whatever floor-wide readout replaces them, if one does.
+  *Originally:* every
   recipe-running machine has an andon on its camera-visible corner: green
   lit is flat out, amber is starved, red is blocked — colour AND position
   on the post (§7), the industrial convention (§3), never rotated with the

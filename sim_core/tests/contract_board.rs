@@ -12,6 +12,8 @@
 //! because "what happens when you fail to deliver" is the whole subject.
 //! `tests/economy.rs` is where a real chain pays a contract.
 
+mod common;
+
 use sim_core::sim::types::Fx;
 use sim_core::sim::{
     ContractRegistry, MachineRegistry, PlayerCommand, RecipeRegistry, World, command_from_json,
@@ -190,10 +192,15 @@ fn a_contract_left_unserved_for_its_strikes_is_lost_and_goes_back_on_the_board()
     // The factory keeps ticking with no contract at all — a legal, if
     // penniless, state — and nothing settles.
     let money = world.money();
+    let wages_before = common::wages_paid(&world);
     for _ in 0..starter.cadence_ticks {
         world.tick();
     }
-    assert_eq!(world.money(), money);
+    // Only wages move the balance (the staff pools MVP epic): no payout.
+    assert_eq!(
+        world.money(),
+        money - (common::wages_paid(&world) - wages_before)
+    );
 
     // Buying it back costs the listed price and starts a clean record.
     let before = world.money();

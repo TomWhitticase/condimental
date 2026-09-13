@@ -181,6 +181,7 @@ use super::recipe::{Recipe, RecipeRegistry};
 use super::shop::{DEFAULT_PURCHASE_QUANTITY, Shop, ShopSnapshot};
 use super::splitter::{SPLITTER_KIND, Side, Splitter};
 use super::stats::{ProductionLedger, ProductionSnapshot, StatKind};
+use super::staff::{CrewEntry, CrewRequest, StaffPools, StaffSnapshot, crew_entries};
 use super::types::{ChunkId, Direction, FluidId, Fx, ItemId, RecipeId, TileCoord, chunk_of};
 
 /// The buildable-kind id (`data/shop.ron`) of one tile of conveyor.
@@ -444,6 +445,18 @@ pub enum PlayerCommand {
     /// refusal [`Self::FillFluidTank`] already makes, rather than a second
     /// rule about when the toggle itself is allowed.
     SetTankAutoFill { tile: TileCoord, enabled: bool },
+    /// Hires one head into a staff category (the staff pools MVP epic,
+    /// GAMEPLAY.md §7). **Free, and never refused for a known category** —
+    /// wages are the cost (§5), paid every pay period by `World::tick`, and
+    /// the MVP answers §11's recruiting-fee question with "no, for now". An
+    /// unknown category is a silent no-op. No chunk is dirtied: a head is
+    /// not a tile, and Godot reads the pools off `staff_snapshot_json`.
+    Hire { category: String },
+    /// Lets one head go. Free and immediate; a silent no-op at headcount 0
+    /// or for an unknown category (the `Purchase` convention). A machine
+    /// mid-craft that loses its crew pauses on the next tick and resumes,
+    /// with no progress lost, when one is free again. No chunk is dirtied.
+    Fire { category: String },
 }
 
 /// JSON wire shape for [`PlayerCommand`], used only at the `gdext` boundary
@@ -532,6 +545,12 @@ enum PlayerCommandDto {
         #[serde(default = "default_auto_fill_enabled")]
         enabled: bool,
     },
+    Hire {
+        category: String,
+    },
+    Fire {
+        category: String,
+    },
 }
 
 /// Turning auto-fill *on* is what the command is for; see
@@ -594,6 +613,8 @@ impl From<PlayerCommandDto> for PlayerCommand {
             PlayerCommandDto::SetTankAutoFill { tile, enabled } => {
                 PlayerCommand::SetTankAutoFill { tile, enabled }
             }
+            PlayerCommandDto::Hire { category } => PlayerCommand::Hire { category },
+            PlayerCommandDto::Fire { category } => PlayerCommand::Fire { category },
         }
     }
 }
@@ -806,20 +827,25 @@ impl MachineLoadSnapshot {
 /// {"kind": "output",         "item": "ketchup"}  // finished, solid output full
 /// {"kind": "fluid_output",   "item": "ketchup"}  // finished, outlet pipe cannot accept
 /// {"kind": "no_outlet_pipe", "item": "ketchup"}  // finished, deposits, no tap
+/// {"kind": "staff",          "item": "manufacturing"} // refused its crew; item = category id
 /// ```
 ///
 /// It describes **this tick's** situation, independently of the window's
 /// `status`: a machine may be `working` over the last ten seconds and
 /// momentarily short of sugar. Only the first shortfall is reported, in
 /// recipe order, solids before fluids. A machine mid-craft, or idle with
-/// everything it needs (it starts next tick), has no stall — `null`.
+/// everything it needs (it starts next tick), has no stall — `null` —
+/// **unless its crew was refused** (the staff pools MVP epic): a staff
+/// refusal happens only on a tick the machine would otherwise have worked,
+/// so it can never mask an input or output shortfall, and it is checked
+/// after the six older kinds have found nothing.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Stall {
     pub kind: StallKind,
     pub item: String,
 }
 
-/// The six ways a machine can be waiting — see [`Stall`]. Serialized in
+/// The seven ways a machine can be waiting — see [`Stall`]. Serialized in
 /// `snake_case`, exactly as listed there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -830,6 +856,8 @@ pub enum StallKind {
     Output,
     FluidOutput,
     NoOutletPipe,
+    /// Refused its crew on the last tick; `item` is the category id.
+    Staff,
 }
 
 /// One entry of [`World::machine_load_snapshots`]: the machine's origin
@@ -992,6 +1020,10 @@ pub struct DockSnapshot {
     pub contents: Vec<(ItemId, u32)>,
     pub capacity_per_item: u32,
     pub shipped_total: u32,
+    /// Refused its logistics crew on the last tick it had something to
+    /// ship (the staff pools MVP epic; `Dock::understaffed`). While true
+    /// the buffer is held and, at capacity, the belt behind it backs up.
+    pub understaffed: bool,
 }
 
 /// One machine's tap into a fluid network, for presentation. Used for both
@@ -1107,12 +1139,15 @@ pub enum TileSnapshot {
     ///   "load": {"working": 600, "starved": 0, "blocked": 0,
     ///            "observed": 600, "window": 600, "percent": 100,
     ///            "status": "working"},
-    ///   "stall": null}`
+    ///   "stall": null,
+    ///   "crew": [{"category": "manufacturing", "count": 2}]}`
     ///
     /// `machine_kind` is spelled out rather than reusing `kind`, which this
     /// enum already spends on its own variant tag. `load` and `stall` are
     /// the same objects [`MachineSnapshot`] carries, so hover can say how
-    /// loaded a machine is and why it waits without a second call.
+    /// loaded a machine is and why it waits without a second call. `crew`
+    /// is the kind's `machines.ron` `staff` requirement (the staff pools
+    /// MVP epic), for hover's "crew: 2 manufacturing".
     Machine {
         machine_kind: String,
         direction: Direction,
@@ -1122,6 +1157,7 @@ pub enum TileSnapshot {
         process: Option<(u64, u64)>,
         load: MachineLoadSnapshot,
         stall: Option<Stall>,
+        crew: Vec<CrewEntry>,
     },
     /// `{"kind": "pipe", "direction": "east", "fluid": "vinegar",
     ///   "volume": 7.5, "capacity": 10.0, "pressure": 0.75,
@@ -1183,6 +1219,12 @@ pub enum TileSnapshot {
         contents: Vec<(ItemId, u32)>,
         capacity_per_item: u32,
         shipped_total: u32,
+        /// The kind's `staff` requirement and whether the dock was refused
+        /// it on the last tick it held something (the staff pools MVP
+        /// epic) — hover's "crew: 1 logistics" and "held · short of
+        /// logistics staff".
+        crew: Vec<CrewEntry>,
+        understaffed: bool,
     },
 }
 
@@ -1505,6 +1547,10 @@ pub struct World {
     /// it (GAMEPLAY.md §5). A plain field beside `shop` and `economy` for
     /// their reason: one per world.
     ingredients: Ingredients,
+    /// The staff pools (the staff pools MVP epic, GAMEPLAY.md §7): a plain
+    /// field like `economy`, for the same reason — four aggregate counters
+    /// are not a reason for ECS machinery.
+    staff: StaffPools,
     topology: Topology,
     /// What the factory made and used, per item, over several rolling
     /// windows and for all time (the production-stats epic, `stats.rs`).
@@ -1634,6 +1680,7 @@ impl World {
             economy: Economy::with_money(&contracts, money),
             shop: Shop::bundled(),
             ingredients: Ingredients::bundled(),
+            staff: StaffPools::bundled(),
             topology: Topology::default(),
             production: ProductionLedger::new(),
         }
@@ -1680,7 +1727,28 @@ impl World {
     /// The shop catalog, the player's owned counts and their current money
     /// in one object — see [`ShopSnapshot`] for the exact JSON shape.
     pub fn shop_snapshot(&self) -> ShopSnapshot {
-        self.shop.snapshot(self.economy.money)
+        self.shop
+            .snapshot(self.economy.money, |kind| crew_entries(self.crew_of_kind(kind)))
+    }
+
+    /// The staff pools: headcounts, the last tick's demand and the payday
+    /// clock (the staff pools MVP epic).
+    pub fn staff(&self) -> &StaffPools {
+        &self.staff
+    }
+
+    /// The staff panel's one poll — see [`StaffSnapshot`]. `money` is
+    /// repeated here as `shop_snapshot` repeats it.
+    pub fn staff_snapshot(&self) -> StaffSnapshot {
+        self.staff.snapshot(self.economy.money)
+    }
+
+    /// The crew `kind` needs while running: its `machines.ron` `staff`
+    /// list, empty for a kind the registry does not know (belt, pipe).
+    pub fn crew_of_kind(&self, kind: &str) -> &[(String, u32)] {
+        self.machines
+            .get(kind)
+            .map_or(&[], |k| k.staff.as_slice())
     }
 
     /// The raw-ingredient market plus the stock the player owns and their
@@ -2430,7 +2498,14 @@ impl World {
     /// 2. **Belts move**, each by one tick's travel — splitters too, which
     ///    are belt tiles with a choice at the end (see
     ///    [`super::splitter`]), so product crosses one at belt speed.
-    /// 3. **Machines run** — start a craft, or deposit a finished one.
+    /// 2b. **Staff pools reset** (the staff pools MVP epic): every category
+    ///    is back at its headcount with nothing asked for yet.
+    /// 3. **Machines run** — start a craft, or deposit a finished one. In
+    ///    `topology.machines` order each machine that would work this tick
+    ///    first claims its kind's whole crew from the pools; a refused
+    ///    machine takes nothing, does nothing and reads `starved` with a
+    ///    `staff` stall (see `Machine::tick`). Stable order is what makes
+    ///    the *same* machine the one that goes short every tick.
     /// 4. **Consumers pull** off a belt's end: into a machine's input
     ///    buffer, or onto a dock.
     /// 5. **Producers push** onto a belt's start: a hopper meters one raw
@@ -2443,12 +2518,18 @@ impl World {
     /// 6. **Docks ship** whatever they took in step 4 into [`Economy`]'s
     ///    shared delivery pool — in the same tick it arrived, because a dock
     ///    is a pass-through (see [`super::dock`]) and the pool is what
-    ///    contracts settle against below.
+    ///    contracts settle against below. A dock holding something first
+    ///    claims its crew like a machine; refused, it holds (at capacity the
+    ///    belt backs up; nothing is lost) and reads `understaffed`.
     /// 7. **Contracts settle**, one cadence check per active contract. A
     ///    contract that pays records its mix in the production ledger as
     ///    consumed — the factory's exit — and the ledger's clock advances
-    ///    last, so everything this tick recorded sits in the bucket that
+    ///    after it, so everything this tick recorded sits in the bucket that
     ///    was current while it happened.
+    /// 8. **Payday** (`StaffPools::tick`): on the tick the clock reaches
+    ///    `next_payday_tick`, wages are paid one head at a time out of the
+    ///    one money counter, and the first head that cannot be paid — and
+    ///    every one after it — leaves.
     ///
     /// Steps 4 and 5 are the same two phases the fixed chain always had
     /// ("belt to machine, then everything onto a belt"); what changed is
@@ -2471,6 +2552,9 @@ impl World {
         for network in &mut self.topology.networks {
             network.tick();
         }
+
+        // 2b. Staff pools: everyone back at their post, nobody asked for.
+        self.staff.reset();
 
         // 2. Belts — and splitters, which carry their contents in an
         // ordinary belt segment (`splitter.rs`) so that product crosses one
@@ -2497,6 +2581,7 @@ impl World {
         let taps = std::mem::take(&mut self.topology.machine_taps);
         let output_taps = std::mem::take(&mut self.topology.machine_output_taps);
         for &machine in &machines {
+            let kind = self.placement_of(machine).kind;
             let tapped = taps
                 .iter()
                 .find(|&&(entity, _, _)| entity == machine)
@@ -2544,11 +2629,18 @@ impl World {
                     ),
                     (None, None) => (None, None),
                 };
+                // The crew is the kind's `machines.ron` list; the claim is
+                // made inside `tick`, only on a tick the machine would work.
+                let crew = CrewRequest {
+                    crew: self.machines.get(&kind).map_or(&[], |k| k.staff.as_slice()),
+                    pools: &mut self.staff,
+                };
                 body.tick(
                     self.tick_count,
                     &self.recipes,
                     fluid_in,
                     fluid_out,
+                    Some(crew),
                     &mut self.production,
                 )
             };
@@ -2620,13 +2712,39 @@ impl World {
         // 6. Docks ship.
         let docks = std::mem::take(&mut self.topology.docks);
         for &dock in &docks {
-            let shipped = {
+            let kind = self.placement_of(dock).kind;
+            let (shipped, flag_flipped) = {
                 let mut body = self
                     .ecs
                     .get::<&mut Dock>(dock)
                     .expect("a dock placement carries a Dock");
-                body.ship_into(&mut self.economy)
+                if body.is_empty() {
+                    // Nothing to ship, nobody asked for; the verdict of the
+                    // last loaded tick stands.
+                    (0, false)
+                } else {
+                    let crew: &[(String, u32)] =
+                        self.machines.get(&kind).map_or(&[], |k| k.staff.as_slice());
+                    let was = body.understaffed();
+                    match self.staff.claim(crew) {
+                        Ok(()) => {
+                            body.set_understaffed(false);
+                            (body.ship_into(&mut self.economy), was)
+                        }
+                        Err(_) => {
+                            // Held, not lost: the buffer keeps it, and at
+                            // capacity `try_absorb` refuses and the belt
+                            // backs up.
+                            body.set_understaffed(true);
+                            (0, !was)
+                        }
+                    }
+                }
             };
+            if flag_flipped {
+                // `understaffed` rides the dock's chunk snapshot.
+                self.mark_placement_dirty(dock);
+            }
             if shipped > 0 {
                 // The dock's own snapshot changed (`shipped_total` at
                 // least), so a chunk-driven renderer has to re-read it. At
@@ -2659,6 +2777,11 @@ impl World {
             }
         }
         self.production.tick();
+
+        // 8. Payday. Not tied to any tile either; Godot polls
+        // `staff_snapshot`. A head who leaves unpaid simply is not there
+        // when the pools reset next tick.
+        let _ = self.staff.tick(self.tick_count, &mut self.economy);
     }
 
     /// Step 0 of [`World::tick`]: tops every auto-filling hopper and tank up
@@ -2975,6 +3098,15 @@ impl World {
             }
             PlayerCommand::SetTankAutoFill { tile, enabled } => {
                 self.try_set_tank_auto_fill(tile, enabled);
+            }
+            // Neither dirties a chunk: a head is not a tile. Both are silent
+            // about an unknown category, and `Fire` about an empty pool,
+            // the `Purchase` convention.
+            PlayerCommand::Hire { category } => {
+                self.staff.hire(&category);
+            }
+            PlayerCommand::Fire { category } => {
+                self.staff.fire(&category);
             }
         }
     }
@@ -3443,6 +3575,20 @@ impl World {
     /// same taps `tick` would hand it, without moving anything.
     fn machine_stall(&self, machine: Entity) -> Option<Stall> {
         let body = self.ecs.get::<&Machine>(machine).ok()?;
+        // The six older kinds first; only when none of them applies can a
+        // crew refusal be the reason (it is asked for only on a tick the
+        // machine would otherwise have worked, so the two never compete).
+        self.machine_supply_stall(machine, &body).or_else(|| {
+            body.refused_by.as_ref().map(|category| Stall {
+                kind: StallKind::Staff,
+                item: category.clone(),
+            })
+        })
+    }
+
+    /// The input/output half of [`Self::machine_stall`]: the six kinds that
+    /// predate staff, in their original precedence.
+    fn machine_supply_stall(&self, machine: Entity, body: &Machine) -> Option<Stall> {
         let recipe = self.recipes.get(&body.recipe)?;
         let tap_of = |taps: &[(Entity, usize, usize)]| {
             taps.iter()
@@ -3568,6 +3714,7 @@ impl World {
             contents: body.contents().cloned().collect(),
             capacity_per_item: body.capacity_per_item(),
             shipped_total: body.shipped_total(),
+            understaffed: body.understaffed(),
         }
     }
 
@@ -3643,6 +3790,7 @@ impl World {
             }
             BodyKind::Machine => {
                 let body = self.ecs.get::<&Machine>(entity).unwrap();
+                let crew = crew_entries(self.crew_of_kind(&placement.kind));
                 TileSnapshot::Machine {
                     machine_kind: placement.kind,
                     direction: placement.direction,
@@ -3655,6 +3803,7 @@ impl World {
                         drop(body);
                         self.machine_stall(entity)
                     },
+                    crew,
                 }
             }
             BodyKind::Pipe => {
@@ -3714,6 +3863,8 @@ impl World {
                     contents: snapshot.contents,
                     capacity_per_item: snapshot.capacity_per_item,
                     shipped_total: snapshot.shipped_total,
+                    crew: crew_entries(self.crew_of_kind(&placement.kind)),
+                    understaffed: snapshot.understaffed,
                 }
             }
         };
@@ -3800,6 +3951,10 @@ impl World {
 
     pub(super) fn restore_tick_count(&mut self, tick: u64) {
         self.tick_count = tick;
+    }
+
+    pub(super) fn restore_staff(&mut self, staff: StaffPools) {
+        self.staff = staff;
     }
 
     pub(super) fn economy_mut(&mut self) -> &mut Economy {

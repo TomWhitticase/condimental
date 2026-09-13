@@ -1,5 +1,14 @@
 # Machine Load Indicator — plan
 
+> **Status 2026-09-12:** the in-world andon stack lights — ticket 2's six
+> `andon_*` models and the floor half of ticket 3 — were **removed** after a
+> playtest (the owner did not like the poles). The indicator is the hover
+> panel: a status glyph and word leading the load line, and the load bar in
+> the status colour. Ticket 1 (sim) and the polling/hover half of ticket 3
+> stand. Everything below about `andon_*` models, `_build_machine_andon`
+> and the camera-visible corner describes what was built and then taken
+> out.
+
 Status: **done** (started and finished 2026-09-11; all three tickets
 landed). Integration branch:
 `TomWhitticase/machine-load-indicator`, worktree

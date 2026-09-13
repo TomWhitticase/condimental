@@ -93,7 +93,12 @@ use super::types::{Direction, TileCoord};
 /// bundled into the binary at compile time, so there is one such file and it
 /// is updated in the same commit as this constant — a version mismatch means
 /// data and binary have drifted apart, which deserves a loud error.
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+///
+/// v2 (the staff pools MVP epic, 2026-09-12) added the **required** `staff`
+/// list to every kind. Bumped rather than defaulted because an omitted crew
+/// should be a loader error, not a silent zero — the precedent `recipes.ron`
+/// set at v2 → v3 for `fluid_outputs`. A v1 file is rejected.
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 /// How many tiles a machine kind occupies, in each axis. See this module's
 /// doc for where the origin sits relative to this rectangle.
@@ -238,11 +243,21 @@ pub struct MachineKind {
     /// `data/recipes.ron` (e.g. "crusher").
     pub id: String,
     pub footprint: Footprint,
+    /// The crew this kind needs **while running**, as `(category, count)`
+    /// lines in the categories `data/staff.ron` defines (GAMEPLAY.md §7;
+    /// `sim::staff`). Required since schema 2; an empty list is a kind that
+    /// never asks — a hopper, a tank, a splitter. Each tick a machine claims
+    /// the whole list or nothing (`StaffPools::claim`), and the list's own
+    /// order is the order a refusal is reported in. Checked against the
+    /// catalog by `StaffCatalog::validate_machines`, a test.
+    pub staff: Vec<(String, u32)>,
 }
 
+/// The file's shape once its version has been checked (see
+/// `from_ron_str`): `schema_version` is read off a header first, so it is
+/// not repeated here.
 #[derive(Debug, Deserialize)]
 struct MachineFile {
-    schema_version: u32,
     machines: Vec<MachineKind>,
 }
 
@@ -339,13 +354,23 @@ const MACHINES_RON: &str = include_str!("../../../data/machines.ron");
 
 impl MachineRegistry {
     pub fn from_ron_str(text: &str) -> Result<Self, MachineLoadError> {
-        let file: MachineFile = ron::from_str(text).map_err(MachineLoadError::Parse)?;
-        if file.schema_version != CURRENT_SCHEMA_VERSION {
+        // The version is checked FIRST, off a header that ignores every
+        // other field, so a file from another schema is reported as such
+        // rather than as whatever parse error its old shape happens to
+        // produce (a v1 file has no `staff` list, which would otherwise
+        // read as "missing field", not "wrong version").
+        #[derive(Deserialize)]
+        struct Header {
+            schema_version: u32,
+        }
+        let header: Header = ron::from_str(text).map_err(MachineLoadError::Parse)?;
+        if header.schema_version != CURRENT_SCHEMA_VERSION {
             return Err(MachineLoadError::UnsupportedSchemaVersion {
-                found: file.schema_version,
+                found: header.schema_version,
                 supported: CURRENT_SCHEMA_VERSION,
             });
         }
+        let file: MachineFile = ron::from_str(text).map_err(MachineLoadError::Parse)?;
 
         let mut by_id = HashMap::with_capacity(file.machines.len());
         for kind in file.machines {
@@ -534,10 +559,10 @@ mod tests {
     }
 
     const EXAMPLE: &str = r#"(
-        schema_version: 1,
+        schema_version: 2,
         machines: [
-            MachineKind(id: "cooker", footprint: Footprint(width_tiles: 1, height_tiles: 1)),
-            MachineKind(id: "crusher", footprint: Footprint(width_tiles: 2, height_tiles: 3)),
+            MachineKind(id: "cooker", footprint: Footprint(width_tiles: 1, height_tiles: 1), staff: [("manufacturing", 1)]),
+            MachineKind(id: "crusher", footprint: Footprint(width_tiles: 2, height_tiles: 3), staff: []),
         ],
     )"#;
 
@@ -621,14 +646,43 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_schema_version() {
-        let text = EXAMPLE.replacen("schema_version: 1", "schema_version: 99", 1);
+        let text = EXAMPLE.replacen("schema_version: 2", "schema_version: 99", 1);
         let err = MachineRegistry::from_ron_str(&text).unwrap_err();
         assert!(matches!(
             err,
             MachineLoadError::UnsupportedSchemaVersion {
                 found: 99,
-                supported: 1
+                supported: 2
             }
+        ));
+    }
+
+    /// v1 had no `staff` list; a v1 file is rejected by version before its
+    /// shape is ever looked at (the staff pools MVP epic).
+    #[test]
+    fn rejects_a_v1_file() {
+        let text = r#"(schema_version: 1, machines: [
+            MachineKind(id: "cooker", footprint: Footprint(width_tiles: 1, height_tiles: 1)),
+        ])"#;
+        assert!(matches!(
+            MachineRegistry::from_ron_str(text).unwrap_err(),
+            MachineLoadError::UnsupportedSchemaVersion {
+                found: 1,
+                supported: 2
+            }
+        ));
+    }
+
+    /// A v2 file with the `staff` list missing on a kind is a parse error,
+    /// not a silent zero — the reason the version was bumped.
+    #[test]
+    fn a_kind_without_a_staff_list_is_a_loader_error() {
+        let text = r#"(schema_version: 2, machines: [
+            MachineKind(id: "cooker", footprint: Footprint(width_tiles: 1, height_tiles: 1)),
+        ])"#;
+        assert!(matches!(
+            MachineRegistry::from_ron_str(text).unwrap_err(),
+            MachineLoadError::Parse(_)
         ));
     }
 

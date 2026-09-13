@@ -395,37 +395,22 @@ const MACHINE_FRAMES := 4
 ## second a frame is the chunky end of UI_UX.md §6 rather than a blur.
 const MACHINE_TICKS_PER_CYCLE := 30
 
-## --- The andon stack light (the machine-load epic, ticket 3) ---------------
+## --- The machine load readout (the machine-load epic, ticket 3; moved
+## --- off the floor and into the hover panel on 2026-09-12) ---------------
 ##
-## Every recipe-running machine stands an industrial stack light beside it:
-## a post with three lenses, green over amber over red, one lit. Which one
-## is the simulation's own verdict on the machine's last ten seconds
+## A machine's load is the simulation's own verdict on its last ten seconds
 ## (`machine_load_snapshots_json`'s `status`: `working`, `starved` or
-## `blocked`) — this file never re-derives it from the counts. The three
-## statuses are the three models, one per lit lens, and this list is also
-## the order the sim spells them, so it is the one place the words live.
-const ANDON_STATUSES := ["working", "starved", "blocked"]
-## `voxgen` ships the stack at two heights (`andon_<status>_short` and
-## `andon_<status>_tall`, `assets.rs`'s "Andon" section): the short one
-## for a 1x1 footprint, whose lens stack clears every 1x1 body, and the
-## tall one for anything larger, whose stack clears the 2x2 vat. Chosen by
-## footprint, here, exactly as ticket 2's note says.
-const ANDON_HEIGHT_SHORT := "short"
-const ANDON_HEIGHT_TALL := "tall"
-## Which corner of a footprint the light stands on, as a sign per tile
-## axis: +1 for the footprint's far (max) edge on that axis, -1 for its
-## origin edge. It is the corner the CAMERA can see, and it is derived from
-## `CAMERA_DIRECTION` rather than chosen: that vector is where the camera
-## SITS relative to what it looks at, so a face is visible only if it
-## points toward the camera on that axis — +X world is +X tile, and +Z
-## world is +Y tile (`_footprint_centre` maps tile y to world z). UI_UX.md
-## §2b point 11 is the same fact stated for a model's faces; this is it for
-## a footprint's tiles. The post itself sits in the corner of that TILE
-## nearest the camera by the same rule (ticket 2 authored it at model +X /
-## low Y, which is world +X / +Z), and is never rotated: a lens on the far
-## side of a turned machine would be a lamp nobody sees (point 18).
-const ANDON_CORNER := Vector2i(int(signf(CAMERA_DIRECTION.x)), int(signf(CAMERA_DIRECTION.z)))
-## How often the lights are re-read from the simulation, in ticks. Load is
+## `blocked`) — this file never re-derives it from the counts. It is READ
+## BY HOVERING the machine: the tooltip's load line leads with a status
+## glyph and word, and the load bar under it takes the status colour. It
+## used to stand in the world as well, as an andon stack light beside every
+## machine; those poles were removed after a playtest (the owner did not
+## like how they looked), and the hover panel is now the one place the
+## status lives. The glyphs are shapes as well as colours (UI_UX.md §7),
+## and this table is also the order the sim spells the statuses, so it is
+## the one place the words live.
+const LOAD_STATUS_GLYPHS := {"working": "●", "starved": "▲", "blocked": "■"}
+## How often the load is re-read from the simulation, in ticks. Load is
 ## polled rather than dirtied (ARCHITECTURE.md §4: it changes on every
 ## machine every tick), and one bucket of the sim's window (`LOAD_BUCKET_TICKS`,
 ## 30) is the finest grain the verdict can change at, so polling faster
@@ -715,9 +700,8 @@ var _machine_lamps: Dictionary = {} # origin key -> MeshInstance3D (emissive mes
 var _machine_gauges: Dictionary = {} # origin key -> Node3D, the live progress bar (see MACHINE_PROGRESS_GAUGES)
 var _machine_running: Dictionary = {} # origin key -> bool, to avoid redundant swaps
 var _machine_motion: Dictionary = {} # origin key -> {"frames": Array[Node3D], "frame": int, "family": String}, see MACHINE_MOTION_MODELS
-## The machine-load epic (ticket 3). Both keyed on origin tile like the rest;
-## see "The andon stack light" below for the shape of each record.
-var _machine_andons: Dictionary = {} # origin key -> {"lenses": {status: Node3D}, "status": String, "height": String, "tile": Vector2i}
+## The machine-load epic (ticket 3). Keyed on origin tile like the rest; see
+## "The machine load readout" above and `_poll_machine_load` for the record.
 var _machine_load: Dictionary = {} # origin key -> {"load": {...}, "stall": Dictionary|null, "reason": Dictionary|null, "status": String}
 var _load_polled_tick := -1 # sim tick of the last `_poll_machine_load`; -1 = never
 ## --- Instanced tiles and carried items (pipes & conveyors overhaul, ticket 4) ---
@@ -982,7 +966,7 @@ const SHOP_SLOT_COLUMNS := 6
 ## a 1280-wide window's inner width, and two rows have to fit above the
 ## hotbar. What made the shorter card possible is the owned line no longer
 ## wrapping — see `_update_shop_menu`.
-const SHOP_SLOT_SIZE := Vector2(128, 130) * UI_SCALE
+const SHOP_SLOT_SIZE := Vector2(144, 138) * UI_SCALE # 128x130 until the crew line (the staff pools MVP): wider so "crew: 2 manufacturing" is not clipped, as tall as two rows above the hotbar allow
 const SHOP_ICON_SIZE := Vector2(46, 46) * UI_SCALE
 ## The ingredient market's crate, which is the same card **one line taller**.
 ## The two panels are deliberately built the same way (see
@@ -1141,6 +1125,49 @@ var _board_box: VBoxContainer
 var _board_rows: Array = [] # Array[Dictionary], see _build_contract_board_row
 var _board_row_ids: Array = []
 var _board_open := false
+
+# --- The staff panel (the staff pools MVP, ticket 3, 2026-09-12) -----------
+# `data/staff.ron`'s four categories, read off `staff_snapshot_json`: how
+# many are hired, how many the factory asked for on the last tick, how many
+# it went short, the wage, and HIRE/FIRE. Opened on H. A plain dark plate
+# like the market and the contracts board (UI_UX.md §5 reserves the paper
+# for orders and checklists), centred above the hotbar, one modal at a time
+# with E/M/C. Rows are built from the wire in file order and rebuilt only if
+# the set of category ids changes, the contract board's own guard.
+#
+# Godot derives NOTHING here that the simulation already knows: `demand`,
+# `assigned` and `short` are the sim's own last-tick figures, `headcount`
+# and `wage` are content. The one piece of arithmetic is the footer's
+# upcoming bill, `sum(headcount * wage)`, which is the payday rule applied
+# to numbers the wire carries — the shop meter's price/money share is the
+# same kind of sum — and NOT a second opinion on any fact the sim reports.
+var _staff_panel: PanelContainer
+var _staff_money_label: Label
+var _staff_scroll: ScrollContainer
+var _staff_rows_box: VBoxContainer
+var _staff_rows: Array = [] # Array[Dictionary], see _build_staff_row
+var _staff_row_ids: Array = []
+var _staff_footer_label: Label
+var _staff_open := false
+## The last `staff_snapshot_json` read, parsed. Polled on the tick like the
+## machine load (see `_poll_staff`); `{}` until the first poll.
+var _staff_snapshot: Dictionary = {}
+var _staff_polled_tick := -1 # sim tick of the last `_poll_staff`; -1 = never
+## The crew each placed machine and dock needs, by origin key, from
+## `query_tile_json`'s `crew` — the kind's `machines.ron` requirement, read
+## once per rebuild for hover's "crew: 2 manufacturing" line.
+var _crews: Dictionary = {}
+const STAFF_METER_WIDTH := 150.0 * UI_SCALE
+const STAFF_METER_HEIGHT := 20.0 * UI_SCALE
+const STAFF_ICON_SIZE := Vector2(40, 40) * UI_SCALE
+## What a row says in place of its meter while the category has nothing
+## hired and nothing asking for it. Keyed on the category id because the
+## sentence names what the category does; a generic "idle" would be wrong
+## for a logistics crew that was simply fired.
+const STAFF_IDLE_NOTES := {"maintenance": "nothing to maintain yet"}
+## Ticket 2's icon files are `staff_<category id>.png`, so the path is built
+## from the wire's id with no lookup table.
+const STAFF_ICON_PREFIX := "staff_"
 ## The active contract ids the clipboard saw on its last poll. The wire has
 ## no "contract lost" event — a lost contract simply stops being listed and
 ## reads `active: false` on the board — so the announcement is a diff of two
@@ -2188,7 +2215,6 @@ func _rebuild_world() -> void:
 	_machine_gauges.clear()
 	_machine_running.clear()
 	_machine_motion.clear()
-	_machine_andons.clear()
 	_machine_load.clear()
 	_splitter_nodes.clear()
 	_splitter_states.clear()
@@ -2226,10 +2252,14 @@ func _rebuild_world() -> void:
 	_build_floor()
 	_seed_machine_states()
 	_seed_splitter_states()
-	# The stack lights, once, right now — not on the next poll tick. A
+	_seed_crews()
+	# Polled here as well as on the tick, so a loaded save's panel and a
+	# fresh world's both read right on their first frame.
+	_poll_staff()
+	# The load records, once, right now — not on the next poll tick. A
 	# rebuild is also what a LOADED game goes through in `_ready`, and a
-	# loaded factory's windows arrive full (`SavedMachine.load`), so its
-	# lights are correct on the first frame drawn rather than a second in.
+	# loaded factory's windows arrive full (`SavedMachine.load`), so a hover
+	# on the first frame drawn reads the right status rather than nothing.
 	_poll_machine_load()
 	_refresh_buffers()
 
@@ -2331,7 +2361,6 @@ func _build_placement(placement: Dictionary) -> void:
 				_world_root.add_child(gauge)
 				_machine_gauges[key] = gauge
 			_build_machine_motion(key, kind, centre, yaw)
-			_build_machine_andon(key, origin, size)
 
 
 ## One of the one-voxel-tall bodies this scene scales every frame to show a
@@ -3146,64 +3175,7 @@ func _update_machine_motion() -> void:
 		motion["frame"] = frame
 
 
-## The tile of a footprint the camera can see the corner of — where its
-## stack light stands. `size` is the ROTATED footprint (what the placement
-## actually covers), and ANDON_CORNER says which edge on each axis.
-func _andon_tile(origin: Vector2i, size: Vector2i) -> Vector2i:
-	return Vector2i(
-		origin.x + (size.x - 1 if ANDON_CORNER.x > 0 else 0),
-		origin.y + (size.y - 1 if ANDON_CORNER.y > 0 else 0)
-	)
-
-
-## Stands this machine's andon on its camera-visible corner tile: one node
-## per status model, all at yaw 0, none visible until the first poll says
-## which. Siblings of the body for the reason the gauge and the motion
-## overlays are — `body.get_node_or_null("emissive")` must keep finding the
-## machine's own status lamp, not a lit lens.
-##
-## The three are built once and only ever have their visibility flipped,
-## like the motion frames: a status changes at most once a bucket and most
-## polls change nothing, so `_poll_machine_load` is a loop of comparisons.
-func _build_machine_andon(key: String, origin: Vector2i, size: Vector2i) -> void:
-	var height := ANDON_HEIGHT_SHORT if size == Vector2i.ONE else ANDON_HEIGHT_TALL
-	var tile := _andon_tile(origin, size)
-	var lenses := {}
-	for status in ANDON_STATUSES:
-		var node := _asset_node("andon_%s_%s" % [status, height])
-		node.name = "andon_%s_%s" % [key, status]
-		# A 1x1 model at the centre of its one tile, ground level, exactly
-		# as the encoder placed its origin (UI_UX.md §2b point 1) — the post's
-		# offset into the corner is authored into the model.
-		node.position = _footprint_centre(tile, Vector2i.ONE, FLOOR_Y)
-		node.rotation.y = 0.0
-		node.visible = false
-		_world_root.add_child(node)
-		lenses[status] = node
-	_machine_andons[key] = {"lenses": lenses, "status": "", "height": height, "tile": tile}
-
-
-## Shows the one lens `status` names on the machine at `origin_key`, if that
-## is a change. A status the sim spells that no model exists for leaves the
-## light as it was rather than dark: a dark tower says "not measured", which
-## would be a lie about a machine that is.
-func _set_machine_andon(origin_key: String, status: String) -> void:
-	if not _machine_andons.has(origin_key):
-		return
-	var andon: Dictionary = _machine_andons[origin_key]
-	if String(andon.get("status", "")) == status:
-		return
-	var lenses: Dictionary = andon["lenses"]
-	if not lenses.has(status):
-		return
-	var previous := String(andon.get("status", ""))
-	if lenses.has(previous):
-		lenses[previous].visible = false
-	lenses[status].visible = true
-	andon["status"] = status
-
-
-## Whether the lights are due a re-read: never read yet, or LOAD_POLL_TICKS
+## Whether the load is due a re-read: never read yet, or LOAD_POLL_TICKS
 ## of simulation since the last one. Against the sim's clock, not a frame
 ## count, so a burst of catch-up ticks in one frame still polls on schedule
 ## and a paused game (no ticks) never polls at all.
@@ -3211,8 +3183,8 @@ func _machine_load_poll_due() -> bool:
 	return _load_polled_tick < 0 or sim.current_tick() - _load_polled_tick >= LOAD_POLL_TICKS
 
 
-## Re-reads every machine's load and stall from the simulation and flips
-## whichever lenses changed. The hover record keeps the LAST reason the sim
+## Re-reads every machine's load and stall from the simulation into the
+## records the hover panel draws from. The record keeps the LAST reason the sim
 ## gave while the status holds: a stall is a per-tick fact and is `null` on
 ## most ticks of a blocked machine (it is mid-craft on most of them; the
 ## reason appears only on the ticks a finished batch is held), so a hover
@@ -3242,7 +3214,6 @@ func _poll_machine_load() -> void:
 		record["stall"] = stall
 		record["status"] = status
 		_machine_load[key] = record
-		_set_machine_andon(key, status)
 
 
 ## The stall reason in words. Item ids go through `_item_display_name` like
@@ -3251,6 +3222,11 @@ func _poll_machine_load() -> void:
 func _stall_reason_text(stall) -> String:
 	if not (stall is Dictionary):
 		return ""
+	# A staff refusal names the CATEGORY in `item` (the staff pools MVP);
+	# it is a plain word, not an item id, so it does not go through
+	# `_item_display_name`.
+	if String(stall.get("kind", "")) == "staff":
+		return "short of %s staff" % String(stall.get("item", ""))
 	var item := _item_display_name(String(stall.get("item", "")))
 	match String(stall.get("kind", "")):
 		"input":
@@ -3268,15 +3244,19 @@ func _stall_reason_text(stall) -> String:
 	return ""
 
 
-## The load line of a machine's hover text — status, share of the window
-## spent working, and (for a machine that is waiting) why:
-##   `flat out · 100% of the last 10s`
-##   `starved · 38% busy · waiting for Sugar`
-##   `blocked · 61% busy · output full`
-## The "10s" is the sim's own window over TICK_HZ, never typed here, so a
-## retuned `LOAD_BUCKETS` reads right without a Godot edit. Empty when the
-## machine has not been polled (a kind the sim does not measure). Pure given
-## `_machine_load`, so a test drives it with a record.
+## The load line of a machine's hover text — a status glyph and word, the
+## share of the window spent working, and (for a machine that is waiting)
+## why:
+##   `● flat out · 100% of the last 10s`
+##   `▲ starved · 38% busy · waiting for Sugar`
+##   `■ blocked · 61% busy · output full`
+## The glyph is the indicator's SHAPE (a lit lens, a warning triangle, a
+## stop block) so the status is never carried by the bar's colour alone
+## (UI_UX.md §7). The "10s" is the sim's own window over TICK_HZ, never
+## typed here, so a retuned `LOAD_BUCKETS` reads right without a Godot
+## edit. Empty when the machine has not been polled (a kind the sim does
+## not measure). Pure given `_machine_load`, so a test drives it with a
+## record.
 func _machine_load_text(origin_key: String) -> String:
 	if not _machine_load.has(origin_key):
 		return ""
@@ -3284,10 +3264,12 @@ func _machine_load_text(origin_key: String) -> String:
 	var load: Dictionary = record.get("load", {})
 	var status := String(record.get("status", ""))
 	var percent := int(load.get("percent", 0))
+	var glyph := String(LOAD_STATUS_GLYPHS.get(status, ""))
+	var lead := "%s " % glyph if glyph != "" else ""
 	if status == "working":
 		var window_seconds := int(round(float(load.get("window", 0)) / TICK_HZ))
-		return "flat out  ·  %d%% of the last %ds" % [percent, window_seconds]
-	var line := "%s  ·  %d%% busy" % [status, percent]
+		return "%sflat out  ·  %d%% of the last %ds" % [lead, percent, window_seconds]
+	var line := "%s%s  ·  %d%% busy" % [lead, status, percent]
 	var reason := _stall_reason_text(record.get("reason"))
 	if reason != "":
 		line += "  ·  %s" % reason
@@ -3388,8 +3370,8 @@ const CROSSHAIR_THICKNESS := 2.0 * UI_SCALE # px, each bar's width
 ## listed here or it is undiscoverable, whereas a building you can click
 ## announces itself on hover, so the line is a pointer rather than the only
 ## way to find out.
-const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    click a hopper or tank: configure\nWASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
-const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    click a hopper or tank: configure\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
+const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    H: staff    click a hopper or tank: configure\nWASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
+const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    H: staff    click a hopper or tank: configure\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
 
 
 ## The tile box the isometric camera frames at startup: whatever is placed,
@@ -3985,6 +3967,7 @@ func _build_ui() -> void:
 	_build_shop_menu(hud, settings)
 	_build_ingredient_market(hud, settings)
 	_build_contract_board(hud, settings)
+	_build_staff_panel(hud, settings)
 
 	# UI_UX.md §5's LAST unbuilt named widget: "a Minecraft-style hotbar/
 	# quick-access strip along one screen edge." Always visible, unlike the
@@ -4738,12 +4721,17 @@ func _build_shop_slot(grid: GridContainer, base_settings: LabelSettings, index: 
 	# children have to place themselves.
 	var column := VBoxContainer.new()
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	column.add_theme_constant_override("separation", _ui_i(2))
+	# No separation and two of top/bottom inset (they were two and eight):
+	# the crew line (the staff pools MVP) had to come out of the card's own
+	# slack, because a taller card makes the two-row grid scroll at
+	# 1600x900 and a taller grid buries the footer (UI_UX.md §5c). Each
+	# label carries its own line height, so the lines still breathe.
+	column.add_theme_constant_override("separation", 0)
 	column.set_anchors_preset(Control.PRESET_FULL_RECT)
 	column.offset_left = _ui_px(8)
 	column.offset_right = -_ui_px(8)
-	column.offset_top = _ui_px(8)
-	column.offset_bottom = -_ui_px(8)
+	column.offset_top = _ui_px(2)
+	column.offset_bottom = -_ui_px(2)
 	button.add_child(column)
 
 	# The hotkey corner. Slots past SHOP_HOTKEY_SLOTS simply show nothing
@@ -4806,6 +4794,27 @@ func _build_shop_slot(grid: GridContainer, base_settings: LabelSettings, index: 
 	price_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(price_label)
 
+	# The crew this kind needs while running (the staff pools MVP), under
+	# the price: a machine costs money once and people every period, and
+	# the card is where the first cost is read. Hidden for a kind with no
+	# crew (a belt) rather than saying "none" — the label stays, empty, so
+	# every card in a row is the same height.
+	var crew_settings := LabelSettings.new()
+	# The smallest step the UI scale allows (test_ui_scale.gd's floor); the
+	# card was widened for it — at -3 on the old card it CLIPPED at
+	# "manufacturi" (UI_UX.md §2b point 32).
+	crew_settings.font_size = _ui_font(-4)
+	crew_settings.font_color = Color(0.66, 0.68, 0.72)
+	crew_settings.outline_size = base_settings.outline_size
+	crew_settings.outline_color = base_settings.outline_color
+
+	var crew_label := Label.new()
+	crew_label.name = "Crew"
+	crew_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	crew_label.label_settings = crew_settings
+	crew_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(crew_label)
+
 	# What this slot would cost measured against what the player HAS. "Cost 70"
 	# and "Money: 1747" are two figures in two corners of the screen, and the
 	# question the player is actually asking — can I afford this, and what will
@@ -4834,6 +4843,7 @@ func _build_shop_slot(grid: GridContainer, base_settings: LabelSettings, index: 
 		"button": button,
 		"icon": icon,
 		"price_label": price_label,
+		"crew_label": crew_label,
 		"cost_meter": cost_meter,
 		"owned_label": owned_label,
 	})
@@ -4908,6 +4918,7 @@ func _update_shop_menu() -> void:
 		# the icon dims, and the whole slot is disabled (which also recolours
 		# its border/background via the disabled stylebox).
 		slot["price_label"].text = ("Cost %.0f" % price) if affordable else ("Cost %.0f  ✗" % price)
+		slot["crew_label"].text = _crew_text(entry.get("crew", []))
 		slot["price_label"].label_settings.font_color = (
 			Color(0.92, 0.93, 0.94) if affordable else Color(0.55, 0.50, 0.48)
 		)
@@ -5020,8 +5031,8 @@ func _update_crosshair_visibility() -> void:
 	if _crosshair == null:
 		return
 	_crosshair.visible = (_view_mode == ViewMode.FIRST_PERSON
-			and not _shop_open and not _market_open and not _board_open and not _pause_open
-			and not _config_open)
+			and not _shop_open and not _market_open and not _board_open and not _staff_open
+			and not _pause_open and not _config_open)
 
 
 func _toggle_shop_menu() -> void:
@@ -5634,6 +5645,540 @@ func _toggle_contract_board() -> void:
 	_set_contract_board_open(not _board_open)
 
 
+# --------------------------------------------------------------------------
+# The staff panel (the staff pools MVP, ticket 3) — see `_staff_panel`'s doc
+# --------------------------------------------------------------------------
+
+## Builds the staff panel. The contracts board's shape (dark plate, heading
+## and balance on one row, a footer naming the verbs) with one row per
+## category between them, in wire order. Hidden until H is pressed.
+func _build_staff_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.06, 0.06, 0.07, 0.94)
+	panel_style.border_color = Color(0.85, 0.63, 0.11, 0.95)
+	panel_style.border_width_top = _ui_i(4)
+	panel_style.border_width_left = _ui_i(2)
+	panel_style.border_width_right = _ui_i(2)
+	panel_style.border_width_bottom = _ui_i(2)
+	panel_style.set_content_margin_all(_ui_px(16.0))
+
+	# Cleared, never appended to — `_ready()` runs twice under the headless
+	# harness (see `_build_ingredient_market`).
+	_staff_rows.clear()
+	_staff_row_ids.clear()
+
+	_staff_panel = PanelContainer.new()
+	_staff_panel.name = "StaffPanel"
+	_staff_panel.add_theme_stylebox_override("panel", panel_style)
+	_staff_panel.visible = false
+	hud.add_child(_staff_panel)
+
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", _ui_i(10))
+	_staff_panel.add_child(body)
+
+	var title_settings := LabelSettings.new()
+	title_settings.font_size = _ui_font(4)
+	title_settings.font_color = base_settings.font_color
+	title_settings.outline_size = base_settings.outline_size
+	title_settings.outline_color = base_settings.outline_color
+
+	var heading := HBoxContainer.new()
+	heading.add_theme_constant_override("separation", _ui_i(16))
+	body.add_child(heading)
+
+	var title := Label.new()
+	title.label_settings = title_settings
+	title.text = "STAFF"
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	heading.add_child(title)
+
+	# Money on the panel, for `_build_shop_menu`'s reason: wages come out of
+	# this figure every period, and "can I carry another head" is read
+	# against it.
+	var money_settings := LabelSettings.new()
+	money_settings.font_size = _ui_font(6)
+	money_settings.font_color = Color(0.98, 0.85, 0.42)
+	money_settings.outline_size = base_settings.outline_size
+	money_settings.outline_color = base_settings.outline_color
+
+	_staff_money_label = Label.new()
+	_staff_money_label.name = "StaffMoney"
+	_staff_money_label.label_settings = money_settings
+	_staff_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	heading.add_child(_staff_money_label)
+
+	_staff_scroll = ScrollContainer.new()
+	_staff_scroll.name = "StaffScroll"
+	_staff_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_staff_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	body.add_child(_staff_scroll)
+
+	_staff_rows_box = VBoxContainer.new()
+	_staff_rows_box.name = "StaffRows"
+	_staff_rows_box.add_theme_constant_override("separation", _ui_i(6))
+	_staff_rows_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_staff_scroll.add_child(_staff_rows_box)
+
+	_poll_staff()
+	_rebuild_staff_rows(_staff_snapshot.get("categories", []))
+
+	_staff_footer_label = Label.new()
+	_staff_footer_label.name = "StaffFooter"
+	_staff_footer_label.label_settings = base_settings
+	body.add_child(_staff_footer_label)
+
+	_update_staff_panel()
+	_position_staff_panel()
+
+
+## Centred in the space above the hotbar, by `_position_contract_board`'s
+## arithmetic and for its reason (the footer must stay on screen).
+func _position_staff_panel() -> void:
+	if _staff_panel == null:
+		return
+	_staff_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
+	var vp := get_viewport()
+	if vp == null:
+		return
+	var reserved := _hotbar_reserved_height()
+	var bounds := vp.get_visible_rect().size
+	_fit_grid_scroll(_staff_scroll, _staff_rows_box, bounds.y - reserved - _ui_px(16.0))
+	var panel_size := _staff_panel.get_combined_minimum_size()
+	_staff_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
+
+
+## Rebuilds the category rows from the snapshot's `categories`. Content, so
+## it never changes length at runtime, but it goes through the same guard the
+## contracts board uses so a content change cannot leave stale rows behind.
+func _rebuild_staff_rows(categories: Array) -> void:
+	for row in _staff_rows:
+		var panel: Node = row["panel"]
+		if is_instance_valid(panel):
+			if panel.get_parent() != null:
+				panel.get_parent().remove_child(panel)
+			panel.queue_free()
+	_staff_rows.clear()
+	_staff_row_ids.clear()
+	for index in range(categories.size()):
+		_staff_rows.append(_build_staff_row(categories[index], index))
+		_staff_row_ids.append(String(categories[index].get("id", "")))
+
+
+func _staff_rows_match(categories: Array) -> bool:
+	if categories.size() != _staff_row_ids.size():
+		return false
+	for i in range(categories.size()):
+		if String(categories[i].get("id", "")) != String(_staff_row_ids[i]):
+			return false
+	return true
+
+
+## The dark row a category sits on: a step lighter than the plate so four
+## rows read as four rows, with the plate's own hairline.
+func _staff_row_style() -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.11, 0.11, 0.13, 0.92)
+	style.border_color = Color(0.30, 0.31, 0.34, 0.95)
+	style.set_border_width_all(_ui_i(1))
+	style.set_content_margin_all(_ui_px(6.0))
+	return style
+
+
+## One category: ticket 2's icon, the name, `hired N` and the wage under it,
+## the assigned/demand meter with both numbers printed ON it and the
+## shortfall in words beside it, and HIRE / FIRE. Returns
+## `{"id", "panel", "name_label", "hired_label", "wage_label", "meter",
+## "meter_label", "short_label", "note_label", "hire_button",
+## "fire_button"}` for `_update_staff_panel` to drive.
+func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
+	var id := String(category.get("id", "?"))
+	var panel := PanelContainer.new()
+	panel.name = "Staff_%s" % id
+	panel.add_theme_stylebox_override("panel", _staff_row_style())
+	_staff_rows_box.add_child(panel)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", _ui_i(14))
+	panel.add_child(row)
+
+	var icon := TextureRect.new()
+	icon.name = "Icon"
+	icon.custom_minimum_size = STAFF_ICON_SIZE
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	icon.texture = _icon_for_asset(STAFF_ICON_PREFIX + id)
+	row.add_child(icon)
+
+	# Name, then hired and wage: what the category is, then what it costs.
+	var text_col := VBoxContainer.new()
+	text_col.add_theme_constant_override("separation", _ui_i(2))
+	text_col.custom_minimum_size = Vector2(_ui_px(150.0), 0.0)
+	text_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(text_col)
+
+	var name_label := Label.new()
+	name_label.name = "Name"
+	name_label.label_settings = _contract_name_settings_dark()
+	name_label.text = String(category.get("name", id))
+	text_col.add_child(name_label)
+
+	# `hired 4  ·  wage 2 / head / period` on ONE line: with each on its own
+	# the row stood three lines tall and the fourth category scrolled off
+	# the plate at 1600x900 (UI_UX.md §5c: layout is what a scale costs).
+	var meta_row := HBoxContainer.new()
+	meta_row.add_theme_constant_override("separation", _ui_i(6))
+	text_col.add_child(meta_row)
+
+	var hired_label := Label.new()
+	hired_label.name = "Hired"
+	hired_label.label_settings = _staff_meta_settings()
+	meta_row.add_child(hired_label)
+
+	var meta_dot := Label.new()
+	meta_dot.label_settings = _staff_meta_settings()
+	meta_dot.text = "·"
+	meta_row.add_child(meta_dot)
+
+	var wage_label := Label.new()
+	wage_label.name = "Wage"
+	wage_label.label_settings = _staff_meta_settings()
+	meta_row.add_child(wage_label)
+
+	# The meter column: assigned / demand as a bar with the two numbers on
+	# it (position AND digits, UI_UX.md §7), the shortfall in words under
+	# it, or — for a category with nothing hired and nothing asking — a
+	# sentence in the meter's place.
+	var meter_col := VBoxContainer.new()
+	meter_col.add_theme_constant_override("separation", _ui_i(3))
+	meter_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	meter_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(meter_col)
+
+	var meter_caption := Label.new()
+	meter_caption.name = "MeterCaption"
+	meter_caption.label_settings = _staff_meta_settings()
+	meter_caption.text = "assigned / asked for"
+	meter_col.add_child(meter_caption)
+
+	# The bar and its shortfall side by side, so "2 short" sits where the
+	# missing part of the bar would be.
+	var meter_row := HBoxContainer.new()
+	meter_row.add_theme_constant_override("separation", _ui_i(10))
+	meter_col.add_child(meter_row)
+
+	var meter := _build_meter(meter_row, STAFF_METER_WIDTH, METER_FILL_LEVEL,
+		METER_TRACK_COLOR, METER_BORDER_COLOR, STAFF_METER_HEIGHT)
+	meter.name = "CrewMeter"
+	meter.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+
+	var meter_label := Label.new()
+	meter_label.name = "MeterLabel"
+	meter_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	meter_label.label_settings = _staff_meter_settings()
+	meter_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	meter_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	meter_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	meter.add_child(meter_label)
+
+	var short_label := Label.new()
+	short_label.name = "Short"
+	short_label.label_settings = _staff_warn_settings()
+	short_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	meter_row.add_child(short_label)
+
+	var note_label := Label.new()
+	note_label.name = "Note"
+	note_label.label_settings = _staff_meta_settings()
+	note_label.visible = false
+	meter_col.add_child(note_label)
+
+	# HIRE beside FIRE, the build menu's own button skin. Each moves ONE
+	# head through the real command; the panel re-reads the wire at once.
+	var buttons := HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", _ui_i(6))
+	buttons.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(buttons)
+
+	var hire_button := Button.new()
+	hire_button.name = "Hire_%s" % id
+	hire_button.text = "HIRE"
+	hire_button.focus_mode = Control.FOCUS_NONE
+	hire_button.custom_minimum_size = _ui_v(Vector2(84, 32))
+	hire_button.add_theme_font_size_override("font_size", _ui_font(-1))
+	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+		hire_button.add_theme_stylebox_override(state, _shop_slot_style(state))
+	hire_button.pressed.connect(_staff_hire.bind(index))
+	buttons.add_child(hire_button)
+
+	var fire_button := Button.new()
+	fire_button.name = "Fire_%s" % id
+	fire_button.text = "FIRE"
+	fire_button.focus_mode = Control.FOCUS_NONE
+	fire_button.custom_minimum_size = _ui_v(Vector2(84, 32))
+	fire_button.add_theme_font_size_override("font_size", _ui_font(-1))
+	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+		fire_button.add_theme_stylebox_override(state, _shop_slot_style(state))
+	fire_button.pressed.connect(_staff_fire.bind(index))
+	buttons.add_child(fire_button)
+
+	return {
+		"id": id,
+		"panel": panel,
+		"name_label": name_label,
+		"hired_label": hired_label,
+		"wage_label": wage_label,
+		"meter": meter,
+		"meter_label": meter_label,
+		"short_label": short_label,
+		"note_label": note_label,
+		"hire_button": hire_button,
+		"fire_button": fire_button,
+	}
+
+
+## The row's name type: the body colour a step bigger.
+func _contract_name_settings_dark() -> LabelSettings:
+	var settings := LabelSettings.new()
+	settings.font_size = _ui_font(2)
+	settings.font_color = Color(0.92, 0.93, 0.94)
+	settings.outline_size = _ui_i(3)
+	settings.outline_color = Color(0, 0, 0, 0.85)
+	return settings
+
+
+## The row's small print: hired, wage, the meter's caption, the idle note.
+func _staff_meta_settings() -> LabelSettings:
+	var settings := LabelSettings.new()
+	settings.font_size = _ui_font(-2)
+	settings.font_color = Color(0.72, 0.74, 0.78)
+	settings.outline_size = _ui_i(3)
+	settings.outline_color = Color(0, 0, 0, 0.85)
+	return settings
+
+
+## The digits printed on the meter: body size, white, outlined so they read
+## over the fill and over the empty track alike.
+func _staff_meter_settings() -> LabelSettings:
+	var settings := LabelSettings.new()
+	settings.font_size = _ui_font(-2)
+	settings.font_color = Color(0.97, 0.97, 0.98)
+	settings.outline_size = _ui_i(3)
+	settings.outline_color = Color(0, 0, 0, 0.9)
+	return settings
+
+
+## The shortfall in words, in the one warning colour, beside the red bar.
+func _staff_warn_settings() -> LabelSettings:
+	var settings := LabelSettings.new()
+	settings.font_size = _ui_font(-1)
+	settings.font_color = METER_FILL_WARN
+	settings.outline_size = _ui_i(3)
+	settings.outline_color = Color(0, 0, 0, 0.85)
+	return settings
+
+
+## Whether the staff pools are due a re-read: never read yet, or
+## LOAD_POLL_TICKS of simulation since the last one. The machine load's
+## rule (`_machine_load_poll_due`), on its own stamp so a HIRE's immediate
+## re-read does not shift the load's cadence.
+func _staff_poll_due() -> bool:
+	return _staff_polled_tick < 0 or sim.current_tick() - _staff_polled_tick >= LOAD_POLL_TICKS
+
+
+## Re-reads `staff_snapshot_json`. Cheap (four categories), so it is read
+## on the cadence whether or not the panel is up — the same object carries
+## the balance, and a panel opened between polls shows the last poll until
+## `_set_staff_open` reads again.
+func _poll_staff() -> void:
+	_staff_polled_tick = sim.current_tick()
+	var parsed = JSON.parse_string(sim.staff_snapshot_json())
+	if parsed is Dictionary:
+		_staff_snapshot = parsed
+
+
+## The pure half of a row (a test drives it with a category dictionary):
+## every string and number the row shows, from the wire's own figures.
+##
+##   hired_text     "hired 4"
+##   wage_text      "wage 2 / head / period"
+##   meter          {"fraction", "color"} — assigned over demand, red when
+##                  short; a demand of 0 is an empty bar reading "0 / 0"
+##   meter_text     "4 / 4"
+##   short_text     "2 short" when short > 0, else ""
+##   note           the idle sentence when the category has nothing hired
+##                  and nothing asking for it, else "" (the meter shows)
+##   fire_enabled   headcount > 0
+func _staff_row_state(category: Dictionary) -> Dictionary:
+	var headcount := int(category.get("headcount", 0))
+	var demand := int(category.get("demand", 0))
+	var assigned := int(category.get("assigned", 0))
+	var short := int(category.get("short", 0))
+	var wage := int(category.get("wage", 0))
+	var id := String(category.get("id", ""))
+	var note := ""
+	if headcount == 0 and demand == 0 and STAFF_IDLE_NOTES.has(id):
+		note = String(STAFF_IDLE_NOTES[id])
+	return {
+		"hired_text": "hired %d" % headcount,
+		"wage_text": "wage %d / head / period" % wage,
+		"meter": {
+			"fraction": (float(assigned) / float(demand)) if demand > 0 else 0.0,
+			"color": METER_FILL_WARN if short > 0 else METER_FILL_LEVEL,
+		},
+		"meter_text": "%d / %d" % [assigned, demand],
+		"short_text": ("%d short" % short) if short > 0 else "",
+		"note": note,
+		"fire_enabled": headcount > 0,
+	}
+
+
+## The upcoming wage bill: every hired head at its category's wage — the
+## payday rule (`docs/STAFF_POOLS_PLAN.md`, "The tick", step 5) applied to
+## the snapshot's own numbers. Arithmetic on figures the wire carries, like
+## the shop meter's price/money share; not a fact the sim reports
+## separately (a `next_bill` on the wire would be the cleaner home if the
+## payday rule ever stopped being "every head at its wage").
+func _staff_bill(snapshot: Dictionary) -> int:
+	var bill := 0
+	for category in snapshot.get("categories", []):
+		bill += int(category.get("headcount", 0)) * int(category.get("wage", 0))
+	return bill
+
+
+## The footer's lines, pure given the snapshot and the tick: the bill per
+## period, the countdown to payday in seconds (`_format_remaining`, so it is
+## the same clock the dockets use), and — only when it happened — how many
+## heads the last payday could not pay (glyph + words, UI_UX.md §7).
+func _staff_footer_text(snapshot: Dictionary, current_tick: int) -> String:
+	var lines: Array[String] = []
+	var remaining: int = int(snapshot.get("next_payday_tick", 0)) - current_tick
+	lines.append("wages %d / period  ·  next payday in %s" % [
+		_staff_bill(snapshot), _format_remaining(remaining),
+	])
+	var walked_out := int(snapshot.get("walked_out_last_payday", 0))
+	if walked_out > 0:
+		lines.append("✗ %d left unpaid last payday" % walked_out)
+	lines.append("HIRE and FIRE move one head; hiring is free, wages are paid every period    H/ESC: close")
+	return "\n".join(PackedStringArray(lines))
+
+
+## Drives every row and the footer from the last poll. Called each frame
+## while the panel is open (the countdown moves), on opening, and after a
+## HIRE or FIRE.
+func _update_staff_panel() -> void:
+	if _staff_panel == null:
+		return
+	var categories: Array = _staff_snapshot.get("categories", [])
+	if not _staff_rows_match(categories):
+		_rebuild_staff_rows(categories)
+	_staff_money_label.text = "Money: %.0f" % float(_staff_snapshot.get("money", 0.0))
+
+	for i in range(min(categories.size(), _staff_rows.size())):
+		var row: Dictionary = _staff_rows[i]
+		var state := _staff_row_state(categories[i])
+		row["hired_label"].text = state["hired_text"]
+		row["wage_label"].text = state["wage_text"]
+		var idle: bool = state["note"] != ""
+		row["note_label"].text = state["note"]
+		row["note_label"].visible = idle
+		row["meter"].visible = not idle
+		row["meter"].get_parent().visible = not idle
+		row["meter"].get_parent().get_parent().get_node("MeterCaption").visible = not idle
+		if not idle:
+			var meter: Dictionary = state["meter"]
+			_set_meter(row["meter"], float(meter["fraction"]), meter["color"])
+			row["meter_label"].text = state["meter_text"]
+		row["short_label"].text = state["short_text"]
+		row["short_label"].visible = state["short_text"] != ""
+		row["fire_button"].disabled = not bool(state["fire_enabled"])
+
+	_staff_footer_label.text = _staff_footer_text(_staff_snapshot, sim.current_tick())
+	_position_staff_panel()
+
+
+## Hires one head of the row's category through the real command, then
+## re-reads the wire at once so the row moves on the same frame.
+func _staff_hire(index: int) -> void:
+	_staff_move_head(index, "hire")
+
+
+## Fires one head. At headcount 0 the button is disabled; the command is a
+## silent no-op there anyway (the `Purchase` convention).
+func _staff_fire(index: int) -> void:
+	_staff_move_head(index, "fire")
+
+
+func _staff_move_head(index: int, verb: String) -> void:
+	if index < 0 or index >= _staff_rows.size():
+		return
+	sim.issue_command_json(JSON.stringify({
+		"type": verb,
+		"category": String(_staff_rows[index]["id"]),
+	}))
+	_poll_staff()
+	_update_staff_panel()
+
+
+func _set_staff_open(open: bool) -> void:
+	if _staff_panel == null or open == _staff_open:
+		return
+	if open:
+		_close_config_panel() # see `_set_shop_menu_open`
+	_staff_open = open
+	_staff_panel.visible = open
+	if open:
+		_poll_staff()
+		_update_staff_panel()
+	if _view_mode == ViewMode.FIRST_PERSON:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
+	_update_crosshair_visibility()
+
+
+func _toggle_staff_panel() -> void:
+	_set_staff_open(not _staff_open)
+
+
+## Reads the crew every placed machine and dock needs, from
+## `query_tile_json`, once per rebuild — `_seed_machine_states`'s twin.
+## A crew is content (the kind's `machines.ron` requirement) and never
+## changes while the thing stands, so it is not on the chunk wire.
+func _seed_crews() -> void:
+	_crews.clear()
+	for placement in _placements:
+		var kind := String(placement.get("kind", ""))
+		if placement.get("recipe") == null and kind != DOCK_KIND:
+			continue
+		var origin := _placement_origin(placement)
+		var parsed = JSON.parse_string(sim.query_tile_json(origin.x, origin.y))
+		if parsed is Dictionary and parsed.get("crew") is Array:
+			_crews[_tile_key(origin)] = parsed["crew"]
+
+
+## A crew in words: `crew: 2 manufacturing`, `crew: 1 manufacturing, 1
+## packaging`; "" for no crew, so a caller can drop the line rather than
+## print "crew: none" on every belt.
+func _crew_text(crew) -> String:
+	if not (crew is Array) or crew.is_empty():
+		return ""
+	var parts: Array = []
+	for entry in crew:
+		parts.append("%d %s" % [int(entry.get("count", 0)), String(entry.get("category", ""))])
+	return "crew: %s" % ", ".join(PackedStringArray(parts))
+
+
+## The categories a crew names, joined: "logistics", "manufacturing and
+## packaging". For the dock's "held · short of logistics staff".
+func _crew_categories_text(crew) -> String:
+	if not (crew is Array) or crew.is_empty():
+		return ""
+	var names: Array = []
+	for entry in crew:
+		names.append(String(entry.get("category", "")))
+	return " and ".join(PackedStringArray(names))
+
+
 ## The pure half of a docket's status (the contract-board epic): how far
 ## through its window a contract is, how many units it is short, and which
 ## of four states that puts it in —
@@ -6211,7 +6756,8 @@ func _close_config_panel() -> void:
 	_config_kind = ""
 	if _config_panel != null:
 		_config_panel.visible = false
-	if _view_mode == ViewMode.FIRST_PERSON and not _shop_open and not _market_open and not _board_open:
+	if _view_mode == ViewMode.FIRST_PERSON and not _shop_open and not _market_open \
+			and not _board_open and not _staff_open:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_update_crosshair_visibility()
 
@@ -6271,7 +6817,7 @@ func _config_click_at_tile(tile: Vector2i) -> void:
 func _update_config_panel() -> void:
 	if not _config_open or _config_panel == null:
 		return
-	if _shop_open or _market_open or _board_open or _in_build_mode():
+	if _shop_open or _market_open or _board_open or _staff_open or _in_build_mode():
 		_close_config_panel()
 		return
 	var placement := _placement_at_tile(_config_tile)
@@ -7086,6 +7632,7 @@ func _enter_build_mode(kind: String) -> void:
 	_set_shop_menu_open(false)
 	_set_market_open(false)
 	_set_contract_board_open(false)
+	_set_staff_open(false)
 	# A hopper carries a choice as well as a facing, so the legal choices are
 	# repolled on entry (the list is the simulation's, and content can change
 	# it). The ghost takes the first of them; changing it is the placed
@@ -7170,6 +7717,7 @@ func _close_all_overlays() -> void:
 	_set_shop_menu_open(false)
 	_set_market_open(false)
 	_set_contract_board_open(false)
+	_set_staff_open(false)
 	_exit_build_mode()
 
 
@@ -7179,7 +7727,7 @@ func _close_all_overlays() -> void:
 ## player is in, and putting it down should be the first press, not the
 ## second.
 func _anything_open() -> bool:
-	return _shop_open or _market_open or _board_open or _in_build_mode()
+	return _shop_open or _market_open or _board_open or _staff_open or _in_build_mode()
 
 
 func _in_build_mode() -> bool:
@@ -7649,12 +8197,14 @@ func _build_hover_tooltip(hud: CanvasLayer) -> void:
 	_hover_meter.name = "HoverMeter"
 	_hover_meter.visible = false
 
-	# A machine's LOAD — the share of the sim's window it spent working, the
-	# number its stack light summarises (the machine-load epic). A real
-	# fraction with a real ceiling (§5e's rule), drawn as a level in the
-	# level colour under the amber progress bar: the two answer different
-	# questions ("how far through this batch" / "how busy lately") and the
-	# words above carry which is which. Only a machine ever shows it.
+	# A machine's LOAD — the share of the sim's window it spent working (the
+	# machine-load epic). A real fraction with a real ceiling (§5e's rule),
+	# drawn as a bar under the amber progress bar and filled in the STATUS
+	# colour (green working, amber starved, red blocked — the same three the
+	# in-world stack lights used before they were removed, so the tooltip
+	# is the andon now): the two bars answer different questions ("how far
+	# through this batch" / "how busy lately") and the words above carry
+	# which is which. Only a machine ever shows it.
 	_hover_load_meter = _build_meter(column, HOVER_METER_WIDTH, METER_FILL_LEVEL)
 	_hover_load_meter.name = "HoverLoadMeter"
 	_hover_load_meter.visible = false
@@ -8128,6 +8678,8 @@ func _process(delta: float) -> void:
 		_update_ingredient_market()
 	if _board_open:
 		_update_contract_board()
+	if _staff_open:
+		_update_staff_panel()
 	_update_contract_notice()
 	# The ghost cannot be up while paused at all — build mode counts as
 	# "open", so ESC puts it down before it opens the panel — but the hover
@@ -8181,11 +8733,15 @@ func _advance_simulation(delta: float) -> void:
 	# the machinery with the pause menu up.
 	_update_belt_frame()
 	_update_machine_motion()
-	# The stack lights follow the tick the same way, so the pause menu's
-	# early return above freezes them too: a light that changed while the
+	# The load records follow the tick the same way, so the pause menu's
+	# early return above freezes them too: a status that changed while the
 	# factory was stopped would be reporting a factory that is not running.
 	if _machine_load_poll_due():
 		_poll_machine_load()
+	# The staff pools follow the same cadence and the same pause rule: the
+	# panel shows last-tick demand, and a paused factory has no last tick.
+	if _staff_poll_due():
+		_poll_staff()
 
 
 ## Real seconds since the last autosave, and the write when it comes due.
@@ -8222,7 +8778,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		# "so a future click-to-build has nothing to fight with". It does
 		# nothing outside build mode, so nothing that used to work changed.
 		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed \
-				and not _shop_open and not _market_open and not _board_open:
+				and not _shop_open and not _market_open and not _board_open and not _staff_open:
 			if _in_build_mode():
 				_confirm_build()
 			else:
@@ -8261,7 +8817,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if _view_mode == ViewMode.ISOMETRIC:
 			if _iso_dragging:
 				_apply_drag_pan(event.relative)
-		elif not _shop_open and not _market_open and not _board_open:
+		elif not _shop_open and not _market_open and not _board_open and not _staff_open:
 			# With either shop panel up in first-person the mouse is visible
 			# and is being used to click slots — swinging the camera with it
 			# too would make the panel unusable.
@@ -8292,6 +8848,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			# of either key always leave the player somewhere definite.
 			_set_market_open(false)
 			_set_contract_board_open(false)
+			_set_staff_open(false)
 		_toggle_shop_menu()
 		return
 
@@ -8305,6 +8862,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_exit_build_mode()
 			_set_shop_menu_open(false)
 			_set_contract_board_open(false)
+			_set_staff_open(false)
 		_toggle_market()
 		return
 
@@ -8320,7 +8878,21 @@ func _unhandled_input(event: InputEvent) -> void:
 			_exit_build_mode()
 			_set_shop_menu_open(false)
 			_set_market_open(false)
+			_set_staff_open(false)
 		_toggle_contract_board()
+		return
+
+	# H opens the STAFF panel — who is hired, what the factory is asking for,
+	# and HIRE/FIRE (the staff pools MVP, ticket 3). H for hire: the panel's
+	# verb, and a key nothing else on the legend uses. One modal at a time
+	# with E, M and C, for E's reason.
+	if event.keycode == KEY_H:
+		if not _staff_open:
+			_exit_build_mode()
+			_set_shop_menu_open(false)
+			_set_market_open(false)
+			_set_contract_board_open(false)
+		_toggle_staff_panel()
 		return
 
 	# **Q IS GONE** (the click-to-configure ticket). It cycled a hopper's
@@ -8704,15 +9276,29 @@ func _hover_panel_state(tile: Vector2i) -> Dictionary:
 		# MACHINE_PROGRESS_GAUGES already states for the in-world gauges.
 		state["meter"] = {"fraction": 0.0, "color": METER_FILL_PROGRESS}
 	# The load bar: the sim's `percent` over its own window, once polled.
-	# A level (green), not progress: the question it answers is "how busy",
-	# and the status word beside it in the text says which way it is failing.
+	# Filled in the STATUS colour — green working, amber starved, red
+	# blocked — which with the glyph and word in the text above it is the
+	# whole indicator; the question it answers is "how busy", and the colour
+	# says which way it is failing.
 	if _machine_load.has(key):
 		var load: Dictionary = _machine_load[key].get("load", {})
 		state["load_meter"] = {
 			"fraction": clampf(float(load.get("percent", 0)) / 100.0, 0.0, 1.0),
-			"color": METER_FILL_LEVEL,
+			"color": _load_status_color(String(_machine_load[key].get("status", ""))),
 		}
 	return state
+
+
+## The status colour of the hover's load bar: the three lens colours the
+## removed stack lights used, kept as meaning (UI_UX.md §7: saturated colour
+## is reserved for state), never as the only carrier of it.
+func _load_status_color(status: String) -> Color:
+	match status:
+		"starved":
+			return METER_FILL_PROGRESS
+		"blocked":
+			return METER_FILL_WARN
+	return METER_FILL_LEVEL
 
 
 ## What one belt's tooltip says, from its `links`: which way it carries and
@@ -8851,12 +9437,19 @@ func _machine_hover_text(origin_key: String, kind: String, direction: String) ->
 		direction,
 		progress_text,
 	]
-	# The load line (the machine-load epic): what the stack light beside the
-	# machine is saying, in words, with the number and the reason the light
-	# cannot carry. Only present once the sim has been polled for it.
+	# The load line (the machine-load epic): the machine's status as a glyph
+	# and a word, the share of the window it spent working, and the reason
+	# it is waiting if it is. This IS the indicator — there is no light on
+	# the floor. Only present once the sim has been polled for it.
 	var load_text := _machine_load_text(origin_key)
 	if load_text != "":
 		text += "\n%s" % load_text
+	# The crew this kind needs while running (the staff pools MVP): read
+	# with the machine's other facts at rebuild, so the line under "short of
+	# manufacturing staff" says how many manufacturing staff that is.
+	var crew_text := _crew_text(_crews.get(origin_key, []))
+	if crew_text != "":
+		text += "\n%s" % crew_text
 	return text
 
 
@@ -9017,12 +9610,23 @@ func _dock_hover_text(origin_key: String, direction: String) -> String:
 	var snapshot: Dictionary = _dock_states.get(origin_key, {})
 	if snapshot.is_empty():
 		return "%s\nfacing %s" % [_kind_display_name(DOCK_KIND), direction]
-	return "%s  ·  facing %s\nships to contracts every tick\n%d shipped by this dock\nwaiting: %s" % [
+	var text := "%s  ·  facing %s\nships to contracts every tick\n%d shipped by this dock\nwaiting: %s" % [
 		_kind_display_name(DOCK_KIND),
 		direction,
 		int(snapshot.get("shipped_total", 0)),
 		_format_counts(_last_dock_stock),
 	]
+	# The dock's crew, and — when the sim refused it on the last tick it had
+	# something to ship — the fact that it is HOLDING and why (the staff
+	# pools MVP). `understaffed` is the sim's verdict; the category is the
+	# crew the wire says this dock needs, never guessed from the pools.
+	var crew: Array = _crews.get(origin_key, [])
+	var crew_text := _crew_text(crew)
+	if crew_text != "":
+		text += "\n%s" % crew_text
+	if bool(snapshot.get("understaffed", false)):
+		text += "\nheld  ·  short of %s staff" % _crew_categories_text(crew)
+	return text
 
 
 ## The thin, live-state-reading half (deliberately not unit tested, same
@@ -9035,7 +9639,7 @@ func _dock_hover_text(origin_key: String, direction: String) -> String:
 func _update_hover_tooltip() -> void:
 	if _hover_tooltip == null:
 		return
-	if _shop_open or _market_open or _board_open or _pause_open or _config_open or _in_build_mode():
+	if _shop_open or _market_open or _board_open or _staff_open or _pause_open or _config_open or _in_build_mode():
 		# The build menu sits over the middle of the screen; a world tooltip
 		# chasing the cursor across it would just be two panels fighting. And
 		# in build mode the placement prompt is already the panel by the

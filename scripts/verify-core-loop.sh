@@ -185,7 +185,8 @@ run_godot_script test_pipe_shapes.gd PIPE_SHAPES_OK "pipe shape, turn, fittings 
 run_godot_script test_belt_shapes.gd BELT_SHAPES_OK "belt shape from links at every facing, frame from tick, corner item arcs, belt hover — pipes & conveyors ticket 5"
 run_godot_script test_payout_feedback.gd PAYOUT_FEEDBACK_OK "the payout celebration: coins, the money punch, the PAID stamp and the sound — payout juice"
 run_godot_script test_machine_motion.gd MACHINE_MOTION_OK "machine motion overlays: frames per kind, frame from the machine's own elapsed ticks, and motion only while it is actually working"
-run_godot_script test_machine_load.gd MACHINE_LOAD_OK "andon stack lights per machine, load polled on the tick, hover load line and bar, lights on the first frame of a load — the machine-load epic, ticket 3"
+run_godot_script test_machine_load.gd MACHINE_LOAD_OK "machine load in the hover panel (glyph, word, status-coloured bar), polled on the tick, right on the first frame of a load, and NO poles on the floor — the machine-load epic, ticket 3 as amended"
+run_godot_script test_staff_panel.gd STAFF_PANEL_OK "the staff panel (H): rows from staff_snapshot_json, HIRE/FIRE through the real commands, an understaffed machine and dock in hover, one modal at a time — the staff pools MVP, ticket 3"
 
 echo
 echo "PASS: real placement + milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"

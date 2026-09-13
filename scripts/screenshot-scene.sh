@@ -71,10 +71,22 @@
 # Pass --bottleneck to build the BOTTLENECK LINE (test_layouts.gd's
 # `build_bottleneck_line`): the whole shipped line with its hoppers and tank
 # on auto-fill, run until it has backed up behind the 240-tick cooking vat,
-# so the andon stack lights read red · red · green · amber · amber along
-# the line — the fixture the machine-load indicator is reviewed on. It
-# implies --populate. Add --hover to put the crusher's load line and load bar
-# in the tooltip, or --closeup on a machine to judge one stack light.
+# so the machines read blocked · blocked · working · starved · starved
+# along the line — the fixture the machine-load indicator is reviewed on.
+# It implies --populate. Add --hover to put the crusher's load line (glyph,
+# word, number, reason) and status-coloured load bar in the tooltip, which
+# is where the indicator lives since the stack-light poles were removed.
+#
+# Pass --staff to build the shipped line, run it (implies --populate, so the
+# meters read a line asking for its crew) and open the STAFF panel (H) over
+# it — one row per category with its icon, hired count, assigned/asked-for
+# meter, wage and HIRE/FIRE, and the wage bill and payday countdown in the
+# footer (the staff pools MVP). Pass --understaffed to build the
+# UNDERSTAFFED LINE (test_layouts.gd's `build_understaffed_line`: the same
+# line on auto-fill with two manufacturing heads fired, run until the
+# cooking vat is refused its crew) with the cursor on the vat, so the hover
+# shows `▲ starved · … · short of manufacturing staff` over its crew line.
+# It implies --populate.
 #
 # Pass --populate to run whatever was built forward first, so the shot shows
 # product moving instead of an idle factory. Pass --first-person to review
@@ -132,7 +144,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--bottleneck] [--contracts] [--payout] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--board] [--no-hud] [--stock] [--hotbar N] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--bottleneck] [--staff] [--understaffed] [--contracts] [--payout] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--board] [--no-hud] [--stock] [--hotbar N] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

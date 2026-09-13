@@ -37,7 +37,42 @@ pub const VINEGAR_UNITS: u32 = 1000;
 /// in it and breaking an unrelated assertion about contract payouts
 /// somewhere else. Fixtures pass this as their `reference_chain_with_budget`
 /// budget, which is what keeps a stocked world's balance at exactly zero.
+#[allow(dead_code)]
 pub const STOCK_COST: u32 = 5500;
+
+/// How many pay periods of the STARTING crew's wages a long-running fixture
+/// holds in reserve (the staff pools MVP epic). A fixture that stocks up
+/// and is left with nothing loses its whole crew at the first payday — a
+/// factory with no money has no staff, which is the mechanic, not a bug —
+/// so every fixture that ticks past a payday funds itself with
+/// [`WAGE_RESERVE`] on top of what it spends. 300 periods covers the
+/// longest loop in these files (200 000 ticks in `fluids.rs`).
+#[allow(dead_code)]
+pub const WAGE_PERIODS: u64 = 300;
+/// `WAGE_PERIODS` × the starting crew's bill per period (4 + 0 + 2 + 1
+/// heads at wage 2 = 14). A literal, like `STOCK_COST`, pinned against
+/// `data/staff.ron` and `data/machines.ron` by `tests/staff.rs`.
+#[allow(dead_code)]
+pub const WAGE_RESERVE: u32 = 4200;
+
+/// What the starting crew has been paid so far — the figure to subtract
+/// from a fixture's balance before asking what it *earned*. Valid only
+/// while the crew is the starting one (no hire, fire or walk-out), which
+/// it asserts; a payday count is read off the payday clock, so it needs no
+/// bookkeeping of its own.
+#[allow(dead_code)]
+pub fn wages_paid(world: &World) -> Fx {
+    let staff = world.staff();
+    assert_eq!(
+        staff.walked_out_last_payday(),
+        0,
+        "wages_paid() assumes the starting crew is intact — fund the fixture with WAGE_RESERVE"
+    );
+    let bill = u64::from(staff.bill_per_period());
+    let period = staff.catalog().pay_period_ticks();
+    let paydays = staff.next_payday_tick() / period - 1;
+    Fx::from_num(bill * paydays)
+}
 
 /// Buys `quantity` of `item`, asserting it was affordable — an unaffordable
 /// buy is a silent no-op, which would otherwise surface much later as an
@@ -57,6 +92,7 @@ pub fn buy(world: &mut World, item: &str, quantity: u32) {
 }
 
 /// Buys [`STOCK_COST`] worth of raw ingredients.
+#[allow(dead_code)]
 pub fn stock_up(world: &mut World) {
     let before = world.money();
     buy(world, "tomato", TOMATO_UNITS);

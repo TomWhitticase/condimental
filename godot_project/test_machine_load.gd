@@ -1,32 +1,32 @@
 # Headless proof of the machine-load indicator's Godot half (the machine-load
-# epic, ticket 3; `docs/MACHINE_LOAD_PLAN.md`): every recipe-running machine
-# carries an andon stack light on its camera-visible corner tile, lit to the
-# simulation's own verdict, polled on the tick, and its hover text says the
-# same thing in words.
+# epic, ticket 3; `docs/MACHINE_LOAD_PLAN.md`), as it stands since the
+# in-world andon stack lights were REMOVED on 2026-09-12: a machine's load
+# is polled from the simulation on the tick and read in the HOVER PANEL —
+# a status glyph and word leading the load line, the number, the reason it
+# is waiting, and a load bar filled in the status colour. Nothing about it
+# stands on the floor.
 #
 # Run with:
 #   godot --headless --path godot_project --script test_machine_load.gd
 #
 # Verifies:
-#   * `ANDON_CORNER` is derived from `CAMERA_DIRECTION`, and `_andon_tile`
-#     picks the max-X/max-Y tile of a footprint under it (the 2x2 vat's far
-#     corner, the 1x2 mixer's north tile, a 1x1 machine's own tile),
-#   * every machine of the settled bottleneck line gets exactly three andon
-#     nodes (one per status model), at that tile, yaw 0, short for a 1x1
-#     footprint and tall for anything larger; nothing that is not a
-#     recipe-running machine gets one — not the hoppers, the tank, the dock,
-#     a belt or a pipe,
-#   * exactly one lens is visible per machine and it is the status the sim
-#     reports on the wire — red · red · green · amber · amber along the
-#     line, which is the whole point of the fixture,
-#   * the hover line carries status, percentage and reason for all three
-#     cases, in the plan's exact language, with the window in seconds from
-#     `window / TICK_HZ` and items through `_item_display_name`; the hover
-#     panel's load bar records the same fraction,
-#   * a status change flips the lens (a real one, polled through
-#     `_advance_simulation` as a fresh line starts up), and the pause menu
-#     freezes polling — the sim may move on, the lights do not,
-#   * a save loaded back shows its lights on the first frame, before any tick.
+#   * the load line carries a status glyph AND word for all three cases,
+#     in the plan's exact language, with the window in seconds from
+#     `window / TICK_HZ` and items through `_item_display_name`,
+#   * the load bar's colour follows the status (green working, amber
+#     starved, red blocked) and its fraction is the sim's percent,
+#   * on the settled bottleneck line every recipe-running machine has a
+#     load record that is the sim's own verdict — blocked · blocked ·
+#     working · starved · starved along the line — and nothing that is not
+#     a machine has one; and NO node on the floor is an andon,
+#   * hover on any tile of a machine's footprint says its status, and a
+#     blocked machine's remembered reason survives the null ticks between
+#     held batches,
+#   * a save loaded back reads its statuses on the first frame, before any
+#     tick,
+#   * a real status change is polled through `_advance_simulation` as a
+#     fresh line starts up, the pause menu freezes polling, and the cadence
+#     is LOAD_POLL_TICKS of simulation.
 extends SceneTree
 
 const Layouts = preload("res://test_layouts.gd")
@@ -64,7 +64,7 @@ func _step() -> void:
 
 
 ## What the simulation itself says the machine at `key` is doing, straight
-## off the wire — the reference every lens is checked against.
+## off the wire — the reference every record is checked against.
 func _sim_status(key: String) -> String:
 	var parsed = JSON.parse_string(main.sim.machine_load_snapshots_json())
 	for entry in parsed:
@@ -73,45 +73,28 @@ func _sim_status(key: String) -> String:
 	return ""
 
 
+## The status the scene holds for the machine at `key`, or "" for none.
+func _shown_status(key: String) -> String:
+	if not main._machine_load.has(key):
+		return ""
+	return String(main._machine_load[key].get("status", ""))
+
+
 ## "x,y" back to a tile.
 func _key_tile(key: String) -> Vector2i:
 	var parts := key.split(",")
 	return Vector2i(int(parts[0]), int(parts[1]))
 
 
-## Which lens the machine at `key` is showing, or "" for none, failing on
-## more than one.
-func _lit_lens(key: String) -> String:
-	if not main._machine_andons.has(key):
-		return ""
-	var lenses: Dictionary = main._machine_andons[key]["lenses"]
-	var lit := ""
-	for status in lenses.keys():
-		var node: Node3D = lenses[status]
-		if node.visible:
-			if lit != "":
-				_fail("the machine at %s shows two lenses at once: %s and %s" % [key, lit, status])
-			lit = String(status)
-	return lit
-
-
 func _run_checks() -> void:
-	# --- 1. the corner, pure -----------------------------------------------
-	var expected_corner := Vector2i(
-		int(signf(main.CAMERA_DIRECTION.x)), int(signf(main.CAMERA_DIRECTION.z))
-	)
-	if main.ANDON_CORNER != expected_corner:
-		_fail("ANDON_CORNER must be the sign of CAMERA_DIRECTION on the tile axes, got %s" % str(main.ANDON_CORNER))
-	if main.ANDON_CORNER != Vector2i(1, 1):
-		_fail("with the shipped camera the visible corner is the far one on both axes, got %s" % str(main.ANDON_CORNER))
-	if main._andon_tile(Vector2i(4, 0), Vector2i(1, 1)) != Vector2i(4, 0):
-		_fail("a 1x1 machine's andon stands on its own tile")
-	if main._andon_tile(Vector2i(12, 0), Vector2i(2, 2)) != Vector2i(13, 1):
-		_fail("the 2x2 vat's andon stands on its far corner (13,1), got %s" % str(main._andon_tile(Vector2i(12, 0), Vector2i(2, 2))))
-	if main._andon_tile(Vector2i(9, 0), Vector2i(1, 2)) != Vector2i(9, 1):
-		_fail("the 1x2 mixer's andon stands on its north tile (9,1)")
+	# --- 1. the words, pure -------------------------------------------------
+	var glyphs: Dictionary = main.LOAD_STATUS_GLYPHS
+	for status in ["working", "starved", "blocked"]:
+		if not glyphs.has(status) or String(glyphs[status]).is_empty():
+			_fail("LOAD_STATUS_GLYPHS has no glyph for %s" % status)
+	if glyphs.values().size() != 3 or glyphs["working"] == glyphs["starved"] or glyphs["starved"] == glyphs["blocked"] or glyphs["working"] == glyphs["blocked"]:
+		_fail("the three status glyphs must be three different shapes, got %s" % str(glyphs))
 
-	# --- 2. the words, pure -------------------------------------------------
 	var window: int = 600
 	var probe := "77,77"
 	main._machine_load[probe] = {
@@ -120,8 +103,8 @@ func _run_checks() -> void:
 	}
 	var expected_seconds := int(round(float(window) / main.TICK_HZ))
 	var flat_out: String = main._machine_load_text(probe)
-	if flat_out != "flat out  ·  100%% of the last %ds" % [expected_seconds]:
-		_fail("a working machine reads 'flat out · 100%% of the last Ns', got '%s'" % [flat_out])
+	if flat_out != "%s flat out  ·  100%% of the last %ds" % [glyphs["working"], expected_seconds]:
+		_fail("a working machine reads '● flat out · 100%% of the last Ns', got '%s'" % [flat_out])
 	if flat_out.find("%ds" % expected_seconds) < 0:
 		_fail("the window must be window / TICK_HZ seconds (%d), got '%s'" % [expected_seconds, flat_out])
 	main._machine_load[probe] = {
@@ -129,8 +112,8 @@ func _run_checks() -> void:
 		"load": {"percent": 38, "window": window, "status": "starved"},
 	}
 	var starved: String = main._machine_load_text(probe)
-	if starved != "starved  ·  38%% busy  ·  waiting for %s" % [main._item_display_name("sugar")]:
-		_fail("a starved machine reads 'starved · 38%% busy · waiting for Sugar', got '%s'" % [starved])
+	if starved != "%s starved  ·  38%% busy  ·  waiting for %s" % [glyphs["starved"], main._item_display_name("sugar")]:
+		_fail("a starved machine reads '▲ starved · 38%% busy · waiting for Sugar', got '%s'" % [starved])
 	if starved.find("sugar") >= 0 and main._item_display_name("sugar") != "sugar":
 		_fail("the item must go through _item_display_name, got '%s'" % starved)
 	main._machine_load[probe] = {
@@ -138,14 +121,14 @@ func _run_checks() -> void:
 		"load": {"percent": 61, "window": window, "status": "blocked"},
 	}
 	var blocked: String = main._machine_load_text(probe)
-	if blocked != "blocked  ·  61% busy  ·  output full":
-		_fail("a blocked machine reads 'blocked · 61%% busy · output full', got '%s'" % [blocked])
+	if blocked != "%s blocked  ·  61%% busy  ·  output full" % glyphs["blocked"]:
+		_fail("a blocked machine reads '■ blocked · 61%% busy · output full', got '%s'" % [blocked])
 	# No remembered reason: the status and the number alone, nothing invented.
 	main._machine_load[probe] = {
 		"status": "blocked", "reason": null,
 		"load": {"percent": 61, "window": window, "status": "blocked"},
 	}
-	if main._machine_load_text(probe) != "blocked  ·  61% busy":
+	if main._machine_load_text(probe) != "%s blocked  ·  61%% busy" % glyphs["blocked"]:
 		_fail("a blocked machine with no reason yet says only status and number, got '%s'" % [main._machine_load_text(probe)])
 	main._machine_load.erase(probe)
 	if main._machine_load_text(probe) != "":
@@ -166,86 +149,52 @@ func _run_checks() -> void:
 	if main._stall_reason_text({"kind": "something_new", "item": "x"}) != "":
 		_fail("an unknown stall kind says nothing rather than guessing")
 
-	# --- 3. the lights on the settled line -----------------------------------
+	# --- 2. the colour, pure -------------------------------------------------
+	# Three statuses, three colours, and they are the panel's own meter
+	# colours rather than three new ones (UI_UX.md §5e/§7).
+	var colors := {
+		"working": main._load_status_color("working"),
+		"starved": main._load_status_color("starved"),
+		"blocked": main._load_status_color("blocked"),
+	}
+	if colors["working"] != main.METER_FILL_LEVEL:
+		_fail("a working machine's load bar is the level colour")
+	if colors["starved"] != main.METER_FILL_PROGRESS:
+		_fail("a starved machine's load bar is the amber colour")
+	if colors["blocked"] != main.METER_FILL_WARN:
+		_fail("a blocked machine's load bar is the warning colour")
+	if colors["working"] == colors["starved"] or colors["starved"] == colors["blocked"] or colors["working"] == colors["blocked"]:
+		_fail("the three status colours must differ")
+
+	# --- 3. the settled line: records, and no poles ---------------------------
 	Layouts.build_bottleneck_line(main.sim)
 	main._rebuild_world()
 
 	var expected: Dictionary = Layouts.BOTTLENECK_MACHINES
-	var heights := {
-		"4,0": main.ANDON_HEIGHT_SHORT, "9,0": main.ANDON_HEIGHT_TALL,
-		"12,0": main.ANDON_HEIGHT_TALL, "16,0": main.ANDON_HEIGHT_SHORT,
-		"21,0": main.ANDON_HEIGHT_SHORT,
-	}
-	var corners := {
-		"4,0": Vector2i(4, 0), "9,0": Vector2i(9, 1), "12,0": Vector2i(13, 1),
-		"16,0": Vector2i(16, 0), "21,0": Vector2i(21, 0),
-	}
-	if main._machine_andons.size() != expected.size():
-		_fail("%d machines on the line, %d andons built" % [expected.size(), main._machine_andons.size()])
+	if main._machine_load.size() != expected.size():
+		_fail("%d machines on the line, %d load records" % [expected.size(), main._machine_load.size()])
 	for key in expected.keys():
-		if not main._machine_andons.has(key):
-			_fail("the machine at %s has no andon" % key)
-		var andon: Dictionary = main._machine_andons[key]
-		var lenses: Dictionary = andon["lenses"]
-		if lenses.size() != main.ANDON_STATUSES.size():
-			_fail("the machine at %s has %d lens nodes, expected %d" % [key, lenses.size(), main.ANDON_STATUSES.size()])
-		if String(andon["height"]) != heights[key]:
-			_fail("the machine at %s stands a %s andon, expected %s" % [key, andon["height"], heights[key]])
-		if andon["tile"] != corners[key]:
-			_fail("the machine at %s stands its andon on %s, expected %s" % [key, str(andon["tile"]), str(corners[key])])
-		var want_position: Vector3 = main._footprint_centre(corners[key], Vector2i.ONE, main.FLOOR_Y)
-		for status in main.ANDON_STATUSES:
-			if not lenses.has(status):
-				_fail("the machine at %s has no %s lens node" % [key, status])
-			var node: Node3D = lenses[status]
-			if node == null or not is_instance_valid(node) or node.get_parent() != main._world_root:
-				_fail("the %s lens of %s is not a node under World" % [status, key])
-			if node.name != "andon_%s_%s" % [key, status]:
-				_fail("the %s lens of %s is named %s" % [status, key, node.name])
-			if node.position.distance_to(want_position) > 0.001:
-				_fail("the %s lens of %s stands at %s, expected the corner tile's centre %s" % [
-					status, key, str(node.position), str(want_position),
-				])
-			if absf(node.rotation.y) > 0.001:
-				_fail("an andon is never rotated; %s's is at yaw %f" % [key, node.rotation.y])
-			# The model is really there: an asset name that fell through to
-			# nothing would be an empty Node3D with every test green.
-			var meshes := 0
-			for child in node.get_children():
-				if child is MeshInstance3D and child.mesh != null:
-					meshes += 1
-			if meshes == 0:
-				_fail("the %s lens of %s (%s) has no mesh — is andon_%s_%s staged?" % [
-					status, key, node.name, status, andon["height"],
-				])
-		# One lens lit, and it is the sim's word.
-		var lit := _lit_lens(key)
+		if not main._machine_load.has(key):
+			_fail("the machine at %s has no load record" % key)
+			continue
 		var sim_status := _sim_status(key)
-		if lit == "":
-			_fail("the machine at %s shows no lens" % key)
-		if lit != sim_status:
-			_fail("the machine at %s shows %s, the sim says %s" % [key, lit, sim_status])
 		if sim_status != expected[key]:
 			_fail("the settled line's %s reads %s, the fixture expects %s" % [key, sim_status, expected[key]])
-		if String(main._machine_load[key]["status"]) != sim_status:
-			_fail("_machine_load[%s] says %s, the sim says %s" % [key, main._machine_load[key]["status"], sim_status])
-	# The body's own lamp is still the body's: the lenses are siblings.
+		if _shown_status(key) != sim_status:
+			_fail("_machine_load[%s] says %s, the sim says %s" % [key, _shown_status(key), sim_status])
+	# Nothing else gets a record: hoppers, the tank, the dock, a belt, a pipe.
+	for key in ["-1,0", "4,1", "5,2", "26,0", "0,0", "10,0"]:
+		if main._machine_load.has(key):
+			_fail("%s is not a recipe-running machine and must have no load record" % key)
+	# And nothing stands on the floor for it: the andon poles are gone, and
+	# a machine's body still owns its own status lamp.
+	for child in main._world_root.get_children():
+		if String(child.name).begins_with("andon_"):
+			_fail("an andon node %s is standing in the world — the poles were removed" % child.name)
 	for key in expected.keys():
 		var lamp = main._machine_lamps.get(key)
 		if lamp == null or not String(lamp.get_parent().name).ends_with("_%s" % key):
-			_fail("the machine at %s lost its own status lamp to the andon" % key)
-
-	# Nothing else gets one: hoppers, the tank, the dock, a belt, a pipe.
-	for key in ["-1,0", "4,1", "5,2", "26,0", "0,0", "10,0"]:
-		if main._machine_andons.has(key):
-			_fail("%s is not a recipe-running machine and must have no andon" % key)
-		if main._machine_load.has(key):
-			_fail("%s is not a recipe-running machine and must have no load record" % key)
-	for child in main._world_root.get_children():
-		if String(child.name).begins_with("andon_"):
-			var owner_key := String(child.name).trim_prefix("andon_").rsplit("_", true, 1)[0]
-			if not expected.has(owner_key):
-				_fail("an andon node %s stands on nothing the fixture expects one on" % child.name)
+			_fail("the machine at %s has no status lamp on its own body" % key)
 
 	# --- 4. hover on the settled line ----------------------------------------
 	var hover_cases := {
@@ -261,6 +210,9 @@ func _run_checks() -> void:
 		for needle in hover_cases[key]:
 			if text.find(needle) < 0:
 				_fail("hover on %s must say '%s', got:\n%s" % [key, needle, text])
+		var status: String = expected[key]
+		if text.find(String(glyphs[status])) < 0:
+			_fail("hover on %s must lead its load line with the %s glyph %s, got:\n%s" % [key, status, glyphs[status], text])
 		var percent := int(main._machine_load[key]["load"]["percent"])
 		if text.find("%d%%" % percent) < 0:
 			_fail("hover on %s must carry the sim's %d%%, got:\n%s" % [key, percent, text])
@@ -268,8 +220,11 @@ func _run_checks() -> void:
 		var load_meter: Dictionary = state.get("load_meter", {})
 		if load_meter.is_empty():
 			_fail("the hover panel on %s has no load bar" % key)
+			continue
 		if absf(float(load_meter["fraction"]) - float(percent) / 100.0) > 0.001:
 			_fail("the load bar on %s is at %f, the sim's percent is %d" % [key, load_meter["fraction"], percent])
+		if load_meter["color"] != colors[status]:
+			_fail("the load bar on %s (%s) is not in the %s colour" % [key, status, status])
 		main._apply_hover_panel_state(state)
 		if not main._hover_load_meter.visible:
 			_fail("the load bar must be shown for a machine")
@@ -290,22 +245,22 @@ func _run_checks() -> void:
 		main._poll_machine_load()
 		if main._machine_load["4,0"]["reason"] == null:
 			_fail("the crusher's remembered reason was dropped on a tick with a null stall")
-		if String(main._machine_load["4,0"]["status"]) != "blocked":
+		if _shown_status("4,0") != "blocked":
 			_fail("the crusher stopped reading blocked during the settled run")
 
-	# --- 5. a save loaded back lights up on the first frame ------------------
+	# --- 5. a save loaded back reads right on the first frame ----------------
 	var save_text: String = main.sim.save_ron()
 	main.sim.new_game()
 	main._rebuild_world()
-	if not main._machine_andons.is_empty():
-		_fail("an empty world has no andons")
+	if not main._machine_load.is_empty():
+		_fail("an empty world has no load records")
 	var refusal: String = main.sim.load_ron(save_text)
 	if refusal != "":
 		_fail("load_ron refused the settled line's save: %s" % refusal)
 	main._rebuild_world()
 	for key in expected.keys():
-		if _lit_lens(key) != expected[key]:
-			_fail("after a load, before any tick, %s shows '%s', expected %s" % [key, _lit_lens(key), expected[key]])
+		if _shown_status(key) != expected[key]:
+			_fail("after a load, before any tick, %s reads '%s', expected %s" % [key, _shown_status(key), expected[key]])
 		if main._hover_text_at_tile(_key_tile(key)).find(expected[key] if expected[key] != "working" else "flat out") < 0:
 			_fail("after a load, hover on %s does not carry its status" % key)
 
@@ -316,14 +271,14 @@ func _run_checks() -> void:
 	main.sim.issue_command_json(JSON.stringify({"type": "set_hopper_auto_fill", "tile": [-1, 0], "enabled": true}))
 	main._rebuild_world()
 	var crusher := "4,0"
-	if _lit_lens(crusher) != "starved":
-		_fail("a machine that has not run yet reads starved (nothing observed), got '%s'" % _lit_lens(crusher))
+	if _shown_status(crusher) != "starved":
+		_fail("a machine that has not run yet reads starved (nothing observed), got '%s'" % _shown_status(crusher))
 	if _sim_status(crusher) != "starved":
 		_fail("the sim itself should read starved before any tick")
 	if main._machine_load_poll_due():
 		_fail("a rebuild polls; nothing is due straight after it")
 	# The pause menu: the sim can be moved on underneath (as a test may), and
-	# the lights must not follow until the game runs again. The run is the
+	# the records must not follow until the game runs again. The run is the
 	# belt's transit (~200 ticks for the first tomato to reach the crusher)
 	# plus a whole window, so the idle start has scrolled out of it.
 	for i in range(1300):
@@ -336,16 +291,15 @@ func _run_checks() -> void:
 		_step()
 	main._pause_open = false
 	if main._load_polled_tick != polled_at:
-		_fail("the lights were polled with the pause menu up")
-	if _lit_lens(crusher) != "starved":
-		_fail("the crusher's light changed with the pause menu up")
-	# Running again: the next frame's step is due and the lens flips — one
-	# visible, the old one hidden.
+		_fail("the load was polled with the pause menu up")
+	if _shown_status(crusher) != "starved":
+		_fail("the crusher's status changed with the pause menu up")
+	# Running again: the next frame's step is due and the record follows.
 	_step()
-	if _lit_lens(crusher) != "working":
-		_fail("after resuming, the crusher's light must follow the sim to working, shows '%s'" % _lit_lens(crusher))
-	if main._machine_andons[crusher]["lenses"]["starved"].visible:
-		_fail("the old lens must be hidden when the status changes")
+	if _shown_status(crusher) != "working":
+		_fail("after resuming, the crusher must follow the sim to working, reads '%s'" % _shown_status(crusher))
+	if main._hover_text_at_tile(_key_tile(crusher)).find("flat out") < 0:
+		_fail("after resuming, hover on the crusher must read flat out")
 	# The cadence: the next poll is LOAD_POLL_TICKS of simulation away, no
 	# sooner, and a step that ticks is what brings it.
 	var after_poll: int = main._load_polled_tick
@@ -358,10 +312,6 @@ func _run_checks() -> void:
 	_step()
 	if main._load_polled_tick == after_poll:
 		_fail("LOAD_POLL_TICKS ticks after a poll, the next one is due")
-	# Setting the same status again is a no-op on the nodes.
-	main._set_machine_andon(crusher, "working")
-	if _lit_lens(crusher) != "working":
-		_fail("re-applying the shown status must change nothing")
 
 	if _failed:
 		quit(1)

@@ -87,6 +87,22 @@
 // buildings that claim tiles, and nothing else should have to know a second
 // way of answering "how big is that thing."
 //
+// EVERY KIND DECLARES ITS CREW (the staff pools MVP epic, 2026-09-12 —
+// `schema_version` 1 -> 2, and the reason for the bump). `staff` is the
+// crew a kind needs WHILE RUNNING, as `(category, count)` lines in the
+// categories `data/staff.ron` defines (GAMEPLAY.md §7). It is required, not
+// defaulted: an omitted crew should be a loader error, not a silent zero,
+// the precedent `recipes.ron` set at v2 -> v3. Each tick a machine claims
+// its whole list or nothing, in the simulation's stable machine order, and
+// a machine refused its crew does not run that tick and reads `starved`
+// with a `staff` stall naming the first short category IN THIS LIST'S
+// ORDER (`sim_core/src/sim/staff.rs`). The hopper, tank and splitter ask
+// for nobody; the dock asks for logistics staff to ship. The shipped
+// starting crew in `staff.ron` is exactly the sum of one reference line's
+// lists — the relationship `sim_core/tests/staff.rs` pins. A category
+// named here that `staff.ron` does not define is a test failure
+// (`StaffCatalog::validate_machines`), not a construction panic.
+//
 // ORDER IN THIS FILE IS NOT THE CHAIN, and since the "Real Placement" epic
 // nothing else is either: there is no chain in the simulation at all, only
 // placements and the adjacency between them. `data/recipes.ron`'s order
@@ -95,7 +111,7 @@
 // placement commands) lays out, and what the raw-ingredient rule reads — but
 // `World` no longer builds anything from it.
 (
-    schema_version: 1,
+    schema_version: 2,
     machines: [
         // The chain's raw-ingredient feeder (ticket 3) — one of the three
         // kinds here with no recipe behind it; see the note above. 1x1: a
@@ -106,6 +122,8 @@
         MachineKind(
             id: "hopper",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
+            staff: [],
+
         ),
         // The pipe run's supply (the "Visual overhaul round 2" epic's
         // ticket 1) — the fluid twin of the hopper above, and another
@@ -123,6 +141,8 @@
         MachineKind(
             id: "fluid_tank",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
+            staff: [],
+
         ),
         // A conveyor splitter (Epic B) — one belt in, two belts out, and
         // the FOURTH kind in this file with no recipe behind it. Like the
@@ -144,6 +164,8 @@
         MachineKind(
             id: "splitter",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
+            staff: [],
+
         ),
         // GAMEPLAY.md §2 tier 1's raw-ingredient prep: crushes whole
         // tomatoes into paste. 1x1 — a crusher is a hopper and a screw, the
@@ -152,6 +174,8 @@
         MachineKind(
             id: "crusher",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
+            staff: [("manufacturing", 1)],
+
         ),
         // Blends tomato paste and sugar with vinegar into an uncooked
         // ketchup mix, and discharges that mix as a **liquid** into a second
@@ -172,6 +196,8 @@
         MachineKind(
             id: "mixer",
             footprint: Footprint(width_tiles: 1, height_tiles: 2),
+            staff: [("manufacturing", 1)],
+
         ),
         // GAMEPLAY.md §2 tier 1/2's cooker/kettle, grown up: a batch vat
         // that cooks the mix down into finished ketchup. **This is the
@@ -196,6 +222,8 @@
         MachineKind(
             id: "cooking_vat",
             footprint: Footprint(width_tiles: 2, height_tiles: 2),
+            staff: [("manufacturing", 2)],
+
         ),
         // Tier 2's bottling & sealing line — and, since the chain rework,
         // the stage where the product stops being a fluid: it draws liquid
@@ -204,12 +232,16 @@
         MachineKind(
             id: "bottler",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
+            staff: [("packaging", 1)],
+
         ),
         // Packing finished bottles into boxes — the stage milestone 4 added
         // as its proof that extending the chain is a data-file-only edit.
         MachineKind(
             id: "packer",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
+            staff: [("packaging", 1)],
+
         ),
         // The chain's finished-product exit (the delivery-dock ticket) — the
         // third kind here with no recipe behind it, and the exact mirror of
@@ -276,6 +308,8 @@
         MachineKind(
             id: "dock",
             footprint: Footprint(width_tiles: 2, height_tiles: 2),
+            staff: [("logistics", 1)],
+
         ),
     ],
 )

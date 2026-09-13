@@ -176,6 +176,13 @@ impl SimBridge {
     /// offer that is already active (one signature per offer), or a fee the
     /// balance does not cover.
     ///
+    /// **`hire` and `fire` are new with the staff pools MVP epic**:
+    /// `{"type": "hire", "category": "manufacturing"}` adds one head, free
+    /// and never refused for a known category; `{"type": "fire", ...}`
+    /// removes one, free, a silent no-op at headcount 0. Both are silent
+    /// no-ops for an unknown category and neither dirties a chunk — poll
+    /// `staff_snapshot_json`.
+    ///
     /// **Two changes from the chain-rework epic**, both of which a caller
     /// has to consume:
     ///
@@ -578,6 +585,49 @@ impl SimBridge {
     fn shop_snapshot_json(&self) -> GString {
         let snapshot = self.world.shop_snapshot();
         let json = serde_json::to_string(&snapshot).expect("ShopSnapshot must serialize");
+        GString::from(json.as_str())
+    }
+
+    /// The staff pools (the staff pools MVP epic, GAMEPLAY.md §7) as one
+    /// JSON object (`sim::StaffSnapshot`) — everything the staff panel
+    /// draws, in one poll:
+    ///
+    /// ```json
+    /// {"pay_period_ticks": 1000, "next_payday_tick": 3000, "last_bill": 14,
+    ///  "walked_out_last_payday": 0, "money": 2986.0,
+    ///  "categories": [
+    ///    {"id": "manufacturing", "name": "Manufacturing", "headcount": 4,
+    ///     "wage": 2, "demand": 4, "assigned": 4, "short": 0},
+    ///    {"id": "maintenance",   "name": "Maintenance",   "headcount": 0,
+    ///     "wage": 2, "demand": 0, "assigned": 0, "short": 0},
+    ///    {"id": "packaging",     "name": "Packaging",     "headcount": 2,
+    ///     "wage": 2, "demand": 2, "assigned": 2, "short": 0},
+    ///    {"id": "logistics",     "name": "Logistics",     "headcount": 1,
+    ///     "wage": 2, "demand": 1, "assigned": 1, "short": 0}]}
+    /// ```
+    ///
+    /// `categories` is in `data/staff.ron` order (the panel order and the
+    /// payday order). `demand`, `assigned` and `short` (= `demand -
+    /// assigned`) describe the LAST completed tick: every head machines
+    /// and docks asked for, how many they got, how many they went without.
+    /// Godot reads these; it never recomputes them from machine counts.
+    /// `money` is repeated here as `shop_snapshot_json` repeats it.
+    /// `next_payday_tick` is in sim ticks; the panel turns it into seconds
+    /// against `current_tick()`.
+    ///
+    /// **Poll it — do not wait for a dirty chunk.** The tallies change
+    /// every tick and dirty nothing, the `machine_load_snapshots_json`
+    /// rule. The commands are `{"type": "hire", "category": "manufacturing"}`
+    /// and `{"type": "fire", "category": "manufacturing"}`; a machine short
+    /// of its crew reads `"stall": {"kind": "staff", "item": "<category>"}`
+    /// with status `starved`, a dock reads `"understaffed": true`, and
+    /// `query_tile_json`'s machine and dock variants plus every
+    /// `shop_snapshot_json` entry carry `"crew": [{"category": ...,
+    /// "count": ...}]`. See `docs/STAFF_POOLS_PLAN.md`, "The wire contract".
+    #[func]
+    fn staff_snapshot_json(&self) -> GString {
+        let snapshot = self.world.staff_snapshot();
+        let json = serde_json::to_string(&snapshot).expect("StaffSnapshot must serialize");
         GString::from(json.as_str())
     }
 

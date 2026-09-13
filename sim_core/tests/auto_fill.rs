@@ -37,6 +37,8 @@
 //! `CycleHopperItem` command this file used to point at was deleted with the
 //! **Q** keybind that was its only caller.
 
+mod common;
+
 use sim_core::sim::{
     FLUID_TANK_CAPACITY, Fx, HOPPER_CAPACITY, PlayerCommand, RecipeRegistry, TileSnapshot, World,
     command_from_json, reference_chain_with_budget,
@@ -44,7 +46,7 @@ use sim_core::sim::{
 
 /// Enough money for the stock these tests buy, on top of the shop bill the
 /// fixture already spends.
-const BUDGET: u32 = 5000;
+const BUDGET: u32 = 5000 + common::WAGE_RESERVE;
 
 /// The tomato hopper's tile in the reference chain's layout, and the tank's.
 /// Both are pinned by `hopper.rs`/`fluids.rs` already; named here so a test
@@ -787,7 +789,7 @@ fn accounted(world: &World, raw: &str, recipes: &RecipeRegistry, final_item: &st
 fn mass_is_conserved_with_auto_fill_on_across_the_whole_chain() {
     let registry = recipes();
     let final_item = registry.ordered().last().unwrap().outputs[0].0.clone();
-    let mut world = reference_chain_with_budget(recipes(), 4000);
+    let mut world = reference_chain_with_budget(recipes(), 4000 + common::WAGE_RESERVE);
 
     buy(&mut world, "tomato", 600);
     buy(&mut world, "sugar", 150);

@@ -90,7 +90,7 @@ func _initialize() -> void:
 		_fail("_ui_v does not scale both axes")
 		return
 	for pair in [
-		["SHOP_SLOT_SIZE", main.SHOP_SLOT_SIZE, Vector2(128, 130)],
+		["SHOP_SLOT_SIZE", main.SHOP_SLOT_SIZE, Vector2(144, 138)],
 		["SHOP_ICON_SIZE", main.SHOP_ICON_SIZE, Vector2(46, 46)],
 		["MARKET_SLOT_SIZE", main.MARKET_SLOT_SIZE, Vector2(128, 152)],
 	]:

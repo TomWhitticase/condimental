@@ -150,16 +150,14 @@ pub const ASSETS: &[Asset] = &[
     // ticket). Not an item and not a building — the one asset in this list
     // that never occupies a tile.
     Asset { name: "coin", build: coin },
-    // The andon stack lights (the machine-load epic, ticket 2): one model
-    // per lit lens. Stood beside a machine by the scene, never bought, so
-    // no icon (`icons.rs`'s `is_andon`). See the "Andon stack light"
-    // section.
-    Asset { name: "andon_working_tall", build: andon_working_tall },
-    Asset { name: "andon_starved_tall", build: andon_starved_tall },
-    Asset { name: "andon_blocked_tall", build: andon_blocked_tall },
-    Asset { name: "andon_working_short", build: andon_working_short },
-    Asset { name: "andon_starved_short", build: andon_starved_short },
-    Asset { name: "andon_blocked_short", build: andon_blocked_short },
+    // The staff-category icons (the staff-pools epic, ticket 2): four more
+    // props that never occupy a tile, one per `data/staff.ron` category,
+    // drawn only to be rendered by `voxicons` for the staff panel. See the
+    // "Staff category icons" section.
+    Asset { name: "staff_manufacturing", build: staff_manufacturing },
+    Asset { name: "staff_maintenance", build: staff_maintenance },
+    Asset { name: "staff_packaging", build: staff_packaging },
+    Asset { name: "staff_logistics", build: staff_logistics },
 ];
 
 /// Items are modelled at half a tile so a finished bottle reads as an object
@@ -1423,6 +1421,212 @@ const COIN_VOXELS: u32 = 10;
 const COIN_C: f32 = (COIN_VOXELS as f32 - 1.0) / 2.0;
 
 // ---------------------------------------------------------------------------
+// Staff category icons (the staff-pools epic, ticket 2 —
+// docs/STAFF_POOLS_PLAN.md, "The icons")
+// ---------------------------------------------------------------------------
+//
+// Four UI props, one per `data/staff.ron` category, so the staff panel
+// (ticket 3) can put a picture beside each name: a hard hat for
+// manufacturing, an open-ended spanner for maintenance, a taped carton with
+// its roll of tape for packaging, a pallet jack for logistics. Each is the
+// tool the category holds, not a person — GAMEPLAY.md §7 is explicit that
+// staff are a capacity, not NPCs, and a figure would promise a person who
+// is not in the simulation. UI_UX.md §5 wants every icon rendered from a
+// real voxel asset, never drawn flat, so these are voxel models like the
+// coin: registered in `ASSETS`, given no footprint, never placed.
+//
+// **Authored for vengi's camera, not the game's** (UI_UX.md §2b point 27,
+// the vinegar jug's precedent): the icon pass is the only thing that ever
+// looks at these, and `vengi-thumbnailer` looks from the **-X/+Y** corner,
+// so a face meant to be seen goes on x = 0, on y = 31, or on top. Nothing
+// here is symmetric about a tile midline on purpose — nothing spins these.
+//
+// **Silhouette first, at 64 px, against a dark plate.** A staff icon is
+// read at a glance in a row of four; it has to be tellable from its
+// neighbours by outline alone. So each object is the *whole* object and
+// lies the way its outline is widest to an isometric camera — the spanner
+// flat, the carton square-on, the jack forks-forward — and detail is spent
+// only where it changes the outline (the hat's brim and crest, the jaw
+// slots, the roll on the lid, the tiller).
+//
+// **Colour is the plan's** (UI_UX.md §7): the hard hat and the tape are
+// `hazard_yellow`, the one signage colour, which is also what a hard hat and
+// a roll of packing tape actually are; the spanner and the jack are `metal`
+// so they catch the light the way every other tool in this factory does
+// (§4); the carton is `cardboard`, matte, like `item_box`. Nothing new was
+// added to `palette.ron` — every colour needed already had a job here.
+
+/// **Manufacturing: a hard hat.** A domed crown on a brim, with a peak at
+/// the front and a raised crest over the top. The crest and the brim are
+/// what stop it being a yellow egg at 64 px: a plain dome from above is a
+/// disc, and a disc says "coin" in this UI. The peak points at the camera
+/// (-X), so the brim reads as a brim and not as a flat rim all round.
+///
+/// The crown is a low elliptical dome, wider than tall (see `HAT_H` for the
+/// bell it was before). One colour, no stripe or badge: a hard hat is a
+/// hard hat by shape.
+pub fn staff_manufacturing(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::tile();
+    let yellow = p.idx("hazard_yellow");
+    // The brim: a flat disc with a longer peak on the camera-facing -X side.
+    m.cylinder_z_f(HAT_C, HAT_BRIM_R, (0, 1), yellow);
+    m.cylinder_z_f((HAT_C.0 - HAT_PEAK, HAT_C.1), HAT_BRIM_R - 1.5, (0, 1), yellow);
+    // The crown, sliced: an elliptical profile, wider than it is tall, with
+    // one crest running front to back a voxel proud of the shell.
+    for z in HAT_BASE_Z..=HAT_BASE_Z + HAT_H {
+        let t = (z - HAT_BASE_Z) as f32 / HAT_H as f32;
+        let f = (1.0 - t * t).max(0.0).sqrt();
+        m.cylinder_z_f(HAT_C, HAT_R * f, (z, z), yellow);
+        let rc = (HAT_R + 1.0) * f;
+        let lo = (HAT_C.0 - rc).round() as i32;
+        let hi = (HAT_C.0 + rc).round() as i32;
+        m.cuboid((lo, hi), (14, 17), (z, z), yellow);
+    }
+    m
+}
+
+/// The hard hat's centre on the tile plane (between voxels 15 and 16, so
+/// the crest is two voxels either side of it).
+const HAT_C: (f32, f32) = (15.5, 15.5);
+const HAT_BRIM_R: f32 = 14.5;
+/// How far the peak's disc is pushed toward -X past the crown's centre.
+const HAT_PEAK: f32 = 5.0;
+const HAT_R: f32 = 12.0;
+const HAT_BASE_Z: i32 = 2;
+/// The crown's height above the brim. **Wider than tall, by a lot**: the
+/// first cut stood 14 high on a radius of 11 with a squared-off
+/// (superellipse) profile, and its icon was a bell — a jelly mould with
+/// ribs. A hard hat's crown is a low dome; at 64 px it is the proportion
+/// of crown to brim that says "hat", not the ribbing.
+const HAT_H: i32 = 9;
+
+/// **Maintenance: an open-ended spanner.** A double-ender lying flat, the
+/// classic tool-icon silhouette: a straight shaft with a round head and an
+/// open jaw at each end. Flat, not standing, because from above the jaws
+/// are what say "spanner", and on edge it is a bar. The two jaws are offset
+/// to opposite sides, the way a real double open-ender's are angled, which
+/// also breaks the mirror symmetry that made the first cut read as a
+/// dumbbell.
+///
+/// Stainless (`steel_light`, class `metal`) with a `steel` stamp band down
+/// the shaft's top — the one darker line a forged spanner's I-section
+/// gives it.
+pub fn staff_maintenance(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::tile();
+    let light = p.idx("steel_light");
+    let steel = p.idx("steel");
+    let z = (0, SPANNER_THICK - 1);
+    m.cuboid((8, 23), (12, 19), z, light);
+    m.cylinder_z_f((7.5, 15.5), SPANNER_HEAD_R, z, light);
+    m.cylinder_z_f((24.5, 15.5), SPANNER_HEAD_R, z, light);
+    // The jaws: a slot cut in from each end, each offset a voxel to its own
+    // side. Shallower than the head is long, so both lips survive to the
+    // mouth and the outline is a C, not a fork.
+    m.carve_cuboid((0, 5), (12, 16), z);
+    m.carve_cuboid((26, 31), (15, 19), z);
+    // The stamp band along the shaft's top face.
+    m.cuboid((10, 21), (14, 17), (z.1, z.1), steel);
+    m
+}
+
+const SPANNER_THICK: i32 = 4;
+const SPANNER_HEAD_R: f32 = 7.5;
+
+/// **Packaging: a taped carton with the roll of tape on its lid.** The
+/// carton is `item_box`'s cardboard at twice the scale, its lid seam sealed
+/// with a strip of `hazard_yellow` tape that turns down the +Y face (the one
+/// vengi sees), and the roll lies flat on the lid at the camera's corner:
+/// a ring of tape on a cardboard core with a hole through it. The roll is
+/// the whole reason the icon is not just a box: a box alone is `item_box`,
+/// which is the *product*, and this icon has to mean the people who seal
+/// it. Yellow tape rather than the box's brown, for the same reason.
+pub fn staff_packaging(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::tile();
+    let card = p.idx("cardboard");
+    let dark = p.idx("cardboard_dark");
+    let tape = p.idx("hazard_yellow");
+    let (b0, b1) = CARTON;
+    m.cuboid(CARTON, CARTON, (0, CARTON_TOP), card);
+    // The lid's flap seam, and the fold lines where the flaps meet the sides.
+    m.cuboid((15, 16), CARTON, (CARTON_TOP, CARTON_TOP), dark);
+    m.cuboid(CARTON, (b0, b0), (CARTON_TOP, CARTON_TOP), dark);
+    m.cuboid(CARTON, (b1, b1), (CARTON_TOP, CARTON_TOP), dark);
+    // The sealing tape over the seam, turned down both ends.
+    m.cuboid((13, 18), CARTON, (CARTON_TOP, CARTON_TOP), tape);
+    m.cuboid((13, 18), (b1, b1), (CARTON_TOP - 8, CARTON_TOP), tape);
+    m.cuboid((13, 18), (b0, b0), (CARTON_TOP - 8, CARTON_TOP), tape);
+    // A shipping label on the -X face, which vengi also sees.
+    m.cuboid((b0, b0), (7, 13), (5, 11), p.idx("label_cream"));
+    // The roll, lying on the lid at the camera's corner.
+    let roll_z = (CARTON_TOP + 1, CARTON_TOP + ROLL_HEIGHT);
+    m.cylinder_z_f(ROLL_C, ROLL_R, roll_z, tape);
+    m.cylinder_z_f(ROLL_C, ROLL_CORE_R, roll_z, card);
+    m.carve_cylinder_z_f(ROLL_C, ROLL_HOLE_R, roll_z);
+    m
+}
+
+const CARTON: (i32, i32) = (3, 28);
+const CARTON_TOP: i32 = 17;
+const ROLL_C: (f32, f32) = (9.5, 21.5);
+const ROLL_R: f32 = 6.5;
+const ROLL_CORE_R: f32 = 3.4;
+const ROLL_HOLE_R: f32 = 2.2;
+const ROLL_HEIGHT: i32 = 4;
+
+/// **Logistics: a pallet jack.** Two forks, a pump housing on its steer
+/// wheels, and a tiller with a T-handle. Forks toward the camera (-X) so
+/// they are the widest thing in the outline and nothing stands in front of
+/// them; the housing and the tiller rise at the far end, where a tall part
+/// hides nothing (UI_UX.md §2b point 16's depth rule, applied to vengi's
+/// camera). The tiller leans back over the housing rather than standing
+/// plumb — a vertical post over two bars reads as a lamppost on a sledge.
+///
+/// Forks and tiller `steel_light`, housing `steel_dark`, all class `metal`;
+/// the four wheels and the two grips are `rubber_dark`, because a jack's
+/// wheels are the one part of it that is not steel and the dark accents are
+/// what make the forks read as *off the ground*.
+pub fn staff_logistics(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::tile();
+    let light = p.idx("steel_light");
+    let steel = p.idx("steel");
+    let dark = p.idx("steel_dark");
+    let rubber = p.idx("rubber_dark");
+    // Load wheels first, so a fork drawn over one keeps its own colour.
+    for &(y0, y1) in &FORK_Y {
+        let yc = (y0 + y1) as f32 / 2.0;
+        m.cylinder_x_f((yc, 1.5), 1.6, (4, 7), rubber);
+        m.cuboid((2, FORK_X1), (y0, y1), (2, 5), light);
+        // A tapered tip.
+        m.cuboid((0, 1), (y0 + 1, y1 - 1), (2, 4), light);
+    }
+    // The carriage that joins the forks, and the pump housing behind it.
+    m.cuboid((FORK_X1 - 2, FORK_X1 + 2), (FORK_Y[0].0, FORK_Y[1].1), (2, 7), steel);
+    m.cuboid((FORK_X1 + 1, FORK_X1 + 5), (11, 20), (0, 12), dark);
+    // Steer wheels either side of the housing.
+    m.cylinder_y_f((FORK_X1 as f32 + 3.5, 2.5), 2.5, (8, 10), rubber);
+    m.cylinder_y_f((FORK_X1 as f32 + 3.5, 2.5), 2.5, (21, 23), rubber);
+    // The tiller: a 2x2 arm leaning back from the housing top to the handle.
+    for k in 0..TILLER_RISE {
+        let x = FORK_X1 + 3 + (k * TILLER_LEAN) / TILLER_RISE;
+        m.cuboid((x, x + 1), (14, 17), (13 + k, 13 + k), light);
+    }
+    let top = 13 + TILLER_RISE;
+    let hx = FORK_X1 + 2 + TILLER_LEAN;
+    m.cuboid((hx, hx + 2), (6, 25), (top, top + 2), light);
+    m.cuboid((hx, hx + 2), (6, 8), (top, top + 2), rubber);
+    m.cuboid((hx, hx + 2), (23, 25), (top, top + 2), rubber);
+    m
+}
+
+/// The two forks' Y spans; the tips point at -X.
+const FORK_Y: [(i32, i32); 2] = [(5, 10), (21, 26)];
+/// Where the forks end and the carriage begins.
+const FORK_X1: i32 = 23;
+const TILLER_RISE: i32 = 12;
+/// How far (+X) the tiller's top sits behind its foot: the lean.
+const TILLER_LEAN: i32 = 3;
+
+// ---------------------------------------------------------------------------
 // Fluid pipes (milestone 6 — ARCHITECTURE.md §3.4; the shape family is the
 // "Pipes & Conveyors Overhaul" ticket 3, docs/PIPES_AND_CONVEYORS_PLAN.md)
 // ---------------------------------------------------------------------------
@@ -2343,10 +2547,10 @@ pub fn machine_crusher(p: &Palette) -> VoxModel {
     // a motor. It now stands on the far (+Y) shoulder, clear of the lane, so
     // the infeed housing below has somewhere to be. It stops at y 29, two
     // voxels short of the tile edge, and not at 30: turned 180° that far
-    // shoulder becomes the +X/low-Y corner the andon stack light stands in
-    // (the "Andon stack light" section), and a motor face exactly
-    // `ANDON_INSET` from the edge lay on the post's own face and z-fought
-    // it. One voxel in, the post passes through the motor instead.
+    // shoulder becomes the +X/low-Y corner, where a free-standing prop one
+    // voxel inside the tile edge meets it (UI_UX.md §2b point 29 — learned
+    // from the andon stack light that stood there until it was removed on
+    // 2026-09-12). One voxel further in, nothing z-fights.
     m.cuboid((0, 5), (25, 29), (10, 19), p.idx("paint_blue"));
     m.cuboid((0, 5), (25, 29), (20, 20), p.idx("steel_light"));
     m.cylinder_y((3, 15), 2.4, (23, 25), p.idx("brass"));
@@ -2718,8 +2922,9 @@ pub fn machine_packer(p: &Palette) -> VoxModel {
 
     // Centred like every other 1x1 kind's, and not at (5, 14) as it was:
     // that put the green lamp at x 0..2, which turned 90° lands one voxel
-    // in from the +X edge — on the andon post's own face (the "Andon stack
-    // light" section), where the two z-fought.
+    // in from the +X edge — where a free-standing prop on that corner
+    // z-fought it (UI_UX.md §2b point 29; the andon post that found this
+    // has since been removed).
     control_panel(&mut m, p, (11, 20), (3, 7), 2);
     m
 }
@@ -3051,156 +3256,6 @@ pub fn machine_packer_motion(p: &Palette, phase: u32) -> VoxModel {
     m.cuboid((16 + dx, 18 + dx), (18, 25), (22, 24), p.idx("steel_dark"));
     m.cylinder_y((19 + dx, PACKER_ROLL_Z), PACKER_ROLL_R, (19, 22), p.idx("brass"));
     m
-}
-
-// ---------------------------------------------------------------------------
-// Andon stack light (the machine-load epic, ticket 2)
-// ---------------------------------------------------------------------------
-//
-// The in-world readout of a machine's load (`docs/MACHINE_LOAD_PLAN.md`):
-// an industrial andon — a slim post carrying three lenses, green over amber
-// over red, exactly one of them lit — stood beside every processing machine
-// so the bottleneck can be read across the whole floor the way it is read
-// on a real line. Three models, one per lit lens, and the scene shows one.
-//
-// Everything about where it stands follows from two facts about the camera
-// (UI_UX.md §2b point 11): only a tile's +X and low-Y faces are ever seen,
-// so the post is at the tile's +X/low-Y corner, and it is NEVER rotated with
-// its machine (point 18: a lamp on a rotated face is a lamp nobody sees).
-// Godot stands it on the camera-visible corner TILE of the footprint, so on
-// a 2x2 vat it is the corner of the vat's own model — which is why the
-// tests below overlay it on every body at every facing.
-//
-// Why it is inset one voxel and no more, and why the post is 3 wide: a
-// machine's plinth is flush with its tile edge (see `machine_footing`), so
-// a post ON the edge would put its outer faces exactly on the plinth's and
-// z-fight there (point 24). One voxel in, the post's column runs down
-// THROUGH the plinth and the painted skirt — which is what "bolted to the
-// machine's corner" looks like — and every voxel it shares with the body is
-// buried, with the post itself covering the one side (+X, or low Y) the
-// skirt does not. Two voxels in would put the post's +X face on the painted
-// skirt's own +X face (`machine_footing_rect` stops the skirt at
-// `xhi - 2`), and the fight comes back. `ANDON_INSET` is therefore a pinned
-// number, not a taste: `the_andon_post_shares_no_exposed_face_with_any_machine_body_at_any_facing`
-// is what says it may be 1.
-//
-// The lenses are a RING (a rounded 5x5 about the post), so they are seen
-// from every side, and they sit above every machine body so no body — this
-// machine's or a neighbour's — can stand between a lens and the camera.
-// Each is `ANDON_LENS_HEIGHT` tall with a `hazard_black` band between, so
-// the lit one reads by its place in the stack and not only by its colour
-// (UI_UX.md §7). The unlit two are dark matte versions of their colour
-// (`palette.ron`'s `status_*_off`), not black: three black bands and one
-// lit one is a pole with a blob on it, not a tower with one lens on.
-
-/// The post's column within its tile, `ANDON_INSET` in from the +X edge and
-/// from the low-Y edge. Public so a test can stand it on a body.
-pub const ANDON_INSET: i32 = 1;
-pub const ANDON_POST_W: i32 = 3;
-pub const ANDON_POST_X: (i32, i32) =
-    (TILE_VOXELS as i32 - ANDON_INSET - ANDON_POST_W, TILE_VOXELS as i32 - 1 - ANDON_INSET);
-pub const ANDON_POST_Y: (i32, i32) = (ANDON_INSET, ANDON_INSET + ANDON_POST_W - 1);
-/// The lens ring's centre (the post's centre) and radius. Radius 2 about an
-/// integer centre is a rounded 5x5 — as wide as the ring can be without
-/// reaching the tile edge, where `VoxModel::set` would clip it flat on
-/// exactly the two faces the camera sees.
-const ANDON_C: (f32, f32) = (
-    (ANDON_POST_X.0 + ANDON_POST_X.1) as f32 / 2.0,
-    (ANDON_POST_Y.0 + ANDON_POST_Y.1) as f32 / 2.0,
-);
-const ANDON_LENS_R: f32 = 2.0;
-pub const ANDON_LENS_HEIGHT: i32 = 4;
-pub const ANDON_LENS_GAP: i32 = 1;
-/// The dark collar the lens stack stands on, and the cap over it.
-const ANDON_COLLAR_HEIGHT: i32 = 2;
-const ANDON_CAP_HEIGHT: i32 = 2;
-/// Where the lowest (red) lens starts. TWO heights, decided by rendering
-/// both beside a crusher and a vat (`docs/MACHINE_LOAD_PLAN.md`, "Decisions
-/// made by tickets"): the tall stack clears every machine body in `ASSETS`
-/// (the vat's stack reaches z 47) and is for any footprint larger than a
-/// tile; the short one clears every 1x1 body (the generic housing's
-/// exhaust reaches z 31) and is for 1x1 kinds, because at 64 voxels the
-/// post was two and a half crushers tall and the lens stack floated a whole
-/// machine above the body, while the short one reads as bolted to it.
-/// Godot picks by footprint. Both are pinned by
-/// `the_andon_lenses_stand_above_every_machine_body`.
-pub const ANDON_TALL_LENS_BOTTOM: i32 = 48;
-pub const ANDON_SHORT_LENS_BOTTOM: i32 = 32;
-
-/// Which lens is lit — the machine's load `status` on the wire, in the
-/// stack's own order.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum AndonLit {
-    /// Green, the top lens: flat out.
-    Working,
-    /// Amber, the middle lens: waiting for input.
-    Starved,
-    /// Red, the bottom lens: finished and waiting on its output.
-    Blocked,
-}
-
-/// The three lenses from the BOTTOM up, each with its lit and unlit colour.
-const ANDON_LENSES: [(AndonLit, &str, &str); 3] = [
-    (AndonLit::Blocked, "status_red", "status_red_off"),
-    (AndonLit::Starved, "status_amber", "status_amber_off"),
-    (AndonLit::Working, "status_green", "status_green_off"),
-];
-
-/// The z range (inclusive) of lens `i` (0 = bottom) in a stack whose lowest
-/// lens starts at `lens_bottom`.
-pub fn andon_lens_z(lens_bottom: i32, i: usize) -> (i32, i32) {
-    let z0 = lens_bottom + i as i32 * (ANDON_LENS_HEIGHT + ANDON_LENS_GAP);
-    (z0, z0 + ANDON_LENS_HEIGHT - 1)
-}
-
-/// The model's height for a given lens bottom: the stack, then the cap.
-/// Even by construction when `lens_bottom` is even (`vox::encode` lifts a
-/// model by `size[2] / 2` whole voxels; UI_UX.md §2b point 27).
-pub fn andon_height(lens_bottom: i32) -> i32 {
-    lens_bottom + 3 * ANDON_LENS_HEIGHT + 2 * ANDON_LENS_GAP + ANDON_CAP_HEIGHT
-}
-
-pub fn andon(p: &Palette, lit: AndonLit, lens_bottom: i32) -> VoxModel {
-    let height = andon_height(lens_bottom);
-    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, height as u32]);
-
-    // The post, floor to collar. It starts at z 0 on purpose — it runs down
-    // through the plinth it is bolted to, so there is no foot to draw and
-    // no seam where a foot would meet the hazard skirt.
-    m.cuboid(ANDON_POST_X, ANDON_POST_Y, (0, lens_bottom - ANDON_COLLAR_HEIGHT - 1), p.idx("paint_grey"));
-    // Collar under the first lens.
-    m.cylinder_z_f(ANDON_C, ANDON_LENS_R, (lens_bottom - ANDON_COLLAR_HEIGHT, lens_bottom - 1), p.idx("hazard_black"));
-
-    for (i, (which, on, off)) in ANDON_LENSES.iter().enumerate() {
-        let (z0, z1) = andon_lens_z(lens_bottom, i);
-        let colour = if *which == lit { on } else { off };
-        m.cylinder_z_f(ANDON_C, ANDON_LENS_R, (z0, z1), p.idx(colour));
-        // The band between this lens and the next (or the cap).
-        m.cylinder_z_f(ANDON_C, ANDON_LENS_R, (z1 + 1, z1 + ANDON_LENS_GAP), p.idx("hazard_black"));
-    }
-    // Cap. The top lens's band above doubles as its first voxel.
-    let (_, top) = andon_lens_z(lens_bottom, 2);
-    m.cylinder_z_f(ANDON_C, ANDON_LENS_R, (top + 1, height - 1), p.idx("hazard_black"));
-    m
-}
-
-pub fn andon_working_tall(p: &Palette) -> VoxModel {
-    andon(p, AndonLit::Working, ANDON_TALL_LENS_BOTTOM)
-}
-pub fn andon_starved_tall(p: &Palette) -> VoxModel {
-    andon(p, AndonLit::Starved, ANDON_TALL_LENS_BOTTOM)
-}
-pub fn andon_blocked_tall(p: &Palette) -> VoxModel {
-    andon(p, AndonLit::Blocked, ANDON_TALL_LENS_BOTTOM)
-}
-pub fn andon_working_short(p: &Palette) -> VoxModel {
-    andon(p, AndonLit::Working, ANDON_SHORT_LENS_BOTTOM)
-}
-pub fn andon_starved_short(p: &Palette) -> VoxModel {
-    andon(p, AndonLit::Starved, ANDON_SHORT_LENS_BOTTOM)
-}
-pub fn andon_blocked_short(p: &Palette) -> VoxModel {
-    andon(p, AndonLit::Blocked, ANDON_SHORT_LENS_BOTTOM)
 }
 
 // ---------------------------------------------------------------------------
@@ -4994,217 +5049,95 @@ mod tests {
         }
     }
 
-    // --- The andon stack light -------------------------------------------
+    // -- Staff category icons (the staff-pools epic, ticket 2) -----------
 
-    /// Every body the scene can stand an andon beside: the processing
-    /// kinds in `data/machines.ron` plus the generic housing any new kind
-    /// falls back to. Not the hopper, tank, dock or splitter — those run
-    /// no recipe and get no light.
-    fn machine_bodies(p: &Palette) -> Vec<(&'static str, VoxModel)> {
-        vec![
-            ("machine", machine(p)),
-            ("machine_crusher", machine_crusher(p)),
-            ("machine_mixer", machine_mixer(p)),
-            ("machine_cooking_vat", machine_cooking_vat(p)),
-            ("machine_bottler", machine_bottler(p)),
-            ("machine_packer", machine_packer(p)),
-        ]
+    fn staff_assets() -> Vec<&'static Asset> {
+        ASSETS.iter().filter(|a| a.name.starts_with("staff_")).collect()
     }
 
-    fn andon_variants(p: &Palette) -> Vec<(&'static str, AndonLit, i32, VoxModel)> {
-        vec![
-            ("andon_working_tall", AndonLit::Working, ANDON_TALL_LENS_BOTTOM, andon_working_tall(p)),
-            ("andon_starved_tall", AndonLit::Starved, ANDON_TALL_LENS_BOTTOM, andon_starved_tall(p)),
-            ("andon_blocked_tall", AndonLit::Blocked, ANDON_TALL_LENS_BOTTOM, andon_blocked_tall(p)),
-            ("andon_working_short", AndonLit::Working, ANDON_SHORT_LENS_BOTTOM, andon_working_short(p)),
-            ("andon_starved_short", AndonLit::Starved, ANDON_SHORT_LENS_BOTTOM, andon_starved_short(p)),
-            ("andon_blocked_short", AndonLit::Blocked, ANDON_SHORT_LENS_BOTTOM, andon_blocked_short(p)),
-        ]
-    }
-
-    fn top_of(m: &VoxModel) -> i32 {
-        m.voxels.keys().map(|&(_, _, z)| z as i32).max().unwrap_or(-1)
-    }
-
-    /// The post may pass THROUGH a body (it is bolted to the machine's
-    /// corner); it may not FIGHT one (UI_UX.md §2b point 24). The scene
-    /// stands the light on the camera-visible corner tile of the footprint
-    /// at yaw 0 whatever the machine's facing, so this stands it at the
-    /// +X/low-Y corner of every body turned all four ways, and asserts that
-    /// wherever a post voxel and a body voxel coincide, every face either
-    /// would expose is covered by one of them.
+    /// The four category props exist, are not empty, and are authored in
+    /// the one-tile volume like every other icon-bearing prop. `VoxModel::set`
+    /// clips silently at the volume (UI_UX.md §2b point 29), so a generator
+    /// that reached past 32 would lose voxels without a word — the voxel
+    /// bounds check is what turns that into a failure.
     #[test]
-    fn the_andon_post_shares_no_exposed_face_with_any_machine_body_at_any_facing() {
+    fn staff_models_are_non_empty_and_fit_one_tile() {
         let p = palette();
-        let tile = TILE_VOXELS as i32;
-        for (light, _, _, andon) in andon_variants(&p) {
-            for (name, body) in machine_bodies(&p) {
-                for turns in 0..4 {
-                    let body = body.rotated_cw(turns);
-                    // The corner tile's origin within the rotated body.
-                    let ox = body.size[0] as i32 - tile;
-                    let filled = |x: i32, y: i32, z: i32| body.filled(x, y, z) || andon.filled(x - ox, y, z);
-                    let mut shared = 0;
-                    let mut fights = Vec::new();
-                    for &(ax, ay, az) in andon.voxels.keys() {
-                        let (x, y, z) = (ax as i32 + ox, ay as i32, az as i32);
-                        if !body.filled(x, y, z) {
-                            continue;
-                        }
-                        shared += 1;
-                        for (nx, ny, nz) in
-                            [(x + 1, y, z), (x - 1, y, z), (x, y + 1, z), (x, y - 1, z), (x, y, z + 1), (x, y, z - 1)]
-                        {
-                            if nz >= 0 && !filled(nx, ny, nz) {
-                                fights.push(format!("({x}, {y}, {z}) toward ({nx}, {ny}, {nz})"));
-                            }
-                        }
-                    }
-                    assert!(
-                        fights.is_empty(),
-                        "{light} on {name} turned {turns}: the post and the body both expose a face at \
-                         {} — they will z-fight there",
-                        fights.join(", ")
-                    );
-                    assert!(shared > 0, "{light} on {name} turned {turns}: the post never enters the plinth");
-                }
-            }
-        }
-    }
-
-    /// No body — this machine's or a neighbour's — may stand between a lens
-    /// and the camera, so the lowest lens starts above the top of every body
-    /// the variant is for: the tall stack above every body there is, the
-    /// short one above every one-tile body.
-    #[test]
-    fn the_andon_lenses_stand_above_every_machine_body() {
-        let p = palette();
-        let tile = TILE_VOXELS;
-        let bodies = machine_bodies(&p);
-        let tallest = bodies.iter().map(|(_, m)| top_of(m)).max().unwrap();
-        let tallest_1x1 = bodies
-            .iter()
-            .filter(|(_, m)| m.size[0] == tile && m.size[1] == tile)
-            .map(|(_, m)| top_of(m))
-            .max()
-            .unwrap();
-        assert!(
-            ANDON_TALL_LENS_BOTTOM > tallest,
-            "the tall stack's first lens (z {ANDON_TALL_LENS_BOTTOM}) is not above the tallest body (z {tallest})"
+        let staff = staff_assets();
+        let names: Vec<&str> = staff.iter().map(|a| a.name).collect();
+        assert_eq!(
+            names,
+            [
+                "staff_manufacturing",
+                "staff_maintenance",
+                "staff_packaging",
+                "staff_logistics"
+            ],
+            "one staff icon per data/staff.ron category, in category order"
         );
-        assert!(
-            ANDON_SHORT_LENS_BOTTOM > tallest_1x1,
-            "the short stack's first lens (z {ANDON_SHORT_LENS_BOTTOM}) is not above the tallest 1x1 body (z {tallest_1x1})"
-        );
-        // And the tall one is not gratuitously taller than it must be: a
-        // whole lens's worth of clearance would be a pole for its own sake.
-        assert!(ANDON_TALL_LENS_BOTTOM - tallest <= ANDON_LENS_HEIGHT);
-        assert!(ANDON_SHORT_LENS_BOTTOM - tallest_1x1 <= ANDON_LENS_HEIGHT);
-    }
-
-    /// Exactly one lens is lit, it is the lens the model is named for, and
-    /// it is in that lens's place in the stack — green top, amber middle,
-    /// red bottom — with the other two present and dark.
-    #[test]
-    fn an_andon_lights_exactly_one_lens_and_it_is_the_right_one_in_the_right_place() {
-        let p = palette();
-        for (light, lit, lens_bottom, m) in andon_variants(&p) {
-            let emissive: Vec<_> = m
-                .voxels
-                .iter()
-                .filter(|&(_, &idx)| p.class_of(idx) == MaterialClass::Emissive)
-                .map(|(&pos, &idx)| (pos, idx))
-                .collect();
-            assert!(!emissive.is_empty(), "{light} lights nothing");
-            let colours: std::collections::BTreeSet<u8> = emissive.iter().map(|&(_, idx)| idx).collect();
-            assert_eq!(colours.len(), 1, "{light} lights more than one colour");
-            for (i, (which, on, off)) in ANDON_LENSES.iter().enumerate() {
-                let (z0, z1) = andon_lens_z(lens_bottom, i);
-                let expect = if *which == lit { on } else { off };
-                let band: Vec<u8> = m
-                    .voxels
-                    .iter()
-                    .filter(|&(&(_, _, z), _)| (z as i32) >= z0 && (z as i32) <= z1)
-                    .map(|(_, &idx)| idx)
-                    .collect();
-                assert!(!band.is_empty(), "{light}: lens {i} has no voxels");
+        for asset in staff {
+            let m = (asset.build)(&p);
+            assert!(!m.is_empty(), "{} is empty", asset.name);
+            assert_eq!(m.size, [TILE_VOXELS; 3], "{} is not a 32^3 volume", asset.name);
+            for &(x, y, z) in m.voxels.keys() {
                 assert!(
-                    band.iter().all(|&idx| idx == p.idx(expect)),
-                    "{light}: lens {i} (z {z0}..{z1}) is not all {expect}"
+                    x < TILE_VOXELS && y < TILE_VOXELS && z < TILE_VOXELS,
+                    "{} has a voxel outside its volume at ({x}, {y}, {z})",
+                    asset.name
                 );
             }
-            // Nothing outside the lit band emits.
-            let lit_i = ANDON_LENSES.iter().position(|(w, _, _)| *w == lit).unwrap();
-            let (lz0, lz1) = andon_lens_z(lens_bottom, lit_i);
-            assert!(
-                emissive.iter().all(|&((_, _, z), _)| (z as i32) >= lz0 && (z as i32) <= lz1),
-                "{light}: something outside the {light} lens emits"
-            );
         }
     }
 
-    /// The post is never turned, so a lens must be a RING that shows on all
-    /// four sides, at least 4 wide and 3 tall, with a dark band between
-    /// lenses so the lit one reads by position (`docs/MACHINE_LOAD_PLAN.md`,
-    /// "The asset").
+    /// The plan's colour rule (docs/STAFF_POOLS_PLAN.md, "The icons"): the
+    /// hard hat and the tape are `hazard_yellow`, the spanner and the jack
+    /// are `metal`, the carton is `matte`. A repaint that kept every
+    /// silhouette would still pass the test above, so pin the classes.
     #[test]
-    fn every_andon_lens_is_a_ring_seen_from_all_four_sides_with_a_dark_band_between() {
+    fn staff_icons_use_the_planned_materials() {
         let p = palette();
-        assert!(ANDON_LENS_HEIGHT >= 3);
-        for (light, _, lens_bottom, m) in andon_variants(&p) {
-            for i in 0..3 {
-                let (z0, z1) = andon_lens_z(lens_bottom, i);
-                for z in z0..=z1 {
-                    let cells: Vec<(i32, i32)> = m
-                        .voxels
-                        .keys()
-                        .filter(|&&(_, _, zz)| zz as i32 == z)
-                        .map(|&(x, y, _)| (x as i32, y as i32))
-                        .collect();
-                    let (xmin, xmax) = (cells.iter().map(|c| c.0).min().unwrap(), cells.iter().map(|c| c.0).max().unwrap());
-                    let (ymin, ymax) = (cells.iter().map(|c| c.1).min().unwrap(), cells.iter().map(|c| c.1).max().unwrap());
-                    assert!(xmax - xmin + 1 >= 4 && ymax - ymin + 1 >= 4, "{light}: lens {i} is narrower than 4 at z {z}");
-                    assert!(
-                        xmin < ANDON_POST_X.0 && xmax > ANDON_POST_X.1 && ymin < ANDON_POST_Y.0 && ymax > ANDON_POST_Y.1,
-                        "{light}: lens {i} does not stand proud of the post on every side at z {z}"
-                    );
-                    // Inside the tile: a ring clipped by the volume would be
-                    // flat on exactly the faces the camera sees.
-                    assert!(xmax < TILE_VOXELS as i32 && ymin > -1 && ymin >= 0);
-                }
-                if i < 2 {
-                    let gap = z1 + 1..andon_lens_z(lens_bottom, i + 1).0;
-                    assert!(!gap.is_empty(), "{light}: lenses {i} and {} touch", i + 1);
-                    for z in gap {
-                        let band: Vec<u8> = m
-                            .voxels
-                            .iter()
-                            .filter(|&(&(_, _, zz), _)| zz as i32 == z)
-                            .map(|(_, &idx)| idx)
-                            .collect();
-                        assert!(!band.is_empty());
-                        assert!(
-                            band.iter().all(|&idx| idx == p.idx("hazard_black")),
-                            "{light}: the band between lenses {i} and {} at z {z} is not dark",
-                            i + 1
-                        );
-                    }
-                }
-            }
-        }
+        let yellow = p.idx("hazard_yellow");
+        let has_yellow = |m: &VoxModel| m.voxels.values().any(|&c| c == yellow);
+
+        let hat = staff_manufacturing(&p);
+        assert!(has_yellow(&hat), "the hard hat is hazard_yellow");
+        assert!(
+            hat.filter_class(&p, MaterialClass::Metal).is_empty(),
+            "a hard hat has no steel on it"
+        );
+
+        let spanner = staff_maintenance(&p);
+        assert!(
+            spanner.filter_class(&p, MaterialClass::Matte).is_empty(),
+            "the spanner is all metal"
+        );
+        assert!(!spanner.filter_class(&p, MaterialClass::Metal).is_empty());
+
+        let carton = staff_packaging(&p);
+        assert!(has_yellow(&carton), "the tape is hazard_yellow");
+        assert!(
+            carton.filter_class(&p, MaterialClass::Metal).is_empty(),
+            "a carton has no steel on it"
+        );
+
+        let jack = staff_logistics(&p);
+        assert!(
+            !jack.filter_class(&p, MaterialClass::Metal).is_empty(),
+            "the jack's forks and tiller are metal"
+        );
+        assert!(!has_yellow(&jack), "the jack carries no signage colour");
     }
 
-    /// `vox::encode` lifts a model by `size[2] / 2` whole voxels (UI_UX.md
-    /// §2b point 27): an odd height would sink the post half a voxel into
-    /// the floor. And the whole thing is `matte` plus one `emissive` lens —
-    /// a signal post is structure (point 8), not stainless.
+    /// The spanner's jaws are genuinely open — empty voxels, not a darker
+    /// colour — for the same reason the machines' doorways are (UI_UX.md
+    /// §2b point 11): a filled slot meshes as a solid head and the tool
+    /// reads as a dumbbell.
     #[test]
-    fn an_andon_has_an_even_height_and_no_metal() {
-        let p = palette();
-        for (light, _, _, m) in andon_variants(&p) {
-            assert_eq!(m.size[2] % 2, 0, "{light} is {} tall", m.size[2]);
-            assert!(m.filter_class(&p, MaterialClass::Metal).is_empty(), "{light} has metal in it");
-            assert!(m.filter_class(&p, MaterialClass::Liquid).is_empty(), "{light} has liquid in it");
-        }
+    fn spanner_jaws_are_open() {
+        let m = staff_maintenance(&palette());
+        assert!(!m.filled(2, 14, 0), "the -X jaw is open at its mouth");
+        assert!(m.filled(2, 11, 0) && m.filled(2, 18, 0), "the -X jaw has two lips");
+        assert!(!m.filled(29, 17, 0), "the +X jaw is open at its mouth");
+        assert!(m.filled(29, 14, 0) && m.filled(29, 21, 0), "the +X jaw has two lips");
     }
 }
