@@ -6678,9 +6678,18 @@ func _update_production_panel() -> void:
 		row["used_label"].text = _production_count_text(int(state["used"]), String(state["used_rate"]))
 	for entry in _production_window_buttons:
 		var selected: bool = int(entry["index"]) == _production_window
+		# Re-styled only when the selection moves, from the hotbar's cached
+		# styleboxes: this ran on every update while the panel was open and
+		# built five new StyleBoxFlats per button each time (the quality
+		# pass, 2026-09-13).
+		if entry.has("selected") and bool(entry["selected"]) == selected:
+			continue
+		entry["selected"] = selected
 		var button: Button = entry["button"]
+		var style_key := "selected" if selected else "stocked"
+		var style: StyleBoxFlat = _hotbar_styles.get(style_key, _hotbar_slot_style(style_key))
 		for state in ["normal", "hover", "pressed", "disabled", "focus"]:
-			button.add_theme_stylebox_override(state, _hotbar_slot_style("selected" if selected else "stocked"))
+			button.add_theme_stylebox_override(state, style)
 	_production_window_label.text = _production_window_text(_production_snapshot, _production_window)
 	var empty := rows.is_empty()
 	_production_scroll.visible = not empty
