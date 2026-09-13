@@ -1347,6 +1347,11 @@ func _ready() -> void:
 	# blobs — see that file's header for why.
 	_audio = FactoryAudio.new()
 	_audio.setup(self)
+	# The score (music.gd). Idempotent: the menu already started it, and a
+	# game entered from the menu must not restart the loop at the cut.
+	var music := _music()
+	if music != null:
+		music.start()
 	_build_ui()
 	_build_ghost_layer()
 	_refresh_owned_counts()
@@ -1430,6 +1435,34 @@ func _session() -> Node:
 		return null
 	var tree_root: Node = (loop as SceneTree).root
 	return tree_root.get_node_or_null("GameSession") if tree_root != null else null
+
+
+## The `Music` autoload, or null — found the same way, for the same reason.
+func _music() -> Node:
+	var loop := Engine.get_main_loop()
+	if not (loop is SceneTree):
+		return null
+	var tree_root: Node = (loop as SceneTree).root
+	return tree_root.get_node_or_null("Music") if tree_root != null else null
+
+
+## One cue, through `audio.gd`. Null-safe because `_audio` is built in
+## `_ready` and a few paths (a test driving a handler directly) can reach a
+## cue before it.
+func _cue(name: String) -> void:
+	if _audio != null:
+		_audio.play(name)
+
+
+## The balance, from the cheapest snapshot that carries it. Used to tell a
+## purchase that went through from one the simulation refused: every
+## command is a silent no-op on failure (the `Purchase` convention), so the
+## only way to know is to look at what it would have changed.
+func _current_money() -> float:
+	var snapshot = JSON.parse_string(sim.shop_snapshot_json())
+	if snapshot is Dictionary:
+		return float(snapshot.get("money", 0.0))
+	return 0.0
 
 
 # --------------------------------------------------------------------------
@@ -4998,9 +5031,11 @@ func _buy_slot(index: int) -> void:
 	if index < 0 or index >= _shop_slots.size():
 		return
 	var kind: String = _shop_slots[index]["kind"]
+	var owned_before := _owned_of(kind)
 	sim.issue_command_json(JSON.stringify({"type": "purchase", "kind": kind}))
 	_refresh_owned_counts()
 	_update_shop_menu()
+	_cue(FactoryAudio.BUY if _owned_of(kind) > owned_before else FactoryAudio.REFUSED)
 
 
 func _set_shop_menu_open(open: bool) -> void:
@@ -5013,6 +5048,7 @@ func _set_shop_menu_open(open: bool) -> void:
 		_close_config_panel()
 	_shop_open = open
 	_shop_menu.visible = open
+	_cue(FactoryAudio.MENU_OPEN if open else FactoryAudio.MENU_CLOSE)
 	if open:
 		_update_shop_menu()
 	# The menu is clickable in first-person too, which means handing the
@@ -5334,12 +5370,14 @@ func _update_ingredient_market() -> void:
 func _buy_ingredient_slot(index: int) -> void:
 	if index < 0 or index >= _market_slots.size():
 		return
+	var money_before := _current_money()
 	sim.issue_command_json(JSON.stringify({
 		"type": "buy_ingredient",
 		"item": String(_market_slots[index]["id"]),
 		"quantity": MARKET_CRATE,
 	}))
 	_update_ingredient_market()
+	_cue(FactoryAudio.BUY if _current_money() < money_before else FactoryAudio.REFUSED)
 
 
 func _set_market_open(open: bool) -> void:
@@ -5349,6 +5387,7 @@ func _set_market_open(open: bool) -> void:
 		_close_config_panel() # see `_set_shop_menu_open`
 	_market_open = open
 	_market_panel.visible = open
+	_cue(FactoryAudio.MENU_OPEN if open else FactoryAudio.MENU_CLOSE)
 	if open:
 		_update_ingredient_market()
 	if _view_mode == ViewMode.FIRST_PERSON:
@@ -5619,12 +5658,16 @@ func _update_contract_board() -> void:
 func _sign_contract_offer(index: int) -> void:
 	if index < 0 or index >= _board_rows.size():
 		return
+	var money_before := _current_money()
 	sim.issue_command_json(JSON.stringify({
 		"type": "sign_contract",
 		"id": String(_board_rows[index]["id"]),
 	}))
 	_update_contract_board()
 	_update_contract_panel()
+	# A signature costs its fee; a refusal (already signed, unaffordable,
+	# unknown) costs nothing — so the balance is what tells the two apart.
+	_cue(FactoryAudio.SIGN if _current_money() < money_before else FactoryAudio.REFUSED)
 
 
 func _set_contract_board_open(open: bool) -> void:
@@ -5634,6 +5677,7 @@ func _set_contract_board_open(open: bool) -> void:
 		_close_config_panel() # see `_set_shop_menu_open`
 	_board_open = open
 	_board_panel.visible = open
+	_cue(FactoryAudio.MENU_OPEN if open else FactoryAudio.MENU_CLOSE)
 	if open:
 		_update_contract_board()
 	if _view_mode == ViewMode.FIRST_PERSON:
@@ -6113,12 +6157,27 @@ func _staff_fire(index: int) -> void:
 func _staff_move_head(index: int, verb: String) -> void:
 	if index < 0 or index >= _staff_rows.size():
 		return
+	var id := String(_staff_rows[index]["id"])
+	var before := _headcount_of(id)
 	sim.issue_command_json(JSON.stringify({
 		"type": verb,
-		"category": String(_staff_rows[index]["id"]),
+		"category": id,
 	}))
 	_poll_staff()
 	_update_staff_panel()
+	var after := _headcount_of(id)
+	if after == before:
+		_cue(FactoryAudio.REFUSED)
+	else:
+		_cue(FactoryAudio.HIRE if after > before else FactoryAudio.FIRE)
+
+
+## A category's hired headcount from the last staff poll, or 0.
+func _headcount_of(id: String) -> int:
+	for category in _staff_snapshot.get("categories", []):
+		if String(category.get("id", "")) == id:
+			return int(category.get("headcount", 0))
+	return 0
 
 
 func _set_staff_open(open: bool) -> void:
@@ -6128,6 +6187,7 @@ func _set_staff_open(open: bool) -> void:
 		_close_config_panel() # see `_set_shop_menu_open`
 	_staff_open = open
 	_staff_panel.visible = open
+	_cue(FactoryAudio.MENU_OPEN if open else FactoryAudio.MENU_CLOSE)
 	if open:
 		_poll_staff()
 		_update_staff_panel()
@@ -6258,6 +6318,7 @@ func _announce_contract_changes(contracts: Array, board: Array) -> void:
 		for id in _known_active_contract_ids:
 			if not ids.has(id):
 				_show_contract_notice("✗ CONTRACT LOST: %s — sign it again on the board (C)" % _board_name_for(String(id), board))
+				_cue(FactoryAudio.CONTRACT_LOST)
 		for id in ids:
 			if not _known_active_contract_ids.has(id):
 				_show_contract_notice("✔ SIGNED: %s" % _board_name_for(String(id), board))
@@ -7310,6 +7371,7 @@ func _select_hotbar_slot(index: int) -> void:
 		return
 	var kind: String = String(_hotbar_slots[index]["kind"])
 	_pulse_hotbar_slot(index)
+	_cue(FactoryAudio.SELECT)
 	_refresh_owned_counts()
 	if _build_kind == kind:
 		_exit_build_mode()
@@ -7754,6 +7816,7 @@ func _rotate_under_cursor() -> void:
 	if _placement_at_tile(tile).is_empty():
 		return
 	_issue_world_command({"type": "rotate", "tile": [tile.x, tile.y]})
+	_cue(FactoryAudio.ROTATE)
 
 
 ## The left click. Places in placement mode, removes in remove mode, and does
@@ -7774,6 +7837,7 @@ func _confirm_build() -> void:
 		if _placement_at_tile(tile).is_empty():
 			return
 		_issue_world_command({"type": "remove", "tile": [tile.x, tile.y]})
+		_cue(FactoryAudio.REMOVE)
 		return
 	if _build_kind == "" or not _ghost_valid:
 		return
@@ -7796,6 +7860,9 @@ func _confirm_build() -> void:
 			return
 		command["item"] = item
 	_issue_world_command(command)
+	# The ghost said the click would work; the simulation has the final say.
+	# What is on the tile afterwards is the answer, and the sound says it.
+	_cue(FactoryAudio.PLACE if not _placement_at_tile(tile).is_empty() else FactoryAudio.REFUSED)
 	# Placing spends one owned unit. Running out ends the mode rather than
 	# leaving a ghost that can no longer be built — the prompt would read
 	# "✗ NONE OWNED" forever, which is a dead end rather than feedback.
@@ -8417,6 +8484,13 @@ func _build_pause_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_pause_sound_button.pressed.connect(_on_pause_sound_pressed)
 	_pause_buttons_box.add_child(_pause_sound_button)
 
+	# The score's own switch, beside the effects': a player who wants the
+	# clunks and chimes but not the track (or the reverse) can have that.
+	_pause_music_button = _pause_button("MusicButton", "MUSIC: ON")
+	_pause_music_button.pressed.connect(_on_pause_music_pressed)
+	_pause_buttons_box.add_child(_pause_music_button)
+	_update_music_button()
+
 	var save_row := HBoxContainer.new()
 	save_row.add_theme_constant_override("separation", _ui_i(8))
 	_pause_buttons_box.add_child(save_row)
@@ -8518,6 +8592,12 @@ func _set_pause_open(open: bool) -> void:
 		return
 	_pause_open = open
 	_pause_menu.visible = open
+	_cue(FactoryAudio.MENU_OPEN if open else FactoryAudio.MENU_CLOSE)
+	# The score steps back while the factory is stopped (music.gd's DUCK_DB)
+	# — not off, which would read as the game having died.
+	var music := _music()
+	if music != null:
+		music.ducked = open
 	if open:
 		_pause_confirm_quit = false
 		_set_pause_confirm(false)
@@ -8626,7 +8706,13 @@ func _quit_to_menu() -> void:
 func _quit_game() -> void:
 	_autosave("quit")
 	if is_inside_tree():
-		get_tree().quit()
+		# Through the score, which stops itself first (music.gd's
+		# `quit_tree` — a stream playing at the instant of teardown leaks).
+		var music := _music()
+		if music != null:
+			music.quit_tree()
+		else:
+			get_tree().quit()
 
 
 ## Writes `user://saves/autosave.ron`. It NEVER touches a named slot, which
@@ -10150,6 +10236,12 @@ func _format_counts(pairs: Array) -> String:
 ## | Clipboard, paying docket | its payout reads PAID | which order paid |
 ## | Speakers | the payout chime (`audio.gd`) | — |
 ##
+## The chime is one of fourteen cues in `audio.gd` since 2026-09-12; every
+## player action (place, remove, rotate, buy, sign, hire, fire, a menu
+## opening) and every unasked-for event (a lost contract, a refused command)
+## has one, fired from the handler that knows whether the action went
+## through. The music track lives on the `Music` autoload, not here.
+##
 ## The "+N" is deliberately NOT anchored to the dock. One payout is one
 ## number, and with two docks a per-dock flyout would read as two payouts of
 ## N; the coins can be per-dock (they are goods, and every dock ships the
@@ -10267,6 +10359,8 @@ var _dock_pop_slot := -1
 
 ## The pause menu's sound switch (built in `_build_pause_menu`).
 var _pause_sound_button: Button
+var _pause_music_button: Button
+
 
 ## Test seams. A dummy audio driver makes "was a sound heard" unanswerable
 ## and a headless run has no eyes, so what a test asserts on is how many
@@ -10616,3 +10710,25 @@ func _update_sound_button() -> void:
 
 func _on_pause_sound_pressed() -> void:
 	_toggle_sound()
+
+
+## The score's switch lives on the `Music` autoload, so it survives a trip
+## back to the menu and into another save within one session.
+func _toggle_music() -> void:
+	var music := _music()
+	if music == null:
+		return
+	music.enabled = not music.enabled
+	_update_music_button()
+
+
+func _update_music_button() -> void:
+	if _pause_music_button == null:
+		return
+	var music := _music()
+	var on: bool = music != null and bool(music.enabled)
+	_pause_music_button.text = "MUSIC: ON" if on else "MUSIC: OFF"
+
+
+func _on_pause_music_pressed() -> void:
+	_toggle_music()

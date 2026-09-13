@@ -129,10 +129,11 @@ sauce-factory/
                            #   panel (H), pause menu, and the click-to-
                            #   configure panel on a placed hopper or tank
     audio.gd               # every sound, SYNTHESISED into AudioStreamWAV at
-                           #   runtime; no .wav binaries. Reached by preload
-                           #   clipboard, market, contracts board (C), pause
-                           #   menu, and the click-to-configure panel on a
-                           #   placed hopper or tank
+                           #   runtime; no .wav binaries. Reached by preload.
+                           #   14 feedback cues + music_samples(), the track
+    music.gd               # autoload `Music`: the one looping track, started
+                           #   by the menu, carried across the scene change,
+                           #   rendered on a Thread, ducked under pause
     sim_core.gdextension   # checked in; points at gitignored bin/
     addons/                # vendored, pinned .vox importer (see VENDORED.md)
     test_*.gd              # headless proofs, each prints its own success
@@ -203,6 +204,37 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-12 **Music and a full set of sound effects.** The owner asked
+  for music, which reverses UI_UX §8's "no soundtrack" half; the
+  "feedback, synthesised, no `.wav`" half stands. `audio.gd` has FOURTEEN
+  cues (`CUES`): payout, delivery, place, remove, rotate, buy, refused,
+  sign, contract_lost, hire, fire, select, menu_open, menu_close. **A cue
+  is fired by the handler that knows the outcome, never by the input**:
+  every command is a silent no-op on refusal, so `_buy_slot` compares the
+  owned count, `_buy_ingredient_slot`/`_sign_contract_offer` compare
+  `_current_money()` (from `shop_snapshot_json`, the cheapest carrier),
+  `_confirm_build` looks at `_placement_at_tile` after the place,
+  `_staff_move_head` compares `_headcount_of`; the difference is BUY/SIGN/
+  HIRE/FIRE/PLACE versus one shared REFUSED buzz. Menus cue in the
+  `_set_*_open` seams (so ESC-closing cues too); CONTRACT_LOST rides the
+  poll diff in `_announce_contract_changes` (SIGN does not, or it would
+  play twice). **The music is ONE looping 8-bar track** (`music_samples`,
+  D minor, 92 BPM, 22 050 Hz mono, pad + bass + mallet pluck + kick/rim/
+  hat, `LOOP_FORWARD`; every note WRAPS at the loop end so the seam is a
+  fraction of a step), owned by the `Music` **autoload** so it starts on
+  the main menu and does not restart at the scene change. Rendered LAZILY
+  on a `Thread` (~0.7 s of GDScript), and only when
+  `DisplayServer.get_name() != "headless"`, so the 29 headless proofs pay
+  nothing; the `AudioStreamWAV` is encoded on the MAIN thread (25 ms).
+  **Every quit path goes through `Music.quit_tree()`** (stop, two frames,
+  then `get_tree().quit()`): a stream playing at the instant of teardown
+  races the engine's exit check and reports its playback leaked three
+  runs in four; stopped first, zero. Pause DUCKS the track by `DUCK_DB` (-10) rather than stopping
+  it; the pause menu gains **MUSIC: ON/OFF** beside SOUND: ON/OFF, both
+  session-scoped. `VOLUME_DB` -13 keeps the bed under the cues' -7.
+  `test_audio.gd` (`AUDIO_OK`) proves every cue's stream, determinism,
+  no clipping, the loop's length/seam, the duck, and every handler's cue
+  and refusal. Full record in `docs/DECISIONS.md`.
 - 2026-09-12 **Staff pools MVP, ticket 3 (Godot).** **H** opens the STAFF
   panel (`_build_staff_panel`): a plain dark plate like the market and the
   board, one row per `staff_snapshot_json` category in wire order (ticket
@@ -224,8 +256,9 @@ Do not re-litigate these without a good reason.
   `_advance_simulation` (a pause polls nothing), once per rebuild, once on
   open, and at once after HIRE/FIRE, so a button's immediate re-read
   never shifts the load's cadence. E/M/C/H are mutually exclusive and
-  `_staff_open` joins every modal guard. No click sound: `audio.gd` has
-  only the payout and delivery cues and nothing new is synthesised.
+  `_staff_open` joins every modal guard. No click sound at the time
+  (`audio.gd` had only the payout and delivery cues; the audio pass of
+  2026-09-12 added HIRE/FIRE and menu cues since).
   Hover: `_crews` (origin key → `crew`, from `query_tile_json` at rebuild,
   machines AND docks) gives `crew: 2 manufacturing` as the last line;
   stall kind `staff` reads `short of manufacturing staff` (the category

@@ -38,6 +38,10 @@ window/size/viewport_height=900
 ; about where a save file lives and what it may be called (sim_core does no
 ; file I/O at all — user:// is Godot's). See godot_project/game_session.gd.
 GameSession="*res://game_session.gd"
+; The music track (2026-09-12). An autoload for the same reason: the score
+; starts on the menu and must not restart when the scene changes to the
+; factory. See godot_project/music.gd.
+Music="*res://music.gd"
 
 [editor_plugins]
 

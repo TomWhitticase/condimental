@@ -22,6 +22,89 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-12: **Music and a full set of sound effects.** Requested
+  directly ("add some nice music and sound effect"). It reverses one half
+  of the 2026-09-11 audio decision — "no music" — and keeps the other
+  three: feedback cues only fire on events, everything is synthesised in
+  GDScript, and no `.wav` is committed.
+
+  1. **Fourteen cues, one per thing that can happen to the player.**
+     `audio.gd`'s `CUES` is the list. The design constraint was a
+     *family*: the payout chime is a rising fourth, so the buy cue is a
+     rising interval a fifth lower and half as long (a receipt, not an
+     earning), the contract-lost cue is the same interval FALLING and held
+     longest of all, hire/fire are a rising and a falling fifth, open/close
+     are two notes up and the same two down. The place cue is a low thump
+     with a bright tick a few milliseconds after it (what separates "a
+     machine landed" from "something fell"); remove is its opposite,
+     rising, because taking a thing back is not a failure. Refusal is ONE
+     shared dull double buzz — the third harmonic on a low E — for every
+     "no" the sim gives (unaffordable, blocked, already signed, fire at
+     zero), so the player learns one sound for "that did not happen".
+  2. **The handler that knows the outcome fires the cue, never the
+     input.** Every command is a silent no-op on refusal (the `Purchase`
+     convention), so the click cannot know. `_buy_slot` compares the owned
+     count before and after; `_buy_ingredient_slot` and
+     `_sign_contract_offer` compare `_current_money()` (read from
+     `shop_snapshot_json`, the cheapest snapshot that carries the
+     balance); `_confirm_build` looks at `_placement_at_tile` after the
+     place; `_staff_move_head` compares `_headcount_of` from the staff
+     poll it already re-runs. Menus cue inside the `_set_*_open` seams so
+     ESC-closing cues too and an already-open menu cues nothing.
+     `CONTRACT_LOST` rides the poll diff in `_announce_contract_changes`;
+     `SIGN` deliberately does not (the board handler already played it,
+     and a poll-side cue would play it twice).
+  3. **One looping track, on an autoload.** `music_samples()` in
+     `audio.gd`: D minor, 92 BPM, eight bars (i–VI–III–VII, then
+     i–VI–iv–V so the loop resolves onto bar one rather than restarting),
+     a detuned two-oscillator pad computed in one pass per chord (the
+     expensive part), a plucked bass on a dotted pattern, a mallet
+     arpeggio on a sixteenth grid with rests (two alternating bars, lifted
+     an octave in the second half), kick on 1 and 3, rim on 2 and 4, hats
+     on the eighths with one open hat every other bar. 22 050 Hz mono —
+     half the cues' rate — because the loop is a thousand times longer
+     than a cue and nothing in it wants the top octave; the dulled hat is
+     the lo-fi character, not a loss. **Every note wraps at the loop
+     end** (`_slot` with `wrap`): a pad released in bar eight is heard
+     under bar one, so the seam is a fraction of a step and
+     `test_audio.gd` pins it. The `Music` autoload owns the player for the
+     same reason `GameSession` is an autoload: `change_scene_to_file`
+     frees the menu before the game's `_ready`, and a player parented to
+     either scene would stop at the cut. `start()` is idempotent (the
+     menu and the game both call it).
+  4. **Rendered lazily, on a thread, never headless — and encoded on the
+     main thread.** Twenty seconds of PCM take ~0.7 s of GDScript
+     (measured), a visible hitch on the menu's first frame, so a `Thread`
+     renders the samples. `DisplayServer.get_name() == "headless"` skips
+     it entirely: the 29 headless proofs instantiate the game dozens of
+     times and can hear nothing. The worker renders only the
+     `PackedFloat32Array`; the `AudioStreamWAV` is encoded on the main
+     thread (25 ms), so the resource is made where it is used.
+     **Quitting goes through `Music.quit_tree()`.** With the track playing
+     at the instant the tree is torn down, `--verbose` reported its
+     `AudioStreamPlaybackWAV` and `AudioStreamWAV` leaked at refcount 1 —
+     nondeterministically, three runs in four of the same build, so it is
+     a race between the audio mix thread releasing the playback and the
+     engine's exit check, not a reference anyone holds. (It was first
+     misread as a worker-thread resource problem; the encode split above
+     was made for that reason and kept because it is the better shape.)
+     Stopping the player and waiting two frames before `get_tree().quit()`
+     made it zero in seven runs; the menu's QUIT, the pause menu's QUIT
+     GAME and the window's close button all call the helper, and none
+     calls `get_tree().quit()` itself any more.
+  5. **Pause ducks, and each channel has its own switch.** The pause menu
+     lowers the track by `DUCK_DB` (-10) rather than stopping it — the
+     factory has stopped, and the score stepping back says so, where
+     silence would read as a crash. MUSIC: ON/OFF sits under SOUND: ON/OFF
+     and both are session-scoped, as the SOUND switch always was (a
+     persisted setting belongs to a settings screen the project has not
+     got). Levels: cues at `VOLUME_DB` -7, the bed at -13, ducked to -23.
+     `VOICES` went 4 → 6 so a placement landing on a menu closing does not
+     cut either off.
+  6. **What did not change.** No idle machine loop, no ambient bed, no
+     `.wav` in the repo. The screenshot script is unaffected (a windowed
+     run renders the track once; the frame it captures is the same).
+
 - 2026-09-12: **Staff pools MVP, ticket 3 — the Godot half.** The plan's
   "Presentation" section (`docs/STAFF_POOLS_PLAN.md`) built as written,
   with the coordinator's amendment that the andon bullet is void. The

@@ -8,12 +8,23 @@ extends RefCounted
 ## registered after an editor scan — a headless `--script` run against a cold
 ## `.godot/` would not find it.
 ##
-## **UI_UX.md §8 listed "audio direction" as not decided. This file is the
-## first half of that decision, and it is deliberately a narrow one:** sound
-## here is *feedback*, not a score or an ambience bed. It fires on the
-## moments the player is meant to feel — a contract paying out, a case
-## landing on the dock — and is silent the rest of the time, which is what
-## keeps a factory that runs for an hour from becoming an hour of noise.
+## **UI_UX.md §8's audio direction, as it stands after 2026-09-12.** The
+## first cut of this file (the payout chime and the dock knock) was
+## feedback-only by design: no score, no ambience. The owner asked for
+## music and a fuller set of effects, so the file now has two halves that
+## keep the original rule where it still applies:
+##
+##   * **Effects are still feedback.** Every cue below fires because the
+##     player DID something or something HAPPENED to them — a tile placed,
+##     a purchase refused, a contract lost — and never on a timer. A running
+##     factory is still quiet apart from the dock's knock, which is what
+##     keeps an hour of play from being an hour of noise.
+##   * **Music is a score, and it is one looping track** (`music_stream`),
+##     synthesised like everything else, owned by the `Music` autoload so it
+##     carries across the menu → game scene change without a restart, and
+##     ducked (not stopped) while the pause menu is up. It is a bed, not a
+##     signal: nothing in it ever tells the player anything, so it can be
+##     switched off on the pause menu without losing information.
 ##
 ## # Why the waveforms are code and not `.wav` files in the repo
 ##
@@ -30,8 +41,12 @@ extends RefCounted
 ## The obvious limit, stated rather than discovered later: this is a
 ## synthesis approach, so it buys arcade-style tones (chimes, clicks, blips)
 ## and not recorded material. That suits a chunky voxel factory and it is
-## what the two cues below need. A future ambience/music layer is a
-## different problem and would want real files; nothing here forecloses that.
+## what the cues below need. The music track pushes the same primitives as
+## far as they go — sine-based pads, plucks and a thumped kick, at half the
+## sample rate — and lands on a warm lo-fi loop rather than anything that
+## pretends to be a recording. If the game ever wants a produced soundtrack
+## that is the point at which real files enter the repo, and nothing here
+## forecloses it.
 ##
 ## # Determinism
 ##
@@ -45,19 +60,35 @@ extends RefCounted
 const MIX_RATE := 44100
 
 ## Every cue this class knows how to make. `play()` takes one of these.
-const PAYOUT := "payout"
-const DELIVERY := "delivery"
+## `CUES` lists them all so a test can prove each one has a stream.
+const PAYOUT := "payout"           # a contract paid (the celebration)
+const DELIVERY := "delivery"       # a case reached the dock (the heartbeat)
+const PLACE := "place"             # a tile or machine put down
+const REMOVE := "remove"           # one picked back up
+const ROTATE := "rotate"           # one turned a quarter
+const BUY := "buy"                 # a purchase went through (equipment or stock)
+const REFUSED := "refused"         # the sim said no: unaffordable, blocked
+const SIGN := "sign"               # a contract signed on the board
+const CONTRACT_LOST := "contract_lost"
+const HIRE := "hire"
+const FIRE := "fire"
+const SELECT := "select"           # a hotbar slot picked up or put down
+const MENU_OPEN := "menu_open"     # any modal (E/M/C/H/pause) opening
+const MENU_CLOSE := "menu_close"   # …and closing
+const CUES := [PAYOUT, DELIVERY, PLACE, REMOVE, ROTATE, BUY, REFUSED, SIGN,
+	CONTRACT_LOST, HIRE, FIRE, SELECT, MENU_OPEN, MENU_CLOSE]
 
 ## Master trim, in dB, applied to every player. Sound is feedback here, so
 ## it sits UNDER the level a music track would want: a coin chime that makes
 ## the player reach for the volume key has failed at being satisfying.
 const VOLUME_DB := -7.0
 
-## How many cues can overlap. Four rather than one because a contract board
-## can settle several contracts on the same tick (sim_core's `Economy::tick`
-## returns a *list* of paid contracts), and a cue cut off by the next one
-## reads as a glitch rather than as a second payout.
-const VOICES := 4
+## How many cues can overlap. Several rather than one because a contract
+## board can settle several contracts on the same tick (sim_core's
+## `Economy::tick` returns a *list* of paid contracts), a placement lands on
+## top of a menu closing, and a cue cut off by the next one reads as a glitch
+## rather than as a second event.
+const VOICES := 6
 
 ## Whether anything is actually audible. Toggled from the pause menu; the
 ## cues are still generated and `play()` still bookkeeps, so muting can never
@@ -78,6 +109,18 @@ var plays: Dictionary = {}
 func setup(parent: Node) -> void:
 	_streams[PAYOUT] = payout_stream()
 	_streams[DELIVERY] = delivery_stream()
+	_streams[PLACE] = place_stream()
+	_streams[REMOVE] = remove_stream()
+	_streams[ROTATE] = rotate_stream()
+	_streams[BUY] = buy_stream()
+	_streams[REFUSED] = refused_stream()
+	_streams[SIGN] = sign_stream()
+	_streams[CONTRACT_LOST] = contract_lost_stream()
+	_streams[HIRE] = hire_stream()
+	_streams[FIRE] = fire_stream()
+	_streams[SELECT] = select_stream()
+	_streams[MENU_OPEN] = menu_open_stream()
+	_streams[MENU_CLOSE] = menu_close_stream()
 	for i in range(VOICES):
 		var player := AudioStreamPlayer.new()
 		player.name = "sfx_%d" % i
@@ -151,14 +194,312 @@ static func delivery_stream() -> AudioStreamWAV:
 	return _encode(samples)
 
 
+## A tile or machine set down. A solid, low "clunk" — the body of a heavy
+## thing meeting concrete — with a breath of noise on the front and one
+## bright metallic tick a hair later, which is what separates "a machine
+## landed" from "something fell over". Short: a player laying a belt run
+## hears this twenty times in ten seconds.
+static func place_stream() -> AudioStreamWAV:
+	var samples := _buffer(0.20)
+	_thump(samples, 0.0, 110.0, 0.50, 30.0)
+	_noise(samples, 0.0, 0.03, 0.12, 160.0)
+	_tone(samples, 0.012, 0.08, 2600.0, 0.07, 60.0)
+	return _encode(samples)
+
+
+## A placement picked back up: the placement sound run the other way. Two
+## quick rising blips and a shorter, lighter noise — the thing leaving the
+## floor rather than meeting it. Rising because taking a thing back is not
+## a failure; the refusal buzz below is what falling means here.
+static func remove_stream() -> AudioStreamWAV:
+	var samples := _buffer(0.18)
+	_noise(samples, 0.0, 0.02, 0.08, 220.0)
+	_tone(samples, 0.0, 0.07, 523.25, 0.14, 40.0)   # C5
+	_tone(samples, 0.05, 0.12, 783.99, 0.14, 30.0)  # G5
+	return _encode(samples)
+
+
+## R on a placement: a ratchet — two dry clicks a few hundredths apart and a
+## faint ring, nothing tonal enough to sound like a note. A quarter turn is
+## a mechanical adjustment and the sound says so.
+static func rotate_stream() -> AudioStreamWAV:
+	var samples := _buffer(0.10)
+	_noise(samples, 0.0, 0.008, 0.22, 400.0)
+	_noise(samples, 0.045, 0.008, 0.18, 400.0)
+	_tone(samples, 0.045, 0.05, 1800.0, 0.05, 120.0)
+	return _encode(samples)
+
+
+## Money spent and something gained: a short till, a fifth lower and half
+## the length of the payout chime so the two never read as the same event.
+## Earning is the celebration; spending is a receipt.
+static func buy_stream() -> AudioStreamWAV:
+	var samples := _buffer(0.30)
+	_thump(samples, 0.0, 160.0, 0.18, 40.0)
+	_tone(samples, 0.0, 0.08, 1567.98, 0.18, 40.0)  # G6
+	_tone(samples, 0.06, 0.22, 2093.00, 0.18, 16.0) # C7
+	return _encode(samples)
+
+
+## The simulation said no — a purchase the balance cannot meet, a placement
+## it would not take, a contract fee too high. A dull double buzz, low and
+## with the third harmonic doing the work, so it reads as a locked door and
+## not as an error tone from a different era of computing.
+static func refused_stream() -> AudioStreamWAV:
+	var samples := _buffer(0.30)
+	_tone(samples, 0.0, 0.11, 164.81, 0.26, 24.0)   # E3
+	_tone(samples, 0.13, 0.14, 164.81, 0.26, 20.0)
+	return _encode(samples)
+
+
+## A contract signed: a pen scratch (long, low-decaying noise) and then the
+## stamp coming down — the clipboard motif of UI_UX.md §5 in sound. The
+## stamp is the payout's till thump an octave up, so the whole family of
+## "paper events" shares a body.
+static func sign_stream() -> AudioStreamWAV:
+	var samples := _buffer(0.42)
+	_noise(samples, 0.0, 0.14, 0.09, 14.0)
+	_thump(samples, 0.17, 150.0, 0.42, 28.0)
+	_noise(samples, 0.17, 0.02, 0.10, 200.0)
+	return _encode(samples)
+
+
+## A contract lost. Two falling notes a fourth apart — the payout's rising
+## interval inverted — held longer than any other cue here, because it is
+## the one piece of bad news the game delivers to the player unasked and it
+## should not be over before they have looked up.
+static func contract_lost_stream() -> AudioStreamWAV:
+	var samples := _buffer(0.70)
+	_tone(samples, 0.0, 0.18, 659.25, 0.22, 12.0)   # E5
+	_tone(samples, 0.16, 0.50, 466.16, 0.22, 6.5)   # Bb4
+	_thump(samples, 0.16, 98.0, 0.20, 18.0)
+	return _encode(samples)
+
+
+## A head hired: a rising fifth, quick and plain — someone clocked in.
+static func hire_stream() -> AudioStreamWAV:
+	var samples := _buffer(0.26)
+	_tone(samples, 0.0, 0.08, 523.25, 0.16, 32.0)   # C5
+	_tone(samples, 0.07, 0.18, 783.99, 0.16, 16.0)  # G5
+	return _encode(samples)
+
+
+## A head let go: the hire cue inverted. Falling, not sad — firing is free
+## and immediate in the staff MVP, and the sound should not scold.
+static func fire_stream() -> AudioStreamWAV:
+	var samples := _buffer(0.26)
+	_tone(samples, 0.0, 0.08, 783.99, 0.16, 32.0)   # G5
+	_tone(samples, 0.07, 0.18, 523.25, 0.16, 16.0)  # C5
+	return _encode(samples)
+
+
+## A hotbar slot picked up or put down: the smallest sound in the game, a
+## single dry tick. It fires on every number key, so it has to be nearly
+## nothing.
+static func select_stream() -> AudioStreamWAV:
+	var samples := _buffer(0.06)
+	_noise(samples, 0.0, 0.005, 0.10, 500.0)
+	_tone(samples, 0.0, 0.05, 1400.0, 0.09, 80.0)
+	return _encode(samples)
+
+
+## A modal opening (the build menu, the market, the board, the staff panel,
+## the pause menu): a soft two-note blip going up. Closing is the same two
+## notes going down (`menu_close_stream`), which is the convention every
+## desktop has taught since windows first made a sound.
+static func menu_open_stream() -> AudioStreamWAV:
+	var samples := _buffer(0.16)
+	_tone(samples, 0.0, 0.07, 880.0, 0.11, 45.0)      # A5
+	_tone(samples, 0.04, 0.11, 1174.66, 0.11, 32.0)   # D6
+	return _encode(samples)
+
+
+static func menu_close_stream() -> AudioStreamWAV:
+	var samples := _buffer(0.16)
+	_tone(samples, 0.0, 0.07, 1174.66, 0.11, 45.0)    # D6
+	_tone(samples, 0.04, 0.11, 880.0, 0.11, 32.0)     # A5
+	return _encode(samples)
+
+
+# --------------------------------------------------------------------------
+# The music
+# --------------------------------------------------------------------------
+
+## The track's own sample rate. Half the cues' rate, for two reasons: the
+## loop is a thousand times longer than a cue and is synthesised in GDScript
+## at startup, so every sample costs; and nothing in it wants the top
+## octave — the pad and bass are sines, the pluck is a soft mallet, and a
+## dulled hat is the lo-fi character the track is going for, not a loss.
+const MUSIC_MIX_RATE := 22050
+const MUSIC_BPM := 92.0
+const MUSIC_BARS := 8
+const MUSIC_BEATS_PER_BAR := 4
+
+## D minor, one chord a bar, as MIDI note numbers (root, third, fifth). A
+## i–VI–III–VII loop for the first half and a ii°-less turnaround
+## (i–VI–iv–V) for the second, so the loop point lands on the dominant and
+## resolves back onto the first bar rather than just restarting. A
+## sauce-factory score is warm and slightly tired at the end of a shift,
+## which is what a minor key at 92 BPM is.
+const MUSIC_CHORDS := [
+	[50, 53, 57], # Dm
+	[46, 50, 53], # Bb
+	[53, 57, 60], # F
+	[48, 52, 55], # C
+	[50, 53, 57], # Dm
+	[46, 50, 53], # Bb
+	[43, 46, 50], # Gm
+	[45, 49, 52], # A
+]
+
+## The pluck's sixteenth-note grid for one bar: which chord tone (0 root,
+## 1 third, 2 fifth, 3 root an octave up) plays on each sixteenth, or -1 for
+## a rest. Off-beat rests are what make it a groove rather than a scale
+## exercise; the two-bar alternation (`MUSIC_PLUCK_B`) keeps it from being
+## the same bar eight times.
+const MUSIC_PLUCK_A := [0, -1, 2, -1, 1, 3, -1, 2, -1, 0, -1, 2, 1, -1, 3, -1]
+const MUSIC_PLUCK_B := [0, -1, 2, 1, -1, 3, -1, 2, -1, -1, 1, 2, -1, 3, -1, 1]
+
+## Bass hits, in beats within the bar, at the chord root two octaves under
+## the pad. A dotted feel (1, the and-of-2, 3, and-of-4) under straight
+## drums is most of what makes the loop swing.
+const MUSIC_BASS_BEATS := [0.0, 1.5, 2.0, 3.5]
+
+## The whole track, as one seamless loop. Built once by the `Music`
+## autoload the first time it is asked to play, never per scene.
+static func music_stream() -> AudioStreamWAV:
+	return _encode(music_samples(), MUSIC_MIX_RATE, true)
+
+
+## The track's samples before encoding — the expensive half, and the half
+## that touches no engine object, so `music.gd` can run it on a thread. The
+## `AudioStreamWAV` itself is made on the main thread: a stream resource
+## created on a worker thread and still playing at quit leaked its playback
+## (found with `--verbose`, 2026-09-12); the same bytes encoded on the main
+## thread do not.
+static func music_samples() -> PackedFloat32Array:
+	var rate := MUSIC_MIX_RATE
+	var beat := 60.0 / MUSIC_BPM
+	var bar := beat * MUSIC_BEATS_PER_BAR
+	var samples := _buffer(bar * MUSIC_BARS, rate)
+	for b in range(MUSIC_BARS):
+		var chord: Array = MUSIC_CHORDS[b]
+		var at := b * bar
+		var second_half := b >= MUSIC_BARS / 2
+		# Pad: the triad an octave up, two detuned voices a note, a slow
+		# swell in and a release that crosses into the next bar (and, in the
+		# last bar, round into the first — that is what `wrap` is for).
+		var pad_freqs: Array = []
+		for note in chord:
+			pad_freqs.append(_midi_hz(note + 12))
+		_pad(samples, at, bar + 0.5, pad_freqs, 0.07, rate)
+		# Bass.
+		for hit in MUSIC_BASS_BEATS:
+			_bass(samples, at + hit * beat, _midi_hz(chord[0] - 12), 0.26, rate)
+		# Pluck. The second half lifts it an octave for the turnaround.
+		var pattern: Array = MUSIC_PLUCK_B if b % 2 == 1 else MUSIC_PLUCK_A
+		for step in range(16):
+			var pick: int = pattern[step]
+			if pick < 0:
+				continue
+			var note: int = chord[pick % 3] + (12 if pick == 3 else 0) + (12 if second_half else 0)
+			_pluck(samples, at + step * beat / 4.0, _midi_hz(note), 0.20, rate)
+		# Drums: kick on 1 and 3, a soft rim on 2 and 4, closed hats on the
+		# eighths. The hat on the and-of-4 of every second bar is opened a
+		# little longer, the one fill the loop allows itself.
+		for kick in [0.0, 2.0]:
+			_thump(samples, at + kick * beat, 58.0, 0.34, 22.0, rate, true)
+		for rim in [1.0, 3.0]:
+			_noise(samples, at + rim * beat, 0.07, 0.10, 90.0, rate, true, 0.55)
+			_tone(samples, at + rim * beat, 0.05, 210.0, 0.08, 70.0, rate, true)
+		for eighth in range(8):
+			var open := (eighth == 7 and b % 2 == 1)
+			_noise(samples, at + eighth * beat / 2.0, 0.09 if open else 0.03,
+				0.045 if eighth % 2 == 0 else 0.03, 45.0 if open else 140.0, rate, true, 0.9)
+	return samples
+
+
+## Equal temperament; A4 (69) = 440 Hz.
+static func _midi_hz(note: int) -> float:
+	return 440.0 * pow(2.0, float(note - 69) / 12.0)
+
+
+## A chord's worth of pad voices in ONE pass over the samples: each voice is
+## a pair of sines detuned a few cents either way (the slow beating between
+## them is the whole warmth of a synth pad), and the loop runs once for the
+## chord rather than once per oscillator because at 22 kHz over twenty
+## seconds this is the most expensive thing in the file. Swell in over a
+## third of a second, sustain, release over the last half second.
+static func _pad(samples: PackedFloat32Array, start: float, seconds: float,
+		freqs: Array, amp: float, rate: int) -> void:
+	var first := int(start * rate)
+	var count := int(seconds * rate)
+	var size := samples.size()
+	var release_from := seconds - 0.5
+	var detune := 1.004
+	for i in range(count):
+		var index := _slot(first + i, size, true)
+		var t := float(i) / rate
+		var envelope: float = minf(1.0, t / 0.35)
+		if t > release_from:
+			envelope *= maxf(0.0, (seconds - t) / 0.5)
+		var value := 0.0
+		for f in freqs:
+			value += sin(TAU * f * t) + sin(TAU * f * detune * t)
+		samples[index] += value * envelope * amp
+
+
+## A bass note: a sine with a touch of second harmonic (a pure sub is felt
+## and not heard on small speakers), plucked — fast in, half a second out.
+static func _bass(samples: PackedFloat32Array, start: float, freq: float,
+		amp: float, rate: int) -> void:
+	var first := int(start * rate)
+	var count := int(0.55 * rate)
+	var size := samples.size()
+	for i in range(count):
+		var index := _slot(first + i, size, true)
+		var t := float(i) / rate
+		var envelope: float = exp(-t * 6.0) * _attack(t)
+		var value: float = sin(TAU * freq * t) + 0.3 * sin(TAU * freq * 2.0 * t)
+		samples[index] += value * envelope * amp
+
+
+## A mallet: a sine with a bright fourth harmonic that dies faster than the
+## fundamental, which is what makes it "wood struck" rather than "note
+## held". Quarter of a second.
+static func _pluck(samples: PackedFloat32Array, start: float, freq: float,
+		amp: float, rate: int) -> void:
+	var first := int(start * rate)
+	var count := int(0.28 * rate)
+	var size := samples.size()
+	for i in range(count):
+		var index := _slot(first + i, size, true)
+		var t := float(i) / rate
+		var body: float = exp(-t * 11.0)
+		var strike: float = exp(-t * 40.0)
+		var value: float = sin(TAU * freq * t) * body + 0.35 * sin(TAU * freq * 4.0 * t) * strike
+		samples[index] += value * _attack(t) * amp
+
+
 # --------------------------------------------------------------------------
 # Synthesis primitives
 # --------------------------------------------------------------------------
 
-static func _buffer(seconds: float) -> PackedFloat32Array:
+static func _buffer(seconds: float, rate: int = MIX_RATE) -> PackedFloat32Array:
 	var samples := PackedFloat32Array()
-	samples.resize(int(seconds * MIX_RATE))
+	samples.resize(int(seconds * rate))
 	return samples
+
+
+## Where a sample lands in the buffer. Cues clip at the end (`wrap` false: a
+## chime's tail past the buffer is simply cut, which the decay makes
+## inaudible). The music loop WRAPS instead: a pad released in the last bar
+## has to come round and be heard under the first, or the loop point is a
+## step in the waveform, and a step is a click every twenty seconds.
+static func _slot(index: int, size: int, wrap: bool) -> int:
+	if wrap:
+		return posmod(index, size)
+	return index if index >= 0 and index < size else -1
 
 
 ## One decaying tone with a third harmonic, mixed into `samples`.
@@ -167,14 +508,16 @@ static func _buffer(seconds: float) -> PackedFloat32Array:
 ## amplitude begins with a step discontinuity, and a step is a click. Every
 ## primitive here ramps in for that reason.
 static func _tone(samples: PackedFloat32Array, start: float, seconds: float,
-		freq: float, amp: float, decay: float) -> void:
-	var first := int(start * MIX_RATE)
-	var count := int(seconds * MIX_RATE)
+		freq: float, amp: float, decay: float, rate: int = MIX_RATE,
+		wrap: bool = false) -> void:
+	var first := int(start * rate)
+	var count := int(seconds * rate)
+	var size := samples.size()
 	for i in range(count):
-		var index := first + i
-		if index < 0 or index >= samples.size():
+		var index := _slot(first + i, size, wrap)
+		if index < 0:
 			continue
-		var t := float(i) / MIX_RATE
+		var t := float(i) / rate
 		var envelope: float = exp(-t * decay) * _attack(t)
 		var value: float = sin(TAU * freq * t) + 0.25 * sin(TAU * freq * 3.0 * t)
 		samples[index] += value * envelope * amp
@@ -184,17 +527,18 @@ static func _tone(samples: PackedFloat32Array, start: float, seconds: float,
 ## is what makes a knock read as something solid being struck rather than as
 ## a bass note.
 static func _thump(samples: PackedFloat32Array, start: float, freq: float,
-		amp: float, decay: float) -> void:
-	var first := int(start * MIX_RATE)
-	var count := int((4.0 / decay) * MIX_RATE)
+		amp: float, decay: float, rate: int = MIX_RATE, wrap: bool = false) -> void:
+	var first := int(start * rate)
+	var count := int((4.0 / decay) * rate)
+	var size := samples.size()
 	var phase := 0.0
 	for i in range(count):
-		var index := first + i
-		if index < 0 or index >= samples.size():
+		var index := _slot(first + i, size, wrap)
+		if index < 0:
 			continue
-		var t := float(i) / MIX_RATE
+		var t := float(i) / rate
 		var envelope: float = exp(-t * decay) * _attack(t)
-		phase += TAU * (freq * (0.55 + 0.45 * exp(-t * decay))) / MIX_RATE
+		phase += TAU * (freq * (0.55 + 0.45 * exp(-t * decay))) / rate
 		samples[index] += sin(phase) * envelope * amp
 
 
@@ -202,21 +546,24 @@ static func _thump(samples: PackedFloat32Array, start: float, freq: float,
 ## randomness comes from an explicit LCG, so the generated PCM is identical
 ## every run (see this class's determinism note).
 static func _noise(samples: PackedFloat32Array, start: float, seconds: float,
-		amp: float, decay: float) -> void:
-	var first := int(start * MIX_RATE)
-	var count := int(seconds * MIX_RATE)
+		amp: float, decay: float, rate: int = MIX_RATE, wrap: bool = false,
+		tone: float = 0.4) -> void:
+	var first := int(start * rate)
+	var count := int(seconds * rate)
+	var size := samples.size()
 	var state := 0x2545F491
 	var smoothed := 0.0
 	for i in range(count):
-		var index := first + i
-		if index < 0 or index >= samples.size():
+		var index := _slot(first + i, size, wrap)
+		if index < 0:
 			continue
 		state = (state * 1103515245 + 12345) & 0x7FFFFFFF
 		var white := float(state % 20001) / 10000.0 - 1.0
 		# One-pole low pass: raw white noise is a hiss, and a dulled one is a
-		# knock.
-		smoothed = smoothed * 0.6 + white * 0.4
-		var t := float(i) / MIX_RATE
+		# knock. `tone` is how much of the new sample gets through — 0.4 is a
+		# knock, 0.9 is a hat.
+		smoothed = smoothed * (1.0 - tone) + white * tone
+		var t := float(i) / rate
 		samples[index] += smoothed * exp(-t * decay) * _attack(t) * amp
 
 
@@ -229,7 +576,8 @@ static func _attack(t: float) -> float:
 ## normalised: the levels above are chosen relative to each other on purpose,
 ## and normalising each cue would throw that relationship away and make the
 ## delivery knock as loud as the payout chime.
-static func _encode(samples: PackedFloat32Array) -> AudioStreamWAV:
+static func _encode(samples: PackedFloat32Array, rate: int = MIX_RATE,
+		loop: bool = false) -> AudioStreamWAV:
 	var data := PackedByteArray()
 	data.resize(samples.size() * 2)
 	for i in range(samples.size()):
@@ -237,7 +585,11 @@ static func _encode(samples: PackedFloat32Array) -> AudioStreamWAV:
 		data.encode_s16(i * 2, value)
 	var stream := AudioStreamWAV.new()
 	stream.format = AudioStreamWAV.FORMAT_16_BITS
-	stream.mix_rate = MIX_RATE
+	stream.mix_rate = rate
 	stream.stereo = false
 	stream.data = data
+	if loop:
+		stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+		stream.loop_begin = 0
+		stream.loop_end = samples.size()
 	return stream

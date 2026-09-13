@@ -653,19 +653,51 @@ one's cue would be an anticlimax for a payout.
 Gameplay and balance (GAMEPLAY.md); architecture, rendering pipeline, data
 formats (ARCHITECTURE.md).
 
-**Audio direction — decided 2026-09-11**, by building the first sounds (§6a).
-Sound in this game is **feedback, not a soundtrack**: a cue fires because
-something happened that the player needs to know about, and there is no
-ambient bed, no music and no idle machine loop. Every sound is
-**synthesised in GDScript at runtime** into an `AudioStreamWAV`
-(`godot_project/audio.gd`) rather than committed as a `.wav` binary — a
-waveform written as code is diffable, reviewable and tweakable the same way
+**Audio direction — decided 2026-09-11, amended 2026-09-12.** The first
+decision, made by building the first sounds (§6a), was that sound in this
+game is **feedback, not a soundtrack**: a cue fires because something
+happened that the player needs to know about. On 2026-09-12 the owner asked
+for music, and the direction is now in two halves:
+
+- **Effects are feedback.** Fourteen cues (`godot_project/audio.gd`): the
+  payout chime and the dock knock, and since the audio pass one for every
+  player action — a tile placed (a low clunk with a metal tick), picked up
+  (two rising blips), rotated (a ratchet), a purchase (a short till, a
+  fifth under the payout so it reads as a receipt rather than an earning),
+  a signature (pen scratch and stamp), hire and fire (a rising and a
+  falling fifth), a hotbar pick (one dry tick), a modal opening and closing
+  (two notes up, the same two down) — and for the two things the game does
+  to the player unasked: a **refused** command (a dull double buzz, the one
+  cue shared by every "no": unaffordable, blocked, already signed) and a
+  **lost contract** (two falling notes, held longest of all). The cue is
+  fired by the handler that knows whether the simulation took the action,
+  never by the click itself, so a click that did nothing sounds like
+  nothing happened (§7: the sound is a channel of the same fact the prompt
+  and the counters show). Still no idle machine loop and no ambient bed:
+  a running factory is quiet apart from the dock.
+- **Music is one looping track**, warm and unhurried (D minor, 92 BPM,
+  eight bars: a detuned pad, a plucked bass, a mallet arpeggio and a soft
+  kick, rim and hat), synthesised like the cues and owned by the `Music`
+  autoload so it starts on the main menu and carries across the cut into
+  the factory without restarting. It **ducks** under the pause menu rather
+  than stopping — the factory has stopped, and the score stepping back says
+  so, where silence would read as a crash — and it has its own MUSIC
+  ON/OFF switch beside SOUND ON/OFF on the pause menu. It is a bed, not a
+  signal: nothing in it ever tells the player anything, which is what makes
+  it safe to switch off.
+
+Every sound is **synthesised in GDScript at runtime** into an
+`AudioStreamWAV` rather than committed as a `.wav` binary — a waveform
+written as code is diffable, reviewable and tweakable the same way
 `assets/voxels/generators/` makes the models code (§2a point 1), and it is
-deterministic, so a test can assert two renders of a cue are byte-identical.
-A SOUND ON/OFF switch lives on the pause menu. What is still undecided is
-whether a later, larger soundscape (machine loops, room tone) stays
-synthesised or moves to recorded samples; that question lands when there is
-something to loop.
+deterministic, so a test can assert two renders are byte-identical
+(`test_audio.gd` does, for every cue and for the track). The track's twenty
+seconds of PCM cost about 0.7 s of GDScript, so it is rendered on a thread
+the first time it is needed and never under a headless run. What is still
+undecided is whether a larger soundscape (machine loops, room tone, a second
+track for a bigger factory) stays synthesised or moves to recorded samples;
+the loop's lo-fi character is the ceiling of the current approach, and it
+suits the voxels.
 
 ## 9. Open questions
 

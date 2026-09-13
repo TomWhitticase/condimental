@@ -116,6 +116,11 @@ func _ready() -> void:
 	_build_backdrop()
 	_build_panel()
 	_refresh_saves()
+	# The score starts here, on the first screen, and carries into the
+	# factory: the `Music` autoload outlives this scene (see music.gd).
+	var music := _music()
+	if music != null:
+		music.start()
 
 
 func _build_backdrop() -> void:
@@ -437,7 +442,13 @@ func _set_load_open(open: bool) -> void:
 
 func _on_quit_pressed() -> void:
 	if is_inside_tree():
-		get_tree().quit()
+		# Through the score, which stops itself first — see music.gd's
+		# `quit_tree`.
+		var music := _music()
+		if music != null:
+			music.quit_tree()
+		else:
+			get_tree().quit()
 
 
 func _on_save_row_pressed(index: int) -> void:
@@ -481,6 +492,15 @@ func _arm_slot(index: int) -> String:
 ## test scripts, which instantiate this scene outside the active tree — there
 ## is no tree to change there, and the assertions those tests make are about
 ## what was ARMED on the session, which has already happened by this point.
+## The `Music` autoload, or null — reached the same way as `_session()`.
+func _music() -> Node:
+	var loop := Engine.get_main_loop()
+	if not (loop is SceneTree):
+		return null
+	var tree_root: Node = (loop as SceneTree).root
+	return tree_root.get_node_or_null("Music") if tree_root != null else null
+
+
 func _start_game() -> void:
 	if is_inside_tree():
 		get_tree().change_scene_to_file("res://main.tscn")
