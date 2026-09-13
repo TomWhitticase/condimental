@@ -207,3 +207,23 @@ throughput, as in Factorio — and the vat is still the line's bottleneck.
 The recipe-ordering rule (crusher quickest, vat slowest) stays; the
 crusher was NOT slowed to 100 ticks. Ticket 5: the hover already says why;
 check nothing in the docs still claims a lane saturates a crusher.
+
+### Ticket 3 merged — read before ticket 4's merge and ticket 5
+
+**Ticket 3 (bugs + perf, 35859dd..ca0bed2).** The wire gained
+`SimBridge::chunk_delta_json` (a chunk snapshot filtered to what changed;
+the whole chunk after place/remove/rotate/load; `chunk_snapshot_json`
+unchanged) and `SimBridge::revision` (ticks + commands, refused ones too),
+and `main.gd` gates every per-frame snapshot parse on revision / viewport /
+selection / open-modal change. Tick path 12 → 2 ms, wire 78 → 12 KB per
+tick. Five bugs fixed with proofs: items in other chunks vanishing after a
+rebuild; the camera panning after a right-drag released over a panel; TAB
+into first-person capturing the mouse under a modal (`_fp_mouse_free` is
+now the ONE decision every capture seam and the crosshair use — ticket 4:
+use it, do not add another `not _x_open` chain); R rotating a tile under a
+panel; X entering remove mode under M/C/H/P. Left for ticket 5: the
+legend's third line runs under the clipboard at 1600x900 on every screen;
+`_announce_contract_changes` shows only the last of several notices from
+one poll (ticket 4's walk-out announcements go through the same seam —
+prefer a queue). Left for later: `_read_world_layout` is ~40 of an 80 ms
+rebuild on 1500 tiles; all perf numbers are on a debug `sim_core`.
