@@ -251,6 +251,128 @@ matches what code comments and data files cite.
   6. **What did not change.** Belt speed, `BELT_TICKS_PER_TILE` and the
      four-frame surface animation, item scale, the corner arc, the save
      schema (positions are saved, not gaps), the wire.
+- 2026-09-13: **Quality pass, ticket 3 — presentation bugs and
+  performance.** The brief (`docs/QUALITY_PASS_PLAN.md`): no new features;
+  measure, fix what is slow, fix what is wrong, prove each fix headlessly.
+  Everything was measured on `test_perf.gd`'s 1500-belt stress line, in
+  the DEBUG `sim_core` that `cargo xtask` builds by default (the release
+  flag exists and nothing in the repo uses it — worth knowing before
+  comparing these numbers to anything else).
+
+  1. **Where the time went.** A frame profile split `_process` into its
+     calls: `_advance_simulation` was 7.2 ms of an 8.4 ms frame, and inside
+     it `sim.tick()` was 1 ms and `_apply_dirty_chunks` 12.3 ms per tick.
+     The chunk snapshot for a dirty chunk was 50 KB (960 belts) + 28 KB
+     (540 belts) — every belt in the chunk, because a belt dirties its
+     chunk whenever an item on it moves, and on a running line some belt in
+     every chunk moves every tick. Of the 12 ms, 6 was Rust serialising
+     (debug), 2.4 was `JSON.parse_string`, 3.5 was `_render_carried_items`
+     over 1500 tiles of which ~80 had changed. Everything else `_process`
+     does was under 1.5 ms combined, but all of it re-parsed snapshots
+     (economy three times) on every frame, ticks or not.
+
+  2. **The fix is a chunk delta, and it is still per-chunk.** ARCHITECTURE
+     §4's rule — "delta granularity: per chunk, not per entity" — was
+     written against copying one delta per entity across FFI every tick.
+     What was actually happening was worse in the other direction: one
+     call per chunk carrying every entity in it. `World::chunk_delta`
+     keeps the call per chunk and makes what it carries proportional to
+     what moved: the sim already calls `mark_dirty(tile)` for exactly the
+     conveyor tiles whose contents changed and `mark_placement_dirty` for
+     exactly the bodies whose state did, so the same call sites now also
+     record `dirty_tiles` and `dirty_entities` (hash sets, membership only;
+     the output is sorted by tile so a reading is deterministic and §3.9 is
+     untouched). A structural change (`mark_tiles_dirty`, used only by
+     place/remove/rotate) and a load (`mark_every_chunk_dirty`) put the
+     chunk in `full_chunks`, and the delta of a full chunk IS
+     `chunk_snapshot`: a renderer holds no last state for a tile that did
+     not exist a moment ago. The same `ChunkSnapshot` struct comes back,
+     so `_render_snapshot` did not fork; a tile absent from a delta is a
+     tile that did not change, which is exactly the contract
+     `_render_carried_items`'s per-tile hiding already had. Pipes are never
+     in a delta (fluid is polled; a pipe's shape is on the layout). The
+     other options the ticket listed were weighed: skipping off-screen
+     chunks helps nothing on a framed factory and the camera can zoom;
+     parsing on a cadence makes items visibly stutter; caching the parsed
+     dictionary and diffing it in GDScript pays the parse anyway. Walking
+     the changed set instead of the chunk (an O(changed) delta) took the
+     Rust side from ~1 ms to ~0.3 ms per chunk on top.
+     `sim_core/tests/chunk_delta.rs` pins the equivalence tile by tile (a
+     belt is in the delta if and only if its snapshot differs from the
+     previous tick's, and the entry is that snapshot), the empty delta of a
+     jammed line, the full delta after a place, and one hopper in the delta
+     when only one unloaded.
+
+  3. **A revision counter gates the per-frame polls.** Every polled
+     snapshot is a function of state that only `tick` and `issue_command`
+     move, so `World::revision` counts both — a REFUSED command too,
+     because a refusal is a fact the hotbar has to re-read (the sim is
+     silent on refusal by design). `_wire_changed` compares it, plus the
+     viewport size (every panel positions against it), the hotbar
+     selection (a key press is not a command) and a bitmask of the open
+     modals (a panel opening must read on that frame). At 60 Hz against a
+     30 Hz tick that is every other frame. The wall-clock fades those
+     functions also drove (the money flyout, the hotbar name flyout) run in
+     the gate's `else` branch so they keep fading between ticks and under
+     the pause menu, where nothing else moves. `_rebuild_world` resets the
+     stamp because a new game's world starts at revision 0. The
+     alternative — gating on `current_tick()` alone — was rejected because
+     the larder's own comment asks for a purchase to show on the same
+     frame, and the headless tests issue commands straight into `main.sim`
+     and then call `_process`.
+
+  4. **After: 8.4 → 2.1 ms per frame on the stress line**, 12.3 → 2.2 ms
+     per tick for `_apply_dirty_chunks`, 78 KB → 12 KB across the wire per
+     tick, items drawn still equal to items in flight (324/324). Draw
+     calls and primitives are unchanged (188 / 4.56 M on the stress
+     frame; the scene graph was not touched).
+
+  5. **The rebuild re-reads every chunk — a bug the delta made me read
+     for.** `_rebuild_world` empties the item pools; the
+     `_apply_dirty_chunks` after it reads only the chunks the sim reports
+     dirty, which after a place/remove/rotate is the one that changed. On
+     a two-chunk factory every item on a belt in the OTHER chunk
+     disappeared until it next moved, and a backed-up belt never moves.
+     Not new — it predates this pass — but the first proof I wrote for it
+     passed without the fix, because the branch belt in the fixture had
+     moved on the last tick and was dirty anyway; the proof that bites
+     (`test_splitters.gd`) builds a dead-end lane across the chunk seam,
+     ticks until a tick dirties nothing, places a belt in the other chunk
+     and looks. `_reread_every_chunk` parses every occupied chunk's full
+     snapshot once per rebuild (chunks from the layout's `occupies`, on
+     the sim's 32-tile grid, packed the way `sim::encode_chunk_id` does):
+     +10 ms on the 1500-belt rebuild, paid once per click.
+
+  6. **Input state, four fixes.** (a) A right-drag whose release landed on
+     a Control with a mouse filter — the hotbar, the clipboard, a docket —
+     or on the pause menu never reached `_unhandled_input`, so
+     `_iso_dragging` stayed true and the camera panned with every mouse
+     move until the next right click. `_input` (which sees events before
+     the GUI) ends a drag on any right release; the press stays in
+     `_unhandled_input` so a right click ON a panel starts nothing;
+     `_set_pause_open(true)` clears it too. (b) TAB into first-person
+     captured the mouse unless the BUILD MENU was open — the one check —
+     so with the market, board, staff, production or configuration panel
+     up the cursor was captured under a panel of buttons. One decision,
+     `_fp_mouse_free`, now feeds `_set_view_mode`, `_set_pause_open` and
+     the crosshair. Headless Godot ignores `Input.mouse_mode` (checked),
+     so the proof asserts the decision. (c) R with a modal open rotated
+     whatever stood behind the panel; `_rotate_tile` refuses under any
+     modal. (d) X with the market/board/staff/production panel open entered
+     remove mode under it and left both up; it closes every modal, as
+     E/M/C/H/P close each other. Proofs in `test_camera_nav.gd` and
+     `test_interaction.gd`.
+
+  7. **Left deliberately, reported.** The legend's third line runs under
+     the clipboard at 1600x900 on every screen (ticket 5 owns overlaps);
+     `_read_world_layout` is ~40 ms of the 80 ms rebuild on 1500 tiles
+     (`world_layout_json` is 336 KB; the honest fix is a leaner layout or
+     an incremental rebuild, both bigger than this pass); placing a tile
+     costs the sim ~5 ms on 1500 tiles (a full topology rebuild, ARCH
+     §3.8's milestone-8 flip); `_announce_contract_changes` shows only the
+     last of several notices raised in one poll; the staff panel was not
+     touched (ticket 4).
+
 - 2026-09-12: **Music and a full set of sound effects.** Requested
   directly ("add some nice music and sound effect"). It reverses one half
   of the 2026-09-11 audio decision — "no music" — and keeps the other

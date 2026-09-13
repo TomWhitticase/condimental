@@ -159,7 +159,7 @@
 //! Godot, so it is fully exercisable from headless `cargo test`
 //! (ARCHITECTURE.md §7).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use hecs::Entity;
 
@@ -1559,6 +1559,23 @@ pub struct World {
     /// comment and ARCHITECTURE.md §4's "Delta granularity" note. A
     /// `Place`/`Remove`/`Rotate` between ticks accumulates into it too.
     dirty: Vec<ChunkId>,
+    /// The tiles whose conveyor contents changed since `dirty` was last
+    /// cleared, and the machines/hoppers/tanks/docks whose live state did —
+    /// what [`World::chunk_delta`] filters a dirty chunk's snapshot down to.
+    /// Membership only; iteration order comes from `topology`, never from
+    /// these sets, so a `HashSet` does not threaten determinism (§3.9).
+    dirty_tiles: HashSet<TileCoord>,
+    dirty_entities: HashSet<Entity>,
+    /// Chunks whose STRUCTURE changed since `dirty` was last cleared — a
+    /// `Place`/`Remove`/`Rotate` or a load — for which a delta is the whole
+    /// snapshot: a tile that was just placed has no "last state" for a
+    /// consumer to have kept.
+    full_chunks: Vec<ChunkId>,
+    /// Bumped by every `tick` and every `issue_command`, accepted or not:
+    /// the one number a presentation layer compares to know whether ANY
+    /// polled snapshot could have changed since it last read one. See
+    /// [`World::revision`].
+    revision: u64,
     /// Money + every active contract's delivery state (GAMEPLAY.md §6/§9).
     economy: Economy,
     /// What the player can buy and what they own of it. Since this epic an
@@ -1720,6 +1737,10 @@ impl World {
             belt_speed: Fx::from_num(BELT_SPEED_TILES_PER_TICK),
             room_ahead: Vec::new(),
             dirty: Vec::new(),
+            dirty_tiles: HashSet::new(),
+            dirty_entities: HashSet::new(),
+            full_chunks: Vec::new(),
+            revision: 0,
             economy: Economy::with_money(&contracts, money),
             shop: Shop::bundled(),
             ingredients: Ingredients::bundled(),
@@ -2493,11 +2514,18 @@ impl World {
         if !self.dirty.contains(&chunk) {
             self.dirty.push(chunk);
         }
+        self.dirty_tiles.insert(tile);
     }
 
+    /// A STRUCTURAL change (place, remove, rotate): every chunk these tiles
+    /// touch is dirty, and its next delta is the whole chunk.
     fn mark_tiles_dirty(&mut self, tiles: &[TileCoord]) {
         for &tile in tiles {
             self.mark_dirty(tile);
+            let chunk = chunk_of(tile);
+            if !self.full_chunks.contains(&chunk) {
+                self.full_chunks.push(chunk);
+            }
         }
     }
 
@@ -2512,6 +2540,10 @@ impl World {
                 self.dirty.push(chunk);
             }
         }
+        self.dirty_entities.insert(entity);
+        // A belt handed an item by a splitter is marked this way too, and a
+        // conveyor's delta membership is by tile.
+        self.dirty_tiles.insert(origin);
     }
 }
 
@@ -2584,8 +2616,9 @@ impl World {
     /// ("belt to machine, then everything onto a belt"); what changed is
     /// that the pairs come from adjacency rather than from a stage index.
     pub fn tick(&mut self) {
-        self.dirty.clear();
+        self.clear_dirty();
         self.tick_count += 1;
+        self.revision += 1;
 
         // 0. Auto-fill, before anything draws down a buffer.
         self.auto_fill_buffers();
@@ -3105,6 +3138,10 @@ impl World {
     /// down a run is the pressure-equalization pass's. The player sets the
     /// *supply*, the machinery sets the *rate*.
     pub fn issue_command(&mut self, cmd: PlayerCommand) {
+        // Refused or not: a consumer cannot tell a refusal from a no-op
+        // without re-reading, and one extra poll is cheaper than a stale
+        // hotbar after a refusal it never heard about.
+        self.revision += 1;
         match cmd {
             PlayerCommand::FillHopper { amount, tile } => {
                 let hoppers = self.targets(&self.topology.hoppers.clone(), tile);
@@ -3350,6 +3387,95 @@ impl World {
     /// AND are currently visible.
     pub fn dirty_chunks(&self) -> &[ChunkId] {
         &self.dirty
+    }
+
+    /// How many ticks and commands this world has taken, in total. Two
+    /// equal readings mean NOTHING on the wire has changed between them —
+    /// every polled snapshot (economy, shop, hoppers, tanks, fluid,
+    /// ingredients, staff, production) is a function of the state those two
+    /// operations mutate — so a presentation layer that parses snapshots
+    /// every frame can skip the frames between ticks, and a refused command
+    /// still bumps it (a refusal is a fact the hotbar has to re-read).
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn clear_dirty(&mut self) {
+        self.dirty.clear();
+        self.dirty_tiles.clear();
+        self.dirty_entities.clear();
+        self.full_chunks.clear();
+    }
+
+    /// [`World::chunk_snapshot`] cut down to what CHANGED since the dirty
+    /// set was last cleared: the belts and splitters whose contents moved,
+    /// and the machines, hoppers, tanks and docks whose live state did.
+    /// Pipes are never in it (fluid is polled, its shape is on the layout).
+    /// After a structural change to the chunk — a place, remove, rotate or a
+    /// load — it IS the whole snapshot, because a consumer holds no last
+    /// state for a tile that did not exist a moment ago.
+    ///
+    /// **Why this exists (the quality pass, 2026-09-13).** A belt tile
+    /// dirties its chunk when an item on it moves, and on a running line
+    /// some belt in every chunk moves every tick, so the per-chunk
+    /// snapshot was re-sending EVERY belt in the chunk — 960 tiles, most of
+    /// them empty — thirty times a second, and the presentation layer
+    /// parsed and re-drew all of them: about 12 ms of a 33 ms tick against
+    /// the sim's own 1 ms. The granularity of *what is reported dirty*
+    /// stays per chunk (ARCHITECTURE.md §4); what a dirty chunk's read
+    /// carries is now proportional to what moved. A jammed line sends
+    /// nothing at all. The same-shape [`ChunkSnapshot`] is returned so a
+    /// consumer's render path does not fork.
+    pub fn chunk_delta(&self, id: ChunkId) -> ChunkSnapshot {
+        if self.full_chunks.contains(&id) {
+            return self.chunk_snapshot(id);
+        }
+        // Walk what CHANGED, not the chunk: on a big floor the changed set
+        // is a small fraction of the chunk, and this runs per dirty chunk
+        // per tick. Sorted so the output order is the topology's own (by
+        // tile, y then x) and a reading is deterministic.
+        let mut snapshot = ChunkSnapshot::default();
+        let mut tiles: Vec<TileCoord> = self
+            .dirty_tiles
+            .iter()
+            .copied()
+            .filter(|&tile| chunk_of(tile) == id)
+            .collect();
+        tiles.sort_by_key(|&(x, y)| (y, x));
+        for tile in tiles {
+            let Some(&entity) = self.topology.grid.get(&tile) else {
+                continue;
+            };
+            match self.body_kind(entity) {
+                Some(BodyKind::Belt) => snapshot.belts.push(self.belt_snapshot(entity)),
+                Some(BodyKind::Splitter) => {
+                    snapshot.splitters.push(self.splitter_snapshot(entity))
+                }
+                _ => {}
+            }
+        }
+        let mut entities: Vec<(TileCoord, Entity)> = self
+            .dirty_entities
+            .iter()
+            .filter(|&&entity| self.ecs.contains(entity))
+            .map(|&entity| (self.position_of(entity), entity))
+            .collect();
+        entities.sort_by_key(|&((x, y), entity)| (y, x, entity.id()));
+        for (_, entity) in entities {
+            if !self.overlaps_chunk(entity, id) {
+                continue;
+            }
+            match self.body_kind(entity) {
+                Some(BodyKind::Machine) => snapshot.machines.push(self.machine_snapshot(entity)),
+                Some(BodyKind::Hopper) => snapshot.hoppers.push(self.hopper_snapshot(entity)),
+                Some(BodyKind::FluidTank) => {
+                    snapshot.fluid_tanks.push(self.fluid_tank_snapshot(entity))
+                }
+                Some(BodyKind::Dock) => snapshot.docks.push(self.dock_snapshot(entity)),
+                _ => {}
+            }
+        }
+        snapshot
     }
 
     /// Every chunk anything currently placed occupies, in a deterministic
@@ -4105,6 +4231,7 @@ impl World {
     /// this is what makes the load *as a whole* announce itself.
     pub(super) fn mark_every_chunk_dirty(&mut self) {
         self.dirty = self.all_chunks();
+        self.full_chunks = self.dirty.clone();
     }
 }
 
