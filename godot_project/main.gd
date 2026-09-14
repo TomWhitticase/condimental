@@ -1173,6 +1173,13 @@ var _staff_open := false
 ## machine load (see `_poll_staff`); `{}` until the first poll.
 var _staff_snapshot: Dictionary = {}
 var _staff_polled_tick := -1 # sim tick of the last `_poll_staff`; -1 = never
+## The `next_payday_tick` `_poll_staff` last saw. A payday has happened
+## exactly when this poll's `next_payday_tick` is greater than it (the clock
+## only ever moves forward, `staff.rs`'s payday step) — the same
+## primed/forward-progress idiom `_known_active_primed` uses for contracts,
+## reset in `_build_staff_panel` so a rebuild does not read a stale value as
+## "payday just happened".
+var _staff_known_payday_tick := -1
 ## The crew each placed machine and dock needs, by origin key, from
 ## `query_tile_json`'s `crew` — the kind's `machines.ron` requirement, read
 ## once per rebuild for hover's "crew: 2 manufacturing" line.
@@ -1215,6 +1222,17 @@ const STAFF_IDLE_NOTES := {"maintenance": "nothing to maintain yet"}
 ## Ticket 2's icon files are `staff_<category id>.png`, so the path is built
 ## from the wire's id with no lookup table.
 const STAFF_ICON_PREFIX := "staff_"
+## What each category does, one sentence, keyed on `data/staff.ron`'s id
+## (the quality pass, ticket 4). The data file itself carries no description
+## (ticket 1 did not add one), so this table is the one place the words live;
+## a category added to the data with no entry here shows no blurb rather
+## than a made-up one.
+const STAFF_CATEGORY_BLURBS := {
+	"manufacturing": "runs the machines that turn ingredients into sauce",
+	"maintenance": "repairs equipment as it wears down",
+	"packaging": "bottles and seals a finished batch",
+	"logistics": "loads pallets and trucks so a delivery can ship",
+}
 ## The active contract ids the clipboard saw on its last poll. The wire has
 ## no "contract lost" event — a lost contract simply stops being listed and
 ## reads `active: false` on the board — so the announcement is a diff of two
@@ -5042,6 +5060,12 @@ func _update_shop_menu() -> void:
 	_shop_money_label.text = "Money: %.0f" % float(snapshot.get("money", 0.0))
 	_position_shop_menu()
 
+	# Built once per redraw, not per slot: the last staff poll's wage per
+	# category, so a card's crew line can price its own cost (ticket 4).
+	var wages_by_category: Dictionary = {}
+	for category in _staff_snapshot.get("categories", []):
+		wages_by_category[String(category.get("id", ""))] = int(category.get("wage", 0))
+
 	for index in range(_shop_slots.size()):
 		if index >= entries.size():
 			break
@@ -5055,7 +5079,7 @@ func _update_shop_menu() -> void:
 		# the icon dims, and the whole slot is disabled (which also recolours
 		# its border/background via the disabled stylebox).
 		slot["price_label"].text = ("Cost %.0f" % price) if affordable else ("Cost %.0f  ✗" % price)
-		slot["crew_label"].text = _crew_text(entry.get("crew", []))
+		slot["crew_label"].text = _crew_cost_text(entry.get("crew", []), wages_by_category)
 		slot["price_label"].label_settings.font_color = (
 			Color(0.92, 0.93, 0.94) if affordable else Color(0.55, 0.50, 0.48)
 		)
@@ -5834,6 +5858,9 @@ func _build_staff_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	# harness (see `_build_ingredient_market`).
 	_staff_rows.clear()
 	_staff_row_ids.clear()
+	# Reset before the poll below primes it, so the very first poll after a
+	# rebuild never reads as "a payday just happened".
+	_staff_known_payday_tick = -1
 
 	_staff_panel = PanelContainer.new()
 	_staff_panel.name = "StaffPanel"
@@ -5955,9 +5982,11 @@ func _staff_row_style() -> StyleBoxFlat:
 
 ## One category: ticket 2's icon, the name, `hired N` and the wage under it,
 ## the assigned/demand meter with both numbers printed ON it and the
-## shortfall in words beside it, and HIRE / FIRE. Returns
-## `{"id", "panel", "name_label", "hired_label", "wage_label", "meter",
-## "meter_label", "short_label", "note_label", "hire_button",
+## shortfall in words beside it, HIRE / FIRE, and — below the row — a static
+## blurb of what the category does and the dynamic WHY line naming what asks
+## for it (ticket 4). Returns `{"id", "panel", "name_label", "hired_label",
+## "wage_label", "meter", "meter_label", "short_label", "note_label",
+## "status_label", "blurb_label", "demand_label", "hire_button",
 ## "fire_button"}` for `_update_staff_panel` to drive.
 func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	var id := String(category.get("id", "?"))
@@ -5966,9 +5995,14 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	panel.add_theme_stylebox_override("panel", _staff_row_style())
 	_staff_rows_box.add_child(panel)
 
+	var row_wrap := VBoxContainer.new()
+	row_wrap.name = "RowWrap"
+	row_wrap.add_theme_constant_override("separation", _ui_i(2))
+	panel.add_child(row_wrap)
+
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", _ui_i(14))
-	panel.add_child(row)
+	row_wrap.add_child(row)
 
 	var icon := TextureRect.new()
 	icon.name = "Icon"
@@ -6062,6 +6096,14 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	note_label.visible = false
 	meter_col.add_child(note_label)
 
+	# The AFTER-payday indicator (ticket 4): unpaid/left, in the same warning
+	# colour the shortfall label uses, hidden when neither happened.
+	var status_label := Label.new()
+	status_label.name = "Status"
+	status_label.label_settings = _staff_warn_settings()
+	status_label.visible = false
+	meter_col.add_child(status_label)
+
 	# HIRE beside FIRE, the build menu's own button skin. Each moves ONE
 	# head through the real command; the panel re-reads the wire at once.
 	var buttons := HBoxContainer.new()
@@ -6091,6 +6133,24 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	fire_button.pressed.connect(_staff_fire.bind(index))
 	buttons.add_child(fire_button)
 
+	# What the category does — static content from `STAFF_CATEGORY_BLURBS`,
+	# set once here rather than on every `_update_staff_panel` poll, since it
+	# never changes while the row stands.
+	var blurb_label := Label.new()
+	blurb_label.name = "Blurb"
+	blurb_label.label_settings = _staff_meta_settings()
+	blurb_label.text = String(STAFF_CATEGORY_BLURBS.get(id, ""))
+	blurb_label.visible = blurb_label.text != ""
+	row_wrap.add_child(blurb_label)
+
+	# The WHY line: what asks for this category, from `_crews`. Dynamic
+	# (placing or removing a machine changes it), so `_update_staff_panel`
+	# fills it on every poll.
+	var demand_label := Label.new()
+	demand_label.name = "Demand"
+	demand_label.label_settings = _staff_meta_settings()
+	row_wrap.add_child(demand_label)
+
 	return {
 		"id": id,
 		"panel": panel,
@@ -6101,6 +6161,9 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 		"meter_label": meter_label,
 		"short_label": short_label,
 		"note_label": note_label,
+		"status_label": status_label,
+		"blurb_label": blurb_label,
+		"demand_label": demand_label,
 		"hire_button": hire_button,
 		"fire_button": fire_button,
 	}
@@ -6164,6 +6227,24 @@ func _poll_staff() -> void:
 	var parsed = JSON.parse_string(sim.staff_snapshot_json())
 	if parsed is Dictionary:
 		_staff_snapshot = parsed
+		_announce_staff_payday(_staff_snapshot)
+
+
+## A row's own AFTER-payday indicator (the quality pass, ticket 4): heads
+## idled by a payday that could not pay them, heads that left because a
+## second payday in a row could not — both in words beside the amber/warn
+## colour the row style already carries (UI_UX.md §7: never colour alone).
+## "" when neither happened, so the row shows nothing extra most of the
+## time.
+func _staff_status_text(category: Dictionary) -> String:
+	var unpaid := int(category.get("unpaid", 0))
+	var left := int(category.get("left_last_payday", 0))
+	var parts: Array[String] = []
+	if unpaid > 0:
+		parts.append("▲ %d unpaid, idle until payday" % unpaid)
+	if left > 0:
+		parts.append("▲ %d left last payday" % left)
+	return "  ·  ".join(parts)
 
 
 ## The pure half of a row (a test drives it with a category dictionary):
@@ -6178,6 +6259,10 @@ func _poll_staff() -> void:
 ##   note           the idle sentence when the category has nothing hired
 ##                  and nothing asking for it, else "" (the meter shows)
 ##   fire_enabled   headcount > 0
+##   hire_enabled   the wire's own `can_hire` (ticket 1's hire-refusal rule;
+##                  Godot never re-derives it — it needs the whole-factory
+##                  bill, not this row's own numbers)
+##   status_text    `_staff_status_text`'s AFTER-payday line
 func _staff_row_state(category: Dictionary) -> Dictionary:
 	var headcount := int(category.get("headcount", 0))
 	var demand := int(category.get("demand", 0))
@@ -6199,6 +6284,8 @@ func _staff_row_state(category: Dictionary) -> Dictionary:
 		"short_text": ("%d short" % short) if short > 0 else "",
 		"note": note,
 		"fire_enabled": headcount > 0,
+		"hire_enabled": bool(category.get("can_hire", true)),
+		"status_text": _staff_status_text(category),
 	}
 
 
@@ -6234,23 +6321,113 @@ func _staff_shortfall(snapshot: Dictionary, money: float) -> int:
 	return int(snapshot.get("shortfall", maxi(_staff_next_bill(snapshot) - int(floor(money)), 0)))
 
 
+## Replays the payday cascade (`docs/CLAUDE.md`'s quality-pass-ticket-1
+## rule, `staff.rs`'s own algorithm) against the snapshot's own numbers to
+## answer "if payday ran right now, how many heads would go unpaid" — a
+## figure the wire does not carry directly (only `unpaid_last_payday`, an
+## AFTER-the-fact count, is on it). Pays `owed` heads one at a time per
+## category in wire order (= `staff.ron` order = payday order); the first
+## head the balance cannot cover, and every wage-earning head after it
+## across every remaining category, goes unpaid. A zero-wage head is never
+## unpaid, even mid-cascade — arithmetic on wire numbers against a
+## documented, stable rule, the same standing as `_staff_bill`.
+func _staff_unpaid_count_if_payday_now(snapshot: Dictionary) -> int:
+	var balance := int(floor(float(snapshot.get("money", 0.0))))
+	var unpaid := 0
+	var short := false
+	for category in snapshot.get("categories", []):
+		var wage := int(category.get("wage", 0))
+		var owed := int(category.get("owed", category.get("headcount", 0)))
+		for i in range(owed):
+			if wage == 0:
+				continue
+			if short:
+				unpaid += 1
+				continue
+			if balance >= wage:
+				balance -= wage
+			else:
+				short = true
+				unpaid += 1
+	return unpaid
+
+
+## The BEFORE-payday warning (ticket 3): a glyph AND words, per UI_UX.md §7,
+## wherever money is shown. The ticket's own example wording, singular when
+## exactly one head would go unpaid.
+func _staff_shortfall_text(shortfall: int, unpaid_count: int) -> String:
+	var head_word := "head goes" if unpaid_count == 1 else "heads go"
+	return "▲ next payday short by %d — %d %s unpaid" % [shortfall, unpaid_count, head_word]
+
+
 ## The footer's lines, pure given the snapshot and the tick: the bill per
 ## period, the countdown to payday in seconds (`_format_remaining`, so it is
-## the same clock the dockets use), and — only when it happened — how many
-## heads the last payday could not pay (glyph + words, UI_UX.md §7).
+## the same clock the dockets use), then either the BEFORE warning (money
+## cannot cover the bill) or the balance the payday would leave behind, and
+## finally — only when it happened — how many heads the last payday idled or
+## lost (glyph + words, UI_UX.md §7).
 func _staff_footer_text(snapshot: Dictionary, current_tick: int) -> String:
 	var lines: Array[String] = []
 	var remaining: int = int(snapshot.get("next_payday_tick", 0)) - current_tick
+	var bill := _staff_next_bill(snapshot)
 	# The wire's `next_bill`, so this and the clipboard's wages line can never
 	# quote different numbers at the player for the same payday.
 	lines.append("wages %d / period  ·  next payday in %s" % [
-		_staff_next_bill(snapshot), _format_remaining(remaining),
+		bill, _format_remaining(remaining),
 	])
+	var money := float(snapshot.get("money", 0.0))
+	var shortfall := _staff_shortfall(snapshot, money)
+	if shortfall > 0:
+		lines.append(_staff_shortfall_text(shortfall, _staff_unpaid_count_if_payday_now(snapshot)))
+	else:
+		lines.append("balance after payday: %d" % (int(floor(money)) - bill))
+	var unpaid_last := int(snapshot.get("unpaid_last_payday", 0))
+	if unpaid_last > 0:
+		lines.append("✗ %d idled unpaid last payday" % unpaid_last)
 	var walked_out := int(snapshot.get("walked_out_last_payday", 0))
 	if walked_out > 0:
 		lines.append("✗ %d left unpaid last payday" % walked_out)
 	lines.append("HIRE and FIRE move one head; hiring is free, wages are paid every period    H/ESC: close")
 	return "\n".join(PackedStringArray(lines))
+
+
+## The AFTER-payday announcement (ticket 4): naming category and count, per
+## the ticket's own wording, for a payday that just idled heads or lost
+## them — the same words `_staff_status_text`'s row line uses, so a player
+## who saw the notice and opens H reads the same sentence again. Pure given
+## the snapshot the payday landed in; `""` when neither happened, so a
+## covered payday announces nothing.
+func _staff_payday_notice_text(snapshot: Dictionary) -> String:
+	var lines: Array[String] = []
+	for category in snapshot.get("categories", []):
+		var name := String(category.get("name", category.get("id", ""))).to_lower()
+		var unpaid := int(category.get("unpaid", 0))
+		if unpaid > 0:
+			lines.append("▲ PAYDAY: %d %s unpaid, idle until next payday" % [unpaid, name])
+		var left := int(category.get("left_last_payday", 0))
+		if left > 0:
+			lines.append("✗ PAYDAY: %d %s left — unpaid two paydays running" % [left, name])
+	return "\n".join(PackedStringArray(lines))
+
+
+## Detects a payday by `next_payday_tick` moving forward since the last poll
+## (the clock only ever advances, `staff.rs`'s payday step) and, when it has,
+## shows `_staff_payday_notice_text` through the same fading notice a lost
+## contract uses (`_show_contract_notice`) — one announcement mechanism for
+## both, per the ticket. The first poll after a rebuild only PRIMES the
+## clock (mirrors `_announce_contract_changes`'s `_known_active_primed`), so
+## a loaded save is not read as a payday that just happened.
+func _announce_staff_payday(snapshot: Dictionary) -> void:
+	var next_tick := int(snapshot.get("next_payday_tick", 0))
+	if _staff_known_payday_tick < 0:
+		_staff_known_payday_tick = next_tick
+		return
+	if next_tick <= _staff_known_payday_tick:
+		return
+	_staff_known_payday_tick = next_tick
+	var text := _staff_payday_notice_text(snapshot)
+	if text != "":
+		_show_contract_notice(text)
 
 
 ## The clipboard's always-visible wages line, pure given the snapshot, the
@@ -6315,6 +6492,12 @@ func _update_staff_panel() -> void:
 		row["short_label"].text = state["short_text"]
 		row["short_label"].visible = state["short_text"] != ""
 		row["fire_button"].disabled = not bool(state["fire_enabled"])
+		row["hire_button"].disabled = not bool(state["hire_enabled"])
+		row["status_label"].text = state["status_text"]
+		row["status_label"].visible = state["status_text"] != ""
+		row["demand_label"].text = _staff_demand_text(
+			_staff_demand_sources_for(String(categories[i].get("id", "")), _placements, _crews)
+		)
 
 	_staff_footer_label.text = _staff_footer_text(_staff_snapshot, sim.current_tick())
 	_position_staff_panel()
@@ -6813,6 +6996,49 @@ func _seed_crews() -> void:
 			_crews[_tile_key(origin)] = parsed["crew"]
 
 
+## What asks for a category, by KIND: every placement's crew (from
+## `_crews`, seeded per rebuild) that names `category_id`, totalled per kind
+## across every placement of it — a second crusher doubles the crusher's own
+## number rather than adding a second "crusher ×1" line. Order is first
+## encountered in `_placements` (the simulation's own tile order), so the
+## panel's WHY line is stable across a poll rather than reshuffling with a
+## dictionary's own order. Returns `[{"kind", "count"}]`, empty when nothing
+## placed asks for this category.
+func _staff_demand_sources_for(category_id: String, placements: Array, crews: Dictionary) -> Array:
+	var totals: Dictionary = {}
+	var order: Array = []
+	for placement in placements:
+		var crew = crews.get(_tile_key(_placement_origin(placement)), [])
+		if not (crew is Array):
+			continue
+		for entry in crew:
+			if String(entry.get("category", "")) != category_id:
+				continue
+			var kind := String(placement.get("kind", ""))
+			if not totals.has(kind):
+				totals[kind] = 0
+				order.append(kind)
+			totals[kind] += int(entry.get("count", 0))
+	var sources: Array = []
+	for kind in order:
+		sources.append({"kind": kind, "count": totals[kind]})
+	return sources
+
+
+## The WHY line under a category row: `_staff_demand_sources_for`'s result
+## in words, kind names lowercase and space-separated (`cooking_vat` ->
+## `cooking vat`) since this is prose, not `_kind_display_name`'s title-case
+## card text. The exact sentence an empty factory reads
+## (`'nothing placed asks for staff yet'`) is pinned by the quality pass.
+func _staff_demand_text(sources: Array) -> String:
+	if sources.is_empty():
+		return "nothing placed asks for staff yet"
+	var parts: Array = []
+	for source in sources:
+		parts.append("%s ×%d" % [String(source["kind"]).replace("_", " "), int(source["count"])])
+	return "asked for by: %s" % ", ".join(PackedStringArray(parts))
+
+
 ## A crew in words: `crew: 2 manufacturing`, `crew: 1 manufacturing, 1
 ## packaging`; "" for no crew, so a caller can drop the line rather than
 ## print "crew: none" on every belt.
@@ -6834,6 +7060,25 @@ func _crew_categories_text(crew) -> String:
 	for entry in crew:
 		names.append(String(entry.get("category", "")))
 	return " and ".join(PackedStringArray(names))
+
+
+## `_crew_text` plus the running cost per period that crew costs at the
+## last staff poll's wages — GAMEPLAY.md §5's third cost axis, made visible
+## where a kind is bought rather than only after it is placed. Falls back to
+## plain `_crew_text` if `wages_by_category` is missing an entry (a poll
+## that has not happened yet, or a category the wire has not named): a
+## missing number is honest, a guessed one is not.
+func _crew_cost_text(crew, wages_by_category: Dictionary) -> String:
+	var text := _crew_text(crew)
+	if text == "" or not (crew is Array):
+		return text
+	var cost := 0
+	for entry in crew:
+		var category := String(entry.get("category", ""))
+		if not wages_by_category.has(category):
+			return text
+		cost += int(entry.get("count", 0)) * int(wages_by_category[category])
+	return "%s  ·  %d / period" % [text, cost]
 
 
 ## The pure half of a docket's status (the contract-board epic): how far

@@ -277,23 +277,58 @@ factory tropes; the sauce theme comes through in what the factory processes.
   "used", a batch landing is "made", a paid order uses what it ships —
   buying and filling are not production and never appear here.
 - **The staff panel (H) is the same dark-plate menu, one row per
-  category** (the staff pools MVP, ticket 3, 2026-09-12). Icon, name,
+  category** (the staff pools MVP, ticket 3, 2026-09-12; extended by the
+  quality pass's staffing-legibility ticket, 2026-09-14). Icon, name,
   `hired 4  ·  wage 2 / head / period`, then the §5e bar that this panel
   earns: `assigned / demand` — what the factory asked for on the last tick
   is the simulation's own ceiling, so the bar is honest, and it reads
   `0 / 0` on an idle line rather than headcount against an invented full
   mark. The two numbers are printed ON the bar, `2 short` stands beside it
   in the one warning red while the bar is red (§7: position, digits, word,
-  colour), and HIRE / FIRE are the build menu's own buttons, FIRE disabled
-  at zero. The footer carries the upcoming bill, the payday countdown in
-  seconds (§5e: never ticks) and, only when it happened, `✗ 3 left unpaid
-  last payday`. A category nothing asks for yet says so in a sentence
-  (`nothing to maintain yet`) in place of an empty bar. E, M, C and H are
-  one modal at a time; ESC closes whichever is up. Being short is also
-  read where it bites: a refused machine's hover says `▲ starved · … ·
-  short of manufacturing staff` over its `crew: 2 manufacturing` line, a
+  colour), and HIRE / FIRE are the build menu's own buttons — FIRE disabled
+  at zero, HIRE disabled the moment the wire's own `can_hire` says a head
+  cannot be afforded, not only after the click is refused. A category
+  says so in a sentence in place of an empty bar
+  (`nothing to maintain yet`), plain-sentence company for two more lines:
+  what asks for that category, and what the category does. **WHY:**
+  `asked for by: crusher ×1, mixer ×1, cooking vat ×2` counts placements
+  by kind in the order the factory first asked, or `nothing placed asks
+  for staff yet` on an empty line — before this a shortfall's cause lived
+  only in a machine's hover, which a category with no shortfall never
+  earned. **What it does:** one sentence per category
+  (`STAFF_CATEGORY_BLURBS`), so a category nobody has needed yet is still
+  explained. The footer carries the upcoming bill, the payday countdown in
+  seconds (§5e: never ticks), and one of two futures: `balance after
+  payday: N` when it is covered, or the ticket's own words when it is not
+  — `▲ next payday short by 6 — 3 heads go unpaid` — glyph and words
+  together, never colour alone (§7). Only when it happened, the footer
+  also says `✗ 3 left unpaid last payday` / `✗ 2 idled unpaid last
+  payday`, and a payday that idles or loses a head fires the clipboard's
+  own fading notice (below) the moment it happens, naming category and
+  count, so the news is not only found by opening H afterward. A row
+  carries the same fact permanently: `▲ 2 unpaid, idle until payday` / `▲
+  1 left last payday`, joined when both apply. E, M, C and H are one
+  modal at a time; ESC closes whichever is up. Being short is also read
+  where it bites: a refused machine's hover says `▲ starved · … · short
+  of manufacturing staff` over its `crew: 2 manufacturing` line, a
   refused dock says `held · short of logistics staff`, and a build-menu
-  card says a kind's crew under its price.
+  card says a kind's crew and its running cost under its price
+  (`crew: 2 manufacturing  ·  4 / period`). **The wage bill and payday
+  countdown are also on the always-visible clipboard** (quality pass,
+  2026-09-14), not only inside H: `wages 14 / period  ·  payday in 6s`
+  sits directly under the money it draws from, taking the docket's one
+  warning red with a glyph and words — `⚠ wages 16 due in 4s — short 6,
+  unpaid heads leave` — when the balance cannot cover it, and hiding
+  itself entirely with nobody hired rather than reading zero. Both the
+  clipboard line and the H footer read the wire's own `next_bill`/
+  `shortfall`, never a Godot-side sum: since the arrears rule a head
+  fired mid-period is still billed for it, so an independently-computed
+  figure could disagree with the sim at the one moment — just after a
+  firing — a player is watching it closest. **A lost head is announced
+  through the same mechanism a lost contract uses**, reusing
+  `_show_contract_notice` rather than a second toast convention, and
+  priming silently on the first poll after a rebuild so a loaded save
+  never replays a stale payday as news.
 - **A machine's load is read from its hover, and only there** (the
   machine-load epic, 2026-09-11; **amended 2026-09-12**). The in-world
   andon stack lights this bullet was written about were removed after a

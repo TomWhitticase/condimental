@@ -182,6 +182,12 @@ var _staff := false
 ## rows, rates, bars and the all-time exit show something.
 var _production := false
 var _understaffed := false
+## `--staff-shortfall` opens the staff panel over a line funded to less than
+## its next payday's bill (the quality pass, ticket 4's BEFORE warning) —
+## `--staff`'s own dispatch, aimed at `build_underfunded_line` instead of the
+## fed reference line, so the footer's shortfall sentence is what the shot
+## reviews rather than the meters `--staff` already covers.
+var _staff_shortfall := false
 var _hotbar_key := ""
 var _stock := false
 ## `--contracts` waits for a STATE, not a tick count: a fixed count drifts
@@ -261,6 +267,10 @@ func _initialize() -> void:
 	_understaffed = args.has("--understaffed")
 	if _understaffed:
 		_fixture = "understaffed"
+		_populate = true
+	_staff_shortfall = args.has("--staff-shortfall")
+	if _staff_shortfall:
+		_fixture = "shortfall"
 		_populate = true
 	_first_person = args.has("--first-person")
 	_hover = args.has("--hover")
@@ -355,6 +365,8 @@ func _build_fixture() -> void:
 			Layouts.build_bottleneck_line(_main.sim)
 		"understaffed":
 			Layouts.build_understaffed_line(_main.sim)
+		"shortfall":
+			Layouts.build_underfunded_line(_main.sim)
 		_:
 			Layouts.build_demo_line(_main.sim)
 	# Every fixture is stocked, whether or not this run will tick: a
@@ -817,6 +829,8 @@ func _process(_delta: float) -> bool:
 		_main._set_production_open(true)
 	if _frames == 2 and _understaffed:
 		_hover_over_tile(Layouts.UNDERSTAFFED_VAT)
+	if _frames == 2 and _staff_shortfall:
+		_main._set_staff_open(true)
 	if _frames == 2 and _contracts:
 		_run_contract_cycles()
 	if _frames == 2 and _payout:

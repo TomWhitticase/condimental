@@ -377,6 +377,22 @@ static func understaffed_stall(sim, tile: Vector2i) -> String:
 	return ""
 
 
+## THE UNDERFUNDED LINE (the quality pass, ticket 4) — the fixture that
+## CANNOT pay its next bill, for `test_staff_panel.gd`'s BEFORE-payday
+## warning and `screenshot-scene.sh --staff-shortfall`. The shipped line's
+## starting crew bills 14 a period (manufacturing 4, packaging 2, logistics
+## 1, each at wage 2); `fund` to 8 leaves it short by exactly 6, and paying
+## the cascade in `staff.ron` order spends the whole balance on
+## manufacturing's four heads before packaging's first — packaging's 2 and
+## logistics' 1 all go unpaid, 3 in total. Those two numbers (6 short, 3
+## unpaid) are the ticket's own example wording, so this fixture is what
+## makes that sentence literally true rather than merely plausible. Placed,
+## not empty, so the panel's WHY line has something to say too.
+static func build_underfunded_line(sim) -> void:
+	build_reference_line(sim)
+	fund(sim, 8)
+
+
 ## THE PIPE GALLERY (the pipes & conveyors overhaul, ticket 6) — the fixture
 ## `test_pipe_shapes.gd` asserts and `scripts/screenshot-scene.sh
 ## --pipe-gallery` photographs. Every pipe shape at every turn, from real
