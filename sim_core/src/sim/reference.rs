@@ -101,7 +101,7 @@ use super::ingredients::raw_ingredient_ids;
 use super::machines::MachineRegistry;
 use super::recipe::RecipeRegistry;
 use super::shop::ShopCatalog;
-use super::types::{Direction, Fx, TileCoord};
+use super::types::{Direction, Money, TileCoord};
 use super::world::{BELT_KIND, PIPE_KIND, PlayerCommand, World};
 
 /// How many belt tiles feed a stage that has solid inputs, and how many run
@@ -180,7 +180,7 @@ pub fn reference_chain_with_content_and_budget(
     contracts: ContractRegistry,
     budget: u32,
 ) -> World {
-    build(recipes, machines, contracts, Fx::from_num(budget))
+    build(recipes, machines, contracts, Money::from_num(budget))
 }
 
 /// [`reference_chain`], with an explicit machine registry and contract board
@@ -198,7 +198,7 @@ pub fn reference_chain_with(
     machines: MachineRegistry,
     contracts: ContractRegistry,
 ) -> World {
-    build(recipes, machines, contracts, Fx::ZERO)
+    build(recipes, machines, contracts, Money::ZERO)
 }
 
 /// The one builder all three entry points share: price the plan, construct a
@@ -208,7 +208,7 @@ fn build(
     recipes: RecipeRegistry,
     machines: MachineRegistry,
     contracts: ContractRegistry,
-    budget: Fx,
+    budget: Money,
 ) -> World {
     // The same cross-file check `World`'s own construction makes, run first
     // so a recipe naming an undefined machine kind fails with `World`'s
@@ -226,12 +226,12 @@ fn build(
     for order in &orders {
         *wanted.entry(order.kind).or_insert(0) += 1;
     }
-    let mut bill = Fx::ZERO;
+    let mut bill = Money::ZERO;
     for (kind, count) in &wanted {
         let entry = catalog.get(kind).unwrap_or_else(|| {
             panic!("data/shop.ron must price '{kind}' for the reference chain to buy one")
         });
-        bill += entry.price_money() * Fx::from_num(*count);
+        bill += entry.price_money() * Money::from_num(*count);
     }
 
     let mut world = World::with_content_and_money(recipes, machines, contracts, bill + budget);

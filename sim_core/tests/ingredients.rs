@@ -25,7 +25,7 @@
 
 mod common;
 
-use sim_core::sim::types::Fx;
+use sim_core::sim::types::Money;
 use sim_core::sim::{
     ContractRegistry, FLUID_TANK_CAPACITY, IngredientCatalog, PlayerCommand, RecipeRegistry,
     command_from_json, raw_ingredient_ids, reference_chain, reference_chain_with_budget,
@@ -36,7 +36,7 @@ fn recipes() -> RecipeRegistry {
         .expect("bundled data/recipes.ron must parse")
 }
 
-fn price_of(item: &str) -> Fx {
+fn price_of(item: &str) -> Money {
     IngredientCatalog::bundled()
         .get(item)
         .unwrap_or_else(|| panic!("data/ingredients.ron must price '{item}'"))
@@ -59,7 +59,7 @@ fn buying_an_ingredient_debits_the_one_money_counter_and_credits_stock() {
 
     assert_eq!(
         world.money(),
-        before - price_of("tomato") * Fx::from_num(20),
+        before - price_of("tomato") * Money::from_num(20),
         "money must fall by exactly quantity * unit price — the same counter a contract \
          payout credits and an equipment purchase debits"
     );
@@ -84,7 +84,7 @@ fn a_refused_ingredient_purchase_is_a_total_no_op() {
         ("saffron", 4, "an ingredient no data file prices"),
         ("belt", 1, "a *buildable kind* is not an ingredient"),
         ("tomato", 500, "more than the balance covers"),
-        ("tomato", u32::MAX, "a total Fx cannot represent"),
+        ("tomato", u32::MAX, "a silly quantity, far past the balance"),
     ] {
         world.issue_command(PlayerCommand::BuyIngredient {
             item: item.to_string(),
@@ -117,7 +117,7 @@ fn a_refused_ingredient_purchase_is_a_total_no_op() {
 #[test]
 fn an_unstocked_factory_can_be_filled_with_nothing_and_produces_nothing() {
     let mut world = reference_chain(recipes());
-    assert_eq!(world.money(), Fx::ZERO, "the fixture spent its whole bill");
+    assert_eq!(world.money(), Money::ZERO, "the fixture spent its whole bill");
 
     for _ in 0..2_000 {
         world.issue_command(PlayerCommand::FillHopper {
@@ -201,19 +201,19 @@ fn a_delivered_unit_is_worth_more_than_the_ingredients_that_made_it() {
         .0
         .clone();
 
-    let ingredient_cost: Fx = raw_ingredient_ids(&registry)
+    let ingredient_cost: Money = raw_ingredient_ids(&registry)
         .iter()
-        .map(|raw| Fx::from_num(raw_content(&final_item, raw, &registry)) * price_of(raw))
+        .map(|raw| Money::from_num(raw_content(&final_item, raw, &registry)) * price_of(raw))
         .sum();
     assert!(
-        ingredient_cost > Fx::ZERO,
+        ingredient_cost > Money::ZERO,
         "the final product must embody some bought ingredient"
     );
 
     let board = ContractRegistry::bundled();
     for contract in board.ordered() {
         let units: u32 = contract.mix.iter().map(|(_, qty)| *qty).sum();
-        let per_unit = contract.payout / Fx::from_num(units);
+        let per_unit = contract.payout / Money::from_num(units);
         assert!(
             per_unit > ingredient_cost,
             "contract '{}' pays {per_unit} per unit but a unit costs {ingredient_cost} in \
@@ -258,7 +258,7 @@ fn running_the_line_both_consumes_bought_stock_and_earns_contract_money() {
     common::stock_up(&mut world);
     assert_eq!(
         world.money(),
-        Fx::from_num(common::WAGE_RESERVE),
+        Money::from_num(common::WAGE_RESERVE),
         "it spent the whole budget on stock, bar the wage reserve"
     );
     let stocked = [
@@ -279,7 +279,7 @@ fn running_the_line_both_consumes_bought_stock_and_earns_contract_money() {
         );
     }
     assert!(
-        world.money() + common::wages_paid(&world) > Fx::from_num(common::WAGE_RESERVE),
+        world.money() + common::wages_paid(&world) > Money::from_num(common::WAGE_RESERVE),
         "...and contract deliveries must pay for it"
     );
 }
@@ -378,7 +378,7 @@ fn the_buy_ingredient_command_parses_from_json_with_and_without_a_quantity() {
     assert!(command_from_json(r#"{"type": "buy_ingredient"}"#).is_none());
 }
 
-/// A `World` type-level guard: stock is a `u32` ledger and money is `Fx`, and
+/// A `World` type-level guard: stock is a `u32` ledger and money is `Money`, and
 /// the two are never conflated — buying does not change what is *placed*,
 /// and placing does not change stock.
 #[test]

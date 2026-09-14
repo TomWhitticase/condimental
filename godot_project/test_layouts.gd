@@ -283,16 +283,20 @@ const REFERENCE_LINE_PLACEMENTS := 37
 ## out), the bottler and packer STARVED (the vat cannot feed them fast
 ## enough). That is the picture the whole epic exists to show.
 ##
-## It takes ~8000 ticks, not the ~1500 one might guess from the vat's
+## It takes ~8500 ticks, not the ~1500 one might guess from the vat's
 ## cycle: every machine holds 8 of its output, there is a belt or pipe run
 ## between each pair, and all of that fills at the vat's pace before the
-## mixer (from ~3500) and then the crusher (from ~7000) stall
+## mixer (from ~3500) and then the crusher (from ~8300) stall
 ## (`sim_core/tests/machine_load.rs` measured it; its settle constant and
-## this one say the same number). The stock is sized for that run with
-## room to spare: the crusher runs flat out for those first ~7000 ticks
-## filling every buffer with paste, four tomatoes a craft, so tomatoes get
-## an extra crate on top of the shared amount.
-const BOTTLENECK_SETTLE_TICKS := 8000
+## this one say the same number). The crusher's figure was ~7000 at the
+## quarter-tile item spacing; at the half-tile spacing of the quality pass
+## one lane delivers four tomatoes per 100 ticks against its 80-tick craft,
+## so it is belt-limited and fills its output a little slower. The stock is
+## sized for that run with room to spare: the crusher runs as fast as its
+## lane feeds it for those first ~8300 ticks filling every buffer with
+## paste, four tomatoes a craft, so tomatoes get an extra crate on top of
+## the shared amount.
+const BOTTLENECK_SETTLE_TICKS := 10000
 const BOTTLENECK_STOCK := 400
 const BOTTLENECK_EXTRA_TOMATOES := 300
 const BOTTLENECK_MACHINES := {

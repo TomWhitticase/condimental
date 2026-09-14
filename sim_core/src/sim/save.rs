@@ -79,10 +79,12 @@
 //! purchase costs real money, so the loading world is funded one item at a
 //! time and the **saved** balance is installed at the very end — the
 //! rebuild's spending can therefore never leak into what the player has.
-//! Funding per item rather than pricing the whole bill up front also keeps
-//! an arbitrarily large factory loadable: `Fx` saturates around 32 767, so a
-//! single up-front bill for a few thousand belt tiles would not fit in the
-//! money counter even though every individual price does.
+//! Funding per item rather than pricing the whole bill up front also kept
+//! an arbitrarily large factory loadable while money was `Fx` (which
+//! saturates around 32 767, so a single up-front bill for a few thousand
+//! belt tiles would not have fit); money is [`Money`] now, 2^47 wide, and
+//! the per-item funding stays because it is still the simplest correct
+//! way to keep the rebuild's spending out of the saved balance.
 //!
 //! # What is deliberately not in the file
 //!
@@ -117,10 +119,10 @@ use super::inventory::Inventory;
 use super::machine::{LOAD_BUCKETS, LoadBucket, LoadWindow, Machine, TimedProcess};
 use super::machines::MachineRegistry;
 use super::recipe::RecipeRegistry;
-use super::staff::StaffPools;
 use super::splitter::{SPLITTER_KIND, Side, Splitter};
+use super::staff::{StaffPools, StaffRestore, StaffRestoreError};
 use super::stats::{ItemStats, ProductionLedger, STAT_BUCKETS, STAT_WINDOW_COUNT, StatKind};
-use super::types::{Direction, Fx, ItemId, TileCoord};
+use super::types::{Direction, Fx, ItemId, Money, TileCoord};
 use super::world::{BELT_KIND, PIPE_KIND, PlayerCommand, World};
 
 /// The save format's version. Bumped whenever the shape below changes;
@@ -148,6 +150,26 @@ impl FxBits {
     }
 }
 
+/// The balance as its raw [`Money`] (`I48F16`) bits — [`FxBits`]'s rule for
+/// the one value wider than `Fx` (the quality pass, 2026-09-13). `Money`
+/// has the same 16 fractional bits, so a save written when money was `Fx`
+/// (an `i32`, which RON prints as the same plain integer) reads back as the
+/// same balance; and `test_layouts.gd`'s `fund` patch, which writes
+/// `amount * 65536`, is still exactly right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct MoneyBits(pub i64);
+
+impl MoneyBits {
+    pub fn of(value: Money) -> Self {
+        Self(value.to_bits())
+    }
+
+    pub fn value(self) -> Money {
+        Money::from_bits(self.0)
+    }
+}
+
 /// One whole saved world. See the module doc for what is here and what is
 /// deliberately derived instead.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,7 +178,7 @@ pub struct SaveData {
     /// The absolute tick the world was saved on — every
     /// [`TimedProcess::start_tick`] below is measured against it.
     pub tick_count: u64,
-    pub money_bits: FxBits,
+    pub money_bits: MoneyBits,
     /// Everything on the floor, in tile order (the world's own placement
     /// order), so two saves of one world are byte-identical.
     pub placements: Vec<SavedPlacement>,
@@ -229,6 +251,25 @@ pub struct SavedStaff {
     pub next_payday_tick: u64,
     pub last_bill: u32,
     pub walked_out_last_payday: u32,
+    /// The quality pass's arrears rule (2026-09-13), all `#[serde(default)]`
+    /// so a save from before it loads with nobody in arrears, every head
+    /// owed and nobody just departed — the state a paid-up crew is in.
+    /// Heads in arrears per category (hired, unpaid last payday, not
+    /// working; gone if unpaid again). A category the map does not name
+    /// has none.
+    #[serde(default)]
+    pub unpaid: BTreeMap<String, u32>,
+    /// Heads the next payday bills per category — everyone employed for
+    /// any part of the period. A category the map does not name is owed
+    /// exactly its headcount. Below the headcount is a corrupt save.
+    #[serde(default)]
+    pub owed: BTreeMap<String, u32>,
+    /// Who left at the last payday, per category.
+    #[serde(default)]
+    pub left_last_payday: BTreeMap<String, u32>,
+    /// How many hired heads the last payday's money did not reach.
+    #[serde(default)]
+    pub unpaid_last_payday: u32,
 }
 
 /// One placed thing: what it is, where it stands, which way it faces, and
@@ -401,6 +442,12 @@ pub enum SaveError {
     UnknownStaffCategory {
         id: String,
     },
+    /// The save's pools are in a state the tick path could never have
+    /// produced (more heads in arrears than hired, fewer owed than hired).
+    BadStaff {
+        category: String,
+        reason: String,
+    },
     UnsupportedSchemaVersion {
         found: u32,
         supported: u32,
@@ -502,6 +549,10 @@ impl std::fmt::Display for SaveError {
             SaveError::UnknownStaffCategory { id } => write!(
                 f,
                 "the save names staff category '{id}', which data/staff.ron does not define"
+            ),
+            SaveError::BadStaff { category, reason } => write!(
+                f,
+                "the save's staff pools are inconsistent for '{category}': {reason}"
             ),
             SaveError::UnsupportedSchemaVersion { found, supported } => write!(
                 f,
@@ -728,7 +779,7 @@ impl World {
         SaveData {
             schema_version: SAVE_SCHEMA_VERSION,
             tick_count: self.current_tick(),
-            money_bits: FxBits::of(self.money()),
+            money_bits: MoneyBits::of(self.money()),
             placements,
             owned_equipment: self
                 .shop()
@@ -767,6 +818,10 @@ impl World {
                 next_payday_tick: self.staff().next_payday_tick(),
                 last_bill: self.staff().last_bill(),
                 walked_out_last_payday: self.staff().walked_out_last_payday(),
+                unpaid: self.staff().unpaid_counts().into_iter().collect(),
+                owed: self.staff().owed_counts().into_iter().collect(),
+                left_last_payday: self.staff().left_counts().into_iter().collect(),
+                unpaid_last_payday: self.staff().unpaid_last_payday(),
             }),
         }
     }
@@ -834,7 +889,7 @@ impl World {
         // An empty world first, so every validation below can be asked of
         // the real content registries rather than of a second copy of the
         // rules. Its starting money is irrelevant and is overwritten.
-        let mut world = World::with_content_and_money(recipes, machines, contracts, Fx::ZERO);
+        let mut world = World::with_content_and_money(recipes, machines, contracts, Money::ZERO);
 
         validate(&world, &data)?;
         rebuild_structure(&mut world, &data)?;
@@ -960,7 +1015,13 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
     }
     let staff_catalog = world.staff().catalog();
     if let Some(staff) = &data.staff {
-        for id in staff.headcount.keys() {
+        for id in staff
+            .headcount
+            .keys()
+            .chain(staff.unpaid.keys())
+            .chain(staff.owed.keys())
+            .chain(staff.left_last_payday.keys())
+        {
             if staff_catalog.get(id).is_none() {
                 return Err(SaveError::UnknownStaffCategory { id: id.clone() });
             }
@@ -978,30 +1039,50 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
     Ok(())
 }
 
-/// The pools: the save's headcounts and payday clock, or — for a pre-epic
-/// save — the starting crew with a payday one period from the saved tick.
+/// The pools: the save's headcounts, arrears, owed counts and payday
+/// clock, or — for a pre-epic save — the starting crew with a payday one
+/// period from the saved tick.
 fn restore_staff(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
     let catalog = world.staff().catalog().clone();
+    fn pairs(map: &BTreeMap<String, u32>) -> Vec<(String, u32)> {
+        map.iter().map(|(id, count)| (id.clone(), *count)).collect()
+    }
     let pools = match &data.staff {
-        Some(saved) => {
-            let headcount: Vec<(String, u32)> = saved
-                .headcount
-                .iter()
-                .map(|(id, count)| (id.clone(), *count))
-                .collect();
-            StaffPools::restore(
-                catalog,
-                &headcount,
-                saved.next_payday_tick,
-                saved.last_bill,
-                saved.walked_out_last_payday,
-            )
-            .map_err(|id| SaveError::UnknownStaffCategory { id })?
-        }
+        Some(saved) => StaffPools::restore(
+            catalog,
+            StaffRestore {
+                headcount: &pairs(&saved.headcount),
+                unpaid: &pairs(&saved.unpaid),
+                owed: &pairs(&saved.owed),
+                left_last_payday: &pairs(&saved.left_last_payday),
+                next_payday_tick: saved.next_payday_tick,
+                last_bill: saved.last_bill,
+                unpaid_last_payday: saved.unpaid_last_payday,
+                walked_out_last_payday: saved.walked_out_last_payday,
+            },
+        )
+        .map_err(|e| match e {
+            StaffRestoreError::UnknownCategory(id) => SaveError::UnknownStaffCategory { id },
+            StaffRestoreError::Inconsistent { category, reason } => {
+                SaveError::BadStaff { category, reason }
+            }
+        })?,
         None => {
             let period = catalog.pay_period_ticks();
-            StaffPools::restore(catalog, &[], data.tick_count + period, 0, 0)
-                .expect("an empty headcount list names no unknown category")
+            StaffPools::restore(
+                catalog,
+                StaffRestore {
+                    headcount: &[],
+                    unpaid: &[],
+                    owed: &[],
+                    left_last_payday: &[],
+                    next_payday_tick: data.tick_count + period,
+                    last_bill: 0,
+                    unpaid_last_payday: 0,
+                    walked_out_last_payday: 0,
+                },
+            )
+            .expect("empty lists name no unknown category and break no invariant")
         }
     };
     world.restore_staff(pools);
@@ -1046,7 +1127,7 @@ fn check_item(
 
 /// Half one of a load: buy and place every saved thing through the real
 /// commands (module doc). Funded one item at a time, so an arbitrarily large
-/// factory loads even though its total bill would not fit in `Fx`.
+/// factory loads whatever its total bill (which once had to fit in `Fx`).
 fn rebuild_structure(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
     for (index, placement) in data.placements.iter().enumerate() {
         let price = world
@@ -1297,7 +1378,9 @@ fn restore_production(saved: &SavedProduction) -> Result<ProductionLedger, SaveE
         })?;
     let mut items = std::collections::BTreeMap::new();
     for item in &saved.items {
-        let rings = |rings: &Vec<Vec<u32>>, what: &str| -> Result<[[u32; STAT_BUCKETS]; STAT_WINDOW_COUNT], SaveError> {
+        let rings = |rings: &Vec<Vec<u32>>,
+                     what: &str|
+         -> Result<[[u32; STAT_BUCKETS]; STAT_WINDOW_COUNT], SaveError> {
             if rings.len() != STAT_WINDOW_COUNT {
                 return Err(bad(format!(
                     "'{}' has {} {what} ring(s), not {STAT_WINDOW_COUNT}",
@@ -1645,7 +1728,8 @@ mod tests {
         assert!(message.contains("midnight_kebab_van"), "{message}");
 
         let mut data = a_save();
-        data.contracts_lost.push(("midnight_kebab_van".to_string(), 1));
+        data.contracts_lost
+            .push(("midnight_kebab_van".to_string(), 1));
         let message = refusal(data);
         assert!(message.contains("midnight_kebab_van"), "{message}");
 
@@ -1691,8 +1775,8 @@ mod tests {
             .board()
             .ordered()
             .iter()
-            .fold(Fx::from_num(0), |sum, c| sum + c.price);
-        world.restore_money(signing_bill + Fx::from_num(100));
+            .fold(Money::from_num(0), |sum, c| sum + c.price);
+        world.restore_money(signing_bill + Money::from_num(100));
         for id in ids.iter().rev() {
             let _ = world.economy_mut().try_sign(id, 0);
         }
@@ -1702,7 +1786,10 @@ mod tests {
             .iter()
             .map(|c| c.contract.id.clone())
             .collect();
-        assert_eq!(board_order, ids, "signing in reverse still yields board order");
+        assert_eq!(
+            board_order, ids,
+            "signing in reverse still yields board order"
+        );
         // Nothing is ever delivered, so every contract is missing windows.
         // Run until exactly the quickest-to-lose offer is gone (the one
         // with the smallest cadence x strikes), which leaves the others
@@ -1718,7 +1805,10 @@ mod tests {
         for _ in 0..(last.cadence_ticks * u64::from(last.strikes) + 1) {
             world.tick();
         }
-        assert!(!world.economy().is_active(&last.id), "the fixture must have lost one");
+        assert!(
+            !world.economy().is_active(&last.id),
+            "the fixture must have lost one"
+        );
         assert_eq!(world.economy().times_lost(&last.id), 1);
         assert!(
             !world.economy().contracts.is_empty(),
@@ -1743,7 +1833,10 @@ mod tests {
             .map(|c| c.contract.id.clone())
             .collect();
         let expected: Vec<String> = ids.iter().filter(|id| **id != last.id).cloned().collect();
-        assert_eq!(loaded_ids, expected, "exactly the saved active set, in board order");
+        assert_eq!(
+            loaded_ids, expected,
+            "exactly the saved active set, in board order"
+        );
         assert_eq!(loaded.economy().times_lost(&last.id), 1);
         let loaded_struck: Vec<(String, u32)> = loaded
             .economy()
@@ -1752,7 +1845,11 @@ mod tests {
             .map(|c| (c.contract.id.clone(), c.consecutive_misses))
             .collect();
         assert_eq!(loaded_struck, struck, "strike counts come back exactly");
-        assert_eq!(loaded.to_save(), world.to_save(), "and a second save is identical");
+        assert_eq!(
+            loaded.to_save(),
+            world.to_save(),
+            "and a second save is identical"
+        );
     }
 
     #[test]

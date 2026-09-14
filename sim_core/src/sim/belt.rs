@@ -26,6 +26,27 @@
 //! exceed `min_spacing`.** Under that assumption, freed space can ripple
 //! back by at most one item per tick, which is what makes the `frontier`
 //! bookkeeping in `tick()` sound.
+//!
+//! # The footprint does not stop at the belt's end
+//!
+//! A placed belt is one tile, and a line is a chain of them handing items
+//! across their shared boundary (`world.rs`'s belt-to-belt hop). The
+//! frontmost item's `gap_ahead` is its distance to the belt's END, so left
+//! alone it runs right up to the boundary — while the tile ahead may be
+//! holding an item at ITS start, which is the very same point. On a jammed
+//! line that put two items on every tile boundary (five per tile at a
+//! quarter-tile spacing: 0, ¼, ½, ¾ and 1, with the 1 of one tile the 0 of
+//! the next). Invisible while the spacing was narrower than the items
+//! themselves; the moment items were spaced to be told apart, every
+//! boundary drew a doubled item. So the front item respects the footprint
+//! of what is on the tile ahead too: [`BeltSegment::tick_toward`] takes
+//! the downstream segment's [`BeltSegment::room_at_start`] and holds the
+//! front item `min_spacing - room` short of the end while that room is
+//! under `min_spacing`. The hop itself is unchanged — `try_spawn` already
+//! refused until the receiver had `min_spacing` of room, and now the sender
+//! reaches its end at exactly the moment the receiver can take it. A fully
+//! compressed line therefore holds `1 / min_spacing` items per tile, and
+//! an item at a tile's start is never also drawn at the previous tile's end.
 
 use std::collections::VecDeque;
 
@@ -78,11 +99,36 @@ impl BeltSegment {
     /// Advances every item by up to `speed` tile-units, constrained by
     /// gaps. Returns whether anything actually moved (used for
     /// dirty-chunk tracking — ARCHITECTURE.md §4).
+    ///
+    /// Nothing is assumed about what lies beyond the belt's end: the front
+    /// item may run right up to it. A belt that hands to another belt
+    /// should use [`Self::tick_toward`] instead (the module doc's last
+    /// section says why).
     pub fn tick(&mut self, speed: Fx) -> bool {
+        self.tick_toward(speed, self.min_spacing)
+    }
+
+    /// [`Self::tick`] for a belt whose end meets the start of another one
+    /// holding `room_ahead` of clear belt at that start (its
+    /// [`Self::room_at_start`]). The front item stops
+    /// `min_spacing - room_ahead` short of the end while that is positive,
+    /// so it keeps its footprint clear of the item on the tile ahead exactly
+    /// as it would of one on its own tile; with `room_ahead >= min_spacing`
+    /// this is plain `tick`.
+    ///
+    /// The caller passes the room as it stood BEFORE any belt ticked this
+    /// tick (`World::tick` snapshots every room first), so the result does
+    /// not depend on the order belts are visited in. The cost is one tick
+    /// of latency the first time an item crosses a boundary in a moving
+    /// queue — the item behind settles `speed` further back than
+    /// `min_spacing` — which is a fiftieth of a tile at the shipped speed
+    /// and changes no throughput: every item pays it once.
+    pub fn tick_toward(&mut self, speed: Fx, room_ahead: Fx) -> bool {
         if self.items.is_empty() {
             self.frontier = 0;
             return false;
         }
+        let reserve = (self.min_spacing - room_ahead).max(Fx::ZERO);
         let upper = (self.frontier + 1).min(self.items.len() - 1);
         let mut freed = Fx::ZERO;
         let mut last_moved = 0usize;
@@ -90,7 +136,15 @@ impl BeltSegment {
         for i in 0..=upper {
             let item = &mut self.items[i];
             let effective_gap = item.gap_ahead + freed;
-            let advance = speed.min(effective_gap);
+            // Only the front item has the belt's end (and whatever stands
+            // just past it) ahead; everything behind it has an item ahead
+            // and `gap_ahead` already reserves the footprint against that.
+            let ceiling = if i == 0 {
+                (effective_gap - reserve).max(Fx::ZERO)
+            } else {
+                effective_gap
+            };
+            let advance = speed.min(ceiling);
             item.gap_ahead = effective_gap - advance;
             freed = advance;
             if advance > Fx::ZERO {
@@ -144,6 +198,18 @@ impl BeltSegment {
         cum
     }
 
+    /// How much clear belt there is at the start: the whole length when
+    /// empty, otherwise the back-most item's distance from the start. This
+    /// is what [`Self::try_spawn`] measures against `min_spacing`, and what
+    /// the belt BEHIND this one passes to [`Self::tick_toward`] so its front
+    /// item stops short of an item standing here (module doc).
+    pub fn room_at_start(&self) -> Fx {
+        match self.items.len() {
+            0 => self.length,
+            n => self.length - self.dist_from_end(n - 1),
+        }
+    }
+
     /// Attempts to place a new item at the belt's start. Fails (returns
     /// `false`, no-op) if the current back-most item hasn't moved at least
     /// `min_spacing` away from the start yet.
@@ -156,7 +222,7 @@ impl BeltSegment {
             self.frontier = 0;
             return true;
         }
-        let back_dist_from_start = self.length - self.dist_from_end(self.items.len() - 1);
+        let back_dist_from_start = self.room_at_start();
         if back_dist_from_start < self.min_spacing {
             return false;
         }
@@ -373,5 +439,98 @@ mod tests {
             belt.take_front_if_at_end().is_some(),
             "the follower must be able to reach the end on its own"
         );
+    }
+
+    #[test]
+    fn room_at_start_is_the_whole_belt_when_empty_and_the_back_items_distance_otherwise() {
+        let mut belt = BeltSegment::new(fx(1.0), fx(SPACING));
+        assert_eq!(belt.room_at_start(), fx(1.0));
+        belt.try_spawn("a".into());
+        assert_eq!(belt.room_at_start(), fx(0.0));
+        // Eighths, which `Fx` holds exactly (0.1 does not sum to 0.3).
+        belt.tick(fx(0.125));
+        belt.tick(fx(0.125));
+        assert_eq!(belt.room_at_start(), fx(0.25));
+        // A second item behind the first: the room is measured to the
+        // BACK-most one, whatever the first has done since.
+        belt.try_spawn("b".into());
+        assert_eq!(belt.room_at_start(), fx(0.0));
+    }
+
+    /// The module doc's boundary rule: an item on the tile ahead standing
+    /// at its start is `min_spacing` of footprint this belt's front item
+    /// must keep clear of, exactly as it would of an item on its own tile.
+    #[test]
+    fn the_front_item_stops_min_spacing_short_of_an_item_at_the_next_belts_start() {
+        let mut belt = BeltSegment::new(fx(1.0), fx(SPACING));
+        belt.try_spawn("a".into());
+        // The tile ahead has no room at all at its start.
+        for _ in 0..40 {
+            belt.tick_toward(fx(0.1), fx(0.0));
+        }
+        let positions = belt.snapshot_positions();
+        assert_eq!(
+            positions[0].1,
+            fx(1.0 - SPACING),
+            "held one footprint short of the end, not on the boundary"
+        );
+        assert!(
+            belt.front_ready().is_none(),
+            "an item held short of the end is not ready to hand over"
+        );
+        // Room opens up ahead by less than a footprint: it creeps forward by
+        // exactly that much...
+        belt.tick_toward(fx(0.1), fx(0.1));
+        assert_eq!(belt.snapshot_positions()[0].1, fx(1.0 - SPACING + 0.1));
+        // ...and with a whole footprint of room it reaches the end, which is
+        // the same moment `try_spawn` on the tile ahead would accept it.
+        for _ in 0..5 {
+            belt.tick_toward(fx(0.1), fx(SPACING));
+        }
+        assert_eq!(belt.snapshot_positions()[0].1, fx(1.0));
+        assert!(belt.front_ready().is_some());
+    }
+
+    /// The reserve is about the tile AHEAD only: items behind the front one
+    /// still close up against it as far as their own footprint allows.
+    #[test]
+    fn the_reserve_holds_only_the_front_item_and_the_rest_close_up_behind_it() {
+        let mut belt = BeltSegment::new(fx(1.0), fx(SPACING));
+        belt.try_spawn("a".into());
+        for _ in 0..3 {
+            belt.tick_toward(fx(0.1), fx(0.0));
+        }
+        belt.try_spawn("b".into());
+        for _ in 0..40 {
+            belt.tick_toward(fx(0.1), fx(0.0));
+        }
+        let positions = belt.snapshot_positions();
+        assert_eq!(positions[0].1, fx(1.0 - SPACING));
+        assert_eq!(positions[1].1, fx(1.0 - 2.0 * SPACING));
+    }
+
+    /// `tick` is `tick_toward` with nothing to reserve against — the two
+    /// must agree exactly, or a belt into a machine would move differently
+    /// from one into a belt with room.
+    #[test]
+    fn tick_is_tick_toward_with_a_whole_footprint_of_room() {
+        let mut plain = BeltSegment::new(fx(2.0), fx(SPACING));
+        let mut toward = BeltSegment::new(fx(2.0), fx(SPACING));
+        for belt in [&mut plain, &mut toward] {
+            belt.try_spawn("a".into());
+            belt.tick(fx(0.1));
+            belt.tick(fx(0.1));
+            belt.tick(fx(0.1));
+            belt.try_spawn("b".into());
+        }
+        for _ in 0..30 {
+            assert_eq!(plain.tick(fx(0.1)), toward.tick_toward(fx(0.1), fx(SPACING)));
+            assert_eq!(plain.snapshot_positions(), toward.snapshot_positions());
+        }
+        // ...and more room than a footprint changes nothing either.
+        for _ in 0..30 {
+            assert_eq!(plain.tick(fx(0.1)), toward.tick_toward(fx(0.1), fx(1.0)));
+            assert_eq!(plain.snapshot_positions(), toward.snapshot_positions());
+        }
     }
 }

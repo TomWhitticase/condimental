@@ -23,7 +23,7 @@
 mod common;
 
 use sim_core::sim::save::{SaveData, SavedBody};
-use sim_core::sim::types::Fx;
+use sim_core::sim::types::Money;
 use sim_core::sim::{SavedProduction, PlayerCommand, RecipeRegistry, World, reference_chain_with_budget};
 
 fn recipes() -> RecipeRegistry {
@@ -557,7 +557,7 @@ fn money_survives_to_the_bit() {
     }
     let money = world.money();
     assert!(
-        money >= Fx::from_num(137),
+        money >= Money::from_num(137),
         "the fixture must hold money (it started with 137 over its stock and wage reserve)"
     );
 
@@ -567,7 +567,7 @@ fn money_survives_to_the_bit() {
     // And a deliberately fractional balance, which no command can currently
     // reach but the format must not be able to lose either.
     let mut save = world.to_save();
-    save.money_bits = sim_core::sim::save::FxBits(money.to_bits() + 1);
+    save.money_bits = sim_core::sim::save::MoneyBits(money.to_bits() + 1);
     let text = save.to_ron();
     let odd = World::from_save_ron(&text, recipes()).unwrap();
     assert_eq!(odd.money().to_bits(), money.to_bits() + 1);

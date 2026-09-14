@@ -204,6 +204,65 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-13 **Quality pass, ticket 1 (sim): no silent walk-out, no free
+  dodge, no money overflow.** The payday rule (`staff.rs`) no longer fires
+  the unpaid: a head the money does not reach is **unpaid** — hired, idle
+  until the next payday (`reset` gives `headcount - unpaid`), gone only if
+  unpaid again; a covered payday clears the arrears, back pay first. The
+  line rule stands (the first refusal leaves every head after it unpaid).
+  **Notice pay:** `CategoryPool::owed` counts every head employed for any
+  part of the period (starts at headcount, `hire` adds, `fire` does not
+  subtract), the payday bills `owed`, fired heads first, so firing before
+  payday changes nothing. **A hire is refused unless
+  `money >= next_bill + wage`** (`can_hire`) — you cannot hire someone you
+  could not pay. Wire (`staff_snapshot_json`): `next_bill`, `shortfall`
+  (0 when covered), `unpaid_last_payday`, per category `owed`/`unpaid`/
+  `left_last_payday`/`can_hire`; `walked_out_last_payday` keeps its name
+  and meaning (how many LEFT). Godot should read `next_bill` for the bill
+  (its `Σ headcount × wage` is the run rate). Save: `SavedStaff` gains
+  `unpaid`/`owed`/`left_last_payday`/`unpaid_last_payday` under
+  `#[serde(default)]`, schema 1; more unpaid than hired or fewer owed than
+  hired is `SaveError::BadStaff`. **Money is `types::Money` (`I48F16`)**,
+  not `Fx`: same 16 fractional bits (old `money_bits` read unchanged,
+  `MoneyBits(i64)`), 48 integer bits; `I16F16`'s 32 767 was minutes away
+  and a payout there PANICS in debug / wraps in release; `Economy::tick`
+  credits with `saturating_add`; `cost_of` refuses a total past `Money`
+  via `checked_from_num`. Audit verdicts in the DEVLOG entry; full record
+  in `docs/DECISIONS.md`.
+- 2026-09-13 **Belt item spacing is half a tile, and a belt's front item
+  respects the next tile's footprint (quality pass, ticket 2).**
+  `ITEM_MIN_SPACING_TILES` in `world.rs` is **0.5** (was 0.25), chosen by
+  rendering `--bottleneck` at default zoom and `--closeup`: items are
+  half-tile models (the box 12 voxels wide), so at a quarter tile a fed
+  lane drew as one bar of product; at a half tile every item stands on
+  visible belt and a jam still reads as a queue; wider reads as a trickle.
+  Item models and `_carried_item_transform` are unchanged. Belt speed is
+  unchanged (one tile per 50 ticks), so a belt carries **one item per 25
+  ticks, forty per thousand**; the reference line's steady output is the
+  same 41–42 boxes per 10 000 ticks before and after (the vat is the
+  bottleneck). **Packing rule found by widening it:** the front item used
+  to run to the belt's end while the next tile held an item at its start,
+  the same point — five per tile with one drawn twice at every boundary.
+  `BeltSegment::tick_toward(speed, room_ahead)` holds the front item
+  `min_spacing - room` short of the end; `World::tick` reads every
+  carrier's downstream `room_at_start()` (`Topology.belt_ahead`, aligned
+  with `belts`; a splitter uses its roomier side) BEFORE any carrier moves,
+  so the result is order-independent and a rebuilt save stays in lockstep.
+  A jammed tile holds exactly `1 / spacing` items (two); a moving queue
+  settles `speed` looser across each boundary, once per item, and no
+  throughput changes. **Knock-on, reported not tuned:** one lane delivers
+  four tomatoes per 100 ticks against the crusher's 80-tick craft, so the
+  crusher is belt-limited (~80 % busy, `starved · waiting for Tomato`) and
+  the mixer runs at its pace until the line backs up (crusher blocked from
+  ~8300 ticks, was ~7000; `SETTLE_TICKS`/`BOTTLENECK_SETTLE_TICKS` are
+  10 000). The staffing rule "short one manufacturing head idles the vat"
+  holds on the ticks the crusher and mixer both claim; on a tick the
+  crusher waits for a tomato the vat gets its crew (`tests/staff.rs`
+  asserts refused > ran; the paused-craft test fires three heads).
+  Splitter fixtures count 8 on four tiles and 6 on three;
+  `test_machine_load.gd`'s polled status change watches the VAT (the one
+  machine a fed line drives to `working`). Whether the crusher's recipe
+  should be re-timed is ticket 1's. Full record in `docs/DECISIONS.md`.
 - 2026-09-13 **Production stats — the P screen.** A `ProductionLedger` on
   `World` counts what each recipe DEPOSITS (made) and TAKES (used) at craft
   start/completion, plus what a paying contract takes from the delivery

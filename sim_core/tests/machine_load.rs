@@ -12,7 +12,7 @@ mod common;
 
 use sim_core::sim::types::Direction;
 use sim_core::sim::{
-    ContractRegistry, Fx, LOAD_BUCKET_TICKS, LOAD_WINDOW_TICKS, MachineRegistry, PlayerCommand, RecipeRegistry,
+    ContractRegistry, Money, LOAD_BUCKET_TICKS, LOAD_WINDOW_TICKS, MachineRegistry, PlayerCommand, RecipeRegistry,
     StallKind, TileSnapshot, WorkState, World, reference_chain_with_budget,
 };
 
@@ -28,8 +28,13 @@ fn recipes() -> RecipeRegistry {
 /// pipe run between every pair, and all of that fills at the vat's pace
 /// (one craft per 240 ticks) before the mixer and then the crusher stall.
 /// Measured: the mixer reads blocked from about tick 3500, the crusher from
-/// about tick 7000. Ticket 3's fixture needs the same patience.
-const SETTLE_TICKS: u32 = 8_000;
+/// about tick 8300 (it was 7000 at the quarter-tile item spacing; at the
+/// half-tile spacing of the quality pass one lane delivers four tomatoes
+/// per 100 ticks against the crusher's 80-tick craft, so the crusher is
+/// belt-limited and fills its own output a little slower). The Godot
+/// fixture (`test_layouts.gd`'s `BOTTLENECK_SETTLE_TICKS`) needs the same
+/// patience and says the same number.
+const SETTLE_TICKS: u32 = 10_000;
 
 /// How long the settled line is watched. One full load window, so every
 /// machine's status is judged over a window that began after the line
@@ -281,7 +286,7 @@ fn a_machine_placed_and_never_fed_reads_starved_for_its_first_input() {
         recipes(),
         MachineRegistry::bundled(),
         ContractRegistry::bundled(),
-        Fx::from_num(5_000),
+        Money::from_num(5_000),
     );
     world.issue_command(PlayerCommand::Purchase {
         kind: "crusher".to_string(),
@@ -325,7 +330,7 @@ fn an_unplumbed_machine_names_the_missing_pipe() {
         recipes(),
         MachineRegistry::bundled(),
         ContractRegistry::bundled(),
-        Fx::from_num(5_000),
+        Money::from_num(5_000),
     );
     for kind in ["bottler", "cooking_vat"] {
         world.issue_command(PlayerCommand::Purchase {
@@ -371,7 +376,7 @@ fn a_changing_load_dirties_nothing() {
         recipes(),
         MachineRegistry::bundled(),
         ContractRegistry::bundled(),
-        Fx::from_num(5_000),
+        Money::from_num(5_000),
     );
     world.issue_command(PlayerCommand::Purchase {
         kind: "crusher".to_string(),

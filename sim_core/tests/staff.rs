@@ -9,16 +9,19 @@
 //! on exactly the LAST machine in stable order that needs the short
 //! category, and nowhere else; a paused machine loses no progress; a
 //! refused dock holds and loses nothing; payday debits the whole bill on
-//! the boundary and fires the unpaid in file order; the commands round-trip
-//! through JSON; a kind with no crew never asks; and all of it survives a
-//! save. `staff.rs`'s own unit tests cover the catalog's rejection rules,
+//! the boundary, warns before it, idles the unpaid rather than firing them
+//! and lets go only those unpaid twice (the quality pass, 2026-09-13);
+//! notice pay makes firing before payday cost nothing less; a hire the
+//! balance could not pay is refused; the commands round-trip through JSON;
+//! a kind with no crew never asks; and all of it survives a save.
+//! `staff.rs`'s own unit tests cover the catalog's rejection rules,
 //! the claim arithmetic and the zero-wage head, which needs a catalog the
 //! shipped `World` does not offer a seam for.
 
 mod common;
 
-use sim_core::sim::save::SavedStaff;
-use sim_core::sim::types::Fx;
+use sim_core::sim::save::{MoneyBits, SavedStaff};
+use sim_core::sim::types::Money;
 use sim_core::sim::{
     ContractRegistry, MachineRegistry, PlayerCommand, RecipeRegistry, STARTING_MONEY, StaffCatalog,
     StaffLoadError, StaffPools, StallKind, TileSnapshot, WorkState, World, command_from_json,
@@ -220,13 +223,28 @@ fn a_fed_reference_chain_runs_on_the_starting_crew_with_no_staff_stall_anywhere(
         ever_staff_stalled.is_empty(),
         "the starting crew covers the line; staff stalls: {ever_staff_stalled:?}"
     );
-    // The crusher is the machine nothing upstream can starve and nothing
-    // downstream has yet blocked: flat out.
-    assert_eq!(
-        status_of(&world, tile_of(&world, "crusher")),
-        WorkState::Working
+    // The crusher is the machine nothing upstream can starve of anything
+    // but tomatoes and nothing downstream has yet blocked. Since the
+    // half-tile item spacing (the quality pass, 2026-09-13) its one lane
+    // delivers four tomatoes per 100 ticks against an 80-tick craft, so it
+    // is belt-limited: the only reason it ever gives is its input, never
+    // staff.
+    let crusher = tile_of(&world, "crusher");
+    assert!(
+        matches!(
+            stall_of(&world, crusher),
+            None | Some((StallKind::Input, _))
+        ),
+        "the crusher waits for tomatoes or for nothing: {:?}",
+        stall_of(&world, crusher)
     );
-    // On a tick when everything asks, the whole starting crew is at work.
+    assert!(
+        status_of(&world, crusher) == WorkState::Working
+            || status_of(&world, crusher) == WorkState::Starved,
+        "belt-limited, not blocked"
+    );
+    // On a tick when everything asks, the whole starting crew is at work;
+    // on a tick the crusher is waiting for a tomato it asks for nobody.
     let snapshot = world.staff_snapshot();
     let by_id = |id: &str| {
         snapshot
@@ -236,7 +254,11 @@ fn a_fed_reference_chain_runs_on_the_starting_crew_with_no_staff_stall_anywhere(
             .unwrap()
             .clone()
     };
-    assert_eq!(by_id("manufacturing").assigned, 4);
+    assert!(
+        by_id("manufacturing").assigned == 4 || by_id("manufacturing").assigned == 3,
+        "{:?}",
+        by_id("manufacturing")
+    );
     assert!(by_id("packaging").assigned <= 2);
     assert_eq!(by_id("maintenance").demand, 0);
     // The dock asks only on a tick it holds something; over the window it
@@ -261,18 +283,35 @@ fn firing_one_manufacturing_head_idles_exactly_the_last_manufacturing_machine() 
         crusher.0 < mixer.0 && mixer.0 < vat.0,
         "stable order is tile order"
     );
-    for tile in [crusher, mixer, vat] {
-        assert_eq!(
-            status_of(&world, tile),
-            WorkState::Working,
-            "{tile:?} before"
+    assert_eq!(status_of(&world, vat), WorkState::Working, "the vat before");
+    // The crusher is the one machine a single lane cannot saturate since
+    // the half-tile item spacing (the quality pass, 2026-09-13): a belt
+    // delivers four tomatoes per 100 ticks and its craft takes 80, so it
+    // waits for a tomato about a fifth of the time, and the mixer behind
+    // it gets one paste per 100 ticks against its 90-tick craft. Both read
+    // `starved` for an INPUT before the line backs up — never for staff.
+    for tile in [crusher, mixer] {
+        assert!(
+            matches!(
+                stall_of(&world, tile),
+                None | Some((StallKind::Input, _))
+            ),
+            "{tile:?} before: belt-limited at most, got {:?}",
+            stall_of(&world, tile)
         );
     }
 
     fire(&mut world, "manufacturing");
     assert_eq!(headcount(&world, "manufacturing"), 3);
 
+    // The rule under test: on every tick all three would work, the vat —
+    // last in tile order — is the one refused, and the two before it are
+    // never short. On a tick the crusher or the mixer is waiting for its
+    // input it claims nothing, and then the vat's two heads ARE free: the
+    // vat runs on exactly those ticks, which is the same first-come rule
+    // read the other way round.
     let mut vat_refusals = 0;
+    let mut vat_runs = 0;
     for _ in 0..120 {
         common::supply(&mut world);
         world.tick();
@@ -282,37 +321,55 @@ fn firing_one_manufacturing_head_idles_exactly_the_last_manufacturing_machine() 
                 "{tile:?} must never go short: it claims before the vat"
             );
         }
-        match stall_of(&world, vat) {
-            Some((StallKind::Staff, category)) => {
-                assert_eq!(category, "manufacturing");
-                vat_refusals += 1;
-            }
-            other => panic!("the vat must be refused every tick it would work, got {other:?}"),
-        }
         let snapshot = world.staff_snapshot();
         let manufacturing = snapshot
             .categories
             .iter()
             .find(|c| c.id == "manufacturing")
             .unwrap();
-        assert_eq!(
-            (
-                manufacturing.demand,
-                manufacturing.assigned,
-                manufacturing.short
-            ),
-            (4, 2, 2)
+        let tally = (
+            manufacturing.demand,
+            manufacturing.assigned,
+            manufacturing.short,
         );
+        match stall_of(&world, vat) {
+            Some((StallKind::Staff, category)) => {
+                assert_eq!(category, "manufacturing");
+                assert_eq!(tally, (4, 2, 2), "crusher and mixer claimed, the vat refused");
+                vat_refusals += 1;
+            }
+            None => {
+                assert_eq!(tally.2, 0, "a machine stood aside, so the vat ran: {tally:?}");
+                assert!(tally.0 <= 3, "{tally:?}");
+                vat_runs += 1;
+            }
+            other => panic!("the vat is refused or it runs, got {other:?}"),
+        }
     }
-    assert_eq!(vat_refusals, 120);
+    assert!(
+        vat_refusals > vat_runs,
+        "the vat is the one short on most ticks: refused {vat_refusals}, ran {vat_runs}"
+    );
     assert_eq!(
         status_of(&world, vat),
         WorkState::Starved,
         "understaffed IS a kind of starved"
     );
-    assert_eq!(status_of(&world, crusher), WorkState::Working);
-    assert_eq!(status_of(&world, mixer), WorkState::Working);
-    // Hover's `crew` for the vat.
+    for tile in [crusher, mixer] {
+        assert!(
+            !matches!(stall_of(&world, tile), Some((StallKind::Staff, _))),
+            "{tile:?} is belt-limited at most, never staff-limited"
+        );
+    }
+    // Hover's `crew` for the vat, on a tick it was refused (the last tick
+    // of the loop may be one the vat ran on).
+    for _ in 0..20 {
+        if matches!(stall_of(&world, vat), Some((StallKind::Staff, _))) {
+            break;
+        }
+        common::supply(&mut world);
+        world.tick();
+    }
     match world.query_tile(vat) {
         Some(TileSnapshot::Machine { crew, stall, .. }) => {
             assert_eq!(crew.len(), 1);
@@ -340,7 +397,15 @@ fn hiring_the_head_back_resumes_the_paused_craft_with_no_lost_progress() {
     }
     let (elapsed_at_fire, required) = progress_of(&world, vat).unwrap();
 
-    fire(&mut world, "manufacturing");
+    // Three heads, not one: with one gone the vat still runs on the ticks
+    // the belt-limited crusher or mixer stands aside (see the test above),
+    // and this test is about a craft that is genuinely PAUSED. With one
+    // head left the crusher or the mixer takes it and the vat's two are
+    // never free.
+    for _ in 0..3 {
+        fire(&mut world, "manufacturing");
+    }
+    assert_eq!(headcount(&world, "manufacturing"), 1);
     for _ in 0..100 {
         common::supply(&mut world);
         world.tick();
@@ -351,7 +416,9 @@ fn hiring_the_head_back_resumes_the_paused_craft_with_no_lost_progress() {
         );
     }
 
-    hire(&mut world, "manufacturing");
+    for _ in 0..3 {
+        hire(&mut world, "manufacturing");
+    }
     assert_eq!(headcount(&world, "manufacturing"), 4);
     let remaining = required - elapsed_at_fire;
     for step in 1..remaining {
@@ -463,10 +530,10 @@ fn payday_debits_the_whole_bill_on_the_boundary_and_every_period_after() {
     let mut world = World::new(recipes());
     let pools = world.staff();
     let period = pools.catalog().pay_period_ticks();
-    let bill = Fx::from_num(pools.bill_per_period());
-    assert!(bill > Fx::ZERO);
+    let bill = Money::from_num(pools.bill_per_period());
+    assert!(bill > Money::ZERO);
     assert_eq!(pools.next_payday_tick(), period);
-    let start = Fx::from_num(STARTING_MONEY);
+    let start = Money::from_num(STARTING_MONEY);
 
     while world.current_tick() < period - 1 {
         world.tick();
@@ -500,63 +567,286 @@ fn payday_debits_the_whole_bill_on_the_boundary_and_every_period_after() {
     }
 }
 
-/// With money for only some of the heads, the first head that cannot be
-/// paid leaves, and so does every one after it — down `staff.ron` in file
-/// order across categories — and the panel is told how many.
+/// A world with `money` in the bank and nothing built — the fixture for
+/// every payday test, because the bill is the only thing that moves money.
+fn empty_world_with_money(money: u32) -> World {
+    World::with_content_and_money(
+        recipes(),
+        MachineRegistry::bundled(),
+        ContractRegistry::bundled(),
+        Money::from_num(money),
+    )
+}
+
+/// Sets the balance by rewriting the save, the way `test_layouts.gd`'s
+/// `fund` does — the one legitimate way to state a balance rather than
+/// earn it — and proves the pools came back identical on the way.
+fn with_money(world: &World, money: u32) -> World {
+    let mut save = world.to_save();
+    save.money_bits = MoneyBits::of(Money::from_num(money));
+    let loaded = World::from_save_ron(&save.to_ron(), recipes()).expect("the save must load");
+    let mut expected = world.staff_snapshot();
+    let mut actual = loaded.staff_snapshot();
+    expected.money = 0.0;
+    actual.money = 0.0;
+    expected.shortfall = 0;
+    actual.shortfall = 0;
+    for c in expected
+        .categories
+        .iter_mut()
+        .chain(actual.categories.iter_mut())
+    {
+        c.can_hire = false;
+    }
+    assert_eq!(actual, expected, "the pools survive the save unchanged");
+    loaded
+}
+
+fn unpaid(world: &World, category: &str) -> u32 {
+    world.staff().pool(category).unwrap().unpaid
+}
+
+fn available(world: &World, category: &str) -> u32 {
+    world.staff().pool(category).unwrap().available
+}
+
+/// **The reported bug** (the quality pass): a factory that spends down to
+/// a few coins before a payday used to lose most of its crew silently.
+/// Now the wire warns before the payday (`next_bill`, `shortfall`), the
+/// first payday leaves the unpaid heads hired but idle (`unpaid`, per
+/// category and in total, nobody `left`), and only a SECOND unpaid payday
+/// lets them go — announced per category in `left_last_payday`. In
+/// between, a payday that is covered clears the arrears.
 #[test]
-fn heads_that_cannot_be_paid_leave_in_staff_ron_order() {
+fn a_factory_that_cannot_pay_is_warned_then_idled_and_loses_its_crew_only_at_the_second_miss() {
     let catalog = StaffCatalog::bundled();
     let period = catalog.pay_period_ticks();
     // Enough for the first two manufacturing wages and part of the third.
     let manufacturing_wage = catalog.get("manufacturing").unwrap().wage;
     let money = 2 * manufacturing_wage + 1;
-    let mut world = World::with_content_and_money(
-        recipes(),
-        MachineRegistry::bundled(),
-        ContractRegistry::bundled(),
-        Fx::from_num(money),
-    );
+    let mut world = empty_world_with_money(money);
     let bill = world.staff().bill_per_period();
     assert!(bill > money, "the fixture must be unable to meet the bill");
-
-    for _ in 0..period {
-        world.tick();
-    }
-    assert_eq!(
-        world.money(),
-        Fx::from_num(1),
-        "two wages paid, then nothing more"
-    );
-    assert_eq!(headcount(&world, "manufacturing"), 2);
-    assert_eq!(headcount(&world, "maintenance"), 0);
-    assert_eq!(
-        headcount(&world, "packaging"),
-        0,
-        "every wage-earner after the refusal leaves"
-    );
-    assert_eq!(headcount(&world, "logistics"), 0);
-    let snapshot = world.staff_snapshot();
     let total_start: u32 = catalog
         .categories()
         .iter()
         .map(|c| c.starting_headcount)
         .sum();
-    assert_eq!(snapshot.walked_out_last_payday, total_start - 2);
-    assert_eq!(snapshot.last_bill, 2 * manufacturing_wage);
 
-    // Hiring is free, so a head can be put back with no money at all; the
-    // next payday then finds 1 money against a wage of 2 and everyone who
-    // earns a wage leaves.
-    hire(&mut world, "logistics");
-    assert_eq!(world.money(), Fx::from_num(1));
-    for _ in 0..period {
+    // BEFORE: the warning is on the wire from the first tick.
+    world.tick();
+    let snapshot = world.staff_snapshot();
+    assert_eq!(snapshot.next_bill, bill);
+    assert_eq!(snapshot.shortfall, bill - money);
+    assert_eq!(snapshot.unpaid_last_payday, 0);
+    assert_eq!(snapshot.walked_out_last_payday, 0);
+
+    // FIRST PAYDAY: two wages paid, nobody leaves, five are unpaid.
+    while world.current_tick() < period {
         world.tick();
     }
-    assert_eq!(headcount(&world, "manufacturing"), 0);
-    assert_eq!(headcount(&world, "logistics"), 0);
-    assert_eq!(world.staff_snapshot().walked_out_last_payday, 3);
-    assert_eq!(world.staff_snapshot().last_bill, 0);
-    assert_eq!(world.money(), Fx::from_num(1));
+    assert_eq!(
+        world.money(),
+        Money::from_num(1),
+        "two wages paid, then nothing more"
+    );
+    for c in catalog.categories() {
+        assert_eq!(
+            headcount(&world, &c.id),
+            c.starting_headcount,
+            "{}: nobody left",
+            c.id
+        );
+    }
+    assert_eq!(unpaid(&world, "manufacturing"), 2);
+    assert_eq!(unpaid(&world, "maintenance"), 0);
+    assert_eq!(
+        unpaid(&world, "packaging"),
+        2,
+        "every wage-earner after the refusal is unpaid"
+    );
+    assert_eq!(unpaid(&world, "logistics"), 1);
+    let snapshot = world.staff_snapshot();
+    assert_eq!(snapshot.unpaid_last_payday, total_start - 2);
+    assert_eq!(
+        snapshot.walked_out_last_payday, 0,
+        "a first miss is arrears, not a walk-out"
+    );
+    assert_eq!(snapshot.last_bill, 2 * manufacturing_wage);
+    assert_eq!(
+        snapshot.next_bill, bill,
+        "arrears do not stack — one wage per head"
+    );
+    assert!(snapshot.categories.iter().all(|c| c.left_last_payday == 0));
+
+    // The unpaid do not work: next tick only the paid heads are at their post.
+    world.tick();
+    assert_eq!(available(&world, "manufacturing"), 2);
+    assert_eq!(available(&world, "packaging"), 0);
+    assert_eq!(available(&world, "logistics"), 0);
+
+    // A hire the balance could not pay is refused — free labour is not
+    // for hire — and the wire says so.
+    assert!(!world.staff_snapshot().categories[3].can_hire);
+    hire(&mut world, "logistics");
+    assert_eq!(headcount(&world, "logistics"), 1);
+    assert_eq!(world.money(), Money::from_num(1));
+
+    // Branch A — SECOND PAYDAY still broke: the heads in arrears leave, by
+    // category, and the panel is told who; the two paid manufacturing heads
+    // now go unpaid for the first time and stay.
+    let mut broke = with_money(&world, 1);
+    while broke.current_tick() < 2 * period {
+        broke.tick();
+    }
+    assert_eq!(headcount(&broke, "manufacturing"), 2);
+    assert_eq!(unpaid(&broke, "manufacturing"), 2);
+    assert_eq!(headcount(&broke, "packaging"), 0);
+    assert_eq!(headcount(&broke, "logistics"), 0);
+    let snapshot = broke.staff_snapshot();
+    assert_eq!(snapshot.walked_out_last_payday, 5);
+    assert_eq!(snapshot.unpaid_last_payday, total_start);
+    assert_eq!(snapshot.last_bill, 0);
+    let left: Vec<(&str, u32)> = snapshot
+        .categories
+        .iter()
+        .map(|c| (c.id.as_str(), c.left_last_payday))
+        .collect();
+    assert_eq!(
+        left,
+        vec![
+            ("manufacturing", 2),
+            ("maintenance", 0),
+            ("packaging", 2),
+            ("logistics", 1)
+        ]
+    );
+    // And the third: the last two go.
+    while broke.current_tick() < 3 * period {
+        broke.tick();
+    }
+    assert_eq!(headcount(&broke, "manufacturing"), 0);
+    assert_eq!(broke.staff_snapshot().walked_out_last_payday, 2);
+    assert_eq!(broke.money(), Money::from_num(1));
+
+    // Branch B — money arrives before the second payday: the bill is met,
+    // the arrears clear, everyone is back at work and nobody left.
+    let mut recovered = with_money(&world, 100);
+    assert_eq!(recovered.staff_snapshot().shortfall, 0);
+    while recovered.current_tick() < 2 * period {
+        recovered.tick();
+    }
+    assert_eq!(recovered.money(), Money::from_num(100 - bill));
+    for c in catalog.categories() {
+        assert_eq!(headcount(&recovered, &c.id), c.starting_headcount);
+        assert_eq!(unpaid(&recovered, &c.id), 0);
+    }
+    let snapshot = recovered.staff_snapshot();
+    assert_eq!(snapshot.unpaid_last_payday, 0);
+    assert_eq!(snapshot.walked_out_last_payday, 0);
+    assert_eq!(snapshot.last_bill, bill);
+    recovered.tick();
+    assert_eq!(available(&recovered, "manufacturing"), 4);
+    assert_eq!(available(&recovered, "logistics"), 1);
+}
+
+/// **The fire-before-payday dodge is closed.** A head is owed for any
+/// period it was employed in any part of: firing everyone the tick before
+/// payday leaves the bill unchanged (notice pay), and hiring them all back
+/// the tick after bills them again at the next one — two periods of
+/// wages either way.
+#[test]
+fn firing_everyone_the_tick_before_payday_leaves_the_bill_unchanged() {
+    let catalog = StaffCatalog::bundled();
+    let period = catalog.pay_period_ticks();
+    let mut world = empty_world_with_money(1_000);
+    let bill = world.staff().bill_per_period();
+
+    while world.current_tick() < period - 1 {
+        world.tick();
+    }
+    for c in catalog.categories() {
+        for _ in 0..c.starting_headcount {
+            fire(&mut world, &c.id);
+        }
+        assert_eq!(headcount(&world, &c.id), 0);
+    }
+    assert_eq!(
+        world.staff().bill_per_period(),
+        0,
+        "nobody is on the books..."
+    );
+    assert_eq!(
+        world.staff_snapshot().next_bill,
+        bill,
+        "...but everybody is owed"
+    );
+    world.tick();
+    assert_eq!(world.current_tick(), period);
+    assert_eq!(
+        world.money(),
+        Money::from_num(1_000 - bill),
+        "the bill is exactly what keeping them would have cost"
+    );
+    let snapshot = world.staff_snapshot();
+    assert_eq!(snapshot.last_bill, bill);
+    assert_eq!(snapshot.next_bill, 0, "the notice is settled");
+    assert_eq!(
+        (snapshot.unpaid_last_payday, snapshot.walked_out_last_payday),
+        (0, 0)
+    );
+
+    // Hired back the tick after: owed in full at the next payday, even
+    // though they were employed for one tick less than a period — and a
+    // head hired one tick BEFORE that payday is owed in full too.
+    for c in catalog.categories() {
+        for _ in 0..c.starting_headcount {
+            hire(&mut world, &c.id);
+        }
+        assert_eq!(headcount(&world, &c.id), c.starting_headcount);
+    }
+    assert_eq!(world.staff_snapshot().next_bill, bill);
+    while world.current_tick() < 2 * period - 1 {
+        world.tick();
+    }
+    hire(&mut world, "packaging");
+    let packaging_wage = catalog.get("packaging").unwrap().wage;
+    assert_eq!(world.staff_snapshot().next_bill, bill + packaging_wage);
+    world.tick();
+    assert_eq!(
+        world.money(),
+        Money::from_num(1_000 - 2 * bill - packaging_wage),
+        "two periods of wages, plus the head hired one tick before payday"
+    );
+}
+
+/// Notice pay is settled FIRST, so a broke factory cannot make its unpaid
+/// heads absorb what it owes the ones it fired: with money for one head,
+/// the fired manufacturing head's notice takes it and the hired heads are
+/// the unpaid ones.
+#[test]
+fn notice_pay_is_settled_before_the_heads_still_hired() {
+    let catalog = StaffCatalog::bundled();
+    let period = catalog.pay_period_ticks();
+    let wage = catalog.get("manufacturing").unwrap().wage;
+    let mut world = empty_world_with_money(wage);
+    fire(&mut world, "manufacturing");
+    assert_eq!(headcount(&world, "manufacturing"), 3);
+    while world.current_tick() < period {
+        world.tick();
+    }
+    assert_eq!(
+        world.money(),
+        Money::ZERO,
+        "the one wage went to the fired head"
+    );
+    assert_eq!(headcount(&world, "manufacturing"), 3, "nobody left");
+    assert_eq!(
+        unpaid(&world, "manufacturing"),
+        3,
+        "and all three hired heads are unpaid"
+    );
+    assert_eq!(world.staff_snapshot().last_bill, wage);
 }
 
 // ---------------------------------------------------------------------
@@ -565,15 +855,15 @@ fn heads_that_cannot_be_paid_leave_in_staff_ron_order() {
 
 #[test]
 fn hire_and_fire_round_trip_through_json_and_dirty_no_chunk() {
-    let mut world = reference_chain(recipes());
+    let mut world = reference_chain_with_budget(recipes(), 1_000);
     world.tick();
     let before = headcount(&world, "packaging");
 
-    let hire =
+    let hire_cmd =
         command_from_json(r#"{"type": "hire", "category": "packaging"}"#).expect("hire parses");
-    assert!(matches!(&hire, PlayerCommand::Hire { category } if category == "packaging"));
+    assert!(matches!(&hire_cmd, PlayerCommand::Hire { category } if category == "packaging"));
     let dirty_before = world.dirty_chunks().to_vec();
-    world.issue_command(hire);
+    world.issue_command(hire_cmd);
     assert_eq!(headcount(&world, "packaging"), before + 1);
     assert_eq!(
         world.dirty_chunks(),
@@ -606,12 +896,27 @@ fn hire_and_fire_round_trip_through_json_and_dirty_no_chunk() {
         command_from_json(r#"{"type": "hire"}"#).is_none(),
         "category is required"
     );
-    // Hiring is free.
+    // Hiring is free — the wage comes at payday — but only for a balance
+    // that could pay it: a world with nothing in the bank is refused.
     let money = world.money();
     world.issue_command(PlayerCommand::Hire {
         category: "manufacturing".to_string(),
     });
     assert_eq!(world.money(), money);
+    let mut broke = reference_chain(recipes());
+    assert_eq!(
+        broke.money(),
+        Money::ZERO,
+        "the plain reference chain spends its whole budget"
+    );
+    let before = headcount(&broke, "manufacturing");
+    assert!(!broke.staff_snapshot().categories[0].can_hire);
+    hire(&mut broke, "manufacturing");
+    assert_eq!(
+        headcount(&broke, "manufacturing"),
+        before,
+        "refused: it could not be paid"
+    );
 }
 
 // ---------------------------------------------------------------------
@@ -700,14 +1005,21 @@ fn staff_snapshot_json_has_the_documented_shape_in_staff_ron_order() {
             "categories",
             "last_bill",
             "money",
+            "next_bill",
             "next_payday_tick",
             "pay_period_ticks",
+            "shortfall",
+            "unpaid_last_payday",
             "walked_out_last_payday"
         ]
     );
     assert_eq!(json["pay_period_ticks"], 1000);
     assert_eq!(json["next_payday_tick"], 2000);
     assert_eq!(json["last_bill"], 14);
+    assert_eq!(json["next_bill"], 14);
+    assert_eq!(json["shortfall"], 0);
+    assert_eq!(json["unpaid_last_payday"], 0);
+    assert_eq!(json["walked_out_last_payday"], 0);
     assert_eq!(json["money"], world.money().to_num::<f64>());
     let ids: Vec<&str> = json["categories"]
         .as_array()
@@ -723,14 +1035,25 @@ fn staff_snapshot_json_has_the_documented_shape_in_staff_ron_order() {
             keys,
             vec![
                 "assigned",
+                "can_hire",
                 "demand",
                 "headcount",
                 "id",
+                "left_last_payday",
                 "name",
+                "owed",
                 "short",
+                "unpaid",
                 "wage"
             ]
         );
+        assert_eq!(
+            c["owed"], c["headcount"],
+            "nobody hired or fired this period"
+        );
+        assert_eq!(c["unpaid"], 0);
+        assert_eq!(c["left_last_payday"], 0);
+        assert_eq!(c["can_hire"], true, "the fixture is funded for 300 periods");
         assert_eq!(
             c["short"].as_u64().unwrap(),
             c["demand"].as_u64().unwrap() - c["assigned"].as_u64().unwrap()
@@ -908,6 +1231,41 @@ fn a_pre_epic_save_loads_with_the_starting_crew_and_a_payday_one_period_out() {
     );
     assert_eq!(loaded.staff().last_bill(), 0);
     assert_eq!(loaded.staff().walked_out_last_payday(), 0);
+    assert_eq!(loaded.staff().unpaid_last_payday(), 0);
+    for c in catalog.categories() {
+        let pool = loaded.staff().pool(&c.id).unwrap();
+        assert_eq!(
+            (pool.unpaid, pool.owed, pool.left_last_payday),
+            (0, c.starting_headcount, 0)
+        );
+    }
+
+    // A save from the staff pools MVP (headcounts and the clock, none of
+    // the quality pass's fields): nobody in arrears, every head owed.
+    let mut mvp = world.to_save();
+    let staff = mvp.staff.as_mut().unwrap();
+    staff.unpaid.clear();
+    staff.owed.clear();
+    staff.left_last_payday.clear();
+    staff.unpaid_last_payday = 0;
+    // Cleared maps still print as `owed: {}`; cut the keys out entirely.
+    let mut text = mvp.to_ron();
+    for key in [
+        "unpaid:",
+        "owed:",
+        "left_last_payday:",
+        "unpaid_last_payday:",
+    ] {
+        text = without(&text, key);
+    }
+    assert!(!text.contains("owed") && !text.contains("unpaid"), "{text}");
+    let loaded = World::from_save_ron(&text, recipes()).unwrap();
+    let full = World::from_save_ron(&world.to_save_ron(), recipes()).unwrap();
+    assert_eq!(
+        serde_json::to_string(&loaded.staff_snapshot()).unwrap(),
+        serde_json::to_string(&full.staff_snapshot()).unwrap(),
+        "a paid-up crew's save reads the same with or without the new fields"
+    );
 
     // And the strict form of "not there": the keys removed from the text.
     // Cut `key: value,` (or `key: value` before a closing paren) wherever
@@ -937,6 +1295,72 @@ fn a_pre_epic_save_loads_with_the_starting_crew_and_a_payday_one_period_out() {
     for entry in loaded.machine_load_snapshots() {
         assert!(!matches!(entry.stall, Some(s) if s.kind == StallKind::Staff));
     }
+}
+
+/// Arrears, owed counts and last payday's leavers ride the save and come
+/// back exactly; an impossible state (more in arrears than hired) is
+/// refused with a reason, like every other corrupt save.
+#[test]
+fn arrears_survive_a_save_and_an_impossible_state_is_refused() {
+    let period = StaffCatalog::bundled().pay_period_ticks();
+    let mut world = empty_world_with_money(3);
+    fire(&mut world, "packaging");
+    while world.current_tick() < period + 5 {
+        world.tick();
+    }
+    let snapshot = world.staff_snapshot();
+    assert!(
+        snapshot.unpaid_last_payday > 0,
+        "the fixture must be in arrears"
+    );
+    assert_eq!(unpaid(&world, "manufacturing"), 3);
+
+    let text = world.to_save_ron();
+    assert!(
+        text.contains("unpaid:") && text.contains("owed:") && text.contains("left_last_payday:")
+    );
+    let mut loaded = World::from_save_ron(&text, recipes()).unwrap();
+    assert_eq!(
+        serde_json::to_string(&loaded.staff_snapshot()).unwrap(),
+        serde_json::to_string(&snapshot).unwrap()
+    );
+    for step in 0..period {
+        world.tick();
+        loaded.tick();
+        assert_eq!(
+            serde_json::to_string(&loaded.staff_snapshot()).unwrap(),
+            serde_json::to_string(&world.staff_snapshot()).unwrap(),
+            "staff snapshots diverged at step {step}"
+        );
+    }
+    assert_eq!(loaded.money(), world.money());
+
+    let mut save = world.to_save();
+    save.staff
+        .as_mut()
+        .unwrap()
+        .unpaid
+        .insert("logistics".to_string(), 9);
+    let message = World::from_save_ron(&save.to_ron(), recipes())
+        .err()
+        .expect("more in arrears than hired is a corrupt save")
+        .to_string();
+    assert!(message.contains("logistics"), "{message}");
+    assert!(message.contains("unpaid"), "{message}");
+    let mut save = world.to_save();
+    save.staff
+        .as_mut()
+        .unwrap()
+        .owed
+        .insert("manufacturing".to_string(), 0);
+    let message = World::from_save_ron(&save.to_ron(), recipes())
+        .err()
+        .expect("fewer owed than hired is a corrupt save")
+        .to_string();
+    assert!(
+        message.contains("manufacturing") && message.contains("owed"),
+        "{message}"
+    );
 }
 
 #[test]

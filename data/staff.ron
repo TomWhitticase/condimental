@@ -27,8 +27,22 @@
 // ORDER MATTERS TWICE. This is the order the staff panel lists categories
 // in, and it is the PAYDAY order: on payday heads are paid one at a time
 // down this list, and the first head that cannot be paid — and every head
-// after it — leaves. Manufacturing is first because a factory that must
-// lose someone should lose its shipping clerk before its cook.
+// after it — goes UNPAID. Manufacturing is first because a factory that
+// must leave someone unpaid should idle its shipping clerk before its cook.
+//
+// WHAT AN UNPAID HEAD DOES (the quality pass, 2026-09-13; the rule is
+// `sim_core/src/sim/staff.rs`'s, this is the summary). It stays hired but
+// does not work the period it was not paid for, so the machines it crewed
+// starve with a `staff` stall and the staff panel says how many are
+// unpaid; it leaves only if the NEXT payday cannot pay it either, and a
+// payday that covers it clears the arrears. Two strikes, like a contract.
+// A head is owed for any period it was employed in any part of: a head
+// fired before payday is still billed at that payday (notice pay, paid
+// first), a head hired just before payday is billed at it, and a hire is
+// refused while the balance cannot cover the next bill plus the new wage.
+// So `wage` here is the cost of a head per period however the period was
+// spent, and nothing the player does with HIRE and FIRE changes what a
+// period's employment costs.
 //
 // NUMBERS. `wage` is whole money units per head per `pay_period_ticks`.
 // Everything is a placeholder in the sense GAMEPLAY.md §10 means (the
@@ -43,7 +57,13 @@
 //      `sim_core/tests/staff.rs` pins that relationship, not the literals.
 //   2. The whole crew costs 14 per 1000 ticks against the starter contract's
 //      payouts, so wages are felt from the first payday without being able
-//      to sink a line that is delivering.
+//      to sink a line that is delivering. Checked against the numbers on
+//      2026-09-13: one kept-fed line makes about 4 boxes per 1000 ticks
+//      (`data/contracts.ron`'s balance note), which the three starter-tier
+//      orders pay about 100 for, on ingredients of about 43 (4 tomato + 1
+//      sugar + 2 vinegar per box, 11 a box) — roughly 60 a period clear
+//      before wages, 45 after. Wages are about a quarter of a first line's
+//      margin: felt, not fatal.
 //   3. One flat wage: the categories differ by what they gate, not yet by
 //      what they cost. A zero wage is legal content (a volunteer category).
 (

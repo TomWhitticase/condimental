@@ -18,7 +18,7 @@
 //! §7).
 
 use sim_core::sim::machines::MachineRegistry;
-use sim_core::sim::types::Fx;
+use sim_core::sim::types::Money;
 use sim_core::sim::{
     ContractRegistry, ConveyorLinks, Direction, LinkInput, LinkKind, LinkOutput, Links,
     PipeConnection, PipeLinks, PlacementSnapshot, PlayerCommand, RecipeRegistry, TileSnapshot,
@@ -42,7 +42,7 @@ fn funded() -> World {
         shipped_recipes(),
         MachineRegistry::bundled(),
         ContractRegistry::bundled(),
-        Fx::from_num(20_000),
+        Money::from_num(20_000),
     )
 }
 

@@ -54,7 +54,7 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 
 use super::recipe::RecipeRegistry;
-use super::types::Fx;
+use super::types::Money;
 
 /// The schema version this build understands. Rejected (not migrated) on
 /// mismatch, for the reason [`super::shop::CURRENT_SCHEMA_VERSION`] gives:
@@ -83,8 +83,8 @@ pub struct IngredientEntry {
 }
 
 impl IngredientEntry {
-    pub fn price_money(&self) -> Fx {
-        Fx::from_num(self.price)
+    pub fn price_money(&self) -> Money {
+        Money::from_num(self.price)
     }
 }
 
@@ -363,23 +363,20 @@ impl Ingredients {
 
     /// What `quantity` units of `id` costs, or `None` if the id isn't priced
     /// (an unknown ingredient), the quantity is zero (nothing to buy), or
-    /// the total would exceed what [`Fx`] can represent.
+    /// the total would exceed what [`Money`] can represent.
     ///
     /// That last case is [`super::shop::Shop::cost_of`]'s, verbatim and for
-    /// its reason: `Fx` is `I16F16`, so money saturates around 32767 and a
-    /// quantity arriving from JSON is a `u32`. Refusing an out-of-range
-    /// total keeps a silly quantity a plain no-op rather than a saturated
-    /// total that could look affordable.
-    pub fn cost_of(&self, id: &str, quantity: u32) -> Option<Fx> {
+    /// its reason: a quantity arriving from JSON is a `u32`, and a total
+    /// past what [`Money`] holds must be refused rather than saturated into
+    /// something that could look affordable. `checked_from_num` keeps a
+    /// silly quantity a plain no-op.
+    pub fn cost_of(&self, id: &str, quantity: u32) -> Option<Money> {
         if quantity == 0 {
             return None;
         }
         let entry = self.catalog.get(id)?;
         let total = entry.price.checked_mul(i64::from(quantity))?;
-        if total > i64::from(Fx::MAX.int().to_num::<i32>()) {
-            return None;
-        }
-        Some(Fx::from_num(total))
+        Money::checked_from_num(total)
     }
 
     /// The presentation snapshot — see [`IngredientsSnapshot`].
@@ -390,7 +387,7 @@ impl Ingredients {
     /// in a hopper. [`super::world::World::ingredients_snapshot`] hands over
     /// its own [`super::world::World::raw_items`], which is the single
     /// definition of that set.
-    pub fn snapshot(&self, money: Fx, hopper_items: &[String]) -> IngredientsSnapshot {
+    pub fn snapshot(&self, money: Money, hopper_items: &[String]) -> IngredientsSnapshot {
         IngredientsSnapshot {
             money: money.to_num::<f64>(),
             hopper_items: hopper_items.to_vec(),
@@ -578,10 +575,22 @@ mod tests {
     #[test]
     fn cost_refuses_a_zero_quantity_an_unknown_id_and_an_unrepresentable_total() {
         let ingredients = Ingredients::new(IngredientCatalog::from_ron_str(EXAMPLE).unwrap());
-        assert_eq!(ingredients.cost_of("tomato", 5), Some(Fx::from_num(5)));
+        assert_eq!(ingredients.cost_of("tomato", 5), Some(Money::from_num(5)));
         assert_eq!(ingredients.cost_of("tomato", 0), None);
         assert_eq!(ingredients.cost_of("saffron", 1), None);
-        assert_eq!(ingredients.cost_of("tomato", u32::MAX), None);
+        // A huge but representable total is a price like any other
+        // (unaffordable, not refused); past `Money`'s 2^47 it is refused.
+        assert_eq!(
+            ingredients.cost_of("tomato", u32::MAX),
+            Some(Money::from_num(i64::from(u32::MAX)))
+        );
+        let dear = Ingredients::new(
+            IngredientCatalog::from_ron_str(
+                r#"(schema_version: 1, entries: [IngredientEntry(id: "saffron", price: 40000)])"#,
+            )
+            .unwrap(),
+        );
+        assert_eq!(dear.cost_of("saffron", u32::MAX), None);
     }
 
     #[test]
@@ -589,7 +598,7 @@ mod tests {
         let mut ingredients = Ingredients::new(IngredientCatalog::from_ron_str(EXAMPLE).unwrap());
         ingredients.owned.add("tomato", 12);
         let hopper_items = ["tomato".to_string(), "sugar".to_string()];
-        let snapshot = ingredients.snapshot(Fx::from_num(2), &hopper_items);
+        let snapshot = ingredients.snapshot(Money::from_num(2), &hopper_items);
         assert_eq!(snapshot.entries.len(), 2);
         assert_eq!(
             snapshot.hopper_items, hopper_items,

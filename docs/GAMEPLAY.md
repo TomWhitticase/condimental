@@ -235,14 +235,22 @@ implementation history (epics, tickets, balancing passes) behind each one.
   refused machine holds its progress and reads *starved* with a `staff`
   reason (understaffed is a kind of starved, no fourth state). Payday pays
   one head at a time in `staff.ron` order out of the one money counter; the
-  first unpayable head, and every one after it, is fired.
+  first unpayable head, and every one after it, goes **unpaid** — still
+  hired, idle until the next payday, gone only if unpaid there too, and a
+  covered payday clears the arrears (the contract board's strikes, applied
+  to people). A head is billed for any period it was employed in any part
+  of (notice pay, so firing before payday saves nothing), and a hire is
+  refused unless the balance covers the next bill plus the new wage, so
+  nobody works a period for free and no head is hired who cannot be paid.
   **MVP-provisional, open to revision:** shortfall allocation is
   first-come in stable order (no player priority yet); no recruiting fee;
-  firing is free and immediate; an unpaid head just leaves.
+  firing is free and immediate but still pays out the period; an unpaid
+  head is idled once and gone the second time (no debt, no reputation
+  meter).
 - **Money and contract state are plain fields on `sim_core::sim::
   economy::Economy`**, owned by `World`, not ECS entities — no per-entity
-  multiplicity to justify that. `money` is a single fixed-point (`Fx`)
-  counter (ARCHITECTURE.md §3.9). `Economy` holds a `Vec<ActiveContract>`
+  multiplicity to justify that. `money` is a single fixed-point (`types::Money`,
+  `I48F16`) counter (ARCHITECTURE.md §3.9). `Economy` holds a `Vec<ActiveContract>`
   (each with its own cadence clock) plus the one shared `delivery_buffer`;
   several contracts are a `Vec` inside one struct, not a reason for ECS
   machinery. Exposed to Godot as `SimBridge::economy_snapshot_json`.
@@ -265,6 +273,6 @@ implementation history (epics, tickets, balancing passes) behind each one.
 - ~~What exactly happens when a delivery interval is missed once — immediate contract loss, a grace period, a reputation meter that only loses the contract after repeated misses?~~ **Decided 2026-09-10 (§9, the contract-board bullet):** a grace period counted in strikes — `strikes` consecutive missed windows lose the contract, a paid window resets the count, and a lost contract is bought back at its listed price. No reputation meter yet.
 - Is there a reputation/trust score gating access to higher-tier contracts, separate from equipment-tier gating?
 - When staff demand exceeds headcount in a category, which machines lose out — player-set priority, first-come-first-served, or proportional throttling across all of them? **MVP-provisional (2026-09-12, §9's staff-pools bullet):** first-come in the simulation's stable machine order, so the same machine is always the one short; player-set priority is the expected replacement and needs no wire change.
-- Is there a one-time recruiting/training cost on top of the recurring per-head wage, and can headcount be reduced (firing) freely or with a penalty/delay? **MVP-provisional (2026-09-12):** no recruiting fee, free and immediate firing, and a head that cannot be paid on payday leaves. All three are placeholders for the balancing pass, not decisions.
+- Is there a one-time recruiting/training cost on top of the recurring per-head wage, and can headcount be reduced (firing) freely or with a penalty/delay? **MVP-provisional (2026-09-12), amended by the quality pass (2026-09-13):** no recruiting fee, but a hire needs the balance to cover the next bill plus the new wage; firing is free and immediate, but the fired head is still paid for the period it worked any part of (notice pay); a head that cannot be paid on payday is idled, not lost, and leaves only if the next payday cannot pay it either. Still placeholders for the balancing pass, not decisions.
 - Are perishability (spoilage) and corrosion (durability) modeled as full ECS components with their own tick-based decay, or as simpler flags/costs? Needs a decision before tier 4/5 implementation starts.
 - Exact tier list beyond the six in §2 (this doc's tiers are illustrative of the *shape* of progression, not necessarily the final content list), and the actual catalog of derived sauces/variants — both are a game-design task, not an architecture or gameplay-systems one.

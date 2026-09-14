@@ -852,6 +852,15 @@ var _last_money := INF
 var _contract_dock_row: HBoxContainer
 var _contract_dock_entries: Dictionary = {} # item id -> {"row": HBoxContainer, "label": Label}
 var _contract_dock_empty_label: Label
+## Wages, always visible on the clipboard (the quality pass, ticket 4):
+## "wages N / period · payday in Xs", with a shortfall warning appended in
+## words and a glyph when the balance cannot cover the next bill — the same
+## figure the H panel shows, read from `_staff_snapshot` (already polled on
+## its own cadence; see `_poll_staff`) so this label costs no extra poll.
+var _contract_wages_label: Label
+## The wages line's own ink, so switching it to the warning red cannot bleed
+## into every docket footnote (they share `_contract_meta_settings`).
+var _contract_wages_settings: LabelSettings
 ## One docket card per active contract, in snapshot (= priority) order.
 var _contract_cards: Array = [] # Array[Dictionary], see _build_contract_card
 var _contract_card_ids: Array = [] # the contract ids _contract_cards was built for
@@ -4233,6 +4242,22 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_dock_empty_label.text = "empty"
 	_contract_dock_row.add_child(_contract_dock_empty_label)
 
+	# Wages, on the always-visible clipboard rather than only inside the H
+	# panel (the quality pass, ticket 4 — GAMEPLAY.md §5's third cost axis
+	# has to be as visible as the money it draws from). Ink by default,
+	# switched to the docket's own warning red when short of the next bill.
+	# Its OWN settings object, duplicated from the meta ink rather than shared:
+	# the line recolours when wages cannot be met, and every docket's footnote
+	# reads from `_contract_meta_settings`, so recolouring the shared one would
+	# turn the whole board red.
+	_contract_wages_label = Label.new()
+	_contract_wages_label.name = "WagesLabel"
+	_contract_wages_settings = LabelSettings.new()
+	_contract_wages_settings.font_size = _contract_meta_settings.font_size
+	_contract_wages_settings.outline_size = 0
+	_contract_wages_label.label_settings = _contract_wages_settings
+	body.add_child(_contract_wages_label)
+
 	_checkbox_style_unchecked = StyleBoxFlat.new()
 	_checkbox_style_unchecked.bg_color = Color(0.80, 0.74, 0.57, 1.0) # a shade darker than the paper
 	_checkbox_style_unchecked.border_color = Color(0.27, 0.29, 0.32, 1.0)
@@ -6119,6 +6144,25 @@ func _staff_bill(snapshot: Dictionary) -> int:
 	return bill
 
 
+## What the NEXT payday will actually charge. The wire reports this as
+## `next_bill` (`Σ owed × wage`), and since ticket 1's notice pay that is no
+## longer the same sum as `_staff_bill`'s `Σ headcount × wage` — a head fired
+## part-way through a period is still owed for it, so the two disagree exactly
+## when someone has been let go. The wire's figure is the fact; `_staff_bill`
+## survives as the fallback for a snapshot older than the field (and as the
+## run-rate sum, which is what it honestly is).
+func _staff_next_bill(snapshot: Dictionary) -> int:
+	return int(snapshot.get("next_bill", _staff_bill(snapshot)))
+
+
+## How far the balance falls short of that bill, 0 when it is covered. Also
+## the sim's own figure (`StaffPools::shortfall`), for the same reason.
+func _staff_shortfall(snapshot: Dictionary, money: float) -> int:
+	# Floor the balance: a part unit cannot pay a whole head, so 13.9 against
+	# a bill of 14 is short by 1, not by 0.1.
+	return int(snapshot.get("shortfall", maxi(_staff_next_bill(snapshot) - int(floor(money)), 0)))
+
+
 ## The footer's lines, pure given the snapshot and the tick: the bill per
 ## period, the countdown to payday in seconds (`_format_remaining`, so it is
 ## the same clock the dockets use), and — only when it happened — how many
@@ -6126,14 +6170,49 @@ func _staff_bill(snapshot: Dictionary) -> int:
 func _staff_footer_text(snapshot: Dictionary, current_tick: int) -> String:
 	var lines: Array[String] = []
 	var remaining: int = int(snapshot.get("next_payday_tick", 0)) - current_tick
+	# The wire's `next_bill`, so this and the clipboard's wages line can never
+	# quote different numbers at the player for the same payday.
 	lines.append("wages %d / period  ·  next payday in %s" % [
-		_staff_bill(snapshot), _format_remaining(remaining),
+		_staff_next_bill(snapshot), _format_remaining(remaining),
 	])
 	var walked_out := int(snapshot.get("walked_out_last_payday", 0))
 	if walked_out > 0:
 		lines.append("✗ %d left unpaid last payday" % walked_out)
 	lines.append("HIRE and FIRE move one head; hiring is free, wages are paid every period    H/ESC: close")
 	return "\n".join(PackedStringArray(lines))
+
+
+## The clipboard's always-visible wages line, pure given the snapshot, the
+## tick and the balance (the quality pass, ticket 4). GAMEPLAY.md §5 makes
+## wages the third recurring cost axis, and until this line existed the bill
+## appeared ONLY inside the H panel — a charge the player pays every period
+## and could see only by going to look for it, unlike the ingredients in the
+## larder strip or the prices in the shop.
+##
+## Two states, and the difference between them is a warning the player can
+## still act on: ink while the balance covers the next bill, the docket's one
+## warning red when it does not, with the shortfall named in figures AND in
+## words beside a glyph, since colour is never the whole message (UI_UX.md
+## §7). The clock goes through `_format_remaining`, so it reads in seconds
+## like every other player-facing clock and never in ticks (§5e).
+##
+## Returns `{}` when there is nothing honest to say — before the first
+## `_poll_staff` has run, or with nobody on the books — rather than drawing
+## "wages 0 / period", which would give a cost that does not exist.
+func _contract_wages_state(snapshot: Dictionary, current_tick: int, money: float) -> Dictionary:
+	if snapshot.is_empty():
+		return {}
+	var bill := _staff_next_bill(snapshot)
+	if bill <= 0:
+		return {}
+	var due := _format_remaining(int(snapshot.get("next_payday_tick", 0)) - current_tick)
+	var shortfall := _staff_shortfall(snapshot, money)
+	if shortfall > 0:
+		return {
+			"text": "⚠ wages %d due in %s — short %d, unpaid heads leave" % [bill, due, shortfall],
+			"short": true,
+		}
+	return {"text": "wages %d / period  ·  payday in %s" % [bill, due], "short": false}
 
 
 ## Drives every row and the footer from the last poll. Called each frame
@@ -10286,6 +10365,7 @@ func _update_contract_panel() -> void:
 	_flash_money_change(money)
 	_update_money_flyout()
 	_update_contract_dock(econ.get("delivery_stock", []))
+	_update_contract_wages(money)
 
 	var contracts: Array = econ.get("contracts", [])
 	_announce_contract_changes(contracts, econ.get("board", []))
@@ -10424,6 +10504,23 @@ func _update_money_flyout() -> void:
 ## this unclamped number is what reconciles them. It is one line of text
 ## rather than a new widget: surfacing the rule is worth it, inventing a
 ## second progress language for it is not.
+## Draws `_contract_wages_state` onto the clipboard's wages line. The staff
+## snapshot it reads is polled on its own cadence whether or not the H panel
+## is open (see `_poll_staff`), so this costs no extra trip across the wire;
+## the line simply hides itself while there is nothing honest to show.
+func _update_contract_wages(money: float) -> void:
+	if _contract_wages_label == null:
+		return
+	var state := _contract_wages_state(_staff_snapshot, sim.current_tick(), money)
+	_contract_wages_label.visible = not state.is_empty()
+	if state.is_empty():
+		return
+	_contract_wages_label.text = String(state["text"])
+	_contract_wages_settings.font_color = (
+		CONTRACT_RISK_COLOR if bool(state["short"]) else _contract_meta_settings.font_color
+	)
+
+
 func _update_contract_dock(stock: Array) -> void:
 	var seen: Dictionary = {}
 	for pair in stock:

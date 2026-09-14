@@ -180,9 +180,9 @@ use super::machines::{Footprint, MachineRegistry};
 use super::recipe::{Recipe, RecipeRegistry};
 use super::shop::{DEFAULT_PURCHASE_QUANTITY, Shop, ShopSnapshot};
 use super::splitter::{SPLITTER_KIND, Side, Splitter};
-use super::stats::{ProductionLedger, ProductionSnapshot, StatKind};
 use super::staff::{CrewEntry, CrewRequest, StaffPools, StaffSnapshot, crew_entries};
-use super::types::{ChunkId, Direction, FluidId, Fx, ItemId, RecipeId, TileCoord, chunk_of};
+use super::stats::{ProductionLedger, ProductionSnapshot, StatKind};
+use super::types::{ChunkId, Direction, FluidId, Fx, ItemId, Money, RecipeId, TileCoord, chunk_of};
 
 /// The buildable-kind id (`data/shop.ron`) of one tile of conveyor.
 ///
@@ -519,16 +519,25 @@ enum PlayerCommandDto {
         item: Option<ItemId>,
     },
     /// `{"type": "remove", "tile": [4, 0]}`.
-    Remove { tile: TileCoord },
+    Remove {
+        tile: TileCoord,
+    },
     /// `{"type": "rotate", "tile": [4, 0]}`.
-    Rotate { tile: TileCoord },
+    Rotate {
+        tile: TileCoord,
+    },
     /// `{"type": "set_hopper_item", "tile": [-1, 0], "item": "sugar"}` —
     /// both required: only the player knows which hopper and which
     /// ingredient.
-    SetHopperItem { tile: TileCoord, item: ItemId },
+    SetHopperItem {
+        tile: TileCoord,
+        item: ItemId,
+    },
     /// `{"type": "sign_contract", "id": "diner_supply"}` — `id` required:
     /// only the player knows which offer they are taking.
-    SignContract { id: String },
+    SignContract {
+        id: String,
+    },
     /// `{"type": "set_hopper_auto_fill", "tile": [-1, 0], "enabled": true}`
     /// — `enabled` optional, defaulting to `true`, because a panel's toggle
     /// sends the state it wants and "turn it on" is the one this command
@@ -1465,6 +1474,13 @@ struct Topology {
     docks: Vec<Entity>,
     /// A belt hands off to the belt (or splitter) it points at.
     belt_to_belt: Vec<(Entity, Entity)>,
+    /// The same relation as `belt_to_belt`, indexed like `belts`: entry
+    /// `i` is what `belts[i]` hands to if that is a belt or a splitter,
+    /// else `None`. The belt tick reads the receiver's room at its start
+    /// through this (`belt.rs`'s "the footprint does not stop at the belt's
+    /// end"), and a per-belt search of `belt_to_belt` every tick would be
+    /// quadratic in the line's length.
+    belt_ahead: Vec<Option<Entity>>,
     /// **The one one-to-many relation in this simulation**: a splitter and
     /// the two things standing on its output tiles — straight-through
     /// first, then the branch one quarter turn clockwise (see
@@ -1532,6 +1548,12 @@ pub struct World {
     raw_items: Vec<ItemId>,
     tick_count: u64,
     belt_speed: Fx,
+    /// Scratch for the belt tick: how much room each carrier's downstream
+    /// carrier has at its start, read for every belt and splitter BEFORE
+    /// any of them moves (`BeltSegment::tick_toward`'s order-independence
+    /// rule). Indexed like `topology.belts` then `topology.splitters`;
+    /// cleared, not reallocated, every tick, like `dirty`.
+    room_ahead: Vec<Fx>,
     /// Chunks touched since the start of the current `tick()` call. Cleared
     /// (not reallocated) at the start of every `tick()` — see `tick`'s doc
     /// comment and ARCHITECTURE.md §4's "Delta granularity" note. A
@@ -1568,13 +1590,33 @@ const BELT_SPEED_TILES_PER_TICK: f64 = 0.02;
 /// One placed belt tile is one unit of belt. (`belt.rs` requires
 /// `speed <= min_spacing`, which the two constants above and below satisfy.)
 const BELT_TILE_LENGTH: f64 = 1.0;
-const ITEM_MIN_SPACING_TILES: f64 = 0.25;
+/// The closest two items on a belt can stand, centre to centre, and so how
+/// many a fully compressed tile holds: **two**, one every half tile, since
+/// the quality pass of 2026-09-13 (it was a quarter tile, four to five per
+/// tile). Chosen by rendering: items are modelled at half a tile
+/// (`assets.rs`'s `ITEM_VOXELS`, the widest — the box — 12 of 32 voxels),
+/// so a quarter-tile spacing drew a jammed lane as one continuous bar of
+/// product, and at a half tile a jammed lane reads as a queue of separate
+/// objects with a few voxels of belt showing between each pair. Wider still
+/// read as a trickle. The belt's speed is unchanged — only the spacing moved
+/// — so a belt now carries `BELT_SPEED_TILES_PER_TICK / this` items per
+/// tick at most: one every 25 ticks, forty per thousand, still well over
+/// what the shipped line's slowest stage asks of it (`tests/core_loop.rs`
+/// pins that the line's rate is the vat's, not the belt's). Exact in `Fx`.
+/// Stated in prose in CLAUDE.md's decisions log and `docs/DECISIONS.md`;
+/// change them together.
+const ITEM_MIN_SPACING_TILES: f64 = 0.5;
 const MACHINE_INPUT_CAPACITY: u32 = 8;
 const MACHINE_OUTPUT_CAPACITY: u32 = 8;
 /// Volume one pipe tile holds, in whole fluid units.
 const PIPE_SEGMENT_CAPACITY: i32 = 10;
 
 impl World {
+    /// [`ITEM_MIN_SPACING_TILES`] as the `Fx` every belt is built with.
+    fn item_min_spacing(&self) -> Fx {
+        Fx::from_num(ITEM_MIN_SPACING_TILES)
+    }
+
     /// An **empty** world: no belts, no machines, no buildings, and
     /// [`STARTING_MONEY`] in the bank. Everything in a factory is something
     /// the player buys ([`PlayerCommand::Purchase`]) and places
@@ -1606,7 +1648,7 @@ impl World {
         machines: MachineRegistry,
         contracts: ContractRegistry,
     ) -> Self {
-        Self::with_content_and_money(recipes, machines, contracts, Fx::from_num(STARTING_MONEY))
+        Self::with_content_and_money(recipes, machines, contracts, Money::from_num(STARTING_MONEY))
     }
 
     /// [`World::with_content`], but starting from a chosen balance instead
@@ -1622,7 +1664,7 @@ impl World {
         recipes: RecipeRegistry,
         machines: MachineRegistry,
         contracts: ContractRegistry,
-        money: Fx,
+        money: Money,
     ) -> Self {
         let ordered = recipes.ordered();
         assert!(
@@ -1676,6 +1718,7 @@ impl World {
             raw_items,
             tick_count: 0,
             belt_speed: Fx::from_num(BELT_SPEED_TILES_PER_TICK),
+            room_ahead: Vec::new(),
             dirty: Vec::new(),
             economy: Economy::with_money(&contracts, money),
             shop: Shop::bundled(),
@@ -1692,7 +1735,7 @@ impl World {
 
     /// Current money balance (ARCHITECTURE.md §3.9: fixed-point, never a
     /// float, since it's shared/persisted simulation state).
-    pub fn money(&self) -> Fx {
+    pub fn money(&self) -> Money {
         self.economy.money
     }
 
@@ -1727,8 +1770,9 @@ impl World {
     /// The shop catalog, the player's owned counts and their current money
     /// in one object — see [`ShopSnapshot`] for the exact JSON shape.
     pub fn shop_snapshot(&self) -> ShopSnapshot {
-        self.shop
-            .snapshot(self.economy.money, |kind| crew_entries(self.crew_of_kind(kind)))
+        self.shop.snapshot(self.economy.money, |kind| {
+            crew_entries(self.crew_of_kind(kind))
+        })
     }
 
     /// The staff pools: headcounts, the last tick's demand and the payday
@@ -1746,9 +1790,7 @@ impl World {
     /// The crew `kind` needs while running: its `machines.ron` `staff`
     /// list, empty for a kind the registry does not know (belt, pipe).
     pub fn crew_of_kind(&self, kind: &str) -> &[(String, u32)] {
-        self.machines
-            .get(kind)
-            .map_or(&[], |k| k.staff.as_slice())
+        self.machines.get(kind).map_or(&[], |k| k.staff.as_slice())
     }
 
     /// The raw-ingredient market plus the stock the player owns and their
@@ -2137,7 +2179,8 @@ impl World {
                 BodyKind::Pipe | BodyKind::Hopper | BodyKind::FluidTank => None,
             }
         };
-        for &belt in &topology.belts {
+        topology.belt_ahead = vec![None; topology.belts.len()];
+        for (index, &belt) in topology.belts.iter().enumerate() {
             let placement = self.placement_of(belt);
             let target = placement.direction.step(self.position_of(belt));
             let Some(occupant) = resolve_sink(&topology.grid, target) else {
@@ -2150,6 +2193,7 @@ impl World {
             });
             if is_belt_like(occupant_body) {
                 topology.belt_to_belt.push((belt, occupant));
+                topology.belt_ahead[index] = Some(occupant);
                 conveyor_links(&mut links, occupant).inputs.push(LinkInput {
                     from: placement.direction.opposite(),
                     kind: LinkKind::Belt,
@@ -2499,7 +2543,9 @@ impl World {
     ///    are belt tiles with a choice at the end (see
     ///    [`super::splitter`]), so product crosses one at belt speed.
     /// 2b. **Staff pools reset** (the staff pools MVP epic): every category
-    ///    is back at its headcount with nothing asked for yet.
+    ///    is back at its headcount less its heads in arrears (the quality
+    ///    pass: an unpaid head stays hired but does not work), with nothing
+    ///    asked for yet.
     /// 3. **Machines run** — start a craft, or deposit a finished one. In
     ///    `topology.machines` order each machine that would work this tick
     ///    first claims its kind's whole crew from the pools; a refused
@@ -2527,9 +2573,12 @@ impl World {
     ///    after it, so everything this tick recorded sits in the bucket that
     ///    was current while it happened.
     /// 8. **Payday** (`StaffPools::tick`): on the tick the clock reaches
-    ///    `next_payday_tick`, wages are paid one head at a time out of the
-    ///    one money counter, and the first head that cannot be paid — and
-    ///    every one after it — leaves.
+    ///    `next_payday_tick`, every head owed for the period — fired ones
+    ///    included, notice pay first — is paid one at a time out of the one
+    ///    money counter. The first head the money does not reach, and every
+    ///    one after it, is UNPAID: still hired, idle until the next payday,
+    ///    and gone if that one cannot pay it either (the quality pass; see
+    ///    `staff.rs`'s module doc).
     ///
     /// Steps 4 and 5 are the same two phases the fixed chain always had
     /// ("belt to machine, then everything onto a belt"); what changed is
@@ -2559,21 +2608,58 @@ impl World {
         // 2. Belts — and splitters, which carry their contents in an
         // ordinary belt segment (`splitter.rs`) so that product crosses one
         // in exactly the time it would cross the belt tile it replaced.
+        //
+        // Every carrier's front item stops short of its end by whatever
+        // footprint the item at the start of the NEXT carrier still claims
+        // (`belt.rs`, "the footprint does not stop at the belt's end").
+        // The rooms are all read before any carrier moves, so the outcome
+        // is the same whatever order the carriers are visited in — which is
+        // what lets a save that was rebuilt in a different placement order
+        // stay in lockstep with the world it was taken from.
         let belts = std::mem::take(&mut self.topology.belts);
         let splitters = std::mem::take(&mut self.topology.splitters);
-        for &carrier in belts.iter().chain(splitters.iter()) {
+        let belt_ahead = std::mem::take(&mut self.topology.belt_ahead);
+        let splitter_outputs = std::mem::take(&mut self.topology.splitter_outputs);
+        let room_at_start = |world: &Self, carrier: Option<Entity>| -> Option<Fx> {
+            let carrier = carrier?;
+            world
+                .ecs
+                .get::<&BeltSegment>(carrier)
+                .ok()
+                .map(|segment| segment.room_at_start())
+        };
+        self.room_ahead.clear();
+        for index in 0..belts.len() {
+            let room = room_at_start(self, belt_ahead[index]);
+            self.room_ahead.push(room.unwrap_or(self.item_min_spacing()));
+        }
+        for (index, _) in splitters.iter().enumerate() {
+            // A splitter's item goes to whichever side takes it, so the
+            // room that matters is the roomier side's; neither side being
+            // a carrier is the "nothing past the end" case, like a belt
+            // into a machine.
+            let (_, outputs) = splitter_outputs[index];
+            let room = outputs
+                .iter()
+                .filter_map(|&output| room_at_start(self, output))
+                .max();
+            self.room_ahead.push(room.unwrap_or(self.item_min_spacing()));
+        }
+        for (index, &carrier) in belts.iter().chain(splitters.iter()).enumerate() {
             let moved = {
                 let mut segment = self
                     .ecs
                     .get::<&mut BeltSegment>(carrier)
                     .expect("a belt or splitter placement carries a BeltSegment");
-                segment.tick(self.belt_speed)
+                segment.tick_toward(self.belt_speed, self.room_ahead[index])
             };
             if moved {
                 let tile = self.position_of(carrier);
                 self.mark_dirty(tile);
             }
         }
+        self.topology.splitter_outputs = splitter_outputs;
+        self.topology.belt_ahead = belt_ahead;
         self.topology.splitters = splitters;
 
         // 3. Machines.
@@ -2779,8 +2865,8 @@ impl World {
         self.production.tick();
 
         // 8. Payday. Not tied to any tile either; Godot polls
-        // `staff_snapshot`. A head who leaves unpaid simply is not there
-        // when the pools reset next tick.
+        // `staff_snapshot`. A head left unpaid is simply not available when
+        // the pools reset next tick; one who leaves is not there at all.
         let _ = self.staff.tick(self.tick_count, &mut self.economy);
     }
 
@@ -3100,10 +3186,12 @@ impl World {
                 self.try_set_tank_auto_fill(tile, enabled);
             }
             // Neither dirties a chunk: a head is not a tile. Both are silent
-            // about an unknown category, and `Fire` about an empty pool,
-            // the `Purchase` convention.
+            // about an unknown category, `Hire` about a balance that could
+            // not pay the next bill plus the new wage (the quality pass:
+            // you cannot hire someone you could not pay), and `Fire` about
+            // an empty pool — the `Purchase` convention.
             PlayerCommand::Hire { category } => {
-                self.staff.hire(&category);
+                self.staff.hire(&category, self.economy.money);
             }
             PlayerCommand::Fire { category } => {
                 self.staff.fire(&category);
@@ -3939,7 +4027,7 @@ impl World {
     /// has to do so twice: once to fund each rebuild purchase, and once at
     /// the end to install the saved balance, so those purchases cannot leak
     /// into it.
-    pub(super) fn restore_money(&mut self, money: Fx) {
+    pub(super) fn restore_money(&mut self, money: Money) {
         self.economy.money = money;
     }
 

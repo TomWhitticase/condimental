@@ -173,6 +173,69 @@ func _run_checks() -> void:
 	if unpaid.find("✗ 3 left unpaid last payday") < 0:
 		_fail("three left unpaid reads '✗ 3 left unpaid last payday', got:\n%s" % unpaid)
 
+	# --- 2b. the clipboard's always-visible wages line, pure ------------------
+	# The bill is on the HUD the player is already looking at, not only inside
+	# the H panel (the quality pass, ticket 4). Same bill and same clock as the
+	# footer above, so the two readouts can never disagree.
+	var paid: Dictionary = main._contract_wages_state(snapshot, 1700, 500.0)
+	if paid.is_empty():
+		_fail("a factory with heads on the books shows a wages line")
+	if String(paid["text"]).find("wages 16") < 0:
+		_fail("the wages line names the bill, got '%s'" % paid["text"])
+	if String(paid["text"]).find("payday in %s" % expected_wait) < 0:
+		_fail("the wages line counts down in seconds, got '%s'" % paid["text"])
+	if bool(paid["short"]):
+		_fail("500 covers a bill of 16, so the line is not in its warning state")
+
+	# Short of the bill: the warning names the gap in figures AND words beside
+	# a glyph, because colour is never the whole message (UI_UX.md §7).
+	var broke: Dictionary = main._contract_wages_state(snapshot, 1700, 10.0)
+	if not bool(broke["short"]):
+		_fail("10 cannot cover a bill of 16, so the line warns")
+	if String(broke["text"]).find("short 6") < 0:
+		_fail("the warning names the shortfall, got '%s'" % broke["text"])
+	if String(broke["text"]).find("⚠") < 0 or String(broke["text"]).find("leave") < 0:
+		_fail("the warning carries a glyph and says what happens, got '%s'" % broke["text"])
+
+	# A part unit cannot pay a whole head: 15.9 against 16 is short by one.
+	var part: Dictionary = main._contract_wages_state(snapshot, 1700, 15.9)
+	if not bool(part["short"]) or String(part["text"]).find("short 1") < 0:
+		_fail("a fractional balance floors, so 15.9 against 16 is short 1, got '%s'" % part["text"])
+
+	# The wire's own figures win over Godot's sum. Since ticket 1's notice pay
+	# a head fired part-way through a period is still owed for it, so
+	# `next_bill` deliberately exceeds `Σ headcount × wage` here — and both
+	# readouts must quote the wire, not recompute it.
+	var notice: Dictionary = snapshot.duplicate(true)
+	notice["next_bill"] = 20
+	notice["shortfall"] = 4
+	if main._staff_next_bill(notice) != 20:
+		_fail("the bill is the wire's next_bill, got %d" % main._staff_next_bill(notice))
+	var owed: Dictionary = main._contract_wages_state(notice, 1700, 16.0)
+	if String(owed["text"]).find("wages 20") < 0:
+		_fail("notice pay is billed, so the line reads 'wages 20', got '%s'" % owed["text"])
+	if not bool(owed["short"]) or String(owed["text"]).find("short 4") < 0:
+		_fail("the wire's shortfall is quoted verbatim, got '%s'" % owed["text"])
+	if main._staff_footer_text(notice, 1700).find("wages 20 / period") < 0:
+		_fail("the H panel footer quotes the same bill as the clipboard line")
+
+	# Nothing honest to say beats a cost that does not exist.
+	if not main._contract_wages_state({}, 1700, 500.0).is_empty():
+		_fail("before the first staff poll the wages line stays hidden")
+	var nobody: Dictionary = snapshot.duplicate(true)
+	for category in nobody["categories"]:
+		category["headcount"] = 0
+	if not main._contract_wages_state(nobody, 1700, 500.0).is_empty():
+		_fail("with nobody hired there is no bill, so the line hides rather than reading 'wages 0'")
+
+	# The wages line owns its ink. It recolours when wages cannot be met, and
+	# every docket footnote reads from `_contract_meta_settings`, so sharing
+	# that object would turn the whole board red on one bad payday.
+	if main._contract_wages_label.label_settings != main._contract_wages_settings:
+		_fail("the wages line draws with its own LabelSettings")
+	if main._contract_wages_settings == main._contract_meta_settings:
+		_fail("the wages line must not share the docket footnote's settings object")
+
 	# --- 3. the reference line: rows match the wire ---------------------------
 	Layouts.build_reference_line(main.sim)
 	Layouts.stock_larder(main.sim, 64)

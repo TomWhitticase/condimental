@@ -14,7 +14,7 @@
 
 mod common;
 
-use sim_core::sim::types::Fx;
+use sim_core::sim::types::Money;
 use sim_core::sim::{
     ContractRegistry, MachineRegistry, PlayerCommand, RecipeRegistry, World, command_from_json,
 };
@@ -139,7 +139,7 @@ fn an_unaffordable_or_unknown_signature_changes_nothing() {
         .cloned()
         .unwrap();
     // A world one unit short of the fee.
-    let short = dearest.price - Fx::from_num(1);
+    let short = dearest.price - Money::from_num(1);
     let mut world = World::with_content_and_money(
         recipes(),
         MachineRegistry::bundled(),

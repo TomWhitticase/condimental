@@ -95,7 +95,7 @@ use std::collections::BTreeMap;
 
 use super::contracts::{Contract, ContractRegistry};
 use super::inventory::Inventory;
-use super::types::{Fx, ItemId};
+use super::types::{Money, ItemId};
 
 /// What a new game starts with in the bank (the "Real Placement" epic's
 /// ticket 1).
@@ -224,7 +224,7 @@ pub enum SignRefusal {
 pub struct Economy {
     /// Fixed-point money counter (ARCHITECTURE.md §3.9 — shared, persisted
     /// simulation state, so never a float).
-    pub money: Fx,
+    pub money: Money,
     /// The whole board of offers, in `contracts.ron` order (module doc:
     /// "Signing and losing contracts"). Content, so read-only.
     board: ContractRegistry,
@@ -336,14 +336,14 @@ impl Economy {
     /// lets a test build an economy in isolation without a starting balance
     /// appearing in its arithmetic.
     pub fn new(contracts: &ContractRegistry) -> Self {
-        Self::with_money(contracts, Fx::ZERO)
+        Self::with_money(contracts, Money::ZERO)
     }
 
     /// [`Economy::new`], but starting from a chosen balance instead of
     /// [`STARTING_MONEY`]. The seam a test fixture uses to start rich (see
     /// [`super::reference::reference_chain`], which buys a whole factory) or
     /// deliberately broke, and where a loaded save will restore its balance.
-    pub fn with_money(contracts: &ContractRegistry, money: Fx) -> Self {
+    pub fn with_money(contracts: &ContractRegistry, money: Money) -> Self {
         Self {
             money,
             contracts: contracts
@@ -389,8 +389,8 @@ impl Economy {
     /// exactly one counter, and a purchase — or a contract signature —
     /// debits the same field a contract delivery credits. A non-positive
     /// `amount` is refused rather than treated as a free purchase.
-    pub fn try_spend(&mut self, amount: Fx) -> bool {
-        if amount <= Fx::ZERO || self.money < amount {
+    pub fn try_spend(&mut self, amount: Money) -> bool {
+        if amount <= Money::ZERO || self.money < amount {
             return false;
         }
         self.money -= amount;
@@ -500,7 +500,9 @@ impl Economy {
             for (item, qty) in &self.contracts[i].contract.mix {
                 self.delivery_buffer.remove(item, *qty);
             }
-            self.money += self.contracts[i].contract.payout;
+            // Saturating, never wrapping (and never panicking in a debug
+            // build): see `types::Money`.
+            self.money = self.money.saturating_add(self.contracts[i].contract.payout);
             self.contracts[i].deliveries_made += 1;
             self.contracts[i].consecutive_misses = 0;
             events.push(ContractEvent::Paid { id });
@@ -628,12 +630,27 @@ mod tests {
         assert_eq!(econ.contract("slow").unwrap().window_start_tick(), 0);
     }
 
+    /// A payout at the top of the money type saturates: never a panic (a
+    /// debug build's `+=` overflow), never a wrap to a negative balance.
+    /// `Money` is 2^47 wide, so play never gets here; the guarantee is what
+    /// matters (the quality pass).
+    #[test]
+    fn a_payout_at_the_ceiling_saturates_rather_than_wrapping() {
+        let mut econ = fixture();
+        econ.money = Money::MAX - Money::from_num(1);
+        econ.deposit("boxed_ketchup", 10);
+        let events = econ.tick(100);
+        assert!(events.iter().any(|e| matches!(e, ContractEvent::Paid { .. })));
+        assert_eq!(econ.money, Money::MAX);
+        assert!(econ.money > Money::ZERO, "it did not wrap");
+    }
+
     #[test]
     fn does_not_pay_out_before_the_cadence_boundary_arrives() {
         let mut econ = fixture();
         econ.deposit("boxed_ketchup", 10);
         assert!(econ.tick(99).is_empty());
-        assert_eq!(econ.money, Fx::from_num(0));
+        assert_eq!(econ.money, Money::from_num(0));
     }
 
     #[test]
@@ -646,7 +663,7 @@ mod tests {
         let events = econ.tick(100);
 
         assert_eq!(paid(&events), vec!["fast"], "only the 100-tick contract should have settled");
-        assert_eq!(econ.money, Fx::from_num(50));
+        assert_eq!(econ.money, Money::from_num(50));
         assert_eq!(
             econ.delivery_buffer.count("boxed_ketchup"),
             3,
@@ -672,7 +689,7 @@ mod tests {
         }
         assert_eq!(
             econ.money,
-            Fx::from_num(100),
+            Money::from_num(100),
             "two 'fast' windows and no 'slow' window should have paid"
         );
         assert_eq!(econ.contract("slow").unwrap().deliveries_made, 0);
@@ -680,7 +697,7 @@ mod tests {
         econ.tick(250);
         assert_eq!(
             econ.money,
-            Fx::from_num(190),
+            Money::from_num(190),
             "'slow' now falls due and adds its own, different payout"
         );
         assert_eq!(econ.contract("slow").unwrap().deliveries_made, 1);
@@ -698,7 +715,7 @@ mod tests {
 
         assert_eq!(
             econ.money,
-            Fx::from_num(50),
+            Money::from_num(50),
             "only 'fast' could be filled from two boxes — 'slow' must not be paid from the \
              same stock"
         );
@@ -720,7 +737,7 @@ mod tests {
 
         assert_eq!(
             econ.money,
-            Fx::from_num(140),
+            Money::from_num(140),
             "both contracts should have settled at the shared boundary"
         );
         assert_eq!(econ.delivery_buffer.count("boxed_ketchup"), 0);
@@ -759,7 +776,7 @@ mod tests {
             id: "fast".to_string(),
             consecutive_misses: 1
         }));
-        assert_eq!(econ.money, Fx::from_num(0));
+        assert_eq!(econ.money, Money::from_num(0));
         assert_eq!(
             econ.delivery_buffer.count("boxed_ketchup"),
             1,
@@ -771,7 +788,7 @@ mod tests {
 
         econ.deposit("boxed_ketchup", 1); // the missing unit arrives later
         assert_eq!(paid(&econ.tick(200)), vec!["fast"]);
-        assert_eq!(econ.money, Fx::from_num(50));
+        assert_eq!(econ.money, Money::from_num(50));
         assert_eq!(
             econ.contract("fast").unwrap().consecutive_misses,
             0,
@@ -822,7 +839,7 @@ mod tests {
     #[test]
     fn a_contract_with_one_strike_is_lost_on_its_first_miss() {
         let mut econ = fixture();
-        econ.money = Fx::from_num(100);
+        econ.money = Money::from_num(100);
         econ.try_sign("offer", 0).unwrap();
         assert!(econ.is_active("offer"));
         let events = econ.tick(150);
@@ -833,10 +850,10 @@ mod tests {
     #[test]
     fn signing_debits_the_price_starts_a_fresh_clock_and_takes_the_boards_position() {
         let mut econ = fixture();
-        econ.money = Fx::from_num(100);
+        econ.money = Money::from_num(100);
 
         assert_eq!(econ.try_sign("offer", 40), Ok(()));
-        assert_eq!(econ.money, Fx::from_num(70), "the fee is the offer's price");
+        assert_eq!(econ.money, Money::from_num(70), "the fee is the offer's price");
         let signed = econ.contract("offer").expect("now active");
         assert_eq!(signed.next_delivery_tick, 190, "first window ends one cadence after signing");
         assert_eq!(signed.window_start_tick(), 40);
@@ -852,14 +869,14 @@ mod tests {
     #[test]
     fn an_offer_can_be_signed_once_only_while_it_is_active() {
         let mut econ = fixture();
-        econ.money = Fx::from_num(1000);
+        econ.money = Money::from_num(1000);
         assert_eq!(econ.try_sign("offer", 0), Ok(()));
         assert_eq!(
             econ.try_sign("offer", 0),
             Err(SignRefusal::AlreadySigned),
             "one signature per offer"
         );
-        assert_eq!(econ.money, Fx::from_num(970), "a refused signature costs nothing");
+        assert_eq!(econ.money, Money::from_num(970), "a refused signature costs nothing");
         assert_eq!(econ.contracts.iter().filter(|c| c.contract.id == "offer").count(), 1);
         assert_eq!(
             econ.try_sign("fast", 0),
@@ -871,25 +888,25 @@ mod tests {
     #[test]
     fn signing_is_refused_whole_when_unaffordable_or_unknown() {
         let mut econ = fixture();
-        econ.money = Fx::from_num(29);
+        econ.money = Money::from_num(29);
         assert_eq!(econ.try_sign("offer", 0), Err(SignRefusal::CannotAfford));
-        assert_eq!(econ.money, Fx::from_num(29));
+        assert_eq!(econ.money, Money::from_num(29));
         assert!(!econ.is_active("offer"));
         assert_eq!(econ.try_sign("midnight_kebab_van", 0), Err(SignRefusal::Unknown));
-        assert_eq!(econ.money, Fx::from_num(29));
+        assert_eq!(econ.money, Money::from_num(29));
     }
 
     #[test]
     fn a_lost_contract_is_signed_again_at_full_price_and_remembers_nothing() {
         let mut econ = fixture();
-        econ.money = Fx::from_num(100);
+        econ.money = Money::from_num(100);
         // Lose "fast": two misses in a row.
         econ.tick(100);
         econ.tick(200);
         assert!(!econ.is_active("fast"));
 
         assert_eq!(econ.try_sign("fast", 250), Ok(()));
-        assert_eq!(econ.money, Fx::from_num(90), "the starter's price applies when it is re-signed");
+        assert_eq!(econ.money, Money::from_num(90), "the starter's price applies when it is re-signed");
         let again = econ.contract("fast").unwrap();
         assert_eq!(again.next_delivery_tick, 350);
         assert_eq!(again.deliveries_missed, 0, "a new signature is a new agreement");
@@ -901,7 +918,7 @@ mod tests {
     #[test]
     fn snapshot_reports_active_contracts_and_the_whole_board() {
         let mut econ = fixture();
-        econ.money = Fx::from_num(25);
+        econ.money = Money::from_num(25);
         econ.deposit("boxed_ketchup", 7); // more than any single mix wants
 
         let snap = econ.snapshot();
@@ -956,7 +973,7 @@ mod tests {
             "a new game starts with exactly one contract — the starter — and buys the rest"
         );
         assert!(econ.board().len() > econ.contracts.len(), "there must be something to buy");
-        assert_eq!(econ.money, Fx::from_num(0));
+        assert_eq!(econ.money, Money::from_num(0));
         for active in &econ.contracts {
             assert_eq!(
                 active.next_delivery_tick, active.contract.cadence_ticks,

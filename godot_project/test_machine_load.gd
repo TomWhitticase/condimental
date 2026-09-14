@@ -265,26 +265,35 @@ func _run_checks() -> void:
 			_fail("after a load, hover on %s does not carry its status" % key)
 
 	# --- 6. a real status change, polled on the tick; pause freezes it ------
+	# The machine watched is the COOKING VAT: it is the line's bottleneck,
+	# so once the mixer's run is charged it reads flat out and stays there.
+	# The crusher used to be the subject, but since the half-tile item
+	# spacing (the quality pass, 2026-09-13) one lane delivers four tomatoes
+	# per 100 ticks against its 80-tick craft, so a fed crusher never
+	# reaches the 95 % that reads `working`.
 	main.sim.new_game()
 	Layouts.build_reference_line(main.sim)
 	Layouts.stock_larder(main.sim, 200)
-	main.sim.issue_command_json(JSON.stringify({"type": "set_hopper_auto_fill", "tile": [-1, 0], "enabled": true}))
+	for tile in [Vector2i(-1, 0), Vector2i(4, 1)]:
+		main.sim.issue_command_json(JSON.stringify({"type": "set_hopper_auto_fill", "tile": [tile.x, tile.y], "enabled": true}))
+	main.sim.issue_command_json(JSON.stringify({"type": "set_tank_auto_fill", "tile": [5, 2], "enabled": true}))
 	main._rebuild_world()
-	var crusher := "4,0"
-	if _shown_status(crusher) != "starved":
-		_fail("a machine that has not run yet reads starved (nothing observed), got '%s'" % _shown_status(crusher))
-	if _sim_status(crusher) != "starved":
+	var vat := "12,0"
+	if _shown_status(vat) != "starved":
+		_fail("a machine that has not run yet reads starved (nothing observed), got '%s'" % _shown_status(vat))
+	if _sim_status(vat) != "starved":
 		_fail("the sim itself should read starved before any tick")
 	if main._machine_load_poll_due():
 		_fail("a rebuild polls; nothing is due straight after it")
 	# The pause menu: the sim can be moved on underneath (as a test may), and
 	# the records must not follow until the game runs again. The run is the
-	# belt's transit (~200 ticks for the first tomato to reach the crusher)
-	# plus a whole window, so the idle start has scrolled out of it.
-	for i in range(1300):
+	# time the front of the line takes to charge the vat's inlet run (the
+	# vat reads flat out from about tick 1500) plus a whole window, so the
+	# idle start has scrolled out of it.
+	for i in range(2200):
 		main.sim.tick()
-	if _sim_status(crusher) != "working":
-		_fail("a fed crusher with room downstream should read working after 1300 ticks, sim says %s" % _sim_status(crusher))
+	if _sim_status(vat) != "working":
+		_fail("a fed vat with room downstream should read working after 2200 ticks, sim says %s" % _sim_status(vat))
 	var polled_at: int = main._load_polled_tick
 	main._pause_open = true
 	for i in range(int(main.LOAD_POLL_TICKS) * 3):
@@ -292,14 +301,14 @@ func _run_checks() -> void:
 	main._pause_open = false
 	if main._load_polled_tick != polled_at:
 		_fail("the load was polled with the pause menu up")
-	if _shown_status(crusher) != "starved":
-		_fail("the crusher's status changed with the pause menu up")
+	if _shown_status(vat) != "starved":
+		_fail("the vat's status changed with the pause menu up")
 	# Running again: the next frame's step is due and the record follows.
 	_step()
-	if _shown_status(crusher) != "working":
-		_fail("after resuming, the crusher must follow the sim to working, reads '%s'" % _shown_status(crusher))
-	if main._hover_text_at_tile(_key_tile(crusher)).find("flat out") < 0:
-		_fail("after resuming, hover on the crusher must read flat out")
+	if _shown_status(vat) != "working":
+		_fail("after resuming, the vat must follow the sim to working, reads '%s'" % _shown_status(vat))
+	if main._hover_text_at_tile(_key_tile(vat)).find("flat out") < 0:
+		_fail("after resuming, hover on the vat must read flat out")
 	# The cadence: the next poll is LOAD_POLL_TICKS of simulation away, no
 	# sooner, and a step that ticks is what brings it.
 	var after_poll: int = main._load_polled_tick

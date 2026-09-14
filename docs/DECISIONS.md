@@ -22,6 +22,236 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-13: **Quality pass, ticket 1 (sim): staffing — no silent
+  walk-out, no free dodge — and the money ceiling.** The brief
+  (`docs/QUALITY_PASS_PLAN.md`) carried the diagnosis: the staff pools
+  MVP's payday paid heads one at a time in `staff.ron` order and FIRED the
+  first head it could not pay and every head after it, with nothing but
+  `walked_out_last_payday` in a panel footer to say so. A player who spent
+  down on equipment before a payday lost most of their crew and read
+  `hired 0`. That is the "kept having to hire staff I never fired" report,
+  and it was a design bug. Eight calls, each with the alternative it beat.
+
+  1. **An unpaid head is idled, not fired; it leaves only if unpaid
+     twice.** The line rule stays — the first head the money does not
+     reach, and every head after it down the file, goes without — but
+     "goes without" now means *unpaid*: still hired, not at its post until
+     the next payday (`StaffPools::reset` hands out `headcount - unpaid`),
+     so the machines it crewed starve with the existing `staff` stall and
+     the panel can print `N unpaid`. A head unpaid at the next payday as
+     well leaves; a covered payday clears the arrears. This is the contract
+     board's strikes (a paid window resets the count; `strikes` misses in
+     a row lose the contract) applied to people, with two strikes. The
+     alternatives: keep firing but announce it (still sudden — a whole
+     line stops with no chance to react); allow debt (GAMEPLAY §1 has one
+     non-negative counter, and a negative balance is a second mechanic);
+     three or more strikes (a factory that cannot pay for three periods is
+     not a factory in trouble, it is a factory with no income, and every
+     extra period of idle heads is a period the panel reads as broken).
+     Arrears do not stack: a head in arrears is owed ONE wage at the next
+     payday, not two — the period it was unpaid for is the period it did
+     not work, so the debt is already settled in labour, and stacking
+     would make the second payday harder to meet than the first, which is
+     the cliff again one period later.
+  2. **Back pay is settled first.** Within a category, the money reaches
+     the fired heads' notice, then the heads in arrears, then the rest.
+     So a factory that can pay some of its crew clears the heads it
+     already owes before it lets a fresh one go unpaid, and "leaves if
+     unpaid twice" means the money genuinely did not reach that head
+     twice. The alternative — counting by position, so whoever is left
+     unpaid is assumed to be the same head — lost a head in exactly the
+     case where the player had found the money for it. A consequence,
+     documented rather than fixed: a factory that can pay half its crew
+     every period keeps everyone, half of them idle, indefinitely. That is
+     half the labour for half the wage, which is fair, and the panel shows
+     it.
+  3. **A head is owed for any period it was employed in any part of**
+     (`CategoryPool::owed`: set to headcount at each payday, `+1` on hire,
+     unchanged on fire). The payday bills `owed`, not `headcount`. This is
+     what closes "fire everyone the tick before payday, hire them back the
+     tick after": the bill is byte-identical to not having fired, and the
+     test says so. Hiring one tick before payday likewise bills that head
+     in full — a period is the unit, and a head that worked any of it is
+     paid for it. The alternative, pro-rating by ticks employed, is
+     honest but is a second clock per head in a system whose whole design
+     is four aggregate counters; and it still leaves the dodge half open
+     (fire at tick 1, hire at tick 999, pay for two ticks). Notice pay is
+     settled before the heads still on the books (call 2), so being broke
+     does not dodge it either: the fired head's wage is the first thing
+     the money reaches.
+  4. **A hire is refused unless the balance covers the next bill plus the
+     new head's wage** (`StaffPools::can_hire`; a refused hire is a silent
+     no-op like every other refusal, and the wire's per-category
+     `can_hire` says so ahead). Without this, calls 1 and 3 opened a worse
+     hole than they closed: hire N heads with no money, let them work a
+     period, let them go unpaid, fire them (still owed, but you cannot pay
+     and they are gone), hire N fresh ones — free labour for the cost of
+     clicking. "You cannot hire someone you could not pay" is one rule,
+     legible on the button, and it is also the honest one: the panel
+     already prints the bill and the balance side by side. What it does
+     not prevent is hiring with the money and then spending it, which is
+     the reported case — and that path now warns first (call 5) and idles
+     rather than fires (call 1).
+  5. **The wire warns before and announces after.** `staff_snapshot_json`
+     gains `next_bill` (`Σ owed × wage` — what the payday will actually
+     take, fired heads included), `shortfall` (how far `money` falls short
+     of it, whole units rounded up, 0 when covered), `unpaid_last_payday`
+     (hired heads the last payday's money did not reach), and per category
+     `owed`, `unpaid`, `left_last_payday` (who left, by category — the
+     announcement's text) and `can_hire`. `walked_out_last_payday` keeps
+     its name and its meaning — how many LEFT — because every reader
+     (`main.gd`'s footer, `test_staff_panel.gd`) means exactly that, and
+     only the rule for leaving changed. Godot's `_staff_bill`
+     (`Σ headcount × wage`) is now the run rate, not the bill: the
+     staff-panel ticket had flagged a sim-side `next_bill` as the cleaner
+     home "if the payday rule ever stops being every head at its wage",
+     and it has.
+  6. **Save: four fields under `#[serde(default)]`, schema 1, and an
+     impossible state is refused.** `SavedStaff` gains `unpaid`, `owed`,
+     `left_last_payday` (maps by category id, like `headcount`) and
+     `unpaid_last_payday`. A save from the MVP loads with nobody in
+     arrears and every head owed exactly its headcount — a paid-up crew,
+     which is what an MVP save could only have been between paydays. More
+     in arrears than hired, or fewer owed than hired, cannot come out of
+     the tick path and is `SaveError::BadStaff` with a reason, the
+     production ledger's precedent. The 1200-step lockstep test compares
+     the staff snapshot every tick with a crew in arrears.
+  7. **Money is `Money`, `fixed`'s `I48F16`, its own type beside `Fx`.**
+     `I16F16` tops out around 32 767; `data/contracts.ron`'s board pays
+     about 23 boxes' worth per 1000 ticks across five lines, which reaches
+     the ceiling in minutes of play. A probe settled what happens there:
+     the `fixed` crate's operators overflow like the primitive integers',
+     so a payout at the top PANICS in a debug build — the profile
+     `cargo xtask` ships by default — and wraps to a negative balance in
+     release. The task allowed "make saturation visible on the wire" as a
+     minimum; that would have left a game whose savings stop at a number
+     it never explains. Widening is the fix, and the choice of `I48F16`
+     over an integer or `I32F32` is deliberate: the SAME 16 fractional
+     bits mean a saved `money_bits` written as `Fx` bits (an `i32`, which
+     RON prints as a plain integer) reads back as the same balance through
+     the new `MoneyBits(i64)`, `test_layouts.gd`'s `fund` patch
+     (`amount * 65536`) is still exactly right, and every whole-number
+     price and wage converts losslessly. Not widening `Fx` itself: belt
+     positions and pipe volumes are fine at 16 bits and are the hot path.
+     `Economy::tick` credits with `saturating_add` regardless of width,
+     and a unit test pins a payout at `Money::MAX - 1` landing on
+     `Money::MAX`, not a panic and not a wrap. `Shop::cost_of` and
+     `Ingredients::cost_of` keep refusing an unrepresentable total, now
+     via `checked_from_num` against the 2^47 ceiling (a `u32::MAX`
+     purchase of a shipped price is representable and simply
+     unaffordable, which the tests now say).
+  8. **The audit's verdicts.** Checked and sound: the machine claim order
+     is `(y, x, id)`-sorted at every topology rebuild, so removing and
+     replacing a machine cannot move it up the queue; a removed machine
+     loses its contents and its load window and refunds its price, a
+     rearrangement, not a gain; a contract has one signature, a first
+     window a full cadence from signing, no refund on loss and a
+     re-signing fee, so sign/lose/re-sign loops only cost; auto-fill moves
+     bought stock in whole units and never touches money; the dock is a
+     bounded pass-through into an unbounded pool whose `Inventory::add`
+     saturates. Balance, written into `data/staff.ron`'s header: the
+     starting crew equals the reference line's summed crew (pinned); one
+     kept-fed line clears about 60 a period on the starter tier before
+     wages of 14 — a quarter of the margin, felt and survivable. Listed
+     for later tickets, not changed here: a removed hopper or tank
+     destroys the stock in it with no warning (ticket 5, a prompt);
+     `test_layouts.gd`'s `fund` clamps at 32 767 (test-only, ticket 3's if
+     a fixture needs more); the maintenance category is a pure cost until
+     something corrodes (the panel already says so).
+
+- 2026-09-13: **Belt item spacing is half a tile, and a belt's front item
+  respects the next tile's footprint (quality pass, ticket 2).** The
+  project owner's playtest note: items on conveyors are too close
+  together.
+
+  1. **The one number, and why a half.** `ITEM_MIN_SPACING_TILES` in
+     `world.rs` is the only place the shipped spacing is set (every belt
+     and splitter tile is built with it; the unit fixtures in `belt.rs`,
+     `hopper.rs` and `dock.rs` carry their own local 0.25 and test the
+     mechanism, not the number). It was 0.25 and is 0.5. Items are
+     modelled at half a tile (`assets.rs`'s `ITEM_VOXELS` = 16; the widest,
+     the box, is 12 voxels across), so at a quarter-tile spacing two
+     neighbours overlapped by half their width and the baseline render of
+     the bottleneck line's tomato lane was one continuous red bar with a
+     stem every few voxels. The candidates were judged by rendering, not
+     arithmetic: at a half tile the closeup shows every tomato and every
+     sugar sack standing on its own patch of belt with a few voxels of
+     rubber between each pair, the jammed sugar lane still reads as a
+     queue, and at default zoom both feed lanes read as rows of separate
+     dots. Three quarters would leave a jammed four-tile lane holding five
+     items, which is a trickle, and 0.4 leaves the box 0.8 of a voxel from
+     its neighbour, which does not fix the complaint. The item models and
+     `main.gd`'s `_carried_item_transform` did not need to move.
+  2. **Speed unchanged, so throughput per belt halves and the line's does
+     not.** A tile is still crossed in 50 ticks; a belt now takes one item
+     per 25 ticks (forty per thousand) instead of one per 12.5. The
+     shipped line's slowest stage, the 240-tick vat, asks its tomato lane
+     for about seventeen per thousand, so the reference line's steady
+     output measured 41–42 boxes per 10 000 ticks before and after,
+     against `data/contracts.ron`'s ~4.1 per thousand. No contract or
+     recipe was touched.
+  3. **The packing bug the old number hid.** A belt tile's front item
+     stores its distance to the tile's END and ran right up to it, while
+     the tile ahead could hold an item at its START — the same physical
+     point, since items are drawn face to face. A jammed line therefore
+     held five items per tile at a quarter spacing (0, ¼, ½, ¾ and 1) and
+     drew one of them twice at every boundary. Invisible while the
+     spacing was narrower than the items; at a half tile it would have
+     been a doubled item every tile. So a belt's front item now respects
+     the footprint of what stands on the tile ahead: `BeltSegment::
+     tick_toward(speed, room_ahead)` holds it `min_spacing - room_ahead`
+     short of the end while that is positive, where `room_ahead` is the
+     downstream segment's new `room_at_start()` (the whole length when
+     empty, else the back item's distance from the start — the very
+     quantity `try_spawn` already measured). The hop is unchanged: the
+     receiver still accepts at `min_spacing` of room, and now the sender
+     reaches its end at exactly that moment. `tick(speed)` is
+     `tick_toward(speed, min_spacing)`, and a belt into a machine or dock,
+     or into nothing, uses it. A jammed tile holds exactly `1 / spacing`
+     items.
+  4. **Order-independent by construction.** `World::tick` reads every
+     carrier's downstream room BEFORE any carrier moves, into a reused
+     buffer (`World::room_ahead`), through `Topology.belt_ahead` — the
+     `belt_to_belt` relation indexed like `belts`, recorded in the same
+     loop that resolves it, because a per-belt search of `belt_to_belt`
+     every tick would be quadratic in the line's length and the stress
+     fixture is 1500 belts. A splitter uses the roomier of its two outputs
+     (its item goes to whichever side takes it). Reading pre-tick state
+     means a belt's result never depends on whether its receiver was
+     visited first, which matters because topology order is placement
+     order and a loaded save rebuilds in save order: the lockstep test in
+     `tests/save_load.rs` still compares every snapshot every tick. The
+     cost is one tick of latency the first time an item crosses a boundary
+     in a moving queue, so the item behind settles `speed` (a fiftieth of
+     a tile) looser than the spacing; each item pays it once and no
+     throughput changes.
+  5. **Knock-on: the crusher is belt-limited, and that is reported, not
+     tuned.** The crusher's recipe takes four tomatoes per 80 ticks; one
+     lane now delivers four per 100. Until the line backs up the crusher
+     reads `starved · waiting for Tomato` about a fifth of the time and
+     the mixer behind it gets one paste per 100 ticks against its 90-tick
+     craft. The vat is the bottleneck so nothing downstream changes, but
+     the line takes longer to back up (the crusher reads blocked from
+     ~8300 ticks, was ~7000; `tests/machine_load.rs`'s `SETTLE_TICKS` and
+     `test_layouts.gd`'s `BOTTLENECK_SETTLE_TICKS` are 10 000 and say
+     why), and the staff pools' "short one manufacturing head idles the
+     vat" now holds on the ticks the crusher and mixer both claim — on a
+     tick the crusher waits for a tomato it claims nobody and the vat's
+     two heads are free, which is the same first-come rule read the other
+     way. `tests/staff.rs` asserts refused ticks outnumber run ticks and
+     the crusher's only reason is ever its input; the paused-craft test
+     fires three heads so the vat genuinely cannot run. The splitter
+     fixtures count what a jammed run holds now (8 on four tiles, 6 on
+     three), and `test_machine_load.gd`'s "a real status change, polled on
+     the tick" section watches the vat instead of the crusher, because the
+     vat is the one machine a fed line drives to `working` and holds
+     there. Whether the crusher's recipe should be re-timed to the lane
+     (100 ticks, or five tomatoes) is a balance question, ticket 1's,
+     flagged in the report and in DEVLOG.
+  6. **What did not change.** Belt speed, `BELT_TICKS_PER_TILE` and the
+     four-frame surface animation, item scale, the corner arc, the save
+     schema (positions are saved, not gaps), the wire.
+
 - 2026-09-13: **Production stats — the P screen (both halves).**
   Factorio's production GUI. Sim: a `ProductionLedger` on `World`
   (`sim/stats.rs`) counts per item/fluid id what a recipe DEPOSITS at
