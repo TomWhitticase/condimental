@@ -1,8 +1,11 @@
 # Headless proof of the staff pools MVP's Godot half (ticket 3;
-# `docs/STAFF_POOLS_PLAN.md`, "Presentation"): the STAFF panel on H, its
-# polling, HIRE/FIRE through the real commands, and the hover lines an
-# understaffed machine and dock gain. Godot derives nothing here — every
-# figure on the panel is read back against `staff_snapshot_json`.
+# `docs/STAFF_POOLS_PLAN.md`, "Presentation") and the quality pass's ticket 4
+# (staffing legibility): the STAFF panel on H, its polling, HIRE/FIRE through
+# the real commands, the hover lines an understaffed machine and dock gain,
+# the WHY line under each row, the always-visible wage bill, the BEFORE
+# warning when the balance cannot cover the next bill, and the AFTER notice
+# a payday that idled or lost heads fires. Godot derives nothing here —
+# every figure on the panel is read back against `staff_snapshot_json`.
 #
 # Run with:
 #   godot --headless --path godot_project --script test_staff_panel.gd
@@ -11,11 +14,33 @@
 #   * a row's words and bar are pure functions of the wire's category
 #     (`hired N`, `assigned / demand` printed on the meter, `N short` in
 #     the warning colour, FIRE disabled at 0, the maintenance idle note),
-#   * the footer says the bill (every head at its wage), the payday
-#     countdown in seconds from `current_tick()`, and the unpaid line only
-#     when someone left,
+#   * HIRE reads the wire's own `can_hire` (ticket 1's hire-refusal rule),
+#     and a row's `status_text` names heads idled or lost by a payday,
+#   * the WHY line under a row (`_staff_demand_sources_for`/
+#     `_staff_demand_text`): kind ×count per placement asking for a
+#     category, lowercase space-separated kind names, and the empty
+#     factory's `'nothing placed asks for staff yet'`,
+#   * every category in `STAFF_CATEGORY_BLURBS` has a sentence,
+#   * the footer says the bill (the wire's `next_bill`), the payday
+#     countdown in seconds from `current_tick()`, the BEFORE warning
+#     (`_staff_shortfall_text`, singular and plural) when the balance
+#     cannot cover it, `balance after payday: N` when it can, and the
+#     `idled`/`left` unpaid lines only when they happened,
+#   * `_staff_unpaid_count_if_payday_now` replays the payday cascade
+#     against wire numbers, a zero-wage head never counted unpaid,
+#   * the clipboard's always-visible wages line (`_contract_wages_state`)
+#     matches the footer's bill and shortfall,
+#   * the AFTER-payday notice (`_staff_payday_notice_text`,
+#     `_announce_staff_payday`) names category and count, primes on the
+#     first poll without announcing, and fires through the same
+#     `_show_contract_notice` a lost contract uses only once
+#     `next_payday_tick` has actually advanced,
 #   * on the reference line the panel's rows match the snapshot in wire
 #     order, with ticket 2's icon (not the fallback) on each,
+#   * the underfunded fixture (`build_underfunded_line`) is short by
+#     exactly 6, leaves exactly 3 heads unpaid, disables every row's HIRE,
+#     carries the ticket's own wording on the footer, and announces the
+#     categories a payday it actually reaches idles,
 #   * H opens the panel and closes the market; opening the market closes
 #     it; ESC closes it without opening the pause menu; the legend names H,
 #   * HIRE and FIRE move `headcount` on the wire by one and the row follows
@@ -27,8 +52,8 @@
 #     on a red bar,
 #   * a dock refused its logistics head says `held · short of logistics
 #     staff` under `crew: 1 logistics`, and says neither while staffed,
-#   * the build-menu card shows a machine's crew under its price and
-#     nothing for a belt,
+#   * the build-menu card shows a machine's crew and its cost per period
+#     under the price, and nothing for a belt,
 #   * the panel polls on the tick at LOAD_POLL_TICKS, the pause menu
 #     freezes it, and a rebuild reads the wire before the first frame.
 extends SceneTree
@@ -145,6 +170,75 @@ func _run_checks() -> void:
 	if float(nobody_asked["meter"]["fraction"]) != 0.0 or nobody_asked["meter_text"] != "0 / 2".replace("2", "0"):
 		_fail("a crew nobody asked for is an empty bar reading '0 / 0', got %s '%s'" % [str(nobody_asked["meter"]["fraction"]), nobody_asked["meter_text"]])
 
+	# --- 1b. HIRE reads the wire's own can_hire; the row's AFTER-payday
+	# status line (ticket 4) -----------------------------------------------
+	var hireable: Dictionary = main._staff_row_state({
+		"id": "manufacturing", "name": "Manufacturing", "headcount": 4, "wage": 2,
+		"demand": 4, "assigned": 4, "short": 0, "can_hire": true,
+	})
+	if not bool(hireable["hire_enabled"]):
+		_fail("can_hire true on the wire means HIRE is enabled")
+	var unhireable: Dictionary = main._staff_row_state({
+		"id": "manufacturing", "name": "Manufacturing", "headcount": 4, "wage": 2,
+		"demand": 4, "assigned": 4, "short": 0, "can_hire": false,
+	})
+	if bool(unhireable["hire_enabled"]):
+		_fail("can_hire false on the wire (ticket 1's hire-refusal rule) means HIRE is disabled")
+	if main._staff_row_state({"id": "manufacturing"})["hire_enabled"] != true:
+		_fail("a snapshot older than can_hire defaults HIRE to enabled")
+	if unhireable["status_text"] != "":
+		_fail("nothing unpaid or left says nothing, got '%s'" % unhireable["status_text"])
+	var idled: Dictionary = main._staff_row_state({
+		"id": "packaging", "name": "Packaging", "headcount": 2, "wage": 2,
+		"demand": 2, "assigned": 2, "short": 0, "unpaid": 2,
+	})
+	if idled["status_text"] != "▲ 2 unpaid, idle until payday":
+		_fail("an idled row says '▲ 2 unpaid, idle until payday', got '%s'" % idled["status_text"])
+	var left_row: Dictionary = main._staff_row_state({
+		"id": "logistics", "name": "Logistics", "headcount": 0, "wage": 2,
+		"demand": 0, "assigned": 0, "short": 0, "left_last_payday": 1,
+	})
+	if left_row["status_text"] != "▲ 1 left last payday":
+		_fail("a row that lost a head says '▲ 1 left last payday', got '%s'" % left_row["status_text"])
+	var both_status: Dictionary = main._staff_row_state({
+		"id": "packaging", "name": "Packaging", "headcount": 2, "wage": 2,
+		"demand": 2, "assigned": 2, "short": 0, "unpaid": 1, "left_last_payday": 1,
+	})
+	if both_status["status_text"] != "▲ 1 unpaid, idle until payday  ·  ▲ 1 left last payday":
+		_fail("both at once join with a separator, got '%s'" % both_status["status_text"])
+
+	# --- 1c. the WHY line: what asks for a category (ticket 4) ---------------
+	if main._staff_demand_text([]) != "nothing placed asks for staff yet":
+		_fail("an empty factory's WHY line reads 'nothing placed asks for staff yet', got '%s'" % main._staff_demand_text([]))
+	var one_each: Array = [{"kind": "crusher", "count": 1}, {"kind": "mixer", "count": 1}]
+	if main._staff_demand_text(one_each) != "asked for by: crusher ×1, mixer ×1":
+		_fail("the WHY line lists kind ×count, got '%s'" % main._staff_demand_text(one_each))
+	var vats: Array = [{"kind": "cooking_vat", "count": 2}]
+	if main._staff_demand_text(vats) != "asked for by: cooking vat ×2":
+		_fail("a multi-word kind id reads as lowercase words, not the wire's underscore id, got '%s'" % main._staff_demand_text(vats))
+	var demand_placements := [
+		{"kind": "crusher", "tile": [4, 0]},
+		{"kind": "crusher", "tile": [4, 5]},
+		{"kind": "mixer", "tile": [9, 0]},
+	]
+	var demand_crews := {
+		"4,0": [{"category": "manufacturing", "count": 1}],
+		"4,5": [{"category": "manufacturing", "count": 1}],
+		"9,0": [{"category": "manufacturing", "count": 1}],
+	}
+	var sources: Array = main._staff_demand_sources_for("manufacturing", demand_placements, demand_crews)
+	if sources.size() != 2 or int(sources[0]["count"]) != 2 or String(sources[0]["kind"]) != "crusher":
+		_fail("a second crusher doubles the crusher's own ×N rather than adding a line, got %s" % str(sources))
+	if int(sources[1]["count"]) != 1 or String(sources[1]["kind"]) != "mixer":
+		_fail("the mixer gets its own line at ×1, got %s" % str(sources))
+	if main._staff_demand_sources_for("logistics", demand_placements, demand_crews) != []:
+		_fail("a category nothing asks for returns no sources")
+
+	# --- 1d. what each category does, one sentence per id (ticket 4) --------
+	for id in ["manufacturing", "maintenance", "packaging", "logistics"]:
+		if String(main.STAFF_CATEGORY_BLURBS.get(id, "")) == "":
+			_fail("category %s has no blurb in STAFF_CATEGORY_BLURBS" % id)
+
 	# --- 2. the footer, pure -------------------------------------------------
 	var snapshot := {
 		"pay_period_ticks": 1000, "next_payday_tick": 2000, "last_bill": 14,
@@ -172,6 +266,53 @@ func _run_checks() -> void:
 	var unpaid: String = main._staff_footer_text(snapshot, 1700)
 	if unpaid.find("✗ 3 left unpaid last payday") < 0:
 		_fail("three left unpaid reads '✗ 3 left unpaid last payday', got:\n%s" % unpaid)
+	snapshot["walked_out_last_payday"] = 0
+	snapshot["unpaid_last_payday"] = 2
+	var idled_footer: String = main._staff_footer_text(snapshot, 1700)
+	if idled_footer.find("✗ 2 idled unpaid last payday") < 0:
+		_fail("two idled last payday reads '✗ 2 idled unpaid last payday' (distinct from 'left'), got:\n%s" % idled_footer)
+	snapshot["unpaid_last_payday"] = 0
+
+	# --- 2a. the BEFORE-payday warning and the covered-payday balance,
+	# pure (ticket 4) ----------------------------------------------------------
+	if main._staff_footer_text(snapshot, 1700).find("balance after payday: 484") < 0:
+		_fail("a covered payday's footer says the balance it would leave (500 - 16 = 484), got:\n%s" % main._staff_footer_text(snapshot, 1700))
+	if main._staff_shortfall_text(6, 3) != "▲ next payday short by 6 — 3 heads go unpaid":
+		_fail("the ticket's own example wording, got '%s'" % main._staff_shortfall_text(6, 3))
+	if main._staff_shortfall_text(2, 1) != "▲ next payday short by 2 — 1 head goes unpaid":
+		_fail("one head is singular ('head goes'), got '%s'" % main._staff_shortfall_text(2, 1))
+	var broke_snapshot: Dictionary = snapshot.duplicate(true)
+	broke_snapshot["money"] = 8.0
+	broke_snapshot["shortfall"] = 6
+	if main._staff_shortfall(broke_snapshot, 8.0) != 6:
+		_fail("the wire's own shortfall wins, got %d" % main._staff_shortfall(broke_snapshot, 8.0))
+	var broke_footer: String = main._staff_footer_text(broke_snapshot, 1700)
+	if broke_footer.find("▲ next payday short by 6") < 0:
+		_fail("an uncovered payday's footer leads with the BEFORE warning, got:\n%s" % broke_footer)
+	if broke_footer.find("balance after payday") >= 0:
+		_fail("a short footer does not also claim a balance after payday, got:\n%s" % broke_footer)
+
+	# `_staff_unpaid_count_if_payday_now` replays the cascade against wire
+	# numbers: manufacturing 4 heads at wage 2 eat the whole balance of 8,
+	# so packaging's 2 and logistics' 1 (3 total) go unpaid — the same
+	# numbers `build_underfunded_line` is built to reproduce end to end.
+	var cascade_snapshot := {
+		"money": 8.0,
+		"categories": [
+			{"id": "manufacturing", "wage": 2, "owed": 4},
+			{"id": "maintenance", "wage": 2, "owed": 0},
+			{"id": "packaging", "wage": 2, "owed": 2},
+			{"id": "logistics", "wage": 2, "owed": 1},
+		],
+	}
+	if main._staff_unpaid_count_if_payday_now(cascade_snapshot) != 3:
+		_fail("the cascade leaves 3 unpaid (2 packaging + 1 logistics), got %d" % main._staff_unpaid_count_if_payday_now(cascade_snapshot))
+	var zero_wage_snapshot := {
+		"money": 0.0,
+		"categories": [{"id": "maintenance", "wage": 0, "owed": 5}],
+	}
+	if main._staff_unpaid_count_if_payday_now(zero_wage_snapshot) != 0:
+		_fail("a zero-wage head is never unpaid, even mid-cascade, got %d" % main._staff_unpaid_count_if_payday_now(zero_wage_snapshot))
 
 	# --- 2b. the clipboard's always-visible wages line, pure ------------------
 	# The bill is on the HUD the player is already looking at, not only inside
@@ -236,6 +377,41 @@ func _run_checks() -> void:
 	if main._contract_wages_settings == main._contract_meta_settings:
 		_fail("the wages line must not share the docket footnote's settings object")
 
+	# --- 2c. the AFTER-payday notice, pure, then wired through the same
+	# fading notice a lost contract uses (ticket 4) ----------------------------
+	var payday_snapshot := {
+		"next_payday_tick": 3000,
+		"categories": [
+			{"id": "packaging", "name": "Packaging", "unpaid": 3},
+			{"id": "logistics", "name": "Logistics", "left_last_payday": 1},
+		],
+	}
+	var notice_text: String = main._staff_payday_notice_text(payday_snapshot)
+	if notice_text.find("▲ PAYDAY: 3 packaging unpaid, idle until next payday") < 0:
+		_fail("the notice names the category and count for unpaid heads, got:\n%s" % notice_text)
+	if notice_text.find("✗ PAYDAY: 1 logistics left — unpaid two paydays running") < 0:
+		_fail("the notice names the category and count for a lost head, got:\n%s" % notice_text)
+	var covered_payday := {"next_payday_tick": 3000, "categories": [{"id": "manufacturing", "name": "Manufacturing"}]}
+	if main._staff_payday_notice_text(covered_payday) != "":
+		_fail("a covered payday announces nothing")
+
+	main._staff_known_payday_tick = -1
+	main._contract_notice.text = ""
+	main._announce_staff_payday(payday_snapshot)
+	if main._contract_notice.text != "":
+		_fail("the first poll after a rebuild only primes the payday clock, it must not announce")
+	if main._staff_known_payday_tick != 3000:
+		_fail("priming remembers the wire's next_payday_tick")
+	main._announce_staff_payday(payday_snapshot)
+	if main._contract_notice.text != "":
+		_fail("the same next_payday_tick is not a new payday")
+	var advanced_payday: Dictionary = payday_snapshot.duplicate(true)
+	advanced_payday["next_payday_tick"] = 4000
+	main._announce_staff_payday(advanced_payday)
+	if main._contract_notice.text != main._staff_payday_notice_text(advanced_payday):
+		_fail("a payday that idled or lost heads is announced through _show_contract_notice, got '%s'" % main._contract_notice.text)
+	main._staff_known_payday_tick = -1
+
 	# --- 3. the reference line: rows match the wire ---------------------------
 	Layouts.build_reference_line(main.sim)
 	Layouts.stock_larder(main.sim, 64)
@@ -278,8 +454,8 @@ func _run_checks() -> void:
 				_fail("row %s's meter prints '%s', expected '%s'" % [id, row["meter_label"].text, state["meter_text"]])
 		if row["fire_button"].disabled == bool(state["fire_enabled"]):
 			_fail("row %s's FIRE button must be %s" % [id, "enabled" if state["fire_enabled"] else "disabled"])
-		if row["hire_button"].disabled:
-			_fail("HIRE is never disabled (it is free and never refused)")
+		if row["hire_button"].disabled == bool(state["hire_enabled"]):
+			_fail("row %s's HIRE button must be %s (the wire's can_hire, ticket 1's hire-refusal rule)" % [id, "enabled" if state["hire_enabled"] else "disabled"])
 	if main._staff_money_label.text != "Money: %.0f" % float(live.get("money", 0.0)):
 		_fail("the panel's balance is the snapshot's money, got '%s'" % main._staff_money_label.text)
 	if main._staff_footer_label.text != main._staff_footer_text(main._staff_snapshot, main.sim.current_tick()):
@@ -287,6 +463,39 @@ func _run_checks() -> void:
 	if main._staff_panel.name != "StaffPanel":
 		_fail("the panel node is named StaffPanel")
 	main._set_staff_open(false)
+
+	# --- 3b. the underfunded line: the BEFORE warning against the wire, and
+	# the AFTER notice on the payday it actually causes (ticket 4) ------------
+	main.sim.new_game()
+	Layouts.build_underfunded_line(main.sim)
+	main._rebuild_world()
+	main._set_staff_open(true)
+	if main._staff_shortfall(main._staff_snapshot, float(main._staff_snapshot.get("money", 0.0))) != 6:
+		_fail("the underfunded line is short by exactly 6, got %d" % main._staff_shortfall(main._staff_snapshot, float(main._staff_snapshot.get("money", 0.0))))
+	if main._staff_unpaid_count_if_payday_now(main._staff_snapshot) != 3:
+		_fail("the cascade leaves exactly 3 heads unpaid, got %d" % main._staff_unpaid_count_if_payday_now(main._staff_snapshot))
+	if main._staff_footer_label.text.find("▲ next payday short by 6 — 3 heads go unpaid") < 0:
+		_fail("the panel's footer carries the ticket's own wording, got:\n%s" % main._staff_footer_label.text)
+	for row in main._staff_rows:
+		var category: Dictionary = _category(String(row["id"]))
+		if not bool(category.get("can_hire", true)) and not row["hire_button"].disabled:
+			_fail("row %s cannot afford the next bill plus a wage, so HIRE must be disabled" % row["id"])
+	main._set_staff_open(false)
+	var payday_tick := int(main._staff_snapshot.get("next_payday_tick", 0))
+	while main.sim.current_tick() < payday_tick + 1:
+		_step()
+	main._poll_staff()
+	if main._contract_notice.text.find("packaging") < 0 and main._contract_notice.text.find("logistics") < 0:
+		_fail("the payday that actually ran announces the categories it idled, got '%s'" % main._contract_notice.text)
+
+	# Restore the funded reference line: sections 4/5 hire and fire real
+	# heads, which the underfunded fixture's `can_hire: false` would refuse.
+	main.sim.new_game()
+	Layouts.build_reference_line(main.sim)
+	Layouts.stock_larder(main.sim, 64)
+	main._rebuild_world()
+	main._staff_known_payday_tick = -1
+	main._contract_notice.text = ""
 
 	# --- 4. keys: H, one modal at a time, ESC, the legend --------------------
 	if not String(main.ISO_HELP_TEXT).contains("H: staff") or not String(main.FP_HELP_TEXT).contains("H: staff"):
@@ -488,16 +697,16 @@ func _run_checks() -> void:
 		var label: Label = slot["crew_label"]
 		if slot["kind"] == "crusher":
 			saw_machine = true
-			if label.text != "crew: 1 manufacturing":
-				_fail("the crusher's card says 'crew: 1 manufacturing' under the price, got '%s'" % label.text)
+			if label.text != "crew: 1 manufacturing  ·  2 / period":
+				_fail("the crusher's card says 'crew: 1 manufacturing  ·  2 / period' under the price, got '%s'" % label.text)
 		if slot["kind"] == "belt":
 			saw_belt = true
 			if label.text != "":
 				_fail("a belt's card shows no crew line")
-		if slot["kind"] == "cooking_vat" and label.text != "crew: 2 manufacturing":
-			_fail("the vat's card says 'crew: 2 manufacturing', got '%s'" % label.text)
-		if slot["kind"] == "dock" and label.text != "crew: 1 logistics":
-			_fail("the dock's card says 'crew: 1 logistics', got '%s'" % label.text)
+		if slot["kind"] == "cooking_vat" and label.text != "crew: 2 manufacturing  ·  4 / period":
+			_fail("the vat's card says 'crew: 2 manufacturing  ·  4 / period', got '%s'" % label.text)
+		if slot["kind"] == "dock" and label.text != "crew: 1 logistics  ·  2 / period":
+			_fail("the dock's card says 'crew: 1 logistics  ·  2 / period', got '%s'" % label.text)
 	if not saw_machine or not saw_belt:
 		_fail("the build menu lists a crusher and a belt")
 	main._set_shop_menu_open(false)
