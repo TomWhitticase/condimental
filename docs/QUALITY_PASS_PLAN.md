@@ -227,3 +227,33 @@ legend's third line runs under the clipboard at 1600x900 on every screen;
 one poll (ticket 4's walk-out announcements go through the same seam —
 prefer a queue). Left for later: `_read_world_layout` is ~40 of an 80 ms
 rebuild on 1500 tiles; all perf numbers are on a debug `sim_core`.
+
+### Coordinator notes — reconciling a parallel manual merge into main
+
+Between ticket 4's merge and ticket 5's dispatch, a separate session (the
+project owner, working directly, commits authored `tomwhitticase` /
+co-authored `Claude Opus 5`) merged part of this pass into `main` by hand:
+commit `365358c` brought in tickets 1 and 2, plus only ticket 4's FIRST
+commit (the wage bill on the clipboard), by merging `qp-4-staffing-ux`'s
+tip directly rather than the up-to-date `TomWhitticase/quality-pass`
+branch — so **ticket 3 (bugs/perf) never reached `main`**, and ticket 4's
+second half (the "asked for by"/blurb text, `98f4417`/`6a88c50`) was never
+pushed to origin at all, only sitting in the local worker worktree.
+
+Reconciled in a scratch branch off `origin/main`: merged
+`origin/TomWhitticase/quality-pass` (bringing ticket 3 in; two conflicts
+in `CLAUDE.md`/`docs/DECISIONS.md`, both just condensed-vs-full duplicate
+decision-log entries, resolved by keeping `main`'s condensed versions and
+adding quality-pass's new ticket-3 entry) then merged the LOCAL
+`qp-4-staffing-ux` branch (bringing in the rest of ticket 4; clean, no
+conflicts). Verified `cargo test --workspace` and
+`scripts/verify-core-loop.sh` green (27 `_OK` markers) on the result, and
+pushed straight to `main` as a fast-forward (`365358c..4c1058b`) — **`main`
+now has every ticket 1-4 change**, tested and pushed.
+
+**Consequence for ticket 5: branch from `main`, not
+`TomWhitticase/quality-pass`.** The `quality-pass` integration branch is
+now behind `main` (missing ticket 4 entirely) and should be treated as
+retired — do not merge into it. Ticket 5's own merge target is `main`
+directly, since it is the last ticket and everything else is already
+there.
