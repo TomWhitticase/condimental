@@ -151,205 +151,101 @@ A rough shape of an early playthrough, to sanity-check that the systems above ac
 
 ## 9. Data & systems this implies for the architecture
 
-Everything in this doc should be **content**, not simulation code, per [ARCHITECTURE.md](ARCHITECTURE.md)'s data-driven-recipes rule:
+Everything in this doc is **content**, not simulation code, per
+[ARCHITECTURE.md](ARCHITECTURE.md)'s data-driven-recipes rule. This section
+states the current design rules only; `docs/DEVLOG.md` has the dated
+implementation history (epics, tickets, balancing passes) behind each one.
 
-- Sauce recipes and their tier/equipment requirements live in `recipes.ron`/`machines.ron` as already planned. Derived sauces and variants (§3) need no new mechanism — a recipe listing another sauce item as an input is already the standard Factorio-style intermediate-product pattern `recipes.ron` is built for.
-- ~~**Contracts need their own data file**~~ — **done (2026-09-08)**: `data/contracts.ron` (schema_version 1) holds a list of contracts, each with an id, a player-facing name, a sauce-mix (item id -> quantity pairs, multi-item supported), a cadence in ticks and a payout in whole money units; `sim_core::sim::contracts::ContractRegistry` loads and validates it, rejecting a mismatched `schema_version` and any degenerate contract (no contracts at all, duplicate id, empty mix, a zero-quantity mix line, zero cadence, zero payout) with an error naming what is wrong — the same `schema_version` treatment `recipes.ron`/`machines.ron` already get (ARCHITECTURE.md §4). **Penalty terms are deliberately not in the file yet**: §11 below still hasn't decided what a missed window costs, and a field nothing reads would be inventing that answer in data. It lands, with a `schema_version` bump, once that question is decided.
-- **The chain has a real delivery point (added 2026-09-08 — this closes the "a real delivery-dock tile is future polish" note `economy.rs` and the entry below both left open):** finished product is no longer lifted out of the last machine's buffer by a player command. `data/machines.ron` gained a `dock` kind (priced in `shop.ron` like every other buildable kind), `World` lays one more ordinary belt past the chain's last machine and stands the dock at its end, and `sim_core::sim::dock::Dock` takes arriving product off that belt and calls `Economy::deposit` **every tick, automatically**. `PlayerCommand::CollectOutput` was **removed**, not kept alongside — two ways to sell the same box, one of which teleports, is exactly the contradiction the hopper removed at the feed end. Two calls worth recording. (1) **The dock is a pass-through, not a store:** it ships everything it receives in the same tick, so its own buffer reads empty between ticks and the visible "what's on the dock" number stays exactly one number in one place — `EconomySnapshot::delivery_stock`, the shared pool every contract settles against. A second staging buffer in front of that pool would show the player boxes standing on the dock that no contract can yet count, which is a gauge reading one thing while the mechanism does another. It gets a real hold the day something gates the release (a truck on a cadence, or §7's logistics-staff capacity) — that is a decision, where a bare delay is only latency. (2) **It still has a bounded buffer (32 per item) even though the drain makes that unreachable today**, because the intake has to be able to refuse: that is what makes a full dock back the belt up rather than annihilate the box, and it is the property the chain's mass-conservation test actually checks.
-- **The delivery-allocation rule (decided 2026-09-08, this doc had left it open):** several contracts now run concurrently, and they all draw from **one shared pool** of collected-but-undelivered stock. At its own cadence boundary a contract is satisfied only if the pool holds its full mix, and on payout it **consumes** that mix from the pool — goods are never credited to two contracts at once. The alternative (credit one delivered unit to every contract that wants that item) duplicates goods, so stacking several contracts onto a single product line would double income at zero production cost — exactly the "find the best sauce and build nothing else" strategy §6 rejects a spot market in order to prevent. Consequence: contracts genuinely compete for throughput, so ties need an order, and `contracts.ron` file order is the deterministic tiebreak (ARCHITECTURE.md §3.9) until a player-set priority exists — the same shape as §11's open question about staff allocation.
-- Multi-stage aged/fermented recipes (tier 6) are exactly what the generic `TimedProcess` component (ARCHITECTURE.md §3.5) was designed for — a chain of several `TimedProcess`-bearing stages feeding into each other, no new architecture needed.
-- Perishability (refrigeration) and corrosion/durability (acid-handling) are the first concrete gameplay uses of "equipment condition/requirements" as a concept — neither exists yet as an ECS component. When these tiers are implemented, they'll need a component (or a tag + countdown on `Inventory`/`Machine`) representing spoilage or wear; that's an implementation detail for whoever builds tier 4/5, not decided here. Corrosion is also what feeds maintenance-staff demand (§7), so this component and the staff-pool mechanic below are linked.
-- **Staff pools (§7) are a new architectural concept, closest in shape to `PowerNetwork`:** four aggregate demand/capacity counters (one per category), with machines declaring a per-category staff requirement while active, resolved as a capacity check each tick rather than per-entity simulation. This likely wants its own small resource type (e.g. `StaffPools { manufacturing, maintenance, packaging, logistics }`) checked alongside power in the same tiered-scheduler pass (ARCHITECTURE.md §3.7/§3.8), not a new ECS component per machine.
-- **Equipment purchasing has its own data file, `shop.ron` (added 2026-09-08,
-  the "Shop & Inventory" epic's ticket 1):** §4's "equipment purchases *are*
-  the tech tree" needs a price per buildable kind, and that lives in
-  `data/shop.ron` (`schema_version` 1, one `ShopEntry(id, price)` per kind)
-  rather than as a field on `machines.ron`, because the set of *buildable*
-  kinds is a superset of the set of *machine* kinds — belt and pipe tiles are
-  priced and are not machines. The loader
-  (`sim_core::sim::shop::ShopCatalog`) rejects a mismatched schema version, a
-  duplicate kind, or a price below 1, and its `validate_covers` makes a
-  machine kind with no price an error rather than something the player can
-  never buy. What the player owns is a per-kind count
-  (`shop::OwnedEquipment`), a plain field on `World` for the same reason
-  `Economy` is one. **Money is deliberately not duplicated there:** §1 allows
-  exactly one currency, so a purchase debits the same `Economy::money` a
-  contract delivery credits, via `Economy::try_spend` (all-or-nothing, so a
-  refused purchase changes nothing at all). Exposed to Godot as
-  `SimBridge::shop_snapshot_json` (catalog + owned counts + money in one
-  object). **No longer deferred (2026-09-08, the "Real Placement" epic's
-  ticket 1):** an owned count is unplaced inventory now. `World::new` builds
-  nothing at all, a new game starts with `economy.rs`'s `STARTING_MONEY`
-  (3000 — enough to build the whole shipped line outright with room to spare;
-  see the balance note at the end of this bullet), and every belt tile,
-  pipe tile, machine and building in a world is something a `Purchase` paid
-  for and a `Place` put down. `Place` spends one owned unit and `Remove`
-  credits one back, so what you own plus what you have placed always equals
-  what you bought; `Rotate` turns a placement 90° clockwise. All three leave
-  money alone — it moved at purchase time, which is what keeps §1's single
-  currency single. Prices, and the starting balance they are measured
-  against, are still placeholders per §10 — but **the balancing pass's first
-  job is done (2026-09-08, the inventory-hotbar ticket).** The "Real
-  Placement" epic's ticket 2 had recorded a concrete hole here: at
-  `STARTING_MONEY` 200, a new save could not be played forward to a contract
-  payout *at all*, because money arrives only through deliveries, deliveries
-  need a line that reaches the dock, and that line costs 1087. Not a slow
-  game — a dead one. `STARTING_MONEY` is **3000** now, deliberately more than
-  2.5x that bill: a new player can build the entire shipped six-stage line
-  outright if they choose and still have about 1900 left for the mistakes and
-  the second line, rather than being unable to reach the shipped content at
-  all. The margin is the point — a balance that only just covered the bill
-  would make a first factory a puzzle with one solution. `sim_core/tests/shop.rs`
-  pins the *relationship* (starting money against the chain's own dynamically
-  priced bill) rather than the two literals, so a price change moves the
-  expectation with it instead of breaking it. Of the three options that entry
-  listed, this is the larger starting balance; the third — an earlier sellable
-  product, a contract the front end alone can satisfy — is still the one that
-  would add progression rather than money, and is still worth doing.
-
-- **Where things stand, and which way they face, is the player's decision
-  (the same epic).** A machine accepts input on the face opposite the way it
-  points and discharges on the face it points at; a belt carries toward the
-  way it faces and hands off to whatever is standing there; a fluid
-  connection is made by touching rather than by facing, because a pressure
-  network is not a conveyor. Flow is therefore derived from what is adjacent
-  to what, recomputed only when something is placed, removed or rotated — so
-  a production line can turn corners, run in any of the four directions, and
-  take shapes the old fixed west-to-east chain could not express. The hopper,
-  the fluid tank and the delivery dock became ordinary placeable kinds in the
-  same change, and a world may hold **any number of each**: several fill
-  points, several delivery points, all still settling against the one shared
-  delivery pool this section's allocation rule describes (a second dock is
-  another door out of the factory, not a second ledger). `data/recipes.ron`'s
-  file order no longer describes any geometry — it describes the production
-  line as *content*, which is what makes the raw-ingredient rule below true,
-  and `sim::reference_chain` is a test fixture that lays that line out using
-  ordinary placement commands.
-- **Raw ingredients are bought, and there is more than one (added 2026-09-08,
-  the chain-rework epic's ticket 1):** §5's first cost axis — "ingredients —
-  recurring, scales directly with production volume" — is implemented. A
-  **raw** ingredient is defined once, structurally: an item or fluid some
-  recipe in `data/recipes.ron` consumes and no recipe produces. The shipped
-  chain has three (tomato, sugar, vinegar), which is what retired the old
-  "the first recipe's first input is *the* raw ingredient" shortcut. Each is
-  priced per unit in a new `data/ingredients.ron` — a separate file from
-  `shop.ron` because the two price different kinds of thing: a shop entry is
-  a building you place and can pick back up, an ingredient is stock a machine
-  eats and never returns. A new `BuyIngredient` command debits the same
-  single `Economy::money` counter §1 allows and credits a per-id stock ledger;
-  `FillHopper`/`FillFluidTank` now draw from that stock and are silent no-ops
-  without it, so nothing enters the factory that was not paid for. A hopper
-  holds one raw item, chosen by the player when it is placed (the simulation
-  still infers it when a chain has only one raw solid to choose from); a tank
-  holds whatever the pipe run it discharges into carries. **Consequence worth
-  stating:** overproduction is now a genuine loss, since a unit no contract
-  has ordered is ingredients converted into unsold stock — which is the
-  design pressure §6 chooses contracts over a spot market to create, and it
-  makes §11's open question about a secondary spot market a live one rather
-  than a theoretical one.
-- **The contract board is sized so the next line always has an order to
-  go after (added 2026-09-11).** §6's pull — invest earnings to become
-  eligible for more demand — needs the board to ask for more than one line
-  can make, and the first three contracts did not: together they absorbed
-  a single line's output almost exactly, so a second line was pure
-  overproduction. `data/contracts.ron` is now written in tiers measured
-  against one line's throughput (one unit per cycle of the slowest
-  recipe): a *starter tier* one kept-fed line can just serve, and a
-  *growth tier* of larger, slower orders worth about five more lines, at
-  per-box rates that rise with the size of the order. Priority stays
-  smallest first so a beginner's income is never eaten by an order they
-  have not built for. Until a second sauce exists every order is still
-  ketchup, so the tiering is in *size and cadence* rather than in mix; the
-  mixed orders this section describes are what a second line unlocks.
-- **A hopper or a tank can keep itself topped up, and that still spends
-  stock rather than money (added 2026-09-09).** Loading a bin was two global
-  keybinds, so keeping a factory fed was something the player did with their
-  hands rather than something they *built*; a placed hopper or tank can now
-  be switched to automatic, after which the simulation refills it to capacity
-  every tick out of the stock the previous bullet's `BuyIngredient` paid for.
-  **This deliberately does not touch §5's first cost axis.** Auto-fill can
-  only move units the player already bought — it never buys, and it never
-  debits the one money counter — so the recurring ingredient cost stays a
-  visible decision the player makes in a shop, not a drain that happens while
-  they are looking somewhere else. An empty larder simply stops the top-ups,
-  and they resume by themselves when stock is bought again. What the toggle
-  removes is the *chore* of loading a bin, not the *cost* of filling it,
-  which is exactly the split §5 needs to keep making the ongoing spend
-  legible. (Its one non-obvious rule: a tank's room is continuous while stock
-  is whole units, so an automatic top-up asks only for the whole units it can
-  take — a manual fill rounds a part unit up to a whole one, which is fair
-  for one keypress and would bankrupt a player sixty times a second.)
-- **Contracts are signed, and can be lost (the contract-board epic,
-  2026-09-10 — this decides §11's "what happens when a delivery interval is
-  missed").** `data/contracts.ron` (schema 2) is a **board of offers**, not
-  the list of what is running. A new game activates only the offers marked
-  `starter` — the shipped board has exactly one, the corner-shop order — and
-  every other contract is **signed** from the contracts board (the **C**
-  key) for its `price`, out of the one money counter §1 allows. **One
-  signature per offer**: an active contract cannot be signed again, so a
-  player can never hold two copies of one order and double a line's income
-  for free — the same "goods are credited once" principle as the allocation
-  rule above, applied to the contracts themselves. A contract that misses
-  `strikes` windows **in a row** is **lost**: it leaves the active list, its
-  record is forgotten, and it goes back on the board at full price; a paid
-  window resets the run of misses, so a factory that recovers is forgiven and
-  only one that keeps failing loses the customer. Losing IS the penalty —
-  there is no fine on top, because the fee to get the order back is already
-  a number printed on the board. A signed contract takes its **file-order**
-  position in the active list whatever order it was signed in, so the
-  scarcity tiebreak never depends on player history. The shipped ladder is
-  four rungs: the starter, two mid-tier orders, and a top rung one line's
-  throughput cannot carry beside the others — which is §6's pull toward a
-  second line, made concrete. Still open: a reputation score gating higher
-  tiers (§11), and cancelling a contract voluntarily (not offered; losing
-  one is the only way off the clipboard).
-- **The simulation measures each machine's load (the machine-load epic,
-  ticket 1, 2026-09-11).** §1's loop is "build production lines", and the
-  question a player asks of a line is *where is the bottleneck*. Every
-  recipe-running machine now keeps a rolling ten-second window of what it
-  did each tick — working, starved (waiting for input), or blocked (finished
-  and waiting on its output) — and reports a percentage, a verdict and the
-  concrete reason it is waiting (`sim_core/src/sim/machine.rs`'s
-  `LoadWindow`; `World::machine_load_snapshots`). It is a measurement of
-  the factory the player built, not a new mechanic: it costs nothing, gates
-  nothing and changes no throughput. It lives in the simulation rather than
-  the presentation layer because it is deterministic, must survive a save
-  and has to be testable headlessly — and because the same numbers are what
-  a later staffing or power constraint (§7) would have to explain itself
-  against. The design point is **bottleneck legibility**: the machine that
-  reads *working* while everything after it reads *starved* and everything
-  before it reads *blocked* is the one to duplicate. It is read by hovering
-  a machine (the hover panel's load line and status-coloured bar). *The
-  in-world stack lights that showed it across the whole floor at once were
-  removed on 2026-09-12 — the owner did not like the poles — so seeing the
-  bottleneck without hovering is an open question again, for a different
-  visual answer if one is wanted.*
-- **Staff pools are real, as a capacity check and a wage bill (the staff
-  pools MVP, ticket 1, 2026-09-12 — `docs/STAFF_POOLS_PLAN.md`).** §7's
-  model is implemented exactly as written: four categories in a new
-  `data/staff.ron` (manufacturing, maintenance, packaging, logistics), each
-  a hired headcount and a wage per head per pay period; every kind in
-  `data/machines.ron` (now schema 2) declares the crew it needs *while
-  running*, and the dock needs a logistics head to ship. **Architectural
-  home:** `sim_core::sim::staff::StaffPools`, a plain field on `World`
-  beside `Economy` — not an ECS component, for the same reason money is
-  not: four aggregate counters, nothing per entity. Each tick the pools
-  reset to headcount and machines claim their whole crew in the
-  simulation's stable machine order (docks after them); a machine refused
-  its crew does not run that tick, keeps its inputs and its progress
-  (a paused craft resumes where it stopped), and reads *starved* with a
-  `staff` reason — understaffed is a kind of starved, no fourth state. §5's
-  third cost axis is live: on payday the bill is paid out of the one money
-  counter, one head at a time in `staff.ron` order, and the first head that
-  cannot be paid, and every one after it, leaves. A new game starts with a
-  crew sized to the shipped line (the relationship is pinned by a test), so
-  the *second* line is what makes the player hire. **MVP-provisional
-  answers to §11, each open to revision:** allocation under a shortfall is
-  first-come in stable order (the same machine goes short every tick; no
-  player-set priority yet); there is no recruiting fee; firing is free and
-  immediate; an unpaid head leaves (no debt, no strike, no reputation
-  meter). Maintenance exists with zero demand until something corrodes.
-- **Money and active-contract state's architectural home (resolved at milestone 5, 2026-09-06):** both live as plain fields on a new `sim_core::sim::economy::Economy` struct, owned directly by `World` and advanced once per tick — not a new ECS component/entity, since milestone 5 has exactly one money counter and one active contract (no per-entity multiplicity to justify ECS machinery yet). `money` is a single fixed-point (`Fx`) counter, per ARCHITECTURE.md §3.9. The one hardcoded `Contract` (fixed mix/cadence/payout, named constants in `economy.rs`) is checked against an accumulating `delivery_buffer` `Inventory` at its cadence boundary (`Economy::tick`), which is where `World::issue_command(PlayerCommand::CollectOutput)` then deposited collected product instead of discarding it — this was milestone 5's "delivery mechanism." (**Superseded 2026-09-08 by the delivery dock**, two bullets up: that command no longer exists and the pool is filled by a building at the chain's tail instead. The pool itself, and everything about how contracts settle against it, is unchanged.) Exposed to Godot as a `SimBridge::economy_snapshot_json` JSON snapshot (money, contract mix, per-item progress, cadence), same pattern as the existing chunk/tile/layout snapshots. **Superseded in part on 2026-09-08:** `contracts.ron` data-file loading and multiple concurrent contracts have since landed — `Economy` now holds a `Vec<ActiveContract>` (each with its own cadence clock and delivery counters) plus one shared `delivery_buffer`, and `economy_snapshot_json` returns an array of contracts rather than one inline. The `Economy`-as-a-plain-field-on-`World` call above was unaffected and still stands: several contracts are a `Vec` inside the one struct, not a reason for ECS machinery. **Still explicitly deferred:** contract-loss/reputation penalties on a missed cadence window (a miss today just skips that window's payout and keeps the contract active — see this doc's own open question below), and the `StaffPools` resource — all future work, per GAMEPLAY.md §6/§9's original fuller design and the milestone-5 task's own scope note.
+- Sauce recipes and their tier/equipment requirements live in
+  `recipes.ron`/`machines.ron`. Derived sauces and variants (§3) need no new
+  mechanism — a recipe listing another sauce item as an input is the
+  standard Factorio-style intermediate-product pattern.
+- **Contracts are a board of offers, not a list of what's running.**
+  `data/contracts.ron` (schema 2) gives every contract an id, mix, cadence,
+  payout, `price` to sign and a `strikes` count; some are marked `starter`
+  and run from a new game, the rest are signed from the contracts board
+  (**C**) for their price. Missing `strikes` windows in a row loses the
+  contract (losing IS the penalty, no fine on top); a paid window resets the
+  count. A signed contract takes its file-order position in the active
+  list, which is also the deterministic tiebreak for scarcity.
+- **All active contracts draw from one shared pool of collected-but-
+  undelivered stock.** A contract is satisfied at its cadence boundary only
+  if the pool holds its full mix, and payout consumes that mix from the
+  pool — goods are never credited to two contracts at once.
+- **The delivery dock is a pass-through, not a store.** It ships everything
+  it receives the same tick into the shared delivery pool
+  (`EconomySnapshot::delivery_stock`); its own buffer reads empty between
+  ticks. It keeps a bounded per-item buffer (32) so intake can still refuse
+  and back up the belt rather than lose product.
+- **The contract board is sized in a line's worth of demand**: a starter
+  tier one kept-fed line can just serve, plus a growth tier of larger,
+  slower orders sized so a second/third/fourth line always has an order to
+  go after. Per-box payout never falls as order size rises; file order
+  (smallest first) is the scarcity tiebreak.
+- Multi-stage aged/fermented recipes (tier 6) are exactly what the generic
+  `TimedProcess` component (ARCHITECTURE.md §3.5) was designed for — a
+  chain of stages feeding into each other, no new architecture needed.
+- **Perishability and corrosion are not yet implemented.** They'll need a
+  component (or a tag + countdown on `Inventory`/`Machine`) for spoilage or
+  wear when tier 4/5 lands; corrosion also feeds maintenance-staff demand
+  (§7). Still an open design question, not decided here.
+- **Equipment purchasing is `data/shop.ron`** (schema 1, one price per
+  buildable kind — a superset of machine kinds, since belts and pipes are
+  priced too). Money is not duplicated there: a purchase debits the same
+  single `Economy::money` a contract delivery credits, via
+  `Economy::try_spend` (all-or-nothing). `World::new` builds nothing; every
+  tile in a world was `Purchase`d then `Place`d. `Place`/`Remove` move a
+  unit between owned and placed; `Rotate` turns a placement 90°; none of
+  the three touch money. `STARTING_MONEY` (3000) is pinned as a
+  *relationship* to the shipped chain's build cost (>2.5x it, not a bare
+  literal), so a new player can build the whole line outright with a real
+  margin for mistakes and a second line.
+- **Placement direction decides flow.** A machine accepts input opposite
+  its facing and discharges on the face it points at; a belt hands off to
+  whatever is downstream of its facing; a fluid connection is made by
+  touching, not facing, since a pressure network is not a conveyor. Flow is
+  derived from adjacency, recomputed only on placement changes. The hopper,
+  fluid tank and delivery dock are ordinary placeable kinds — a world may
+  hold any number of each, all settling against the one shared delivery
+  pool.
+- **A raw ingredient is defined structurally**: an item or fluid some
+  recipe consumes and none produces. Each is priced per unit in
+  `data/ingredients.ron` (separate from `shop.ron` — a shop entry is a
+  placeable you can pick back up, an ingredient is stock a machine eats and
+  never returns). `BuyIngredient` debits money and credits a per-id stock
+  ledger that `FillHopper`/`FillFluidTank` draw from; nothing enters the
+  factory that wasn't paid for. Overproduction is a genuine loss.
+- **Auto-fill spends stock, never money.** A hopper or tank can be switched
+  to automatic and tops itself up every tick from already-bought stock; it
+  never debits the money counter, keeping the ingredient spend a visible
+  shop decision rather than a background drain. An empty larder just stops
+  the top-ups.
+- **Every recipe-running machine measures its own load** (a rolling
+  window of working/starved/blocked, with the concrete stall reason) so a
+  bottleneck is legible: the machine reading *working* while everything
+  after it reads *starved* and everything before it reads *blocked* is the
+  one to duplicate. It costs nothing and gates nothing — read via hover
+  only (the in-world stack lights were tried and removed after a
+  playtest verdict on looks; a floor-wide readout is an open question).
+- **Staff pools are four aggregate categories** (manufacturing,
+  maintenance, packaging, logistics — `data/staff.ron`), a plain field on
+  `World` beside `Economy`, not an ECS component. Every machine kind
+  declares the crew it needs while running; each tick the pools reset to
+  headcount and machines claim their whole crew in stable order — a
+  refused machine holds its progress and reads *starved* with a `staff`
+  reason (understaffed is a kind of starved, no fourth state). Payday pays
+  one head at a time in `staff.ron` order out of the one money counter; the
+  first unpayable head, and every one after it, is fired.
+  **MVP-provisional, open to revision:** shortfall allocation is
+  first-come in stable order (no player priority yet); no recruiting fee;
+  firing is free and immediate; an unpaid head just leaves.
+- **Money and contract state are plain fields on `sim_core::sim::
+  economy::Economy`**, owned by `World`, not ECS entities — no per-entity
+  multiplicity to justify that. `money` is a single fixed-point (`Fx`)
+  counter (ARCHITECTURE.md §3.9). `Economy` holds a `Vec<ActiveContract>`
+  (each with its own cadence clock) plus the one shared `delivery_buffer`;
+  several contracts are a `Vec` inside one struct, not a reason for ECS
+  machinery. Exposed to Godot as `SimBridge::economy_snapshot_json`.
 
 ---
 

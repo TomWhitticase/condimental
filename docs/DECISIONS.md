@@ -22,6 +22,39 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-13: **Production stats — the P screen (both halves).**
+  Factorio's production GUI. Sim: a `ProductionLedger` on `World`
+  (`sim/stats.rs`) counts per item/fluid id what a recipe DEPOSITS at
+  craft completion (made) and TAKES at craft start (used), plus what a
+  paying contract takes from the delivery pool — the factory's exit, so
+  the boxed product is used only when an order ships. Buying stock,
+  filling a bin and a hopper metering onto a belt count NOTHING: the
+  market is not the factory and moving a unit between bins is neither
+  making nor using it. Four rolling windows (`STAT_WINDOWS`: 5s/1m/10m/1h,
+  thirty buckets each, one clock advanced once per tick after everything
+  that records) plus lifetime totals; integers only, fluids in the
+  recipe's whole units. It never dirties a chunk —
+  `production_snapshot_json` is polled — and the rings ride the save as
+  `SavedProduction` (schema stays 1; an older save loads empty; a corrupt
+  ledger is refused with a reason). Godot: **P** opens the PRODUCTION
+  panel (`_build_production_panel`), the dark plate like H/C/E/M and one
+  modal at a time with them. Godot SORTS and FORMATS and never counts:
+  one row per id with anything in the window, biggest first (made + used,
+  then id), icon, name, kind, and MADE / USED bars with the count and a
+  per-minute rate printed on them — the rate divides by the window's
+  OBSERVED span (the wire's `observed`), so a young factory reads its
+  true rate; bars are shares of the largest count on the list so rows
+  compare (Factorio's convention); a window selector built from the
+  wire's `windows` plus "all time" (totals, no rate); an empty window
+  says so in a sentence. Polled only while open, on the load's cadence,
+  re-read on opening, frozen by the pause menu. `test_production_stats.gd`
+  (pure rows and rates from a literal; the bottleneck line counting every
+  stage, fluids as fluids, the exit rule; nothing for buying/filling;
+  keys; polling; a loaded save's counts on the first frame) and
+  `screenshot-scene.sh --production`. Merged into main behind the staff
+  pools: `Machine::tick` takes the crew request AND the ledger, recording
+  at the `Plan::Start`/`Plan::Deposit` points, and a crew refusal records
+  nothing.
 - 2026-09-12: **Music and a full set of sound effects.** Requested
   directly ("add some nice music and sound effect"). It reverses one half
   of the 2026-09-11 audio decision — "no music" — and keeps the other
@@ -4571,6 +4604,20 @@ were only discoverable by building it:
     preview shows the detail, which is what the eye lands on, and the
     detail is not what the icon is read by. Point 9 already budgets a
     rework pass per asset; this is what the pass is usually for.
+32. **A fixed-size card clips a label without complaint, and a taller
+    card is not always available to fix it.** The build-menu card gained
+    one line (`crew: 2 manufacturing`) and the first render cut it at
+    "manufacturi" on the right and pushed `Owned 0` off the bottom; every
+    headless test read the full string and passed (point 12 again — a
+    Label's text is intact whatever the card shows of it). The obvious fix,
+    a taller card, made the two-row grid scroll, because the menu is capped
+    against the hotbar (§5c), and a wider card alone left the bottom line
+    clipped. What worked was paying for the line out of the card's own
+    slack: two less inset top and bottom, no separation, the smallest font
+    step the scale allows, and a card wide enough for the longest crew
+    string. The rule: a new line on a card that lives in a capped grid is
+    bought from the card's padding, not from the grid's height, and the
+    check is the rendered frame at the shipped window size.
 
 ## Part C — ARCHITECTURE.md §9a, full text (mobile export spike findings, 2026-09-06)
 

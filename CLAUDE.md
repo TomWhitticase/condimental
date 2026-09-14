@@ -204,850 +204,253 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
-- 2026-09-13 **Production stats — the P screen (both halves).** Factorio's
-  production GUI. Sim: a `ProductionLedger` on `World` (`sim/stats.rs`)
-  counts per item/fluid id what a recipe DEPOSITS at craft completion
-  (made) and TAKES at craft start (used), plus what a paying contract takes
-  from the delivery pool — the factory's exit, so the boxed product is
-  used only when an order ships. Buying stock, filling a bin and a hopper
-  metering onto a belt count NOTHING: the market is not the factory and
-  moving a unit between bins is neither making nor using it. Four rolling
-  windows (`STAT_WINDOWS`: 5s/1m/10m/1h, thirty buckets each, one clock
-  advanced once per tick after everything that records) plus lifetime
-  totals; integers only, fluids in the recipe's whole units. It never
-  dirties a chunk — `production_snapshot_json` is polled — and the rings
-  ride the save as `SavedProduction` (schema stays 1; an older save loads
-  empty; a corrupt ledger is refused with a reason). Godot: **P** opens
-  the PRODUCTION panel (`_build_production_panel`), the dark plate like
-  H/C/E/M and one modal at a time with them. Godot SORTS and FORMATS and
-  never counts: one row per id with anything in the window, biggest first
-  (made + used, then id), icon, name, kind, and MADE / USED bars with the
-  count and a per-minute rate printed on them — the rate divides by the
-  window's OBSERVED span (the wire's `observed`), so a young factory reads
-  its true rate; bars are shares of the largest count on the list so rows
-  compare (Factorio's convention); a window selector built from the wire's
-  `windows` plus "all time" (totals, no rate); an empty window says so in
-  a sentence. Polled only while open, on the load's cadence, re-read on
-  opening, frozen by the pause menu. `test_production_stats.gd` (pure rows
-  and rates from a literal; the bottleneck line counting every stage,
-  fluids as fluids, the exit rule; nothing for buying/filling; keys;
-  polling; a loaded save's counts on the first frame) and
-  `screenshot-scene.sh --production`. Merged into main behind the staff
-  pools: `Machine::tick` takes the crew request AND the ledger, recording
-  at the `Plan::Start`/`Plan::Deposit` points, and a crew refusal records
-  nothing.
-- 2026-09-12 **Music and a full set of sound effects.** The owner asked
-  for music, which reverses UI_UX §8's "no soundtrack" half; the
-  "feedback, synthesised, no `.wav`" half stands. `audio.gd` has FOURTEEN
-  cues (`CUES`): payout, delivery, place, remove, rotate, buy, refused,
-  sign, contract_lost, hire, fire, select, menu_open, menu_close. **A cue
-  is fired by the handler that knows the outcome, never by the input**:
-  every command is a silent no-op on refusal, so `_buy_slot` compares the
-  owned count, `_buy_ingredient_slot`/`_sign_contract_offer` compare
-  `_current_money()` (from `shop_snapshot_json`, the cheapest carrier),
-  `_confirm_build` looks at `_placement_at_tile` after the place,
-  `_staff_move_head` compares `_headcount_of`; the difference is BUY/SIGN/
-  HIRE/FIRE/PLACE versus one shared REFUSED buzz. Menus cue in the
-  `_set_*_open` seams (so ESC-closing cues too); CONTRACT_LOST rides the
-  poll diff in `_announce_contract_changes` (SIGN does not, or it would
-  play twice). **The music is ONE looping 8-bar track** (`music_samples`,
-  D minor, 92 BPM, 22 050 Hz mono, pad + bass + mallet pluck + kick/rim/
-  hat, `LOOP_FORWARD`; every note WRAPS at the loop end so the seam is a
-  fraction of a step), owned by the `Music` **autoload** so it starts on
-  the main menu and does not restart at the scene change. Rendered LAZILY
-  on a `Thread` (~0.7 s of GDScript), and only when
-  `DisplayServer.get_name() != "headless"`, so the 29 headless proofs pay
-  nothing; the `AudioStreamWAV` is encoded on the MAIN thread (25 ms).
-  **Every quit path goes through `Music.quit_tree()`** (stop, two frames,
-  then `get_tree().quit()`): a stream playing at the instant of teardown
-  races the engine's exit check and reports its playback leaked three
-  runs in four; stopped first, zero. Pause DUCKS the track by `DUCK_DB` (-10) rather than stopping
-  it; the pause menu gains **MUSIC: ON/OFF** beside SOUND: ON/OFF, both
-  session-scoped. `VOLUME_DB` -13 keeps the bed under the cues' -7.
-  `test_audio.gd` (`AUDIO_OK`) proves every cue's stream, determinism,
-  no clipping, the loop's length/seam, the duck, and every handler's cue
-  and refusal. Full record in `docs/DECISIONS.md`.
-- 2026-09-12 **Staff pools MVP, ticket 3 (Godot).** **H** opens the STAFF
-  panel (`_build_staff_panel`): a plain dark plate like the market and the
-  board, one row per `staff_snapshot_json` category in wire order (ticket
-  2's icon at `res://voxels/icons/staff_<id>.png`, name, `hired N  ·  wage
-  N / head / period`, an `assigned / demand` meter with the two numbers
-  PRINTED ON the track, `N short` in the warning colour beside a red bar,
-  HIRE and FIRE with FIRE disabled at 0), footer `wages N / period  ·  next
-  payday in Ns` (+ `✗ N left unpaid last payday` only when non-zero).
-  **Godot derives nothing the sim knows**: `demand`/`assigned`/`short`/
-  `headcount` are read, never recomputed; the ONE sum is the footer's
-  upcoming bill, `Σ headcount × wage` (`_staff_bill`), arithmetic on wire
-  numbers by the shop-meter precedent — a sim-side `next_bill` is the
-  cleaner home if the payday rule ever stops being "every head at its
-  wage". Rows are pure (`_staff_row_state`, `_staff_footer_text`) so the
-  proof needs no viewport. Maintenance reads `nothing to maintain yet`
-  in place of its meter while headcount and demand are 0
-  (`STAFF_IDLE_NOTES`, keyed on the id, not a generic "idle"). Polled on
-  its OWN stamp (`_staff_polled_tick`) every `LOAD_POLL_TICKS` from
-  `_advance_simulation` (a pause polls nothing), once per rebuild, once on
-  open, and at once after HIRE/FIRE, so a button's immediate re-read
-  never shifts the load's cadence. E/M/C/H are mutually exclusive and
-  `_staff_open` joins every modal guard. No click sound at the time
-  (`audio.gd` had only the payout and delivery cues; the audio pass of
-  2026-09-12 added HIRE/FIRE and menu cues since).
-  Hover: `_crews` (origin key → `crew`, from `query_tile_json` at rebuild,
-  machines AND docks) gives `crew: 2 manufacturing` as the last line;
-  stall kind `staff` reads `short of manufacturing staff` (the category
-  is a plain word, not an item id); an `understaffed` dock adds `held  ·
-  short of logistics staff`, the category from ITS crew. The build-menu
-  card shows the crew under the price; fitting it cost the card two
-  numbers (`SHOP_SLOT_SIZE` 128x130 → 144x138, inner inset 8 → 2,
-  separation 2 → 0) because a taller card scrolls the two-row grid at
-  1600x900 (UI_UX.md §2b point 32). Fixture `build_understaffed_line`
-  (reference line, auto-fill, `fire manufacturing` twice, ticked until
-  `query_tile_json` on the vat reports the `staff` stall, capped at
-  `UNDERSTAFFED_MAX_TICKS`): the crusher and mixer take the two heads
-  left in stable order and the vat is the one refused. The andon bullet
-  is void (the poles are gone): `test_staff_panel.gd` asserts the wire's
-  stall, the hover's `▲ starved · … · short of manufacturing staff` and
-  the amber load bar. `screenshot-scene.sh --staff` (implies
-  `--populate`, so meters read a line asking for its crew) and
-  `--understaffed` (hover on the vat). Full record in `docs/DECISIONS.md`.
+- 2026-09-13 **Production stats — the P screen.** A `ProductionLedger` on
+  `World` counts what each recipe DEPOSITS (made) and TAKES (used) at craft
+  start/completion, plus what a paying contract takes from the delivery
+  pool; buying stock, filling a bin, and belt metering count as nothing.
+  Four rolling windows (5s/1m/10m/1h) plus lifetime totals, polled via
+  `production_snapshot_json`, saved with the world. **P** opens the panel
+  (dark plate, like H/C/E/M); Godot only sorts and formats (MADE/USED bars,
+  rate-per-minute over the window's observed span), never counts.
+- 2026-09-12 **Music and a full set of sound effects.** Reverses UI_UX §8's
+  "no soundtrack" half, keeps "feedback, synthesised, no `.wav`". Fourteen
+  cues in `audio.gd`, each fired by the handler that knows the real
+  outcome (never by the input), so every refused command shares one buzz.
+  One looping 8-bar track on a `Music` autoload starts on the main menu,
+  ducks (not stops) under pause with its own ON/OFF switch, and is skipped
+  entirely in headless test runs.
+- 2026-09-12 **Staff pools MVP, ticket 3 (Godot).** **H** opens a STAFF
+  panel: per category, hired count, wage, and an assigned/demand meter
+  with any shortfall called out; footer shows the upcoming wage bill and
+  payday countdown. Godot reads the sim's own demand/assigned/short
+  numbers, never recomputes them; hover and the build-menu card both
+  surface a machine's or dock's crew and any staffing shortfall.
 - 2026-09-12 **Staff pools MVP, ticket 1 (sim).** Staff are four aggregate
-  pools (`data/staff.ron`, schema 1: `pay_period_ticks`, categories with
-  `id`/`name`/`wage`/`starting_headcount`; loader `StaffCatalog` rejects a
-  bad version, no categories, a duplicate id, an empty name, a zero period;
-  a zero wage is legal). `data/machines.ron` is **schema 2**: every kind
-  has a REQUIRED `staff: [(category, count)]` (hopper/tank/splitter `[]`,
-  crusher/mixer 1 manufacturing, vat 2, bottler/packer 1 packaging, dock 1
-  logistics); the version is checked off a header before the shape, so a
-  v1 file says "wrong version", not "missing field". A crew naming an
-  unknown category, twice, or with count 0 is a TEST failure
-  (`StaffCatalog::validate_machines`), not a construction panic. `World`
-  owns `StaffPools` as a plain field like `Economy`. **The tick:** pools
-  reset after fluid; each machine, in `topology.machines` order, claims its
-  kind's WHOLE crew inside `Machine::tick` (new `crew: Option<CrewRequest>`
-  arg) only on a tick it would otherwise record `Working` — a refused
-  machine takes nothing, records `Starved`, remembers the first short
-  category (`Machine::refused_by`, crew-list order) and, if mid-craft,
-  shifts `start_tick` forward one (elapsed stands still; reported as a
-  change since Godot derives progress from `start_tick`); a dock claims
-  only when it holds something, a refused dock holds and reads
-  `understaffed`. Stable order means the SAME machine goes short every
-  tick — the shipped line short one manufacturing head idles the vat (last
-  in tile order), never the crusher or mixer. **Payday** after the economy
-  tick: at `next_payday_tick` heads are paid one at a time in `staff.ron`
-  order via `Economy::try_spend`; the first refusal fires that head and
-  every wage-earning head after it (a zero-wage head stays); `last_bill`,
-  `walked_out_last_payday` recorded; clock `+= pay_period_ticks`. Hire is
-  free and never refused for a known category; fire at 0 / unknown
-  category = silent no-op; neither dirties a chunk. **Wire:**
-  `staff_snapshot_json` (plan shape; `demand`/`assigned`/`short` are the
-  LAST tick's; `money` repeated); `StallKind::Staff` with `item` = category,
-  reported only after the six older kinds find nothing; `crew` on
-  `query_tile_json`'s machine and dock variants and every
-  `shop_snapshot_json` entry; `DockSnapshot.understaffed`. **Save:**
-  `SaveData.staff: Option<SavedStaff>` (`#[serde(default)]`; `None` = a
-  pre-epic save → starting crew, payday one period from its tick),
-  `SavedMachine.refused_by`, `SavedDock.understaffed`, schema stays 1;
-  per-tick tallies are not saved (the first tick recomputes them). **A
-  broke factory has no staff, so every long-running test fixture funds
-  itself with `tests/common`'s `WAGE_RESERVE`** (300 periods of the starting
-  crew's bill, pinned by `tests/staff.rs`) and asserts *earnings* (balance
-  + `wages_paid` − reserve) where it used to assert money. Full record in
-  `docs/DECISIONS.md`.
-- 2026-09-12 **Staff pools, ticket 2 (icons).** Four UI-only voxel props
-  in `assets.rs`'s "Staff category icons" section, registered after `coin`
-  and never placed: `staff_manufacturing` (a hard hat), `staff_maintenance`
-  (a double open-ended spanner, lying flat), `staff_packaging` (a taped
-  carton with the roll of tape on its lid), `staff_logistics` (a pallet
-  jack: forks toward the camera, tiller leaning back). Named
-  `staff_<category id>` so ticket 3 builds the icon path from the wire's
-  `id` with no lookup table. One-tile volume each, **authored for vengi's
-  -X/+Y camera** (UI_UX §2b point 27, the vinegar precedent): the icon pass
-  is their only consumer. Colours are the plan's — hat and tape
-  `hazard_yellow`, spanner and jack `metal` (`steel_light`/`steel`/
-  `steel_dark`, with the jack's wheels and grips `rubber_dark`), carton
-  `cardboard` — and **no palette entry was added**, so no other `.vox`
-  re-emitted. The tool, never a person (GAMEPLAY §7). Rework pass: the hard
-  hat read as a bell until its crown was made wider than tall (`HAT_H` 9 on
-  `HAT_R` 12, a plain ellipse, one crest); at 64 px an object is its
-  proportions, not its detail (new UI_UX §2b point 31). Tests pin the four
-  names in category order, non-empty, every voxel inside 32³, the plan's
-  material classes, and genuinely open spanner jaws. `icons.rs` needs no
-  exclusion. Full record in `docs/DECISIONS.md`.
-- 2026-09-12 **Machine load: the stack-light poles are REMOVED; the hover
-  panel is the indicator.** A playtest verdict on looks alone — a pole
-  beside every machine was not wanted — so the six `andon_*` models, their
-  generator section and voxel tests, `icons.rs`'s `is_andon`, and the three
-  sibling nodes per machine (`_build_machine_andon`, `_set_machine_andon`,
-  `_andon_tile`, `ANDON_*`) are gone. Kept, unchanged: the sim's load
-  window and wire (ticket 1), `_poll_machine_load` on the tick (frozen by
-  the pause menu, run on every rebuild so a loaded game reads right on
-  its first frame), and the hover's load line and bar. What changed in the
-  hover is that it now carries the whole indicator, never by colour alone
-  (UI_UX.md §7): the load line leads with a status glyph and word
-  (`LOAD_STATUS_GLYPHS`: ● flat out, ▲ starved, ■ blocked) and the load
-  bar is filled in the status colour (`_load_status_color`: the meter's
-  own level/amber/warn colours). `test_machine_load.gd` now asserts the
-  records, the glyphs, the colours, and that NO `andon_*` node stands in
-  the world. Floor-wide bottleneck legibility is an open thread again
-  (GAMEPLAY.md §9); if it comes back it should be an overlay or a HUD
-  list, not the poles. `palette.ron`'s `status_*_off` colours stay so no
-  other `.vox` shifts.
-- 2026-09-11 **Machine load, ticket 3 (Godot).** Every recipe-running
-  machine stands its andon (`_build_machine_andon`) as THREE sibling nodes
-  of the body — one per status model, like the motion frames — on the
-  footprint's **camera-visible corner tile**, yaw 0, one visible.
-  `ANDON_CORNER` is `sign(CAMERA_DIRECTION.x), sign(CAMERA_DIRECTION.z)`
-  (tile axes; world Z is tile Y), derived, not chosen: `(1, 1)`, so the
-  2x2 vat's light is on (13,1) and the 1x2 mixer's on its north tile.
-  Height by footprint: `_short` for 1x1, `_tall` otherwise. **Godot never
-  derives status**: `_poll_machine_load` reads
-  `machine_load_snapshots_json` every `LOAD_POLL_TICKS` (30) of SIM time
-  from the end of `_advance_simulation` (a pause polls nothing), and once
-  in `_rebuild_world` after `_seed_machine_states`, so a loaded save shows
-  its lights on the first frame; `_set_machine_andon` flips visibility only
-  on a change. `_machine_load[key]` keeps `load`, this tick's `stall` and
-  the **last non-null `reason` while the status holds** (a blocked
-  machine's stall is `null` on most ticks; hover must not flicker). Hover
-  gains one line: `flat out  ·  100% of the last 20s` / `starved  ·  38%
-  busy  ·  waiting for Sugar` / `blocked  ·  61% busy  ·  output full`;
-  the seconds are `window / TICK_HZ` (**20 s at TICK_HZ 30**, not the
-  plan's "10s", which assumed 60 Hz); items through `_item_display_name`;
-  an unknown stall kind says nothing. The hover panel adds a second bar,
-  `_hover_load_meter` (green, `METER_FILL_LEVEL`: a level with a real
-  ceiling), under the amber progress bar; `_hover_panel_state` returns it
-  as `load_meter`. Fixture `build_bottleneck_line` (reference line, both
-  hoppers and the tank on auto-fill, 400 of everything + 300 tomatoes,
-  funded to 8000, ticked `BOTTLENECK_SETTLE_TICKS` = 8000): red · red ·
-  green · amber · amber, pinned by `BOTTLENECK_MACHINES`.
-  `test_machine_load.gd` proves it (its `_fail` withholds the marker rather
-  than relying on `quit(1)`, which a later `quit(0)` overrides);
-  `screenshot-scene.sh --bottleneck` (implies `--populate`, whose loop now
-  polls the load once at its end) renders it. Render verdict: the closeup
-  reads unambiguously; at the whole-line auto-framing a lit lens is a
-  2–3 px dot whose colour is tellable and whose position needs one step of
-  zoom. Full record in `docs/DECISIONS.md`.
-- 2026-09-11 **Machine load, ticket 2 (andon assets).** Six models, two
-  heights: `andon_working_short`/`andon_starved_short`/`andon_blocked_short`
-  for 1x1 kinds and `andon_working_tall`/`_starved_tall`/`_blocked_tall` for
-  any larger footprint — ticket 3 picks by footprint. One generator,
-  `andon(p, lit, lens_bottom)`; the plan's single height was rendered beside
-  a crusher and rejected (a 64-voxel post is two and a half crushers tall
-  and the stack floats a whole machine above the body); on the vat only the
-  tall one clears the stack (z 47). A 3x3 `paint_grey` post (new palette
-  entry: painted structure, §2b point 8; grey not black, point 21) stands
-  at the tile's +X/low-Y corner **inset exactly one voxel**
-  (`ANDON_INSET`): on the edge it fights the flush plinth, two in it fights
-  the painted skirt's own face. The post runs from z 0 THROUGH the plinth;
-  a body may be passed through, never fought — a voxgen test overlays the
-  post on every machine body at all four facings and asserts no shared
-  exposed face. That test moved two body features by a voxel each: the
-  crusher's motor (y 25..29, was ..30) and the packer's control panel
-  (centred at (11, 20), was (5, 14)), both of which landed on the post's
-  inset when turned. **The post is never rotated**, so every lens is a RING
-  (rounded 5x5, `cylinder_z_f` radius 2, the widest that stays inside the
-  tile — `VoxModel::set` clips at the edge, on exactly the faces the camera
-  sees), 4 tall, one `hazard_black` band between. Red lens bottom is 32
-  (short) / 48 (tall), pinned `> tallest body` (1x1 bodies / all bodies) and
-  within one lens height of it. Unlit lenses are dark matte versions of the
-  three status colours (`status_green_off`/`_amber_off`/`_red_off`, new
-  palette entries), never black — the tower must read as a tower. Only
-  `matte` + one `emissive` colour per model; heights 48/64 (even, point 27).
-  `VoxModel::rotated_cw` now turns an oblong footprint (the mixer). No icon
-  (`icons.rs`'s `is_andon`). Palette colours appended → every `.vox`
-  re-emitted; the crusher/packer/mixer/bottler/floor icons and the
-  previously uncommitted coin/floor-variant icons are refreshed too.
+  pools (`data/staff.ron`); every kind in `machines.ron` (schema 2)
+  declares its required crew. Each tick, machines claim their whole crew
+  in stable order — a machine that can't gets `Starved` with the reason
+  recorded and its progress held, not lost. Payday pays wages in category
+  order from the one money counter; an unpayable head is fired. Long
+  test fixtures fund a wage reserve so they don't go broke.
+- 2026-09-12 **Staff pools, ticket 2 (icons).** Four UI-only voxel icons —
+  hard hat, spanner, taped carton, pallet jack — one per staff category,
+  never placed in the world.
+- 2026-09-12 **Machine load: the stack-light poles are removed.** A
+  playtest verdict on looks — a pole beside every machine was not wanted
+  — so the six `andon_*` models and their scene nodes are gone (the two
+  tickets that built them are superseded). The sim's load window and wire
+  are unchanged; the hover panel now carries the whole indicator instead
+  (status glyph + word, and a bar filled in the status colour). Floor-wide
+  bottleneck legibility (GAMEPLAY §9) is an open question again.
 - 2026-09-11 **Machine load, ticket 1 (sim).** Every recipe-running
-  machine owns a `LoadWindow` (`machine.rs`): a ring of `LOAD_BUCKETS` (20)
-  buckets of `LOAD_BUCKET_TICKS` (30) — a 600-tick window, integers only,
-  no `Fx`. `Machine::tick` records EXACTLY ONE `WorkState` per tick:
-  started/advanced/DEPOSITED → `Working`; nothing started → `Starved`;
-  finished but held → `Blocked`. **The completion tick counts as work**, so
-  a fed-and-drained machine reads exactly 100 % with no per-cycle dip
-  (unit-tested); `status()` is `working` at ≥ `FULL_LOAD_PERCENT` (95),
-  else `starved` ≥ `blocked` on a tie, and `starved` when nothing has been
-  observed. A warmed ring clears a whole bucket the tick after it fills, so
-  `observed` sits in `(570, 600]`. **The load never dirties a chunk**
-  (polled, like fluid): `machine_load_snapshots_json` returns
-  `[{tile, load, stall}]` per machine in topology order; the identical
-  `load`/`stall` ride `MachineSnapshot` and `query_tile`'s machine variant.
-  `stall` is computed at SNAPSHOT time from the machine's taps, never per
-  tick: first shortfall in recipe order, solids before fluids — `input`,
-  `fluid_input`, `no_supply_pipe` when idle; `output`, `fluid_output`,
-  `no_outlet_pipe` only when a batch is complete and held; `null` mid-craft
-  or when it starts next tick. `WorkState`/`StallKind` serialize as the
-  plan's exact words; Godot reads `status`, never re-derives it. Save:
-  `SavedMachine.load` is the raw ring + cursor with `#[serde(default)]`
-  (schema stays 1; empty = fresh window; a non-ring is `BadLoadWindow`).
-  **The shipped line takes ~7000 ticks, not 1500, to back up to the
-  crusher** (8-slot buffers and a run between every pair fill at the vat's
-  pace: mixer blocked from ~3500, crusher from ~7000); `tests/machine_load.rs`
-  settles 8000 ticks and asserts status over a full window, and a stall is a
-  per-tick fact asserted as "the only reason ever given", never at one
-  sampled tick. Full record in `docs/DECISIONS.md`.
-- 2026-09-11 **Payout feedback — what earning money looks and sounds like.**
-  A payout is detected ENTIRELY in Godot, by polling each contract's
-  `deliveries_made` in `economy_snapshot_json` for a rise: no sim change, no
-  new wire field. The first poll after a rebuild or a load SEEDS silently, so
-  loading a save with 40 deliveries behind it does not throw 40 celebrations.
-  Several windows settling at once, or two contracts paying in one poll, are
-  ONE event whose total is summed. **The clock is `sim.current_tick()`, never
-  `Time.get_ticks_msec()`**: the celebration pauses with the game, stays
-  inside `MAX_TICKS_PER_FRAME`'s byte-identical-screenshot guarantee, and is a
-  pure function a headless test drives by ticking. **Every distance in the
-  burst is a multiple of `TILE`** — the first render caught `COIN_LAUNCH`/
-  `COIN_GRAVITY`/`COIN_SPREAD` in raw world units, which made a 0.2-tile arc
-  and a spread narrower than a coin: ten coins as one gold lump. Coins are a
-  FIXED pool of `COIN_POOL` (24) `MeshInstance3D`s hand-animated on a
-  `Feedback` node at SCENE level (not under `World`, which `_rebuild_world`
-  frees), never `GPUParticles3D`; fan angle and per-coin lift come from the
-  coin's index, never `randf()`, so a burst screenshot is reproducible. The
-  "+N" flyout is a Label parented to the HUD `CanvasLayer`, so nothing sizes
-  it — it sizes itself from `get_minimum_size()` and rises OUT OF the money
-  counter, there being no `PAYOUT_FLYOUT_RISE` of headroom above a top-right
-  clipboard. Both of those were render-found (UI_UX §2b point 12), invisible
-  to every headless assertion. Audio is SYNTHESISED into an
-  `AudioStreamWAV` at runtime (`godot_project/audio.gd`, reached by
-  `preload`, not `class_name`) — no committed `.wav` binaries, deterministic,
-  and it settles UI_UX §8's open audio question as *feedback-only sound,
-  procedurally generated*. A dock arrival gets the small cue (one knock,
-  a case pop); a payout gets the chime, the coins, the money punch and a PAID
-  stamp on the docket that paid. `test_payout_feedback.gd` proves every
-  number; `screenshot-scene.sh --payout` is the one review that can say
-  whether the burst reads as a fountain.
-- 2026-09-11 **Machine animations (UI_UX.md §2b points 27-28).** Every
-  processing machine has a MOTION OVERLAY: `<machine>_motion_f0..f3` on the
-  body's own footprint, four sibling nodes at the body's position and yaw,
-  one visible. The moving parts are CUT OUT of the body, never duplicated —
-  two voxel solids that overlap z-fight (point 24) — and a voxgen test
-  compares every overlay voxel against its body. Every motion volume is an
-  EVEN height (`vox::encode` lifts by `size[2] / 2` in whole voxels; an odd
-  one sinks half a voxel). Frames must differ CONSECUTIVELY, not pairwise: a
-  reciprocating part repeats a pose (`BOTTLER_PLUNGE` is `[0,-1,-2,-1]`), and
-  only the `spin`-driven families must show four angles. **The gate is
-  `process != null AND 0 <= elapsed < required`, not `process != null`**:
-  `Machine::tick` keeps the process of a machine finished-but-blocked on a
-  full output, so `process` is what the LAMP says ("has a batch") and
-  `elapsed < required` is what the MECHANISM says ("is turning") — lamp lit
-  with nothing turning reads as "downstream is full". `MACHINE_TICKS_PER_CYCLE`
-  is 30 for EVERY kind (pace says "working", not "working this fast"; the
-  belt carries speed); the frame comes from the machine's OWN elapsed, so a
-  mechanism starts at frame 0 when work starts, and `_update_machine_motion`
-  is called only from `_advance_simulation`, so pause freezes it for free.
-  Mixer ribbon spans `MIXER_RIBBON_Y` (20..43) only — the full drum length
-  runs the flights through two feed throats and the discharge nozzle.
-  Motion overlays get no catalogue icon (`icons.rs`'s `is_motion_overlay`).
-  No steam: a puff is mass a stopped vat should not have.
-  `test_machine_motion.gd` proves it; `test_screenshot.gd` now advances belt
-  AND machine frames in its populate loop, so screenshots stop photographing
-  an idle-looking factory mid-run.
-- 2026-09-10 **Belt arrows removed.** The belt's raised `hazard_yellow`
-  direction arrow is gone at the player's request; the moving mark is a
-  **plain cleat** (`rubber_dark`, two voxels along the path, lane width
-  less one voxel each side, still one voxel proud: `BELT_CLEAT_Z`,
-  `cleat_covers`). The cleat exists only so the four frames differ and the
-  belt visibly runs; direction is in words (`✔ PLACE Belt · facing east`,
-  hover `carries east`), not on the tile. Nothing in signage colour may
-  stand on the running surface (`cargo test -p voxgen` pins it). Only the
-  twelve belt models and three belt icons changed; the splitter's
-  next-output arrow is a different readout and stays.
-- 2026-09-11 **Vinegar drawn as vinegar (a raw fluid's presentation).** A
-  fluid gets a `palette.ron` colour of its own (`vinegar_amber` `#AD6B23`,
-  class `liquid`) and `FLUID_TINTS[id]` IS that RGB — §2b point 5's "hue is
-  not palette data" still governs the tinted pipe body, but the value's one
-  home is the palette, because a market icon and a pipe run are seen
-  together. Amber, not clear: a colourless fluid in a stainless pipe reads
-  as an empty pipe. `FLUID_MODELS` is its OWN table beside `ITEM_MODELS`
-  (that one answers "what rides the belt", and no belt carries a fluid);
-  `_market_asset_for` and `_icon_for` check items, then fluids, then fall
-  back — before this, vinegar fell through to `PIPE_ASSET` and the market
-  offered a length of pipe. `item_vinegar` is a tall straight-sided jug and
-  is authored for **vengi's -X/+Y corner**, not the game camera's +X: a
-  fluid never appears in the scene, so the icon pass is the model's only
-  consumer (new UI_UX §2b point 27). Palette colours are APPENDED — every
-  `.vox` re-emits, only the new icon's bytes change. Full record in
-- 2026-09-11 **Factory floor redesign.** The floor is a BACKGROUND surface
-  and is authored by its value range, not its detail (UI_UX §2b points 27,
-  28). Its own palette entries — `concrete_slab`/`concrete_mottle`/
-  `concrete_shade`, deliberately within eight points of each other — not the
-  shared `concrete`, which the dock deck and machine plinths keep. Variation
-  is broad ragged blotches on a coarse 8-voxel cell grid, most cells bare;
-  NEVER per-voxel speckle (it read as static, and blotches greedy-mesh far
-  cheaper: 1 363 384 → 798 272 primitives). **The floor must never hold the
-  brightest pixel in the frame** — §4 reserves that for metal — so the
-  repair patch is `concrete_shade`, DARKER than the slab, saw-cut in
-  `concrete_dark`. Four models (`floor_tile`, `_worn`, `_patch`, `_drain`)
-  picked by `main.gd`'s `_floor_variant_for(tx, tz)`, each laid at a
-  hash-chosen quarter turn by `_floor_yaw_steps_for` — four stamps repeat
-  visibly, rotation fixes it free. **That is why `floor_joint` keeps its cut
-  on all FOUR edges**: a rotatable tile's edges must be four-fold symmetric
-  or seams step; the doubled interior line was fixed by lightening
-  `floor_seam` (`#33332F` → `#50504A`), not by dropping edges. Variant and
-  turn are pure functions of (tx, tz) — `_build_floor` runs on every
-  place/remove and must not repave. Drains are laid in whole rows
-  (`posmod(tz + 4, 9) == 0`, phased off row 0) and are the one model never
-  turned; their grating bars stay `concrete` because a grating is the one
-  part of this floor that wants contrast. `_floor_node` is a `Node3D` named
-  `"Floor"` parenting one `MultiMeshInstance3D` per variant (the name is
-  asserted by `test_placement.gd`/`test_presentation.gd`); the whole floor
-  stays in the `matte` class because `material_override` is set on it.
-  Three voxgen tests pin: nothing stands proud of the slab top (`FLOOR_Y`
-  puts everything else on that plane), identical joints on all four edges of
-  every rotatable model, drain channel crossing the whole tile on the
-  midline. Judged by rendering the EMPTY world, not the fixture.
+  machine keeps a rolling ~600-tick `LoadWindow` of `Working`/`Starved`/
+  `Blocked` per tick (the completion tick counts as work, so a
+  fed-and-drained machine reads 100%). Never dirties a chunk — polled via
+  `machine_load_snapshots_json`, which also gives the current stall reason
+  (first shortfall in recipe order, solids before fluids). Saved with the
+  world; an older save loads a fresh window.
+- 2026-09-11 **Payout feedback — what earning money looks and sounds
+  like.** Detected entirely in Godot by polling each contract's
+  `deliveries_made` for a rise (no sim change); a coin fountain, a money
+  counter punch, a "+N" flyout and a PAID stamp fire together, clocked off
+  `sim.current_tick()` so it pauses with the game and stays reproducible
+  in a screenshot run. A dock arrival gets a much smaller cue. First audio
+  in the project, synthesised at runtime — no committed `.wav` files.
+- 2026-09-11 **Machine animations.** Every processing machine has a
+  four-frame motion overlay on its own footprint (moving parts cut out of
+  the body, never duplicated, so nothing z-fights), advanced from the tick
+  so pause freezes it. It runs only while `elapsed < required`, so a
+  machine finished-but-blocked on a full output stands visibly still with
+  its status lamp still lit. One pace for every kind; no steam.
+- 2026-09-10 **Belt arrows removed.** The belt's raised direction arrow is
+  gone at the player's request; the moving mark is a plain rubber cleat,
+  there only so the animation frames read as motion. Direction is stated
+  in words (build prompt, hover), never drawn on the tile.
+- 2026-09-11 **Vinegar drawn as vinegar.** A fluid gets its own
+  `palette.ron` colour, and that RGB is what tints its pipe body too — a
+  market icon and a pipe run are seen together, so the value has one home.
+  Amber, not clear: a colourless fluid in a stainless pipe reads as empty.
+- 2026-09-11 **Factory floor redesign.** The floor is a background surface,
+  authored by its value range rather than its detail (UI_UX §2b points 27
+  in "the floor" and 28): broad low-contrast blotches, never per-voxel
+  speckle, and the floor must never hold the brightest pixel in the frame
+  (metal keeps that). Four tile variants laid at a per-tile hashed
+  rotation so the repeat doesn't read, with edges kept four-fold symmetric
+  so a turned tile's seam never steps.
 - 2026-09-11 **UI visualisation pass — one bar language.** A quantity is
-  drawn as a bar **only where the simulation defines its ceiling** (hopper
-  and tank level, machine cycle, pipe pressure, a contract's countdown
-  against its cadence, a price against the balance); a figure with no
-  denominator — larder stock, the balance itself — stays a number, because
-  a bar against an invented maximum is a gauge that lies. One mechanism:
-  `_build_meter(parent, width, fill, track, border, height)` returns the
-  TRACK, `_set_meter(track, fraction, fill)` sizes the fill and **records
-  `fraction` as node meta** so a headless test can prove a bar moved with no
-  viewport. Three fills, each a meaning: `METER_FILL_LEVEL` (green, how
-  full), `METER_FILL_PROGRESS` (amber, work under way), `METER_FILL_WARN`
-  (red, a cost you cannot meet or a clock nearly out) — always with a word
-  or glyph beside it (UI_UX §7). Widget state comes from
-  `_hover_panel_state(tile)`, a pure function beside the pure
-  `_hover_text_at_tile`. The docket keeps to paper + ink (no third colour,
-  UI_UX §5), reads **"8s to go" / "due now"** never ticks
-  (`_format_remaining`, ARCH §3.9), carries ✓/✗ tallies, and puts the
-  countdown, cadence and both tallies on ONE row — a second row scrolled the
-  board at 1600x900 (UI_UX §5c) — with `CONTRACT_METER_MIN_WIDTH` so the
-  expanding bar cannot be squeezed to nothing by the longest cadence text.
-  Shop/market slots draw a price as its share of money, floored at
-  `SHOP_METER_MIN_SHARE` so a cheap thing still draws something, full red
-  when unaffordable. The money figure flashes `+N`/`-N` beneath itself on
-  every change (`_flash_money_change`, the hotbar flyout's hold/fade; its
-  deadline starts one fade in the PAST, since `Time.get_ticks_msec()` is
-  small at boot). Every id the player reads goes through
-  `_kind_display_name`/`_item_display_name`, never the wire's
-  `boxed_ketchup`. Full record in `docs/DECISIONS.md`.
+  drawn as a bar only where the simulation defines its ceiling (hopper/tank
+  level, machine cycle, pipe pressure, a contract's countdown, a price
+  against the balance); a figure with no real denominator (larder stock,
+  the balance itself) stays a number. One shared meter mechanism, three
+  fills each with one meaning (level/progress/warn), always paired with a
+  word or glyph. The money figure flashes `+N`/`-N` on every change.
 - 2026-09-10 **Contract board: contracts are signed, struck and lost.**
-  `contracts.ron` is `schema_version` 2 (v1 rejected): every contract gains
-  `price` (≥ 1), `strikes` (≥ 1) and optional `starter`; at least one
-  starter. A new game runs ONLY the starters (shipped: one, `corner_shop`);
-  `PlayerCommand::SignContract { id }` (`{"type": "sign_contract"}`) buys an
-  offer via `Economy::try_sign` — refused silently for an unknown id, an
-  offer ALREADY ACTIVE (one of each, never two) or an unaffordable fee. A
-  signed contract is inserted at its FILE-ORDER rank (`insert_in_board_order`),
-  so priority never depends on signing order. `Economy::tick` returns
-  `Vec<ContractEvent>` (`Paid`/`Missed`/`Lost`); a miss bumps
-  `consecutive_misses`, a payout zeroes it, reaching `strikes` REMOVES the
-  contract that tick and bumps `Economy::losses`; re-signing costs the price
-  again and starts a clean record. Losing is the whole penalty (GAMEPLAY §11
-  decided). `Economy` owns the board (`board()`); the snapshot gains `board`
-  (every offer: `active`, `affordable`, `times_lost`, `starter`…) and per
-  active contract `satisfied`, `window_start_tick`, `price`,
-  `consecutive_misses`, `strikes`. Save: schema stays 1 (`#[serde(default)]`
-  on `consecutive_misses` and `contracts_lost`); the active list is a SUBSET
-  of the board, restored exactly (starters cleared first), an unknown active
-  id or a duplicate is an error, an unsigned offer is not
-  (`MissingContract` deleted). Godot: **C** opens the CONTRACTS BOARD (dark
-  plate, paper offer rows, one SIGN button each; E/M/C mutually exclusive;
-  `_board_open` joins every modal guard); the docket gains a status line,
-  strike pips and a state border (the §5e countdown meter is the time half)
-  from the pure `_contract_risk_for` →
-  `ready`/`ok`/`risk` (≥ `CONTRACT_RISK_FRACTION` 0.5 elapsed, short)/
-  `last_chance` (next miss loses it); a docket keeps to paper, ink, done-
-  green and ONE warning red. Loss/signature is announced by diffing active
-  ids between polls (`_announce_contract_changes`; first poll only primes);
-  an empty clipboard says "press C". Shipped board: 4 rungs; the top one
-  exceeds one line's throughput on purpose. Tests: `tests/contract_board.rs`,
-  `test_contract_board.gd`; `test_contract_panel.gd` signs every offer first;
-  `screenshot-scene.sh --board`, and `--contracts` signs all. Full record in
-  `docs/DECISIONS.md`.
+  `contracts.ron` is schema 2: every contract has a `price` to sign, a
+  `strikes` count, and an optional `starter` (a new game runs only
+  starters). Missing `strikes` windows in a row loses the contract —
+  losing IS the penalty, no fine on top; a paid window resets the count.
+  **C** opens the contracts board to sign offers; the clipboard docket
+  gains a status line, strike pips and a state border.
 - 2026-09-11 **Contract board sized in lines' worth of demand.** The board
-  is nine contracts: the original three are a STARTER TIER that one
-  kept-fed line can just serve (~3.9 boxes/1000 ticks against ~4.1
-  capacity), and six larger, slower orders are a GROWTH TIER (~19.2/1000)
-  so a second, third and fourth line always have an order to go after.
-  Per-box payout never falls as order size rises (24/box for one box up to
-  40/box for the 20-box pallet). File order stays smallest first: under
-  scarcity the starter orders settle before the big ones. Both rules are
-  pinned in `contracts.rs` against the chain's slowest recipe, not literals.
-  Two contracts MAY share a cadence; `test_contract_panel.gd` checks each
-  docket names its own. `CONTRACT_CHECKLIST_MAX_BOXES` (12) already caps
-  the checkbox row, so the pallet draws one box. Content only; no
-  `schema_version` bump. Every order is still `boxed_ketchup` until a
-  second sauce exists.
-- 2026-09-10 **Hopper/tank configuration, ticket 2 (Godot + one sim deletion).**
-  A placed hopper or tank is CLICKED and configured on a panel beside it:
-  level, FILL (with its reason in words when refused), AUTO-FILL toggle,
-  and an item picker that retargets a PLACED hopper through `SetHopperItem`.
-  The global keys SPACE (fill hoppers), V (fill tanks) and Q (cycle hopper
-  contents) are GONE, and so is `PlayerCommand::CycleHopperItem`; a hopper
-  is placed holding the first raw item and changed on its panel. ESC, menus,
-  modes and removal close the panel; an unplumbed tank is refused.
-  `test_config_panel.gd` proves it; `screenshot-scene.sh --config TX,TY`
-  photographs it. Full record in `docs/DECISIONS.md`.
+  is a starter tier one kept-fed line can just serve, plus a growth tier
+  of six larger, slower orders sized so a second/third/fourth line always
+  has an order to go after; per-box payout never falls as order size
+  rises, and file order (smallest first) is the scarcity tiebreak.
+- 2026-09-10 **Hopper/tank configuration.** A placed hopper or tank is
+  clicked and configured on a panel beside it: level, FILL (with its
+  refusal reason in words), an AUTO-FILL toggle, and — for a hopper — an
+  item picker. The global fill/cycle keybinds are gone; configuration
+  lives on the placed building, not the keyboard.
 - 2026-09-10 **Pipes & conveyors overhaul, ticket 5 (belt presentation).**
-  A belt tile's shape is `_belt_shape_for(links, direction)`, pure: input
-  from behind → straight (plus any flank = MERGE); exactly one flank input
-  and nothing behind → corner, LEFT if fed from the anticlockwise side of
-  its facing, RIGHT from the clockwise side; two flanks → merge; no inputs
-  → START (a lone tile is a start); inputs but no output → END. Merge,
-  start and end draw the straight family; corners need NO yaw of their own
-  (authored output-+X, spun by the facing like everything else). Frame sets
-  are `<family>_f0..f3`; `BELT_FRAMES` (4) and `BELT_TICKS_PER_TILE` (50)
-  are mirrored in `main.gd`; the frame is `floor(tick*4/50) mod 4` from
-  `sim.current_tick()` at the end of `_advance_simulation`, so a pause
-  freezes it for free. **Items are drawn face to face**: distance 0 is the
-  input face's midpoint, 1 the output face's (they were centre-to-next-
-  centre, half a tile downstream); a corner's items follow a quarter circle
-  of radius half a tile about the pivot corner, and `_carried_item_transform`
-  reads the shape from `_belt_shapes`. **The belt ghost stays straight**
-  (the would-be links of an unplaced tile are the sim's to compute; ARCH §4's
-  `preview_command` is the home). Hover: `carries east · turns left / fed
-  from the west (Hopper) / hands to Crusher`, `not connected` where null.
-  The `belt`, `belt_inlet`, `belt_outlet` aliases, models and icons are
-  DELETED; `SHOP_MODELS["belt"]` is `belt_f0`; `voxgen`'s `belt()` stays
-  as the test reference only. `_belt_asset_for` is gone; `_is_building_tile`
-  survives only for the pipe roles (ticket 6). `test_layouts.gd`'s
-  `build_belt_gallery` + `--belt-gallery`: both hands of corner and every
-  belt-to-building junction at all four facings. At 30 Hz the four-frame
-  march is 2.4 frame changes a second; judged by numbers, not by eye.
-- 2026-09-09 **Pipe presentation (Pipes & Conveyors ticket 6).** A pipe
-  tile's shape, turn and fittings come from `links.connections` ONLY
-  (`_pipe_shape_for`, `_pipe_fitting_for`; `_pipe_roles` is gone). Turn
-  arithmetic in `DIRECTIONS` indices: an end is authored open west (2), a
-  corner on (east 0, north 3), a tee closed south (1); one clockwise turn
-  adds one. A straight is ALWAYS turn 0 on an east-west axis and 1 on a
-  north-south one, so joint flanges never stack; a pipe's `direction`
-  decides only a lonely tile's axis. `pipe_end` carries no joint flange
-  (its turn is dictated, so it would stack). Fittings are instances keyed
-  `fitting:x,y:side`; fluid bodies stay nodes, one asset per shape
-  (`PIPE_FLUID_ASSETS`), `FLUID_END_CAP_TRIM` deleted. Every part of a
-  fitting is `PIPE_FITTING_MARGIN` (1.0) of radius larger than anything it
-  can cover — voxgen pins it on both faces of a straight. Hover: "connects
-  west and north · fed by Fluid Tank · feeds Mixer" (tank = fed by; machine
-  in `producers` = fed by, in `taps` = feeds; the neighbour placement names
-  the kind). The pipe ghost takes its shape from adjacent PIPE placements
-  only, no fitting — reconcile with ticket 5's belt ghost in ticket 7.
-  `pipe_source`/`pipe_inlet` deleted (generators, models, icons).
-  `test_pipe_shapes.gd` runs on `build_pipe_gallery` (= `--pipe-gallery`);
-  a fixture run shows liquid only in a run tapped by a machine whose fluid
-  input is RAW (a mixer), since a tank fills from bought stock.
+  A belt tile's shape (straight/corner/merge/start/end) is derived purely
+  from its `links` and facing — never authored per-junction. Items are
+  drawn face to face (input face's midpoint to output face's), not
+  centre-to-centre, so a corner's arc actually leaves through the right
+  face. Hover states what a belt carries, turns, and hands off to, in
+  words.
+- 2026-09-09 **Pipe presentation (ticket 6).** A pipe tile's shape, turn
+  and fittings come from its `links.connections` alone. A straight pipe's
+  turn is fixed by its axis (never by facing), so joint flanges never
+  stack when a run bends; only a tile joined to nothing visibly rotates.
 - 2026-09-09 **Pipes & conveyors overhaul, ticket 2 (belt model family).**
-  One generator, `belt_shape(shape, phase)`, emits `belt_f0..f3`,
-  `belt_corner_left_f0..f3`, `belt_corner_right_f0..f3`; `belt`,
-  `belt_inlet`, `belt_outlet` are byte-identical to `belt_f0` until ticket 5
-  drops the names. `BELT_FRAMES` = 4, shift = 8 voxels per frame along +X;
-  frames differ ONLY on the lane surface, pinned by an exact-shift test;
-  idlers/rails/legs never move. Pattern period = one tile (one arrow per
-  tile). Direction mark = a SOLID raised arrow in `hazard_yellow` at
-  `BELT_ARROW_Z` = `BELT_SURFACE_Z + 1`; a thin chevron became an `L` under
-  the camera (UI_UX §2b point 23). Corner = quarter annulus about the pivot
-  corner; `Left` fed from north = vox low Y, `Right` is its Y-mirror (built
-  by `mirror_y`, never authored twice); pattern coordinate `u` is stretched
-  over the quarter turn. **Belt-side junction variants retired**: the plain
-  tile carries the junction, machine hoods do the rest. Splitter stubs are
-  plain rubber (no arrow beside the lit one). `voxicons` skips `_fN` for
-  N ≥ 1. Corners were only render-checked via a temporary `main.gd` hack;
-  ticket 5 must re-check them at all four facings once it draws them.
-- 2026-09-09 **Pipe model family (Pipes & Conveyors ticket 3, assets
-  only).** Shapes `pipe`/`pipe_corner`/`pipe_tee`/`pipe_cross`/`pipe_end`,
-  fittings `pipe_fitting_machine`/`pipe_fitting_tank` (authored on +X,
-  overlaid by Godot on any open leg, hardware at x ≥ 27 so no leg window is
-  covered), one one-voxel fluid body per shape. Face convention: vox LOW Y
-  is north (camera-facing); a corner is open on x = 31 and y = 0. The pipe
-  axis sits on the tile midline (`PIPE_C` = 15.5, `*_f` primitives), not on
-  voxel 16; machine nozzles stay on 16. The fluid body is narrower than the
-  bore (`PIPE_FLUID_Y` 14..17) so no face of a full column coincides with
-  the tube's outer wall. Junction shapes carry a hub and NO end flange; the
-  straight keeps one at low X. A cap is a bright plate with brass bolts,
-  never a brass disc. `main.gd`'s PIPE_BORE_* stay 12/7; the end body stops
-  before its cap. `pipe_source`/`pipe_inlet` are deprecated compositions
-  until ticket 6 deletes them. Voxgen tests pin open faces, body-in-bore,
-  window and flange-on-boundary; `VoxModel::rotated_cw` is `rotate_cw`.
+  One generator emits every belt/corner shape across 4 animation frames
+  on a one-tile pattern period. The belt-side junction art variants are
+  retired — the plain tile carries the junction, the machine's own hood
+  does the rest.
+- 2026-09-09 **Pipe model family (ticket 3, assets only).** Straight/
+  corner/tee/cross/end pipe shapes plus machine/tank fittings, on the
+  tile's true 15.5 midline (not voxel 16) so a turned run stays symmetric.
+  A fitting overlays a shape with a margin so the two meshes never share a
+  face.
 - 2026-09-09 **Pipes & conveyors, ticket 4 (instanced rendering).** Belts,
-  splitters, pipes and carried items are `MultiMesh` instances: one
-  `MultiMeshInstance3D` per (asset, material class) under `World/Tiles`,
-  one swap-remove pool per item asset under `World/Items`. Machines,
-  buildings, level bodies (hopper/tank/pipe fluid), the splitter arrow, dock
-  cases and the ghost STAY nodes: anything with live per-instance state
-  (material swap, scale, visibility) is a node. `_asset_for_placement` still
-  picks the asset; `_tile_frames_for` wraps it as a FRAME SET and
-  `_set_tile_frame` flips per-frame visibility (ticket 5 animates through
-  it). Per-tile yaw is supplied by the caller of `_stage_tile_instance`,
-  never derived inside. Items are positioned only by
-  `_carried_item_transform(tile, direction, distance)`; corners extend it.
-  Per-tile item hiding is kept. Tests use `_tile_instance_at`,
-  `_carried_item`, `_carried_item_count`, not node names. Stress fixture
-  `build_stress_line` (1500 belts) funds itself via `fund` (save/load money
-  patch, ceiling ~32 767 = `Fx`); `test_perf.gd` asserts generous ceilings;
-  `screenshot-scene.sh --stress` prints `SCREENSHOT_RENDER` counts. The
-  remaining per-frame cost is chunk-snapshot JSON parsing (wire, milestone
-  8), not the scene.
-- 2026-09-09 **Pipes & conveyors overhaul, ticket 1 (`links` on the wire).**
-  Every belt, splitter and pipe in `world_layout_json` (and its
-  `query_tile_json` variant) carries `links`; every other kind OMITS the key
-  (`skip_serializing_if`), so its JSON is byte-identical to before. Shape is
-  `docs/PIPES_AND_CONVEYORS_PLAN.md` "The wire contract": belt/splitter
-  `{inputs: [{from, kind}], output: {to, kind} | null}`, pipe
-  `{connections: [{to, kind}]}`; directions absolute, named from the tile
-  toward the neighbour; entries in north/east/south/west order (at most one
-  thing per side, so the order is geometry, not walk order). Recorded ONCE
-  in `World::recompute_topology` as `Topology.links`, at the moment each
-  relation is resolved — never a second adjacency scan, never per tick;
-  `world_layout`/`query_tile` look it up. A lonely belt still has
-  `{inputs: [], output: null}`. A splitter's `output` is its straight side
-  only; the branch stays in `outputs`. A pipe lists a machine or tank on
-  the ONE tile the sim taps (`machine_taps`/`machine_output_taps`/
-  `tank_discharges`), never on every touching tile. Found and deliberately
-  NOT changed (ticket 7): `resolve_sink` links a belt into a machine or
-  dock when the tile it points at is on the inlet EDGE, from any side — a
-  1x1 machine is fed from all four sides, including through its outlet
-  face; `test_layouts.gd`'s demo line depends on it. `tests/links.rs` pins
-  the current rule so a fix shows up there.
-- 2026-09-09 **Hopper/tank auto-fill, ticket 1 (sim).** Auto-fill runs as
-  tick step 0, before tank discharge and hopper metering, so a topped-up bin
-  feeds in the same tick. One fill helper per kind (`World::fill_hopper_entity`
-  / `fill_tank_entity`) serves both the tick path and the manual command:
-  clamp to owned stock, then to buffer room, then debit exactly what `fill`
-  reports. Auto-fill spends STOCK, never money; `BuyIngredient` stays an
-  explicit action. An empty larder stops top-ups silently and the flag stays
-  on. A tank auto-fill asks only for `whole_unit_room` (floor); the manual
-  command still rounds a part unit up. A hopper top-up dirties its chunk; a
-  tank top-up does not (tank level is poll-only). `SetHopperItem` added
-  (refuses non-raw; same item = no-op keeping contents); `CycleHopperItem`
-  kept only until ticket 2 deletes it with `main.gd`'s Q binding. The flag
-  survives a retarget and a `Rotate`, dies with `Remove`. Save
-  `schema_version` stays 1 (`#[serde(default)] auto_fill`).
-- 2026-09-09 **Save/load, ticket 2 (Godot).** `game_session.gd` autoload
-  carries the New Game/Load choice across `change_scene_to_file`;
-  `pending_action` is sticky (headless tests call `_ready()` twice), default
-  `new_game`. All save-file rules live there: `user://saves/<slot>.ron`,
-  listing, whitelist sanitizer (letters, digits, space, `-`, `_`; else `_`;
-  nothing left = refuse), reserved `autosave` slot. A save is proved to load
-  (throwaway `SimBridge.load_ron`) before the scene changes; failures show
-  `load_ron`'s message on the menu. ESC closes what is open first, then opens
-  the pause menu; build mode counts as open. Pause clears `_tick_accum` and
-  stops the autosave clock. Autosave: 3-minute real-time timer plus
-  quit-to-menu, quit and window close; a manual save named `autosave` is
-  refused out loud. `auto_accept_quit` is OFF; `main.gd` handles
-  `NOTIFICATION_WM_CLOSE_REQUEST` (autosave, then quit). Flagged: no save
-  delete, no overwrite confirm.
-- 2026-09-09 **Save/load, ticket 1 (sim).** A save is a full state SNAPSHOT,
-  not a command log (ARCH §4 amended). Bar: running-state-identical, pinned by
-  a 2600-tick lockstep test comparing every snapshot every tick. `Fx` stored
-  as raw bits (`FxBits`), never decimal; `fixed`'s serde feature stays off.
-  Load rebuilds structure via real `Purchase`+`Place` (a refused `Place` =
-  corrupt save error), then writes live state through restore-only
-  `pub(crate)`/`pub(super)` methods — never public API. Rebuild is funded
-  per item (Fx saturates ~32 767); saved money is installed last. Belt
-  `frontier` and empty inventory slots ARE saved; recipes, capacities, pipe
-  network shape and the dirty set are derived, not saved. No file I/O in
-  `sim_core`. `SimBridge::load_ron` returns `""` on success or a reason; on
-  failure the live world is untouched; on success every chunk is dirty.
-  `new_game()` exists for symmetry. A contract board that differs from the
-  save in either direction is an error. `schema_version` = 1.
-- 2026-09-09 **Tuning pass after a playtest.** Crusher = 80 ticks (mixer 90,
-  vat 240). Rule: crushing is quickest, the cook slowest; change the numbers
-  and the prose in `recipes.ron`, `machines.ron` and this log together.
-  Content changes never bump `schema_version`. Lesson: a fixture that stops
-  supplying a factory has not stopped it (the economy test now removes the
-  dock after the first unit). Dock is 2x2, extra tile spent on DEPTH (UI_UX
-  §2b point 16); price stays 70 — price tracks function, not tiles; only
-  infrastructure is priced per tile. Dock model re-laid at 64x64, despatch
-  wall starts east of the far tile's hood, four pallet positions. UI is 1.5x:
-  `UI_SCALE` and `UI_FONT_BASE` (15) in `main.gd` with `_ui_px/_ui_i/_ui_v/
-  _ui_font`, NOT `content_scale_factor` (3D→screen mappings would need the
-  factor divided out). Panels cap against `_hotbar_reserved_height()`.
-  `project.godot` window is 1600x900; at 1280x720 the build grid scrolls a
-  little, by design. Hotbar socket = 0.88 of the scale.
-- 2026-09-08 **Chain rework, ticket 2 (Godot/assets).** A hopper's contents
-  are a property of the PLACEMENT (Q cycles while the ghost is up; prompt
-  names it; ghost carries a tinted `hopper_fill` slab), not separate catalog
-  entries (fixed hotbar slots must not renumber). One sim change:
-  `IngredientsSnapshot.hopper_items` = `World::raw_items`. Buying stock is
-  its own panel on M, mirroring the build menu; one click buys a crate of 10.
-  A permanent larder strip sits above the hotbar; zero reads "none". Mixer is
-  a horizontal ribbon blender, 32x64 voxels (footprint × tile scale). A fluid
-  junction is ONE nozzle helper (`machine_fluid_port`) on both faces; the
-  vat's belt gallery/doorway were deleted. `pipe_inlet` art applies only when
-  the tapping machine is south-adjacent; else plain tile. `item_sugar` is a
-  sack. `ITEM_MODELS` keeps unreachable `ketchup_mix`/`ketchup` entries.
-  `screenshot-scene.sh --no-hud` added.
+  splitters, pipes and carried items are drawn as `MultiMesh` instances
+  (one per asset/material class) rather than one node each; anything with
+  live per-instance state (machines, the ghost, level bodies) stays a
+  node. A 1500-tile stress fixture and `test_perf.gd` guard the win.
+- 2026-09-09 **Pipes & conveyors overhaul, ticket 1 (`links` on the
+  wire).** Every belt, splitter and pipe in `world_layout_json` carries a
+  `links` object naming exactly what feeds it, what it hands to, or what
+  it is joined to per side — recorded once by the topology pass, never a
+  second adjacency scan, so Godot derives shape from data instead of
+  re-deriving adjacency itself.
+- 2026-09-09 **Hopper/tank auto-fill.** A placed hopper or tank can be
+  switched to automatic, topping itself up from bought stock every tick.
+  It spends stock, never money — buying stays an explicit, visible player
+  action; an empty larder just pauses the top-ups.
+- 2026-09-09 **Save/load, ticket 2 (Godot).** `game_session.gd` owns every
+  save-file rule (slot naming/sanitizing, the reserved `autosave` slot,
+  listing). A save is proven to load before the scene changes. Autosave
+  fires on a 3-minute timer and on every quit path.
+- 2026-09-09 **Save/load, ticket 1 (sim).** A save is a full state
+  snapshot with a `schema_version`, not a command log (amends ARCH §4) —
+  a command log would replay through *current* logic and silently rewrite
+  old saves. Fixed-point values are stored as raw bits. Load rebuilds
+  structure via real `Purchase`/`Place` commands, then restores live
+  state through non-public methods. No file I/O lives in `sim_core`.
+- 2026-09-09 **Tuning pass after a playtest.** Crusher/mixer/vat cycle
+  times set (crushing quickest, cooking slowest — change the numbers and
+  the prose together). The dock grew to 2x2 for depth, not price. UI
+  scaled 1.5x via explicit constants, not `content_scale_factor`.
+- 2026-09-08 **Chain rework, ticket 2 (Godot/assets).** A hopper's
+  contents are chosen at placement, not on a separate catalog entry
+  (fixed hotbar slots must not renumber). Buying raw stock got its own
+  panel (**M**); a permanent larder strip shows what's bought.
 - 2026-09-08 **Splitter, ticket 2 (Godot/assets).** Drawn as a machined
-  diverter table in the belt run; generator lives in `assets.rs`'s conveyor
-  section (the `machine_` prefix is only for `MACHINE_MODELS` keying).
-  Next-output readout is an arrow inlaid FLUSH in the deck: both grooves
-  always cut, one emissive slab lit. One arrow asset, branch = rotate 90°
-  clockwise (same as `Direction::rotate_cw`). The arrow shows where the item
-  will ACTUALLY go: a `null` output hands to the other side; neither → arrow
-  hidden. A splitter is CONVEYOR to `_belt_asset_for`. Items are hidden per
-  TILE from the tile's own count, not per render pass (multi-chunk bug).
-  `screenshot-scene.sh --populate` applies dirty chunks every tick. `packer`
-  and `dock` are keyless (`SHOP_HOTKEY_SLOTS`), asserted by `test_hotbar.gd`.
-- 2026-09-08 **Splitter, ticket 1 (sim).** `direction` = straight output;
-  branch = one quarter turn clockwise, derived not stored, so one `Rotate`
-  turns both. Accepts from any side (1x1 rule). Round-robin with same-tick
-  fallback; the cursor advances on whichever side TOOK the item. Buffer is an
-  ordinary one-tile `BeltSegment`; `Splitter` holds only the cursor. Own
-  kind in `machines.ron` and `shop.ron`, own `BodyKind`;
-  `Topology.splitter_outputs` and belts share one `resolve_sink` closure.
-  Priced 25, listed with infrastructure.
-- 2026-09-08 **Chain rework, ticket 1 (sim).** `Recipe.fluid_outputs` mirrors
-  `fluid_inputs`; `fluid.rs` gained `can_accept_at`/`deposit_at`. A fluid
-  output leaves by the FACING face; a fluid input may come from any OTHER
-  pipe touching the footprint; the output tap is resolved first and excluded
-  from input choice (a loop touching both sides = outlet only). Fluid output
-  gated at craft completion. `recipes.ron` `schema_version` = 3 (v2
-  rejected). `validate_chain` recognises a fluid link. A machine's inlet face
-  is as long as its footprint, so N solid ingredients need an inlet face ≥ N
-  tiles (a 1x1 mixer deadlocked); the mixer is 1x2. `World::raw_items` is a
-  `Vec` from `ingredients::raw_ingredient_ids` (consumed, never produced).
-  `Place.item` is optional while inferable, required (silent refusal) once
-  ambiguous; non-raw refused. `data/ingredients.ron` + `sim/ingredients.rs` +
-  `BuyIngredient` are `shop.ron`/`shop.rs`/`Purchase` with one word changed.
-  Fill debit rule: clamp to owned, let `fill` clamp to capacity, debit what
-  `fill` added. A tank is filled with the fluid of the run it discharges
-  into; a run nothing taps cannot be filled. `validate_covers` is a test, not
-  a construction panic. Overproduction is a real loss; tests pin the
-  per-unit margin, not "a running factory profits". Reference chain: one
-  feed lane per solid input, machine-to-machine pipe runs are 2 tiles, the
-  tank-fed run 4; `reference_chain_with_budget` seams. Aging rack and
-  `tests/timed_processes.rs` deleted.
-- 2026-09-08 **Inventory hotbar + starting balance.** `STARTING_MONEY` =
-  3000 (> 2.5x the 1087 reference-chain bill); `tests/shop.rs` pins the
-  relationship, not the literals. Tests calibrated on 200 were rewritten to
-  reasons that still hold (small fixtures by choice; the vat needs its own
-  world because of a footprint collision). Hotbar = `shop.ron` order, FIXED
-  slots; owned-0 draws as an empty socket. Number keys select in any mode
-  (same key again deselects); SHIFT+number buys ONLY with the build menu
-  open. Selection is signalled four ways (scale, hazard-yellow frame, caret,
-  bright digit) plus a fading name flyout; growth is a scale, not a position;
-  selection is derived from `_build_kind`, never stored. Hotbar plate nearly
-  opaque; build menu centred above the strip. `--stock`/`--hotbar N` added.
+  diverter table with a next-output arrow inlaid flush in the deck
+  (nothing stands proud of the surface product slides over); the arrow
+  shows where an item will *actually* go, never the raw field alone.
+- 2026-09-08 **Splitter, ticket 1 (sim).** A splitter's branch output is
+  always one quarter turn clockwise from its straight output, derived
+  rather than stored, so one `Rotate` turns both. Round-robin with
+  same-tick fallback to the open side so a blocked branch never stalls
+  the line.
+- 2026-09-08 **Chain rework, ticket 1 (sim).** The middle of the chain is
+  piped, not belted: `Recipe.fluid_outputs` mirrors `fluid_inputs`, so a
+  fluid product leaves by the facing face and a fluid input may come from
+  any other touching pipe. `recipes.ron` bumped to schema 3. Overproduction
+  is a real loss now that raw ingredients cost money.
+- 2026-09-08 **Inventory hotbar + starting balance.** `STARTING_MONEY` is
+  set well above (>2.5x) the shipped chain's full build cost, pinned as a
+  *relationship* in tests rather than as two literals, so a price change
+  can't silently break the guarantee that a new game can reach a payout.
 - 2026-09-08 **Real Placement, ticket 2 (Godot).** The scene rebuilds its
-  whole World subtree on every place/remove/rotate, never per tick. Rotation
-  = Y rotation of `index * 90` along `Direction::rotate_cw` order; the encoder
-  centres models on their footprint. Junction art stays east-only; other
-  facings fall back to the plain tile (tested). Build-menu slot: left-click
-  buys, right-click places. Ghost validity is a Godot-side footprint check
-  signalled by glyph + word + colour (✔ PLACE / ✗ BLOCKED / ✗ NONE OWNED);
-  the tint MULTIPLIES over vertex colours. Remove is a MODE (X) with a red
-  prompt even when valid. R rotates what is under the cursor. Every headless
-  Godot test builds its factory through real commands (`test_layouts.gd`).
-- 2026-09-08 **Delivery dock, drawn.** Architecture, not equipment; layout
-  by the occlusion rule UI_UX §2b point 16. No fill gauge (the buffer empties
-  every tick); the deck shows one case per unit of `delivery_stock`, capped.
-  The packer gained an outfeed; the dock is the only kind with none. `C` and
-  `collect_output` removed everywhere; `test_interaction.gd` asserts it.
+  whole World subtree on every place/remove/rotate, never per tick. Ghost
+  validity is a Godot-side footprint check signalled by glyph + word +
+  colour, never colour alone. Every headless Godot test builds its
+  factory through real placement commands.
+- 2026-09-08 **Delivery dock, drawn.** Architecture, not equipment,
+  following UI_UX §2b's occlusion rule (height at the far side, content at
+  the near side). No fill gauge — its buffer empties every tick — the
+  deck instead shows delivery stock directly.
 - 2026-09-08 **Real Placement, ticket 1 (sim).** `World::new` builds an
-  empty grid; `Place`/`Remove`/`Rotate` do the rest. `Direction::East` is the
-  regression anchor; `sim::reference_chain` rebuilds the shipped line from
-  commands and every integration test uses it. A rotated footprint keeps its
-  origin corner and swaps extents (`machines.rs` doc). `direction` = outlet
-  face; opposite edge = inlet; flanks accept nothing. Fluids connect by
-  TOUCHING any footprint tile; a pipe's `direction` is presentation-only.
-  Topology is a full single-threaded rebuild on Place/Remove/Rotate, never
-  per tick; pipe volumes carried over by tile. A belt is one tile; the
-  belt-to-belt hop spawns on the receiver before taking from the sender.
-  Hopper, tank and dock are ordinary kinds, any number of each; `FillHopper`
-  /`FillFluidTank` take an optional `tile`. Kind→recipe is 1:1 (two recipes
-  on a kind panics). `Remove` destroys contents; `Rotate` keeps them. Wire:
-  `world_layout_json` replaced `chain_layout_json`; snapshots are arrays and
-  carry `direction` strings.
-- 2026-09-08 **Delivery dock, ticket 1 (sim).** `dock` kind (priced 70).
-  The dock is a PASS-THROUGH: `ship_into` empties it every tick into
-  `Economy`'s pool, `DockSnapshot` has no `fill`. `CollectOutput` REMOVED
-  (unknown commands are silent no-ops). `DOCK_CAPACITY` = 32 per item so
-  `try_absorb` can refuse (mass conservation). Multi-item `Inventory`. Reuses
-  `try_transfer_machine_output_to_belt`. Wire: `dock_snapshot_json`, `docks`
-  on chunk snapshots, `"dock"` from `query_tile_json`.
-- 2026-09-08 **Contracts, ticket 2 (clipboard).** One board, one docket per
-  contract (paper tone + steel hairline). Money shown once; cadence, payout
-  and delivered/missed per docket. One "on the dock" line for the shared
-  pool. Overflow is a capped scrolling stack; rebuilds guarded on the set of
-  contract ids. Tick mark sized to its box.
-- 2026-09-08 **Milestone 7, ticket 2 (aging rack drawn; rack since
-  deleted).** Rules that survive: `MACHINE_PROGRESS_GAUGES` is keyed on kind
-  and sparse (short cycles get no bar); a progress bar is recomputed from
-  `current_tick()` every frame, not from a snapshot; a gauge on this camera
-  must be emissive and show its full-scale mark when empty; oak is the one
-  exception to "food contact is stainless" (`palette.ron` `oak`).
-- 2026-09-08 **Contracts, ticket 1 (sim).** `data/contracts.ron` (schema 1,
-  three contracts), `sim/contracts.rs`, `Economy` holds `Vec<ActiveContract>`
-  with independent clocks over ONE shared pool; a settling contract CONSUMES
-  its mix (never credited twice). File order is the scarcity tiebreak. No
-  `penalty` field until GAMEPLAY §11 decides one. The contracts-vs-recipes
-  check is a test, not a construction panic. `economy_snapshot_json`:
-  `contracts` array + `delivery_stock`; per-contract `progress` is clamped.
-- 2026-09-08 **Visual overhaul r2, ticket 3 (junctions).** Outlet = doorway
-  on the +X face; inlet = hooded housing cut open on the camera-facing side
-  (UI_UX §2b point 11). Openings must be genuinely empty voxels — asserted by
-  `cargo test -p voxgen`. `belt_inlet`/`belt_outlet` variants chosen per tile
-  from the layout, +X only. The vat's inlet is widened to an unoccluded
-  corner. `MAX_TICKS_PER_FRAME` clamps catch-up so two screenshot runs are
-  byte-identical. Pipe run's downstream end terminated.
-- 2026-09-08 **Shop, ticket 1 (sim).** `data/shop.ron` is its own file
-  (buildable kinds ⊃ machine kinds); `validate_covers` errors on an unpriced
-  machine kind. One money counter on `Economy`; `Economy::try_spend` is the
-  only debit and is all-or-nothing. Owned counts are a `BTreeMap` field on
-  `World`, not an `Inventory`. `Purchase` is a silent no-op on any failure
-  and dirties no chunk. Ticket 2 built the build menu (B, later E).
+  empty grid; `Place`/`Remove`/`Rotate` do everything else, and
+  `sim::reference_chain` rebuilds the shipped line from real commands as
+  the one test fixture every integration test shares. Flow is derived
+  from adjacency, recomputed only on placement changes, never per tick.
+- 2026-09-08 **Delivery dock, ticket 1 (sim).** The dock is a
+  pass-through: it empties into `Economy`'s shared pool every tick rather
+  than holding stock, so what's "on the dock" is always one number in one
+  place. `CollectOutput` is removed — a supplied factory earns money with
+  no player action.
+- 2026-09-08 **Contracts, ticket 2 (clipboard).** One board, one paper
+  docket per contract, money and the shared delivery pool shown once above
+  them, per-contract facts on each docket. Past a capped height the stack
+  scrolls.
+- 2026-09-08 **Milestone 7, ticket 2 (aging rack, since deleted).** The
+  rack itself is gone (ageing isn't a mechanic this game wants), but the
+  progress-gauge rules it proved survive: a bar recomputed from
+  `current_tick()` every frame, emissive on this camera, sparse — only
+  processes an order of magnitude longer than a craft cycle get one.
+- 2026-09-08 **Contracts, ticket 1 (sim).** Several contracts run
+  concurrently over ONE shared delivery pool; a settling contract consumes
+  its mix so nothing is ever credited twice. File order is the scarcity
+  tiebreak.
+- 2026-09-08 **Visual overhaul r2, ticket 3 (junctions).** On this fixed
+  camera only two faces of a tile are ever seen, so an outlet is a doorway
+  carved through the camera-facing wall and an inlet is a hooded housing
+  cut open on that same side — cutting the *true* inlet face would be
+  invisible (UI_UX §2b point 11).
+- 2026-09-08 **Shop, ticket 1 (sim).** `data/shop.ron` prices every
+  buildable kind (a superset of machine kinds — belts and pipes are
+  priced too). One money counter on `Economy`; `try_spend` is the only,
+  all-or-nothing debit.
 - 2026-09-07 **Visual overhaul r2, ticket 1 (FluidTank).** The tank is a
-  placed building with a footprint, kept OUT of `FluidNetwork::segments`; one
-  `equalize` function moves tank→segments[0] and pipe→pipe. It presents
-  CONSTANT full head (not its fill fraction) so flow is one-way and an empty
-  tank moves nothing. `is_source` now marks only the tile the tank connects
-  to. Capacity 120, a Rust constant like `HOPPER_CAPACITY` (64).
-- 2026-09-07 **Machines improvement, ticket 4 (presentation).**
-  `MACHINE_MODELS` keyed on kind with `machine` as fallback. A machine node
-  sits at its footprint CENTRE; model size = footprint × 32 voxels. Hopper
-  fill reuses the one-voxel-slab mechanism over `bulk_pale` (matte). Hover is
-  footprint-aware. Material rule: food contact is stainless, structure is
-  painted or poured (UI_UX §2b point 8). Stale `ITEM_MODELS` entries are only
-  visible in a rendered frame (§2b point 12).
-- 2026-09-07 **Milestone 6 presentation (pipes).** Pipe geometry comes from
-  `fluid_snapshot_json`'s `segments`, not chunk snapshots (fluid movement
-  never dirties a chunk). `palette.ron` has a `liquid` material class; fluid
-  hue is decided in GDScript. Pipes are stainless steel. The fluid model is
-  one voxel tall, scaled to fill. Godot exits 0 when a `--script` fails to
-  parse, so every headless test prints its own success marker.
+  placed building presenting a constant full head (not its fill
+  fraction), so flow stays one-way and an empty tank moves nothing.
+- 2026-09-07 **Machines improvement, ticket 4 (presentation).** Machine
+  models are keyed by kind with a generic fallback so a missing model is
+  visible rather than silently wrong; food-contact surfaces are stainless,
+  structure is painted or poured (UI_UX §2b point 8).
+- 2026-09-07 **Milestone 6 presentation (pipes).** Pipe geometry comes
+  from the polled fluid snapshot, not chunk snapshots — fluid movement
+  deliberately dirties nothing. Pipes are stainless steel; a liquid is its
+  own material class.
 - 2026-09-07 **Machines improvement, ticket 2 (content).** Crusher, mixer,
-  2x2 cooking vat replaced cooker/reducer. Vat is the ONLY 2x2 by design.
-  The fluid requirement moved to the mixing stage with no Rust change.
-  `schema_version` is not bumped for content.
+  and a genuinely 2x2 cooking vat replaced the old cooker/reducer; the vat
+  is the only 2x2 kind by design.
 - 2026-09-07 **Machines improvement, ticket 1 (footprints).**
-  `data/machines.ron`; origin = min-X/min-Y corner = the tile the belt feeds
-  (stated once in `machines.rs`). A footprint straddling a chunk boundary is
-  reported in EVERY chunk it overlaps (consumers de-duplicate by `tile`).
-  `World::with_machines` is the test seam.
-- 2026-09-07 **Visual-polish pass (voxel pipeline + 3D scene).**
-  Hand-written `.vox` encoder (`generators/vox.rs`). Importer pinned:
-  qbradq/Godot-MagicaVoxel-Importer-with-Extensions @ `288f1d8` (v1.2),
-  vendored; a bump is a reviewed decision. One `.vox` per material class;
-  `palette.ron` owns material class; Godot rebuilds one material per class
-  from `materials.json`. `cargo xtask` stages models into
-  `godot_project/voxels/`. Camera is true isometric `(1, 1, 1)`, fixed. Godot
-  needs TWO `--import` passes on a cold cache; vengi's thumbnailer needs a
-  real video driver. `test_presentation.gd` + `screenshot-scene.sh`.
-- 2026-09-06 **Milestone 5 (Economy MVP).** `sim/economy.rs`: `Fx` money +
-  contracts as plain fields on `Economy`, owned by `World` (no ECS). A miss
-  advances the cadence boundary (no penalty). `economy_snapshot_json`.
-- 2026-09-06 **Milestone 4 (first full chain).** Chain topology came from
-  `recipes.ron` list order (since superseded by placement); `validate_chain`
-  panics on a broken link. Adding a recipe was verified as a data-only edit.
-  `ChunkSnapshot` fields are plural.
-- 2026-09-06 **Milestone 3 (core loop).** `data/` is top-level (resolves
-  ARCH §11). `sim/` module tree has zero gdext dependency; `lib.rs` is a thin
-  JSON layer. Belt gaps are slack beyond a fixed minimum spacing (`belt.rs`
-  doc). Wire format is JSON strings via `serde_json`, to minimise gdext
-  surface. `recipes.ron` is `include_str!`-embedded.
+  `data/machines.ron` gives every machine kind a footprint; origin is
+  always the min-X/min-Y corner, the tile a belt feeds into.
+- 2026-09-07 **Visual-polish pass (voxel pipeline + 3D scene).** A
+  hand-written `.vox` encoder (no Rust crate can write the format this
+  pipeline needs); the `.vox` importer is pinned and vendored. Camera is
+  true isometric `(1,1,1)`, fixed. Godot needs two `--import` passes on a
+  cold cache.
+- 2026-09-06 **Milestone 5 (Economy MVP).** Money and contracts are plain
+  fields on a new `Economy` struct owned by `World`, not ECS entities — no
+  per-entity multiplicity to justify that yet.
+- 2026-09-06 **Milestone 4 (first full chain).** `validate_chain` panics
+  on a broken recipe link at load time rather than failing silently at
+  runtime.
+- 2026-09-06 **Milestone 3 (core loop).** `data/` is top-level; `sim/` has
+  zero `gdext` dependency; the wire is JSON strings via `serde_json` to
+  minimise the `gdext`-specific surface.
 - 2026-09-06 **Milestone 2 (mobile export spike).** Android export works
-  end-to-end; install/launch unverified. iOS blocked in this environment (no
-  Xcode.app) → iOS is stretch/deferred, an open question. See ARCH §9a.
-- 2026-09-06 **Milestone 1 (scaffold).** Pins: Godot 4.6.3-stable, `gdext`
-  0.5.5, Rust edition 2024 (MSRV 1.98.1), `hecs` 0.11.1. `cargo xtask` is
-  the build script. Godot needs a one-time `--import` to discover the
-  extension (`verify-scaffold.sh`).
-- 2026-09-06 **Process and docs.** Conventional Commits (hook + CI).
-  ARCHITECTURE.md adopted after a critical review that turned every hedge
-  into a decision (fixed-point, `hecs`+`rayon`, pinned versions, headless
-  loop). UI_UX.md, GAMEPLAY.md (contracts not spot market; equipment IS the
-  tech tree; staff are an abstract pool of four categories; derived sauces
-  and variants), docs/README.md, docs/DEVLOG.md (not `@`-included) added.
-  Voxel pipeline: `.vox` format, Rust generators as source of truth,
-  headless vengi renders. Milestone 5 "Economy MVP" was added to ARCH §9.
-  Orca orchestration adopted for milestone-sized work.
+  end-to-end (install/launch unverified). iOS is blocked in this dev
+  environment (no Xcode.app) — stretch/deferred. See ARCH §9a.
+- 2026-09-06 **Milestone 1 (scaffold).** Pinned: Godot 4.6.3-stable,
+  `gdext` 0.5.5, Rust edition 2024 (MSRV 1.98.1), `hecs` 0.11.1.
+- 2026-09-06 **Process and docs.** Conventional Commits enforced by hook +
+  CI. The three design docs adopted after a critical review that turned
+  every hedged "X or Y" into a firm decision. Orca orchestration adopted
+  for milestone-sized work.

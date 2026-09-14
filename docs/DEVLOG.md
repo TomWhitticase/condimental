@@ -67,6 +67,26 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-14 — The always-loaded docs were cut down again
+
+The three `@`-included files had grown past the 40k-char budget a second
+time (73k, 45k, 43k) — the same failure mode as the 2026-09-09 pass below,
+this time led by `CLAUDE.md`'s decisions log (54 entries, ~850 lines) and
+`UI_UX.md` §2b (32 points) rather than by `ARCHITECTURE.md`. Same fix,
+same rule: every entry's full text was confirmed present in
+`docs/DECISIONS.md` (two entries — the 2026-09-13 production-stats log
+entry and §2b's point 32 — had been added to the loaded docs but never
+backfilled, and were copied over first so nothing was lost), then each
+entry in `CLAUDE.md`'s log and each point in `UI_UX.md` §2b was condensed
+to its rule in 1-3 sentences; two fully-superseded log entries (the andon
+Godot/asset tickets, since the poles they built were deleted) were dropped
+outright rather than condensed, their text still intact in DECISIONS.md.
+`GAMEPLAY.md` §9 got a different treatment: its dated epic/ticket
+narrative substantially duplicated this DEVLOG's own entries, so it was
+rewritten as current-state design rules only, with a pointer here for
+history, rather than needing a DECISIONS.md Part D. The three files are
+now 29k, 32k and 28k.
+
 ### 2026-09-13 — The P screen: what the factory made and used
 
 Factorio's production statistics, both halves. The simulation half had

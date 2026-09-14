@@ -86,295 +86,117 @@ assets/voxels/
 Point numbers are cited by code comments; keep them stable. Full narrative in
 DECISIONS.md Part B. There is no point 10.
 
-1. **The `.vox` encoder is hand-written** (`generators/vox.rs`). No Rust
-   crate writes the scene-graph chunks the Godot importer needs. ~150 lines,
-   and it also emits `MATL` chunks. The encoder puts a model's origin at its
-   footprint centre at ground level.
+1. **The `.vox` encoder is hand-written** (`generators/vox.rs`, ~150 lines) —
+   no Rust crate writes the chunks the Godot importer needs. It puts a
+   model's origin at its footprint centre at ground level.
 2. **One asset = one mesh per material class.** An imported voxel mesh has
-   one material, so `voxgen` writes `name.vox` (preview) plus
-   `name.<class>.vox` per class; Godot rebuilds one `StandardMaterial3D` per
-   class from `materials.json` (exported from `palette.ron`).
-3. **Headless review:** `vengi-thumbnailer -i model.vox -o out.png -s 512
-   --image --isometric`. `vengi-voxconvert -o out.png` writes one PNG per
-   Z-slice, not a thumbnail. The thumbnailer needs a real video driver
-   (`SDL_VIDEODRIVER=dummy` fails). `scripts/build-voxels.sh` wraps it.
-4. **Godot needs `--import` twice on a cold cache.** The `.vox` importer is
-   an editor plugin registered only on the pass after the first scan.
-5. **A liquid is its own material class** (`liquid`, glossy dielectric,
-   roughness 0.14). The fluid's hue is NOT palette data: which liquid is in a
-   pipe is live sim data, so the fluid model is near-white and `main.gd`
-   tints it. The fluid model is **one voxel tall**, scaled vertically to the
-   live fill fraction; because of point 1's origin rule no pivot maths is
-   needed. The same mechanism draws the hopper fill, the tank level and any
-   progress gauge — do not invent another. **The tint value itself is
-   palette data even though the model's hue is not:** a fluid that also has
-   a still model (vinegar's jug, point 27) would otherwise be one colour in
-   `palette.ron` and another in `main.gd`, and the two are seen side by side
-   the moment a market icon sits above a pipe. `FLUID_TINTS[id]` is the
-   palette entry's RGB, written as such in a comment beside it.
+   one material, so `voxgen` writes `name.<class>.vox` per class; Godot
+   rebuilds one `StandardMaterial3D` per class from `materials.json`.
+3. **Headless review** via `vengi-thumbnailer` (needs a real video driver;
+   `SDL_VIDEODRIVER=dummy` fails), wrapped by `scripts/build-voxels.sh`.
+4. **Godot needs `--import` twice on a cold cache** — the `.vox` importer
+   plugin registers only on the pass after the first scan.
+5. **A liquid is its own material class**, near-white so `main.gd` can tint
+   it live; the fluid model is one voxel tall, scaled to fill fraction (the
+   same mechanism draws hopper/tank level and progress gauges). The tint
+   value itself IS palette data (`FLUID_TINTS[id]`), even though the
+   model's hue is not, so a fluid with a still model (vinegar's jug, point
+   27) doesn't show two different colours side by side.
 6. **Pipes are stainless steel, hollow, with an open inspection channel**
-   starting just above the bore floor, so the level is visible below half
-   fill. Steel, not PVC: §4 makes metal the shiny exception, and
-   GAMEPLAY.md tier 5 reserves special piping as a later gate.
-7. **UI icons are a second render pass** (`generators/icons.rs`,
-   `cargo run -p voxgen --bin voxicons`), not shrunk previews: the
-   thumbnailer has no transparent-background option, so icons are rendered,
-   flood-filled to transparent from the border, cropped and downscaled to a
-   64px square. Output `assets/voxels/icons/`, committed.
-8. **Material rule for machines: food contact is stainless (`metal`),
-   structure is painted or poured (`matte`).** An all-steel machine reads as
-   flat; matte structure gives the metal something to pop against. Emissive
-   is for status lamps only.
-9. **Review the rendered asset, not the generator, and budget a rework
-   pass per asset.** Looking changes the design (a crusher throat too deep
-   to see into; a gearbox that hid the agitator).
-11. **Only two of a machine's four vertical faces can ever be seen: +X and
-    +Z-world.** So an OUTLET is a doorway carved through the +X face, and an
-    INLET is a hooded transfer housing whose CAMERA-FACING side is cut away
-    (a doorway on the true inlet face is invisible). Both read by value
-    contrast (brightest frame, genuinely black opening, one brass
-    threshold); a mid-grey interior or a hazard stripe fails at scene scale.
-    A machine tall enough to stand between its inlet and the camera (the 2x2
-    vat) needs its opening widened to an unoccluded corner. A neighbouring
-    building can hide a correct junction.
-12. **The full-scene render catches bugs no headless test can.** Any
-    presentation lookup keyed by a content id (`ITEM_MODELS`,
-    `MACHINE_MODELS`) has a fallback, so a stale key ships the wrong model
+   above the bore floor so level is visible below half fill.
+7. **UI icons are a second render pass** (`icons.rs`), flood-filled
+   transparent and downscaled to 64px — not shrunk previews.
+8. **Material rule for machines: food contact is stainless, structure is
+   painted or poured.** Emissive is for status lamps only.
+9. **Review the rendered asset, not the generator**, and budget a rework
+   pass per asset — looking changes the design.
+11. **Only a machine's +X and +Z-world faces are ever seen.** An outlet is
+    a doorway on +X; an inlet is a hooded housing cut open on the
+    camera-facing side (the true inlet face is invisible). Both read by
+    value contrast, not colour. A tall machine (the 2x2 vat) needs its
+    opening widened to an unoccluded corner.
+12. **The full-scene render catches bugs no headless test can** — every
+    content-id lookup needs a fallback, since a stale key ships silently
     with every test green. `scripts/screenshot-scene.sh` is the check.
 13. **A process an order of magnitude longer than a craft cycle needs a
-    passive gauge, and on this camera it must be emissive** (both visible
-    faces are the shadow side). An empty gauge must show its own scale: a
-    lit finish line at the top, a position rather than a colour (§7).
-    `MACHINE_PROGRESS_GAUGES` is keyed on kind and sparse: a bar on a 60-tick
-    cycle is a flicker.
-14. **Wood (`palette.ron` `oak`) is the one exception to point 8.** In a
-    barrel-aging room the wood IS the process. Do not "fix" it to steel.
-15. **A machine with no mechanism is a legitimate silhouette** when what
-    distinguishes it is that it only waits. Casks stand on end: lying down
-    they recede into the tile and read as corrugation.
-16. **A building with an open floor follows the depth rule: put the height
-    at high y, put the content at low y.** A sight line travels
-    `(+x, -y, +z)` in model space, so a tall structure on the near side walls
-    off everything behind it. The delivery dock is architecture (raised
-    platform, striped edge, bumpers, despatch doors under a canopy), with
-    the building on the FAR tile and the near tile open apron. It is 2x2
-    since 2026-09-09; the extra tile went into depth. A machine's infeed
-    hood claims its tile corner, and a wall drawn through it is a hole, so
-    the despatch wall starts east of that corner. Lessons: a large block in
-    `concrete_dark` reads as a pit; a canopy on thin posts reads as a
-    floating shelf.
-17. **What stands on the dock is drawn from `delivery_stock`, not from the
-    dock**, whose own buffer empties every tick. One case per unit, with the
-    item's own model, capped at four (a 2x2 block). The exact figure is on
-    the clipboard and in hover.
-18. **A rotated placement needs no new geometry: the same mesh is spun about
-    its footprint-centre origin.** The exception is point 11's junction
-    art: spinning a carved +X doorway 180° puts the opening where nobody can
-    see it, visibly worse than the plain tile. The belt's
-    `belt_inlet`/`belt_outlet` variants were **retired** by the pipes and
-    conveyors overhaul (point 23): the plain belt tile carries the junction
-    and the machine's own hood and doorway do the rest, at every facing.
-    Pipes no longer have this gap either: a pipe tile is a shape plus
-    overlaid fittings, each turned to the side its `links` name (point 25).
-19. **A live body scaled inside a hollow shape must be strictly narrower
-    than the shape's OUTER wall at every height it can reach.** The pipe's
-    fluid slab was as wide as the bore; where the tube curves in toward
-    the crown its outer wall is that wide too, and the two z-fought as a
-    coloured stripe along every closed tile. Only a scene render with
-    liquid in the run shows it.
-20. **Anything Godot spins must be symmetric about the tile midline,
-    between voxels 15 and 16.** An integer-centred axis (voxel 16) lands
-    on the other side of the midline after a turn, so a run at mixed
-    facings steps at every joint. Use the `*_f` primitives with centre
-    15.5 for pipes, belts and junction art.
+    passive, emissive gauge** showing its own full-scale mark when empty.
+    `MACHINE_PROGRESS_GAUGES` is sparse — a bar on a short cycle flickers.
+14. **Wood (`oak`) is the one exception to point 8** — in a barrel-aging
+    room the wood IS the process.
+15. **A machine with no mechanism is a legitimate silhouette** when it only
+    waits (e.g. casks stand on end, not lying down).
+16. **An open-floored building puts height at the far side, content at the
+    near side** (sight line travels `(+x,-y,+z)`). The delivery dock is
+    architecture on the far tile with an open near apron.
+17. **What stands on the dock is drawn from `delivery_stock`**, not the
+    dock's own buffer (which empties every tick) — one case per unit,
+    capped at four.
+18. **A rotated placement reuses the same mesh spun about its footprint
+    origin**, except point 11's junction art — carved doorways don't
+    survive a 180° spin, so belt/pipe junctions are carried by the plain
+    tile plus overlaid fittings instead (point 23, 25).
+19. **A live body inside a hollow shape must stay strictly narrower than
+    the shape's outer wall at every height it reaches**, or the two
+    z-fight — only visible with liquid actually in the run.
+20. **Anything Godot spins must be symmetric about the tile midline**
+    (voxel 15.5, not 16), or a run at mixed facings steps at each joint.
 21. **A dark accent on a camera-facing shadow-side face reads as a hole**
-    (the converse of point 11). The end cap's brass disc rendered as the
-    open mouth it closed; bolts on a bright plate keep the accent.
-22. **A composable fitting is an overlay: it keeps out of every shape's
-    sight window (tube-height hardware at x ≥ 27; leg windows at 20..26)
-    and carves its bore a little wider than the shape's so the two meshes
-    never share a surface.** `vengi` previews look from the -X/+Y corner,
-    which the game never shows, so +X-face hardware is judged only in the
-    scene.
-23. **A thin diagonal mark on the tile plane does not survive this camera;
-    a solid shape does.** The isometric view looks straight down one tile
-    diagonal, so a line along one diagonal projects to a full-length screen
-    horizontal and a line along the other to a short screen vertical: a
-    two-arm `>` chevron rendered as an `L`, and could not point anywhere at
-    any facing. The belt's mark was therefore a **filled** arrow (wedge
-    head, short shaft) in `hazard_yellow` until 2026-09-10, when the player
-    asked for the arrows to go: the mark is now a **plain cleat**, a bar of
-    dark rubber two voxels long across the lane, and the belt's direction is
-    given in words (the build prompt's `facing east`, hover's `carries
-    east`) and by the running surface itself. The camera lesson stands for
-    any mark anyone draws next. **Raised, not recessed**: one edge of any
-    recess runs along the sight line and shadows its own floor. Belts
-    animate by **frames**:
-    frame `k` is the same tile with the surface pattern advanced `k` quarter
-    tiles along the path and nothing else changed; the pattern's period is
-    one tile (a shorter one makes frames coincide or run backwards). A
-    corner's surface is a quarter annulus about the tile corner between its
-    two open faces, whose pattern is stretched to a tile's worth so it
-    reaches the exit face in the same frame a straight would; its cleat
-    bends with the belt. Idlers, rails and legs are structure and never
-    move. The plain tile carries every belt-to-machine junction (point 18).
-24. **A fitting overlaid on a shape must be a full voxel of radius larger
-    than anything it can cover** (`PIPE_FITTING_MARGIN`). Two voxel solids
-    z-fight wherever a voxel of both has an outward neighbour in neither;
-    a one-voxel margin puts every axis-neighbour of an inner voxel inside
-    the outer solid. Found where the machine fitting lands on a straight's
-    own joint flange; pinned by `cargo test -p voxgen` on both faces.
-25. **A pipe tile's turn is a property of what it is joined to, never of
-    its facing.** One joint flange per straight only reads as one join if
-    every tile along an axis keeps it on the same side (east-west turn 0,
-    north-south turn 1); an end's turn is dictated by its open side, so it
-    carries no joint flange at all. R on a pipe visibly changes only a tile
-    joined to nothing.
-26. **A uniform offset in a path convention is invisible on a straight
-    line and shows up the moment the line bends.** Items were drawn from a
-    tile's centre to the next tile's centre — half a tile downstream of the
-    simulation's own input-face-to-output-face distance — and every render
-    of a straight line looked continuous, because every tile shared the
-    shift. A corner cannot share it: the arc has to leave through the
-    output face, and drawn half a tile late it left through the wrong one.
-    Items are now drawn face to face on every tile, so an item appears at a
-    hopper's mouth and vanishes at a machine's face. The general rule: check
-    a path convention against the tile's edges, not against its neighbours,
-    because neighbours hide a shared error.
-27. **A machine is animated by a separate motion model in `MACHINE_FRAMES`
-    arrangements, and the moving parts are CUT OUT of the body rather than
-    duplicated into the overlay.** Point 23's frame mechanism applied to
-    something that is not a tile: the crusher's roll teeth and flywheels,
-    the mixer's ribbon, the vat's agitator spider, the bottler's nozzles and
-    capping chuck and the packer's taping carriage all live in
-    `<machine>_motion_f0..f3`, cut on the machine's own footprint so the
-    overlay and the body share an origin and Godot needs no offset. All four
-    stand beside the body as siblings and exactly one is visible. Two voxel
-    solids that overlap z-fight (point 24), so the body cannot keep a copy
-    of what moves; `cargo test -p voxgen` compares every overlay voxel
-    against its body. Every motion volume is an EVEN number of voxels tall,
-    because `vox::encode` lifts a model by `size[2] / 2` in whole voxels and
-    an odd height sinks the overlay half a voxel into the body it sits on.
-    The frames must differ CONSECUTIVELY, not pairwise: a part that
-    reciprocates passes through the same pose on the way out and on the way
-    back, and only a turning part has to show four distinct angles.
-28. **Motion means "working", and working is narrower than "has a batch".**
-    A mechanism turns only while `0 <= elapsed < required`, so a machine
-    that has finished and is blocked on a full output stands still while its
-    status lamp stays lit — lamp on and nothing turning is the readout for
-    "the thing downstream is full", which neither signal gives alone. The
-    pace is one cycle per 30 ticks for EVERY kind: driving it from a
-    machine's own process length would make the 240-tick vat read as a
-    different factory from the 80-tick crusher, and how long a stage takes
-    is already stated by the product backing up behind it. **No steam,
-    deliberately** — a puff is mass a stopped vat should not have, and a
-    frozen cloud over a cold vat states the opposite of what the lamp says.
+    (converse of point 11) — keep accents on bright plates.
+22. **A composable fitting overlay keeps clear of a shape's sight windows**
+    and carves its bore wider than the shape's so the meshes never share a
+    surface.
+23. **A thin diagonal mark does not survive this camera; a solid shape
+    does** — a chevron rendered as an `L`. The belt's direction mark is a
+    plain raised cleat (not an arrow, since 2026-09-10), with direction
+    given in words. Belts animate by frames of one tile's period; corners
+    use a quarter-annulus pattern stretched to match.
+24. **A fitting overlay must be a full voxel of radius larger than
+    anything it covers** (`PIPE_FITTING_MARGIN`), or the two solids
+    z-fight at shared-neighbour voxels.
+25. **A pipe tile's turn is a property of what it's joined to, never of its
+    facing** — one joint-flange side per axis, so rotating a pipe visibly
+    changes only a tile joined to nothing.
+26. **A uniform offset in a path convention is invisible on a straight run
+    and shows up the moment it bends** — items are now drawn face to face
+    (input midpoint to output midpoint), not centre to centre.
+27. **A machine's moving parts are a separate motion overlay, cut out of
+    the body rather than duplicated** (`<machine>_motion_f0..f3`, siblings,
+    one visible) — two overlapping voxel solids z-fight. Every motion
+    volume is an even voxel height (`vox::encode` lifts by half-height).
+    Frames must differ consecutively; a reciprocating part repeats a pose.
+28. **Motion means "working", narrower than "has a batch"** — a mechanism
+    turns only while `0 <= elapsed < required`, so a finished-but-blocked
+    machine stands still with its lamp still lit. One pace (30 ticks) for
+    every kind. No steam, deliberately.
 27. **A model whose only consumer is the icon pass must be authored for
-    vengi's camera, not the game's.** Point 11 ("only +X and +Z-world are
-    ever seen") is a rule about the *scene*; point 7's icon render goes
-    through `vengi-thumbnailer`, which looks from the **-X/+Y** corner
-    (point 22) — the two cameras see opposite sides of the same model. An
-    asset that appears in both places has to read from both: `item_box`'s
-    label, authored on the faces the game shows, is invisible in its own
-    icon, and nobody noticed because the icon still read as a box. A
-    **fluid** is the pure case of the other extreme: a fluid never rides a
-    belt and is never placed, so its model exists only to be an icon, and
-    its label, handle and fill line belong on the faces vengi shows. Decide
-    which cameras a new model will actually meet before deciding where its
-    detail goes, and render it to check — a face nobody sees is the same
-    cost as one nobody drew.
-27. **The floor is the one surface whose job is to be a background, so it
-    is authored by its VALUE RANGE, not by its detail.** Every other asset
-    is judged alone; the floor is judged as thousands of copies filling the
-    frame, and at that scale anything with contrast becomes the loudest
-    thing in the picture. Three failures, each found only by rendering an
-    empty world (the state a new game starts in, and almost entirely
-    floor): a near-black joint on all four tile edges read as bathroom
-    grout, not a poured slab; single-voxel `concrete_light` speckle read as
-    television static; and a repair patch filled with the shared `concrete`
-    tone measured +16 render units against a floor whose whole variation
-    was ±2, so it read as white paving slabs dropped at random. The rules
-    that came out of it: keep the pour's own tones within a few points of
-    each other (§7's neutral base is a *narrow* band here, not just a
-    desaturated one); make variation BROAD and low-contrast — blotches with
-    wandering outlines, never per-voxel noise, which also greedy-meshes into
-    far fewer triangles on the one asset whose triangle count multiplies by
-    the size of the world; and **never let the floor hold the brightest
-    pixel in the frame**, because §4 reserves that for metal. A feature that
-    genuinely wants contrast (a drain grating read by its stripes) is the
-    exception and should be a real object, not a texture.
-28. **N models laid over thousands of tiles is still only N stamps; the
-    multiplier is per-instance rotation, and it is only free if the tile's
-    edges are four-fold symmetric.** Four floor variants looked varied in
-    isolation and repeated visibly in a magnified render — every worn tile's
-    scuff ran the same way across the screen, every plain tile carried its
-    blotches in the same spots. Laying each instance at a quarter turn chosen
-    by a hash of its coordinates breaks all of that at once, at no asset
-    cost. The constraint it imposes is on the EDGE: whatever the tile draws
-    at its border must survive a quarter turn, or the seam steps wherever two
-    differently-turned tiles meet — the same failure point 20 records for an
-    integer-centred axis. So the saw-cut joint stays on all four edges even
-    though that doubles an interior line, and the joint's colour was
-    lightened until the doubled line still read as a hairline. The choice of
-    variant and of turn must be a pure function of the tile coordinate, so a
-    reloaded save is not repaved and a rebuild does not reshuffle the floor
-    under the player. The one model that must NOT be turned is the one whose
-    feature spans tiles: a row of trench drains is a trench only while every
-    tile lays its channel on the same axis.
-29. **A free-standing thing at a fixed place on a tile meets every body at
-    every facing, and a face one voxel from a tile edge is a face one voxel
-    from EVERY edge once the body turns.** The andon post (removed on
-    2026-09-12 — the lesson stands) stood at the tile's +X/low-Y corner,
-    inset one voxel, and never rotated; the machines it was bolted to do. Two features that had sat harmlessly at
-    the far side of their bodies — the crusher's motor one voxel from its
-    +Y edge, the packer's status lamp one voxel from its -X edge — landed
-    exactly on the post's own faces when the body was turned, and z-fought
-    it (point 24) in a way no preview could show, because a preview shows
-    one facing. The rule: an overlay that does not turn with its host is
-    checked against the host turned all four ways, by a test, not by eye;
-    and the check is on co-located voxels with a face exposed by both, which
-    is the whole of point 24 in one predicate. The corollary for the inset
-    itself: on the tile edge it fights the flush plinth, two in it fights
-    the painted skirt, so one voxel is a pinned number and not a choice —
-    the post passes THROUGH a body and never fights one. The last lesson is
-    the lens ring's size: `VoxModel::set` clips silently at the volume, so a
-    ring about a point two voxels from two edges has radius two at most, or
-    it is flat on exactly the faces the camera sees.
-30. **A per-tick fact shown beside a windowed verdict has to be held across
-    the ticks it is absent.** The load wire carries a `status` judged over
-    the last 600 ticks and a `stall` that is this tick's reason — `null` on
-    most ticks of a blocked machine, which is mid-craft on most of them. A
-    hover printing exactly this poll's `stall` beside an unchanged `status`
-    flickers between "blocked · output full" and "blocked", which reads as
-    the reason going away. The scene keeps the last non-null reason while
-    the status holds and forgets it when the status changes, and a test
-    asserts it is never dropped across hundreds of polls. When one polled
-    field explains another, the explanation's lifetime is the explained
-    thing's, not the poll's.
-31. **At icon scale an object is identified by the proportion of its
-    parts, not by their presence.** The hard hat's first cut had every
-    part a hard hat has — brim, front peak, domed crown, a crest over the
-    top — and its 64 px icon was a bell, because the crown stood taller
-    than it was wide; correct detail on a wrong ratio reads as the wrong
-    thing. A low crown, wider than tall, fixed it with fewer voxels and
-    fewer features. So judge an icon at its real size on the real plate
-    before judging the preview: the preview shows detail, which is what the
-    eye lands on and not what the icon is read by.
-
-32. **A fixed-size card clips a label without complaint, and a taller
-    card is not always available to fix it.** The build-menu card gained
-    one line (`crew: 2 manufacturing`) and the first render cut it at
-    "manufacturi" on the right and pushed `Owned 0` off the bottom; every
-    headless test read the full string and passed (point 12 again — a
-    Label's text is intact whatever the card shows of it). The obvious fix,
-    a taller card, made the two-row grid scroll, because the menu is capped
-    against the hotbar (§5c), and a wider card alone left the bottom line
-    clipped. What worked was paying for the line out of the card's own
-    slack: two less inset top and bottom, no separation, the smallest font
-    step the scale allows, and a card wide enough for the longest crew
-    string. The rule: a new line on a card that lives in a capped grid is
-    bought from the card's padding, not from the grid's height, and the
-    check is the rendered frame at the shipped window size.
+    vengi's camera (the -X/+Y corner), not the game's** — the two cameras
+    see opposite sides of the same model. A fluid is the pure case: it's
+    never placed or belt-borne, so its whole detail budget goes to the
+    icon-visible faces.
+27. **The floor is a background surface, authored by its value range, not
+    its detail** — judged as thousands of copies, so any contrast becomes
+    the loudest thing in frame. Variation is broad, low-contrast blotches,
+    never per-voxel speckle, and the floor must never hold the brightest
+    pixel (§4 reserves that for metal).
+28. **N models over thousands of tiles is still only N stamps; the
+    multiplier is per-instance rotation, free only if the tile's edges are
+    four-fold symmetric.** Variant and turn are a pure function of tile
+    coordinate, so a reload never repaves. The one exception is a model
+    whose feature spans tiles (trench drains), which must never turn.
+29. **A free-standing overlay at a fixed tile position meets every host
+    body at every facing** — check it against the host turned all four
+    ways by a test, not by eye, since a preview shows only one facing.
+30. **A per-tick fact shown beside a windowed verdict must be held across
+    the ticks it's absent** — a hover explaining a status from a
+    same-tick-only reason flickers; keep the last non-null reason while
+    the status holds.
+31. **At icon scale an object is identified by the proportion of its parts,
+    not their presence** — correct detail on a wrong ratio reads as the
+    wrong thing. Judge an icon at its real size on the real plate, not the
+    full-size preview.
+32. **A fixed-size card clips a label without complaint, and a taller card
+    is not always available to fix it** — a new line on a card in a capped
+    grid is paid for from the card's own padding, not the grid's height.
 
 ## 3. Theme & setting
 
