@@ -22,6 +22,123 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-14: **Quality pass, ticket 4: staffing legibility — WHY, COST,
+  BEFORE, AFTER.** The brief (`docs/QUALITY_PASS_PLAN.md`) named four gaps
+  ticket 1's arrears rule left standing: a player could see a category was
+  short without knowing what placed thing was asking for it, could see the
+  bill only by opening H, had no warning before a payday it could not
+  cover, and had no notice after one that it had actually hurt. Four
+  sub-decisions, one per gap, plus the two supporting fixture/testing calls
+  that fell out of building them.
+
+  1. **WHY is answered by counting placements, not by asking the sim for
+     a reason.** `_staff_demand_sources_for(category_id, placements,
+     crews)` walks the world's own placements and crews (the same data
+     the hover panel's crew line already reads) and returns one entry per
+     *kind* asking for the category, in the order it was first asked,
+     with a running count — `asked for by: crusher ×1, mixer ×1, cooking
+     vat ×2`. The alternative, a wire field carrying pre-aggregated
+     demand sources, was rejected: the sim already reports `demand` as a
+     single number per category, and turning that into a breakdown by
+     kind is a presentation question (which kinds exist, how their names
+     read) with no simulation consequence — the same reasoning that keeps
+     `_kind_display_name` and the hover's crew line on the Godot side.
+     `STAFF_CATEGORY_BLURBS` (one sentence per category, a plain const
+     dictionary) answers the case demand can't: a category nothing has
+     been placed against yet still deserves an explanation of what it
+     *would* do, so a new player reads `nothing placed asks for staff
+     yet` under a sentence naming the job, not two blank lines.
+  2. **COST moves to the clipboard, and both readouts quote the wire's
+     `next_bill`/`shortfall` rather than recomputing them.** Ingredients
+     have the larder strip and equipment has shop prices always on
+     screen; wages, GAMEPLAY.md §5's third recurring cost, only existed
+     inside the H modal. The always-visible line
+     (`wages 14 / period  ·  payday in 6s`) sits under the money counter
+     it draws from, and goes to the docket's one warning red with a glyph
+     and words when the balance can't cover it — never colour alone
+     (UI_UX.md §7). The candidate Godot-side arithmetic, `Σ headcount ×
+     wage`, was rejected even though `_staff_bill` already computes it:
+     since ticket 1's notice pay, the bill for the *next* period and the
+     run-rate can genuinely differ (a head fired mid-period is still
+     billed for it), so a second, disagreeing number would appear exactly
+     when a player just fired someone and is watching the figure most
+     closely. `_staff_bill` survives only as the fallback for a snapshot
+     from before the field existed. The build-menu card gained the same
+     treatment (`_crew_cost_text`, `crew: 2 manufacturing  ·  4 /
+     period`) so a kind's running cost is visible before it's bought, not
+     only after, in the same slack UI_UX.md §2b point 32 already
+     recorded paying a card's new line from.
+  3. **BEFORE replays the payday cascade client-side, against wire
+     numbers, in wire order.** The wire has `shortfall` (a single
+     number) but not "how many heads will actually go unpaid," because
+     that requires walking `owed`/`wage` per category in the sim's own
+     payment order — exactly the payday rule ticket 1 wrote in `staff.rs`.
+     Two ways to get that count: add a wire field computed by the sim, or
+     replay the rule in Godot against numbers already on the wire. The
+     wire field was rejected for the same reason as point 1 — this is a
+     read of the *next tick that hasn't happened*, not a fact about the
+     current tick, and the sim already gives Godot everything the rule
+     needs (`owed`, `wage`, category order) to derive it without a new
+     round trip. `_staff_unpaid_count_if_payday_now` therefore duplicates
+     the cascade rule (a zero-wage head is never counted unpaid even
+     mid-cascade, matching `staff.rs`'s own treatment) and is asserted
+     against both a literal cascade and the real fixture below, so a
+     future change to the payday rule in Rust has a Godot-side test that
+     would need deliberately updating to match, not one that silently
+     drifts. The warning's wording is the ticket's own, verbatim
+     (`_staff_shortfall_text`: `▲ next payday short by 6 — 3 heads go
+     unpaid`, with a singular `1 head goes unpaid`), because the ticket
+     text is itself an example a test can hold to exactly. HIRE reading
+     the wire's `can_hire` per row (already computed by ticket 1's hire
+     refusal, previously ignored by the row) closes a small legibility
+     gap of its own: the button used to say ENABLED until the click was
+     silently refused.
+  4. **AFTER reuses the contract-loss notice mechanism rather than
+     inventing a second one.** `_show_contract_notice` already exists to
+     put a fading, one-line announcement along the clipboard's edge, and
+     `_announce_contract_changes` already has the right priming idiom
+     (the first poll after a rebuild seeds silently, so a loaded save
+     doesn't replay history as new events). `_announce_staff_payday`
+     copies that idiom exactly, keyed on `next_payday_tick` strictly
+     advancing rather than diffing a set of ids, and
+     `_staff_payday_notice_text` composes one line per affected category
+     (`▲ PAYDAY: 3 packaging unpaid, idle until next payday`, `✗ PAYDAY: 1
+     logistics left — unpaid two paydays running`) joined by newlines
+     when more than one category is hit in the same payday. A second,
+     staff-specific toast widget was rejected: a player who already knows
+     what the clipboard's fading notice means for a lost contract does
+     not need to learn a second UI convention for a lost head — same
+     mechanism, same place, same idiom for reading it. Each row's own
+     `status_text` (`_staff_status_text`, both cases sharing the `▲`
+     glyph, joined with `  ·  ` when a row is both idled and down a head)
+     gives the same fact a permanent home on the row, so the transient
+     notice and the persistent row never disagree about what happened.
+
+  **Fixture and testing calls.** `test_layouts.gd` gained
+  `build_underfunded_line` (the shipped reference line funded to 8
+  against a 14 bill, chosen so manufacturing's 4 heads at wage 2 exactly
+  exhaust the balance on the cascade, leaving packaging's 2 and
+  logistics' 1 unpaid — shortfall 6, 3 heads unpaid, the ticket's own
+  numbers) rather than reusing `build_understaffed_line`: that fixture is
+  short on *crew*, this one is short on *money*, and the panel's two
+  warnings (short of staff vs. short of cash) needed to be provably
+  distinct fixtures, not the same factory read two ways. Loading it
+  mid-test disables every category's `can_hire`, which surfaced a real
+  test-ordering bug: the pre-existing HIRE/FIRE command tests later in
+  `test_staff_panel.gd` assumed the previously-loaded fixture's
+  affordability and started failing once the underfunded fixture ran
+  before them in the same script. The fix is to rebuild the funded
+  reference line explicitly before those tests run, rather than assume
+  world state a prior test section happened to leave behind — the same
+  discipline `build_understaffed_line`'s section already followed for
+  its own `new_game()` call, just not one this new section had inherited
+  automatically. `--staff-shortfall` (`screenshot-scene.sh`) renders the
+  fixture with the STAFF panel open so the BEFORE warning and disabled
+  HIRE buttons are reviewed as pixels, not only as strings a headless
+  test read back — both `--staff` and `--staff-shortfall` were rendered
+  and read at 1600×900 confirming neither the WHY lines nor the shortfall
+  warning clip against the clipboard or the hotbar.
+
 - 2026-09-13: **Quality pass, ticket 1 (sim): staffing — no silent
   walk-out, no free dodge — and the money ceiling.** The brief
   (`docs/QUALITY_PASS_PLAN.md`) carried the diagnosis: the staff pools

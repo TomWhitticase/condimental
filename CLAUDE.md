@@ -153,7 +153,7 @@ sauce-factory/
                            #   --contracts, --board, --stock, --hotbar N, --no-hud,
                            #   --closeup, --first-person, --stress,
                            #   --belt-gallery, --bottleneck, --staff,
-                           #   --understaffed, menu/pause)
+                           #   --staff-shortfall, --understaffed, menu/pause)
   docs/                    # README.md (index), ARCHITECTURE.md, UI_UX.md,
                            #   GAMEPLAY.md, DEVLOG.md, DECISIONS.md
   .githooks/               # commit-msg + pre-commit; enable with
@@ -204,6 +204,40 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-14 **Quality pass, ticket 4: staffing legibility (WHY, COST,
+  BEFORE, AFTER).** The staff panel and HUD now answer four questions the
+  MVP left to hover and hindsight. **WHY:** each row gets a demand line
+  under its meter, `asked for by: crusher ×1, mixer ×1, cooking vat ×2`
+  (`_staff_demand_sources_for` counts placements by kind in first-asked
+  order, `_staff_demand_text` formats it; `nothing placed asks for staff
+  yet` when empty) plus one sentence of what the category does
+  (`STAFF_CATEGORY_BLURBS`). **COST, always visible:** the wage bill and
+  payday countdown moved out of H onto the always-visible clipboard
+  (`wages 14 / period  ·  payday in 6s`), reading the wire's own
+  `next_bill`/`shortfall` rather than a Godot-side sum, since ticket 1's
+  notice pay means those two can genuinely differ; the build-menu card
+  gained a crew's running cost (`_crew_cost_text`, `crew: 2 manufacturing
+  ·  4 / period`). **BEFORE:** the footer replays the payday cascade
+  client-side against wire numbers in wire order
+  (`_staff_unpaid_count_if_payday_now` — a zero-wage head is never unpaid
+  mid-cascade) and warns in the ticket's own words when short
+  (`_staff_shortfall_text`: `▲ next payday short by 6 — 3 heads go
+  unpaid`, singular `1 head goes unpaid`), else prints `balance after
+  payday: N`; HIRE now reads the wire's own `can_hire` per row instead of
+  always being enabled. **AFTER:** a payday that idles or loses heads is
+  announced through the same `_show_contract_notice` a lost contract uses
+  (`_staff_payday_notice_text`/`_announce_staff_payday`, priming on the
+  first poll exactly like `_announce_contract_changes`), naming category
+  and count (`▲ PAYDAY: 3 packaging unpaid, idle until next payday`, `✗
+  PAYDAY: 1 logistics left — unpaid two paydays running`); a row's own
+  `status_text` carries the same fact (`▲ 2 unpaid, idle until payday`).
+  New fixture `build_underfunded_line` (`test_layouts.gd`: the reference
+  line funded to 8, short of its 14 bill by 6, 3 heads unpaid on cascade)
+  backs both the pure-function tests and a `--staff-shortfall` screenshot;
+  loading it mid-test disables every row's HIRE, so the pre-existing real
+  HIRE/FIRE tests that follow it in `test_staff_panel.gd` now explicitly
+  rebuild the funded reference line first rather than assume prior state.
+  Full record in `docs/DECISIONS.md`.
 - 2026-09-13 **Quality pass, ticket 1 (sim): no silent walk-out, no free
   dodge, no money overflow.** The payday rule (`staff.rs`) no longer fires
   the unpaid: a head the money does not reach is **unpaid** — hired, idle
