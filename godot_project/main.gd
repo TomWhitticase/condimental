@@ -704,6 +704,17 @@ var _machine_motion: Dictionary = {} # origin key -> {"frames": Array[Node3D], "
 ## "The machine load readout" above and `_poll_machine_load` for the record.
 var _machine_load: Dictionary = {} # origin key -> {"load": {...}, "stall": Dictionary|null, "reason": Dictionary|null, "status": String}
 var _load_polled_tick := -1 # sim tick of the last `_poll_machine_load`; -1 = never
+## --- The per-frame poll gate (the quality pass, 2026-09-13) ---
+## Every snapshot `_process` reads is a function of the simulation's state,
+## which only a tick or a command moves — `sim.revision()` counts both —
+## and of the viewport, the hotbar's selection and which modal is up, which
+## decide where and whether a panel is drawn. When none of those moved since
+## the last poll, the frame between two ticks has nothing new to read, so
+## the JSON parses are skipped (`_wire_changed`). -1 = never polled.
+var _polled_revision := -1
+var _polled_viewport := Vector2.ZERO
+var _polled_selected := -1
+var _polled_modals := -1
 ## --- Instanced tiles and carried items (pipes & conveyors overhaul, ticket 4) ---
 ## Belts, splitters and pipes are not nodes: each is one instance in a
 ## MultiMesh shared by every tile drawing the same asset, and the items
@@ -2331,6 +2342,42 @@ func _rebuild_world() -> void:
 	# on the first frame drawn reads the right status rather than nothing.
 	_poll_machine_load()
 	_refresh_buffers()
+	_reread_every_chunk()
+	# Everything above was rebuilt; the next frame must read every snapshot
+	# again whatever the revision says (a new game's world starts at 0).
+	_polled_revision = -1
+
+
+## Draws every chunk's FULL snapshot — carried items, machine states,
+## splitter arrows — after a rebuild has emptied the item pools. A rebuild
+## is followed by `_apply_dirty_chunks`, but that reads only the chunks the
+## simulation reports dirty, which after a place/remove/rotate is the chunk
+## that changed: on a factory spanning two chunks, every item on a belt in
+## the OTHER chunk vanished from the scene until it next moved, and on a
+## backed-up belt that is never (the quality pass, 2026-09-13; found by
+## reading, proved in test_splitters.gd on its cross-chunk branch). The
+## chunks are computed from the placements the layout just gave, the same
+## 32-tile grid the sim packs into its chunk ids (`sim::encode_chunk_id`).
+func _reread_every_chunk() -> void:
+	var seen := {}
+	for placement in _placements:
+		for pair in placement.get("occupies", []):
+			if not (pair is Array) or pair.size() < 2:
+				continue
+			var chunk := Vector2i(_chunk_coord(int(pair[0])), _chunk_coord(int(pair[1])))
+			if seen.has(chunk):
+				continue
+			seen[chunk] = true
+			var packed: int = (chunk.x << 32) | (chunk.y & 0xFFFFFFFF)
+			var parsed = JSON.parse_string(sim.chunk_snapshot_json(packed))
+			if parsed != null:
+				_render_snapshot(parsed)
+
+
+## Which 32-tile chunk a tile coordinate falls in, on one axis — floored
+## division, so -1 is in chunk -1 (`sim::chunk_of`).
+func _chunk_coord(t: int) -> int:
+	return (t - posmod(t, CHUNK_TILES)) / CHUNK_TILES
 
 
 ## Builds the node (or nodes) for one placement: its body at the centre of
@@ -2894,7 +2941,7 @@ func _carried_item(key: String) -> Dictionary:
 ## waiting on an event that never comes (see `SimBridge`'s own docs). The
 ## hopper and dock could be chunk-driven and are polled with them for one
 ## code path rather than two.
-func _refresh_buffers() -> void:
+func _refresh_buffers(econ: Dictionary = {}) -> void:
 	_hopper_states.clear()
 	for snapshot in _read_snapshot_array(sim.hopper_snapshots_json()):
 		var key := _tile_key(_pair_to_tile(snapshot.get("tile")))
@@ -2932,8 +2979,11 @@ func _refresh_buffers() -> void:
 	for snapshot in _read_snapshot_array(sim.dock_snapshots_json()):
 		_dock_states[_tile_key(_pair_to_tile(snapshot.get("tile")))] = snapshot
 
-	var econ = JSON.parse_string(sim.economy_snapshot_json())
-	_last_dock_stock = econ.get("delivery_stock", []) if econ is Dictionary else []
+	# The economy is parsed by the caller when it already has it (a frame's
+	# poll reads it once for the clipboard, the deck and the board).
+	if econ.is_empty():
+		econ = _read_economy()
+	_last_dock_stock = econ.get("delivery_stock", [])
 	_update_dock_stock(_last_dock_stock)
 
 
@@ -3685,10 +3735,11 @@ func _set_view_mode(mode: int) -> void:
 		_camera.fov = FP_FOV
 		_camera.near = FP_NEAR
 		_camera.keep_aspect = Camera3D.KEEP_HEIGHT
-		# ...unless the build menu is up, which needs the cursor (see
-		# _set_shop_menu_open); closing it recaptures.
-		if not _shop_open:
-			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		# ...unless a panel is up and needs the cursor. This used to check
+		# the build menu alone, so TAB with the market, board, staff or
+		# production panel (or a configuration panel) open captured the
+		# mouse under a panel full of buttons (the quality pass, 2026-09-13).
+		_apply_fp_mouse_mode()
 		_update_fp_camera_transform()
 		if _help_label != null:
 			_help_label.text = FP_HELP_TEXT
@@ -5116,12 +5167,31 @@ func _set_shop_menu_open(open: bool) -> void:
 ## screen in exactly the case where there is no real cursor. With either shop
 ## panel up the mouse is handed back (above), and leaving the crosshair drawn
 ## would park a stray mark on top of a slot.
+## Whether something on screen wants the cursor: any of the five modal
+## panels, the configuration panel or the pause menu. The one answer the
+## first-person mouse capture and the crosshair both read.
+func _fp_mouse_free() -> bool:
+	return _modal_open() or _config_open or _pause_open
+
+
+## Any of the five modal panels (E, M, C, H, P) is up. Build mode is not a
+## modal — see `_anything_open` for the version that counts it.
+func _modal_open() -> bool:
+	return _shop_open or _market_open or _board_open or _staff_open or _production_open
+
+
+## In first-person the mouse is captured for looking around unless a panel
+## wants it (`_fp_mouse_free`); in isometric it is always visible.
+func _apply_fp_mouse_mode() -> void:
+	if _view_mode != ViewMode.FIRST_PERSON:
+		return
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if _fp_mouse_free() else Input.MOUSE_MODE_CAPTURED
+
+
 func _update_crosshair_visibility() -> void:
 	if _crosshair == null:
 		return
-	_crosshair.visible = (_view_mode == ViewMode.FIRST_PERSON
-			and not _shop_open and not _market_open and not _board_open and not _staff_open
-			and not _production_open and not _pause_open and not _config_open)
+	_crosshair.visible = _view_mode == ViewMode.FIRST_PERSON and not _fp_mouse_free()
 
 
 func _toggle_shop_menu() -> void:
@@ -5662,10 +5732,11 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 ## says what a click will do (SIGN · price), or why it will do nothing
 ## (SIGNED — one of each; ✗ — the fee is more than the balance), with the
 ## same three never-colour-alone signals the build menu uses.
-func _update_contract_board() -> void:
+func _update_contract_board(econ: Dictionary = {}) -> void:
 	if _board_panel == null:
 		return
-	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
+	if econ.is_empty():
+		econ = _read_economy()
 	var board: Array = econ.get("board", [])
 	if not _board_rows_match(board):
 		_rebuild_board_rows(board)
@@ -6686,9 +6757,18 @@ func _update_production_panel() -> void:
 		row["used_label"].text = _production_count_text(int(state["used"]), String(state["used_rate"]))
 	for entry in _production_window_buttons:
 		var selected: bool = int(entry["index"]) == _production_window
+		# Re-styled only when the selection moves, from the hotbar's cached
+		# styleboxes: this ran on every update while the panel was open and
+		# built five new StyleBoxFlats per button each time (the quality
+		# pass, 2026-09-13).
+		if entry.has("selected") and bool(entry["selected"]) == selected:
+			continue
+		entry["selected"] = selected
 		var button: Button = entry["button"]
+		var style_key := "selected" if selected else "stocked"
+		var style: StyleBoxFlat = _hotbar_styles.get(style_key, _hotbar_slot_style(style_key))
 		for state in ["normal", "hover", "pressed", "disabled", "focus"]:
-			button.add_theme_stylebox_override(state, _hotbar_slot_style("selected" if selected else "stocked"))
+			button.add_theme_stylebox_override(state, style)
 	_production_window_label.text = _production_window_text(_production_snapshot, _production_window)
 	var empty := rows.is_empty()
 	_production_scroll.visible = not empty
@@ -8242,7 +8322,15 @@ func _toggle_remove_mode() -> void:
 	_build_kind = ""
 	_remove_mode = true
 	_close_config_panel()
+	# Every modal, not only the build menu: X with the market or the board
+	# up used to put a red ghost under the panel and leave both open (the
+	# quality pass, 2026-09-13). Entering a mode closes them, as E/M/C/H/P
+	# close each other.
 	_set_shop_menu_open(false)
+	_set_market_open(false)
+	_set_contract_board_open(false)
+	_set_staff_open(false)
+	_set_production_open(false)
 	_rebuild_ghost_body()
 	_update_ghost()
 	# Remove mode replaces placement mode, so the strip has nothing selected
@@ -8331,7 +8419,17 @@ func _rotate_ghost() -> void:
 ## from any other builder expects, and it is free — `PlayerCommand::Rotate`
 ## resolves from any tile of a footprint and keeps the thing's contents.
 func _rotate_under_cursor() -> void:
-	var tile := _ghost_target_tile()
+	_rotate_tile(_ghost_target_tile())
+
+
+## R's rotation of a placed thing, given the tile. **Not under a modal**:
+## with a panel up the cursor is over the panel, and R used to turn
+## whatever stood behind it — an action the player could not see (the
+## quality pass, 2026-09-13). Split from `_rotate_under_cursor` so a
+## headless test can name the tile.
+func _rotate_tile(tile: Vector2i) -> void:
+	if _modal_open():
+		return
 	if tile == HOVER_NO_TILE:
 		return
 	if _placement_at_tile(tile).is_empty():
@@ -9125,14 +9223,16 @@ func _set_pause_open(open: bool) -> void:
 		_pause_status.text = ""
 		_pause_slot_field.text = _save_slot
 		_position_pause_menu()
+		# A drag in progress when ESC is pressed never sees its release
+		# (the pause branch of `_unhandled_input` swallows it) — see `_input`.
+		_iso_dragging = false
 	else:
 		# Whatever real time passed while the panel was up must not become
 		# simulation ticks the moment it closes — see `_process`. The clamp
 		# would cap the burst at MAX_TICKS_PER_FRAME per frame, but a long
 		# pause would still be paid back over the following frames.
 		_tick_accum = 0.0
-	if _view_mode == ViewMode.FIRST_PERSON:
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
+	_apply_fp_mouse_mode()
 	_update_crosshair_visibility()
 
 
@@ -9271,24 +9371,35 @@ func _notification(what: int) -> void:
 func _process(delta: float) -> void:
 	_advance_simulation(delta)
 
-	_update_contract_panel()
-	if _shop_open:
-		# Only while it's up: money the running factory earns should make a
-		# slot go from unaffordable to affordable while the player watches.
-		_update_shop_menu()
-	_update_fluid_network()
-	_refresh_buffers()
+	# The snapshot readers run only when something they read could have
+	# changed (see `_wire_changed`); the wall-clock fades they also drive run
+	# every frame regardless, in the `else` branch, so a flyout keeps fading
+	# on the frames between ticks and under the pause menu.
+	if _wire_changed():
+		# One parse of the economy for the clipboard, the dock deck and the
+		# board, which all used to parse it themselves on the same frame.
+		var econ := _read_economy()
+		_update_contract_panel(econ)
+		if _shop_open:
+			# Only while it's up: money the running factory earns should make a
+			# slot go from unaffordable to affordable while the player watches.
+			_update_shop_menu()
+		_update_fluid_network()
+		_refresh_buffers(econ)
+		_update_hotbar()
+		_update_larder()
+		if _market_open:
+			_update_ingredient_market()
+		if _board_open:
+			_update_contract_board(econ)
+		if _staff_open:
+			_update_staff_panel()
+		if _production_open:
+			_update_production_panel()
+	else:
+		_update_money_flyout()
+		_update_hotbar_flyout()
 	_update_machine_gauges()
-	_update_hotbar()
-	_update_larder()
-	if _market_open:
-		_update_ingredient_market()
-	if _board_open:
-		_update_contract_board()
-	if _staff_open:
-		_update_staff_panel()
-	if _production_open:
-		_update_production_panel()
 	_update_contract_notice()
 	# The ghost cannot be up while paused at all — build mode counts as
 	# "open", so ESC puts it down before it opens the panel — but the hover
@@ -9357,6 +9468,40 @@ func _advance_simulation(delta: float) -> void:
 		_poll_production()
 
 
+## Whether anything a `_process` poll reads could differ from the last
+## poll: the simulation's revision (every tick and every command, refused
+## or not), the viewport's size (every panel positions against it), the
+## hotbar's selection (a key press, not a command) and which modal is open
+## (a panel opening must read on that frame, not the next tick's). Records
+## the new stamps when it says yes. A frame between two ticks with nothing
+## pressed says no, which at 60 Hz against a 30 Hz tick is every other frame.
+func _wire_changed() -> bool:
+	var revision: int = sim.revision()
+	var vp := get_viewport()
+	var viewport := vp.get_visible_rect().size if vp != null else Vector2.ZERO
+	var selected := _hotbar_selected_index()
+	var modals := (
+		(1 if _shop_open else 0) | (2 if _market_open else 0) | (4 if _board_open else 0)
+		| (8 if _staff_open else 0) | (16 if _production_open else 0)
+		| (32 if _pause_open else 0) | (64 if _config_open else 0)
+	)
+	if revision == _polled_revision and viewport == _polled_viewport \
+			and selected == _polled_selected and modals == _polled_modals:
+		return false
+	_polled_revision = revision
+	_polled_viewport = viewport
+	_polled_selected = selected
+	_polled_modals = modals
+	return true
+
+
+## `economy_snapshot_json`, parsed once for everything on a frame that
+## reads it; `{}` if the wire returned nothing parseable.
+func _read_economy() -> Dictionary:
+	var parsed = JSON.parse_string(sim.economy_snapshot_json())
+	return parsed if parsed is Dictionary else {}
+
+
 ## Real seconds since the last autosave, and the write when it comes due.
 ## Only called while unpaused, so a game left sitting on the pause menu
 ## overnight does not autosave a state nothing has changed.
@@ -9366,6 +9511,21 @@ func _advance_autosave(delta: float) -> void:
 		return
 	_autosave_accum = 0.0
 	_autosave("timer")
+
+
+## Sees every input BEFORE the GUI does, and takes exactly one thing from
+## it: a right-button RELEASE ends a drag-pan whatever is under the cursor.
+## The press stays in `_unhandled_input` (a right click ON a panel must not
+## start a drag), but a drag that ENDS over a panel with a mouse filter —
+## the hotbar, the clipboard, a docket — has its release consumed by that
+## panel and never reaches `_unhandled_input`, so `_iso_dragging` stayed
+## true and the camera followed every mouse movement until the next right
+## click (the quality pass, 2026-09-13). The same release is also lost
+## when the pause menu opens mid-drag, hence `_set_pause_open` clears it.
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT \
+			and not event.pressed:
+		_iso_dragging = false
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -9619,10 +9779,21 @@ func _unhandled_input(event: InputEvent) -> void:
 	# in the first place.
 
 
+## Re-reads every chunk the simulation reports dirty. It reads the chunk's
+## DELTA — only the belts and splitters whose contents moved and the
+## machines whose state changed, and the whole chunk after a place, remove,
+## rotate or load (`sim::World::chunk_delta`) — not the full snapshot: on a
+## running line some belt in every chunk moves every tick, so the full
+## snapshot re-sent every belt in the chunk, most of them empty, thirty
+## times a second, and parsing and re-drawing them cost about 12 ms of a
+## 33 ms tick against the simulation's own 1 ms (the quality pass,
+## 2026-09-13; docs/DECISIONS.md). `_render_snapshot` is unchanged: a tile
+## absent from a delta is a tile that did not change, and a tile present is
+## drawn exactly as a full snapshot's would be.
 func _apply_dirty_chunks() -> void:
 	var dirty: PackedInt64Array = sim.dirty_chunk_ids()
 	for chunk_id in dirty:
-		var parsed = JSON.parse_string(sim.chunk_snapshot_json(chunk_id))
+		var parsed = JSON.parse_string(sim.chunk_delta_json(chunk_id))
 		if parsed != null:
 			_render_snapshot(parsed)
 
@@ -9751,6 +9922,8 @@ func _direction_world(direction: String) -> Vector3:
 ## a phantom tile no player could see). Callers get an explicit "no tile"
 ## value rather than a Vector2i(0, 0) that could also be a real tile.
 const HOVER_NO_TILE := Vector2i(-999999, -999999)
+## The simulation's chunk edge in tiles (ARCHITECTURE.md §3.1, `sim::CHUNK_SIZE`).
+const CHUNK_TILES := 32
 ## Screen-space offset from the raw cursor position to the tooltip panel's
 ## top-left corner, so the panel doesn't sit directly under (and get
 ## re-hidden by chasing) the cursor itself.
@@ -10358,9 +10531,10 @@ func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
 ## the one shared money figure, the one shared dock pool, and then EVERY
 ## active contract's own docket — its checklist boxes, its numeric progress
 ## and its own countdown to its own next delivery check.
-func _update_contract_panel() -> void:
-	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
-	var money := float(econ["money"])
+func _update_contract_panel(econ: Dictionary = {}) -> void:
+	if econ.is_empty():
+		econ = _read_economy()
+	var money := float(econ.get("money", 0.0))
 	_contract_money_label.text = "Money: %.0f" % money
 	_flash_money_change(money)
 	_update_money_flyout()

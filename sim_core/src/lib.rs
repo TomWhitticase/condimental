@@ -94,6 +94,32 @@ impl SimBridge {
         GString::from(json.as_str())
     }
 
+    /// `chunk_snapshot_json` cut down to what CHANGED in that chunk since the
+    /// dirty set was last cleared — the belts and splitters whose contents
+    /// moved, the machines/hoppers/tanks/docks whose live state did, never
+    /// a pipe — and the WHOLE snapshot after a place/remove/rotate/load
+    /// touched the chunk. Same JSON shape as `chunk_snapshot_json`, so a
+    /// renderer keyed by tile applies either with the same code; a belt
+    /// absent from a delta is a belt that did not change. This is the read
+    /// to pair with `dirty_chunk_ids()` on the tick path (the quality pass,
+    /// 2026-09-13: the full snapshot re-sent every belt in a chunk, most of
+    /// them empty, thirty times a second). See `sim::World::chunk_delta`.
+    #[func]
+    fn chunk_delta_json(&self, chunk_id: i64) -> GString {
+        let snapshot = self.world.chunk_delta(decode_chunk_id(chunk_id));
+        let json = serde_json::to_string(&snapshot).expect("ChunkSnapshot must serialize");
+        GString::from(json.as_str())
+    }
+
+    /// Ticks plus commands taken so far (`sim::World::revision`). Two equal
+    /// readings mean no polled snapshot can differ between them, so a
+    /// presentation layer can skip its per-frame parses on the frames
+    /// between ticks; a refused command still bumps it.
+    #[func]
+    fn revision(&self) -> i64 {
+        self.world.revision() as i64
+    }
+
     /// A JSON-serialized `sim::TileSnapshot`, or an empty string if the
     /// tile is unoccupied.
     ///

@@ -166,10 +166,62 @@ func _initialize() -> void:
 		_fail("mouse motion without the right button held should not pan")
 		return
 
+	# --- A release the GUI swallowed still ends the drag (quality pass) -----
+	# A drag that ends over a panel with a mouse filter (the hotbar, the
+	# clipboard) has its release consumed by that panel, so `_unhandled_input`
+	# never sees it; `_input` does, and must clear the drag, or the camera
+	# follows every mouse move until the next right click.
+	main._unhandled_input(drag_start)
+	if not main._iso_dragging:
+		_fail("a second right press should start a second drag")
+		return
+	main._input(drag_end) # the GUI ate it: only `_input` sees the release
+	if main._iso_dragging:
+		_fail("a right-button release seen by _input alone must end the drag")
+		return
+	var focus_after_swallowed: Vector3 = main._camera_focus
+	main._unhandled_input(drag_motion)
+	if not main._camera_focus.is_equal_approx(focus_after_swallowed):
+		_fail("after a swallowed release, mouse motion must not pan")
+		return
+	# The pause menu opening mid-drag is the other lost release.
+	main._unhandled_input(drag_start)
+	main._set_pause_open(true)
+	if main._iso_dragging:
+		_fail("opening the pause menu must end a drag in progress")
+		return
+	main._set_pause_open(false)
+
 	# --- TAB toggles ISOMETRIC <-> FIRST_PERSON on the shared Camera3D ------
 	var tab_key := InputEventKey.new()
 	tab_key.keycode = KEY_TAB
 	tab_key.pressed = true
+
+	# --- TAB with a panel up must NOT capture the mouse (quality pass) ------
+	# The capture decision used to check the build menu alone, so TAB with
+	# the market (or the board, staff, production or a configuration panel)
+	# open captured the cursor under a panel full of buttons. Headless Godot
+	# ignores `Input.mouse_mode`, so the DECISION is what is asserted:
+	# `_fp_mouse_free` is what every first-person capture seam reads.
+	main._set_market_open(true)
+	main._unhandled_input(tab_key)
+	if main._view_mode != main.ViewMode.FIRST_PERSON:
+		_fail("TAB should switch to FIRST_PERSON with the market open")
+		return
+	if not main._fp_mouse_free():
+		_fail("with the market open the first-person mouse must stay free (visible), not captured")
+		return
+	if main._crosshair != null and main._crosshair.visible:
+		_fail("the crosshair must not show while the market holds the cursor")
+		return
+	main._set_market_open(false)
+	if main._fp_mouse_free():
+		_fail("with every panel closed the first-person mouse should be captured")
+		return
+	main._unhandled_input(tab_key) # back to isometric for the checks below
+	if main._view_mode != main.ViewMode.ISOMETRIC:
+		_fail("TAB again should return to ISOMETRIC")
+		return
 
 	main._unhandled_input(tab_key)
 	if main._view_mode != main.ViewMode.FIRST_PERSON:
@@ -223,5 +275,5 @@ func _initialize() -> void:
 		_fail("switching back to isometric must restore the orthographic camera, projection was %d" % camera.projection)
 		return
 
-	print("CAMERA_NAV_OK: zoom clamps at both ends, pan moves along screen axes, trackpad gesture and +/- keys both zoom, drag-pan and TAB view-mode switching and first-person look/move all work, orientation never changes in isometric mode")
+	print("CAMERA_NAV_OK: zoom clamps at both ends, pan moves along screen axes, trackpad gesture and +/- keys both zoom, drag-pan (and a release the GUI or the pause menu swallowed still ends it) and TAB view-mode switching (never capturing the mouse under a panel) and first-person look/move all work, orientation never changes in isometric mode")
 	quit(0)

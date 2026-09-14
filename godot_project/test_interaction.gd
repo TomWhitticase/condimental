@@ -137,6 +137,37 @@ func _initialize() -> void:
 		_fail("rotating the belt at (0, 0) should turn east -> south, got %s -> %s" % [belt_before, belt_after])
 		return
 
+	# --- R and X under a modal (the quality pass, 2026-09-13) ---------------
+	# With a panel up the cursor is over the panel: R used to rotate whatever
+	# stood behind it, unseen, and X put a remove ghost under the market and
+	# left both open. R is refused under any modal; X closes the modal first.
+	_press(main, KEY_C)
+	if not main._board_open:
+		_fail("C should open the contracts board")
+		return
+	main._rotate_tile(Vector2i(0, 0))
+	if _direction_at(main.sim, Vector2i(0, 0)) != "south":
+		_fail("R under the contracts board must not rotate the belt behind it")
+		return
+	_press(main, KEY_X)
+	if main._board_open or not main._remove_mode:
+		_fail("X under the contracts board should close the board and enter remove mode (board %s, remove %s)" % [main._board_open, main._remove_mode])
+		return
+	_press(main, KEY_ESCAPE)
+	_press(main, KEY_M)
+	if not main._market_open:
+		_fail("M should open the market")
+		return
+	_press(main, KEY_X)
+	if main._market_open or not main._remove_mode:
+		_fail("X under the market should close the market and enter remove mode")
+		return
+	_press(main, KEY_ESCAPE)
+	main._rotate_tile(Vector2i(0, 0))
+	if _direction_at(main.sim, Vector2i(0, 0)) != "west":
+		_fail("with nothing open, R rotates the belt: expected west after south, got %s" % _direction_at(main.sim, Vector2i(0, 0)))
+		return
+
 	# --- E OPENS THE MENU, ESC CLOSES EVERYTHING (the E/ESC-controls ticket)
 	# The build menu moved off B onto Factorio's own inventory key, and B was
 	# removed rather than kept as an alias — so both halves get asserted, the

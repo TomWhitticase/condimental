@@ -208,10 +208,43 @@ func _run_checks() -> void:
 		])
 		return
 
-	# --- the splitter whose branch was never built ------------------------
-	# Its `next_output` alternates to "branch" as soon as it has passed one
-	# item, and stays there — nothing can ever take it. The arrow must point
-	# where the item actually goes.
+	# --- A rebuild keeps the OTHER chunk's items (the quality pass) ---------
+	# Placing anything rebuilds the scene and empties the item pools, and
+	# only the changed chunk comes back dirty. A JAMMED belt in another chunk
+	# never dirties its own (nothing on it moves), so its items used to
+	# vanish on the next place/remove/rotate anywhere else — for good. Build
+	# a dead-end lane straddling the chunk seam at x = 0, let it back up
+	# until a tick dirties nothing, then place a belt far away in the line's
+	# chunk and look again.
+	var jam_tile := Vector2i(-1, 5) # chunk (-1, 0); the dead end at (0, 5) is chunk (0, 0)
+	Layouts.place(main.sim, "hopper", Vector2i(-2, 5), "east", "tomato")
+	Layouts.place(main.sim, "belt", jam_tile, "east")
+	Layouts.place(main.sim, "belt", Vector2i(0, 5), "east")
+	main._rebuild_world()
+	main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper", "tile": [-2, 5]}))
+	var settled := _tick_until(4000, func():
+		return _items_at(jam_tile) > 0 and main.sim.dirty_chunk_ids().is_empty())
+	if not settled:
+		_fail("the dead-end lane never jammed still (items on %s: %d, dirty chunks: %s)" % [
+			str(jam_tile), _items_at(jam_tile), str(main.sim.dirty_chunk_ids()),
+		])
+		return
+	main.sim.issue_command_json(JSON.stringify({"type": "purchase", "kind": "belt"}))
+	main._issue_world_command({"type": "place", "kind": "belt", "tile": [12, 12], "direction": "east"})
+	if main._placement_at_tile(Vector2i(12, 12)).is_empty():
+		_fail("the far belt was not placed — the rebuild check below would be vacuous")
+		return
+	var still_there := _items_at(jam_tile)
+	var still_drawn := 0
+	for i in range(still_there):
+		if not main._carried_item("belt_%d_%d_%d" % [jam_tile.x, jam_tile.y, i]).is_empty():
+			still_drawn += 1
+	if still_there < 1 or still_drawn != still_there:
+		_fail("after placing a belt in another chunk the jammed belt at %s carries %d items and the scene draws %d — a rebuild must re-read every chunk, not only the dirty one" % [
+			str(jam_tile), still_there, still_drawn,
+		])
+		return
+
 	if not _tick_until(4000, func(): return _due_branch(STRAIGHT_ONLY)):
 		_fail("the branchless splitter never reported 'branch' as due — the fallback case was never exercised")
 		return

@@ -284,6 +284,44 @@ Do not re-litigate these without a good reason.
   payday countdown. Godot reads the sim's own demand/assigned/short
   numbers, never recomputes them; hover and the build-menu card both
   surface a machine's or dock's crew and any staffing shortfall.
+- 2026-09-13 **Quality pass, ticket 3 — presentation bugs and performance.**
+  **The tick path reads a chunk DELTA, and per-frame polls are gated on
+  the wire's revision.** `SimBridge::chunk_delta_json(chunk)` is the chunk
+  snapshot cut down to the belts/splitters whose contents changed and the
+  machines/hoppers/tanks/docks whose state did since the dirty set was
+  last cleared (walked from the changed set, never the chunk; sorted so a
+  reading is deterministic; never a pipe — fluid is polled), and the WHOLE
+  snapshot after a place/remove/rotate/load touched the chunk
+  (`World::chunk_delta`, `full_chunks`). `chunk_snapshot_json` is unchanged
+  and stays the full read. Delta granularity is still per chunk (ARCH §4):
+  what changed is what a dirty chunk's read CARRIES. `SimBridge::revision()`
+  counts ticks plus commands, refused or not; `_process` parses its
+  snapshots only when the revision, the viewport size, the hotbar
+  selection or the set of open modals changed (`_wire_changed`), and the
+  wall-clock fades run in the `else` branch so nothing freezes under the
+  pause menu; a rebuild resets the gate. The economy is parsed once per
+  frame (`_read_economy`) for the clipboard, deck and board. Stress line
+  (`test_perf.gd`): 8.4 → 2.1 ms/frame, `_apply_dirty_chunks` 12.3 → 2.2
+  ms per tick, 78 KB → 12 KB per tick; `_rebuild_world` 70 → 80 ms because
+  **a rebuild now re-reads EVERY occupied chunk's full snapshot**
+  (`_reread_every_chunk`, chunks computed from the layout on the sim's
+  32-tile grid): before, a place/remove/rotate emptied the item pools and
+  re-read only the dirty chunk, so every item on a belt in another chunk
+  vanished until it next moved — for good on a backed-up belt.
+  Input-state fixes, each with a headless proof: `_input` ends a right-drag
+  on any right RELEASE (a release over a panel with a mouse filter or the
+  pause menu never reached `_unhandled_input` and the camera followed the
+  mouse until the next right click); first-person mouse capture is one
+  decision, `_fp_mouse_free` (TAB with M/C/H/P or a config panel up used
+  to capture the cursor under the panel); `_rotate_tile` refuses under any
+  modal (R turned the tile behind the panel, unseen); X closes every modal
+  like E/M/C/H/P do. The production panel's window buttons take the
+  hotbar's cached styleboxes instead of five new ones per button per
+  update. Deliberately left (reported): the legend's third line runs under
+  the clipboard at 1600x900 on every screen (ticket 5); `_read_world_layout`
+  is ~40 of the rebuild's 80 ms on 1500 tiles (a 336 KB layout parse per
+  place); `cargo xtask` builds a DEBUG `sim_core` and every number above is
+  measured on it. Full record in `docs/DECISIONS.md`.
 - 2026-09-12 **Staff pools MVP, ticket 1 (sim).** Staff are four aggregate
   pools (`data/staff.ron`); every kind in `machines.ron` (schema 2)
   declares its required crew. Each tick, machines claim their whole crew
