@@ -1,5 +1,12 @@
 # Quality pass — plan (2026-09-13)
 
+> **DONE — all five tickets, closed 2026-09-15.** Every ticket is merged
+> into `main`; "Decisions made by tickets" at the bottom of this file is the
+> summary of what each one decided, and `docs/DEVLOG.md` has an entry per
+> ticket. The brief below is kept as written for the record — read the
+> decisions section, not the ticket table, for what the game actually does
+> now.
+
 **No new features.** The project owner, after playing the game with other
 people, asked for a pass that makes what exists correct, fast, fair and
 legible. This document is the brief every ticket reads first: the
@@ -257,3 +264,74 @@ now behind `main` (missing ticket 4 entirely) and should be treated as
 retired — do not merge into it. Ticket 5's own merge target is `main`
 directly, since it is the last ticket and everything else is already
 there.
+
+## Decisions made by tickets
+
+What the pass actually decided, one entry per ticket. Each is condensed in
+CLAUDE.md's decisions log with the full reasoning in `docs/DECISIONS.md`;
+this section is the pass's own index into them.
+
+**Ticket 1 — the payday rule is the contract board's strikes, applied to
+people.** A head the money does not reach is UNPAID: still hired, idle
+until the next payday, and gone only if that one cannot pay it either; a
+covered payday clears the arrears, back pay first. The line rule stands —
+the first refusal leaves every head after it unpaid. **Notice pay closes
+the fire-before-payday dodge:** a head employed for any part of a period is
+owed for it, so firing everyone the tick before payday bills identically.
+**A hire is refused unless the balance covers the next bill plus the new
+wage.** Money became `types::Money` (`I48F16`): the old `Fx` ceiling of
+~32 767 was minutes away for a five-line board, and a payout at it panicked
+in debug and wrapped in release. The wire gained `next_bill`, `shortfall`,
+`unpaid_last_payday` and per-category `owed`/`unpaid`/`left_last_payday`/
+`can_hire` so a panel could warn before and announce after.
+
+**Ticket 2 — belt item spacing is half a tile, and a belt's front item
+respects the next tile's footprint.** `ITEM_MIN_SPACING_TILES` went 0.25 →
+0.5, chosen by rendering it rather than by arithmetic: items are half-tile
+models, so at a quarter tile a fed lane drew as one solid bar of product.
+Belt speed and item models are unchanged, and the reference line's steady
+throughput is unchanged (the vat is the bottleneck). Widening it exposed a
+real packing bug — the front item ran to the belt's end while the next
+tile held an item at its start, the same point, drawn twice at every
+boundary — fixed with a pre-tick snapshot of downstream room, so the result
+stays order-independent and a rebuilt save stays in lockstep. **Accepted,
+not retuned:** one lane delivers four tomatoes per 100 ticks against the
+crusher's 80-tick craft, so a single-lane crusher is belt-limited and says
+so on hover. A lane has a throughput; that is the honest readout.
+
+**Ticket 3 — the tick path reads a delta, and per-frame polls are gated on
+a revision.** `chunk_delta_json` is the chunk snapshot cut down to what
+actually changed (and the whole chunk after a place/remove/rotate/load);
+`revision()` counts ticks plus commands, so `_process` parses nothing on a
+frame where nothing could have moved. The stress line went 8.4 → 2.1
+ms/frame and 78 → 12 KB per tick. Delta granularity is still per chunk
+(ARCH §4) — what changed is what a dirty chunk's read *carries*. Five
+input-state bugs fixed with headless proofs: items in other chunks
+vanishing after a rebuild, the camera panning on after a right-drag
+released over a panel, first-person capture fighting an open modal, R
+rotating a tile hidden behind a panel, X not closing every modal.
+
+**Ticket 4 — staffing answers why, what it costs, what is about to happen,
+and what just did.** Each staff row names what asks for its category and
+says in a sentence what the category does. The wage bill and payday
+countdown moved onto the always-visible clipboard, reading the wire's own
+`next_bill`/`shortfall` rather than a Godot-side sum — since notice pay,
+the two genuinely differ just after a firing, which is exactly when a
+player is watching. The footer warns before a payday it cannot cover in
+words and a glyph, and HIRE is disabled from the wire's `can_hire` rather
+than after a refused click. A payday that idles or loses heads announces
+itself through the same notice mechanism a lost contract uses.
+
+**Ticket 5 — polish sweep and docs.** Every screen rendered at 1600x900 and
+every PNG read. A hover or config panel now clears the legend, the
+clipboard and the hotbar in all four quadrants, with a fallback that is
+checked *after* the on-screen clamp rather than before it. The legend is
+five lines so its panels line stops running under the clipboard. Two
+contract notices raised in the same poll are each shown in turn instead of
+the second overwriting the first before a frame drew it — queuing only the
+second and later, because the first is asserted synchronously by the
+existing tests. A build card's crew cost is two lines paid for out of the
+card's own padding, because the grid's scroll cap comes from the panel's
+height and a taller card only clips more. A splitter's hover says
+`connected`, not the wire's tile coordinates. A new game played to its
+first payout needed no wording or ordering fix.

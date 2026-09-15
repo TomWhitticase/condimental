@@ -22,6 +22,141 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-15: **Quality pass, ticket 5: polish sweep and docs — closes out
+  the quality pass.** The brief was a method rather than a defect list:
+  render every screen the game has at 1600x900 through
+  `scripts/screenshot-scene.sh` and *read* each PNG, on the standing
+  argument of UI_UX.md §2b point 12 that the full-scene render catches what
+  no headless test can. Five things read wrong. Two of them were not
+  discoveries — ticket 3 found them, judged them out of its scope and
+  named this ticket in its notes — which is worth recording as evidence
+  that the hand-off worked: a bug a ticket declines to fix needs a named
+  owner or it becomes permanent.
+
+  1. **A panel's placement is checked against the plates it can land on,
+     not only against the viewport's edges — and the check has to survive
+     the clamp.** `_panel_position_near` places every hover tooltip and the
+     hopper/tank config panel. It flipped the panel to the other side of
+     the cursor when it ran past the viewport's right or bottom edge, and
+     that is all it did. Three things it therefore ignored: the hotbar,
+     which draws over the bottom of the viewport and is not part of its
+     visible rect (the config panel's own clamp already subtracted
+     `_hotbar_reserved_height()`, so the knowledge existed a few lines
+     away); the legend in the top-left; and the contracts clipboard in the
+     top-right. A tile low on screen put its tooltip through the hotbar,
+     and one high on screen put it over the clipboard's own text. Both were
+     found in rendered frames, one bug each.
+
+     The replacement tries all four quadrants around the cursor — nearest
+     first, so nothing moves in the common case — and takes the first that
+     clears the viewport, the hotbar's reserved height and every avoided
+     plate. Plates are read with `get_global_rect()` rather than
+     `position`/`size`, since both sit inside their own layout containers
+     while this panel is effectively in screen space.
+
+     The fallback is where the real lesson is, and it cost two attempts. A
+     tall tooltip (buffer rows, two meters) near the top middle can fail
+     all four quadrants at once: down runs past the hotbar, up lands on the
+     legend or the clipboard whichever side of the cursor it takes. The
+     first fallback written clamped the panel on screen and then pushed it
+     off the overlapping plate along whichever axis it penetrated least —
+     and pushed it straight down off the bottom of the screen, where the
+     same clamp snapped it back onto the plate it was fleeing. The rule
+     that came out of it: **a positioning fix must be validated after every
+     constraint has been applied, not at the moment it is chosen.**
+     `_pushed_clear_of` now tries all four directions off a plate, clamps
+     each candidate, and keeps only one that still clears the plate
+     afterwards. Penetration depth only orders the attempts; it no longer
+     decides.
+
+  2. **The legend's panels line is cut whenever it grows, and it will grow
+     again.** Ticket 3 reported the legend's third line running under the
+     clipboard at 1600x900 on every screen. The cause is not a layout bug:
+     the line reads `E: build menu  M: market  C: contracts  H: staff  P:
+     production  click a hopper or tank: configure`, and it grew by one
+     entry each time a panel got a key (H with the staff pools, P with
+     production stats) with nothing capping its width. Splitting the
+     configure hint onto its own line — five legend lines, not four — takes
+     the longest line back clear of the clipboard's left edge. This is the
+     second time that line has been cut for this reason, so it is recorded
+     as a recurring cost rather than a fix: **the next panel that earns a
+     key will overrun it again**, and the honest structural answer (wrap
+     the legend against the clipboard's measured rect, or drop the
+     panel keys into a single "E/M/C/H/P: panels" entry) was left alone as
+     out of a no-new-features ticket's scope.
+
+  3. **Only the second and later notices in a poll are queued; the first
+     stays synchronous.** Ticket 3's other hand-off:
+     `_announce_contract_changes` loops over what changed since the last
+     poll and calls `_show_contract_notice` per change, and that function
+     assigns `_contract_notice.text` outright. Two contracts lost on the
+     same poll, or a loss and a signature together, therefore showed only
+     the last — the earlier text overwritten before a single frame drew it.
+     Ticket 3's note suggested a queue, and the first implementation was
+     the obvious one: every notice appends, `_update_contract_notice`
+     drains. It broke `test_contract_board.gd`, and the reason is worth
+     keeping. Both of that file's notice assertions read
+     `main._contract_notice.text` *synchronously*, immediately after
+     `_sign_contract_offer` or after advancing ticks, with no frame pumped
+     and no call to `_update_contract_notice` in between; and `.text` is
+     never reset between the two cases, so the second one starts with the
+     first's text already in the label. Gating on an empty label fails for
+     the same reason; gating on wall-clock time since process start is
+     unpredictable at test time.
+
+     So the batching moved into `_announce_contract_changes`'s own loop: a
+     local `raised` flag, the first change of a poll shown immediately
+     exactly as before, the rest appended to `_contract_notice_queue` and
+     drained by `_update_contract_notice` once the current notice's hold
+     and fade have fully elapsed. `_show_contract_notice` itself is
+     unchanged. **The bug was about a second call, so the fix is scoped to
+     the second call** — which leaves every existing caller (including
+     ticket 4's payday announcements, which share this seam) and every
+     existing test behaving identically.
+
+  4. **A card's new line is paid for from the card's own padding, because a
+     taller card is not available.** Ticket 4 put a crew's running cost on
+     the build-menu card joined to the crew line by ` · `, and at the
+     card's real width that overran on every kind with a crew — painted
+     over by the next card's stylebox, so it read as a truncated word
+     rather than as overflow. The natural fix, growing `SHOP_SLOT_SIZE`,
+     was implemented and reverted: `_fit_grid_scroll` caps the build grid's
+     scroll against the *panel's* available height, not the grid's natural
+     height, so a taller card does not raise the cap — it clips more of row
+     two before the scroll starts, and past a point puts a scrollbar on
+     screen at 1600x900, which UI_UX.md §5c explicitly rules out. Autowrap
+     alone was tried second and broke the phrase in the wrong place
+     ("manufacturing · 2 /" then "period"), still overrunning. What shipped
+     is a literal newline in `_crew_cost_text` (bounded at two lines) and a
+     new `SHOP_CARD_ICON_SIZE` shrinking the build card's icon by roughly
+     what the line costs. The market's crate keeps the larger
+     `SHOP_ICON_SIZE`, since its grid is one row of three rather than two
+     of six and has the slack. This is UI_UX.md §2b point 32 applying to
+     itself a second time, and both constants now carry the reasoning in
+     comments so the revert is not re-attempted.
+
+  5. **A hover line is never the wire's own representation.**
+     `_splitter_output_text` printed a connected output as its tile
+     coordinates (`12, 7`). UI_UX.md §5e's rule is about clocks and ids —
+     seconds not ticks, display names not wire ids — and a tile coordinate
+     is the same category of leak: it is the simulation's addressing scheme
+     surfacing in a player-facing line, and it is not actionable, since the
+     player is looking at the tile. It says `connected` / `not connected`
+     now, which is the whole of the fact the player can act on.
+
+  The ticket's other half was playing a new game from nothing to its first
+  payout across the real command boundary, the way `test_layouts.gd` builds,
+  looking for any point a player would not know what to do next. It
+  produced no fixes, which is a result worth recording rather than an empty
+  section: the build prompt, the larder strip, the docket and the payday
+  line answer the run's questions in the order it raises them, and the
+  earlier tickets' readouts (ticket 4's wage line especially) are what
+  closed the gaps that would otherwise have shown up here. One oddity was
+  found and deliberately not fixed: `scripts/screenshot-scene.sh --hover`
+  can settle the cursor a tile away from the one requested. It is a
+  property of the harness's own camera-to-tile math, not reachable in play,
+  and fixing it is test-tooling work rather than polish.
+
 - 2026-09-14: **Quality pass, ticket 4: staffing legibility — WHY, COST,
   BEFORE, AFTER.** The brief (`docs/QUALITY_PASS_PLAN.md`) named four gaps
   ticket 1's arrears rule left standing: a player could see a category was
@@ -64,10 +199,12 @@ matches what code comments and data files cite.
      when a player just fired someone and is watching the figure most
      closely. `_staff_bill` survives only as the fallback for a snapshot
      from before the field existed. The build-menu card gained the same
-     treatment (`_crew_cost_text`, `crew: 2 manufacturing  ·  4 /
-     period`) so a kind's running cost is visible before it's bought, not
-     only after, in the same slack UI_UX.md §2b point 32 already
-     recorded paying a card's new line from.
+     treatment (`_crew_cost_text`) so a kind's running cost is visible
+     before it's bought, not only after, in the same slack UI_UX.md §2b
+     point 32 already recorded paying a card's new line from. *(Ticket 5
+     amended the format: the cost is on its own line under the crew line,
+     not joined to it by ` · ` — see ticket 5's record for why the joined
+     form did not fit the card.)*
   3. **BEFORE replays the payday cascade client-side, against wire
      numbers, in wire order.** The wire has `shortfall` (a single
      number) but not "how many heads will actually go unpaid," because

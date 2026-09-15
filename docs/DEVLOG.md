@@ -49,8 +49,8 @@ below is history and should only ever be appended to.)*
 - **Payout juice, and the project's first audio (done):** earning money is now an event rather than a number quietly going up. When a contract settles, coins fountain up over every dock, the money counter punches up in scale and flashes amber, a "+N" rises out of it and the docket that paid is stamped **PAID**; a case landing on the dock gets a much smaller cue (a pop and a quiet knock), because that happens constantly and a payout happens every thousand-odd ticks. It needed **no simulation change at all** — Godot notices a payout by watching each contract's `deliveries_made` for a rise in the snapshot it already polls. The whole celebration is clocked off `sim.current_tick()`, so it pauses with the game and a screenshot run stays reproducible. **Sound exists now**, and it is synthesised in GDScript at runtime (`godot_project/audio.gd`) rather than shipped as `.wav` files — which settles UI_UX.md §8's open audio question as *feedback-only, procedurally generated*, with a SOUND switch on the pause menu.
 - **Pipes & conveyors overhaul (IN PROGRESS — six of seven tickets merged, `docs/PIPES_AND_CONVEYORS_PLAN.md` has the ticket-7 hand-off notes):** seven tickets on one integration branch to make belts and pipes look right, read right, run fast and connect up. **Ticket 1 (sim) has landed:** every belt, splitter and pipe on the wire carries `links` — what feeds it, what it hands to, or what its pipe is joined to, per side — recorded by the topology pass so it is exact and free per tick. **Ticket 4 (Godot) has landed:** belts, splitters, pipes and the items riding them are `MultiMesh` instances (one per asset and material class) rather than a node each, with a 1500-tile stress fixture, a headless timing test (`test_perf.gd`) and `scripts/screenshot-scene.sh --stress`; machines and buildings keep their nodes, and the seams the belt-animation and corner tickets build on (frame sets, a caller-supplied yaw per tile, one item-positioning function) are in place in `main.gd`. **Ticket 3 (assets) has landed:** the pipe model family (straight, corner, tee, cross, end, machine/tank fittings, one fluid body per shape) on a 15.5 midline, with seven pipe rendering defects fixed at the generator. **Ticket 2 (assets) has landed:** the belt model family — straights and left/right corners in four animation frames with a solid raised direction arrow *(replaced by a plain rubber cleat on 2026-09-10 at the player's request — see the log)*; the belt-side junction variants are retired (the plain tile carries the junction, the machine's hood does the rest). **Ticket 6 (Godot) has landed:** every pipe tile draws its shape (end, straight, corner, tee, cross), its turn, its machine/tank fittings and its per-shape liquid body from the wire's `links` alone; hover names a pipe's connections in words; the one-arrangement `pipe_source`/`pipe_inlet` tiles are deleted; `test_pipe_shapes.gd` and `scripts/screenshot-scene.sh --pipe-gallery` cover every shape at every turn. **Ticket 5 (Godot) has landed:** a belt's shape (straight, left/right corner, merge, start, end) comes from its `links`, the four-frame surface animates at item speed from the tick, items arc through corners (and are drawn face to face on every tile — they had been half a tile downstream), hover says feeds and hand-offs in words, the retired belt aliases are deleted, and a `--belt-gallery` fixture shows every shape and junction at every facing. Ticket 7 (gallery bug hunt and docs close-out) is to do; one sim rule discrepancy (a belt feeds a machine from any side of an inlet-edge tile) is flagged for ticket 7.
 - **Machine load indicator (DONE, all three tickets, 2026-09-11; plan: `docs/MACHINE_LOAD_PLAN.md`):** the player can see which machines are flat out and which are waiting, and so where the bottleneck is, across the whole floor. The simulation measures each machine's load over a rolling 600-tick window and reports `working`/`starved`/`blocked` with a percentage and the reason it is waiting, on the wire (`machine_load_snapshots_json`, plus the same fields on chunk and tile snapshots) and in the save (ticket 1). Six `andon_*` stack-light models — three statuses in a short and a tall height — are pinned by voxgen tests against every machine body at every facing (ticket 2). Every recipe-running machine now stands one on its camera-visible corner, lit to the sim's own verdict, polled on the tick (a pause freezes it; a loaded save lights up on its first frame); hover gains a line in words (`blocked · 61% busy · output full`) and a load bar; `test_layouts.gd`'s `build_bottleneck_line` settles the shipped line behind the cooking vat so it reads red · red · green · amber · amber, and `scripts/screenshot-scene.sh --bottleneck` photographs it (ticket 3). **Amended 2026-09-12: the stack-light poles are gone.** After a playtest the owner did not like a pole beside every machine, so the six `andon_*` models and the scene nodes were removed; the indicator is the hover panel alone — a status glyph and word leading the load line and the load bar filled in the status colour. The simulation half and the polling are unchanged.
-- **Staff pools MVP (DONE, all three tickets, 2026-09-12; plan: `docs/STAFF_POOLS_PLAN.md`):** the factory needs people, and people cost money every period (GAMEPLAY.md §5, §7). **Ticket 1 (sim) has landed:** four staff categories in `data/staff.ron`, a required crew per kind in `data/machines.ron` (now schema 2), per-tick whole-crew claims in stable machine order (a machine short of its crew pauses where it is and reads *starved* with a `staff` reason; a dock without its logistics head holds), payday out of the one money counter with the unpaid leaving in file order, free `hire`/`fire` commands, `staff_snapshot_json`, `crew` on tile and shop snapshots, `understaffed` on the dock, and all of it in the save. **Ticket 2 (icons) has landed:** four voxel props rendered through the icon pass, one per category (hard hat, spanner, taped carton, pallet jack). **Ticket 3 (Godot) has landed:** the **H** staff panel — one row per category with its icon, hired count, an assigned/asked-for meter with the numbers printed on it, the shortfall in words, wage and HIRE/FIRE, and the wage bill and payday countdown in the footer — polled on the tick like the machine load; hover gains `crew: 2 manufacturing`, an understaffed machine reads `▲ starved · short of manufacturing staff` and an understaffed dock `held · short of logistics staff`; the build-menu card shows a kind's crew under its price; `test_staff_panel.gd` proves it on a new `build_understaffed_line` fixture and `scripts/screenshot-scene.sh --staff` / `--understaffed` photograph it.
-- **Quality pass (IN PROGRESS, 2026-09-13; plan: `docs/QUALITY_PASS_PLAN.md`):** no new features — correct, fast, fair, legible. **Ticket 1 (sim) has landed:** the payday rule no longer fires the unpaid silently — an unpaid head is idled for a period and leaves only if unpaid again, the wire says the next bill and the shortfall ahead of time and who left afterwards (`staff_snapshot_json`: `next_bill`, `shortfall`, `unpaid_last_payday`, per-category `owed`/`unpaid`/`left_last_payday`/`can_hire`); a fired head is still owed for its period and a hire needs the balance to cover the next bill, so neither HIRE nor FIRE dodges a wage; money is `Money` (`I48F16`) so a payout can no longer panic or wrap at 32 767; the rest of the sim was audited for exploits (see the log entry). **Ticket 2 (belt gaps) and the production-stats screen have landed too.** **Ticket 4 (staffing legibility) has landed:** the wage bill and payday countdown are on the always-visible clipboard and in the H footer, drawn from the wire's own `next_bill`/`shortfall`; each row names what asks for its category and what the category does; the footer warns before a payday it cannot cover in the ticket's own words (`▲ next payday short by 6 — 3 heads go unpaid`) and disables HIRE per the wire's `can_hire`; a payday that idles or loses heads is announced through the same mechanism a lost contract uses. Tickets 3 and 5 (Godot bug/perf pass, polish) are untouched.
+- **Staff pools MVP (DONE, all three tickets, 2026-09-12; plan: `docs/STAFF_POOLS_PLAN.md`):** the factory needs people, and people cost money every period (GAMEPLAY.md §5, §7). **Ticket 1 (sim) has landed:** four staff categories in `data/staff.ron`, a required crew per kind in `data/machines.ron` (now schema 2), per-tick whole-crew claims in stable machine order (a machine short of its crew pauses where it is and reads *starved* with a `staff` reason; a dock without its logistics head holds), payday out of the one money counter in file order — **amended by the quality pass's ticket 1 (2026-09-13, below): an unpaid head is idled, not fired, and leaves only if the next payday is unpaid too**, free `hire`/`fire` commands, `staff_snapshot_json`, `crew` on tile and shop snapshots, `understaffed` on the dock, and all of it in the save. **Ticket 2 (icons) has landed:** four voxel props rendered through the icon pass, one per category (hard hat, spanner, taped carton, pallet jack). **Ticket 3 (Godot) has landed:** the **H** staff panel — one row per category with its icon, hired count, an assigned/asked-for meter with the numbers printed on it, the shortfall in words, wage and HIRE/FIRE, and the wage bill and payday countdown in the footer — polled on the tick like the machine load; hover gains `crew: 2 manufacturing`, an understaffed machine reads `▲ starved · short of manufacturing staff` and an understaffed dock `held · short of logistics staff`; the build-menu card shows a kind's crew under its price; `test_staff_panel.gd` proves it on a new `build_understaffed_line` fixture and `scripts/screenshot-scene.sh --staff` / `--understaffed` photograph it.
+- **Quality pass (DONE, all five tickets, 2026-09-13/14; plan: `docs/QUALITY_PASS_PLAN.md`, decisions in CLAUDE.md's log):** no new features — correct, fast, fair, legible. **Ticket 1 (sim):** the payday rule no longer fires the unpaid silently — an unpaid head is idled for a period and leaves only if unpaid again, the wire says the next bill and the shortfall ahead of time and who left afterwards (`staff_snapshot_json`: `next_bill`, `shortfall`, `unpaid_last_payday`, per-category `owed`/`unpaid`/`left_last_payday`/`can_hire`); a fired head is still owed for its period and a hire needs the balance to cover the next bill, so neither HIRE nor FIRE dodges a wage; money is `Money` (`I48F16`) so a payout can no longer panic or wrap at 32 767; the rest of the sim was audited for exploits (see the log entry). **Ticket 2 (belt gaps):** `ITEM_MIN_SPACING_TILES` is half a tile, not a quarter — a fed lane now reads as a visible queue of boxes instead of one solid bar, at the same steady throughput as before (the vat is still the bottleneck); widening it exposed and fixed a packing bug where the belt's front item and the next tile's item occupied the same point at every tile boundary. **Ticket 3 (Godot bugs/perf):** the tick path reads a chunk *delta* (`chunk_delta_json`, only what actually changed) instead of the whole chunk snapshot, and per-frame polls are gated on the wire's own `revision()` so an unchanged frame parses nothing — the stress line dropped from 8.4 to 2.1 ms/frame; fixed a right-drag that never released when the mouse came up over a panel, first-person mouse capture fighting the pause/config panels, `R` rotating a tile hidden behind an open panel, and `X` not closing every modal like E/M/C/H do. **Ticket 4 (staffing legibility):** the wage bill and payday countdown are on the always-visible clipboard and in the H footer, drawn from the wire's own `next_bill`/`shortfall`; each row names what asks for its category and what the category does; the footer warns before a payday it cannot cover in the ticket's own words (`▲ next payday short by 6 — 3 heads go unpaid`) and disables HIRE per the wire's `can_hire`; a payday that idles or loses heads is announced through the same mechanism a lost contract uses. **Ticket 5 (polish sweep and docs):** every screen walked at 1600x900 and every PNG read, five things fixed. A hover or config panel could land squarely on the legend, on the contracts clipboard or under the hotbar, because it only ever flipped off the right and bottom edges of the viewport — it now tries all four quadrants around the cursor and, failing those, clamps on screen and pushes clear of whichever plate it still overlaps (`_panel_position_near`/`_pushed_clear_of`). The legend is five lines instead of four, so the panels line (E/M/C/H/P) and the configure hint no longer run back under the clipboard — ticket 3 left that one by name. `_announce_contract_changes` shows two notices raised in the same poll (two contracts lost at once, or a loss and a signature together) in turn, instead of the second silently overwriting the first before either was ever read (`_contract_notice_queue`) — ticket 3 left that one by name too. A build-menu card's crew cost is two lines (`crew: 2 manufacturing` / `4 / period`), paid for out of the card's own padding by a smaller build-card icon, because joined on one line it overran the card and a taller card does not help (the scroll cap comes from the panel's height, not the grid's). A splitter's hover says `connected` / `not connected` rather than the wire's raw tile coordinates. A new game was also played through to its first payout by driving the real command boundary, and nothing in that run needed a wording or ordering fix. Finally this doc, CLAUDE.md's decisions log and `docs/QUALITY_PASS_PLAN.md` were reconciled across the whole pass. `cargo test --workspace` and `scripts/verify-core-loop.sh` are green.
 - **Production stats — the P screen (DONE, both halves, 2026-09-13):** Factorio's production GUI. The simulation keeps a per-item ledger of what recipes made and used over four rolling windows (5s/1m/10m/1h) and for all time — a paid contract counts as using what it ships, buying and filling count nothing — polled over `production_snapshot_json` and saved with the world. **P** opens the PRODUCTION panel: rows biggest first with the item's icon, MADE and USED bars with counts and per-minute rates printed on them (over the observed span, scaled against the largest count), a window selector plus all time, one modal at a time with E/M/C/H. `test_production_stats.gd` proves it; `scripts/screenshot-scene.sh --production` photographs it. The sim half was written on 2026-09-12 and left uncommitted in a worktree; it was picked up, merged behind the staff pools (a craft records at the same points a crew is claimed for) and finished with the Godot half in one pass.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
@@ -67,6 +67,96 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-15 — Every screen read once, on purpose (quality pass, ticket 5)
+
+The last ticket of the quality pass, and the only one whose method was
+looking rather than measuring: render every screen the game has at
+1600x900 through `scripts/screenshot-scene.sh` — menu, pause, build menu,
+market, contracts board, staff panel (funded and short), production panel,
+a configured hopper, every hover (machine, hopper, tank, dock, pipe,
+splitter, belt), the bottleneck line, the belt gallery, a closeup, first
+person, a payout — and actually read each PNG rather than confirming it
+rendered. Five things read wrong. Two of them ticket 3 had already found
+and left here by name, which is the argument for the ticket existing.
+
+**A panel could land on another panel.** `_panel_position_near` places
+every hover tooltip and the hopper/tank config panel, and it flipped only
+off the right and bottom edges of the *viewport*. The hotbar is not part of
+the viewport's edges, and neither is the legend or the contracts clipboard,
+so a tile low on screen put its tooltip through the hotbar and a tile high
+on screen put it over the clipboard's text. It now tries all four quadrants
+around the cursor and takes the first that clears the viewport, the
+hotbar's reserved height and every fixed plate. The fallback is where the
+real lesson is: a tall tooltip near the top middle fails all four
+quadrants at once, and the first fallback written — clamp on screen, then
+push off the overlapping plate along whichever axis it penetrated least —
+pushed the tooltip straight down off the bottom of the screen, where the
+same clamp snapped it back onto the plate it was fleeing. `_pushed_clear_of`
+now tries all four directions off a plate and keeps only one that survives
+being clamped back. **A position fix has to be checked after the clamp, not
+before it.**
+
+**The legend ran under the clipboard.** Ticket 3 reported this on every
+screen and left it. The cause is that the legend's panels line has been
+quietly growing — E and M, then C, then H, then P, plus the "click a hopper
+or tank" hint on the same line — and nothing caps its width. Splitting the
+configure hint onto its own line makes the legend five lines and takes the
+longest line back under the clipboard's left edge. Worth saying plainly:
+this is the second time that line has been cut for exactly this reason, and
+it will happen a third time when the next panel gets a key.
+
+**Two notices in one poll, one of them never seen.** Also ticket 3's, also
+left here. `_announce_contract_changes` calls `_show_contract_notice` in a
+loop, and that function assigns `_contract_notice.text` synchronously — so
+two contracts lost on the same poll, or a loss and a signature together,
+showed only the last one, the earlier text having been overwritten before a
+single frame drew it. The fix queues the *second and later* notices in a
+poll and drains them from `_update_contract_notice` once the current one's
+hold and fade have fully elapsed. It is deliberately not a queue-everything
+design: `test_contract_board.gd` asserts `.text` immediately after signing
+and after a loss, with no frame pumped in between, so anything that defers
+the first notice of a poll fails both. Keeping the first synchronous makes
+the fix invisible to every existing caller and to the tests, which is the
+right shape for a bug about a second call.
+
+**A card clipped its own new line.** Ticket 4 added the running cost to the
+build menu's crew line, joined with ` · `, and on the card's real width
+that runs past the edge on every kind with a crew — painted over by the
+next card's stylebox, so it read as a truncated word rather than as
+overflow. The obvious fix, a taller card, does not work here and it is
+worth recording why: `_fit_grid_scroll`'s scroll cap is set by the *panel's*
+available height, not the grid's natural height, so a taller card does not
+raise the cap — it clips more of row two before the scroll begins, and past
+a point puts a scrollbar on screen at 1600x900, which UI_UX.md §5c rules
+out. So the second line is paid for out of the card's own padding (UI_UX.md
+§2b point 32): `_crew_cost_text` returns a literal two lines and a new
+`SHOP_CARD_ICON_SIZE` shrinks the build card's icon by what the line costs.
+Autowrap alone was tried first and broke the phrase in the wrong place
+("manufacturing · 2 /" then "period"), still overrunning.
+
+**A hover read out the wire.** A splitter's hover printed its outputs as
+tile coordinates (`12, 7`), which is the wire's representation, not the
+player's — UI_UX.md §5e's rule that a player-facing line never shows the
+wire's own ids or units. It says `connected` / `not connected` now, which
+is the whole of what the player can act on.
+
+The other half of the ticket was playing a new game from nothing to its
+first payout, driving the real command boundary the way `test_layouts.gd`
+does, watching for anywhere a player would not know what to do next. That
+turned up nothing needing a fix: the build prompt, the larder, the
+clipboard's docket and the payday line between them answer the questions
+the run raises, in that order. The one oddity found is in the screenshot
+harness rather than the game — `--hover` can settle the cursor a tile off
+what it was asked for — and it is reported, not fixed, since it is not
+reachable in play.
+
+Docs: this file's Current status now covers all five tickets of the pass
+with one clause each, the staff-pools bullet is amended where ticket 1
+superseded it, CLAUDE.md's decisions log gains ticket 5's entry and has
+ticket 4's crew-cost line corrected to the two-line format, and
+`docs/QUALITY_PASS_PLAN.md` is closed out with what each ticket decided.
+`cargo test --workspace` and `scripts/verify-core-loop.sh` are green.
 
 ### 2026-09-14 — Staffing legibility finished: why, before, and after (quality pass, ticket 4, part 2)
 

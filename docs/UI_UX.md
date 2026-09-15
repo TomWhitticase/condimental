@@ -197,6 +197,21 @@ DECISIONS.md Part B. There is no point 10.
 32. **A fixed-size card clips a label without complaint, and a taller card
     is not always available to fix it** — a new line on a card in a capped
     grid is paid for from the card's own padding, not the grid's height.
+    The grid's scroll cap comes from the PANEL's available height, so a
+    taller card raises nothing and clips more of the row below it; and a
+    wrapped label is not a fix either, since autowrap breaks the phrase
+    where the width falls rather than where the sense does (the build
+    card's crew line takes a literal newline and a smaller icon).
+33. **A panel placed near the cursor is positioned against the fixed HUD
+    plates, not just the viewport's edges, and every candidate is judged
+    AFTER the on-screen clamp rather than when it is chosen.** The hotbar,
+    legend and clipboard are drawn over the viewport, so a flip that only
+    respects the viewport's right and bottom edges lands the panel on top
+    of them. Try all four quadrants around the cursor, nearest first; when
+    a tall panel fails all four, clamp on screen and then push clear —
+    keeping only a push that still clears the plate once the clamp has been
+    re-applied, or the clamp snaps the panel back onto what it was
+    avoiding.
 
 ## 3. Theme & setting
 
@@ -313,7 +328,8 @@ factory tropes; the sauce theme comes through in what the factory processes.
   of manufacturing staff` over its `crew: 2 manufacturing` line, a
   refused dock says `held · short of logistics staff`, and a build-menu
   card says a kind's crew and its running cost under its price
-  (`crew: 2 manufacturing  ·  4 / period`). **The wage bill and payday
+  (`crew: 2 manufacturing`, with `4 / period` on its own second line —
+  point 33 below). **The wage bill and payday
   countdown are also on the always-visible clipboard** (quality pass,
   2026-09-14), not only inside H: `wages 14 / period  ·  payday in 6s`
   sits directly under the money it draws from, taking the docket's one

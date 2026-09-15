@@ -204,6 +204,49 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-15 **Quality pass, ticket 5: polish sweep and docs — closes out
+  the quality pass.** Every screen walked at 1600x900 through
+  `scripts/screenshot-scene.sh` and every PNG read; five fixes, of which
+  the first two were left for this ticket by name in ticket 3's notes.
+  **A panel never lands on another plate** (`_panel_position_near`,
+  rewritten, plus `_pushed_clear_of`): it used to flip only off the right
+  and bottom *viewport* edges, so a hover or config panel could sit
+  squarely over the legend, over the contracts clipboard, or under the
+  hotbar (which is not part of the visible rect). It now tries all four
+  quadrants around the cursor and takes the first that clears the
+  viewport, the hotbar's reserved height and every fixed plate, then
+  falls back to clamping on screen and *pushing* clear — picking a
+  direction that survives the clamp, since an earlier version chose by
+  penetration depth alone and shoved the tooltip off the bottom, where
+  the clamp snapped it straight back onto the plate it was fleeing.
+  **The legend is five lines, not four:** H and P had joined E/M/C on the
+  panels line and that line plus the configure hint ran back under the
+  clipboard — the configure hint gets its own line
+  (`ISO_HELP_TEXT`/`FP_HELP_TEXT`). **A poll that raises more than one
+  contract notice no longer clobbers itself**
+  (`_announce_contract_changes`/`_contract_notice_queue`): two contracts
+  lost together, or a loss and a signature in the same poll, left only
+  the last call's text visible, since `_show_contract_notice` overwrites
+  `_contract_notice.text` synchronously. The fix is local to
+  `_announce_contract_changes`'s own loop — the first notice in a poll
+  still shows immediately, exactly as before (both
+  `test_contract_board.gd` cases assert `.text` synchronously with no
+  intervening frame pump, so a queue-everything design broke them), and
+  only a second or later notice in the *same* poll queues, drained by
+  `_update_contract_notice` once the current notice's hold+fade window
+  has fully elapsed. **A build-menu card's crew cost is two lines**
+  (`_crew_cost_text` returns `crew: 2 manufacturing\n4 / period`): joined
+  by ` · ` it overran the card and was painted over by the next card's
+  stylebox, and `AUTOWRAP_WORD_SMART` alone broke it mid-phrase into
+  three. Per UI_UX.md §2b point 32 the line is paid for out of the card's
+  own padding — a new `SHOP_CARD_ICON_SIZE` shrinks the build card's icon
+  by what the line costs — because a taller card does NOT help:
+  `_fit_grid_scroll`'s scroll cap comes from the panel's height, not the
+  grid's, so growing the card only clips more of row two. **A splitter's
+  hover says `connected` / `not connected`,** not the wire's raw tile
+  coordinates (UI_UX.md §5e). Un-fixed and reported: a hover-drift quirk
+  in the `--hover` screenshot harness itself, not reproducible in play.
+  Full record in `docs/DECISIONS.md`.
 - 2026-09-14 **Quality pass, ticket 4: staffing legibility (WHY, COST,
   BEFORE, AFTER).** The staff panel and HUD now answer four questions the
   MVP left to hover and hindsight. **WHY:** each row gets a demand line
@@ -216,8 +259,9 @@ Do not re-litigate these without a good reason.
   (`wages 14 / period  ·  payday in 6s`), reading the wire's own
   `next_bill`/`shortfall` rather than a Godot-side sum, since ticket 1's
   notice pay means those two can genuinely differ; the build-menu card
-  gained a crew's running cost (`_crew_cost_text`, `crew: 2 manufacturing
-  ·  4 / period`). **BEFORE:** the footer replays the payday cascade
+  gained a crew's running cost (`_crew_cost_text`; ticket 5 put the cost on
+  its own line — `crew: 2 manufacturing` then `4 / period` — see ticket 5's
+  entry below). **BEFORE:** the footer replays the payday cascade
   client-side against wire numbers in wire order
   (`_staff_unpaid_count_if_payday_now` — a zero-wage head is never unpaid
   mid-cascade) and warns in the ticket's own words when short
