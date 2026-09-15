@@ -204,6 +204,46 @@ or meaningful progress, and update DEVLOG's "Current status" if it is stale.
 Newest first. Each entry is the rule; `docs/DECISIONS.md` has the reasoning.
 Do not re-litigate these without a good reason.
 
+- 2026-09-15 **Pipes & conveyors overhaul, ticket 7 — the close-out, and
+  what a close-out may not decide.** The galleries were clean; what the
+  bug hunt found was around the work. **`cargo xtask` now runs `godot
+  --import` itself, twice** (staging deletes the `.import` sidecars and
+  the `.vox` importer registers only on the second pass, UI_UX §2b point
+  4), degrading to a printed reminder when godot is not runnable so a
+  `cargo test`-only CI box stays green; `--no-import` opts out. A step
+  that must be run twice by hand by someone who already knows about it is
+  a trap, and it caught this ticket. **The "known benign" `Parameter
+  "material" is null` line was real:** freeing an instance still holding a
+  `material_override` emits it, so `_release_render_resources` drops mesh
+  and material off BOTH instance kinds (`MultiMeshInstance3D` and the
+  `MeshInstance3D`s `_asset_node` makes) at every one of the six places the
+  scene frees something that could hold a mesh — clearing only the first
+  kind, or only the two subtree frees, each left one occurrence behind
+  (the last was the ghost body, whose tint is a `material_override`). The line surfaces on the
+  rendering server's flush, not at the `free()`, so marker prints around
+  the frees point at the wrong place; `test_placement.gd`'s header now
+  calls it a regression, not scenery. **`scripts/make-demo-saves.sh` +
+  `make_demo_saves.gd` rebuild the four demo saves** from
+  `test_layouts.gd`'s builders through real Purchase/Place, each warmed
+  600 ticks and proven to LOAD before it is written; they live in
+  `user://saves/`, since the committed fixture is the builder, not its
+  output, and a schema bump rejects (never migrates) every existing save.
+  **One ghost rule, not two** (UI_UX §2b point 34): *a ghost previews what
+  the connection rules already make certain and never what the simulation
+  still has to decide* — the pipe ghost takes shape from adjacent pipes
+  (fluids connect by touching), the belt ghost stays straight (a belt's
+  hand-off is `resolve_sink`'s answer), and the pipe ghost still previews
+  no machine/tank fitting. No behaviour changed. **Deliberately left to
+  the owner:** `resolve_sink` feeds a machine from any side of an
+  inlet-edge tile and counts a belt on its OUTLET face as feeding it —
+  measured, and contrary to both `world.rs`'s module doc and GAMEPLAY §9,
+  so the code is the outlier (`tests/links.rs` pins it on purpose). The
+  fix is one condition (`belt.direction == sink.direction`) but it is a
+  gameplay change that breaks `build_demo_line` and existing saves. Also
+  reported not fixed: nobody has watched the belt animation live
+  (`BELT_FRAMES`), `_read_world_layout` is ~40 of a rebuild's 80 ms
+  (milestone 8), and every perf figure is off a debug build. Full record
+  in `docs/DECISIONS.md`.
 - 2026-09-15 **Quality pass, ticket 5: polish sweep and docs — closes out
   the quality pass.** Every screen walked at 1600x900 through
   `scripts/screenshot-scene.sh` and every PNG read; five fixes, of which

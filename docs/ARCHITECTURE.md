@@ -440,8 +440,10 @@ Resolved: data-file path (`data/`, top-level); `hecs` maintenance; `gdext`
 version; `.vox` importer; money/contract home (GAMEPLAY.md §9); per-tile
 orientation (real placement epic — `Direction` on every placement, one Y
 rotation in Godot; the belt's east-only junction art was retired by the
-pipes & conveyors overhaul, UI_UX.md §2b point 18; the pipe's `pipe_inlet`
-is the last east-only asset, ticket 6's to retire).
+pipes & conveyors overhaul, UI_UX.md §2b point 18, and its ticket 6 retired
+`pipe_source`/`pipe_inlet`, the last east-only assets, so **no asset in the
+project is authored for one facing any more** — every tile derives its shape
+and turn from its `links`).
 
 Still open:
 

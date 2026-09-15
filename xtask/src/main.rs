@@ -76,6 +76,71 @@ fn main() {
 
     copy_voxel_models(&root);
     copy_voxel_icons(&root);
+
+    if env::args().any(|a| a == "--no-import") {
+        println!("xtask: --no-import given; run `{IMPORT_HINT}` (twice) before launching");
+    } else {
+        reimport_godot_assets(&root);
+    }
+}
+
+/// The command a human has to run if xtask cannot run it for them.
+const IMPORT_HINT: &str = "godot --headless --path godot_project --import";
+
+/// Re-runs Godot's asset import over `godot_project/`, twice.
+///
+/// Staging the voxels above deletes `godot_project/voxels/` and rebuilds it,
+/// which takes every `.import` sidecar with it — so straight after an xtask the
+/// project has models Godot has never imported, and a windowed launch or a
+/// `scripts/screenshot-scene.sh` render draws NO MESHES AT ALL (`floor_tile
+/// mesh missing`). That cost real time to diagnose more than once, because the
+/// failure looks like a broken scene rather than a missing build step.
+///
+/// It runs TWICE for the reason `scripts/verify-core-loop.sh` documents at
+/// length: the `.vox` importer is an editor plugin, and it only registers on
+/// the pass AFTER the first scan, so a cold cache imports zero models on pass
+/// one and all of them on pass two.
+///
+/// Doing it here rather than in each script is the same argument the rest of
+/// this file makes: xtask is what invalidated the sidecars, so xtask is what
+/// should restore them, and nobody should have to know that. `--no-import`
+/// opts out for a build that is not about to launch anything; a missing
+/// `godot` is a printed reminder rather than a failure, since building the
+/// library is useful on a machine with no engine installed (CI runs
+/// `cargo test` alone).
+fn reimport_godot_assets(root: &Path) {
+    let godot_bin = env::var("GODOT_BIN").unwrap_or_else(|_| "godot".into());
+    let project = root.join("godot_project");
+
+    for pass in 1..=2 {
+        let result = Command::new(&godot_bin)
+            .current_dir(root)
+            .args(["--headless", "--path"])
+            .arg(&project)
+            .arg("--import")
+            .output();
+        match result {
+            Ok(output) if output.status.success() => {
+                println!("xtask: godot --import pass {pass}/2 ok");
+            }
+            Ok(output) => {
+                eprintln!(
+                    "xtask: godot --import pass {pass}/2 failed ({}); \
+                     run `{IMPORT_HINT}` (twice) by hand before launching",
+                    output.status
+                );
+                return;
+            }
+            Err(e) => {
+                println!(
+                    "xtask: '{godot_bin}' not runnable ({e}); skipping asset import. \
+                     Before launching the scene, run `{IMPORT_HINT}` TWICE \
+                     (set GODOT_BIN to override), or the world draws no meshes."
+                );
+                return;
+            }
+        }
+    }
 }
 
 /// Mirrors `assets/voxels/models/` into `godot_project/voxels/`.

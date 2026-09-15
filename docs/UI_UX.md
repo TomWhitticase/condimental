@@ -213,6 +213,22 @@ DECISIONS.md Part B. There is no point 10.
     re-applied, or the clamp snaps the panel back onto what it was
     avoiding.
 
+34. **A ghost previews what the game's connection rules already make
+    certain, and never what the simulation still has to decide.** The two
+    shapes drawn under the cursor look inconsistent and are not: a belt
+    ghost stays straight at its facing even beside a belt that will corner
+    it, while a pipe ghost takes its shape from the pipes already placed
+    around it. GAMEPLAY.md §9 is the reason — solids respect faces, fluids
+    connect by touching. A pipe joins everything it touches, so the shape
+    the tile will have is knowable before the click; a belt's hand-off is
+    the sim's own directional answer (`resolve_sink`), so a ghost that
+    drew the corner would be promising a link the placement might not
+    make. For the same reason the pipe ghost still previews no machine or
+    tank fitting: which tile of a footprint is tapped is the simulation's
+    call, not geometry's. Where a rule is certain, show it; where it is
+    not, show the plain tile and let the prompt (§5a) say the rest in
+    words.
+
 ## 3. Theme & setting
 
 **A grounded, semi-realistic 21st-century industrial food factory**:

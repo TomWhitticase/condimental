@@ -87,9 +87,9 @@ static func stock_larder(sim, quantity := 64) -> void:
 ## crusher facing WEST, which discharges back west along three more belts, with
 ## a short pipe run heading SOUTH beside it. That shape is chosen, not
 ## arbitrary: it uses three of the four directions on belts and the fourth on
-## the pipes, so "does a rotated tile render correctly" and "does the
-## east-only junction art fall back cleanly everywhere else" are both visible
-## in one frame. It also actually RUNS — the hopper unloads onto the first
+## the pipes, so "does a rotated tile render correctly" and "does a belt pick
+## the right shape where it turns and where it meets a machine" are both
+## visible in one frame. It also actually RUNS — the hopper unloads onto the first
 ## belt, the belts carry, the crusher crushes and discharges — so it is a
 ## working factory rather than a diorama.
 ##
