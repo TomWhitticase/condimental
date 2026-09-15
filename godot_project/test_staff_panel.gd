@@ -697,16 +697,16 @@ func _run_checks() -> void:
 		var label: Label = slot["crew_label"]
 		if slot["kind"] == "crusher":
 			saw_machine = true
-			if label.text != "crew: 1 manufacturing  ·  2 / period":
-				_fail("the crusher's card says 'crew: 1 manufacturing  ·  2 / period' under the price, got '%s'" % label.text)
+			if label.text != "crew: 1 manufacturing\n2 / period":
+				_fail("the crusher's card says 'crew: 1 manufacturing\n2 / period' under the price, got '%s'" % label.text)
 		if slot["kind"] == "belt":
 			saw_belt = true
 			if label.text != "":
 				_fail("a belt's card shows no crew line")
-		if slot["kind"] == "cooking_vat" and label.text != "crew: 2 manufacturing  ·  4 / period":
-			_fail("the vat's card says 'crew: 2 manufacturing  ·  4 / period', got '%s'" % label.text)
-		if slot["kind"] == "dock" and label.text != "crew: 1 logistics  ·  2 / period":
-			_fail("the dock's card says 'crew: 1 logistics  ·  2 / period', got '%s'" % label.text)
+		if slot["kind"] == "cooking_vat" and label.text != "crew: 2 manufacturing\n4 / period":
+			_fail("the vat's card says 'crew: 2 manufacturing\n4 / period', got '%s'" % label.text)
+		if slot["kind"] == "dock" and label.text != "crew: 1 logistics\n2 / period":
+			_fail("the dock's card says 'crew: 1 logistics\n2 / period', got '%s'" % label.text)
 	if not saw_machine or not saw_belt:
 		_fail("the build menu lists a crusher and a belt")
 	main._set_shop_menu_open(false)

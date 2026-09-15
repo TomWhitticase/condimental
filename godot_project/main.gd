@@ -986,8 +986,29 @@ const SHOP_SLOT_COLUMNS := 6
 ## a 1280-wide window's inner width, and two rows have to fit above the
 ## hotbar. What made the shorter card possible is the owned line no longer
 ## wrapping — see `_update_shop_menu`.
-const SHOP_SLOT_SIZE := Vector2(144, 138) * UI_SCALE # 128x130 until the crew line (the staff pools MVP): wider so "crew: 2 manufacturing" is not clipped, as tall as two rows above the hotbar allow
+## 128x130 until the crew line (the staff pools MVP): wider so "crew: 2
+## manufacturing" is not clipped, as tall as two rows above the hotbar allow.
+## Stayed 144x138 through the quality pass (ticket 5), which tried growing it
+## to fit the crew line's cost suffix on its own second line and reverted:
+## `_fit_grid_scroll`'s scroll cap is set by the PANEL's available height, not
+## the grid's natural height, so a taller card does not raise the cap — it
+## only clips MORE of row two before the scroll starts, and growing it past
+## a point puts a scrollbar on screen at 1600x900, which UI_UX.md §5c rules
+## out. The card's own budget paid for the second line instead
+## (`SHOP_CARD_ICON_SIZE` below), per UI_UX.md §2b point 32.
+const SHOP_SLOT_SIZE := Vector2(144, 138) * UI_SCALE
 const SHOP_ICON_SIZE := Vector2(46, 46) * UI_SCALE
+## The build-menu card's own icon, smaller than the market's `SHOP_ICON_SIZE`
+## above (the quality pass, ticket 5). `_crew_cost_text`'s running-cost
+## suffix needs a literal second line (" 4 / period") under the crew line,
+## or it clips past the card's edge on every kind with a crew (UI_UX.md §2b
+## point 32) — and growing the card doesn't help (see `SHOP_SLOT_SIZE`'s own
+## comment). The line has to come out of the card's own padding, so the
+## build card's icon shrinks by the same ~18px the second line costs; the
+## market's crate keeps the bigger icon since its card has a whole line of
+## slack the build card doesn't (`MARKET_SLOT_SIZE` is one row of three, not
+## two of six).
+const SHOP_CARD_ICON_SIZE := Vector2(30, 30) * UI_SCALE
 ## The ingredient market's crate, which is the same card **one line taller**.
 ## The two panels are deliberately built the same way (see
 ## `_build_ingredient_market`), and this is the one place they differ: a
@@ -1246,6 +1267,14 @@ var _known_active_primed := false
 ## just changed, gone once it has been read.
 var _contract_notice: Label
 var _contract_notice_until_msec := 0
+## `_announce_contract_changes` can raise more than one notice in the same
+## poll (two contracts lost at once, or a loss and a signature together) —
+## the first still shows immediately (`_show_contract_notice`, unchanged),
+## but the rest queue here rather than overwriting it before it's ever been
+## read a frame; `_update_contract_notice` shows the next one once the
+## current notice has fully faded (quality pass, ticket 5: flagged by
+## ticket 3, fixed here).
+var _contract_notice_queue: Array[String] = []
 const CONTRACT_NOTICE_HOLD_MSEC := 6000
 const CONTRACT_NOTICE_FADE_MSEC := 900
 ## A docket is AT RISK once this much of its window has passed unfilled. Half:
@@ -3507,8 +3536,17 @@ const CROSSHAIR_THICKNESS := 2.0 * UI_SCALE # px, each bar's width
 ## listed here or it is undiscoverable, whereas a building you can click
 ## announces itself on hover, so the line is a pointer rather than the only
 ## way to find out.
-const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    H: staff    P: production    click a hopper or tank: configure\nWASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
-const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    H: staff    P: production    click a hopper or tank: configure\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
+##
+## FIVE lines, not four (the quality pass, ticket 5): H and P joined the
+## panels line after it already carried E/M/C, and at that length the panel
+## group plus the configure hint ran back under the contract clipboard at
+## 1600x900 — the exact clipping this comment already describes happening
+## once, recurring because the panels line keeps growing and nothing caps
+## its width. The configure hint is its own line now, so the panels line
+## stays five short entries and neither line reaches the clipboard's left
+## edge at this window size.
+const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    H: staff    P: production\nclick a hopper or tank: configure\nWASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
+const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    H: staff    P: production\nclick a hopper or tank: configure\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
 
 
 ## The tile box the isometric camera frames at startup: whatever is placed,
@@ -4918,7 +4956,7 @@ func _build_shop_slot(grid: GridContainer, base_settings: LabelSettings, index: 
 	var icon := TextureRect.new()
 	icon.name = "Icon"
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	icon.custom_minimum_size = SHOP_ICON_SIZE
+	icon.custom_minimum_size = SHOP_CARD_ICON_SIZE
 	# Same reason _build_contract_checklist_row gives: without
 	# EXPAND_IGNORE_SIZE a TextureRect's minimum size is the source PNG's own
 	# 64x64, which would win over custom_minimum_size above.
@@ -4968,6 +5006,7 @@ func _build_shop_slot(grid: GridContainer, base_settings: LabelSettings, index: 
 	crew_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	crew_label.label_settings = crew_settings
 	crew_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	crew_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	column.add_child(crew_label)
 
 	# What this slot would cost measured against what the player HAS. "Cost 70"
@@ -7068,6 +7107,14 @@ func _crew_categories_text(crew) -> String:
 ## plain `_crew_text` if `wages_by_category` is missing an entry (a poll
 ## that has not happened yet, or a category the wire has not named): a
 ## missing number is honest, a guessed one is not.
+##
+## Two lines, not one joined by " · " (the quality pass, ticket 5): on the
+## card's own width "crew: 2 manufacturing · 4 / period" ran past the edge
+## on every kind with a crew, clipped by the next card's stylebox drawing
+## over it (UI_UX.md §2b point 32 — the card was not given a line back after
+## the cost joined it). A literal newline is a bounded two lines; leaving it
+## to `AUTOWRAP_WORD_SMART` wrapped mid-phrase into three ("manufacturing ·
+## 2 /" then "period") and still overran the card into the row below.
 func _crew_cost_text(crew, wages_by_category: Dictionary) -> String:
 	var text := _crew_text(crew)
 	if text == "" or not (crew is Array):
@@ -7078,7 +7125,7 @@ func _crew_cost_text(crew, wages_by_category: Dictionary) -> String:
 		if not wages_by_category.has(category):
 			return text
 		cost += int(entry.get("count", 0)) * int(wages_by_category[category])
-	return "%s  ·  %d / period" % [text, cost]
+	return "%s\n%d / period" % [text, cost]
 
 
 ## The pure half of a docket's status (the contract-board epic): how far
@@ -7157,13 +7204,28 @@ func _announce_contract_changes(contracts: Array, board: Array) -> void:
 	for contract in contracts:
 		ids.append(String(contract.get("id", "")))
 	if _known_active_primed:
+		# The first change this poll shows right away, as it always has;
+		# a second (or third) in the same poll queues instead of silently
+		# overwriting the one before it, since it will otherwise be
+		# clobbered before a single frame renders it.
+		var raised := false
 		for id in _known_active_contract_ids:
 			if not ids.has(id):
-				_show_contract_notice("✗ CONTRACT LOST: %s — sign it again on the board (C)" % _board_name_for(String(id), board))
+				var text := "✗ CONTRACT LOST: %s — sign it again on the board (C)" % _board_name_for(String(id), board)
+				if raised:
+					_contract_notice_queue.append(text)
+				else:
+					_show_contract_notice(text)
+					raised = true
 				_cue(FactoryAudio.CONTRACT_LOST)
 		for id in ids:
 			if not _known_active_contract_ids.has(id):
-				_show_contract_notice("✔ SIGNED: %s" % _board_name_for(String(id), board))
+				var text := "✔ SIGNED: %s" % _board_name_for(String(id), board)
+				if raised:
+					_contract_notice_queue.append(text)
+				else:
+					_show_contract_notice(text)
+					raised = true
 	_known_active_contract_ids = ids
 	_known_active_primed = true
 
@@ -7207,7 +7269,14 @@ func _position_contract_notice() -> void:
 func _update_contract_notice() -> void:
 	if _contract_notice == null:
 		return
-	var remaining := _contract_notice_until_msec - Time.get_ticks_msec()
+	var now := Time.get_ticks_msec()
+	var remaining := _contract_notice_until_msec - now
+	# Fully faded and something is waiting: start it, rather than the next
+	# `_show_contract_notice` call overwriting a label nobody finished
+	# reading.
+	if remaining <= -CONTRACT_NOTICE_FADE_MSEC and not _contract_notice_queue.is_empty():
+		_show_contract_notice(_contract_notice_queue.pop_front())
+		return
 	if remaining >= 0:
 		_contract_notice.modulate = Color(1, 1, 1, 1)
 		_position_contract_notice() # the legend lays out after the first frame
@@ -10441,13 +10510,14 @@ func _splitter_hover_text(origin_key: String, direction: String) -> String:
 	]
 
 
-## One output's tile, or "not connected" — the state `outputs[i] == null`
-## means, which is "nothing that can accept an item stands there".
+## Whether one output is connected — the state `outputs[i] == null` means,
+## which is "nothing that can accept an item stands there". Reports the fact
+## in words rather than the wire's own tile coordinates (UI_UX.md §5e: a
+## player-facing line is never the wire's own representation).
 func _splitter_output_text(outputs: Array, side: int) -> String:
 	if side >= outputs.size() or outputs[side] == null:
 		return "not connected"
-	var tile := _pair_to_tile(outputs[side])
-	return "%d, %d" % [tile.x, tile.y]
+	return "connected"
 
 
 ## The recipe/progress/input/output text for one machine, keyed by its origin
@@ -10764,12 +10834,99 @@ func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
 	var size := panel.get_combined_minimum_size()
 	var vp := get_viewport()
 	var bounds := vp.get_visible_rect().size if vp != null else Vector2(1600, 900)
-	var pos := anchor + HOVER_TOOLTIP_OFFSET
-	if pos.x + size.x > bounds.x:
-		pos.x = anchor.x - HOVER_TOOLTIP_OFFSET.x - size.x
-	if pos.y + size.y > bounds.y:
-		pos.y = anchor.y - HOVER_TOOLTIP_OFFSET.y - size.y
-	return Vector2(maxf(pos.x, 0.0), maxf(pos.y, 0.0))
+	# The hotbar sits over the bottom of the viewport (§5b) but isn't part of
+	# `bounds` — without subtracting its reserved height here, a cursor low on
+	# the screen (a closeup camera, a low placement) draws this panel over the
+	# hotbar's top edge, same bug the config panel's own clamp
+	# (`_hotbar_reserved_height()` below) already guards against.
+	var lower_bound := bounds.y - _hotbar_reserved_height()
+	# The legend (top-left) and the contracts clipboard (top-right) are fixed
+	# HUD plates this panel must never land on — a tile rendered under either
+	# (a close-zoomed camera near the world origin, or a cursor high on the
+	# screen where the flip below used to only check the right/bottom edges)
+	# put this panel right over their own text otherwise (found in rendered
+	# frames, twice — one bug each).
+	# `get_global_rect()`, not `.position`/`.size` — both plates sit inside
+	# their own layout containers, whose local origin is not this panel's
+	# (a direct CanvasLayer child, effectively in screen space) (see the
+	# config panel's own avoidance above, which makes the same call).
+	var avoid: Array[Rect2] = []
+	var legend: Control = _help_label.get_parent() as Control if _help_label != null else null
+	if legend != null and legend.size.y > 0.0:
+		avoid.append(legend.get_global_rect())
+	if _contract_panel != null and _contract_panel.visible and _contract_panel.size.y > 0.0:
+		avoid.append(_contract_panel.get_global_rect())
+	# Try both hands of both axes around the cursor, nearest (bottom-right,
+	# matching the un-flipped default) first, and take the first that fits
+	# on screen, above the hotbar and clear of every avoided plate.
+	var candidates := [
+		anchor + HOVER_TOOLTIP_OFFSET,
+		Vector2(anchor.x - HOVER_TOOLTIP_OFFSET.x - size.x, anchor.y + HOVER_TOOLTIP_OFFSET.y),
+		Vector2(anchor.x + HOVER_TOOLTIP_OFFSET.x, anchor.y - HOVER_TOOLTIP_OFFSET.y - size.y),
+		Vector2(anchor.x - HOVER_TOOLTIP_OFFSET.x - size.x, anchor.y - HOVER_TOOLTIP_OFFSET.y - size.y),
+	]
+	for candidate in candidates:
+		if candidate.x < 0.0 or candidate.x + size.x > bounds.x:
+			continue
+		if candidate.y < 0.0 or candidate.y + size.y > lower_bound:
+			continue
+		var rect := Rect2(candidate, size)
+		var clear := true
+		for r in avoid:
+			if r.intersects(rect):
+				clear = false
+				break
+		if clear:
+			return candidate
+	# A tall tooltip (buffer rows, two meters) near the top-middle of the
+	# screen can fail all four quadrants at once: flipping down runs past
+	# the hotbar, flipping up lands on the legend or the contracts panel
+	# regardless of which side of the cursor it's on. Found the same way as
+	# the two bugs above — a rendered frame, not a headless test — where
+	# this used to fall straight to a plain on-screen clamp that could still
+	# land squarely on the contracts panel. Clamp on-screen first, then push
+	# clear of whichever plate that clamp still overlaps (`_pushed_clear_of`
+	# tries all four directions off that plate, smaller-penetration axis
+	# first, and keeps only a direction the viewport clamp doesn't erase —
+	# an earlier version picked the axis by penetration alone and pushed the
+	# tooltip straight down off the bottom of the screen, where the same
+	# clamp snapped it right back onto the plate it was fleeing). A second
+	# pass in case clearing one plate slides the panel into the other; with
+	# just the two corner plates this repo has, one pass always suffices.
+	var pos: Vector2 = candidates[0]
+	var rect := Rect2(
+		clampf(pos.x, 0.0, maxf(0.0, bounds.x - size.x)),
+		clampf(pos.y, 0.0, maxf(0.0, lower_bound - size.y)),
+		size.x, size.y
+	)
+	for _pass in range(avoid.size() + 1):
+		for r in avoid:
+			rect = _pushed_clear_of(rect, r, bounds.x, lower_bound)
+	return rect.position
+
+
+## Moves `rect` off to one side of `r` — whichever of the four directions
+## (left/right/above/below, smaller-penetration axis tried first) still
+## clears `r` after being clamped back into the viewport. Returns `rect`
+## unchanged if no direction does (genuinely no room, an extreme case).
+func _pushed_clear_of(rect: Rect2, r: Rect2, bounds_x: float, lower_bound: float) -> Rect2:
+	var overlap := rect.intersection(r)
+	if overlap.size.x <= 0.0 or overlap.size.y <= 0.0:
+		return rect
+	var left := Vector2(r.position.x - rect.size.x, rect.position.y)
+	var right := Vector2(r.position.x + r.size.x, rect.position.y)
+	var above := Vector2(rect.position.x, r.position.y - rect.size.y)
+	var below := Vector2(rect.position.x, r.position.y + r.size.y)
+	var options := [left, right, above, below] if overlap.size.x <= overlap.size.y else [above, below, left, right]
+	for opt in options:
+		var clamped := Rect2(
+			clampf(opt.x, 0.0, maxf(0.0, bounds_x - rect.size.x)),
+			clampf(opt.y, 0.0, maxf(0.0, lower_bound - rect.size.y)),
+			rect.size.x, rect.size.y
+		)
+		if not clamped.intersects(r):
+			return clamped
+	return rect
 
 
 ## Drives the contract clipboard (UI_UX.md §5) from `economy_snapshot_json`:
