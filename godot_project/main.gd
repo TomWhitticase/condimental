@@ -8282,15 +8282,46 @@ func _stock_row_height() -> float:
 ## `_hotbar_reserved_height()`'s twin, and asked for the same reason: the
 ## clipboard above must not be allowed to grow down across it.
 ##
+## It reports the height the plate WANTS — its whole list, bounded by
+## `STOCK_PANEL_HEIGHT_SHARE` — not the height it happens to have settled at.
+## Reporting the settled height made the two caps chase each other the wrong
+## way at 1280x720 (found by rendering the merged HUD): the plate is capped
+## against what the clipboard leaves, so a frame where it had shrunk to one
+## row reserved one row's worth, which let the clipboard grow, which left one
+## row again. The stable point was a single ingredient on a plate whose whole
+## job is showing every ingredient. Reserving the list's full height instead
+## settles the other way round — the docket stack scrolls by design (UI_UX.md
+## §5c's last resort), and this readout does not.
+##
 ## Falls back to the plate's minimum size before it has laid itself out,
 ## which is the state a headless run never leaves.
 func _stock_reserved_height() -> float:
 	if _stock_panel == null or not _stock_panel.visible:
 		return 0.0
-	var height: float = _stock_panel.size.y
+	var height: float = _stock_wanted_height()
 	if height <= 0.0:
 		height = _stock_panel.get_combined_minimum_size().y
 	return height + STOCK_PANEL_MARGIN * 2.0
+
+
+## The plate at its full list height, capped by the share of the column it is
+## allowed (`_position_stock_panel`'s own cap, read from the same two
+## numbers), and floored at one row plus chrome so it is never zero.
+func _stock_wanted_height() -> float:
+	if _stock_panel == null or _stock_rows == null or _stock_scroll == null:
+		return 0.0
+	var chrome: float = _stock_panel.get_combined_minimum_size().y - _stock_scroll.custom_minimum_size.y
+	var natural: float = _stock_rows.get_combined_minimum_size().y
+	var wanted: float = chrome + natural
+	var vp := get_viewport()
+	if vp != null and vp.get_visible_rect().size.y > 0.0:
+		var share: float = (
+			vp.get_visible_rect().size.y
+			- _hotbar_reserved_height()
+			- STOCK_PANEL_MARGIN * 2.0
+		) * STOCK_PANEL_HEIGHT_SHARE
+		wanted = minf(wanted, maxf(chrome + _stock_row_height(), share))
+	return wanted
 
 
 ## The stock plate's rect on screen, for the panels that must not land on it
