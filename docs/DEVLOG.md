@@ -1,4 +1,4 @@
-# Sauce Factory — Development Log & Status Tracker
+# CONDIMENTAL — Development Log & Status Tracker
 
 This doc answers "what's actually been done, and what's the state of things
 right now" for whoever (human or agent) picks this project up cold. It's a
@@ -138,6 +138,39 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-16 — The game is called CONDIMENTAL
+
+`sauce-factory` was always a working title. The game's name is **CONDIMENTAL**,
+styled all-caps — it is what the title screen says, what `project.godot` calls
+the application, and what the design docs are titled.
+
+The rename stops at the name. "Sauce" is still the theme and still the noun in
+every recipe, ingredient and plan; only the title changed. Three things keep
+the old name deliberately:
+
+- **The repo and the worktree paths** are still `sauce-factory`, so every
+  `github.com/TomWhitticase/sauce-factory/...` link in the docs is left exactly
+  as it is. Rewriting them before the repo is renamed would 404 them; after a
+  rename GitHub redirects the old paths, so there is no hurry either way.
+  Renaming the GitHub repo is the owner's to do.
+- **This log and DECISIONS.md** are dated history. Past entries say
+  "Sauce Factory" because that is what it was called at the time.
+- **The archived `*_PLAN.md` files**, for the same reason — including the
+  worker prompts quoted verbatim inside them.
+
+One consequence worth knowing: `user://` resolves through `config/name`, so
+saves now live in `app_userdata/CONDIMENTAL/` rather than
+`app_userdata/Sauce Factory/`. Any pre-existing local save is not migrated —
+it is simply in the old directory, and the game will not list it. That is
+acceptable at pre-alpha, where the schema is not migrated either.
+
+The gdext entry struct is `CondimentalExtension` now; the crate is still
+`sim_core` and `entry_symbol` is still gdext's default `gdext_rust_init`, so
+no library filename or binding moved. Android/iOS ids went from
+`com.saucefactory.spike` to `com.condimental.spike`, which is free because
+nothing has ever been published under either.
+
 
 ### 2026-09-16 — BBQ sauce, the second sauce, is planned
 

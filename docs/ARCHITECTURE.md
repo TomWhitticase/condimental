@@ -1,4 +1,4 @@
-# Sauce Factory — Architecture Plan
+# CONDIMENTAL — Architecture Plan
 
 A Factorio-like automation game, sauce-themed. Targets: PC, Mac, mobile.
 

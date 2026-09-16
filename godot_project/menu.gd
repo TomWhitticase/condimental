@@ -311,7 +311,7 @@ func _build_wordmark(column: VBoxContainer) -> void:
 	# A heavier outline than anything else in the game: this text stands over
 	# a lit 3D frame with nothing behind it at all.
 	title.label_settings = _settings(TITLE_FONT_SIZE, HAZARD, TITLE_OUTLINE)
-	title.text = "SAUCE FACTORY"
+	title.text = "CONDIMENTAL"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(title)
 

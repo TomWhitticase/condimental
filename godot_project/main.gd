@@ -1731,7 +1731,7 @@ func _apply_pending_session() -> void:
 	# is a note where two are noise.
 	if not _printed_saves_dir:
 		_printed_saves_dir = true
-		print("Sauce Factory saves: %s" % GameSaves.resolved_saves_dir())
+		print("CONDIMENTAL saves: %s" % GameSaves.resolved_saves_dir())
 	var session := _session()
 	if session == null or String(session.pending_action) != "load":
 		sim.new_game()
@@ -1741,7 +1741,7 @@ func _apply_pending_session() -> void:
 	var text: String = GameSaves.read_save(path)
 	var refusal: String = sim.load_ron(text) if text != "" else "could not read %s" % path
 	if refusal != "":
-		printerr("Sauce Factory: could not load %s — %s" % [path, refusal])
+		printerr("CONDIMENTAL: could not load %s — %s" % [path, refusal])
 		sim.new_game()
 		_save_slot = DEFAULT_SLOT
 		return
@@ -11400,7 +11400,7 @@ func _autosave(reason := "") -> void:
 		GameSaves.AUTOSAVE_SLOT, String(sim.save_ron()), true
 	)
 	if error != "":
-		printerr("Sauce Factory: autosave failed — %s" % error)
+		printerr("CONDIMENTAL: autosave failed — %s" % error)
 		return
 	if reason == "timer":
 		_show_hotbar_flyout("Autosaved")
