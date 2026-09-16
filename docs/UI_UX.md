@@ -340,7 +340,32 @@ factory tropes; the sauce theme comes through in what the factory processes.
   also says `✗ 3 left unpaid last payday` / `✗ 2 idled unpaid last
   payday`, and a payday that idles or loses a head fires the clipboard's
   own fading notice (below) the moment it happens, naming category and
-  count, so the news is not only found by opening H afterward. A row
+  count, so the news is not only found by opening H afterward.
+  **Being short is said before H is opened, and again at the top of it**
+  (2026-09-16, on the owner's verdict that it was not clear when staff were
+  needed): a **SHORT-STAFFED** strip on the always-visible clipboard, under
+  the wage line it belongs with, in the docket's one warning red with a
+  glyph, the words and the key — `▲ SHORT-STAFFED — hire 2 manufacturing ·
+  press H` — naming only the categories actually short and disappearing
+  entirely when none are, never reading `0 short`; and the panel opening
+  with a one-sentence verdict above its first row (`▲ 2 short — hire 1
+  manufacturing, 1 packaging`, `✔ every machine has its crew`, or `nothing
+  placed asks for staff yet`), three states in three inks, the green spent
+  only on a verdict the factory actually earned. A short row is then
+  obvious without reading numbers: a `▲ SHORT` chip beside its name, a
+  warn-coloured border, and a line saying what hiring would unblock (`hire 2
+  → crusher, mixer, cooking vat all get crew again`), drawn from the same
+  count of placements the `asked for by:` line uses. **A button says what
+  the click does and what it costs** — `HIRE +1 · 2 / period`, `FIRE −1` —
+  and a disabled HIRE says *why* in words rather than only in grey (`✗
+  cannot hire — 8 in hand, 14 due, 2 / period`). Last, the payday rules are
+  stated in plain words at the foot of the scrolled list (`STAFF_RULES`):
+  every head employed for any part of a period is billed for it; an unpaid
+  head idles until the next payday and leaves only if unpaid twice. The
+  legend sits **inside** the scroll rather than under the footer for §2b
+  point 32's reason — `_fit_grid_scroll` takes its cap from the panel's
+  height, so four lines of chrome cost a whole category row — with one
+  always-visible footer line saying it is down there. A row
   carries the same fact permanently: `▲ 2 unpaid, idle until payday` / `▲
   1 left last payday`, joined when both apply. E, M, C and H are one
   modal at a time; ESC closes whichever is up. Being short is also read
@@ -408,7 +433,12 @@ Conventions: **green means "this click builds"; red means "this click
 destroys, or refuses"**, so a valid removal is red. **Removal is a mode (X),
 not a modifier-click**: it is the one destructive action, and a mode
 announces itself in the legend and the prompt. A build-menu slot has two
-actions: **left-click buys one, right-click places one you own**. A hopper's
+actions: **left-click buys one, right-click places one you own**; a market
+crate has two as well — **left-click buys one crate, SHIFT+left-click buys
+every unit the balance covers** — and each slot prints what the shift
+gesture would fetch *right now* (`shift: buy 123`) under the crate's price,
+dimmed to `shift: buy 0` when nothing is affordable, because a modifier
+nobody can see is a modifier nobody uses. A hopper's
 contents are chosen on the ghost (**Q** cycles raw items; the prompt names
 it; the ghost shows a tinted fill).
 
@@ -416,8 +446,9 @@ it; the ghost shows a tinted fill).
 
 An always-visible strip along the **bottom** edge, centred (the other edges
 hold the legend and the clipboard). One slot per `data/shop.ron` entry, in
-file order, built from `shop_snapshot_json`. Above it, a permanent larder
-strip shows bought raw stock; zero reads "none".
+file order, built from `shop_snapshot_json`. What raw stock has been bought
+is **not** here — it is the right-hand STOCK plate (§5f), which replaced the
+one-line larder strip that used to sit above the sockets.
 
 1. **Fixed slots, not a packed list of what is owned.** Slot 5 must still be
    the crusher after the last crusher is placed.
@@ -482,8 +513,9 @@ glance.
 **A bar is drawn only where the simulation defines the ceiling.** Hopper and
 tank level, a machine's cycle, a pipe's pressure, a contract's countdown
 against its own cadence, a price against the money in the player's pocket:
-those are real fractions. Larder stock and the balance itself are not —
-nothing in the game says how many tomatoes is "full" — so they stay figures.
+those are real fractions. Stock on hand (the §5f plate) and the balance
+itself are not — nothing in the game says how many tomatoes is "full" — so
+they stay figures.
 A gauge whose full mark is invented teaches a scale that does not exist.
 
 All of them go through one pair of helpers in `main.gd` (`_build_meter` /
@@ -509,6 +541,53 @@ changed it** (`+90`, `-5`) beneath itself and fades, on the hotbar name
 flyout's timings. A payout arrives on a contract's clock while the player is
 looking at the factory, and a balance that only ever shows its current value
 hides every event that produced it.
+
+### 5f. The right-hand column: what you have, and the legend that folds
+
+Three plates are drawn over the game and never asked for: the legend
+top-left, the contracts clipboard top-right, and — since 2026-09-16 — the
+**STOCK** plate under the clipboard, on the same right edge. Between them
+they answer "what do I press", "what do I owe" and "what do I have", and the
+first and the third are the two the owner asked to be able to see and to get
+out of the way.
+
+**STOCK is a plate, not a strip.** Bought raw stock used to be a one-line
+larder strip inside the hotbar's own container, centred over the sockets:
+one line tall by construction, so it could only ever afford a chip per
+ingredient and would not survive the ingredient list growing. It is now a
+right-hand plate, a sibling of the clipboard, with **one row per raw
+ingredient the simulation prices** — voxel icon, display name, amount
+right-aligned so the numbers form a column a glance can run down. **One
+readout, one fact, one place:** nothing on the hotbar shows stock any more.
+Per §5e there is no bar (nothing says how many tomatoes is "full"), so zero
+is carried by the word `none` on a dimmed row rather than by a colour (§7),
+and the heading keeps the `M: market` hint so the plate says where the
+numbers come from.
+
+**The right-hand column arbitrates in both directions, and only one half of
+that is obvious.** The clipboard's scroll cap subtracts the plate's reserved
+height; the plate takes the band left between the clipboard's *actual*
+bottom edge and the hotbar's top. The trap, found by rendering the merged
+HUD at 1280x720: if the plate reserves the height it has *settled at*, the
+two caps chase each other down — a frame where stock had shrunk to one row
+reserved one row's worth, the clipboard grew into the slack, and stock
+stayed at one row for good. **A reserved height is what a plate wants, not
+what it currently has.** The docket stack scrolls by design (§5c's last
+resort); this readout does not, so the clipboard is the one that yields.
+
+**The legend folds, and folding is not a modal.** Its plate gains a heading
+row — `CONTROLS` and a button naming its key — and folds to that stub, so
+what is left still says what it is and how to bring it back; a panel that
+vanishes completely teaches the player nothing about getting it back. Two
+ways in, the button (a generous hit target that never takes focus, so the
+number keys keep reaching the game) and **F1**, the first function key the
+project binds, read in `_unhandled_input` beside TAB so it works in
+isometric and first person alike. It is deliberately **not** a modal: it
+neither closes an open panel nor is closed by ESC or X, and the "one modal
+at a time" rule is untouched. State is session-only — a fold is a "not right
+now", not a preference. Everything that measures the legend (the fixed-plate
+avoid list of §2b point 33, the contract notice) reads its *current* rect,
+so folding really does hand the space back.
 
 ## 6. Feedback, motion & animation
 

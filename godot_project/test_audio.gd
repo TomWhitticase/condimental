@@ -13,7 +13,9 @@
 #     button says ON or OFF in words
 #   * every player action fires its cue from the handler that knows whether
 #     the simulation took it: place / remove, a purchase that went through
-#     and one refused for money, a signature and a refused re-signature,
+#     and one refused for money, a market crate and a shift+click that buys
+#     all it can afford (and one refused with an empty wallet, which sends
+#     no command at all), a signature and a refused re-signature,
 #     hire / fire and a refused fire at zero headcount, a hotbar selection,
 #     every modal opening and closing, and a lost contract
 #
@@ -191,6 +193,19 @@ func _initialize() -> void:
 		Layouts.fund(main.sim, 0)
 		main._buy_ingredient_slot(0)
 		_expect_plays(main, FactoryAudio.REFUSED, 1, "a crate with no money")
+		# The same square's other verb (shift+click buys all you can afford),
+		# on the same rule: the cue comes from the outcome, never the gesture.
+		# The refused case is the interesting one — it sends no command at
+		# all, so the "no" has to be fired by the handler itself.
+		Layouts.fund(main.sim, 5000)
+		main._audio.plays.clear()
+		main._buy_all_from_slot(0)
+		_expect_plays(main, FactoryAudio.BUY, 1, "shift+click buying all it could afford")
+		_expect_plays(main, FactoryAudio.REFUSED, 0, "shift+click buying all it could afford")
+		main._audio.plays.clear()
+		main._buy_all_from_slot(0)
+		_expect_plays(main, FactoryAudio.REFUSED, 1, "shift+click with an empty wallet")
+		_expect_plays(main, FactoryAudio.BUY, 0, "shift+click with an empty wallet")
 	main._set_market_open(false)
 
 	# Place, then remove.

@@ -68,6 +68,18 @@ below is history and should only ever be appended to.)*
 - **Staff pools MVP (DONE, all three tickets, 2026-09-12; plan: `docs/STAFF_POOLS_PLAN.md`):** the factory needs people, and people cost money every period (GAMEPLAY.md §5, §7). **Ticket 1 (sim) has landed:** four staff categories in `data/staff.ron`, a required crew per kind in `data/machines.ron` (now schema 2), per-tick whole-crew claims in stable machine order (a machine short of its crew pauses where it is and reads *starved* with a `staff` reason; a dock without its logistics head holds), payday out of the one money counter in file order — **amended by the quality pass's ticket 1 (2026-09-13, below): an unpaid head is idled, not fired, and leaves only if the next payday is unpaid too**, free `hire`/`fire` commands, `staff_snapshot_json`, `crew` on tile and shop snapshots, `understaffed` on the dock, and all of it in the save. **Ticket 2 (icons) has landed:** four voxel props rendered through the icon pass, one per category (hard hat, spanner, taped carton, pallet jack). **Ticket 3 (Godot) has landed:** the **H** staff panel — one row per category with its icon, hired count, an assigned/asked-for meter with the numbers printed on it, the shortfall in words, wage and HIRE/FIRE, and the wage bill and payday countdown in the footer — polled on the tick like the machine load; hover gains `crew: 2 manufacturing`, an understaffed machine reads `▲ starved · short of manufacturing staff` and an understaffed dock `held · short of logistics staff`; the build-menu card shows a kind's crew under its price; `test_staff_panel.gd` proves it on a new `build_understaffed_line` fixture and `scripts/screenshot-scene.sh --staff` / `--understaffed` photograph it.
 - **Quality pass (DONE, all five tickets, 2026-09-13/14; plan: `docs/QUALITY_PASS_PLAN.md`, decisions in CLAUDE.md's log):** no new features — correct, fast, fair, legible. **Ticket 1 (sim):** the payday rule no longer fires the unpaid silently — an unpaid head is idled for a period and leaves only if unpaid again, the wire says the next bill and the shortfall ahead of time and who left afterwards (`staff_snapshot_json`: `next_bill`, `shortfall`, `unpaid_last_payday`, per-category `owed`/`unpaid`/`left_last_payday`/`can_hire`); a fired head is still owed for its period and a hire needs the balance to cover the next bill, so neither HIRE nor FIRE dodges a wage; money is `Money` (`I48F16`) so a payout can no longer panic or wrap at 32 767; the rest of the sim was audited for exploits (see the log entry). **Ticket 2 (belt gaps):** `ITEM_MIN_SPACING_TILES` is half a tile, not a quarter — a fed lane now reads as a visible queue of boxes instead of one solid bar, at the same steady throughput as before (the vat is still the bottleneck); widening it exposed and fixed a packing bug where the belt's front item and the next tile's item occupied the same point at every tile boundary. **Ticket 3 (Godot bugs/perf):** the tick path reads a chunk *delta* (`chunk_delta_json`, only what actually changed) instead of the whole chunk snapshot, and per-frame polls are gated on the wire's own `revision()` so an unchanged frame parses nothing — the stress line dropped from 8.4 to 2.1 ms/frame; fixed a right-drag that never released when the mouse came up over a panel, first-person mouse capture fighting the pause/config panels, `R` rotating a tile hidden behind an open panel, and `X` not closing every modal like E/M/C/H do. **Ticket 4 (staffing legibility):** the wage bill and payday countdown are on the always-visible clipboard and in the H footer, drawn from the wire's own `next_bill`/`shortfall`; each row names what asks for its category and what the category does; the footer warns before a payday it cannot cover in the ticket's own words (`▲ next payday short by 6 — 3 heads go unpaid`) and disables HIRE per the wire's `can_hire`; a payday that idles or loses heads is announced through the same mechanism a lost contract uses. **Ticket 5 (polish sweep and docs):** every screen walked at 1600x900 and every PNG read, five things fixed. A hover or config panel could land squarely on the legend, on the contracts clipboard or under the hotbar, because it only ever flipped off the right and bottom edges of the viewport — it now tries all four quadrants around the cursor and, failing those, clamps on screen and pushes clear of whichever plate it still overlaps (`_panel_position_near`/`_pushed_clear_of`). The legend is five lines instead of four, so the panels line (E/M/C/H/P) and the configure hint no longer run back under the clipboard — ticket 3 left that one by name. `_announce_contract_changes` shows two notices raised in the same poll (two contracts lost at once, or a loss and a signature together) in turn, instead of the second silently overwriting the first before either was ever read (`_contract_notice_queue`) — ticket 3 left that one by name too. A build-menu card's crew cost is two lines (`crew: 2 manufacturing` / `4 / period`), paid for out of the card's own padding by a smaller build-card icon, because joined on one line it overran the card and a taller card does not help (the scroll cap comes from the panel's height, not the grid's). A splitter's hover says `connected` / `not connected` rather than the wire's raw tile coordinates. A new game was also played through to its first payout by driving the real command boundary, and nothing in that run needed a wording or ordering fix. Finally this doc, CLAUDE.md's decisions log and `docs/QUALITY_PASS_PLAN.md` were reconciled across the whole pass. `cargo test --workspace` and `scripts/verify-core-loop.sh` are green.
 - **Production stats — the P screen (DONE, both halves, 2026-09-13):** Factorio's production GUI. The simulation keeps a per-item ledger of what recipes made and used over four rolling windows (5s/1m/10m/1h) and for all time — a paid contract counts as using what it ships, buying and filling count nothing — polled over `production_snapshot_json` and saved with the world. **P** opens the PRODUCTION panel: rows biggest first with the item's icon, MADE and USED bars with counts and per-minute rates printed on them (over the observed span, scaled against the largest count), a window selector plus all time, one modal at a time with E/M/C/H. `test_production_stats.gd` proves it; `scripts/screenshot-scene.sh --production` photographs it. The sim half was written on 2026-09-12 and left uncommitted in a worktree; it was picked up, merged behind the staff pools (a craft records at the same points a crew is claimed for) and finished with the Godot half in one pass.
+- **HUD features from the owner's playtest (DONE, 2026-09-16):** five
+  requests, three parallel worktrees, no Rust change. Being short-staffed
+  is now said on the always-visible clipboard (a **SHORT-STAFFED** strip
+  naming the categories and the key), at the top of the staff panel (a
+  one-sentence verdict) and on the row itself (a `▲ SHORT` chip, a warn
+  border and a line saying what hiring would unblock); HIRE/FIRE name
+  their cost and a refused HIRE says why in words; the payday rules are
+  written out in the panel. **SHIFT+click a market crate** buys every unit
+  the balance covers in one command, with the quantity printed on the
+  slot. Raw stock moved off the hotbar onto a **right-hand STOCK plate**,
+  one row per priced ingredient. The keybind legend **folds to a labelled
+  stub** (its button, or F1).
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -83,6 +95,101 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-16 — Five things the owner asked for after playing it
+
+Not a pass with a theme — a list of five sentences from the owner after a
+session with the game, four of them about not being able to see something:
+make it obvious when staff need hiring, let SHIFT+click buy as much as the
+money allows, show what is in stock on the right-hand side, let the
+instructions panel be closed, and "more UI for the staff stuff because it's
+confusing to users". The first and the last are the same complaint at two
+distances, which is why they were built together.
+
+It was run as **three parallel work packages in three worktrees** — staff,
+market, HUD layout — and the interesting part of that is how it was made
+safe in a single 11,877-line file. Two rules did it. Each package owned a
+*region* of the HUD rather than a feature list, so the diffs barely
+overlapped; and **no package was allowed to touch a `.md` file**, because
+three agents documenting their own work all write into the same
+top-of-file decisions log and would conflict every time. Docs are the
+orchestrator's job after the merge, which is what this entry and the
+records beside it are. The only real conflict in three merges was in the
+fixed-plate variable block, where the HUD package retired the larder strip
+that the market package's new constant had been declared beside.
+
+**No Rust changed, and that was checked first.** The quality pass had
+already put `short`, `can_hire`, `next_bill` and `shortfall` on
+`staff_snapshot_json`, and `buy_ingredient` has always taken an arbitrary
+quantity — so buy-all is one command, not a loop of ten, and every staff
+readout below is the simulation's own number formatted differently. Worth
+recording as a partition rule: **check what the wire already carries before
+splitting the work**, since a package that needs a sim change cannot run
+beside the package that would consume it.
+
+**Staffing is now said at three distances.** The old panel had every figure
+right and still answered a question the player had to know to ask. So: a
+**SHORT-STAFFED** strip on the always-visible clipboard, under the wage
+line it belongs with (`▲ SHORT-STAFFED — hire 2 manufacturing · press H`),
+naming only the categories actually short and hiding entirely when none
+are — a readout that says `0 short` in the steady state trains the player
+to stop looking at it. Then the panel opens with a one-sentence verdict
+above its first row instead of four rows of meters. Then the short row
+wears a `▲ SHORT` chip, a warn border and a line saying what hiring would
+unblock. The buttons say what a click costs (`HIRE +1 · 2 / period`), and a
+HIRE the wire refuses says *why* in words rather than going grey. Finally
+the payday rules are written out in plain words — inside the scrolled list,
+not under the footer, because `_fit_grid_scroll` caps against the panel's
+height and four lines of chrome cost a whole category row (UI_UX.md §2b
+point 32, for the third time in this project).
+
+**SHIFT+click in the market buys everything the balance covers**, as a
+single command — `cost_of` is all-or-nothing, so there is never a
+partially-completed purchase to reason about. The half that matters for
+whether anyone finds it: every slot prints what the gesture would fetch
+right now (`shift: buy 123`) under the price, dimmed to `shift: buy 0` when
+nothing is affordable. A slot is also now recessed only when *neither* verb
+can act, where it used to go dead the moment a whole crate was out of
+reach — which would have disabled the gesture in exactly the case it exists
+for, a player who can afford four tomatoes but not ten.
+
+**Stock got a plate.** It used to be a one-line larder strip inside the
+hotbar's own container — one line tall by construction, a chip per
+ingredient, and no room to grow. It is now a right-hand plate under the
+clipboard with a row per priced raw ingredient (icon, display name,
+right-aligned amount), and nothing on the hotbar shows stock any more,
+since two readouts of one fact drift apart. The bug that came out of it is
+the entry's best lesson. The right-hand column arbitrates in both
+directions: the clipboard's scroll cap subtracts the plate's reserved
+height, and the plate takes the band left under the clipboard. Rendering
+the merged HUD at 1280x720 showed *one* of three ingredients — because the
+plate reported the height it had **settled at**, the two caps chased each
+other down, and the stable point was one row on a plate whose entire job is
+showing every ingredient. **Two constraints that read each other must not
+both read a settled value**; one has to state an intention. The plate now
+reports what it wants, and the clipboard yields, because a docket stack
+scrolls by design and this readout does not.
+
+**The legend folds, and a fold is not a modal.** It collapses to a labelled
+stub — its heading plus a button naming F1 — rather than vanishing, so what
+is left still says how to get it back. Two ways in (the button, which never
+takes focus so the number keys keep reaching the game, and F1, read beside
+TAB so it works in both camera modes), deliberately outside the
+one-modal-at-a-time rule: it neither closes an open panel nor is closed by
+ESC. State is session-only; a fold is "not right now", not a preference.
+
+Proofs: a new `test_hud_plates.gd` (`HUD_PLATES_OK`) in
+`verify-core-loop.sh`, new sections in `test_staff_panel.gd` and
+`test_chain_rework.gd`, and two new screenshot flags for the readouts that
+cannot be photographed any other way — `--short-staffed` (the strip is
+hidden by every panel that would otherwise be open) and
+`--legend-collapsed` (the stub only exists once the legend is gone).
+`scripts/verify-core-loop.sh` is green; reviewed at 1600x900 and 1280x720.
+**Reported, not fixed:** the staff panel shows about 2.5 of its 4 rows at
+1600x900, and a busy clipboard standing beside the SHORT-STAFFED strip
+clips its last docket line. Both are the same capped-grid arithmetic, and
+both leave "am I short?" answered by the strip and the summary line, which
+is what was asked for.
 
 ### 2026-09-16 — GitHub is the workflow now: PRs in, issues out
 
@@ -136,6 +243,7 @@ rule is `docs/WORKFLOW.md`'s new GitHub section, with `CLAUDE.md` carrying
 only the two lines that always apply. Not done, and the owner's call: branch
 protection on `main`, which would enforce this server-side but would also stop
 the owner's own direct pushes.
+
 
 ### 2026-09-16 — The agent context restructured: CLAUDE.md is a map now
 

@@ -147,8 +147,16 @@ func _run_checks() -> void:
 		_fail("a short row's bar is the warning colour")
 	if short["meter_text"] != "2 / 4":
 		_fail("a short row's meter reads '2 / 4', got '%s'" % short["meter_text"])
-	if short["short_text"] != "2 short":
-		_fail("a short row says '2 short' in words, got '%s'" % short["short_text"])
+	if short["short_text"] != "▲ 2 short":
+		_fail("a short row says '▲ 2 short' in words (glyph + word + colour, UI_UX §7), got '%s'" % short["short_text"])
+	if short["state_text"] != "▲ SHORT" or short["state_color"] != main.METER_FILL_WARN:
+		_fail("a short row's name carries a ▲ SHORT chip in the warning colour, got '%s'" % short["state_text"])
+	if not bool(short["short_row"]):
+		_fail("a short row is flagged for the heavier border")
+	if full["state_text"] != "✔ CREWED" or full["state_color"] != main.METER_FILL_LEVEL:
+		_fail("a crewed row's chip reads '✔ CREWED', got '%s'" % full["state_text"])
+	if bool(full["short_row"]):
+		_fail("a crewed row is not flagged short")
 	var idle: Dictionary = main._staff_row_state({
 		"id": "maintenance", "name": "Maintenance", "headcount": 0, "wage": 2,
 		"demand": 0, "assigned": 0, "short": 0,
@@ -157,6 +165,8 @@ func _run_checks() -> void:
 		_fail("maintenance with nothing hired and nothing asked reads 'nothing to maintain yet', got '%s'" % idle["note"])
 	if bool(idle["fire_enabled"]):
 		_fail("FIRE is disabled at headcount 0")
+	if idle["state_text"] != "":
+		_fail("a category nothing asks for gets no chip at all, got '%s'" % idle["state_text"])
 	var idle_logistics: Dictionary = main._staff_row_state({
 		"id": "logistics", "name": "Logistics", "headcount": 0, "wage": 2,
 		"demand": 0, "assigned": 0, "short": 0,
@@ -238,6 +248,114 @@ func _run_checks() -> void:
 	for id in ["manufacturing", "maintenance", "packaging", "logistics"]:
 		if String(main.STAFF_CATEGORY_BLURBS.get(id, "")) == "":
 			_fail("category %s has no blurb in STAFF_CATEGORY_BLURBS" % id)
+
+	# --- 1e. the HIRE/FIRE buttons say what a click does and costs, and a
+	# disabled HIRE says WHY in words (the staffing ticket, requirement 3) ----
+	if main._staff_hire_button_text({"wage": 2}) != "HIRE +1 · 2/period":
+		_fail("HIRE names the per-period cost of the head it adds, got '%s'" % main._staff_hire_button_text({"wage": 2}))
+	if main._staff_hire_button_text({"wage": 0}) != "HIRE +1":
+		_fail("a volunteer category's HIRE quotes no cost, got '%s'" % main._staff_hire_button_text({"wage": 0}))
+	if main._staff_row_state({"id": "manufacturing", "wage": 2})["hire_text"] != "HIRE +1 · 2/period":
+		_fail("the row state carries the button's own text")
+	if main._staff_row_state({"id": "manufacturing"})["fire_text"] != "FIRE −1":
+		_fail("FIRE says it removes one head")
+	if main._staff_hire_blocked_text({"can_hire": true, "wage": 2}, {}) != "":
+		_fail("a hireable row says nothing extra")
+	var blocked_snapshot := {
+		"money": 8.0,
+		"categories": [
+			{"id": "manufacturing", "name": "Manufacturing", "headcount": 4, "wage": 2, "owed": 4},
+			{"id": "packaging", "name": "Packaging", "headcount": 2, "wage": 2, "owed": 2},
+			{"id": "logistics", "name": "Logistics", "headcount": 1, "wage": 2, "owed": 1},
+		],
+	}
+	var blocked_text: String = main._staff_hire_blocked_text(
+		{"id": "manufacturing", "wage": 2, "can_hire": false}, blocked_snapshot)
+	for needle in ["cannot hire", "8 in hand", "%d" % main._staff_next_bill(blocked_snapshot), "2 for the new head"]:
+		if blocked_text.find(needle) < 0:
+			_fail("a blocked HIRE says WHY in words ('%s'), got '%s'" % [needle, blocked_text])
+	if blocked_text.find("✗") != 0:
+		_fail("the blocked sentence leads with a glyph, not colour alone (UI_UX §7), got '%s'" % blocked_text)
+
+	# --- 1f. what hiring would unblock, from the same demand sources the WHY
+	# line names (the staffing ticket, requirement 5) -------------------------
+	if main._staff_hire_unblocks_text(0, [{"kind": "cooking_vat", "count": 1}]) != "":
+		_fail("nothing short has nothing to unblock")
+	if main._staff_hire_unblocks_text(2, []) != "hire 2 and nothing goes short":
+		_fail("a shortfall with no named source still says what hiring achieves")
+	var one_kind: String = main._staff_hire_unblocks_text(2, [{"kind": "cooking_vat", "count": 1}])
+	if one_kind != "hire 2 → the cooking vat gets its crew again":
+		_fail("one asking kind is named in display words, got '%s'" % one_kind)
+	var many_kinds: String = main._staff_hire_unblocks_text(
+		3, [{"kind": "crusher", "count": 1}, {"kind": "cooking_vat", "count": 2}])
+	if many_kinds != "hire 3 → crusher, cooking vat all get their crew again":
+		_fail("several asking kinds are all named, got '%s'" % many_kinds)
+
+	# --- 1g. the panel leads with a verdict (requirement 2) ------------------
+	var verdict_short: Dictionary = main._staff_summary_state({"categories": [
+		{"id": "manufacturing", "name": "Manufacturing", "demand": 4, "short": 1},
+		{"id": "maintenance", "name": "Maintenance", "demand": 0, "short": 0},
+		{"id": "packaging", "name": "Packaging", "demand": 2, "short": 1},
+	]})
+	if verdict_short["text"] != "▲ 2 short — hire 1 manufacturing, 1 packaging":
+		_fail("the verdict names every short category and the heads to hire, got '%s'" % verdict_short["text"])
+	if int(verdict_short["short"]) != 2:
+		_fail("the verdict carries the wire's own summed shortfall")
+	var verdict_ok: Dictionary = main._staff_summary_state({"categories": [
+		{"id": "manufacturing", "name": "Manufacturing", "demand": 4, "short": 0},
+	]})
+	if verdict_ok["text"] != "✔ every machine has its crew" or int(verdict_ok["short"]) != 0:
+		_fail("a fully crewed factory is told so in one sentence, got '%s'" % verdict_ok["text"])
+	var verdict_empty: Dictionary = main._staff_summary_state({"categories": [
+		{"id": "manufacturing", "name": "Manufacturing", "demand": 0, "short": 0},
+	]})
+	if verdict_empty["text"] != "nothing placed asks for staff yet":
+		_fail("an empty factory is not congratulated on its staffing, got '%s'" % verdict_empty["text"])
+	if main._staff_summary_state({})["text"] != "nothing placed asks for staff yet":
+		_fail("an unpolled snapshot reads as nothing asking, not as short")
+	if String(verdict_short["state"]) != "short" or String(verdict_ok["state"]) != "crewed" \
+			or String(verdict_empty["state"]) != "idle":
+		_fail("the verdict names its own state, so the ink is not a green/red pair")
+
+	# --- 1h. the always-visible SHORT-STAFFED alert (requirement 1) ----------
+	if not main._staff_alert_state({}).is_empty():
+		_fail("an unpolled snapshot raises no alert")
+	if not main._staff_alert_state({"categories": [
+		{"id": "manufacturing", "name": "Manufacturing", "demand": 4, "short": 0},
+	]}).is_empty():
+		_fail("nothing short means NO strip at all, never a strip reading '0 short'")
+	var alert: Dictionary = main._staff_alert_state({"categories": [
+		{"id": "manufacturing", "name": "Manufacturing", "demand": 4, "short": 2},
+		{"id": "packaging", "name": "Packaging", "demand": 2, "short": 0},
+	]})
+	if int(alert["short"]) != 2:
+		_fail("the alert carries the wire's summed shortfall")
+	for needle in ["▲", "SHORT-STAFFED", "hire 2 manufacturing", "press H"]:
+		if String(alert["text"]).find(needle) < 0:
+			_fail("the alert says '%s' (glyph + words + key), got '%s'" % [needle, alert["text"]])
+	if String(alert["text"]).find("packaging") >= 0:
+		_fail("a category that is not short is not named in the alert")
+	var alert_two: Dictionary = main._staff_alert_state({"categories": [
+		{"id": "manufacturing", "name": "Manufacturing", "demand": 4, "short": 2},
+		{"id": "logistics", "name": "Logistics", "demand": 1, "short": 1},
+	]})
+	if String(alert_two["text"]).find("hire 2 manufacturing, 1 logistics") < 0:
+		_fail("every short category is named, in wire order, got '%s'" % alert_two["text"])
+
+	# --- 1i. the model explained in plain words in the panel (requirement 4) --
+	if main.STAFF_RULES.size() < 3:
+		_fail("the panel explains the three rules a player can only otherwise learn by losing heads")
+	var rules: String = main._staff_rules_text()
+	if rules.find("how staffing works") != 0:
+		_fail("the legend is headed, got '%s'" % rules)
+	for rule in main.STAFF_RULES:
+		if rules.find(String(rule)) < 0:
+			_fail("the legend prints every rule; '%s' is missing" % String(rule))
+	for needle in ["WHOLE crew", "firing", "unpaid"]:
+		if rules.find(needle) < 0:
+			_fail("the legend covers '%s', got:\n%s" % [needle, rules])
+	if rules.split("\n").size() != main.STAFF_RULES.size() + 1:
+		_fail("the legend is one line per rule under one heading, got:\n%s" % rules)
 
 	# --- 2. the footer, pure -------------------------------------------------
 	var snapshot := {
@@ -628,15 +746,48 @@ func _run_checks() -> void:
 	var manufacturing := _category("manufacturing")
 	if int(manufacturing.get("short", 0)) != 2 or int(manufacturing.get("headcount", 0)) != 2:
 		_fail("the fixture's manufacturing pool reads headcount 2, short 2, got %s" % str(manufacturing))
-	if short_row["short_label"].text != "2 short" or not short_row["short_label"].visible:
-		_fail("the manufacturing row says '2 short', got '%s'" % short_row["short_label"].text)
+	if short_row["short_label"].text != "▲ 2 short" or not short_row["short_label"].visible:
+		_fail("the manufacturing row says '▲ 2 short', got '%s'" % short_row["short_label"].text)
+	if short_row["state_label"].text != "▲ SHORT" or not short_row["state_label"].visible:
+		_fail("the short row wears its ▲ SHORT chip, got '%s'" % short_row["state_label"].text)
+	var short_border: StyleBoxFlat = short_row["panel"].get_theme_stylebox("panel")
+	if short_border.border_color != main.METER_FILL_WARN:
+		_fail("a short row is bordered in the warning colour")
+	if _row("maintenance")["state_label"].visible:
+		_fail("a category with nothing asking for it wears no chip")
+	if _row("maintenance")["panel"].get_theme_stylebox("panel").border_color == main.METER_FILL_WARN:
+		_fail("a row that is not short keeps the plain hairline border")
 	if short_row["meter_label"].text != "%d / %d" % [int(manufacturing.get("assigned", 0)), int(manufacturing.get("demand", 0))]:
 		_fail("the manufacturing meter prints the wire's assigned / demand, got '%s'" % short_row["meter_label"].text)
 	var fill: Panel = short_row["meter"].get_node("Fill")
 	var fill_style: StyleBoxFlat = fill.get_theme_stylebox("panel")
 	if fill_style.bg_color != main.METER_FILL_WARN:
 		_fail("the short row's bar is drawn in the warning colour")
-	main._set_staff_open(false)
+	# And the strip on the always-visible clipboard says it with NO panel
+	# open, which is the whole point of it (the staffing ticket,
+	# requirement 1). It is drawn by the clipboard's own update, so drive
+	# that rather than waiting on a frame.
+	main._update_staff_panel()
+	main._update_contract_panel()
+	if not main._staff_alert_panel.visible:
+		_fail("an understaffed factory wears the SHORT-STAFFED strip with no panel open")
+	for needle in ["SHORT-STAFFED", "manufacturing", "press H"]:
+		if main._staff_alert_label.text.find(needle) < 0:
+			_fail("the clipboard strip says '%s', got '%s'" % [needle, main._staff_alert_label.text])
+	# The panel's own verdict is the same fact, one sentence, under the heading.
+	if main._staff_summary_label.text.find("\u25b2 2 short") < 0:
+		_fail("the panel leads with its verdict, got '%s'" % main._staff_summary_label.text)
+	if main._staff_rules_label.text.find("how staffing works") < 0:
+		_fail("the panel carries the staffing rules in plain words")
+	# The legend is INSIDE the scroll (UI_UX §2b point 32: chrome added under
+	# the footer is rows clipped off the top of a capped grid).
+	var rules_parent: Node = main._staff_rules_label.get_parent()
+	while rules_parent != null and not (rules_parent is ScrollContainer):
+		rules_parent = rules_parent.get_parent()
+	if rules_parent != main._staff_scroll:
+		_fail("the rules legend scrolls with the rows rather than eating the panel's height")
+	if main._staff_footer_label.text.find("scroll for how staffing works") < 0:
+		_fail("the always-visible footer says the legend is down there")
 	# Hiring the two back un-starves it: the panel is the fix as well as the
 	# readout. (Two commands, then a tick for the claim to run.)
 	main._staff_hire(row_index)
@@ -647,6 +798,17 @@ func _run_checks() -> void:
 		_fail("with its crew hired back the vat is no longer refused")
 	if _category("manufacturing").get("short", 0) != 0:
 		_fail("nobody is short once the crew is hired back")
+	main._poll_staff()
+	main._update_contract_panel()
+	if main._staff_alert_panel.visible:
+		_fail("the strip disappears entirely once nothing is short — it never reads '0 short'")
+	main._set_staff_open(true)
+	main._update_staff_panel()
+	if main._staff_summary_label.text.find("\u2714") < 0:
+		_fail("the verdict flips to the crewed sentence, got '%s'" % main._staff_summary_label.text)
+	if _row("manufacturing")["state_label"].text != "\u2714 CREWED":
+		_fail("the row's chip flips back to CREWED once the crew is hired")
+	main._set_staff_open(false)
 
 	# --- 8. a dock refused its logistics head --------------------------------------
 	# A short line straight into a dock: a crusher's paste reaches it in a

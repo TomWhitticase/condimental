@@ -824,6 +824,25 @@ var _lamp_running: StandardMaterial3D
 var _asset_classes: Dictionary = {} # asset name -> Array of class names
 
 var _help_label: Label
+## The legend's own plate, its heading row and the button that folds it away.
+##
+## WHY IT FOLDS (the HUD ticket). The legend is five lines of keybinds pinned
+## over the top-left of the factory floor, and it is only useful until they
+## are learned — after that it is a permanent five-line hole in the view of
+## the thing the player came to look at. So it collapses, by the button on
+## its own plate or by **F1**, and what is left behind is the plate's heading
+## with the key printed on it: UI_UX.md §7's "never encode state invisibly"
+## applies to a panel that has hidden itself just as much as to a status
+## colour, so there is always a stub saying how to get it back.
+##
+## It is deliberately NOT a modal. E/M/C/H/P are one-at-a-time screens that
+## stop the player doing anything else; this is a HUD plate changing size,
+## so it does not close the others, the others do not close it, and the
+## quality pass's rules about what refuses to run under a modal are
+## untouched by it.
+var _legend_panel: PanelContainer
+var _legend_toggle: Button
+var _legend_collapsed := false
 
 # --- Contract clipboard (UI_UX.md §5) --------------------------------------
 # The money/contract readout used to be one plain Label folded into the
@@ -1017,7 +1036,16 @@ const SHOP_CARD_ICON_SIZE := Vector2(30, 30) * UI_SCALE
 ## line and must not be truncated — where a build card's "Owned 0" always
 ## does. The market can afford the extra height because it is one row of
 ## three, not two rows of six.
-const MARKET_SLOT_SIZE := Vector2(128, 152) * UI_SCALE
+##
+## **One line taller again since shift+click buys all you can afford**: the
+## crate names its second verb and what that verb would fetch right now
+## ("shift: buy 123"). UI_UX.md §2b point 32 says a new line on a card comes
+## out of the card's OWN budget when the grid is capped — the build menu's
+## did, and its icon shrank to pay for it — but the market's row is not
+## capped: three slots on one line, in a panel that leaves most of the height
+## above the hotbar unused. So here the honest budget is the card's height,
+## and the crate keeps the big icon that makes it readable as a crate.
+const MARKET_SLOT_SIZE := Vector2(128, 178) * UI_SCALE
 ## How many catalog entries get a number key at all. Ten — 1..9 then 0, the
 ## row a Minecraft or Terraria hotbar occupies. A catalog longer than this
 ## simply leaves its tail click-only rather than inventing a second key
@@ -1030,6 +1058,44 @@ const MARKET_SLOT_SIZE := Vector2(128, 152) * UI_SCALE
 ## the SAME index: menu slot N and hotbar slot N are one kind, in
 ## `data/shop.ron` order, so the two views never disagree.
 const SHOP_HOTKEY_SLOTS := 10
+
+# --- The stock plate and the collapsible legend (the HUD ticket) -----------
+## The stock row's icon. Bigger than the retired larder chip's 20px — a row
+## with a name beside it can afford it, and at 20 the tomato and the sugar
+## crate were hard to tell apart at a glance, which is the whole job of the
+## icon (UI_UX.md §2b point 31: an icon is judged at its real size on the
+## real plate).
+const STOCK_ICON_SIZE := Vector2(28, 28) * UI_SCALE
+## The gap the plate keeps from the window's right edge, from the hotbar
+## below it and from the clipboard above it. One number, so the three gaps
+## cannot drift apart.
+const STOCK_PANEL_MARGIN := 16.0 * UI_SCALE
+## Wide enough that the longest shipped display name and a four-digit count
+## sit on one row without the name eliding. Bought stock reaches four digits
+## (`--payout`'s fixture buys a thousand vinegar), and a plate that resized
+## itself every time a count crossed a power of ten would twitch on the one
+## edge of the screen the player is not looking at.
+const STOCK_PANEL_MIN_WIDTH := 228.0 * UI_SCALE
+## The share of the space between the clipboard and the hotbar the plate may
+## take before its list scrolls. `data/ingredients.ron` ships three raw
+## ingredients and this engages at about nine, so it is the safety valve
+## `_fit_grid_scroll` already is for the build menu and the docket stack —
+## what it really guarantees is that the clipboard above always keeps most of
+## the column, since the clipboard is capped against whatever this leaves.
+const STOCK_PANEL_HEIGHT_SHARE := 0.42
+## The plate's two text values, and how far a row with nothing in it fades.
+## No new colour language (UI_UX.md §7): the stocked count is the dark
+## plate's ordinary body ink, and `none` is the same grey the hint line under
+## the list already uses. Zero is carried by the WORD and by the row fading
+## back, never by the colour on its own.
+const STOCK_COUNT_COLOR := Color(0.92, 0.93, 0.94)
+const STOCK_NONE_COLOR := Color(0.66, 0.68, 0.72)
+const STOCK_NONE_ROW_ALPHA := 0.62
+## The legend's fold button. A "generous hit target" (UI_UX.md §5) — the
+## production panel's window buttons are 74x28 design pixels and this is the
+## one control on an otherwise text-only plate, so it is wider still and the
+## key it mirrors is printed on it.
+const LEGEND_TOGGLE_MIN_SIZE := Vector2(122.0, 30.0) * UI_SCALE
 
 # --- The hotbar (UI_UX.md §5, the inventory-hotbar ticket) -----------------
 ## An always-visible quick-select strip along the bottom edge — the thing
@@ -1189,6 +1255,31 @@ var _staff_rows_box: VBoxContainer
 var _staff_rows: Array = [] # Array[Dictionary], see _build_staff_row
 var _staff_row_ids: Array = []
 var _staff_footer_label: Label
+## The panel's one-sentence verdict under the heading, and its own ink (it
+## recolours between the level green and the warning red, so it cannot share
+## a settings object with anything else). See `_staff_summary_state`.
+var _staff_summary_label: Label
+var _staff_summary_settings_obj: LabelSettings
+## The verdict's third ink (nothing has asked for staff yet): the panel's own
+## body colour, captured when the panel is built so no new colour is coined.
+var _staff_summary_idle_color := Color(0.86, 0.87, 0.90, 1.0)
+## The static legend of how staffing works (`STAFF_RULES`), drawn once.
+var _staff_scroll_box: VBoxContainer
+var _staff_rules_label: Label
+## The two row skins, plain and SHORT, built once by `_staff_row_style`.
+var _staff_row_styles: Dictionary = {}
+## The always-visible SHORT-STAFFED strip on the clipboard, and its own ink.
+## The one thing outside this panel that says the factory is understaffed
+## (the staffing ticket's requirement 1); hidden entirely when nothing is
+## short. See `_staff_alert_state` / `_update_staff_alert`.
+var _staff_alert_panel: PanelContainer
+var _staff_alert_label: Label
+var _staff_alert_settings: LabelSettings
+## The shortfall the alert last showed, so the cue fires when the factory
+## GOES short rather than on every frame it still is. -1 until the first
+## poll, which primes it — a rebuild or a loaded save must not sound an
+## alarm for a shortfall the player has not just caused.
+var _staff_alert_known_short := -1
 var _staff_open := false
 ## The last `staff_snapshot_json` read, parsed. Polled on the tick like the
 ## machine load (see `_poll_staff`); `{}` until the first poll.
@@ -1254,6 +1345,21 @@ const STAFF_CATEGORY_BLURBS := {
 	"packaging": "bottles and seals a finished batch",
 	"logistics": "loads pallets and trucks so a delivery can ship",
 }
+## The three rules of the staffing model, printed in the panel's own legend
+## (see `_staff_rules_text`). Content, not layout: an array so a test can
+## assert each rule is present and a line can be added without touching the
+## label that draws them.
+const STAFF_RULES := [
+	"a machine that cannot get its WHOLE crew stops — it never runs short-handed",
+	"payday bills every head employed for any part of the period, so firing just before one saves nothing",
+	"a head the money does not reach goes unpaid and idles until the next payday — unpaid twice and they leave",
+]
+## The SHORT-STAFFED strip on the clipboard: the docket's own paper tone
+## (the card's, a shade darker than the sheet) inside the clipboard's ONE
+## warning red, so the alert adds no colour the board did not already own
+## (UI_UX.md §5). It is the only always-visible thing that says the factory
+## is understaffed.
+const STAFF_ALERT_BG := Color(0.83, 0.77, 0.60, 1.0)
 ## The active contract ids the clipboard saw on its last poll. The wire has
 ## no "contract lost" event — a lost contract simply stops being listed and
 ## reads `active: false` on the board — so the announcement is a diff of two
@@ -1306,17 +1412,51 @@ var _strike_style_struck: StyleBoxFlat
 ## printed on the slot, so the gesture means one thing.
 const MARKET_CRATE := 10
 
-## The larder: a one-line strip above the hotbar showing how much of each raw
-## ingredient the player is carrying. It exists because of a specific silent
-## failure — SPACE and V load a hopper and a tank FROM STOCK, and with no
-## stock they do nothing at all and say nothing — so the number that explains
-## why is on screen permanently, right next to the hotbar the player already
-## reads for "what am I carrying". It is a readout, not a control; buying
-## happens in the market panel it names.
-var _larder_panel: PanelContainer
-var _larder_row: HBoxContainer
-var _larder_entries: Dictionary = {} # item id -> Label
-var _larder_hint: Label
+## The slack a market unit price is compared with when working out how many
+## units a balance covers. Money is fixed-point on the wire (`types::Money`,
+## sixteen fractional bits, so a granularity of about 1.5e-5) and arrives
+## here as a JSON double, so an exact multiple can land a hair either side of
+## itself after a division: 3000 / 3 is allowed to come back 999.999999. This
+## is far below one money tick and far below one unit of anything priced, so
+## it can only ever recover the intended answer, never invent an extra unit
+## the simulation will then refuse.
+const MARKET_PRICE_EPSILON := 1.0e-6
+
+## The STOCK plate: what raw ingredients the player owns, and how many of
+## each, on the right-hand edge of the screen between the contracts clipboard
+## and the hotbar.
+##
+## WHY IT EXISTS AT ALL. A specific silent failure: FILL loads a hopper or a
+## tank FROM STOCK, and with no stock it does nothing and says nothing — so
+## the number that explains why has to be on screen permanently. It is a
+## readout, not a control; buying happens in the market (**M**) it names.
+##
+## WHY IT MOVED HERE (the HUD ticket, the owner's words: "on the right hand
+## side of the screen i want to be able to clearly see what I have in stock,
+## all the ingredients i have and amounts"). It used to be a one-line strip
+## of icon+number chips squeezed between the hotbar and the name flyout,
+## where a count was a bare digit beside a 20px icon with nothing naming what
+## it counted — three chips read as a row of numbers rather than as a larder.
+## A column on the right edge gives every ingredient a full row: its icon,
+## its DISPLAY NAME (UI_UX.md §5e: never the wire's id) and its amount. The
+## strip is gone rather than kept alongside — one readout of one fact in one
+## place, so the two can never disagree.
+##
+## NO BAR, ON PURPOSE (UI_UX.md §5e). Nothing in the game says how many
+## tomatoes is "full", so stock stays a figure; a gauge whose full mark is
+## invented teaches a scale that does not exist. Zero is the one state with a
+## consequence, and it is carried by the WORD `none`, dimmed — not by colour
+## alone (§7).
+##
+## `_larder_entries` and `_update_larder()` keep their names through the
+## move: they are the dictionary of id -> count Label and the per-frame
+## refresh, and both are what `test_chain_rework.gd` drives.
+var _stock_panel: PanelContainer
+var _stock_scroll: ScrollContainer
+var _stock_rows: VBoxContainer
+var _stock_hint: Label
+var _larder_entries: Dictionary = {} # item id -> count Label
+var _stock_row_nodes: Dictionary = {} # item id -> HBoxContainer (dimmed at zero)
 
 # --------------------------------------------------------------------------
 # The pause menu, saving and autosave (the "Save/load + a real main menu"
@@ -2384,7 +2524,11 @@ func _rebuild_world() -> void:
 	_seed_splitter_states()
 	_seed_crews()
 	# Polled here as well as on the tick, so a loaded save's panel and a
-	# fresh world's both read right on their first frame.
+	# fresh world's both read right on their first frame. The clipboard's
+	# SHORT-STAFFED strip re-primes with it: a rebuilt or loaded factory
+	# that is already short is a state, not an event, and must not sound
+	# like one (see `_update_staff_alert`).
+	_staff_alert_known_short = -1
 	_poll_staff()
 	# The load records, once, right now — not on the next poll tick. A
 	# rebuild is also what a LOADED game goes through in `_ready`, and a
@@ -4154,11 +4298,14 @@ func _build_ui() -> void:
 	style.set_content_margin_all(_ui_px(12.0))
 
 	var panel := PanelContainer.new()
+	panel.name = "Legend"
 	panel.add_theme_stylebox_override("panel", style)
 	panel.position = _ui_v(Vector2(16, 16))
 	hud.add_child(panel)
+	_legend_panel = panel
 
 	var rows := VBoxContainer.new()
+	rows.name = "LegendRows"
 	rows.add_theme_constant_override("separation", _ui_i(4))
 	panel.add_child(rows)
 
@@ -4168,16 +4315,60 @@ func _build_ui() -> void:
 	settings.outline_size = _ui_i(4)
 	settings.outline_color = Color(0, 0, 0, 0.85)
 
+	# The heading row is what survives the fold — the plate's name plus the
+	# button, so a collapsed legend is a labelled stub that names the key
+	# rather than a corner of the screen that has gone quiet. It is built
+	# before the keybind text so it stays the top line either way.
+	var header := HBoxContainer.new()
+	header.name = "LegendHeader"
+	header.add_theme_constant_override("separation", _ui_i(16))
+	rows.add_child(header)
+
+	var heading_settings := LabelSettings.new()
+	heading_settings.font_size = _ui_font(-1)
+	heading_settings.font_color = Color(0.98, 0.85, 0.42) # the plate's hazard accent
+	heading_settings.outline_size = settings.outline_size
+	heading_settings.outline_color = settings.outline_color
+
+	var heading := Label.new()
+	heading.name = "LegendHeading"
+	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	heading.label_settings = heading_settings
+	heading.text = "CONTROLS"
+	# NOT expanded to fill: the button sits next to the heading rather than
+	# out at the plate's far edge. The legend is as wide as its widest keybind
+	# line, and at 1280x720 that runs under the contracts clipboard (which is
+	# drawn over it) — an affordance whose right half is buried is worse than
+	# a buried word, so the one control on this plate is kept where the plate
+	# is always visible, beside the word it belongs to.
+	heading.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	header.add_child(heading)
+
+	_legend_toggle = Button.new()
+	_legend_toggle.name = "LegendToggle"
+	_legend_toggle.focus_mode = Control.FOCUS_NONE
+	_legend_toggle.custom_minimum_size = LEGEND_TOGGLE_MIN_SIZE
+	_legend_toggle.add_theme_font_size_override("font_size", _ui_font(-1))
+	_legend_toggle.pressed.connect(_toggle_legend)
+	header.add_child(_legend_toggle)
+
 	_help_label = Label.new()
+	_help_label.name = "LegendText"
 	_help_label.label_settings = settings
 	_help_label.text = ISO_HELP_TEXT
 	rows.add_child(_help_label)
+	_apply_legend_collapsed()
 
 	# UI_UX.md §5: "a contract IS a clipboard." The money/contract readout
 	# used to be a plain Label folded into the panel above (milestone 5); it
 	# now gets its own diegetic clipboard panel — paper background, a steel
 	# clip bar, checkbox-style tick marks for delivery progress.
 	_build_contract_panel(hud, settings)
+
+	# The STOCK plate, directly under the clipboard on the same edge (the HUD
+	# ticket) — see `_stock_panel`'s doc for why it is a right-hand column
+	# rather than the strip of chips it replaces.
+	_build_stock_panel(hud, settings)
 
 	# UI_UX.md §5's other named widget: "build/recipe menus as grids of
 	# voxel-rendered icon slots." Hidden until E is pressed.
@@ -4214,6 +4405,69 @@ func _build_ui() -> void:
 	# permanently there.
 	_build_payout_feedback(hud)
 	_update_sound_button()
+
+
+## Folds the keybind legend away, or brings it back. Reached two ways, on
+## purpose: the button on the plate (discoverable, and the only way a player
+## who never reads a legend would find it) and **F1** (the conventional key
+## for a help overlay in every game that has one, and — checked against
+## `_unhandled_input` — the first function key this project binds at all, so
+## it collides with nothing).
+func _toggle_legend() -> void:
+	_set_legend_collapsed(not _legend_collapsed)
+
+
+## The one place the state is written, so the button, the label and every
+## panel that measures the plate can never disagree about it. Session-only:
+## the HUD is built once in `_ready` and this is a view preference, not
+## something a save should carry back.
+func _set_legend_collapsed(collapsed: bool) -> void:
+	if _legend_collapsed == collapsed:
+		return
+	_legend_collapsed = collapsed
+	_apply_legend_collapsed()
+	# The two notes a panel already opens and closes on. The legend is not a
+	# modal (see `_legend_panel`'s doc), but what the player just did is make
+	# a panel appear or disappear, and that is exactly what those two cues
+	# say — a third convention for one button would be a new sound language
+	# for no new fact (UI_UX.md §8).
+	_cue(FactoryAudio.MENU_CLOSE if collapsed else FactoryAudio.MENU_OPEN)
+
+
+func _apply_legend_collapsed() -> void:
+	if _help_label != null:
+		_help_label.visible = not _legend_collapsed
+	if _legend_toggle != null:
+		# The stub. Collapsed, this line IS the legend, so it says both ways
+		# back — click here, or press F1 (UI_UX.md §7: a panel that has
+		# hidden itself must not hide how to return it).
+		_legend_toggle.text = "+ SHOW  F1" if _legend_collapsed else "−  HIDE  F1"
+	if _legend_panel != null:
+		# A Control parented to a CanvasLayer is not in a container, so Godot
+		# grows it to its minimum size and never shrinks it back — without
+		# this the plate would keep the five lines' worth of height it was
+		# built at, and the fold would be invisible.
+		_legend_panel.size = _legend_panel.get_combined_minimum_size()
+	_position_contract_notice()
+
+
+## The legend plate's CURRENT rect on screen — collapsed or expanded,
+## whichever it is now. Everything that has to stay off the legend asks here
+## rather than measuring `_help_label`'s own parent, which is the rect of the
+## text INSIDE the plate and is the wrong answer twice over: it misses the
+## plate's own margins, and while the text is hidden it reports the empty
+## strip where the text used to be rather than the stub that is really there.
+##
+## Falls back to the plate's minimum size before layout has run, the state a
+## headless run never leaves — the old `size.y > 0` guard silently dropped
+## the legend out of the avoid list entirely in exactly that case.
+func _legend_rect() -> Rect2:
+	if _legend_panel == null or not _legend_panel.visible:
+		return Rect2()
+	var size := _legend_panel.size
+	if size.y <= 0.0:
+		size = _legend_panel.get_combined_minimum_size()
+	return Rect2(_legend_panel.global_position, size)
 
 
 ## The diegetic clipboard/checklist widget (UI_UX.md §5) — the money/contract
@@ -4405,6 +4659,45 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_wages_settings.outline_size = 0
 	_contract_wages_label.label_settings = _contract_wages_settings
 	body.add_child(_contract_wages_label)
+
+	# SHORT-STAFFED, on the always-visible clipboard (the staffing ticket's
+	# requirement 1). Until this strip, the ONLY thing in the game that said
+	# a machine was standing idle for want of a head was that machine's own
+	# hover — a fact the player had to go looking for, about a factory that
+	# had already stopped earning. It goes here, under the wage bill it is
+	# the other half of, rather than in a second toast convention: the money
+	# line, the wages line and this are one column about what the factory
+	# costs and what is stopping it.
+	#
+	# A strip rather than another line of text, because it has to be
+	# unmissable: the docket's paper inside the clipboard's ONE warning red
+	# (no new colour), its glyph and words carrying the message on their own
+	# if the colour is not seen at all (UI_UX.md §7). It is a CHILD of the
+	# clipboard, so it can never land on another fixed plate (§2b point 33) —
+	# the board simply grows a strip when the factory is short and loses it
+	# again when it is not.
+	var alert_style := StyleBoxFlat.new()
+	alert_style.bg_color = STAFF_ALERT_BG
+	alert_style.border_color = CONTRACT_LAST_CHANCE_COLOR
+	alert_style.set_border_width_all(_ui_i(2))
+	alert_style.set_content_margin_all(_ui_px(5.0))
+
+	_staff_alert_panel = PanelContainer.new()
+	_staff_alert_panel.name = "StaffAlert"
+	_staff_alert_panel.add_theme_stylebox_override("panel", alert_style)
+	_staff_alert_panel.visible = false
+	body.add_child(_staff_alert_panel)
+
+	_staff_alert_settings = LabelSettings.new()
+	_staff_alert_settings.font_size = _ui_font()
+	_staff_alert_settings.font_color = CONTRACT_LAST_CHANCE_COLOR
+	_staff_alert_settings.outline_size = 0
+
+	_staff_alert_label = Label.new()
+	_staff_alert_label.name = "StaffAlertLabel"
+	_staff_alert_label.label_settings = _staff_alert_settings
+	_staff_alert_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_staff_alert_panel.add_child(_staff_alert_label)
 
 	_checkbox_style_unchecked = StyleBoxFlat.new()
 	_checkbox_style_unchecked.bg_color = Color(0.80, 0.74, 0.57, 1.0) # a shade darker than the paper
@@ -5420,7 +5713,13 @@ func _build_ingredient_market(hud: CanvasLayer, base_settings: LabelSettings) ->
 
 	var footer := Label.new()
 	footer.label_settings = base_settings
-	footer.text = "click a crate to buy %d\nthen click a hopper or tank to load it    M/ESC: close" % MARKET_CRATE
+	# BOTH VERBS, NAMED. A market crate is the build slot's two-actions-one-
+	# square shape (UI_UX.md §5b) with the modifier standing in for the second
+	# mouse button, so the footer spells out both the way the build menu's
+	# does — a gesture nobody is told about is a gesture nobody uses. The
+	# shift line gets its own line rather than a "·" join so the footer stays
+	# no wider than the slot row it sits under.
+	footer.text = "click a crate to buy %d\nshift+click: buy all you can afford\nthen click a hopper or tank to load it    M/ESC: close" % MARKET_CRATE
 	body.add_child(footer)
 
 	_position_market_panel()
@@ -5450,6 +5749,12 @@ func _build_market_slot(row: HBoxContainer, base_settings: LabelSettings, index:
 	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
 		button.add_theme_stylebox_override(state, _shop_slot_style(state))
 	button.pressed.connect(_buy_ingredient_slot.bind(index))
+	# SHIFT+left-click is the second half of the slot (see
+	# `_on_market_slot_gui_input`). A Button reports a plain left click
+	# through `pressed` with no modifier state attached, so the second action
+	# has to come off the raw event — the build slot's right-click place does
+	# the same thing for the same reason.
+	button.gui_input.connect(_on_market_slot_gui_input.bind(index))
 	row.add_child(button)
 
 	var column := VBoxContainer.new()
@@ -5500,6 +5805,29 @@ func _build_market_slot(row: HBoxContainer, base_settings: LabelSettings, index:
 	price_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	column.add_child(price_label)
 
+	# THE SECOND VERB, AND WHAT IT WOULD ACTUALLY FETCH. "shift+click buys
+	# all you can afford" is a promise about a number the player cannot work
+	# out at a glance — it is the balance divided by a unit price printed two
+	# lines below — so the slot prints the answer instead of asking them to
+	# do the division. It sits directly under the crate price because the two
+	# lines are the slot's two verbs and they should be read together
+	# (UI_UX.md §5b). Its own settings object, not the price's: the two lines
+	# dim on different conditions (a crate may be out of reach while a
+	# handful of units is not).
+	var shift_settings := LabelSettings.new()
+	shift_settings.font_size = _ui_font(-2)
+	shift_settings.font_color = Color(0.98, 0.85, 0.42)
+	shift_settings.outline_size = base_settings.outline_size
+	shift_settings.outline_color = base_settings.outline_color
+
+	var shift_label := Label.new()
+	shift_label.name = "ShiftBuy"
+	shift_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	shift_label.label_settings = shift_settings
+	shift_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	shift_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	column.add_child(shift_label)
+
 	# The same cost-against-balance bar the build menu's slots carry, on the
 	# same mechanism — a crate of ingredients and a machine are both money
 	# leaving the one counter, and the player should not have to read two
@@ -5527,6 +5855,7 @@ func _build_market_slot(row: HBoxContainer, base_settings: LabelSettings, index:
 		"button": button,
 		"icon": icon,
 		"price_label": price_label,
+		"shift_label": shift_label,
 		"cost_meter": cost_meter,
 		"owned_label": owned_label,
 	})
@@ -5569,7 +5898,26 @@ func _update_ingredient_market() -> void:
 			Color(0.92, 0.93, 0.94) if affordable else Color(0.55, 0.50, 0.48)
 		)
 		slot["icon"].modulate = Color.WHITE if affordable else Color(0.42, 0.42, 0.45, 0.75)
-		slot["button"].disabled = not affordable
+		# WHAT SHIFT+CLICK WOULD FETCH RIGHT NOW, recomputed every poll from
+		# the wire's own unit price (never a Godot-side idea of one), so the
+		# second verb is a number on the card rather than a promise the
+		# player has to do arithmetic to check.
+		var units := _units_affordable(float(snapshot.get("money", 0.0)), unit_price)
+		slot["shift_label"].text = (
+			"shift: buy %d" % units if units > 0 else "shift: buy 0  ✗"
+		)
+		slot["shift_label"].label_settings.font_color = (
+			Color(0.98, 0.85, 0.42) if units > 0 else Color(0.55, 0.50, 0.48)
+		)
+		# A SLOT IS RECESSED ONLY WHEN NEITHER VERB CAN DO ANYTHING. It went
+		# disabled the moment a whole crate was out of reach, which was right
+		# while a crate was the only thing a click could buy; with shift on
+		# the same square, a balance that covers four tomatoes but not ten
+		# still has a real action on it, and a disabled Button is exactly the
+		# wrong picture of that. The crate itself being unaffordable is still
+		# said three other ways (the "✗", the dimmed icon and the meter
+		# below), so the recess is the one signal that changes meaning here.
+		slot["button"].disabled = not affordable and units <= 0
 		# ...and a fourth reading of the same fact, which is the only one that
 		# says HOW unaffordable: the share of the balance this price takes,
 		# pinned full and red once it takes more than all of it. A price the
@@ -5591,20 +5939,103 @@ func _update_ingredient_market() -> void:
 		slot["owned_label"].text = "In stock %d\n%.0f each" % [int(entry.get("owned", 0)), unit_price]
 
 
-## Buys one crate. An unaffordable or unknown purchase is a silent no-op in
-## the simulation (`BuyIngredient`, like `Purchase`), so the only thing to do
-## afterwards is re-read either way.
-func _buy_ingredient_slot(index: int) -> void:
+## Buys one crate, or `quantity` units when a caller has worked out a better
+## number (`_buy_all_from_slot`). An unaffordable or unknown purchase is a
+## silent no-op in the simulation (`BuyIngredient`, like `Purchase`), so the
+## only thing to do afterwards is re-read either way — and the balance moving
+## is what says the simulation took it, at any quantity.
+func _buy_ingredient_slot(index: int, quantity: int = MARKET_CRATE) -> void:
 	if index < 0 or index >= _market_slots.size():
 		return
 	var money_before := _current_money()
 	sim.issue_command_json(JSON.stringify({
 		"type": "buy_ingredient",
 		"item": String(_market_slots[index]["id"]),
-		"quantity": MARKET_CRATE,
+		"quantity": quantity,
 	}))
 	_update_ingredient_market()
 	_cue(FactoryAudio.BUY if _current_money() < money_before else FactoryAudio.REFUSED)
+
+
+## How many units of `unit_price` a balance of `money` covers. Pure, and the
+## one place the "buy all you can afford" arithmetic lives — the slot's
+## printed promise and the click that keeps it must never be able to
+## disagree.
+##
+## The division is only a first guess. Money crosses the wire as a JSON
+## double and an exact multiple can come back a hair either side of itself,
+## so the answer is settled by MULTIPLYING back within `MARKET_PRICE_EPSILON`
+## — the operation the simulation itself will do (`IngredientCatalog::
+## cost_of`) when it prices the command. A free or unpriced ingredient
+## (`price <= 0`) has no "as many as you can afford" and buys nothing, rather
+## than dividing by zero into an infinity that becomes a nonsense quantity.
+func _units_affordable(money: float, unit_price: float) -> int:
+	if unit_price <= 0.0 or money <= 0.0:
+		return 0
+	var units := int(floor(money / unit_price))
+	while units > 0 and float(units) * unit_price > money + MARKET_PRICE_EPSILON:
+		units -= 1
+	while float(units + 1) * unit_price <= money + MARKET_PRICE_EPSILON:
+		units += 1
+	return units
+
+
+## [`_units_affordable`] for one ingredient id, against the live balance and
+## the live price — the number the slot prints on its shift line.
+func _affordable_units(item_id: String) -> int:
+	var snapshot := _ingredients_snapshot()
+	var money := float(snapshot.get("money", 0.0))
+	for entry in snapshot.get("entries", []):
+		if String(entry.get("id", "")) == item_id:
+			return _units_affordable(money, float(entry.get("price", 0.0)))
+	return 0
+
+
+## SHIFT+click's half of a market slot: buy as many units as the balance
+## covers, in ONE command.
+##
+## One command, not a loop of crates: `BuyIngredient` takes an arbitrary
+## `quantity` and prices it in one go (`IngredientCatalog::cost_of`, then a
+## single all-or-nothing `Economy::try_spend`), so a loop would only be a
+## slower way to reach the same balance — and a partially-completed loop
+## would be a new failure mode the simulation does not have.
+##
+## Nothing affordable means nothing is sent. The simulation would refuse a
+## zero quantity anyway (`cost_of` returns `None` for it), but a command
+## issued to be refused is a command that could be taken, and the player is
+## owed the same "no" they get everywhere else: the one shared refusal cue
+## (UI_UX.md §8), matching the "✗" the slot is already showing.
+func _buy_all_from_slot(index: int) -> void:
+	if index < 0 or index >= _market_slots.size():
+		return
+	var units := _affordable_units(String(_market_slots[index]["id"]))
+	if units <= 0:
+		_cue(FactoryAudio.REFUSED)
+		return
+	_buy_ingredient_slot(index, units)
+
+
+## A market slot has two actions on one square, the way a build slot does
+## (UI_UX.md §5b) — but with a modifier rather than the second mouse button,
+## because both of these actions are BUYING and they differ only in how much.
+## Left-click buys a crate; SHIFT+left-click buys everything the balance
+## covers, which is the one quantity worth a gesture of its own: it is the
+## quantity a player stocking up before a long run actually wants, and it is
+## the only one that cannot be reached by clicking (the crate is ten, and the
+## balance is rarely a multiple of ten unit prices).
+##
+## Taken off the raw event and consumed here, because a `Button`'s `pressed`
+## signal carries no modifier state and would otherwise ALSO fire the crate
+## buy on the same click. `Control` emits `gui_input` before the button's own
+## handling for exactly this reason, so marking the event handled is what
+## keeps one gesture to one purchase.
+func _on_market_slot_gui_input(event: InputEvent, index: int) -> void:
+	if not (event is InputEventMouseButton):
+		return
+	if event.button_index != MOUSE_BUTTON_LEFT or not event.pressed or not event.shift_pressed:
+		return
+	get_viewport().set_input_as_handled()
+	_buy_all_from_slot(index)
 
 
 func _set_market_open(open: bool) -> void:
@@ -5983,20 +6414,55 @@ func _build_staff_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_staff_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	heading.add_child(_staff_money_label)
 
+	# The verdict, before any row: "is this factory staffed" answered in one
+	# sentence at the top of the panel (the staffing ticket's requirement 2).
+	# Its own settings object, recoloured per state by `_update_staff_panel`.
+	_staff_summary_settings_obj = _staff_summary_settings()
+	# The idle verdict's ink is the panel's own body colour, not a new one:
+	# no new colours beyond the established palette.
+	_staff_summary_idle_color = base_settings.font_color
+	_staff_summary_label = Label.new()
+	_staff_summary_label.name = "StaffSummary"
+	_staff_summary_label.label_settings = _staff_summary_settings_obj
+	body.add_child(_staff_summary_label)
+
 	_staff_scroll = ScrollContainer.new()
 	_staff_scroll.name = "StaffScroll"
 	_staff_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_staff_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	body.add_child(_staff_scroll)
 
+	# Everything that scrolls lives in one box: the rows, then the rules.
+	# The legend is IN the scroll, not under the footer, for UI_UX.md §2b
+	# point 32's reason — `_fit_grid_scroll` takes the scroll's cap from the
+	# PANEL's available height, so every line added as panel chrome is a line
+	# clipped off the rows. Four lines of small print outside the scroll cost
+	# a whole category row; inside it they cost nothing and are still one
+	# flick away, which is the right price for text read once.
+	_staff_scroll_box = VBoxContainer.new()
+	_staff_scroll_box.name = "StaffScrollBox"
+	_staff_scroll_box.add_theme_constant_override("separation", _ui_i(10))
+	_staff_scroll_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_staff_scroll.add_child(_staff_scroll_box)
+
 	_staff_rows_box = VBoxContainer.new()
 	_staff_rows_box.name = "StaffRows"
 	_staff_rows_box.add_theme_constant_override("separation", _ui_i(6))
 	_staff_rows_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_staff_scroll.add_child(_staff_rows_box)
+	_staff_scroll_box.add_child(_staff_rows_box)
 
 	_poll_staff()
 	_rebuild_staff_rows(_staff_snapshot.get("categories", []))
+
+	# The rules of the model, in small print at the end of the scrolled
+	# list (requirement 4). Static — they are the simulation's rules, not
+	# this factory's state — so they are set once here and never touched by
+	# a poll.
+	_staff_rules_label = Label.new()
+	_staff_rules_label.name = "StaffRules"
+	_staff_rules_label.label_settings = _staff_meta_settings()
+	_staff_rules_label.text = _staff_rules_text()
+	_staff_scroll_box.add_child(_staff_rules_label)
 
 	_staff_footer_label = Label.new()
 	_staff_footer_label.name = "StaffFooter"
@@ -6018,7 +6484,7 @@ func _position_staff_panel() -> void:
 		return
 	var reserved := _hotbar_reserved_height()
 	var bounds := vp.get_visible_rect().size
-	_fit_grid_scroll(_staff_scroll, _staff_rows_box, bounds.y - reserved - _ui_px(16.0))
+	_fit_grid_scroll(_staff_scroll, _staff_scroll_box, bounds.y - reserved - _ui_px(16.0))
 	var panel_size := _staff_panel.get_combined_minimum_size()
 	_staff_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
 
@@ -6050,14 +6516,25 @@ func _staff_rows_match(categories: Array) -> bool:
 
 
 ## The dark row a category sits on: a step lighter than the plate so four
-## rows read as four rows, with the plate's own hairline.
-func _staff_row_style() -> StyleBoxFlat:
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.11, 0.11, 0.13, 0.92)
-	style.border_color = Color(0.30, 0.31, 0.34, 0.95)
-	style.set_border_width_all(_ui_i(1))
-	style.set_content_margin_all(_ui_px(6.0))
-	return style
+## rows read as four rows, with the plate's own hairline. A SHORT row takes
+## the warning colour as a heavier border (the docket's own idiom for "this
+## one is in trouble", UI_UX.md §5) — never a red fill, which would read as
+## a different kind of row rather than the same row in trouble.
+##
+## The two styles are built ONCE and handed out, not rebuilt per update: the
+## panel re-reads every row on every frame it is open, and the quality pass
+## (ticket 3) already had to undo one readout that allocated a stylebox per
+## element per frame.
+func _staff_row_style(short: bool = false) -> StyleBoxFlat:
+	if _staff_row_styles.is_empty():
+		for is_short in [false, true]:
+			var style := StyleBoxFlat.new()
+			style.bg_color = Color(0.11, 0.11, 0.13, 0.92)
+			style.border_color = METER_FILL_WARN if is_short else Color(0.30, 0.31, 0.34, 0.95)
+			style.set_border_width_all(_ui_i(3) if is_short else _ui_i(1))
+			style.set_content_margin_all(_ui_px(6.0))
+			_staff_row_styles[is_short] = style
+	return _staff_row_styles[short]
 
 
 ## One category: ticket 2's icon, the name, `hired N` and the wage under it,
@@ -6100,11 +6577,25 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	text_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(text_col)
 
+	# The name and, beside it, the row's own verdict chip: "▲ SHORT" or
+	# "✔ CREWED" (the staffing ticket's requirement 2). A meter is a shape
+	# and this is the word for the same fact, at the place the eye lands
+	# first on a row — UI_UX.md §7 again: glyph, word AND colour.
+	var name_row := HBoxContainer.new()
+	name_row.add_theme_constant_override("separation", _ui_i(8))
+	text_col.add_child(name_row)
+
 	var name_label := Label.new()
 	name_label.name = "Name"
 	name_label.label_settings = _contract_name_settings_dark()
 	name_label.text = String(category.get("name", id))
-	text_col.add_child(name_label)
+	name_row.add_child(name_label)
+
+	var state_label := Label.new()
+	state_label.name = "State"
+	state_label.label_settings = _staff_state_settings()
+	state_label.visible = false
+	name_row.add_child(state_label)
 
 	# `hired 4  ·  wage 2 / head / period` on ONE line: with each on its own
 	# the row stood three lines tall and the fourth category scrolled off
@@ -6191,12 +6682,15 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	buttons.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(buttons)
 
+	# Wide enough for "HIRE +1 · 2/period" at the button's own type size: a
+	# button that says what the click does and what it costs is the staffing
+	# ticket's requirement 3, and a clipped one would say neither.
 	var hire_button := Button.new()
 	hire_button.name = "Hire_%s" % id
-	hire_button.text = "HIRE"
+	hire_button.text = "HIRE +1"
 	hire_button.focus_mode = Control.FOCUS_NONE
-	hire_button.custom_minimum_size = _ui_v(Vector2(84, 32))
-	hire_button.add_theme_font_size_override("font_size", _ui_font(-1))
+	hire_button.custom_minimum_size = _ui_v(Vector2(132, 32))
+	hire_button.add_theme_font_size_override("font_size", _ui_font(-2))
 	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
 		hire_button.add_theme_stylebox_override(state, _shop_slot_style(state))
 	hire_button.pressed.connect(_staff_hire.bind(index))
@@ -6204,10 +6698,10 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 
 	var fire_button := Button.new()
 	fire_button.name = "Fire_%s" % id
-	fire_button.text = "FIRE"
+	fire_button.text = "FIRE −1"
 	fire_button.focus_mode = Control.FOCUS_NONE
 	fire_button.custom_minimum_size = _ui_v(Vector2(84, 32))
-	fire_button.add_theme_font_size_override("font_size", _ui_font(-1))
+	fire_button.add_theme_font_size_override("font_size", _ui_font(-2))
 	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
 		fire_button.add_theme_stylebox_override(state, _shop_slot_style(state))
 	fire_button.pressed.connect(_staff_fire.bind(index))
@@ -6231,10 +6725,30 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	demand_label.label_settings = _staff_meta_settings()
 	row_wrap.add_child(demand_label)
 
+	# What hiring this shortfall would put back to work, in the machines'
+	# own names — the staffing ticket's requirement 5, built out of the
+	# demand sources above rather than out of any new sim fact.
+	var unblock_label := Label.new()
+	unblock_label.name = "Unblock"
+	unblock_label.label_settings = _staff_warn_settings()
+	unblock_label.visible = false
+	row_wrap.add_child(unblock_label)
+
+	# WHY a disabled HIRE is disabled (requirement 3): grey alone says only
+	# "not now", never "and here is what would change it".
+	var blocked_label := Label.new()
+	blocked_label.name = "HireBlocked"
+	blocked_label.label_settings = _staff_warn_settings()
+	blocked_label.visible = false
+	row_wrap.add_child(blocked_label)
+
 	return {
 		"id": id,
 		"panel": panel,
 		"name_label": name_label,
+		"state_label": state_label,
+		"unblock_label": unblock_label,
+		"blocked_label": blocked_label,
 		"hired_label": hired_label,
 		"wage_label": wage_label,
 		"meter": meter,
@@ -6290,6 +6804,30 @@ func _staff_warn_settings() -> LabelSettings:
 	return settings
 
 
+## The row's verdict chip beside its name ("▲ SHORT" / "✔ CREWED"). Its own
+## object per row, since its colour is the row's state — sharing one would
+## paint every row with the last row's verdict.
+func _staff_state_settings() -> LabelSettings:
+	var settings := LabelSettings.new()
+	settings.font_size = _ui_font(-1)
+	settings.font_color = METER_FILL_WARN
+	settings.outline_size = _ui_i(3)
+	settings.outline_color = Color(0, 0, 0, 0.85)
+	return settings
+
+
+## The panel's verdict line under the heading: body size a step up, coloured
+## by `_staff_summary_state`. Its own object for `_staff_state_settings`'s
+## reason.
+func _staff_summary_settings() -> LabelSettings:
+	var settings := LabelSettings.new()
+	settings.font_size = _ui_font(1)
+	settings.font_color = METER_FILL_LEVEL
+	settings.outline_size = _ui_i(3)
+	settings.outline_color = Color(0, 0, 0, 0.85)
+	return settings
+
+
 ## Whether the staff pools are due a re-read: never read yet, or
 ## LOAD_POLL_TICKS of simulation since the last one. The machine load's
 ## rule (`_machine_load_poll_due`), on its own stamp so a HIRE's immediate
@@ -6335,13 +6873,21 @@ func _staff_status_text(category: Dictionary) -> String:
 ##   meter          {"fraction", "color"} — assigned over demand, red when
 ##                  short; a demand of 0 is an empty bar reading "0 / 0"
 ##   meter_text     "4 / 4"
-##   short_text     "2 short" when short > 0, else ""
+##   short_text     "▲ 2 short" when short > 0, else "" (the glyph is the
+##                  staffing ticket's: a shortfall is read at a glance, and
+##                  the warning colour is never the whole message)
+##   state_text     the row's own verdict chip beside its name — "▲ SHORT",
+##                  "✔ CREWED", or "" for a category nothing asks for
+##   state_color    that chip's ink
+##   short_row      true when this row is the reason the HUD is shouting
 ##   note           the idle sentence when the category has nothing hired
 ##                  and nothing asking for it, else "" (the meter shows)
 ##   fire_enabled   headcount > 0
 ##   hire_enabled   the wire's own `can_hire` (ticket 1's hire-refusal rule;
 ##                  Godot never re-derives it — it needs the whole-factory
 ##                  bill, not this row's own numbers)
+##   hire_text      what the HIRE button's click does AND costs
+##   fire_text      what FIRE's click does
 ##   status_text    `_staff_status_text`'s AFTER-payday line
 func _staff_row_state(category: Dictionary) -> Dictionary:
 	var headcount := int(category.get("headcount", 0))
@@ -6353,6 +6899,11 @@ func _staff_row_state(category: Dictionary) -> Dictionary:
 	var note := ""
 	if headcount == 0 and demand == 0 and STAFF_IDLE_NOTES.has(id):
 		note = String(STAFF_IDLE_NOTES[id])
+	var state_text := ""
+	if short > 0:
+		state_text = "▲ SHORT"
+	elif demand > 0:
+		state_text = "✔ CREWED"
 	return {
 		"hired_text": "hired %d" % headcount,
 		"wage_text": "wage %d / head / period" % wage,
@@ -6361,12 +6912,161 @@ func _staff_row_state(category: Dictionary) -> Dictionary:
 			"color": METER_FILL_WARN if short > 0 else METER_FILL_LEVEL,
 		},
 		"meter_text": "%d / %d" % [assigned, demand],
-		"short_text": ("%d short" % short) if short > 0 else "",
+		"short_text": ("▲ %d short" % short) if short > 0 else "",
+		"state_text": state_text,
+		"state_color": METER_FILL_WARN if short > 0 else METER_FILL_LEVEL,
+		"short_row": short > 0,
 		"note": note,
 		"fire_enabled": headcount > 0,
 		"hire_enabled": bool(category.get("can_hire", true)),
+		"hire_text": _staff_hire_button_text(category),
+		"fire_text": "FIRE −1",
 		"status_text": _staff_status_text(category),
 	}
+
+
+## What a click on HIRE does and what it costs, on the button itself: the
+## staffing ticket's own complaint was that a bare "HIRE" says neither.
+## "HIRE +1 · 2/period" — the head it adds and the wage it adds to every
+## payday from now on, which is the recurring cost GAMEPLAY.md §5 makes the
+## third spend axis. A category with no wage on the wire says only what the
+## click does, rather than printing a cost of nothing.
+func _staff_hire_button_text(category: Dictionary) -> String:
+	var wage := int(category.get("wage", 0))
+	if wage <= 0:
+		return "HIRE +1"
+	return "HIRE +1 · %d/period" % wage
+
+
+## WHY a disabled HIRE is disabled, in words rather than in grey (ticket 1's
+## hire-refusal rule: `money >= next_bill + wage`, so nobody is hired who
+## cannot be paid). Every figure is the wire's — the balance, the bill it
+## reports as `next_bill`, and the row's own wage — so this sentence can
+## never quote a number the sim disagrees with. "" while `can_hire` is true,
+## which is the common case, so the row shows nothing extra.
+func _staff_hire_blocked_text(category: Dictionary, snapshot: Dictionary) -> String:
+	if bool(category.get("can_hire", true)):
+		return ""
+	var wage := int(category.get("wage", 0))
+	var bill := _staff_next_bill(snapshot)
+	var money := int(floor(float(snapshot.get("money", 0.0))))
+	return "✗ cannot hire — %d in hand; the next payday needs %d, plus %d for the new head" % [
+		money, bill, wage,
+	]
+
+
+## What hiring this category's shortfall would actually unblock, named from
+## the same `asked for by:` sources the WHY line uses (`_staff_demand_sources_for`).
+## The sim's own rule makes this honest without inventing a fact: a machine
+## that cannot get its WHOLE crew stalls, and a category whose `short` is 0
+## has assigned == demand, so clearing the shortfall is exactly "every one of
+## these gets its crew". "" when nothing is short — there is nothing to
+## unblock — and a bare hire count when nothing placed names the category
+## (a shortfall with no source is not a sentence this can complete).
+func _staff_hire_unblocks_text(short: int, sources: Array) -> String:
+	if short <= 0:
+		return ""
+	if sources.is_empty():
+		return "hire %d and nothing goes short" % short
+	var names: Array = []
+	for source in sources:
+		names.append(String(source["kind"]).replace("_", " "))
+	if names.size() == 1:
+		return "hire %d → the %s gets its crew again" % [short, names[0]]
+	return "hire %d → %s all get their crew again" % [
+		short, ", ".join(PackedStringArray(names)),
+	]
+
+
+## The panel's verdict, under the heading, before any row is read: is this
+## factory staffed or not, in one sentence. The staffing ticket's lead —
+## a player who opens H must not have to compare four meters to answer it.
+## Returns `{"text", "short"}`; `short` is the total heads missing across
+## every category (0 when nothing is short), which is also what the HUD
+## alert outside the panel is keyed on.
+##
+## Three states, and each is a real one: something is short (name the
+## categories and the heads to hire), nothing is short but something is
+## asking (every machine has its crew), or nothing is asking at all — which
+## is a new game, not a staffed one, and must not be congratulated as if it
+## were.
+func _staff_summary_state(snapshot: Dictionary) -> Dictionary:
+	var parts: Array = []
+	var total_short := 0
+	var total_demand := 0
+	for category in snapshot.get("categories", []):
+		total_demand += int(category.get("demand", 0))
+		var short := int(category.get("short", 0))
+		if short <= 0:
+			continue
+		total_short += short
+		parts.append("%d %s" % [short, _staff_category_word(category)])
+	if total_short > 0:
+		return {
+			"text": "▲ %d short — hire %s" % [total_short, ", ".join(PackedStringArray(parts))],
+			"short": total_short,
+			"state": "short",
+		}
+	if total_demand > 0:
+		return {"text": "✔ every machine has its crew", "short": 0, "state": "crewed"}
+	return {"text": "nothing placed asks for staff yet", "short": 0, "state": "idle"}
+
+
+## A category's display name, lowercased, for prose ("hire 2 manufacturing").
+## The wire's `name` when it has one, its id otherwise — never a table here.
+func _staff_category_word(category: Dictionary) -> String:
+	return String(category.get("name", category.get("id", ""))).to_lower()
+
+
+## The always-visible SHORT-STAFFED alert (the staffing ticket's first
+## requirement): the one thing outside the H panel that says the factory is
+## understaffed, drawn on the clipboard beside the money and the wage bill —
+## where the player is already looking — rather than as a second toast
+## convention.
+##
+## `{}` when nothing is short, so the strip disappears entirely rather than
+## reading "0 short"; `{"text", "short"}` otherwise, naming every short
+## category, the heads to hire and the key that opens the panel. Glyph, words
+## and colour together (UI_UX.md §7) — the colour is added by the caller.
+## Every figure is the wire's own `short`; Godot never recomputes it.
+func _staff_alert_state(snapshot: Dictionary) -> Dictionary:
+	if snapshot.is_empty():
+		return {}
+	var parts: Array = []
+	var total := 0
+	for category in snapshot.get("categories", []):
+		var short := int(category.get("short", 0))
+		if short <= 0:
+			continue
+		total += short
+		parts.append("%d %s" % [short, _staff_category_word(category)])
+	if total == 0:
+		return {}
+	return {
+		"text": "▲ SHORT-STAFFED — hire %s  ·  press H" % ", ".join(PackedStringArray(parts)),
+		"short": total,
+	}
+
+
+## The rules of the staffing model, in the panel, in plain words (the
+## staffing ticket's fourth requirement). Three sentences, each one a rule
+## that is real in `sim_core` and was invisible in the UI until now — a
+## player could only learn them by losing heads:
+##
+##   * a machine that cannot get its WHOLE crew stalls (GAMEPLAY.md §7:
+##     it does not run degraded),
+##   * notice pay — a head is billed for any period it worked any part of,
+##     so firing just before payday saves nothing (the quality pass,
+##     ticket 1),
+##   * unpaid once is idle, unpaid twice is gone (same ticket).
+##
+## Kept to three lines of small print, not an essay: the panel is a control
+## surface first.
+func _staff_rules_text() -> String:
+	var lines: Array[String] = ["how staffing works"]
+	for rule in STAFF_RULES:
+		lines.append("·  %s" % String(rule))
+	return "\n".join(PackedStringArray(lines))
 
 
 ## The upcoming wage bill: every hired head at its category's wage — the
@@ -6467,7 +7167,13 @@ func _staff_footer_text(snapshot: Dictionary, current_tick: int) -> String:
 	var walked_out := int(snapshot.get("walked_out_last_payday", 0))
 	if walked_out > 0:
 		lines.append("✗ %d left unpaid last payday" % walked_out)
-	lines.append("HIRE and FIRE move one head; hiring is free, wages are paid every period    H/ESC: close")
+	# "hiring is free" used to end this line and is gone: a hire is refused
+	# unless the balance covers the next bill plus the new wage (the quality
+	# pass, ticket 1), and the rules legend under this footer now says what
+	# a head actually costs.
+	# The rules legend lives at the end of the scrolled list (see
+	# `_build_staff_panel`), so the one always-visible line says it is there.
+	lines.append("HIRE and FIRE move one head    scroll for how staffing works    H/ESC: close")
 	return "\n".join(PackedStringArray(lines))
 
 
@@ -6554,6 +7260,22 @@ func _update_staff_panel() -> void:
 		_rebuild_staff_rows(categories)
 	_staff_money_label.text = "Money: %.0f" % float(_staff_snapshot.get("money", 0.0))
 
+	# The verdict first, so the panel answers "am I short" before any row is
+	# read (the staffing ticket's requirement 2).
+	var summary := _staff_summary_state(_staff_snapshot)
+	_staff_summary_label.text = String(summary["text"])
+	# Three states, three inks: the warn red when short, the level green only
+	# for an actual verdict of "crewed", and plain body ink when nothing has
+	# asked for staff yet — a green tick over an idle line would read as a
+	# pass mark the factory has not earned.
+	match String(summary.get("state", "idle")):
+		"short":
+			_staff_summary_settings_obj.font_color = METER_FILL_WARN
+		"crewed":
+			_staff_summary_settings_obj.font_color = METER_FILL_LEVEL
+		_:
+			_staff_summary_settings_obj.font_color = _staff_summary_idle_color
+
 	for i in range(min(categories.size(), _staff_rows.size())):
 		var row: Dictionary = _staff_rows[i]
 		var state := _staff_row_state(categories[i])
@@ -6573,11 +7295,29 @@ func _update_staff_panel() -> void:
 		row["short_label"].visible = state["short_text"] != ""
 		row["fire_button"].disabled = not bool(state["fire_enabled"])
 		row["hire_button"].disabled = not bool(state["hire_enabled"])
+		row["hire_button"].text = state["hire_text"]
+		row["fire_button"].text = state["fire_text"]
 		row["status_label"].text = state["status_text"]
 		row["status_label"].visible = state["status_text"] != ""
-		row["demand_label"].text = _staff_demand_text(
-			_staff_demand_sources_for(String(categories[i].get("id", "")), _placements, _crews)
+		# The row's own verdict chip, and the warning border that goes with
+		# it: a short row must be obvious without reading its meter.
+		var state_label: Label = row["state_label"]
+		state_label.text = state["state_text"]
+		state_label.visible = state["state_text"] != ""
+		state_label.label_settings.font_color = state["state_color"]
+		row["panel"].add_theme_stylebox_override(
+			"panel", _staff_row_style(bool(state["short_row"]))
 		)
+		var sources := _staff_demand_sources_for(
+			String(categories[i].get("id", "")), _placements, _crews
+		)
+		row["demand_label"].text = _staff_demand_text(sources)
+		var unblock := _staff_hire_unblocks_text(int(categories[i].get("short", 0)), sources)
+		row["unblock_label"].text = unblock
+		row["unblock_label"].visible = unblock != ""
+		var blocked := _staff_hire_blocked_text(categories[i], _staff_snapshot)
+		row["blocked_label"].text = blocked
+		row["blocked_label"].visible = blocked != ""
 
 	_staff_footer_label.text = _staff_footer_text(_staff_snapshot, sim.current_tick())
 	_position_staff_panel()
@@ -7298,10 +8038,14 @@ func _position_contract_notice() -> void:
 		return
 	var left: float = _ui_px(18.0)
 	var top: float = _ui_px(18.0)
-	var legend: Control = _help_label.get_parent() as Control if _help_label != null else null
-	if legend != null and legend.size.y > 0.0:
+	# The legend's CURRENT rect (`_legend_rect`), not the rect it has when
+	# expanded: a folded legend that still pushed this line five lines down
+	# the screen would leave the notice floating over nothing, which is most
+	# of the reason the fold is worth having.
+	var legend := _legend_rect()
+	if legend.size.y > 0.0:
 		left = legend.position.x
-		top = legend.position.y + legend.size.y + _ui_px(22.0)
+		top = legend.end.y + _ui_px(14.0)
 	_contract_notice.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	_contract_notice.position = Vector2(left, top)
 	_contract_notice.size = _contract_notice.get_combined_minimum_size()
@@ -7327,57 +8071,88 @@ func _update_contract_notice() -> void:
 		_contract_notice.modulate = Color(1, 1, 1, 0)
 
 
-## The larder strip: one chip per raw ingredient, above the hotbar. Built
-## from the same snapshot the market sells from, so it lists whatever
-## `data/ingredients.ron` prices with no list of its own.
-func _build_larder(parent: VBoxContainer, base_settings: LabelSettings) -> void:
+## The STOCK plate: one row per raw ingredient, on the right-hand edge under
+## the contracts clipboard. Built from the same snapshot the market sells
+## from, so it lists whatever `data/ingredients.ron` prices with no list of
+## its own — a fourth raw ingredient appears here, in the market and in a
+## hopper's picker from the data file alone.
+##
+## A SIBLING OF THE CLIPBOARD, not a child of the hotbar's column. The strip
+## this replaces was built into `_hotbar_root`, which is why it was one line
+## tall and centred over the sockets; a plate of its own can be as tall as
+## its list and can sit where the ticket asks for it. Mouse filter IGNORE
+## throughout, like the strip before it: it is a readout with no controls on
+## it, and a plate that swallowed clicks would make the tiles behind it
+## unbuildable on the one edge a factory usually grows towards.
+func _build_stock_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	var plate := StyleBoxFlat.new()
 	plate.bg_color = Color(0.06, 0.06, 0.07, 0.93)
 	plate.border_color = Color(0.85, 0.63, 0.11, 0.95)
-	plate.border_width_top = _ui_i(2)
-	plate.set_content_margin_all(_ui_px(6.0))
+	plate.border_width_top = _ui_i(3)
+	plate.set_content_margin_all(_ui_px(10.0))
 
-	_larder_entries.clear() # `_ready` runs twice headlessly — see `_build_ingredient_market`
+	# Cleared, never appended to: `_ready()` genuinely runs twice under the
+	# headless `--script` harness — the same guard `_build_ingredient_market`
+	# carries, and the reason this dictionary is rebuilt rather than added to.
+	_larder_entries.clear()
+	_stock_row_nodes.clear()
 
-	_larder_panel = PanelContainer.new()
-	_larder_panel.name = "Larder"
-	_larder_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_larder_panel.add_theme_stylebox_override("panel", plate)
-	parent.add_child(_larder_panel)
+	_stock_panel = PanelContainer.new()
+	_stock_panel.name = "StockPanel"
+	_stock_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stock_panel.add_theme_stylebox_override("panel", plate)
+	_stock_panel.custom_minimum_size.x = STOCK_PANEL_MIN_WIDTH
+	hud.add_child(_stock_panel)
 
-	_larder_row = HBoxContainer.new()
-	_larder_row.name = "LarderRow"
-	_larder_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_larder_row.add_theme_constant_override("separation", _ui_i(14))
-	_larder_panel.add_child(_larder_row)
+	var body := VBoxContainer.new()
+	body.name = "StockBody"
+	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	body.add_theme_constant_override("separation", _ui_i(6))
+	_stock_panel.add_child(body)
 
-	var label_settings := LabelSettings.new()
-	label_settings.font_size = _ui_font(-1)
-	label_settings.font_color = Color(0.92, 0.93, 0.94)
-	label_settings.outline_size = base_settings.outline_size
-	label_settings.outline_color = base_settings.outline_color
+	var heading_settings := LabelSettings.new()
+	heading_settings.font_size = _ui_font(-1)
+	heading_settings.font_color = Color(0.98, 0.85, 0.42) # the plate's hazard accent
+	heading_settings.outline_size = base_settings.outline_size
+	heading_settings.outline_color = base_settings.outline_color
+
+	# Heading and hint share one line. They are two words between them and the
+	# plate's height is the scarce thing in this column (the clipboard above
+	# it scrolls already), so a line spent on `M: market` alone is a row of
+	# stock the player cannot see at 1280x720.
+	var head_row := HBoxContainer.new()
+	head_row.name = "StockHeadRow"
+	head_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	head_row.add_theme_constant_override("separation", _ui_i(12))
+	body.add_child(head_row)
+
+	var heading := Label.new()
+	heading.name = "StockHeading"
+	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	heading.label_settings = heading_settings
+	heading.text = "STOCK"
+	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	heading.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	head_row.add_child(heading)
+
+	# The list scrolls past `STOCK_PANEL_HEIGHT_SHARE` of the column rather
+	# than growing into the clipboard — `_fit_grid_scroll`'s job everywhere
+	# else in this HUD, and the same last resort it is there.
+	_stock_scroll = ScrollContainer.new()
+	_stock_scroll.name = "StockScroll"
+	_stock_scroll.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stock_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	body.add_child(_stock_scroll)
+
+	_stock_rows = VBoxContainer.new()
+	_stock_rows.name = "StockRows"
+	_stock_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stock_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_stock_rows.add_theme_constant_override("separation", _ui_i(5))
+	_stock_scroll.add_child(_stock_rows)
 
 	for entry in _ingredients_snapshot().get("entries", []):
-		var item_id := String(entry.get("id", ""))
-		var chip := HBoxContainer.new()
-		chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		chip.add_theme_constant_override("separation", _ui_i(5))
-		_larder_row.add_child(chip)
-
-		var icon := TextureRect.new()
-		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		icon.custom_minimum_size = _ui_v(Vector2(20, 20))
-		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		icon.texture = _icon_for_asset(_market_asset_for(item_id))
-		chip.add_child(icon)
-
-		var count := Label.new()
-		count.name = "Larder_%s" % item_id
-		count.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		count.label_settings = label_settings
-		chip.add_child(count)
-		_larder_entries[item_id] = count
+		_build_stock_row(base_settings, String(entry.get("id", "")))
 
 	var hint_settings := LabelSettings.new()
 	hint_settings.font_size = _ui_font(-2)
@@ -7385,19 +8160,230 @@ func _build_larder(parent: VBoxContainer, base_settings: LabelSettings) -> void:
 	hint_settings.outline_size = base_settings.outline_size
 	hint_settings.outline_color = base_settings.outline_color
 
-	_larder_hint = Label.new()
-	_larder_hint.name = "LarderHint"
-	_larder_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_larder_hint.label_settings = hint_settings
-	_larder_hint.text = "M: market"
-	_larder_row.add_child(_larder_hint)
+	# Kept from the strip: the plate says what it counts, and the key that
+	# buys more of it. A readout that names its own verb's home.
+	_stock_hint = Label.new()
+	_stock_hint.name = "StockHint"
+	_stock_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stock_hint.label_settings = hint_settings
+	_stock_hint.text = "M: market"
+	_stock_hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	head_row.add_child(_stock_hint)
+
+	_position_stock_panel()
 
 
-## Repolled every frame, like the hotbar beside it: a stock count that moved
-## because a hopper was loaded has to move here in the same frame, or the one
-## number that explains why SPACE did nothing is stale exactly when it
-## matters.
+## One row: icon, display name, count. The count is right-aligned against the
+## plate's edge so the three numbers form a column the eye can run down —
+## the thing the strip of chips could not do.
+##
+## EVERY COUNT LABEL GETS ITS OWN `LabelSettings`. The strip shared one
+## instance across all three chips and then recoloured it per chip in
+## `_update_larder`, so all three took whichever colour the last ingredient
+## wrote — an out-of-stock vinegar dimmed the tomato count beside it. A
+## `LabelSettings` is a Resource: assigning it to three Labels is one object
+## with three references, not three copies.
+func _build_stock_row(base_settings: LabelSettings, item_id: String) -> void:
+	if item_id == "":
+		return
+	var row := HBoxContainer.new()
+	row.name = "StockRow_%s" % item_id
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", _ui_i(9))
+	_stock_rows.add_child(row)
+	_stock_row_nodes[item_id] = row
+
+	var icon := TextureRect.new()
+	icon.name = "StockIcon_%s" % item_id
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.custom_minimum_size = STOCK_ICON_SIZE
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.texture = _icon_for_asset(_market_asset_for(item_id))
+	row.add_child(icon)
+
+	var name_settings := LabelSettings.new()
+	name_settings.font_size = _ui_font(-1)
+	name_settings.font_color = Color(0.92, 0.93, 0.94)
+	name_settings.outline_size = base_settings.outline_size
+	name_settings.outline_color = base_settings.outline_color
+
+	var name_label := Label.new()
+	name_label.name = "StockName_%s" % item_id
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	name_label.label_settings = name_settings
+	# The DISPLAY name, never the wire id (UI_UX.md §5e): "Tomato", not
+	# `tomato`, and "Vinegar" for a fluid bought by the jug.
+	name_label.text = _item_display_name(item_id)
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(name_label)
+
+	var count_settings := LabelSettings.new()
+	count_settings.font_size = _ui_font(-1)
+	count_settings.font_color = STOCK_COUNT_COLOR
+	count_settings.outline_size = base_settings.outline_size
+	count_settings.outline_color = base_settings.outline_color
+
+	var count := Label.new()
+	count.name = "Stock_%s" % item_id
+	count.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	count.label_settings = count_settings
+	count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	count.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(count)
+	_larder_entries[item_id] = count
+
+
+## Right edge, hard against the top of the hotbar's reserved band and clear
+## of the window's edge by `STOCK_PANEL_MARGIN`.
+##
+## ANCHORED FROM THE BOTTOM, not hung under the clipboard. The clipboard's
+## own height is a function of how many contracts are running and how far
+## its docket stack has been allowed to grow, so a plate placed under it
+## would move up and down the screen as orders were signed and lost. Fixing
+## it above the hotbar instead gives the one permanently-visible readout a
+## permanent home, and it is the CLIPBOARD that is capped against what is
+## left (`_stock_reserved_height`, read by `_update_contract_panel`) — the
+## docket stack already scrolls by design, so it is the right one to yield.
+##
+## The clipboard cannot yield indefinitely, though: `_fit_grid_scroll` floors
+## its docket stack, and at 1280x720 that floor plus the clipboard's own
+## heading, money, wage and footer lines is already more than half the
+## column. So this plate reads the clipboard's ACTUAL bottom edge and takes
+## what is left, scrolling its own list if that is less than the whole of it.
+## The two caps do not chase each other: the clipboard's is against this
+## plate's height, which stops shrinking the moment the clipboard stops
+## growing, and at both reviewed resolutions it settles on the first frame.
+func _position_stock_panel() -> void:
+	if _stock_panel == null:
+		return
+	var vp := get_viewport()
+	if vp == null:
+		return
+	var bounds := vp.get_visible_rect().size
+	if bounds.x <= 0.0 or bounds.y <= 0.0:
+		return
+	# The band this plate may occupy: from under the clipboard (whatever
+	# height it has settled at this frame) down to the top of the hotbar,
+	# a margin clear of each.
+	#
+	# The hotbar PLATE's own top edge, not `_hotbar_reserved_height()`, which
+	# also reserves the strip above the plate that the item-name flyout pops
+	# into. That flyout is centred over the hotbar and this plate is hard
+	# against the right edge, so the two cannot meet, and at 1280x720 the
+	# difference is a whole row of stock. `_hotbar_reserved_height()` is
+	# still the fallback for a hotbar that has not laid out yet (a headless
+	# run never leaves that state).
+	var floor_y: float = bounds.y - _hotbar_reserved_height() - STOCK_PANEL_MARGIN
+	if _hotbar_panel != null and _hotbar_panel.size.y > 0.0:
+		floor_y = _hotbar_panel.get_global_rect().position.y - STOCK_PANEL_MARGIN
+	var ceiling: float = STOCK_PANEL_MARGIN
+	if _contract_panel != null and _contract_panel.visible and _contract_panel.size.y > 0.0:
+		ceiling = maxf(ceiling, _contract_panel.get_global_rect().end.y + STOCK_PANEL_MARGIN)
+	var available: float = maxf(0.0, floor_y - ceiling)
+	# At most a share of the column even when there is more room than that:
+	# this is a readout of three to five short rows, and a plate that grew to
+	# half the screen the day a sixth ingredient was priced would be a bigger
+	# surprise than a scrollbar.
+	available = minf(available, (bounds.y - _hotbar_reserved_height() - STOCK_PANEL_MARGIN * 2.0) * STOCK_PANEL_HEIGHT_SHARE)
+
+	# NOT `_fit_grid_scroll`: its floor is `_ui_px(110)`, which is taller than
+	# this whole list's natural height, so it could never cap anything here —
+	# it would hand back the full list and the plate would run up into the
+	# clipboard at 1280x720. Same shape, one row as the floor instead, so the
+	# list scrolls (UI_UX.md §5c's deliberate last resort) rather than the
+	# plate colliding with the two fixed things it is wedged between.
+	var natural: float = _stock_rows.get_combined_minimum_size().y
+	_stock_scroll.custom_minimum_size.y = natural
+	var chrome: float = _stock_panel.get_combined_minimum_size().y - natural
+	var cap: float = maxf(_stock_row_height(), available - chrome)
+	_stock_scroll.custom_minimum_size.y = minf(natural, cap)
+
+	var size := _stock_panel.get_combined_minimum_size()
+	_stock_panel.size = size
+	_stock_panel.position = Vector2(
+		maxf(0.0, bounds.x - size.x - STOCK_PANEL_MARGIN),
+		maxf(0.0, floor_y - size.y)
+	)
+
+
+## One row's worth of height, the floor the list is never capped below: a
+## plate showing nothing at all would be worse than a plate showing one row
+## and a scrollbar. Measured off a real row rather than assumed, so it stays
+## right if the icon size or the row font moves.
+func _stock_row_height() -> float:
+	if _stock_rows == null or _stock_rows.get_child_count() == 0:
+		return STOCK_ICON_SIZE.y
+	var row := _stock_rows.get_child(0) as Control
+	return STOCK_ICON_SIZE.y if row == null else row.get_combined_minimum_size().y
+
+
+## How much of the right-hand column the stock plate owns, margins included —
+## `_hotbar_reserved_height()`'s twin, and asked for the same reason: the
+## clipboard above must not be allowed to grow down across it.
+##
+## It reports the height the plate WANTS — its whole list, bounded by
+## `STOCK_PANEL_HEIGHT_SHARE` — not the height it happens to have settled at.
+## Reporting the settled height made the two caps chase each other the wrong
+## way at 1280x720 (found by rendering the merged HUD): the plate is capped
+## against what the clipboard leaves, so a frame where it had shrunk to one
+## row reserved one row's worth, which let the clipboard grow, which left one
+## row again. The stable point was a single ingredient on a plate whose whole
+## job is showing every ingredient. Reserving the list's full height instead
+## settles the other way round — the docket stack scrolls by design (UI_UX.md
+## §5c's last resort), and this readout does not.
+##
+## Falls back to the plate's minimum size before it has laid itself out,
+## which is the state a headless run never leaves.
+func _stock_reserved_height() -> float:
+	if _stock_panel == null or not _stock_panel.visible:
+		return 0.0
+	var height: float = _stock_wanted_height()
+	if height <= 0.0:
+		height = _stock_panel.get_combined_minimum_size().y
+	return height + STOCK_PANEL_MARGIN * 2.0
+
+
+## The plate at its full list height, capped by the share of the column it is
+## allowed (`_position_stock_panel`'s own cap, read from the same two
+## numbers), and floored at one row plus chrome so it is never zero.
+func _stock_wanted_height() -> float:
+	if _stock_panel == null or _stock_rows == null or _stock_scroll == null:
+		return 0.0
+	var chrome: float = _stock_panel.get_combined_minimum_size().y - _stock_scroll.custom_minimum_size.y
+	var natural: float = _stock_rows.get_combined_minimum_size().y
+	var wanted: float = chrome + natural
+	var vp := get_viewport()
+	if vp != null and vp.get_visible_rect().size.y > 0.0:
+		var share: float = (
+			vp.get_visible_rect().size.y
+			- _hotbar_reserved_height()
+			- STOCK_PANEL_MARGIN * 2.0
+		) * STOCK_PANEL_HEIGHT_SHARE
+		wanted = minf(wanted, maxf(chrome + _stock_row_height(), share))
+	return wanted
+
+
+## The stock plate's rect on screen, for the panels that must not land on it
+## (UI_UX.md §2b point 33). An empty `Rect2` when there is no plate; the
+## minimum-size fallback is `_stock_reserved_height`'s, for its reason.
+func _stock_rect() -> Rect2:
+	if _stock_panel == null or not _stock_panel.visible:
+		return Rect2()
+	var size := _stock_panel.size
+	if size.y <= 0.0:
+		size = _stock_panel.get_combined_minimum_size()
+	return Rect2(_stock_panel.global_position, size)
+
+
+## Repolled every frame, like the hotbar it used to sit on: a stock count
+## that moved because a hopper was loaded has to move here in the same frame,
+## or the one number that explains why FILL did nothing is stale exactly when
+## it matters. Keeps its name through the move to the right-hand plate —
+## `test_chain_rework.gd` drives it directly.
 func _update_larder() -> void:
+	_position_stock_panel()
 	if _larder_entries.is_empty():
 		return
 	for entry in _ingredients_snapshot().get("entries", []):
@@ -7406,15 +8392,19 @@ func _update_larder() -> void:
 			continue
 		var owned := int(entry.get("owned", 0))
 		var label: Label = _larder_entries[item_id]
-		label.text = "%d" % owned
-		# Out of stock is a real state with a consequence (SPACE and V will
-		# do nothing), so it is called out in words rather than left as a
-		# grey zero — colour alone would not carry it (UI_UX.md §7).
-		if owned == 0:
-			label.text = "none"
-		label.label_settings.font_color = (
-			Color(0.92, 0.93, 0.94) if owned > 0 else Color(0.90, 0.52, 0.42)
-		)
+		# Out of stock is a real state with a consequence (FILL will refuse),
+		# so it is called out in WORDS rather than left as a zero — colour
+		# alone would not carry it (UI_UX.md §7). Dimmed rather than alarmed:
+		# every ingredient is listed now, including ones a new game has
+		# simply never bought, and a plate of red on a factory that is
+		# running perfectly well would cry wolf.
+		label.text = "%d" % owned if owned > 0 else "none"
+		label.label_settings.font_color = STOCK_COUNT_COLOR if owned > 0 else STOCK_NONE_COLOR
+		# The whole row recedes with its number, so the eye lands on what
+		# the player actually has (position and value, not colour — §7).
+		var row: Control = _stock_row_nodes.get(item_id)
+		if row != null:
+			row.modulate = Color(1, 1, 1, 1.0 if owned > 0 else STOCK_NONE_ROW_ALPHA)
 
 
 # --------------------------------------------------------------------------
@@ -7482,7 +8472,7 @@ const CONFIG_PICKER_ICON_SIZE := Vector2(30.0, 30.0) * UI_SCALE
 func _build_config_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	# `_ready` runs twice in a headless script (once from the engine, once
 	# called directly), so the slot list is cleared rather than appended to —
-	# the same guard `_build_ingredient_market` and `_build_larder` carry.
+	# the same guard `_build_ingredient_market` and `_build_stock_panel` carry.
 	_config_picker_slots.clear()
 
 	var plate := StyleBoxFlat.new()
@@ -8005,11 +8995,18 @@ func _position_config_panel() -> void:
 	# — so the clipboard's left edge is the right-hand bound wherever the
 	# two would overlap vertically, not only the window's edge. Past either
 	# bound the panel flips to the building's other side.
+	# The stock plate is the same argument on the same edge, lower down: it
+	# is the one readout that says whether a FILL on this very panel can
+	# succeed, so covering it with this panel would hide the answer to the
+	# question the panel is asking (UI_UX.md §2b point 33).
 	var right_bound := bounds.x
 	if _contract_panel != null and _contract_panel.visible:
 		var clip := _contract_panel.get_global_rect()
 		if pos.y < clip.end.y and pos.y + size.y > clip.position.y:
 			right_bound = minf(right_bound, clip.position.x)
+	var stock := _stock_rect()
+	if stock.size.y > 0.0 and pos.y < stock.end.y and pos.y + size.y > stock.position.y:
+		right_bound = minf(right_bound, stock.position.x)
 	if pos.x + size.x > right_bound:
 		pos.x = anchor.x - CONFIG_PANEL_OFFSET.x - size.x
 	pos.x = clampf(pos.x, 8.0, maxf(8.0, bounds.x - size.x - 8.0))
@@ -8116,11 +9113,11 @@ func _build_hotbar(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_hotbar_root.add_theme_constant_override("separation", _ui_i(6))
 	hud.add_child(_hotbar_root)
 
-	# The larder sits at the TOP of the strip's column, above the name
-	# flyout: the flyout has to stay directly over the slots it names, and
-	# the larder is a standing readout rather than something that appears.
-	_build_larder(_hotbar_root, base_settings)
-
+	# The larder strip used to sit at the TOP of this column. It is the STOCK
+	# plate on the right-hand edge now (the HUD ticket — see `_stock_panel`),
+	# and it is NOT also repeated here: one readout of one fact in one place.
+	# What is left in this column is the name flyout, which has to stay
+	# directly over the slots it names.
 	var flyout_settings := LabelSettings.new()
 	flyout_settings.font_size = _ui_font(3)
 	flyout_settings.font_color = Color(0.98, 0.85, 0.42) # the plate's hazard accent
@@ -9916,6 +10913,21 @@ func _unhandled_input(event: InputEvent) -> void:
 		_set_view_mode(ViewMode.FIRST_PERSON if _view_mode == ViewMode.ISOMETRIC else ViewMode.ISOMETRIC)
 		return
 
+	# F1 folds the keybind legend away and brings it back — sited here, with
+	# TAB, because it belongs to the same class of control: a view preference
+	# that is true in isometric and in first person alike and is not a modal,
+	# so it neither closes what is open nor is closed by ESC, and none of the
+	# modal rules below (X closes every modal, R refuses under one) change
+	# because of it. The one key the pause menu still swallows, deliberately:
+	# with the factory stopped the legend is the least of what is on screen.
+	#
+	# F1 IS FREE: this handler binds TAB, E, M, C, H, P, Q, R, X, V, SPACE,
+	# ESC, the digits and the zoom keys, and no function key anywhere — and
+	# F1 is what a player reaches for when they want to know the controls.
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F1:
+		_toggle_legend()
+		return
+
 	if event is InputEventMouseButton:
 		# The left button is the build click (the "Real Placement" epic's
 		# ticket 2) — the button this handler had deliberately left unbound
@@ -10906,22 +11918,30 @@ func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
 	# hotbar's top edge, same bug the config panel's own clamp
 	# (`_hotbar_reserved_height()` below) already guards against.
 	var lower_bound := bounds.y - _hotbar_reserved_height()
-	# The legend (top-left) and the contracts clipboard (top-right) are fixed
-	# HUD plates this panel must never land on — a tile rendered under either
-	# (a close-zoomed camera near the world origin, or a cursor high on the
-	# screen where the flip below used to only check the right/bottom edges)
-	# put this panel right over their own text otherwise (found in rendered
-	# frames, twice — one bug each).
-	# `get_global_rect()`, not `.position`/`.size` — both plates sit inside
-	# their own layout containers, whose local origin is not this panel's
-	# (a direct CanvasLayer child, effectively in screen space) (see the
-	# config panel's own avoidance above, which makes the same call).
+	# The legend (top-left), the contracts clipboard (top-right) and the stock
+	# plate (right edge, above the hotbar) are fixed HUD plates this panel must
+	# never land on — a tile rendered under any of them (a close-zoomed camera
+	# near the world origin, or a cursor high on the screen where the flip
+	# below used to only check the right/bottom edges) put this panel right
+	# over their own text otherwise (found in rendered frames, twice — one bug
+	# each).
+	# Each plate reports its own CURRENT rect through a helper
+	# (`_legend_rect`, `_stock_rect`) rather than being measured here, so a
+	# collapsed legend is avoided at the size it actually is — its stub — and
+	# not at the five-line size it had when the game started.
 	var avoid: Array[Rect2] = []
-	var legend: Control = _help_label.get_parent() as Control if _help_label != null else null
-	if legend != null and legend.size.y > 0.0:
-		avoid.append(legend.get_global_rect())
+	var legend := _legend_rect()
+	if legend.size.y > 0.0:
+		avoid.append(legend)
+	# `get_global_rect()`, not `.position`/`.size` — the clipboard sits inside
+	# its own layout container, whose local origin is not this panel's (a
+	# direct CanvasLayer child, effectively in screen space) (see the config
+	# panel's own avoidance above, which makes the same call).
 	if _contract_panel != null and _contract_panel.visible and _contract_panel.size.y > 0.0:
 		avoid.append(_contract_panel.get_global_rect())
+	var stock := _stock_rect()
+	if stock.size.y > 0.0:
+		avoid.append(stock)
 	# Try both hands of both axes around the cursor, nearest (bottom-right,
 	# matching the un-flipped default) first, and take the first that fits
 	# on screen, above the hotbar and clear of every avoided plate.
@@ -10957,8 +11977,8 @@ func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
 	# an earlier version picked the axis by penetration alone and pushed the
 	# tooltip straight down off the bottom of the screen, where the same
 	# clamp snapped it right back onto the plate it was fleeing). A second
-	# pass in case clearing one plate slides the panel into the other; with
-	# just the two corner plates this repo has, one pass always suffices.
+	# pass per plate in case clearing one slides the panel into another; with
+	# the three plates this repo has, one pass has always sufficed.
 	var pos: Vector2 = candidates[0]
 	var rect := Rect2(
 		clampf(pos.x, 0.0, maxf(0.0, bounds.x - size.x)),
@@ -11008,6 +12028,7 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 	_update_money_flyout()
 	_update_contract_dock(econ.get("delivery_stock", []))
 	_update_contract_wages(money)
+	_update_staff_alert()
 
 	var contracts: Array = econ.get("contracts", [])
 	_announce_contract_changes(contracts, econ.get("board", []))
@@ -11044,7 +12065,12 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 	# that let the board's bottom edge reach down across the larder strip. It
 	# is now the space actually left above the hotbar, measured the same way
 	# the build menu measures its own (`_fit_grid_scroll`), so the two panels
-	# can never disagree about where the usable screen ends.
+	# can never disagree about where the usable screen ends. The stock plate
+	# (2026-09-16) took the bottom of that same right-hand column, and the
+	# clipboard is the one that yields: its docket stack already scrolls by
+	# design, whereas a scrolling stock list would hide the ingredient the
+	# player is short of behind a scrollbar they have no reason to look
+	# under.
 	#
 	# A headless SceneTree run has no viewport at all, and a window that has
 	# not laid out yet reports a zero rect — neither must collapse the stack
@@ -11054,7 +12080,10 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 		_fit_grid_scroll(
 			_contract_cards_scroll,
 			_contract_cards_box,
-			viewport.get_visible_rect().size.y - _hotbar_reserved_height() - _ui_px(24.0)
+			viewport.get_visible_rect().size.y
+				- _hotbar_reserved_height()
+				- _stock_reserved_height()
+				- _ui_px(24.0)
 		)
 	else:
 		_contract_cards_scroll.custom_minimum_size.y = _contract_cards_box.get_combined_minimum_size().y
@@ -11161,6 +12190,28 @@ func _update_contract_wages(money: float) -> void:
 	_contract_wages_settings.font_color = (
 		CONTRACT_RISK_COLOR if bool(state["short"]) else _contract_meta_settings.font_color
 	)
+
+
+## Draws `_staff_alert_state` onto the clipboard's SHORT-STAFFED strip, and
+## sounds the refusal cue the first frame a factory goes short — the same
+## cue every "no" in this game shares (UI_UX.md §8), fired once on the
+## transition rather than on every frame of it. The first poll after a
+## rebuild only primes the remembered count, so a loaded save that was
+## already short does not sound like something the player just did.
+func _update_staff_alert() -> void:
+	if _staff_alert_panel == null:
+		return
+	var state := _staff_alert_state(_staff_snapshot)
+	var short: int = int(state.get("short", 0))
+	_staff_alert_panel.visible = not state.is_empty()
+	if not state.is_empty():
+		_staff_alert_label.text = String(state["text"])
+	if _staff_alert_known_short < 0:
+		_staff_alert_known_short = short
+		return
+	if short > _staff_alert_known_short:
+		_cue(FactoryAudio.REFUSED)
+	_staff_alert_known_short = short
 
 
 func _update_contract_dock(stock: Array) -> void:

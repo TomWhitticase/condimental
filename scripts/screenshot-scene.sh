@@ -42,9 +42,15 @@
 #
 # Pass --stock to buy an assorted kit (belts, pipes, a hopper, a tank, a
 # machine or two) so the hotbar shows carried sockets, multi-digit counts and
-# empty sockets side by side, and --hotbar N to press hotbar key N for real —
+# empty sockets side by side, plus uneven raw stock so the STOCK plate shows a
+# stocked row beside an out-of-stock one, and --hotbar N to press hotbar key N for real —
 # the only way to review the selected-slot state, the name flyout and the
 # ghost it puts in the player's hand.
+#
+# Pass --legend-collapsed to fold the keybind legend away before the shot (the
+# HUD ticket). It is the only way to review what the fold LEAVES: the plate's
+# heading plus the button that names F1, and the corner of the floor the
+# five lines of keybinds were covering.
 #
 # Pass --stress to build and run the STRESS LINE (a 1500-tile serpentine belt
 # fed by hoppers, plus three tank-fed pipe runs — test_layouts.gd's
@@ -95,6 +101,13 @@
 # unpaid`) and the disabled HIRE buttons are what the shot reviews, rather
 # than the meters --staff already covers (the quality pass, ticket 4). It
 # implies --populate.
+#
+# Pass --short-staffed to build the same UNDERSTAFFED LINE with NO panel open
+# and nothing hovered, so the always-visible SHORT-STAFFED strip on the
+# clipboard (`▲ SHORT-STAFFED — hire 2 manufacturing  ·  press H`) is what the
+# shot reviews — the one readout --staff and --understaffed cannot show,
+# since both cover the screen with a panel or a tooltip. It implies
+# --populate.
 #
 # Pass --production to build the bottleneck line and open the PRODUCTION
 # panel (P) over it: what the factory made and used per item over a
@@ -161,7 +174,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--bottleneck] [--staff] [--staff-shortfall] [--production] [--understaffed] [--contracts] [--payout] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--board] [--no-hud] [--stock] [--hotbar N] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--bottleneck] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--contracts] [--payout] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--board] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

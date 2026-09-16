@@ -92,7 +92,7 @@ func _initialize() -> void:
 	for pair in [
 		["SHOP_SLOT_SIZE", main.SHOP_SLOT_SIZE, Vector2(144, 138)],
 		["SHOP_ICON_SIZE", main.SHOP_ICON_SIZE, Vector2(46, 46)],
-		["MARKET_SLOT_SIZE", main.MARKET_SLOT_SIZE, Vector2(128, 152)],
+		["MARKET_SLOT_SIZE", main.MARKET_SLOT_SIZE, Vector2(128, 178)],
 	]:
 		var got: Vector2 = pair[1]
 		var want: Vector2 = (pair[2] as Vector2) * main.UI_SCALE

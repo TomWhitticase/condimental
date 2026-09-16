@@ -18,6 +18,47 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-16 **Five HUD features, built in parallel: staffing made
+  unmissable, buy-all in the market, a right-hand STOCK plate, a
+  collapsible legend.** Owner's brief, three parallel worktrees (staff /
+  market / HUD layout), **no Rust change** — the quality pass had already
+  put `short`, `can_hire`, `next_bill` and `shortfall` on the wire and
+  `buy_ingredient` already took a quantity. Agents were forbidden `.md`
+  files: three sessions' doc edits all land in the same logs, so docs are
+  the orchestrator's job after the merge. **Being short is said at three
+  distances:** a SHORT-STAFFED strip on the always-visible clipboard (`▲
+  SHORT-STAFFED — hire 2 manufacturing · press H`, a child of the
+  clipboard's body so it can never land on another plate, naming only the
+  categories actually short and hidden entirely when none are — never `0
+  short`), a one-sentence verdict above the panel's first row, and a `▲
+  SHORT` chip plus warn border on the row, with a line saying what hiring
+  would unblock. **A button names its cost and a disabled one says why in
+  words** (`HIRE +1 · 2 / period`; `✗ cannot hire — 8 in hand, 14 due, 2 /
+  period`), all three figures the wire's own. The payday rules are stated
+  in plain words at the foot of the SCROLLED list, not under the footer —
+  `_fit_grid_scroll` caps against the panel, so four lines of chrome cost a
+  whole category row (UI_UX §2b point 32). **SHIFT+click a market crate
+  buys every unit the balance covers as ONE command** (`cost_of` is
+  all-or-nothing, so no partial purchase can exist), the quantity printed
+  on every slot (`shift: buy 123`, dimmed `shift: buy 0`) because an
+  invisible gesture is an unused one, and a slot is recessed only when
+  NEITHER verb can act. **Stock is a right-hand plate, one row per priced
+  raw ingredient**, replacing the one-line larder strip that was one line
+  tall by construction; nothing on the hotbar shows stock any more, and
+  zero is the word `none` on a dimmed row (UI_UX §5e: no bar, nothing
+  defines "full"). The right-hand column arbitrates both ways, and **a
+  reserved height must be what a plate WANTS, not what it has** —
+  reporting the settled height let the clipboard's cap and the plate's cap
+  chase each other down to one row at 1280x720; the clipboard yields
+  because a docket stack scrolls by design and this readout does not. **A
+  fold is not a modal:** the legend folds to a labelled stub (heading + a
+  button naming F1), toggled by the button or F1 in `_unhandled_input` so
+  it works in both camera modes, outside the one-modal rule, session-only
+  state, and everything that avoids the legend reads its CURRENT rect so
+  the space really comes back. Reported not fixed: the staff panel shows
+  ~2.5 of 4 rows at 1600x900, and a busy clipboard beside the strip clips
+  its last docket line. Full record in [DECISIONS.md](DECISIONS.md).
+
 - 2026-09-16 **GitHub is the workflow: every change lands by pull request,
   every deferral becomes an issue.** Nothing is committed or pushed to `main`
   directly — work goes on a `<type>/<description>` branch, `gh pr create`
@@ -40,6 +81,7 @@ See [WORKFLOW.md](WORKFLOW.md).
   a milestone to `docs/DEVLOG.md`, a plan to a doc in `docs/`. Skills
   `open-pr` and `file-issue` are the procedures; `docs/WORKFLOW.md` has the
   rule. Full record in `docs/DECISIONS.md`.
+
 - 2026-09-16 **The agent context is a map, not the manual.** `CLAUDE.md`
   `@`-included the three design docs and carried this log plus a per-file
   project structure, so every single request paid for ~2,000 lines
