@@ -7077,13 +7077,18 @@ func _staff_hire_unblocks_text(short: int, sources: Array) -> String:
 ## categories and the heads to hire), nothing is short but something is
 ## asking (every machine has its crew), or nothing is asking at all — which
 ## is a new game, not a staffed one, and must not be congratulated as if it
-## were.
+## were. "Asking" means PLACED, not running: the establishment.
 func _staff_summary_state(snapshot: Dictionary) -> Dictionary:
 	var parts: Array = []
 	var total_short := 0
-	var total_demand := 0
+	var total_required := 0
 	for category in snapshot.get("categories", []):
-		total_demand += int(category.get("demand", 0))
+		# `required` — the establishment — never `demand`. `demand` is what is
+		# being worked THIS TICK, so a factory stalled for want of ingredients
+		# (or of paid staff, which is exactly the state this verdict matters
+		# in) reports zero and the panel used to greet a fully crewed line
+		# with "nothing placed asks for staff yet".
+		total_required += int(category.get("required", 0))
 		var short := int(category.get("short", 0))
 		if short <= 0:
 			continue
@@ -7095,7 +7100,7 @@ func _staff_summary_state(snapshot: Dictionary) -> Dictionary:
 			"short": total_short,
 			"state": "short",
 		}
-	if total_demand > 0:
+	if total_required > 0:
 		return {"text": "✔ every machine has its crew", "short": 0, "state": "crewed"}
 	return {"text": "nothing placed asks for staff yet", "short": 0, "state": "idle"}
 

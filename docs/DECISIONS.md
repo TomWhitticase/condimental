@@ -127,6 +127,17 @@ matches what code comments and data files cite.
   single ellipsised row rather than a wrapping one, so a big factory's
   machine names cannot silently push the plate past its cap.
 
+  **The plan's per-row meter was dropped, and the plate carries numbers
+  only.** A bar would have been legitimate under UI_UX §5e — `required` is a
+  sim-defined ceiling, which is exactly what §5e asks for — but it does not
+  fit: the column is 342px wide, and `icon 27 + "Manufacturing" ~120 + a
+  50px track + "2 / 4" ~45 + "▲ HIRE 2" ~90` plus separations overruns it,
+  while a full-width track under each row costs ~24px of height on a plate
+  whose whole budget is 43% of the column and which already drops its detail
+  line at 1280x720. `2 / 4` beside `▲ HIRE 2` says both things the bar would
+  have said, in less room. The H panel keeps its meter, where there is width
+  for one.
+
   **From the holistic review of the feature, also fixed here.**
   `maintenance` is a dead category — nothing in `machines.ron` asks for it
   and the roster starts it at zero — so it now takes no room on the plate

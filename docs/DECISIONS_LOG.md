@@ -38,6 +38,9 @@ See [WORKFLOW.md](WORKFLOW.md).
   computed against `headcount`, never `available`: a head in arrears is not
   working, but hiring a second head to cover them is the wrong advice —
   paying them is.
+  The plan's per-row meter is dropped: `required` is a legitimate §5e
+  ceiling, but neither a 50px track nor a full-width one fits a 342px column
+  already at its height cap — `2 / 4` beside `▲ HIRE 2` says the same thing.
 - 2026-09-16 **The hall is drawn in first person only; the isometric view
   gets its air.** Owner's playtest ("when in isometric view the skybox is
   messed up… decide what to do with it"). A sky is found by intersecting a

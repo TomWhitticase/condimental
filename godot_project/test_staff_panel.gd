@@ -306,21 +306,31 @@ func _run_checks() -> void:
 
 	# --- 1g. the panel leads with a verdict (requirement 2) ------------------
 	var verdict_short: Dictionary = main._staff_summary_state({"categories": [
-		{"id": "manufacturing", "name": "Manufacturing", "demand": 4, "short": 1},
-		{"id": "maintenance", "name": "Maintenance", "demand": 0, "short": 0},
-		{"id": "packaging", "name": "Packaging", "demand": 2, "short": 1},
+		{"id": "manufacturing", "name": "Manufacturing", "required": 5, "demand": 4, "short": 1},
+		{"id": "maintenance", "name": "Maintenance", "required": 0, "demand": 0, "short": 0},
+		{"id": "packaging", "name": "Packaging", "required": 3, "demand": 2, "short": 1},
 	]})
 	if verdict_short["text"] != "▲ 2 short — hire 1 manufacturing, 1 packaging":
 		_fail("the verdict names every short category and the heads to hire, got '%s'" % verdict_short["text"])
 	if int(verdict_short["short"]) != 2:
 		_fail("the verdict carries the wire's own summed shortfall")
 	var verdict_ok: Dictionary = main._staff_summary_state({"categories": [
-		{"id": "manufacturing", "name": "Manufacturing", "demand": 4, "short": 0},
+		{"id": "manufacturing", "name": "Manufacturing", "required": 4, "demand": 4, "short": 0},
 	]})
 	if verdict_ok["text"] != "✔ every machine has its crew" or int(verdict_ok["short"]) != 0:
 		_fail("a fully crewed factory is told so in one sentence, got '%s'" % verdict_ok["text"])
+	# The regression a screenshot caught and no fixture did: a line that is
+	# fully crewed but STALLED (no ingredients, or its heads unpaid and not
+	# working) reports `demand` 0 for every category. Read against `demand`,
+	# the verdict greeted four hired heads with "nothing placed asks for
+	# staff yet". The establishment is what asks, and it does not stall.
+	var verdict_stalled: Dictionary = main._staff_summary_state({"categories": [
+		{"id": "manufacturing", "name": "Manufacturing", "required": 4, "demand": 0, "short": 0},
+	]})
+	if verdict_stalled["text"] != "✔ every machine has its crew":
+		_fail("a crewed but stalled factory still reads as crewed, got '%s'" % verdict_stalled["text"])
 	var verdict_empty: Dictionary = main._staff_summary_state({"categories": [
-		{"id": "manufacturing", "name": "Manufacturing", "demand": 0, "short": 0},
+		{"id": "manufacturing", "name": "Manufacturing", "required": 0, "demand": 0, "short": 0},
 	]})
 	if verdict_empty["text"] != "nothing placed asks for staff yet":
 		_fail("an empty factory is not congratulated on its staffing, got '%s'" % verdict_empty["text"])
