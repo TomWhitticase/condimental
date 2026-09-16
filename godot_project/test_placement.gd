@@ -343,5 +343,73 @@ func _run_checks() -> void:
 		_fail("leaving build mode should hide the ghost and its prompt")
 		return
 
-	print("PLACEMENT_OK: empty world renders bare floor, the ghost is a real model with footprint-aware validity signalled by glyph and word as well as colour, all four facings render the matching rotation, a belt's shape comes from its links at every facing, and place/remove drive the scene through the real command boundary")
+	# --- 10. SHIFT places and restocks in one click ------------------------
+	# The modifier is read from `Input`, which a headless run cannot press,
+	# so `_auto_buy_forced` stands in for the key (and for nothing else — the
+	# same `_auto_buy_held` answer drives both the click and the prompt).
+	main._auto_buy_forced = false
+	main._enter_build_mode("belt")
+	main._build_direction = "east"
+	var owned_before: int = main._owned_of("belt")
+	if owned_before <= 0:
+		_fail("this section needs a belt in stock to place; owned %d" % owned_before)
+		return
+	main._ghost_tile = Vector2i(14, 14)
+	main._ghost_valid = true
+	main._ghost_reason = ""
+	_left_click(main)
+	if main._owned_of("belt") != owned_before - 1:
+		_fail("without SHIFT a placement should spend a belt from stock (%d -> %d)" % [owned_before, main._owned_of("belt")])
+		return
+
+	main._auto_buy_forced = true
+	main._enter_build_mode("belt")
+	main._build_direction = "east"
+	var held_before: int = main._owned_of("belt")
+	var money_before: float = float(main._read_economy().get("money", 0.0))
+	main._ghost_tile = Vector2i(15, 14)
+	main._ghost_valid = true
+	main._ghost_reason = ""
+	_left_click(main)
+	if main._placement_at_tile(Vector2i(15, 14)).is_empty():
+		_fail("a SHIFT-click must still place the tile")
+		return
+	if main._owned_of("belt") != held_before:
+		_fail("SHIFT should buy the replacement for what it placed, leaving the count alone (%d -> %d)" % [held_before, main._owned_of("belt")])
+		return
+	var money_after: float = float(main._read_economy().get("money", 0.0))
+	if money_after >= money_before:
+		_fail("the replacement was not paid for: balance %f -> %f" % [money_before, money_after])
+		return
+
+	# A blocked click buys nothing either: the purchase is the placement's
+	# other half, not the click's.
+	var blocked_owned: int = main._owned_of("belt")
+	main._ghost_tile = Vector2i(15, 14)
+	main._ghost_valid = false
+	main._ghost_reason = "blocked"
+	_left_click(main)
+	if main._owned_of("belt") != blocked_owned:
+		_fail("a refused click must not buy anything")
+		return
+
+	# The prompt says what SHIFT will do before it is held, and what it is
+	# doing once it is — a modifier nothing mentions is one nobody finds.
+	main._ghost_tile = Vector2i(16, 14)
+	main._ghost_valid = true
+	main._ghost_reason = ""
+	main._auto_buy_forced = false
+	var idle_prompt: String = main._placement_prompt_text()
+	if not idle_prompt.contains("SHIFT: buy a replacement as you place"):
+		_fail("the PLACE prompt should advertise SHIFT, got: '%s'" % idle_prompt)
+		return
+	main._auto_buy_forced = true
+	var held_prompt: String = main._placement_prompt_text()
+	if not held_prompt.contains("SHIFT: buying a replacement each click"):
+		_fail("with SHIFT down the prompt should report the spend, got: '%s'" % held_prompt)
+		return
+	main._auto_buy_forced = false
+	main._exit_build_mode()
+
+	print("PLACEMENT_OK: empty world renders bare floor, the ghost is a real model with footprint-aware validity signalled by glyph and word as well as colour, all four facings render the matching rotation, a belt's shape comes from its links at every facing, place/remove drive the scene through the real command boundary, and SHIFT buys back what a click places")
 	quit(0)

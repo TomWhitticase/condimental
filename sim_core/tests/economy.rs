@@ -27,7 +27,7 @@ mod common;
 
 use sim_core::sim::types::Money;
 use sim_core::sim::{
-    ContractRegistry, DockSnapshot, MachineRegistry, PlayerCommand,
+    ContractRegistry, DELIVERY_STOCK_CAPACITY, DockSnapshot, MachineRegistry, PlayerCommand,
     RecipeRegistry, World, reference_chain_with_budget, reference_chain_with_content_and_budget,
 };
 
@@ -409,6 +409,14 @@ fn the_economy_snapshot_reports_one_entry_per_shipped_contract() {
     assert!(json.contains("\"contracts\":["), "{json}");
     assert!(json.contains("\"board\":["), "{json}");
     assert!(json.contains("\"delivery_stock\""), "{json}");
+    // The pool's ceiling and whether it is at it (the dock-capacity change,
+    // 2026-09-16) — what the clipboard's ON THE DOCK line draws its bar
+    // against (UI_UX.md §5e) and warns with.
+    assert!(
+        json.contains(&format!("\"delivery_capacity\":{DELIVERY_STOCK_CAPACITY}")),
+        "{json}"
+    );
+    assert!(json.contains("\"delivery_full\":false"), "{json}");
     assert!(
         !json.contains("contract_mix"),
         "the old single-contract fields must be gone: {json}"

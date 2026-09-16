@@ -18,6 +18,46 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-16 **Four playtest asks: a full dock, pulp off the crusher,
+  SHIFT-to-rebuy, and the first-person camera's entry pose.**
+  **A dock can be full**, and the ceiling is on the shared delivery POOL,
+  **per item id** — `DELIVERY_STOCK_CAPACITY` (48) is the number the player
+  already watches, and a single total would deadlock the game (one
+  overproduced item crowds the others out, a mix naming a crowded-out item
+  becomes unsatisfiable, and nothing dumps stock). The number is pinned as
+  a *relationship* by `tests/dock.rs` — comfortably over the board's
+  largest single mix quantity — never as two literals. `try_absorb` asks
+  the economy for room before taking a box off the belt, so a full pool
+  backs the line up through the dock's existing refusal path; **the
+  backed-up line IS the consequence**, no penalty on top. An over-cap save
+  is `SaveError::OverfullDeliveryPool`, not a truncation. The clipboard's
+  ON THE DOCK line now earns UI_UX §5e's bar (`20/48`, red plus `⚠ FULL —
+  belt backing up` at the cap); on the floor the full dock **pulses** its
+  deck lamps (`DOCK_FULL_PULSE_TICKS`, off `sim.current_tick()`), because
+  emission MULTIPLIES vertex colour (§2b point 8) so a red lamp is
+  impossible here — **a world-space warning is a rhythm, not a colour.**
+  **The crusher throws pulp, and a BEAT is a third size of feedback**
+  beside §6a's two: five `crush_bit` flecks every `CRUSH_BEAT_TICKS` of
+  the machine's own WORK ticks, so a starved or blocked crusher throws
+  nothing (§2b point 28's "working" for free) and the spray is another
+  statement of what the mechanism and the lamp already say. Varied by
+  index, never `randf()`; measured in `TILE`; **no sound** (§8 keeps "no
+  idle machine loop", and a cue every ten ticks is that loop). Tuned by
+  rendering, not by plan: three flecks read as stray pixels, five varied
+  as a spit, and a higher arc as debris off the floor.
+  `screenshot-scene.sh --crushing` waits for the *state* and freezes it,
+  since the obvious fixtures photograph a blocked or starved crusher.
+  **SHIFT buys back what the click places** — a modifier on *placing*, so
+  the purchase happens after the placement and only if it landed; the
+  prompt names it and its price in all three states, and an unaffordable
+  SHIFT warns before the click rather than buzzing after it.
+  **Entering first person places the first-person camera:**
+  `_set_view_mode` ended with an unconditional `_update_camera_transform()`
+  (the isometric placement) after a branch that had already placed the
+  camera, so first person kept the isometric pose until the first input.
+  **When two modes each own a transform, the switch must not have a third
+  opinion.** Full record in `docs/DECISIONS.md`.
+
 - 2026-09-16 **Every pull request body embeds a screenshot, no
   exceptions.** Owner's rule. A PR here reviews a frame, so it shows one;
   "visual changes only" was rejected because the conditional version rots

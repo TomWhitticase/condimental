@@ -51,6 +51,9 @@
     "metal",
     "emissive"
   ],
+  "crush_bit": [
+    "matte"
+  ],
   "floor_tile": [
     "matte"
   ],
