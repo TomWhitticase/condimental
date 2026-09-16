@@ -1,0 +1,97 @@
+# godot_project — the presentation layer
+
+Authority: `docs/UI_UX.md` (visual/UI), `docs/ARCHITECTURE.md` §4–§5 (the
+wire, the rebuild rule). Reasoning for anything below: `docs/DECISIONS.md`.
+
+## The one rule
+
+**Godot renders, formats and sorts. The sim decides.** No gameplay logic in
+GDScript, and never recompute a number the wire already carries: the staff
+panel reads `next_bill`/`shortfall` and the sim's own `demand`/`assigned`/
+`short`, never a Godot-side `Σ headcount × wage` (`_staff_next_bill`,
+`_staff_shortfall` — both fall back to a local sum only for a pre-field
+snapshot). Same for load windows, production counts and stall reasons.
+Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
+`links`, floor variant from tile coords, payout detection by polling
+`deliveries_made`.
+
+## Wire and rebuild invariants
+
+- The 3D World subtree is rebuilt from `world_layout_json` on every
+  place/remove/rotate — **never per tick** (`_rebuild_world`).
+- A rebuild re-reads **every occupied chunk's FULL** `chunk_snapshot_json`
+  (`_reread_every_chunk`). Re-reading only the dirty chunk made items on
+  belts elsewhere vanish, permanently on a backed-up belt.
+- The tick path reads `chunk_delta_json` (`_apply_dirty_chunks`), not the
+  full snapshot.
+- Per-frame polls are gated on `_wire_changed()`: `sim.revision()` (ticks +
+  commands, refused or not) plus viewport size, hotbar selection and the
+  open-modal bitmask. Wall-clock fades (`_update_money_flyout`,
+  `_update_hotbar_flyout`) run in the **`else` branch** so nothing freezes
+  under the pause menu.
+- Fluid and tank auto-fill dirty nothing — polled (`fluid_snapshot_json`).
+  Machine load, staff and production are polled on their own tick cadence.
+- `_advance_simulation` caps catch-up at `MAX_TICKS_PER_FRAME` and
+  **discards** the backlog; paused means no ticks and no accumulation.
+
+## Presentation invariants
+
+- **Every animation/celebration clock is `sim.current_tick()`**, never wall
+  time — pause freezes them and screenshot runs stay reproducible.
+- **Never colour alone** (UI_UX §7): pair every status colour with a glyph,
+  word, shape or position.
+- **One meter language**: `_build_meter`/`_set_meter` only. A bar exists
+  only where the sim defines the ceiling; three fills, one meaning each —
+  `METER_FILL_LEVEL` / `_PROGRESS` / `_WARN`. `_set_meter` sizes the fill
+  explicitly (never anchors) and records the fraction on the track, so a
+  headless test can assert it with no layout pass.
+- **Seconds, never ticks** in player-facing clocks; **display names**
+  (`_kind_display_name`/`_item_display_name`), never wire ids.
+- **UI scale is two constants** — `UI_SCALE`, `UI_FONT_BASE` — threaded
+  through `_ui_px`/`_ui_i`/`_ui_v`/`_ui_font`. Not `content_scale_factor`:
+  the scene maps 3D→screen in several places.
+- **Every content-id lookup needs a documented fallback** (`MACHINE_MODELS`
+  → `MACHINE_MODEL_FALLBACK`, `ITEM_MODELS`, `FLUID_TINTS`, `_icon_for`). A
+  stale key ships silently with every test green; only the rendered frame
+  catches it (UI_UX §2b point 12).
+- **3D burst distances are measured in `TILE`**, not raw world units.
+- **Visual randomness is derived from an index**, never `randf()`, so a
+  review screenshot is repeatable (coin lift/spread; `audio.gd` uses an LCG).
+- **A cursor-following panel positions against the fixed HUD plates**
+  (hotbar reserved height, legend, clipboard), not just viewport edges, and
+  every candidate is judged *after* the clamp (`_panel_position_near`,
+  `_pushed_clear_of` — UI_UX §2b point 33).
+- **Audio is synthesised into `AudioStreamWAV` at runtime**; no `.wav` in the
+  repo. A cue is fired by the handler that knows the real outcome (compare
+  money/owned before and after), never by the input — so a refused command
+  always sounds like `REFUSED`.
+- `.tscn`/`.tres` stay **text**, never binary, no visual scripting. `main.tscn`
+  and `menu.tscn` are a script on a bare node: the whole scene graph and HUD
+  are built in code. Shared scripts are reached by `preload`, not
+  `class_name` (unregistered on a cold `.godot/` under `--script`).
+
+## Orientation
+
+`main.gd` (~11.9k lines) — the 3D scene, HUD, build mode, every panel, the
+tick loop. `game_session.gd` — autoload; the New Game/Load handoff **and all
+save-file rules** (dir, listing, slot sanitizer, reserved `autosave` slot);
+`sim_core` does no file I/O. `music.gd` — autoload; the one looping track,
+ducked (not stopped) under pause, skipped headless. `audio.gd` — every cue,
+synthesised. `menu.gd` — main menu; validates a save through a throwaway
+`SimBridge` **before** the scene changes. `test_layouts.gd` — shared fixture,
+builds factories through real purchase/place commands.
+
+## Running things
+
+- `scripts/verify-core-loop.sh` — cargo tests, `cargo xtask`, the imports,
+  then every headless `test_*.gd`.
+- One test: `godot --headless --path godot_project --script test_x.gd`.
+  **Every test must print its own success marker** (`FOO_OK`) — Godot exits 0
+  even on a script parse failure, so exit status proves nothing.
+- Godot needs **two** `--import` passes on a cold `.godot/` cache: the `.vox`
+  importer is a plugin and registers only on the pass after the first scan.
+- `scripts/screenshot-scene.sh` is the one **non-headless** check
+  (`test_screenshot.gd`); it is the only thing that catches a stale lookup or
+  a panel landing on a plate. Read the PNG.
+- `bin/` and `voxels/` are gitignored build output staged by `cargo xtask`;
+  `sim_core.gdextension` is checked in and points at them.

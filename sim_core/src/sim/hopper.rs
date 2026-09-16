@@ -59,8 +59,8 @@ pub const HOPPER_KIND: &str = "hopper";
 ///
 /// Sized against the line it feeds rather than picked round: the shipped
 /// crusher consumes 4 tomatoes every 80 ticks (`data/recipes.ron`), so 64
-/// tomatoes is 16 crafts — roughly 21 seconds of unattended running at
-/// ARCHITECTURE.md §3.9's 60 ticks/sec. That is the intended feel: enough
+/// tomatoes is 16 crafts — roughly 43 seconds of unattended running at
+/// ARCHITECTURE.md §3.9's 30 ticks/sec. That is the intended feel: enough
 /// that filling it buys real breathing room, little enough that keeping the
 /// line fed is an ongoing decision rather than something you do once and
 /// forget.

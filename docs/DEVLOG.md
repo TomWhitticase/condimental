@@ -22,10 +22,18 @@ below is history and should only ever be appended to.)*
   finished but unmerged — contract board, payout juice + audio, machine
   animations, floor redesign, vinegar assets, belt-arrow removal — were
   consolidated onto one integration branch and fast-forwarded into `main`.
-  The union passes `scripts/verify-core-loop.sh` (19 Rust suites, 26 headless
+  The union passes `scripts/verify-core-loop.sh` (19 Rust suites, 30 headless
   Godot proofs, no failures) and has been rendered and played. A fresh
   worktree still needs `cargo xtask` and **two** `godot --import` passes
   before the world is visible. See the log entry below.
+- **Agent context restructured (2026-09-16).** `CLAUDE.md` is 72 lines and
+  `@`-includes nothing; it maps a task to the doc that covers it. The
+  condensed decisions log lives in `docs/DECISIONS_LOG.md`, workflow in
+  `docs/WORKFLOW.md`, and `sim_core/`, `godot_project/` and `assets/voxels/`
+  each carry their own `CLAUDE.md` of local invariants with `AGENTS.md`
+  symlinked beside it. Four skills under `.claude/skills/`. Always-loaded
+  context went from ~34,500 tokens to ~950. See the log entry below for the
+  five doc defects the move turned up, including the tick rate.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
 - **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. **Milestone 6 (Fluids) is done**: its simulation half (pipe network, pressure equalization, a recipe requiring a liquid, the `SimBridge` fluid snapshot) and its presentation half (pipe/supply-tap/liquid voxel assets, a pipe run rendered from the simulation's own segment list, a liquid body whose height tracks live pressure, and pipe hover info in both view modes) have both landed, built as a 2-ticket orchestration Run (`run_2867a25ae373`, sequential: sim core then presentation). **Milestone 7 (Timed processes) is DONE, and the stage that proved it has since been deleted**: its simulation half added an `aging_rack` holding a batch for 2400 ticks (40 real seconds, 10x the cooking vat) on the *existing* generic `TimedProcess`, needing zero changes under `sim_core/src/`, which was the milestone's actual point; its presentation half drew the rack with a live maturation gauge. The **chain rework** (below) then removed ageing from the game outright, so nothing shipped exercises the long timescale any more — `TimedProcess` itself is untouched and runs every craft cycle, and the gauge mechanism is kept as an empty `MACHINE_PROGRESS_GAUGES` table waiting for the next long process. A separate **"Machines improvement"** epic (not an ARCHITECTURE.md §9 milestone — an infrastructure/content pass requested directly) is in progress: ticket 1 landed machine footprints as data (`data/machines.ron`), generalizing the chain's layout math so a machine can occupy more than one tile, and ticket 2 spent that on real content — the chain's front end is now a crusher, a mixer and a genuinely 2x2 cooking vat. Ticket 3 replaced the debug "spawn a tomato onto the belt" command with a real **hopper** — a building west of the chain's head that buffers raw tomatoes and meters them onto the first belt one per tick, filled by the player (SPACE) rather than teleporting items. **Ticket 4 finished the epic**: the Godot presentation of all three — a bespoke voxel model per front-end machine kind, multi-tile rendering so the cooking vat actually covers its 2x2 footprint, the hopper drawn with a product level that tracks its live fill, and hover resolving any tile of a multi-tile machine as well as the hopper. **The "Machines improvement" epic is complete.** A further **"Shop & Inventory"** epic (also requested directly, and a deliberate priority shift toward a real build-your-own-factory game) has started: **ticket 1** landed the economy half — `data/shop.ron` prices every buildable kind, `sim::shop` loads/validates it, the player owns a per-kind count, and a `Purchase` command spends contract money on it, all exposed as `shop_snapshot_json`. **Ticket 2 finished the epic**: a real build menu (**B**), a grid of voxel-rendered icon slots built entirely from `shop_snapshot_json`, where clicking a slot — or pressing its number key — buys one, and what you can't afford is disabled, dimmed and marked. **The "Shop & Inventory" epic is complete.** The **"Real Placement"** epic that followed it is what made a purchase visible on the floor: **ticket 1 (sim) has landed** — `World::new` now builds *nothing*, every belt tile, pipe tile, machine and building is placed by the player out of what they own, everything carries a real four-way `Direction` it can be rotated through, and flow is derived from adjacency (recomputed only when something is placed, removed or rotated) rather than from `recipes.ron`'s file order. Ticket 2 (the Godot build/ghost/rotate UI, and rendering per-tile rotation) is still to do.
@@ -47,7 +55,7 @@ below is history and should only ever be appended to.)*
 - **Machine animations (done):** every processing machine has a visible moving mechanism — the crusher's toothed rolls and flywheels, the mixer's ribbon, the cooking vat's agitator spider, the bottler's plunging nozzles and capping chuck, the packer's taping carriage, and a drive spider on the generic housing for any kind without a model of its own. Drawn as a four-frame motion overlay on the machine's own footprint (the moving parts are cut out of the bodies, not duplicated, so nothing z-fights), advanced from the tick beside the belt animation so the pause menu freezes it. **It runs only while the machine is actually working**: `Machine::tick` keeps the process of a machine that has finished but is blocked on a full output, so the gate is `elapsed < required` rather than `process != null` — which makes a lit status lamp over a still machine mean "the thing downstream is full". One pace for every kind (a cycle per 30 ticks); the belt carries speed.
 - **Music and sound effects (done, 2026-09-12):** the game has a score and a sound for everything the player does. One looping synthesised track (D minor, 92 BPM, eight bars — pad, bass, mallet arpeggio, soft drums) starts on the main menu, carries across into the factory on the `Music` autoload, ducks under the pause menu and has its own MUSIC ON/OFF switch there. `audio.gd` grew from two cues to fourteen: place, remove, rotate, buy, sign, hire, fire, a hotbar pick, menus opening and closing, a shared "refused" buzz for every command the simulation declines, and a falling cue for a lost contract — each fired by the handler that knows whether the action went through. Still synthesised in GDScript, still no `.wav` files; `test_audio.gd` proves all of it headlessly.
 - **Payout juice, and the project's first audio (done):** earning money is now an event rather than a number quietly going up. When a contract settles, coins fountain up over every dock, the money counter punches up in scale and flashes amber, a "+N" rises out of it and the docket that paid is stamped **PAID**; a case landing on the dock gets a much smaller cue (a pop and a quiet knock), because that happens constantly and a payout happens every thousand-odd ticks. It needed **no simulation change at all** — Godot notices a payout by watching each contract's `deliveries_made` for a rise in the snapshot it already polls. The whole celebration is clocked off `sim.current_tick()`, so it pauses with the game and a screenshot run stays reproducible. **Sound exists now**, and it is synthesised in GDScript at runtime (`godot_project/audio.gd`) rather than shipped as `.wav` files — which settles UI_UX.md §8's open audio question as *feedback-only, procedurally generated*, with a SOUND switch on the pause menu.
-- **Pipes & conveyors overhaul (IN PROGRESS — six of seven tickets merged, `docs/PIPES_AND_CONVEYORS_PLAN.md` has the ticket-7 hand-off notes):** seven tickets on one integration branch to make belts and pipes look right, read right, run fast and connect up. **Ticket 1 (sim) has landed:** every belt, splitter and pipe on the wire carries `links` — what feeds it, what it hands to, or what its pipe is joined to, per side — recorded by the topology pass so it is exact and free per tick. **Ticket 4 (Godot) has landed:** belts, splitters, pipes and the items riding them are `MultiMesh` instances (one per asset and material class) rather than a node each, with a 1500-tile stress fixture, a headless timing test (`test_perf.gd`) and `scripts/screenshot-scene.sh --stress`; machines and buildings keep their nodes, and the seams the belt-animation and corner tickets build on (frame sets, a caller-supplied yaw per tile, one item-positioning function) are in place in `main.gd`. **Ticket 3 (assets) has landed:** the pipe model family (straight, corner, tee, cross, end, machine/tank fittings, one fluid body per shape) on a 15.5 midline, with seven pipe rendering defects fixed at the generator. **Ticket 2 (assets) has landed:** the belt model family — straights and left/right corners in four animation frames with a solid raised direction arrow *(replaced by a plain rubber cleat on 2026-09-10 at the player's request — see the log)*; the belt-side junction variants are retired (the plain tile carries the junction, the machine's hood does the rest). **Ticket 6 (Godot) has landed:** every pipe tile draws its shape (end, straight, corner, tee, cross), its turn, its machine/tank fittings and its per-shape liquid body from the wire's `links` alone; hover names a pipe's connections in words; the one-arrangement `pipe_source`/`pipe_inlet` tiles are deleted; `test_pipe_shapes.gd` and `scripts/screenshot-scene.sh --pipe-gallery` cover every shape at every turn. **Ticket 5 (Godot) has landed:** a belt's shape (straight, left/right corner, merge, start, end) comes from its `links`, the four-frame surface animates at item speed from the tick, items arc through corners (and are drawn face to face on every tile — they had been half a tile downstream), hover says feeds and hand-offs in words, the retired belt aliases are deleted, and a `--belt-gallery` fixture shows every shape and junction at every facing. Ticket 7 (gallery bug hunt and docs close-out) is to do; one sim rule discrepancy (a belt feeds a machine from any side of an inlet-edge tile) is flagged for ticket 7.
+- **Pipes & conveyors overhaul (DONE, `docs/PIPES_AND_CONVEYORS_PLAN.md` has the what-shipped/what-is-open section):** seven tickets on one integration branch to make belts and pipes look right, read right, run fast and connect up. **Ticket 1 (sim) has landed:** every belt, splitter and pipe on the wire carries `links` — what feeds it, what it hands to, or what its pipe is joined to, per side — recorded by the topology pass so it is exact and free per tick. **Ticket 4 (Godot) has landed:** belts, splitters, pipes and the items riding them are `MultiMesh` instances (one per asset and material class) rather than a node each, with a 1500-tile stress fixture, a headless timing test (`test_perf.gd`) and `scripts/screenshot-scene.sh --stress`; machines and buildings keep their nodes, and the seams the belt-animation and corner tickets build on (frame sets, a caller-supplied yaw per tile, one item-positioning function) are in place in `main.gd`. **Ticket 3 (assets) has landed:** the pipe model family (straight, corner, tee, cross, end, machine/tank fittings, one fluid body per shape) on a 15.5 midline, with seven pipe rendering defects fixed at the generator. **Ticket 2 (assets) has landed:** the belt model family — straights and left/right corners in four animation frames with a solid raised direction arrow *(replaced by a plain rubber cleat on 2026-09-10 at the player's request — see the log)*; the belt-side junction variants are retired (the plain tile carries the junction, the machine's hood does the rest). **Ticket 6 (Godot) has landed:** every pipe tile draws its shape (end, straight, corner, tee, cross), its turn, its machine/tank fittings and its per-shape liquid body from the wire's `links` alone; hover names a pipe's connections in words; the one-arrangement `pipe_source`/`pipe_inlet` tiles are deleted; `test_pipe_shapes.gd` and `scripts/screenshot-scene.sh --pipe-gallery` cover every shape at every turn. **Ticket 5 (Godot) has landed:** a belt's shape (straight, left/right corner, merge, start, end) comes from its `links`, the four-frame surface animates at item speed from the tick, items arc through corners (and are drawn face to face on every tile — they had been half a tile downstream), hover says feeds and hand-offs in words, the retired belt aliases are deleted, and a `--belt-gallery` fixture shows every shape and junction at every facing. **Ticket 7 (close-out) has landed:** the galleries were walked shape by shape and the defects found were not in the shapes — `cargo xtask` now runs Godot's importer twice itself (a staged voxel whose `.import` sidecar had been deleted left the scene blank until someone knew to run `--import` by hand); the headless proofs' standing `Parameter "material" is null` line is gone, freed instances now drop their mesh and material first (`_release_render_resources`), so that line is a real regression from here rather than scenery; `scripts/make-demo-saves.sh` rebuilds the four demo saves from `test_layouts.gd`'s own builders, each proven to load back before it is written, which a save-schema bump had otherwise made unrepeatable; and the two ghost rules are reconciled as one (UI_UX.md §2b point 34) with no behaviour change. **Left open deliberately, not missed:** the sim lets a belt feed a machine from any side of an inlet-edge tile — and out of its outlet face — which contradicts `world.rs`'s own module doc and GAMEPLAY.md §9; the fix is one condition in `resolve_sink`, but it is a gameplay change that invalidates existing saves and the shipped demo line, so it is the owner's call. Nobody has watched the belt animation run live at speed, and every perf figure in the plan doc is off a debug build.
 - **Machine load indicator (DONE, all three tickets, 2026-09-11; plan: `docs/MACHINE_LOAD_PLAN.md`):** the player can see which machines are flat out and which are waiting, and so where the bottleneck is, across the whole floor. The simulation measures each machine's load over a rolling 600-tick window and reports `working`/`starved`/`blocked` with a percentage and the reason it is waiting, on the wire (`machine_load_snapshots_json`, plus the same fields on chunk and tile snapshots) and in the save (ticket 1). Six `andon_*` stack-light models — three statuses in a short and a tall height — are pinned by voxgen tests against every machine body at every facing (ticket 2). Every recipe-running machine now stands one on its camera-visible corner, lit to the sim's own verdict, polled on the tick (a pause freezes it; a loaded save lights up on its first frame); hover gains a line in words (`blocked · 61% busy · output full`) and a load bar; `test_layouts.gd`'s `build_bottleneck_line` settles the shipped line behind the cooking vat so it reads red · red · green · amber · amber, and `scripts/screenshot-scene.sh --bottleneck` photographs it (ticket 3). **Amended 2026-09-12: the stack-light poles are gone.** After a playtest the owner did not like a pole beside every machine, so the six `andon_*` models and the scene nodes were removed; the indicator is the hover panel alone — a status glyph and word leading the load line and the load bar filled in the status colour. The simulation half and the polling are unchanged.
 - **Staff pools MVP (DONE, all three tickets, 2026-09-12; plan: `docs/STAFF_POOLS_PLAN.md`):** the factory needs people, and people cost money every period (GAMEPLAY.md §5, §7). **Ticket 1 (sim) has landed:** four staff categories in `data/staff.ron`, a required crew per kind in `data/machines.ron` (now schema 2), per-tick whole-crew claims in stable machine order (a machine short of its crew pauses where it is and reads *starved* with a `staff` reason; a dock without its logistics head holds), payday out of the one money counter in file order — **amended by the quality pass's ticket 1 (2026-09-13, below): an unpaid head is idled, not fired, and leaves only if the next payday is unpaid too**, free `hire`/`fire` commands, `staff_snapshot_json`, `crew` on tile and shop snapshots, `understaffed` on the dock, and all of it in the save. **Ticket 2 (icons) has landed:** four voxel props rendered through the icon pass, one per category (hard hat, spanner, taped carton, pallet jack). **Ticket 3 (Godot) has landed:** the **H** staff panel — one row per category with its icon, hired count, an assigned/asked-for meter with the numbers printed on it, the shortfall in words, wage and HIRE/FIRE, and the wage bill and payday countdown in the footer — polled on the tick like the machine load; hover gains `crew: 2 manufacturing`, an understaffed machine reads `▲ starved · short of manufacturing staff` and an understaffed dock `held · short of logistics staff`; the build-menu card shows a kind's crew under its price; `test_staff_panel.gd` proves it on a new `build_understaffed_line` fixture and `scripts/screenshot-scene.sh --staff` / `--understaffed` photograph it.
 - **Quality pass (DONE, all five tickets, 2026-09-13/14; plan: `docs/QUALITY_PASS_PLAN.md`, decisions in CLAUDE.md's log):** no new features — correct, fast, fair, legible. **Ticket 1 (sim):** the payday rule no longer fires the unpaid silently — an unpaid head is idled for a period and leaves only if unpaid again, the wire says the next bill and the shortfall ahead of time and who left afterwards (`staff_snapshot_json`: `next_bill`, `shortfall`, `unpaid_last_payday`, per-category `owed`/`unpaid`/`left_last_payday`/`can_hire`); a fired head is still owed for its period and a hire needs the balance to cover the next bill, so neither HIRE nor FIRE dodges a wage; money is `Money` (`I48F16`) so a payout can no longer panic or wrap at 32 767; the rest of the sim was audited for exploits (see the log entry). **Ticket 2 (belt gaps):** `ITEM_MIN_SPACING_TILES` is half a tile, not a quarter — a fed lane now reads as a visible queue of boxes instead of one solid bar, at the same steady throughput as before (the vat is still the bottleneck); widening it exposed and fixed a packing bug where the belt's front item and the next tile's item occupied the same point at every tile boundary. **Ticket 3 (Godot bugs/perf):** the tick path reads a chunk *delta* (`chunk_delta_json`, only what actually changed) instead of the whole chunk snapshot, and per-frame polls are gated on the wire's own `revision()` so an unchanged frame parses nothing — the stress line dropped from 8.4 to 2.1 ms/frame; fixed a right-drag that never released when the mouse came up over a panel, first-person mouse capture fighting the pause/config panels, `R` rotating a tile hidden behind an open panel, and `X` not closing every modal like E/M/C/H do. **Ticket 4 (staffing legibility):** the wage bill and payday countdown are on the always-visible clipboard and in the H footer, drawn from the wire's own `next_bill`/`shortfall`; each row names what asks for its category and what the category does; the footer warns before a payday it cannot cover in the ticket's own words (`▲ next payday short by 6 — 3 heads go unpaid`) and disables HIRE per the wire's `can_hire`; a payday that idles or loses heads is announced through the same mechanism a lost contract uses. **Ticket 5 (polish sweep and docs):** every screen walked at 1600x900 and every PNG read, five things fixed. A hover or config panel could land squarely on the legend, on the contracts clipboard or under the hotbar, because it only ever flipped off the right and bottom edges of the viewport — it now tries all four quadrants around the cursor and, failing those, clamps on screen and pushes clear of whichever plate it still overlaps (`_panel_position_near`/`_pushed_clear_of`). The legend is five lines instead of four, so the panels line (E/M/C/H/P) and the configure hint no longer run back under the clipboard — ticket 3 left that one by name. `_announce_contract_changes` shows two notices raised in the same poll (two contracts lost at once, or a loss and a signature together) in turn, instead of the second silently overwriting the first before either was ever read (`_contract_notice_queue`) — ticket 3 left that one by name too. A build-menu card's crew cost is two lines (`crew: 2 manufacturing` / `4 / period`), paid for out of the card's own padding by a smaller build-card icon, because joined on one line it overran the card and a taller card does not help (the scroll cap comes from the panel's height, not the grid's). A splitter's hover says `connected` / `not connected` rather than the wire's raw tile coordinates. A new game was also played through to its first payout by driving the real command boundary, and nothing in that run needed a wording or ordering fix. Finally this doc, CLAUDE.md's decisions log and `docs/QUALITY_PASS_PLAN.md` were reconciled across the whole pass. `cargo test --workspace` and `scripts/verify-core-loop.sh` are green.
@@ -174,6 +182,176 @@ hidden by every panel that would otherwise be open) and
 clips its last docket line. Both are the same capped-grid arithmetic, and
 both leave "am I short?" answered by the strip and the summary line, which
 is what was asked for.
+
+### 2026-09-16 — The agent context restructured: CLAUDE.md is a map now
+
+Prompted by an outside argument rather than a bug: "Why Your AI Generates
+Crap Code - And How to Fix It" (Web Dev Simplified). Its central point is
+that `CLAUDE.md`/`AGENTS.md` is injected into **every** request, so its size
+is a tax on every turn, and that an `@`-include is exactly equivalent to
+pasting the included file's whole text inline.
+
+By that measure this repo was the worst case the video describes. `CLAUDE.md`
+was 631 lines and `@`-included ARCHITECTURE.md, UI_UX.md and GAMEPLAY.md, so
+the real always-loaded payload was about **2,000 lines / ~34,500 tokens** —
+several times the largest example the video was willing to call broken. Three
+causes: a 429-line decisions log (a bullet per past problem, all of it loaded
+on requests that never touch a machine or a contract), a 131-line **per-file**
+project structure (the part of a layout that goes stale first, and a
+confident lie in the always-loaded file is worse than no description), and
+the three `@`-included design docs, of which most sessions need one at most.
+
+What it is now:
+
+- **`CLAUDE.md`: 72 lines, ~950 tokens** — a 97% cut, no `@`-includes. The
+  project in a sentence, the rules that genuinely always apply, a
+  directory-level layout, and a table from "what you are working on" to
+  "which doc to read".
+- **`docs/DECISIONS_LOG.md`** holds the condensed log, all 57 entries moved
+  verbatim. Linked, read on demand.
+- **`docs/WORKFLOW.md`** holds build/verify/commit/DEVLOG/Orca material.
+- **Per-module `CLAUDE.md`** for `sim_core/`, `godot_project/` and
+  `assets/voxels/` — ~100 lines each of that area's non-obvious invariants,
+  loaded only when work happens there. Worst case inside a module is now
+  ~2,400 tokens. ARCHITECTURE.md §10 had called for these "once warranted";
+  this is what warranted looks like.
+- **`AGENTS.md` is a symlink to `CLAUDE.md`** at the root and beside each
+  module file. Not cosmetic: an untracked 160 KB `AGENTS.md` had been sitting
+  at the root, and it turned out to be a flattened snapshot of `CLAUDE.md`
+  with its `@`-includes expanded — a copy that had already drifted. A symlink
+  cannot.
+- **Four skills** under `.claude/skills/`: `voxel-asset`, `verify`,
+  `screenshot-review`, `record-decision`. Only a skill's name and description
+  sit in context; the body loads when it is invoked.
+
+The rule, in `docs/DECISIONS_LOG.md` and ARCHITECTURE.md §10: put something
+in an always-loaded file only if it would be wrong for the agent not to know
+it on a turn that has nothing to do with it. Everything else is a link.
+
+**Five documentation defects fell out of verifying the move**, all of them
+drift that had been invisible precisely because nobody re-reads a 631-line
+file:
+
+1. **ARCHITECTURE.md §3.9 said the fixed timestep is 60 ticks/s. It never
+   was.** `main.gd`'s `TICK_HZ` has been 30 since milestone 3 (`e7683c1`),
+   and DECISIONS.md already called §3.9's figure "nominal" against "the rate
+   the scene actually runs". A factual correction, not a new decision — but
+   every seconds-figure derived from it was twice the real elapsed time, and
+   two were: `hopper.rs`'s "roughly 21 seconds" (43) and a DEVLOG figure of
+   "40 seconds" (80). §3.9 now names `TICK_HZ` as the single place the rate
+   is set and records what it used to say. A dated 2026-09-11 entry keeps its
+   original figure — it was accurate when written.
+2. **"Nineteen headless Godot scripts"** in this file's Current status and in
+   `scripts/verify-core-loop.sh`'s header. There are **thirty**.
+3. **`scripts/screenshot-scene.sh`'s worked example was broken.** It read
+   `screenshot-scene.sh out.png --build --config=…`, which silently loses
+   `--build`: the script takes `$2` as the resolution and forwards only
+   `"${@:3}"`, so the flag goes to `godot --resolution`. The example now
+   passes the resolution and says why it has to.
+4. **UI_UX.md §2b had three duplicate point numbers** — two extra 27s and an
+   extra 28 — in a list whose own header says the numbers are cited by code
+   comments and must stay stable. Citations had resorted to disambiguating in
+   prose (`points 27 in "the floor" and 28`). The three entries took the
+   next free numbers — **35** (a model whose only consumer is the icon pass
+   is authored for vengi's camera), **36** (the floor is authored by its
+   value range) and **37** (N models over thousands of tiles is still N
+   stamps; per-instance rotation is the multiplier) — in place rather than
+   renumbered into sequence, so every existing citation stays correct. 34
+   was taken by ticket 7's ghost rule the day before. All seven
+   citations and DECISIONS.md Part B's own copies were updated.
+5. **`main.gd`'s `_panel_position_near` docstring** still described the
+   viewport-edge-flipping behaviour the quality pass's ticket 5 replaced,
+   sitting directly above the four-quadrant, plate-avoiding body that
+   superseded it.
+
+`scripts/verify-core-loop.sh` passes (19 Rust suites, 30 headless Godot
+proofs). Nothing under `sim_core/src/`, `godot_project/*.tscn`, `data/` or
+`assets/voxels/models/` changed behaviour — the only code touched was
+comments and one docstring.
+### 2026-09-15 — Pipes & conveyors overhaul closed out (ticket 7)
+
+The last ticket of the overhaul: walk the two galleries shape by shape,
+fix what the six build tickets left behind, and write the whole thing
+down. The galleries themselves were clean — every belt shape at every
+facing, every pipe shape at every turn, drawn from `links` as tickets 5
+and 6 intended. What the walk actually found were four things around the
+edges of the work, which is the more useful answer.
+
+**The scene came up blank, and the code was fine.** Running the proofs
+after a `cargo xtask` gave `Nonexistent function 'chunk_delta_json' in
+base 'SimBridge'` — a stale library and unimported voxels, because
+`xtask` stages models and deletes their `.import` sidecars, and Godot's
+`.vox` importer is an editor plugin that only registers on the pass
+after the first scan (UI_UX.md §2b point 4). So the models needed
+`godot --headless --path godot_project --import` run **twice**, by hand,
+by someone who already knew that. `xtask` now runs those two passes
+itself at the end of `main()`, printing `godot --import pass 1/2 ok` as
+it goes, and degrades to a printed reminder rather than a failure when
+godot is not on PATH, so a CI box that only runs `cargo test` is
+unaffected. `--no-import` opts out.
+
+**The headless proofs' standing error line is gone.** `Parameter
+"material" is null`, from `material_get_instance_shader_parameters`, had
+been written off as scenery — `test_placement.gd`'s header told the next
+reader not to chase it. It was real: freeing a `MultiMeshInstance3D` or
+a `MeshInstance3D` that still holds a `material_override` makes the
+headless dummy renderer complain. `main.gd`'s new
+`_release_render_resources` walks a subtree and drops mesh and material
+off both instance kinds just before it is freed, at every one of the six
+places the scene frees something that could hold a mesh — including the
+ghost body, a lone `MeshInstance3D` whose tint is a `material_override`,
+which kept `test_pipe_shapes.gd` printing the line after the two subtree
+frees were fixed. Worth recording the debugging dead end: the line is
+emitted when the rendering server flushes, not synchronously at the
+`free()`, so instrumenting the frees with marker prints points at
+whatever ran next rather than at the culprit. Clearing on the way out of
+both kinds is what actually silenced it, and the header comment now says
+the opposite of what it used to — a `material` line there is a
+regression now.
+
+**The demo saves can be rebuilt.** The four saves used for demos since
+2026-09-10 came from a throwaway script nobody kept, and a save is
+rejected, not migrated, on a `schema_version` mismatch (ARCHITECTURE.md
+§4) — so the next bump would have quietly ended them.
+`scripts/make-demo-saves.sh` plus `godot_project/make_demo_saves.gd`
+rebuild all four from `test_layouts.gd`'s own builders through real
+Purchase/Place commands, warm each for 600 ticks, and prove each one
+loads back before writing it. The shell script requires the script's
+`DEMO_SAVES_OK` marker, since Godot exits 0 on a parse failure — which
+is exactly how the first version's `Layouts.call(builder, ...)` was
+caught (a static function cannot be dispatched by name off the script
+class; it is a `match` now).
+
+**The two ghost rules are one rule.** A belt ghost stays straight beside
+a belt that will corner it; a pipe ghost takes its shape from the pipes
+around it. That looked like an inconsistency ticket 7 was meant to
+settle, and the settlement is that both are already right for the same
+reason: GAMEPLAY.md §9's split, solids respect faces and fluids connect
+by touching, means a pipe's shape is knowable before the click and a
+belt's hand-off is the simulation's own answer (`resolve_sink`). A
+ghost previews what the connection rules make certain and never what the
+sim still has to decide — which is also why the pipe ghost still shows
+no machine or tank fitting. Recorded as UI_UX.md §2b point 34; no
+behaviour changed.
+
+**Deliberately left, with evidence.** `resolve_sink` lets a belt feed a
+machine through any side of an inlet-edge tile, and registers a belt
+sitting on a machine's *outlet* face as feeding it. This is not
+theoretical: a crusher facing east crafts when fed from its north flank,
+and a belt on an outlet face shows up in `links` as both an input from
+and an output to the same machine while carrying real product. Both
+`world.rs`'s module doc ("A belt pointing into a machine's flank does
+nothing") and GAMEPLAY.md §9 say otherwise, so the code is the outlier
+and `sim_core/tests/links.rs` pins the current behaviour on purpose. The
+fix is one condition (`belt.direction == sink.direction`), but it is a
+gameplay change, not a bug fix: it breaks `test_layouts.gd`'s
+`build_demo_line` and every save built against the current rule. That is
+the owner's call to make, not a close-out ticket's. Also open: nobody
+has watched the belt animation run live at speed (`BELT_FRAMES` is a
+judgement a headless run cannot make), `_read_world_layout` is still
+~40 ms of an 80 ms rebuild at 1500 tiles and belongs to milestone 8, and
+every perf number in the plan doc is measured on the debug `sim_core`
+`cargo xtask` builds.
 
 ### 2026-09-15 — Every screen read once, on purpose (quality pass, ticket 5)
 
@@ -887,7 +1065,7 @@ in `ITEM_MODELS`, which is about what rides a belt, and a fluid never does.
 Amber rather than the honest colourless, because a clear fluid behind a
 stainless inspection window is indistinguishable from an empty pipe; malt
 vinegar is amber and real, so legibility and honesty agreed. The one
-genuinely new pipeline rule came out of the render loop (UI_UX §2b point 27):
+genuinely new pipeline rule came out of the render loop (UI_UX §2b point 35):
 the jug's label was authored on the faces the game camera sees and was
 invisible in its own icon, because `vengi-thumbnailer` looks from the
 opposite (-X/+Y) corner — and a fluid never appears in the scene at all, so
@@ -916,7 +1094,7 @@ low-contrast areas greedy-mesh far better than speckle, and the floor is the
 one asset whose triangle count is multiplied by the size of the world.
 
 Three iterations, each judged by looking. Two lessons general enough to keep
-(UI_UX.md §2b points 27 and 28). **The floor is authored by its value range,
+(UI_UX.md §2b points 36 and 37). **The floor is authored by its value range,
 not its detail** — it is the one asset seen as thousands of copies filling
 the frame, so it must never hold the brightest pixel, which §4 reserves for
 metal. That rule broke a tie: a repair patch "should" be a paler fresh pour,
@@ -2106,7 +2284,7 @@ clipboard panel, which is exactly what ticket 2 is for.
 
 ARCHITECTURE.md §9 milestone 7 ("Timed processes") — the simulation half.
 The chain gained a sixth stage: cooked ketchup now rests on an **aging rack**
-for **2400 ticks** (40 seconds at §3.9's 60 ticks/sec, exactly ten times the
+for **2400 ticks** (80 seconds at §3.9's 30 ticks/sec, exactly ten times the
 cooking vat's cook) before it can be bottled.
 
 **The interesting result is how little there was to do.** `TimedProcess`

@@ -83,8 +83,12 @@ assets/voxels/
 
 ### 2b. How the pipeline actually turned out — rules learned by building it
 
-Point numbers are cited by code comments; keep them stable. Full narrative in
-DECISIONS.md Part B. There is no point 10.
+Point numbers are cited by code comments; keep them stable — a number is
+never reused and never moves. Full narrative in DECISIONS.md Part B. There is
+no point 10, and the list runs 1-28, 35-37, 29-34: the three entries the
+factory-floor work added were written as a second 27, a third 27 and a second
+28, and were given the next free numbers on 2026-09-16 rather than renumbered
+into sequence. They sit where they were discovered.
 
 1. **The `.vox` encoder is hand-written** (`generators/vox.rs`, ~150 lines) —
    no Rust crate writes the chunks the Godot importer needs. It puts a
@@ -101,7 +105,7 @@ DECISIONS.md Part B. There is no point 10.
    same mechanism draws hopper/tank level and progress gauges). The tint
    value itself IS palette data (`FLUID_TINTS[id]`), even though the
    model's hue is not, so a fluid with a still model (vinegar's jug, point
-   27) doesn't show two different colours side by side.
+   35) doesn't show two different colours side by side.
 6. **Pipes are stainless steel, hollow, with an open inspection channel**
    above the bore floor so level is visible below half fill.
 7. **UI icons are a second render pass** (`icons.rs`), flood-filled
@@ -168,17 +172,17 @@ DECISIONS.md Part B. There is no point 10.
     turns only while `0 <= elapsed < required`, so a finished-but-blocked
     machine stands still with its lamp still lit. One pace (30 ticks) for
     every kind. No steam, deliberately.
-27. **A model whose only consumer is the icon pass must be authored for
+35. **A model whose only consumer is the icon pass must be authored for
     vengi's camera (the -X/+Y corner), not the game's** — the two cameras
     see opposite sides of the same model. A fluid is the pure case: it's
     never placed or belt-borne, so its whole detail budget goes to the
     icon-visible faces.
-27. **The floor is a background surface, authored by its value range, not
+36. **The floor is a background surface, authored by its value range, not
     its detail** — judged as thousands of copies, so any contrast becomes
     the loudest thing in frame. Variation is broad, low-contrast blotches,
     never per-voxel speckle, and the floor must never hold the brightest
     pixel (§4 reserves that for metal).
-28. **N models over thousands of tiles is still only N stamps; the
+37. **N models over thousands of tiles is still only N stamps; the
     multiplier is per-instance rotation, free only if the tile's edges are
     four-fold symmetric.** Variant and turn are a pure function of tile
     coordinate, so a reload never repaves. The one exception is a model
@@ -212,6 +216,22 @@ DECISIONS.md Part B. There is no point 10.
     keeping only a push that still clears the plate once the clamp has been
     re-applied, or the clamp snaps the panel back onto what it was
     avoiding.
+
+34. **A ghost previews what the game's connection rules already make
+    certain, and never what the simulation still has to decide.** The two
+    shapes drawn under the cursor look inconsistent and are not: a belt
+    ghost stays straight at its facing even beside a belt that will corner
+    it, while a pipe ghost takes its shape from the pipes already placed
+    around it. GAMEPLAY.md §9 is the reason — solids respect faces, fluids
+    connect by touching. A pipe joins everything it touches, so the shape
+    the tile will have is knowable before the click; a belt's hand-off is
+    the sim's own directional answer (`resolve_sink`), so a ghost that
+    drew the corner would be promising a link the placement might not
+    make. For the same reason the pipe ghost still previews no machine or
+    tank fitting: which tile of a footprint is tapped is the simulation's
+    call, not geometry's. Where a rule is certain, show it; where it is
+    not, show the plain tile and let the prompt (§5a) say the rest in
+    words.
 
 ## 3. Theme & setting
 

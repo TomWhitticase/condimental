@@ -3,15 +3,18 @@
 This file holds the **full, verbatim decision records** that used to live in
 `CLAUDE.md`'s decisions log, `docs/UI_UX.md` §2b and `docs/ARCHITECTURE.md`
 §9a. They were moved here on 2026-09-09 because the three `@`-included docs
-had grown past the context budget. This file is deliberately **not**
-`@`-included into `CLAUDE.md`.
+had grown past the context budget. Nothing in this file is loaded
+automatically; it is read on demand.
 
-What stays loaded every session is the **rule** each record produced, in
-condensed form:
+What each record produced is the **rule**, in condensed form:
 
-- `CLAUDE.md` → "Decisions log (condensed)"
+- `docs/DECISIONS_LOG.md` → the condensed log (it lived in `CLAUDE.md` until
+  the context restructure of 2026-09-16, Part A's newest entry)
 - `docs/UI_UX.md` → §2b (same point numbers as below)
 - `docs/ARCHITECTURE.md` → §9a (summary)
+
+None of those three is loaded automatically either, since the restructure.
+`CLAUDE.md` links to them instead.
 
 Read this file when you need the *why* behind a rule, or the history of a
 change. New decisions: add the condensed rule to the loaded doc, and the full
@@ -164,6 +167,213 @@ matches what code comments and data files cite.
   are the same capped-grid arithmetic, and both leave the "am I short"
   question answered by the summary line and the strip, which is what the
   brief asked for.
+
+- 2026-09-16: **The agent context was restructured: `CLAUDE.md` is a map,
+  not the manual.** Everything below in this file is a record of a decision
+  about the *game*. This one is a decision about how the game gets built,
+  and it was prompted by an outside argument rather than by a defect:
+  "Why Your AI Generates Crap Code - And How to Fix It" (Web Dev Simplified),
+  whose central claim is that `CLAUDE.md`/`AGENTS.md` is injected into every
+  single request, so its size is not a one-off cost but a tax on every turn,
+  and that an `@`-include is exactly equivalent to pasting the file's whole
+  text inline.
+
+  Measured against that, this repo was the worst case the video describes.
+  `CLAUDE.md` was 631 lines, and it `@`-included ARCHITECTURE.md, UI_UX.md
+  and GAMEPLAY.md, so the real always-loaded payload was about **2,000 lines
+  / ~34,500 tokens** — roughly four times the largest example the video was
+  willing to call broken. Three causes, each individually reasonable:
+
+  1. **The decisions log grew a bullet per past problem.** 57 entries, 429
+     lines, all of it loaded on every request including the ones that never
+     touch a machine, a contract or a voxel. The log is genuinely valuable —
+     it is what stops a rule being re-litigated — but "valuable" and "worth
+     paying for on every turn" are different claims.
+  2. **Project structure was documented file by file**, 131 lines naming
+     nearly every source file and what it contains. Per-file detail is the
+     part of a layout that goes stale first: the thing it describes is one
+     rename away from being a lie, and a confident lie in the always-loaded
+     file is worse than no description at all.
+  3. **The three design docs were `@`-included.** They are authoritative and
+     they are long, and most sessions need exactly one of them, if any.
+
+  The restructure, following the video's own prescriptions:
+
+  - **`CLAUDE.md` is 72 lines / ~950 tokens** (a 97% cut). It holds the
+    project in a sentence, the rules that genuinely always apply — Rust owns
+    gameplay logic, content is data, no floats in sim state, follow the
+    design docs, small increments, plan mode, text scenes, Conventional
+    Commits — a seven-line layout block at *directory* granularity, and a
+    table mapping "what you are working on" to "which doc to read". No
+    `@`-includes at all.
+  - **The condensed decisions log moved to `docs/DECISIONS_LOG.md`**
+    verbatim, all 57 entries. It is linked, not included: an agent reads it
+    when it needs to know whether a question is already settled.
+  - **Per-module `CLAUDE.md` files exist now** for `sim_core/`,
+    `godot_project/` and `assets/voxels/` (ARCHITECTURE.md §10 said "once
+    warranted" — three years of invariants in one root file is what
+    warranted looks like). Each is ~100 lines of that area's non-obvious
+    invariants: `sim_core/`'s determinism and topology rules,
+    `godot_project/`'s rebuild/wire invariants, `assets/voxels/`'s geometry
+    traps. Worst case inside a module is now ~2,400 tokens.
+  - **`AGENTS.md` is a symlink to `CLAUDE.md`** at the root and in each of
+    those three directories. This is not cosmetic: an untracked 160 KB
+    `AGENTS.md` had been sitting at the root, and it turned out to be a
+    flattened snapshot of `CLAUDE.md` with its three `@`-includes expanded —
+    a copy that had already drifted. A symlink cannot drift.
+  - **Workflow material moved to `docs/WORKFLOW.md`** (build, verification,
+    the non-headless check, commits, the DEVLOG decision, Orca
+    orchestration), and four **skills** were added under `.claude/skills/` —
+    `voxel-asset`, `verify`, `screenshot-review`, `record-decision`. A
+    skill's body is loaded only when it is invoked; only its name and
+    description sit in context, which is the right shape for a procedure
+    that matters on the rare turn it is needed and costs nothing otherwise.
+
+  The rule this produces, and the one worth keeping: **only put something in
+  an always-loaded file if it would be wrong for the agent not to know it on
+  a turn that has nothing to do with it.** Everything else is a link. The
+  corollary the video is blunter about than this repo had been: a rule added
+  because the agent did something wrong once is not automatically worth its
+  place forever — the always-loaded file is not a changelog of past
+  mistakes.
+
+  Five documentation defects were found in the process of verifying the
+  move, all of them the kind of drift that had been invisible precisely
+  because nobody re-reads a 631-line file:
+
+  - **ARCHITECTURE.md §3.9 said the fixed timestep is 60 ticks/s. It has
+    never been.** `main.gd`'s `TICK_HZ` has been 30 since milestone 3
+    (`e7683c1`), and DECISIONS.md already described §3.9's figure as
+    "nominal" against "the rate the scene actually runs". This is a
+    correction, not a decision: every seconds-figure derived from the wrong
+    rate was twice the real elapsed time, and two were — `hopper.rs`'s
+    "roughly 21 seconds" (really 43) and a DEVLOG figure of "40 seconds"
+    (really 80). §3.9 now names `TICK_HZ` as the one place the rate is set
+    and says what it read until today; a dated DEVLOG entry from 2026-09-11
+    was left alone, being accurate when written.
+  - **`docs/DEVLOG.md`'s "Current status" and `scripts/verify-core-loop.sh`
+    both still said nineteen headless Godot scripts.** There are thirty.
+  - **`scripts/screenshot-scene.sh`'s worked example was broken**:
+    `screenshot-scene.sh out.png --build …` silently loses `--build`,
+    because the script reads `$2` as the resolution and forwards only
+    `"${@:3}"`. The example now passes the resolution, and says why it must.
+  - **UI_UX.md §2b had three duplicate point numbers** — two extra 27s and
+    an extra 28 — in a list whose own header says point numbers are cited by
+    code comments and must stay stable. Citations in the wild had resorted
+    to disambiguating in prose ("points 27 in \"the floor\" and 28"). The
+    three entries took the unused numbers **35** (a model whose only
+    consumer is the icon pass is authored for vengi's camera), **36** (the
+    floor is authored by its value range) and **37** (N models over
+    thousands of tiles is still N stamps; per-instance rotation is the
+    multiplier), in place rather than renumbered into sequence, so that
+    every existing citation stays correct (34 was taken by ticket 7's
+    ghost rule the day before). All seven citations plus
+    Part B's own copies were updated.
+  - **`main.gd`'s `_panel_position_near` docstring still described the
+    behaviour ticket 5 replaced** — viewport-edge flipping only — directly
+    above the four-quadrant, plate-avoiding body that superseded it.
+- 2026-09-15: **Pipes & conveyors overhaul, ticket 7: the close-out, and
+  what a close-out ticket may not decide.** The overhaul's last ticket was
+  a bug hunt over the two galleries plus the docs. The galleries were
+  clean — tickets 5 and 6 did derive every belt and pipe shape from
+  `links`, at every facing and turn — so what the ticket actually found
+  sat around the edges of the work, and the decisions worth keeping are
+  these five.
+
+  1. **`cargo xtask` runs Godot's importer itself, twice.** Staging voxel
+     models deletes their `.import` sidecars, and the `.vox` importer is an
+     editor plugin that registers only on the pass after the first scan
+     (UI_UX.md §2b point 4), so after every `cargo xtask` the scene came up
+     blank until someone ran `godot --headless --path godot_project
+     --import` twice by hand. A step that must be run twice, by hand, by
+     someone who already knows about it, is not a step — it is a trap, and
+     it caught this ticket on its first run (`Nonexistent function
+     'chunk_delta_json'`, from a stale staged library beside unimported
+     voxels). `main()` now ends with both passes, printing `xtask: godot
+     --import pass 1/2 ok`. It **degrades rather than fails** when godot is
+     not runnable, because `cargo test` on a CI box with no Godot must
+     stay green; `--no-import` opts out and prints the command to run.
+
+  2. **The headless proofs' one known-benign log line was not benign.**
+     `Parameter "material" is null` (from
+     `material_get_instance_shader_parameters`) had a comment at the top of
+     `test_placement.gd` telling the next reader not to chase it. Freeing
+     an instance that still holds a `material_override` is what emits it
+     under the headless dummy renderer. `main.gd`'s
+     `_release_render_resources` walks a subtree and drops mesh and
+     material off **both** kinds of visual instance — the
+     `MultiMeshInstance3D`s `_build_multimesh_group` makes and the plain
+     `MeshInstance3D`s `_asset_node` makes for anything with live
+     per-instance state — immediately before it is freed, at every one of the
+     six places the scene frees something that could hold a mesh. Clearing
+     only the MultiMesh kind left the line at one occurrence, which is how
+     the second kind was found; fixing only the two subtree frees left it
+     in `test_pipe_shapes.gd`, which is how the ghost body (a lone
+     `MeshInstance3D` whose tint is a `material_override`) was found. The
+     debugging note is worth as much as the fix: **the line surfaces when
+     the rendering server flushes, not synchronously at the `free()`**, so
+     instrumenting the frees with marker prints points at whatever ran
+     next, not at the culprit. The header comment now says the inverse —
+     a `material` line there is a regression, not scenery. A "known benign"
+     annotation is a standing invitation to ignore a real signal; it
+     earns its keep only while nobody can afford to remove the cause.
+
+  3. **The demo saves are regenerated by a committed script, from the same
+     fixtures the tests use.** The four saves demoed since 2026-09-10 came
+     from a throwaway script nobody kept, and a save is rejected, not
+     migrated, on a `schema_version` mismatch (ARCHITECTURE.md §4) — so the
+     next bump would have ended them with no way back.
+     `godot_project/make_demo_saves.gd` and `scripts/make-demo-saves.sh`
+     rebuild all four ("demo line", "full chain", "belt gallery", "pipe
+     gallery") from `test_layouts.gd`'s own builders through real
+     `Purchase`/`Place` commands, warm each 600 ticks, and **prove each one
+     loads back before writing it** — the rule `game_session.gd` already
+     applies before a scene change, for the same reason: a demo save that
+     will not load is discovered in front of whoever the demo is for. The
+     saves stay in `user://saves/`, not the repo: the committed fixture is
+     the builder, not its output. The shell script requires the script's
+     `DEMO_SAVES_OK` marker (Godot exits 0 on a parse failure), which is
+     what caught the first version calling `Layouts.call(builder, …)` — a
+     *static* function cannot be dispatched by name off the script class,
+     so the pairing is a `match` now.
+
+  4. **A ghost previews what the connection rules make certain, and never
+     what the simulation still has to decide** (UI_UX.md §2b point 34).
+     The belt ghost stays straight beside a belt that will corner it while
+     the pipe ghost takes its shape from the pipes around it; that reads as
+     an inconsistency and is not one. GAMEPLAY.md §9 splits the two models
+     — solids respect faces, fluids connect by touching — so a pipe joins
+     whatever it touches and its shape is knowable before the click, while
+     a belt's hand-off is `resolve_sink`'s answer at placement time. A
+     belt ghost that drew the corner would be promising a link the
+     placement might not make. The same rule is why the pipe ghost still
+     previews no machine or tank fitting: which tile of a footprint gets
+     tapped is the sim's call. **No behaviour changed** — the rule was
+     written down, and both ghosts already obeyed it.
+
+  5. **A close-out ticket does not get to change the game.** `resolve_sink`
+     lets a belt feed a machine through **any** side of an inlet-edge tile,
+     and registers a belt sitting on a machine's **outlet** face as feeding
+     it. Measured, not inferred: a crusher facing east crafts when fed from
+     its north flank, and a belt on an outlet face appears in `links` as
+     both `input from West kind Machine` and `output to West kind Machine`
+     while carrying real `tomato_paste`. Both `world.rs`'s own module doc
+     ("A belt pointing into a machine's flank does nothing") and
+     GAMEPLAY.md §9's "a machine accepts input opposite its facing" say
+     otherwise, so the **code is the outlier**, and
+     `sim_core/tests/links.rs` pins the behaviour deliberately while naming
+     this ticket as the owner of the decision. The fix is one condition
+     (`belt.direction == sink.direction`). It was not taken, because it is
+     a **gameplay change, not a bug fix**: it breaks `test_layouts.gd`'s
+     `build_demo_line`, the shipped demo saves, and any layout a player has
+     built against the current rule. Tightening a connection rule after
+     players have built against it is the owner's call. Two more items are
+     reported rather than fixed for the same class of reason: nobody has
+     watched the belt animation run live at speed (`BELT_FRAMES` is a
+     judgement no headless run can make), and `_read_world_layout` is ~40 ms
+     of an 80 ms rebuild at 1500 tiles, which is milestone 8's. Every perf
+     figure in the plan doc is off the debug `sim_core` that `cargo xtask`
+     builds.
 
 - 2026-09-15: **Quality pass, ticket 5: polish sweep and docs — closes out
   the quality pass.** The brief was a method rather than a defect list:
@@ -1806,7 +2016,7 @@ matches what code comments and data files cite.
   `FLUID_MODELS`, then fall back.
 
   (4) **A model whose only consumer is the icon renderer is authored for
-  vengi's camera** (new §2b point 27). The jug's label and moulded ear were
+  vengi's camera** (new §2b point 35). The jug's label and moulded ear were
   first put on the faces the *game* camera sees, per point 11, and were
   invisible in the rendered icon: `vengi-thumbnailer` looks from the -X/+Y
   corner (point 22), the opposite side. Confirmed by rendering `item_box`,
@@ -1898,7 +2108,7 @@ matches what code comments and data files cite.
   the grout problem in (3) was a dark line on all four edges of *every*
   tile. Frequency was cut with it (`FLOOR_PATCH_IN` 41 → 97).
 
-  Recorded as UI_UX.md §2b points 27 and 28. Three voxgen property tests
+  Recorded as UI_UX.md §2b points 36 and 37. Three voxgen property tests
   pin what a render cannot re-check by itself: nothing on the floor stands
   proud of the slab's top surface (`main.gd`'s `FLOOR_Y` puts everything
   else on that plane, so one voxel too tall intersects every belt and
@@ -4666,7 +4876,11 @@ matches what code comments and data files cite.
 ## Part B — UI_UX.md §2b, full text ("How the pipeline actually turned out")
 
 Point numbers are the ones code comments cite (`UI_UX.md §2b point N`).
-There is no point 10 — it was skipped in the original numbering.
+There is no point 10 — it was skipped in the original numbering — and the
+list runs 1-28, 36-37, 29-34: the factory-floor entries were written as a
+second 27 and a second 28, and took the next free numbers on 2026-09-16
+rather than renumber anything already cited. (UI_UX.md §2b also has a 35, the
+icon-pass camera rule, which has no long form here.)
 
 Everything above held up. Four things are worth writing down because they
 were only discoverable by building it:
@@ -5214,7 +5428,7 @@ were only discoverable by building it:
     rigid translation of frame 0 is byte-identical to it, because the
     thumbnailer crops to the bounding box: judge a translation in the scene,
     which is point 22's warning about vengi's camera in another form.
-27. **The floor is the one surface whose job is to be a background, so it
+36. **The floor is the one surface whose job is to be a background, so it
     is authored by its VALUE RANGE, not by its detail.**
 
     Every other asset in this pipeline is designed by looking at one copy
@@ -5262,7 +5476,7 @@ were only discoverable by building it:
       instead of to the mottle tone, which gets pulled toward the slab every
       time the floor is quietened.
 
-28. **N models laid over thousands of tiles is still only N stamps; the
+37. **N models laid over thousands of tiles is still only N stamps; the
     multiplier is per-instance rotation, and it is only free if the tile's
     edges are four-fold symmetric.**
 

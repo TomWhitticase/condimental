@@ -212,8 +212,15 @@ an unsolved problem; fixed-point is one integer type threaded from the
 start. Floats are fine for Godot-side presentation values that never feed
 back into the sim.
 
-Also: fixed timestep (60 ticks/s), deterministic iteration order (stable ids,
-no hashmap iteration in hot paths). Tested per §6, not asserted.
+Also: fixed timestep (**30 ticks/s**), deterministic iteration order (stable
+ids, no hashmap iteration in hot paths). Tested per §6, not asserted.
+
+The rate is set in exactly one place, `godot_project/main.gd`'s `TICK_HZ`;
+`sim_core` itself only counts `tick()` calls and assumes no rate. This
+section read "60 ticks/s" until 2026-09-16 — that was never the rate the
+game ran (`TICK_HZ` has been 30 since milestone 3), so every seconds-figure
+derived from it was twice the real elapsed time. Player-facing clocks use
+the rate the game actually runs (UI_UX.md §5e).
 
 ---
 
@@ -425,8 +432,16 @@ as a regression.
 - Cover every sim-core change with headless tests before merging.
 - Content changes never require Rust changes; if they do, add a data field.
 - Keep `.tscn`/`.tres` as text.
-- One `CLAUDE.md` per major module (`sim_core/`, `godot_project/`)
-  documenting non-obvious invariants, once warranted.
+- One `CLAUDE.md` per major module documenting non-obvious invariants.
+  Built 2026-09-16 for `sim_core/`, `godot_project/` and `assets/voxels/`;
+  each is loaded only when work happens in that directory. `AGENTS.md` is a
+  symlink to `CLAUDE.md` beside each one, so the two cannot drift.
+- **An always-loaded file is a tax on every request, not a one-off cost**
+  (2026-09-16). The root `CLAUDE.md` holds only what would be wrong for an
+  agent not to know on a turn that has nothing to do with it; everything
+  else — this doc, UI_UX.md, GAMEPLAY.md, the decisions log, the workflow —
+  is a link it follows on demand. An `@`-include is inlining, so there are
+  none. Repeatable procedures are skills under `.claude/skills/`.
 - No `f32`/`f64` in shared simulation state (§3.9).
 - Treat any `gdext` bump as a reviewed decision.
 - The primary loop is headless `cargo test` (§7).
@@ -440,8 +455,10 @@ Resolved: data-file path (`data/`, top-level); `hecs` maintenance; `gdext`
 version; `.vox` importer; money/contract home (GAMEPLAY.md §9); per-tile
 orientation (real placement epic — `Direction` on every placement, one Y
 rotation in Godot; the belt's east-only junction art was retired by the
-pipes & conveyors overhaul, UI_UX.md §2b point 18; the pipe's `pipe_inlet`
-is the last east-only asset, ticket 6's to retire).
+pipes & conveyors overhaul, UI_UX.md §2b point 18, and its ticket 6 retired
+`pipe_source`/`pipe_inlet`, the last east-only assets, so **no asset in the
+project is authored for one facing any more** — every tile derives its shape
+and turn from its `links`).
 
 Still open:
 

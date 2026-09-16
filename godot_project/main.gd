@@ -1921,9 +1921,10 @@ func _direction_offset(direction: String) -> Vector2i:
 ## rotated placement is the same mesh spun about that origin and re-centred
 ## on the rotated rectangle — no new geometry. That includes a belt corner
 ## (`_belt_shape_for`): the corner models are authored with their output on
-## +X like every straight, so the same yaw turns them. The one asset family
-## that still keeps an east-only member is the pipe's `pipe_inlet`, ticket
-## 6's to retire.
+## +X like every straight, so the same yaw turns them. Since the pipes &
+## conveyors overhaul finished, no asset in the project is authored for one
+## facing — `pipe_source`/`pipe_inlet` were the last two and ticket 6 deleted
+## them — so this yaw is the whole story for every tile the scene draws.
 func _direction_yaw(direction: String) -> float:
 	return deg_to_rad(float(_direction_index(direction)) * 90.0)
 
@@ -2138,6 +2139,7 @@ func _build_floor() -> void:
 
 	if _floor_node != null:
 		remove_child(_floor_node)
+		_release_render_resources(_floor_node)
 		_floor_node.free()
 	_floor_node = Node3D.new()
 	_floor_node.name = "Floor"
@@ -2477,6 +2479,7 @@ func _rebuild_world() -> void:
 	var existing := get_node_or_null("World")
 	if existing != null:
 		remove_child(existing)
+		_release_render_resources(existing)
 		existing.free()
 	_machine_lamps.clear()
 	_machine_gauges.clear()
@@ -3006,6 +3009,43 @@ func _build_multimesh_group(
 	return out
 
 
+## Drops the mesh and material references off every visual instance under
+## `node`, to be called just before the subtree is freed. Covers both ways
+## this scene draws a tile: the `MultiMeshInstance3D`s `_build_multimesh_group`
+## makes, and the plain `MeshInstance3D`s `_asset_node` makes for anything with
+## live per-instance state.
+##
+## Freeing an instance that still held a `material_override` made Godot's
+## HEADLESS dummy renderer print `Parameter "material" is null` from
+## `material_get_instance_shader_parameters` — the dummy backend has no storage
+## entry for the override and looks it up while tearing the instance down. It
+## was harmless (a real rendering run never printed it, and every mesh in the
+## scene is asserted to have a material by test_machines.gd) but it appeared in
+## the middle of the headless suite's output, where the one thing a proof's
+## reader must be able to trust is that a line saying ERROR means something IS
+## wrong. Dropping the references first leaves the dummy backend nothing to
+## resolve.
+##
+## Note the free is what emits the line, but not synchronously: the message
+## surfaces when the rendering server flushes, so instrumenting the `free()`
+## calls points at whatever ran next, not at the culprit. Clearing on the way
+## out of BOTH instance kinds is what actually silenced it — and it has to run
+## at EVERY free, not only the two subtree frees: the ghost body is a lone
+## `MeshInstance3D` carrying the tint as a `material_override`, so
+## `test_pipe_shapes.gd` still printed the line until `_clear_ghost_body` and
+## `_build_ghost_layer` called this too. Anything this scene frees that could
+## be holding a mesh goes through here.
+func _release_render_resources(node: Node) -> void:
+	if node is MultiMeshInstance3D:
+		node.material_override = null
+		node.multimesh = null
+	elif node is MeshInstance3D:
+		node.material_override = null
+		node.mesh = null
+	for child in node.get_children():
+		_release_render_resources(child)
+
+
 ## --- The item pools ---------------------------------------------------------
 ##
 ## One pool per item asset: a group of per-class MultiMeshes with `capacity`
@@ -3269,6 +3309,7 @@ func _update_dock_stock(stock: Array) -> void:
 			if current == null or String(current.get_meta("asset", "")) != asset:
 				if current != null:
 					slot.remove_child(current)
+					_release_render_resources(current)
 					current.queue_free()
 				var node := _asset_node(asset)
 				node.name = "case"
@@ -9555,6 +9596,7 @@ func _build_ghost_layer() -> void:
 	var existing := get_node_or_null("Ghost")
 	if existing != null:
 		remove_child(existing)
+		_release_render_resources(existing)
 		existing.free()
 	_ghost_root = Node3D.new()
 	_ghost_root.name = "Ghost"
@@ -9897,6 +9939,7 @@ func _clear_ghost_body() -> void:
 		var body := _ghost_root.get_node_or_null(child_name)
 		if body != null:
 			_ghost_root.remove_child(body)
+			_release_render_resources(body)
 			body.free()
 	_ghost_asset = ""
 	_ghost_fill = null
@@ -9920,6 +9963,7 @@ func _update_ghost_fill() -> void:
 		return
 	if _ghost_fill != null:
 		_ghost_root.remove_child(_ghost_fill)
+		_release_render_resources(_ghost_fill)
 		_ghost_fill.free()
 		_ghost_fill = null
 	var item := _selected_hopper_item()
@@ -9984,24 +10028,37 @@ func _update_ghost() -> void:
 		else:
 			_ghost_valid = true
 			_ghost_reason = ""
-		# **The belt ghost is always the straight tile**, even where the
-		# placed tile will become a corner or a merge. A tile's shape is
-		# derived from `links`, and `links` are what the simulation's
-		# topology pass resolved for a tile that EXISTS; the would-be links
-		# of a tile that does not are a fact the sim has not computed yet,
-		# and computing them here would mean a Godot-side copy of
-		# `resolve_sink` (which belts feed which, from which sides, with the
-		# inlet-edge rule ticket 1 flagged) that drifts the moment the sim's
-		# rule changes — the second adjacency scan the whole `links` field
-		# exists to avoid. The right home for a would-be shape is
+		# **A ghost previews what the game's connection rules already make
+		# certain, and never what the simulation still has to decide.** That
+		# one rule is why the belt ghost and the pipe ghost look like they
+		# disagree — they are the same rule meeting GAMEPLAY.md §9's two
+		# different connection models (reconciled by the pipes & conveyors
+		# overhaul's ticket 7; the two were written by separate tickets and
+		# read as a contradiction until the principle under them was named).
+		#
+		# **A solid respects faces, so the belt ghost is always the straight
+		# tile** — even where the placed tile will become a corner or a
+		# merge. A tile's shape comes from `links`, and links are what the
+		# topology pass resolved for a tile that EXISTS; which belt feeds
+		# which, from which side, is `resolve_sink`'s directional answer, and
+		# re-deriving it here would be a Godot-side copy of a sim rule that
+		# drifts the moment the sim's changes — the second adjacency scan the
+		# whole `links` field exists to avoid. The corner appears the instant
+		# the tile is placed, since placing rebuilds.
+		#
+		# **A fluid connects by touching, not facing, so the pipe ghost can
+		# know its own shape** (`_pipe_ghost_shape`, ticket 6): every
+		# orthogonally adjacent pipe joins the same network whatever either
+		# tile faces, so the shape is certain from what is already standing,
+		# with no sim rule copied. It still previews no machine or tank
+		# fitting, because which tile of a run a machine taps IS the sim's
+		# choice — the same line, drawn in the same place.
+		#
+		# Where a would-be link is genuinely uncertain the answer is
 		# ARCHITECTURE.md §4's planned `preview_command`, a validation pass
-		# the sim answers; when it lands the ghost reads its shape from it.
-		# Until then the ghost's job is the tile, the facing (named in the
-		# prompt's `facing east`) and whether the click will succeed; the corner
-		# appears the instant the tile is placed, since placing rebuilds.
-		# A pipe's ghost, by ticket 6's rule, shows the shape the placed pipes
-		# around the tile would give it (see `_pipe_ghost_shape`), at that
-		# shape's own turn; ticket 7 reconciles the two ghost rules.
+		# the sim itself answers; until it lands the belt ghost's job is the
+		# tile, the facing (named in the prompt's `facing east`) and whether
+		# the click will succeed.
 		var ghost_asset := _shop_asset_for(_build_kind)
 		var ghost_yaw := _direction_yaw(_build_direction)
 		if _build_kind == PIPE_KIND:
@@ -11833,15 +11890,24 @@ func _apply_hover_panel_state(state: Dictionary) -> void:
 
 
 ## Where a cursor-following panel goes: offset from the cursor, then kept
-## inside the viewport.
+## clear of the viewport's edges AND of every fixed HUD plate (UI_UX.md §2b
+## point 33).
 ##
-## The clamp is new with build mode and is not cosmetic — the placement prompt
-## is three lines wide and the cursor spends most of its time near the right
-## of the screen while a factory is being extended eastward, so without it the
-## panel telling the player whether the click will work runs off the edge.
-## (Found the only way it could be: in a rendered frame — UI_UX.md §2b
-## point 12.) It flips to the other side of the cursor rather than sliding, so
-## the panel never sits on top of the tile it is describing.
+## None of this is cosmetic. The placement prompt is three lines wide and the
+## cursor spends most of its time near the right of the screen while a factory
+## is being extended eastward, so without the clamp the panel telling the
+## player whether the click will work runs off the edge; and the hotbar, the
+## legend and the contracts clipboard are drawn OVER the viewport, so a flip
+## that respects only the viewport's own edges lands the panel squarely on
+## their text instead. All of it was found the only way it could be, in
+## rendered frames — UI_UX.md §2b point 12.
+##
+## So: try all four quadrants around the cursor, nearest first (a flip rather
+## than a slide, so the panel never sits on the tile it is describing), and
+## take the first that clears the viewport, the hotbar's reserved height and
+## every avoided plate. A tall panel can fail all four; that falls back to
+## clamping on screen and then PUSHING clear, judging each candidate after the
+## clamp rather than when it is chosen.
 func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
 	var size := panel.get_combined_minimum_size()
 	var vp := get_viewport()
@@ -12577,6 +12643,7 @@ func _build_payout_feedback(hud: CanvasLayer) -> void:
 		# (see `_rebuild_world`'s note), and a second pool would leave the
 		# first one's nodes orphaned in the tree.
 		remove_child(existing)
+		_release_render_resources(existing)
 		existing.free()
 	_coin_root = Node3D.new()
 	_coin_root.name = "Feedback"

@@ -29,3 +29,9 @@ assets/voxels/previews/
 
 # Exported platform packages (.apk/.aab/.ipa) — build output, not source.
 /build/
+
+# A stale copy of CLAUDE.md that the agent environment drops into every
+# worktree. Nobody creates it deliberately and it has never been committed;
+# ignoring it keeps `git status` honest so a real untracked file stands out.
+# CLAUDE.md itself is the source of truth and IS tracked.
+/AGENTS.md

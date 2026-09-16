@@ -57,8 +57,7 @@ high-level, skip trivial changes), but the question should get asked, not
 skipped. A `pre-commit` hook (same `.githooks` setup as above) prints a
 reminder if a commit doesn't touch `docs/DEVLOG.md`; it never blocks the
 commit, since whether an entry is actually warranted is a judgment call. See
-CLAUDE.md's working conventions for the actual rule an AI agent should follow
-here.
+`docs/WORKFLOW.md` for the actual rule an AI agent should follow here.
 
 ### Why
 

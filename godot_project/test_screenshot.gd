@@ -22,8 +22,8 @@
 # hopper feeding belts that run east, TURN NORTH into a crusher facing WEST,
 # which discharges back west, with a pipe run heading SOUTH beside it. Three
 # of the four facings on belts and the fourth on the pipes, which is what
-# makes it the right subject for reviewing per-tile rotation and the
-# junction art's east-only fallback in one frame.
+# makes it the right subject for reviewing per-tile rotation and the belt
+# shapes the overhaul derives from `links` in one frame.
 #
 # `--fixture <name>` picks a different one: `machines` (hopper, machine and
 # dock, i.e. one of each sort of building), `fluids` (a tank, a pipe run and

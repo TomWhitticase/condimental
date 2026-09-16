@@ -20,21 +20,21 @@
 #     click on a blocked tile changes nothing at all,
 #   * every one of the four facings renders with the matching Y rotation, and
 #     a quarter turn swaps a non-square footprint's extents,
-#   * the junction art's east-only fallback holds under real placement: a
-#     belt facing east beside a building takes a junction variant, the same
-#     belt facing any other way takes the plain tile,
+#   * a belt's shape comes from its `links` and facing under real placement,
+#     with nothing east-only left about it: a belt fed from behind draws the
+#     plain straight family whichever way it faces,
 #   * remove mode ghosts the thing under the cursor and a click picks it up,
 #   * leaving either mode frees the ghost rather than hiding it.
 #
 # The one-frame-before-checking dance and the "never hold your own camera
 # reference" rule are inherited from test_hover.gd — see that file's header.
 #
-# Known, benign log line: freeing and rebuilding the "World" subtree makes
-# Godot's HEADLESS dummy renderer print `Parameter "material" is null` from
-# `material_get_instance_shader_parameters` once. It is the dummy backend
-# querying a freed instance, not a missing material — every mesh in the scene
-# is asserted to have one by test_machines.gd — and it does not appear in a
-# real (rendering) run. Don't chase it.
+# This script used to print one benign `Parameter "material" is null` from the
+# HEADLESS dummy renderer when it freed and rebuilt the "World" subtree. It is
+# gone as of the pipes & conveyors overhaul's ticket 7: `main.gd`'s
+# `_release_render_resources` drops each instance's mesh and material on the
+# way out, so the dummy backend has nothing left to resolve. A `Parameter
+# "material" is null` line here is a real regression now, not scenery.
 extends SceneTree
 
 const Layouts = preload("res://test_layouts.gd")
@@ -343,5 +343,5 @@ func _run_checks() -> void:
 		_fail("leaving build mode should hide the ghost and its prompt")
 		return
 
-	print("PLACEMENT_OK: empty world renders bare floor, the ghost is a real model with footprint-aware validity signalled by glyph and word as well as colour, all four facings render the matching rotation, the junction art falls back cleanly off east, and place/remove drive the scene through the real command boundary")
+	print("PLACEMENT_OK: empty world renders bare floor, the ghost is a real model with footprint-aware validity signalled by glyph and word as well as colour, all four facings render the matching rotation, a belt's shape comes from its links at every facing, and place/remove drive the scene through the real command boundary")
 	quit(0)

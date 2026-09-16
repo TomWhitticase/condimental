@@ -1,8 +1,11 @@
 # Pipes & Conveyors Overhaul — plan
 
-Status: in progress (started 2026-09-09; tickets 1–6 merged by 2026-09-10 morning, ticket 7 not started). Integration branch:
-`TomWhitticase/pipes-and-conveyors-overhaul`. Built as one Orca
-orchestration Run; tickets below map 1:1 to Tasks.
+Status: **DONE** (started 2026-09-09; tickets 1–6 merged by 2026-09-10
+morning; ticket 7, the close-out, landed 2026-09-15). Integration branch:
+`TomWhitticase/pipes-and-conveyors-overhaul`, long since merged to `main`.
+Built as one Orca orchestration Run; tickets below map 1:1 to Tasks.
+See "What shipped, and what is still open" at the end of this doc before
+picking anything up from it.
 
 ## Goal
 
@@ -136,6 +139,11 @@ visibility flips.
 
 ## Coordinator notes (appended as wave 1 lands)
 
+> **Historical.** This section is the running hand-off as the tickets landed,
+> kept because it records what each worker was told and what it reported.
+> Everything it lists as outstanding was ticket 7's, and ticket 7 is done —
+> read "What shipped, and what is still open" below for what is true now.
+
 **Merged so far:** tickets 1 (`links`), 4 (instancing), 3 (pipe models) and
 2 (belt models). Read their DEVLOG entries.
 
@@ -233,6 +241,92 @@ dispatched.
   throwaway script built on `test_layouts.gd`; a committed
   `scripts/make-demo-saves.sh` would be worth having.
 
+## What shipped, and what is still open
+
+Written at ticket 7's close-out (2026-09-15). Read this instead of inferring
+the state of the update from the ticket table above.
+
+### Shipped
+
+- **The wire carries connectivity** (ticket 1). Every belt, splitter and pipe
+  in `world_layout_json` carries a `links` object recorded by the topology
+  pass itself, so Godot draws where product actually goes rather than
+  re-deriving adjacency.
+- **Belt and pipe model families** (tickets 2, 3) on the tile's true 15.5
+  midline, in four animation frames, with composable fittings.
+- **Instanced rendering** (ticket 4): belts, splitters, pipes and carried
+  items are `MultiMesh` instances, guarded by a 1500-tile stress fixture and
+  `test_perf.gd`.
+- **Shape from links, for both** (tickets 5, 6): a belt's straight/corner/
+  merge/start/end and a pipe's end/straight/corner/tee/cross, its turn and
+  its fittings all come from `links` alone. `pipe_source`/`pipe_inlet` are
+  deleted — **no asset in the project is authored for a single facing any
+  more.** Items are drawn face to face, so a corner's arc leaves through the
+  right face.
+- **Galleries**: `--belt-gallery` and `--pipe-gallery` on
+  `scripts/screenshot-scene.sh`, backed by `build_belt_gallery` /
+  `build_pipe_gallery` in `test_layouts.gd`, cover every shape and junction
+  at every facing. These replaced ticket 7's proposed single `--gallery`
+  flag: one frame holding both families is too small to judge a flange in,
+  which is the reason `--closeup` exists.
+- **Close-out fixes** (ticket 7): the headless suite no longer prints
+  `Parameter "material" is null` (`main.gd`'s `_release_render_resources`
+  drops each instance's mesh and material before it is freed, at all six
+  places the scene frees something that could hold one — the last found was
+  the ghost body, whose tint is a `material_override` — so the dummy
+  renderer has nothing to resolve — an ERROR line in a proof's
+  output means something is wrong again); `cargo xtask` now runs Godot's two
+  `--import` passes itself, because it is what deleted the `.import`
+  sidecars and a launch straight after it used to draw no meshes at all;
+  `scripts/make-demo-saves.sh` regenerates the four Load Game demo saves
+  through real Purchase/Place commands, each proven to load before it is
+  written; the stray `AGENTS.md` the agent environment drops in every
+  worktree is `.gitignore`d.
+- **One ghost rule, named** (ticket 7). The belt ghost (always straight) and
+  the pipe ghost (shaped by adjacent placed pipes) looked like two rules
+  because two tickets wrote them separately. They are one:
+  **a ghost previews what the game's connection rules already make certain,
+  and never what the simulation still has to decide** — which is
+  GAMEPLAY.md §9's own split. A fluid connects by *touching*, so a pipe's
+  shape is knowable from what stands beside it; a solid respects *faces* and
+  the sim resolves which sink, so a belt's is not. The pipe ghost still
+  previews no machine or tank fitting, because which tile of a run a machine
+  taps is the sim's choice. Recorded as UI_UX.md §2b point 34; no behaviour
+  changed.
+
+### Still open
+
+- **The `resolve_sink` inlet rule contradicts both design docs, and it moves
+  real product.** A belt feeds a machine or dock when the tile it points
+  into is on the inlet EDGE, *from whichever side it approaches*. For a 1x1
+  machine every side is that edge. Measured at close-out, not inferred: a
+  crusher facing east, fed from its north flank, crafts normally; and a belt
+  standing on a machine's own OUTLET face is linked as feeding it, so the
+  same belt both receives the machine's output and is registered to deliver
+  into it. Today that only jams (no recipe consumes its own output), but it
+  is a loop waiting for one that does.
+  `sim_core/src/sim/world.rs`'s module doc says the opposite in as many
+  words ("A belt pointing into a machine's flank does nothing. This is what
+  makes rotating a machine a decision with a visible consequence"), and so
+  does GAMEPLAY.md §9 ("A machine accepts input opposite its facing"). The
+  code is the outlier. The fix is one condition in `resolve_sink`
+  (`belt.direction == sink.direction`), but it is a **gameplay change, not a
+  bug fix**: it stops flank feeding working, and `test_layouts.gd`'s
+  `build_demo_line` is built on flank feeding (a north-going belt into a
+  west-facing crusher), as is any player's save that used it.
+  `sim_core/tests/links.rs` pins the current behaviour deliberately so the
+  change is a visible diff. **Left for the owner to decide** — it was not
+  taken unilaterally because it changes what a player is allowed to build.
+- **Nobody has watched the belt animation live.** It is a 4-frame march at
+  sim speed (~2.4 frame changes/s); whether `BELT_FRAMES` should stay 4 is a
+  judgement a PNG cannot make and a headless run cannot make either. Needs
+  somebody at a windowed build.
+- **`_read_world_layout` is ~40 ms of an 80 ms rebuild on 1500 tiles** (a
+  336 KB layout parse per placement). Milestone 8 scope, with the rest of
+  the scale-up work.
+- All performance figures anywhere in this doc are measured on a **debug**
+  `sim_core`, which is what `cargo xtask` builds.
+
 ## Appendix — the ticket specs as dispatched
 
 Exported from Orca Run `run_63d3ba781e83` on 2026-09-10 so the specs live in git, not only in the local orchestration database. Every ticket was prefixed with this shared context:
@@ -295,7 +389,7 @@ Do: (1) Replace `_pipe_roles` entirely: derive each pipe tile's shape from `link
 
 Tests: a new headless `test_pipe_shapes.gd`: each shape and rotation from a real placement (end, straight both axes, all four corner rotations, four tee rotations, cross), machine and tank fittings on the right faces, fluid body asset per shape, hover text; update `test_fluids.gd`/`test_chain_rework.gd` where they assert the old roles. Add `--pipe-gallery` to `scripts/screenshot-scene.sh` (every shape at every rotation, a tank feeding from each of four sides, a machine tapped from each side, the shipped mixer->vat->bottler runs) and READ the PNGs at scene zoom and closeup; fix what reads wrong (generator fixes are in scope — regenerate and commit models). DEVLOG entry, CLAUDE.md condensed + DECISIONS.md, UI_UX §2b points; update main.gd/world.rs comments that still describe the old fallback.
 
-### Ticket 7 — `task_15907b4d0158` (ready)
+### Ticket 7 — `task_15907b4d0158` (completed)
 
 TICKET 7 — Bug hunt, polish and documentation close-out for the Pipes & Conveyors Overhaul. Layer: anything the defects need. Tickets 1–6 are MERGED on the integration branch you were branched from; read `docs/PIPES_AND_CONVEYORS_PLAN.md`, every 2026-09-09/10 DEVLOG entry from this update and the worker notes the coordinator passes in this spec, then hunt.
 
