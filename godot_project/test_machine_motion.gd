@@ -60,6 +60,14 @@ func _frame_of(key: String) -> int:
 	return int(main._machine_motion[key]["frame"])
 
 
+## One whole frame: a simulation step and then the feedback pass `_process`
+## runs after it. The crusher's spray rides that pass, not `_advance_simulation`,
+## so a test that only stepped the simulation would prove nothing about it.
+func _frame() -> void:
+	_step()
+	main._update_payout_feedback()
+
+
 func _run_checks() -> void:
 	# --- 1. the frame arithmetic, pure -------------------------------------
 	if main._motion_frame_for_elapsed(-1) != 0:
@@ -221,6 +229,52 @@ func _run_checks() -> void:
 			before, _frame_of(crusher),
 		])
 
+	# --- 4b. a working crusher throws pulp, on its own beat ------------------
+	# The spray is the animation's louder half (the crusher-particles change,
+	# 2026-09-16) and it is driven by the same `_machine_work_elapsed` the
+	# frames are, so it inherits the same meaning of "working" — which is the
+	# thing worth proving, since a machine holding a finished batch still has
+	# a lamp on and still has a process.
+	if not main._crush_anchors.has(crusher):
+		_fail("the placed crusher recorded no anchor to throw pulp from")
+	var anchor_point: Vector3 = main._crush_anchors[crusher]
+	if not is_equal_approx(anchor_point.y, main.CRUSH_MOUTH_Y):
+		_fail("pulp should leave from the feed pocket's mouth (%f), not %f" % [
+			main.CRUSH_MOUTH_Y, anchor_point.y,
+		])
+	for other in ["-1,0", "5,0", "6,0"]:
+		if main._crush_anchors.has(other):
+			_fail("only a crusher throws pulp; '%s' has an anchor too" % other)
+
+	var beats_before: int = main.crush_beats_thrown
+	var seen_in_air := 0
+	for i in range(main.CRUSH_BEAT_TICKS * 3):
+		_frame()
+		seen_in_air = maxi(seen_in_air, main._active_crush_count())
+	if main.crush_beats_thrown <= beats_before:
+		_fail("a working crusher threw no pulp over three whole beats")
+	if seen_in_air <= 0:
+		_fail("pulp was thrown but nothing was ever in the air")
+	if seen_in_air > main.CRUSH_POOL:
+		_fail("more flecks in the air (%d) than the pool holds (%d)" % [seen_in_air, main.CRUSH_POOL])
+
+	# Paused, the pulp hangs where it is: the flight is clocked off the
+	# simulation tick, never wall time (UI_UX.md §6a).
+	var beats_at_pause: int = main.crush_beats_thrown
+	var in_air_at_pause: int = main._active_crush_count()
+	main._pause_open = true
+	for i in range(main.CRUSH_BEAT_TICKS * 2):
+		_frame()
+	main._pause_open = false
+	if main.crush_beats_thrown != beats_at_pause:
+		_fail("the pause menu must stop the spray: %d beats became %d" % [
+			beats_at_pause, main.crush_beats_thrown,
+		])
+	if main._active_crush_count() != in_air_at_pause:
+		_fail("pulp in the air must freeze with the game, %d became %d" % [
+			in_air_at_pause, main._active_crush_count(),
+		])
+
 	# --- 5. work stops, the mechanism stops ---------------------------------
 	main._machine_states[crusher] = {"process": null}
 	main._update_machine_motion()
@@ -230,6 +284,21 @@ func _run_checks() -> void:
 	for k in range(resting.size()):
 		if resting[k].visible != (k == 0):
 			_fail("at rest only frame 0 is drawn; node %d visible=%s" % [k, str(resting[k].visible)])
+	# ...and throws nothing. A crusher holding a finished batch it cannot put
+	# down has a process and a lit lamp, and is exactly the case that must
+	# not keep spraying (UI_UX.md §2b point 28).
+	# Driven directly rather than through `_frame()`: a real step re-polls the
+	# machine states from the simulation, which would put the forced-idle
+	# crusher straight back to work. The tick is handed in for the same
+	# reason a real frame hands it in — the flight is a function of it.
+	var idle_beats: int = main.crush_beats_thrown
+	var idle_tick: int = main.sim.current_tick()
+	for i in range(main.CRUSH_BEAT_TICKS * 3 + main.CRUSH_FLIGHT_TICKS + 1):
+		main._update_crush_spray(idle_tick + i)
+	if main.crush_beats_thrown != idle_beats:
+		_fail("a machine that is not working must throw no pulp")
+	if main._active_crush_count() != 0:
+		_fail("every fleck must be reclaimed once its flight is over, %d still out" % main._active_crush_count())
 
-	print("MACHINE_MOTION_OK")
+	print("MACHINE_MOTION_OK: mechanisms turn only while working, and a working crusher throws pulp on its own beat")
 	quit(0)

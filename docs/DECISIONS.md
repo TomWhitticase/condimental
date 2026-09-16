@@ -233,6 +233,146 @@ matches what code comments and data files cite.
   of the frame, so without that assertion a silent return to an outdoor sky
   would pass the entire suite.
 
+- 2026-09-16: **Four playtest asks: a dock that can be full, pulp off the
+  crusher, SHIFT-to-rebuy while placing, and the first-person camera's
+  entry pose.** Four small, unrelated requests from the owner, done as one
+  pass. Recorded together because three of them turned out to be the same
+  argument at different sizes — *the simulation owns the fact, the
+  presentation owns how it reads* — and because the fourth is a one-line
+  fix whose whole value is the note about what caused it.
+
+  1. **A dock can be full, and the ceiling went on the POOL, per item id.**
+     `sim::economy::DELIVERY_STOCK_CAPACITY` is 48 units of any one item.
+     The dock stays the pass-through it was designed as (GAMEPLAY.md §9);
+     the bound is on the shared delivery pool it drains into, because that
+     is the number the player already watches — a cap on the dock's own
+     32-unit buffer would be invisible, since `ship_into` empties it every
+     tick and it never holds more than one box.
+
+     **Per item id, not one total,** and this is the load-bearing part: a
+     single total can deadlock the game outright. One overproduced product
+     would crowd every other item out of the pool, a contract whose mix
+     names a crowded-out item could then never be satisfied again, and
+     nothing in this game dumps excess stock (GAMEPLAY.md §11's
+     spot-market question is still open) — so there would be no way out of
+     it. Per item, every id always has its own room, a mix is always
+     eventually fillable, and a clog is always a specific sentence ("the
+     dock is full of boxed ketchup") rather than a mystery.
+
+     **The number is a relationship, not a literal**, the rule
+     `STARTING_MONEY` already follows: a contract settles only when the
+     pool holds its whole mix at once, so the cap must comfortably exceed
+     the largest single mix quantity on the board — `export_pallet` asks
+     for 20, and 48 is 2.4x that, leaving the pallet order to build up
+     while the small orders are skimmed off the same pool. `tests/dock.rs`
+     pins the *relationship* against `data/contracts.ron`, so adding a
+     bigger order fails a test instead of quietly making that contract
+     unsatisfiable. Left running against no demand at all, a line reaches
+     the ceiling in about 12 000 ticks — long enough not to nag, short
+     enough to be a consequence.
+
+     `Dock::try_absorb` now asks the economy for room before it takes a
+     box off the belt, so a full pool backs the line up instead of
+     swallowing product — the refusal path the dock's own bounded buffer
+     had already built and tested, which is why the sim change is small.
+     A save whose pool is over the cap is `SaveError::OverfullDeliveryPool`
+     rather than a silent truncation: a save that loads to a state the
+     live game cannot reach is the bug, not the rejection.
+
+     **Presentation, and the "never colour alone" problem this exposed.**
+     The clipboard's ON THE DOCK line was a bare figure under UI_UX.md
+     §5e's rule that a bar needs a simulation-defined ceiling; now there is
+     one, so it reads `20/48` with a meter, the meter turning the docket's
+     one warning red at the cap with `⚠ FULL — belt backing up` beside it.
+     On the floor, the obvious signal — light the dock red — is impossible
+     here: `_make_material` gives emission `EMISSION_OP_MULTIPLY` over
+     vertex colour (§2b point 8's status-lamp rule), so a red wash over a
+     blue-grey deck is a dimmer deck, not a red one. The full dock
+     **pulses** its deck lamps instead (`DOCK_FULL_PULSE_TICKS`, 12 ticks
+     lit, 12 dark), clocked off `sim.current_tick()` like every other
+     animation in the scene (§6a), so a pause freezes it and a screenshot
+     repeats. A rhythm is also the one signal that survives this camera at
+     any zoom, and cannot be mistaken for the steady lamp that already
+     means "has stock". `_dock_lamp_lit(stocked, full, tick)` is split out
+     pure so `test_presentation.gd` can assert the blink without pumping
+     frames.
+
+  2. **The crusher throws pulp — a BEAT, which is a third size of
+     feedback.** §6a settled two sizes for two frequencies (a payout's
+     celebration, a dock arrival's small cue). Crushing is neither: it is
+     something a machine is *doing* for eighty ticks at a stretch. So it
+     is a beat rather than a burst — five flecks of a new `crush_bit`
+     voxel asset thrown out of the feed pocket every `CRUSH_BEAT_TICKS`
+     (10) of the machine's own WORK ticks, arcing about a fifth of a tile
+     over the mouth and shrinking out as they fall back into it.
+
+     **Driving it off `_machine_work_elapsed` is the decision**, not an
+     implementation detail: the spray inherits §2b point 28's narrow
+     meaning of "working" for free, so a crusher starved of tomatoes or
+     blocked on a full output throws nothing, and the pulp is another
+     statement of the fact the mechanism and the status lamp already make.
+     The beat index is compared with `!=` rather than `>` because a new
+     batch resets the machine's elapsed count to zero and its first beat
+     still has to fire. Heights and sizes vary from the fleck's own index,
+     never `randf()` (§6a), and every distance is in `TILE`.
+
+     **Two things came out of the render and not the plan** (§2b point
+     12). The `crush_bit` model took three passes: pale seed pips read as
+     a stalk — i.e. as a whole tomato, the opposite of crushed — and a
+     cuboid torn corner rendered as a slab hanging off the lump; what
+     works is three overlapping spheres and a single proud voxel. And the
+     first spray, three flecks at 0.85 scale, read as three stray red
+     pixels on the machine's roof rather than as a spit; five at varied
+     sizes read as one. Thrown higher (an experiment at 2.4 tiles of
+     launch) it stops reading as something coming out of the pocket and
+     starts reading as debris flying off the floor. **No sound was added**:
+     UI_UX.md §8 keeps "no idle machine loop" deliberately, and a cue
+     every ten ticks per crusher is exactly that loop.
+
+     `scripts/screenshot-scene.sh --crushing` is the review flag, built
+     for the same reason `--payout` was and holding the same shape: it
+     waits for the *state* (a crusher genuinely mid-batch with pulp in the
+     air) rather than a tick count, then freezes the scene, because the
+     flight is nine ticks and the shot's warm-up is longer. It exists
+     because a headless test can prove a fleck was thrown from the mouth
+     and reclaimed, and cannot say whether the throw reads as crushing —
+     and because without it the obvious fixtures photograph a crusher that
+     is blocked or starved at the frame, which is correct behaviour and a
+     useless picture. The first `--crushing` run is also what caught a
+     missing `cargo xtask` + double `--import`: the flecks were invisible
+     because `crush_bit` had never been staged into `godot_project/voxels/`
+     (§2b point 4 again).
+
+  3. **SHIFT buys back what the click places.** A modifier on *placing*,
+     not a second way to buy: the click still places a unit the player
+     owns, and the purchase happens after it and only if the placement
+     actually landed, so a blocked tile never charges. It exists because
+     laying a run of belt otherwise costs a round trip to the build menu
+     per handful. The prompt carries it in all three states, with the
+     price on each (`SHIFT: buy a replacement as you place (5 each)` /
+     `⟳ SHIFT: buying a replacement each click (-5)` / `⚠ SHIFT: cannot
+     afford another (5) · placing from stock`), because a modifier nothing
+     ever mentions is one nobody finds, and one that silently drains the
+     balance is §7's "never encode state invisibly". The unaffordable case
+     warns *before* the click rather than buzzing after it: nothing is
+     refused, the placement stands, and the owned count simply starts
+     falling.
+
+  4. **Entering first person places the first-person camera.**
+     `_set_view_mode` ended with an unconditional
+     `_update_camera_transform()` — the isometric placement — after a
+     branch that had already placed the camera for whichever mode was
+     being entered. Entering first person therefore left the camera at the
+     isometric angle and distance until the first mouse-look or WASD input
+     called `_update_fp_camera_transform()` and snapped it into place,
+     which is exactly the "weird place until I start moving" the owner
+     reported. Each branch now places the camera and nothing runs
+     afterwards. The rule worth keeping: **when two modes each own a
+     transform, the switch must not have a third opinion.**
+     `test_camera_nav.gd` asserts the camera *itself* is at `_fp_position`
+     on entry, not merely that the mode flag flipped — the old test passed
+     throughout.
+
 - 2026-09-16: **Every pull request body embeds a screenshot, no
   exceptions.** The owner's instruction was that PRs always include visual
   elements, and the first question was whether to scope it to visual

@@ -40,8 +40,9 @@
 //!
 //! The dock's own [`Inventory`] is a **transfer buffer, not a store**:
 //! [`Dock::ship_into`] moves everything in it into the shared delivery pool
-//! in the same tick it arrived, so a snapshot taken between ticks always
-//! reads empty. That was a real choice, and the alternative — hold a visible
+//! in the same tick it arrived, so a snapshot taken between ticks reads
+//! empty (all but the one case [`Dock::ship_into`] names — a pool filled by
+//! another dock later in the same tick). That was a real choice, and the alternative — hold a visible
 //! stack on the dock and release it on some schedule — was rejected for two
 //! reasons.
 //!
@@ -71,6 +72,23 @@
 //! `EconomySnapshot::delivery_stock`, not from this buffer — see
 //! `world::DockSnapshot`, which deliberately has no `fill` field for that
 //! reason.
+//!
+//! # ...and why it can still be full (the dock-capacity change, 2026-09-16)
+//!
+//! A pass-through with an unbounded sink can never fill up, and for a year
+//! this one could not: the player could point a line at a dock nobody had
+//! ordered from and watch a number grow. The ceiling went on the pool it
+//! drains into rather than on this buffer
+//! ([`super::economy::DELIVERY_STOCK_CAPACITY`], per item id, and that
+//! constant's doc carries the argument), because that is the number the
+//! player already sees. Everything above survives it: there is still one
+//! figure called "what's on the dock", it is still the one contracts settle
+//! against, and this buffer still drains. What changed is that
+//! [`Dock::try_absorb`] now asks the economy for room before it takes a box
+//! off the belt, so a dock with nowhere to put a box refuses it and the
+//! line backs up — the same refusal a full machine buffer already makes,
+//! and the reason the "full" state is visible on the factory floor rather
+//! than only in a readout. `DockSnapshot::full` reports it.
 //!
 //! # Any item, unlike the hopper's one
 //!
@@ -114,16 +132,20 @@ pub const DOCK_KIND: &str = "dock";
 /// delivery is short. It is half a hopper, which is also about right for the
 /// relative bulk of a boxed pallet against loose tomatoes.
 ///
-/// **It is not a constraint the shipped world can currently reach**, and
-/// that is stated rather than hidden: [`Dock::ship_into`] empties the buffer
-/// every tick and [`Dock::try_absorb`] fills it at most one unit per tick,
-/// so it never holds more than one. The bound exists because the absorb has
-/// to be able to say *no* — that is what makes a full dock back the belt up
+/// **It is still not a constraint the shipped world can reach**, and that is
+/// stated rather than hidden: [`Dock::ship_into`] empties the buffer every
+/// tick and [`Dock::try_absorb`] fills it at most one unit per tick, so it
+/// never holds more than one. The bound exists because the absorb has to be
+/// able to say *no* — that is what makes a full dock back the belt up
 /// instead of annihilating the item, which is the property the
-/// mass-conservation test in `tests/core_loop.rs` actually checks. It starts
-/// mattering the day the drain is gated (see this module's doc), and having
-/// the refusal path built and tested now is what keeps that a one-line
-/// change instead of a new mechanism.
+/// mass-conservation test in `tests/core_loop.rs` actually checks.
+///
+/// The ceiling the player actually meets is the shared pool's
+/// ([`super::economy::DELIVERY_STOCK_CAPACITY`], added 2026-09-16): the
+/// drain IS gated now, exactly as this paragraph used to predict, and it
+/// was the one-line change it predicted — `try_absorb` asks the economy for
+/// room beside asking this buffer, and the refusal path this bound had
+/// already built and tested is what carried it.
 ///
 /// A Rust constant rather than a `data/machines.ron` field, matching
 /// `HOPPER_CAPACITY` and `FLUID_TANK_CAPACITY`: when buffer sizes become
@@ -227,14 +249,23 @@ impl Dock {
     /// between. One unit per call (and `World::tick` calls it once per tick)
     /// keeps the dock's intake rate a property of the machinery rather than
     /// of how often anything asks.
-    pub fn try_absorb(&mut self, belt: &mut BeltSegment) -> bool {
+    pub fn try_absorb(&mut self, belt: &mut BeltSegment, economy: &Economy) -> bool {
         let Some(item) = belt.front_ready().cloned() else {
             return false;
         };
         // Checked before the item is taken, so a full dock leaves the box
         // standing at the belt's end and the line backs up behind it —
         // exactly what a machine with a full input buffer already does.
-        if !self.buffer.has_room_for(&item, 1) {
+        //
+        // TWO ceilings, and the second is the one the player meets (the
+        // dock-capacity change, 2026-09-16). This buffer is a pass-through
+        // and empties every tick, so it is the SHARED POOL that actually
+        // fills up: `has_delivery_room` is what makes "the dock is full" a
+        // reachable state rather than the unreachable one `DOCK_CAPACITY`'s
+        // doc describes. Asking the economy here rather than letting
+        // `ship_into` drop the overflow is what keeps the refusal on the
+        // belt, where it backs the line up instead of destroying a box.
+        if !self.buffer.has_room_for(&item, 1) || !economy.has_delivery_room(&item, 1) {
             return false;
         }
         let Some(taken) = belt.take_front_if_at_end() else {
@@ -250,18 +281,26 @@ impl Dock {
     /// [`Economy::deposit`], made every tick by the building instead of on a
     /// keypress by the player.
     ///
-    /// Unconditional and complete: there is no capacity to check (the pool
-    /// is an unbounded ledger, `Economy::new`) and nothing to throttle
-    /// against (contracts already meter the pool out at their own cadences),
-    /// so holding anything back would be latency with no decision attached
-    /// to it. See the module doc for the full argument.
+    /// Unthrottled, and complete except against a full pool: nothing is
+    /// held back on purpose (contracts already meter the pool out at their
+    /// own cadences, so a hold here would be latency with no decision
+    /// attached to it — see the module doc), but the pool has had a ceiling
+    /// since the dock-capacity change and **only what the pool accepts
+    /// leaves this buffer**. The remainder stays on the dock and is offered
+    /// again next tick, so a box is never destroyed by a full pool.
+    ///
+    /// That is the one case where a between-ticks snapshot of a dock reads
+    /// non-empty, and it is rare by construction: [`Self::try_absorb`]
+    /// refuses to take a box for a pool with no room, so the buffer only
+    /// ever holds an unshippable unit when ANOTHER dock filled the pool
+    /// later in the same tick.
     pub fn ship_into(&mut self, economy: &mut Economy) -> u32 {
         let held: Vec<(ItemId, u32)> = self.buffer.iter().cloned().collect();
         let mut shipped = 0u32;
         for (item, qty) in held {
-            self.buffer.remove(&item, qty);
-            economy.deposit(&item, qty);
-            shipped = shipped.saturating_add(qty);
+            let accepted = economy.deposit(&item, qty);
+            self.buffer.remove(&item, accepted);
+            shipped = shipped.saturating_add(accepted);
         }
         self.shipped_total = self.shipped_total.saturating_add(shipped);
         shipped
@@ -271,6 +310,7 @@ impl Dock {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sim::economy::DELIVERY_STOCK_CAPACITY;
     use crate::sim::types::Fx;
 
     const BELT_SPEED: f64 = 0.02;
@@ -320,8 +360,9 @@ mod tests {
     fn an_empty_belt_never_puts_anything_on_the_dock() {
         let mut d = dock();
         let mut b = belt();
+        let econ = economy();
         for _ in 0..500 {
-            assert!(!d.try_absorb(&mut b));
+            assert!(!d.try_absorb(&mut b, &econ));
             b.tick(Fx::from_num(BELT_SPEED));
         }
         assert!(d.is_empty());
@@ -335,16 +376,17 @@ mod tests {
     fn an_item_still_travelling_is_not_absorbed_until_it_arrives() {
         let mut d = dock();
         let mut b = belt();
+        let econ = economy();
         assert!(b.try_spawn("boxed_ketchup".to_string()));
 
         assert!(
-            !d.try_absorb(&mut b),
+            !d.try_absorb(&mut b, &econ),
             "a box that just entered the belt has not reached the dock"
         );
         assert_eq!(b.len(), 1, "and it must still be on the belt");
 
         run_to_end(&mut b);
-        assert!(d.try_absorb(&mut b));
+        assert!(d.try_absorb(&mut b, &econ));
         assert!(b.is_empty());
         assert_eq!(
             d.contents().cloned().collect::<Vec<_>>(),
@@ -364,7 +406,7 @@ mod tests {
         assert!(b.try_spawn("boxed_ketchup".to_string()));
 
         run_to_end(&mut b);
-        assert!(d.try_absorb(&mut b));
+        assert!(d.try_absorb(&mut b, &economy()));
         assert_eq!(b.len(), 1, "exactly one box moved, not the whole belt");
         assert_eq!(d.contents().map(|(_, n)| *n).sum::<u32>(), 1);
     }
@@ -385,11 +427,12 @@ mod tests {
         assert!(b.try_spawn("boxed_ketchup".to_string()));
         run_to_end(&mut b);
 
-        assert!(d.try_absorb(&mut b));
+        let econ = economy();
+        assert!(d.try_absorb(&mut b, &econ));
         for _ in 0..500 {
             b.tick(Fx::from_num(BELT_SPEED));
             assert!(
-                !d.try_absorb(&mut b),
+                !d.try_absorb(&mut b, &econ),
                 "a full dock must not accept a second box"
             );
         }
@@ -407,7 +450,7 @@ mod tests {
 
         assert!(b.try_spawn("boxed_ketchup".to_string()));
         run_to_end(&mut b);
-        assert!(d.try_absorb(&mut b));
+        assert!(d.try_absorb(&mut b, &econ));
 
         assert_eq!(d.ship_into(&mut econ), 1);
         assert!(d.is_empty(), "the dock is a pass-through, not a store");
@@ -435,7 +478,7 @@ mod tests {
         for item in ["boxed_ketchup", "boxed_mayo", "boxed_ketchup"] {
             assert!(b.try_spawn(item.to_string()));
             run_to_end(&mut b);
-            assert!(d.try_absorb(&mut b));
+            assert!(d.try_absorb(&mut b, &econ));
         }
         assert_eq!(d.contents().map(|(_, n)| *n).sum::<u32>(), 3);
 
@@ -444,6 +487,114 @@ mod tests {
         assert_eq!(econ.delivery_buffer.count("boxed_mayo"), 1);
         assert_eq!(d.shipped_total(), 3);
         assert!(d.is_empty());
+    }
+
+    /// The dock-capacity change's central rule: once the shared pool is at
+    /// its per-item ceiling, the dock stops taking boxes off the belt. Not
+    /// "takes it and drops it" and not "takes it and holds it forever" —
+    /// the box stays on the belt, which is what backs the line up.
+    #[test]
+    fn a_full_delivery_pool_leaves_the_box_on_the_belt() {
+        let mut d = dock();
+        let mut econ = economy();
+        let mut b = belt();
+
+        econ.deposit("boxed_ketchup", DELIVERY_STOCK_CAPACITY);
+        assert!(econ.delivery_pool_full());
+
+        assert!(b.try_spawn("boxed_ketchup".to_string()));
+        run_to_end(&mut b);
+        for _ in 0..200 {
+            assert!(
+                !d.try_absorb(&mut b, &econ),
+                "a dock with nowhere to ship must refuse the box"
+            );
+            b.tick(Fx::from_num(BELT_SPEED));
+        }
+        assert_eq!(b.len(), 1, "the refused box is still on the belt, not lost");
+        assert!(d.is_empty());
+        assert_eq!(
+            econ.delivery_buffer.count("boxed_ketchup"),
+            DELIVERY_STOCK_CAPACITY,
+            "and nothing was added to a pool that had no room"
+        );
+    }
+
+    /// The ceiling is per item id, so a pool full of one product still takes
+    /// another — the property that keeps a contract's mix fillable and the
+    /// game out of a deadlock (`DELIVERY_STOCK_CAPACITY`'s doc).
+    #[test]
+    fn a_pool_full_of_one_item_still_accepts_another() {
+        let mut d = dock();
+        let econ = {
+            let mut e = economy();
+            e.deposit("boxed_ketchup", DELIVERY_STOCK_CAPACITY);
+            e
+        };
+        let mut b = belt();
+
+        assert!(b.try_spawn("boxed_mayo".to_string()));
+        run_to_end(&mut b);
+        assert!(d.try_absorb(&mut b, &econ));
+        assert_eq!(d.contents().map(|(_, n)| *n).sum::<u32>(), 1);
+    }
+
+    /// The second gate: a dock that absorbed a box before the pool filled
+    /// (another dock shipped first, in the same tick) KEEPS it rather than
+    /// shipping it into nothing. Mass conservation is the invariant here,
+    /// not the drain.
+    #[test]
+    fn shipping_into_a_full_pool_holds_the_box_instead_of_destroying_it() {
+        let mut d = dock();
+        let mut econ = economy();
+        let mut b = belt();
+
+        assert!(b.try_spawn("boxed_ketchup".to_string()));
+        run_to_end(&mut b);
+        assert!(d.try_absorb(&mut b, &econ));
+
+        // The pool fills between the absorb and the ship.
+        econ.deposit("boxed_ketchup", DELIVERY_STOCK_CAPACITY);
+
+        assert_eq!(d.ship_into(&mut econ), 0, "nothing could be shipped");
+        assert_eq!(
+            d.contents().map(|(_, n)| *n).sum::<u32>(),
+            1,
+            "so the box is still standing on the dock"
+        );
+        assert_eq!(d.shipped_total(), 0);
+        assert_eq!(
+            econ.delivery_buffer.count("boxed_ketchup"),
+            DELIVERY_STOCK_CAPACITY
+        );
+
+        // And it goes the moment room appears.
+        econ.delivery_buffer.remove("boxed_ketchup", 1);
+        assert_eq!(d.ship_into(&mut econ), 1);
+        assert!(d.is_empty());
+    }
+
+    /// A partial ship: the pool has room for some of what the dock holds,
+    /// so some goes and the rest stays. The one case where `ship_into`'s
+    /// return value and the buffer's contents have to agree unit for unit.
+    #[test]
+    fn a_partly_full_pool_takes_what_fits_and_leaves_the_rest() {
+        let mut d = dock();
+        let mut econ = economy();
+        let mut b = belt();
+
+        for _ in 0..3 {
+            assert!(b.try_spawn("boxed_ketchup".to_string()));
+            run_to_end(&mut b);
+            assert!(d.try_absorb(&mut b, &econ));
+        }
+        assert_eq!(d.contents().map(|(_, n)| *n).sum::<u32>(), 3);
+
+        econ.deposit("boxed_ketchup", DELIVERY_STOCK_CAPACITY - 1);
+        assert_eq!(d.ship_into(&mut econ), 1);
+        assert_eq!(d.contents().map(|(_, n)| *n).sum::<u32>(), 2);
+        assert_eq!(d.shipped_total(), 1);
+        assert!(econ.delivery_pool_full());
     }
 
     /// `shipped_total` is cumulative across ships, which is what makes it
@@ -458,7 +609,7 @@ mod tests {
         for _ in 0..5 {
             assert!(b.try_spawn("boxed_ketchup".to_string()));
             run_to_end(&mut b);
-            assert!(d.try_absorb(&mut b));
+            assert!(d.try_absorb(&mut b, &econ));
             d.ship_into(&mut econ);
         }
         assert_eq!(d.shipped_total(), 5);

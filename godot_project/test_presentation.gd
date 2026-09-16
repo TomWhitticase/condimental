@@ -252,7 +252,43 @@ func _initialize() -> void:
 		_fail("the first belt's first slot should carry the tomato at belt-surface height, got %s" % str(drawn))
 		return
 
-	print("PRESENTATION_OK: orthographic camera, %d light(s) w/ shadows, SSAO+glow, %d voxel meshes, %d placement(s), item rendered" % [
+	# --- A full delivery pool pulses the dock's lamp ----------------------
+	# The lamp's hue comes from the mesh's own vertex colour (see
+	# `_make_material`: emission MULTIPLIES it), so "full" cannot be a second
+	# colour of lamp. It is a time channel instead — the one channel a lit
+	# lamp and a stack of crates do not already use — and it is clocked off
+	# the simulation tick, so pause freezes it and a screenshot run repeats
+	# (UI_UX.md §6a).
+	if main._dock_lamp_lit(false, false, 0):
+		_fail("an empty dock's lamp should be dark")
+		return
+	for tick in [0, 7, 40, 601]:
+		if not main._dock_lamp_lit(true, false, tick):
+			_fail("a dock holding stock should hold its lamp steady, dark at tick %d" % tick)
+			return
+	var lit_ticks := 0
+	var dark_ticks := 0
+	for tick in range(main.DOCK_FULL_PULSE_TICKS * 4):
+		if main._dock_lamp_lit(true, true, tick):
+			lit_ticks += 1
+		else:
+			dark_ticks += 1
+	if lit_ticks == 0 or dark_ticks == 0:
+		_fail("a full dock's lamp must blink, not hold: %d lit / %d dark ticks" % [lit_ticks, dark_ticks])
+		return
+	if lit_ticks != dark_ticks:
+		_fail("the full-dock blink should be even, got %d lit / %d dark" % [lit_ticks, dark_ticks])
+		return
+	if not main._dock_lamp_lit(true, true, 0) or main._dock_lamp_lit(true, true, main.DOCK_FULL_PULSE_TICKS):
+		_fail("the blink should turn over every DOCK_FULL_PULSE_TICKS ticks")
+		return
+	# A full pool that somehow holds nothing drawable still reads as full:
+	# "full" is the pool's own verdict, not one inferred from the crates.
+	if not main._dock_lamp_lit(false, true, 0):
+		_fail("a full dock's lamp should blink whatever the deck is showing")
+		return
+
+	print("PRESENTATION_OK: orthographic camera, %d light(s) w/ shadows, SSAO+glow, %d voxel meshes, %d placement(s), item rendered, full dock pulses" % [
 		lights.size(), meshes.size(), layout.size()
 	])
 	quit(0)

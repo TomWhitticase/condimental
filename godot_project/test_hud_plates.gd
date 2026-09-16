@@ -24,6 +24,11 @@
 #     ingredient greyed the counts beside it,
 #   * the plate clears the clipboard above it and the hotbar below it at
 #     1600x900 AND at 1280x720, on the right-hand edge in both,
+#   * both capped lists in that column — the clipboard's docket stack and the
+#     plate's own rows — are cut BETWEEN two rows and never through one, at
+#     both window sizes and with the SHORT-STAFFED strip up as well as down
+#     (issue #8: a card sliced through a line of text reads as a rendering
+#     fault, not as "there is more, scroll"),
 #   * the legend folds and unfolds from the button and from F1 (through the
 #     real `_unhandled_input`), in isometric and in first person, and the
 #     stub names the key that brings it back,
@@ -44,8 +49,31 @@ const Layouts = preload("res://test_layouts.gd")
 const BIG := Vector2i(1600, 900)
 const SMALL := Vector2i(1280, 720)
 
+## A staff snapshot with something short in it, to raise the SHORT-STAFFED
+## strip on the clipboard. Shaped like the wire's own `categories` array and
+## read the same way (`_staff_alert_state`) — Godot never recomputes `short`.
+const SHORT_STAFFED_SNAPSHOT := {
+	"categories": [{"id": "manufacturing", "name": "Manufacturing", "short": 2}],
+}
+
+## Every combination the right-hand column has to survive: the strip down and
+## up, at the shipped window size and at the tight one.
+const DOCKET_CASES := [
+	[false, BIG], [false, SMALL], [true, BIG], [true, SMALL],
+]
+## Frames a case is given before it is read — one to apply it, the rest for
+## Godot's deferred minimum-size invalidation (`_sweep_step`). It has always
+## settled by the second; the third is slack.
+const SETTLE_FRAMES := 3
+
 var main
 var _ran := false
+## What `_run_checks` proved, held for the success line the sweep prints.
+var _summary := ""
+## The docket sweep's cursor: which case, and how many frames it has had to
+## settle in (see `_sweep_step`).
+var _case := 0
+var _frame := 0
 
 
 func _fail(msg: String) -> void:
@@ -60,11 +88,11 @@ func _initialize() -> void:
 
 
 func _process(_delta: float) -> bool:
-	if _ran:
-		return true
-	_ran = true
-	_run_checks()
-	return true
+	if not _ran:
+		_ran = true
+		_run_checks()
+		return false
+	return _sweep_step()
 
 
 ## The window is 64x64 under `--script`, so every geometry check sets a real
@@ -415,7 +443,151 @@ func _run_checks() -> void:
 		return
 	probe.queue_free()
 
-	print("HUD_PLATES_OK: %d stock rows on a right-hand plate clear of the clipboard and hotbar at 1600x900 and 1280x720, each with its own colour and a 'none' zero state; the legend folds %s -> %s from its button and from F1 in both view modes, is not a modal, and every cursor panel reads its current rect" % [
+	# --- The clipboard's docket stack is cut BETWEEN dockets (issue #8) ----
+	# The clipboard is the panel that yields the right-hand column (see
+	# `_position_stock_panel`), so its docket stack is the one that gets
+	# capped — and the cut has to land on a boundary between two dockets. A
+	# card cut through the middle of a line of text reads as a rendering
+	# fault, not as "there is more, scroll".
+	#
+	# This needs more dockets than fit, so sign every offer on the board
+	# through the real command. The sweep itself runs a case per frame from
+	# `_sweep_step`, for the reason written there.
+	for offer in JSON.parse_string(main.sim.economy_snapshot_json()).get("board", []):
+		if not bool(offer.get("active", false)):
+			main.sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": String(offer["id"])}))
+	_summary = "%d stock rows on a right-hand plate clear of the clipboard and hotbar at 1600x900 and 1280x720, each with its own colour and a 'none' zero state; the legend folds %s -> %s from its button and from F1 in both view modes, is not a modal, and every cursor panel reads its current rect" % [
 		ids.size(), str(open_rect.size), str(stub_rect.size)
-	])
-	quit(0)
+	]
+
+
+## One case of the docket sweep per call, and SEVERAL FRAMES per case.
+##
+## Raising the SHORT-STAFFED strip changes the clipboard's minimum size, and
+## Godot invalidates a cached minimum size in a DEFERRED call — which a
+## `--script` SceneTree run flushes between `_process` calls and never inside
+## one. Asserting in the frame that raised the strip reads the height the
+## clipboard had before the strip existed (it read 1584px, the whole unfitted
+## stack); by the next frame it has settled, and it never moves again. So the
+## case is applied, given `SETTLE_FRAMES` to settle, and only then read.
+##
+## The strip is driven off the staff snapshot the clipboard already polls,
+## rather than by firing crew and running the line for a few thousand ticks —
+## this is a LAYOUT check, and what it needs is the two extra lines in the
+## body (test_staff_panel.gd owns the real understaffed fixture). It is
+## re-applied every frame because `main._process` re-polls the real one.
+func _sweep_step() -> bool:
+	if _case >= DOCKET_CASES.size():
+		main._staff_snapshot = {}
+		_resize(BIG)
+		print("HUD_PLATES_OK: %s; and the docket stack is cut between dockets, the board hint yields to the SHORT-STAFFED strip, and neither plate lands on the other, at both sizes with the strip up and down" % _summary)
+		quit(0)
+		return true
+	var strip: bool = bool(DOCKET_CASES[_case][0])
+	var window: Vector2i = DOCKET_CASES[_case][1]
+	main._staff_snapshot = SHORT_STAFFED_SNAPSHOT if strip else {}
+	_resize(window)
+	_frame += 1
+	if _frame < SETTLE_FRAMES:
+		return false
+	if not _check_docket_case(strip, window):
+		return true
+	_case += 1
+	_frame = 0
+	return false
+
+
+## False when the case failed (`_fail` has already asked to quit).
+func _check_docket_case(strip: bool, window: Vector2i) -> bool:
+	var where := "%s (strip %s)" % [str(window), "up" if strip else "down"]
+	if main._staff_alert_panel.visible != strip:
+		_fail("the SHORT-STAFFED strip should be %s for this case at %s" % [
+			"up" if strip else "down", str(window)
+		])
+		return false
+	# ONE hint line at a time (issue #13): the board hint and the strip say
+	# the same kind of thing in the same place, and the column cannot afford
+	# both. The strip is the one with a number in it, so the hint yields.
+	if main._contract_hint_label.visible == strip:
+		_fail("at %s the board hint and the strip are both %s — the column shows one hint line at a time" % [
+			where, "up" if strip else "down"
+		])
+		return false
+
+	# Neither plate is drawn ON the other. This is the fault that outranks
+	# every cut below: the earlier section checks it too, but only with the
+	# strip DOWN, which is how a taller clipboard came to overlap the stock
+	# plate at 1280x720 with every test green.
+	var stock: Rect2 = main._stock_rect()
+	var clipboard: Rect2 = main._contract_panel.get_global_rect()
+	if main._contract_panel.visible and stock.intersects(clipboard):
+		_fail("at %s the stock plate lands on the clipboard (stock %s, clipboard %s)" % [
+			where, str(stock), str(clipboard)
+		])
+		return false
+	if stock.intersects(main._hotbar_panel.get_global_rect()):
+		_fail("at %s the stock plate lands on the hotbar (stock %s)" % [where, str(stock)])
+		return false
+	if clipboard.end.y > float(window.y):
+		_fail("at %s the clipboard runs off the bottom of the window (%s)" % [where, str(clipboard)])
+		return false
+
+	# The cut lands on a docket boundary — unless the no-overlap clamp above
+	# is what set it, which is the 1280x720 case with a full board: there the
+	# stack is cut wherever it falls, because the alternative is the plate
+	# below having nowhere to stand (`_stock_ceiling_y`).
+	var cut: float = main._contract_cards_scroll.custom_minimum_size.y
+	var whole: Array = _docket_boundaries()
+	if whole.size() < 2:
+		_fail("this check needs several dockets to have a boundary to land on, found %d" % whole.size())
+		return false
+	var clamped: bool = cut < float(whole[0]) - 0.5
+	if not clamped:
+		var lands_on_boundary := false
+		for boundary in whole:
+			if absf(cut - float(boundary)) <= 0.5:
+				lands_on_boundary = true
+		if not lands_on_boundary:
+			_fail("at %s the docket stack is cut at %.0fpx, which is inside a docket — whole dockets end at %s" % [
+				where, cut, str(whole)
+			])
+			return false
+
+	# The plate under it obeys the same rule, and this is where it matters:
+	# the clipboard's floor is a whole docket now, so this is the tightest
+	# the stock list ever gets — and a count sliced through its digits is the
+	# same fault in the other panel.
+	var rows_cut: float = main._stock_scroll.custom_minimum_size.y
+	var row_height: float = main._stock_row_height()
+	var separation: float = float(main._stock_rows.get_theme_constant("separation"))
+	var rows_shown: float = (rows_cut + separation) / (row_height + separation)
+	if absf(rows_shown - roundf(rows_shown)) > 0.02:
+		_fail("at %s the stock list is cut at %.0fpx — %.2f rows, not a whole number of them" % [
+			where, rows_cut, rows_shown
+		])
+		return false
+	if rows_cut < row_height - 0.5:
+		_fail("at %s the stock list is capped below one whole row (%.0f < %.0f)" % [
+			where, rows_cut, row_height
+		])
+		return false
+	return true
+
+
+## The heights at which the docket stack has a boundary: the first docket,
+## the first two, and so on up to all of them. Measured off the real cards,
+## because a docket's height varies with its checklist, its status line and
+## its strike pips — there is no one row height to divide by here.
+func _docket_boundaries() -> Array:
+	var separation: float = float(main._contract_cards_box.get_theme_constant("separation"))
+	var out: Array = []
+	var running: float = 0.0
+	for child in main._contract_cards_box.get_children():
+		var card := child as Control
+		if card == null or not card.visible:
+			continue
+		if not out.is_empty():
+			running += separation
+		running += card.get_combined_minimum_size().y
+		out.append(running)
+	return out

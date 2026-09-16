@@ -586,6 +586,16 @@ const DOCK_STOCK_OFFSETS := [
 ]
 const DOCK_STOCK_SLOTS := 4
 
+## How many TICKS a full dock's lamp spends lit, and then dark, before it
+## repeats (the dock-capacity change, 2026-09-16). A pulse, not a colour: the
+## lamp's hue is its own mesh's (emission multiplies vertex colour, see
+## `_make_material`), so "full" is said in a channel the lamp still has —
+## time — and UI_UX.md §7 is satisfied without a second lamp material that
+## would read as a different lamp. Clocked off `current_tick()` like every
+## other animation here, so a paused game freezes it and a screenshot run of
+## a fixed tick count still renders the same frame.
+const DOCK_FULL_PULSE_TICKS := 12
+
 ## Presentation-only tint per raw-ingredient item id, the same shape as
 ## FLUID_TINTS: *which* item a hopper holds is simulation data — the player
 ## chooses it when they place the hopper (see `_hopper_item_choices`), so a
@@ -763,6 +773,8 @@ var _fluid_tank_nodes: Dictionary = {} # origin key -> {"fill": Node3D, "lamp": 
 var _dock_states: Dictionary = {} # origin key -> dock snapshot
 var _dock_nodes: Dictionary = {} # origin key -> {"slots": Array[Node3D], "lamp": MeshInstance3D, "stocked": bool}
 var _last_dock_stock: Array = [] # economy_snapshot_json's delivery_stock, shared by every dock
+var _delivery_capacity := 0 # how many of ONE item the pool holds, 0 until first polled
+var _delivery_full := false # is any item at that ceiling — the dock reads FULL
 
 # --- Build mode: the ghost, and what the next click will do ----------------
 # `_build_kind` is "" when the player is not placing anything; `_remove_mode`
@@ -778,6 +790,14 @@ var _ghost_tile := Vector2i.ZERO
 var _ghost_valid := false
 var _ghost_reason := "" # "", "blocked", "none_owned", "nothing_here"
 var _owned_counts: Dictionary = {} # kind -> owned count, repolled while building
+var _shop_prices: Dictionary = {} # kind -> price, from the same poll
+var _shop_affordable: Dictionary = {} # kind -> can the balance cover one, same poll
+## SHIFT while placing buys the replacement (2026-09-16), and the prompt says
+## so before the click as well as after it — so the ghost has to know whether
+## the key is down on a frame with no input event at all. `Input` is the one
+## reader; this overrides it, because a headless run has no window to press a
+## key in and `test_placement.gd` still has to drive both states.
+var _auto_buy_forced := false
 var _placement_prompt: PanelContainer
 var _placement_label: Label
 
@@ -887,8 +907,9 @@ var _last_money := INF
 ## from THIS pile, so three checklists reading "2/2" do not mean three
 ## payouts — see `_update_contract_dock`.
 var _contract_dock_row: HBoxContainer
-var _contract_dock_entries: Dictionary = {} # item id -> {"row": HBoxContainer, "label": Label}
+var _contract_dock_entries: Dictionary = {} # item id -> {"row": HBoxContainer, "label": Label, "meter": Panel}
 var _contract_dock_empty_label: Label
+var _contract_dock_full_label: Label
 ## Wages, always visible on the clipboard (the quality pass, ticket 4):
 ## "wages N / period · payday in Xs", with a shortfall warning appended in
 ## words and a glyph when the balance cannot cover the next bill — the same
@@ -948,6 +969,12 @@ const CONTRACT_METER_INK := Color(0.34, 0.29, 0.20, 1.0)
 const CONTRACT_METER_DUE := Color(0.60, 0.24, 0.16, 1.0)
 ## Under this much of a cadence left, the countdown is drawn as due.
 const CONTRACT_DUE_FRACTION := 0.12
+## The ON THE DOCK line's own bar (the dock-capacity change, 2026-09-16).
+## Narrower than a docket's countdown because several ride one line, one per
+## item in the pool — and it exists at all only because the pool HAS a
+## ceiling now: UI_UX.md §5e draws a bar exactly where the simulation defines
+## the full mark, and until `DELIVERY_STOCK_CAPACITY` this figure had none.
+const CONTRACT_DOCK_METER_WIDTH := 38.0 * UI_SCALE
 
 # --- UI scale (the 2026-09-09 tuning pass) ---------------------------------
 ## **Every pixel dimension in this HUD is measured in these two numbers.**
@@ -1077,6 +1104,11 @@ const STOCK_ICON_SIZE := Vector2(28, 28) * UI_SCALE
 ## below it and from the clipboard above it. One number, so the three gaps
 ## cannot drift apart.
 const STOCK_PANEL_MARGIN := 16.0 * UI_SCALE
+## The clipboard's inset from the top and right edges of the window, the one
+## number `_stock_ceiling_y` is measured against to decide how tall the
+## clipboard may grow. NOT `UI_SCALE`d: it is the offset handed to
+## `PRESET_TOP_RIGHT`, which is in window pixels.
+const CONTRACT_PANEL_MARGIN := 16
 ## Wide enough that the longest shipped display name and a four-digit count
 ## sit on one row without the name eliding. Bought stock reaches four digits
 ## (`--payout`'s fixture buys a thousand vinegar), and a plate that resized
@@ -2412,6 +2444,8 @@ func _rebuild_world() -> void:
 	_machine_gauges.clear()
 	_machine_running.clear()
 	_machine_motion.clear()
+	_crush_anchors.clear()
+	_crush_beats.clear()
 	_machine_load.clear()
 	_splitter_nodes.clear()
 	_splitter_states.clear()
@@ -2598,6 +2632,12 @@ func _build_placement(placement: Dictionary) -> void:
 				_world_root.add_child(gauge)
 				_machine_gauges[key] = gauge
 			_build_machine_motion(key, kind, centre, yaw)
+			if kind == CRUSH_KIND:
+				# Where the pulp comes out. Recorded with the placement rather
+				# than looked up per frame, and taken from the footprint centre
+				# (not the body node) so a turned crusher sprays from the same
+				# mouth: the feed pocket is carved on the tile's own midline.
+				_crush_anchors[key] = _footprint_centre(origin, size, CRUSH_MOUTH_Y)
 
 
 ## One of the one-voxel-tall bodies this scene scales every frame to show a
@@ -3142,7 +3182,13 @@ func _refresh_buffers(econ: Dictionary = {}) -> void:
 	if econ.is_empty():
 		econ = _read_economy()
 	_last_dock_stock = econ.get("delivery_stock", [])
-	_update_dock_stock(_last_dock_stock)
+	# The pool's ceiling and whether it is at it (the dock-capacity change).
+	# Both are facts about the ONE shared pool, so they are read here, once,
+	# rather than off each dock's own snapshot — which carries `full` too, for
+	# a chunk-driven reader with no economy in hand.
+	_delivery_capacity = int(econ.get("delivery_capacity", 0))
+	_delivery_full = bool(econ.get("delivery_full", false))
+	_update_dock_stock(_last_dock_stock, _delivery_full, sim.current_tick())
 
 
 ## Parses one of the SimBridge calls that returns an ARRAY of snapshots —
@@ -3209,8 +3255,16 @@ func _set_lamp_stocked(nodes: Dictionary, stocked: bool) -> void:
 ## ledger), and the dock's own `contents` empties every tick, so a per-dock
 ## figure would be zero forever — see DOCK_ASSET's doc.
 ##
-## Pure given `stock` and the built nodes, so a test can drive it directly.
-func _update_dock_stock(stock: Array) -> void:
+## `full` says the pool has hit `DELIVERY_STOCK_CAPACITY` for something and
+## the docks are refusing the belt (the dock-capacity change, 2026-09-16).
+## A full deck already looks like a full deck — the cases cap out at
+## DOCK_STOCK_SLOTS long before the pool does — so the state gets the one
+## channel a stack of crates does not have: the lamp PULSES instead of
+## holding, off `current_tick`.
+##
+## Pure given `stock`, `full`, `current_tick` and the built nodes, so a test
+## can drive it directly.
+func _update_dock_stock(stock: Array, full := false, current_tick := 0) -> void:
 	# Flatten the pool's (item, quantity) pairs into one case per unit, in
 	# snapshot order, so a multi-item pool shows a mixed stack rather than
 	# only its first product.
@@ -3243,7 +3297,20 @@ func _update_dock_stock(stock: Array) -> void:
 				node.set_meta("asset", asset)
 				slot.add_child(node)
 			slot.visible = true
-		_set_lamp_stocked(nodes, not waiting.is_empty())
+		_set_lamp_stocked(nodes, _dock_lamp_lit(not waiting.is_empty(), full, current_tick))
+
+
+## Whether a dock's lamp is lit this tick: steady while it merely holds
+## stock, blinking once the pool is full. Split out and pure so
+## `test_presentation.gd` can assert the blink without a rendered frame, and
+## so the one place the rule lives is readable: a full dock is the only thing
+## in the scene whose lamp is not a straight reading of "has something".
+func _dock_lamp_lit(stocked: bool, full: bool, current_tick: int) -> bool:
+	if not full:
+		return stocked
+	@warning_ignore("integer_division")
+	var phase := int(current_tick / DOCK_FULL_PULSE_TICKS)
+	return phase % 2 == 0
 
 
 ## A network's or tank's fluid id, or "" — `fluid` is NULLABLE on the wire
@@ -3883,6 +3950,15 @@ func _fp_camera_move(delta: float) -> void:
 ## TAB toggles between ISOMETRIC and FIRST_PERSON. Both share the one
 ## Camera3D node — this reconfigures it (projection, near plane, aspect
 ## policy) rather than creating a second one.
+##
+## Each branch places the camera itself and nothing may place it again
+## afterwards: this used to end with an unconditional
+## `_update_camera_transform()`, which the isometric branch had already made
+## and which the first-person branch had no business making — so entering
+## first person put the camera back at the isometric angle and distance
+## until the first mouse-look or WASD input called
+## `_update_fp_camera_transform()` and snapped it into place (fixed
+## 2026-09-16).
 func _set_view_mode(mode: int) -> void:
 	if mode == _view_mode:
 		return
@@ -3923,7 +3999,6 @@ func _set_view_mode(mode: int) -> void:
 		_update_camera_transform()
 		if _help_label != null:
 			_help_label.text = ISO_HELP_TEXT
-	_update_camera_transform()
 
 
 ## Fits the orthographic frustum to the factory floor's bounding box by
@@ -4504,6 +4579,20 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_dock_empty_label.text = "empty"
 	_contract_dock_row.add_child(_contract_dock_empty_label)
 
+	# ...and its opposite. The bar beside each item already says how close
+	# the pool is to its ceiling; this says what being AT it means, in words,
+	# because a bar reading full is a fact and "the line behind it has
+	# stopped" is the consequence (UI_UX.md §7, §5e). Its own settings
+	# object, duplicated rather than shared, for the wage line's reason: it
+	# carries the docket's warning red and every other meta line must not.
+	var full_settings: LabelSettings = _contract_meta_settings.duplicate()
+	full_settings.font_color = CONTRACT_METER_DUE
+	_contract_dock_full_label = Label.new()
+	_contract_dock_full_label.label_settings = full_settings
+	_contract_dock_full_label.text = "⚠ FULL — the belt is backing up"
+	_contract_dock_full_label.visible = false
+	_contract_dock_row.add_child(_contract_dock_full_label)
+
 	# Wages, on the always-visible clipboard rather than only inside the H
 	# panel (the quality pass, ticket 4 — GAMEPLAY.md §5's third cost axis
 	# has to be as visible as the money it draws from). Ink by default,
@@ -4679,7 +4768,7 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	# Anchored to the top-right corner with a fixed margin, sized to its own
 	# content — independent of however tall the machine-line panel ends up
 	# being.
-	_contract_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 16)
+	_contract_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, CONTRACT_PANEL_MARGIN)
 
 
 ## Rebuilds the docket stack from a `contracts` array. Called once at build
@@ -5067,7 +5156,7 @@ func _hotbar_reserved_height() -> float:
 	return HOTBAR_SLOT_SIZE.y * HOTBAR_SELECTED_SCALE + HOTBAR_BOTTOM_MARGIN * 3.0
 
 
-func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float) -> void:
+func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float, snap_rows := false, hard_available := INF) -> void:
 	if scroll == null or grid == null:
 		return
 	var natural: float = grid.get_combined_minimum_size().y
@@ -5081,7 +5170,63 @@ func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float) 
 	# A floor, so a viewport too small for even one row leaves a scrollable
 	# stub rather than a panel with no grid in it at all.
 	var cap: float = maxf(_ui_px(110.0), available - chrome)
+	# `snap_rows` moves the cut down to the last whole row, for a stack whose
+	# rows are cards the player reads (see `_whole_rows_height`). The build
+	# menu does NOT ask for it: its grid wraps six icon slots to a line, so a
+	# "row" there is a line of cards that are all the same height anyway, and
+	# the half-row it shows past the cap is the thing that says "scroll".
+	if snap_rows:
+		cap = _whole_rows_height(grid, cap)
+	# Both floors above — `_ui_px(110)` and a whole row — may exceed what the
+	# caller said was available, which is how the panel takes a little of the
+	# column back from whatever is under it. `hard_available` is where that
+	# stops: the height past which the thing under it would have nowhere left
+	# to go at all. Past that the list is cut wherever it falls, ragged, and
+	# that is the right answer — a panel drawn ON another panel is a worse
+	# fault than a card cut through a line (issue #13).
+	cap = minf(cap, maxf(0.0, hard_available - chrome))
 	scroll.custom_minimum_size.y = minf(natural, cap)
+
+
+## The tallest height not greater than `cap` that ends on a boundary between
+## two of `box`'s rows — so a capped list is cut between rows rather than
+## through the middle of a line of text, which reads as a rendering fault
+## rather than as "there is more below" (issue #8).
+##
+## Rows are MEASURED, not divided out of a constant: a docket's height varies
+## with its checklist, its status line and its strike pips, so there is no one
+## row height for the clipboard to divide by the way the stock plate has one
+## (`_stock_row_height`).
+##
+## One whole row is the floor, for the same reason `_fit_grid_scroll` has one:
+## a list showing nothing at all is worse than a list showing its first row
+## and a scrollbar. That can exceed `cap` — the clipboard's floor is a whole
+## docket now rather than `_ui_px(110)`, and at 1600x900 with the
+## SHORT-STAFFED strip up it costs the stock plate below it a row. That is the
+## column's documented order of yielding (`_position_stock_panel`): the
+## clipboard cannot yield past its own floor, and the plate takes what is
+## left and scrolls.
+func _whole_rows_height(box: Control, cap: float) -> float:
+	if box == null:
+		return cap
+	var separation: float = 0.0
+	if box is BoxContainer:
+		separation = float(box.get_theme_constant("separation"))
+	var used: float = 0.0
+	var fitted: float = 0.0
+	var rows: int = 0
+	for child in box.get_children():
+		var row := child as Control
+		if row == null or not row.visible:
+			continue
+		if rows > 0:
+			used += separation
+		used += row.get_combined_minimum_size().y
+		if rows > 0 and used > cap:
+			break
+		fitted = used
+		rows += 1
+	return cap if rows == 0 else fitted
 
 
 ## One icon slot. A Button rather than a Panel so pressing it is the whole
@@ -8154,10 +8299,15 @@ func _position_stock_panel() -> void:
 	# clipboard at 1280x720. Same shape, one row as the floor instead, so the
 	# list scrolls (UI_UX.md §5c's deliberate last resort) rather than the
 	# plate colliding with the two fixed things it is wedged between.
+	#
+	# And the cut lands BETWEEN two rows, the same rule the clipboard's docket
+	# stack follows (`_whole_rows_height`, issue #8) — a count sliced through
+	# the middle of its digits is unreadable in a way a count behind a
+	# scrollbar is not.
 	var natural: float = _stock_rows.get_combined_minimum_size().y
 	_stock_scroll.custom_minimum_size.y = natural
 	var chrome: float = _stock_panel.get_combined_minimum_size().y - natural
-	var cap: float = maxf(_stock_row_height(), available - chrome)
+	var cap: float = _whole_rows_height(_stock_rows, maxf(_stock_row_height(), available - chrome))
 	_stock_scroll.custom_minimum_size.y = minf(natural, cap)
 
 	var size := _stock_panel.get_combined_minimum_size()
@@ -8203,6 +8353,36 @@ func _stock_reserved_height() -> float:
 	if height <= 0.0:
 		height = _stock_panel.get_combined_minimum_size().y
 	return height + STOCK_PANEL_MARGIN * 2.0
+
+
+## The lowest `y` anything hung above this plate may reach: where its top
+## edge would be if it had shrunk to its floor of chrome plus one row.
+## `_stock_reserved_height`'s twin at the other end — that one is what the
+## plate WANTS and the clipboard is capped against, this is what it will take
+## regardless, and so the line the clipboard may never grow across
+## (`_update_contract_panel`). A plate drawn ON the clipboard is a worse
+## fault than either of the two things the caps are there to avoid.
+##
+## An absolute `y` rather than a height, because the two numbers a height
+## would have to be subtracted from are both approximations of this one:
+## `_update_contract_panel`'s column reserves the hotbar's flyout strip that
+## this plate is too far right to meet, and the margin between the two panels
+## is one gap, not each of their margins. Measuring the same `floor_y` this
+## plate is positioned against costs a second reading of the hotbar and gets
+## the real answer — at 1280x720 the approximations were a whole docket out.
+##
+## `INF` when there is no plate to collide with: no plate, no limit.
+func _stock_ceiling_y() -> float:
+	if _stock_panel == null or not _stock_panel.visible:
+		return INF
+	var vp := get_viewport()
+	if vp == null or vp.get_visible_rect().size.y <= 0.0:
+		return INF
+	var floor_y: float = vp.get_visible_rect().size.y - _hotbar_reserved_height() - STOCK_PANEL_MARGIN
+	if _hotbar_panel != null and _hotbar_panel.size.y > 0.0:
+		floor_y = _hotbar_panel.get_global_rect().position.y - STOCK_PANEL_MARGIN
+	var chrome: float = _stock_panel.get_combined_minimum_size().y - _stock_scroll.custom_minimum_size.y
+	return floor_y - (chrome + _stock_row_height()) - STOCK_PANEL_MARGIN
 
 
 ## The plate at its full list height, capped by the share of the column it is
@@ -9246,7 +9426,7 @@ func _update_hotbar() -> void:
 			# The strip already parses the one snapshot `_refresh_owned_counts`
 			# would, every frame — so it keeps that cache current rather than
 			# making the next caller parse the same object again.
-			_owned_counts[String(entries[index].get("kind", ""))] = int(entries[index].get("owned", 0))
+			_remember_shop_entry(entries[index])
 	for index in range(_hotbar_slots.size()):
 		var slot: Dictionary = _hotbar_slots[index]
 		var owned := 0
@@ -9694,7 +9874,13 @@ func _confirm_build() -> void:
 	_issue_world_command(command)
 	# The ghost said the click would work; the simulation has the final say.
 	# What is on the tile afterwards is the answer, and the sound says it.
-	_cue(FactoryAudio.PLACE if not _placement_at_tile(tile).is_empty() else FactoryAudio.REFUSED)
+	var placed := not _placement_at_tile(tile).is_empty()
+	_cue(FactoryAudio.PLACE if placed else FactoryAudio.REFUSED)
+	# ...and with SHIFT held, a placement that landed buys its own
+	# replacement, so the mode can keep going. Only a placement that actually
+	# happened spends money: a refused click must cost nothing.
+	if placed and _auto_buy_held() and _buy_replacement(_build_kind):
+		_cue(FactoryAudio.BUY)
 	# Placing spends one owned unit. Running out ends the mode rather than
 	# leaving a ghost that can no longer be built — the prompt would read
 	# "✗ NONE OWNED" forever, which is a dead end rather than feedback.
@@ -9725,11 +9911,67 @@ func _refresh_owned_counts() -> void:
 	if not (snapshot is Dictionary):
 		return
 	for entry in snapshot.get("entries", []):
-		_owned_counts[String(entry.get("kind", ""))] = int(entry.get("owned", 0))
+		_remember_shop_entry(entry)
+
+
+## One shop entry's three facts the scene keeps outside the build menu: what
+## is owned, what one costs and whether the balance covers it. The menu reads
+## the snapshot straight and needs none of this; the ghost, the prompt and
+## SHIFT's replacement purchase run with no menu open, and the alternative is
+## each of them parsing the same object again on the frame it is asked.
+func _remember_shop_entry(entry: Dictionary) -> void:
+	var kind := String(entry.get("kind", ""))
+	_owned_counts[kind] = int(entry.get("owned", 0))
+	_shop_prices[kind] = float(entry.get("price", 0.0))
+	_shop_affordable[kind] = bool(entry.get("affordable", false))
 
 
 func _owned_of(kind: String) -> int:
 	return int(_owned_counts.get(kind, 0))
+
+
+func _price_of(kind: String) -> float:
+	return float(_shop_prices.get(kind, 0.0))
+
+
+func _can_afford(kind: String) -> bool:
+	return bool(_shop_affordable.get(kind, false))
+
+
+## Is the auto-buy modifier down? SHIFT, read from `Input` rather than from
+## the click's own `shift_pressed`, because the prompt has to answer the same
+## question on frames where nothing was clicked at all — and because the
+## answer must be the same one `_confirm_build` acts on, or the prompt would
+## promise a purchase the click does not make.
+func _auto_buy_held() -> bool:
+	return _auto_buy_forced or Input.is_key_pressed(KEY_SHIFT)
+
+
+## SHIFT's half of the placement click: the shop restocks the unit that was
+## just spent, so a run of belt is laid without a trip back to the build menu
+## (or the hotbar's SHIFT+number) for every tile.
+##
+## It buys exactly ONE — the replacement for what was placed — rather than
+## topping the owned count back up to some earlier figure, which would be a
+## bigger and vaguer promise; one placement, one purchase, and the balance
+## falls by a price the prompt has already named.
+##
+## An unaffordable replacement is refused the same way the build menu's own
+## buy is (the simulation's `Purchase` is a silent no-op), and nothing else
+## changes: the placement already happened out of stock, the prompt says the
+## money is not there, and running out of stock ends build mode as it always
+## has. Returns whether money actually moved, so the caller can sound the
+## till only when it did (UI_UX.md §8: the cue is fired by the handler that
+## knows the outcome, never by the input).
+func _buy_replacement(kind: String) -> bool:
+	if kind == "" or not _can_afford(kind):
+		return false
+	var owned_before := _owned_of(kind)
+	sim.issue_command_json(JSON.stringify({"type": "purchase", "kind": kind}))
+	_refresh_owned_counts()
+	if _shop_open:
+		_update_shop_menu()
+	return _owned_of(kind) > owned_before
 
 
 ## The tile the ghost sits on — the same ray/plane pick the hover tooltip
@@ -10014,9 +10256,26 @@ func _placement_prompt_text() -> String:
 			return "✗ BLOCKED  %s  ·  facing %s\nsomething is already there\nR: rotate    ESC: cancel%s" % [
 				kind_name, _build_direction, contents_hint
 			]
-	return "✔ PLACE  %s  ·  facing %s\nclick to build    %d left to place\nR: rotate    ESC: cancel%s" % [
-		kind_name, _build_direction, owned, contents_hint
+	return "✔ PLACE  %s  ·  facing %s\nclick to build    %d left to place\n%s\nR: rotate    ESC: cancel%s" % [
+		kind_name, _build_direction, owned, _auto_buy_hint_text(), contents_hint
 	]
+
+
+## The prompt's SHIFT line. Held or not, it is always there while a valid
+## placement is on offer: the whole point of the modifier is that it lets a
+## line be laid without opening a menu, and a modifier nothing ever mentions
+## is one nobody finds. Held, it stops advertising and starts reporting —
+## with the price, because it is spending money on every click, and with the
+## warning glyph and the words when the balance cannot cover the next one
+## (UI_UX.md §7: never colour alone, and this line has no colour of its own
+## at all).
+func _auto_buy_hint_text() -> String:
+	var price := _price_of(_build_kind)
+	if not _auto_buy_held():
+		return "SHIFT: buy a replacement as you place  (%.0f each)" % price
+	if not _can_afford(_build_kind):
+		return "⚠ SHIFT: cannot afford another  (%.0f)  ·  placing from stock" % price
+	return "⟳ SHIFT: buying a replacement each click  (-%.0f)" % price
 
 
 ## The prompt's plate: the scene's near-black HUD panel with its rule
@@ -11677,6 +11936,13 @@ func _dock_hover_text(origin_key: String, direction: String) -> String:
 		text += "\n%s" % crew_text
 	if bool(snapshot.get("understaffed", false)):
 		text += "\nheld  ·  short of %s staff" % _crew_categories_text(crew)
+	# `full` is the POOL's state, identical on every dock, and it is the
+	# reason a belt into this building has stopped moving — so it is said
+	# here, where the player has just pointed at the thing that stopped
+	# (UI_UX.md §7: glyph and words, no colour involved at all).
+	if bool(snapshot.get("full", false)):
+		text += "\n⚠ FULL  ·  %d of one item is all the dock holds\nthe belt backs up until a contract ships some" % \
+			_delivery_capacity
 	return text
 
 
@@ -11886,7 +12152,11 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 	_contract_money_label.text = "Money: %.0f" % money
 	_flash_money_change(money)
 	_update_money_flyout()
-	_update_contract_dock(econ.get("delivery_stock", []))
+	_update_contract_dock(
+		econ.get("delivery_stock", []),
+		int(econ.get("delivery_capacity", 0)),
+		bool(econ.get("delivery_full", false))
+	)
 	_update_contract_wages(money)
 	_update_staff_alert()
 
@@ -11932,18 +12202,37 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 	# player is short of behind a scrollbar they have no reason to look
 	# under.
 	#
+	# The cut lands BETWEEN two dockets, never through one (issue #8). What
+	# made that visible was the SHORT-STAFFED strip (2026-09-16), which sits
+	# inside this same clipboard body and takes two lines out of the stack's
+	# share: the bottom docket then ended mid-sentence, which reads as a
+	# rendering fault rather than as "there is more, scroll". Nothing about
+	# what the stack is capped AGAINST changed — see `_whole_rows_height`.
+	#
 	# A headless SceneTree run has no viewport at all, and a window that has
 	# not laid out yet reports a zero rect — neither must collapse the stack
 	# to nothing, so "no viewport" means "no cap", not "a cap of zero".
 	var viewport := get_viewport()
 	if viewport != null and viewport.get_visible_rect().size.y > 0.0:
+		var column: float = (
+			viewport.get_visible_rect().size.y - _hotbar_reserved_height() - _ui_px(24.0)
+		)
+		# Where the stack's floors stop mattering: the line the plate below
+		# stands on once it has given up everything but one row
+		# (`_stock_ceiling_y`), measured from this panel's own top edge.
+		var hard: float = INF
+		var ceiling_y: float = _stock_ceiling_y()
+		if is_finite(ceiling_y):
+			var top: float = CONTRACT_PANEL_MARGIN
+			if _contract_panel.size.y > 0.0:
+				top = _contract_panel.get_global_rect().position.y
+			hard = maxf(0.0, ceiling_y - top)
 		_fit_grid_scroll(
 			_contract_cards_scroll,
 			_contract_cards_box,
-			viewport.get_visible_rect().size.y
-				- _hotbar_reserved_height()
-				- _stock_reserved_height()
-				- _ui_px(24.0)
+			column - _stock_reserved_height(),
+			true,
+			hard
 		)
 	else:
 		_contract_cards_scroll.custom_minimum_size.y = _contract_cards_box.get_combined_minimum_size().y
@@ -11954,7 +12243,7 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 	# only computes offsets once, at the moment it's called — without this,
 	# the panel stays sized/positioned for its build-time (near-empty) text
 	# and later, wider text spills past its right edge.
-	_contract_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 16)
+	_contract_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, CONTRACT_PANEL_MARGIN)
 
 
 ## True when the built dockets already correspond, in order, to the reported
@@ -12066,6 +12355,20 @@ func _update_staff_alert() -> void:
 	_staff_alert_panel.visible = not state.is_empty()
 	if not state.is_empty():
 		_staff_alert_label.text = String(state["text"])
+	# ONE hint line at a time (issue #13). The board hint and this strip are
+	# both advice about what to do next, and the clipboard has room for one:
+	# the strip's two lines plus the hint's one were what pushed the stock
+	# plate below the clipboard off its third row at 1600x900 once the docket
+	# stack floored at a whole docket (`_whole_rows_height`).
+	#
+	# The hint is the one that yields, and not only because it is the shorter
+	# line. A factory that cannot crew the orders it is already running has
+	# no business being told where to sign more — hiring is the next action,
+	# and the strip names its key. The way to the board is still printed in
+	# the legend (`C: contracts`) and on the empty-board line, so it is never
+	# the only copy of it on screen.
+	if _contract_hint_label != null:
+		_contract_hint_label.visible = not _staff_alert_panel.visible
 	if _staff_alert_known_short < 0:
 		_staff_alert_known_short = short
 		return
@@ -12074,7 +12377,7 @@ func _update_staff_alert() -> void:
 	_staff_alert_known_short = short
 
 
-func _update_contract_dock(stock: Array) -> void:
+func _update_contract_dock(stock: Array, capacity: int, full: bool) -> void:
 	var seen: Dictionary = {}
 	for pair in stock:
 		var item_id: String = String(pair[0])
@@ -12084,7 +12387,23 @@ func _update_contract_dock(stock: Array) -> void:
 		if entry.is_empty():
 			entry = _build_contract_dock_entry(item_id)
 			_contract_dock_entries[item_id] = entry
-		entry["label"].text = "%d" % qty
+		# The pool has a per-item ceiling now (the dock-capacity change,
+		# 2026-09-16), so the figure has a denominator and earns UI_UX.md
+		# §5e's bar. An older wire with no capacity on it still reads as the
+		# bare figure it always did rather than inventing a full mark.
+		var meter: Panel = entry["meter"]
+		if capacity > 0:
+			var at_ceiling := qty >= capacity
+			entry["label"].text = "%d/%d" % [qty, capacity]
+			meter.visible = true
+			_set_meter(
+				meter,
+				float(qty) / float(capacity),
+				CONTRACT_METER_DUE if at_ceiling else CONTRACT_METER_INK
+			)
+		else:
+			entry["label"].text = "%d" % qty
+			meter.visible = false
 		entry["row"].visible = true
 	for item_id in _contract_dock_entries:
 		if not seen.has(item_id):
@@ -12092,6 +12411,12 @@ func _update_contract_dock(stock: Array) -> void:
 	# `delivery_stock` reports non-zero entries only, so an empty array is
 	# genuinely "nothing on the dock" — say so rather than showing a bare label.
 	_contract_dock_empty_label.visible = stock.is_empty()
+	_contract_dock_full_label.visible = full
+	if full:
+		# The label is built before any item entry exists, so it is pushed
+		# back to the end of the line each time it shows: the sentence reads
+		# as the consequence of the bars beside it, not as a heading over them.
+		_contract_dock_row.move_child(_contract_dock_full_label, -1)
 
 
 func _build_contract_dock_entry(item_id: String) -> Dictionary:
@@ -12110,7 +12435,17 @@ func _build_contract_dock_entry(item_id: String) -> Dictionary:
 	var label := Label.new()
 	label.label_settings = _contract_meta_settings
 	row.add_child(label)
-	return {"row": row, "label": label, "icon": icon}
+
+	# One bar per item, in the docket's own ink on its own paper (UI_UX.md
+	# §5e: a clipboard's meter takes the two colours the card already has).
+	# Hidden until a capacity arrives on the wire, so nothing draws a bar
+	# against a full mark that does not exist.
+	var meter := _build_meter(
+		row, CONTRACT_DOCK_METER_WIDTH, CONTRACT_METER_INK,
+		CONTRACT_METER_TRACK, CONTRACT_METER_BORDER, CONTRACT_METER_HEIGHT
+	)
+	meter.visible = false
+	return {"row": row, "label": label, "icon": icon, "meter": meter}
 
 
 ## One docket's live state. `progress` is sim_core's per-contract, clamped
@@ -12443,6 +12778,83 @@ const PAYOUT_FLYOUT_RISE := 26.0
 ## How long a paid docket's payout figure reads PAID instead of "+90".
 const PAYOUT_STAMP_TICKS := 45
 
+## --- The crusher's spray (the crusher-particles change, 2026-09-16) -------
+##
+## The one piece of feedback in this scene that is not an EVENT: a payout, a
+## delivery and a purchase each happen once and get one burst, while crushing
+## is a thing a machine is *doing* for eighty ticks at a stretch. So this is
+## a beat rather than a burst — a few flecks of pulp thrown out of the feed
+## pocket every CRUSH_BEAT_TICKS of WORK — and every constant below is chosen
+## to keep it readable at that rate (UI_UX.md §6: juice stays legible over
+## spectacle, and a burst sized for a rare event is exhausting at a frequent
+## one's pace — §6a's two-sizes rule, applied a third time).
+##
+## `_machine_work_elapsed` is what drives it, so the spray inherits that
+## function's narrower meaning for free: a crusher that has finished its
+## batch and is blocked on a full output stands there holding pulp it cannot
+## throw, and one waiting for tomatoes throws nothing at all. The machine
+## that is visibly working is the one that IS working (UI_UX.md §2b point 28).
+const CRUSH_KIND := "crusher"
+const CRUSH_ASSET := "crush_bit"
+
+## The whole pool, allocated once like COIN_POOL and for its reason. Sized
+## for three crushers all beating at once with a beat still in the air.
+const CRUSH_POOL := 24
+
+## One spit per this many ticks of work, and how many flecks it throws. At
+## the crusher's 80-tick recipe that is eight spits a batch: often enough to
+## read as a continuous chewing, sparse enough that each one is a separate
+## event the eye can follow. FIVE flecks rather than the three the first
+## render used: at this camera a beat of three read as three stray pixels
+## sitting on the machine's roof, not as a spit (UI_UX.md §2b point 12 — the
+## headless test could prove the throw and not that it reads as one).
+const CRUSH_BEAT_TICKS := 10
+const CRUSH_PER_BEAT := 5
+
+## A fleck's whole life, in ticks — deliberately shorter than the beat, so
+## the air over the crusher clears between spits and the effect never builds
+## into a permanent red cloud sitting on the machine.
+const CRUSH_FLIGHT_TICKS := 9
+
+## The ballistics, in TILE like every other distance in a 3D burst (§6a: the
+## coin fountain's own lesson, not re-learned here). Peaks at
+## `(LAUNCH * lift)^2 / (4 * GRAVITY)` = 0.2 tiles over the mouth at an
+## average lift and 0.43 at the highest, and is back at mouth height around
+## phase 0.5, which is where CRUSH_SHRINK has all but taken it away — so the
+## pulp arcs out of the pocket and is gone as it drops back in. A first
+## render at 2.4 threw it clear over the machine's roof and out of its own
+## tile: past about a half tile the spray stops reading as something coming
+## out of the pocket and starts reading as debris flying off the floor.
+const CRUSH_LAUNCH := 1.8 * TILE
+const CRUSH_GRAVITY := 4.0 * TILE
+## Outward drift over the flight. Under half a tile: the pocket is 16 voxels
+## across, so anything wider would throw pulp through the machine's own frame.
+const CRUSH_SPREAD := 0.28 * TILE
+## How much the throw varies fleck to fleck, as a fraction either side of 1,
+## and how many turns about world Y it makes on the way. Derived from the
+## fleck's index and the tick, never `randf()`, so a screenshot repeats (§6a).
+const CRUSH_LIFT_VARY := 0.45
+const CRUSH_SPINS := 1.25
+## The fleck model is a quarter tile; this trims it a little further, and
+## CRUSH_SIZE_VARY spreads the fan either side of it. Pulp is torn, so a beat
+## of identical lumps reads as manufactured parts rather than as debris; the
+## size is picked from the fleck's own index, like its lift, so a screenshot
+## still repeats (§6a).
+const CRUSH_SCALE := 0.7
+const CRUSH_SIZE_VARY := 0.3
+## Fractions of the flight spent growing in and shrinking out. It grows in
+## fast — pulp is thrown, it does not fade up — and leaves slower, so the
+## last thing seen is it falling back into the pocket.
+const CRUSH_GROW := 0.15
+const CRUSH_SHRINK := 0.4
+
+## The height the pulp leaves from: the top of the crusher's feed pocket,
+## which `machine_crusher` carves to voxel 25 (`assets.rs`). Spelled in
+## voxels against FLOOR_Y like every other height in this scene, so a change
+## to the model is a change to one number here.
+const CRUSH_MOUTH_VOXELS := 25
+const CRUSH_MOUTH_Y := FLOOR_Y + CRUSH_MOUTH_VOXELS * VOXEL_UNIT
+
 ## The dock case pop: a new case scales up from nothing over this many ticks.
 ## Much shorter than a payout's anything — this fires every few seconds on a
 ## running line, so it has to be over before it is noticed as an animation.
@@ -12477,6 +12889,21 @@ var _dock_stock_seen := -1
 var _dock_pop_tick := -1
 var _dock_pop_slot := -1
 
+## The crusher spray's pool and bookkeeping. `_crush_anchors` and
+## `_crush_beats` are per-PLACEMENT and so are cleared with the world;
+## `_crush_bits` is per-SCENE and survives a rebuild, for the same reason the
+## coins do (a player laying a belt should not blink the factory's pulp out).
+var _crush_bits: Array = []
+var _crush_root: Node3D
+var _crush_next := 0
+## Crusher origin key -> where its pulp is thrown from.
+var _crush_anchors: Dictionary = {}
+## Crusher origin key -> the index of the last beat it threw, so one beat
+## fires exactly once however many frames it spans. Absent means "not seen
+## working yet", which is what makes a freshly loaded save silent until its
+## crushers actually start a batch.
+var _crush_beats: Dictionary = {}
+
 ## The pause menu's sound switch (built in `_build_pause_menu`).
 var _pause_sound_button: Button
 var _pause_music_button: Button
@@ -12487,6 +12914,9 @@ var _pause_music_button: Button
 ## payouts were celebrated and for how much in total.
 var payout_events := 0
 var payout_total := 0
+## The same seam for the crusher's spray: how many beats have been thrown
+## since the scene was built.
+var crush_beats_thrown := 0
 
 
 ## Builds the coin pool and the "+N" label. Called once from `_build_ui`.
@@ -12517,6 +12947,21 @@ func _build_payout_feedback(hud: CanvasLayer) -> void:
 		node.visible = false
 		_coin_root.add_child(node)
 		_coins.append({"node": node, "start_tick": -1, "origin": Vector3.ZERO,
+			"dir": Vector3.ZERO, "lift": 1.0})
+
+	# The crusher's pulp shares this root, and so shares its rebuild rule:
+	# both are feedback that outlives a place/remove/rotate.
+	_crush_root = Node3D.new()
+	_crush_root.name = "CrushSpray"
+	_coin_root.add_child(_crush_root)
+	_crush_bits.clear()
+	_crush_next = 0
+	for i in range(CRUSH_POOL):
+		var bit := _asset_node(CRUSH_ASSET)
+		bit.name = "crush_bit_%d" % i
+		bit.visible = false
+		_crush_root.add_child(bit)
+		_crush_bits.append({"node": bit, "start_tick": -1, "origin": Vector3.ZERO,
 			"dir": Vector3.ZERO, "lift": 1.0})
 
 	var flyout_settings := LabelSettings.new()
@@ -12643,6 +13088,7 @@ func _launch_coin(origin: Vector3, dir: Vector3, lift: float, current_tick: int)
 func _update_payout_feedback() -> void:
 	var current_tick: int = sim.current_tick()
 	_update_coins(current_tick)
+	_update_crush_spray(current_tick)
 	_update_money_punch(current_tick)
 	_update_payout_flyout(current_tick)
 	_update_payout_stamps(current_tick)
@@ -12678,6 +13124,94 @@ func _active_coin_count() -> int:
 	var count := 0
 	for coin in _coins:
 		if int(coin["start_tick"]) >= 0:
+			count += 1
+	return count
+
+
+## The crusher's pulp: one spit per CRUSH_BEAT_TICKS of a crusher's own work,
+## for every crusher on the map.
+##
+## The beat is counted in the machine's WORK ticks, not in the global tick,
+## for the reason `_machine_motion_frame` counts its frames that way: a
+## crusher that starts a batch mid-beat would otherwise join a factory-wide
+## rhythm part way through, and the spray would not line up with the rolls
+## turning beside it. Two crushers working out of step therefore spit out of
+## step, which is what a floor of machines actually looks like.
+##
+## Pure given the tick and the machine states, and it fires nothing at all
+## for a machine that is not working, so a paused game holds its pulp in the
+## air (§6a: the animation clock is the simulation tick, never wall time).
+func _update_crush_spray(current_tick: int) -> void:
+	for key in _crush_anchors.keys():
+		var work := _machine_work_elapsed(key)
+		if work < 0:
+			# Not working: starved, blocked, or between batches. Forget the
+			# beat rather than remembering it, so the next batch starts its
+			# spray from its own first tick.
+			_crush_beats.erase(key)
+			continue
+		@warning_ignore("integer_division")
+		var beat := int(work / CRUSH_BEAT_TICKS)
+		# `!=` rather than `>`: a new batch resets `work` to 0, and its first
+		# beat has to fire even though its index went backwards.
+		if int(_crush_beats.get(key, -1)) != beat:
+			_crush_beats[key] = beat
+			_throw_crush_beat(_crush_anchors[key], beat, current_tick)
+	_update_crush_bits(current_tick)
+
+
+## One spit. The fan is evenly spaced and rotated by the beat's own index, so
+## consecutive beats are not the identical picture and none of it is random
+## (§6a: derived from an index, never from `randf()`).
+func _throw_crush_beat(anchor: Vector3, beat: int, current_tick: int) -> void:
+	if _crush_bits.is_empty():
+		return
+	crush_beats_thrown += 1
+	var base: float = TAU * (float(beat % 5) / 5.0)
+	for i in range(CRUSH_PER_BEAT):
+		var angle: float = base + TAU * float(i) / float(CRUSH_PER_BEAT)
+		var lift: float = 1.0 + CRUSH_LIFT_VARY * (float((i * 3 + beat) % 7) / 3.0 - 1.0)
+		var size: float = 1.0 + CRUSH_SIZE_VARY * (float((i * 2 + beat) % 5) / 2.0 - 1.0)
+		var bit: Dictionary = _crush_bits[_crush_next]
+		_crush_next = (_crush_next + 1) % _crush_bits.size()
+		bit["start_tick"] = current_tick
+		bit["origin"] = anchor
+		bit["dir"] = Vector3(cos(angle), 0.0, sin(angle))
+		bit["lift"] = lift
+		bit["size"] = size
+
+
+## Flies every live fleck. The coin's arc, at a quarter of its size and a
+## third of its length — deliberately the same shape of code rather than a
+## second animation convention.
+func _update_crush_bits(current_tick: int) -> void:
+	for bit in _crush_bits:
+		var start: int = int(bit["start_tick"])
+		var node: Node3D = bit["node"]
+		if start < 0:
+			continue
+		var phase: float = float(current_tick - start) / float(CRUSH_FLIGHT_TICKS)
+		if phase < 0.0 or phase >= 1.0:
+			bit["start_tick"] = -1
+			node.visible = false
+			continue
+		var lift: float = float(bit.get("lift", 1.0))
+		var height: float = CRUSH_LAUNCH * lift * phase - CRUSH_GRAVITY * phase * phase
+		node.position = Vector3(bit["origin"]) + Vector3(bit["dir"]) * (CRUSH_SPREAD * phase) \
+			+ Vector3(0.0, height, 0.0)
+		node.rotation.y = phase * TAU * CRUSH_SPINS
+		var grow: float = clampf(phase / CRUSH_GROW, 0.0, 1.0)
+		var shrink: float = clampf((1.0 - phase) / CRUSH_SHRINK, 0.0, 1.0)
+		node.scale = Vector3.ONE * (CRUSH_SCALE * float(bit.get("size", 1.0)) * grow * shrink)
+		node.visible = true
+
+
+## How many flecks are in the air — the headless test's window onto the
+## world half of this, exactly as `_active_coin_count` is for a payout.
+func _active_crush_count() -> int:
+	var count := 0
+	for bit in _crush_bits:
+		if int(bit["start_tick"]) >= 0:
 			count += 1
 	return count
 

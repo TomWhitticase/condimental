@@ -36,8 +36,8 @@
 mod common;
 
 use sim_core::sim::{
-    DOCK_CAPACITY, DockSnapshot, Direction, RecipeRegistry, TileSnapshot, World,
-    reference_chain_with_budget,
+    ContractRegistry, DELIVERY_STOCK_CAPACITY, DOCK_CAPACITY, DockSnapshot, Direction,
+    RecipeRegistry, TileSnapshot, World, reference_chain_with_budget,
 };
 
 /// Exactly `common::stock_up`'s ingredient bill, so a stocked world starts
@@ -404,6 +404,10 @@ fn the_dock_json_shape_is_what_presentation_is_told_to_expect() {
     assert_eq!(dock["contents"], serde_json::json!([]));
     assert_eq!(dock["capacity_per_item"], DOCK_CAPACITY);
     assert_eq!(dock["shipped_total"], 0);
+    // The dock-capacity change (2026-09-16): `full` is the pool's state, not
+    // this building's, and it rides every dock's snapshot so a chunk-driven
+    // renderer can say "full — the belt is backing up" on the tile itself.
+    assert_eq!(dock["full"], false);
     assert!(
         dock.get("fill").is_none(),
         "a dock has no fill level on purpose — presentation must read \
@@ -429,3 +433,119 @@ fn the_dock_json_shape_is_what_presentation_is_told_to_expect() {
     assert_eq!(tile["capacity_per_item"], DOCK_CAPACITY);
     assert_eq!(tile["shipped_total"], 0);
 }
+
+// ---------------------------------------------------------------------
+// 5. The ceiling on the pool — a relationship, not a literal.
+// ---------------------------------------------------------------------
+
+/// `DELIVERY_STOCK_CAPACITY` has to clear the biggest single quantity any
+/// contract on the board asks for in one window, because a contract settles
+/// only when the pool holds its whole mix at once: a ceiling at or under
+/// that quantity would make that contract permanently unsatisfiable, and the
+/// game would give no hint why. Pinned against `data/contracts.ron` itself
+/// rather than against the literal 20 `export_pallet` asks for today, the
+/// way `STARTING_MONEY` is pinned against the chain's build cost — adding a
+/// bigger order fails this test instead of quietly breaking that order.
+///
+/// The margin is the doc's "comfortably exceed", spelled as twice over: the
+/// pool is shared, so the biggest order must be able to build up while the
+/// small ones keep skimming the same pile.
+#[test]
+fn the_pool_ceiling_clears_the_biggest_order_on_the_board() {
+    let board = ContractRegistry::bundled();
+    let (biggest_id, biggest_item, biggest_qty) = board
+        .ordered()
+        .iter()
+        .flat_map(|c| {
+            c.mix
+                .iter()
+                .map(move |(item, qty)| (c.id.clone(), item.clone(), *qty))
+        })
+        .max_by_key(|(_, _, qty)| *qty)
+        .expect("the bundled board offers at least one contract");
+
+    assert!(
+        DELIVERY_STOCK_CAPACITY >= biggest_qty * 2,
+        "the delivery pool holds {DELIVERY_STOCK_CAPACITY} of an item, but '{biggest_id}'          asks for {biggest_qty} {biggest_item} in one window — raise          DELIVERY_STOCK_CAPACITY to at least twice the biggest order, or that order can          never be filled"
+    );
+}
+
+/// The ceiling reached for real, by a line producing into it. What must NOT
+/// happen is product quietly evaporating at the end of the chain: the pool
+/// stops at its ceiling, the dock refuses the belt rather than swallowing
+/// what it cannot pass on (its own buffer stays empty, the pass-through rule
+/// of section 3 holds even when full), and the belt behind it backs up with
+/// the boxes that have nowhere to go. That backed-up belt is the thing the
+/// player sees, and `full` on the dock's snapshot is how presentation says
+/// so in words.
+#[test]
+fn a_full_pool_backs_the_line_up_instead_of_losing_product() {
+    // Twice `world()`'s larder: the line has to run some 25 000 ticks to
+    // out-produce the starter contract's appetite by a whole pool, and one
+    // stocking runs dry before then (a dead line proves nothing here).
+    let mut world = reference_chain_with_budget(recipes(), BUDGET + common::STOCK_COST);
+    common::stock_up(&mut world);
+    common::stock_up(&mut world);
+    let belt_start = the_dock(&world)
+        .belt_tile
+        .expect("the dock is fed by a belt");
+    let belt_chunk = (belt_start.0.div_euclid(32), belt_start.1.div_euclid(32));
+
+    let mut filled = false;
+    for _ in 0..80_000u32 {
+        common::supply(&mut world);
+        world.tick();
+
+        let stock = world.economy_snapshot().delivery_stock;
+        for (item, qty) in &stock {
+            assert!(
+                *qty <= DELIVERY_STOCK_CAPACITY,
+                "the pool holds {qty} {item}, past its own ceiling of                  {DELIVERY_STOCK_CAPACITY}"
+            );
+        }
+        assert!(
+            the_dock(&world).contents.is_empty(),
+            "a full pool must make the dock REFUSE the belt, not hold product itself —              the dock is a pass-through at every fill level"
+        );
+
+        if stock
+            .iter()
+            .any(|(_, qty)| *qty == DELIVERY_STOCK_CAPACITY)
+        {
+            filled = true;
+            break;
+        }
+    }
+
+    assert!(
+        filled,
+        "an undemanded line must reach the pool's ceiling — it never did, so either the          line stopped producing or the ceiling is not being applied"
+    );
+    let dock = the_dock(&world);
+    assert!(
+        dock.full,
+        "a pool at its ceiling is what the dock's `full` flag reports: {dock:?}"
+    );
+
+    // Keep running with nowhere to put product: the belt fills instead.
+    let mut backed_up = 0;
+    for _ in 0..2_000u32 {
+        common::supply(&mut world);
+        world.tick();
+        backed_up = world
+            .chunk_snapshot(belt_chunk)
+            .belts
+            .iter()
+            .find(|b| b.tile == belt_start)
+            .map(|b| b.items.len())
+            .unwrap_or(0);
+        if backed_up > 0 {
+            break;
+        }
+    }
+    assert!(
+        backed_up > 0,
+        "with the pool full the dock's belt must hold the boxes it cannot hand over"
+    );
+}
+

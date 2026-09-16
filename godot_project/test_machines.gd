@@ -233,6 +233,36 @@ func _run_checks() -> void:
 			_fail("a full delivery pool left a dock slot empty")
 			return
 
+	# --- a full pool says so on the dock it stopped ------------------------
+	# The `full` flag and the capacity both come off the wire (asserted in
+	# `cargo test -p sim_core`); what is checked here is that the hover says
+	# the two things a player standing at a stopped belt needs — that this is
+	# the ceiling, and what happens next (UI_UX.md §7: glyph and words).
+	var dock_state: Dictionary = main._dock_states.get("5,0", {})
+	if dock_state.is_empty():
+		_fail("the placed dock has no polled state to hover")
+		return
+	if bool(dock_state.get("full", false)):
+		_fail("an idle dock's pool should not read as full")
+		return
+	var calm_hover: String = main._dock_hover_text("5,0", "east")
+	if calm_hover.contains("FULL"):
+		_fail("a dock with room said it was full: '%s'" % calm_hover)
+		return
+	dock_state["full"] = true
+	main._delivery_capacity = 48
+	var full_hover: String = main._dock_hover_text("5,0", "east")
+	if not full_hover.contains("⚠ FULL"):
+		_fail("a full dock's hover must say so, got: '%s'" % full_hover)
+		return
+	if not full_hover.contains("48"):
+		_fail("the full-dock hover should name the ceiling it hit, got: '%s'" % full_hover)
+		return
+	if not full_hover.contains("backs up"):
+		_fail("the full-dock hover should say what being full does to the belt, got: '%s'" % full_hover)
+		return
+	dock_state["full"] = false
+
 	# --- hover answers for every placed kind through one mechanism --------
 	for kind in placed.keys():
 		var tile: Vector2i = placed[kind][0]

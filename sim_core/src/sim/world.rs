@@ -1033,6 +1033,19 @@ pub struct DockSnapshot {
     /// ship (the staff pools MVP epic; `Dock::understaffed`). While true
     /// the buffer is held and, at capacity, the belt behind it backs up.
     pub understaffed: bool,
+    /// Whether the shared delivery pool has reached its per-item ceiling
+    /// (`Economy::delivery_pool_full`), i.e. whether this dock is currently
+    /// refusing boxes off its belt and the line behind it is backing up (the
+    /// dock-capacity change, 2026-09-16).
+    ///
+    /// A property of the POOL, not of this building, so every dock reports
+    /// it identically — the same rule the pallet stack drawn on the deck
+    /// already follows (point 1 above). It rides the dock's own snapshot
+    /// anyway because it is a fact about this tile that hover has to state
+    /// ("full — the belt is backing up") and because a chunk-driven renderer
+    /// re-reads a dock when it ships; presentation with the economy snapshot
+    /// already in hand may equally read `delivery_full` there.
+    pub full: bool,
 }
 
 /// One machine's tap into a fluid network, for presentation. Used for both
@@ -3125,7 +3138,10 @@ impl World {
     fn try_absorb_belt_into_dock(&mut self, belt: Entity, dock: Entity) -> bool {
         let mut body = self.ecs.get::<&mut Dock>(dock).unwrap();
         let mut segment = self.ecs.get::<&mut BeltSegment>(belt).unwrap();
-        body.try_absorb(&mut segment)
+        // The economy comes in read-only, as the pool's room check (the
+        // dock-capacity change): a full pool leaves the box standing on the
+        // belt rather than on a dock that cannot ship it.
+        body.try_absorb(&mut segment, &self.economy)
     }
 
     /// Applies a player-issued command (ARCHITECTURE.md §4). Invalid/no-op
@@ -3929,6 +3945,7 @@ impl World {
             capacity_per_item: body.capacity_per_item(),
             shipped_total: body.shipped_total(),
             understaffed: body.understaffed(),
+            full: self.economy.delivery_pool_full(),
         }
     }
 
