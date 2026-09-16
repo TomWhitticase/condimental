@@ -23,7 +23,8 @@ mod common;
 use sim_core::sim::save::{MoneyBits, SavedStaff};
 use sim_core::sim::types::Money;
 use sim_core::sim::{
-    ContractRegistry, MachineRegistry, PlayerCommand, RecipeRegistry, STARTING_MONEY, StaffCatalog,
+    ContractRegistry, Direction, MachineRegistry, PlayerCommand, RecipeRegistry, STARTING_MONEY,
+    StaffCatalog,
     StaffLoadError, StaffPools, StallKind, TileSnapshot, WorkState, World, command_from_json,
     reference_chain, reference_chain_with_budget,
 };
@@ -144,6 +145,89 @@ fn validate_machines_rejects_an_unknown_category_a_duplicate_and_a_zero_count() 
         catalog.validate_machines(&registry(r#"[("manufacturing", 0)]"#)),
         Err(StaffLoadError::ZeroCrewCount { .. })
     ));
+}
+
+/// THE ESTABLISHMENT MOVES WHEN THE FACTORY MOVES, AND AT NO OTHER TIME.
+///
+/// This is the rule the 2026-09-16 staffing change exists to create, and it
+/// is stated as two assertions because a player feels it as two things:
+/// placing a machine tells you at once that it needs a crew, and nothing
+/// you are not doing ever changes that number under you.
+#[test]
+fn the_establishment_tracks_what_is_placed_and_never_the_tick() {
+    let mut world = running_line(60);
+    let required = |w: &World, id: &str| -> u32 {
+        w.staff_snapshot()
+            .categories
+            .iter()
+            .find(|c| c.id == id)
+            .unwrap()
+            .required
+    };
+
+    // The shipped chain: crusher 1 + mixer 1 + cooking vat 2.
+    let before = required(&world, "manufacturing");
+    assert_eq!(before, 4, "the reference chain's manufacturing establishment");
+
+    // Running the factory for a long while does not move it, however the
+    // line ebbs and flows. `demand` is free to breathe underneath.
+    for _ in 0..200 {
+        common::supply(&mut world);
+        world.tick();
+        assert_eq!(
+            required(&world, "manufacturing"),
+            before,
+            "the establishment moved without a machine being placed or removed"
+        );
+    }
+
+    // A second crusher asks for one more cook, the moment it is placed.
+    world.issue_command(PlayerCommand::Purchase { kind: "crusher".into(), quantity: 1 });
+    world.issue_command(PlayerCommand::Place {
+        kind: "crusher".into(),
+        tile: (12, 12),
+        direction: Direction::East,
+        item: None,
+    });
+    assert_eq!(
+        required(&world, "manufacturing"),
+        before + 1,
+        "a placed crusher raises the manufacturing establishment by its crew"
+    );
+
+    // And takes it back when it is removed.
+    world.issue_command(PlayerCommand::Remove { tile: (12, 12) });
+    assert_eq!(
+        required(&world, "manufacturing"),
+        before,
+        "removing it gives the head back"
+    );
+}
+
+/// A 2x2 cooking vat is ONE crew of two, not four crews of two: the
+/// establishment counts placements, and a multi-tile machine is one
+/// placement however many tiles it covers.
+#[test]
+fn a_multi_tile_machine_is_counted_once() {
+    let world = running_line(1);
+    let vat_crew: u32 = world
+        .crew_of_kind("cooking_vat")
+        .iter()
+        .filter(|(c, _)| c == "manufacturing")
+        .map(|(_, n)| n)
+        .sum();
+    assert_eq!(vat_crew, 2, "the shipped vat asks for two cooks");
+    let manufacturing = world
+        .staff_snapshot()
+        .categories
+        .iter()
+        .find(|c| c.id == "manufacturing")
+        .unwrap()
+        .required;
+    assert_eq!(
+        manufacturing, 4,
+        "crusher 1 + mixer 1 + vat 2 — the vat counted once, not once per tile"
+    );
 }
 
 /// The starting crew is sized to the reference line the way `STARTING_MONEY`
@@ -327,19 +411,33 @@ fn firing_one_manufacturing_head_idles_exactly_the_last_manufacturing_machine() 
             .iter()
             .find(|c| c.id == "manufacturing")
             .unwrap();
-        let tally = (
-            manufacturing.demand,
-            manufacturing.assigned,
-            manufacturing.short,
+
+        // THE REGRESSION THAT MOTIVATED THE ESTABLISHMENT (2026-09-16).
+        // One head was fired from a line whose placed machinery needs four,
+        // so the answer to "how many must I hire?" is ONE, on every tick,
+        // for as long as nothing is placed or removed. It used to be
+        // `demand - assigned`, which read 2 on a tick the vat was refused
+        // and 0 on a tick it ran — flapping between two wrong numbers while
+        // the factory sat uniformly one head short, and moving again before
+        // the player could act on what it said.
+        assert_eq!(
+            (manufacturing.required, manufacturing.short),
+            (4, 1),
+            "the establishment and the hiring advice must not move tick to tick"
         );
+
+        let tally = (manufacturing.demand, manufacturing.assigned);
         match stall_of(&world, vat) {
             Some((StallKind::Staff, category)) => {
                 assert_eq!(category, "manufacturing");
-                assert_eq!(tally, (4, 2, 2), "crusher and mixer claimed, the vat refused");
+                assert_eq!(tally, (4, 2), "crusher and mixer claimed, the vat refused");
                 vat_refusals += 1;
             }
             None => {
-                assert_eq!(tally.2, 0, "a machine stood aside, so the vat ran: {tally:?}");
+                // `demand` still describes the tick honestly: a machine
+                // stood aside, so fewer heads were asked for and the vat
+                // got its two. That figure is worth showing as "working
+                // right now"; it is simply not the hiring question.
                 assert!(tally.0 <= 3, "{tally:?}");
                 vat_runs += 1;
             }
@@ -1042,6 +1140,7 @@ fn staff_snapshot_json_has_the_documented_shape_in_staff_ron_order() {
                 "left_last_payday",
                 "name",
                 "owed",
+                "required",
                 "short",
                 "unpaid",
                 "wage"

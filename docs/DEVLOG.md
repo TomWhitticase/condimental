@@ -119,6 +119,60 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-16 — Staffing holds still, and the crew is on screen
+
+A playtest note said the staffing requirement "keeps fluctuating", and it
+did. `demand` was a THROUGHPUT measure: a machine asks for a crew only when
+it plans to work, so a belt running dry dropped the requirement and a burst
+raised it. The `▲ SHORT-STAFFED` verdict was a momentary peak, and acting on
+it meant over-hiring.
+
+The requirement is now the **establishment**: the sum of the crews of every
+PLACED machine, running or not, recomputed only when a machine is placed,
+removed or rotated (and again after a load). `short` means "hire this many"
+and holds still. The per-tick figures are kept and still shown, demoted to
+"3 of 4 working right now" — a true and interesting number that was never
+the hiring question. Per-tick claim gating is untouched, so the tick path
+and its determinism guarantees did not move. No save-schema bump; `required`
+is derived.
+
+This contradicted GAMEPLAY §7 as written, so §7 is amended and the reasoning
+is in DECISIONS.md. The owner agreed the change before any code was written.
+Three things in the tree already assumed it: `staff.ron`'s starting roster
+equals the shipped chain's placed crews (and a test asserts it), the HUD was
+summing placements in GDScript to draw its "asked by" line, and §7's own
+starting numbers only worked on the placement model.
+
+The second half was a **CREW plate** on the right-hand column: who you have,
+what they are committed to, whether you must hire, the next payday's cost
+and whether you can cover it — all without a key pressed. Building it showed
+the clipboard was already saying two of those things, so the clipboard is
+now the ALERT (the wages warning, beside the balance it is about) and the
+plate is the READOUT. The SHORT-STAFFED strip moved onto the plate's heading
+and border. At 1280x720 that move was load-bearing: the strip's two lines
+were the difference between the column fitting and the plates overlapping.
+
+The column has three tenants now and the order of yielding is written down
+and tested — clipboard scrolls its dockets, stock scrolls its rows, CREW
+drops its detail line rather than growing a scrollbar, because an
+at-a-glance readout you have to scroll is not one.
+
+From a holistic review of the feature: `maintenance` is a dead category
+(nothing asks for it) so it takes no room until something does; FIRE is
+gated on heads and never on the establishment, or a player could be billed
+for staff they cannot shed; and notice pay is now a tooltip on the FIRE
+button, which is the one rule whose consequence arrives after the decision.
+
+Two deferrals filed as issues: the unpaid spiral has no designed escape
+hatch, and there is still no per-machine "who is unstaffed" at a glance.
+
+The review shot earned its place again: with the panel open on an underfunded
+line, the verdict read "nothing placed asks for staff yet" over four hired
+heads and a `4 / 4` bar. It was summing `demand`, which a stalled factory
+reports as zero. It sums `required` now, and the stalled case is a fixture.
+The plate carries numbers and no bar: a 342px column has no room for a track
+beside `2 / 4` and `▲ HIRE 2`, and `docs/DECISIONS.md` says so.
+
 ### 2026-09-16 — the hall in first person, its air in isometric; menu centred
 
 Two notes back from the owner's demo of the title-screen branch.

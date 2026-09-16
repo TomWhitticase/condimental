@@ -25,6 +25,132 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-16: **Staffing is an establishment, not a throughput measure — and
+  the crew gets a plate.** A playtest complaint that "the number of staff
+  needed keeps fluctuating" turned out to be exactly true, and the cause was
+  the design, not a bug.
+
+  **What was happening.** `sim::machine` asks for a crew only when the plan
+  is to work ("the crew is asked for only when the plan is to work"), and the
+  dock claims its logistics head only when its buffer is non-empty. So
+  `demand` measured THROUGHPUT, not staffing. A belt running dry dropped the
+  requirement; a burst raised it. The `▲ SHORT-STAFFED` verdict was therefore
+  computed from a momentary peak, and a player who acted on it over-hired,
+  because the number that prompted them had already moved. GAMEPLAY.md §7
+  stated this as the design — "*while actively running*" — so changing it
+  needed the owner's agreement, which it got before any code was written.
+
+  **What it is now.** `CategoryPool.required` is the sum of the crews of
+  every PLACED machine, running or not. It is recomputed in exactly one
+  place, `World::recompute_establishment`, called from
+  `World::recompute_topology` — which is already the single choke point for
+  `Place`, `Remove` and `Rotate` and nothing else. `short` on the wire became
+  `required - headcount`: "hire this many", and it does not move unless the
+  player moves it. The old per-tick figures are NOT deleted: `demand` and
+  `assigned` remain, and the HUD still shows "3 of 4 working right now"
+  beside the establishment. That is a genuinely interesting number; it just
+  was never the hiring question.
+
+  **Three things said the codebase already assumed this.** `data/staff.ron`
+  ships manufacturing 4, packaging 2, logistics 1 — exactly crusher 1 +
+  mixer 1 + vat 2, bottler 1 + packer 1, dock 1, and `tests/staff.rs`
+  *asserts* that equality. The HUD was already summing placements in
+  GDScript to draw its "asked by: crusher ×1, mixer ×1, cooking vat ×2"
+  line — two sources of truth, and gameplay arithmetic on the wrong side of
+  the boundary (CLAUDE.md: gameplay logic lives in Rust, never in GDScript).
+  And GAMEPLAY §7's own starting numbers only made sense on the placement
+  model. Moving the sum into Rust fixed the rule violation and the bug
+  together.
+
+  **What was deliberately NOT changed.** Per-tick claim gating stays as it
+  was: machines still claim crew each tick in the topology's stable order.
+  When `headcount >= required` every claim succeeds, so the two models agree
+  whenever the factory is properly staffed, and when it is short the existing
+  stable-order rule still lands the shortfall on the same machine every tick.
+  The tick path is untouched, which is why this was a safe change to make to
+  a system with a long-running determinism requirement.
+
+  **`short` is computed against `headcount`, never `available`.** A head in
+  arrears is on the books and not working. Counting them as missing would
+  advise hiring a second head to cover the first — but the fix for a head in
+  arrears is paying them, and hiring makes the next payday worse. The
+  distinction only exists because notice pay exists.
+
+  **No save-schema bump.** `required` is derived, so it is recomputed on
+  load rather than stored. That nearly shipped broken:
+  `save::load` rebuilds structure by replaying real `Place` commands (which
+  recompute it correctly) and THEN calls `restore_staff`, which builds fresh
+  pools and threw the derived state away. Every loaded world read as needing
+  nobody. Caught by an existing round-trip test, fixed by calling
+  `recompute_establishment` after the restore. Worth remembering as a shape:
+  a restore that rebuilds a struct wholesale silently discards anything
+  derived that was computed before it.
+
+  **The balance consequence, stated plainly.** You are now told to hire for
+  machines that are idle, where before an idle machine cost nothing.
+  Expansion is more expensive up front and less surprising later. Because
+  the starting roster exactly equals the shipped line's establishment, a
+  fresh game still starts perfectly staffed. Whether a machine should be
+  *mothballable* — switched off deliberately, releasing its crew — is left
+  open in GAMEPLAY §11; it is a balance question, and nothing in the wire or
+  the save format precludes it.
+
+  **The CREW plate, and what it displaced.** The second half of the same
+  request: a permanent readout on the right-hand column showing who you
+  have, what they are committed to, whether you must hire, the next payday's
+  cost and whether you can cover it. Building it revealed that the clipboard
+  was already saying two of those things — a "wages 10 / period · payday in
+  18s" line and a two-line SHORT-STAFFED strip — four inches above a plate
+  that now says both permanently and in more detail. At 1280x720 that was
+  not merely untidy: those two lines were the difference between the column
+  fitting and the plates overlapping. So the split is **alert vs readout**.
+  The clipboard keeps only the wages WARNING, beside the balance it is
+  about; the plate owns the figures; the alarm moved to the plate's heading
+  and border, where the rows beneath already name which categories are short
+  and by how many. Issue #13's "one hint line at a time" trade lapsed with
+  it — the board hint and the alarm are on different plates now.
+
+  **The right-hand column has three tenants, so the order of yielding is
+  written down.** The clipboard scrolls its docket stack; the stock list
+  scrolls its rows; the CREW plate, whose content is bounded at four staff
+  categories, drops its "assigned to" detail line instead of growing a
+  scrollbar — an at-a-glance readout you have to scroll is not one, and
+  every category stays on screen either way, which a scroll could not
+  promise. The plate's cap is measured off the viewport and the hotbar
+  ALONE. Reading the clipboard or the stock plate there would close a loop,
+  because both of those are sized against the plate's reserved height; that
+  is the same circularity `_stock_reserved_height` documents from the
+  two-plate era, and it was re-derived the hard way here. Two related
+  Godot-specific traps: a wrapping Label reports its minimum height at its
+  MINIMUM width, not the width it will be drawn at, so an unconstrained one
+  measured three times its real height; and the assignment line is now a
+  single ellipsised row rather than a wrapping one, so a big factory's
+  machine names cannot silently push the plate past its cap.
+
+  **The plan's per-row meter was dropped, and the plate carries numbers
+  only.** A bar would have been legitimate under UI_UX §5e — `required` is a
+  sim-defined ceiling, which is exactly what §5e asks for — but it does not
+  fit: the column is 342px wide, and `icon 27 + "Manufacturing" ~120 + a
+  50px track + "2 / 4" ~45 + "▲ HIRE 2" ~90` plus separations overruns it,
+  while a full-width track under each row costs ~24px of height on a plate
+  whose whole budget is 43% of the column and which already drops its detail
+  line at 1280x720. `2 / 4` beside `▲ HIRE 2` says both things the bar would
+  have said, in less room. The H panel keeps its meter, where there is width
+  for one.
+
+  **From the holistic review of the feature, also fixed here.**
+  `maintenance` is a dead category — nothing in `machines.ron` asks for it
+  and the roster starts it at zero — so it now takes no room on the plate
+  until something asks or a head is hired into it, and the H panel says why.
+  FIRE is gated on HEADS, never on the establishment: a category nothing
+  needs is exactly where a player is most likely to be carrying heads they
+  want to shed, and disabling the button there would bill them every payday
+  with no way out. And notice pay — `fire()` drops `headcount` but leaves
+  `owed`, and payday pays the heads who have already left FIRST — is now a
+  tooltip on the FIRE button itself, not only a line in the legend at the
+  foot of the panel. It is the one staffing rule whose consequence arrives
+  after the decision, and FIRE is the button a player reaches for in exactly
+  the payday it cannot rescue them from.
 - 2026-09-16: **The hall is drawn in first person only; the isometric view
   gets its air. And the main menu is centred.** Two things the owner sent
   back after demoing the title-screen branch: "make the menu centred, at the

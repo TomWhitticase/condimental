@@ -2083,6 +2083,50 @@ impl World {
     // Topology
     // -----------------------------------------------------------------
 
+    /// Sums the ESTABLISHMENT — every head the placed machinery needs to be
+    /// fully crewed, whether or not any of it is running — and hands it to
+    /// [`StaffPools::set_required`].
+    ///
+    /// Called from [`Self::recompute_topology`], which is reached only from
+    /// `Place`, `Remove` and `Rotate`, so the staffing requirement moves
+    /// when the FACTORY changes and at no other time. **Also called by the
+    /// save loader after it restores the pools**: `StaffPools::restore`
+    /// builds fresh pools, which would otherwise drop the establishment the
+    /// replayed `Place` commands had just computed and load every world
+    /// needing nobody.
+    ///
+    /// The per-tick `demand` beside it cannot do this job: a machine asks
+    /// for its crew only when its plan is to work (`machine.rs`, "The crew
+    /// is asked for only when the plan is to work"), and the dock only when
+    /// its buffer has something in it, so `demand` falls whenever a belt
+    /// runs dry. The player saw a hiring figure that had already changed by
+    /// the time they clicked HIRE. Establishment against headcount is the
+    /// stable question, and `staff.ron`'s starting roster was always the
+    /// shipped chain's establishment — `tests/staff.rs` asserts that
+    /// equality (docs/DECISIONS.md, the 2026-09-16 record).
+    ///
+    /// One entry per placement, so a 2x2 cooking vat is one crew and not
+    /// four: the ECS holds one entity per placement, however many tiles it
+    /// covers.
+    pub(super) fn recompute_establishment(&mut self) {
+        let mut establishment: BTreeMap<String, u32> = BTreeMap::new();
+        let entities: Vec<Entity> = self.ecs.iter().map(|e| e.entity()).collect();
+        for entity in entities {
+            if self.ecs.get::<&Position>(entity).is_err() {
+                continue;
+            }
+            let kind = self.placement_of(entity).kind;
+            let Some(machine) = self.machines.get(&kind) else {
+                continue;
+            };
+            for (category, count) in &machine.staff {
+                *establishment.entry(category.clone()).or_insert(0) += *count;
+            }
+        }
+        let establishment: Vec<(String, u32)> = establishment.into_iter().collect();
+        self.staff.set_required(&establishment);
+    }
+
     /// Rebuilds everything derived from where things stand: the occupancy
     /// grid, the ordered per-kind entity lists, the hand-off links, and the
     /// fluid networks.
@@ -2151,6 +2195,8 @@ impl World {
                 );
             }
         }
+
+        self.recompute_establishment();
 
         let body_of = |entity: Entity| -> BodyKind {
             *self

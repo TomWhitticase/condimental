@@ -18,6 +18,29 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-16 **Staffing is an establishment, and the crew has a plate.**
+  **The staffing requirement is the sum of the crews of every PLACED
+  machine**, running or not — recomputed only in `World::recompute_topology`
+  (place/remove/rotate) and again after a load, never per tick. `short` on
+  the wire means `required - headcount`: "hire this many", and it holds
+  still. The per-tick `demand`/`assigned` figures are kept and still shown,
+  demoted to "what is working right now". This contradicts GAMEPLAY §7 as
+  written ("*while actively running*"), which is amended with it: the old
+  model made the hire advice move with the belts, so it had changed by the
+  time the player acted on it. No save-schema bump — `required` is derived.
+  Per-tick claim gating is untouched; the two models agree whenever the
+  factory is properly staffed. The **CREW plate** on the right-hand column
+  makes staffing legible with no key pressed, and it takes the SHORT-STAFFED
+  alarm and the wages line OFF the clipboard: the clipboard keeps only the
+  wages WARNING, beside the balance it is about. The right-hand column's
+  order of yielding is now clipboard scrolls → stock scrolls → CREW drops
+  its detail line (bounded content, so never a scrollbar). `short` is
+  computed against `headcount`, never `available`: a head in arrears is not
+  working, but hiring a second head to cover them is the wrong advice —
+  paying them is.
+  The plan's per-row meter is dropped: `required` is a legitimate §5e
+  ceiling, but neither a 50px track nor a full-width one fits a 342px column
+  already at its height cap — `2 / 4` beside `▲ HIRE 2` says the same thing.
 - 2026-09-16 **The hall is drawn in first person only; the isometric view
   gets its air.** Owner's playtest ("when in isometric view the skybox is
   messed up… decide what to do with it"). A sky is found by intersecting a
