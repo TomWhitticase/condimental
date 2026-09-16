@@ -627,6 +627,34 @@ static func build_stress_line(sim) -> void:
 const STRESS_PLACEMENTS := STRESS_BELTS + 1 + 2 * 4 + STRESS_PIPE_RUNS * (2 + STRESS_PIPES_PER_RUN)
 
 
+## THE ITEM GALLERY (the second-sauce epic, `docs/BBQ_SAUCE_PLAN.md`) — a
+## bare straight belt run for `test_screenshot.gd --item-gallery` to stand one
+## of each finished-goods model on, side by side, at the size an item really
+## renders. 80 of a 3,000 starting balance.
+##
+## A belt run rather than an empty floor because an item is only ever judged
+## ON a belt: half a tile of product against black rubber is the contrast a
+## player actually reads, and `_carried_item_transform` is what knows where
+## on a tile it stands. Nothing feeds it, so what is on it is exactly what
+## the screenshot put there — which is the whole point, since this fixture
+## exists to photograph models for items `data/recipes.ron` does not
+## necessarily make yet.
+##
+## Deliberately one belt per item with a gap between them: adjacent items on
+## a real belt touch, and two cases nose to nose would be reviewed as one
+## silhouette instead of two.
+const ITEM_GALLERY_SLOTS := 4
+static func build_item_gallery(sim) -> void:
+	for x in range(ITEM_GALLERY_SLOTS * 2):
+		place(sim, "belt", Vector2i(x, 0), "east")
+
+
+## Which tile the nth item-gallery slot stands on. Every other tile, so the
+## run reads as a belt rather than as a shelf.
+static func item_gallery_tile(slot: int) -> Vector2i:
+	return Vector2i(slot * 2, 0)
+
+
 ## THE BELT GALLERY (the pipes & conveyors overhaul, ticket 5) — every belt
 ## shape at every facing, and a belt meeting a machine, a hopper and a dock
 ## at every facing, in one world. `test_belt_shapes.gd` asserts against it

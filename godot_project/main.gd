@@ -633,6 +633,18 @@ const ITEM_MODELS := {
 	"ketchup": "item_ketchup_pail",
 	"bottled_ketchup": "item_bottle",
 	"boxed_ketchup": "item_box",
+	# The second sauce (`docs/BBQ_SAUCE_PLAN.md`). Separate item ids on the
+	# same bottler and packer, so separate models: a belt carrying BBQ has to
+	# be tellable from a belt carrying ketchup at a glance, and the fallback
+	# below would make every crate of either the same cardboard box.
+	#
+	# **These two keys are mapped BEFORE the items exist.** The epic's ticket
+	# 2 adds them to `data/recipes.ron`; until it lands nothing produces
+	# either and both entries are simply unreachable, exactly like
+	# `ketchup_mix` above. That is the safe order — the doc above records
+	# what the other one costs.
+	"bottled_bbq": "item_bottle_bbq",
+	"boxed_bbq": "item_box_bbq",
 }
 const ITEM_MODEL_FALLBACK := "item_box"
 

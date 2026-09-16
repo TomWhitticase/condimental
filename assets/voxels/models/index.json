@@ -85,7 +85,13 @@
   "item_bottle": [
     "matte"
   ],
+  "item_bottle_bbq": [
+    "matte"
+  ],
   "item_box": [
+    "matte"
+  ],
+  "item_box_bbq": [
     "matte"
   ],
   "item_ketchup_pail": [

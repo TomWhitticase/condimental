@@ -49,6 +49,12 @@
 # building junction at every facing), the review subject for the pipes and
 # conveyors overhaul's belt presentation.
 #
+# `--item-gallery` builds the ITEM GALLERY (test_layouts.gd's
+# `build_item_gallery`) and stands one of each finished-goods model on it —
+# the second-sauce epic's review frame, and the only one that shows a
+# shipping case's LABEL, which the model previews cannot (they are rendered
+# from the opposite corner).
+#
 # `--bottleneck` builds the BOTTLENECK LINE (test_layouts.gd's
 # `build_bottleneck_line`: the reference line on auto-fill, run until it has
 # backed up behind the cooking vat), the fixture the machine-load epic's
@@ -311,6 +317,24 @@ var _pause := false
 const MENU_REVIEW_SLOT := "zz review shot"
 var _menu_review_path := ""
 
+## `--item-gallery` — one of each FINISHED-GOODS model standing on a bare
+## belt run (`test_layouts.gd`'s `build_item_gallery`), ketchup beside BBQ,
+## at the size an item really renders. The second-sauce epic's one review
+## that nothing else can give: a preview render is a single model blown up to
+## fill the frame, and the model previews are shot from vengi's camera — the
+## opposite corner to the game's (UI_UX.md §2b point 35) — which is the very
+## face a shipping label is NOT on.
+##
+## Ketchup first, then its BBQ counterpart, so the pair to compare is
+## adjacent. The items are stood through `main.gd`'s own
+## `_show_carried_item`/`_carried_item_transform`, not posed here, so what
+## this photographs is a belt item and not an approximation of one; nothing
+## ticks in this fixture, so they stay where they were put.
+const ITEM_GALLERY_ASSETS := [
+	"item_bottle", "item_bottle_bbq", "item_box", "item_box_bbq"
+]
+var _item_gallery := false
+
 ## `--closeup` target tile and orthographic width; `_closeup` gates both.
 const CLOSEUP_SIZE := 9.0
 var _closeup := false
@@ -333,6 +357,9 @@ func _initialize() -> void:
 		_fixture = "pipes"
 	if args.has("--belt-gallery"):
 		_fixture = "gallery"
+	_item_gallery = args.has("--item-gallery")
+	if _item_gallery:
+		_fixture = "items"
 	if args.has("--bottleneck"):
 		_fixture = "bottleneck"
 		_populate = true
@@ -458,6 +485,8 @@ func _build_fixture() -> void:
 			Layouts.build_pipe_gallery(_main.sim)
 		"gallery":
 			Layouts.build_belt_gallery(_main.sim)
+		"items":
+			Layouts.build_item_gallery(_main.sim)
 		"bottleneck":
 			Layouts.build_bottleneck_line(_main.sim)
 		"understaffed":
@@ -962,6 +991,22 @@ func _open_menu_load_view() -> void:
 	_main._on_load_pressed()
 
 
+## `--item-gallery`: one finished-goods model per gallery slot, standing
+## mid-tile on the bare belt run the fixture placed.
+##
+## Straight through the scene's own item drawing — the same pooled multimesh,
+## the same transform, the same materials a belt item gets — because the
+## question this shot answers is "can a player tell these apart on a belt",
+## and a model posed by the test would be answering a different one.
+func _stand_item_gallery() -> void:
+	for slot in range(ITEM_GALLERY_ASSETS.size()):
+		_main._show_carried_item(
+			"item_gallery_%d" % slot,
+			String(ITEM_GALLERY_ASSETS[slot]),
+			_main._carried_item_transform(Layouts.item_gallery_tile(slot), "east", 0.5)
+		)
+
+
 ## `--pause`: the in-game menu, over a factory that has been running.
 func _open_pause_menu() -> void:
 	_main._set_pause_open(true)
@@ -989,6 +1034,8 @@ func _process(_delta: float) -> bool:
 	# afterwards would leave the cursor pointing at whatever moved under it.
 	if _frames == 2 and _closeup:
 		_enter_closeup()
+	if _frames == 2 and _item_gallery:
+		_stand_item_gallery()
 	if _frames == 2 and _hover:
 		_hover_over_first_machine()
 	if _frames == 2 and _hover_pipe:

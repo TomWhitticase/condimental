@@ -171,6 +171,33 @@ no library filename or binding moved. Android/iOS ids went from
 `com.saucefactory.spike` to `com.condimental.spike`, which is free because
 nothing has ever been published under either.
 
+### 2026-09-16 — BBQ sauce has a bottle and a case
+
+The second sauce's finished goods, drawn ahead of the content that makes them
+(`docs/BBQ_SAUCE_PLAN.md`'s ticket 4; `bottled_bbq` and `boxed_bbq` do not
+exist in `data/` yet and will not until ticket 2 lands). `item_bottle` and
+`item_box` are now thin callers of a shared `bottle`/`box_of_sauce`
+parameterised by livery, with `item_bottle_bbq` and `item_box_bbq` beside
+them and both ids mapped in `main.gd`'s `ITEM_MODELS`.
+
+The distinction is carried by VALUE, not hue, in both directions: a bottle of
+BBQ is a deep molasses `bbq_brown` where ketchup is vivid `ketchup_red`, and
+a case of BBQ has DARK labels where ketchup's are near-white cream. At the
+size an item renders on a belt — half a tile — two warm colours a shade apart
+are not a difference a player can act on; reversing the contrast direction
+survives any zoom. The carton itself does not change, per the project owner:
+a case is a cardboard box whichever sauce is in it, and only the print on it
+says which.
+
+Two things fell out of rendering it. The model previews could not review a
+case at all — they are shot from vengi's camera, the opposite corner to the
+game's (UI_UX.md §2b point 35), which is the face the labels are not on — so
+`scripts/screenshot-scene.sh --item-gallery` now stands one of each
+finished-goods model on a bare belt run, through the scene's own item
+drawing. And for the same reason **`boxed_ketchup`'s icon has never shown its
+label**: a case is labelled on both long faces now, which changes `item_box`
+on a face the isometric camera cannot see, and is what stops the contract
+clipboard showing the same blank carton for two different items.
 
 ### 2026-09-16 — BBQ sauce, the second sauce, is planned
 
