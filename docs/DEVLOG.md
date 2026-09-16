@@ -127,6 +127,23 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-16 — The README is the front door, with pictures
+
+The root `README.md` had described a milestone-1 scaffold with "no gameplay
+yet" for months. It is now a real front page: what the game is, eleven
+rendered screenshots and the voxel icon set as artwork, prerequisites and a
+build/run/verify walkthrough anyone can follow from a cold clone, a controls
+table and an eight-step "your first factory" tutorial, the four architectural
+rules, how the project is developed by agents, the roadmap and the release
+position (there are none; build from source).
+
+The screenshots are committed under `docs/media/`, downscaled and quantised
+(2.7 MB for eleven), because the repository is private: a
+`raw.githubusercontent.com` link renders as a broken image for a reader
+without a token, which is the same constraint `scripts/pr-screenshot.sh`
+documents for PR bodies. `docs/README.md` says so and says how to re-render
+one. Nothing outside the three doc files changed.
+
 ### 2026-09-16 — Nothing in the factory emits light
 
 The dock's "delivery pool is full" signal is a pulse on its deck lamps.

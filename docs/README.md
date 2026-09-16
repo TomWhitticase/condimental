@@ -29,6 +29,13 @@ three grow without bound. Check them when you need status, history, or
 whether a rule already exists; append to them when you finish meaningful work
 or make a decision.
 
+`media/` is not a doc: it holds the screenshots the root `README.md` embeds,
+committed (unlike `assets/voxels/previews/`, which is gitignored) because a
+README image has to render for anyone who can see the repository. Re-render
+one with `scripts/screenshot-scene.sh` and replace the file in place; keep
+them downscaled — the committed copies are 1280px wide, or 900px for a
+close-up.
+
 This index exists for quickly orienting on the `docs/` folder itself (e.g.
 before adding a new doc, or when only skimming rather than reading
 everything).
