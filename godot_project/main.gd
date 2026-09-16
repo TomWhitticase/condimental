@@ -1583,6 +1583,12 @@ var _pause_buttons_box: VBoxContainer
 ## in this panel with no undo — so it asks, where Save & Quit (which cannot
 ## lose anything) does not.
 var _pause_confirm_quit := false
+## Latched by `_quit_to_menu` for the rest of this scene's life. The factory
+## is on its way out, so nothing in it wants the mouse captured any more —
+## `change_scene_to_file` hands the menu whatever mouse mode was left behind,
+## and the menu is a cursor screen. Read through `_fp_mouse_free` so the
+## capture rule and the crosshair agree, as they do everywhere else.
+var _leaving_to_menu := false
 ## In design pixels times `UI_SCALE`, like every other fixed size in this
 ## HUD (the pause menu was written alongside the 2026-09-09 UI-scale pass and
 ## reconciled with it at merge).
@@ -5594,10 +5600,11 @@ func _set_shop_menu_open(open: bool) -> void:
 ## panel up the mouse is handed back (above), and leaving the crosshair drawn
 ## would park a stray mark on top of a slot.
 ## Whether something on screen wants the cursor: any of the five modal
-## panels, the configuration panel or the pause menu. The one answer the
+## panels, the configuration panel or the pause menu — or the fact that this
+## scene is being torn down for the main menu. The one answer the
 ## first-person mouse capture and the crosshair both read.
 func _fp_mouse_free() -> bool:
-	return _modal_open() or _config_open or _pause_open
+	return _leaving_to_menu or _modal_open() or _config_open or _pause_open
 
 
 ## Any of the five modal panels (E, M, C, H, P) is up. Build mode is not a
@@ -11350,11 +11357,18 @@ func _on_pause_quit_game_pressed() -> void:
 ## `load` — the menu re-arms it on every choice anyway, but leaving a stale
 ## action behind is the kind of thing that only shows up as "New Game loaded
 ## my old factory" much later.
+##
+## Hands the cursor back on the way out, too. Closing the pause menu re-runs
+## the first-person capture rule, so quitting from FIRST_PERSON used to
+## recapture the mouse in the frame before the scene change and leave the
+## menu with an invisible pointer — `_leaving_to_menu` is set FIRST so that
+## rule answers "free" instead.
 func _quit_to_menu() -> void:
 	_autosave("quit to menu")
 	var session := _session()
 	if session != null:
 		session.arm_new_game()
+	_leaving_to_menu = true
 	_set_pause_open(false)
 	if is_inside_tree():
 		get_tree().change_scene_to_file("res://menu.tscn")
