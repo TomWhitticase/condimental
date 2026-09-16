@@ -74,6 +74,41 @@ floor. The script's header explains every flag; grouped, they are:
   `--config TX,TY` (+ `--contents N`). A value starting with `-` needs the
   `=` form: `--config=-1,0`.
 
+### What CI runs
+
+The same commands, on every pull request, so that a check skipped in a
+session is still caught before the change reaches `main`. Workflows live in
+`.github/workflows/`; each one's header says why it exists.
+
+| Workflow | Runs | On |
+|---|---|---|
+| `rust.yml` | `cargo test -p sim_core`, `cargo test -p voxgen`, `cargo xtask`, the fmt/clippy ratchet, and a regenerate-and-diff of `assets/voxels/models` | every PR and push to `main` |
+| `invariants.yml` | `scripts/check-invariants.sh`, `shellcheck`, `actionlint` | every PR and push to `main` |
+| `commitlint.yml` | `scripts/lint-commit-msg.sh` over the whole range | every PR and push to `main` |
+| `pr-screenshot.yml` | `scripts/check-pr-screenshot.sh` — the body embeds an image | every PR |
+| `verify.yml` | `scripts/verify-core-loop.sh` in full, Godot and all | nightly, on demand, or on a PR labelled `full-verify` |
+| `audit.yml` | `cargo audit` against Cargo.lock | lockfile changes, and weekly |
+| `claude.yml`, `claude-review.yml` | `@claude` on an issue or PR, and a first-pass review of every PR | on mention / on PR open |
+
+Two of these are worth knowing the shape of before they surprise you.
+
+**The fmt/clippy ratchet is not `-D warnings`.**
+`scripts/check-rust-lint.sh` holds a high-water mark — the count of
+unformatted files and of clippy warnings the repo has today. A change may not
+push either number up; when you bring one down, lower the baseline in the
+same commit. The script says so when it can be lowered. The backlog itself is
+tracked as an issue, and the day it reaches zero both become ordinary
+all-or-nothing gates. Run it locally with `scripts/check-rust-lint.sh`; it
+needs nothing but `cargo`.
+
+**The full Godot gate is opt-in per PR.** `verify-core-loop.sh` costs minutes
+and a Godot download, so `verify.yml` runs it nightly rather than on every
+push. Put the `full-verify` label on a pull request that touches the wire
+format, `godot_project/`, `xtask` or `data/` and it runs there too. This does
+not replace running it yourself before you push (§ above) — it is the
+backstop for the session that did not.
+
+
 ## Commits
 
 [Conventional Commits](https://www.conventionalcommits.org/), enforced by a

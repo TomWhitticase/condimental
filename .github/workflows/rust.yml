@@ -1,0 +1,97 @@
+name: Rust
+
+# The cheap, always-on half of docs/WORKFLOW.md's "Verification": everything
+# scripts/verify-core-loop.sh runs BEFORE it needs a Godot binary. That is
+# most of the simulation's real coverage — sim_core/tests/ ticks the whole
+# chain and asserts item conservation (ARCHITECTURE.md §7) — and it runs in
+# a couple of minutes on every pull request. The Godot half is
+# .github/workflows/verify.yml.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# An agent working in a worktree pushes often. Superseded runs on a branch are
+# wasted minutes on a private repo; a superseded run on main is not, because
+# main's history is the record.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: cargo test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # data/*.ron is `include_str!`ed into sim_core, so this step is also
+      # what catches a malformed recipe, machine, contract or shop entry —
+      # content changes are not exempt from CI (CLAUDE.md, "Content is data").
+      - name: cargo test -p sim_core
+        run: cargo test -p sim_core
+
+      # The voxel generators own geometry claims a mesh cannot express — a
+      # machine's inlet has to be a genuinely EMPTY opening, not a rectangle
+      # painted black (assets/voxels/CLAUDE.md).
+      - name: cargo test -p voxgen
+        run: cargo test -p voxgen
+
+      # xtask is how the extension reaches Godot at all (ARCHITECTURE.md §7).
+      # If it cannot build and stage the cdylib, verify.yml has nothing to run
+      # and a developer's first command in a fresh clone fails.
+      - name: cargo xtask (build + stage the GDExtension)
+        run: cargo xtask
+
+  lint:
+    name: fmt + clippy (ratchet)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      # Not `-D warnings`: see the header of the script for why this is a
+      # high-water mark instead, and how to lower it.
+      - run: scripts/check-rust-lint.sh
+
+  voxels-match-generators:
+    name: models match their generators
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # assets/voxels/CLAUDE.md: "generators are the source, models/ is
+      # output" — but the output is committed, because Godot imports it and
+      # CI has no voxel editor. Nothing else notices when the two drift: an
+      # edited generator with a stale .vox beside it passes every test in
+      # this workflow and renders the OLD model in the screenshot the pull
+      # request is judged on. voxgen's output is byte-reproducible, so a
+      # regenerate-and-diff says so exactly.
+      - name: cargo run -p voxgen
+        run: cargo run -p voxgen
+
+      - name: models/ is unchanged by regenerating it
+        run: |
+          if ! git diff --quiet -- assets/voxels/models; then
+            echo "::error::assets/voxels/models is out of date with assets/voxels/generators."
+            echo "Run 'scripts/build-voxels.sh' (or 'cargo run -p voxgen') and commit the result."
+            git diff --stat -- assets/voxels/models
+            exit 1
+          fi
+          echo "models/ matches the generators."

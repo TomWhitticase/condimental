@@ -1,0 +1,47 @@
+name: Project rules
+
+# CLAUDE.md's rules and .claude/skills/verify/SKILL.md's footguns, checked
+# mechanically — the subset of them that CAN be. See the header of
+# scripts/check-invariants.sh for what is deliberately left to review.
+#
+# This job is seconds long and catches the failures that are otherwise
+# SILENT: a Godot test script nobody wired into the runner, a scene pointing
+# at a deleted model, a doc link into a renamed file.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  invariants:
+    name: invariants
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: scripts/check-invariants.sh
+        run: scripts/check-invariants.sh
+
+      # Bash is load-bearing here — the verification gate, the git hooks, the
+      # screenshot pipeline and the voxel build are all shell, and an agent
+      # editing one gets no compiler. -S error only: the repo's `cd "$root"`
+      # idiom trips SC2164 at warning level in every script, and a check that
+      # is noisy on day one is a check that gets ignored by day three.
+      - name: shellcheck
+        run: shellcheck -S error scripts/*.sh .githooks/*
+
+      # The workflows in this directory have no other test. actionlint also
+      # shellchecks every `run:` block.
+      - name: actionlint
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color

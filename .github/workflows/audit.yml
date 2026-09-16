@@ -1,0 +1,41 @@
+name: Dependency audit
+
+# `cargo audit` against the RustSec advisory database. Cargo.lock is
+# committed, so this is a real answer about what this project actually
+# builds, not a guess from version ranges.
+#
+# Weekly as well as on a lockfile change, because an advisory is published
+# against code that has not changed — the dependency is the same one it was
+# yesterday, and today it is known-vulnerable.
+
+on:
+  pull_request:
+    paths:
+      - '**/Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - '**/Cargo.toml'
+      - 'Cargo.lock'
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # A prebuilt cargo-audit — building it from source costs more than the
+      # audit it performs.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - run: cargo audit --deny warnings
