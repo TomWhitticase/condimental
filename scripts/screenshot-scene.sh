@@ -143,10 +143,14 @@
 # --contents N on top presses the open panel's picker slot N, so a placed
 # hopper is photographed retargeted to another raw ingredient, e.g.
 #
-#   scripts/screenshot-scene.sh out.png --build --config=-1,0 --contents 1
+#   scripts/screenshot-scene.sh out.png 1600x900 --build --config=-1,0 --contents 1
 #
 # (the demo line's hopper stands at (-1, 0); note the `=` form, since a
-# value starting with `-` would otherwise be read as another flag).
+# value starting with `-` would otherwise be read as another flag. Note also
+# that the RESOLUTION IS POSITIONAL and must be given whenever any flag is:
+# this script reads $2 as the resolution and passes only "${@:3}" through, so
+# `out.png --build` hands `--build` to `godot --resolution` and the flag is
+# silently lost.)
 #
 # Pass --closeup TX,TY[,SIZE] to aim the isometric camera at one simulation
 # tile and zoom right in (SIZE is the orthographic width in world units;

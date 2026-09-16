@@ -22,10 +22,18 @@ below is history and should only ever be appended to.)*
   finished but unmerged — contract board, payout juice + audio, machine
   animations, floor redesign, vinegar assets, belt-arrow removal — were
   consolidated onto one integration branch and fast-forwarded into `main`.
-  The union passes `scripts/verify-core-loop.sh` (19 Rust suites, 26 headless
+  The union passes `scripts/verify-core-loop.sh` (19 Rust suites, 30 headless
   Godot proofs, no failures) and has been rendered and played. A fresh
   worktree still needs `cargo xtask` and **two** `godot --import` passes
   before the world is visible. See the log entry below.
+- **Agent context restructured (2026-09-16).** `CLAUDE.md` is 72 lines and
+  `@`-includes nothing; it maps a task to the doc that covers it. The
+  condensed decisions log lives in `docs/DECISIONS_LOG.md`, workflow in
+  `docs/WORKFLOW.md`, and `sim_core/`, `godot_project/` and `assets/voxels/`
+  each carry their own `CLAUDE.md` of local invariants with `AGENTS.md`
+  symlinked beside it. Four skills under `.claude/skills/`. Always-loaded
+  context went from ~34,500 tokens to ~950. See the log entry below for the
+  five doc defects the move turned up, including the tick rate.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
 - **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. **Milestone 6 (Fluids) is done**: its simulation half (pipe network, pressure equalization, a recipe requiring a liquid, the `SimBridge` fluid snapshot) and its presentation half (pipe/supply-tap/liquid voxel assets, a pipe run rendered from the simulation's own segment list, a liquid body whose height tracks live pressure, and pipe hover info in both view modes) have both landed, built as a 2-ticket orchestration Run (`run_2867a25ae373`, sequential: sim core then presentation). **Milestone 7 (Timed processes) is DONE, and the stage that proved it has since been deleted**: its simulation half added an `aging_rack` holding a batch for 2400 ticks (40 real seconds, 10x the cooking vat) on the *existing* generic `TimedProcess`, needing zero changes under `sim_core/src/`, which was the milestone's actual point; its presentation half drew the rack with a live maturation gauge. The **chain rework** (below) then removed ageing from the game outright, so nothing shipped exercises the long timescale any more — `TimedProcess` itself is untouched and runs every craft cycle, and the gauge mechanism is kept as an empty `MACHINE_PROGRESS_GAUGES` table waiting for the next long process. A separate **"Machines improvement"** epic (not an ARCHITECTURE.md §9 milestone — an infrastructure/content pass requested directly) is in progress: ticket 1 landed machine footprints as data (`data/machines.ron`), generalizing the chain's layout math so a machine can occupy more than one tile, and ticket 2 spent that on real content — the chain's front end is now a crusher, a mixer and a genuinely 2x2 cooking vat. Ticket 3 replaced the debug "spawn a tomato onto the belt" command with a real **hopper** — a building west of the chain's head that buffers raw tomatoes and meters them onto the first belt one per tick, filled by the player (SPACE) rather than teleporting items. **Ticket 4 finished the epic**: the Godot presentation of all three — a bespoke voxel model per front-end machine kind, multi-tile rendering so the cooking vat actually covers its 2x2 footprint, the hopper drawn with a product level that tracks its live fill, and hover resolving any tile of a multi-tile machine as well as the hopper. **The "Machines improvement" epic is complete.** A further **"Shop & Inventory"** epic (also requested directly, and a deliberate priority shift toward a real build-your-own-factory game) has started: **ticket 1** landed the economy half — `data/shop.ron` prices every buildable kind, `sim::shop` loads/validates it, the player owns a per-kind count, and a `Purchase` command spends contract money on it, all exposed as `shop_snapshot_json`. **Ticket 2 finished the epic**: a real build menu (**B**), a grid of voxel-rendered icon slots built entirely from `shop_snapshot_json`, where clicking a slot — or pressing its number key — buys one, and what you can't afford is disabled, dimmed and marked. **The "Shop & Inventory" epic is complete.** The **"Real Placement"** epic that followed it is what made a purchase visible on the floor: **ticket 1 (sim) has landed** — `World::new` now builds *nothing*, every belt tile, pipe tile, machine and building is placed by the player out of what they own, everything carries a real four-way `Direction` it can be rotated through, and flow is derived from adjacency (recomputed only when something is placed, removed or rotated) rather than from `recipes.ron`'s file order. Ticket 2 (the Godot build/ghost/rotate UI, and rendering per-tile rotation) is still to do.
@@ -68,6 +76,91 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-16 — The agent context restructured: CLAUDE.md is a map now
+
+Prompted by an outside argument rather than a bug: "Why Your AI Generates
+Crap Code - And How to Fix It" (Web Dev Simplified). Its central point is
+that `CLAUDE.md`/`AGENTS.md` is injected into **every** request, so its size
+is a tax on every turn, and that an `@`-include is exactly equivalent to
+pasting the included file's whole text inline.
+
+By that measure this repo was the worst case the video describes. `CLAUDE.md`
+was 631 lines and `@`-included ARCHITECTURE.md, UI_UX.md and GAMEPLAY.md, so
+the real always-loaded payload was about **2,000 lines / ~34,500 tokens** —
+several times the largest example the video was willing to call broken. Three
+causes: a 429-line decisions log (a bullet per past problem, all of it loaded
+on requests that never touch a machine or a contract), a 131-line **per-file**
+project structure (the part of a layout that goes stale first, and a
+confident lie in the always-loaded file is worse than no description), and
+the three `@`-included design docs, of which most sessions need one at most.
+
+What it is now:
+
+- **`CLAUDE.md`: 72 lines, ~950 tokens** — a 97% cut, no `@`-includes. The
+  project in a sentence, the rules that genuinely always apply, a
+  directory-level layout, and a table from "what you are working on" to
+  "which doc to read".
+- **`docs/DECISIONS_LOG.md`** holds the condensed log, all 57 entries moved
+  verbatim. Linked, read on demand.
+- **`docs/WORKFLOW.md`** holds build/verify/commit/DEVLOG/Orca material.
+- **Per-module `CLAUDE.md`** for `sim_core/`, `godot_project/` and
+  `assets/voxels/` — ~100 lines each of that area's non-obvious invariants,
+  loaded only when work happens there. Worst case inside a module is now
+  ~2,400 tokens. ARCHITECTURE.md §10 had called for these "once warranted";
+  this is what warranted looks like.
+- **`AGENTS.md` is a symlink to `CLAUDE.md`** at the root and beside each
+  module file. Not cosmetic: an untracked 160 KB `AGENTS.md` had been sitting
+  at the root, and it turned out to be a flattened snapshot of `CLAUDE.md`
+  with its `@`-includes expanded — a copy that had already drifted. A symlink
+  cannot.
+- **Four skills** under `.claude/skills/`: `voxel-asset`, `verify`,
+  `screenshot-review`, `record-decision`. Only a skill's name and description
+  sit in context; the body loads when it is invoked.
+
+The rule, in `docs/DECISIONS_LOG.md` and ARCHITECTURE.md §10: put something
+in an always-loaded file only if it would be wrong for the agent not to know
+it on a turn that has nothing to do with it. Everything else is a link.
+
+**Five documentation defects fell out of verifying the move**, all of them
+drift that had been invisible precisely because nobody re-reads a 631-line
+file:
+
+1. **ARCHITECTURE.md §3.9 said the fixed timestep is 60 ticks/s. It never
+   was.** `main.gd`'s `TICK_HZ` has been 30 since milestone 3 (`e7683c1`),
+   and DECISIONS.md already called §3.9's figure "nominal" against "the rate
+   the scene actually runs". A factual correction, not a new decision — but
+   every seconds-figure derived from it was twice the real elapsed time, and
+   two were: `hopper.rs`'s "roughly 21 seconds" (43) and a DEVLOG figure of
+   "40 seconds" (80). §3.9 now names `TICK_HZ` as the single place the rate
+   is set and records what it used to say. A dated 2026-09-11 entry keeps its
+   original figure — it was accurate when written.
+2. **"Nineteen headless Godot scripts"** in this file's Current status and in
+   `scripts/verify-core-loop.sh`'s header. There are **thirty**.
+3. **`scripts/screenshot-scene.sh`'s worked example was broken.** It read
+   `screenshot-scene.sh out.png --build --config=…`, which silently loses
+   `--build`: the script takes `$2` as the resolution and forwards only
+   `"${@:3}"`, so the flag goes to `godot --resolution`. The example now
+   passes the resolution and says why it has to.
+4. **UI_UX.md §2b had three duplicate point numbers** — two extra 27s and an
+   extra 28 — in a list whose own header says the numbers are cited by code
+   comments and must stay stable. Citations had resorted to disambiguating in
+   prose (`points 27 in "the floor" and 28`). The three entries took the
+   next free numbers — **35** (a model whose only consumer is the icon pass
+   is authored for vengi's camera), **36** (the floor is authored by its
+   value range) and **37** (N models over thousands of tiles is still N
+   stamps; per-instance rotation is the multiplier) — in place rather than
+   renumbered into sequence, so every existing citation stays correct. 34
+   was taken by ticket 7's ghost rule the day before. All seven
+   citations and DECISIONS.md Part B's own copies were updated.
+5. **`main.gd`'s `_panel_position_near` docstring** still described the
+   viewport-edge-flipping behaviour the quality pass's ticket 5 replaced,
+   sitting directly above the four-quadrant, plate-avoiding body that
+   superseded it.
+
+`scripts/verify-core-loop.sh` passes (19 Rust suites, 30 headless Godot
+proofs). Nothing under `sim_core/src/`, `godot_project/*.tscn`, `data/` or
+`assets/voxels/models/` changed behaviour — the only code touched was
+comments and one docstring.
 ### 2026-09-15 — Pipes & conveyors overhaul closed out (ticket 7)
 
 The last ticket of the overhaul: walk the two galleries shape by shape,
@@ -865,7 +958,7 @@ in `ITEM_MODELS`, which is about what rides a belt, and a fluid never does.
 Amber rather than the honest colourless, because a clear fluid behind a
 stainless inspection window is indistinguishable from an empty pipe; malt
 vinegar is amber and real, so legibility and honesty agreed. The one
-genuinely new pipeline rule came out of the render loop (UI_UX §2b point 27):
+genuinely new pipeline rule came out of the render loop (UI_UX §2b point 35):
 the jug's label was authored on the faces the game camera sees and was
 invisible in its own icon, because `vengi-thumbnailer` looks from the
 opposite (-X/+Y) corner — and a fluid never appears in the scene at all, so
@@ -894,7 +987,7 @@ low-contrast areas greedy-mesh far better than speckle, and the floor is the
 one asset whose triangle count is multiplied by the size of the world.
 
 Three iterations, each judged by looking. Two lessons general enough to keep
-(UI_UX.md §2b points 27 and 28). **The floor is authored by its value range,
+(UI_UX.md §2b points 36 and 37). **The floor is authored by its value range,
 not its detail** — it is the one asset seen as thousands of copies filling
 the frame, so it must never hold the brightest pixel, which §4 reserves for
 metal. That rule broke a tie: a repair patch "should" be a paler fresh pour,
@@ -2084,7 +2177,7 @@ clipboard panel, which is exactly what ticket 2 is for.
 
 ARCHITECTURE.md §9 milestone 7 ("Timed processes") — the simulation half.
 The chain gained a sixth stage: cooked ketchup now rests on an **aging rack**
-for **2400 ticks** (40 seconds at §3.9's 60 ticks/sec, exactly ten times the
+for **2400 ticks** (80 seconds at §3.9's 30 ticks/sec, exactly ten times the
 cooking vat's cook) before it can be bottled.
 
 **The interesting result is how little there was to do.** `TimedProcess`

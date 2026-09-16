@@ -10878,15 +10878,24 @@ func _apply_hover_panel_state(state: Dictionary) -> void:
 
 
 ## Where a cursor-following panel goes: offset from the cursor, then kept
-## inside the viewport.
+## clear of the viewport's edges AND of every fixed HUD plate (UI_UX.md §2b
+## point 33).
 ##
-## The clamp is new with build mode and is not cosmetic — the placement prompt
-## is three lines wide and the cursor spends most of its time near the right
-## of the screen while a factory is being extended eastward, so without it the
-## panel telling the player whether the click will work runs off the edge.
-## (Found the only way it could be: in a rendered frame — UI_UX.md §2b
-## point 12.) It flips to the other side of the cursor rather than sliding, so
-## the panel never sits on top of the tile it is describing.
+## None of this is cosmetic. The placement prompt is three lines wide and the
+## cursor spends most of its time near the right of the screen while a factory
+## is being extended eastward, so without the clamp the panel telling the
+## player whether the click will work runs off the edge; and the hotbar, the
+## legend and the contracts clipboard are drawn OVER the viewport, so a flip
+## that respects only the viewport's own edges lands the panel squarely on
+## their text instead. All of it was found the only way it could be, in
+## rendered frames — UI_UX.md §2b point 12.
+##
+## So: try all four quadrants around the cursor, nearest first (a flip rather
+## than a slide, so the panel never sits on the tile it is describing), and
+## take the first that clears the viewport, the hotbar's reserved height and
+## every avoided plate. A tall panel can fail all four; that falls back to
+## clamping on screen and then PUSHING clear, judging each candidate after the
+## clamp rather than when it is chosen.
 func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
 	var size := panel.get_combined_minimum_size()
 	var vp := get_viewport()

@@ -3,15 +3,18 @@
 This file holds the **full, verbatim decision records** that used to live in
 `CLAUDE.md`'s decisions log, `docs/UI_UX.md` §2b and `docs/ARCHITECTURE.md`
 §9a. They were moved here on 2026-09-09 because the three `@`-included docs
-had grown past the context budget. This file is deliberately **not**
-`@`-included into `CLAUDE.md`.
+had grown past the context budget. Nothing in this file is loaded
+automatically; it is read on demand.
 
-What stays loaded every session is the **rule** each record produced, in
-condensed form:
+What each record produced is the **rule**, in condensed form:
 
-- `CLAUDE.md` → "Decisions log (condensed)"
+- `docs/DECISIONS_LOG.md` → the condensed log (it lived in `CLAUDE.md` until
+  the context restructure of 2026-09-16, Part A's newest entry)
 - `docs/UI_UX.md` → §2b (same point numbers as below)
 - `docs/ARCHITECTURE.md` → §9a (summary)
+
+None of those three is loaded automatically either, since the restructure.
+`CLAUDE.md` links to them instead.
 
 Read this file when you need the *why* behind a rule, or the history of a
 change. New decisions: add the condensed rule to the loaded doc, and the full
@@ -22,6 +25,110 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-16: **The agent context was restructured: `CLAUDE.md` is a map,
+  not the manual.** Everything below in this file is a record of a decision
+  about the *game*. This one is a decision about how the game gets built,
+  and it was prompted by an outside argument rather than by a defect:
+  "Why Your AI Generates Crap Code - And How to Fix It" (Web Dev Simplified),
+  whose central claim is that `CLAUDE.md`/`AGENTS.md` is injected into every
+  single request, so its size is not a one-off cost but a tax on every turn,
+  and that an `@`-include is exactly equivalent to pasting the file's whole
+  text inline.
+
+  Measured against that, this repo was the worst case the video describes.
+  `CLAUDE.md` was 631 lines, and it `@`-included ARCHITECTURE.md, UI_UX.md
+  and GAMEPLAY.md, so the real always-loaded payload was about **2,000 lines
+  / ~34,500 tokens** — roughly four times the largest example the video was
+  willing to call broken. Three causes, each individually reasonable:
+
+  1. **The decisions log grew a bullet per past problem.** 57 entries, 429
+     lines, all of it loaded on every request including the ones that never
+     touch a machine, a contract or a voxel. The log is genuinely valuable —
+     it is what stops a rule being re-litigated — but "valuable" and "worth
+     paying for on every turn" are different claims.
+  2. **Project structure was documented file by file**, 131 lines naming
+     nearly every source file and what it contains. Per-file detail is the
+     part of a layout that goes stale first: the thing it describes is one
+     rename away from being a lie, and a confident lie in the always-loaded
+     file is worse than no description at all.
+  3. **The three design docs were `@`-included.** They are authoritative and
+     they are long, and most sessions need exactly one of them, if any.
+
+  The restructure, following the video's own prescriptions:
+
+  - **`CLAUDE.md` is 72 lines / ~950 tokens** (a 97% cut). It holds the
+    project in a sentence, the rules that genuinely always apply — Rust owns
+    gameplay logic, content is data, no floats in sim state, follow the
+    design docs, small increments, plan mode, text scenes, Conventional
+    Commits — a seven-line layout block at *directory* granularity, and a
+    table mapping "what you are working on" to "which doc to read". No
+    `@`-includes at all.
+  - **The condensed decisions log moved to `docs/DECISIONS_LOG.md`**
+    verbatim, all 57 entries. It is linked, not included: an agent reads it
+    when it needs to know whether a question is already settled.
+  - **Per-module `CLAUDE.md` files exist now** for `sim_core/`,
+    `godot_project/` and `assets/voxels/` (ARCHITECTURE.md §10 said "once
+    warranted" — three years of invariants in one root file is what
+    warranted looks like). Each is ~100 lines of that area's non-obvious
+    invariants: `sim_core/`'s determinism and topology rules,
+    `godot_project/`'s rebuild/wire invariants, `assets/voxels/`'s geometry
+    traps. Worst case inside a module is now ~2,400 tokens.
+  - **`AGENTS.md` is a symlink to `CLAUDE.md`** at the root and in each of
+    those three directories. This is not cosmetic: an untracked 160 KB
+    `AGENTS.md` had been sitting at the root, and it turned out to be a
+    flattened snapshot of `CLAUDE.md` with its three `@`-includes expanded —
+    a copy that had already drifted. A symlink cannot drift.
+  - **Workflow material moved to `docs/WORKFLOW.md`** (build, verification,
+    the non-headless check, commits, the DEVLOG decision, Orca
+    orchestration), and four **skills** were added under `.claude/skills/` —
+    `voxel-asset`, `verify`, `screenshot-review`, `record-decision`. A
+    skill's body is loaded only when it is invoked; only its name and
+    description sit in context, which is the right shape for a procedure
+    that matters on the rare turn it is needed and costs nothing otherwise.
+
+  The rule this produces, and the one worth keeping: **only put something in
+  an always-loaded file if it would be wrong for the agent not to know it on
+  a turn that has nothing to do with it.** Everything else is a link. The
+  corollary the video is blunter about than this repo had been: a rule added
+  because the agent did something wrong once is not automatically worth its
+  place forever — the always-loaded file is not a changelog of past
+  mistakes.
+
+  Five documentation defects were found in the process of verifying the
+  move, all of them the kind of drift that had been invisible precisely
+  because nobody re-reads a 631-line file:
+
+  - **ARCHITECTURE.md §3.9 said the fixed timestep is 60 ticks/s. It has
+    never been.** `main.gd`'s `TICK_HZ` has been 30 since milestone 3
+    (`e7683c1`), and DECISIONS.md already described §3.9's figure as
+    "nominal" against "the rate the scene actually runs". This is a
+    correction, not a decision: every seconds-figure derived from the wrong
+    rate was twice the real elapsed time, and two were — `hopper.rs`'s
+    "roughly 21 seconds" (really 43) and a DEVLOG figure of "40 seconds"
+    (really 80). §3.9 now names `TICK_HZ` as the one place the rate is set
+    and says what it read until today; a dated DEVLOG entry from 2026-09-11
+    was left alone, being accurate when written.
+  - **`docs/DEVLOG.md`'s "Current status" and `scripts/verify-core-loop.sh`
+    both still said nineteen headless Godot scripts.** There are thirty.
+  - **`scripts/screenshot-scene.sh`'s worked example was broken**:
+    `screenshot-scene.sh out.png --build …` silently loses `--build`,
+    because the script reads `$2` as the resolution and forwards only
+    `"${@:3}"`. The example now passes the resolution, and says why it must.
+  - **UI_UX.md §2b had three duplicate point numbers** — two extra 27s and
+    an extra 28 — in a list whose own header says point numbers are cited by
+    code comments and must stay stable. Citations in the wild had resorted
+    to disambiguating in prose ("points 27 in \"the floor\" and 28"). The
+    three entries took the unused numbers **35** (a model whose only
+    consumer is the icon pass is authored for vengi's camera), **36** (the
+    floor is authored by its value range) and **37** (N models over
+    thousands of tiles is still N stamps; per-instance rotation is the
+    multiplier), in place rather than renumbered into sequence, so that
+    every existing citation stays correct (34 was taken by ticket 7's
+    ghost rule the day before). All seven citations plus
+    Part B's own copies were updated.
+  - **`main.gd`'s `_panel_position_near` docstring still described the
+    behaviour ticket 5 replaced** — viewport-edge flipping only — directly
+    above the four-quadrant, plate-avoiding body that superseded it.
 - 2026-09-15: **Pipes & conveyors overhaul, ticket 7: the close-out, and
   what a close-out ticket may not decide.** The overhaul's last ticket was
   a bug hunt over the two galleries plus the docs. The galleries were
@@ -1766,7 +1873,7 @@ matches what code comments and data files cite.
   `FLUID_MODELS`, then fall back.
 
   (4) **A model whose only consumer is the icon renderer is authored for
-  vengi's camera** (new §2b point 27). The jug's label and moulded ear were
+  vengi's camera** (new §2b point 35). The jug's label and moulded ear were
   first put on the faces the *game* camera sees, per point 11, and were
   invisible in the rendered icon: `vengi-thumbnailer` looks from the -X/+Y
   corner (point 22), the opposite side. Confirmed by rendering `item_box`,
@@ -1858,7 +1965,7 @@ matches what code comments and data files cite.
   the grout problem in (3) was a dark line on all four edges of *every*
   tile. Frequency was cut with it (`FLOOR_PATCH_IN` 41 → 97).
 
-  Recorded as UI_UX.md §2b points 27 and 28. Three voxgen property tests
+  Recorded as UI_UX.md §2b points 36 and 37. Three voxgen property tests
   pin what a render cannot re-check by itself: nothing on the floor stands
   proud of the slab's top surface (`main.gd`'s `FLOOR_Y` puts everything
   else on that plane, so one voxel too tall intersects every belt and
@@ -4626,7 +4733,11 @@ matches what code comments and data files cite.
 ## Part B — UI_UX.md §2b, full text ("How the pipeline actually turned out")
 
 Point numbers are the ones code comments cite (`UI_UX.md §2b point N`).
-There is no point 10 — it was skipped in the original numbering.
+There is no point 10 — it was skipped in the original numbering — and the
+list runs 1-28, 36-37, 29-34: the factory-floor entries were written as a
+second 27 and a second 28, and took the next free numbers on 2026-09-16
+rather than renumber anything already cited. (UI_UX.md §2b also has a 35, the
+icon-pass camera rule, which has no long form here.)
 
 Everything above held up. Four things are worth writing down because they
 were only discoverable by building it:
@@ -5174,7 +5285,7 @@ were only discoverable by building it:
     rigid translation of frame 0 is byte-identical to it, because the
     thumbnailer crops to the bounding box: judge a translation in the scene,
     which is point 22's warning about vengi's camera in another form.
-27. **The floor is the one surface whose job is to be a background, so it
+36. **The floor is the one surface whose job is to be a background, so it
     is authored by its VALUE RANGE, not by its detail.**
 
     Every other asset in this pipeline is designed by looking at one copy
@@ -5222,7 +5333,7 @@ were only discoverable by building it:
       instead of to the mottle tone, which gets pulled toward the slab every
       time the floor is quietened.
 
-28. **N models laid over thousands of tiles is still only N stamps; the
+37. **N models laid over thousands of tiles is still only N stamps; the
     multiplier is per-instance rotation, and it is only free if the tile's
     edges are four-fold symmetric.**
 

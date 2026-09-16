@@ -1620,7 +1620,7 @@ const BELT_TILE_LENGTH: f64 = 1.0;
 /// tick at most: one every 25 ticks, forty per thousand, still well over
 /// what the shipped line's slowest stage asks of it (`tests/core_loop.rs`
 /// pins that the line's rate is the vat's, not the belt's). Exact in `Fx`.
-/// Stated in prose in CLAUDE.md's decisions log and `docs/DECISIONS.md`;
+/// Stated in prose in `docs/DECISIONS_LOG.md` and `docs/DECISIONS.md`;
 /// change them together.
 const ITEM_MIN_SPACING_TILES: f64 = 0.5;
 const MACHINE_INPUT_CAPACITY: u32 = 8;

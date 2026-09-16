@@ -1435,7 +1435,7 @@ const COIN_C: f32 = (COIN_VOXELS as f32 - 1.0) / 2.0;
 // real voxel asset, never drawn flat, so these are voxel models like the
 // coin: registered in `ASSETS`, given no footprint, never placed.
 //
-// **Authored for vengi's camera, not the game's** (UI_UX.md §2b point 27,
+// **Authored for vengi's camera, not the game's** (UI_UX.md §2b point 35,
 // the vinegar jug's precedent): the icon pass is the only thing that ever
 // looks at these, and `vengi-thumbnailer` looks from the **-X/+Y** corner,
 // so a face meant to be seen goes on x = 0, on y = 31, or on top. Nothing
