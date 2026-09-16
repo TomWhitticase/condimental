@@ -83,8 +83,12 @@ jobs:
       # this workflow and renders the OLD model in the screenshot the pull
       # request is judged on. voxgen's output is byte-reproducible, so a
       # regenerate-and-diff says so exactly.
-      - name: cargo run -p voxgen
-        run: cargo run -p voxgen
+      # --bin is not optional: the voxgen package ships two binaries, and
+      # `voxicons` is the other one (it needs vengi-thumbnailer and a video
+      # driver, so it is not a CI job at all). scripts/build-voxels.sh names
+      # the same binary.
+      - name: cargo run -p voxgen --bin voxgen
+        run: cargo run -p voxgen --bin voxgen
 
       - name: models/ is unchanged by regenerating it
         run: |
