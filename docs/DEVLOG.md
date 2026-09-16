@@ -166,6 +166,13 @@ button, which is the one rule whose consequence arrives after the decision.
 Two deferrals filed as issues: the unpaid spiral has no designed escape
 hatch, and there is still no per-machine "who is unstaffed" at a glance.
 
+The review shot earned its place again: with the panel open on an underfunded
+line, the verdict read "nothing placed asks for staff yet" over four hired
+heads and a `4 / 4` bar. It was summing `demand`, which a stalled factory
+reports as zero. It sums `required` now, and the stalled case is a fixture.
+The plate carries numbers and no bar: a 342px column has no room for a track
+beside `2 / 4` and `▲ HIRE 2`, and `docs/DECISIONS.md` says so.
+
 ### 2026-09-16 — the hall in first person, its air in isometric; menu centred
 
 Two notes back from the owner's demo of the title-screen branch.
