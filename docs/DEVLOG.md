@@ -35,6 +35,14 @@ below is history and should only ever be appended to.)*
   context went from ~34,500 tokens to ~950. See the log entry below for the
   five doc defects the move turned up, including the tick rate.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
+- **Work reaches `main` through pull requests, and deferrals become issues
+  (2026-09-16).** Nothing is pushed to `main` directly — a `pre-push` hook
+  refuses it — and anything noticed but consciously not fixed is filed with
+  `gh issue create --label deferred` instead of being left in a closing
+  message. The open backlog is `gh issue list`, not this file: this doc stays
+  the status and history, `docs/DECISIONS_LOG.md` stays the rules. Full rule
+  in `docs/WORKFLOW.md`; the `open-pr` and `file-issue` skills are the
+  procedures.
 - **Design docs:** ARCHITECTURE.md, UI_UX.md, and GAMEPLAY.md are all written and cross-referenced; docs/README.md indexes them.
 - **Milestone progress:** milestones 1-5 (Scaffold through Economy MVP) were built as an Orca orchestration Run (`run_51e5cb271445`), one Task per milestone, dependency-chained. **All 5 are complete and merged.** Check `orca orchestration task-list --run run_51e5cb271445 --json` for the DAG's final state. There are 11 milestones total, not 9 — a milestone 5 "Economy MVP" was added since the loop wasn't a game without it. **Milestone 6 (Fluids) is done**: its simulation half (pipe network, pressure equalization, a recipe requiring a liquid, the `SimBridge` fluid snapshot) and its presentation half (pipe/supply-tap/liquid voxel assets, a pipe run rendered from the simulation's own segment list, a liquid body whose height tracks live pressure, and pipe hover info in both view modes) have both landed, built as a 2-ticket orchestration Run (`run_2867a25ae373`, sequential: sim core then presentation). **Milestone 7 (Timed processes) is DONE, and the stage that proved it has since been deleted**: its simulation half added an `aging_rack` holding a batch for 2400 ticks (40 real seconds, 10x the cooking vat) on the *existing* generic `TimedProcess`, needing zero changes under `sim_core/src/`, which was the milestone's actual point; its presentation half drew the rack with a live maturation gauge. The **chain rework** (below) then removed ageing from the game outright, so nothing shipped exercises the long timescale any more — `TimedProcess` itself is untouched and runs every craft cycle, and the gauge mechanism is kept as an empty `MACHINE_PROGRESS_GAUGES` table waiting for the next long process. A separate **"Machines improvement"** epic (not an ARCHITECTURE.md §9 milestone — an infrastructure/content pass requested directly) is in progress: ticket 1 landed machine footprints as data (`data/machines.ron`), generalizing the chain's layout math so a machine can occupy more than one tile, and ticket 2 spent that on real content — the chain's front end is now a crusher, a mixer and a genuinely 2x2 cooking vat. Ticket 3 replaced the debug "spawn a tomato onto the belt" command with a real **hopper** — a building west of the chain's head that buffers raw tomatoes and meters them onto the first belt one per tick, filled by the player (SPACE) rather than teleporting items. **Ticket 4 finished the epic**: the Godot presentation of all three — a bespoke voxel model per front-end machine kind, multi-tile rendering so the cooking vat actually covers its 2x2 footprint, the hopper drawn with a product level that tracks its live fill, and hover resolving any tile of a multi-tile machine as well as the hopper. **The "Machines improvement" epic is complete.** A further **"Shop & Inventory"** epic (also requested directly, and a deliberate priority shift toward a real build-your-own-factory game) has started: **ticket 1** landed the economy half — `data/shop.ron` prices every buildable kind, `sim::shop` loads/validates it, the player owns a per-kind count, and a `Purchase` command spends contract money on it, all exposed as `shop_snapshot_json`. **Ticket 2 finished the epic**: a real build menu (**B**), a grid of voxel-rendered icon slots built entirely from `shop_snapshot_json`, where clicking a slot — or pressing its number key — buys one, and what you can't afford is disabled, dimmed and marked. **The "Shop & Inventory" epic is complete.** The **"Real Placement"** epic that followed it is what made a purchase visible on the floor: **ticket 1 (sim) has landed** — `World::new` now builds *nothing*, every belt tile, pipe tile, machine and building is placed by the player out of what they own, everything carries a real four-way `Direction` it can be rotated through, and flow is derived from adjacency (recomputed only when something is placed, removed or rotated) rather than from `recipes.ron`'s file order. Ticket 2 (the Godot build/ghost/rotate UI, and rendering per-tile rotation) is still to do.
 - **Art/UI:** the voxel pipeline (UI_UX.md §2a/§2b) exists and is the source of every asset in the scene — including milestone 6's pipes and the liquid inside them, which added a fourth material class (`liquid`, a glossy dielectric) to `palette.ron` — Rust generators in `assets/voxels/generators/` produce `.vox` models, reviewed as isometric PNGs via `scripts/build-voxels.sh`, imported into Godot by a pinned community importer. UI_UX.md §5's real UI is now landed: the money/contract readout is a diegetic clipboard panel (paper background, steel clip bar, checkbox tick marks) with a voxel-rendered icon per required item, and per-machine detail (recipe/progress/buffers) is hover-only instead of dense always-on text, working in both view modes — a screen-centre crosshair stands in for the cursor in first-person — see the log entries below.
@@ -182,6 +190,60 @@ hidden by every panel that would otherwise be open) and
 clips its last docket line. Both are the same capped-grid arithmetic, and
 both leave "am I short?" answered by the strip and the summary line, which
 is what was asked for.
+
+### 2026-09-16 — GitHub is the workflow now: PRs in, issues out
+
+The context restructure (below) fixed what an agent *reads*. This fixes what
+an agent *does with finished work and with what it chooses not to do*.
+
+Two things were going wrong, both invisible from inside a session. Changes
+were reaching `main` by local merge and direct push — this very repo had a
+commit fast-forwarded onto `main` an hour before this entry was written — so
+there was no reviewable artifact, no CI run standing behind the merge, and
+nothing to read afterwards except a `git log` subject. And findings that a
+session consciously decided not to fix were being reported in its closing
+message and nowhere else. GitHub had four years of stock labels, **zero
+issues and zero pull requests** while the repo carried at least four known,
+written-down deferrals.
+
+**Nothing lands on `main` except by merging a PR.** `.githooks/pre-push`
+refuses a direct push and prints the five commands that do it properly; unlike
+the `pre-commit` DEVLOG reminder it blocks, because "am I pushing to main" is
+mechanical, not a judgement call. Squash-merge is the default so the squashed
+subject is the one Conventional Commit for the change and is linted like any
+other. `.github/pull_request_template.md` asks for the thing reviews here
+actually need: the verification commands **actually run and what they said**,
+not "tests pass" — and, for a visual change, what the PNG showed in words,
+since it is gitignored and cannot be attached from a headless run.
+
+**A deferral is not finished until the issue exists.** `gh issue create
+--label deferred`, with a body that assumes the reader starts cold: file *and
+function*, how it was found (which test, which `screenshot-scene.sh` flag),
+why it was deferred, and what the fix probably is. Seven labels, kept few:
+`deferred`, `owner-decision` (blocked on a human — a gameplay change, a
+design-doc deviation, anything invalidating saves) and five `area:` labels.
+
+The four deferrals already written down in prose were filed as the first
+issues, and `docs/PIPES_AND_CONVEYORS_PLAN.md`'s "Still open" section now
+points at them so there are not two competing backlogs: the `resolve_sink`
+inlet rule that contradicts both `world.rs`'s module doc and GAMEPLAY.md §9
+([#1](https://github.com/TomWhitticase/sauce-factory/issues/1),
+`owner-decision`, because it invalidates saves and the demo line), the belt
+animation nobody has watched live
+([#2](https://github.com/TomWhitticase/sauce-factory/issues/2)),
+`_read_world_layout`'s ~40 ms of an 80 ms rebuild
+([#3](https://github.com/TomWhitticase/sauce-factory/issues/3)), and the
+`--hover` screenshot harness's cursor drift
+([#4](https://github.com/TomWhitticase/sauce-factory/issues/4)).
+
+Issues are the **backlog** and nothing else: a rule still goes through the
+three-place decision ritual, a milestone still comes here, a plan is still a
+doc. Two new skills, `open-pr` and `file-issue`, are the procedures; the full
+rule is `docs/WORKFLOW.md`'s new GitHub section, with `CLAUDE.md` carrying
+only the two lines that always apply. Not done, and the owner's call: branch
+protection on `main`, which would enforce this server-side but would also stop
+the owner's own direct pushes.
+
 
 ### 2026-09-16 — The agent context restructured: CLAUDE.md is a map now
 

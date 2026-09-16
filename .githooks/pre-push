@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Refuses a direct push to main. Unlike the pre-commit reminder, this one
+# BLOCKS: "am I pushing to main" is a mechanical check, not a judgment call,
+# and every change is supposed to reach main through a reviewable pull request
+# with CI behind it (docs/WORKFLOW.md, "GitHub: branches, pull requests and
+# issues").
+#
+# git feeds refs to be pushed on stdin as: <local ref> <local sha> <remote ref>
+# <remote sha>. A deletion has an all-zero local sha and is left alone.
+set -euo pipefail
+
+protected="refs/heads/main"
+zero="0000000000000000000000000000000000000000"
+
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+  if [ "$remote_ref" != "$protected" ] || [ "$local_sha" = "$zero" ]; then
+    continue
+  fi
+
+  cat >&2 <<'MSG'
+refusing to push directly to main.
+
+  main is only ever updated by merging a pull request, so that every change
+  has a review artifact and a CI run behind it. Instead:
+
+    git switch -c <type>/<short-description>   # if you are not on a branch
+    git push -u origin HEAD
+    gh pr create --fill
+    gh pr checks --watch
+    gh pr merge --squash --delete-branch
+
+  See docs/WORKFLOW.md. If you genuinely need to bypass this (a hotfix with
+  nobody to review it), `git push --no-verify` — and say that you did.
+MSG
+  exit 1
+done
+
+exit 0
