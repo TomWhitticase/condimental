@@ -153,29 +153,43 @@ func _initialize() -> void:
 		if mi.mesh == null or mi.mesh.get_surface_count() < 1:
 			_fail("MeshInstance3D '%s' has no mesh surfaces — did the .vox import fail?" % mi.name)
 			return
-		var mat: StandardMaterial3D = mi.get_surface_override_material(0)
+		var mat: Material = mi.get_surface_override_material(0)
 		if mat == null:
 			_fail("MeshInstance3D '%s' has no material override" % mi.name)
 			return
-		if not mat.vertex_color_use_as_albedo:
+		# `emissive` is the one class that is a ShaderMaterial (issue #25):
+		# emission has to follow each voxel's OWN colour, which
+		# StandardMaterial3D cannot express. Both kinds still take their
+		# colour from the mesh's vertices and nowhere else.
+		if mat is ShaderMaterial:
+			if String(mi.name) != "emissive":
+				_fail("'%s' should be a StandardMaterial3D — only 'emissive' needs a shader" % mi.name)
+				return
+			var shader: Shader = (mat as ShaderMaterial).shader
+			if shader == null or not String(shader.resource_path).ends_with("voxel_emissive.gdshader"):
+				_fail("the 'emissive' material must use voxel_emissive.gdshader, was '%s'" % ("<none>" if shader == null else shader.resource_path))
+				return
+			# Unless this particular lamp is currently showing the OFF
+			# material, which is emission-free by design — a dead lens
+			# that still emitted would be a lamp half on. The guard is
+			# about the CLASS material still being built to emit, and an
+			# `emissive` mesh wearing `lamp_idle` is a lamp whose state
+			# has been set, not a material that lost its emission.
+			var energy := float(mat.get_shader_parameter("emission_energy"))
+			if energy <= 0.0 and mat != main._lamp_idle:
+				_fail("the 'emissive' material must actually emit (UI_UX.md §4/§7)")
+				return
+			continue
+		var std: StandardMaterial3D = mat
+		if not std.vertex_color_use_as_albedo:
 			_fail("'%s' must use vertex colours as albedo — voxel palettes are the only colour source" % mi.name)
 			return
 		match String(mi.name):
 			"matte":
-				matte_roughness = mat.roughness
+				matte_roughness = std.roughness
 			"metal":
-				metal_roughness = mat.roughness
-				metal_metallic = mat.metallic
-			"emissive":
-				# Unless this particular lamp is currently showing the OFF
-				# material, which is emission-free by design — a dead lens
-				# that still emitted would be a lamp half on. The guard is
-				# about the CLASS material still being built to emit, and an
-				# `emissive` mesh wearing `lamp_idle` is a lamp whose state
-				# has been set, not a material that lost its emission.
-				if not mat.emission_enabled and mat != main._lamp_idle:
-					_fail("the 'emissive' material must actually emit (UI_UX.md §4/§7)")
-					return
+				metal_roughness = std.roughness
+				metal_metallic = std.metallic
 
 	if metal_metallic < 0.0 or matte_roughness < 0.0:
 		_fail("scene is missing a metal or matte voxel mesh — the material split didn't survive import")
@@ -298,23 +312,28 @@ func _initialize() -> void:
 	# They did not. `lamp_idle` was `lamp_running`'s emission at a quarter
 	# energy until 2026-09-16, and the two rendered at most 2/255 apart: the
 	# blink above was correct on every count this file could check and still
-	# invisible on screen. Emission is why — it contributes nothing here at
-	# any energy (issue #25, `voxel_assets.gd`'s `make_material`) — so the
-	# difference has to live in ALBEDO, which does reach the screen. Asserted
-	# as a channel rather than as a look because that is the part a headless
-	# run can actually hold: an emission-only difference would pass every
-	# other line in this section.
-	var lamp_off: StandardMaterial3D = main._lamp_idle
-	var lamp_on: StandardMaterial3D = main._lamp_running
+	# invisible on screen. Emission was why — it contributed nothing at any
+	# energy (issue #25) — so the difference was moved into ALBEDO, which did
+	# reach the screen. The shader fixed emission afterwards, and BOTH
+	# assertions stay: albedo is what still separates the two halves in a
+	# frame where the glow pass is what the eye reads, and it is the part a
+	# headless run can actually hold.
+	var lamp_off: ShaderMaterial = main._lamp_idle
+	var lamp_on: ShaderMaterial = main._lamp_running
 	if lamp_off == null or lamp_on == null:
 		_fail("the scene should hold both status-lamp materials")
 		return
-	if lamp_off.emission_enabled:
+	if float(lamp_off.get_shader_parameter("emission_energy")) > 0.0:
 		_fail("an unlit lens that still emitted would be a lamp half on")
 		return
-	if lamp_off.albedo_color.v > lamp_on.albedo_color.v * 0.6:
+	if float(lamp_on.get_shader_parameter("emission_energy")) <= 0.0:
+		_fail("a lit lens must emit — that is what `emissive` is for (UI_UX.md §4/§7)")
+		return
+	var off_albedo: Color = lamp_off.get_shader_parameter("albedo_scale")
+	var on_albedo: Color = lamp_on.get_shader_parameter("albedo_scale")
+	if off_albedo.v > on_albedo.v * 0.6:
 		_fail("an off lamp must be visibly darker than a lit one, not merely dimmer in a channel that does not render: off %s vs on %s" % [
-			lamp_off.albedo_color, lamp_on.albedo_color
+			off_albedo, on_albedo
 		])
 		return
 

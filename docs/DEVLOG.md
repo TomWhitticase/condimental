@@ -50,14 +50,17 @@ below is history and should only ever be appended to.)*
   it is built from the game's own assets, lighting and floor helpers
   (`title_scene.gd`, `voxel_assets.gd`, `factory_environment.gd`). See the
   log entry below.
-- **No voxel in the game emits light, and that is a known bug (2026-09-16,
-  issue #25).** `EMISSION_OP_MULTIPLY` multiplies by an emission texture and
-  this pipeline has none, so every `emissive`-class voxel — status lamps, the
-  vat ring, the payout coin — renders as ordinary paint at any energy, and
-  the glow settings were tuned with nothing feeding them. Status lamps report
-  their state through **albedo** in the meantime, which does reach the screen.
-  Read anything in `docs/UI_UX.md` that assumes a lamp glows with that in
-  mind. See the log entry below.
+- **An emissive voxel glows in its own colour (2026-09-16, issue #25 fixed).**
+  `emissive` is the one material class Godot builds as a `ShaderMaterial`
+  (`godot_project/voxel_emissive.gdshader`, `EMISSION = COLOR.rgb * energy`);
+  matte, metal and liquid stay `StandardMaterial3D`, which they must, because
+  `main.gd` duplicates and re-tints those. `StandardMaterial3D` could not
+  express it: its emission comes from a texture this pipeline does not have.
+  `emission_energy` was retuned 2.6 -> 1.2 in the same pass — the old value
+  was picked when nothing could reach the screen, and it burns a lit amber
+  lens to cream. Status lamps still report their state through **albedo** as
+  well as emission, so an OFF lamp reads off in any lighting. See the log
+  entry below.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Work reaches `main` through pull requests, and deferrals become issues
   (2026-09-16).** Nothing is pushed to `main` directly — a `pre-push` hook
@@ -126,6 +129,38 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-16 — The factory emits light
+
+The follow-up to the entry below, and the close of **issue #25**. `emissive`
+is now the one material class Godot builds as a `ShaderMaterial`
+(`godot_project/voxel_emissive.gdshader`): `ALBEDO = lens * albedo_scale`,
+`EMISSION = lens * energy`, where `lens` is the mesh's own vertex colour
+converted sRGB → linear. Everything else stays `StandardMaterial3D`, which
+matte, metal and liquid need to be — `main.gd` duplicates and re-tints those
+for hopper fills and per-fluid pipe bodies.
+
+`StandardMaterial3D` could not do this. Its emission comes from a flat colour
+and an emission texture, never from vertex colours, and `EMISSION_OP_ADD` —
+the only setting that lights anything at all — lights every lens the same
+white, which is the failure the original MULTIPLY was reaching for. A single
+`emissive` submesh routinely carries two lens colours: `control_panel` puts
+`status_green` at one end and `status_amber` at the other.
+
+`palette.ron`'s `emission_energy` went **2.6 → 1.2** in the same pass. 2.6 was
+never a judgement — it was picked while the value could not reach the screen,
+so every value rendered the same frame. Judged for the first time against the
+mixer's amber lamp, the vat's ring and the dock's deck lamps under the glow
+settings that were themselves tuned while nothing emitted, 2.6 burns a lit
+#FFB020 lens through to (255, 245, 178), a cream white — the hue-washing the
+shader exists to prevent, reached from the other side. At 1.2 a lens reads
+unmistakably lit against the hazard chevrons beside it and is still amber.
+
+The OFF lamp keeps its dark **albedo** as well as zero energy: that is what
+separates the two halves of the dock's full-pool blink in a frame where the
+glow pass is what the eye reads, and it is the half a headless test can hold.
+`test_presentation.gd` asserts both, plus that the `emissive` material is the
+shader and no other class is.
 
 ### 2026-09-16 — The README is the front door, with pictures
 

@@ -26,20 +26,23 @@ const VOX_DIR := "res://voxels/"
 ## #5C4212 is a little over a third, and so is red's and green's.
 const LAMP_OFF_ALBEDO := 0.38
 
-## "matte"/"metal"/"emissive"/"liquid" -> StandardMaterial3D.
+## "matte"/"metal"/"emissive"/"liquid" -> Material. `emissive` is the one
+## `ShaderMaterial` (`voxel_emissive.gdshader`); the rest are
+## `StandardMaterial3D` and stay that way — see `make_emissive_material`.
 var class_materials: Dictionary = {}
 ## The two status-lamp variants; see `load_materials`.
-var lamp_idle: StandardMaterial3D
-var lamp_running: StandardMaterial3D
+var lamp_idle: ShaderMaterial
+var lamp_running: ShaderMaterial
 ## Asset name -> Array of the material classes `voxgen` split it into.
 var asset_classes: Dictionary = {}
 
 
-## Rebuilds one `StandardMaterial3D` per material class from
-## `voxels/materials.json`, which `voxgen` exports straight out of
-## `assets/voxels/palette.ron`. The numbers deliberately are NOT written down
-## here: palette.ron stays the single source of truth for colour and material
-## (UI_UX.md §2a point 5), and GDScript just consumes it.
+## Rebuilds one material per class from `voxels/materials.json`, which
+## `voxgen` exports straight out of `assets/voxels/palette.ron`. The numbers
+## deliberately are NOT written down here: palette.ron stays the single source
+## of truth for colour and material (UI_UX.md §2a point 5), and GDScript just
+## consumes it. A class that emits gets a `ShaderMaterial`, everything else a
+## `StandardMaterial3D` — `make_emissive_material` says why.
 func load_materials() -> void:
 	var defaults := {
 		"matte": {"metallic": 0.0, "roughness": 0.95, "emission_energy": 0.0},
@@ -56,38 +59,42 @@ func load_materials() -> void:
 
 	for class_name_ in table.keys():
 		var def: Dictionary = table[class_name_]
-		class_materials[class_name_] = make_material(
-			float(def.get("metallic", 0.0)),
-			float(def.get("roughness", 1.0)),
-			float(def.get("emission_energy", 0.0))
+		var metallic := float(def.get("metallic", 0.0))
+		var roughness := float(def.get("roughness", 1.0))
+		var energy := float(def.get("emission_energy", 0.0))
+		class_materials[class_name_] = (
+			make_emissive_material(metallic, roughness, energy, Color(1, 1, 1))
+			if energy > 0.0
+			else make_material(metallic, roughness)
 		)
 
 	# Two variants of the emissive material so a machine's status lamps can
 	# actually report state (UI_UX.md §4/§7: saturated colour reserved for
 	# meaning, never decoration). Same mesh, swapped override material.
 	#
-	# The OFF variant is dark ALBEDO, not dimmed emission. It was a quarter of
-	# the lit emission energy until 2026-09-16, and the two were
-	# indistinguishable in a rendered frame — at most 2/255 between them, so
-	# the dock's full-pool blink (`main.gd`'s `_dock_lamp_lit`) was a signal
-	# nobody could see. Emission turns out to contribute NOTHING here at any
-	# energy: `make_material`'s note and issue #25 say why. Albedo is the
-	# channel that moves, and it is the one the palette itself reaches for —
-	# the `status_*_off` entries in `palette.ron` are the same hues taken
-	# down to a dark matte, "dark enough that a dead lens does not compete
-	# with a live one, light enough not to vanish", and `LAMP_OFF_ALBEDO` is
-	# that idea applied to a mesh whose colour cannot be repainted per state.
+	# The OFF variant darkens ALBEDO and drops emission to zero, and it keeps
+	# doing BOTH now that emission works. Albedo is not redundant: it is what
+	# made the dock's full-pool blink visible when emission contributed nothing
+	# (2026-09-16 — the two variants rendered at most 2/255 apart while the
+	# only difference between them was energy), and it is what keeps a dead
+	# lens reading as a dead lens in a frame where the glow pass is doing the
+	# talking. It is also the channel `palette.ron` itself reaches for: the
+	# `status_*_off` entries are the same hues taken down to a dark matte,
+	# "dark enough that a dead lens does not compete with a live one, light
+	# enough not to vanish", and `LAMP_OFF_ALBEDO` is that idea applied to a
+	# mesh whose colour cannot be repainted per state.
 	var lamp_energy: float = float(table.get("emissive", defaults["emissive"]).get("emission_energy", 2.6))
-	lamp_idle = make_material(0.0, 0.6, 0.0)
-	lamp_idle.albedo_color = Color(LAMP_OFF_ALBEDO, LAMP_OFF_ALBEDO, LAMP_OFF_ALBEDO)
-	lamp_running = make_material(0.0, 0.45, lamp_energy)
+	lamp_idle = make_emissive_material(
+		0.0, 0.6, 0.0, Color(LAMP_OFF_ALBEDO, LAMP_OFF_ALBEDO, LAMP_OFF_ALBEDO)
+	)
+	lamp_running = make_emissive_material(0.0, 0.45, lamp_energy, Color(1, 1, 1))
 
 	var index = read_json(VOX_DIR + "index.json")
 	if index is Dictionary:
 		asset_classes = index
 
 
-static func make_material(metallic: float, roughness: float, emission_energy: float) -> StandardMaterial3D:
+static func make_material(metallic: float, roughness: float) -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()
 	# Voxel meshes carry their colour per vertex, straight from the .vox
 	# palette — there are no textures anywhere in this pipeline.
@@ -95,27 +102,31 @@ static func make_material(metallic: float, roughness: float, emission_energy: fl
 	mat.vertex_color_is_srgb = true
 	mat.metallic = metallic
 	mat.roughness = roughness
-	if emission_energy > 0.0:
-		mat.emission_enabled = true
-		mat.emission = Color(1, 1, 1)
-		# MULTIPLY was chosen so that an emissive mesh holding several
-		# differently coloured lamps kept each one's hue, where a flat
-		# additive emission washes them all to the same white.
-		#
-		# It does not do that, and NOTHING HERE EMITS — issue #25. Godot's
-		# MULTIPLY multiplies by the emission TEXTURE, not by albedo and not
-		# by the mesh's vertex colours, and this pipeline has no textures at
-		# all, so the product is zero: raising `emission_energy` to 50
-		# renders a byte-identical frame. Left as it stands on purpose. ADD
-		# would light every lamp white, which is the failure the line above
-		# set out to avoid; emission that follows each voxel's own colour
-		# needs a spatial shader and a relight of every machine, and that
-		# wants its own review pass rather than a rider on a bug fix.
-		#
-		# Until then, a lamp's state must be told by ALBEDO, the channel that
-		# does reach the screen — see `LAMP_OFF_ALBEDO`.
-		mat.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
-		mat.emission_energy_multiplier = emission_energy
+	return mat
+
+
+## The `emissive` class, and only it: a lamp lit in its own colour.
+##
+## `StandardMaterial3D` cannot do that (issue #25, fixed 2026-09-16). Its
+## emission comes from a flat colour and an emission TEXTURE, never from the
+## vertex colours that are this pipeline's only colour source, so the previous
+## `EMISSION_OP_MULTIPLY` against an absent texture multiplied by nothing:
+## every lamp in the factory was ordinary painted amber at any energy, and
+## `emission_energy: 50` rendered a byte-identical frame. The full reasoning —
+## and why `EMISSION_OP_ADD` is not the answer either — is at the top of
+## `voxel_emissive.gdshader`.
+##
+## `albedo_scale` multiplies the lens colour in the ALBEDO channel alone, which
+## is how `lamp_idle` reads as OFF while staying the same hue of lens.
+static func make_emissive_material(
+	metallic: float, roughness: float, emission_energy: float, albedo_scale: Color
+) -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = preload("res://voxel_emissive.gdshader")
+	mat.set_shader_parameter("metallic", metallic)
+	mat.set_shader_parameter("roughness", roughness)
+	mat.set_shader_parameter("emission_energy", emission_energy)
+	mat.set_shader_parameter("albedo_scale", albedo_scale)
 	return mat
 
 

@@ -33,7 +33,23 @@
         // Status lights / indicator strips. Both an aesthetic touch and a
         // functional readability signal (§4, §7) — these are the elements the
         // WorldEnvironment's glow pass picks up.
-        "emissive": (metallic: 0.0, roughness: 0.55, emission_energy: 2.6),
+        //
+        // This is the one class Godot builds as a ShaderMaterial rather than a
+        // StandardMaterial3D (`voxel_emissive.gdshader`): a lamp has to emit
+        // its OWN vertex colour, because the crusher carries a green lens and
+        // an amber one in a single `emissive` submesh and a flat emission
+        // colour washes both to the same white.
+        //
+        // 2.6 until 2026-09-16 (issue #25), and that number never rendered:
+        // the material asked for emission it could not produce, so ANY value
+        // gave a byte-identical frame and this was never judged by eye.
+        // Retuned to 1.2 the first time it actually lit anything, against the
+        // mixer's amber lamp and the cooking vat's ring under the glow pass
+        // (`factory_environment.gd`: hdr threshold 0.85, intensity 0.7). At
+        // 2.6 a lit lens burns through to cream — #FFB020 renders (255, 245,
+        // 178) — which is the very hue-washing the shader exists to prevent.
+        // 1.2 is the most a lens can take and still read as its own colour.
+        "emissive": (metallic: 0.0, roughness: 0.55, emission_energy: 1.2),
         // Fluid bodies inside pipes and tanks (milestone 6). A dielectric,
         // so metallic stays 0, but glossier than anything else in the
         // palette — that gloss IS UI_UX.md §4's "visible liquid surfaces in
