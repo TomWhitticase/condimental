@@ -1,4 +1,4 @@
-# Sauce Factory — Decision records (full history)
+# CONDIMENTAL — Decision records (full history)
 
 This file holds the **full, verbatim decision records** that used to live in
 `CLAUDE.md`'s decisions log, `docs/UI_UX.md` §2b and `docs/ARCHITECTURE.md`
@@ -24,6 +24,62 @@ matches what code comments and data files cite.
 ---
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
+
+- 2026-09-16: **The game is called CONDIMENTAL.** "sauce-factory was just a
+  temporary name, ive now come up with the name 'CONDIMENTAL'". The owner's
+  call, and the only naming decision this project has ever actually made —
+  `sauce-factory` was never chosen, it was what the directory happened to be
+  called on day one.
+
+  **What it means, and where it stops.** CONDIMENTAL is the *title*: the
+  wordmark on the menu (`menu.gd`'s `title.text`), `config/name`, the
+  `package/name` of the mobile exports, and the heading of every design doc.
+  It is styled all-caps because that is how the owner wrote it and because
+  `menu.gd` was already setting the wordmark in caps.
+
+  It is not a theme change. "Sauce" is still what the game is about and still
+  the noun in every recipe, ingredient, contract and plan — `boxed_ketchup`
+  does not become `boxed_condiment`, and `docs/BBQ_SAUCE_PLAN.md` keeps its
+  name. A rename that reached into `data/*.ron` would be a content change
+  wearing a rename's clothes.
+
+  **The three places the old name deliberately survives.** A later agent will
+  grep for `sauce-factory`, find these, and want to be helpful. It should not
+  be.
+
+  1. *The repository, the clone URL and the worktree paths.* The repo is
+     still `TomWhitticase/sauce-factory`; renaming it is the owner's to do,
+     not an agent's, because it is an outward-facing change to a URL other
+     people may hold. Until they do, every
+     `github.com/TomWhitticase/sauce-factory/...` link in the docs is correct
+     and rewriting it would 404. After they do, GitHub redirects the old
+     paths indefinitely, so the links keep working and can be updated at
+     leisure — there is no moment at which a sweep is urgent.
+  2. *Dated history.* DEVLOG.md's log and this file's older records say
+     "Sauce Factory" because that is what it was called on those dates. A log
+     that edits its own past to agree with the present is worth less than one
+     that does not.
+  3. *The archived `*_PLAN.md` files*, for the same reason — including
+     `PIPES_AND_CONVEYORS_PLAN.md`'s worker prompt, which is quoted verbatim
+     and should stay a faithful quote.
+
+  **The one real consequence: saves move.** `user://` resolves through
+  `config/name`, so the save directory went from
+  `app_userdata/Sauce Factory/` to `app_userdata/CONDIMENTAL/`. Existing
+  local saves are not migrated and not listed — they sit in the old
+  directory. This is accepted rather than solved: the project is pre-alpha
+  and already *rejects* saves whose schema has moved rather than migrating
+  them, so a save surviving a rename would be a stronger guarantee than a
+  save survives an ordinary week. Anyone who wants an old save back can move
+  the directory by hand.
+
+  **What did not move.** The crate is still `sim_core`, so every library
+  filename in `sim_core.gdextension` is unchanged, and `entry_symbol` is
+  still gdext's default `gdext_rust_init` — the `ExtensionLibrary` struct was
+  renamed to `CondimentalExtension` for readability only, and no binding
+  depends on its name. The Android/iOS ids moved from `com.saucefactory.spike`
+  to `com.condimental.spike`, which costs nothing because nothing has ever
+  been published under either.
 
 - 2026-09-16: **The title screen's scrim is gone — nothing is washed over the
   hall.** "In the splash screen, get rid of the dark haze/shadowy effect

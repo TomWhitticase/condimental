@@ -1,4 +1,4 @@
-# Sauce Factory — UI/UX & Visual Style Plan
+# CONDIMENTAL — UI/UX & Visual Style Plan
 
 This doc covers **aesthetics and UI/UX only** — how the game looks and
 behaves to the player. Mechanics are [GAMEPLAY.md](GAMEPLAY.md); how it is

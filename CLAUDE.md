@@ -1,4 +1,4 @@
-# sauce-factory
+# CONDIMENTAL
 
 A Factorio-like automation game, themed around sauce production. Pre-alpha.
 A deterministic Rust simulation core (`sim_core`) drives a Godot 4 / GDScript

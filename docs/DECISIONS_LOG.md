@@ -1,4 +1,4 @@
-# Sauce Factory — Decisions log (condensed)
+# CONDIMENTAL — Decisions log (condensed)
 
 Every entry here is **the rule**, newest first. The full reasoning behind each
 one is in [DECISIONS.md](DECISIONS.md), Part A, under the same date and title.
@@ -18,6 +18,15 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-16 **The game is called CONDIMENTAL.** All-caps, everywhere it is
+  the title: the menu's `title.text`, `config/name`, the design-doc headings.
+  `sauce-factory` was a working title and survives *deliberately* in three
+  places — do not sweep them: the **GitHub repo, clone URLs and worktree
+  paths** (renaming the repo is the owner's; rewriting the links first only
+  404s them), **dated history** in DEVLOG.md and DECISIONS.md, and the
+  archived `*_PLAN.md` files. "Sauce" stays the theme and the noun in every
+  recipe. `user://` resolves through `config/name`, so saves moved to
+  `app_userdata/CONDIMENTAL/` and pre-rename saves are not migrated.
 - 2026-09-16 **Nothing is washed over the title screen's hall.** The main
   menu's gradient scrim is **removed**: no full-screen tinted overlay may sit
   between `title_scene.gd`'s backdrop and the menu column, asserted in

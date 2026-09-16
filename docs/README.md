@@ -1,6 +1,6 @@
 # Docs index
 
-Sauce Factory is a Factorio-like automation game, themed around sauce
+CONDIMENTAL is a Factorio-like automation game, themed around sauce
 production. Three docs cover the whole design, split by concern so each stays
 useful even if the others change:
 
