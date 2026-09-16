@@ -56,6 +56,28 @@ const SHORT_STAFFED_SNAPSHOT := {
 	"categories": [{"id": "manufacturing", "name": "Manufacturing", "short": 2}],
 }
 
+## A staff snapshot for the CREW plate, shaped like the wire's `categories`.
+##
+## `short` is deliberately INCONSISTENT with `required - headcount` here
+## (2, not 1). The plate must print the wire's own figure: `short` is the
+## sim's hiring advice and Godot recomputing it would be exactly the
+## GDScript-side gameplay arithmetic the establishment change removed
+## (CLAUDE.md: gameplay logic lives in Rust). A plate that printed "HIRE 1"
+## from this fixture would be doing its own sums.
+##
+## `maintenance` is the dead category: nothing in `machines.ron` asks for it
+## and nobody is hired into it, so its row must take no room at all.
+const CREW_SNAPSHOT := {
+	"money": 40.0,
+	"next_payday_tick": 600,
+	"next_bill": 52,
+	"categories": [
+		{"id": "manufacturing", "name": "Manufacturing", "headcount": 3, "required": 4, "short": 2},
+		{"id": "packaging", "name": "Packaging", "headcount": 2, "required": 2, "short": 0},
+		{"id": "maintenance", "name": "Maintenance", "headcount": 0, "required": 0, "short": 0},
+	],
+}
+
 ## Every combination the right-hand column has to survive: the strip down and
 ## up, at the shipped window size and at the tight one.
 const DOCKET_CASES := [
@@ -101,6 +123,9 @@ func _process(_delta: float) -> bool:
 func _resize(to: Vector2i) -> void:
 	root.size = to
 	main._position_hotbar()
+	# CREW before STOCK before the clipboard — the column's order of
+	# yielding, and the order `_update_larder` runs them in every frame.
+	main._position_crew_panel()
 	main._update_contract_panel()
 	main._position_stock_panel()
 
@@ -311,7 +336,115 @@ func _run_checks() -> void:
 			_fail("the stock plate is capped below one row's height at %s" % str(window))
 			return
 
+	# --- The CREW plate: the staffing readout that needs no key pressed ----
+	# It is the bottom tenant of the right-hand column, so the order of
+	# yielding it completes is: the clipboard scrolls its dockets, the stock
+	# list scrolls its rows, and this plate — bounded at four categories —
+	# takes its natural height. All three must therefore be disjoint, at both
+	# window sizes, on the right-hand edge.
+	for window in [BIG, SMALL]:
+		_resize(window)
+		if main._crew_panel == null or not main._crew_panel.visible:
+			_fail("there is no CREW plate at %s" % str(window))
+			return
+		var crew := Rect2(main._crew_panel.global_position, main._crew_panel.size)
+		if crew.size.x <= 0.0 or crew.size.y <= 0.0:
+			_fail("the CREW plate has no rect at %s" % str(window))
+			return
+		if crew.position.x < 0.0 or crew.end.x > float(window.x) + 0.5:
+			_fail("the CREW plate runs off the %s window horizontally (%s)" % [str(window), str(crew)])
+			return
+		if crew.position.y < 0.0 or crew.end.y > float(window.y) + 0.5:
+			_fail("the CREW plate runs off the %s window vertically (%s)" % [str(window), str(crew)])
+			return
+		if crew.position.x < float(window.x) * 0.5:
+			_fail("the CREW plate is not on the right-hand half of the %s window (%s)" % [str(window), str(crew)])
+			return
+		for other in [
+			["the contracts clipboard", main._contract_panel.get_global_rect(), main._contract_panel.visible],
+			["the stock plate", main._stock_rect(), true],
+			["the hotbar", main._hotbar_panel.get_global_rect(), true],
+		]:
+			if bool(other[2]) and crew.intersects(other[1]):
+				_fail("the CREW plate lands on %s at %s (crew %s, other %s)" % [
+					String(other[0]), str(window), str(crew), str(other[1])
+				])
+				return
+		# Below the stock list, never above it: the bounded plate holds the
+		# bottom so the unbounded one above it can do the scrolling.
+		if crew.position.y < main._stock_rect().end.y:
+			_fail("the CREW plate sits above the stock plate at %s (crew %s, stock %s)" % [
+				str(window), str(crew), str(main._stock_rect())
+			])
+			return
+
+	# Tight window: the plate sheds its DETAIL line, never a category and
+	# never behind a scrollbar. Every category the player might have to act
+	# on stays on screen at 1280x720 (`_crew_fit_detail`) — an at-a-glance
+	# readout you have to scroll is not one.
+	_resize(SMALL)
+	for id in main._crew_row_nodes:
+		var nodes = main._crew_row_nodes[id]
+		if nodes["wrap"].visible and nodes["assigned_label"].visible:
+			_fail("the CREW plate kept the '%s' assignment line at 1280x720" % id)
+			return
+
 	_resize(BIG)
+	var named := 0
+	for id in main._crew_row_nodes:
+		var nodes = main._crew_row_nodes[id]
+		if not nodes["wrap"].visible:
+			continue
+		if not nodes["assigned_label"].visible:
+			_fail("the CREW plate dropped the '%s' assignment line at 1600x900" % id)
+			return
+		if String(nodes["assigned_label"].text) != "":
+			named += 1
+	if named == 0:
+		_fail("no CREW row names what its category is assigned to")
+		return
+
+	# Every figure on the plate is the wire's, read through the one pure
+	# function that builds it — no window size involved, so it is asserted
+	# once rather than per window.
+	var crew_state: Dictionary = main._crew_plate_state(CREW_SNAPSHOT, 0)
+	var crew_rows: Array = crew_state["rows"]
+	if crew_rows.size() != 3:
+		_fail("the CREW plate built %d rows for 3 categories" % crew_rows.size())
+		return
+	if String(crew_rows[0]["count_text"]) != "3 / 4":
+		_fail("the CREW plate reads '%s' for 3 hired of 4 required" % crew_rows[0]["count_text"])
+		return
+	if String(crew_rows[0]["chip_text"]) != "▲ HIRE 2":
+		_fail("the CREW plate recomputed the shortfall instead of reading it: '%s'" % crew_rows[0]["chip_text"])
+		return
+	if String(crew_rows[1]["chip_text"]) != "":
+		_fail("a fully crewed category still shows a HIRE chip ('%s')" % crew_rows[1]["chip_text"])
+		return
+	if not bool(crew_rows[0]["visible"]) or not bool(crew_rows[1]["visible"]):
+		_fail("a category with an establishment is hidden from the CREW plate")
+		return
+	if bool(crew_rows[2]["visible"]):
+		_fail("the dead `maintenance` category takes room on the CREW plate")
+		return
+	# Seconds, never ticks (UI_UX.md): 600 ticks away is not "600".
+	var payday := String(crew_state["payday_text"])
+	if not payday.begins_with("payday in") or payday.contains("600"):
+		_fail("the CREW plate's payday line reads in ticks, not seconds ('%s')" % payday)
+		return
+	if not payday.contains("52"):
+		_fail("the CREW plate's payday line does not name the bill ('%s')" % payday)
+		return
+	# 40 in the bank against a bill of 52: the warning comes BEFORE the money
+	# is gone, and carries a glyph and words, never colour alone (§7).
+	if not bool(crew_state["afford_warn"]) or String(crew_state["afford_text"]) == "":
+		_fail("40 in hand against a bill of 52 raised no affordability warning")
+		return
+	# And the live plate hides its own dead row, not just the state dictionary.
+	var maintenance = main._crew_row_nodes.get("maintenance", null)
+	if maintenance is Dictionary and maintenance["wrap"].visible:
+		_fail("the live CREW plate still draws the empty `maintenance` row")
+		return
 
 	# --- The legend folds, from the button and from F1 ---------------------
 	if main._legend_panel == null or main._legend_toggle == null:
@@ -456,7 +589,7 @@ func _run_checks() -> void:
 	for offer in JSON.parse_string(main.sim.economy_snapshot_json()).get("board", []):
 		if not bool(offer.get("active", false)):
 			main.sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": String(offer["id"])}))
-	_summary = "%d stock rows on a right-hand plate clear of the clipboard and hotbar at 1600x900 and 1280x720, each with its own colour and a 'none' zero state; the legend folds %s -> %s from its button and from F1 in both view modes, is not a modal, and every cursor panel reads its current rect" % [
+	_summary = "%d stock rows on a right-hand plate clear of the clipboard and hotbar at 1600x900 and 1280x720, each with its own colour and a 'none' zero state; the legend folds %s -> %s from its button and from F1 in both view modes, is not a modal, and every cursor panel reads its current rect; the CREW plate holds the bottom of that column clear of all three at both sizes, prints the wire's own shortfall, hides the dead maintenance row and warns before payday" % [
 		ids.size(), str(open_rect.size), str(stub_rect.size)
 	]
 

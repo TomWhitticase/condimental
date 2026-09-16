@@ -119,18 +119,18 @@ func _run_checks() -> void:
 	# --- 1. a row's state, pure --------------------------------------------
 	var full: Dictionary = main._staff_row_state({
 		"id": "manufacturing", "name": "Manufacturing", "headcount": 4, "wage": 2,
-		"demand": 4, "assigned": 4, "short": 0,
+		"demand": 4, "assigned": 4, "required": 4, "short": 0,
 	})
 	if full["hired_text"] != "hired 4":
 		_fail("a row reads 'hired N', got '%s'" % full["hired_text"])
 	if full["wage_text"].find("2") < 0 or full["wage_text"].find("wage") < 0:
 		_fail("a row names the wage per head, got '%s'" % full["wage_text"])
 	if absf(float(full["meter"]["fraction"]) - 1.0) > 0.001:
-		_fail("4 assigned of 4 asked is a full bar, got %s" % str(full["meter"]["fraction"]))
+		_fail("4 hired of 4 required is a full bar, got %s" % str(full["meter"]["fraction"]))
 	if full["meter"]["color"] != main.METER_FILL_LEVEL:
 		_fail("a fully staffed row's bar is the level colour")
 	if full["meter_text"] != "4 / 4":
-		_fail("the meter prints assigned / demand, got '%s'" % full["meter_text"])
+		_fail("the meter prints hired / required, got '%s'" % full["meter_text"])
 	if full["short_text"] != "":
 		_fail("nothing short says nothing, got '%s'" % full["short_text"])
 	if full["note"] != "":
@@ -139,16 +139,16 @@ func _run_checks() -> void:
 		_fail("FIRE is enabled with heads to fire")
 	var short: Dictionary = main._staff_row_state({
 		"id": "manufacturing", "name": "Manufacturing", "headcount": 2, "wage": 2,
-		"demand": 4, "assigned": 2, "short": 2,
+		"demand": 4, "assigned": 2, "required": 4, "short": 2,
 	})
 	if absf(float(short["meter"]["fraction"]) - 0.5) > 0.001:
-		_fail("2 assigned of 4 asked is a half bar, got %s" % str(short["meter"]["fraction"]))
+		_fail("2 hired of 4 required is a half bar, got %s" % str(short["meter"]["fraction"]))
 	if short["meter"]["color"] != main.METER_FILL_WARN:
 		_fail("a short row's bar is the warning colour")
 	if short["meter_text"] != "2 / 4":
 		_fail("a short row's meter reads '2 / 4', got '%s'" % short["meter_text"])
-	if short["short_text"] != "▲ 2 short":
-		_fail("a short row says '▲ 2 short' in words (glyph + word + colour, UI_UX §7), got '%s'" % short["short_text"])
+	if short["short_text"] != "▲ hire 2":
+		_fail("a short row says '▲ hire 2' in words (glyph + word + colour, UI_UX §7), got '%s'" % short["short_text"])
 	if short["state_text"] != "▲ SHORT" or short["state_color"] != main.METER_FILL_WARN:
 		_fail("a short row's name carries a ▲ SHORT chip in the warning colour, got '%s'" % short["state_text"])
 	if not bool(short["short_row"]):
@@ -159,60 +159,64 @@ func _run_checks() -> void:
 		_fail("a crewed row is not flagged short")
 	var idle: Dictionary = main._staff_row_state({
 		"id": "maintenance", "name": "Maintenance", "headcount": 0, "wage": 2,
-		"demand": 0, "assigned": 0, "short": 0,
+		"demand": 0, "assigned": 0, "required": 0, "short": 0,
 	})
-	if idle["note"] != "nothing to maintain yet":
-		_fail("maintenance with nothing hired and nothing asked reads 'nothing to maintain yet', got '%s'" % idle["note"])
+	if idle["note"] != "nothing needs maintenance yet — nothing to hire for":
+		_fail("maintenance with nothing hired and nothing asked reads 'nothing needs maintenance yet — nothing to hire for', got '%s'" % idle["note"])
 	if bool(idle["fire_enabled"]):
 		_fail("FIRE is disabled at headcount 0")
 	if idle["state_text"] != "":
 		_fail("a category nothing asks for gets no chip at all, got '%s'" % idle["state_text"])
 	var idle_logistics: Dictionary = main._staff_row_state({
 		"id": "logistics", "name": "Logistics", "headcount": 0, "wage": 2,
-		"demand": 0, "assigned": 0, "short": 0,
+		"demand": 0, "assigned": 0, "required": 0, "short": 0,
 	})
 	if idle_logistics["note"] != "" or idle_logistics["meter_text"] != "0 / 0":
 		_fail("an emptied logistics crew keeps its (empty) meter, not maintenance's note")
 	var nobody_asked: Dictionary = main._staff_row_state({
 		"id": "packaging", "name": "Packaging", "headcount": 2, "wage": 2,
-		"demand": 0, "assigned": 0, "short": 0,
+		"demand": 0, "assigned": 0, "required": 0, "short": 0,
 	})
-	if float(nobody_asked["meter"]["fraction"]) != 0.0 or nobody_asked["meter_text"] != "0 / 2".replace("2", "0"):
-		_fail("a crew nobody asked for is an empty bar reading '0 / 0', got %s '%s'" % [str(nobody_asked["meter"]["fraction"]), nobody_asked["meter_text"]])
+	if float(nobody_asked["meter"]["fraction"]) != 0.0 or nobody_asked["meter_text"] != "2 / 0":
+		_fail("two heads nothing needs is an empty bar reading '2 / 0', got %s '%s'" % [str(nobody_asked["meter"]["fraction"]), nobody_asked["meter_text"]])
+	if not bool(nobody_asked["fire_enabled"]):
+		_fail("heads nothing needs must still be fireable — otherwise the payroll is a trap")
+	if bool(nobody_asked["hire_enabled"]):
+		_fail("HIRE is closed on a category with no establishment (the maintenance money sink)")
 
 	# --- 1b. HIRE reads the wire's own can_hire; the row's AFTER-payday
 	# status line (ticket 4) -----------------------------------------------
 	var hireable: Dictionary = main._staff_row_state({
 		"id": "manufacturing", "name": "Manufacturing", "headcount": 4, "wage": 2,
-		"demand": 4, "assigned": 4, "short": 0, "can_hire": true,
+		"demand": 4, "assigned": 4, "required": 4, "short": 0, "can_hire": true,
 	})
 	if not bool(hireable["hire_enabled"]):
 		_fail("can_hire true on the wire means HIRE is enabled")
 	var unhireable: Dictionary = main._staff_row_state({
 		"id": "manufacturing", "name": "Manufacturing", "headcount": 4, "wage": 2,
-		"demand": 4, "assigned": 4, "short": 0, "can_hire": false,
+		"demand": 4, "assigned": 4, "required": 4, "short": 0, "can_hire": false,
 	})
 	if bool(unhireable["hire_enabled"]):
 		_fail("can_hire false on the wire (ticket 1's hire-refusal rule) means HIRE is disabled")
-	if main._staff_row_state({"id": "manufacturing"})["hire_enabled"] != true:
+	if main._staff_row_state({"id": "manufacturing", "required": 1})["hire_enabled"] != true:
 		_fail("a snapshot older than can_hire defaults HIRE to enabled")
 	if unhireable["status_text"] != "":
 		_fail("nothing unpaid or left says nothing, got '%s'" % unhireable["status_text"])
 	var idled: Dictionary = main._staff_row_state({
 		"id": "packaging", "name": "Packaging", "headcount": 2, "wage": 2,
-		"demand": 2, "assigned": 2, "short": 0, "unpaid": 2,
+		"demand": 2, "assigned": 2, "required": 2, "short": 0, "unpaid": 2,
 	})
 	if idled["status_text"] != "▲ 2 unpaid, idle until payday":
 		_fail("an idled row says '▲ 2 unpaid, idle until payday', got '%s'" % idled["status_text"])
 	var left_row: Dictionary = main._staff_row_state({
 		"id": "logistics", "name": "Logistics", "headcount": 0, "wage": 2,
-		"demand": 0, "assigned": 0, "short": 0, "left_last_payday": 1,
+		"demand": 0, "assigned": 0, "required": 0, "short": 0, "left_last_payday": 1,
 	})
 	if left_row["status_text"] != "▲ 1 left last payday":
 		_fail("a row that lost a head says '▲ 1 left last payday', got '%s'" % left_row["status_text"])
 	var both_status: Dictionary = main._staff_row_state({
 		"id": "packaging", "name": "Packaging", "headcount": 2, "wage": 2,
-		"demand": 2, "assigned": 2, "short": 0, "unpaid": 1, "left_last_payday": 1,
+		"demand": 2, "assigned": 2, "required": 2, "short": 0, "unpaid": 1, "left_last_payday": 1,
 	})
 	if both_status["status_text"] != "▲ 1 unpaid, idle until payday  ·  ▲ 1 left last payday":
 		_fail("both at once join with a separator, got '%s'" % both_status["status_text"])
@@ -746,8 +750,8 @@ func _run_checks() -> void:
 	var manufacturing := _category("manufacturing")
 	if int(manufacturing.get("short", 0)) != 2 or int(manufacturing.get("headcount", 0)) != 2:
 		_fail("the fixture's manufacturing pool reads headcount 2, short 2, got %s" % str(manufacturing))
-	if short_row["short_label"].text != "▲ 2 short" or not short_row["short_label"].visible:
-		_fail("the manufacturing row says '▲ 2 short', got '%s'" % short_row["short_label"].text)
+	if short_row["short_label"].text != "▲ hire 2" or not short_row["short_label"].visible:
+		_fail("the manufacturing row says '▲ hire 2', got '%s'" % short_row["short_label"].text)
 	if short_row["state_label"].text != "▲ SHORT" or not short_row["state_label"].visible:
 		_fail("the short row wears its ▲ SHORT chip, got '%s'" % short_row["state_label"].text)
 	var short_border: StyleBoxFlat = short_row["panel"].get_theme_stylebox("panel")
@@ -757,8 +761,8 @@ func _run_checks() -> void:
 		_fail("a category with nothing asking for it wears no chip")
 	if _row("maintenance")["panel"].get_theme_stylebox("panel").border_color == main.METER_FILL_WARN:
 		_fail("a row that is not short keeps the plain hairline border")
-	if short_row["meter_label"].text != "%d / %d" % [int(manufacturing.get("assigned", 0)), int(manufacturing.get("demand", 0))]:
-		_fail("the manufacturing meter prints the wire's assigned / demand, got '%s'" % short_row["meter_label"].text)
+	if short_row["meter_label"].text != "%d / %d" % [int(manufacturing.get("headcount", 0)), int(manufacturing.get("required", 0))]:
+		_fail("the manufacturing meter prints the wire's hired / required, got '%s'" % short_row["meter_label"].text)
 	var fill: Panel = short_row["meter"].get_node("Fill")
 	var fill_style: StyleBoxFlat = fill.get_theme_stylebox("panel")
 	if fill_style.bg_color != main.METER_FILL_WARN:

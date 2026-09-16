@@ -1120,6 +1120,42 @@ const STOCK_PANEL_HEIGHT_SHARE := 0.42
 ## plate's ordinary body ink, and `none` is the same grey the hint line under
 ## the list already uses. Zero is carried by the WORD and by the row fading
 ## back, never by the colour on its own.
+## The CREW plate, the STOCK plate's sibling in the right-hand column (the
+## playtest's second request: the staff you have, what they are assigned to,
+## whether you must hire, and what the next payday costs — without opening
+## anything). It keeps STOCK's width so the two plates form one column edge
+## rather than a ragged one, and its accent is the staff panel's blue rather
+## than STOCK's hazard gold, so a glance tells the two plates apart.
+##
+## NO SCROLL, unlike STOCK. `data/staff.ron` defines four categories and the
+## file's own comment says four is deliberate, so this list has a known
+## ceiling and can take its natural height. That is what lets the column's
+## order of yielding stay simple: the clipboard keeps its floor, CREW takes
+## what it needs, and STOCK — the one genuinely unbounded list of the three
+## — absorbs the remainder and scrolls (`_position_stock_panel`).
+const CREW_PANEL_ACCENT := Color(0.42, 0.66, 0.95, 0.95)
+## Smaller than STOCK's icon. This plate shares one column with the
+## clipboard AND the stock list, and an icon taller than the line of text
+## beside it sets the whole row's height for no gain — four rows of it was a
+## quarter of the plate.
+const CREW_ICON_SIZE := Vector2(18, 18) * UI_SCALE
+## The plate's content margin, and the text width inside it.
+##
+## AN AUTOWRAPPING LABEL MUST BE TOLD THIS WIDTH. `get_combined_minimum_size`
+## measures a wrapping Label at its MINIMUM width, not at the width it will
+## actually be drawn at, so an unconstrained one reports the height of its
+## text broken one word per line — which made this plate report roughly three
+## times its real height, and `_position_stock_panel` duly shoved the STOCK
+## plate up into the clipboard (caught by test_hud_plates.gd at 1600x900).
+## Setting `custom_minimum_size.x` makes the measurement happen at the width
+## the label really gets.
+const CREW_PANEL_PADDING := 10.0 * UI_SCALE
+const CREW_TEXT_WIDTH := STOCK_PANEL_MIN_WIDTH - CREW_PANEL_PADDING * 2.0
+## The most of the right-hand column this plate may take before it starts
+## dropping detail (`_crew_fit_detail`). STOCK's twin, and deliberately close
+## to it: the column now has three tenants and the clipboard is the one that
+## ends up with the remainder, so neither readout below it may be open-ended.
+const CREW_PANEL_HEIGHT_SHARE := 0.43
 const STOCK_COUNT_COLOR := Color(0.92, 0.93, 0.94)
 const STOCK_NONE_COLOR := Color(0.66, 0.68, 0.72)
 const STOCK_NONE_ROW_ALPHA := 0.62
@@ -1362,7 +1398,19 @@ const STAFF_ICON_SIZE := Vector2(40, 40) * UI_SCALE
 ## hired and nothing asking for it. Keyed on the category id because the
 ## sentence names what the category does; a generic "idle" would be wrong
 ## for a logistics crew that was simply fired.
-const STAFF_IDLE_NOTES := {"maintenance": "nothing to maintain yet"}
+## What a category with NO establishment says in place of its meter. A row
+## whose `required` is 0 has nothing placed asking for it, so a bar reading
+## "0 / 0" would be noise and a HIRE button would be a pure money sink —
+## both are hidden and this sentence stands instead.
+##
+## `maintenance` is the standing case: `data/machines.ron` contains no
+## machine that asks for it, because the corrosion and wear it exists to
+## service is GAMEPLAY.md §4's tier-4/5 scope and is not built. It ships in
+## `staff.ron` at headcount 0 so the panel and the save already know the
+## shape (that file says so itself). Until then a player could hire and pay
+## maintenance staff forever for no effect, which the playtest review called
+## out as a trap.
+const STAFF_IDLE_NOTES := {"maintenance": "nothing needs maintenance yet — nothing to hire for"}
 ## Ticket 2's icon files are `staff_<category id>.png`, so the path is built
 ## from the wire's id with no lookup table.
 const STAFF_ICON_PREFIX := "staff_"
@@ -1487,6 +1535,13 @@ var _stock_panel: PanelContainer
 var _stock_scroll: ScrollContainer
 var _stock_rows: VBoxContainer
 var _stock_hint: Label
+## The CREW plate and its per-category rows, keyed on the wire's category id
+## so a category added to `data/staff.ron` needs no change here.
+var _crew_panel: PanelContainer
+var _crew_rows: VBoxContainer
+var _crew_row_nodes: Dictionary = {}
+var _crew_payday_label: Label
+var _crew_afford_label: Label
 var _larder_entries: Dictionary = {} # item id -> count Label
 var _stock_row_nodes: Dictionary = {} # item id -> HBoxContainer (dimmed at zero)
 
@@ -4444,6 +4499,7 @@ func _build_ui() -> void:
 	# ticket) — see `_stock_panel`'s doc for why it is a right-hand column
 	# rather than the strip of chips it replaces.
 	_build_stock_panel(hud, settings)
+	_build_crew_panel(hud, settings)
 
 	# UI_UX.md §5's other named widget: "build/recipe menus as grids of
 	# voxel-rendered icon slots." Hidden until E is pressed.
@@ -6688,7 +6744,8 @@ func _staff_row_style(short: bool = false) -> StyleBoxFlat:
 ## blurb of what the category does and the dynamic WHY line naming what asks
 ## for it (ticket 4). Returns `{"id", "panel", "name_label", "hired_label",
 ## "wage_label", "meter", "meter_label", "short_label", "note_label",
-## "status_label", "blurb_label", "demand_label", "hire_button",
+## "status_label", "blurb_label", "demand_label", "working_label",
+## "hire_button",
 ## "fire_button"}` for `_update_staff_panel` to drive.
 func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	var id := String(category.get("id", "?"))
@@ -6870,6 +6927,16 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	demand_label.label_settings = _staff_meta_settings()
 	row_wrap.add_child(demand_label)
 
+	# "3 of 4 working right now" — the per-tick activity figure, kept as a
+	# quiet sub-line. It is deliberately NOT the row's headline: it moves
+	# with production flow, and reading a hiring decision off it was the bug
+	# the establishment fixed (`_staff_working_text`).
+	var working_label := Label.new()
+	working_label.name = "Working"
+	working_label.label_settings = _staff_meta_settings()
+	working_label.visible = false
+	row_wrap.add_child(working_label)
+
 	# What hiring this shortfall would put back to work, in the machines'
 	# own names — the staffing ticket's requirement 5, built out of the
 	# demand sources above rather than out of any new sim fact.
@@ -6903,6 +6970,7 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 		"status_label": status_label,
 		"blurb_label": blurb_label,
 		"demand_label": demand_label,
+		"working_label": working_label,
 		"hire_button": hire_button,
 		"fire_button": fire_button,
 	}
@@ -7015,10 +7083,13 @@ func _staff_status_text(category: Dictionary) -> String:
 ##
 ##   hired_text     "hired 4"
 ##   wage_text      "wage 2 / head / period"
-##   meter          {"fraction", "color"} — assigned over demand, red when
-##                  short; a demand of 0 is an empty bar reading "0 / 0"
+##   meter          {"fraction", "color"} — HIRED over REQUIRED, red when
+##                  short; a required of 0 is an empty bar reading "0 / 0".
+##                  A bar is honest here under UI_UX.md §5e because the sim
+##                  defines the ceiling: `required` is the establishment the
+##                  placed machinery needs, not a number Godot invented
 ##   meter_text     "4 / 4"
-##   short_text     "▲ 2 short" when short > 0, else "" (the glyph is the
+##   short_text     "▲ hire 2" when short > 0, else "" (the glyph is the
 ##                  staffing ticket's: a shortfall is read at a glance, and
 ##                  the warning colour is never the whole message)
 ##   state_text     the row's own verdict chip beside its name — "▲ SHORT",
@@ -7036,38 +7107,64 @@ func _staff_status_text(category: Dictionary) -> String:
 ##   status_text    `_staff_status_text`'s AFTER-payday line
 func _staff_row_state(category: Dictionary) -> Dictionary:
 	var headcount := int(category.get("headcount", 0))
-	var demand := int(category.get("demand", 0))
+	var required := int(category.get("required", 0))
 	var assigned := int(category.get("assigned", 0))
 	var short := int(category.get("short", 0))
 	var wage := int(category.get("wage", 0))
 	var id := String(category.get("id", ""))
 	var note := ""
-	if headcount == 0 and demand == 0 and STAFF_IDLE_NOTES.has(id):
+	if headcount == 0 and required == 0 and STAFF_IDLE_NOTES.has(id):
 		note = String(STAFF_IDLE_NOTES[id])
 	var state_text := ""
 	if short > 0:
 		state_text = "▲ SHORT"
-	elif demand > 0:
+	elif required > 0:
 		state_text = "✔ CREWED"
 	return {
 		"hired_text": "hired %d" % headcount,
 		"wage_text": "wage %d / head / period" % wage,
 		"meter": {
-			"fraction": (float(assigned) / float(demand)) if demand > 0 else 0.0,
+			"fraction": minf(float(headcount) / float(required), 1.0) if required > 0 else 0.0,
 			"color": METER_FILL_WARN if short > 0 else METER_FILL_LEVEL,
 		},
-		"meter_text": "%d / %d" % [assigned, demand],
-		"short_text": ("▲ %d short" % short) if short > 0 else "",
+		"meter_text": "%d / %d" % [headcount, required],
+		"short_text": ("▲ hire %d" % short) if short > 0 else "",
 		"state_text": state_text,
 		"state_color": METER_FILL_WARN if short > 0 else METER_FILL_LEVEL,
 		"short_row": short > 0,
 		"note": note,
+		"working_text": _staff_working_text(assigned, headcount, required),
+		# FIRE is gated on HEADS, never on the establishment. A category
+		# nothing needs is exactly where a player is most likely to be
+		# carrying heads they want to shed, and disabling the button there
+		# would bill them every payday with no way out.
 		"fire_enabled": headcount > 0,
-		"hire_enabled": bool(category.get("can_hire", true)),
+		"hire_enabled": bool(category.get("can_hire", true)) and required > 0,
 		"hire_text": _staff_hire_button_text(category),
 		"fire_text": "FIRE −1",
 		"status_text": _staff_status_text(category),
 	}
+
+
+## The per-tick activity figure, kept but demoted to a sub-line.
+##
+## `assigned` is how many heads a machine actually took LAST TICK, and it
+## rises and falls with production flow — a belt runs dry, a machine stands
+## aside, and fewer heads are asked for. That is a true and interesting
+## thing to show ("what is working right now") and it is NOT the hiring
+## question, which is why the row's meter and its ▲ SHORT chip are drawn
+## from `required` instead. Before 2026-09-16 this number WAS the headline,
+## and the panel therefore told the player to hire a figure that had moved
+## again by the time they clicked (docs/DECISIONS.md, the establishment
+## record).
+##
+## "" for a category nothing needs, so an unused row stays quiet.
+func _staff_working_text(assigned: int, headcount: int, required: int) -> String:
+	if required <= 0:
+		return ""
+	if assigned <= 0:
+		return "none working this moment"
+	return "%d of %d working right now" % [assigned, headcount]
 
 
 ## What a click on HIRE does and what it costs, on the button itself: the
@@ -7457,6 +7554,9 @@ func _update_staff_panel() -> void:
 			String(categories[i].get("id", "")), _placements, _crews
 		)
 		row["demand_label"].text = _staff_demand_text(sources)
+		var working: String = state["working_text"]
+		row["working_label"].text = working
+		row["working_label"].visible = working != ""
 		var unblock := _staff_hire_unblocks_text(int(categories[i].get("short", 0)), sources)
 		row["unblock_label"].text = unblock
 		row["unblock_label"].visible = unblock != ""
@@ -8318,6 +8418,413 @@ func _build_stock_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_position_stock_panel()
 
 
+## The pure half of the CREW plate — every string it shows, from the wire's
+## own figures and nothing else, so a test can drive it with a snapshot and
+## no scene. Mirrors `_staff_row_state`'s split for the H panel.
+##
+## Returns `{"rows": [...], "payday_text", "afford_text", "afford_warn"}`.
+## Each row is `{"id", "count_text", "chip_text", "assigned_text", "short"}`.
+func _crew_plate_state(snapshot: Dictionary, current_tick: int) -> Dictionary:
+	var rows: Array = []
+	for category in snapshot.get("categories", []):
+		var id := String(category.get("id", ""))
+		var headcount := int(category.get("headcount", 0))
+		var required := int(category.get("required", 0))
+		var short := int(category.get("short", 0))
+		var sources := _staff_demand_sources_for(id, _placements, _crews)
+		rows.append({
+			"id": id,
+			"count_text": "%d / %d" % [headcount, required],
+			"chip_text": ("▲ HIRE %d" % short) if short > 0 else "",
+			"assigned_text": _crew_assigned_text(required, sources),
+			"short": short > 0,
+			# A category nothing has ever asked for and nobody has been hired
+			# into takes no room at all. Today that is `maintenance`: no
+			# machine in `machines.ron` requires it and the roster starts it
+			# at zero, so a permanent "Maintenance 0 / 0 — nothing needs them
+			# yet" row would cost a quarter of this plate to say nothing. It
+			# is still in the H panel, with its own note, so hiring one is
+			# still possible and still explained; and the moment a head IS
+			# hired or a machine asks, the row appears here.
+			"visible": required > 0 or headcount > 0,
+		})
+
+	var bill := _staff_next_bill(snapshot)
+	var remaining: int = int(snapshot.get("next_payday_tick", 0)) - current_tick
+	var money := float(snapshot.get("money", 0.0))
+	var shortfall := _staff_shortfall(snapshot, money)
+	var afford_text := ""
+	if shortfall > 0:
+		# The same sentence the H panel's footer uses, so a player who reads
+		# it here and then opens the panel is not told it twice in two
+		# different ways.
+		afford_text = _staff_shortfall_text(
+			shortfall, _staff_unpaid_count_if_payday_now(snapshot)
+		)
+	return {
+		"rows": rows,
+		"payday_text": "payday in %s  ·  %d" % [_format_remaining(remaining), bill],
+		"afford_text": afford_text,
+		"afford_warn": shortfall > 0,
+	}
+
+
+## What a category is committed to, in the machines' own names. The
+## establishment's sources, never what happens to be running — the whole
+## point of the change this plate was built for.
+##
+## "nothing needs them yet" for a category with no establishment, which is
+## the honest reading of a `required` of 0 and reads better in a corner
+## plate than the H panel's longer idle note.
+func _crew_assigned_text(required: int, sources: Array) -> String:
+	if required <= 0 or sources.is_empty():
+		return "nothing needs them yet"
+	var parts: Array = []
+	for source in sources:
+		parts.append(String(source["kind"]).replace("_", " "))
+	return ", ".join(PackedStringArray(parts))
+
+
+## Draws `_crew_plate_state` onto the plate. Called on the same cadence as
+## the larder, so the payday countdown ticks down whether or not any panel
+## is open.
+func _update_crew_panel() -> void:
+	if _crew_panel == null:
+		return
+	var state := _crew_plate_state(_staff_snapshot, sim.current_tick())
+	for row_state in state["rows"]:
+		var nodes = _crew_row_nodes.get(String(row_state["id"]), null)
+		if not (nodes is Dictionary):
+			continue
+		nodes["count_label"].text = row_state["count_text"]
+		var chip: Label = nodes["chip_label"]
+		chip.text = row_state["chip_text"]
+		chip.visible = row_state["chip_text"] != ""
+		nodes["assigned_label"].text = row_state["assigned_text"]
+		# A short row fades UP rather than recolouring: the ▲ HIRE chip
+		# beside it already carries the glyph and the word, so the alpha is
+		# the third cue and never the only one (UI_UX.md §7).
+		nodes["wrap"].modulate = Color(1, 1, 1, 1.0 if row_state["short"] else 0.86)
+		nodes["wrap"].visible = row_state["visible"]
+	_crew_payday_label.text = state["payday_text"]
+	_crew_afford_label.text = state["afford_text"]
+	_crew_afford_label.visible = state["afford_text"] != ""
+	_position_crew_panel()
+
+
+## Parks the plate against the right edge, its bottom a margin clear of the
+## hotbar — the position the STOCK plate used to hold alone.
+##
+## CREW sits BELOW stock and stock is pushed up off it
+## (`_position_stock_panel` reads this plate's top edge as its floor). The
+## order is deliberate: this plate is the bounded one, so it can take its
+## natural height and let the unbounded list above it do the scrolling. Put
+## the other way round, every hire or newly priced ingredient would fight
+## the same pixels.
+func _position_crew_panel() -> void:
+	if _crew_panel == null:
+		return
+	var vp := get_viewport()
+	if vp == null:
+		return
+	var bounds := vp.get_visible_rect().size
+	if bounds.x <= 0.0 or bounds.y <= 0.0:
+		return
+	var floor_y: float = bounds.y - _hotbar_reserved_height() - STOCK_PANEL_MARGIN
+	if _hotbar_panel != null and _hotbar_panel.size.y > 0.0:
+		floor_y = _hotbar_panel.get_global_rect().position.y - STOCK_PANEL_MARGIN
+	# Fit before measuring, or the plate is placed at the height it wanted
+	# and the plates above it were told to expect the height it settled at.
+	var size := Vector2(_crew_panel.get_combined_minimum_size().x, _crew_fit_detail())
+	_crew_panel.size = size
+	_crew_panel.position = Vector2(
+		maxf(0.0, bounds.x - size.x - STOCK_PANEL_MARGIN),
+		maxf(0.0, floor_y - size.y)
+	)
+
+
+## How much of the column the CREW plate takes, for the STOCK plate above it
+## to stay clear of. Its WANTED height, like `_stock_wanted_height`, so the
+## two caps cannot chase each other: this plate never scrolls, so what it
+## wants is what it gets.
+func _crew_reserved_height() -> float:
+	if _crew_panel == null or not _crew_panel.visible:
+		return 0.0
+	return _crew_fit_detail() + STOCK_PANEL_MARGIN
+
+
+## Fits the plate into its share of the column by DROPPING DETAIL, not by
+## scrolling, and returns the height it settled at.
+##
+## The other two tenants of this column scroll when they run out of room,
+## because both of them are unbounded lists — any number of ingredients, any
+## number of signed contracts. This one is bounded: there are four staff
+## categories in `staff.ron` and there will not suddenly be forty. So it has
+## a better move available than a scrollbar, which on an at-a-glance readout
+## would be self-defeating — the whole point of the plate is that you do not
+## have to interact with it.
+##
+## What it gives up first is the "what are they assigned to" line. Losing the
+## machine names costs the player the least: the count, the `hired /
+## required` and the ▲ HIRE chip are the parts you ACT on, and the names are
+## still in the H panel in full. Every category stays on screen either way,
+## which a scroll could not promise.
+##
+## The cap is measured off the viewport and the hotbar only — never off the
+## clipboard or the stock plate, both of which are sized against THIS plate's
+## reserved height. Reading either of them here would close the loop and the
+## three would chase each other frame to frame, which is the bug
+## `_stock_reserved_height` documents from the two-plate era.
+func _crew_fit_detail() -> float:
+	if _crew_panel == null:
+		return 0.0
+	var vp := get_viewport()
+	if vp == null or vp.get_visible_rect().size.y <= 0.0:
+		return _crew_panel.get_combined_minimum_size().y
+	# Measured off the hotbar PLATE, the same floor this plate is hung from
+	# (`_position_crew_panel`), not `_hotbar_reserved_height()`: that also
+	# reserves the strip the item-name flyout pops into, which is centred over
+	# the hotbar and cannot reach this far right. At 1600x900 the difference
+	# is the whole assignment line.
+	var floor_y: float = vp.get_visible_rect().size.y - _hotbar_reserved_height() - STOCK_PANEL_MARGIN
+	if _hotbar_panel != null and _hotbar_panel.size.y > 0.0:
+		floor_y = _hotbar_panel.get_global_rect().position.y - STOCK_PANEL_MARGIN
+	var cap: float = (floor_y - STOCK_PANEL_MARGIN) * CREW_PANEL_HEIGHT_SHARE
+	# Ask for everything first, then measure: the answer has to depend on the
+	# window alone, not on whatever the previous frame happened to hide.
+	_crew_set_detail_visible(true)
+	if _crew_panel.get_combined_minimum_size().y <= cap:
+		return _crew_panel.get_combined_minimum_size().y
+	_crew_set_detail_visible(false)
+	return _crew_panel.get_combined_minimum_size().y
+
+
+## Shows or hides every row's assignment line in one go — the detail is all
+## of it or none of it, never per row, so the rows keep a common height and
+## the eye can still run down the numbers column.
+func _crew_set_detail_visible(shown: bool) -> void:
+	for id in _crew_row_nodes:
+		var nodes = _crew_row_nodes[id]
+		if nodes is Dictionary:
+			nodes["assigned_label"].visible = shown
+
+
+## The CREW plate: the staffing readout that needs no key pressed.
+##
+## The playtest's complaint was that staffing was only legible inside the H
+## panel, so the player learned they were short by watching a machine stall.
+## This plate answers the four questions that were behind that, permanently,
+## in the corner the player is already using for STOCK:
+##
+##   * who you have and what they are committed to (`hired / required`, and
+##     the machines asking, by name),
+##   * whether you must hire (the ▲ HIRE chip and the amber border),
+##   * what the next payday costs and when it lands,
+##   * whether the balance covers it — the warning BEFORE the money is gone,
+##     not the report afterwards.
+##
+## Every figure is the wire's. Godot does no staffing arithmetic here: the
+## establishment, the shortfall and the bill are all `sim_core`'s, which is
+## the point of the 2026-09-16 change (CLAUDE.md: gameplay logic lives in
+## Rust, never in GDScript).
+##
+## Mouse filter IGNORE throughout, exactly as STOCK is and for the same
+## reason: this is a readout, and the right-hand edge is the side a factory
+## usually grows towards, so a plate that swallowed clicks would make those
+## tiles unbuildable. HIRE and FIRE stay in the H panel, which this plate
+## names on its own hint line.
+func _build_crew_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	var plate := StyleBoxFlat.new()
+	plate.bg_color = Color(0.06, 0.06, 0.07, 0.93)
+	plate.border_color = CREW_PANEL_ACCENT
+	plate.border_width_top = _ui_i(3)
+	plate.set_content_margin_all(CREW_PANEL_PADDING)
+
+	# Cleared, never appended to: `_ready()` genuinely runs twice under the
+	# headless `--script` harness (the same guard `_build_stock_panel` has).
+	_crew_row_nodes.clear()
+
+	_crew_panel = PanelContainer.new()
+	_crew_panel.name = "CrewPanel"
+	_crew_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_crew_panel.add_theme_stylebox_override("panel", plate)
+	_crew_panel.custom_minimum_size.x = STOCK_PANEL_MIN_WIDTH
+	hud.add_child(_crew_panel)
+
+	var body := VBoxContainer.new()
+	body.name = "CrewBody"
+	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	body.add_theme_constant_override("separation", _ui_i(6))
+	_crew_panel.add_child(body)
+
+	var heading_settings := LabelSettings.new()
+	heading_settings.font_size = _ui_font(-1)
+	heading_settings.font_color = CREW_PANEL_ACCENT
+	heading_settings.outline_size = base_settings.outline_size
+	heading_settings.outline_color = base_settings.outline_color
+
+	# Heading and the key that opens the controls share one line, the same
+	# economy STOCK's head row makes: this column's scarce axis is height.
+	var head_row := HBoxContainer.new()
+	head_row.name = "CrewHeadRow"
+	head_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	head_row.add_theme_constant_override("separation", _ui_i(12))
+	body.add_child(head_row)
+
+	var heading := Label.new()
+	heading.name = "CrewHeading"
+	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	heading.label_settings = heading_settings
+	heading.text = "CREW"
+	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	heading.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	head_row.add_child(heading)
+
+	var hint_settings := LabelSettings.new()
+	hint_settings.font_size = _ui_font(-2)
+	hint_settings.font_color = Color(0.66, 0.68, 0.72)
+	hint_settings.outline_size = base_settings.outline_size
+	hint_settings.outline_color = base_settings.outline_color
+
+	var hint := Label.new()
+	hint.name = "CrewHint"
+	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hint.label_settings = hint_settings
+	hint.text = "H: hire"
+	hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	head_row.add_child(hint)
+
+	_crew_rows = VBoxContainer.new()
+	_crew_rows.name = "CrewRows"
+	_crew_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_crew_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_crew_rows.add_theme_constant_override("separation", _ui_i(5))
+	body.add_child(_crew_rows)
+
+	for category in _staff_snapshot.get("categories", []):
+		_build_crew_row(base_settings, category)
+
+	# The payday line, and the affordability verdict under it. Two labels,
+	# not one: the cost is always true and the warning is conditional, and
+	# folding them together would mean rebuilding the whole sentence to add
+	# or drop a warning.
+	_crew_payday_label = Label.new()
+	_crew_payday_label.name = "CrewPayday"
+	_crew_payday_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_crew_payday_label.label_settings = hint_settings
+	body.add_child(_crew_payday_label)
+
+	_crew_afford_label = Label.new()
+	_crew_afford_label.name = "CrewAfford"
+	_crew_afford_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_crew_afford_label.label_settings = _staff_warn_settings()
+	_crew_afford_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_crew_afford_label.custom_minimum_size.x = CREW_TEXT_WIDTH
+	_crew_afford_label.visible = false
+	body.add_child(_crew_afford_label)
+
+	_update_crew_panel()
+	# STOCK was positioned at its own build time, when this plate did not
+	# exist and so reserved nothing. Re-hang it now the floor has moved, or
+	# the very first drawn frame shows the two overlapping.
+	_position_stock_panel()
+
+
+## One CREW row: icon, name, `hired / required`, and the ▲ HIRE chip.
+##
+## Two lines, not one. The top line is the numbers; the second is what the
+## category is committed to, in the machines' own names ("crusher, mixer,
+## cooking vat"). That second line is the playtest's "what are they assigned
+## to" and it is drawn from the establishment, so it holds still — naming
+## what is RUNNING this instant would flicker exactly the way the old
+## headline number did.
+func _build_crew_row(base_settings: LabelSettings, category: Dictionary) -> void:
+	var id := String(category.get("id", ""))
+	if id == "":
+		return
+
+	var wrap := VBoxContainer.new()
+	wrap.name = "CrewRow_%s" % id
+	wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wrap.add_theme_constant_override("separation", _ui_i(1))
+	_crew_rows.add_child(wrap)
+
+	var row := HBoxContainer.new()
+	row.name = "CrewTop_%s" % id
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", _ui_i(8))
+	wrap.add_child(row)
+
+	var icon := TextureRect.new()
+	icon.name = "CrewIcon_%s" % id
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.custom_minimum_size = CREW_ICON_SIZE
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.texture = _icon_for_asset("%s%s" % [STAFF_ICON_PREFIX, id])
+	row.add_child(icon)
+
+	# EVERY LABEL GETS ITS OWN `LabelSettings` — a Resource assigned to two
+	# Labels is one object with two references, and recolouring per row would
+	# then repaint every row (the bug `_build_stock_row` documents).
+	var name_settings := LabelSettings.new()
+	name_settings.font_size = _ui_font(-1)
+	name_settings.font_color = Color(0.92, 0.93, 0.94)
+	name_settings.outline_size = base_settings.outline_size
+	name_settings.outline_color = base_settings.outline_color
+
+	var name_label := Label.new()
+	name_label.name = "CrewName_%s" % id
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	name_label.label_settings = name_settings
+	name_label.text = String(category.get("name", id))
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(name_label)
+
+	var count_settings := LabelSettings.new()
+	count_settings.font_size = _ui_font(-1)
+	count_settings.font_color = STOCK_COUNT_COLOR
+	count_settings.outline_size = base_settings.outline_size
+	count_settings.outline_color = base_settings.outline_color
+
+	var count_label := Label.new()
+	count_label.name = "CrewCount_%s" % id
+	count_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	count_label.label_settings = count_settings
+	count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	count_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(count_label)
+
+	var chip_label := Label.new()
+	chip_label.name = "CrewChip_%s" % id
+	chip_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	chip_label.label_settings = _staff_warn_settings()
+	chip_label.visible = false
+	row.add_child(chip_label)
+
+	var assigned_settings := LabelSettings.new()
+	assigned_settings.font_size = _ui_font(-2)
+	assigned_settings.font_color = Color(0.66, 0.68, 0.72)
+	assigned_settings.outline_size = base_settings.outline_size
+	assigned_settings.outline_color = base_settings.outline_color
+
+	var assigned_label := Label.new()
+	assigned_label.name = "CrewAssigned_%s" % id
+	assigned_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	assigned_label.label_settings = assigned_settings
+	assigned_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	assigned_label.custom_minimum_size.x = CREW_TEXT_WIDTH
+	wrap.add_child(assigned_label)
+
+	_crew_row_nodes[id] = {
+		"wrap": wrap,
+		"count_label": count_label,
+		"chip_label": chip_label,
+		"assigned_label": assigned_label,
+	}
+
+
 ## One row: icon, display name, count. The count is right-aligned against the
 ## plate's edge so the three numbers form a column the eye can run down —
 ## the thing the strip of chips could not do.
@@ -8423,6 +8930,12 @@ func _position_stock_panel() -> void:
 	var floor_y: float = bounds.y - _hotbar_reserved_height() - STOCK_PANEL_MARGIN
 	if _hotbar_panel != null and _hotbar_panel.size.y > 0.0:
 		floor_y = _hotbar_panel.get_global_rect().position.y - STOCK_PANEL_MARGIN
+	# The CREW plate holds the bottom of this column now, so this plate's
+	# floor is its top edge. Its WANTED height (`_crew_reserved_height`), not
+	# the height it has settled at: reserving a settled height is what made
+	# the clipboard and this plate chase each other in circles at 1280x720,
+	# and the fix there was the same one (`_stock_wanted_height`).
+	floor_y -= _crew_reserved_height()
 	var ceiling: float = STOCK_PANEL_MARGIN
 	if _contract_panel != null and _contract_panel.visible and _contract_panel.size.y > 0.0:
 		ceiling = maxf(ceiling, _contract_panel.get_global_rect().end.y + STOCK_PANEL_MARGIN)
@@ -8431,7 +8944,12 @@ func _position_stock_panel() -> void:
 	# this is a readout of three to five short rows, and a plate that grew to
 	# half the screen the day a sixth ingredient was priced would be a bigger
 	# surprise than a scrollbar.
-	available = minf(available, (bounds.y - _hotbar_reserved_height() - STOCK_PANEL_MARGIN * 2.0) * STOCK_PANEL_HEIGHT_SHARE)
+	available = minf(available, (
+		bounds.y
+		- _hotbar_reserved_height()
+		- _crew_reserved_height()
+		- STOCK_PANEL_MARGIN * 2.0
+	) * STOCK_PANEL_HEIGHT_SHARE)
 
 	# NOT `_fit_grid_scroll`: its floor is `_ui_px(110)`, which is taller than
 	# this whole list's natural height, so it could never cap anything here —
@@ -8452,9 +8970,17 @@ func _position_stock_panel() -> void:
 
 	var size := _stock_panel.get_combined_minimum_size()
 	_stock_panel.size = size
+	# Hung from its floor, but never above the ceiling. The cap above keeps
+	# the plate inside the band in every case it CAN — this clamp is for the
+	# case it cannot, where chrome plus one row is taller than the band
+	# itself. Without it the plate simply kept growing upwards and landed on
+	# the clipboard (caught by test_hud_plates.gd at 1600x900 the day the
+	# CREW plate raised this floor). Overflowing DOWNWARD, towards the
+	# hotbar, is the lesser fault of the two: the hotbar is a fixed strip the
+	# player already knows the shape of, whereas the clipboard is text.
 	_stock_panel.position = Vector2(
 		maxf(0.0, bounds.x - size.x - STOCK_PANEL_MARGIN),
-		maxf(0.0, floor_y - size.y)
+		maxf(0.0, maxf(ceiling, floor_y - size.y))
 	)
 
 
@@ -8521,6 +9047,10 @@ func _stock_ceiling_y() -> float:
 	var floor_y: float = vp.get_visible_rect().size.y - _hotbar_reserved_height() - STOCK_PANEL_MARGIN
 	if _hotbar_panel != null and _hotbar_panel.size.y > 0.0:
 		floor_y = _hotbar_panel.get_global_rect().position.y - STOCK_PANEL_MARGIN
+	# The CREW plate stands between this one and the hotbar, so it lifts the
+	# hard line by its whole height. Omitting it here is what let the docket
+	# stack grow down onto a stock plate that had already been pushed up.
+	floor_y -= _crew_reserved_height()
 	var chrome: float = _stock_panel.get_combined_minimum_size().y - _stock_scroll.custom_minimum_size.y
 	return floor_y - (chrome + _stock_row_height()) - STOCK_PANEL_MARGIN
 
@@ -8539,6 +9069,7 @@ func _stock_wanted_height() -> float:
 		var share: float = (
 			vp.get_visible_rect().size.y
 			- _hotbar_reserved_height()
+			- _crew_reserved_height()
 			- STOCK_PANEL_MARGIN * 2.0
 		) * STOCK_PANEL_HEIGHT_SHARE
 		wanted = minf(wanted, maxf(chrome + _stock_row_height(), share))
@@ -8563,6 +9094,7 @@ func _stock_rect() -> Rect2:
 ## it matters. Keeps its name through the move to the right-hand plate —
 ## `test_chain_rework.gd` drives it directly.
 func _update_larder() -> void:
+	_update_crew_panel()
 	_position_stock_panel()
 	if _larder_entries.is_empty():
 		return
@@ -12370,7 +12902,7 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 		_fit_grid_scroll(
 			_contract_cards_scroll,
 			_contract_cards_box,
-			column - _stock_reserved_height(),
+			column - _stock_reserved_height() - _crew_reserved_height(),
 			true,
 			hard
 		)
