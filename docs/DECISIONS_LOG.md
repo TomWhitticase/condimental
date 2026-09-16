@@ -18,6 +18,24 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-16 **An emissive voxel emits its OWN colour, through the one
+  shader in the pipeline.** `emissive` is built as a `ShaderMaterial`
+  (`godot_project/voxel_emissive.gdshader`, `EMISSION = COLOR.rgb *
+  energy`); every other material class stays a `StandardMaterial3D`. The
+  reason is that colour in this pipeline lives ONLY in the mesh's vertex
+  colours, and `StandardMaterial3D`'s emission can come from a flat colour or
+  an emission texture and from nothing else — so the `EMISSION_OP_MULTIPLY`
+  it was asked for multiplied by an absent texture and **nothing in the
+  factory emitted at all** until this was fixed (issue #25). A flat additive
+  colour is not the alternative: a single `emissive` submesh carries more
+  than one lens colour (the crusher's green and amber), so one additive hue
+  washes them together. `emission_energy` was retuned 2.6 → **1.2** at the
+  same time, because 2.6 had never rendered anything and at 2.6 a lit amber
+  lens burns through to cream — which loses exactly the hue the shader is
+  for. A lamp's OFF state still moves **albedo** as well as energy
+  (`LAMP_OFF_ALBEDO`); that is what carries the dock's full-pool blink in a
+  frame where the glow pass is what the eye reads.
+
 - 2026-09-16 **Staffing is an establishment, and the crew has a plate.**
   **The staffing requirement is the sum of the crews of every PLACED
   machine**, running or not — recomputed only in `World::recompute_topology`

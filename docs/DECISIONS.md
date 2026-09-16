@@ -25,6 +25,60 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-16: **An emissive voxel emits its own colour, and that takes the
+  pipeline's one material shader.** Issue #25: nothing in the factory was
+  emitting. Every `emissive` voxel — machine status lamps, the cooking vat's
+  ring, the splitter's power lens, the payout coin — was being drawn as
+  ordinary painted amber, green or red, and `palette.ron`'s
+  `emission_energy: 2.6` had no effect whatsoever.
+
+  **The cause.** `make_material` built emission as `emission = Color(1,1,1)`
+  with `EMISSION_OP_MULTIPLY`. Godot's MULTIPLY multiplies the emission
+  colour by the material's **emission texture** — not by albedo, and not by
+  the mesh's vertex colours. This pipeline has no textures anywhere (a `.vox`
+  mesh carries colour per vertex), so the operand was absent and the product
+  was zero. The comment beside those lines claimed the opposite
+  ("multiplying by albedo keeps green reading as green"), which is what the
+  author intended and what MULTIPLY would do if the operand were albedo. It
+  isn't. Raising the energy to 50 rendered a **byte-identical** frame, which
+  is how the bug was proved rather than argued.
+
+  **Why the obvious fix is wrong.** `EMISSION_OP_ADD` lights the lamps
+  instantly and lights them all **white**, which is the precise failure the
+  original comment set out to avoid: a single `emissive` submesh often holds
+  more than one lens colour — the crusher's `control_panel` puts
+  `status_green` at one end and `status_amber` at the other — so one flat
+  additive colour washes green, amber and red into the same signal, and
+  UI_UX §7's "saturated colour reserved for meaning" is spent on nothing.
+
+  **What it is now.** One spatial shader,
+  `godot_project/voxel_emissive.gdshader`: `ALBEDO = lens * albedo_scale`,
+  `EMISSION = lens * energy`, where `lens` is `COLOR.rgb` converted sRGB →
+  linear with Godot's own curve — the conversion `vertex_color_is_srgb` does
+  for the other classes. Albedo and emission are fed the SAME linear value,
+  so a lamp emits the colour it is painted and never a second hue laid over
+  the first. `emissive` is the only class that gets it; matte, metal and
+  liquid stay `StandardMaterial3D`, which they need to be — `main.gd`
+  duplicates and re-tints those for hopper fills and per-fluid pipe bodies.
+
+  **The energy was retuned in the same pass, 2.6 → 1.2.** 2.6 was never a
+  judgement: it was chosen while the value could not reach the screen, and
+  any number rendered the same frame. Judged for the first time against the
+  mixer's amber lamp, the cooking vat's ring and the dock's deck lamps, under
+  the glow settings that were themselves tuned while nothing emitted
+  (`factory_environment.gd`: `glow_hdr_threshold 0.85`, `glow_intensity
+  0.7`), 2.6 burns a lit `status_amber` #FFB020 lens through to (255, 245,
+  178) — a cream white. That is the hue-washing the shader exists to prevent,
+  arrived at from the other direction. At 1.2 a lens is unmistakably lit
+  against the hazard chevrons beside it and is still amber.
+
+  **The OFF lamp keeps its albedo.** `lamp_idle` drops energy to zero AND
+  darkens albedo by `LAMP_OFF_ALBEDO`, unchanged from the fix that made the
+  dock's full-pool blink visible (same day, issue #23). Emission working does
+  not make albedo redundant: it is what separates the two halves of the blink
+  in a frame where the glow pass is doing the talking, and it is the half a
+  headless test can assert.
+
 - 2026-09-16: **Staffing is an establishment, not a throughput measure — and
   the crew gets a plate.** A playtest complaint that "the number of staff
   needed keeps fluctuating" turned out to be exactly true, and the cause was

@@ -111,7 +111,9 @@ into sequence. They sit where they were discovered.
 7. **UI icons are a second render pass** (`icons.rs`), flood-filled
    transparent and downscaled to 64px — not shrunk previews.
 8. **Material rule for machines: food contact is stainless, structure is
-   painted or poured.** Emissive is for status lamps only.
+   painted or poured.** Emissive is for status lamps only — and it is the
+   only class Godot builds as a `ShaderMaterial`, so that a lamp emits its
+   own vertex colour (§4).
 9. **Review the rendered asset, not the generator**, and budget a rework
    pass per asset — looking changes the design.
 11. **Only a machine's +X and +Z-world faces are ever seen.** An outlet is
@@ -288,7 +290,13 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   from the interior sky itself. Warming the key beiges every grey asset in
   the game, because there is no blue sky left to balance it.
 - **Emissives**: status lights, screens and strobes glow — both aesthetic
-  and a readability signal (§7).
+  and a readability signal (§7). **A lit voxel glows in its OWN colour**, and
+  that is the one place in the pipeline that needs a shader rather than a
+  `StandardMaterial3D` (`godot_project/voxel_emissive.gdshader`): a single
+  `emissive` submesh often holds two lens colours, so a flat emission would
+  wash them together. `palette.ron`'s `emission_energy` is judged against a
+  rendered lens, not picked — past about 1.2 an amber lens burns through to
+  cream and the hue is gone (DECISIONS.md, 2026-09-16).
 - **Atmosphere**: steam/smoke from cooking equipment, visible liquid
   surfaces with subtle reflection.
 
