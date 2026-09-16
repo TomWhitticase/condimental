@@ -36,6 +36,7 @@ extends SceneTree
 
 const Layouts = preload("res://test_layouts.gd")
 const GameSaves = preload("res://game_session.gd")
+const FactoryEnvironment = preload("res://factory_environment.gd")
 
 ## Distinctive enough that they cannot collide with a real save, and both
 ## removed at the end.
@@ -182,6 +183,14 @@ func _initialize() -> void:
 	if title_sky.background_mode != Environment.BG_SKY or title_sky.sky == null \
 			or not (title_sky.sky.sky_material is ShaderMaterial):
 		_fail("the title backdrop must use the factory-interior sky, the same one main.gd builds (factory_environment.gd is shared for exactly this reason)")
+		return
+	# ...but with clear air. Haze is atmosphere over a play session; in one
+	# still frame under a wordmark it is a grey wash sitting on the picture.
+	# Asserted because it is a single shader parameter that anyone re-tuning
+	# the hall would naturally push back through both callers.
+	var title_haze = (title_sky.sky.sky_material as ShaderMaterial).get_shader_parameter("haze_density")
+	if not is_equal_approx(float(title_haze), FactoryEnvironment.TITLE_HAZE_DENSITY):
+		_fail("the title screen's air must be clear (haze_density %f), was %f — the poster wants the roof and the far wall crisp" % [FactoryEnvironment.TITLE_HAZE_DENSITY, float(title_haze)])
 		return
 	if backdrop.get_node_or_null("Floor") == null:
 		_fail("the title backdrop has no Floor — the poster stands on the game's own floor tiles")

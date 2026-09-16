@@ -129,7 +129,9 @@ const DRIFT_YAW := 3.0 # degrees, either side of centre
 func _ready() -> void:
 	name = "TitleScene"
 	_assets.load_materials()
-	FactoryEnvironment.build_into(self)
+	# Clear air, unlike the game: see `TITLE_HAZE_DENSITY`. A poster wants the
+	# hall's roof and far wall crisp behind the chain, not washed grey.
+	FactoryEnvironment.build_into(self, FactoryEnvironment.TITLE_HAZE_DENSITY)
 	_build_floor()
 	_build_models()
 	_build_camera()

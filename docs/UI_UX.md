@@ -563,7 +563,10 @@ variants and lighting all come from the game's own pipeline
 (`voxel_assets.gd`, `factory_environment.gd`, `main.gd`'s floor helpers are
 shared, not copied), so the poster cannot go stale. The camera is
 **perspective** here — the fixed orthographic rule (§1) governs how the game
-is *played*, and depth is the whole subject of a photograph of the hall.
+is *played*, and depth is the whole subject of a photograph of the hall. The
+air is clear here where the game's is hazy (`TITLE_HAZE_DENSITY`) — the one
+parameter that differs between the two, because haze read as a grey wash
+lying on a single still frame rather than as distance.
 
 Over it: the wordmark, subtitle and a tilted yellow **splash line** (picked
 from a fixed list by the date, so it changes day to day and a review

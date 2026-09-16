@@ -104,6 +104,28 @@ matches what code comments and data files cite.
   -33 (one dead half of the screen; the foreground hopper cropped), and a
   distant broadside at yaw -8 (the chain too small to read).
 
+  **And the title screen gets clear air** ("get rid of the haze in the splash
+  screen"). `build_into` took a `haze_density` argument and `title_scene.gd`
+  passes `TITLE_HAZE_DENSITY = 0.0`. The haze is doing real work in the game
+  — the far wall is 132 units off and the player walks about in it, so
+  distance has to read as distance — but a title screen is one still frame
+  seen under a wordmark, where the same haze reads as a grey wash lying on
+  the picture rather than as air. Without it the roof trusses, the skylight
+  ribbons, the clerestory glazing and the far plant line all come up crisp
+  behind the hand-placed chain, which is what makes the chain look like it is
+  standing somewhere specific.
+
+  This is the **one** parameter that differs between the game's environment
+  and the menu's, and the header of `factory_environment.gd` now says so —
+  the whole point of that file is that the menu cannot end up lit differently
+  from the game. It is a property of the photograph, not of the lighting:
+  surfaces, both lights, exposure and palette are unchanged, and measured in
+  the rendered frame the models moved by at most three levels (the crusher
+  (81,84,83) → (80,82,81), the bottler (72,72,73) → (69,69,69)).
+  `test_main_menu.gd` asserts the title sky's `haze_density`, because it is a
+  single shader parameter that anyone re-tuning the hall would naturally push
+  back through both callers.
+
 
 - 2026-09-16: **The main menu is a title screen: the factory itself, hand
   composed, behind the menu.** The owner asked for "a splash screen similar

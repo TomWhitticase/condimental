@@ -38,7 +38,12 @@ See [WORKFLOW.md](WORKFLOW.md).
   entry's "a column set to one side of the vanishing point" — the owner asked
   for it centred, the scrim became a symmetric four-stop gradient, and
   `title_scene.gd`'s camera was re-framed around it (tomatoes in on the left,
-  bottles out on the right, plate over the middle).
+  bottles out on the right, plate over the middle), and **the title screen
+  gets clear air** — `build_into(parent, haze_density)` with
+  `TITLE_HAZE_DENSITY = 0.0`, the one parameter that differs between the two
+  callers. Haze is atmosphere over a play session; in a single still frame
+  under a wordmark it is a grey wash on the picture. The game keeps
+  `HAZE_DENSITY`.
   Full record in `docs/DECISIONS.md`.
 
 - 2026-09-16 **The main menu is a title screen: the factory itself, hand

@@ -9,6 +9,12 @@
 ## either was tuned, and "the menu is lit differently from the game" is the
 ## exact defect this arrangement exists to make impossible.
 ##
+## **One parameter, and only one, differs between the two callers**: the
+## title screen asks for clear air (`TITLE_HAZE_DENSITY`). That is a property
+## of the photograph, not of the lighting — the surfaces, both lights, the
+## exposure and the palette are still the game's, and the models in the title
+## frame measure within three levels of what they did under the hazy sky.
+##
 ## Reached by `preload`, never `class_name` (godot_project/CLAUDE.md).
 extends RefCounted
 
@@ -16,6 +22,20 @@ extends RefCounted
 ## to, and — see `set_backdrop_for` — what the isometric view shows in place
 ## of the hall itself. Stated once and passed to the shader below.
 const HAZE_COLOR := Color("#939495")
+
+## How fast that air swallows the hall (the shader's `haze_density`). In the
+## game it is doing most of the work of making the place feel deep: the far
+## wall is 132 units off and the player is walking about in it, so distance
+## has to read as distance.
+const HAZE_DENSITY := 0.0052
+
+## The title screen gets **clear air**. Owner's call, and it is the right one
+## for a poster: haze is atmosphere you notice over a whole play session, but
+## in one still frame under a wordmark it reads as a grey wash sitting on the
+## picture. A photograph of the hall wants the roof, the glazing and the far
+## plant line crisp, which is also what makes the hand-placed chain in front
+## of them look like it is standing somewhere specific.
+const TITLE_HAZE_DENSITY := 0.0
 
 
 ## UI_UX.md §4: real-time dynamic lighting with soft shadows, light ambient
@@ -40,7 +60,7 @@ const HAZE_COLOR := Color("#939495")
 ##
 ## Colours below are palette.ron's, by name, so the backdrop is made of the
 ## same industrial greys as the voxel models standing in front of it.
-static func build_into(parent: Node) -> WorldEnvironment:
+static func build_into(parent: Node, haze_density: float = HAZE_DENSITY) -> WorldEnvironment:
 	var sky_material := ShaderMaterial.new()
 	sky_material.shader = preload("res://factory_interior_sky.gdshader")
 	sky_material.set_shader_parameter("deck_color", Color("#3A3C40"))      # painted deck, below steel_dark
@@ -56,6 +76,7 @@ static func build_into(parent: Node) -> WorldEnvironment:
 	# surfaces it swallows, as lit dust actually is, but kept neutral: a warm
 	# haze tints the ambient, and the concrete floor then photographs beige.
 	sky_material.set_shader_parameter("haze_color", HAZE_COLOR)
+	sky_material.set_shader_parameter("haze_density", haze_density)
 
 	var sky := Sky.new()
 	sky.sky_material = sky_material

@@ -157,6 +157,16 @@ This reverses the previous entry's "column set to one side of the vanishing
 point", which is why it is argued in `docs/DECISIONS.md` rather than quietly
 replaced.
 
+**"Get rid of the haze in the splash screen."** Done, and it is the right
+call: haze is atmosphere you read over a play session, but in one still frame
+under a wordmark it is a grey wash lying on the picture. `build_into` takes a
+`haze_density` now and the title screen passes `TITLE_HAZE_DENSITY = 0.0`, so
+the roof trusses, the skylight ribbons, the glazing band and the far plant
+line all come up crisp behind the chain. It is the one parameter that differs
+between the game's hall and the menu's, and it is a property of the
+photograph rather than of the lighting — measured in the frame, the models
+moved by at most three levels.
+
 ### 2026-09-16 — a title screen: the factory behind the menu
 
 The game opened on a flat charcoal plate. It now opens on a **title screen**
