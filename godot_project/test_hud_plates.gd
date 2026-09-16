@@ -24,6 +24,11 @@
 #     ingredient greyed the counts beside it,
 #   * the plate clears the clipboard above it and the hotbar below it at
 #     1600x900 AND at 1280x720, on the right-hand edge in both,
+#   * both capped lists in that column — the clipboard's docket stack and the
+#     plate's own rows — are cut BETWEEN two rows and never through one, at
+#     both window sizes and with the SHORT-STAFFED strip up as well as down
+#     (issue #8: a card sliced through a line of text reads as a rendering
+#     fault, not as "there is more, scroll"),
 #   * the legend folds and unfolds from the button and from F1 (through the
 #     real `_unhandled_input`), in isometric and in first person, and the
 #     stub names the key that brings it back,
@@ -43,6 +48,13 @@ const Layouts = preload("res://test_layouts.gd")
 # The shipped window, and the small one §5c calls the tight case.
 const BIG := Vector2i(1600, 900)
 const SMALL := Vector2i(1280, 720)
+
+## A staff snapshot with something short in it, to raise the SHORT-STAFFED
+## strip on the clipboard. Shaped like the wire's own `categories` array and
+## read the same way (`_staff_alert_state`) — Godot never recomputes `short`.
+const SHORT_STAFFED_SNAPSHOT := {
+	"categories": [{"id": "manufacturing", "name": "Manufacturing", "short": 2}],
+}
 
 var main
 var _ran := false
@@ -415,7 +427,91 @@ func _run_checks() -> void:
 		return
 	probe.queue_free()
 
+	# --- The clipboard's docket stack is cut BETWEEN dockets (issue #8) ----
+	# The clipboard is the panel that yields the right-hand column (see
+	# `_position_stock_panel`), so its docket stack is the one that gets
+	# capped — and the cut has to land on a boundary between two dockets. A
+	# card cut through the middle of a line of text reads as a rendering
+	# fault, not as "there is more, scroll".
+	#
+	# This needs more dockets than fit, so sign every offer on the board
+	# through the real command, and it needs the SHORT-STAFFED strip, which
+	# is what made the ragged cut visible: the strip lives inside the
+	# clipboard's own body and takes two lines out of the stack's share.
+	for offer in JSON.parse_string(main.sim.economy_snapshot_json()).get("board", []):
+		if not bool(offer.get("active", false)):
+			main.sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": String(offer["id"])}))
+	for strip in [false, true]:
+		# The strip is driven off the staff snapshot the clipboard already
+		# polls, rather than by firing crew and running the line for a few
+		# thousand ticks — this is a LAYOUT check, and what it needs is the
+		# two extra lines in the body (test_staff_panel.gd owns the real
+		# understaffed fixture).
+		main._staff_snapshot = SHORT_STAFFED_SNAPSHOT if strip else {}
+		for window in [BIG, SMALL]:
+			_resize(window)
+			if main._staff_alert_panel.visible != strip:
+				_fail("the SHORT-STAFFED strip should be %s for this case at %s" % [
+					"up" if strip else "down", str(window)
+				])
+				return
+			var cut: float = main._contract_cards_scroll.custom_minimum_size.y
+			var whole: Array = _docket_boundaries()
+			if whole.size() < 2:
+				_fail("this check needs several dockets to have a boundary to land on, found %d" % whole.size())
+				return
+			var lands_on_boundary := false
+			for boundary in whole:
+				if absf(cut - float(boundary)) <= 0.5:
+					lands_on_boundary = true
+			if not lands_on_boundary:
+				_fail("at %s (strip %s) the docket stack is cut at %.0fpx, which is inside a docket — whole dockets end at %s" % [
+					str(window), "up" if strip else "down", cut, str(whole)
+				])
+				return
+			# And at least one whole docket, however tight the column is —
+			# the stack's own floor, the stock plate's `_stock_row_height`.
+			if cut < float(whole[0]) - 0.5:
+				_fail("the docket stack is capped below one whole docket at %s (%.0f < %.0f)" % [
+					str(window), cut, float(whole[0])
+				])
+				return
+			# The plate under it obeys the same rule, and this is where it
+			# matters: the clipboard's floor is a whole docket now, so this
+			# is the tightest the stock list ever gets — and a count sliced
+			# through its digits is the same fault in the other panel.
+			var rows_cut: float = main._stock_scroll.custom_minimum_size.y
+			var row_height: float = main._stock_row_height()
+			var separation: float = float(main._stock_rows.get_theme_constant("separation"))
+			var rows_shown: float = (rows_cut + separation) / (row_height + separation)
+			if absf(rows_shown - roundf(rows_shown)) > 0.02:
+				_fail("at %s (strip %s) the stock list is cut at %.0fpx — %.2f rows, not a whole number of them" % [
+					str(window), "up" if strip else "down", rows_cut, rows_shown
+				])
+				return
+	main._staff_snapshot = {}
+	_resize(BIG)
+
 	print("HUD_PLATES_OK: %d stock rows on a right-hand plate clear of the clipboard and hotbar at 1600x900 and 1280x720, each with its own colour and a 'none' zero state; the legend folds %s -> %s from its button and from F1 in both view modes, is not a modal, and every cursor panel reads its current rect" % [
 		ids.size(), str(open_rect.size), str(stub_rect.size)
 	])
 	quit(0)
+
+
+## The heights at which the docket stack has a boundary: the first docket,
+## the first two, and so on up to all of them. Measured off the real cards,
+## because a docket's height varies with its checklist, its status line and
+## its strike pips — there is no one row height to divide by here.
+func _docket_boundaries() -> Array:
+	var separation: float = float(main._contract_cards_box.get_theme_constant("separation"))
+	var out: Array = []
+	var running: float = 0.0
+	for child in main._contract_cards_box.get_children():
+		var card := child as Control
+		if card == null or not card.visible:
+			continue
+		if not out.is_empty():
+			running += separation
+		running += card.get_combined_minimum_size().y
+		out.append(running)
+	return out
