@@ -113,6 +113,118 @@ the rule is found where it is needed. UI_UX.md §2b point numbers and
 ARCHITECTURE.md §9a are cited from code comments — keep them stable, and do
 not re-litigate a logged decision without a good reason.
 
+## GitHub: branches, pull requests and issues
+
+**The repository on GitHub is the record of the work, not just a backup of
+it.** Every change arrives on `main` through a pull request, and everything
+noticed and not fixed becomes an issue. Both rules exist for the same reason:
+this project is built mostly by agents in separate worktrees over sessions
+that do not share memory, so a finding that lives only in a session's final
+message is lost, and a change that lands by a local merge has no reviewable
+artifact and no CI run behind it.
+
+`gh` is the interface — it is authenticated in this environment and needs no
+token handling. If `gh auth status` fails, stop and say so rather than falling
+back to pushing `main` by hand.
+
+### Never commit to `main`
+
+Work happens on a branch, always, however small the change:
+
+```
+git switch -c <type>/<short-kebab-description>    # feat/, fix/, docs/, chore/…
+```
+
+The branch prefix matches the Conventional Commit type of the work. `main` is
+only ever updated by merging a pull request. **Do not `git push origin main`,
+do not `git merge` a feature branch locally and push the result** — a
+`pre-push` hook refuses the first and there is no reason to do the second.
+A worktree whose `HEAD` is already `main` should branch before its first
+commit, not after.
+
+### Open a pull request, and finish it
+
+```
+git push -u origin HEAD
+gh pr create --fill                 # or --title/--body for a written-up PR
+```
+
+`.github/pull_request_template.md` is the body's shape: what changed and why,
+**what was run to verify it** (name the actual commands — `cargo test -p
+sim_core`, `scripts/verify-core-loop.sh`, which `screenshot-scene.sh` flags
+and whether the PNG was read), the DEVLOG/decision-log calls that were made,
+and `Closes #N` for every issue the branch settles. A PR that changes anything
+visual carries the screenshot's findings in words; the PNG itself is
+gitignored and cannot be attached from a headless run.
+
+Then **watch it land** — an open PR is unfinished work, not a handoff:
+
+```
+gh pr checks --watch          # commitlint must pass; a red PR is not done
+gh pr merge --squash --delete-branch
+```
+
+**Squash by default.** A branch's intermediate commits ("fix the test",
+"wording") are noise in a history that feeds the changelog (CONTRIBUTING.md);
+the squashed subject becomes the one Conventional Commit that describes the
+change, so it must pass the same lint. Use a real merge commit only when the
+individual commits are genuinely worth keeping — a ticketed epic where each
+commit is a reviewed unit.
+
+**Do not merge a PR the owner asked to review, and do not merge one whose
+checks are red or still running.** Say it is ready and stop. Merging your own
+work unreviewed is fine for routine changes the owner has not asked to see;
+it is not fine for anything the design docs call a deviation, a `gdext` bump,
+a save-format change, or anything the owner flagged.
+
+### File an issue for anything you are not fixing
+
+**If you notice something wrong and decide it is out of scope, that decision
+is only complete when the issue exists.** The bar is low and deliberately so:
+if it was worth mentioning in a report, it is worth an issue. A finding
+reported only in a final message dies with the session — the `resolve_sink`
+inlet-rule contradiction (`docs/DEVLOG.md`, the pipes & conveyors close-out)
+sat in a DEVLOG paragraph for a week precisely because there was nowhere else
+to put it.
+
+```
+gh issue create --title "<imperative summary>" \
+  --label deferred --label area:sim --body "$(cat <<'EOF'
+…
+EOF
+)"
+```
+
+`.github/ISSUE_TEMPLATE/deferred-finding.md` is the body's shape, and the
+`file-issue` skill is the full procedure. What makes an issue useful here is
+that the next agent starts cold: name the **file and function**, say how it
+was **found** (which test, which screenshot flag, which run), say what the
+**fix probably is** if you know, and say **why it was deferred** — out of
+scope, or a call the owner has to make. Search first (`gh issue list --search`)
+so the same finding is not filed twice.
+
+Labels, kept deliberately few:
+
+| Label | For |
+|---|---|
+| `deferred` | Spotted during other work and consciously not fixed. The one that matters most. |
+| `owner-decision` | Blocked on a call only the owner can make — a gameplay change, a deviation from a design doc, anything that invalidates saves. |
+| `area:sim` `area:godot` `area:assets` `area:docs` `area:tooling` | Where the work would happen. |
+
+plus GitHub's stock `bug`, `enhancement` and `documentation` for kind.
+
+**Close issues from the work that fixes them**, with `Closes #N` in the PR
+body so the merge closes them automatically — never by hand afterwards, which
+is a step that gets forgotten. If a finding turns out to be wrong or already
+fixed, close it with a comment saying which, rather than deleting it.
+
+### What still belongs in the repo, not in GitHub
+
+Issues are the *backlog*; they are not the decision record and not the status
+tracker. A decision still goes in the three places under *Recording a decision*
+above, a milestone still goes in `docs/DEVLOG.md`, and a design plan is still a doc in `docs/`. An
+issue is the right home only for work that is not being done yet.
+
 ## Orchestration (Orca)
 
 Use Orca's orchestration layer (`orca orchestration …`) for milestone-sized

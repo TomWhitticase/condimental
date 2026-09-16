@@ -49,6 +49,41 @@ BREAKING CHANGE: old JSON save files are no longer loadable.
   push/PR as a backstop, in case the local hook was skipped
   (e.g. `git commit --no-verify`).
 
+## Branches, pull requests and issues
+
+**Nothing lands on `main` by a direct push.** Work on a branch named for the
+Conventional Commit type of the change (`feat/`, `fix/`, `docs/`, `chore/`…),
+push it, and open a pull request:
+
+```
+git switch -c fix/belt-corner-arc
+git push -u origin HEAD
+gh pr create --fill
+gh pr checks --watch
+gh pr merge --squash --delete-branch
+```
+
+A `pre-push` hook (same `.githooks` setup as below) refuses a push to `main`
+and prints those steps. `.github/pull_request_template.md` sets out what a PR
+body needs: what changed and why, **the verification commands actually run and
+what they reported**, whether the DEVLOG and the decision record needed
+updating, and `Closes #N` for the issues it settles.
+
+**Squash-merge by default.** The squashed subject becomes the single
+Conventional Commit for the change and is linted like any other, which is what
+keeps the history usable as a changelog source (see *Why* below). A real merge
+commit is for the rare branch whose individual commits are each worth keeping.
+
+**File an issue for anything you notice and decide not to fix.** This project
+is built largely by AI agents in separate sessions that share no memory, so a
+defect mentioned only in a session's closing summary is gone. Use the
+*Deferred finding* issue template, label it `deferred` plus one `area:` label,
+and name the file and function, how it was found, why it was deferred and what
+the fix probably is. `owner-decision` marks anything blocked on a human call —
+a gameplay change, a deviation from a design doc, anything invalidating saves.
+
+`docs/WORKFLOW.md` has the full rule and the reasoning behind it.
+
 ## Development log
 
 Every commit should prompt the question "does docs/DEVLOG.md need a note?" —

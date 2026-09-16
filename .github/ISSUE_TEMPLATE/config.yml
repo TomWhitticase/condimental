@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Is it already decided?
+    url: https://github.com/TomWhitticase/sauce-factory/blob/main/docs/DECISIONS_LOG.md
+    about: Every design rule, newest first. Check before re-opening a settled question.
+  - name: How work gets done here
+    url: https://github.com/TomWhitticase/sauce-factory/blob/main/docs/WORKFLOW.md
+    about: Branches, pull requests, issues, verification, and the decision record.

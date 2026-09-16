@@ -30,6 +30,11 @@ empty, and the player buys and places every tile.
 - Scenes stay text `.tscn`/`.tres`. Never binary, no visual scripting.
 - Conventional Commits, enforced by a hook + CI. Once per clone:
   `git config core.hooksPath .githooks`.
+- **Never commit or push to `main`.** Work on a branch and merge it through a
+  pull request (`gh pr create`); a `pre-push` hook refuses the alternative.
+- **Anything you notice and decide not to fix becomes a GitHub issue**
+  (`gh issue create --label deferred`). A finding reported only in a final
+  message is lost — the next session starts cold.
 
 ## Layout
 
@@ -57,13 +62,13 @@ change something that seems to conflict with it.
 | Stack, ECS, interop, save format, milestones | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Anything visual: art, UI, camera, audio | [docs/UI_UX.md](docs/UI_UX.md) |
 | Mechanics, progression, economy, contracts, staff | [docs/GAMEPLAY.md](docs/GAMEPLAY.md) |
-| Verifying, committing, DEVLOG, Orca orchestration | [docs/WORKFLOW.md](docs/WORKFLOW.md) |
+| Verifying, committing, branches/PRs/issues, DEVLOG, Orca | [docs/WORKFLOW.md](docs/WORKFLOW.md) |
 | Whether a question is already settled | [docs/DECISIONS_LOG.md](docs/DECISIONS_LOG.md) |
 | Why a rule exists (full records) | [docs/DECISIONS.md](docs/DECISIONS.md) |
 | Status and dated history | [docs/DEVLOG.md](docs/DEVLOG.md) |
 
 Skills cover the repeatable procedures: `voxel-asset`, `verify`,
-`screenshot-review`, `record-decision`.
+`screenshot-review`, `record-decision`, `open-pr`, `file-issue`.
 
 ## Not yet built, deliberately
 

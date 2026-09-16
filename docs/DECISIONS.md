@@ -25,6 +25,98 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-16: **GitHub is the workflow: every change lands by pull request,
+  and every deferral becomes an issue.** The restructure recorded immediately
+  below fixed what an agent *reads* on every turn. This one fixes what it does
+  with finished work, and with the work it decides not to do.
+
+  **The measurement.** The repo had been under active agent development for
+  ten days, across a dozen worktrees and several orchestration Runs. GitHub
+  held the ten stock labels, **zero issues and zero pull requests.** Every
+  merge to date had been a local fast-forward or a manual conflict resolution
+  followed by `git push origin HEAD:main` — including, an hour before this was
+  written, the context restructure itself. Meanwhile at least four findings
+  had been consciously deferred and written into prose: the `resolve_sink`
+  inlet rule, the unwatched belt animation, `_read_world_layout`'s share of a
+  rebuild, and the `--hover` harness drift.
+
+  **The two failures, which have the same cause.** A change that lands by
+  local merge has no reviewable artifact: no diff anyone can comment on, no
+  CI run standing behind the merge (the commitlint workflow runs on push and
+  PR, so a fast-forward of an already-pushed branch proves nothing new), and
+  nothing afterwards to read but a subject line. And a finding that lives only
+  in a session's closing message is gone the moment the session ends. The
+  cause in both cases is that this project is built by agents in separate
+  worktrees whose sessions share no memory — *the repository is the only thing
+  they have in common*, so anything not written into it did not happen. That
+  is the same argument the DEVLOG and the decisions log already won; this
+  extends it to the backlog and to the act of merging.
+
+  **The rule for landing work.** Work goes on a `<type>/<description>` branch
+  whose prefix is the Conventional Commit type; `gh pr create` opens the PR;
+  `gh pr checks` must be green; `gh pr merge --squash --delete-branch` lands
+  it. `.githooks/pre-push` refuses a push to `main` and prints those steps.
+  It **blocks**, where the `pre-commit` DEVLOG hook only reminds, and the
+  difference is the point: whether a change deserves a DEVLOG entry is a
+  judgement a script cannot make, whereas "is this ref `refs/heads/main`" is
+  mechanical, so it is the rare case where blocking is honest. The escape
+  hatch is `--no-verify`, and the hook says so and asks that using it be
+  declared.
+
+  **Squash by default** — a branch's "fix the test" and "wording" commits are
+  noise in a history CONTRIBUTING.md treats as a changelog source, and the
+  squashed subject becomes the single Conventional Commit for the change,
+  linted by the same `scripts/lint-commit-msg.sh`. A real merge commit is kept
+  only where the individual commits are each a reviewed unit, as in a ticketed
+  epic. **Self-merging is allowed for routine work and refused for four
+  cases**: red or still-running checks, a PR the owner asked to review,
+  anything the design docs call a deviation, and a `gdext` bump or save-format
+  change. The agent says it is ready, gives the URL, and stops.
+
+  `.github/pull_request_template.md` asks for what a review here actually
+  needs, which is not "what changed" — the diff says that — but **what was run
+  and what it said**: the commands by name, the 30 headless markers and the
+  `PASS`, and for a visual change what the PNG showed *in words*, because the
+  PNG is gitignored and a headless run cannot attach it. It also asks which
+  record-keeping calls were made, so the DEVLOG and decision-log questions are
+  answered at review time rather than forgotten.
+
+  **The rule for deferrals.** Deciding something is out of scope is only half
+  a decision; the issue is the other half, and the bar is deliberately low —
+  if it was worth putting in a report, it is worth an issue. The body assumes
+  a cold reader: **file and function** (not "somewhere in the Godot layer"),
+  **how it was found** (the test name, the `screenshot-scene.sh` flags, the
+  fixture — this is what turns a re-investigation into one command), **why it
+  was deferred**, and **what the fix probably is** including what it would
+  break. Labels are kept few on purpose, because a taxonomy nobody maintains
+  is worse than none: `deferred`, `owner-decision` for anything blocked on a
+  human call, and five `area:` labels. `owner-decision` earns its place
+  because this repo keeps generating that exact shape — a fix that is known,
+  small, and not an agent's to make because it changes what a player may
+  build or invalidates saves.
+
+  **What issues are NOT.** They are the backlog and nothing else. A rule that
+  is now true goes to `docs/DECISIONS_LOG.md` and here; a milestone goes to
+  `docs/DEVLOG.md`; a plan is a doc in `docs/`. An issue is only for work not
+  yet done. Without that line the four records would start competing, and the
+  one that is easiest to write would win.
+
+  **Dogfooded**: this change itself was made on a branch and merged by PR
+  rather than pushed, and the four written-down deferrals were filed as issues
+  #1–#4, with `docs/PIPES_AND_CONVEYORS_PLAN.md`'s "Still open" section
+  amended to cite them so there are not two backlogs. Skills `open-pr` and
+  `file-issue` carry the procedures; `docs/WORKFLOW.md` has the rule;
+  `CLAUDE.md` carries only the two sentences that apply on every turn.
+
+  **Left undone, deliberately: branch protection on `main`.** A GitHub ruleset
+  requiring a PR and a green commitlint check would enforce this server-side
+  instead of relying on a hook that `--no-verify` bypasses and that a fresh
+  clone does not even have until `git config core.hooksPath .githooks` is run.
+  It is not enabled because it would equally stop the **owner's** own direct
+  pushes to their own private repo, which is a workflow choice to make
+  deliberately rather than a default to impose. The command is one line when
+  wanted.
+
 - 2026-09-16: **The agent context was restructured: `CLAUDE.md` is a map,
   not the manual.** Everything below in this file is a record of a decision
   about the *game*. This one is a decision about how the game gets built,
