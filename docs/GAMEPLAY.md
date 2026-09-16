@@ -1,4 +1,4 @@
-# Sauce Factory — Gameplay, Progression & Economy Plan
+# CONDIMENTAL — Gameplay, Progression & Economy Plan
 
 This doc is about **what the game actually is to play** — the core loop, the
 sauce/equipment progression, and the money economy that ties them together.

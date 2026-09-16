@@ -30,7 +30,7 @@
 extends Node
 
 ## Where saves live. `user://` resolves per-platform (macOS:
-## `~/Library/Application Support/Godot/app_userdata/Sauce Factory/`), which
+## `~/Library/Application Support/Godot/app_userdata/CONDIMENTAL/`), which
 ## is why `resolved_saves_dir()` exists and why `main.gd` prints it once at
 ## startup — a developer looking for the files should not have to know that.
 const SAVES_DIR := "user://saves"

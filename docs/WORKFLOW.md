@@ -1,4 +1,4 @@
-# Sauce Factory — Workflow
+# CONDIMENTAL — Workflow
 
 What to run, what to commit, what to record, and how milestone-sized work is
 orchestrated. [ARCHITECTURE.md](ARCHITECTURE.md), [UI_UX.md](UI_UX.md) and
