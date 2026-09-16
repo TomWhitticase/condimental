@@ -240,5 +240,11 @@ work, not one long session.
 - Prefer `worker-start` over manual `dispatch --inject`.
 - Use `gate-create` at milestone boundaries for a human check.
 - After every accepted `worker_done`, decide whether it is DEVLOG-worthy.
+- **A worker's branch lands the same way as anything else: a pull request.**
+  A ticket's branch is pushed and `gh pr create`d rather than merged into
+  the integration branch by hand, and the integration branch reaches `main`
+  by one PR of its own. A worker that defers a finding files the issue
+  itself (it has `gh`) rather than leaving it in `worker_done`, where only
+  the orchestrator ever reads it.
 - Full ownership handoffs use `orca-cli` / `orca worktree create --prompt`,
   not Task/Dispatch machinery.
