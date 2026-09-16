@@ -50,6 +50,14 @@ below is history and should only ever be appended to.)*
   it is built from the game's own assets, lighting and floor helpers
   (`title_scene.gd`, `voxel_assets.gd`, `factory_environment.gd`). See the
   log entry below.
+- **No voxel in the game emits light, and that is a known bug (2026-09-16,
+  issue #25).** `EMISSION_OP_MULTIPLY` multiplies by an emission texture and
+  this pipeline has none, so every `emissive`-class voxel — status lamps, the
+  vat ring, the payout coin — renders as ordinary paint at any energy, and
+  the glow settings were tuned with nothing feeding them. Status lamps report
+  their state through **albedo** in the meantime, which does reach the screen.
+  Read anything in `docs/UI_UX.md` that assumes a lamp glows with that in
+  mind. See the log entry below.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Work reaches `main` through pull requests, and deferrals become issues
   (2026-09-16).** Nothing is pushed to `main` directly — a `pre-push` hook
@@ -118,6 +126,40 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-16 — Nothing in the factory emits light
+
+The dock's "delivery pool is full" signal is a pulse on its deck lamps.
+`--full-dock` (added the same day) made it possible to photograph either half
+of that pulse on demand, and the two halves turned out to be **2/255 apart** —
+a signal correct on every count a headless test could check, and invisible on
+screen.
+
+The cause is bigger than the dock. `voxel_assets.gd` built emission with
+`EMISSION_OP_MULTIPLY` and a white emission colour, on the stated assumption
+that MULTIPLY multiplies by albedo and so keeps each lamp's own hue. It
+multiplies by the emission **texture**, and this pipeline has no textures at
+all — colour is per-vertex, straight from `palette.ron`. The product is zero.
+Raising the lit lamp from 2.6 to 50 renders a byte-identical PNG; switching to
+ADD blows the same pixels to white immediately. **No `emissive`-class voxel in
+the game has ever emitted** — not the status lamps, the vat ring, the payout
+coin or the pilot lights. What has been shipping is ordinary painted amber,
+green and red, and the glow settings in `factory_environment.gd` were tuned
+with nothing feeding them.
+
+Fixing that properly means emission that follows each voxel's own colour,
+which `StandardMaterial3D` cannot express — it needs a small spatial shader
+and a relight of every machine. That is its own review pass, so it is
+**issue #25**, not a rider on a bug fix.
+
+What did change: an off lamp is now told by **albedo**, the channel that does
+reach the screen, taken down to a little over a third — which is where
+`palette.ron` put its `status_*_off` trio back when the andon stack lights
+let the colour be chosen outright. The dock's lamp reads (204, 154, 46) lit
+against (66, 42, 16) dark, and the same swap serves every hopper, tank and
+machine lamp. `test_presentation.gd` now asserts the two lamp materials differ
+in **albedo specifically**, since an emission-only difference passes every
+other assertion in that section and is still invisible.
 
 ### 2026-09-16 — Staffing holds still, and the crew is on screen
 
