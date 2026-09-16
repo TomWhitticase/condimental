@@ -36,7 +36,12 @@
 #     run turns down into the mixer through a CORNER with its fitting south,
 #   * THE INGREDIENT MARKET is a real panel on M with one slot per priced
 #     ingredient, a click buys a crate, and the larder strip follows the
-#     stock it bought.
+#     stock it bought,
+#   * A CRATE'S SECOND VERB: shift+click buys every unit the balance covers.
+#     The arithmetic is pinned as a pure function, the slot prints what that
+#     gesture would fetch right now and stays live while a crate is already
+#     out of reach, a click spends the balance down to under one more unit,
+#     and a shift+click with an empty wallet issues no command at all.
 #
 # The one-frame-before-checking dance and the "never hold your own camera
 # reference" rule are inherited from test_hover.gd — see that file's header.
@@ -95,6 +100,14 @@ func _hopper_item(tile: Vector2i) -> String:
 		if int(hopper["tile"][0]) == tile.x and int(hopper["tile"][1]) == tile.y:
 			return String(hopper.get("item", ""))
 	return ""
+
+
+## How much of a raw ingredient the player owns, straight off the wire.
+func _stock_of(item_id: String) -> int:
+	for entry in JSON.parse_string(main.sim.ingredients_snapshot_json()).get("entries", []):
+		if String(entry["id"]) == item_id:
+			return int(entry["owned"])
+	return 0
 
 
 ## Which fluid the network covering `tile` carries, or "" if no network does.
@@ -286,6 +299,152 @@ func _run_checks() -> void:
 	if unstocked != null and unstocked.text != "none":
 		_fail("an out-of-stock ingredient reads '%s', not 'none'" % unstocked.text)
 		return
+
+	# --- 5a. SHIFT+click buys all you can afford ---------------------------
+	# The arithmetic first, as a pure function. It is a PROMISE THE SLOT
+	# PRINTS ("shift: buy 123") as well as what the click sends, so the two
+	# can never be allowed to disagree — and the fixed-point balance crossing
+	# the wire as a double makes the exact-multiple case (3000 / 3) the one
+	# worth pinning.
+	for pure_case in [
+		[0.0, 1.0, 0],       # no money buys nothing
+		[7.0, 3.0, 2],       # the ordinary case: change left over
+		[9.0, 3.0, 3],       # exact, small
+		[3000.0, 3.0, 1000], # exact, and the one a double can round either way
+		[2.0, 3.0, 0],       # not even one
+		[5.0, 0.0, 0],       # an unpriced ingredient is not infinitely free
+		[-1.0, 2.0, 0],      # a negative balance is not a purchase
+	]:
+		var got_units: int = main._units_affordable(float(pure_case[0]), float(pure_case[1]))
+		if got_units != int(pure_case[2]):
+			_fail("_units_affordable(%s, %s) = %d, expected %d" % [
+				pure_case[0], pure_case[1], got_units, pure_case[2]
+			])
+			return
+	var sugar_price := 0.0
+	for entry in JSON.parse_string(main.sim.ingredients_snapshot_json()).get("entries", []):
+		if String(entry["id"]) == "sugar":
+			sugar_price = float(entry["price"])
+	if sugar_price <= 0.0:
+		_fail("sugar has no unit price on the wire to divide a balance by")
+		return
+
+	# A BALANCE THAT COVERS A FEW UNITS BUT NOT A CRATE. The slot must say so
+	# and stay clickable: the crate is out of reach (that is what the "✗" and
+	# the dimmed icon are for) but shift+click is not, and a disabled Button
+	# would swallow the gesture.
+	var short_money := int(sugar_price) * 2
+	Layouts.fund(main.sim, short_money)
+	main._update_ingredient_market()
+	var sugar_stock := 0
+	for entry in JSON.parse_string(main.sim.ingredients_snapshot_json()).get("entries", []):
+		if String(entry["id"]) == "sugar":
+			sugar_stock = int(entry["owned"])
+	if main._affordable_units("sugar") != 2:
+		_fail("with %d in hand and sugar at %.0f, the market offers %d units, expected 2" % [
+			short_money, sugar_price, main._affordable_units("sugar")
+		])
+		return
+	var sugar_card: Dictionary = main._market_slots[sugar_slot]
+	if sugar_card["shift_label"].text != "shift: buy 2":
+		_fail("the sugar crate's shift line reads '%s', not 'shift: buy 2'" % sugar_card["shift_label"].text)
+		return
+	if sugar_card["button"].disabled:
+		_fail("a slot the player can still shift-buy two of was recessed as unbuyable")
+		return
+
+	# THE CLICK ITSELF: one command, the whole affordable quantity, and the
+	# balance spent down to less than one more unit.
+	main._buy_all_from_slot(sugar_slot)
+	var bought_stock := 0
+	for entry in JSON.parse_string(main.sim.ingredients_snapshot_json()).get("entries", []):
+		if String(entry["id"]) == "sugar":
+			bought_stock = int(entry["owned"])
+	if bought_stock != sugar_stock + 2:
+		_fail("shift+click moved sugar stock %d -> %d, expected +2" % [sugar_stock, bought_stock])
+		return
+	if main._affordable_units("sugar") != 0:
+		_fail("buying all it could afford left the balance able to buy %d more" % main._affordable_units("sugar"))
+		return
+	# ...and the slot now says the wallet is out, in a glyph as well as a
+	# number (UI_UX.md §7), with the square finally recessed.
+	if sugar_card["shift_label"].text != "shift: buy 0  ✗":
+		_fail("a spent-out crate's shift line reads '%s'" % sugar_card["shift_label"].text)
+		return
+	if not sugar_card["button"].disabled:
+		_fail("a crate with neither verb left to offer stayed live")
+		return
+
+	# AN EMPTY WALLET ISSUES NOTHING AT ALL. `revision()` counts ticks plus
+	# commands, refused or not — so it is the one honest test of "no command
+	# was sent", which a stock count alone could not tell from a command the
+	# simulation happened to refuse.
+	Layouts.fund(main.sim, 0)
+	main._update_ingredient_market()
+	var revision_before: int = main.sim.revision()
+	main._buy_all_from_slot(sugar_slot)
+	if main.sim.revision() != revision_before:
+		_fail("a shift+click with an empty wallet issued a command anyway (revision %d -> %d)" % [
+			revision_before, main.sim.revision()
+		])
+		return
+	var broke_stock := 0
+	for entry in JSON.parse_string(main.sim.ingredients_snapshot_json()).get("entries", []):
+		if String(entry["id"]) == "sugar":
+			broke_stock = int(entry["owned"])
+	if broke_stock != bought_stock:
+		_fail("a shift+click with an empty wallet moved sugar stock %d -> %d" % [bought_stock, broke_stock])
+		return
+
+	# THE LINE FITS THE CARD it is printed in, at a balance rich enough to
+	# make the quantity five digits — UI_UX.md §2b point 32: a fixed card
+	# clips a label without complaint, and a market crate is a fixed square.
+	Layouts.fund(main.sim, 32767)
+	main._update_ingredient_market()
+	var cheapest: Label = main._market_slots[0]["shift_label"]
+	var inner_width: float = main.MARKET_SLOT_SIZE.x - 2.0 * main._ui_px(8)
+	var drawn_width: float = cheapest.get_theme_default_font().get_string_size(
+		cheapest.text, HORIZONTAL_ALIGNMENT_LEFT, -1, cheapest.label_settings.font_size
+	).x
+	if drawn_width > inner_width:
+		_fail("the shift line '%s' draws %.0fpx wide inside a %.0fpx card" % [
+			cheapest.text, drawn_width, inner_width
+		])
+		return
+
+	# THE GESTURE, through the handler the Button hands its raw events to.
+	# A plain left press belongs to the crate (it is `pressed`'s, and this
+	# handler has to keep its hands off it); only SHIFT+left is buy-all.
+	Layouts.fund(main.sim, int(sugar_price) * 3)
+	main._update_ingredient_market()
+	var plain_click := InputEventMouseButton.new()
+	plain_click.button_index = MOUSE_BUTTON_LEFT
+	plain_click.pressed = true
+	var quiet_revision: int = main.sim.revision()
+	main._on_market_slot_gui_input(plain_click, sugar_slot)
+	if main.sim.revision() != quiet_revision:
+		_fail("an unmodified left-click reached the buy-all handler and spent money")
+		return
+	var shift_click := InputEventMouseButton.new()
+	shift_click.button_index = MOUSE_BUTTON_LEFT
+	shift_click.pressed = true
+	shift_click.shift_pressed = true
+	var gesture_stock := _stock_of("sugar")
+	main._on_market_slot_gui_input(shift_click, sugar_slot)
+	if _stock_of("sugar") != gesture_stock + 3:
+		_fail("SHIFT+left-click moved sugar stock %d -> %d, expected +3" % [
+			gesture_stock, _stock_of("sugar")
+		])
+		return
+
+	# BOTH VERBS ARE NAMED where the player looks for them (UI_UX.md §5b).
+	var market_footer := ""
+	for child in main._market_panel.find_children("*", "Label", true, false):
+		if String(child.text).find("M/ESC: close") >= 0:
+			market_footer = String(child.text)
+	if market_footer.find("buy %d" % main.MARKET_CRATE) < 0 or market_footer.find("shift+click") < 0:
+		_fail("the market footer names only one of its two verbs: '%s'" % market_footer)
+		return
 	main._set_market_open(false)
 
 	# --- 6. The shipped line: the 1x2 mixer and the piped middle ----------
@@ -399,7 +558,7 @@ func _run_checks() -> void:
 			_fail("the mixer's inlet tile at row %d has no feed belt" % lane_y)
 			return
 
-	print("CHAIN_REWORK_OK: the aging rack is gone from every mapping, a hopper places holding the first raw item (the prompt names it and points at the panel that changes it, the ghost shows it) while the same click without an item is refused, a placed hopper is retargeted through the panel's picker, the market buys crates and the larder follows, and the shipped line renders a 1x2 mixer hovering from both tiles, two machine-to-machine pipe runs carrying ketchup_mix and ketchup on the plain tile, the tank-fed run still on the branch fitting, and no belt into either piped machine")
+	print("CHAIN_REWORK_OK: the aging rack is gone from every mapping, a hopper places holding the first raw item (the prompt names it and points at the panel that changes it, the ghost shows it) while the same click without an item is refused, a placed hopper is retargeted through the panel's picker, the market buys crates and the larder follows, shift+click buys every unit the balance covers and an empty wallet sends nothing, and the shipped line renders a 1x2 mixer hovering from both tiles, two machine-to-machine pipe runs carrying ketchup_mix and ketchup on the plain tile, the tank-fed run still on the branch fitting, and no belt into either piped machine")
 	quit(0)
 
 

@@ -1017,7 +1017,16 @@ const SHOP_CARD_ICON_SIZE := Vector2(30, 30) * UI_SCALE
 ## line and must not be truncated — where a build card's "Owned 0" always
 ## does. The market can afford the extra height because it is one row of
 ## three, not two rows of six.
-const MARKET_SLOT_SIZE := Vector2(128, 152) * UI_SCALE
+##
+## **One line taller again since shift+click buys all you can afford**: the
+## crate names its second verb and what that verb would fetch right now
+## ("shift: buy 123"). UI_UX.md §2b point 32 says a new line on a card comes
+## out of the card's OWN budget when the grid is capped — the build menu's
+## did, and its icon shrank to pay for it — but the market's row is not
+## capped: three slots on one line, in a panel that leaves most of the height
+## above the hotbar unused. So here the honest budget is the card's height,
+## and the crate keeps the big icon that makes it readable as a crate.
+const MARKET_SLOT_SIZE := Vector2(128, 178) * UI_SCALE
 ## How many catalog entries get a number key at all. Ten — 1..9 then 0, the
 ## row a Minecraft or Terraria hotbar occupies. A catalog longer than this
 ## simply leaves its tail click-only rather than inventing a second key
@@ -1345,6 +1354,16 @@ var _strike_style_struck: StyleBoxFlat
 ## than a shop. A crate is also the unit stock actually arrives in. It is
 ## printed on the slot, so the gesture means one thing.
 const MARKET_CRATE := 10
+
+## The slack a market unit price is compared with when working out how many
+## units a balance covers. Money is fixed-point on the wire (`types::Money`,
+## sixteen fractional bits, so a granularity of about 1.5e-5) and arrives
+## here as a JSON double, so an exact multiple can land a hair either side of
+## itself after a division: 3000 / 3 is allowed to come back 999.999999. This
+## is far below one money tick and far below one unit of anything priced, so
+## it can only ever recover the intended answer, never invent an extra unit
+## the simulation will then refuse.
+const MARKET_PRICE_EPSILON := 1.0e-6
 
 ## The larder: a one-line strip above the hotbar showing how much of each raw
 ## ingredient the player is carrying. It exists because of a specific silent
@@ -5462,7 +5481,13 @@ func _build_ingredient_market(hud: CanvasLayer, base_settings: LabelSettings) ->
 
 	var footer := Label.new()
 	footer.label_settings = base_settings
-	footer.text = "click a crate to buy %d\nthen click a hopper or tank to load it    M/ESC: close" % MARKET_CRATE
+	# BOTH VERBS, NAMED. A market crate is the build slot's two-actions-one-
+	# square shape (UI_UX.md §5b) with the modifier standing in for the second
+	# mouse button, so the footer spells out both the way the build menu's
+	# does — a gesture nobody is told about is a gesture nobody uses. The
+	# shift line gets its own line rather than a "·" join so the footer stays
+	# no wider than the slot row it sits under.
+	footer.text = "click a crate to buy %d\nshift+click: buy all you can afford\nthen click a hopper or tank to load it    M/ESC: close" % MARKET_CRATE
 	body.add_child(footer)
 
 	_position_market_panel()
@@ -5492,6 +5517,12 @@ func _build_market_slot(row: HBoxContainer, base_settings: LabelSettings, index:
 	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
 		button.add_theme_stylebox_override(state, _shop_slot_style(state))
 	button.pressed.connect(_buy_ingredient_slot.bind(index))
+	# SHIFT+left-click is the second half of the slot (see
+	# `_on_market_slot_gui_input`). A Button reports a plain left click
+	# through `pressed` with no modifier state attached, so the second action
+	# has to come off the raw event — the build slot's right-click place does
+	# the same thing for the same reason.
+	button.gui_input.connect(_on_market_slot_gui_input.bind(index))
 	row.add_child(button)
 
 	var column := VBoxContainer.new()
@@ -5542,6 +5573,29 @@ func _build_market_slot(row: HBoxContainer, base_settings: LabelSettings, index:
 	price_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	column.add_child(price_label)
 
+	# THE SECOND VERB, AND WHAT IT WOULD ACTUALLY FETCH. "shift+click buys
+	# all you can afford" is a promise about a number the player cannot work
+	# out at a glance — it is the balance divided by a unit price printed two
+	# lines below — so the slot prints the answer instead of asking them to
+	# do the division. It sits directly under the crate price because the two
+	# lines are the slot's two verbs and they should be read together
+	# (UI_UX.md §5b). Its own settings object, not the price's: the two lines
+	# dim on different conditions (a crate may be out of reach while a
+	# handful of units is not).
+	var shift_settings := LabelSettings.new()
+	shift_settings.font_size = _ui_font(-2)
+	shift_settings.font_color = Color(0.98, 0.85, 0.42)
+	shift_settings.outline_size = base_settings.outline_size
+	shift_settings.outline_color = base_settings.outline_color
+
+	var shift_label := Label.new()
+	shift_label.name = "ShiftBuy"
+	shift_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	shift_label.label_settings = shift_settings
+	shift_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	shift_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	column.add_child(shift_label)
+
 	# The same cost-against-balance bar the build menu's slots carry, on the
 	# same mechanism — a crate of ingredients and a machine are both money
 	# leaving the one counter, and the player should not have to read two
@@ -5569,6 +5623,7 @@ func _build_market_slot(row: HBoxContainer, base_settings: LabelSettings, index:
 		"button": button,
 		"icon": icon,
 		"price_label": price_label,
+		"shift_label": shift_label,
 		"cost_meter": cost_meter,
 		"owned_label": owned_label,
 	})
@@ -5611,7 +5666,26 @@ func _update_ingredient_market() -> void:
 			Color(0.92, 0.93, 0.94) if affordable else Color(0.55, 0.50, 0.48)
 		)
 		slot["icon"].modulate = Color.WHITE if affordable else Color(0.42, 0.42, 0.45, 0.75)
-		slot["button"].disabled = not affordable
+		# WHAT SHIFT+CLICK WOULD FETCH RIGHT NOW, recomputed every poll from
+		# the wire's own unit price (never a Godot-side idea of one), so the
+		# second verb is a number on the card rather than a promise the
+		# player has to do arithmetic to check.
+		var units := _units_affordable(float(snapshot.get("money", 0.0)), unit_price)
+		slot["shift_label"].text = (
+			"shift: buy %d" % units if units > 0 else "shift: buy 0  ✗"
+		)
+		slot["shift_label"].label_settings.font_color = (
+			Color(0.98, 0.85, 0.42) if units > 0 else Color(0.55, 0.50, 0.48)
+		)
+		# A SLOT IS RECESSED ONLY WHEN NEITHER VERB CAN DO ANYTHING. It went
+		# disabled the moment a whole crate was out of reach, which was right
+		# while a crate was the only thing a click could buy; with shift on
+		# the same square, a balance that covers four tomatoes but not ten
+		# still has a real action on it, and a disabled Button is exactly the
+		# wrong picture of that. The crate itself being unaffordable is still
+		# said three other ways (the "✗", the dimmed icon and the meter
+		# below), so the recess is the one signal that changes meaning here.
+		slot["button"].disabled = not affordable and units <= 0
 		# ...and a fourth reading of the same fact, which is the only one that
 		# says HOW unaffordable: the share of the balance this price takes,
 		# pinned full and red once it takes more than all of it. A price the
@@ -5633,20 +5707,103 @@ func _update_ingredient_market() -> void:
 		slot["owned_label"].text = "In stock %d\n%.0f each" % [int(entry.get("owned", 0)), unit_price]
 
 
-## Buys one crate. An unaffordable or unknown purchase is a silent no-op in
-## the simulation (`BuyIngredient`, like `Purchase`), so the only thing to do
-## afterwards is re-read either way.
-func _buy_ingredient_slot(index: int) -> void:
+## Buys one crate, or `quantity` units when a caller has worked out a better
+## number (`_buy_all_from_slot`). An unaffordable or unknown purchase is a
+## silent no-op in the simulation (`BuyIngredient`, like `Purchase`), so the
+## only thing to do afterwards is re-read either way — and the balance moving
+## is what says the simulation took it, at any quantity.
+func _buy_ingredient_slot(index: int, quantity: int = MARKET_CRATE) -> void:
 	if index < 0 or index >= _market_slots.size():
 		return
 	var money_before := _current_money()
 	sim.issue_command_json(JSON.stringify({
 		"type": "buy_ingredient",
 		"item": String(_market_slots[index]["id"]),
-		"quantity": MARKET_CRATE,
+		"quantity": quantity,
 	}))
 	_update_ingredient_market()
 	_cue(FactoryAudio.BUY if _current_money() < money_before else FactoryAudio.REFUSED)
+
+
+## How many units of `unit_price` a balance of `money` covers. Pure, and the
+## one place the "buy all you can afford" arithmetic lives — the slot's
+## printed promise and the click that keeps it must never be able to
+## disagree.
+##
+## The division is only a first guess. Money crosses the wire as a JSON
+## double and an exact multiple can come back a hair either side of itself,
+## so the answer is settled by MULTIPLYING back within `MARKET_PRICE_EPSILON`
+## — the operation the simulation itself will do (`IngredientCatalog::
+## cost_of`) when it prices the command. A free or unpriced ingredient
+## (`price <= 0`) has no "as many as you can afford" and buys nothing, rather
+## than dividing by zero into an infinity that becomes a nonsense quantity.
+func _units_affordable(money: float, unit_price: float) -> int:
+	if unit_price <= 0.0 or money <= 0.0:
+		return 0
+	var units := int(floor(money / unit_price))
+	while units > 0 and float(units) * unit_price > money + MARKET_PRICE_EPSILON:
+		units -= 1
+	while float(units + 1) * unit_price <= money + MARKET_PRICE_EPSILON:
+		units += 1
+	return units
+
+
+## [`_units_affordable`] for one ingredient id, against the live balance and
+## the live price — the number the slot prints on its shift line.
+func _affordable_units(item_id: String) -> int:
+	var snapshot := _ingredients_snapshot()
+	var money := float(snapshot.get("money", 0.0))
+	for entry in snapshot.get("entries", []):
+		if String(entry.get("id", "")) == item_id:
+			return _units_affordable(money, float(entry.get("price", 0.0)))
+	return 0
+
+
+## SHIFT+click's half of a market slot: buy as many units as the balance
+## covers, in ONE command.
+##
+## One command, not a loop of crates: `BuyIngredient` takes an arbitrary
+## `quantity` and prices it in one go (`IngredientCatalog::cost_of`, then a
+## single all-or-nothing `Economy::try_spend`), so a loop would only be a
+## slower way to reach the same balance — and a partially-completed loop
+## would be a new failure mode the simulation does not have.
+##
+## Nothing affordable means nothing is sent. The simulation would refuse a
+## zero quantity anyway (`cost_of` returns `None` for it), but a command
+## issued to be refused is a command that could be taken, and the player is
+## owed the same "no" they get everywhere else: the one shared refusal cue
+## (UI_UX.md §8), matching the "✗" the slot is already showing.
+func _buy_all_from_slot(index: int) -> void:
+	if index < 0 or index >= _market_slots.size():
+		return
+	var units := _affordable_units(String(_market_slots[index]["id"]))
+	if units <= 0:
+		_cue(FactoryAudio.REFUSED)
+		return
+	_buy_ingredient_slot(index, units)
+
+
+## A market slot has two actions on one square, the way a build slot does
+## (UI_UX.md §5b) — but with a modifier rather than the second mouse button,
+## because both of these actions are BUYING and they differ only in how much.
+## Left-click buys a crate; SHIFT+left-click buys everything the balance
+## covers, which is the one quantity worth a gesture of its own: it is the
+## quantity a player stocking up before a long run actually wants, and it is
+## the only one that cannot be reached by clicking (the crate is ten, and the
+## balance is rarely a multiple of ten unit prices).
+##
+## Taken off the raw event and consumed here, because a `Button`'s `pressed`
+## signal carries no modifier state and would otherwise ALSO fire the crate
+## buy on the same click. `Control` emits `gui_input` before the button's own
+## handling for exactly this reason, so marking the event handled is what
+## keeps one gesture to one purchase.
+func _on_market_slot_gui_input(event: InputEvent, index: int) -> void:
+	if not (event is InputEventMouseButton):
+		return
+	if event.button_index != MOUSE_BUTTON_LEFT or not event.pressed or not event.shift_pressed:
+		return
+	get_viewport().set_input_as_handled()
+	_buy_all_from_slot(index)
 
 
 func _set_market_open(open: bool) -> void:
