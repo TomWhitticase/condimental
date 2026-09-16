@@ -22,6 +22,149 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-16: **Five HUD features the owner asked for, built in parallel:
+  staffing made unmissable, buy-all in the market, a right-hand STOCK
+  plate, a collapsible legend.** The brief was five sentences from the
+  owner, two of which ("make it clear I need to hire staff", "more UI for
+  the staff stuff because it's confusing") are the same complaint at two
+  distances, and it was run as three parallel work packages in three
+  worktrees — staff, market, HUD layout — merged in that order. **No Rust
+  changed.** Everything the staff features needed was already on the wire
+  from the quality pass (`short`, `can_hire`, `next_bill`, `shortfall`),
+  and `buy_ingredient` already took an arbitrary quantity, so buy-all is
+  one command rather than a loop of ten. That is the reusable half of the
+  partition: **check the wire before splitting the work**, because a
+  package that needs a sim change cannot run beside the package that
+  consumes it.
+
+  The partition rule that made three parallel sessions safe in one
+  11,000-line file (`main.gd`) is that every package owned a *region* of
+  the HUD — the staff panel, the market grid, the fixed plates — and no
+  package was allowed to touch a `.md` file. Documentation is where three
+  agents' edits genuinely collide, since every doc change lands in the same
+  top-of-file decisions log; it is the orchestrator's job after the merge,
+  which is what this entry is. The one real conflict was in the fixed-plate
+  variable block, where the HUD package retired the larder strip that the
+  market package's neighbours were declared beside.
+
+  1. **Short-staffed is said where the player already is, not only where
+     the answer is.** The staff panel had every number right and was still
+     answering a question the player had to know to ask. The fix is three
+     readouts at three distances rather than a better panel: a
+     **SHORT-STAFFED strip on the always-visible clipboard** (`▲
+     SHORT-STAFFED — hire 2 manufacturing · press H`), a **one-sentence
+     verdict** above the panel's first row, and a **`▲ SHORT` chip plus
+     warn border** on the row itself. The strip is a child of the
+     clipboard's own body rather than a free plate, so it can never land on
+     another plate (§2b point 33 costs nothing if the thing is parented to
+     something already placed); it names only the categories actually
+     short and hides entirely when none are, because a readout that reads
+     `0 short` in the steady state is noise that trains the player to stop
+     looking at it. It re-primes on a rebuild, so loading a save that is
+     already short does not fire the refusal cue as though it had just
+     happened — the same priming `_announce_contract_changes` and the
+     payday notices needed, now three callers deep, which is the point at
+     which it is a convention rather than a workaround.
+
+  2. **A disabled button says why in words.** `HIRE +1 · 2 / period` and
+     `FIRE −1` name the cost of the click on the click, and a HIRE the wire
+     refuses reads `✗ cannot hire — 8 in hand, 14 due, 2 / period` rather
+     than going grey. Grey says "not now"; only the words say "and here is
+     what would change that". The three figures are the wire's own
+     (`money`, `next_bill`, `wage`), never a Godot-side sum, for the reason
+     the quality pass recorded: after a firing, notice pay makes an
+     independently-computed bill disagree with the sim at the exact moment
+     the player is watching it.
+
+  3. **The payday rules are stated, inside the scroll.** Four lines of
+     plain-words rules (`STAFF_RULES`) at the foot of the *scrolled* list,
+     not under the footer, because `_fit_grid_scroll` takes its cap from
+     the panel's available height (§2b point 32 again): four lines of
+     chrome cost a whole category row, measured at 1600x900 as 2.5 visible
+     rows dropping to 1.5. One always-visible footer line says the legend
+     is down there. Also dropped: the old footer's `hiring is free`, which
+     stopped being true when the quality pass made a hire require the next
+     bill covered — a sentence that was right when written is not
+     self-maintaining.
+
+  4. **SHIFT+click buys every unit the balance covers, as ONE command.**
+     Not a loop of ten single-crate purchases: `IngredientCatalog::cost_of`
+     is all-or-nothing, so one command for the whole quantity means no
+     partially-completed purchase exists to be reasoned about, and the unit
+     price comes from the market snapshot rather than a Godot-side idea of
+     one. The arithmetic is two pure helpers (`_units_affordable`,
+     `_affordable_units`) so it can be asserted headlessly, and it settles
+     the division by multiplying back within `MARKET_PRICE_EPSILON`, since
+     money crosses the wire as a double and a fixed-point price that
+     divides exactly in the sim does not always divide exactly here.
+     **A gesture nobody can see is a gesture nobody uses**, so every slot
+     prints what shift would fetch right now (`shift: buy 123`) under the
+     price, dimmed to `shift: buy 0` when nothing is affordable. The slot
+     is now recessed only when *neither* verb can act, where it used to
+     disable the moment a whole crate was out of reach — which would have
+     swallowed the shift gesture in exactly the case it was built for, a
+     player who can afford four tomatoes but not ten. The card pays for its
+     new line in height rather than by shrinking its icon, the opposite of
+     the build card's choice in ticket 5, and legitimately so: §2b point
+     32's icon-shrink is forced by a *capped grid*, and the market's single
+     row of three is not capped.
+
+  5. **Stock is a plate on the right edge, and a reserved height is what a
+     plate wants, not what it has.** The larder strip lived inside the
+     hotbar's container, so it was one line tall by construction and could
+     never be more than a chip per ingredient. The replacement is a plate
+     under the clipboard with a row per priced raw ingredient — icon,
+     display name, right-aligned amount — and nothing on the hotbar shows
+     stock any more, since two readouts of one fact drift. No bar (§5e:
+     nothing defines "full" for a tomato), so zero is the word `none` on a
+     dimmed row.
+
+     The right-hand column now arbitrates in both directions: the
+     clipboard's scroll cap subtracts the plate's reserved height, and the
+     plate takes the band between the clipboard's actual bottom edge and
+     the hotbar's top. Only one half of that was documented when it was
+     built, and the other half bit immediately. Rendering the merged HUD at
+     1280x720 showed one of three ingredients: the plate reported the
+     height it had *settled at*, which the clipboard's cap is computed
+     against, so the two caps chased each other down to a stable point of
+     one row on a plate whose entire job is showing every ingredient.
+     `_stock_reserved_height` now reports `_stock_wanted_height` — chrome
+     plus the list's natural height, capped by the same share the placement
+     uses, floored at one row. **Two constraints that read each other must
+     not both read a settled value**; one of them has to state an
+     intention. Here the clipboard is the right one to yield, because a
+     docket stack scrolls by design and this readout does not. The plate
+     also uses its own cap rather than `_fit_grid_scroll`, whose
+     `_ui_px(110)` floor is taller than the whole list's natural height and
+     so could never cap it.
+
+  6. **A fold is not a modal, and it leaves a stub.** The legend's plate
+     gains a heading row (`CONTROLS` and a button naming its key) and folds
+     to exactly that, so what is left still says what it is and how to get
+     it back. Two ways in — the button, which never takes focus so the
+     number keys keep reaching the game, and **F1**, read in
+     `_unhandled_input` beside TAB so it works in both camera modes. It is
+     deliberately outside the one-modal-at-a-time rule: it neither closes
+     an open panel nor is closed by ESC or X, because it is furniture, not
+     a screen. State is session-only — a fold is "not right now", not a
+     preference, and persisting it would need a settings file this project
+     does not have. Everything that measures the legend reads `_legend_rect`
+     (its *current* rect) rather than a constant, so folding genuinely
+     returns the space to the fixed-plate avoid list of §2b point 33.
+
+  Proofs: a new `test_hud_plates.gd` (`HUD_PLATES_OK`, registered in
+  `verify-core-loop.sh`), new sections in `test_staff_panel.gd` and
+  `test_chain_rework.gd`, and `--short-staffed` / `--legend-collapsed`
+  screenshot flags for the two readouts that cannot be photographed any
+  other way (one is hidden by every panel, the other only exists once the
+  panel is gone). Reviewed at 1600x900 and 1280x720.
+  **Reported, not fixed:** at 1600x900 the staff panel shows about 2.5 of
+  its 4 category rows and the rest are scrolled to, and a busy clipboard
+  standing beside the SHORT-STAFFED strip clips its last docket line — both
+  are the same capped-grid arithmetic, and both leave the "am I short"
+  question answered by the summary line and the strip, which is what the
+  brief asked for.
+
 - 2026-09-15: **Quality pass, ticket 5: polish sweep and docs — closes out
   the quality pass.** The brief was a method rather than a defect list:
   render every screen the game has at 1600x900 through
