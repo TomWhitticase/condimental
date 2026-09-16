@@ -18,7 +18,8 @@
 #     without this test waiting three minutes for it — and does NOT run while
 #     the game is paused,
 #   * Quit to Menu asks first, then autosaves and arms the session for a
-#     fresh start.
+#     fresh start — and leaves the cursor free, so the menu it changes to is
+#     not handed a captured mouse.
 #
 # It writes real files under `user://saves/`, because that is what is being
 # tested. It removes the named slot it wrote, and it BACKS UP AND RESTORES
@@ -304,10 +305,22 @@ func _initialize() -> void:
 		_fail("Cancel must leave the pause menu up, not resume the game")
 		return
 
-	# --- ...and then does it. ----------------------------------------------
+	# --- ...and then does it, WITHOUT taking the cursor with it. -----------
+	# Quitting from first-person: closing the pause menu re-runs the capture
+	# rule, which used to recapture the mouse in the frame before the scene
+	# change and hand the main menu an invisible pointer. Headless Godot
+	# ignores `Input.mouse_mode` (see test_camera_nav.gd), so the DECISION is
+	# what is asserted — `_fp_mouse_free` is what every capture seam reads.
+	main._view_mode = main.ViewMode.FIRST_PERSON
 	DirAccess.remove_absolute(autosave_path)
 	session.arm_load("res://nowhere.ron", "stale")
 	main._quit_to_menu()
+	if not main._fp_mouse_free():
+		_fail("quitting to the menu must hand the cursor back, not leave it captured")
+		return
+	if main._crosshair != null and main._crosshair.visible:
+		_fail("the crosshair must go with the factory, not follow it to the menu")
+		return
 	if not FileAccess.file_exists(autosave_path):
 		_fail("quitting to the menu must autosave first")
 		return
@@ -325,5 +338,6 @@ func _initialize() -> void:
 	print("               nothing is, the factory genuinely stops and resumes without a")
 	print("               jump, Save writes save_ron() to a sanitized slot, the reserved")
 	print("               autosave name is refused out loud, the three-minute timer fires")
-	print("               and Quit to Menu confirms, autosaves and re-arms the session")
+	print("               and Quit to Menu confirms, autosaves, re-arms the session and")
+	print("               hands the cursor back on its way out")
 	quit(0)
