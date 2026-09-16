@@ -588,9 +588,9 @@ const DOCK_STOCK_SLOTS := 4
 
 ## How many TICKS a full dock's lamp spends lit, and then dark, before it
 ## repeats (the dock-capacity change, 2026-09-16). A pulse, not a colour: the
-## lamp's hue is its own mesh's (emission multiplies vertex colour, see
-## `_make_material`), so "full" is said in a channel the lamp still has —
-## time — and UI_UX.md §7 is satisfied without a second lamp material that
+## lamp's hue is its own mesh's (it emits its own vertex colour — see
+## `voxel_emissive.gdshader`), so "full" is said in a channel the lamp still
+## has — time — and UI_UX.md §7 is satisfied without a second lamp material that
 ## would read as a different lamp. Clocked off `current_tick()` like every
 ## other animation here, so a paused game freezes it and a screenshot run of
 ## a fixed tick count still renders the same frame.
@@ -845,9 +845,9 @@ var _ghost_fill: Node3D
 ## The loader itself; the four below are its tables, copied out once in
 ## `_load_voxel_materials` so the call sites in this file read unchanged.
 var _assets := VoxelAssets.new()
-var _class_materials: Dictionary = {} # "matte"/"metal"/"emissive" -> StandardMaterial3D
-var _lamp_idle: StandardMaterial3D
-var _lamp_running: StandardMaterial3D
+var _class_materials: Dictionary = {} # "matte"/"metal"/"emissive" -> Material
+var _lamp_idle: ShaderMaterial
+var _lamp_running: ShaderMaterial
 var _asset_classes: Dictionary = {} # asset name -> Array of class names
 
 var _help_label: Label
@@ -1818,8 +1818,8 @@ func _load_voxel_materials() -> void:
 	_asset_classes = _assets.asset_classes
 
 
-func _make_material(metallic: float, roughness: float, emission_energy: float) -> StandardMaterial3D:
-	return VoxelAssets.make_material(metallic, roughness, emission_energy)
+func _make_material(metallic: float, roughness: float) -> StandardMaterial3D:
+	return VoxelAssets.make_material(metallic, roughness)
 
 
 ## Builds one asset as a `Node3D` holding a `MeshInstance3D` per material
@@ -3286,7 +3286,7 @@ func _tint_level_body(node: Node3D, material: StandardMaterial3D) -> void:
 ## cleanly over it — *which* item a hopper holds is simulation data.
 func _hopper_fill_material(item_id: String) -> StandardMaterial3D:
 	var base: StandardMaterial3D = _class_materials.get("matte", null)
-	var mat: StandardMaterial3D = base.duplicate() if base != null else _make_material(0.0, 0.95, 0.0)
+	var mat: StandardMaterial3D = base.duplicate() if base != null else _make_material(0.0, 0.95)
 	mat.albedo_color = HOPPER_FILL_TINTS.get(item_id, HOPPER_FILL_TINT_FALLBACK)
 	return mat
 
@@ -3385,7 +3385,7 @@ func _fluid_id_of(snapshot: Dictionary) -> String:
 ## the shading numbers stay in palette.ron like every other material.
 func _fluid_material_for(fluid_id: String) -> StandardMaterial3D:
 	var base: StandardMaterial3D = _class_materials.get("liquid", null)
-	var mat: StandardMaterial3D = base.duplicate() if base != null else _make_material(0.0, 0.14, 0.0)
+	var mat: StandardMaterial3D = base.duplicate() if base != null else _make_material(0.0, 0.14)
 	mat.albedo_color = FLUID_TINTS.get(fluid_id, FLUID_TINT_FALLBACK)
 	return mat
 
