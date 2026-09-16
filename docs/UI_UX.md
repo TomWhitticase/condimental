@@ -442,6 +442,24 @@ nobody can see is a modifier nobody uses. A hopper's
 contents are chosen on the ghost (**Q** cycles raw items; the prompt names
 it; the ghost shows a tinted fill).
 
+**SHIFT buys back what the click places** (2026-09-16). Laying a run of belt
+otherwise costs two trips to the build menu per handful — buy ten, place
+ten, buy ten more — so holding SHIFT while placing spends money to replace
+the unit just placed, keeping the owned count level until the balance runs
+out. It is a *modifier on placing*, not a second way to buy: the click still
+places what the player owns, and the purchase happens after it and only if
+it succeeded, so a blocked tile never charges. The prompt says which it is
+before the click and after it, always with the price on it: **SHIFT: buy a
+replacement as you place  (5 each)** unheld, **⟳ SHIFT: buying a replacement
+each click  (-5)** while held, and **⚠ SHIFT: cannot afford another  (5)  ·
+placing from stock** when the balance has run out — because a modifier that
+silently drains the balance is exactly §7's "never encode state invisibly",
+and the line has no colour of its own to say it with. The unaffordable case
+warns *before* the click rather than buzzing after it: nothing was refused,
+the placement still stands, and the owned count simply starts falling.
+Placing gets its own cue and the replacement its purchase cue (§8), so two
+sounds mean two things happened.
+
 ### 5b. The hotbar: what is in your hand
 
 An always-visible strip along the **bottom** edge, centred (the other edges
@@ -528,6 +546,16 @@ unaffordable slot is dimmed and marked as well as red.
 
 Two consequences worth keeping:
 
+- **What's on the dock earned its bar the day the simulation gave it a
+  ceiling** (the dock-capacity change, 2026-09-16). The clipboard's ON THE
+  DOCK line was a bare figure under exactly this rule — nothing said how
+  many boxes was "full" — and now the shared pool has a per-item cap
+  (GAMEPLAY.md §9) the line reads `20/48` with the meter beside it, in the
+  level green until it is full and the warning red at the ceiling, with
+  `⚠ FULL` spelled out beside it (§7). The rule is unchanged, not bent: the
+  bar appeared because the ceiling did, and with no `delivery_capacity` on
+  the wire the line falls back to the bare figure rather than inventing a
+  full mark.
 - **A docket's bar stays paper and ink.** §5 gives a contract card two
   colours; the countdown is drawn in ink on the checkbox's paper tone, and
   the card's single warning red is spent only on the last stretch of a
@@ -625,6 +653,33 @@ one's cue would be an anticlimax for a payout.
   a deterministic variation gives that without making a review screenshot
   unrepeatable.
 
+**A third size, for a thing that is not an event at all (2026-09-16).** A
+payout happens once and a case lands once; *crushing* is something a machine
+is doing for eighty ticks at a stretch, so it gets neither a burst nor a
+cue but a **beat** — a few flecks of pulp thrown out of the crusher's feed
+pocket every ten ticks of its own work, arcing about a fifth of a tile over
+the mouth and shrinking away as they drop back into it. Everything above
+still holds: the distances are in `TILE`, the clock is the simulation tick
+(so a pause holds the pulp in the air), and the fan's heights and sizes are
+derived from the fleck's index rather than from `randf()`. Two rules are
+new, and both came out of the render rather than the plan (§2b point 12):
+
+- **A continuous effect is driven by the machine's own work clock**, so it
+  inherits §2b point 28's narrow meaning of "working" for free — a crusher
+  starved of tomatoes or blocked on a full output throws nothing, and the
+  spray is another statement of the same fact its mechanism and its status
+  lamp already make, not a decoration that runs whenever a machine exists.
+- **At this camera a beat of three flecks is three stray pixels.** The
+  first render read as a rash on the machine's roof rather than as a spit;
+  five flecks at varied sizes read as one. Thrown higher it stops reading
+  as something coming out of the pocket and starts reading as debris flying
+  off the floor, so the arc is deliberately small and the fleck's exit is
+  its shrink, not its landing. `scripts/screenshot-scene.sh --crushing` is
+  the review, the way `--payout` is for the celebration: it waits for the
+  crusher to be genuinely mid-batch and freezes the frame with pulp in the
+  air, because a headless test can prove a fleck was thrown and cannot say
+  whether the throw reads as crushing.
+
 ## 7. Color & readability
 
 - **Base palette is neutral/industrial**: steel greys, concrete, safety
@@ -633,6 +688,17 @@ one's cue would be an anticlimax for a payout.
   highlights, selection.
 - **Never encode critical state in colour alone**: pair every status colour
   with a glyph, word, shape or position.
+- **A world-space warning is a rhythm, not a lamp** (the dock-capacity
+  change, 2026-09-16). A full delivery dock has to say so on the floor, not
+  only on the clipboard, and it cannot say it by turning red: machine
+  emission in this scene MULTIPLIES over vertex colour (§2b point 8's
+  status-lamp rule, `_make_material`), so a red wash over a blue-grey deck
+  is a dimmer deck, not a red one. The dock's own deck lights instead
+  **pulse** — lit, dark, lit — off the simulation tick like every other
+  animation here (§6a), which reads across a floor at any zoom and cannot
+  be confused with a steady lamp. The words are still where the detail is:
+  the hover says `⚠ FULL`, and the clipboard's ON THE DOCK line reads
+  `48/48` with its bar at the ceiling (§5e).
 
 ## 8. What this doc does not cover
 

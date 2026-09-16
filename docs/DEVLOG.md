@@ -73,6 +73,7 @@ below is history and should only ever be appended to.)*
 - **Machine load indicator (DONE, all three tickets, 2026-09-11; plan: `docs/MACHINE_LOAD_PLAN.md`):** the player can see which machines are flat out and which are waiting, and so where the bottleneck is, across the whole floor. The simulation measures each machine's load over a rolling 600-tick window and reports `working`/`starved`/`blocked` with a percentage and the reason it is waiting, on the wire (`machine_load_snapshots_json`, plus the same fields on chunk and tile snapshots) and in the save (ticket 1). Six `andon_*` stack-light models — three statuses in a short and a tall height — are pinned by voxgen tests against every machine body at every facing (ticket 2). Every recipe-running machine now stands one on its camera-visible corner, lit to the sim's own verdict, polled on the tick (a pause freezes it; a loaded save lights up on its first frame); hover gains a line in words (`blocked · 61% busy · output full`) and a load bar; `test_layouts.gd`'s `build_bottleneck_line` settles the shipped line behind the cooking vat so it reads red · red · green · amber · amber, and `scripts/screenshot-scene.sh --bottleneck` photographs it (ticket 3). **Amended 2026-09-12: the stack-light poles are gone.** After a playtest the owner did not like a pole beside every machine, so the six `andon_*` models and the scene nodes were removed; the indicator is the hover panel alone — a status glyph and word leading the load line and the load bar filled in the status colour. The simulation half and the polling are unchanged.
 - **Staff pools MVP (DONE, all three tickets, 2026-09-12; plan: `docs/STAFF_POOLS_PLAN.md`):** the factory needs people, and people cost money every period (GAMEPLAY.md §5, §7). **Ticket 1 (sim) has landed:** four staff categories in `data/staff.ron`, a required crew per kind in `data/machines.ron` (now schema 2), per-tick whole-crew claims in stable machine order (a machine short of its crew pauses where it is and reads *starved* with a `staff` reason; a dock without its logistics head holds), payday out of the one money counter in file order — **amended by the quality pass's ticket 1 (2026-09-13, below): an unpaid head is idled, not fired, and leaves only if the next payday is unpaid too**, free `hire`/`fire` commands, `staff_snapshot_json`, `crew` on tile and shop snapshots, `understaffed` on the dock, and all of it in the save. **Ticket 2 (icons) has landed:** four voxel props rendered through the icon pass, one per category (hard hat, spanner, taped carton, pallet jack). **Ticket 3 (Godot) has landed:** the **H** staff panel — one row per category with its icon, hired count, an assigned/asked-for meter with the numbers printed on it, the shortfall in words, wage and HIRE/FIRE, and the wage bill and payday countdown in the footer — polled on the tick like the machine load; hover gains `crew: 2 manufacturing`, an understaffed machine reads `▲ starved · short of manufacturing staff` and an understaffed dock `held · short of logistics staff`; the build-menu card shows a kind's crew under its price; `test_staff_panel.gd` proves it on a new `build_understaffed_line` fixture and `scripts/screenshot-scene.sh --staff` / `--understaffed` photograph it.
 - **Quality pass (DONE, all five tickets, 2026-09-13/14; plan: `docs/QUALITY_PASS_PLAN.md`, decisions in CLAUDE.md's log):** no new features — correct, fast, fair, legible. **Ticket 1 (sim):** the payday rule no longer fires the unpaid silently — an unpaid head is idled for a period and leaves only if unpaid again, the wire says the next bill and the shortfall ahead of time and who left afterwards (`staff_snapshot_json`: `next_bill`, `shortfall`, `unpaid_last_payday`, per-category `owed`/`unpaid`/`left_last_payday`/`can_hire`); a fired head is still owed for its period and a hire needs the balance to cover the next bill, so neither HIRE nor FIRE dodges a wage; money is `Money` (`I48F16`) so a payout can no longer panic or wrap at 32 767; the rest of the sim was audited for exploits (see the log entry). **Ticket 2 (belt gaps):** `ITEM_MIN_SPACING_TILES` is half a tile, not a quarter — a fed lane now reads as a visible queue of boxes instead of one solid bar, at the same steady throughput as before (the vat is still the bottleneck); widening it exposed and fixed a packing bug where the belt's front item and the next tile's item occupied the same point at every tile boundary. **Ticket 3 (Godot bugs/perf):** the tick path reads a chunk *delta* (`chunk_delta_json`, only what actually changed) instead of the whole chunk snapshot, and per-frame polls are gated on the wire's own `revision()` so an unchanged frame parses nothing — the stress line dropped from 8.4 to 2.1 ms/frame; fixed a right-drag that never released when the mouse came up over a panel, first-person mouse capture fighting the pause/config panels, `R` rotating a tile hidden behind an open panel, and `X` not closing every modal like E/M/C/H do. **Ticket 4 (staffing legibility):** the wage bill and payday countdown are on the always-visible clipboard and in the H footer, drawn from the wire's own `next_bill`/`shortfall`; each row names what asks for its category and what the category does; the footer warns before a payday it cannot cover in the ticket's own words (`▲ next payday short by 6 — 3 heads go unpaid`) and disables HIRE per the wire's `can_hire`; a payday that idles or loses heads is announced through the same mechanism a lost contract uses. **Ticket 5 (polish sweep and docs):** every screen walked at 1600x900 and every PNG read, five things fixed. A hover or config panel could land squarely on the legend, on the contracts clipboard or under the hotbar, because it only ever flipped off the right and bottom edges of the viewport — it now tries all four quadrants around the cursor and, failing those, clamps on screen and pushes clear of whichever plate it still overlaps (`_panel_position_near`/`_pushed_clear_of`). The legend is five lines instead of four, so the panels line (E/M/C/H/P) and the configure hint no longer run back under the clipboard — ticket 3 left that one by name. `_announce_contract_changes` shows two notices raised in the same poll (two contracts lost at once, or a loss and a signature together) in turn, instead of the second silently overwriting the first before either was ever read (`_contract_notice_queue`) — ticket 3 left that one by name too. A build-menu card's crew cost is two lines (`crew: 2 manufacturing` / `4 / period`), paid for out of the card's own padding by a smaller build-card icon, because joined on one line it overran the card and a taller card does not help (the scroll cap comes from the panel's height, not the grid's). A splitter's hover says `connected` / `not connected` rather than the wire's raw tile coordinates. A new game was also played through to its first payout by driving the real command boundary, and nothing in that run needed a wording or ordering fix. Finally this doc, CLAUDE.md's decisions log and `docs/QUALITY_PASS_PLAN.md` were reconciled across the whole pass. `cargo test --workspace` and `scripts/verify-core-loop.sh` are green.
+- **Dock capacity, crusher pulp, SHIFT auto-buy, first-person camera (DONE, 2026-09-16):** four playtest asks in one pass. The shared delivery pool has a per-item ceiling (`DELIVERY_STOCK_CAPACITY`, 48) so a dock with nowhere to put a box refuses it and the belt backs up — read on the clipboard as `20/48` with a bar and `⚠ FULL`, and on the floor as the dock's deck lamps pulsing, since emission multiplies vertex colour here and a red lamp is impossible. A working crusher throws pulp on its own beat (five flecks every ten *work* ticks, so a starved or blocked crusher throws nothing), reviewed through the new `screenshot-scene.sh --crushing` flag. Holding SHIFT while placing buys a replacement after the placement lands, with the price named in the prompt in all three states. And entering first person no longer leaves the camera at the isometric pose until the first input — `_set_view_mode` had a third opinion after each branch had already placed the camera.
 - **Production stats — the P screen (DONE, both halves, 2026-09-13):** Factorio's production GUI. The simulation keeps a per-item ledger of what recipes made and used over four rolling windows (5s/1m/10m/1h) and for all time — a paid contract counts as using what it ships, buying and filling count nothing — polled over `production_snapshot_json` and saved with the world. **P** opens the PRODUCTION panel: rows biggest first with the item's icon, MADE and USED bars with counts and per-minute rates printed on them (over the observed span, scaled against the largest count), a window selector plus all time, one modal at a time with E/M/C/H. `test_production_stats.gd` proves it; `scripts/screenshot-scene.sh --production` photographs it. The sim half was written on 2026-09-12 and left uncommitted in a worktree; it was picked up, merged behind the staff pools (a craft records at the same points a crew is claimed for) and finished with the Godot half in one pass.
 - **HUD features from the owner's playtest (DONE, 2026-09-16):** five
   requests, three parallel worktrees, no Rust change. Being short-staffed
@@ -101,6 +102,100 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-16 — Four playtest asks: a dock that fills up, pulp off the crusher, SHIFT to rebuy, and the first-person camera's first frame
+
+Four unrelated things the owner asked for after playing, done as one pass.
+Three of them turned out to be the same argument at different sizes: the
+simulation owns the fact, the presentation owns how it reads.
+
+**A dock can be full now, and the ceiling went on the pool, per item id.**
+The dock itself stays the pass-through GAMEPLAY.md §9 designed — it empties
+into the shared delivery pool every tick, so a cap on its own buffer would
+be invisible. The cap is on the pool: `DELIVERY_STOCK_CAPACITY`, 48 units
+of any *one* item. Per item, not one total, because a single total can
+deadlock the game outright — one overproduced product crowds every other
+item out of the pool, a contract whose mix names a crowded-out item can
+then never settle again, and nothing in this game dumps excess stock. Per
+item, every id always has its own room and a clog is always a specific
+sentence rather than a mystery. The 48 is a *relationship*, not a literal,
+pinned the way `STARTING_MONEY` is: `tests/dock.rs` asserts it comfortably
+exceeds the board's largest single mix quantity (20, the export pallet), so
+adding a bigger order fails a test instead of quietly making that contract
+unsatisfiable. `Dock::try_absorb` asks the economy for room before taking a
+box off the belt, which reuses the refusal path the dock's bounded buffer
+already had, so the sim change is small. A save whose pool is over the cap
+is now `SaveError::OverfullDeliveryPool` rather than a silent truncation.
+
+Reading it is two things. The clipboard's ON THE DOCK line finally has a
+denominator, so under UI_UX.md §5e's rule it earns a bar — `20/48` with a
+meter that takes the docket's one warning red and `⚠ FULL — belt backing
+up` at the cap. On the floor the obvious move, lighting the dock red, is
+impossible here: `_make_material` gives emission `EMISSION_OP_MULTIPLY` over
+vertex colour, so a red wash over a blue-grey deck is just a dimmer deck.
+The full dock **pulses** its deck lamps instead, clocked off
+`sim.current_tick()` like everything else in the scene, so a pause freezes
+it and a screenshot repeats. A rhythm also survives every zoom this camera
+has, and cannot be confused with the steady lamp that already means "has
+stock". Worth keeping as a rule: **a world-space warning here is a rhythm,
+not a colour.** And the full dock is not a penalty on top of anything — the
+belt backing up behind it *is* the consequence.
+
+**The crusher throws pulp.** UI_UX.md §6a had settled two sizes of feedback
+for two frequencies — a payout's celebration, a dock arrival's small cue.
+Crushing is neither: it is something a machine is *doing* for eighty ticks
+at a stretch, so it is a beat rather than a burst. Five flecks of a new
+`crush_bit` model out of the feed pocket every ten of the machine's own
+*work* ticks, arcing about a fifth of a tile over the mouth and shrinking
+out as they fall back in. Driving it off `_machine_work_elapsed` is the
+decision rather than a detail: the spray inherits §2b point 28's narrow
+meaning of "working", so a crusher starved of tomatoes or blocked on a full
+output throws nothing, and the pulp says the same thing the mechanism and
+the status lamp already say. No sound — §8 keeps "no idle machine loop"
+deliberately, and a cue every ten ticks per crusher is exactly that loop.
+
+Two things came out of the render rather than the plan, which is §2b point
+12 again. The model took three passes: pale seed pips read as a stalk, i.e.
+as a whole tomato, the opposite of crushed; a torn cuboid corner read as a
+slab hanging off the lump; three overlapping spheres and one proud voxel
+work. And the first spray — three flecks, 0.85 scale — read as three stray
+red pixels on the machine's roof; five at varied sizes read as a spit;
+thrown higher it stopped reading as something leaving the pocket and
+started reading as debris flying off the floor. `scripts/screenshot-scene.sh
+--crushing` is the review flag that made judging any of that possible: it
+waits for the *state* (a crusher genuinely mid-batch with pulp in the air)
+rather than a tick count, then freezes, because the flight is nine ticks
+and the shot's warm-up is longer. Without it the obvious fixtures
+photograph a crusher that is blocked or starved at that frame — correct
+behaviour, useless picture. Its first run also caught the flecks being
+invisible for the oldest reason in this repo: `crush_bit` had never been
+staged with `cargo xtask` and imported twice, so the mesh silently did not
+exist.
+
+**SHIFT buys back what the click places**, so a run of belt no longer costs
+a round trip to the build menu per handful. It is a modifier on *placing*,
+not a second way to buy: the click still places a unit the player owns, and
+the purchase happens after it and only if the placement actually landed, so
+a blocked tile never charges. The prompt carries it in all three states
+with the price on each, because a modifier nothing mentions is one nobody
+finds and one that silently drains the balance is UI_UX.md §7's "never
+encode state invisibly". Unaffordable warns *before* the click rather than
+buzzing after it — nothing is refused, the placement stands, and the owned
+count simply starts falling.
+
+**Entering first person put the camera somewhere odd until you moved.**
+`_set_view_mode` ended with an unconditional `_update_camera_transform()`
+— the isometric placement — after a branch that had already placed the
+camera for whichever mode was being entered, so first person kept the
+isometric angle and distance until the first mouse-look or WASD input
+called `_update_fp_camera_transform()` and snapped it into place. Each
+branch now places the camera and nothing runs afterwards. The rule worth
+keeping: **when two modes each own a transform, the switch must not have a
+third opinion.** `test_camera_nav.gd` now asserts the camera itself is at
+`_fp_position` on entry rather than that the mode flag flipped, which is
+why the old test passed throughout.
+
+`scripts/verify-core-loop.sh` is green.
 
 ### 2026-09-16 — Pull requests have to show the change
 

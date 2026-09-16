@@ -112,7 +112,7 @@ use serde::{Deserialize, Serialize};
 use super::belt::BeltSegment;
 use super::contracts::ContractRegistry;
 use super::dock::{DOCK_KIND, Dock};
-use super::economy::ActiveContract;
+use super::economy::{ActiveContract, DELIVERY_STOCK_CAPACITY};
 use super::fluid::{FLUID_TANK_KIND, FluidTank};
 use super::hopper::{HOPPER_KIND, Hopper};
 use super::inventory::Inventory;
@@ -519,6 +519,17 @@ pub enum SaveError {
     DuplicateContract {
         id: String,
     },
+    /// The shared delivery pool holding more of one item than
+    /// [`DELIVERY_STOCK_CAPACITY`]. It has no tile, so it cannot use
+    /// [`SaveError::OverCapacity`]; it is the same corruption all the same.
+    /// A save written before the pool had a ceiling can land here — the
+    /// world it describes is one this build cannot run, and saying so is
+    /// better than silently shipping the excess into nothing.
+    OverfullDeliveryPool {
+        item: ItemId,
+        held: u32,
+        capacity: u32,
+    },
     /// A buffer, bin, tank or pipe holding more than it can. A hand-edited
     /// file, or content whose capacity constant shrank.
     OverCapacity {
@@ -612,6 +623,15 @@ impl std::fmt::Display for SaveError {
                 f,
                 "the save lists contract '{id}' as active twice — a contract can be signed \
                  once at a time"
+            ),
+            SaveError::OverfullDeliveryPool {
+                item,
+                held,
+                capacity,
+            } => write!(
+                f,
+                "the shared delivery pool holds {held} '{item}', more than the {capacity} \
+                 one item may stand on the dock"
             ),
             SaveError::OverCapacity {
                 what,
@@ -987,10 +1007,17 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
             return Err(SaveError::UnknownIngredient { id: id.clone() });
         }
     }
-    for (item, _) in &data.delivery_stock {
+    for (item, held) in &data.delivery_stock {
         check_item(item, &known_items, || {
             "in the shared delivery pool".to_string()
         })?;
+        if *held > DELIVERY_STOCK_CAPACITY {
+            return Err(SaveError::OverfullDeliveryPool {
+                item: item.clone(),
+                held: *held,
+                capacity: DELIVERY_STOCK_CAPACITY,
+            });
+        }
     }
 
     // Every active contract has to be an offer this build's board makes,
@@ -1461,7 +1488,7 @@ fn restore_ledgers(world: &mut World, data: &SaveData) {
     let delivery_stock = data.delivery_stock.clone();
     let contracts = data.contracts.clone();
     let economy = world.economy_mut();
-    economy.delivery_buffer = Inventory::restore(u32::MAX, delivery_stock);
+    economy.delivery_buffer = Inventory::restore(DELIVERY_STOCK_CAPACITY, delivery_stock);
     // The active list is EXACTLY the save's. The empty world was built with
     // the board's starters running (that is what a new game is); a save
     // that lost a starter, or signed an offer, says so by listing exactly

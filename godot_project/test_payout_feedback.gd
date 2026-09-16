@@ -66,8 +66,18 @@ func _initialize() -> void:
 	if feedback == null:
 		_fail("no scene-level 'Feedback' node — the coin pool must not hang off _world_root")
 		return
-	if feedback.get_child_count() != main.COIN_POOL:
-		_fail("expected a fixed pool of %d coins, found %d children of Feedback"
+	# The crusher's spray shares this root (it outlives a rebuild for the same
+	# reason a coin does), so Feedback holds the coins plus that one subtree.
+	var crush_root: Node = feedback.get_node_or_null("CrushSpray")
+	if crush_root == null:
+		_fail("no 'CrushSpray' under Feedback — the crusher's pulp must survive _rebuild_world too")
+		return
+	if crush_root.get_child_count() != main.CRUSH_POOL:
+		_fail("expected a fixed pool of %d crush bits, found %d children of CrushSpray"
+			% [main.CRUSH_POOL, crush_root.get_child_count()])
+		return
+	if feedback.get_child_count() != main.COIN_POOL + 1:
+		_fail("expected a fixed pool of %d coins beside CrushSpray, found %d children of Feedback"
 			% [main.COIN_POOL, feedback.get_child_count()])
 		return
 	if main._coins.size() != main.COIN_POOL:

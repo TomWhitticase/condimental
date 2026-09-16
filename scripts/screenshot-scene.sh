@@ -40,6 +40,16 @@
 # It implies --fixture chain, and it FREEZES the scene once the frame is set
 # up, since a burst is over in 34 ticks and the shot's warm-up is longer.
 #
+# Pass --crushing to build that same line, run it until the crusher is
+# genuinely mid-batch, and hold the frame with its pulp in the air — the
+# spray it throws on its own beat while it works. The same review --payout
+# gets, one size down: test_machine_motion.gd can prove a fleck is thrown
+# from the mouth and reclaimed, and cannot say whether the burst reads as
+# satisfying crushing. It implies --fixture chain and --populate, and (like
+# --payout) FREEZES the scene, since a fleck's flight is 9 ticks and the
+# shot's warm-up is longer. A starved or blocked crusher throws nothing by
+# design, which is why this waits for the state rather than a tick count.
+#
 # Pass --stock to buy an assorted kit (belts, pipes, a hopper, a tank, a
 # machine or two) so the hotbar shows carried sockets, multi-digit counts and
 # empty sockets side by side, plus uneven raw stock so the STOCK plate shows a
@@ -174,7 +184,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--bottleneck] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--contracts] [--payout] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--board] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--bottleneck] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--board] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

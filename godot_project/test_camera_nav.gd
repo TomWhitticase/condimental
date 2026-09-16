@@ -231,6 +231,22 @@ func _initialize() -> void:
 		_fail("first-person mode must use a perspective camera, projection was %d" % camera.projection)
 		return
 
+	# --- Entering first person PLACES the camera, before any input ----------
+	# The bug this guards (fixed 2026-09-16): `_set_view_mode` ended with an
+	# unconditional `_update_camera_transform()`, so the first frame of first
+	# person was rendered from the isometric camera's position and angle and
+	# only snapped into place on the first mouse-look or WASD input. The
+	# switch must leave the camera exactly where `_update_fp_camera_transform`
+	# would put it, with nothing pressed.
+	var placed_on_entry := camera.transform
+	main._update_fp_camera_transform()
+	if not placed_on_entry.is_equal_approx(camera.transform):
+		_fail("entering first person must place the camera itself: it sat at %s until the first input moved it to %s" % [placed_on_entry, camera.transform])
+		return
+	if not placed_on_entry.origin.is_equal_approx(main._fp_position):
+		_fail("the first-person camera must stand at _fp_position %s, not %s" % [main._fp_position, placed_on_entry.origin])
+		return
+
 	# --- First-person mouse-look: rotates and clamps pitch ------------------
 	var yaw_before: float = main._fp_yaw
 	main._apply_look(Vector2(100.0, 0.0)) # simulate the mouse moving right
