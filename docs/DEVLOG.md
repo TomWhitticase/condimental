@@ -26,6 +26,15 @@ below is history and should only ever be appended to.)*
   Godot proofs, no failures) and has been rendered and played. A fresh
   worktree still needs `cargo xtask` and **two** `godot --import` passes
   before the world is visible. See the log entry below.
+- **CI runs the tests now (2026-09-16).** Seven workflows under
+  `.github/workflows/`: `rust.yml` (sim_core + voxgen tests, `cargo xtask`,
+  a fmt/clippy ratchet, and a check that `assets/voxels/models` still matches
+  its generators), `invariants.yml` (the CLAUDE.md rules that can be grepped
+  for, `shellcheck`, `actionlint`), the two older lint/screenshot backstops,
+  `verify.yml` (the full Godot gate — nightly, on demand, or on a PR labelled
+  `full-verify`), `audit.yml`, and `claude.yml`/`claude-review.yml` (dormant
+  until an `ANTHROPIC_API_KEY` secret exists). `docs/WORKFLOW.md`,
+  "What CI runs", is the table. See the log entry below.
 - **Agent context restructured (2026-09-16).** `CLAUDE.md` is 72 lines and
   `@`-includes nothing; it maps a task to the doc that covers it. The
   condensed decisions log lives in `docs/DECISIONS_LOG.md`, workflow in
@@ -162,6 +171,39 @@ glow pass is what the eye reads, and it is the half a headless test can hold.
 `test_presentation.gd` asserts both, plus that the `emissive` material is the
 shader and no other class is.
 
+### 2026-09-16 — CI grew up: the checks a session skips now run anyway
+
+The repository had two workflows — commit-message linting and the
+PR-screenshot backstop — and neither of them ran a single test. Everything
+that actually proves this project works was, until today, only ever run by
+whoever happened to remember to run it. That is a bad bet in a repo built
+mostly by agents in separate worktrees, and it had already been taken: the
+workspace has 32 unformatted files and 28 clippy warnings, and nothing had
+ever said so.
+
+Seven workflows now. `rust.yml` runs `cargo test -p sim_core`, `cargo test -p
+voxgen` and `cargo xtask` on every pull request, plus a regenerate-and-diff of
+`assets/voxels/models` — voxgen's output turns out to be byte-reproducible, so
+an edited generator with a stale `.vox` beside it is now caught instead of
+quietly rendering the old model in the screenshot the PR is judged on.
+`invariants.yml` checks the rules that fail silently: a `test_*.gd` nobody
+wired into `verify-core-loop.sh`, a marker the runner greps for that the
+script never prints, a `res://` path into a deleted file, a doc link into a
+renamed one, plus `shellcheck` and `actionlint`. `verify.yml` runs the full
+Godot gate nightly, on demand, or on a PR labelled `full-verify` — not on
+every push, because it costs minutes and a 100MB download. `audit.yml` is
+`cargo audit`. `claude.yml` and `claude-review.yml` answer `@claude` and
+post a first-pass review against CLAUDE.md's own rules; both no-op until an
+API-key secret exists. Dependabot, a path labeller and CODEOWNERS fill in the
+rest.
+
+The fmt/clippy backlog is handled as a **ratchet** rather than a gate:
+`scripts/check-rust-lint.sh` holds a high-water mark, so new code cannot add
+an unformatted file or a warning, while the existing 32 and 28 are burned down
+under issues #28 and #29. A gate that is red on day one is a gate that is
+ignored by day three. The same reasoning kept the full Godot verify off the
+PR path until it has been seen green on Linux — it has only ever run on the
+macOS machines this project is developed on.
 ### 2026-09-16 — The README is the front door, with pictures
 
 The root `README.md` had described a milestone-1 scaffold with "no gameplay

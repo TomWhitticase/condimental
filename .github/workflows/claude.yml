@@ -1,0 +1,87 @@
+name: Claude
+
+# @claude in a comment on an issue or a pull request, and Claude answers,
+# reviews, or opens a branch with the change on it.
+#
+# This project is built mostly by agents in worktrees that do not share
+# memory (docs/WORKFLOW.md). That work all happens BEFORE a pull request
+# exists. This workflow is the other half: the conversation on the pull
+# request itself — "why did this change the belt spacing?", "@claude fix the
+# clippy warning you added" — answered against the same CLAUDE.md rules,
+# without a human copying context back into a terminal.
+#
+# SETUP: needs one repository secret, ANTHROPIC_API_KEY (or
+# CLAUDE_CODE_OAUTH_TOKEN, which `claude /install-github-app` sets up for
+# you). Until one exists every job here no-ops with a note rather than
+# failing, so the rest of CI is unaffected.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  issues:
+    types: [opened, assigned]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
+jobs:
+  claude:
+    # Only wake up for the trigger phrase. Without this every comment on
+    # every issue starts a runner.
+    if: >-
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The `secrets` context cannot be read in an `if:`, so the presence of the
+    # key comes through env instead.
+    env:
+      HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+    steps:
+      - name: No API key configured
+        if: env.HAS_KEY != 'true'
+        run: |
+          echo "::notice::Set the ANTHROPIC_API_KEY (or CLAUDE_CODE_OAUTH_TOKEN) repository secret to enable @claude. Skipping."
+
+      - uses: actions/checkout@v7
+        if: env.HAS_KEY == 'true'
+        with:
+          # Claude reads the history to answer questions about why something
+          # is the way it is, and docs/DEVLOG.md is only half the record.
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        if: env.HAS_KEY == 'true'
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # CLAUDE.md and the docs it points at are checked in, so the rules
+          # arrive with the checkout. This only adds what a runner cannot
+          # work out for itself.
+          prompt: |
+            You are working in the sauce-factory repository. Read CLAUDE.md
+            first and follow it — in particular: gameplay logic lives in Rust
+            and never in GDScript, content lives in data/*.ron and never in
+            code, and shared simulation state is fixed-point only, never
+            f32/f64.
+
+            Verification here is `cargo test -p sim_core` (fast, and the
+            right check for a sim-only change) and
+            `scripts/verify-core-loop.sh` (the full gate — it needs a Godot
+            binary, which this runner does NOT have, so say so rather than
+            claiming a change is verified when it is not).
+
+            If you open a pull request, follow docs/WORKFLOW.md: a branch,
+            Conventional Commits, and a body that follows
+            .github/pull_request_template.md.
+          claude_args: '--max-turns 30'

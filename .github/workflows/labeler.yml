@@ -1,0 +1,23 @@
+name: Label pull requests
+
+# Applies .github/labeler.yml. `pull_request_target` is what lets the labeler
+# write to a pull request at all; it is safe HERE and only here because this
+# workflow checks out nothing and runs no repository code — it reads the list
+# of changed files through the API and applies labels.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/labeler@v7
+        with:
+          sync-labels: true

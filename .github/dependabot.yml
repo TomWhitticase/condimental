@@ -1,0 +1,39 @@
+version: 2
+
+# Two ecosystems, both grouped into a single pull request each, because every
+# pull request here costs a screenshot and a review (docs/WORKFLOW.md) and
+# nine separate patch bumps are not nine separate decisions.
+
+updates:
+  # gdext (`godot`), hecs, fixed, ron and serde. `godot` is the one to read
+  # carefully: it pins against a Godot version, and
+  # godot_project/sim_core.gdextension's `compatibility_minimum` and
+  # project.godot have to agree with it — see scripts/verify-scaffold.sh,
+  # which exists for exactly that bump.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      cargo-minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      # Conventional Commits are enforced by a hook and by CI
+      # (.github/workflows/commitlint.yml); Dependabot's own commits are not
+      # exempt.
+      prefix: chore
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: chore
+      include: scope

@@ -1,0 +1,33 @@
+# Path-based labels for pull requests (actions/labeler). The point is triage:
+# most pull requests here are opened by an agent in its own worktree, and the
+# first question a human asks of the list is which layer each one touches —
+# ARCHITECTURE.md's split between the Rust simulation, the Godot presentation
+# layer and the data that drives both.
+
+# Label names follow the repository's existing `area:` taxonomy — the labels
+# `gh label list` already shows, not a second parallel set.
+area:sim:
+  - changed-files:
+      - any-glob-to-any-file: 'sim_core/**'
+
+area:godot:
+  - changed-files:
+      - any-glob-to-any-file: 'godot_project/**'
+
+area:assets:
+  - changed-files:
+      - any-glob-to-any-file: ['assets/voxels/**', 'scripts/build-voxels.sh']
+
+# CLAUDE.md, "Content is data, never code": a change here is a balance change,
+# and it is reviewed as one.
+area:content:
+  - changed-files:
+      - any-glob-to-any-file: 'data/**'
+
+area:docs:
+  - changed-files:
+      - any-glob-to-any-file: ['docs/**', '**/*.md']
+
+area:tooling:
+  - changed-files:
+      - any-glob-to-any-file: ['xtask/**', 'scripts/**', '.github/**', '.githooks/**']

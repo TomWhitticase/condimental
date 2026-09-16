@@ -1,0 +1,4 @@
+# Every pull request gets its author as a reviewer automatically. One owner
+# today; the file exists so that "who reviews the simulation" has an answer
+# in the repository rather than in somebody's head when that changes.
+*       @TomWhitticase
