@@ -34,6 +34,9 @@ below is history and should only ever be appended to.)*
   symlinked beside it. Four skills under `.claude/skills/`. Always-loaded
   context went from ~34,500 tokens to ~950. See the log entry below for the
   five doc defects the move turned up, including the tick rate.
+- **The world is indoors (2026-09-16).** The backdrop is a factory-interior
+  sky shader, not weather, and the scene's lighting is the hall's rather than
+  a sun's. See the log entry below.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Work reaches `main` through pull requests, and deferrals become issues
   (2026-09-16).** Nothing is pushed to `main` directly — a `pre-push` hook
@@ -101,6 +104,33 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-16 — The backdrop is now the inside of a factory
+
+The game used to stand on a concrete slab under an open blue sky. It now
+stands in the middle of a factory hall far larger than anything the player
+can build: a trussed roof with skylight ribbons and high-bay lamps overhead,
+clad walls with a pipe-rack gantry, clerestory glazing and a line of other
+plant along them, and air haze swallowing all of it towards the far end.
+Press TAB and look around and the answer to "where am I" is the setting
+UI_UX.md §3 describes, rather than a field.
+
+It is one sky shader (`godot_project/factory_interior_sky.gdshader`), not
+geometry and not a texture: a box intersected against the view direction,
+with the roof trusses and the wall columns sharing one structural grid so
+they line up. Being a sky, it has no parallax — the hall stays the same size
+however far the player flies, which is exactly why it reads as massive
+instead of as a room with walls to reach.
+
+Two findings worth carrying forward. A near-parallel ray that returns a
+*negative* distance overflows the haze term, and the resulting infinity in
+the radiance map renders **every lit surface in the world black** — a
+symptom that points nowhere near the sky. And an interior is a far darker,
+far warmer light source than daylight: ambient went 0.8 -> 1.2 and the key
+light lost the sun's warmth, because measured against the old frame the bare
+concrete had gone from r-b = 5 to r-b = 21, i.e. every grey asset in the game
+was photographing beige. Full record in DECISIONS.md.
+
 
 ### 2026-09-16 — Pull requests have to show the change
 

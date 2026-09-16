@@ -95,6 +95,22 @@ func _initialize() -> void:
 	if env.background_mode != Environment.BG_SKY or env.sky == null:
 		_fail("background must be the sky (BG_SKY with a Sky resource), not a flat void colour — see main.gd's own note on why a flat BG_COLOR read as an empty void once first-person mode let you look around")
 		return
+	# The backdrop is the inside of a factory hall, not weather (UI_UX.md §3).
+	# Asserted here because it is invisible to every other check: the
+	# isometric camera shows a sliver of it in one corner, so an accidental
+	# return to an outdoor sky would pass the whole suite and only be caught
+	# by someone pressing TAB.
+	var sky_material := env.sky.sky_material
+	if not (sky_material is ShaderMaterial):
+		_fail("the sky must be the factory-interior shader, not a %s — UI_UX.md §3 puts the factory INSIDE a hall, and a ProceduralSkyMaterial is weather" % sky_material.get_class())
+		return
+	var sky_shader: Shader = (sky_material as ShaderMaterial).shader
+	if sky_shader == null or not String(sky_shader.resource_path).ends_with("factory_interior_sky.gdshader"):
+		_fail("the sky's shader must be factory_interior_sky.gdshader, was '%s'" % ("<none>" if sky_shader == null else sky_shader.resource_path))
+		return
+	if env.ambient_light_source != Environment.AMBIENT_SOURCE_SKY:
+		_fail("ambient must come from that sky — an interior lights the scene it stands in, and the shadowed faces of a voxel model have nothing else filling them")
+		return
 
 	# --- Assets: real voxel meshes, and metal is shinier than matte -------
 	var meshes := _find_all(main, "MeshInstance3D", [])

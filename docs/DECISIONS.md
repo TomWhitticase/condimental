@@ -25,6 +25,59 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-16: **The backdrop is the inside of a factory hall, not the
+  sky.** The owner asked for a skybox that makes the game look like it is
+  always inside a massive factory. The backdrop had already been argued
+  twice: a flat near-black `BG_COLOR` first (chosen to keep a hard horizon
+  and a sun streak out of the tightly-framed isometric view), then an
+  outdoor `ProceduralSkyMaterial` when first-person mode made the flat
+  colour read as an empty void. The second answer fixed the void and left
+  the factory standing on a concrete slab in the open air, which is not what
+  UI_UX.md §3 describes.
+
+  Three ways to build an interior were considered. **Real geometry** — an
+  actual shell around the play area — was rejected first: the hall would be
+  finite, so first-person mode could walk to a wall and find the edge of the
+  world, and any shell tall enough to read as a factory would occlude the
+  isometric camera the moment the floor grew. A **panorama texture** was
+  rejected because it is not code-generated content, and because at 4K it
+  still resolves into visible pixels under the first-person FOV. What
+  shipped is a **sky shader** (`factory_interior_sky.gdshader`): analytic,
+  resolution-independent, zero draw calls, and — being a sky — at infinity
+  with no parallax, so the hall never resolves into a room whose size the
+  player can pace out. The lack of parallax is the feature, not a
+  compromise.
+
+  The shape is one box intersected against `EYEDIR`: roof at 26 units, walls
+  at 132, slab 5 below. Roof and walls share one structural grid
+  (`bay_pitch`), in x and z alike, so a wall column always lands under a roof
+  truss — that alignment is most of what makes it read as a building.
+  Distance-proportional `soft` widths stand in for the derivatives a sky
+  shader cannot take, and the per-bay variation in the distant plant line is
+  hashed from the bay index, never `randf()`, so a review screenshot is
+  repeatable.
+
+  Two things cost real time and are worth writing down. **A near-parallel
+  ray must not return a negative distance.** The first version guarded the
+  reciprocal by clamping the magnitude of the direction and kept its sign,
+  so a ray running a hair below parallel to the wall pair came back with a
+  large *negative* `t`, won the `min()`, and made `exp(-t * density)`
+  overflow. The infinity spread through the radiance map, and the symptom
+  was that *every lit surface in the world rendered black* — nothing about
+  the frame pointed at the sky. `plane_distance()` now returns `1e9` for a
+  parallel ray and the haze is clamped. **An interior is a much darker and
+  much warmer light source than an open sky.** Ambient energy went 0.8 ->
+  1.2 to hold the same fill on the shadowed faces of a voxel model, and the
+  key light lost the sun's warmth (0.95/0.88 -> 0.98/0.95) with the fill
+  turned back towards daylight-blue: measured against the previous frame,
+  the bare floor had gone from r-b = 5 to r-b = 21, i.e. every grey asset in
+  the game was photographing beige. Exposure came back from 1.05 to 1.0.
+
+  `test_presentation.gd` asserts the sky is that shader and that ambient
+  still comes from it. The isometric camera shows the backdrop in one corner
+  of the frame, so without that assertion a silent return to an outdoor sky
+  would pass the entire suite.
+
 - 2026-09-16: **Every pull request body embeds a screenshot, no
   exceptions.** The owner's instruction was that PRs always include visual
   elements, and the first question was whether to scope it to visual

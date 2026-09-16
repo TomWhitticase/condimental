@@ -241,6 +241,16 @@ striping, pallets, loading docks. Lean into real industrial visual language
 (signage, cable runs, grates, walkways). Avoid candy-coloured or cutesy
 factory tropes; the sauce theme comes through in what the factory processes.
 
+**The player's line stands inside that factory, and the backdrop says so.**
+The sky is `godot_project/factory_interior_sky.gdshader`: a hall with a
+trussed roof, skylight ribbons, high-bay lamps, clad walls with clerestory
+glazing and a line of other plant standing along them, all fading into air
+haze. It is a *sky*, so it sits at infinity with no parallax — the hall is
+the same size however far the player walks, which is what makes it read as
+enormous rather than as a room. Never an outdoor sky (the factory then reads
+as a slab of concrete in a field) and never real geometry (a finite shell has
+a wall to reach and occludes the isometric camera).
+
 ## 4. Materials & lighting
 
 - **Baseline materials are simple and mostly matte**: painted metal,
@@ -250,6 +260,10 @@ factory tropes; the sauce theme comes through in what the factory processes.
 - **Lighting**: real-time dynamic lighting, soft shadows, mild bloom on
   emissives, light SSAO. Reference: a modded-Minecraft shader pack, not
   photorealism.
+- **The light is indoor light**: a lamp-white key from above for the roof's
+  high-bay fittings, a daylight-cool fill for the glazing, and ambient taken
+  from the interior sky itself. Warming the key beiges every grey asset in
+  the game, because there is no blue sky left to balance it.
 - **Emissives**: status lights, screens and strobes glow — both aesthetic
   and a readability signal (§7).
 - **Atmosphere**: steam/smoke from cooking equipment, visible liquid

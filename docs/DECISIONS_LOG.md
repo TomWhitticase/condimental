@@ -18,6 +18,21 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-16 **The backdrop is the inside of a factory hall, not the
+  sky.** Owner's brief. `godot_project/factory_interior_sky.gdshader` is a
+  sky shader that ray-marches nothing and intersects one box centred on the
+  viewer — roof deck, trusses, skylight ribbons and high-bay lamps overhead;
+  clad walls with a pipe-rack gantry, clerestory glazing and a line of
+  distant plant; a concrete slab below; all fading into air haze. It is at
+  infinity and has no parallax, so the hall is the same size wherever the
+  player walks: that is what makes it read as massive rather than as a room.
+  Colours are `palette.ron`'s, passed in from `_build_environment` as
+  `source_color` uniforms. The key light is now lamp-white and the fill
+  daylight-cool, because with no blue sky left to balance the old warm sun
+  every concrete surface in the game photographed beige. Do not put the
+  outdoor sky back, and do not build this as geometry.
+  Full record in `docs/DECISIONS.md`.
+
 - 2026-09-16 **Every pull request body embeds a screenshot, no
   exceptions.** Owner's rule. A PR here reviews a frame, so it shows one;
   "visual changes only" was rejected because the conditional version rots
