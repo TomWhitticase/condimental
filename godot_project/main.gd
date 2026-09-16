@@ -824,6 +824,25 @@ var _lamp_running: StandardMaterial3D
 var _asset_classes: Dictionary = {} # asset name -> Array of class names
 
 var _help_label: Label
+## The legend's own plate, its heading row and the button that folds it away.
+##
+## WHY IT FOLDS (the HUD ticket). The legend is five lines of keybinds pinned
+## over the top-left of the factory floor, and it is only useful until they
+## are learned — after that it is a permanent five-line hole in the view of
+## the thing the player came to look at. So it collapses, by the button on
+## its own plate or by **F1**, and what is left behind is the plate's heading
+## with the key printed on it: UI_UX.md §7's "never encode state invisibly"
+## applies to a panel that has hidden itself just as much as to a status
+## colour, so there is always a stub saying how to get it back.
+##
+## It is deliberately NOT a modal. E/M/C/H/P are one-at-a-time screens that
+## stop the player doing anything else; this is a HUD plate changing size,
+## so it does not close the others, the others do not close it, and the
+## quality pass's rules about what refuses to run under a modal are
+## untouched by it.
+var _legend_panel: PanelContainer
+var _legend_toggle: Button
+var _legend_collapsed := false
 
 # --- Contract clipboard (UI_UX.md §5) --------------------------------------
 # The money/contract readout used to be one plain Label folded into the
@@ -1030,6 +1049,44 @@ const MARKET_SLOT_SIZE := Vector2(128, 152) * UI_SCALE
 ## the SAME index: menu slot N and hotbar slot N are one kind, in
 ## `data/shop.ron` order, so the two views never disagree.
 const SHOP_HOTKEY_SLOTS := 10
+
+# --- The stock plate and the collapsible legend (the HUD ticket) -----------
+## The stock row's icon. Bigger than the retired larder chip's 20px — a row
+## with a name beside it can afford it, and at 20 the tomato and the sugar
+## crate were hard to tell apart at a glance, which is the whole job of the
+## icon (UI_UX.md §2b point 31: an icon is judged at its real size on the
+## real plate).
+const STOCK_ICON_SIZE := Vector2(28, 28) * UI_SCALE
+## The gap the plate keeps from the window's right edge, from the hotbar
+## below it and from the clipboard above it. One number, so the three gaps
+## cannot drift apart.
+const STOCK_PANEL_MARGIN := 16.0 * UI_SCALE
+## Wide enough that the longest shipped display name and a four-digit count
+## sit on one row without the name eliding. Bought stock reaches four digits
+## (`--payout`'s fixture buys a thousand vinegar), and a plate that resized
+## itself every time a count crossed a power of ten would twitch on the one
+## edge of the screen the player is not looking at.
+const STOCK_PANEL_MIN_WIDTH := 228.0 * UI_SCALE
+## The share of the space between the clipboard and the hotbar the plate may
+## take before its list scrolls. `data/ingredients.ron` ships three raw
+## ingredients and this engages at about nine, so it is the safety valve
+## `_fit_grid_scroll` already is for the build menu and the docket stack —
+## what it really guarantees is that the clipboard above always keeps most of
+## the column, since the clipboard is capped against whatever this leaves.
+const STOCK_PANEL_HEIGHT_SHARE := 0.42
+## The plate's two text values, and how far a row with nothing in it fades.
+## No new colour language (UI_UX.md §7): the stocked count is the dark
+## plate's ordinary body ink, and `none` is the same grey the hint line under
+## the list already uses. Zero is carried by the WORD and by the row fading
+## back, never by the colour on its own.
+const STOCK_COUNT_COLOR := Color(0.92, 0.93, 0.94)
+const STOCK_NONE_COLOR := Color(0.66, 0.68, 0.72)
+const STOCK_NONE_ROW_ALPHA := 0.62
+## The legend's fold button. A "generous hit target" (UI_UX.md §5) — the
+## production panel's window buttons are 74x28 design pixels and this is the
+## one control on an otherwise text-only plate, so it is wider still and the
+## key it mirrors is printed on it.
+const LEGEND_TOGGLE_MIN_SIZE := Vector2(122.0, 30.0) * UI_SCALE
 
 # --- The hotbar (UI_UX.md §5, the inventory-hotbar ticket) -----------------
 ## An always-visible quick-select strip along the bottom edge — the thing
@@ -1306,17 +1363,41 @@ var _strike_style_struck: StyleBoxFlat
 ## printed on the slot, so the gesture means one thing.
 const MARKET_CRATE := 10
 
-## The larder: a one-line strip above the hotbar showing how much of each raw
-## ingredient the player is carrying. It exists because of a specific silent
-## failure — SPACE and V load a hopper and a tank FROM STOCK, and with no
-## stock they do nothing at all and say nothing — so the number that explains
-## why is on screen permanently, right next to the hotbar the player already
-## reads for "what am I carrying". It is a readout, not a control; buying
-## happens in the market panel it names.
-var _larder_panel: PanelContainer
-var _larder_row: HBoxContainer
-var _larder_entries: Dictionary = {} # item id -> Label
-var _larder_hint: Label
+## The STOCK plate: what raw ingredients the player owns, and how many of
+## each, on the right-hand edge of the screen between the contracts clipboard
+## and the hotbar.
+##
+## WHY IT EXISTS AT ALL. A specific silent failure: FILL loads a hopper or a
+## tank FROM STOCK, and with no stock it does nothing and says nothing — so
+## the number that explains why has to be on screen permanently. It is a
+## readout, not a control; buying happens in the market (**M**) it names.
+##
+## WHY IT MOVED HERE (the HUD ticket, the owner's words: "on the right hand
+## side of the screen i want to be able to clearly see what I have in stock,
+## all the ingredients i have and amounts"). It used to be a one-line strip
+## of icon+number chips squeezed between the hotbar and the name flyout,
+## where a count was a bare digit beside a 20px icon with nothing naming what
+## it counted — three chips read as a row of numbers rather than as a larder.
+## A column on the right edge gives every ingredient a full row: its icon,
+## its DISPLAY NAME (UI_UX.md §5e: never the wire's id) and its amount. The
+## strip is gone rather than kept alongside — one readout of one fact in one
+## place, so the two can never disagree.
+##
+## NO BAR, ON PURPOSE (UI_UX.md §5e). Nothing in the game says how many
+## tomatoes is "full", so stock stays a figure; a gauge whose full mark is
+## invented teaches a scale that does not exist. Zero is the one state with a
+## consequence, and it is carried by the WORD `none`, dimmed — not by colour
+## alone (§7).
+##
+## `_larder_entries` and `_update_larder()` keep their names through the
+## move: they are the dictionary of id -> count Label and the per-frame
+## refresh, and both are what `test_chain_rework.gd` drives.
+var _stock_panel: PanelContainer
+var _stock_scroll: ScrollContainer
+var _stock_rows: VBoxContainer
+var _stock_hint: Label
+var _larder_entries: Dictionary = {} # item id -> count Label
+var _stock_row_nodes: Dictionary = {} # item id -> HBoxContainer (dimmed at zero)
 
 # --------------------------------------------------------------------------
 # The pause menu, saving and autosave (the "Save/load + a real main menu"
@@ -4113,11 +4194,14 @@ func _build_ui() -> void:
 	style.set_content_margin_all(_ui_px(12.0))
 
 	var panel := PanelContainer.new()
+	panel.name = "Legend"
 	panel.add_theme_stylebox_override("panel", style)
 	panel.position = _ui_v(Vector2(16, 16))
 	hud.add_child(panel)
+	_legend_panel = panel
 
 	var rows := VBoxContainer.new()
+	rows.name = "LegendRows"
 	rows.add_theme_constant_override("separation", _ui_i(4))
 	panel.add_child(rows)
 
@@ -4127,16 +4211,60 @@ func _build_ui() -> void:
 	settings.outline_size = _ui_i(4)
 	settings.outline_color = Color(0, 0, 0, 0.85)
 
+	# The heading row is what survives the fold — the plate's name plus the
+	# button, so a collapsed legend is a labelled stub that names the key
+	# rather than a corner of the screen that has gone quiet. It is built
+	# before the keybind text so it stays the top line either way.
+	var header := HBoxContainer.new()
+	header.name = "LegendHeader"
+	header.add_theme_constant_override("separation", _ui_i(16))
+	rows.add_child(header)
+
+	var heading_settings := LabelSettings.new()
+	heading_settings.font_size = _ui_font(-1)
+	heading_settings.font_color = Color(0.98, 0.85, 0.42) # the plate's hazard accent
+	heading_settings.outline_size = settings.outline_size
+	heading_settings.outline_color = settings.outline_color
+
+	var heading := Label.new()
+	heading.name = "LegendHeading"
+	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	heading.label_settings = heading_settings
+	heading.text = "CONTROLS"
+	# NOT expanded to fill: the button sits next to the heading rather than
+	# out at the plate's far edge. The legend is as wide as its widest keybind
+	# line, and at 1280x720 that runs under the contracts clipboard (which is
+	# drawn over it) — an affordance whose right half is buried is worse than
+	# a buried word, so the one control on this plate is kept where the plate
+	# is always visible, beside the word it belongs to.
+	heading.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	header.add_child(heading)
+
+	_legend_toggle = Button.new()
+	_legend_toggle.name = "LegendToggle"
+	_legend_toggle.focus_mode = Control.FOCUS_NONE
+	_legend_toggle.custom_minimum_size = LEGEND_TOGGLE_MIN_SIZE
+	_legend_toggle.add_theme_font_size_override("font_size", _ui_font(-1))
+	_legend_toggle.pressed.connect(_toggle_legend)
+	header.add_child(_legend_toggle)
+
 	_help_label = Label.new()
+	_help_label.name = "LegendText"
 	_help_label.label_settings = settings
 	_help_label.text = ISO_HELP_TEXT
 	rows.add_child(_help_label)
+	_apply_legend_collapsed()
 
 	# UI_UX.md §5: "a contract IS a clipboard." The money/contract readout
 	# used to be a plain Label folded into the panel above (milestone 5); it
 	# now gets its own diegetic clipboard panel — paper background, a steel
 	# clip bar, checkbox-style tick marks for delivery progress.
 	_build_contract_panel(hud, settings)
+
+	# The STOCK plate, directly under the clipboard on the same edge (the HUD
+	# ticket) — see `_stock_panel`'s doc for why it is a right-hand column
+	# rather than the strip of chips it replaces.
+	_build_stock_panel(hud, settings)
 
 	# UI_UX.md §5's other named widget: "build/recipe menus as grids of
 	# voxel-rendered icon slots." Hidden until E is pressed.
@@ -4173,6 +4301,69 @@ func _build_ui() -> void:
 	# permanently there.
 	_build_payout_feedback(hud)
 	_update_sound_button()
+
+
+## Folds the keybind legend away, or brings it back. Reached two ways, on
+## purpose: the button on the plate (discoverable, and the only way a player
+## who never reads a legend would find it) and **F1** (the conventional key
+## for a help overlay in every game that has one, and — checked against
+## `_unhandled_input` — the first function key this project binds at all, so
+## it collides with nothing).
+func _toggle_legend() -> void:
+	_set_legend_collapsed(not _legend_collapsed)
+
+
+## The one place the state is written, so the button, the label and every
+## panel that measures the plate can never disagree about it. Session-only:
+## the HUD is built once in `_ready` and this is a view preference, not
+## something a save should carry back.
+func _set_legend_collapsed(collapsed: bool) -> void:
+	if _legend_collapsed == collapsed:
+		return
+	_legend_collapsed = collapsed
+	_apply_legend_collapsed()
+	# The two notes a panel already opens and closes on. The legend is not a
+	# modal (see `_legend_panel`'s doc), but what the player just did is make
+	# a panel appear or disappear, and that is exactly what those two cues
+	# say — a third convention for one button would be a new sound language
+	# for no new fact (UI_UX.md §8).
+	_cue(FactoryAudio.MENU_CLOSE if collapsed else FactoryAudio.MENU_OPEN)
+
+
+func _apply_legend_collapsed() -> void:
+	if _help_label != null:
+		_help_label.visible = not _legend_collapsed
+	if _legend_toggle != null:
+		# The stub. Collapsed, this line IS the legend, so it says both ways
+		# back — click here, or press F1 (UI_UX.md §7: a panel that has
+		# hidden itself must not hide how to return it).
+		_legend_toggle.text = "+ SHOW  F1" if _legend_collapsed else "−  HIDE  F1"
+	if _legend_panel != null:
+		# A Control parented to a CanvasLayer is not in a container, so Godot
+		# grows it to its minimum size and never shrinks it back — without
+		# this the plate would keep the five lines' worth of height it was
+		# built at, and the fold would be invisible.
+		_legend_panel.size = _legend_panel.get_combined_minimum_size()
+	_position_contract_notice()
+
+
+## The legend plate's CURRENT rect on screen — collapsed or expanded,
+## whichever it is now. Everything that has to stay off the legend asks here
+## rather than measuring `_help_label`'s own parent, which is the rect of the
+## text INSIDE the plate and is the wrong answer twice over: it misses the
+## plate's own margins, and while the text is hidden it reports the empty
+## strip where the text used to be rather than the stub that is really there.
+##
+## Falls back to the plate's minimum size before layout has run, the state a
+## headless run never leaves — the old `size.y > 0` guard silently dropped
+## the legend out of the avoid list entirely in exactly that case.
+func _legend_rect() -> Rect2:
+	if _legend_panel == null or not _legend_panel.visible:
+		return Rect2()
+	var size := _legend_panel.size
+	if size.y <= 0.0:
+		size = _legend_panel.get_combined_minimum_size()
+	return Rect2(_legend_panel.global_position, size)
 
 
 ## The diegetic clipboard/checklist widget (UI_UX.md §5) — the money/contract
@@ -7257,10 +7448,14 @@ func _position_contract_notice() -> void:
 		return
 	var left: float = _ui_px(18.0)
 	var top: float = _ui_px(18.0)
-	var legend: Control = _help_label.get_parent() as Control if _help_label != null else null
-	if legend != null and legend.size.y > 0.0:
+	# The legend's CURRENT rect (`_legend_rect`), not the rect it has when
+	# expanded: a folded legend that still pushed this line five lines down
+	# the screen would leave the notice floating over nothing, which is most
+	# of the reason the fold is worth having.
+	var legend := _legend_rect()
+	if legend.size.y > 0.0:
 		left = legend.position.x
-		top = legend.position.y + legend.size.y + _ui_px(22.0)
+		top = legend.end.y + _ui_px(14.0)
 	_contract_notice.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	_contract_notice.position = Vector2(left, top)
 	_contract_notice.size = _contract_notice.get_combined_minimum_size()
@@ -7286,57 +7481,88 @@ func _update_contract_notice() -> void:
 		_contract_notice.modulate = Color(1, 1, 1, 0)
 
 
-## The larder strip: one chip per raw ingredient, above the hotbar. Built
-## from the same snapshot the market sells from, so it lists whatever
-## `data/ingredients.ron` prices with no list of its own.
-func _build_larder(parent: VBoxContainer, base_settings: LabelSettings) -> void:
+## The STOCK plate: one row per raw ingredient, on the right-hand edge under
+## the contracts clipboard. Built from the same snapshot the market sells
+## from, so it lists whatever `data/ingredients.ron` prices with no list of
+## its own — a fourth raw ingredient appears here, in the market and in a
+## hopper's picker from the data file alone.
+##
+## A SIBLING OF THE CLIPBOARD, not a child of the hotbar's column. The strip
+## this replaces was built into `_hotbar_root`, which is why it was one line
+## tall and centred over the sockets; a plate of its own can be as tall as
+## its list and can sit where the ticket asks for it. Mouse filter IGNORE
+## throughout, like the strip before it: it is a readout with no controls on
+## it, and a plate that swallowed clicks would make the tiles behind it
+## unbuildable on the one edge a factory usually grows towards.
+func _build_stock_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	var plate := StyleBoxFlat.new()
 	plate.bg_color = Color(0.06, 0.06, 0.07, 0.93)
 	plate.border_color = Color(0.85, 0.63, 0.11, 0.95)
-	plate.border_width_top = _ui_i(2)
-	plate.set_content_margin_all(_ui_px(6.0))
+	plate.border_width_top = _ui_i(3)
+	plate.set_content_margin_all(_ui_px(10.0))
 
-	_larder_entries.clear() # `_ready` runs twice headlessly — see `_build_ingredient_market`
+	# Cleared, never appended to: `_ready()` genuinely runs twice under the
+	# headless `--script` harness — the same guard `_build_ingredient_market`
+	# carries, and the reason this dictionary is rebuilt rather than added to.
+	_larder_entries.clear()
+	_stock_row_nodes.clear()
 
-	_larder_panel = PanelContainer.new()
-	_larder_panel.name = "Larder"
-	_larder_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_larder_panel.add_theme_stylebox_override("panel", plate)
-	parent.add_child(_larder_panel)
+	_stock_panel = PanelContainer.new()
+	_stock_panel.name = "StockPanel"
+	_stock_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stock_panel.add_theme_stylebox_override("panel", plate)
+	_stock_panel.custom_minimum_size.x = STOCK_PANEL_MIN_WIDTH
+	hud.add_child(_stock_panel)
 
-	_larder_row = HBoxContainer.new()
-	_larder_row.name = "LarderRow"
-	_larder_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_larder_row.add_theme_constant_override("separation", _ui_i(14))
-	_larder_panel.add_child(_larder_row)
+	var body := VBoxContainer.new()
+	body.name = "StockBody"
+	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	body.add_theme_constant_override("separation", _ui_i(6))
+	_stock_panel.add_child(body)
 
-	var label_settings := LabelSettings.new()
-	label_settings.font_size = _ui_font(-1)
-	label_settings.font_color = Color(0.92, 0.93, 0.94)
-	label_settings.outline_size = base_settings.outline_size
-	label_settings.outline_color = base_settings.outline_color
+	var heading_settings := LabelSettings.new()
+	heading_settings.font_size = _ui_font(-1)
+	heading_settings.font_color = Color(0.98, 0.85, 0.42) # the plate's hazard accent
+	heading_settings.outline_size = base_settings.outline_size
+	heading_settings.outline_color = base_settings.outline_color
+
+	# Heading and hint share one line. They are two words between them and the
+	# plate's height is the scarce thing in this column (the clipboard above
+	# it scrolls already), so a line spent on `M: market` alone is a row of
+	# stock the player cannot see at 1280x720.
+	var head_row := HBoxContainer.new()
+	head_row.name = "StockHeadRow"
+	head_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	head_row.add_theme_constant_override("separation", _ui_i(12))
+	body.add_child(head_row)
+
+	var heading := Label.new()
+	heading.name = "StockHeading"
+	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	heading.label_settings = heading_settings
+	heading.text = "STOCK"
+	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	heading.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	head_row.add_child(heading)
+
+	# The list scrolls past `STOCK_PANEL_HEIGHT_SHARE` of the column rather
+	# than growing into the clipboard — `_fit_grid_scroll`'s job everywhere
+	# else in this HUD, and the same last resort it is there.
+	_stock_scroll = ScrollContainer.new()
+	_stock_scroll.name = "StockScroll"
+	_stock_scroll.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stock_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	body.add_child(_stock_scroll)
+
+	_stock_rows = VBoxContainer.new()
+	_stock_rows.name = "StockRows"
+	_stock_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stock_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_stock_rows.add_theme_constant_override("separation", _ui_i(5))
+	_stock_scroll.add_child(_stock_rows)
 
 	for entry in _ingredients_snapshot().get("entries", []):
-		var item_id := String(entry.get("id", ""))
-		var chip := HBoxContainer.new()
-		chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		chip.add_theme_constant_override("separation", _ui_i(5))
-		_larder_row.add_child(chip)
-
-		var icon := TextureRect.new()
-		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		icon.custom_minimum_size = _ui_v(Vector2(20, 20))
-		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		icon.texture = _icon_for_asset(_market_asset_for(item_id))
-		chip.add_child(icon)
-
-		var count := Label.new()
-		count.name = "Larder_%s" % item_id
-		count.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		count.label_settings = label_settings
-		chip.add_child(count)
-		_larder_entries[item_id] = count
+		_build_stock_row(base_settings, String(entry.get("id", "")))
 
 	var hint_settings := LabelSettings.new()
 	hint_settings.font_size = _ui_font(-2)
@@ -7344,19 +7570,199 @@ func _build_larder(parent: VBoxContainer, base_settings: LabelSettings) -> void:
 	hint_settings.outline_size = base_settings.outline_size
 	hint_settings.outline_color = base_settings.outline_color
 
-	_larder_hint = Label.new()
-	_larder_hint.name = "LarderHint"
-	_larder_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_larder_hint.label_settings = hint_settings
-	_larder_hint.text = "M: market"
-	_larder_row.add_child(_larder_hint)
+	# Kept from the strip: the plate says what it counts, and the key that
+	# buys more of it. A readout that names its own verb's home.
+	_stock_hint = Label.new()
+	_stock_hint.name = "StockHint"
+	_stock_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stock_hint.label_settings = hint_settings
+	_stock_hint.text = "M: market"
+	_stock_hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	head_row.add_child(_stock_hint)
+
+	_position_stock_panel()
 
 
-## Repolled every frame, like the hotbar beside it: a stock count that moved
-## because a hopper was loaded has to move here in the same frame, or the one
-## number that explains why SPACE did nothing is stale exactly when it
-## matters.
+## One row: icon, display name, count. The count is right-aligned against the
+## plate's edge so the three numbers form a column the eye can run down —
+## the thing the strip of chips could not do.
+##
+## EVERY COUNT LABEL GETS ITS OWN `LabelSettings`. The strip shared one
+## instance across all three chips and then recoloured it per chip in
+## `_update_larder`, so all three took whichever colour the last ingredient
+## wrote — an out-of-stock vinegar dimmed the tomato count beside it. A
+## `LabelSettings` is a Resource: assigning it to three Labels is one object
+## with three references, not three copies.
+func _build_stock_row(base_settings: LabelSettings, item_id: String) -> void:
+	if item_id == "":
+		return
+	var row := HBoxContainer.new()
+	row.name = "StockRow_%s" % item_id
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", _ui_i(9))
+	_stock_rows.add_child(row)
+	_stock_row_nodes[item_id] = row
+
+	var icon := TextureRect.new()
+	icon.name = "StockIcon_%s" % item_id
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.custom_minimum_size = STOCK_ICON_SIZE
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.texture = _icon_for_asset(_market_asset_for(item_id))
+	row.add_child(icon)
+
+	var name_settings := LabelSettings.new()
+	name_settings.font_size = _ui_font(-1)
+	name_settings.font_color = Color(0.92, 0.93, 0.94)
+	name_settings.outline_size = base_settings.outline_size
+	name_settings.outline_color = base_settings.outline_color
+
+	var name_label := Label.new()
+	name_label.name = "StockName_%s" % item_id
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	name_label.label_settings = name_settings
+	# The DISPLAY name, never the wire id (UI_UX.md §5e): "Tomato", not
+	# `tomato`, and "Vinegar" for a fluid bought by the jug.
+	name_label.text = _item_display_name(item_id)
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(name_label)
+
+	var count_settings := LabelSettings.new()
+	count_settings.font_size = _ui_font(-1)
+	count_settings.font_color = STOCK_COUNT_COLOR
+	count_settings.outline_size = base_settings.outline_size
+	count_settings.outline_color = base_settings.outline_color
+
+	var count := Label.new()
+	count.name = "Stock_%s" % item_id
+	count.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	count.label_settings = count_settings
+	count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	count.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(count)
+	_larder_entries[item_id] = count
+
+
+## Right edge, hard against the top of the hotbar's reserved band and clear
+## of the window's edge by `STOCK_PANEL_MARGIN`.
+##
+## ANCHORED FROM THE BOTTOM, not hung under the clipboard. The clipboard's
+## own height is a function of how many contracts are running and how far
+## its docket stack has been allowed to grow, so a plate placed under it
+## would move up and down the screen as orders were signed and lost. Fixing
+## it above the hotbar instead gives the one permanently-visible readout a
+## permanent home, and it is the CLIPBOARD that is capped against what is
+## left (`_stock_reserved_height`, read by `_update_contract_panel`) — the
+## docket stack already scrolls by design, so it is the right one to yield.
+##
+## The clipboard cannot yield indefinitely, though: `_fit_grid_scroll` floors
+## its docket stack, and at 1280x720 that floor plus the clipboard's own
+## heading, money, wage and footer lines is already more than half the
+## column. So this plate reads the clipboard's ACTUAL bottom edge and takes
+## what is left, scrolling its own list if that is less than the whole of it.
+## The two caps do not chase each other: the clipboard's is against this
+## plate's height, which stops shrinking the moment the clipboard stops
+## growing, and at both reviewed resolutions it settles on the first frame.
+func _position_stock_panel() -> void:
+	if _stock_panel == null:
+		return
+	var vp := get_viewport()
+	if vp == null:
+		return
+	var bounds := vp.get_visible_rect().size
+	if bounds.x <= 0.0 or bounds.y <= 0.0:
+		return
+	# The band this plate may occupy: from under the clipboard (whatever
+	# height it has settled at this frame) down to the top of the hotbar,
+	# a margin clear of each.
+	#
+	# The hotbar PLATE's own top edge, not `_hotbar_reserved_height()`, which
+	# also reserves the strip above the plate that the item-name flyout pops
+	# into. That flyout is centred over the hotbar and this plate is hard
+	# against the right edge, so the two cannot meet, and at 1280x720 the
+	# difference is a whole row of stock. `_hotbar_reserved_height()` is
+	# still the fallback for a hotbar that has not laid out yet (a headless
+	# run never leaves that state).
+	var floor_y: float = bounds.y - _hotbar_reserved_height() - STOCK_PANEL_MARGIN
+	if _hotbar_panel != null and _hotbar_panel.size.y > 0.0:
+		floor_y = _hotbar_panel.get_global_rect().position.y - STOCK_PANEL_MARGIN
+	var ceiling: float = STOCK_PANEL_MARGIN
+	if _contract_panel != null and _contract_panel.visible and _contract_panel.size.y > 0.0:
+		ceiling = maxf(ceiling, _contract_panel.get_global_rect().end.y + STOCK_PANEL_MARGIN)
+	var available: float = maxf(0.0, floor_y - ceiling)
+	# At most a share of the column even when there is more room than that:
+	# this is a readout of three to five short rows, and a plate that grew to
+	# half the screen the day a sixth ingredient was priced would be a bigger
+	# surprise than a scrollbar.
+	available = minf(available, (bounds.y - _hotbar_reserved_height() - STOCK_PANEL_MARGIN * 2.0) * STOCK_PANEL_HEIGHT_SHARE)
+
+	# NOT `_fit_grid_scroll`: its floor is `_ui_px(110)`, which is taller than
+	# this whole list's natural height, so it could never cap anything here —
+	# it would hand back the full list and the plate would run up into the
+	# clipboard at 1280x720. Same shape, one row as the floor instead, so the
+	# list scrolls (UI_UX.md §5c's deliberate last resort) rather than the
+	# plate colliding with the two fixed things it is wedged between.
+	var natural: float = _stock_rows.get_combined_minimum_size().y
+	_stock_scroll.custom_minimum_size.y = natural
+	var chrome: float = _stock_panel.get_combined_minimum_size().y - natural
+	var cap: float = maxf(_stock_row_height(), available - chrome)
+	_stock_scroll.custom_minimum_size.y = minf(natural, cap)
+
+	var size := _stock_panel.get_combined_minimum_size()
+	_stock_panel.size = size
+	_stock_panel.position = Vector2(
+		maxf(0.0, bounds.x - size.x - STOCK_PANEL_MARGIN),
+		maxf(0.0, floor_y - size.y)
+	)
+
+
+## One row's worth of height, the floor the list is never capped below: a
+## plate showing nothing at all would be worse than a plate showing one row
+## and a scrollbar. Measured off a real row rather than assumed, so it stays
+## right if the icon size or the row font moves.
+func _stock_row_height() -> float:
+	if _stock_rows == null or _stock_rows.get_child_count() == 0:
+		return STOCK_ICON_SIZE.y
+	var row := _stock_rows.get_child(0) as Control
+	return STOCK_ICON_SIZE.y if row == null else row.get_combined_minimum_size().y
+
+
+## How much of the right-hand column the stock plate owns, margins included —
+## `_hotbar_reserved_height()`'s twin, and asked for the same reason: the
+## clipboard above must not be allowed to grow down across it.
+##
+## Falls back to the plate's minimum size before it has laid itself out,
+## which is the state a headless run never leaves.
+func _stock_reserved_height() -> float:
+	if _stock_panel == null or not _stock_panel.visible:
+		return 0.0
+	var height: float = _stock_panel.size.y
+	if height <= 0.0:
+		height = _stock_panel.get_combined_minimum_size().y
+	return height + STOCK_PANEL_MARGIN * 2.0
+
+
+## The stock plate's rect on screen, for the panels that must not land on it
+## (UI_UX.md §2b point 33). An empty `Rect2` when there is no plate; the
+## minimum-size fallback is `_stock_reserved_height`'s, for its reason.
+func _stock_rect() -> Rect2:
+	if _stock_panel == null or not _stock_panel.visible:
+		return Rect2()
+	var size := _stock_panel.size
+	if size.y <= 0.0:
+		size = _stock_panel.get_combined_minimum_size()
+	return Rect2(_stock_panel.global_position, size)
+
+
+## Repolled every frame, like the hotbar it used to sit on: a stock count
+## that moved because a hopper was loaded has to move here in the same frame,
+## or the one number that explains why FILL did nothing is stale exactly when
+## it matters. Keeps its name through the move to the right-hand plate —
+## `test_chain_rework.gd` drives it directly.
 func _update_larder() -> void:
+	_position_stock_panel()
 	if _larder_entries.is_empty():
 		return
 	for entry in _ingredients_snapshot().get("entries", []):
@@ -7365,15 +7771,19 @@ func _update_larder() -> void:
 			continue
 		var owned := int(entry.get("owned", 0))
 		var label: Label = _larder_entries[item_id]
-		label.text = "%d" % owned
-		# Out of stock is a real state with a consequence (SPACE and V will
-		# do nothing), so it is called out in words rather than left as a
-		# grey zero — colour alone would not carry it (UI_UX.md §7).
-		if owned == 0:
-			label.text = "none"
-		label.label_settings.font_color = (
-			Color(0.92, 0.93, 0.94) if owned > 0 else Color(0.90, 0.52, 0.42)
-		)
+		# Out of stock is a real state with a consequence (FILL will refuse),
+		# so it is called out in WORDS rather than left as a zero — colour
+		# alone would not carry it (UI_UX.md §7). Dimmed rather than alarmed:
+		# every ingredient is listed now, including ones a new game has
+		# simply never bought, and a plate of red on a factory that is
+		# running perfectly well would cry wolf.
+		label.text = "%d" % owned if owned > 0 else "none"
+		label.label_settings.font_color = STOCK_COUNT_COLOR if owned > 0 else STOCK_NONE_COLOR
+		# The whole row recedes with its number, so the eye lands on what
+		# the player actually has (position and value, not colour — §7).
+		var row: Control = _stock_row_nodes.get(item_id)
+		if row != null:
+			row.modulate = Color(1, 1, 1, 1.0 if owned > 0 else STOCK_NONE_ROW_ALPHA)
 
 
 # --------------------------------------------------------------------------
@@ -7441,7 +7851,7 @@ const CONFIG_PICKER_ICON_SIZE := Vector2(30.0, 30.0) * UI_SCALE
 func _build_config_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	# `_ready` runs twice in a headless script (once from the engine, once
 	# called directly), so the slot list is cleared rather than appended to —
-	# the same guard `_build_ingredient_market` and `_build_larder` carry.
+	# the same guard `_build_ingredient_market` and `_build_stock_panel` carry.
 	_config_picker_slots.clear()
 
 	var plate := StyleBoxFlat.new()
@@ -7964,11 +8374,18 @@ func _position_config_panel() -> void:
 	# — so the clipboard's left edge is the right-hand bound wherever the
 	# two would overlap vertically, not only the window's edge. Past either
 	# bound the panel flips to the building's other side.
+	# The stock plate is the same argument on the same edge, lower down: it
+	# is the one readout that says whether a FILL on this very panel can
+	# succeed, so covering it with this panel would hide the answer to the
+	# question the panel is asking (UI_UX.md §2b point 33).
 	var right_bound := bounds.x
 	if _contract_panel != null and _contract_panel.visible:
 		var clip := _contract_panel.get_global_rect()
 		if pos.y < clip.end.y and pos.y + size.y > clip.position.y:
 			right_bound = minf(right_bound, clip.position.x)
+	var stock := _stock_rect()
+	if stock.size.y > 0.0 and pos.y < stock.end.y and pos.y + size.y > stock.position.y:
+		right_bound = minf(right_bound, stock.position.x)
 	if pos.x + size.x > right_bound:
 		pos.x = anchor.x - CONFIG_PANEL_OFFSET.x - size.x
 	pos.x = clampf(pos.x, 8.0, maxf(8.0, bounds.x - size.x - 8.0))
@@ -8075,11 +8492,11 @@ func _build_hotbar(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_hotbar_root.add_theme_constant_override("separation", _ui_i(6))
 	hud.add_child(_hotbar_root)
 
-	# The larder sits at the TOP of the strip's column, above the name
-	# flyout: the flyout has to stay directly over the slots it names, and
-	# the larder is a standing readout rather than something that appears.
-	_build_larder(_hotbar_root, base_settings)
-
+	# The larder strip used to sit at the TOP of this column. It is the STOCK
+	# plate on the right-hand edge now (the HUD ticket — see `_stock_panel`),
+	# and it is NOT also repeated here: one readout of one fact in one place.
+	# What is left in this column is the name flyout, which has to stay
+	# directly over the slots it names.
 	var flyout_settings := LabelSettings.new()
 	flyout_settings.font_size = _ui_font(3)
 	flyout_settings.font_color = Color(0.98, 0.85, 0.42) # the plate's hazard accent
@@ -9859,6 +10276,21 @@ func _unhandled_input(event: InputEvent) -> void:
 		_set_view_mode(ViewMode.FIRST_PERSON if _view_mode == ViewMode.ISOMETRIC else ViewMode.ISOMETRIC)
 		return
 
+	# F1 folds the keybind legend away and brings it back — sited here, with
+	# TAB, because it belongs to the same class of control: a view preference
+	# that is true in isometric and in first person alike and is not a modal,
+	# so it neither closes what is open nor is closed by ESC, and none of the
+	# modal rules below (X closes every modal, R refuses under one) change
+	# because of it. The one key the pause menu still swallows, deliberately:
+	# with the factory stopped the legend is the least of what is on screen.
+	#
+	# F1 IS FREE: this handler binds TAB, E, M, C, H, P, Q, R, X, V, SPACE,
+	# ESC, the digits and the zoom keys, and no function key anywhere — and
+	# F1 is what a player reaches for when they want to know the controls.
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F1:
+		_toggle_legend()
+		return
+
 	if event is InputEventMouseButton:
 		# The left button is the build click (the "Real Placement" epic's
 		# ticket 2) — the button this handler had deliberately left unbound
@@ -10840,22 +11272,30 @@ func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
 	# hotbar's top edge, same bug the config panel's own clamp
 	# (`_hotbar_reserved_height()` below) already guards against.
 	var lower_bound := bounds.y - _hotbar_reserved_height()
-	# The legend (top-left) and the contracts clipboard (top-right) are fixed
-	# HUD plates this panel must never land on — a tile rendered under either
-	# (a close-zoomed camera near the world origin, or a cursor high on the
-	# screen where the flip below used to only check the right/bottom edges)
-	# put this panel right over their own text otherwise (found in rendered
-	# frames, twice — one bug each).
-	# `get_global_rect()`, not `.position`/`.size` — both plates sit inside
-	# their own layout containers, whose local origin is not this panel's
-	# (a direct CanvasLayer child, effectively in screen space) (see the
-	# config panel's own avoidance above, which makes the same call).
+	# The legend (top-left), the contracts clipboard (top-right) and the stock
+	# plate (right edge, above the hotbar) are fixed HUD plates this panel must
+	# never land on — a tile rendered under any of them (a close-zoomed camera
+	# near the world origin, or a cursor high on the screen where the flip
+	# below used to only check the right/bottom edges) put this panel right
+	# over their own text otherwise (found in rendered frames, twice — one bug
+	# each).
+	# Each plate reports its own CURRENT rect through a helper
+	# (`_legend_rect`, `_stock_rect`) rather than being measured here, so a
+	# collapsed legend is avoided at the size it actually is — its stub — and
+	# not at the five-line size it had when the game started.
 	var avoid: Array[Rect2] = []
-	var legend: Control = _help_label.get_parent() as Control if _help_label != null else null
-	if legend != null and legend.size.y > 0.0:
-		avoid.append(legend.get_global_rect())
+	var legend := _legend_rect()
+	if legend.size.y > 0.0:
+		avoid.append(legend)
+	# `get_global_rect()`, not `.position`/`.size` — the clipboard sits inside
+	# its own layout container, whose local origin is not this panel's (a
+	# direct CanvasLayer child, effectively in screen space) (see the config
+	# panel's own avoidance above, which makes the same call).
 	if _contract_panel != null and _contract_panel.visible and _contract_panel.size.y > 0.0:
 		avoid.append(_contract_panel.get_global_rect())
+	var stock := _stock_rect()
+	if stock.size.y > 0.0:
+		avoid.append(stock)
 	# Try both hands of both axes around the cursor, nearest (bottom-right,
 	# matching the un-flipped default) first, and take the first that fits
 	# on screen, above the hotbar and clear of every avoided plate.
@@ -10891,8 +11331,8 @@ func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
 	# an earlier version picked the axis by penetration alone and pushed the
 	# tooltip straight down off the bottom of the screen, where the same
 	# clamp snapped it right back onto the plate it was fleeing). A second
-	# pass in case clearing one plate slides the panel into the other; with
-	# just the two corner plates this repo has, one pass always suffices.
+	# pass per plate in case clearing one slides the panel into another; with
+	# the three plates this repo has, one pass has always sufficed.
 	var pos: Vector2 = candidates[0]
 	var rect := Rect2(
 		clampf(pos.x, 0.0, maxf(0.0, bounds.x - size.x)),
@@ -10978,7 +11418,12 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 	# that let the board's bottom edge reach down across the larder strip. It
 	# is now the space actually left above the hotbar, measured the same way
 	# the build menu measures its own (`_fit_grid_scroll`), so the two panels
-	# can never disagree about where the usable screen ends.
+	# can never disagree about where the usable screen ends. The stock plate
+	# (2026-09-16) took the bottom of that same right-hand column, and the
+	# clipboard is the one that yields: its docket stack already scrolls by
+	# design, whereas a scrolling stock list would hide the ingredient the
+	# player is short of behind a scrollbar they have no reason to look
+	# under.
 	#
 	# A headless SceneTree run has no viewport at all, and a window that has
 	# not laid out yet reports a zero rect — neither must collapse the stack
@@ -10988,7 +11433,10 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 		_fit_grid_scroll(
 			_contract_cards_scroll,
 			_contract_cards_box,
-			viewport.get_visible_rect().size.y - _hotbar_reserved_height() - _ui_px(24.0)
+			viewport.get_visible_rect().size.y
+				- _hotbar_reserved_height()
+				- _stock_reserved_height()
+				- _ui_px(24.0)
 		)
 	else:
 		_contract_cards_scroll.custom_minimum_size.y = _contract_cards_box.get_combined_minimum_size().y

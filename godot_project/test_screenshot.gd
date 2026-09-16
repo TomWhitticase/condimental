@@ -99,7 +99,9 @@
 # `--stock` buys an assorted starting kit (belts, pipes, a hopper, a tank and
 # a machine or two) so the hotbar shows CARRIED sockets, multi-digit counts and
 # EMPTY sockets side by side — the only way to review that distinction, since a
-# new game carries nothing and every socket is empty.
+# new game carries nothing and every socket is empty. It buys uneven RAW STOCK
+# for the same reason, so the STOCK plate shows a stocked row beside an
+# out-of-stock one rather than three of a kind.
 #
 # `--hotbar N` presses hotbar key N (1..9, or 0 for the tenth slot) through
 # the scene's real `_unhandled_input`, after buying one of that slot's kind so
@@ -190,6 +192,12 @@ var _understaffed := false
 var _staff_shortfall := false
 var _hotbar_key := ""
 var _stock := false
+## `--legend-collapsed` folds the keybind legend away before the shot (the
+## HUD ticket), which is the half of that feature a headless test cannot
+## judge: whether what is LEFT — the plate's heading and the button naming
+## F1 — still reads as a thing to click rather than as a stray label, and
+## whether the corner it frees actually looks freed (UI_UX.md §2b point 12).
+var _legend_collapsed := false
 ## `--contracts` waits for a STATE, not a tick count: a fixed count drifts
 ## with any change to throughput or to the shipped cadences and quietly goes
 ## back to photographing three identical checklists. What it waits for is at
@@ -299,6 +307,7 @@ func _initialize() -> void:
 		_fixture = "chain"
 	_hotbar_key = _string_arg(args, "--hotbar")
 	_stock = args.has("--stock")
+	_legend_collapsed = args.has("--legend-collapsed")
 	_ghost_kind = _string_arg(args, "--ghost")
 	if _ghost_kind == "":
 		_ghost_kind = _string_arg(args, "--ghost-blocked")
@@ -737,8 +746,16 @@ func _stock_the_hotbar() -> void:
 		_main.sim.issue_command_json(JSON.stringify({
 			"type": "purchase", "kind": pair[0], "quantity": pair[1],
 		}))
+	# Raw stock too, and deliberately UNEVEN: the STOCK plate (the HUD ticket)
+	# is reviewed for whether a stocked row and an out-of-stock one can be
+	# told apart in the same glance, which a plate of three equal numbers —
+	# or, after a fixture has run its larder dry, three identical `none`s —
+	# cannot show. Vinegar is left unbought on purpose; it is the zero.
+	Layouts.stock(_main.sim, "tomato", 42)
+	Layouts.stock(_main.sim, "sugar", 7)
 	_main._refresh_owned_counts()
 	_main._update_hotbar()
+	_main._update_larder()
 
 
 func _hotbar_key_code() -> int:
@@ -837,6 +854,11 @@ func _process(_delta: float) -> bool:
 		_run_to_payout()
 	if _frames == 2 and _stock:
 		_stock_the_hotbar()
+	# Through the real setter, not by hiding the label: the point of the shot
+	# is what the collapse leaves behind, and only the setter resizes the
+	# plate and rewrites the button.
+	if _frames == 2 and _legend_collapsed:
+		_main._set_legend_collapsed(true)
 	if _frames == 2 and _hotbar_key != "":
 		_select_hotbar_key()
 	# After --stock, so a stocked larder photographs FILL enabled and an
