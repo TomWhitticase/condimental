@@ -167,7 +167,13 @@ func _initialize() -> void:
 				metal_roughness = mat.roughness
 				metal_metallic = mat.metallic
 			"emissive":
-				if not mat.emission_enabled:
+				# Unless this particular lamp is currently showing the OFF
+				# material, which is emission-free by design — a dead lens
+				# that still emitted would be a lamp half on. The guard is
+				# about the CLASS material still being built to emit, and an
+				# `emissive` mesh wearing `lamp_idle` is a lamp whose state
+				# has been set, not a material that lost its emission.
+				if not mat.emission_enabled and mat != main._lamp_idle:
 					_fail("the 'emissive' material must actually emit (UI_UX.md §4/§7)")
 					return
 
@@ -253,11 +259,11 @@ func _initialize() -> void:
 		return
 
 	# --- A full delivery pool pulses the dock's lamp ----------------------
-	# The lamp's hue comes from the mesh's own vertex colour (see
-	# `_make_material`: emission MULTIPLIES it), so "full" cannot be a second
-	# colour of lamp. It is a time channel instead — the one channel a lit
-	# lamp and a stack of crates do not already use — and it is clocked off
-	# the simulation tick, so pause freezes it and a screenshot run repeats
+	# The lamp's hue comes from the mesh's own vertex colours, which no
+	# material can repaint per state, so "full" cannot be a second colour of
+	# lamp. It is a time channel instead — the one channel a lit lamp and a
+	# stack of crates do not already use — and it is clocked off the
+	# simulation tick, so pause freezes it and a screenshot run repeats
 	# (UI_UX.md §6a).
 	if main._dock_lamp_lit(false, false, 0):
 		_fail("an empty dock's lamp should be dark")
@@ -286,6 +292,30 @@ func _initialize() -> void:
 	# "full" is the pool's own verdict, not one inferred from the crates.
 	if not main._dock_lamp_lit(false, true, 0):
 		_fail("a full dock's lamp should blink whatever the deck is showing")
+		return
+
+	# --- and the two halves of that blink have to LOOK different ----------
+	# They did not. `lamp_idle` was `lamp_running`'s emission at a quarter
+	# energy until 2026-09-16, and the two rendered at most 2/255 apart: the
+	# blink above was correct on every count this file could check and still
+	# invisible on screen. Emission is why — it contributes nothing here at
+	# any energy (issue #25, `voxel_assets.gd`'s `make_material`) — so the
+	# difference has to live in ALBEDO, which does reach the screen. Asserted
+	# as a channel rather than as a look because that is the part a headless
+	# run can actually hold: an emission-only difference would pass every
+	# other line in this section.
+	var lamp_off: StandardMaterial3D = main._lamp_idle
+	var lamp_on: StandardMaterial3D = main._lamp_running
+	if lamp_off == null or lamp_on == null:
+		_fail("the scene should hold both status-lamp materials")
+		return
+	if lamp_off.emission_enabled:
+		_fail("an unlit lens that still emitted would be a lamp half on")
+		return
+	if lamp_off.albedo_color.v > lamp_on.albedo_color.v * 0.6:
+		_fail("an off lamp must be visibly darker than a lit one, not merely dimmer in a channel that does not render: off %s vs on %s" % [
+			lamp_off.albedo_color, lamp_on.albedo_color
+		])
 		return
 
 	print("PRESENTATION_OK: orthographic camera, %d light(s) w/ shadows, SSAO+glow, %d voxel meshes, %d placement(s), item rendered, full dock pulses" % [

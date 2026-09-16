@@ -15,6 +15,17 @@ extends RefCounted
 
 const VOX_DIR := "res://voxels/"
 
+## What `lamp_idle` multiplies a status lamp's own colour by to read as OFF.
+## Multiplies rather than replaces because the hue lives in the mesh's vertex
+## colours, not in the material: one number has to take amber, green and red
+## down together and leave each still recognisable as its own lens.
+##
+## Set by rendering, the way `palette.ron` set its `status_*_off` trio — and
+## against that trio, which is the same judgement made where the colour could
+## be chosen outright: `status_amber` #FFB020 against `status_amber_off`
+## #5C4212 is a little over a third, and so is red's and green's.
+const LAMP_OFF_ALBEDO := 0.38
+
 ## "matte"/"metal"/"emissive"/"liquid" -> StandardMaterial3D.
 var class_materials: Dictionary = {}
 ## The two status-lamp variants; see `load_materials`.
@@ -54,8 +65,21 @@ func load_materials() -> void:
 	# Two variants of the emissive material so a machine's status lamps can
 	# actually report state (UI_UX.md §4/§7: saturated colour reserved for
 	# meaning, never decoration). Same mesh, swapped override material.
+	#
+	# The OFF variant is dark ALBEDO, not dimmed emission. It was a quarter of
+	# the lit emission energy until 2026-09-16, and the two were
+	# indistinguishable in a rendered frame — at most 2/255 between them, so
+	# the dock's full-pool blink (`main.gd`'s `_dock_lamp_lit`) was a signal
+	# nobody could see. Emission turns out to contribute NOTHING here at any
+	# energy: `make_material`'s note and issue #25 say why. Albedo is the
+	# channel that moves, and it is the one the palette itself reaches for —
+	# the `status_*_off` entries in `palette.ron` are the same hues taken
+	# down to a dark matte, "dark enough that a dead lens does not compete
+	# with a live one, light enough not to vanish", and `LAMP_OFF_ALBEDO` is
+	# that idea applied to a mesh whose colour cannot be repainted per state.
 	var lamp_energy: float = float(table.get("emissive", defaults["emissive"]).get("emission_energy", 2.6))
-	lamp_idle = make_material(0.0, 0.6, lamp_energy * 0.25)
+	lamp_idle = make_material(0.0, 0.6, 0.0)
+	lamp_idle.albedo_color = Color(LAMP_OFF_ALBEDO, LAMP_OFF_ALBEDO, LAMP_OFF_ALBEDO)
 	lamp_running = make_material(0.0, 0.45, lamp_energy)
 
 	var index = read_json(VOX_DIR + "index.json")
@@ -74,9 +98,22 @@ static func make_material(metallic: float, roughness: float, emission_energy: fl
 	if emission_energy > 0.0:
 		mat.emission_enabled = true
 		mat.emission = Color(1, 1, 1)
-		# MULTIPLY, not ADD: the emissive mesh holds several differently
-		# coloured lamps, and a flat additive emission would wash them all to
-		# the same white. Multiplying by albedo keeps green reading as green.
+		# MULTIPLY was chosen so that an emissive mesh holding several
+		# differently coloured lamps kept each one's hue, where a flat
+		# additive emission washes them all to the same white.
+		#
+		# It does not do that, and NOTHING HERE EMITS — issue #25. Godot's
+		# MULTIPLY multiplies by the emission TEXTURE, not by albedo and not
+		# by the mesh's vertex colours, and this pipeline has no textures at
+		# all, so the product is zero: raising `emission_energy` to 50
+		# renders a byte-identical frame. Left as it stands on purpose. ADD
+		# would light every lamp white, which is the failure the line above
+		# set out to avoid; emission that follows each voxel's own colour
+		# needs a spatial shader and a relight of every machine, and that
+		# wants its own review pass rather than a rider on a bug fix.
+		#
+		# Until then, a lamp's state must be told by ALBEDO, the channel that
+		# does reach the screen — see `LAMP_OFF_ALBEDO`.
 		mat.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
 		mat.emission_energy_multiplier = emission_energy
 	return mat
