@@ -270,12 +270,53 @@ func _initialize() -> void:
 	# readout itself, which is pure given the pool — the pool's own arithmetic
 	# is asserted in `cargo test -p sim_core`.
 	var delivered_item := "boxed_ketchup"
-	main._update_contract_dock([[delivered_item, 3]])
+	main._update_contract_dock([[delivered_item, 3]], 48, false)
 	if main._contract_dock_empty_label.visible:
 		_fail("stock is on the dock but the readout still says empty")
 		return
 	if not main._contract_dock_entries.has(delivered_item):
 		_fail("delivered '%s' but the dock readout has no entry for it" % delivered_item)
+		return
+
+	# --- The pool's ceiling: a figure, a bar, and what the ceiling costs ---
+	# The dock holds a bounded amount of any one item (the dock-capacity
+	# change, 2026-09-16), so the readout says both halves of the fraction
+	# and draws UI_UX.md §5e's bar against the sim's own full mark.
+	var dock_entry: Dictionary = main._contract_dock_entries[delivered_item]
+	if String(dock_entry["label"].text) != "3/48":
+		_fail("the dock line must stand its figure against the pool's ceiling, got: %s" % dock_entry["label"].text)
+		return
+	if not dock_entry["meter"].visible:
+		_fail("a figure with a real ceiling earns a bar (UI_UX.md 5e); the dock's is hidden")
+		return
+	var part_full: float = float(dock_entry["meter"].get_meta("fraction", -1.0))
+	if absf(part_full - 3.0 / 48.0) > 0.001:
+		_fail("the dock bar should read 3 of 48, got fraction %f" % part_full)
+		return
+	if main._contract_dock_full_label.visible:
+		_fail("the dock is nowhere near full but the clipboard already says it is")
+		return
+
+	main._update_contract_dock([[delivered_item, 48]], 48, true)
+	var brim_full: float = float(dock_entry["meter"].get_meta("fraction", -1.0))
+	if absf(brim_full - 1.0) > 0.001:
+		_fail("at the ceiling the dock bar should read full, got fraction %f" % brim_full)
+		return
+	if not main._contract_dock_full_label.visible:
+		_fail("a full dock must say so in words, not only as a filled bar (UI_UX.md 7)")
+		return
+	if not String(main._contract_dock_full_label.text).contains("FULL"):
+		_fail("the full-dock line must say FULL, got: %s" % main._contract_dock_full_label.text)
+		return
+	# Last in the line, after the bars whose consequence it states.
+	var kids: Array = main._contract_dock_row.get_children()
+	if kids[kids.size() - 1] != main._contract_dock_full_label:
+		_fail("the full-dock sentence should follow the bars it explains, not head them")
+		return
+
+	main._update_contract_dock([[delivered_item, 3]], 48, false)
+	if main._contract_dock_full_label.visible:
+		_fail("the dock emptied below its ceiling but the clipboard still says FULL")
 		return
 
 	# --- The money figure announces what it just did ----------------------

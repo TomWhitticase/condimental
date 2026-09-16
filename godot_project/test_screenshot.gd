@@ -237,6 +237,24 @@ const PAYOUT_REVIEW_TICK_LIMIT := 20000
 ## the top of the flight, which is where the fan reads as a fountain rather
 ## than as a pile on the deck.
 const PAYOUT_REVIEW_PHASE := 0.5
+## `--crushing` photographs the crusher's spray: the pulp a working crusher
+## throws out of its mouth on its own beat. The same review `--payout` exists
+## for, one size down — a headless test can prove a fleck is thrown, launched
+## from the mouth and reclaimed, and cannot say whether the burst reads as
+## satisfying crushing or as a rash of red pixels (UI_UX.md §2b point 12).
+##
+## Like `--payout` it waits for the STATE, not for a tick count: the spray
+## runs off `_machine_work_elapsed`, so a crusher starved of tomatoes or
+## blocked on a full output throws nothing by design, and about a third of
+## the shipped line's frames catch it that way. It ticks until the crusher is
+## genuinely mid-batch with pulp in the air, then freezes, for the same
+## reason `--payout` does.
+var _crushing := false
+const CRUSHING_REVIEW_TICK_LIMIT := 2000
+## How many ticks past the first fleck to stop the clock: far enough for a
+## second beat to leave the mouth, so the shot shows a spray rather than one
+## bit, and short of CRUSH_FLIGHT_TICKS so the first beat is still up.
+const CRUSHING_REVIEW_HOLD_TICKS := 6
 var _ghost_kind := ""
 var _ghost_blocked := false
 var _remove_mode := false
@@ -319,6 +337,10 @@ func _initialize() -> void:
 	_payout = args.has("--payout")
 	if _payout:
 		_fixture = "chain"
+	_crushing = args.has("--crushing")
+	if _crushing:
+		_fixture = "chain"
+		_populate = true
 	_hotbar_key = _string_arg(args, "--hotbar")
 	_stock = args.has("--stock")
 	_legend_collapsed = args.has("--legend-collapsed")
@@ -713,6 +735,38 @@ func _run_to_payout() -> void:
 	_main.set_process(false)
 
 
+## Ticks until the crusher is working and has thrown pulp, then holds the
+## frame in the air. `_update_payout_feedback` is what drives the spray (it
+## carries `_update_crush_spray`), and `_run_chain_forward`'s loop does not
+## go through it, so it is called per tick here exactly as the belt and
+## mechanism animations are there.
+func _run_to_crushing() -> void:
+	var thrown := false
+	for i in range(CRUSHING_REVIEW_TICK_LIMIT):
+		_main.sim.tick()
+		_main._apply_dirty_chunks()
+		_main._update_belt_frame()
+		_main._update_machine_motion()
+		_main._update_payout_feedback()
+		if _main._active_crush_count() > 0:
+			thrown = true
+			break
+	if not thrown:
+		printerr("SCREENSHOT_NOTE: --crushing ran %d ticks without the crusher throwing"
+			% CRUSHING_REVIEW_TICK_LIMIT)
+	for i in range(CRUSHING_REVIEW_HOLD_TICKS):
+		_main.sim.tick()
+		_main._apply_dirty_chunks()
+		_main._update_belt_frame()
+		_main._update_machine_motion()
+		_main._update_payout_feedback()
+	_main._refresh_buffers()
+	_main._update_fluid_network()
+	# Frozen for `--payout`'s reason: a fleck's whole flight is
+	# CRUSH_FLIGHT_TICKS (9) and the warm-up frames that follow are longer.
+	_main.set_process(false)
+
+
 func _contract_board_is_mixed() -> bool:
 	var econ: Dictionary = JSON.parse_string(_main.sim.economy_snapshot_json())
 	var stock := 0
@@ -866,6 +920,8 @@ func _process(_delta: float) -> bool:
 		_run_contract_cycles()
 	if _frames == 2 and _payout:
 		_run_to_payout()
+	if _frames == 2 and _crushing:
+		_run_to_crushing()
 	if _frames == 2 and _stock:
 		_stock_the_hotbar()
 	# Through the real setter, not by hiding the label: the point of the shot

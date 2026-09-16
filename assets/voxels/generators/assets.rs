@@ -150,6 +150,10 @@ pub const ASSETS: &[Asset] = &[
     // ticket). Not an item and not a building — the one asset in this list
     // that never occupies a tile.
     Asset { name: "coin", build: coin },
+    // The pulp the crusher throws while it works (the crusher-particles
+    // change). Never occupies a tile either, and never appears in a menu —
+    // it exists only to be thrown.
+    Asset { name: "crush_bit", build: crush_bit },
     // The staff-category icons (the staff-pools epic, ticket 2): four more
     // props that never occupy a tile, one per `data/staff.ron` category,
     // drawn only to be rendered by `voxicons` for the staff panel. See the
@@ -1419,6 +1423,52 @@ const COIN_VOXELS: u32 = 10;
 /// The midline of that volume — between voxels 4 and 5 (UI_UX.md §2b point
 /// 20). Not 5.
 const COIN_C: f32 = (COIN_VOXELS as f32 - 1.0) / 2.0;
+
+/// A fleck of crushed tomato — what the crusher spits while it is actually
+/// working (the crusher-particles change, 2026-09-16). Like [`coin`] it is
+/// an asset that never occupies a tile: `main.gd` keeps a pool of these and
+/// throws them out of the crusher's feed pocket on a beat.
+///
+/// **A lump, not a ball.** Three overlapping spheres with their centres off
+/// the volume's midline in different directions, so the silhouette has a
+/// waist and a corner and reads as a piece torn off something rather than as
+/// a bead. That matters more here than any surface detail does: at a quarter
+/// of a tile, thrown, and gone in under a second, the outline is the whole
+/// of what a player sees (UI_UX.md §2b point 31's rule, one scale down).
+///
+/// **Dark underneath, light on top,** the same reason [`item_tomato`] is
+/// shaded: this camera lights the tops of things, so a fleck with one flat
+/// albedo reads as a paper cut-out. Nothing brighter than the red is on it:
+/// the first cut put two pale seed voxels on the crown and the preview read
+/// them as a stalk — i.e. as a whole tomato, the one thing this is not.
+///
+/// The lump straddles the volume midline (`CRUSH_BIT_C`) because `main.gd`
+/// spins these about world Y as they fly, exactly as it spins a coin, and an
+/// off-centre mass orbits the pivot instead of turning on it (point 20).
+pub fn crush_bit(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([CRUSH_BIT_VOXELS, CRUSH_BIT_VOXELS, CRUSH_BIT_VOXELS]);
+    let c = CRUSH_BIT_C;
+    m.sphere_f((c - 0.8, c + 0.2, c + 0.6), 2.1, p.idx("tomato_red"));
+    m.sphere_f((c + 1.0, c - 0.6, c - 0.2), 1.6, p.idx("tomato_red"));
+    // The wet, torn underside, cast after the body so it wins the voxels
+    // both claim.
+    m.sphere_f((c, c, c - 1.4), 1.9, p.idx("tomato_shadow"));
+    // One torn corner: a single voxel proud of the lump on the lit top face,
+    // so the outline has a point in it. Kept to one voxel because a cuboid
+    // here (the second cut of this) rendered as a slab hanging off the side
+    // and read as two objects rather than one torn one.
+    let i = c.round() as i32;
+    m.set(i + 2, i - 1, i + 1, p.idx("tomato_red"));
+    m
+}
+
+/// The fleck's volume, in voxels: a quarter of a tile, smaller than an item
+/// (half a tile) and smaller than a coin, because several are in the air at
+/// once over a machine that is itself only one tile.
+const CRUSH_BIT_VOXELS: u32 = 8;
+
+/// Its midline — between voxels 3 and 4 (UI_UX.md §2b point 20). Not 4.
+const CRUSH_BIT_C: f32 = (CRUSH_BIT_VOXELS as f32 - 1.0) / 2.0;
 
 // ---------------------------------------------------------------------------
 // Staff category icons (the staff-pools epic, ticket 2 —

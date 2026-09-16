@@ -172,11 +172,28 @@ implementation history (epics, tickets, balancing passes) behind each one.
   undelivered stock.** A contract is satisfied at its cadence boundary only
   if the pool holds its full mix, and payout consumes that mix from the
   pool — goods are never credited to two contracts at once.
+- **That pool has a ceiling, and it is per item id** (48,
+  `DELIVERY_STOCK_CAPACITY`, added 2026-09-16): production nobody has
+  ordered is a real loss (§5), and an unbounded sink made overproduction
+  cost nothing but a growing number. Per item rather than one total,
+  because one total can deadlock the game — an overproduced product would
+  crowd every other item out of the pool, a contract whose mix names a
+  crowded-out item could never be satisfied again, and nothing in the game
+  dumps excess stock (§11's spot-market question is still open). Per item,
+  every id always has its own room and a clog is always specific. The
+  number is a *relationship*, not a literal, like `STARTING_MONEY`: it must
+  comfortably exceed the largest single mix quantity on the board (20, so
+  48 is 2.4x it), and `tests/dock.rs` pins that against `contracts.ron`
+  rather than the figure.
 - **The delivery dock is a pass-through, not a store.** It ships everything
   it receives the same tick into the shared delivery pool
   (`EconomySnapshot::delivery_stock`); its own buffer reads empty between
   ticks. It keeps a bounded per-item buffer (32) so intake can still refuse
-  and back up the belt rather than lose product.
+  and back up the belt rather than lose product — and since the pool it
+  drains into can be full, that refusal is now a state the player meets: a
+  dock with nowhere to put a box leaves it on the belt and the line backs
+  up behind it, exactly as a full machine buffer does. A full dock is not a
+  penalty on top; the backed-up line IS the consequence.
 - **The contract board is sized in a line's worth of demand**: a starter
   tier one kept-fed line can just serve, plus a growth tier of larger,
   slower orders sized so a second/third/fourth line always has an order to

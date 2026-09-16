@@ -148,6 +148,54 @@ use super::types::{Money, ItemId};
 /// [`Economy::new`], which starts an empty ledger at zero.
 pub const STARTING_MONEY: u32 = 3000;
 
+/// How many units of any ONE item may stand on the dock at once — the
+/// ceiling on the shared delivery pool, per item id.
+///
+/// **Why the pool has a ceiling at all** (the dock-capacity change,
+/// 2026-09-16). Until now this was `u32::MAX` and its comment called the
+/// pool "an accumulating ledger, not a physical-space-limited buffer". That
+/// was true of the ledger and false of the fiction: what the player sees is
+/// a loading dock with cases standing on it, and a loading dock fills up.
+/// With no ceiling a line built far past the board's demand simply grew a
+/// number forever — overproduction cost ingredients (`contracts.ron`'s own
+/// closing note) but never showed up on the floor, so the one place the
+/// player would actually notice it, the factory itself, stayed silent. A
+/// full pool now refuses the box at the dock's belt end
+/// ([`super::dock::Dock::try_absorb`]), the line backs up behind it exactly
+/// the way a full machine buffer already backs one up, and a jam that says
+/// "you are making more than anyone ordered" is visible from across the
+/// floor. It also gives `delivery_stock` a real denominator, which is what
+/// lets presentation draw it as a bar at all (UI_UX.md §5e: a bar is only
+/// drawn where the simulation defines the ceiling).
+///
+/// **Why it is per item and not one total.** A single total can deadlock
+/// the game: one overproduced product would crowd every other item out of
+/// the pool, and a contract whose mix names an item that can no longer be
+/// delivered could never be satisfied again — and nothing in the game can
+/// dump excess stock (GAMEPLAY.md §11's spot-market question is still
+/// open), so there would be no way out. A per-item ceiling cannot do that:
+/// every item always has its own room, so a mix is always eventually
+/// fillable, and a clog is always specific ("the dock is full of boxed
+/// ketchup") rather than a mystery.
+///
+/// **The number is a relationship, not a literal** (the same rule
+/// [`STARTING_MONEY`] follows): it must comfortably exceed the LARGEST
+/// single mix quantity on the board, because a contract settles only when
+/// the pool holds its whole mix at once — `export_pallet` asks for 20 boxes
+/// in one window, so a ceiling of 20 or under would make it unsatisfiable.
+/// 48 is 2.4x that: the pallet order can be building up while the small
+/// orders keep being skimmed off the same pool. `tests/dock.rs` pins the
+/// relationship against `data/contracts.ron` rather than the literal, so
+/// adding a bigger order fails a test instead of quietly breaking that
+/// contract. Left of that ceiling, a line running against no demand at all
+/// reaches it in about 12 000 ticks (~6.5 minutes) — long enough not to
+/// nag, short enough to be a consequence.
+///
+/// A Rust constant rather than a `data/` field for
+/// [`super::dock::DOCK_CAPACITY`]'s reason, and to be moved when buffer
+/// sizes become content.
+pub const DELIVERY_STOCK_CAPACITY: u32 = 48;
+
 /// One contract plus the bookkeeping that is *this world's* rather than the
 /// content's: when it is next checked, and how it has done so far.
 ///
@@ -262,6 +310,15 @@ pub struct EconomySnapshot {
     /// show for "what's on the dock," as opposed to a contract's own
     /// clamped `progress`.
     pub delivery_stock: Vec<(ItemId, u32)>,
+    /// The ceiling each of those entries stands against
+    /// ([`DELIVERY_STOCK_CAPACITY`]) — on the wire so presentation can draw
+    /// the level as a bar without knowing the constant, and so a change to
+    /// it never needs a matching edit in GDScript.
+    pub delivery_capacity: u32,
+    /// Whether any item has reached that ceiling, i.e. whether the dock is
+    /// refusing boxes and the line behind it is backing up
+    /// ([`Economy::delivery_pool_full`]).
+    pub delivery_full: bool,
     /// Every **active** contract, in priority order.
     pub contracts: Vec<ContractSnapshot>,
     /// Every offer on the board, in file order, active or not — what the
@@ -352,10 +409,10 @@ impl Economy {
                 .map(|c| ActiveContract::signed_at(c, 0))
                 .collect(),
             board: contracts.clone(),
-            // Unbounded per-item capacity: this is an accumulating ledger of
-            // "delivered, awaiting a contract check," not a
-            // physical-space-limited buffer like a machine's input/output.
-            delivery_buffer: Inventory::new(u32::MAX),
+            // Bounded per item since the dock-capacity change — see
+            // DELIVERY_STOCK_CAPACITY for why the dock fills up and why the
+            // ceiling is per item rather than one total.
+            delivery_buffer: Inventory::new(DELIVERY_STOCK_CAPACITY),
             losses: BTreeMap::new(),
         }
     }
@@ -374,8 +431,37 @@ impl Economy {
     /// Adds finished product into the shared delivery pool — called from
     /// [`super::dock::Dock::ship_into`], once per tick, for whatever the
     /// chain's delivery dock received that tick.
-    pub fn deposit(&mut self, item: &str, qty: u32) {
-        self.delivery_buffer.add(item, qty);
+    ///
+    /// **Returns how many units were actually accepted**, which is fewer
+    /// than `qty` once the pool is at [`DELIVERY_STOCK_CAPACITY`] for that
+    /// item. The caller must keep the remainder rather than assume the whole
+    /// deposit landed: the dock does, so a box is never destroyed by a full
+    /// pool (`tests/core_loop.rs`'s mass-conservation check is the property
+    /// this protects). In practice the remainder is almost always zero,
+    /// because [`super::dock::Dock::try_absorb`] refuses to take a box off
+    /// the belt for a full pool in the first place — this is the second
+    /// gate, for the tick where one dock fills the pool that another dock
+    /// had already taken a box for.
+    pub fn deposit(&mut self, item: &str, qty: u32) -> u32 {
+        self.delivery_buffer.add(item, qty)
+    }
+
+    /// Whether the shared pool could take `qty` more of `item` — the gate
+    /// [`super::dock::Dock::try_absorb`] asks before it takes a box off the
+    /// belt, and therefore the definition of "this dock is full" that the
+    /// wire and the HUD both report.
+    pub fn has_delivery_room(&self, item: &str, qty: u32) -> bool {
+        self.delivery_buffer.has_room_for(item, qty)
+    }
+
+    /// Whether any item in the pool has reached the ceiling — "the dock is
+    /// full", as the dock's lamp and the clipboard say it. Deliberately
+    /// *any* rather than *all*: one item at the ceiling is already enough to
+    /// stop that product's line dead, which is the fact worth showing.
+    pub fn delivery_pool_full(&self) -> bool {
+        self.delivery_buffer
+            .iter()
+            .any(|(_, qty)| *qty >= DELIVERY_STOCK_CAPACITY)
     }
 
     /// Spends `amount` if there is enough money, and reports whether it
@@ -526,6 +612,8 @@ impl Economy {
         EconomySnapshot {
             money: self.money.to_num::<f64>(),
             delivery_stock: self.delivery_buffer.iter().cloned().collect(),
+            delivery_capacity: self.delivery_buffer.capacity_per_item,
+            delivery_full: self.delivery_pool_full(),
             contracts: self
                 .contracts
                 .iter()
