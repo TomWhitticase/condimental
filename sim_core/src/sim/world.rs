@@ -32,11 +32,14 @@
 //! items toward the tile its own [`Direction`] points at, and what happens
 //! there depends entirely on what is standing there: another belt, a
 //! machine's inlet face, a dock, or nothing. A machine discharges onto
-//! whatever belt is adjacent to its outlet face. `recipes.ron`'s file order
-//! still *describes* a chain — [`validate_chain`] still enforces that, since
-//! it is what makes the shipped content a coherent line and what
-//! [`super::reference::reference_chain`] builds — but nothing in the
-//! simulation reads it as geometry any more.
+//! whatever belt is adjacent to its outlet face. `recipes.ron` still
+//! *describes* a line — [`validate_chain`] enforces that its recipes form
+//! one connected graph, since that is what makes the shipped content a
+//! coherent line and what [`super::reference::reference_chain`] builds —
+//! but nothing in the simulation reads its order as geometry any more. Its
+//! order survives as one thing only: the tiebreak when a machine kind could
+//! run more than one of its recipes (see "Which recipe a machine runs",
+//! below).
 //!
 //! **2. Topology is recomputed on a topology change, and never per tick**
 //! (ARCHITECTURE.md §3.8's union-find rule, made real for the first time —
@@ -98,20 +101,17 @@
 //!   still product. That asymmetry is what makes a machine plumbed on both
 //!   sides unambiguous without the player having to label a run: the mixer
 //!   pushes its ketchup mix east into the pipe it faces, and draws its
-//!   vinegar from the run merely touching it. An input tap is therefore
-//!   resolved as "the first adjacent pipe network that is **not** the output
-//!   network" — so a loop of pipe touching a machine on both sides is read
+//!   vinegar from the run merely touching it. A machine's input taps are
+//!   therefore **every** adjacent pipe network that is *not* the output
+//!   network — so a loop of pipe touching a machine on both sides is read
 //!   as its outlet and gives it no inlet at all, rather than as a machine
 //!   quietly feeding itself.
 //!
-//!   A network's fluid id is still decided by content and not by the player:
-//!   the topology pass claims an unclaimed network for whichever fluid the
-//!   first machine to reach it names, whether that machine is drawing or
-//!   depositing. Producer and consumer agree by naming the same id in
-//!   `recipes.ron` — a run between the mixer and the vat resolves to
-//!   `"ketchup_mix"` whichever end is walked first — and a run whose two
-//!   ends disagree simply stalls one of them, the same way a machine tapping
-//!   the wrong fluid always has.
+//!   Plural since the BBQ epic: a recipe may draw several fluids (the
+//!   cooking vat takes bbq mix and liquid smoke), and each is matched at
+//!   tick time to a *distinct* touching run **by fluid id**, never by
+//!   position. One run per input, first fit in tile order. A fluid output
+//!   is still exactly one, off the outlet face ([`validate_fluid_scope`]).
 //! - **One placement resolves to two downstream targets, and only one.** A
 //!   belt looks at the single tile it points at; a
 //!   [splitter](super::splitter) looks at two — the tile on its own facing
@@ -122,6 +122,55 @@
 //!   accepts a hand-off from anything a belt accepts one from, so it can be
 //!   dropped into a line in place of a belt tile without changing how fast
 //!   product moves through it.
+//!
+//! # What a pipe run carries
+//!
+//! A network's fluid id is decided by content and not by the player, and
+//! deriving it is the subtlest pass in this file ([`resolve_network_fluids`]
+//! has the mechanism; this is the shape of the problem).
+//!
+//! It used to be one line of code. A machine kind named exactly one recipe,
+//! so the first machine to reach an unclaimed run named it from that
+//! recipe, drawing or depositing alike, and producer and consumer agreed by
+//! naming the same id in `recipes.ron`. The BBQ epic ends that: a kind may
+//! now run several recipes and a placed machine picks whichever its inputs
+//! satisfy, so a mixer's outlet run is `ketchup_mix` or `bbq_mix` depending
+//! on what is plumbed into the mixer — which is the very thing being
+//! derived. Asking each machine in turn would make the answer depend on
+//! which machine was walked first, and this simulation does not get to have
+//! answers like that (ARCHITECTURE.md §3.9).
+//!
+//! So it is derived for the whole graph at once, by narrowing. Each run
+//! starts with every id it could possibly hold — what a machine at its end
+//! could deposit, or for a run nothing fills, what a machine could draw —
+//! and one constraint from outside: **a run a tank discharges into can hold
+//! only a raw fluid**, because a tank is the only way into the graph and a
+//! raw ingredient is the only thing that comes in from outside. Then, while
+//! anything still changes: a recipe is *feasible* for a machine when its
+//! output still fits its outlet run and each of its inputs can be matched
+//! by id to a distinct touching run, and where every feasible recipe of a
+//! kind agrees about a run, that run cannot hold anything else. A run left
+//! with exactly one id carries it; two or more is genuine ambiguity, none
+//! is a contradiction, and either way the run stays **unnamed** and the
+//! machines on it stall rather than anything panicking.
+//!
+//! The sets only shrink and each pass reads the last pass's answer, so it
+//! terminates and it does not depend on any iteration order — the same
+//! layout built in a different placement order gets the same naming, which
+//! is what `pipe_naming_is_independent_of_placement_order` asserts.
+//!
+//! # Which recipe a machine runs
+//!
+//! Whichever of its kind's recipes its **current inputs** satisfy, re-picked
+//! on every idle tick and frozen for the length of a craft
+//! ([`super::machine::Machine::choose`]). `data/recipes.ron`'s file order
+//! breaks a tie. There is no player-facing picker and deliberately so: the
+//! plumbing and the hoppers *are* the mechanism, so a mixer on a vinegar
+//! pipe beside a sugar hopper blends ketchup mix and one on a ketchup pipe
+//! beside spice and molasses hoppers blends BBQ mix. Because the pick is
+//! live state rather than a property of the kind, it is saved
+//! ([`super::save::SavedMachine::recipe`]) — a reload mid-craft has to
+//! finish the craft that was started.
 //!
 //! # Corners, finally
 //!
@@ -159,7 +208,7 @@
 //! Godot, so it is fully exercisable from headless `cargo test`
 //! (ARCHITECTURE.md §7).
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use hecs::Entity;
 
@@ -1537,13 +1586,6 @@ pub struct World {
     ecs: hecs::World,
     recipes: RecipeRegistry,
     machines: MachineRegistry,
-    /// Which recipe a machine *kind* runs — the 1:1 inverse of
-    /// `Recipe.machine`, built once at construction. A placed machine runs
-    /// this and nothing else: choosing a recipe per machine is a mechanic
-    /// nobody has asked for, and `data/recipes.ron` has always had exactly
-    /// one recipe per kind (construction panics if that stops being true,
-    /// rather than silently picking one).
-    recipe_for_kind: HashMap<String, RecipeId>,
     /// Every **raw** item the chain consumes: an item some recipe takes as a
     /// solid input and no recipe produces
     /// ([`super::ingredients::raw_ingredient_ids`], filtered to solids
@@ -1559,6 +1601,15 @@ pub struct World {
     /// Empty for a recipe file with no raw solid at all, in which case a
     /// hopper cannot be placed (rather than the world refusing to be built).
     raw_items: Vec<ItemId>,
+    /// The same, for fluids: a fluid some recipe draws and no recipe
+    /// produces — vinegar today. **This is the root of the whole
+    /// pipe-naming propagation** (`resolve_network_fluids`): a raw fluid is
+    /// the only thing that can enter the graph from outside it, so a run a
+    /// tank discharges into can carry one of these and nothing else, and
+    /// every other run is named from what a machine at one of its ends
+    /// could make or take. A `BTreeSet` because that propagation walks it
+    /// (ARCHITECTURE.md §3.9's iteration-order rule).
+    raw_fluids: BTreeSet<FluidId>,
     tick_count: u64,
     belt_speed: Fx,
     /// Scratch for the belt tick: how much room each carrier's downstream
@@ -1720,37 +1771,36 @@ impl World {
             panic!("machine content error: {e}");
         }
 
-        let mut recipe_for_kind: HashMap<String, RecipeId> = HashMap::new();
-        for recipe in ordered {
-            if let Some(existing) = recipe_for_kind.get(&recipe.machine) {
-                panic!(
-                    "recipes.ron content error: machine kind '{}' runs both '{existing}' and \
-                     '{}' — a placed machine runs the one recipe its kind names (world.rs's \
-                     `recipe_for_kind`), so two recipes on one kind would need a \
-                     recipe-selection mechanic that does not exist",
-                    recipe.machine, recipe.id
-                );
-            }
-            recipe_for_kind.insert(recipe.machine.clone(), recipe.id.clone());
-        }
-        // Raw = consumed somewhere, produced nowhere. The fluid raws
-        // (vinegar) are bought the same way but are not hopper contents, so
-        // only the solids are kept here.
+        // Raw = consumed somewhere, produced nowhere. The two halves are
+        // split by where they arrive: a raw *solid* is what a hopper holds,
+        // a raw *fluid* is what a player-filled tank discharges. Both are
+        // bought from `data/ingredients.ron`.
         let solid_inputs: Vec<&str> = ordered
             .iter()
             .flat_map(|r| r.inputs.iter().map(|(item, _)| item.as_str()))
             .collect();
-        let raw_items: Vec<ItemId> = raw_ingredient_ids(&recipes)
-            .into_iter()
+        let fluid_inputs: Vec<&str> = ordered
+            .iter()
+            .flat_map(|r| r.fluid_inputs.iter().map(|(fluid, _)| fluid.as_str()))
+            .collect();
+        let raws = raw_ingredient_ids(&recipes);
+        let raw_items: Vec<ItemId> = raws
+            .iter()
             .filter(|id| solid_inputs.contains(&id.as_str()))
+            .cloned()
+            .collect();
+        let raw_fluids: BTreeSet<FluidId> = raws
+            .iter()
+            .filter(|id| fluid_inputs.contains(&id.as_str()))
+            .cloned()
             .collect();
 
         Self {
             ecs: hecs::World::new(),
             recipes,
             machines,
-            recipe_for_kind,
             raw_items,
+            raw_fluids,
             tick_count: 0,
             belt_speed: Fx::from_num(BELT_SPEED_TILES_PER_TICK),
             room_ahead: Vec::new(),
@@ -1892,7 +1942,7 @@ impl World {
         match kind {
             BELT_KIND | PIPE_KIND | SPLITTER_KIND | DOCK_KIND | FLUID_TANK_KIND => true,
             HOPPER_KIND => !self.raw_items.is_empty(),
-            other => self.recipe_for_kind.contains_key(other),
+            other => self.recipes.for_machine(other).next().is_some(),
         }
     }
 
@@ -2017,7 +2067,17 @@ impl World {
                 Dock::new(DOCK_CAPACITY),
             )),
             machine_kind => {
-                let recipe = self.recipe_for_kind[machine_kind].clone();
+                // A freshly placed machine starts on its kind's first recipe
+                // in file order; from its first idle tick onwards it re-picks
+                // whichever one its inputs satisfy. See
+                // `RecipeRegistry::for_machine`.
+                let recipe = self
+                    .recipes
+                    .for_machine(machine_kind)
+                    .next()
+                    .expect("can_construct checked this kind has a recipe")
+                    .id
+                    .clone();
                 self.ecs.spawn((
                     position,
                     placement,
@@ -2445,34 +2505,37 @@ impl World {
         // and it is why a loop of pipe wrapped around one machine reads as
         // its outlet rather than as a machine feeding itself.
         //
-        // Whichever machine reaches an unclaimed network first names it,
-        // producer or consumer alike; machines are walked in tile order, so
-        // that is deterministic. Two machines naming the same run agree by
-        // naming the same id in `recipes.ron`, which is what makes a
-        // mixer -> pipe -> vat run resolve to one fluid from either end.
+        // This pass is pure **geometry**: it records the one network a
+        // machine could deposit into and every network it could draw from,
+        // and names nothing. Which of a kind's recipes runs is decided per
+        // tick from what the machine actually holds, so the pipe ids cannot
+        // be read off a machine's assignment any more — they are resolved
+        // afterwards, for the whole graph at once, by
+        // [`resolve_network_fluids`]. See this module's doc, "What a pipe
+        // run carries".
+        let mut plumbing: Vec<Plumbing> = Vec::with_capacity(topology.machines.len());
         for &machine in &topology.machines {
             let placement = self.placement_of(machine);
             let origin = self.position_of(machine);
-            let Some(recipe) = self
-                .ecs
-                .get::<&Machine>(machine)
-                .ok()
-                .and_then(|m| self.recipes.get(&m.recipe).cloned())
-            else {
-                continue;
-            };
+            let kind = placement.kind.clone();
+            // Whether this kind plumbs at all is a property of the *kind*,
+            // not of whichever recipe it happens to be running: a machine
+            // that can draw a fluid under any of its recipes gets its taps,
+            // so switching recipe never has to rebuild the topology.
+            let (mut draws, mut deposits) = (false, false);
+            for recipe in self.recipes.for_machine(&kind) {
+                draws |= !recipe.fluid_inputs.is_empty();
+                deposits |= !recipe.fluid_outputs.is_empty();
+            }
 
             let mut output_network: Option<usize> = None;
-            if let Some((fluid_id, _)) = recipe.fluid_outputs.first().cloned() {
+            if deposits {
                 let tap = placement
                     .footprint
                     .outlet_neighbours(origin, placement.direction)
                     .into_iter()
                     .find_map(|tile| topology.pipe_index.get(&tile).map(|&index| (tile, index)));
                 if let Some((tile, (network, segment))) = tap {
-                    if topology.networks[network].fluid.is_none() {
-                        topology.networks[network].fluid = Some(fluid_id);
-                    }
                     output_network = Some(network);
                     topology
                         .machine_output_taps
@@ -2489,8 +2552,14 @@ impl World {
                 }
             }
 
-            if let Some((fluid_id, _)) = recipe.fluid_inputs.first().cloned() {
-                let tap = placement
+            // Every network touching the footprint, not just the first:
+            // a recipe may draw several fluids, and which tap supplies
+            // which is matched by fluid id in `Machine::tick`. One entry
+            // per *network*, so the taps a machine is handed are pairwise
+            // distinct and can be borrowed mutably all at once.
+            let mut input_networks: Vec<usize> = Vec::new();
+            if draws {
+                let touching = placement
                     .tiles(origin)
                     .into_iter()
                     .flat_map(|tile| Direction::ALL.map(|dir| (dir, dir.step(tile))))
@@ -2502,11 +2571,12 @@ impl World {
                     })
                     // A machine never draws from the run it fills: that is
                     // not plumbing, it is a machine feeding itself.
-                    .find(|&(_, _, (network, _))| Some(network) != output_network);
-                if let Some((dir, tile, (network, segment))) = tap {
-                    if topology.networks[network].fluid.is_none() {
-                        topology.networks[network].fluid = Some(fluid_id);
+                    .filter(|&(_, _, (network, _))| Some(network) != output_network);
+                for (dir, tile, (network, segment)) in touching {
+                    if input_networks.contains(&network) {
+                        continue;
                     }
+                    input_networks.push(network);
                     topology.machine_taps.push((machine, network, segment));
                     // `dir` stepped from the footprint to the pipe; the
                     // wire names the side from the pipe's point of view.
@@ -2519,6 +2589,12 @@ impl World {
                         });
                 }
             }
+
+            plumbing.push(Plumbing {
+                kind,
+                output: output_network,
+                inputs: input_networks,
+            });
         }
         for &tank in &topology.tanks {
             let placement = self.placement_of(tank);
@@ -2540,6 +2616,15 @@ impl World {
                     });
             }
         }
+
+        // --- what each run carries. Every tank discharge is marked by now,
+        // which is what gives the propagation somewhere to start.
+        resolve_network_fluids(
+            &mut topology.networks,
+            &plumbing,
+            &self.recipes,
+            &self.raw_fluids,
+        );
 
         // A side order that is a property of the geometry (north, east,
         // south, west — `Direction`'s own order), not of which placement the
@@ -2767,10 +2852,14 @@ impl World {
         let output_taps = std::mem::take(&mut self.topology.machine_output_taps);
         for &machine in &machines {
             let kind = self.placement_of(machine).kind;
-            let tapped = taps
+            // Every network this machine can draw from, in the tile order
+            // the topology pass found them; `Machine::tick` matches them to
+            // its recipe's fluid inputs by id.
+            let tapped: Vec<(usize, usize)> = taps
                 .iter()
-                .find(|&&(entity, _, _)| entity == machine)
-                .map(|&(_, network, inlet)| (network, inlet));
+                .filter(|&&(entity, _, _)| entity == machine)
+                .map(|&(_, network, inlet)| (network, inlet))
+                .collect();
             let pushing = output_taps
                 .iter()
                 .find(|&&(entity, _, _)| entity == machine)
@@ -2780,40 +2869,24 @@ impl World {
                     .ecs
                     .get::<&mut Machine>(machine)
                     .expect("a machine placement carries a Machine");
-                // The topology pass guarantees the two networks are
+                // The topology pass guarantees these networks are pairwise
                 // different (see `recompute_topology`), which is what makes
-                // holding both mutable borrows at once sound — and what
-                // `two_networks_mut` asserts rather than assumes.
-                let (fluid_in, fluid_out) = match (tapped, pushing) {
-                    (Some((a, inlet)), Some((b, outlet))) => {
-                        let (net_a, net_b) = two_networks_mut(&mut self.topology.networks, a, b);
-                        (
-                            Some(FluidTap {
-                                network: net_a,
-                                inlet,
-                            }),
-                            Some(FluidTap {
-                                network: net_b,
-                                inlet: outlet,
-                            }),
-                        )
-                    }
-                    (Some((a, inlet)), None) => (
-                        Some(FluidTap {
-                            network: &mut self.topology.networks[a],
-                            inlet,
-                        }),
-                        None,
-                    ),
-                    (None, Some((b, outlet))) => (
-                        None,
-                        Some(FluidTap {
-                            network: &mut self.topology.networks[b],
-                            inlet: outlet,
-                        }),
-                    ),
-                    (None, None) => (None, None),
-                };
+                // holding every mutable borrow at once sound — and what
+                // `disjoint_networks_mut` asserts rather than assumes. The
+                // deposit borrow goes last, so popping it off the end
+                // leaves the draws in tap order.
+                let mut wanted: Vec<usize> = tapped.iter().map(|&(network, _)| network).collect();
+                wanted.extend(pushing.map(|(network, _)| network));
+                let mut borrowed = disjoint_networks_mut(&mut self.topology.networks, &wanted);
+                let fluid_out = pushing.map(|(_, outlet)| FluidTap {
+                    network: borrowed.pop().expect("pushing added the last borrow"),
+                    inlet: outlet,
+                });
+                let fluid_in: Vec<FluidTap<'_>> = borrowed
+                    .into_iter()
+                    .zip(tapped.iter())
+                    .map(|(network, &(_, inlet))| FluidTap { network, inlet })
+                    .collect();
                 // The crew is the kind's `machines.ron` list; the claim is
                 // made inside `tick`, only on a tick the machine would work.
                 let crew = CrewRequest {
@@ -3763,6 +3836,13 @@ impl World {
             .filter(|&&(_, net, _)| net == index)
             .filter_map(|&(machine, _, segment)| {
                 let body = self.ecs.get::<&Machine>(machine).ok()?;
+                // Which side of the recipe this tap is on is the caller's
+                // business; *which entry* of that side is this run's, since
+                // a recipe may draw several fluids from several runs. Match
+                // by the id the network carries, and report 0 for a tap on
+                // a run the current recipe has no use for — the machine is
+                // plumbed into it but is not drawing from it this craft.
+                let fluid = self.topology.networks[index].fluid.as_deref();
                 let units_per_craft = self
                     .recipes
                     .get(&body.recipe)
@@ -3772,7 +3852,9 @@ impl World {
                         } else {
                             &r.fluid_inputs
                         };
-                        side.first().map(|(_, units)| *units)
+                        side.iter()
+                            .find(|(id, _)| Some(id.as_str()) == fluid)
+                            .map(|(_, units)| *units)
                     })
                     .unwrap_or(0);
                 Some(FluidTapSnapshot {
@@ -3871,10 +3953,14 @@ impl World {
     /// predate staff, in their original precedence.
     fn machine_supply_stall(&self, machine: Entity, body: &Machine) -> Option<Stall> {
         let recipe = self.recipes.get(&body.recipe)?;
-        let tap_of = |taps: &[(Entity, usize, usize)]| {
+        // Every tap on one side, in the order `tick` would be handed them.
+        // Plural now: a recipe may draw several fluids, each from whichever
+        // touching run carries it.
+        let taps_of = |taps: &[(Entity, usize, usize)]| -> Vec<(usize, usize)> {
             taps.iter()
-                .find(|&&(entity, _, _)| entity == machine)
+                .filter(|&&(entity, _, _)| entity == machine)
                 .map(|&(_, network, segment)| (network, segment))
+                .collect()
         };
         let stall = |kind: StallKind, item: &str| {
             Some(Stall {
@@ -3889,19 +3975,34 @@ impl World {
                         return stall(StallKind::Input, item);
                     }
                 }
-                let tap = tap_of(&self.topology.machine_taps);
+                let taps = taps_of(&self.topology.machine_taps);
+                let mut claimed: Vec<usize> = Vec::new();
                 for (fluid, units) in &recipe.fluid_inputs {
-                    match tap {
-                        None => return stall(StallKind::NoSupplyPipe, fluid),
-                        Some((network, segment)) => {
-                            if !self.topology.networks[network].can_supply_at(
-                                segment,
+                    // The same first-fit matching `Machine::tick` does, so
+                    // the reason shown is the reason it stalled. A run
+                    // carrying the right fluid but short of it reads as
+                    // `FluidInput`; nothing touching that carries it at all
+                    // reads as `NoSupplyPipe`, which is the "you have not
+                    // plumbed this in" message and covers no pipe at all.
+                    let supplier = taps.iter().find(|(network, segment)| {
+                        !claimed.contains(network)
+                            && self.topology.networks[*network].can_supply_at(
+                                *segment,
                                 fluid,
                                 Fx::from_num(*units),
-                            ) {
-                                return stall(StallKind::FluidInput, fluid);
-                            }
+                            )
+                    });
+                    match supplier {
+                        Some(&(network, _)) => claimed.push(network),
+                        None if taps.iter().any(|&(network, _)| {
+                            !claimed.contains(&network)
+                                && self.topology.networks[network].fluid.as_deref()
+                                    == Some(fluid.as_str())
+                        }) =>
+                        {
+                            return stall(StallKind::FluidInput, fluid);
                         }
+                        None => return stall(StallKind::NoSupplyPipe, fluid),
                     }
                 }
                 None
@@ -3915,7 +4016,7 @@ impl World {
                         return stall(StallKind::Output, item);
                     }
                 }
-                let tap = tap_of(&self.topology.machine_output_taps);
+                let tap = taps_of(&self.topology.machine_output_taps).first().copied();
                 for (fluid, units) in &recipe.fluid_outputs {
                     match tap {
                         None => return stall(StallKind::NoOutletPipe, fluid),
@@ -4274,6 +4375,17 @@ impl World {
     /// what [`super::save`] checks a loaded belt, buffer, dock or delivery
     /// pool against, since an item id that no recipe names any more is a
     /// content change the save cannot survive.
+    /// Every recipe id a machine of `kind` can run, in `data/recipes.ron`
+    /// order — the list [`super::machine::Machine::choose`] picks from, and
+    /// what [`super::save`] checks a saved in-flight craft against. Empty
+    /// for a kind no recipe names, which is a kind that cannot be placed.
+    pub(super) fn recipes_for_kind(&self, kind: &str) -> Vec<String> {
+        self.recipes
+            .for_machine(kind)
+            .map(|recipe| recipe.id.clone())
+            .collect()
+    }
+
     pub(super) fn recipe_item_ids(&self) -> Vec<String> {
         let mut ids: Vec<String> = self
             .recipes
@@ -4303,75 +4415,313 @@ impl World {
     }
 }
 
-/// Enforces the chain-linkage assumption `data/recipes.ron` is written
-/// under: recipe `i + 1` must consume (as one of its inputs) an item that
-/// recipe `i` produces. A clear panic here — at construction time, before
-/// any tick runs — is the data-file equivalent of a compiler error.
+/// Enforces that `data/recipes.ron` describes **one production line**: the
+/// graph whose nodes are recipes and whose edges join any two recipes
+/// sharing an id — solid or fluid, in either direction — must be connected.
+/// A clear panic here, at construction time before any tick runs, is the
+/// data-file equivalent of a compiler error.
 ///
-/// **`World` no longer lays a chain out from that order** (the "Real
-/// Placement" epic — the player does), so this is no longer load-bearing for
-/// geometry. It is kept because it is still load-bearing for *content*: the
-/// file describes one production line, "the first recipe's first input is
-/// the chain's raw ingredient" (which is what a placed hopper holds) is only
-/// true if it does, and [`super::reference::reference_chain`] builds that
-/// line in that order.
+/// This used to be the stricter "recipe `i + 1` consumes something recipe
+/// `i` produces", reading the file as a sequence. The BBQ epic ends that:
+/// the file holds a *branching* chain (ketchup feeds both the bottler and
+/// the BBQ mixer), so consecutive entries no longer chain, while the thing
+/// that rule was really defending — that the file is one line and not a
+/// pile of unrelated fragments — still holds. Connectivity is the same
+/// claim without the ordering.
+///
+/// **Which net catches what.** These two cover the content errors between
+/// them, and neither does alone:
+///
+/// - *This check* catches a **structural break**: a stage joined to nothing,
+///   or two halves of a file that never meet. That is the error where a
+///   machine would silently never start with no clue why.
+/// - [`super::ingredients::IngredientCatalog::validate_covers`] catches a
+///   **typo'd id**, as a test rather than a panic. A misspelled input is by
+///   definition consumed-nowhere-produced, i.e. a new raw ingredient, and
+///   raw ingredients must be priced — so the unpriced `tomatoe` fails
+///   there. `data/ingredients.ron`'s header says why that one is a test:
+///   pricing is a content judgement, not a load-time invariant.
+///
+/// **This rule encodes a claim that will expire.** "One connected
+/// component" means every sauce shares an ancestor with every other, which
+/// is true today only because BBQ derives from ketchup. The first sauce
+/// with an independent raw chain breaks it — mayonnaise is eggs and oil and
+/// shares nothing with tomato, and it is tier 4 in GAMEPLAY.md §2 — and it
+/// will false-panic here. When that lands, the fix is to require every
+/// component to be *internally* connected (i.e. drop this check for a
+/// per-component one, or a declared list of lines) rather than to weaken it
+/// to nothing. Tracked as a deferred issue.
 fn validate_chain(ordered: &[Recipe]) {
-    for pair in ordered.windows(2) {
-        let (prev, next) = (&pair[0], &pair[1]);
-        let links_by_item = next
+    if ordered.len() < 2 {
+        return;
+    }
+    // Union-find would be overkill for a file this size: flood the
+    // component containing the first recipe and see if it reaches them all.
+    fn ids_of(recipe: &Recipe) -> BTreeSet<&str> {
+        recipe
             .inputs
             .iter()
-            .any(|(item, _)| prev.outputs.iter().any(|(out_item, _)| out_item == item));
-        // The fluid half, added by the chain-rework epic. Two stages joined
-        // by a pipe share no solid id at all — the mixer's whole output is a
-        // liquid and the cooking vat's whole input is one — so without this
-        // the middle of the shipped chain would look like a break in the
-        // line. A typo'd *fluid* id is exactly as much a content error as a
-        // typo'd item id, and gets exactly the same construction-time panic.
-        let links_by_fluid = next.fluid_inputs.iter().any(|(fluid, _)| {
-            prev.fluid_outputs
-                .iter()
-                .any(|(out_fluid, _)| out_fluid == fluid)
-        });
-        assert!(
-            links_by_item || links_by_fluid,
-            "recipes.ron chain error: recipe '{}' (outputs {:?}, fluid_outputs {:?}) does not \
-             feed recipe '{}' (inputs {:?}, fluid_inputs {:?}) — the file describes one \
-             production line, so consecutive recipes must chain by a shared id, solid or fluid",
-            prev.id,
-            prev.outputs,
-            prev.fluid_outputs,
-            next.id,
-            next.inputs,
-            next.fluid_inputs
-        );
+            .chain(recipe.outputs.iter())
+            .map(|(item, _)| item.as_str())
+            .chain(
+                recipe
+                    .fluid_inputs
+                    .iter()
+                    .chain(recipe.fluid_outputs.iter())
+                    .map(|(fluid, _)| fluid.as_str()),
+            )
+            .collect()
+    }
+    let touched: Vec<BTreeSet<&str>> = ordered.iter().map(ids_of).collect();
+    let mut reached = vec![false; ordered.len()];
+    reached[0] = true;
+    let mut frontier = vec![0usize];
+    while let Some(index) = frontier.pop() {
+        for (other, ids) in touched.iter().enumerate() {
+            if !reached[other] && !ids.is_disjoint(&touched[index]) {
+                reached[other] = true;
+                frontier.push(other);
+            }
+        }
+    }
+    let orphans: Vec<&str> = ordered
+        .iter()
+        .zip(&reached)
+        .filter(|&(_, &seen)| !seen)
+        .map(|(recipe, _)| recipe.id.as_str())
+        .collect();
+    assert!(
+        orphans.is_empty(),
+        "recipes.ron chain error: recipe(s) {orphans:?} share no ingredient id with the line \
+         starting at '{}' — the file describes one production line, so every recipe must be \
+         joined to the rest of it by some id it consumes or produces, solid or fluid. (A \
+         misspelled id usually shows up as an unpriced raw ingredient in \
+         IngredientCatalog::validate_covers instead; this is the structural half.)",
+        ordered[0].id
+    );
+}
+
+/// One machine's plumbing as the topology pass found it — pure **geometry**,
+/// with no recipe attached to it. `output` is the network off the outlet
+/// face (the only one a machine may deposit into, and `None` if no pipe
+/// stands there); `inputs` is every *other* network touching the footprint,
+/// in tile order, one entry per network.
+///
+/// Kept separate from `Topology::machine_taps` because that list is keyed
+/// for the tick's per-machine lookups, while this one is what
+/// [`resolve_network_fluids`] walks: the same facts, shaped for the two
+/// different questions.
+struct Plumbing {
+    kind: String,
+    output: Option<usize>,
+    inputs: Vec<usize>,
+}
+
+/// Decides what fluid each network carries, for the whole graph at once.
+///
+/// This is the subtlest thing in this file; the *why* is in the module doc
+/// under "What a pipe run carries". In short: a machine kind may run
+/// several recipes, so a run's id can no longer be read off the one recipe
+/// a machine at its end was assigned. It is derived instead, by narrowing:
+///
+/// 1. **What could reach it.** Each run starts with the set of fluids that
+///    can physically get into it. A run a tank discharges into can hold a
+///    raw fluid — nothing else enters the graph from outside. A run off a
+///    machine's outlet face can hold anything that kind's recipes make.
+///    Every other run starts empty, which is why a length of pipe joined to
+///    nothing stays unnamed.
+/// 2. **Narrowing.** A recipe is *feasible* for a machine when its fluid
+///    output is still possible on the outlet run and each of its fluid
+///    inputs can be matched, by id, to a distinct run touching the
+///    footprint that could hold it. If **every** feasible recipe of a
+///    machine's kind puts the same few ids on a run, that run cannot hold
+///    anything else, so its set is intersected down to them. A machine with
+///    no feasible recipe at all says nothing rather than emptying its runs:
+///    a mixer plumbed so it can never draw still names what it would fill.
+/// 3. **Naming.** A run whose set has narrowed to exactly one id carries
+///    it. Two or more left is genuine ambiguity; none left is a
+///    contradiction; either way the run stays **unnamed**.
+///
+/// Step 2 repeats until a sweep changes nothing. Sets only ever shrink and
+/// each sweep is computed from the previous sweep's sets and applied all at
+/// once, so it terminates (every productive sweep drops at least one id
+/// from one run) and the answer does not depend on the order machines or
+/// runs are walked in — build the same layout in a different placement
+/// order and the naming is identical
+/// (`pipe_naming_is_independent_of_placement_order`).
+///
+/// **An unnamed run is not an error.** `can_supply_at`/`can_accept_at`
+/// reject one, so its machines stall — the same graceful "not plumbed yet"
+/// a player sees for most of the time they spend laying a run, and never a
+/// panic.
+fn resolve_network_fluids(
+    networks: &mut [FluidNetwork],
+    plumbing: &[Plumbing],
+    recipes: &RecipeRegistry,
+    raw_fluids: &BTreeSet<FluidId>,
+) {
+    // 1. Only a *machine* claims an id for a run: what it would deposit
+    // there, or — for a run no machine fills — what it would draw from
+    // there. The second half is what makes a run a player has laid but not
+    // yet given a source read as the line it is going to be rather than as
+    // nothing. A run no machine touches at all is claimed by nobody and
+    // stays unnamed however much pipe it is, which is the pre-BBQ
+    // behaviour and the reason a tank plumbed to nothing loads nothing.
+    let mut filled_by: Vec<BTreeSet<FluidId>> = vec![BTreeSet::new(); networks.len()];
+    let mut drawn_by: Vec<BTreeSet<FluidId>> = vec![BTreeSet::new(); networks.len()];
+    for machine in plumbing {
+        for recipe in recipes.for_machine(&machine.kind) {
+            if let Some(network) = machine.output {
+                for (fluid, _) in &recipe.fluid_outputs {
+                    filled_by[network].insert(fluid.clone());
+                }
+            }
+            for &network in &machine.inputs {
+                for (fluid, _) in &recipe.fluid_inputs {
+                    drawn_by[network].insert(fluid.clone());
+                }
+            }
+        }
+    }
+    let mut possible: Vec<BTreeSet<FluidId>> = filled_by
+        .into_iter()
+        .zip(drawn_by)
+        .map(|(filled, drawn)| if filled.is_empty() { drawn } else { filled })
+        .collect();
+    // A tank names nothing by itself — its own fluid is whatever the run it
+    // discharges into carries (`PlayerCommand::FillFluidTank`). What it
+    // contributes is the opposite of a claim: it is the only way into the
+    // graph from outside, and the only thing that comes in from outside is
+    // a **raw** fluid, so a run a tank feeds can hold nothing else. That is
+    // what makes the propagation terminate somewhere sensible instead of
+    // guessing: one end of every line is pinned by what the player buys.
+    for (network, ids) in networks.iter().zip(possible.iter_mut()) {
+        if network.segments().iter().any(|segment| segment.is_source) {
+            ids.retain(|fluid| raw_fluids.contains(fluid));
+        }
+    }
+
+    // 2. One id dropped per productive sweep, at the very least.
+    let bound: usize = possible.iter().map(BTreeSet::len).sum();
+    for _ in 0..=bound {
+        let mut narrowed = possible.clone();
+        for machine in plumbing {
+            let feasible: Vec<Vec<(usize, FluidId)>> = recipes
+                .for_machine(&machine.kind)
+                .filter_map(|recipe| feasible_naming(recipe, machine, &possible))
+                .collect();
+            if feasible.is_empty() {
+                continue;
+            }
+            let mut claims: BTreeMap<usize, BTreeSet<FluidId>> = BTreeMap::new();
+            for naming in &feasible {
+                for (network, fluid) in naming {
+                    claims.entry(*network).or_default().insert(fluid.clone());
+                }
+            }
+            for (network, ids) in claims {
+                // Only a run *every* feasible recipe uses is narrowed. One
+                // that some of them leave alone — an unused tap, or an
+                // outlet a fluidless recipe never fills — is left as it is,
+                // because that recipe running would put nothing there.
+                let used_by_all = feasible
+                    .iter()
+                    .all(|naming| naming.iter().any(|&(used, _)| used == network));
+                if used_by_all {
+                    narrowed[network].retain(|fluid| ids.contains(fluid));
+                }
+            }
+        }
+        if narrowed == possible {
+            break;
+        }
+        possible = narrowed;
+    }
+
+    // 3.
+    for (network, ids) in networks.iter_mut().zip(&possible) {
+        let mut ids = ids.iter();
+        if let (Some(only), None) = (ids.next(), ids.next()) {
+            network.fluid = Some(only.clone());
+        }
     }
 }
 
-/// Two distinct networks out of one `Vec`, as a pair of mutable borrows.
+/// Which runs `recipe` would put which fluid into, if the machine plumbed
+/// as `machine` ran it — or `None` when it could not run at all as this
+/// machine is plumbed, and so has nothing to say about these runs.
 ///
-/// Exists so [`World::tick`] can hand a machine an input tap and an output
-/// tap at the same time. `a != b` is an invariant of the topology pass —
-/// a machine never draws from the run it fills (see
-/// [`World::recompute_topology`]) — and this asserts it rather than trusting
-/// it, because getting it wrong would be aliasing rather than a wrong
-/// answer.
-fn two_networks_mut(
-    networks: &mut [FluidNetwork],
-    a: usize,
-    b: usize,
-) -> (&mut FluidNetwork, &mut FluidNetwork) {
-    assert_ne!(
-        a, b,
-        "a machine's input and output taps must be different networks — the topology pass          resolves the output first and excludes it when choosing the input"
-    );
-    let (lo, hi) = (a.min(b), a.max(b));
-    let (left, right) = networks.split_at_mut(hi);
-    if a < b {
-        (&mut left[lo], &mut right[0])
-    } else {
-        (&mut right[0], &mut left[lo])
+/// The input matching is the same first-fit, one-run-per-input rule
+/// [`super::machine::Machine::tick`] uses to actually draw, so a naming
+/// this produces is a naming the tick can honour.
+fn feasible_naming(
+    recipe: &Recipe,
+    machine: &Plumbing,
+    possible: &[BTreeSet<FluidId>],
+) -> Option<Vec<(usize, FluidId)>> {
+    let mut naming = Vec::with_capacity(recipe.fluid_inputs.len() + recipe.fluid_outputs.len());
+    for (fluid, _) in &recipe.fluid_outputs {
+        // No pipe off the outlet face means this recipe cannot run here at
+        // all, so it does not get to narrow this machine's input runs
+        // either.
+        let network = machine.output?;
+        if !possible[network].contains(fluid) {
+            return None;
+        }
+        naming.push((network, fluid.clone()));
     }
+    let mut claimed: Vec<usize> = Vec::new();
+    for (fluid, _) in &recipe.fluid_inputs {
+        let supplier = machine
+            .inputs
+            .iter()
+            .copied()
+            .find(|network| !claimed.contains(network) && possible[*network].contains(fluid))?;
+        claimed.push(supplier);
+        naming.push((supplier, fluid.clone()));
+    }
+    Some(naming)
+}
+
+/// Several distinct networks out of one `Vec`, as mutable borrows, in the
+/// order asked for.
+///
+/// Exists so [`World::tick`] can hand a machine every tap it might draw
+/// from and the one it deposits into, all at the same time. That the
+/// indices are pairwise distinct is an invariant of the topology pass — one
+/// entry per network per machine, and a machine never draws from the run it
+/// fills (see [`World::recompute_topology`]) — and this asserts it rather
+/// than trusting it, because getting it wrong would be aliasing rather than
+/// a wrong answer.
+fn disjoint_networks_mut<'a>(
+    networks: &'a mut [FluidNetwork],
+    indices: &[usize],
+) -> Vec<&'a mut FluidNetwork> {
+    for (position, index) in indices.iter().enumerate() {
+        assert!(
+            !indices[position + 1..].contains(index),
+            "a machine's fluid taps must be pairwise distinct networks — the topology pass keeps \
+             one tap per network and excludes the outlet run when choosing the inputs, so {index} \
+             appearing twice in {indices:?} means that pass is wrong"
+        );
+    }
+    // Peel the slice in ascending index order — each `split_at_mut` hands
+    // back one element and the untouched tail — then put the borrows back
+    // into the caller's order.
+    let mut ascending: Vec<usize> = (0..indices.len()).collect();
+    ascending.sort_by_key(|&slot| indices[slot]);
+    let mut borrows: Vec<(usize, &'a mut FluidNetwork)> = Vec::with_capacity(indices.len());
+    let mut rest = networks;
+    let mut consumed = 0usize;
+    for slot in ascending {
+        let (_, tail) = rest.split_at_mut(indices[slot] - consumed);
+        let (one, tail) = tail.split_at_mut(1);
+        consumed = indices[slot] + 1;
+        rest = tail;
+        borrows.push((slot, &mut one[0]));
+    }
+    borrows.sort_by_key(|&(slot, _)| slot);
+    borrows.into_iter().map(|(_, network)| network).collect()
 }
 
 /// Every chunk (ARCHITECTURE.md §3.1's 32x32 grid) a **rotated** footprint
@@ -4426,25 +4776,38 @@ fn pipe_snapshot(segment: &PipeSegment) -> PipeSnapshot {
     }
 }
 
-/// Enforces the one fluid assumption that survived placement: a machine is
-/// plumbed into exactly **one** network, so a recipe may declare at most one
-/// fluid input. A data file asking for two would otherwise get the second
-/// silently ignored, with the machine simply never starting and no clue why.
+/// Enforces what stays asymmetric about plumbing: a machine **deposits**
+/// into exactly one network — the pipe off the face it points at, exactly
+/// as it discharges a solid — so a recipe may declare at most one fluid
+/// output. A data file asking for two would get the second silently
+/// ignored, with the machine simply never finishing and no clue why.
 ///
-/// What this *stopped* enforcing is the milestone-6 restriction that a whole
-/// recipe file could contain at most one fluid-using recipe. That existed
-/// because `World` built one hardcoded pipe run; a world now holds one
-/// network per connected component of placed pipe, so several fluid recipes
-/// are simply several runs the player may or may not have built.
+/// A recipe may declare **several fluid inputs** (the BBQ epic: the cooking
+/// vat draws bbq mix and liquid smoke), because drawing has never been
+/// tied to one face — a machine draws from every run touching its
+/// footprint, and `Machine::tick` matches each input to a distinct one of
+/// them by fluid id. Two inputs naming the *same* fluid are still a content
+/// error: they would ask for two runs of the same thing, which is a single
+/// larger draw written twice.
+///
+/// What this *stopped* enforcing, earlier, is the milestone-6 restriction
+/// that a whole recipe file could contain at most one fluid-using recipe.
+/// That existed because `World` built one hardcoded pipe run; a world now
+/// holds one network per connected component of placed pipe, so several
+/// fluid recipes are simply several runs the player may or may not have
+/// built.
 fn validate_fluid_scope(ordered: &[Recipe]) {
     for recipe in ordered {
-        assert!(
-            recipe.fluid_inputs.len() <= 1,
-            "recipes.ron fluid error: recipe '{}' declares {} fluid inputs, but a machine taps \
-             exactly one network to draw from",
-            recipe.id,
-            recipe.fluid_inputs.len()
-        );
+        let mut named: BTreeSet<&str> = BTreeSet::new();
+        for (fluid, _) in &recipe.fluid_inputs {
+            assert!(
+                named.insert(fluid.as_str()),
+                "recipes.ron fluid error: recipe '{}' draws '{fluid}' twice — a machine matches \
+                 each fluid input to a different network, so one fluid means one input with the \
+                 units added up",
+                recipe.id,
+            );
+        }
         assert!(
             recipe.fluid_outputs.len() <= 1,
             "recipes.ron fluid error: recipe '{}' declares {} fluid outputs, but a machine \

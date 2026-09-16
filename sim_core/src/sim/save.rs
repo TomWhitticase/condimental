@@ -88,13 +88,20 @@
 //!
 //! # What is deliberately not in the file
 //!
-//! Anything derived or constant: a machine's recipe (its kind names it),
-//! every buffer's capacity (a Rust constant), a pipe network's shape or
+//! Anything derived or constant: every buffer's capacity (a Rust
+//! constant), a pipe network's shape or
 //! which fluid it carries or which tile a tank discharges into (all
 //! re-derived by `World::recompute_topology` from the placements, which is
 //! the same pass a `Place` triggers), and the dirty-chunk set (a freshly
 //! loaded world reports **every** chunk dirty, so a chunk-driven renderer
 //! redraws all of it).
+//!
+//! A machine's **recipe** left that list in the BBQ epic. It used to be
+//! derived — a kind named exactly one recipe — but a kind may now name
+//! several and a placed machine picks whichever its inputs satisfy, so the
+//! pick is live state. It has to be saved for the same reason `process` is:
+//! reloading mid-craft must resume *that* craft, and re-deriving the pick
+//! from a half-consumed buffer would resume a different one.
 //!
 //! # Forward compatibility
 //!
@@ -102,8 +109,9 @@
 //! whatever this batch of work merges with**. The auto-fill ticket has since
 //! landed and did exactly what this note reserved: `SavedHopper` and
 //! `SavedTank` each gained one `#[serde(default)] auto_fill: bool`, and the
-//! schema version stayed at 1. After this batch ships, a field addition is a
-//! version bump like any other shape change.
+//! schema version stayed at 1. `SavedMachine::recipe` is the third, added
+//! by the BBQ epic on the same terms. After this batch ships, a field
+//! addition is a version bump like any other shape change.
 
 use std::collections::BTreeMap;
 
@@ -122,7 +130,7 @@ use super::recipe::RecipeRegistry;
 use super::splitter::{SPLITTER_KIND, Side, Splitter};
 use super::staff::{StaffPools, StaffRestore, StaffRestoreError};
 use super::stats::{ItemStats, ProductionLedger, STAT_BUCKETS, STAT_WINDOW_COUNT, StatKind};
-use super::types::{Direction, Fx, ItemId, Money, TileCoord};
+use super::types::{Direction, Fx, ItemId, Money, RecipeId, TileCoord};
 use super::world::{BELT_KIND, PIPE_KIND, PlayerCommand, World};
 
 /// The save format's version. Bumped whenever the shape below changes;
@@ -337,9 +345,12 @@ pub struct SavedPipe {
     pub volume_bits: FxBits,
 }
 
-/// A machine's two buffers and its in-flight craft. The recipe is not here:
-/// a placed machine runs the one recipe its *kind* names
-/// (`world.rs`'s `recipe_for_kind`), so saving it would be saving content.
+/// A machine's two buffers, its in-flight craft, and which recipe that
+/// craft is. The recipe was *not* saved until the BBQ epic, because a kind
+/// named exactly one and re-deriving it was free; a kind may now name
+/// several (`RecipeRegistry::for_machine`), the pick is made from what the
+/// machine holds when a craft starts, and it is frozen for that craft's
+/// length — so it is live state, and a save mid-craft has to carry it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedMachine {
     pub input: Vec<(ItemId, u32)>,
@@ -364,6 +375,19 @@ pub struct SavedMachine {
     /// compares before the first post-load tick. `#[serde(default)]`.
     #[serde(default)]
     pub refused_by: Option<String>,
+    /// Which of its kind's recipes this machine is running
+    /// (`sim::machine::Machine::recipe`). `#[serde(default)]` and added to
+    /// `schema_version` 1 rather than bumping it, like
+    /// `SavedHopper::auto_fill` and `load` above: a save without it loads on
+    /// the kind's first recipe in file order and re-picks on its next idle
+    /// tick, which is exactly what a freshly placed machine does.
+    ///
+    /// A save written mid-craft is the case that needs it. `process` says a
+    /// craft is 30 ticks from done; this says *which* craft, and without it
+    /// a two-recipe kind could finish the reload making something the
+    /// player never started.
+    #[serde(default)]
+    pub recipe: Option<RecipeId>,
 }
 
 /// A [`LoadWindow`](super::machine::LoadWindow)'s ring, verbatim: one
@@ -494,6 +518,15 @@ pub enum SaveError {
         tile: TileCoord,
         raw: Vec<String>,
     },
+    /// A machine whose in-flight craft names a recipe its *kind* cannot
+    /// run — `data/recipes.ron` changed under this save, either dropping
+    /// the recipe or moving it to another machine.
+    UnknownMachineRecipe {
+        recipe: String,
+        kind: String,
+        tile: TileCoord,
+        known: Vec<String>,
+    },
     /// A buildable kind in the owned-equipment ledger that `data/shop.ron`
     /// does not price.
     UnknownEquipmentKind {
@@ -604,6 +637,18 @@ impl std::fmt::Display for SaveError {
                 "the hopper at {tile:?} holds '{item}', which is not a raw ingredient of \
                  this build's recipes (raw: {}) — a hopper can only ever hold one of those",
                 raw.join(", ")
+            ),
+            SaveError::UnknownMachineRecipe {
+                recipe,
+                kind,
+                tile,
+                known,
+            } => write!(
+                f,
+                "the {kind} at {tile:?} is running recipe '{recipe}', which this build's \
+                 data/recipes.ron does not give that kind (it runs: {}) — the recipe file \
+                 changed under this save",
+                known.join(", ")
             ),
             SaveError::UnknownEquipmentKind { kind } => write!(
                 f,
@@ -785,6 +830,7 @@ impl World {
                             cursor: machine.load.cursor(),
                         },
                         refused_by: machine.refused_by.clone(),
+                        recipe: Some(machine.recipe.clone()),
                     })
                 }
             };
@@ -980,6 +1026,21 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
                     check_item(item, &known_items, || {
                         format!("in the machine buffer at {:?}", placement.tile)
                     })?;
+                }
+                // The saved pick has to still be one this kind can run —
+                // the same list `Machine::choose` picks from, so a restored
+                // machine can never be on a recipe the live sim would not
+                // have chosen for it.
+                if let Some(recipe) = &machine.recipe {
+                    let known = world.recipes_for_kind(&placement.kind);
+                    if !known.iter().any(|id| id == recipe) {
+                        return Err(SaveError::UnknownMachineRecipe {
+                            recipe: recipe.clone(),
+                            kind: placement.kind.clone(),
+                            tile: placement.tile,
+                            known,
+                        });
+                    }
                 }
             }
             SavedBody::Dock(dock) => {
@@ -1260,6 +1321,12 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                     });
                 machine.load = load;
                 machine.refused_by = saved.refused_by.clone();
+                // `validate` already checked this names one of the kind's
+                // recipes; a save without the field keeps the recipe the
+                // `Place` above started the machine on.
+                if let Some(recipe) = &saved.recipe {
+                    machine.recipe = recipe.clone();
+                }
             }
             SavedBody::Hopper(saved) => {
                 let mut hopper = world
@@ -1690,6 +1757,7 @@ mod tests {
             process: None,
             load: SavedLoad::default(),
             refused_by: None,
+            recipe: None,
         });
         let message = refusal(data);
         assert!(message.contains("9999"), "{message}");
@@ -1721,6 +1789,10 @@ mod tests {
         let legacy: SavedMachine = ron::from_str("(input: [], output: [], process: None)")
             .expect("a pre-load-window machine record still parses");
         assert_eq!(legacy.load, SavedLoad::default());
+        assert_eq!(
+            legacy.recipe, None,
+            "and the same record predates the recipe field, which defaults the same way"
+        );
         let mut data = a_save();
         for placement in &mut data.placements {
             if let SavedBody::Machine(machine) = &mut placement.body {

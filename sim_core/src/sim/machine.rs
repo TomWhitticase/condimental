@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::fluid::FluidTap;
 use super::inventory::Inventory;
-use super::recipe::RecipeRegistry;
+use super::recipe::{Recipe, RecipeRegistry};
 use super::staff::CrewRequest;
 use super::stats::{ProductionLedger, StatKind};
 use super::types::{Fx, RecipeId};
@@ -225,6 +225,19 @@ impl TimedProcess {
 
 #[derive(Debug)]
 pub struct Machine {
+    /// The recipe this machine is running, or — when it is idle — the one
+    /// it would run next.
+    ///
+    /// A machine's *kind* used to name exactly one recipe, so this was
+    /// content wearing a field's clothes: `world.rs` looked it up once at
+    /// placement and it never changed again, which is why `save.rs`
+    /// deliberately did not store it. Since the BBQ epic a kind may name
+    /// several ([`RecipeRegistry::for_machine`]) and this is live state:
+    /// [`Machine::tick`] re-picks it on every idle tick from what the
+    /// buffers and the touching pipes actually hold, and **freezes it for
+    /// the length of a craft** — a batch that started as BBQ finishes as
+    /// BBQ even if its inputs are gone, which is exactly why it is now
+    /// saved (`save.rs`'s `SavedMachine::recipe`).
     pub recipe: RecipeId,
     pub input: Inventory,
     pub output: Inventory,
@@ -261,19 +274,37 @@ impl Machine {
     /// Godot can derive progress itself from `start_tick`/`required_ticks`
     /// plus the current tick count, without a new snapshot every tick.
     ///
-    /// `fluid_in` is this machine's tap into the pipe network it *draws*
-    /// from, if it has one (milestone 6 — ARCHITECTURE.md §9 item 6/§3.4; a
-    /// [`FluidTap`] is the network plus the one segment this machine
-    /// touches, since the "Real Placement" epic made which segment that is a
-    /// placement question). A recipe with `fluid_inputs` treats it exactly
-    /// the way it treats its solid `inputs`: enough of the right fluid must
-    /// be available *before* a craft starts, and starting consumes it. A
-    /// machine that can't get its fluid simply sits idle — it never runs
-    /// degraded, never crafts a partial batch, and never half-consumes its
-    /// solid input; the same "stalls, doesn't run degraded" rule power and
-    /// staff will use later (GAMEPLAY.md §7). Passing `None` for a recipe
-    /// that wants fluid is therefore a permanent stall, which is the correct
-    /// reading of "this machine has no pipe connected."
+    /// **Which recipe is decided here, never by the player.** A machine
+    /// mid-craft is running the recipe in [`Machine::recipe`] and nothing
+    /// re-picks it. An idle one re-picks every tick: the first of its
+    /// kind's recipes (`data/recipes.ron` order) whose solid inputs are in
+    /// the buffer *and* whose every fluid input is carried by one of the
+    /// networks in `fluid_in`. When none is satisfiable it holds the one it
+    /// is closest to running, so the stall readout names what the machine
+    /// is actually waiting for rather than an arbitrary first entry. A kind
+    /// with one recipe — every kind before the BBQ epic — therefore behaves
+    /// exactly as it always did: there is nothing to pick.
+    ///
+    /// `fluid_in` is this machine's taps into the pipe networks it *draws*
+    /// from (milestone 6 — ARCHITECTURE.md §9 item 6/§3.4; a [`FluidTap`]
+    /// is the network plus the one segment this machine touches, since the
+    /// "Real Placement" epic made which segment that is a placement
+    /// question). `world.rs` hands over **every** network touching the
+    /// footprint that is not the outlet one, in tile order, and a recipe's
+    /// fluid inputs are matched against them **by fluid id** — so a cooking
+    /// vat standing between a mix pipe and a liquid-smoke pipe draws one
+    /// unit from each without either the content or the player having to
+    /// say which run is which. Each tap supplies at most one input.
+    ///
+    /// A recipe with `fluid_inputs` treats them exactly the way it treats
+    /// its solid `inputs`: enough of the right fluid must be available
+    /// *before* a craft starts, and starting consumes it. A machine that
+    /// can't get its fluid simply sits idle — it never runs degraded, never
+    /// crafts a partial batch, and never half-consumes its solid input; the
+    /// same "stalls, doesn't run degraded" rule power and staff will use
+    /// later (GAMEPLAY.md §7). An empty `fluid_in` for a recipe that wants
+    /// fluid is therefore a permanent stall, which is the correct reading of
+    /// "this machine has no pipe connected."
     ///
     /// `fluid_out` is the **second** tap, added by the chain-rework epic: the
     /// network this machine *deposits* into, for a recipe with
@@ -281,8 +312,8 @@ impl Machine {
     /// of the same tap because it is a genuinely different network — a
     /// machine that both consumes and produces liquid stands between two
     /// unconnected runs, which is exactly the shipped cooking vat. `world.rs`
-    /// guarantees the two are never the same network, so holding both
-    /// mutable borrows at once is sound.
+    /// guarantees every tap here names a **distinct** network, so holding
+    /// all of these mutable borrows at once is sound.
     ///
     /// **A fluid output is gated at completion, not at start**, symmetrically
     /// with the solid output buffer it sits beside: a finished batch that has
@@ -323,19 +354,36 @@ impl Machine {
         &mut self,
         current_tick: u64,
         recipes: &RecipeRegistry,
-        fluid_in: Option<FluidTap<'_>>,
+        mut fluid_in: Vec<FluidTap<'_>>,
         fluid_out: Option<FluidTap<'_>>,
         crew: Option<CrewRequest<'_>>,
         ledger: &mut ProductionLedger,
     ) -> bool {
         let mut changed = false;
         self.refused_by = None;
-        let Some(recipe) = recipes.get(&self.recipe) else {
+        let Some(running) = recipes.get(&self.recipe) else {
             // A machine with no recipe can never start, which is a
             // permanent starve; `World` refuses to place one, so this is
             // for completeness of the "exactly one state per tick" rule.
             self.load.record(WorkState::Starved);
             return false;
+        };
+        // An in-flight craft owns the recipe for its whole length; only an
+        // idle machine re-reads its inputs to pick one (see this method's
+        // doc). `satisfied` is the same question `Plan::Start` needs asked,
+        // asked once.
+        let (recipe, satisfied) = match self.process {
+            Some(_) => (running, false),
+            None => {
+                let (chosen, satisfied) = self
+                    .choose(recipes, &running.machine, &fluid_in)
+                    .unwrap_or((running, false));
+                if chosen.id != self.recipe {
+                    self.recipe = chosen.id.clone();
+                    changed = true;
+                }
+                (chosen, satisfied)
+            }
         };
         // Starved until something below says otherwise: a tick that starts
         // nothing and completes nothing is a tick spent waiting for input.
@@ -352,26 +400,11 @@ impl Machine {
             Idle,
         }
         let plan = match self.process {
-            None => {
-                let has_inputs = recipe
-                    .inputs
-                    .iter()
-                    .all(|(item, qty)| self.input.has_at_least(item, *qty));
-                // Checked before anything is consumed, so a fluid shortage
-                // can never leave the machine having eaten its solid input.
-                let has_fluids = match &fluid_in {
-                    Some(tap) => recipe
-                        .fluid_inputs
-                        .iter()
-                        .all(|(id, units)| tap.can_supply(id, Fx::from_num(*units))),
-                    None => recipe.fluid_inputs.is_empty(),
-                };
-                if has_inputs && has_fluids {
-                    Plan::Start
-                } else {
-                    Plan::Idle
-                }
-            }
+            // Solids and fluids were both checked before anything was
+            // consumed, so a shortage can never leave the machine having
+            // eaten half its input.
+            None if satisfied => Plan::Start,
+            None => Plan::Idle,
             Some(process) if !process.is_complete(current_tick) => Plan::Advance,
             Some(_) => {
                 let has_room = recipe
@@ -423,16 +456,29 @@ impl Machine {
                     self.input.remove(item, *qty);
                     ledger.record_consumed(item, StatKind::Item, *qty);
                 }
-                if let Some(mut tap) = fluid_in {
-                    for (id, units) in &recipe.fluid_inputs {
-                        ledger.record_consumed(id, StatKind::Fluid, *units);
-                        let drawn = tap.draw(id, Fx::from_num(*units));
+                // The same id-matching `satisfaction` just did, run again to
+                // draw rather than to count — a craft starts at most once
+                // every `time_ticks`, so re-matching there is cheaper than
+                // carrying an allocation through every idle tick.
+                let mut claimed = 0u64;
+                for (id, units) in &recipe.fluid_inputs {
+                    let amount = Fx::from_num(*units);
+                    let Some(index) = Self::supplier(&fluid_in, claimed, id, amount) else {
                         debug_assert!(
-                            drawn,
-                            "fluid availability was checked immediately above, so this draw \
-                             cannot fail without something having mutated the network in between"
+                            false,
+                            "every fluid input was matched to a tap immediately above, so this \
+                             lookup cannot fail without something having mutated the topology"
                         );
-                    }
+                        continue;
+                    };
+                    claimed |= 1 << index;
+                    ledger.record_consumed(id, StatKind::Fluid, *units);
+                    let drawn = fluid_in[index].draw(id, amount);
+                    debug_assert!(
+                        drawn,
+                        "fluid availability was checked immediately above, so this draw \
+                         cannot fail without something having mutated the network in between"
+                    );
                 }
                 self.process = Some(TimedProcess {
                     start_tick: current_tick,
@@ -478,6 +524,85 @@ impl Machine {
         self.load.record(state);
         changed
     }
+
+    /// Which of `kind`'s recipes an idle machine should hold, and whether
+    /// its inputs are satisfied right now.
+    ///
+    /// Two rules, in this order:
+    ///
+    /// 1. **The first fully-satisfied recipe wins**, so `data/recipes.ron`'s
+    ///    own order is the tiebreak when the buffers and the pipes satisfy
+    ///    more than one. That is the only role the file's order plays in
+    ///    recipe selection, and it is why a mixer standing on a vinegar pipe
+    ///    beside a sugar hopper blends ketchup mix while one on a ketchup
+    ///    pipe beside spice and molasses hoppers blends BBQ mix: the two
+    ///    never both match.
+    /// 2. When none is satisfied, **the one closest to being satisfied**,
+    ///    counting requirements met, earliest again winning a tie. Nothing
+    ///    in the simulation turns on this — an unsatisfied machine does not
+    ///    move — but the snapshot and the stall readout are read off
+    ///    [`Machine::recipe`], and "waiting for molasses" is a true sentence
+    ///    about a BBQ mixer where "waiting for vinegar" is not.
+    ///
+    /// `None` only for a kind no recipe names, which `World` refuses to
+    /// place.
+    fn choose<'r>(
+        &self,
+        recipes: &'r RecipeRegistry,
+        kind: &str,
+        fluid_in: &[FluidTap<'_>],
+    ) -> Option<(&'r Recipe, bool)> {
+        let mut closest: Option<(u32, &'r Recipe)> = None;
+        for candidate in recipes.for_machine(kind) {
+            let (met, wanted) = self.satisfaction(candidate, fluid_in);
+            if met == wanted {
+                return Some((candidate, true));
+            }
+            if closest.is_none_or(|(best, _)| met > best) {
+                closest = Some((met, candidate));
+            }
+        }
+        closest.map(|(_, recipe)| (recipe, false))
+    }
+
+    /// How many of `recipe`'s inputs this machine could satisfy this tick,
+    /// out of how many it asks for — `met == wanted` is exactly the
+    /// condition for starting a craft.
+    ///
+    /// Solids are counted against the input buffer. Each fluid is matched
+    /// **by id** against the networks in `fluid_in`, each of which may
+    /// supply at most one input; the match is greedy in recipe order, which
+    /// is enough because a recipe never names the same fluid twice
+    /// (`world.rs`'s `validate_fluid_scope`) and two touching runs carrying
+    /// the same fluid are interchangeable.
+    fn satisfaction(&self, recipe: &Recipe, fluid_in: &[FluidTap<'_>]) -> (u32, u32) {
+        let mut met = 0;
+        for (item, qty) in &recipe.inputs {
+            if self.input.has_at_least(item, *qty) {
+                met += 1;
+            }
+        }
+        // A bitmask rather than a `Vec<bool>`: this runs for every candidate
+        // recipe of every idle machine every tick, and a machine touches far
+        // fewer than 64 pipe runs.
+        let mut claimed = 0u64;
+        for (id, units) in &recipe.fluid_inputs {
+            if let Some(index) = Self::supplier(fluid_in, claimed, id, Fx::from_num(*units)) {
+                claimed |= 1 << index;
+                met += 1;
+            }
+        }
+        let wanted = (recipe.inputs.len() + recipe.fluid_inputs.len()) as u32;
+        (met, wanted)
+    }
+
+    /// The first tap in `fluid_in` not already `claimed` that carries
+    /// `fluid` and can supply `amount` of it.
+    fn supplier(fluid_in: &[FluidTap<'_>], claimed: u64, fluid: &str, amount: Fx) -> Option<usize> {
+        fluid_in.iter().enumerate().position(|(index, tap)| {
+            index < 64 && claimed & (1 << index) == 0 && tap.can_supply(fluid, amount)
+        })
+    }
 }
 
 #[cfg(test)]
@@ -511,7 +636,7 @@ mod tests {
         let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
         machine.input.add("tomato", 2);
         for tick in 0..20 {
-            machine.tick(tick, &recipes, None, None, None, &mut ledger);
+            machine.tick(tick, &recipes, vec![], None, None, &mut ledger);
         }
         assert!(machine.process.is_none());
         assert_eq!(machine.output.count("tomato_sauce"), 0);
@@ -524,12 +649,12 @@ mod tests {
         let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
         machine.input.add("tomato", 4);
 
-        machine.tick(0, &recipes, None, None, None, &mut ledger); // consumes input, starts process
+        machine.tick(0, &recipes, vec![], None, None, &mut ledger); // consumes input, starts process
         assert_eq!(machine.input.count("tomato"), 0);
         assert!(machine.process.is_some());
 
         for tick in 1..10 {
-            machine.tick(tick, &recipes, None, None, None, &mut ledger);
+            machine.tick(tick, &recipes, vec![], None, None, &mut ledger);
             assert_eq!(
                 machine.output.count("tomato_sauce"),
                 0,
@@ -537,7 +662,7 @@ mod tests {
             );
         }
 
-        machine.tick(10, &recipes, None, None, None, &mut ledger); // required_ticks elapsed
+        machine.tick(10, &recipes, vec![], None, None, &mut ledger); // required_ticks elapsed
         assert_eq!(machine.output.count("tomato_sauce"), 1);
         assert!(machine.process.is_none());
     }
@@ -550,9 +675,9 @@ mod tests {
         machine.output.add("tomato_sauce", 1); // pre-fill the only slot
         machine.input.add("tomato", 4);
 
-        machine.tick(0, &recipes, None, None, None, &mut ledger);
+        machine.tick(0, &recipes, vec![], None, None, &mut ledger);
         for tick in 1..=10 {
-            machine.tick(tick, &recipes, None, None, None, &mut ledger);
+            machine.tick(tick, &recipes, vec![], None, None, &mut ledger);
         }
         // Blocked: process completed but couldn't deposit, so it must
         // still be holding, not silently dropping the crafted item.
@@ -560,7 +685,7 @@ mod tests {
         assert_eq!(machine.output.count("tomato_sauce"), 1);
 
         machine.output.remove("tomato_sauce", 1);
-        machine.tick(11, &recipes, None, None, None, &mut ledger);
+        machine.tick(11, &recipes, vec![], None, None, &mut ledger);
         assert_eq!(machine.output.count("tomato_sauce"), 1);
         assert!(machine.process.is_none());
     }
@@ -639,7 +764,7 @@ mod tests {
             machine.tick(
                 tick,
                 &recipes,
-                Some(tap(&mut network, 0)),
+                vec![tap(&mut network, 0)],
                 None,
                 None,
                 &mut ledger,
@@ -666,7 +791,7 @@ mod tests {
         machine.input.add("tomato_sauce", 10);
 
         for tick in 0..500 {
-            machine.tick(tick, &recipes, None, None, None, &mut ledger);
+            machine.tick(tick, &recipes, vec![], None, None, &mut ledger);
         }
 
         assert!(machine.process.is_none());
@@ -685,7 +810,7 @@ mod tests {
         machine.tick(
             0,
             &recipes,
-            Some(tap(&mut network, 1)),
+            vec![tap(&mut network, 1)],
             None,
             None,
             &mut ledger,
@@ -706,7 +831,7 @@ mod tests {
             machine.tick(
                 tick,
                 &recipes,
-                Some(tap(&mut network, 1)),
+                vec![tap(&mut network, 1)],
                 None,
                 None,
                 &mut ledger,
@@ -764,7 +889,7 @@ mod tests {
         machine.tick(
             0,
             &recipes,
-            Some(tap(&mut inflow, 0)),
+            vec![tap(&mut inflow, 0)],
             Some(tap(&mut outflow, 0)),
             None,
             &mut ledger,
@@ -788,7 +913,7 @@ mod tests {
             machine.tick(
                 tick,
                 &recipes,
-                Some(tap(&mut inflow, 0)),
+                vec![tap(&mut inflow, 0)],
                 Some(tap(&mut outflow, 0)),
                 None,
                 &mut ledger,
@@ -812,7 +937,7 @@ mod tests {
             machine.tick(
                 tick,
                 &recipes,
-                Some(tap(&mut inflow, 0)),
+                vec![tap(&mut inflow, 0)],
                 Some(tap(&mut outflow, 0)),
                 None,
                 &mut ledger,
@@ -833,7 +958,7 @@ mod tests {
         machine.tick(
             6,
             &recipes,
-            Some(tap(&mut inflow, 0)),
+            vec![tap(&mut inflow, 0)],
             Some(tap(&mut outflow, 0)),
             None,
             &mut ledger,
@@ -853,7 +978,7 @@ mod tests {
             machine.tick(
                 tick,
                 &recipes,
-                Some(tap(&mut inflow, 0)),
+                vec![tap(&mut inflow, 0)],
                 None,
                 None,
                 &mut ledger,
@@ -882,7 +1007,7 @@ mod tests {
             machine.tick(
                 tick,
                 &recipes,
-                Some(tap(&mut inflow, 0)),
+                vec![tap(&mut inflow, 0)],
                 Some(tap(&mut outflow, 0)),
                 None,
                 &mut ledger,
@@ -907,7 +1032,7 @@ mod tests {
             machine.tick(
                 tick,
                 &recipes,
-                Some(tap(&mut network, 1)),
+                vec![tap(&mut network, 1)],
                 None,
                 None,
                 &mut ledger,
@@ -1021,7 +1146,7 @@ mod tests {
             machine.input.add("tomato", short);
             let made = machine.output.count("tomato_sauce");
             machine.output.remove("tomato_sauce", made);
-            machine.tick(tick, &recipes, None, None, None, &mut ledger);
+            machine.tick(tick, &recipes, vec![], None, None, &mut ledger);
             assert_eq!(
                 machine.load.starved() + machine.load.blocked(),
                 0,
@@ -1039,7 +1164,7 @@ mod tests {
         let recipes = registry();
         let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
         for tick in 0..50 {
-            machine.tick(tick, &recipes, None, None, None, &mut ledger);
+            machine.tick(tick, &recipes, vec![], None, None, &mut ledger);
         }
         assert_eq!(machine.load.starved(), 50);
         assert_eq!(machine.load.working(), 0);
@@ -1055,7 +1180,7 @@ mod tests {
         for tick in 0..LOAD_WINDOW_TICKS as u64 * 2 {
             let short = 10 - machine.input.count("tomato").min(10);
             machine.input.add("tomato", short);
-            machine.tick(tick, &recipes, None, None, None, &mut ledger);
+            machine.tick(tick, &recipes, vec![], None, None, &mut ledger);
         }
         assert!(
             machine.process.is_some(),
@@ -1083,7 +1208,7 @@ mod tests {
             machine.tick(
                 tick,
                 &recipes,
-                Some(tap(&mut inflow, 0)),
+                vec![tap(&mut inflow, 0)],
                 Some(tap(&mut outflow, 0)),
                 None,
                 &mut ledger,
@@ -1102,20 +1227,20 @@ mod tests {
         let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
         machine.input.add("tomato", 4);
 
-        machine.tick(0, &recipes, None, None, None, &mut ledger);
+        machine.tick(0, &recipes, vec![], None, None, &mut ledger);
         // Consumed at the start, in the recipe's own quantity; nothing made
         // yet.
         assert_eq!(ledger.consumed_total("tomato"), 4);
         assert_eq!(ledger.produced_total("tomato_sauce"), 0);
         for tick in 1..10 {
-            machine.tick(tick, &recipes, None, None, None, &mut ledger);
+            machine.tick(tick, &recipes, vec![], None, None, &mut ledger);
         }
         assert_eq!(
             ledger.produced_total("tomato_sauce"),
             0,
             "not before it lands"
         );
-        machine.tick(10, &recipes, None, None, None, &mut ledger);
+        machine.tick(10, &recipes, vec![], None, None, &mut ledger);
         assert_eq!(ledger.produced_total("tomato_sauce"), 1);
         assert_eq!(
             ledger.consumed_total("tomato"),
@@ -1133,12 +1258,12 @@ mod tests {
         machine.output.add("tomato_sauce", 1);
         machine.input.add("tomato", 4);
         for tick in 0..=20 {
-            machine.tick(tick, &recipes, None, None, None, &mut ledger);
+            machine.tick(tick, &recipes, vec![], None, None, &mut ledger);
         }
         assert!(machine.process.is_some(), "held");
         assert_eq!(ledger.produced_total("tomato_sauce"), 0);
         machine.output.remove("tomato_sauce", 1);
-        machine.tick(21, &recipes, None, None, None, &mut ledger);
+        machine.tick(21, &recipes, vec![], None, None, &mut ledger);
         assert_eq!(ledger.produced_total("tomato_sauce"), 1);
     }
 
@@ -1152,7 +1277,7 @@ mod tests {
         machine.tick(
             0,
             &recipes,
-            Some(tap(&mut network, 1)),
+            vec![tap(&mut network, 1)],
             None,
             None,
             &mut ledger,

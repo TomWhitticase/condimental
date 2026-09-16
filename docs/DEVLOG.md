@@ -70,6 +70,14 @@ below is history and should only ever be appended to.)*
   lens to cream. Status lamps still report their state through **albedo** as
   well as emission, so an OFF lamp reads off in any lighting. See the log
   entry below.
+- **The sim can express a branching chain (2026-09-17).** A machine kind may
+  have several recipes and a placed machine runs whichever its current inputs
+  satisfy (file order breaks a tie, and there is deliberately no player-facing
+  picker); a recipe may draw several fluid networks, matched by fluid id;
+  `validate_chain` is a connectivity check over a graph. A pipe run's fluid is
+  now derived by shrinking possibility sets rather than by whichever machine
+  reached it first, and which recipe a machine is on is saved. `data/*.ron` is
+  untouched — the BBQ chain itself is the next ticket. See the log entry below.
 - **Repo:** Private GitHub repo (`TomWhitticase/condimental`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Work reaches `main` through pull requests, and deferrals become issues
   (2026-09-16).** Nothing is pushed to `main` directly — a `pre-push` hook
@@ -139,6 +147,64 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-17 — the sim can express a branching chain
+
+The three sim costs the BBQ plan named are paid, against a test fixture
+rather than against `data/recipes.ron` — the shipped file keeps its five
+entries and its behaviour is byte-identical, because the sauce itself is the
+next ticket.
+
+**A machine kind may run several recipes.** `RecipeRegistry` keeps a
+per-kind list in file order; a placed machine runs whichever of its kind's
+recipes its *current inputs* satisfy, re-picked on each idle tick, with file
+order as the tiebreak when more than one fits. There is deliberately no
+player-facing picker: no command, no UI, no save field for a choice. Two
+cooking vats on one line, same kind and same facing, now run different
+recipes because they are plumbed into different things.
+
+**A recipe may draw several fluids.** The one-fluid-input cap is gone and
+each input is matched to a touching pipe run **by fluid id** at tick time,
+not by position; fluid *outputs* stay capped at one, off the outlet face.
+The N draws plus one deposit are borrowed as disjoint mutable slices.
+
+**`validate_chain` reads a graph.** It floods from the first recipe and
+panics on any recipe sharing no ingredient id with the rest, so a fork is
+legal and a structural break still fails at construction. A typo'd id that
+merely invents an unpriced raw is still caught by
+`IngredientCatalog::validate_covers` instead; `validate_chain`'s doc records
+which net catches which. That rule expires the day a sauce has an
+independent raw chain — mayonnaise, GAMEPLAY.md §2 tier 4 — which is issue
+#42.
+
+**The subtle part was naming pipe runs.** A network's fluid used to come
+from the single recipe its machine named, which multi-recipe kinds destroy.
+It is now derived by **shrinking possibility sets**: a run seeds to what the
+machine whose outlet faces it could make, or failing that to what the
+machines drawing on it could want; a run with a tank on it is intersected
+with the raw fluids, because a tank is the only way in from outside and only
+raws come in; then every machine whose feasible recipes *all* use a run
+narrows that run to what they name it, repeated until nothing changes. One
+possibility left means the run carries it; none or several means the run
+stays unnamed and its machines stall, never a panic. Shrinkage is monotone,
+so it terminates, and a sweep is computed from the previous sweep's state
+and applied at once, so the answer does not depend on the order machines are
+walked — `pipe_naming_is_independent_of_placement_order` builds one layout
+forwards and backwards and asserts identical naming. `world.rs`'s module doc
+carries the full explanation. The case it cannot resolve — two *tank-fed*
+runs feeding one machine that draws two raw fluids — is issue #43.
+
+**Save format.** Which recipe a machine is on is live state now, so
+`SavedMachine` carries it: a `#[serde(default)] recipe: Option<RecipeId>`
+added **without** bumping `SAVE_SCHEMA_VERSION`, on the standing rule that
+an additive optional field is not a shape change. A save taken mid-craft
+comes back on the same craft; a save written before the field loads on the
+kind's first recipe. An unknown recipe id for a kind is a `SaveError`.
+
+This supersedes DECISIONS.md decision (7), "a placed machine runs the one
+recipe its kind names" — the *no player-facing picker* half of that decision
+stands and is in fact what made this possible; only the "one" is gone.
+`data/recipes.ron`'s header still describes the old rules and is issue #44,
+left alone because the next ticket of this epic owns that file.
 ### 2026-09-17 — The fmt backlog is cleared
 
 `cargo fmt --all` landed as one commit (#28): 32 of the repo's 46 Rust files
