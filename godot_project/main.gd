@@ -3676,7 +3676,7 @@ const ISO_NEAR := 0.5
 # factory up close. No gravity, no collision: this project has no player
 # entity or collision shapes on the voxel meshes, so it deliberately doesn't
 # pretend to be one.
-const FP_MOVE_SPEED := 6.0 # world units/second (~2 tiles/second)
+const FP_MOVE_SPEED := 15.0 # world units/second (~4.7 tiles/second)
 const FP_MOUSE_SENSITIVITY := 0.0025 # radians per pixel of relative mouse motion
 const FP_PITCH_LIMIT := deg_to_rad(89.0) # stop just short of looking straight up/down
 const FP_FOV := 75.0
@@ -4070,14 +4070,14 @@ func _build_environment() -> void:
 	sky_material.set_shader_parameter("purlin_color", Color("#565A60"))
 	sky_material.set_shader_parameter("cladding_color", Color("#6A6A63"))  # concrete
 	sky_material.set_shader_parameter("plinth_color", Color("#43433F"))    # concrete_dark
-	sky_material.set_shader_parameter("slab_color", Color("#6A6A63"))     # concrete, same as the floor tiles
+	sky_material.set_shader_parameter("slab_color", Color("#979489"))     # a touch over concrete_light, warm like the floor tiles
 	sky_material.set_shader_parameter("hazard_color", Color("#D9A21B"))    # hazard_yellow
 	sky_material.set_shader_parameter("lamp_color", Color("#FFF6EA"))
 	sky_material.set_shader_parameter("window_color", Color("#B9C6CE"))
 	# The haze is what the eye reads as "this hall goes on" — lighter than the
 	# surfaces it swallows, as lit dust actually is, but kept neutral: a warm
 	# haze tints the ambient, and the concrete floor then photographs beige.
-	sky_material.set_shader_parameter("haze_color", Color("#7B7D80"))
+	sky_material.set_shader_parameter("haze_color", Color("#939495"))
 
 	var sky := Sky.new()
 	sky.sky_material = sky_material

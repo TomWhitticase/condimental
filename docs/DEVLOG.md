@@ -131,6 +131,15 @@ light lost the sun's warmth, because measured against the old frame the bare
 concrete had gone from r-b = 5 to r-b = 21, i.e. every grey asset in the game
 was photographing beige. Full record in DECISIONS.md.
 
+Two things came back from the owner's playthrough. The hall's slab was set
+to the same `concrete` the floor tiles use, which in the frame read about 40
+levels darker than them — the tiles are lit and the backdrop is not — so it
+is now a warmer, lighter `#979489` that measures within 4 levels of the game
+floor at the seam, and the haze lifted with it. And walking the hall at 6
+world units/second took most of a minute to cross it; first-person movement
+is 15 now, about 4.7 tiles a second, which is a walk in a building this size
+rather than a crawl.
+
 
 ### 2026-09-16 — Pull requests have to show the change
 
