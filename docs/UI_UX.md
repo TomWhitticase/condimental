@@ -579,12 +579,16 @@ lying on a single still frame rather than as distance.
 Over it: the wordmark, subtitle and a tilted yellow **splash line** (picked
 from a fixed list by the date, so it changes day to day and a review
 screenshot still repeats), then a dark plate with New Game / Load Game /
-Quit, **centred in the viewport** over a symmetric gradient scrim that keeps
-the text legible whatever the drifting camera is pointing at. (An earlier cut
-stood the column to one side so the plate would not cover the vanishing
-point; the owner asked for it centred, and the backdrop's framing was moved
-to suit — the chain now reads either side of the plate, tomatoes going in on
-the left and bottles coming out on the right.) Load Game **replaces** the buttons with the save list. A row shows the slot name and the file's mtime (not the tick
+Quit, **centred in the viewport**. **Nothing is washed over the hall**: a
+gradient scrim used to stand behind the column for legibility and read as a
+shadow lying on the picture, so it is gone (the owner's call). The text
+carries its own contrast instead — the wordmark and the strap take a heavier
+outline than anything inside a plate needs (`TITLE_OUTLINE`,
+`STRAP_OUTLINE`), and the button plate is near-opaque in its own right. (An
+earlier cut stood the column to one side so the plate would not cover the
+vanishing point; the owner asked for it centred, and the backdrop's framing
+was moved to suit — the chain now reads either side of the plate, tomatoes
+going in on the left and bottles coming out on the right.) Load Game **replaces** the buttons with the save list. A row shows the slot name and the file's mtime (not the tick
 count, which would mean parsing every file). The autosave is listed and
 labelled. An empty list says so in a sentence.
 

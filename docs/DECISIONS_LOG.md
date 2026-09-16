@@ -18,6 +18,17 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-16 **Nothing is washed over the title screen's hall.** The main
+  menu's gradient scrim is **removed**: no full-screen tinted overlay may sit
+  between `title_scene.gd`'s backdrop and the menu column, asserted in
+  `test_main_menu.gd`. Legibility over the drifting 3D frame is bought by the
+  text carrying its own edge — `menu.gd`'s `TITLE_OUTLINE` (14px at
+  `UI_SCALE`) on the wordmark and `STRAP_OUTLINE` (8px) on the tagline and
+  splash line — and by the button plate already being near-opaque
+  (`PLATE_BG`). This reverses the scrim clause of the centred-menu entry
+  below; the centring and the camera framing stand.
+  Full record in `docs/DECISIONS.md`.
+
 - 2026-09-16 **An emissive voxel emits its OWN colour, through the one
   shader in the pipeline.** `emissive` is built as a `ShaderMaterial`
   (`godot_project/voxel_emissive.gdshader`, `EMISSION = COLOR.rgb *
