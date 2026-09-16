@@ -308,7 +308,9 @@ pub fn crew_entries(staff: &[(String, u32)]) -> Vec<CrewEntry> {
 
 /// One category's live numbers. `headcount`, `unpaid`, `owed` and
 /// `left_last_payday` persist (and ride the save); `available`, `demand`
-/// and `assigned` are this tick's tally, reset at the top of every tick.
+/// and `assigned` are this tick's tally, reset at the top of every tick;
+/// `required` is the ESTABLISHMENT, derived from what is placed and
+/// changed only by a topology change (see [`StaffPools::set_required`]).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CategoryPool {
     pub headcount: u32,
@@ -330,6 +332,13 @@ pub struct CategoryPool {
     pub demand: u32,
     /// Heads actually handed to a machine or dock this tick.
     pub assigned: u32,
+    /// The ESTABLISHMENT: every head the PLACED machinery needs to be fully
+    /// crewed, whether or not any of it is running this tick. Summed from
+    /// the placements by `World::recompute_topology`, so it moves only when
+    /// a machine is placed, removed or rotated — never with production
+    /// flow. This is the number "do I need to hire?" is answered from;
+    /// `demand` remains the honest per-tick activity figure beside it.
+    pub required: u32,
 }
 
 /// What a machine or dock hands `Machine::tick` / `World::tick` to ask for
@@ -409,6 +418,7 @@ impl StaffPools {
                 available: c.starting_headcount,
                 demand: 0,
                 assigned: 0,
+                required: 0,
             })
             .collect();
         let next_payday_tick = catalog.pay_period_ticks;
@@ -515,6 +525,56 @@ impl StaffPools {
         };
         let needed = Money::saturating_from_num(self.next_bill().saturating_add(c.wage));
         money >= needed
+    }
+
+    /// Sets the ESTABLISHMENT — how many heads of each category the placed
+    /// machinery needs to be fully crewed — from a per-category total.
+    ///
+    /// Called from `World::recompute_topology`, which is reached only by
+    /// `Place`, `Remove` and `Rotate`, so this figure is **stable during
+    /// play**: it cannot move because a belt ran dry or a vat finished a
+    /// batch. That stability is the whole point. `demand` (what was asked
+    /// for this tick) breathes with production flow, which made
+    /// "do I need to hire?" unanswerable from the HUD — the number that
+    /// prompted a hire had already gone by the time the player acted
+    /// (docs/DECISIONS.md, the 2026-09-16 establishment record).
+    ///
+    /// Categories the caller does not mention are set to zero, so a factory
+    /// whose last crusher was removed stops asking for cooks. An unknown
+    /// category id is ignored rather than rejected: the catalog is the
+    /// authority on what exists, and `validate_machines` has already proved
+    /// every machine's crew names a real category.
+    pub fn set_required(&mut self, totals: &[(String, u32)]) {
+        for pool in &mut self.pools {
+            pool.required = 0;
+        }
+        for (category, count) in totals {
+            if let Some(i) = self.catalog.index_of(category) {
+                self.pools[i].required = self.pools[i].required.saturating_add(*count);
+            }
+        }
+    }
+
+    /// The establishment for one category — what the placed machinery needs.
+    pub fn required(&self, category: &str) -> u32 {
+        self.catalog
+            .index_of(category)
+            .map_or(0, |i| self.pools[i].required)
+    }
+
+    /// How many heads of `category` the player must HIRE for the placed
+    /// machinery to be fully crewed: `required - headcount`, floored at 0.
+    ///
+    /// Deliberately measured against `headcount` and not `available`: a head
+    /// in arrears is not working, but hiring a second head to cover them is
+    /// the wrong advice — paying them is. The unpaid count is reported
+    /// separately and reads as its own warning.
+    pub fn short(&self, category: &str) -> u32 {
+        self.catalog.index_of(category).map_or(0, |i| {
+            self.pools[i]
+                .required
+                .saturating_sub(self.pools[i].headcount)
+        })
     }
 
     /// Step 2 of `World::tick`: everyone who is being paid is back at
@@ -700,7 +760,8 @@ impl StaffPools {
                     can_hire: self.can_hire(&c.id, money),
                     demand: p.demand,
                     assigned: p.assigned,
-                    short: p.demand.saturating_sub(p.assigned),
+                    required: p.required,
+                    short: p.required.saturating_sub(p.headcount),
                 })
                 .collect(),
         }
@@ -808,11 +869,19 @@ impl StaffPools {
 ///  "categories": [
 ///    {"id": "manufacturing", "name": "Manufacturing", "headcount": 4,
 ///     "wage": 2, "owed": 4, "unpaid": 0, "left_last_payday": 0,
-///     "can_hire": true, "demand": 4, "assigned": 4, "short": 0}, ...]}
+///     "can_hire": true, "required": 4, "demand": 4, "assigned": 4,
+///      "short": 0}, ...]}
 /// ```
 ///
-/// `demand`, `assigned` and `short` (= `demand - assigned`) describe the
-/// LAST completed tick. `money` is repeated here, as `shop_snapshot_json`
+/// `demand` and `assigned` describe the LAST completed tick — what was
+/// asked for and what was handed out — and both breathe with production
+/// flow. `required` and `short` do NOT: `required` is the establishment
+/// the PLACED machinery needs (`StaffPools::set_required`, recomputed only
+/// on a topology change) and `short` is `required - headcount`, the heads
+/// the player must HIRE. A panel answering "do I need staff?" reads
+/// `short`; one showing "what is working right now" reads `assigned`.
+/// Before 2026-09-16 `short` meant `demand - assigned`, which moved every
+/// tick and so could not be acted on. `money` is repeated here, as `shop_snapshot_json`
 /// does, so the staff panel needs one poll.
 ///
 /// The quality pass's additions (2026-09-13), so a panel can warn BEFORE
@@ -851,6 +920,7 @@ pub struct StaffCategorySnapshot {
     pub can_hire: bool,
     pub demand: u32,
     pub assigned: u32,
+    pub required: u32,
     pub short: u32,
 }
 
@@ -1271,21 +1341,44 @@ mod tests {
         let cooks = &snap.categories[0];
         assert_eq!(cooks.id, "cooks");
         assert_eq!(cooks.name, "Cooks");
+        // `demand`/`assigned` are the tick's tally: three cooks asked for,
+        // two handed out. `short` is NOT drawn from them — nothing has been
+        // placed, so these pools have no establishment and there is nobody
+        // to hire, however busy the tick was.
         assert_eq!(
             (
                 cooks.headcount,
                 cooks.wage,
                 cooks.demand,
                 cooks.assigned,
+                cooks.required,
                 cooks.short
             ),
-            (2, 3, 3, 2, 1)
+            (2, 3, 3, 2, 0, 0)
         );
         assert_eq!(
             (cooks.owed, cooks.unpaid, cooks.left_last_payday),
             (2, 0, 0)
         );
         assert!(cooks.can_hire, "42 covers 11 + 3");
+        // Give the pools an establishment — what placed machinery would
+        // need — and `short` becomes the hiring advice: three cooks' worth
+        // of machines standing, two cooks hired, so hire one. It does not
+        // matter what this or any other tick asked for.
+        pools.set_required(&[("cooks".to_string(), 3)]);
+        let staffed = pools.snapshot(Money::from_num(42));
+        assert_eq!(
+            (staffed.categories[0].required, staffed.categories[0].short),
+            (3, 1)
+        );
+        pools.reset();
+        let idle = pools.snapshot(Money::from_num(42));
+        assert_eq!(
+            (idle.categories[0].demand, idle.categories[0].short),
+            (0, 1),
+            "a tick that asked for nobody does not mean nobody is needed"
+        );
+
         let poor = pools.snapshot(Money::from_num(10));
         assert_eq!(poor.shortfall, 1);
         assert!(!poor.categories[0].can_hire);

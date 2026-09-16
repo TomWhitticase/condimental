@@ -917,6 +917,11 @@ impl World {
         restore_ledgers(&mut world, &data);
         world.restore_production(restore_production(&data.production)?);
         restore_staff(&mut world, &data)?;
+        // `restore_staff` builds fresh pools, so the establishment the
+        // replayed `Place` commands computed in `rebuild_structure` is gone
+        // by here. Sum it again, or every loaded world reads as needing
+        // nobody and the hiring advice is silently wrong after a load.
+        world.recompute_establishment();
 
         world.restore_tick_count(data.tick_count);
         world.restore_money(data.money_bits.value());
