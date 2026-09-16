@@ -5207,7 +5207,7 @@ func _hotbar_reserved_height() -> float:
 	return HOTBAR_SLOT_SIZE.y * HOTBAR_SELECTED_SCALE + HOTBAR_BOTTOM_MARGIN * 3.0
 
 
-func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float) -> void:
+func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float, snap_rows := false) -> void:
 	if scroll == null or grid == null:
 		return
 	var natural: float = grid.get_combined_minimum_size().y
@@ -5221,7 +5221,55 @@ func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float) 
 	# A floor, so a viewport too small for even one row leaves a scrollable
 	# stub rather than a panel with no grid in it at all.
 	var cap: float = maxf(_ui_px(110.0), available - chrome)
+	# `snap_rows` moves the cut down to the last whole row, for a stack whose
+	# rows are cards the player reads (see `_whole_rows_height`). The build
+	# menu does NOT ask for it: its grid wraps six icon slots to a line, so a
+	# "row" there is a line of cards that are all the same height anyway, and
+	# the half-row it shows past the cap is the thing that says "scroll".
+	if snap_rows:
+		cap = _whole_rows_height(grid, cap)
 	scroll.custom_minimum_size.y = minf(natural, cap)
+
+
+## The tallest height not greater than `cap` that ends on a boundary between
+## two of `box`'s rows — so a capped list is cut between rows rather than
+## through the middle of a line of text, which reads as a rendering fault
+## rather than as "there is more below" (issue #8).
+##
+## Rows are MEASURED, not divided out of a constant: a docket's height varies
+## with its checklist, its status line and its strike pips, so there is no one
+## row height for the clipboard to divide by the way the stock plate has one
+## (`_stock_row_height`).
+##
+## One whole row is the floor, for the same reason `_fit_grid_scroll` has one:
+## a list showing nothing at all is worse than a list showing its first row
+## and a scrollbar. That can exceed `cap` — the clipboard's floor is a whole
+## docket now rather than `_ui_px(110)`, and at 1600x900 with the
+## SHORT-STAFFED strip up it costs the stock plate below it a row. That is the
+## column's documented order of yielding (`_position_stock_panel`): the
+## clipboard cannot yield past its own floor, and the plate takes what is
+## left and scrolls.
+func _whole_rows_height(box: Control, cap: float) -> float:
+	if box == null:
+		return cap
+	var separation: float = 0.0
+	if box is BoxContainer:
+		separation = float(box.get_theme_constant("separation"))
+	var used: float = 0.0
+	var fitted: float = 0.0
+	var rows: int = 0
+	for child in box.get_children():
+		var row := child as Control
+		if row == null or not row.visible:
+			continue
+		if rows > 0:
+			used += separation
+		used += row.get_combined_minimum_size().y
+		if rows > 0 and used > cap:
+			break
+		fitted = used
+		rows += 1
+	return cap if rows == 0 else fitted
 
 
 ## One icon slot. A Button rather than a Panel so pressing it is the whole
@@ -8294,10 +8342,15 @@ func _position_stock_panel() -> void:
 	# clipboard at 1280x720. Same shape, one row as the floor instead, so the
 	# list scrolls (UI_UX.md §5c's deliberate last resort) rather than the
 	# plate colliding with the two fixed things it is wedged between.
+	#
+	# And the cut lands BETWEEN two rows, the same rule the clipboard's docket
+	# stack follows (`_whole_rows_height`, issue #8) — a count sliced through
+	# the middle of its digits is unreadable in a way a count behind a
+	# scrollbar is not.
 	var natural: float = _stock_rows.get_combined_minimum_size().y
 	_stock_scroll.custom_minimum_size.y = natural
 	var chrome: float = _stock_panel.get_combined_minimum_size().y - natural
-	var cap: float = maxf(_stock_row_height(), available - chrome)
+	var cap: float = _whole_rows_height(_stock_rows, maxf(_stock_row_height(), available - chrome))
 	_stock_scroll.custom_minimum_size.y = minf(natural, cap)
 
 	var size := _stock_panel.get_combined_minimum_size()
@@ -12072,6 +12125,13 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 	# player is short of behind a scrollbar they have no reason to look
 	# under.
 	#
+	# The cut lands BETWEEN two dockets, never through one (issue #8). What
+	# made that visible was the SHORT-STAFFED strip (2026-09-16), which sits
+	# inside this same clipboard body and takes two lines out of the stack's
+	# share: the bottom docket then ended mid-sentence, which reads as a
+	# rendering fault rather than as "there is more, scroll". Nothing about
+	# what the stack is capped AGAINST changed — see `_whole_rows_height`.
+	#
 	# A headless SceneTree run has no viewport at all, and a window that has
 	# not laid out yet reports a zero rect — neither must collapse the stack
 	# to nothing, so "no viewport" means "no cap", not "a cap of zero".
@@ -12083,7 +12143,8 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 			viewport.get_visible_rect().size.y
 				- _hotbar_reserved_height()
 				- _stock_reserved_height()
-				- _ui_px(24.0)
+				- _ui_px(24.0),
+			true
 		)
 	else:
 		_contract_cards_scroll.custom_minimum_size.y = _contract_cards_box.get_combined_minimum_size().y

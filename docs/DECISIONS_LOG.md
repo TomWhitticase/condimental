@@ -18,6 +18,21 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-16 **Every pull request body embeds a screenshot, no
+  exceptions.** Owner's rule. A PR here reviews a frame, so it shows one;
+  "visual changes only" was rejected because the conditional version rots
+  into an author deciding their change is not visual. `gh` cannot attach a
+  file and the rendered PNGs are gitignored, so
+  `scripts/pr-screenshot.sh` pushes them to **`pr-media`**, an orphan
+  branch never merged into `main`, and prints a
+  `github.com/<owner>/<repo>/blob/pr-media/…?raw=true` link — the
+  `raw.githubusercontent.com` form renders broken in a private repo
+  because it needs a token. Enforced twice, since a rule that only asks is
+  a rule a hurried session skips: a `PreToolUse` hook
+  (`.claude/hooks/require-pr-screenshot.sh`) refuses `gh pr create` with
+  no image in the body — so `--fill` alone no longer opens a PR — and the
+  `PR screenshot` CI job re-checks the body and that every link resolves.
+
 - 2026-09-16 **Five HUD features, built in parallel: staffing made
   unmissable, buy-all in the market, a right-hand STOCK plate, a
   collapsible legend.** Owner's brief, three parallel worktrees (staff /

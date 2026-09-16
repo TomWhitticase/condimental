@@ -16,10 +16,22 @@ that is a discussion, not a merge. -->
   - [ ] `cargo test -p sim_core`
   - [ ] `cargo test -p voxgen`
   - [ ] `scripts/verify-core-loop.sh` (30 headless Godot markers + PASS)
-  - [ ] `scripts/screenshot-scene.sh <flags>` — and what the PNG showed, in
-        words. Required for any presentation change; the PNG is gitignored
-        and cannot be attached from a headless run.
+  - [ ] `scripts/screenshot-scene.sh <flags>` — the PNG goes under
+        Screenshots below, and what it showed goes in words here.
 Anything sim-core needs a headless test covering it (ARCHITECTURE §10). -->
+
+## Screenshots
+
+<!-- REQUIRED, on every PR — CI fails a body with no image in it.
+Render the frame that shows this change (`scripts/screenshot-scene.sh out.png
+1600x900 <flag>`), read the PNG, then publish it:
+
+    scripts/pr-screenshot.sh out.png
+
+and paste the markdown it prints below, each image with a line saying what it
+shows and what to look at. For a change with no visual surface, show the state
+it affects — the panel whose numbers moved, or the demo line at this commit.
+Name the PNG after its subject: the file name becomes the caption. -->
 
 ## Record-keeping
 

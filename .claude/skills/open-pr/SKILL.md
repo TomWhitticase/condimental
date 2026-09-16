@@ -1,6 +1,6 @@
 ---
 name: open-pr
-description: Ship finished work through GitHub — branch, push, open a pull request with gh, watch its checks and merge it. Use when a change is complete and needs to reach main, or when you are about to commit and find yourself on main, or when you catch yourself about to merge or push main locally.
+description: Ship finished work through GitHub — branch, push, screenshot the change, open a pull request with gh, watch its checks and merge it. Use when a change is complete and needs to reach main, or when you are about to commit and find yourself on main, or when you catch yourself about to merge or push main locally.
 ---
 
 # Getting work onto `main`
@@ -40,24 +40,52 @@ headless test covering it before it merges (ARCHITECTURE §10).
 Decide the DEVLOG question and the decision-record question here too — both
 belong in the same PR as the change, not in a follow-up.
 
-## 3. Push and open the PR
+## 3. Screenshot the change — every PR, no exceptions
+
+**A PR body that embeds no image does not open.** A `PreToolUse` hook refuses
+the command and CI fails the PR; both exist because "visual changes only" rots
+into nobody rendering anything. The change under review is a frame, so show it.
+
+```
+scripts/screenshot-scene.sh shot.png 1600x900 --board   # the flag that shows it
+```
+
+Pick the one fixture or panel this branch touches (the `screenshot-review`
+skill lists every flag), **read the PNG** — a shot nobody looked at has
+verified nothing — and then publish it:
+
+```
+scripts/pr-screenshot.sh shot.png        # prints ![caption](url), ready to paste
+```
+
+That pushes to `pr-media`, an orphan branch never merged into `main`, and
+prints a link form that renders in this private repo (a
+`raw.githubusercontent.com` URL does not — do not hand-write one). The file
+name becomes the caption, so name the PNG after its subject.
+
+**A change with no visual surface still gets a screenshot**: show the state it
+affects — the panel whose numbers moved, the line that backs up, or the demo
+line (`--build`) as it stands at this commit. Say beside the image what it
+shows and what to look at.
+
+## 4. Push and open the PR
 
 ```
 git push -u origin HEAD
-gh pr create --fill          # --title/--body when it deserves a written-up description
+gh pr create --title "…" --body "…"      # --fill holds no image, so it cannot pass
 ```
 
 `.github/pull_request_template.md` is the body's shape: what changed and why,
-**the commands actually run to verify it and what they said**, the
-DEVLOG/decision calls, and `Closes #N` for every issue it settles. For a
-visual change, put what the screenshot showed **in words** — the PNG is
-gitignored and cannot be attached from a headless run.
+**the commands actually run to verify it and what they said**, the screenshots
+under `## Screenshots`, the DEVLOG/decision calls, and `Closes #N` for every
+issue it settles. The image does not replace the words: what the screenshot
+showed still goes in "How it was verified".
 
 **File issues for anything you noticed and are not fixing** (the `file-issue`
 skill) and list them in the PR body, so the deferral is reviewable rather than
 buried in a session transcript.
 
-## 4. Watch it land
+## 5. Watch it land
 
 An open PR is unfinished work.
 
