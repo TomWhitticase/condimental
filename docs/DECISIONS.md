@@ -25,6 +25,86 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-16: **The hall is drawn in first person only; the isometric view
+  gets its air. And the main menu is centred.** Two things the owner sent
+  back after demoing the title-screen branch: "make the menu centred, at the
+  moment the main menu is to the left of the screen", and "when in isometric
+  view the skybox is messed up (it looks great in first person btw) so decide
+  on what to do with the skybox when we are in the isometric view".
+
+  **The artifact.** In the isometric view the hall's roof came out as a
+  handful of hard, near-white stripes fanning from the corners of the frame,
+  which slid sideways when the player panned. Rendered at two zooms
+  (`--build --closeup 0,0,320` and `--closeup 0,0,160`) to see it properly.
+  The cause is structural, not a bug in the shader: `factory_interior_sky.
+  gdshader` finds every surface by intersecting a viewer-centred box against
+  `EYEDIR`, and an **orthographic camera's rays are parallel**. The entire
+  screen therefore samples barely a degree of direction, so two or three roof
+  bays get magnified across 1600 pixels; and being a sky, it has no parallax
+  to pin it to the floor, so panning slides it. A painted infinite room
+  cannot be photographed with a parallel projection. Nothing about the first-
+  person view is affected — its rays fan out, which is exactly why the same
+  shader reads as a building there.
+
+  **What was rejected.** *Pre-render a panorama of the hall and show that in
+  isometric* — it goes stale the moment the voxel art or the lighting is
+  re-tuned, which is the defect `factory_environment.gd` exists to prevent.
+  *Fake a perspective `EYEDIR` from `SCREEN_UV` when the camera is
+  orthographic* — a sky shader does not know the camera, so it would need
+  per-frame uniforms pushed from `main.gd`, and it would paint a hall that
+  disagrees with the projection of everything in front of it. *Swap in a
+  different sky material in isometric* — that changes the sky-derived ambient
+  and reflections, so the factory's whole look would shift on TAB, which is
+  the one thing the shared environment is there to stop. *A giant slab quad
+  behind the world* — real geometry has an edge and occludes the camera as
+  the floor grows, which is why the backdrop is a sky in the first place.
+
+  **The rule.** `factory_environment.gd` gained
+  `set_backdrop_for(env, first_person)`, the single place that decides:
+  `BG_SKY` in first person, `BG_COLOR` at `HAZE_COLOR` (`#939495` — the very
+  colour every distant surface in the shader already fades to) in isometric.
+  So the hall is drawn where it reads and stands up to being looked at, and
+  the isometric view gets the same hall's *air*: the floor runs out into haze
+  instead of into a starburst, and pressing TAB reveals the room that haze
+  was standing in. `main.gd` holds the `WorldEnvironment` returned by
+  `build_into` and calls `_apply_backdrop_mode()` at build and on every TAB.
+  The title screen never calls it — its camera is perspective, so it keeps
+  the hall.
+
+  **Only the background changes**, and that is the point. The `Sky` resource
+  stays on the environment and stays `AMBIENT_SOURCE_SKY` /
+  `REFLECTION_SOURCE_SKY` in both modes. Verified rather than asserted: the
+  same isometric frame was rendered with the branch forced to `BG_SKY` and
+  then with the haze fill, and three sampled patches — floor tiles, the
+  machine cluster, a belt's shadowed side — came out **byte-identical**
+  ((155,154,144), (141,137,130), (123,122,118)); the only pixels that differ
+  are the background itself and a little glow bleed at its edge.
+
+  `test_presentation.gd` now asserts the whole rule, because it is a one-line
+  property with a purely rendered symptom — swap the two branches and every
+  other test still passes: a `Sky` with the interior shader and sky ambient
+  in *both* modes, `BG_COLOR` at exactly `HAZE_COLOR` in isometric, `BG_SKY`
+  after `_set_view_mode(FIRST_PERSON)`, the haze back on TAB, and the sky and
+  ambient source untouched by the round trip.
+
+  **The centred menu** reverses one clause of the title-screen record above,
+  which put the column "to one side of the vanishing point" so the plate
+  would not sit on the picture's subject. The owner looked at it and wanted
+  it centred, which is decisive — it is a title screen, and a centred plate
+  is what both reference games do. So the column and the plate are
+  `SIZE_SHRINK_CENTER`, the wordmark is centre-aligned, and the scrim became
+  a symmetric four-stop gradient (`SCRIM_CORE`, opaque across the middle 40%,
+  falling to clear at both edges) instead of the one-sided ramp. That leaves
+  the plate on the composition's middle, so the composition moved to suit it:
+  `title_scene.gd`'s camera was re-framed to `Vector3(2.8 * TILE, 4.9,
+  8.4 * TILE)` at yaw -6, which puts tomatoes riding into the crusher in the
+  left third and bottles coming out of the bottler in the right third —
+  "sugar in, sauce out" spread across the frame with the menu in the gap.
+  Four framings were rendered and rejected first: pulled back at yaw -30 and
+  -33 (one dead half of the screen; the foreground hopper cropped), and a
+  distant broadside at yaw -8 (the chain too small to read).
+
+
 - 2026-09-16: **The main menu is a title screen: the factory itself, hand
   composed, behind the menu.** The owner asked for "a splash screen similar
   to minecraft/factorio using our assets". Both of those games open on the

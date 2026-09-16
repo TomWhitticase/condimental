@@ -83,11 +83,14 @@ const SPLASH_LINES := [
 ## the player what the game is, which a charcoal rectangle cannot.
 ##
 ## The scrim below is the price of putting text over a photograph: a dark
-## wash across the side the menu column sits on, so the wordmark and the
-## buttons keep their contrast wherever the drifting camera happens to be.
-const SCRIM_INK := Color(0.03, 0.03, 0.04, 0.88)
-## How far across the screen the scrim has faded out entirely.
-const SCRIM_SPAN := 0.62
+## wash behind the menu column, so the wordmark and the buttons keep their
+## contrast wherever the drifting camera happens to be. It is centred with
+## the column and falls away to nothing at both edges, leaving the hall
+## itself clear on either side of the menu.
+const SCRIM_INK := Color(0.03, 0.03, 0.04, 0.82)
+## Where the wash is at full strength (0 = left edge, 1 = right edge). The
+## band is symmetric about the middle, so these are mirrored.
+const SCRIM_CORE := 0.30
 ## **Every size here is measured in `main.gd`'s `UI_SCALE`**, read from that
 ## script rather than repeated, so the menu and the HUD cannot drift apart
 ## (the menu was written alongside the 2026-09-09 UI-scale pass and
@@ -97,10 +100,11 @@ const SCRIM_SPAN := 0.62
 const MainScript := preload("res://main.gd")
 var UI_SCALE: float = MainScript.UI_SCALE
 
-## How far in from the left edge the menu column stands. The column is on
-## one side rather than centred because the backdrop is a photograph now:
-## a panel in the middle of it covers the vanishing point the whole
-## composition is aimed at.
+## The gutter the menu column keeps from either edge of the screen. The
+## column itself is CENTRED — the owner's call, and the one both Minecraft
+## and Factorio make: a title screen's menu is the thing you came to press,
+## and standing it off to one side to protect the composition behind it puts
+## the decoration first. The backdrop was reframed around that instead.
 var COLUMN_MARGIN: float = 86.0 * UI_SCALE
 
 ## The same 15px design base `main.gd`'s `UI_FONT_BASE` uses; every font
@@ -199,9 +203,14 @@ func _build_backdrop() -> void:
 	# screen. Without it the wordmark sits over whatever the drifting camera
 	# is pointing at — a lit skylight one minute, a dark plinth the next —
 	# and an outline alone cannot hold text against both.
+	var clear := Color(SCRIM_INK.r, SCRIM_INK.g, SCRIM_INK.b, 0.0)
 	var gradient := Gradient.new()
-	gradient.set_color(0, SCRIM_INK)
-	gradient.set_color(1, Color(SCRIM_INK.r, SCRIM_INK.g, SCRIM_INK.b, 0.0))
+	# Four stops: clear at both edges, full across the middle where the
+	# column stands. `Gradient` starts with two, so the inner pair is added.
+	gradient.set_color(0, clear)
+	gradient.set_color(1, clear)
+	gradient.add_point(SCRIM_CORE, SCRIM_INK)
+	gradient.add_point(1.0 - SCRIM_CORE, SCRIM_INK)
 	var texture := GradientTexture2D.new()
 	texture.gradient = gradient
 	texture.width = 256
@@ -213,9 +222,7 @@ func _build_backdrop() -> void:
 	scrim.name = "Scrim"
 	scrim.texture = texture
 	scrim.stretch_mode = TextureRect.STRETCH_SCALE
-	scrim.set_anchors_and_offsets_preset(Control.PRESET_LEFT_WIDE)
-	scrim.anchor_right = SCRIM_SPAN
-	scrim.offset_right = 0.0
+	scrim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	scrim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(scrim)
 
@@ -254,7 +261,7 @@ func _build_panel() -> void:
 	var column := VBoxContainer.new()
 	column.name = "MenuColumn"
 	column.alignment = BoxContainer.ALIGNMENT_CENTER
-	column.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	column.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	column.add_theme_constant_override("separation", _i(10))
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margins.add_child(column)
@@ -265,7 +272,7 @@ func _build_panel() -> void:
 	panel.name = "MenuPanel"
 	panel.add_theme_stylebox_override("panel", style)
 	panel.custom_minimum_size = Vector2(PANEL_MIN_WIDTH, 0.0)
-	panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	column.add_child(panel)
 
 	_root_box = VBoxContainer.new()
@@ -308,7 +315,8 @@ func _build_panel() -> void:
 ## The wordmark, the tagline and the splash line — the top of the column,
 ## outside the panel. Minecraft and Factorio both put the game's name over
 ## the art rather than inside a box, and that is the whole difference between
-## a title screen and a dialog.
+## a title screen and a dialog. All of it is centred on the same axis as the
+## plate below, so the screen reads as one column down the middle.
 func _build_wordmark(column: VBoxContainer) -> void:
 	var title := Label.new()
 	title.name = "Title"
@@ -317,7 +325,7 @@ func _build_wordmark(column: VBoxContainer) -> void:
 	# rather than a background.
 	title.label_settings = _settings(TITLE_FONT_SIZE, HAZARD, _i(9))
 	title.text = "SAUCE FACTORY"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(title)
 
 	# The tagline and the splash share one row, so the splash sits off the
@@ -333,7 +341,7 @@ func _build_wordmark(column: VBoxContainer) -> void:
 	subtitle.name = "Subtitle"
 	subtitle.label_settings = _settings(SUBTITLE_FONT_SIZE, INK, _i(5))
 	subtitle.text = "condiment production, automated"
-	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	subtitle.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	subtitle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	strap.add_child(subtitle)

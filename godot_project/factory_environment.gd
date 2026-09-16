@@ -12,6 +12,11 @@
 ## Reached by `preload`, never `class_name` (godot_project/CLAUDE.md).
 extends RefCounted
 
+## The hall's air: the colour every distant surface in the sky shader fades
+## to, and — see `set_backdrop_for` — what the isometric view shows in place
+## of the hall itself. Stated once and passed to the shader below.
+const HAZE_COLOR := Color("#939495")
+
 
 ## UI_UX.md §4: real-time dynamic lighting with soft shadows, light ambient
 ## occlusion in voxel crevices, and mild bloom on emissives — the
@@ -35,7 +40,7 @@ extends RefCounted
 ##
 ## Colours below are palette.ron's, by name, so the backdrop is made of the
 ## same industrial greys as the voxel models standing in front of it.
-static func build_into(parent: Node) -> void:
+static func build_into(parent: Node) -> WorldEnvironment:
 	var sky_material := ShaderMaterial.new()
 	sky_material.shader = preload("res://factory_interior_sky.gdshader")
 	sky_material.set_shader_parameter("deck_color", Color("#3A3C40"))      # painted deck, below steel_dark
@@ -50,7 +55,7 @@ static func build_into(parent: Node) -> void:
 	# The haze is what the eye reads as "this hall goes on" — lighter than the
 	# surfaces it swallows, as lit dust actually is, but kept neutral: a warm
 	# haze tints the ambient, and the concrete floor then photographs beige.
-	sky_material.set_shader_parameter("haze_color", Color("#939495"))
+	sky_material.set_shader_parameter("haze_color", HAZE_COLOR)
 
 	var sky := Sky.new()
 	sky.sky_material = sky_material
@@ -93,11 +98,6 @@ static func build_into(parent: Node) -> void:
 	# flattened the whole factory into one haze-grey value and cost more
 	# contrast than the atmosphere was worth.
 
-	var world_env := WorldEnvironment.new()
-	world_env.name = "Environment"
-	world_env.environment = env
-	parent.add_child(world_env)
-
 	# Key light: warm, shadow-casting, angled so machinery casts shadows
 	# across the belt line rather than straight down it. Steeper than the
 	# original -52 now that it stands in for the roof's high-bay fittings
@@ -132,3 +132,43 @@ static func build_into(parent: Node) -> void:
 	fill.light_energy = 0.4
 	fill.shadow_enabled = false
 	parent.add_child(fill)
+
+	var world_env := WorldEnvironment.new()
+	world_env.name = "Environment"
+	world_env.environment = env
+	parent.add_child(world_env)
+	return world_env
+
+
+## Which backdrop a camera gets, and the one thing about this hall that is
+## NOT the same in both view modes.
+##
+## The hall is a sky: every surface of it is at infinity and is found by
+## intersecting a box against `EYEDIR`. That needs rays that fan out, and an
+## **orthographic camera's rays are parallel** — the whole screen samples
+## barely a degree of direction, so two or three roof bays get magnified into
+## hard white stripes that fan across the corners of the frame and slide
+## sideways as the player pans, since a sky has no parallax to pin them to
+## the floor. It is not a bug in the shader; a painted infinite room simply
+## cannot be photographed with a parallel projection.
+##
+## So the hall is drawn where it reads and stands up to being looked at —
+## first person, which is where the player actually looks around — and the
+## isometric view gets the same hall's AIR instead: a flat fill of the very
+## colour every distant surface in the shader fades to, so the floor runs out
+## into haze rather than into a starburst. Pressing TAB then reveals the room
+## that haze was standing in, which is the right way round.
+##
+## **Only the background changes.** The sky resource stays on the environment
+## and stays the ambient and reflection source in both modes (that is what
+## fills the shadowed side of every voxel and puts a roof in the stainless),
+## so the factory itself is lit identically either way and TAB changes what is
+## BEHIND the world, not the world.
+static func set_backdrop_for(env: Environment, first_person: bool) -> void:
+	if env == null:
+		return
+	if first_person:
+		env.background_mode = Environment.BG_SKY
+	else:
+		env.background_mode = Environment.BG_COLOR
+		env.background_color = HAZE_COLOR

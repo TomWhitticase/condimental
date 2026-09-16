@@ -22,6 +22,7 @@
 extends SceneTree
 
 const Layouts = preload("res://test_layouts.gd")
+const FactoryEnvironment = preload("res://factory_environment.gd")
 
 
 func _fail(msg: String) -> void:
@@ -92,8 +93,8 @@ func _initialize() -> void:
 	if not env.glow_enabled:
 		_fail("glow disabled — UI_UX.md §4 asks for mild bloom on emissives")
 		return
-	if env.background_mode != Environment.BG_SKY or env.sky == null:
-		_fail("background must be the sky (BG_SKY with a Sky resource), not a flat void colour — see main.gd's own note on why a flat BG_COLOR read as an empty void once first-person mode let you look around")
+	if env.sky == null:
+		_fail("the environment must carry a Sky resource in BOTH view modes — it is the ambient and reflection source, not just the backdrop, and dropping it leaves every shadowed voxel face unlit")
 		return
 	# The backdrop is the inside of a factory hall, not weather (UI_UX.md §3).
 	# Asserted here because it is invisible to every other check: the
@@ -110,6 +111,33 @@ func _initialize() -> void:
 		return
 	if env.ambient_light_source != Environment.AMBIENT_SOURCE_SKY:
 		_fail("ambient must come from that sky — an interior lights the scene it stands in, and the shadowed faces of a voxel model have nothing else filling them")
+		return
+
+	# --- Which backdrop each view mode gets -------------------------------
+	# A sky is found by intersecting a box against EYEDIR, which needs rays
+	# that fan out; the isometric camera's are parallel, so the hall came out
+	# as hard stripes fanning from the corners. So the hall is DRAWN in first
+	# person and stood in for by its own haze colour in the isometric view
+	# (`factory_environment.gd`'s `set_backdrop_for`). Asserted because it is
+	# a one-line property with a rendered symptom: swap the two branches and
+	# every test still passes.
+	if env.background_mode != Environment.BG_COLOR:
+		_fail("the isometric view must fill the background with the hall's haze (BG_COLOR), not draw the sky — an orthographic camera turns the hall into a starburst")
+		return
+	if not env.background_color.is_equal_approx(FactoryEnvironment.HAZE_COLOR):
+		_fail("the isometric backdrop must be the shader's own haze colour %s, was %s — any other colour leaves a visible edge where the floor runs out" % [FactoryEnvironment.HAZE_COLOR, env.background_color])
+		return
+	main._set_view_mode(main.ViewMode.FIRST_PERSON)
+	if env.background_mode != Environment.BG_SKY:
+		_fail("first person must draw the hall itself (BG_SKY) — that is the view the sky shader exists for")
+		return
+	main._set_view_mode(main.ViewMode.ISOMETRIC)
+	if env.background_mode != Environment.BG_COLOR:
+		_fail("TAB back to isometric must restore the haze fill")
+		return
+	# Only the BACKGROUND changes: the factory is lit identically either way.
+	if env.sky == null or env.ambient_light_source != Environment.AMBIENT_SOURCE_SKY:
+		_fail("switching view modes must not touch the sky or the ambient source — TAB changes what is BEHIND the world, not the world")
 		return
 
 	# --- Assets: real voxel meshes, and metal is shinier than matte -------

@@ -37,6 +37,12 @@ below is history and should only ever be appended to.)*
 - **The world is indoors (2026-09-16).** The backdrop is a factory-interior
   sky shader, not weather, and the scene's lighting is the hall's rather than
   a sun's. See the log entry below.
+- **The hall is drawn in first person only (2026-09-16).** The isometric view
+  fills its background with the hall's own haze colour instead — a sky is
+  intersected against `EYEDIR` and an orthographic camera's rays are
+  parallel, so the roof came out as stripes fanning from the corners. The sky
+  stays the ambient and reflection source in both modes, so the factory is
+  lit identically either way (`factory_environment.gd`'s `set_backdrop_for`).
 - **The menu is a title screen (2026-09-16).** The game opens on the factory
   itself — a hand-composed 3D still life of the shipped chain in the same
   hall, with a drifting camera, a big wordmark and a daily splash line — not
@@ -111,6 +117,44 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-16 — the hall in first person, its air in isometric; menu centred
+
+Two notes back from the owner's demo of the title-screen branch.
+
+**"When in isometric view the skybox is messed up (it looks great in first
+person btw)."** It was, and for a reason worth writing down. The hall is a
+*sky*: every surface of it is found by intersecting a box against `EYEDIR`,
+which needs rays that fan out. An **orthographic camera's rays are
+parallel**, so the entire screen sampled barely a degree of direction and two
+or three roof bays were magnified into hard stripes fanning from the corners
+— sliding sideways as the player panned, since a sky has no parallax to pin
+it to the floor. Not a bug in the shader; a painted infinite room simply
+cannot be photographed with a parallel projection.
+
+So the hall is drawn where it reads and stands up to being looked at — first
+person — and the isometric view gets the same hall's **air**:
+`factory_environment.gd`'s new `set_backdrop_for` fills the background with
+`HAZE_COLOR`, the very colour every distant surface in the shader fades to,
+so the floor runs out into haze rather than into a starburst. Pressing TAB
+then reveals the room that haze was standing in, which is the right way
+round. **Only the background changes** — the sky stays the ambient and
+reflection source in both modes, checked rather than assumed: the same
+isometric frame rendered both ways came out byte-identical on the floor
+tiles, the machine cluster and a belt's shadowed side.
+`test_presentation.gd` now asserts the whole rule, because it is a one-line
+property whose only symptom is a rendered frame.
+
+**"Make the menu centred."** Done — the column and the plate are
+`SIZE_SHRINK_CENTER`, the wordmark is centre-aligned and the scrim became a
+symmetric four-stop gradient. That put the plate over the composition's
+middle, so the composition moved: `title_scene.gd`'s camera was re-framed
+(four framings rendered and rejected first) to put tomatoes riding into the
+crusher in the left third and bottles coming out of the bottler in the right
+— "sugar in, sauce out" spread across the frame with the menu in the gap.
+This reverses the previous entry's "column set to one side of the vanishing
+point", which is why it is argued in `docs/DECISIONS.md` rather than quietly
+replaced.
 
 ### 2026-09-16 — a title screen: the factory behind the menu
 

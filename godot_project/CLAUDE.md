@@ -41,6 +41,13 @@ Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
   exception is the title screen (`title_scene.gd`'s camera drift,
   `menu.gd`'s splash pulse): there is no simulation on that screen to take a
   tick from.
+- **The hall is drawn in first person, never in isometric.** A sky is
+  intersected against `EYEDIR`; an orthographic camera's rays are parallel,
+  so it comes out as stripes fanning from the corners.
+  `factory_environment.gd`'s `set_backdrop_for` is the one place that
+  decides, called from `main.gd`'s `_apply_backdrop_mode` at build and on
+  every TAB. **Only `background_mode` changes** — the `Sky` stays the ambient
+  and reflection source in both modes, or the factory's look shifts on TAB.
 - **Never colour alone** (UI_UX §7): pair every status colour with a glyph,
   word, shape or position.
 - **One meter language**: `_build_meter`/`_set_meter` only. A bar exists

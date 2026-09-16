@@ -44,8 +44,9 @@ const FLOOR_TO := Vector2i(34, 20)
 ## Eye height. `factory_interior_sky.gdshader`'s `floor_drop` puts the hall's
 ## slab 5 units below the VIEWER (a sky has no parallax), and first person
 ## stands at `TILE * 1.5` = 4.8, so a camera near that height is the one that
-## makes the painted slab and the real floor tiles line up.
-const CAMERA_HEIGHT := 5.2
+## makes the painted slab and the real floor tiles line up. It is also the
+## height a person would see this from, which is the point of the shot.
+const CAMERA_HEIGHT := 4.9
 
 ## The chain, west to east, exactly the order `data/recipes.ron` runs it in:
 ## hopper, crusher, mixer, the 2x2 cooking vat, bottler, packer, dock, with
@@ -144,18 +145,30 @@ func _process(delta: float) -> void:
 	_camera.rotation_degrees.y = _camera_yaw() + phase * DRIFT_YAW
 
 
-## Where the camera sits at the middle of its drift: off the west end of the
-## line, low enough to be standing on the floor rather than looking down at a
-## diagram, and turned so the chain runs away from the viewer into the haze.
+## Where the camera sits at the middle of its drift: south of the line and
+## roughly level with its middle, looking at it nearly broadside, low enough
+## to be standing on the floor rather than looking down at a diagram.
+##
+## The framing is **built around a centred menu**. The plate covers the
+## middle of the screen, so the two things worth seeing are put either side
+## of it: tomatoes riding into the crusher on the left, bottles coming out of
+## the bottler on the right — "sugar in, sauce out" spread across the frame
+## with the menu in the gap. An earlier version looked down the line from its
+## west end, which read well under a menu standing off to one side and left
+## one dead half of the screen once the menu moved to the middle.
+##
 ## The whole composition is judged in a rendered frame
-## (`scripts/screenshot-scene.sh out.png 1600x900 --menu`), not from these
+## (`scripts/screenshot-scene.sh out.png 1600x900 --title`), not from these
 ## numbers — UI_UX.md §2b point 12.
 func _camera_home() -> Vector3:
-	return Vector3(-3.1 * TILE, CAMERA_HEIGHT, 4.2 * TILE)
+	return Vector3(2.8 * TILE, CAMERA_HEIGHT, 8.4 * TILE)
 
 
+## Barely turned off broadside — just enough that the belts and machine faces
+## are not perfectly flat to the screen, which would read as an elevation
+## drawing rather than a photograph.
 func _camera_yaw() -> float:
-	return -35.0
+	return -6.0
 
 
 func _build_camera() -> void:

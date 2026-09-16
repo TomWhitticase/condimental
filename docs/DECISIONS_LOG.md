@@ -18,6 +18,29 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-16 **The hall is drawn in first person only; the isometric view
+  gets its air.** Owner's playtest ("when in isometric view the skybox is
+  messed up… decide what to do with it"). A sky is found by intersecting a
+  box against `EYEDIR`, which needs rays that fan out; an **orthographic
+  camera's rays are parallel**, so the whole screen sampled barely a degree
+  of direction and two or three roof bays were magnified into hard stripes
+  fanning from the corners, sliding as the player panned. It is not a shader
+  bug — a painted infinite room cannot be photographed with a parallel
+  projection. `factory_environment.gd`'s `set_backdrop_for(env, first_person)`
+  is now the one place that decides: `BG_SKY` in first person, `BG_COLOR` at
+  `HAZE_COLOR` (the very colour every distant surface in the shader fades to)
+  in isometric. **Only the background changes** — the `Sky` stays on the
+  environment and stays the ambient and reflection source in both modes, so
+  the factory is lit identically either way and TAB changes what is BEHIND
+  the world, not the world. `main.gd` calls it from `_apply_backdrop_mode`,
+  at build and on every TAB; the title screen is perspective and keeps the
+  sky. **Also: the main menu's column is CENTRED**, reversing the previous
+  entry's "a column set to one side of the vanishing point" — the owner asked
+  for it centred, the scrim became a symmetric four-stop gradient, and
+  `title_scene.gd`'s camera was re-framed around it (tomatoes in on the left,
+  bottles out on the right, plate over the middle).
+  Full record in `docs/DECISIONS.md`.
+
 - 2026-09-16 **The main menu is a title screen: the factory itself, hand
   composed, behind the menu.** Owner's brief ("a splash screen similar to
   minecraft/factorio using our assets"). This **reverses** the earlier "flat

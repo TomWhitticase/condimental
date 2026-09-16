@@ -1544,6 +1544,9 @@ var _crosshair: Control # visible only in FIRST_PERSON — see _set_view_mode
 
 enum ViewMode { ISOMETRIC, FIRST_PERSON }
 var _view_mode: int = ViewMode.ISOMETRIC
+## The hall's environment, kept because the two view modes want different
+## BACKDROPS out of it — see `_apply_backdrop_mode`.
+var _world_environment: WorldEnvironment
 
 ## belt origin tile (as a "x,y" key) -> the BELT_SHAPE_* it was drawn as,
 ## recorded at rebuild from the placement's `links`. Read by
@@ -3885,6 +3888,7 @@ func _set_view_mode(mode: int) -> void:
 		return
 	_view_mode = mode
 	_update_crosshair_visibility()
+	_apply_backdrop_mode()
 
 	if mode == ViewMode.FIRST_PERSON:
 		_iso_dragging = false
@@ -3970,7 +3974,21 @@ func _framing_size(basis: Basis) -> float:
 ## the same hall, and a menu lit differently from the game would be the one
 ## screen that does not look like the game.
 func _build_environment() -> void:
-	FactoryEnvironment.build_into(self)
+	_world_environment = FactoryEnvironment.build_into(self)
+	_apply_backdrop_mode()
+
+
+## The hall is drawn behind the world in first person and stood in for by its
+## own haze in the isometric view — a sky cannot be photographed with a
+## parallel projection. `factory_environment.gd`'s `set_backdrop_for` carries
+## the reasoning; this is only the call site, which is every place the view
+## mode is decided (build, and TAB).
+func _apply_backdrop_mode() -> void:
+	if _world_environment == null:
+		return
+	FactoryEnvironment.set_backdrop_for(
+		_world_environment.environment, _view_mode == ViewMode.FIRST_PERSON
+	)
 
 
 # --------------------------------------------------------------------------
