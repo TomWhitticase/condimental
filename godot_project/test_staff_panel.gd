@@ -263,6 +263,15 @@ func _run_checks() -> void:
 		_fail("the row state carries the button's own text")
 	if main._staff_row_state({"id": "manufacturing"})["fire_text"] != "FIRE −1":
 		_fail("FIRE says it removes one head")
+	# Notice pay is the one staffing rule whose consequence lands after the
+	# decision, and FIRE is the button a player reaches for in exactly the
+	# payday it will not rescue them from. The warning has to be ON the
+	# button, not only in the legend at the foot of the panel.
+	var fire_notice := String(main._staff_row_state({"id": "manufacturing"})["fire_tooltip"])
+	if not fire_notice.to_lower().contains("notice pay"):
+		_fail("FIRE does not warn about notice pay ('%s')" % fire_notice)
+	if String(_row("manufacturing")["fire_button"].tooltip_text) != fire_notice:
+		_fail("the FIRE button carries no notice-pay tooltip")
 	if main._staff_hire_blocked_text({"can_hire": true, "wage": 2}, {}) != "":
 		_fail("a hireable row says nothing extra")
 	var blocked_snapshot := {
@@ -436,19 +445,14 @@ func _run_checks() -> void:
 	if main._staff_unpaid_count_if_payday_now(zero_wage_snapshot) != 0:
 		_fail("a zero-wage head is never unpaid, even mid-cascade, got %d" % main._staff_unpaid_count_if_payday_now(zero_wage_snapshot))
 
-	# --- 2b. the clipboard's always-visible wages line, pure ------------------
-	# The bill is on the HUD the player is already looking at, not only inside
-	# the H panel (the quality pass, ticket 4). Same bill and same clock as the
-	# footer above, so the two readouts can never disagree.
-	var paid: Dictionary = main._contract_wages_state(snapshot, 1700, 500.0)
-	if paid.is_empty():
-		_fail("a factory with heads on the books shows a wages line")
-	if String(paid["text"]).find("wages 16") < 0:
-		_fail("the wages line names the bill, got '%s'" % paid["text"])
-	if String(paid["text"]).find("payday in %s" % expected_wait) < 0:
-		_fail("the wages line counts down in seconds, got '%s'" % paid["text"])
-	if bool(paid["short"]):
-		_fail("500 covers a bill of 16, so the line is not in its warning state")
+	# --- 2b. the clipboard's wages WARNING, pure ------------------------------
+	# The clipboard is the ALARM now, not the readout: since the CREW plate
+	# (2026-09-16) the bill and the countdown are permanently on screen four
+	# inches below this line, so printing them here too would be the same
+	# sentence twice in one frame. What the clipboard keeps is the half the
+	# plate cannot do as well — the warning, beside the balance it is about.
+	if not main._contract_wages_state(snapshot, 1700, 500.0).is_empty():
+		_fail("a balance that covers the bill leaves the clipboard silent; the CREW plate has the figure")
 
 	# Short of the bill: the warning names the gap in figures AND words beside
 	# a glyph, because colour is never the whole message (UI_UX.md §7).
@@ -480,7 +484,13 @@ func _run_checks() -> void:
 	if not bool(owed["short"]) or String(owed["text"]).find("short 4") < 0:
 		_fail("the wire's shortfall is quoted verbatim, got '%s'" % owed["text"])
 	if main._staff_footer_text(notice, 1700).find("wages 20 / period") < 0:
-		_fail("the H panel footer quotes the same bill as the clipboard line")
+		_fail("the H panel footer quotes the same bill as the clipboard warning")
+	# And so does the plate, which is the readout the warning replaced.
+	var plate_footer := String(main._crew_plate_state(notice, 1700)["payday_text"])
+	if plate_footer.find("wages 20") < 0:
+		_fail("the CREW plate quotes the wire's bill, got '%s'" % plate_footer)
+	if plate_footer.find("payday in %s" % expected_wait) < 0:
+		_fail("the CREW plate counts down in seconds, got '%s'" % plate_footer)
 
 	# Nothing honest to say beats a cost that does not exist.
 	if not main._contract_wages_state({}, 1700, 500.0).is_empty():
@@ -767,17 +777,25 @@ func _run_checks() -> void:
 	var fill_style: StyleBoxFlat = fill.get_theme_stylebox("panel")
 	if fill_style.bg_color != main.METER_FILL_WARN:
 		_fail("the short row's bar is drawn in the warning colour")
-	# And the strip on the always-visible clipboard says it with NO panel
-	# open, which is the whole point of it (the staffing ticket,
-	# requirement 1). It is drawn by the clipboard's own update, so drive
-	# that rather than waiting on a frame.
+	# And the CREW plate says it with NO panel open, which is the whole point
+	# of it (the staffing ticket, requirement 1). The alarm is the heading
+	# and the border; which categories and how many is the rows beneath.
 	main._update_staff_panel()
+	main._update_staff_alert()
+	main._update_crew_panel()
+	if main._crew_hint.text.find("SHORT-STAFFED") < 0:
+		_fail("an understaffed factory wears the alarm with no panel open, got '%s'" % main._crew_hint.text)
+	if main._crew_hint.label_settings != main._crew_hint_warn:
+		_fail("the alarm is not in the warning ink")
+	if main._crew_plate_style.border_color != main.METER_FILL_WARN:
+		_fail("the CREW plate's border does not carry the alarm")
+	if main._crew_row_nodes["manufacturing"]["chip_label"].text.find("HIRE") < 0:
+		_fail("the short row names the heads to hire, got '%s'" % main._crew_row_nodes["manufacturing"]["chip_label"].text)
+	# The board hint is back up beside it: they are on different plates now,
+	# so issue #13's one-hint-at-a-time trade no longer applies.
 	main._update_contract_panel()
-	if not main._staff_alert_panel.visible:
-		_fail("an understaffed factory wears the SHORT-STAFFED strip with no panel open")
-	for needle in ["SHORT-STAFFED", "manufacturing", "press H"]:
-		if main._staff_alert_label.text.find(needle) < 0:
-			_fail("the clipboard strip says '%s', got '%s'" % [needle, main._staff_alert_label.text])
+	if not main._contract_hint_label.visible:
+		_fail("the board hint yields to an alarm that is no longer on the clipboard")
 	# The panel's own verdict is the same fact, one sentence, under the heading.
 	if main._staff_summary_label.text.find("\u25b2 2 short") < 0:
 		_fail("the panel leads with its verdict, got '%s'" % main._staff_summary_label.text)
@@ -803,9 +821,11 @@ func _run_checks() -> void:
 	if _category("manufacturing").get("short", 0) != 0:
 		_fail("nobody is short once the crew is hired back")
 	main._poll_staff()
-	main._update_contract_panel()
-	if main._staff_alert_panel.visible:
-		_fail("the strip disappears entirely once nothing is short — it never reads '0 short'")
+	main._update_staff_alert()
+	if main._crew_hint.text.find("SHORT-STAFFED") >= 0:
+		_fail("the alarm clears entirely once nothing is short — it never reads '0 short'")
+	if main._crew_plate_style.border_color != main.CREW_PANEL_ACCENT:
+		_fail("the CREW plate's border stays red after the crew is hired back")
 	main._set_staff_open(true)
 	main._update_staff_panel()
 	if main._staff_summary_label.text.find("\u2714") < 0:

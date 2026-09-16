@@ -633,18 +633,20 @@ func _sweep_step() -> bool:
 ## False when the case failed (`_fail` has already asked to quit).
 func _check_docket_case(strip: bool, window: Vector2i) -> bool:
 	var where := "%s (strip %s)" % [str(window), "up" if strip else "down"]
-	if main._staff_alert_panel.visible != strip:
-		_fail("the SHORT-STAFFED strip should be %s for this case at %s" % [
-			"up" if strip else "down", str(window)
+	# The alarm is on the CREW plate now (2026-09-16), not on the clipboard,
+	# so the clipboard's height no longer moves with it — which is what made
+	# the right-hand column fit at 1280x720 with three plates in it. Both
+	# cases still run: the snapshot drives the plate's heading and border,
+	# and the column must survive either.
+	if (main._crew_hint.text.find("SHORT-STAFFED") >= 0) != strip:
+		_fail("the CREW alarm should be %s for this case at %s (heading '%s')" % [
+			"up" if strip else "down", str(window), main._crew_hint.text
 		])
 		return false
-	# ONE hint line at a time (issue #13): the board hint and the strip say
-	# the same kind of thing in the same place, and the column cannot afford
-	# both. The strip is the one with a number in it, so the hint yields.
-	if main._contract_hint_label.visible == strip:
-		_fail("at %s the board hint and the strip are both %s — the column shows one hint line at a time" % [
-			where, "up" if strip else "down"
-		])
+	# Issue #13's trade is off: the board hint no longer competes with an
+	# alarm that is not on its plate.
+	if not main._contract_hint_label.visible:
+		_fail("at %s the board hint is down with nothing on the clipboard to yield to" % where)
 		return false
 
 	# Neither plate is drawn ON the other. This is the fault that outranks

@@ -1336,13 +1336,6 @@ var _staff_scroll_box: VBoxContainer
 var _staff_rules_label: Label
 ## The two row skins, plain and SHORT, built once by `_staff_row_style`.
 var _staff_row_styles: Dictionary = {}
-## The always-visible SHORT-STAFFED strip on the clipboard, and its own ink.
-## The one thing outside this panel that says the factory is understaffed
-## (the staffing ticket's requirement 1); hidden entirely when nothing is
-## short. See `_staff_alert_state` / `_update_staff_alert`.
-var _staff_alert_panel: PanelContainer
-var _staff_alert_label: Label
-var _staff_alert_settings: LabelSettings
 ## The shortfall the alert last showed, so the cue fires when the factory
 ## GOES short rather than on every frame it still is. -1 until the first
 ## poll, which primes it — a rebuild or a loaded save must not sound an
@@ -1434,12 +1427,6 @@ const STAFF_RULES := [
 	"payday bills every head employed for any part of the period, so firing just before one saves nothing",
 	"a head the money does not reach goes unpaid and idles until the next payday — unpaid twice and they leave",
 ]
-## The SHORT-STAFFED strip on the clipboard: the docket's own paper tone
-## (the card's, a shade darker than the sheet) inside the clipboard's ONE
-## warning red, so the alert adds no colour the board did not already own
-## (UI_UX.md §5). It is the only always-visible thing that says the factory
-## is understaffed.
-const STAFF_ALERT_BG := Color(0.83, 0.77, 0.60, 1.0)
 ## The active contract ids the clipboard saw on its last poll. The wire has
 ## no "contract lost" event — a lost contract simply stops being listed and
 ## reads `active: false` on the board — so the announcement is a diff of two
@@ -1541,6 +1528,16 @@ var _crew_panel: PanelContainer
 var _crew_rows: VBoxContainer
 var _crew_row_nodes: Dictionary = {}
 var _crew_payday_label: Label
+## The heading's right-hand word: the calm "H: hire", or the SHORT-STAFFED
+## alarm the clipboard used to carry (`_update_staff_alert`).
+var _crew_hint: Label
+var _crew_hint_calm: LabelSettings
+var _crew_hint_warn: LabelSettings
+## The plate's border, swapped to the warning red while the factory is short
+## so the alarm is visible from the far side of the screen — the glyph and
+## the words in the heading carry it on their own if the colour is not seen
+## (UI_UX.md §7).
+var _crew_plate_style: StyleBoxFlat
 var _crew_afford_label: Label
 var _larder_entries: Dictionary = {} # item id -> count Label
 var _stock_row_nodes: Dictionary = {} # item id -> HBoxContainer (dimmed at zero)
@@ -4805,44 +4802,15 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_wages_label.label_settings = _contract_wages_settings
 	body.add_child(_contract_wages_label)
 
-	# SHORT-STAFFED, on the always-visible clipboard (the staffing ticket's
-	# requirement 1). Until this strip, the ONLY thing in the game that said
-	# a machine was standing idle for want of a head was that machine's own
-	# hover — a fact the player had to go looking for, about a factory that
-	# had already stopped earning. It goes here, under the wage bill it is
-	# the other half of, rather than in a second toast convention: the money
-	# line, the wages line and this are one column about what the factory
-	# costs and what is stopping it.
-	#
-	# A strip rather than another line of text, because it has to be
-	# unmissable: the docket's paper inside the clipboard's ONE warning red
-	# (no new colour), its glyph and words carrying the message on their own
-	# if the colour is not seen at all (UI_UX.md §7). It is a CHILD of the
-	# clipboard, so it can never land on another fixed plate (§2b point 33) —
-	# the board simply grows a strip when the factory is short and loses it
-	# again when it is not.
-	var alert_style := StyleBoxFlat.new()
-	alert_style.bg_color = STAFF_ALERT_BG
-	alert_style.border_color = CONTRACT_LAST_CHANCE_COLOR
-	alert_style.set_border_width_all(_ui_i(2))
-	alert_style.set_content_margin_all(_ui_px(5.0))
-
-	_staff_alert_panel = PanelContainer.new()
-	_staff_alert_panel.name = "StaffAlert"
-	_staff_alert_panel.add_theme_stylebox_override("panel", alert_style)
-	_staff_alert_panel.visible = false
-	body.add_child(_staff_alert_panel)
-
-	_staff_alert_settings = LabelSettings.new()
-	_staff_alert_settings.font_size = _ui_font()
-	_staff_alert_settings.font_color = CONTRACT_LAST_CHANCE_COLOR
-	_staff_alert_settings.outline_size = 0
-
-	_staff_alert_label = Label.new()
-	_staff_alert_label.name = "StaffAlertLabel"
-	_staff_alert_label.label_settings = _staff_alert_settings
-	_staff_alert_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_staff_alert_panel.add_child(_staff_alert_label)
+	# SHORT-STAFFED used to be a two-line strip HERE, under the wage bill.
+	# The CREW plate took both jobs on 2026-09-16: it names the short
+	# categories and the heads to hire permanently, in warning red, on this
+	# same edge — so the strip was saying a second time what the plate says
+	# always, and its two lines were the difference between the right-hand
+	# column fitting at 1280x720 and the plate below it overlapping the one
+	# below that. The alarm did not go away; it moved to the plate that is
+	# about crew (`_update_staff_alert`), and the clipboard went back to
+	# being about contracts and money.
 
 	_checkbox_style_unchecked = StyleBoxFlat.new()
 	_checkbox_style_unchecked.bg_color = Color(0.80, 0.74, 0.57, 1.0) # a shade darker than the paper
@@ -6901,6 +6869,7 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	var fire_button := Button.new()
 	fire_button.name = "Fire_%s" % id
 	fire_button.text = "FIRE −1"
+	fire_button.tooltip_text = STAFF_FIRE_NOTICE
 	fire_button.focus_mode = Control.FOCUS_NONE
 	fire_button.custom_minimum_size = _ui_v(Vector2(84, 32))
 	fire_button.add_theme_font_size_override("font_size", _ui_font(-2))
@@ -7104,6 +7073,7 @@ func _staff_status_text(category: Dictionary) -> String:
 ##                  bill, not this row's own numbers)
 ##   hire_text      what the HIRE button's click does AND costs
 ##   fire_text      what FIRE's click does
+##   fire_tooltip   the notice-pay rule, on the button that springs it
 ##   status_text    `_staff_status_text`'s AFTER-payday line
 func _staff_row_state(category: Dictionary) -> Dictionary:
 	var headcount := int(category.get("headcount", 0))
@@ -7142,6 +7112,7 @@ func _staff_row_state(category: Dictionary) -> Dictionary:
 		"hire_enabled": bool(category.get("can_hire", true)) and required > 0,
 		"hire_text": _staff_hire_button_text(category),
 		"fire_text": "FIRE −1",
+		"fire_tooltip": STAFF_FIRE_NOTICE,
 		"status_text": _staff_status_text(category),
 	}
 
@@ -7165,6 +7136,21 @@ func _staff_working_text(assigned: int, headcount: int, required: int) -> String
 	if assigned <= 0:
 		return "none working this moment"
 	return "%d of %d working right now" % [assigned, headcount]
+
+
+## Notice pay, on the button that springs it.
+##
+## `StaffPools::fire` drops `headcount` but leaves `owed` alone, and payday
+## pays the heads who have already left FIRST (`staff.rs`, `pay_if_due`). So
+## firing to escape a payday you cannot afford does not work — it is the one
+## staffing rule whose consequence arrives after the decision, and the one a
+## player is most likely to reach for in exactly the moment it will not help.
+##
+## It is in the `STAFF_RULES` legend at the foot of the panel, but a rule
+## read once at the bottom of a panel is not a rule read at the moment of the
+## click. A tooltip rather than a line on the row: this is a warning about a
+## button, and it belongs on the button.
+const STAFF_FIRE_NOTICE := "Notice pay: this period's wages are already owed, and heads who have left are paid FIRST. Firing saves money from the NEXT payday, not this one."
 
 
 ## What a click on HIRE does and what it costs, on the button itself: the
@@ -7458,17 +7444,23 @@ func _announce_staff_payday(snapshot: Dictionary) -> void:
 		_show_contract_notice(text)
 
 
-## The clipboard's always-visible wages line, pure given the snapshot, the
-## tick and the balance (the quality pass, ticket 4). GAMEPLAY.md §5 makes
-## wages the third recurring cost axis, and until this line existed the bill
-## appeared ONLY inside the H panel — a charge the player pays every period
-## and could see only by going to look for it, unlike the ingredients in the
-## larder strip or the prices in the shop.
+## The clipboard's wages WARNING, pure given the snapshot, the tick and the
+## balance (the quality pass, ticket 4). GAMEPLAY.md §5 makes wages the third
+## recurring cost axis, and until this line existed the bill appeared ONLY
+## inside the H panel — a charge the player pays every period and could see
+## only by going to look for it.
 ##
-## Two states, and the difference between them is a warning the player can
-## still act on: ink while the balance covers the next bill, the docket's one
-## warning red when it does not, with the shortfall named in figures AND in
-## words beside a glyph, since colour is never the whole message (UI_UX.md
+## It was the calm line too, until the CREW plate arrived (2026-09-16). The
+## plate prints the bill and the countdown permanently, four inches below
+## this one on the same edge, so keeping both meant the same sentence twice
+## in one frame — against the one-fact-one-place rule this file opens with.
+## What the clipboard keeps is the half the plate cannot do as well: the
+## ALARM, next to the balance it is about. A player watching money sees the
+## warning where the money is; a player asking "what does my crew cost" reads
+## the plate. Calm state: nothing here at all.
+##
+## The warning names the shortfall in figures AND in words beside a glyph,
+## since colour is never the whole message (UI_UX.md
 ## §7). The clock goes through `_format_remaining`, so it reads in seconds
 ## like every other player-facing clock and never in ticks (§5e).
 ##
@@ -7488,7 +7480,8 @@ func _contract_wages_state(snapshot: Dictionary, current_tick: int, money: float
 			"text": "⚠ wages %d due in %s — short %d, unpaid heads leave" % [bill, due, shortfall],
 			"short": true,
 		}
-	return {"text": "wages %d / period  ·  payday in %s" % [bill, due], "short": false}
+	# Calm: silence. The CREW plate has the bill and the countdown, always up.
+	return {}
 
 
 ## Drives every row and the footer from the last poll. Called each frame
@@ -8463,7 +8456,9 @@ func _crew_plate_state(snapshot: Dictionary, current_tick: int) -> Dictionary:
 		)
 	return {
 		"rows": rows,
-		"payday_text": "payday in %s  ·  %d" % [_format_remaining(remaining), bill],
+		# Named, not bare: "payday in 18s · 10" left the 10 to be guessed at,
+		# and the two figures on this line are in different units.
+		"payday_text": "payday in %s  ·  wages %d" % [_format_remaining(remaining), bill],
 		"afford_text": afford_text,
 		"afford_warn": shortfall > 0,
 	}
@@ -8478,7 +8473,10 @@ func _crew_plate_state(snapshot: Dictionary, current_tick: int) -> Dictionary:
 ## plate than the H panel's longer idle note.
 func _crew_assigned_text(required: int, sources: Array) -> String:
 	if required <= 0 or sources.is_empty():
-		return "nothing needs them yet"
+		# The state a new game opens in: a roster on the books and an empty
+		# field. "idle" says whose fault that is — nothing is wrong, there is
+		# simply nothing placed for them to be on yet.
+		return "idle — nothing needs them yet"
 	var parts: Array = []
 	for source in sources:
 		parts.append(String(source["kind"]).replace("_", " "))
@@ -8639,6 +8637,7 @@ func _build_crew_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	plate.border_color = CREW_PANEL_ACCENT
 	plate.border_width_top = _ui_i(3)
 	plate.set_content_margin_all(CREW_PANEL_PADDING)
+	_crew_plate_style = plate
 
 	# Cleared, never appended to: `_ready()` genuinely runs twice under the
 	# headless `--script` harness (the same guard `_build_stock_panel` has).
@@ -8686,13 +8685,19 @@ func _build_crew_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	hint_settings.outline_size = base_settings.outline_size
 	hint_settings.outline_color = base_settings.outline_color
 
-	var hint := Label.new()
-	hint.name = "CrewHint"
-	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hint.label_settings = hint_settings
-	hint.text = "H: hire"
-	hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	head_row.add_child(hint)
+	# Two settings objects, swapped between, never one recoloured in place:
+	# the calm hint and the alarm are different inks and this Label is the
+	# one node both are drawn on (`_update_staff_alert`).
+	_crew_hint_calm = hint_settings
+	_crew_hint_warn = _staff_warn_settings()
+
+	_crew_hint = Label.new()
+	_crew_hint.name = "CrewHint"
+	_crew_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_crew_hint.label_settings = _crew_hint_calm
+	_crew_hint.text = "H: hire"
+	_crew_hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	head_row.add_child(_crew_hint)
 
 	_crew_rows = VBoxContainer.new()
 	_crew_rows.name = "CrewRows"
@@ -8813,7 +8818,14 @@ func _build_crew_row(base_settings: LabelSettings, category: Dictionary) -> void
 	assigned_label.name = "CrewAssigned_%s" % id
 	assigned_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	assigned_label.label_settings = assigned_settings
-	assigned_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# ONE line, trimmed with an ellipsis — never wrapped. A wrapping line
+	# makes the row's height depend on how many machines happen to be placed
+	# and how long their names are, so a big factory would silently push the
+	# plate past its cap and cost every row its detail (`_crew_fit_detail`).
+	# A fixed row height also lets the eye run down the numbers column, which
+	# is the reason this plate is a column of rows and not a paragraph. The
+	# full list is in the H panel; this is the glance.
+	assigned_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	assigned_label.custom_minimum_size.x = CREW_TEXT_WIDTH
 	wrap.add_child(assigned_label)
 
@@ -13013,34 +13025,39 @@ func _update_contract_wages(money: float) -> void:
 	)
 
 
-## Draws `_staff_alert_state` onto the clipboard's SHORT-STAFFED strip, and
+## Draws `_staff_alert_state` onto the CREW plate's heading and border, and
 ## sounds the refusal cue the first frame a factory goes short — the same
 ## cue every "no" in this game shares (UI_UX.md §8), fired once on the
 ## transition rather than on every frame of it. The first poll after a
 ## rebuild only primes the remembered count, so a loaded save that was
 ## already short does not sound like something the player just did.
+##
+## The heading rather than a strip of its own: the plate underneath it is
+## already a list of exactly which categories are short and by how many, so
+## a strip would be a second, shorter copy of the rows below it. What the
+## heading adds is the thing a list of rows cannot — one word, at the top,
+## visible without reading any of them, plus the key that fixes it.
 func _update_staff_alert() -> void:
-	if _staff_alert_panel == null:
+	if _crew_hint == null:
 		return
 	var state := _staff_alert_state(_staff_snapshot)
 	var short: int = int(state.get("short", 0))
-	_staff_alert_panel.visible = not state.is_empty()
-	if not state.is_empty():
-		_staff_alert_label.text = String(state["text"])
-	# ONE hint line at a time (issue #13). The board hint and this strip are
-	# both advice about what to do next, and the clipboard has room for one:
-	# the strip's two lines plus the hint's one were what pushed the stock
-	# plate below the clipboard off its third row at 1600x900 once the docket
-	# stack floored at a whole docket (`_whole_rows_height`).
-	#
-	# The hint is the one that yields, and not only because it is the shorter
-	# line. A factory that cannot crew the orders it is already running has
-	# no business being told where to sign more — hiring is the next action,
-	# and the strip names its key. The way to the board is still printed in
-	# the legend (`C: contracts`) and on the empty-board line, so it is never
-	# the only copy of it on screen.
+	if state.is_empty():
+		_crew_hint.label_settings = _crew_hint_calm
+		_crew_hint.text = "H: hire"
+		_crew_plate_style.border_color = CREW_PANEL_ACCENT
+	else:
+		_crew_hint.label_settings = _crew_hint_warn
+		# The heading's short form: the rows below already name which
+		# categories and how many, and the heading has one line.
+		_crew_hint.text = "▲ SHORT-STAFFED  ·  H"
+		_crew_plate_style.border_color = METER_FILL_WARN
+	# Issue #13 made the board hint yield to the SHORT-STAFFED strip, because
+	# the clipboard had room for one line of advice and hiring beat signing.
+	# The strip is on the CREW plate now and the two are no longer competing
+	# for the same pixels, so the hint is simply always up again.
 	if _contract_hint_label != null:
-		_contract_hint_label.visible = not _staff_alert_panel.visible
+		_contract_hint_label.visible = true
 	if _staff_alert_known_short < 0:
 		_staff_alert_known_short = short
 		return
