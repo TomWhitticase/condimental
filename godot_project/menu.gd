@@ -24,6 +24,7 @@
 extends Control
 
 const GameSaves = preload("res://game_session.gd")
+const TitleScene = preload("res://title_scene.gd")
 
 # --- Plate palette, shared with main.gd's HUD ------------------------------
 ## Deliberately the same three colours `main.gd` builds every panel from, so
@@ -36,15 +37,60 @@ const INK := Color(0.92, 0.93, 0.94)
 const INK_DIM := Color(0.66, 0.68, 0.70)
 const HAZARD := Color(0.98, 0.85, 0.42)
 const ERROR_INK := Color(0.97, 0.55, 0.48)
+## The splash line is the one yellow on this screen that is not the hazard
+## stripe: brighter, so it reads as a sticker slapped on the poster.
+const SPLASH_INK := Color(1.0, 0.94, 0.30)
+const SPLASH_TILT_DEGREES := -7.0
+const SPLASH_PULSE := 0.055
+const SPLASH_BEATS_PER_SECOND := 0.9
 
-## The backdrop. A flat industrial charcoal rather than the factory scene:
-## `main.tscn` costs a full voxel-asset load and a lit 3D frame to stand
-## behind a menu the player leaves in two seconds, and this ticket's own
-## brief called a clean panel enough. The band across the middle is the
-## hazard stripe the rest of the UI already uses, at the one scale where it
-## can be architecture instead of trim.
-const BACKDROP := Color(0.09, 0.095, 0.105, 1.0)
-const BACKDROP_STRIPE := Color(0.13, 0.115, 0.075, 1.0)
+## The lines themselves. In-jokes about this game and this codebase, the way
+## Minecraft's are about that one — the point of a splash line is that it
+## could only belong to the game it is on.
+const SPLASH_LINES := [
+	"Now with 100% more tomato!",
+	"Deterministic to the last tick!",
+	"Fixed-point, never float!",
+	"Automate the condiment!",
+	"The vinegar is load-bearing",
+	"Mind the conveyor!",
+	"Ketchup is a vegetable",
+	"Sugar in, sauce out",
+	"Belt, belt, corner, belt",
+	"Pressure-equalized!",
+	"Made of real voxels",
+	"Bottles all the way down",
+	"Also try the mayonnaise!",
+	"The hopper is full, boss",
+	"Every asset is a cube",
+	"Contractually obliged",
+	"Squeezy!",
+	"No gameplay in GDScript!",
+	"Shipping from the dock",
+	"Batch number 4,096",
+]
+
+## The backdrop is a REAL FACTORY, standing in the same hall the game is
+## played in (`title_scene.gd`) — the thing Minecraft's panorama and
+## Factorio's title art both are, asked for in those words.
+##
+## It replaces a flat industrial charcoal plate, which was chosen on the
+## argument that `main.tscn` costs a full voxel-asset load and a lit 3D frame
+## to stand behind a menu the player leaves in two seconds. That cost is real
+## and is not paid: `title_scene.gd` loads none of `main.tscn` and builds no
+## simulation — it is about twenty hand-placed models on a floor, in the same
+## hall, lit by the same two lights. What it buys is the first screen telling
+## the player what the game is, which a charcoal rectangle cannot.
+##
+## The scrim below is the price of putting text over a photograph: a dark
+## wash behind the menu column, so the wordmark and the buttons keep their
+## contrast wherever the drifting camera happens to be. It is centred with
+## the column and falls away to nothing at both edges, leaving the hall
+## itself clear on either side of the menu.
+const SCRIM_INK := Color(0.03, 0.03, 0.04, 0.82)
+## Where the wash is at full strength (0 = left edge, 1 = right edge). The
+## band is symmetric about the middle, so these are mirrored.
+const SCRIM_CORE := 0.30
 ## **Every size here is measured in `main.gd`'s `UI_SCALE`**, read from that
 ## script rather than repeated, so the menu and the HUD cannot drift apart
 ## (the menu was written alongside the 2026-09-09 UI-scale pass and
@@ -54,16 +100,22 @@ const BACKDROP_STRIPE := Color(0.13, 0.115, 0.075, 1.0)
 const MainScript := preload("res://main.gd")
 var UI_SCALE: float = MainScript.UI_SCALE
 
-## Half the band's height, in design pixels times the scale — sized so the
-## panel sits inside it with the floor showing above and below.
-var BAND_HALF_HEIGHT: float = 190.0 * UI_SCALE
+## The gutter the menu column keeps from either edge of the screen. The
+## column itself is CENTRED — the owner's call, and the one both Minecraft
+## and Factorio make: a title screen's menu is the thing you came to press,
+## and standing it off to one side to protect the composition behind it puts
+## the decoration first. The backdrop was reframed around that instead.
+var COLUMN_MARGIN: float = 86.0 * UI_SCALE
 
 ## The same 15px design base `main.gd`'s `UI_FONT_BASE` uses; every font
 ## size here is an offset from it, scaled — `main.gd`'s `_ui_font` rule.
 const BASE_FONT_SIZE := 15
 var BODY_FONT_SIZE: int = int(round(BASE_FONT_SIZE * UI_SCALE))
-var TITLE_FONT_SIZE: int = int(round((BASE_FONT_SIZE + 33) * UI_SCALE))
-var SUBTITLE_FONT_SIZE: int = int(round((BASE_FONT_SIZE + 1) * UI_SCALE))
+## The wordmark stands on its own over the scene now instead of inside the
+## panel, so it is nearly twice the size it was.
+var TITLE_FONT_SIZE: int = int(round((BASE_FONT_SIZE + 61) * UI_SCALE))
+var SUBTITLE_FONT_SIZE: int = int(round((BASE_FONT_SIZE + 4) * UI_SCALE))
+var SPLASH_FONT_SIZE: int = int(round((BASE_FONT_SIZE + 4) * UI_SCALE))
 var BUTTON_FONT_SIZE: int = int(round((BASE_FONT_SIZE + 5) * UI_SCALE))
 var ROW_FONT_SIZE: int = int(round((BASE_FONT_SIZE + 2) * UI_SCALE))
 var BUTTON_MIN_SIZE: Vector2 = Vector2(260.0, 52.0) * UI_SCALE
@@ -72,8 +124,13 @@ var PANEL_MIN_WIDTH: float = 560.0 * UI_SCALE
 ## The width left inside the panel's own margins — what every full-width
 ## child (the list, the rows, the error line) is sized to.
 var PANEL_INNER_WIDTH: float = PANEL_MIN_WIDTH - PANEL_MARGIN * 2.0
-## The load list scrolls past this height rather than pushing the panel off
-## the screen — the same cap the contract clipboard's docket stack takes.
+## The load list scrolls rather than pushing the panel off the screen. The
+## cap is not a fixed number: the wordmark stands outside the panel now, so
+## what is left for the list depends on the window — see
+## `_list_height_budget`. These two only bound that measurement, so a very
+## short window still shows a scrollable list rather than a sliver, and a
+## very tall one does not stretch the plate down the whole screen.
+var SAVE_LIST_MIN_HEIGHT: float = 110.0 * UI_SCALE
 var SAVE_LIST_MAX_HEIGHT: float = 300.0 * UI_SCALE
 
 
@@ -85,6 +142,12 @@ func _px(n: float) -> float:
 ## `_px` for the properties Godot types as `int` — `main.gd`'s `_ui_i`.
 func _i(n: float) -> int:
 	return int(round(n * UI_SCALE))
+
+## The 3D factory standing behind the menu (`title_scene.gd`).
+var _title_scene: Node3D
+## Minecraft's splash line, and the clock it beats on.
+var _splash_label: Label
+var _splash_beat := 0.0
 
 var _root_box: VBoxContainer
 var _button_box: VBoxContainer
@@ -116,6 +179,12 @@ func _ready() -> void:
 	_build_backdrop()
 	_build_panel()
 	_refresh_saves()
+	# The list's height is a function of the window's, so it is re-measured
+	# when the window changes rather than only at build time. The headless
+	# tests call `_ready` on a menu that is not in a tree, and a menu with no
+	# window has nothing to follow.
+	if is_inside_tree():
+		get_viewport().size_changed.connect(_apply_list_height)
 	# The score starts here, on the first screen, and carries into the
 	# factory: the `Music` autoload outlives this scene (see music.gd).
 	var music := _music()
@@ -124,40 +193,38 @@ func _ready() -> void:
 
 
 func _build_backdrop() -> void:
-	var back := ColorRect.new()
-	back.name = "Backdrop"
-	back.color = BACKDROP
-	back.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	back.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(back)
+	# The factory itself, in 3D, behind everything. It is added first so the
+	# whole Control tree draws over it: Godot renders a viewport's 3D world
+	# under its 2D, whatever the order of the nodes.
+	_title_scene = TitleScene.new()
+	add_child(_title_scene)
 
-	# One wide hazard band behind the panel — the factory's own signage
-	# language at building scale. It is deliberately very low contrast: it
-	# should be read as "there is a floor here", not as a second UI element
-	# competing with the plate in front of it. The two hairlines are what
-	# make it read as a painted band rather than as an accidental change of
-	# background: an edge with nothing on it looked like a rendering seam in
-	# the first frame of this.
-	_add_band(BACKDROP_STRIPE, -BAND_HALF_HEIGHT, BAND_HALF_HEIGHT)
-	_add_band(Color(PLATE_ACCENT.r, PLATE_ACCENT.g, PLATE_ACCENT.b, 0.30),
-			-BAND_HALF_HEIGHT, -BAND_HALF_HEIGHT + _px(2.0))
-	_add_band(Color(PLATE_ACCENT.r, PLATE_ACCENT.g, PLATE_ACCENT.b, 0.30),
-			BAND_HALF_HEIGHT - _px(2.0), BAND_HALF_HEIGHT)
+	# A dark wash from the left edge, fading out before the middle of the
+	# screen. Without it the wordmark sits over whatever the drifting camera
+	# is pointing at — a lit skylight one minute, a dark plinth the next —
+	# and an outline alone cannot hold text against both.
+	var clear := Color(SCRIM_INK.r, SCRIM_INK.g, SCRIM_INK.b, 0.0)
+	var gradient := Gradient.new()
+	# Four stops: clear at both edges, full across the middle where the
+	# column stands. `Gradient` starts with two, so the inner pair is added.
+	gradient.set_color(0, clear)
+	gradient.set_color(1, clear)
+	gradient.add_point(SCRIM_CORE, SCRIM_INK)
+	gradient.add_point(1.0 - SCRIM_CORE, SCRIM_INK)
+	var texture := GradientTexture2D.new()
+	texture.gradient = gradient
+	texture.width = 256
+	texture.height = 1
+	texture.fill_from = Vector2(0.0, 0.0)
+	texture.fill_to = Vector2(1.0, 0.0)
 
-
-## A full-width horizontal band centred vertically on the screen, `top` and
-## `bottom` pixels from the middle.
-func _add_band(colour: Color, top: float, bottom: float) -> void:
-	var band := ColorRect.new()
-	band.color = colour
-	band.set_anchors_and_offsets_preset(Control.PRESET_CENTER_LEFT)
-	band.anchor_right = 1.0
-	band.offset_left = 0.0
-	band.offset_right = 0.0
-	band.offset_top = top
-	band.offset_bottom = bottom
-	band.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(band)
+	var scrim := TextureRect.new()
+	scrim.name = "Scrim"
+	scrim.texture = texture
+	scrim.stretch_mode = TextureRect.STRETCH_SCALE
+	scrim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	scrim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(scrim)
 
 
 func _build_panel() -> void:
@@ -170,43 +237,48 @@ func _build_panel() -> void:
 	style.border_width_bottom = _i(2)
 	style.set_content_margin_all(PANEL_MARGIN)
 
-	# A CenterContainer filling the screen, rather than a PRESET_CENTER on the
-	# panel itself: that preset is computed from the panel's minimum size at
-	# the moment it is applied, and at build time the labels inside it have no
-	# text yet — the first cut put the whole menu in the bottom-right corner,
-	# which is the kind of thing only a rendered frame shows (UI_UX.md §2b
-	# point 12). A container re-centres its child whenever the child resizes.
-	var centre := CenterContainer.new()
-	centre.name = "MenuCentre"
-	centre.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	centre.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(centre)
+	# One column down the left of the screen: the wordmark, the splash line
+	# and the panel, vertically centred, with the factory filling the rest of
+	# the frame. A MarginContainer holds it off the edge and a VBox that
+	# SHRINKS to its contents keeps the column as narrow as the panel, rather
+	# than stretching a plate across a backdrop that is the point of the
+	# screen. (It used to be a CenterContainer: that preset is computed from
+	# the panel's minimum size at the moment it is applied, and at build time
+	# the labels inside have no text yet — the first cut put the whole menu
+	# in the bottom-right corner, which is the kind of thing only a rendered
+	# frame shows, UI_UX.md §2b point 12. A container re-lays its child
+	# whenever the child resizes, which is why one is still used here.)
+	var margins := MarginContainer.new()
+	margins.name = "MenuMargins"
+	margins.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	margins.add_theme_constant_override("margin_left", int(COLUMN_MARGIN))
+	margins.add_theme_constant_override("margin_right", int(COLUMN_MARGIN))
+	margins.add_theme_constant_override("margin_top", _i(28))
+	margins.add_theme_constant_override("margin_bottom", _i(28))
+	margins.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(margins)
+
+	var column := VBoxContainer.new()
+	column.name = "MenuColumn"
+	column.alignment = BoxContainer.ALIGNMENT_CENTER
+	column.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	column.add_theme_constant_override("separation", _i(10))
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margins.add_child(column)
+
+	_build_wordmark(column)
 
 	var panel := PanelContainer.new()
 	panel.name = "MenuPanel"
 	panel.add_theme_stylebox_override("panel", style)
 	panel.custom_minimum_size = Vector2(PANEL_MIN_WIDTH, 0.0)
-	centre.add_child(panel)
+	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	column.add_child(panel)
 
 	_root_box = VBoxContainer.new()
 	_root_box.name = "MenuBody"
 	_root_box.add_theme_constant_override("separation", _i(14))
 	panel.add_child(_root_box)
-
-	var title := Label.new()
-	title.name = "Title"
-	title.label_settings = _settings(TITLE_FONT_SIZE, HAZARD, _i(6))
-	title.text = "SAUCE FACTORY"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_root_box.add_child(title)
-
-	var subtitle := Label.new()
-	subtitle.label_settings = _settings(SUBTITLE_FONT_SIZE, INK_DIM, _i(3))
-	subtitle.text = "condiment production, automated"
-	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_root_box.add_child(subtitle)
-
-	_root_box.add_child(_rule())
 
 	_button_box = VBoxContainer.new()
 	_button_box.name = "MenuButtons"
@@ -238,6 +310,96 @@ func _build_panel() -> void:
 	_error_label.custom_minimum_size = Vector2(PANEL_INNER_WIDTH, 0.0)
 	_error_label.visible = false
 	_root_box.add_child(_error_label)
+
+
+## The wordmark, the tagline and the splash line — the top of the column,
+## outside the panel. Minecraft and Factorio both put the game's name over
+## the art rather than inside a box, and that is the whole difference between
+## a title screen and a dialog. All of it is centred on the same axis as the
+## plate below, so the screen reads as one column down the middle.
+func _build_wordmark(column: VBoxContainer) -> void:
+	var title := Label.new()
+	title.name = "Title"
+	# A heavier outline than anything else in the game: this text stands over
+	# a lit 3D frame, not over a plate, and the scrim behind it is a wash
+	# rather than a background.
+	title.label_settings = _settings(TITLE_FONT_SIZE, HAZARD, _i(9))
+	title.text = "SAUCE FACTORY"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(title)
+
+	# The tagline and the splash share one row, so the splash sits off the
+	# wordmark's bottom-right corner the way Minecraft's does rather than
+	# hanging under the middle of everything.
+	var strap := HBoxContainer.new()
+	strap.name = "Strap"
+	strap.custom_minimum_size = Vector2(PANEL_MIN_WIDTH, 0.0)
+	strap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_child(strap)
+
+	var subtitle := Label.new()
+	subtitle.name = "Subtitle"
+	subtitle.label_settings = _settings(SUBTITLE_FONT_SIZE, INK, _i(5))
+	subtitle.text = "condiment production, automated"
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	subtitle.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	subtitle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	strap.add_child(subtitle)
+
+	# The splash line: yellow, tilted, and beating slowly — Minecraft's, and
+	# the one piece of pure decoration on the screen. It is tilted by
+	# transforming the Label INSIDE a plain `Control`, because a container
+	# lays its children out axis-aligned and would undo the rotation.
+	var splash_slot := Control.new()
+	splash_slot.name = "SplashSlot"
+	splash_slot.custom_minimum_size = Vector2(PANEL_MIN_WIDTH * 0.62, _px(44.0))
+	splash_slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	splash_slot.clip_contents = false
+	strap.add_child(splash_slot)
+
+	_splash_label = Label.new()
+	_splash_label.name = "SplashText"
+	_splash_label.label_settings = _settings(SPLASH_FONT_SIZE, SPLASH_INK, _i(5))
+	_splash_label.text = _splash_line()
+	_splash_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_splash_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_splash_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_splash_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_splash_label.rotation = deg_to_rad(SPLASH_TILT_DEGREES)
+	splash_slot.add_child(_splash_label)
+	# The pivot has to follow the slot's real size, which is not known until
+	# the container has laid out at least once.
+	splash_slot.resized.connect(_recentre_splash.bind(splash_slot))
+	_recentre_splash(splash_slot)
+
+
+func _recentre_splash(slot: Control) -> void:
+	if _splash_label == null:
+		return
+	_splash_label.pivot_offset = slot.size * 0.5
+
+
+## Which splash line is showing. Derived from the DATE, never `randf()`:
+## godot_project/CLAUDE.md requires visual randomness to come from an index
+## so a review screenshot repeats, and "a different one every day" is as
+## close to Minecraft's per-launch pick as that rule allows.
+func _splash_line() -> String:
+	var date := Time.get_date_dict_from_system()
+	var index: int = (int(date.get("year", 0)) * 372 + int(date.get("month", 1)) * 31
+			+ int(date.get("day", 1)))
+	return SPLASH_LINES[index % SPLASH_LINES.size()]
+
+
+## The splash line's slow beat, and the only thing on this screen that is a
+## function of wall time. The 3D backdrop drifts on its own clock
+## (`title_scene.gd`); there is no simulation on this screen to take a tick
+## count from.
+func _process(delta: float) -> void:
+	if _splash_label == null:
+		return
+	_splash_beat += delta
+	var pulse := 1.0 + SPLASH_PULSE * absf(sin(_splash_beat * SPLASH_BEATS_PER_SECOND * PI))
+	_splash_label.scale = Vector2(pulse, pulse)
 
 
 func _build_load_view() -> void:
@@ -362,10 +524,45 @@ func _apply_list_height() -> void:
 	var scroll := _load_box.get_node_or_null("SaveScroll") if _load_box != null else null
 	if scroll == null:
 		return
+	# Zeroed first so the load box reports what it needs WITHOUT the list,
+	# which is what `_list_height_budget` measures against.
+	(scroll as ScrollContainer).custom_minimum_size = Vector2(PANEL_INNER_WIDTH, 0.0)
 	var wanted := float(_save_rows.size()) * (BUTTON_MIN_SIZE.y + _px(6.0))
-	(scroll as ScrollContainer).custom_minimum_size = Vector2(
-		PANEL_INNER_WIDTH, minf(wanted, SAVE_LIST_MAX_HEIGHT)
+	var height := clampf(
+		minf(wanted, _list_height_budget()), SAVE_LIST_MIN_HEIGHT, SAVE_LIST_MAX_HEIGHT
 	)
+	(scroll as ScrollContainer).custom_minimum_size = Vector2(PANEL_INNER_WIDTH, height)
+
+
+## How tall the save list may grow before it scrolls: the window, less
+## everything else on the load view. Measured off the nodes rather than
+## restated as numbers, so it keeps following the fonts and paddings if
+## either changes.
+##
+## This exists because the wordmark left the panel when the backdrop became a
+## real scene. A list capped at a flat 450px used to fit under a title inside
+## the plate; under a 114pt one standing above it, at 1600x900, it pushed
+## BACK clean off the bottom edge — a frame nobody had rendered since the
+## column was rearranged (UI_UX.md §2b point 12).
+func _list_height_budget() -> float:
+	if not is_inside_tree():
+		# No window to measure against (the headless tests build the menu
+		# outside a tree); the flat cap is the honest answer.
+		return SAVE_LIST_MAX_HEIGHT
+	var used := _px(28.0) * 2.0 # the screen margins, top and bottom
+	used += PANEL_MARGIN * 2.0 # the plate's own padding
+	var column := get_node_or_null("MenuMargins/MenuColumn")
+	if column != null:
+		var separation := float(column.get_theme_constant("separation"))
+		for child in column.get_children():
+			# Everything standing above the plate: the wordmark and its strap.
+			if child is Control and child.name != "MenuPanel":
+				used += (child as Control).get_combined_minimum_size().y + separation
+	if _load_box != null:
+		# The heading, the rule and BACK — the list itself is zeroed by the
+		# caller before this is read.
+		used += _load_box.get_combined_minimum_size().y
+	return float(get_viewport_rect().size.y) - used
 
 
 ## One save, as a button: its slot name, and — the honest second fact, read
@@ -432,12 +629,14 @@ func _on_back_pressed() -> void:
 
 func _set_load_open(open: bool) -> void:
 	_load_open = open
-	if open:
-		_refresh_saves()
 	if _button_box != null:
 		_button_box.visible = not open
 	if _load_box != null:
 		_load_box.visible = open
+	# After the swap, not before: `_refresh_saves` sizes the list against the
+	# space the visible load view leaves.
+	if open:
+		_refresh_saves()
 
 
 func _on_quit_pressed() -> void:

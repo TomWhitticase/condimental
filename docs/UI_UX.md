@@ -233,6 +233,18 @@ into sequence. They sit where they were discovered.
     not, show the plain tile and let the prompt (§5a) say the rest in
     words.
 
+35. **A list that scrolls is capped by what the window has left, measured,
+    not by a constant.** The main menu's save list had a flat 450px cap,
+    which fit while the title sat inside the plate. The wordmark then moved
+    out of the plate and grew to 114pt for the title screen (§5d), and at
+    1600x900 that same list pushed the BACK button clean off the bottom
+    edge. `menu.gd`'s `_list_height_budget` now subtracts the wordmark, the
+    plate's padding and the load view's own furniture — measured off the
+    nodes with `get_combined_minimum_size`, so it follows the fonts — from
+    the viewport, and the list takes what is left. A constant that was
+    right once is only right until the layout around it moves; and only a
+    rendered frame shows that it stopped being right (point 12).
+
 ## 3. Theme & setting
 
 **A grounded, semi-realistic 21st-century industrial food factory**:
@@ -240,6 +252,27 @@ stainless tanks, rubber belts, steel piping, poured concrete, hazard
 striping, pallets, loading docks. Lean into real industrial visual language
 (signage, cable runs, grates, walkways). Avoid candy-coloured or cutesy
 factory tropes; the sauce theme comes through in what the factory processes.
+
+**The player's line stands inside that factory, and the backdrop says so.**
+The sky is `godot_project/factory_interior_sky.gdshader`: a hall with a
+trussed roof, skylight ribbons, high-bay lamps, clad walls with clerestory
+glazing and a line of other plant standing along them, all fading into air
+haze. It is a *sky*, so it sits at infinity with no parallax — the hall is
+the same size however far the player walks, which is what makes it read as
+enormous rather than as a room. Never an outdoor sky (the factory then reads
+as a slab of concrete in a field) and never real geometry (a finite shell has
+a wall to reach and occludes the isometric camera).
+
+**The hall is drawn in first person; the isometric view gets its air.** A sky
+is found by intersecting a box against `EYEDIR`, which needs rays that fan
+out, and the isometric camera's are parallel — the hall came out as hard
+stripes fanning from the corners of the frame. So `factory_environment.gd`'s
+`set_backdrop_for` fills the isometric background with `HAZE_COLOR`, the very
+colour every distant surface in the shader fades to, and draws the hall
+itself in first person. **Only the background changes**: the sky stays the
+ambient and reflection source in both modes, so the factory is lit
+identically either way and TAB changes what is *behind* the world, not the
+world. Full record in `docs/DECISIONS.md` (2026-09-16).
 
 ## 4. Materials & lighting
 
@@ -250,6 +283,10 @@ factory tropes; the sauce theme comes through in what the factory processes.
 - **Lighting**: real-time dynamic lighting, soft shadows, mild bloom on
   emissives, light SSAO. Reference: a modded-Minecraft shader pack, not
   photorealism.
+- **The light is indoor light**: a lamp-white key from above for the roof's
+  high-bay fittings, a daylight-cool fill for the glazing, and ambient taken
+  from the interior sky itself. Warming the key beiges every grey asset in
+  the game, because there is no blue sky left to balance it.
 - **Emissives**: status lights, screens and strobes glow — both aesthetic
   and a readability signal (§7).
 - **Atmosphere**: steam/smoke from cooking equipment, visible liquid
@@ -516,10 +553,30 @@ Both are built from §5's ingredients (dark plate, hazard-yellow rule,
 outlined text), not a stock engine theme: the main menu is the first thing a
 player sees.
 
-**Main menu**: one centred plate (a `CenterContainer`, so it re-centres when
-labels resize) with title, subtitle and New Game / Load Game / Quit over a
-backdrop with one edged hazard band. Load Game **replaces** the buttons with
-the save list. A row shows the slot name and the file's mtime (not the tick
+**Main menu**: a **title screen** — the factory itself, in 3D, standing in
+the §3 hall behind the menu (`title_scene.gd`), the way Minecraft's panorama
+and Factorio's title art do. It is a hand-composed still life of the shipped
+chain, not `main.tscn` and not a simulation: nothing ticks, the items on the
+belts were put there by hand, and the camera drifts slowly so the screen
+reads as a place rather than as a paused game. Its models, materials, floor
+variants and lighting all come from the game's own pipeline
+(`voxel_assets.gd`, `factory_environment.gd`, `main.gd`'s floor helpers are
+shared, not copied), so the poster cannot go stale. The camera is
+**perspective** here — the fixed orthographic rule (§1) governs how the game
+is *played*, and depth is the whole subject of a photograph of the hall. The
+air is clear here where the game's is hazy (`TITLE_HAZE_DENSITY`) — the one
+parameter that differs between the two, because haze read as a grey wash
+lying on a single still frame rather than as distance.
+
+Over it: the wordmark, subtitle and a tilted yellow **splash line** (picked
+from a fixed list by the date, so it changes day to day and a review
+screenshot still repeats), then a dark plate with New Game / Load Game /
+Quit, **centred in the viewport** over a symmetric gradient scrim that keeps
+the text legible whatever the drifting camera is pointing at. (An earlier cut
+stood the column to one side so the plate would not cover the vanishing
+point; the owner asked for it centred, and the backdrop's framing was moved
+to suit — the chain now reads either side of the plate, tomatoes going in on
+the left and bottles coming out on the right.) Load Game **replaces** the buttons with the save list. A row shows the slot name and the file's mtime (not the tick
 count, which would mean parsing every file). The autosave is listed and
 labelled. An empty list says so in a sentence.
 

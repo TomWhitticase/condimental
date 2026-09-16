@@ -34,6 +34,22 @@ below is history and should only ever be appended to.)*
   symlinked beside it. Four skills under `.claude/skills/`. Always-loaded
   context went from ~34,500 tokens to ~950. See the log entry below for the
   five doc defects the move turned up, including the tick rate.
+- **The world is indoors (2026-09-16).** The backdrop is a factory-interior
+  sky shader, not weather, and the scene's lighting is the hall's rather than
+  a sun's. See the log entry below.
+- **The hall is drawn in first person only (2026-09-16).** The isometric view
+  fills its background with the hall's own haze colour instead — a sky is
+  intersected against `EYEDIR` and an orthographic camera's rays are
+  parallel, so the roof came out as stripes fanning from the corners. The sky
+  stays the ambient and reflection source in both modes, so the factory is
+  lit identically either way (`factory_environment.gd`'s `set_backdrop_for`).
+- **The menu is a title screen (2026-09-16).** The game opens on the factory
+  itself — a hand-composed 3D still life of the shipped chain in the same
+  hall, with a drifting camera, a big wordmark and a daily splash line — not
+  on a flat plate. It loads none of `main.tscn` and runs no simulation, and
+  it is built from the game's own assets, lighting and floor helpers
+  (`title_scene.gd`, `voxel_assets.gd`, `factory_environment.gd`). See the
+  log entry below.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Work reaches `main` through pull requests, and deferrals become issues
   (2026-09-16).** Nothing is pushed to `main` directly — a `pre-push` hook
@@ -102,6 +118,130 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-16 — the hall in first person, its air in isometric; menu centred
+
+Two notes back from the owner's demo of the title-screen branch.
+
+**"When in isometric view the skybox is messed up (it looks great in first
+person btw)."** It was, and for a reason worth writing down. The hall is a
+*sky*: every surface of it is found by intersecting a box against `EYEDIR`,
+which needs rays that fan out. An **orthographic camera's rays are
+parallel**, so the entire screen sampled barely a degree of direction and two
+or three roof bays were magnified into hard stripes fanning from the corners
+— sliding sideways as the player panned, since a sky has no parallax to pin
+it to the floor. Not a bug in the shader; a painted infinite room simply
+cannot be photographed with a parallel projection.
+
+So the hall is drawn where it reads and stands up to being looked at — first
+person — and the isometric view gets the same hall's **air**:
+`factory_environment.gd`'s new `set_backdrop_for` fills the background with
+`HAZE_COLOR`, the very colour every distant surface in the shader fades to,
+so the floor runs out into haze rather than into a starburst. Pressing TAB
+then reveals the room that haze was standing in, which is the right way
+round. **Only the background changes** — the sky stays the ambient and
+reflection source in both modes, checked rather than assumed: the same
+isometric frame rendered both ways came out byte-identical on the floor
+tiles, the machine cluster and a belt's shadowed side.
+`test_presentation.gd` now asserts the whole rule, because it is a one-line
+property whose only symptom is a rendered frame.
+
+**"Make the menu centred."** Done — the column and the plate are
+`SIZE_SHRINK_CENTER`, the wordmark is centre-aligned and the scrim became a
+symmetric four-stop gradient. That put the plate over the composition's
+middle, so the composition moved: `title_scene.gd`'s camera was re-framed
+(four framings rendered and rejected first) to put tomatoes riding into the
+crusher in the left third and bottles coming out of the bottler in the right
+— "sugar in, sauce out" spread across the frame with the menu in the gap.
+This reverses the previous entry's "column set to one side of the vanishing
+point", which is why it is argued in `docs/DECISIONS.md` rather than quietly
+replaced.
+
+**"Get rid of the haze in the splash screen."** Done, and it is the right
+call: haze is atmosphere you read over a play session, but in one still frame
+under a wordmark it is a grey wash lying on the picture. `build_into` takes a
+`haze_density` now and the title screen passes `TITLE_HAZE_DENSITY = 0.0`, so
+the roof trusses, the skylight ribbons, the glazing band and the far plant
+line all come up crisp behind the chain. It is the one parameter that differs
+between the game's hall and the menu's, and it is a property of the
+photograph rather than of the lighting — measured in the frame, the models
+moved by at most three levels.
+
+### 2026-09-16 — a title screen: the factory behind the menu
+
+The game opened on a flat charcoal plate. It now opens on a **title screen**
+in the sense Minecraft and Factorio mean it: the factory itself, standing in
+the hall, photographed. The shipped chain runs across the frame — hopper,
+crusher, mixer, the 2x2 cooking vat, bottler, packer, dock, with tomatoes on
+the belts going in and boxes coming out — a second line of plant stands off
+in the haze behind it, and the camera drifts slowly along the line so the
+screen reads as a place rather than as a paused game. Over it: a 114pt
+hazard-yellow wordmark, the tagline, and a tilted yellow **splash line**
+picked from a fixed list by the date.
+
+**It is art, not a simulation.** None of `main.tscn` is loaded and no
+`SimBridge` is created: `godot_project/title_scene.gd` is about twenty
+hand-placed models on a floor, which costs a handful of `.vox` loads rather
+than the game. That is what answers the argument the original flat plate was
+chosen on. The parts it shares with the game were **extracted, not copied** —
+`voxel_assets.gd` (the `.vox` loading, the per-class materials, the mesh
+cache) and `factory_environment.gd` (the sky shader's uniforms, the
+environment, the lights) both came out of `main.gd`, which now calls them,
+and the floor helpers became `static` — so re-rendering the voxels or
+re-tuning the lighting changes the title screen with the game instead of
+leaving a stale poster behind.
+
+The camera here is perspective, not the game's orthographic view: §1's rule
+governs how the game is *played*, and the converging roof and the receding
+line are the whole subject of a photograph. Its framing came out of a
+camera-projection search after three rendered compositions were rejected.
+
+The menu was rearranged around it — the wordmark out of the plate, the column
+set to one side of the vanishing point, a gradient scrim holding the text
+against whatever the drifting camera is pointing at. That turned up one real
+regression, now UI_UX.md §2b point 35: the save list's flat 450px cap pushed
+the BACK button off the bottom edge under the taller wordmark. The list is
+now sized from the window less its measured chrome, and `test_main_menu.gd`
+asserts both that budget and the backdrop itself (camera, hall, floor,
+models, drift, splash).
+
+Full reasoning in `docs/DECISIONS.md`; the rule is in `docs/DECISIONS_LOG.md`
+and UI_UX.md §5d.
+
+### 2026-09-16 — The backdrop is now the inside of a factory
+
+The game used to stand on a concrete slab under an open blue sky. It now
+stands in the middle of a factory hall far larger than anything the player
+can build: a trussed roof with skylight ribbons and high-bay lamps overhead,
+clad walls with a pipe-rack gantry, clerestory glazing and a line of other
+plant along them, and air haze swallowing all of it towards the far end.
+Press TAB and look around and the answer to "where am I" is the setting
+UI_UX.md §3 describes, rather than a field.
+
+It is one sky shader (`godot_project/factory_interior_sky.gdshader`), not
+geometry and not a texture: a box intersected against the view direction,
+with the roof trusses and the wall columns sharing one structural grid so
+they line up. Being a sky, it has no parallax — the hall stays the same size
+however far the player flies, which is exactly why it reads as massive
+instead of as a room with walls to reach.
+
+Two findings worth carrying forward. A near-parallel ray that returns a
+*negative* distance overflows the haze term, and the resulting infinity in
+the radiance map renders **every lit surface in the world black** — a
+symptom that points nowhere near the sky. And an interior is a far darker,
+far warmer light source than daylight: ambient went 0.8 -> 1.2 and the key
+light lost the sun's warmth, because measured against the old frame the bare
+concrete had gone from r-b = 5 to r-b = 21, i.e. every grey asset in the game
+was photographing beige. Full record in DECISIONS.md.
+
+Two things came back from the owner's playthrough. The hall's slab was set
+to the same `concrete` the floor tiles use, which in the frame read about 40
+levels darker than them — the tiles are lit and the backdrop is not — so it
+is now a warmer, lighter `#979489` that measures within 4 levels of the game
+floor at the seam, and the haze lifted with it. And walking the hall at 6
+world units/second took most of a minute to cross it; first-person movement
+is 15 now, about 4.7 tiles a second, which is a walk in a building this size
+rather than a crawl.
 
 ### 2026-09-16 — Four playtest asks: a dock that fills up, pulp off the crusher, SHIFT to rebuy, and the first-person camera's first frame
 
