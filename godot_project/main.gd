@@ -89,6 +89,10 @@ extends Node3D
 ## `menu.gd` reads the list with, so the screen that writes a save and the
 ## screen that loads one cannot disagree about either.
 const GameSaves = preload("res://game_session.gd")
+## The voxel loader, shared with the title screen (see the Assets section).
+const VoxelAssets = preload("res://voxel_assets.gd")
+## The hall's light and backdrop, shared with the title screen.
+const FactoryEnvironment = preload("res://factory_environment.gd")
 
 # --- Scale ---------------------------------------------------------------
 # UI_UX.md §2 fixes one world tile at 32x32x32 voxels. The .vox importer's
@@ -838,6 +842,9 @@ var _hopper_items: Array = [] # item ids a hopper may legally hold, from the sim
 ## item in words beside it, and this is the reinforcement.
 var _ghost_fill: Node3D
 
+## The loader itself; the four below are its tables, copied out once in
+## `_load_voxel_materials` so the call sites in this file read unchanged.
+var _assets := VoxelAssets.new()
 var _class_materials: Dictionary = {} # "matte"/"metal"/"emissive" -> StandardMaterial3D
 var _lamp_idle: StandardMaterial3D
 var _lamp_running: StandardMaterial3D
@@ -1621,6 +1628,9 @@ var _crosshair: Control # visible only in FIRST_PERSON — see _set_view_mode
 
 enum ViewMode { ISOMETRIC, FIRST_PERSON }
 var _view_mode: int = ViewMode.ISOMETRIC
+## The hall's environment, kept because the two view modes want different
+## BACKDROPS out of it — see `_apply_backdrop_mode`.
+var _world_environment: WorldEnvironment
 
 ## belt origin tile (as a "x,y" key) -> the BELT_SHAPE_* it was drawn as,
 ## recorded at rebuild from the placement's `links`. Read by
@@ -1787,125 +1797,42 @@ func _current_money() -> float:
 # Assets
 # --------------------------------------------------------------------------
 
-## Rebuilds one `StandardMaterial3D` per material class from
-## `voxels/materials.json`, which `voxgen` exports straight out of
-## `assets/voxels/palette.ron`. The numbers deliberately are NOT written down
-## here: palette.ron stays the single source of truth for colour and material
-## (UI_UX.md §2a point 5), and GDScript just consumes it.
+## Every voxel model in the scene comes through here (`voxel_assets.gd`).
+## It used to be this file's own code and moved out wholesale when the title
+## screen began standing real machines behind the main menu: the menu builds
+## its models with the same loader, so the two scenes cannot end up lit by
+## different readings of `palette.ron`. The wrappers below stay because
+## `_asset_node` is called from thirteen places in this file and reads better
+## than `_assets.asset_node`.
 func _load_voxel_materials() -> void:
-	var defaults := {
-		"matte": {"metallic": 0.0, "roughness": 0.95, "emission_energy": 0.0},
-		"metal": {"metallic": 0.9, "roughness": 0.18, "emission_energy": 0.0},
-		"emissive": {"metallic": 0.0, "roughness": 0.55, "emission_energy": 2.6},
-		"liquid": {"metallic": 0.0, "roughness": 0.14, "emission_energy": 0.0},
-	}
-	var table: Dictionary = defaults
-	var parsed = _read_json(VOX_DIR + "materials.json")
-	if parsed is Dictionary:
-		table = parsed
-	else:
-		push_warning("voxels/materials.json missing — falling back to built-in material values")
-
-	for class_name_ in table.keys():
-		var def: Dictionary = table[class_name_]
-		_class_materials[class_name_] = _make_material(
-			float(def.get("metallic", 0.0)),
-			float(def.get("roughness", 1.0)),
-			float(def.get("emission_energy", 0.0))
-		)
-
-	# Two variants of the emissive material so a machine's status lamps can
-	# actually report state (UI_UX.md §4/§7: saturated colour reserved for
-	# meaning, never decoration). Same mesh, swapped override material.
-	var lamp_energy: float = float(table.get("emissive", defaults["emissive"]).get("emission_energy", 2.6))
-	_lamp_idle = _make_material(0.0, 0.6, lamp_energy * 0.25)
-	_lamp_running = _make_material(0.0, 0.45, lamp_energy)
-
-	var index = _read_json(VOX_DIR + "index.json")
-	if index is Dictionary:
-		_asset_classes = index
+	_assets.load_materials()
+	_class_materials = _assets.class_materials
+	_lamp_idle = _assets.lamp_idle
+	_lamp_running = _assets.lamp_running
+	_asset_classes = _assets.asset_classes
 
 
 func _make_material(metallic: float, roughness: float, emission_energy: float) -> StandardMaterial3D:
-	var mat := StandardMaterial3D.new()
-	# Voxel meshes carry their colour per vertex, straight from the .vox
-	# palette — there are no textures anywhere in this pipeline.
-	mat.vertex_color_use_as_albedo = true
-	mat.vertex_color_is_srgb = true
-	mat.metallic = metallic
-	mat.roughness = roughness
-	if emission_energy > 0.0:
-		mat.emission_enabled = true
-		mat.emission = Color(1, 1, 1)
-		# MULTIPLY, not ADD: the emissive mesh holds several differently
-		# coloured lamps, and a flat additive emission would wash them all to
-		# the same white. Multiplying by albedo keeps green reading as green.
-		mat.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
-		mat.emission_energy_multiplier = emission_energy
-	return mat
-
-
-func _read_json(path: String):
-	if not FileAccess.file_exists(path):
-		return null
-	var text := FileAccess.get_file_as_string(path)
-	if text.is_empty():
-		return null
-	return JSON.parse_string(text)
+	return VoxelAssets.make_material(metallic, roughness, emission_energy)
 
 
 ## Builds one asset as a `Node3D` holding a `MeshInstance3D` per material
-## class it uses. Returns an empty node (with a warning) rather than failing
-## if the models haven't been staged — `cargo xtask` is what puts them in
-## res://voxels/, and a missing asset should not take down the whole scene.
+## class it uses; an empty node with a warning if the models were never
+## staged by `cargo xtask`.
 func _asset_node(asset: String) -> Node3D:
-	var root := Node3D.new()
-	root.name = asset
-
-	var built := 0
-	for class_name_ in _asset_class_names(asset):
-		var mesh := _class_mesh_for(asset, class_name_)
-		if mesh == null:
-			continue
-		var mi := MeshInstance3D.new()
-		mi.name = String(class_name_)
-		mi.mesh = mesh
-		# Only when there IS one: assigning a null override makes the headless
-		# dummy renderer log "Parameter 'material' is null" when the node is
-		# later freed, which is noise in every test log.
-		var class_material = _class_materials.get(class_name_, null)
-		if class_material != null:
-			mi.set_surface_override_material(0, class_material)
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-		root.add_child(mi)
-		built += 1
-
-	if built == 0:
-		push_warning("no voxel meshes for '%s' under %s — run `cargo xtask`" % [asset, VOX_DIR])
-	return root
+	return _assets.asset_node(asset)
 
 
 func _mesh_for(asset: String) -> Mesh:
-	var path := VOX_DIR + asset + ".vox"
-	if not ResourceLoader.exists(path):
-		return null
-	return load(path) as Mesh
+	return _assets.mesh_for(asset)
 
 
-## The material classes an asset was split into by `voxgen` (from
-## `index.json`), or every class when the index is missing — a class with no
-## file simply contributes no mesh.
 func _asset_class_names(asset: String) -> Array:
-	return _asset_classes.get(asset, ["matte", "metal", "emissive", "liquid"])
+	return _assets.asset_class_names(asset)
 
 
-## One asset's per-class mesh (`name.<class>.vox`, UI_UX.md §2b point 2), or
-## null when that class was not written for it or failed to import.
 func _class_mesh_for(asset: String, class_name_: String) -> Mesh:
-	var path := "%s%s.%s.vox" % [VOX_DIR, asset, class_name_]
-	if not ResourceLoader.exists(path):
-		return null
-	return load(path) as Mesh
+	return _assets.class_mesh_for(asset, class_name_)
 
 
 # --------------------------------------------------------------------------
@@ -2144,7 +2071,7 @@ func _world_tile_bounds() -> Rect2i:
 ## FLOOR_ASSET_* constants for why that matters. Drains are decided first and
 ## win outright: they are a continuous line across the world, and a worn tile
 ## punched out of the middle of one would break the trench.
-func _floor_variant_for(tx: int, tz: int) -> String:
+static func _floor_variant_for(tx: int, tz: int) -> String:
 	if posmod(tz + FLOOR_DRAIN_ROW_PHASE, FLOOR_DRAIN_ROW_PITCH) == 0:
 		return FLOOR_ASSET_DRAIN
 	# The same XOR hash the generators use, and for the same reason: a
@@ -2162,7 +2089,7 @@ func _floor_variant_for(tx: int, tz: int) -> String:
 ## reason: a modulo of a linear combination of tx and tz lays its results out
 ## in diagonal stripes, and the isometric camera looks straight down a
 ## diagonal.
-func _floor_hash(tx: int, tz: int) -> int:
+static func _floor_hash(tx: int, tz: int) -> int:
 	return absi((tx * 73856093) ^ (tz * 19349663))
 
 
@@ -2178,7 +2105,7 @@ func _floor_hash(tx: int, tz: int) -> int:
 ## The DRAIN is the exception and is always laid square: its channel has to
 ## stay on one axis or a row of them stops being a trench and becomes a row
 ## of holes.
-func _floor_yaw_steps_for(tx: int, tz: int, variant: String) -> int:
+static func _floor_yaw_steps_for(tx: int, tz: int, variant: String) -> int:
 	if variant == FLOOR_ASSET_DRAIN:
 		return 0
 	return (_floor_hash(tx, tz) / 3) % 4
@@ -3795,7 +3722,7 @@ const ISO_NEAR := 0.5
 # factory up close. No gravity, no collision: this project has no player
 # entity or collision shapes on the voxel meshes, so it deliberately doesn't
 # pretend to be one.
-const FP_MOVE_SPEED := 6.0 # world units/second (~2 tiles/second)
+const FP_MOVE_SPEED := 15.0 # world units/second (~4.7 tiles/second)
 const FP_MOUSE_SENSITIVITY := 0.0025 # radians per pixel of relative mouse motion
 const FP_PITCH_LIMIT := deg_to_rad(89.0) # stop just short of looking straight up/down
 const FP_FOV := 75.0
@@ -4089,6 +4016,7 @@ func _set_view_mode(mode: int) -> void:
 		return
 	_view_mode = mode
 	_update_crosshair_visibility()
+	_apply_backdrop_mode()
 
 	if mode == ViewMode.FIRST_PERSON:
 		_iso_dragging = false
@@ -4167,95 +4095,27 @@ func _framing_size(basis: Basis) -> float:
 	return max(needed_width, needed_height * aspect) * 1.06
 
 
-## UI_UX.md §4: real-time dynamic lighting with soft shadows, light ambient
-## occlusion in voxel crevices, and mild bloom on emissives — the
-## "modded Minecraft with a shader pack" reference point, not photorealism.
-## All of it is stock Forward+ environment configuration; no custom shaders.
-##
-## The sky IS the visible backdrop (BG_SKY), not just a light source — a
-## flat near-black BG_COLOR was tried first specifically to avoid a hard
-## horizon line/sun streak behind the tightly-framed isometric view, but it
-## reads as an empty void the moment first-person mode lets you look around
-## freely, which fights UI_UX.md §3's "a real factory you could walk into,"
-## not a factory floating in nothing. A soft, bright, sun-disk-free sky (see
-## sun_angle_max below) keeps the "no distracting streak" property that
-## motivated the original choice, while actually looking like somewhere.
+## The scene's light, air and backdrop — the inside of a factory hall far
+## bigger than anything the player can build. It lives in
+## `factory_environment.gd` because the title screen stands its machines in
+## the same hall, and a menu lit differently from the game would be the one
+## screen that does not look like the game.
 func _build_environment() -> void:
-	var sky_material := ProceduralSkyMaterial.new()
-	# A brighter, friendlier daytime sky than the original — still a
-	# believable overcast-ish industrial-zone sky (UI_UX.md §3's "grounded,
-	# not cartoonish"), just not dim enough to read as night or a void.
-	sky_material.sky_top_color = Color(0.42, 0.55, 0.72)
-	sky_material.sky_horizon_color = Color(0.78, 0.81, 0.83)
-	sky_material.ground_horizon_color = Color(0.42, 0.40, 0.37)
-	sky_material.ground_bottom_color = Color(0.24, 0.23, 0.21)
-	# Still no sun disk: the default draws a wide soft halo that the glow pass
-	# smears into a distracting beam. Brightness now comes from the sky
-	# colours and the key light below, not a visible sun.
-	sky_material.sun_angle_max = 0.0
-	var sky := Sky.new()
-	sky.sky_material = sky_material
+	_world_environment = FactoryEnvironment.build_into(self)
+	_apply_backdrop_mode()
 
-	var env := Environment.new()
-	env.background_mode = Environment.BG_SKY
-	env.sky = sky
-	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
-	# Sky-derived ambient is what fills the shadowed sides of a voxel model;
-	# without it, unlit faces read as flat black and the medium looks cheap.
-	# Raised from the original 0.55 alongside the brighter sky above.
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 0.8
 
-	env.ssao_enabled = true
-	env.ssao_radius = 0.9
-	env.ssao_intensity = 2.4
-	env.ssao_power = 1.6
-
-	env.glow_enabled = true
-	env.glow_intensity = 0.7
-	env.glow_bloom = 0.15
-	env.glow_hdr_threshold = 0.85
-	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
-
-	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_white = 6.0
-	# Raised from 0.92 to match the brighter sky/ambient — ACES still rolls
-	# off highlights safely, so this doesn't blow out the metal specular.
-	env.tonemap_exposure = 1.05
-	# Deliberately no depth fog: it was tried, and at this camera distance it
-	# flattened the whole factory into one haze-grey value and cost more
-	# contrast than the atmosphere was worth.
-
-	var world_env := WorldEnvironment.new()
-	world_env.name = "Environment"
-	world_env.environment = env
-	add_child(world_env)
-
-	# Key light: warm, shadow-casting, angled so machinery casts shadows
-	# across the belt line rather than straight down it.
-	var sun := DirectionalLight3D.new()
-	sun.name = "KeyLight"
-	sun.rotation_degrees = Vector3(-52.0, -130.0, 0.0)
-	sun.light_color = Color(1.0, 0.95, 0.88)
-	sun.light_energy = 1.6
-	sun.shadow_enabled = true
-	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
-	sun.directional_shadow_max_distance = 160.0
-	sun.shadow_blur = 1.4
-	# A non-zero angular size is what actually softens the shadow edge with
-	# distance, rather than just blurring the whole map uniformly.
-	sun.light_angular_distance = 0.6
-	add_child(sun)
-
-	# Cool fill from the opposite side, no shadows — keeps the shadowed faces
-	# of stainless steel from going dead grey.
-	var fill := DirectionalLight3D.new()
-	fill.name = "FillLight"
-	fill.rotation_degrees = Vector3(-28.0, 55.0, 0.0)
-	fill.light_color = Color(0.72, 0.80, 1.0)
-	fill.light_energy = 0.4
-	fill.shadow_enabled = false
-	add_child(fill)
+## The hall is drawn behind the world in first person and stood in for by its
+## own haze in the isometric view — a sky cannot be photographed with a
+## parallel projection. `factory_environment.gd`'s `set_backdrop_for` carries
+## the reasoning; this is only the call site, which is every place the view
+## mode is decided (build, and TAB).
+func _apply_backdrop_mode() -> void:
+	if _world_environment == null:
+		return
+	FactoryEnvironment.set_backdrop_for(
+		_world_environment.environment, _view_mode == ViewMode.FIRST_PERSON
+	)
 
 
 # --------------------------------------------------------------------------

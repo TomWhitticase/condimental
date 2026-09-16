@@ -114,6 +114,10 @@
 # is the only way to review the hotbar's selected state without a live
 # session, exactly as `--ghost` is for build mode.
 #
+# `--title` photographs the TITLE SCREEN — the menu exactly as the player
+# first sees it, three buttons and the wordmark over the 3D factory backdrop
+# (`title_scene.gd`). `--menu` is the same scene with its LOAD LIST open,
+# which is the other half worth reviewing.
 # `--menu` photographs the MAIN MENU (`menu.tscn`) instead of the game,
 # having first written a save file so the load list has something real in it.
 # It is the only flag here that renders a different scene, because the main
@@ -261,6 +265,11 @@ var _remove_mode := false
 ## `--menu` renders menu.tscn rather than main.tscn; `--pause` renders the
 ## in-game pause menu over a running factory. See the header.
 var _menu := false
+## `--title` is `--menu` as the player first sees it — the title screen, with
+## its three buttons, over the 3D factory backdrop — rather than the load
+## list `--menu` opens. Both are worth a frame: the list is the half with the
+## typography in it, and the title is the half that is a poster.
+var _title := false
 var _pause := false
 ## The save this run writes so `--menu`'s list is not empty, and removes
 ## again on the way out. Named so it cannot collide with a real save.
@@ -349,7 +358,8 @@ func _initialize() -> void:
 		_ghost_kind = _string_arg(args, "--ghost-blocked")
 		_ghost_blocked = _ghost_kind != ""
 	_remove_mode = args.has("--remove-mode")
-	_menu = args.has("--menu")
+	_title = args.has("--title")
+	_menu = args.has("--menu") or _title
 	_pause = args.has("--pause")
 	_parse_closeup(args)
 	if _menu:
@@ -864,7 +874,7 @@ func _process(_delta: float) -> bool:
 	# the "Real Placement" epic there is nothing to look at until one of the
 	# fixtures has been placed.
 	if _menu:
-		if _frames == 1:
+		if _frames == 1 and not _title:
 			_open_menu_load_view()
 		if _frames < WARMUP_FRAMES:
 			return false

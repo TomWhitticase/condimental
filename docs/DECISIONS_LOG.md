@@ -38,6 +38,67 @@ See [WORKFLOW.md](WORKFLOW.md).
   computed against `headcount`, never `available`: a head in arrears is not
   working, but hiring a second head to cover them is the wrong advice —
   paying them is.
+- 2026-09-16 **The hall is drawn in first person only; the isometric view
+  gets its air.** Owner's playtest ("when in isometric view the skybox is
+  messed up… decide what to do with it"). A sky is found by intersecting a
+  box against `EYEDIR`, which needs rays that fan out; an **orthographic
+  camera's rays are parallel**, so the whole screen sampled barely a degree
+  of direction and two or three roof bays were magnified into hard stripes
+  fanning from the corners, sliding as the player panned. It is not a shader
+  bug — a painted infinite room cannot be photographed with a parallel
+  projection. `factory_environment.gd`'s `set_backdrop_for(env, first_person)`
+  is now the one place that decides: `BG_SKY` in first person, `BG_COLOR` at
+  `HAZE_COLOR` (the very colour every distant surface in the shader fades to)
+  in isometric. **Only the background changes** — the `Sky` stays on the
+  environment and stays the ambient and reflection source in both modes, so
+  the factory is lit identically either way and TAB changes what is BEHIND
+  the world, not the world. `main.gd` calls it from `_apply_backdrop_mode`,
+  at build and on every TAB; the title screen is perspective and keeps the
+  sky. **Also: the main menu's column is CENTRED**, reversing the previous
+  entry's "a column set to one side of the vanishing point" — the owner asked
+  for it centred, the scrim became a symmetric four-stop gradient, and
+  `title_scene.gd`'s camera was re-framed around it (tomatoes in on the left,
+  bottles out on the right, plate over the middle), and **the title screen
+  gets clear air** — `build_into(parent, haze_density)` with
+  `TITLE_HAZE_DENSITY = 0.0`, the one parameter that differs between the two
+  callers. Haze is atmosphere over a play session; in a single still frame
+  under a wordmark it is a grey wash on the picture. The game keeps
+  `HAZE_DENSITY`.
+  Full record in `docs/DECISIONS.md`.
+
+- 2026-09-16 **The main menu is a title screen: the factory itself, hand
+  composed, behind the menu.** Owner's brief ("a splash screen similar to
+  minecraft/factorio using our assets"). This **reverses** the earlier "flat
+  charcoal plate is enough" call, and answers its argument rather than
+  ignoring it: `godot_project/title_scene.gd` loads NONE of `main.tscn` and
+  creates no simulation — it is ~20 hand-placed models of the shipped chain
+  on the game's own floor, in the §3 hall, with a perspective camera that
+  drifts on wall time. It is art, not a sim: nothing ticks, and the items on
+  the belts were placed by hand. To stop the poster drifting from the game,
+  the shared parts were EXTRACTED rather than copied — `voxel_assets.gd`
+  (loading, materials, meshes), `factory_environment.gd` (sky, environment,
+  lights), and `main.gd`'s floor helpers made `static`. The wordmark,
+  subtitle and a date-picked tilted splash line stand outside the plate, over
+  a gradient scrim, in a column set to one side of the vanishing point. A
+  list inside the menu is now capped by `_list_height_budget` — the window
+  less the measured chrome — not by a constant.
+  Full record in `docs/DECISIONS.md`.
+
+- 2026-09-16 **The backdrop is the inside of a factory hall, not the
+  sky.** Owner's brief. `godot_project/factory_interior_sky.gdshader` is a
+  sky shader that ray-marches nothing and intersects one box centred on the
+  viewer — roof deck, trusses, skylight ribbons and high-bay lamps overhead;
+  clad walls with a pipe-rack gantry, clerestory glazing and a line of
+  distant plant; a concrete slab below; all fading into air haze. It is at
+  infinity and has no parallax, so the hall is the same size wherever the
+  player walks: that is what makes it read as massive rather than as a room.
+  Colours are `palette.ron`'s, passed in from `_build_environment` as
+  `source_color` uniforms. The key light is now lamp-white and the fill
+  daylight-cool, because with no blue sky left to balance the old warm sun
+  every concrete surface in the game photographed beige. Do not put the
+  outdoor sky back, and do not build this as geometry.
+  Full record in `docs/DECISIONS.md`.
+
 - 2026-09-16 **Four playtest asks: a full dock, pulp off the crusher,
   SHIFT-to-rebuy, and the first-person camera's entry pose.**
   **A dock can be full**, and the ceiling is on the shared delivery POOL,
