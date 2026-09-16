@@ -1,0 +1,26 @@
+name: PR screenshot
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+# docs/WORKFLOW.md, "GitHub": every pull request shows the change, it does not
+# only describe it. This job is the backstop for that rule — it fails a PR
+# whose body embeds no image, and fails one whose image link is of a form that
+# renders broken in a private repository.
+jobs:
+  body-embeds-an-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the pull request body
+        env:
+          # Via env, never inlined into the script: a PR body is untrusted input.
+          PR_BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: scripts/check-pr-screenshot.sh

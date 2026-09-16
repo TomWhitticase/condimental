@@ -146,16 +146,50 @@ commit, not after.
 
 ```
 git push -u origin HEAD
-gh pr create --fill                 # or --title/--body for a written-up PR
+gh pr create --title "…" --body "…"   # --fill carries no screenshot; see below
 ```
 
 `.github/pull_request_template.md` is the body's shape: what changed and why,
 **what was run to verify it** (name the actual commands — `cargo test -p
 sim_core`, `scripts/verify-core-loop.sh`, which `screenshot-scene.sh` flags
 and whether the PNG was read), the DEVLOG/decision-log calls that were made,
-and `Closes #N` for every issue the branch settles. A PR that changes anything
-visual carries the screenshot's findings in words; the PNG itself is
-gitignored and cannot be attached from a headless run.
+and `Closes #N` for every issue the branch settles.
+
+### Every pull request shows the change
+
+**A PR body embeds at least one screenshot — every PR, not only the visual
+ones.** This is a game: the thing under review is a frame, and a paragraph
+describing a frame is a claim about it where the image is the evidence. The
+rule is unconditional because the conditional version rots — "visual changes
+only" becomes an author deciding their change is not visual, and the one check
+that catches a stale content-id lookup (UI_UX.md §2b point 12) is the one
+nobody ran. A sim change still has a surface: the panel whose numbers moved,
+the line that now backs up, the demo line as it stands at this commit.
+
+```
+scripts/screenshot-scene.sh shot.png 1600x900 --board   # the flag that shows it
+                                                        # then READ the PNG
+scripts/pr-screenshot.sh shot.png                       # prints the markdown
+```
+
+`scripts/pr-screenshot.sh` exists because `gh` cannot attach a file to a PR
+body and the rendered PNGs are gitignored. It pushes them to **`pr-media`**, an
+orphan branch that shares no history with `main` and is never merged into it,
+and prints a `github.com/<owner>/<repo>/blob/pr-media/…?raw=true` link. That
+URL form is not incidental: this repository is private, so a
+`raw.githubusercontent.com` link needs a token and renders as a broken image
+for every reader, while the `github.com` one is fetched with the reader's own
+session. The file name becomes the caption — name the PNG after its subject.
+
+Beside each image, say what it shows and what to look at. The screenshot
+replaces nothing in "How it was verified", where the findings still go in
+words. Two layers hold the rule up, because a rule is only worth having if it
+survives a session in a hurry: a `PreToolUse` hook
+(`.claude/hooks/require-pr-screenshot.sh`) refuses a `gh pr create` whose body
+has no image — which is why `--fill` alone no longer opens a PR here — and the
+`PR screenshot` CI job (`scripts/check-pr-screenshot.sh`) fails a body with no
+image, one with a `raw.githubusercontent.com` link, or one linking a file that
+does not exist.
 
 Then **watch it land** — an open PR is unfinished work, not a handoff:
 
