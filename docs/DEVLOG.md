@@ -70,7 +70,7 @@ below is history and should only ever be appended to.)*
   lens to cream. Status lamps still report their state through **albedo** as
   well as emission, so an OFF lamp reads off in any lighting. See the log
   entry below.
-- **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
+- **Repo:** Private GitHub repo (`TomWhitticase/condimental`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Work reaches `main` through pull requests, and deferrals become issues
   (2026-09-16).** Nothing is pushed to `main` directly — a `pre-push` hook
   refuses it — and anything noticed but consciously not fixed is filed with
@@ -138,6 +138,32 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-16 — The repo is `condimental` too
+
+The name change reached GitHub: `TomWhitticase/sauce-factory` →
+[`TomWhitticase/condimental`](https://github.com/TomWhitticase/condimental).
+Every current-tense link was swept with it — the clone instructions and issues
+link in README.md, the two `ISSUE_TEMPLATE/config.yml` URLs, `claude.yml`'s
+line about which repo the agent is in, and the **Repo:** line in the status
+section above.
+
+Nothing was ever pointing at a dead URL, because GitHub redirects a renamed
+repo's old paths indefinitely. That is also why the old links are left alone
+where they are history: the `#1`–`#4` issue links in the log below, the ones
+in `PIPES_AND_CONVEYORS_PLAN.md`, and — the ones that would have been genuinely
+annoying to fix — the `pr-media` screenshot URLs baked into every past PR body.
+They all still resolve.
+
+The tooling needed no edit: `pr-screenshot.sh` and `check-pr-screenshot.sh`
+both ask `gh repo view --json nameWithOwner` rather than spelling the repo out,
+so they picked up the new name on their own. Worth keeping that way.
+
+**The local directories are deliberately NOT renamed.** `orca/projects/sauce-factory`
+and `orca/workspaces/sauce-factory/*` stay as they are. A worktree's `.git` is
+an absolute path into the parent checkout's `.git/worktrees/`, and there were
+three live worktrees with sessions running in them at the time; renaming the
+directory breaks all of them and git does not care what a checkout is called.
 
 ### 2026-09-16 — The game is called CONDIMENTAL
 

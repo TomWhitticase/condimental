@@ -112,8 +112,8 @@ same way. An Android export has been proven working; iOS is blocked (see
 ### 2. Build
 
 ```bash
-git clone https://github.com/TomWhitticase/sauce-factory.git
-cd sauce-factory
+git clone https://github.com/TomWhitticase/condimental.git
+cd condimental
 cargo xtask
 ```
 
@@ -318,7 +318,7 @@ statistics, save/load, and a music and sound pass).
 | **More sauce** (content) | BBQ (a long slow-cook stage), mayo (refrigeration and a cold chain), hot sauce (acid-resistant equipment, fermentation), then aged and derived sauces — chilli mayo needs mayo *and* hot sauce, so the sauce list becomes a dependency tree |
 | **Multiplayer** (stretch) | Designed for in the architecture, deliberately deferred |
 
-The current open backlog is [GitHub issues](https://github.com/TomWhitticase/sauce-factory/issues);
+The current open backlog is [GitHub issues](https://github.com/TomWhitticase/condimental/issues);
 `docs/DEVLOG.md` is what has actually been built, dated.
 
 ## Releases

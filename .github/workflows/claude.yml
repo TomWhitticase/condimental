@@ -69,7 +69,7 @@ jobs:
           # arrive with the checkout. This only adds what a runner cannot
           # work out for itself.
           prompt: |
-            You are working in the CONDIMENTAL repository (the `sauce-factory` repo). Read CLAUDE.md
+            You are working in the CONDIMENTAL repository (`TomWhitticase/condimental`). Read CLAUDE.md
             first and follow it — in particular: gameplay logic lives in Rust
             and never in GDScript, content lives in data/*.ron and never in
             code, and shared simulation state is fixed-point only, never

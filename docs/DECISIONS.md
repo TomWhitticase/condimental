@@ -47,14 +47,16 @@ matches what code comments and data files cite.
   grep for `sauce-factory`, find these, and want to be helpful. It should not
   be.
 
-  1. *The repository, the clone URL and the worktree paths.* The repo is
-     still `TomWhitticase/sauce-factory`; renaming it is the owner's to do,
-     not an agent's, because it is an outward-facing change to a URL other
-     people may hold. Until they do, every
-     `github.com/TomWhitticase/sauce-factory/...` link in the docs is correct
-     and rewriting it would 404. After they do, GitHub redirects the old
-     paths indefinitely, so the links keep working and can be updated at
-     leisure — there is no moment at which a sweep is urgent.
+  1. *The local checkout and the worktree paths.* `orca/projects/sauce-factory`
+     and `orca/workspaces/sauce-factory/*` keep the old name. Three live
+     worktrees and their running sessions resolve through those paths — a
+     worktree's `.git` file is an absolute path into the parent's
+     `.git/worktrees/` — so renaming the directory breaks every one of them to
+     buy nothing. Git does not care what a checkout is called.
+
+     (The *GitHub* repo was `TomWhitticase/sauce-factory` when this record was
+     written, with the rename left as the owner's call. See the addendum
+     below: they made it the same day.)
   2. *Dated history.* DEVLOG.md's log and this file's older records say
      "Sauce Factory" because that is what it was called on those dates. A log
      that edits its own past to agree with the present is worth less than one
@@ -80,6 +82,25 @@ matches what code comments and data files cite.
   depends on its name. The Android/iOS ids moved from `com.saucefactory.spike`
   to `com.condimental.spike`, which costs nothing because nothing has ever
   been published under either.
+
+  **Addendum, 2026-09-16, hours later: the repo is renamed too.** "go ahead
+  and rename it from sauce-factory to condimental." `gh repo rename` →
+  `TomWhitticase/condimental`, and the current-tense links went with it: the
+  clone instructions in README.md, the issues link, the two
+  `ISSUE_TEMPLATE/config.yml` URLs, `claude.yml`'s description of where the
+  agent is, and DEVLOG.md's **Repo:** line.
+
+  Two things made this cheap. GitHub **redirects a renamed repo's old paths
+  indefinitely**, so no link was ever dead — not the ones in this file's
+  history, not the `pr-media` screenshot URLs embedded in every past PR body,
+  which is why those are left alone. And the tooling never hardcoded the name:
+  `pr-screenshot.sh` and `check-pr-screenshot.sh` both derive it from
+  `gh repo view --json nameWithOwner`, so they followed the rename with no
+  edit at all. That is worth preserving — a script that spells out the repo is
+  a script that breaks the next time something is renamed.
+
+  `git remote set-url` was handled by `gh` itself, and because the three
+  worktrees share one `.git`, that single update reached all of them.
 
 - 2026-09-16: **The title screen's scrim is gone — nothing is washed over the
   hall.** "In the splash screen, get rid of the dark haze/shadowy effect
