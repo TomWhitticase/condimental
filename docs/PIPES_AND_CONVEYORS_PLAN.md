@@ -296,6 +296,9 @@ the state of the update from the ticket table above.
 
 ### Still open
 
+Each of these is now a GitHub issue as well, so it is findable without
+reading this doc; the prose here stays as the evidence behind it.
+
 - **The `resolve_sink` inlet rule contradicts both design docs, and it moves
   real product.** A belt feeds a machine or dock when the tile it points
   into is on the inlet EDGE, *from whichever side it approaches*. For a 1x1
@@ -317,13 +320,16 @@ the state of the update from the ticket table above.
   `sim_core/tests/links.rs` pins the current behaviour deliberately so the
   change is a visible diff. **Left for the owner to decide** — it was not
   taken unilaterally because it changes what a player is allowed to build.
+  ([#1](https://github.com/TomWhitticase/sauce-factory/issues/1), `owner-decision`.)
 - **Nobody has watched the belt animation live.** It is a 4-frame march at
   sim speed (~2.4 frame changes/s); whether `BELT_FRAMES` should stay 4 is a
   judgement a PNG cannot make and a headless run cannot make either. Needs
   somebody at a windowed build.
+  ([#2](https://github.com/TomWhitticase/sauce-factory/issues/2).)
 - **`_read_world_layout` is ~40 ms of an 80 ms rebuild on 1500 tiles** (a
   336 KB layout parse per placement). Milestone 8 scope, with the rest of
   the scale-up work.
+  ([#3](https://github.com/TomWhitticase/sauce-factory/issues/3).)
 - All performance figures anywhere in this doc are measured on a **debug**
   `sim_core`, which is what `cargo xtask` builds.
 

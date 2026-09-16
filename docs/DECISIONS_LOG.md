@@ -18,6 +18,28 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-16 **GitHub is the workflow: every change lands by pull request,
+  every deferral becomes an issue.** Nothing is committed or pushed to `main`
+  directly — work goes on a `<type>/<description>` branch, `gh pr create`
+  opens the PR, `gh pr checks` must be green, and `gh pr merge --squash
+  --delete-branch` lands it (squash by default, so the squashed subject is the
+  one Conventional Commit and is linted like any other; a real merge commit
+  only where each commit is a reviewed unit). `.githooks/pre-push` **blocks** a
+  direct push to `main` — mechanical, unlike the `pre-commit` DEVLOG reminder,
+  which is a judgement call and only warns. Do not merge a PR that is red,
+  still running, requested for review, or that deviates from a design doc,
+  bumps `gdext` or changes the save format — say it is ready and stop.
+  **Deciding something is out of scope is only half the decision; filing it is
+  the other half**: `gh issue create --label deferred`, with file *and*
+  function, how it was found, why it was deferred and what the fix probably
+  is, because the next agent starts cold and a finding reported only in a
+  closing message is lost. Labels are deliberately few: `deferred`,
+  `owner-decision` (blocked on a human call — a gameplay change, a design-doc
+  deviation, anything invalidating saves) and `area:sim|godot|assets|docs|
+  tooling`. Issues are the **backlog only** — a rule still goes to this log,
+  a milestone to `docs/DEVLOG.md`, a plan to a doc in `docs/`. Skills
+  `open-pr` and `file-issue` are the procedures; `docs/WORKFLOW.md` has the
+  rule. Full record in `docs/DECISIONS.md`.
 - 2026-09-16 **The agent context is a map, not the manual.** `CLAUDE.md`
   `@`-included the three design docs and carried this log plus a per-file
   project structure, so every single request paid for ~2,000 lines

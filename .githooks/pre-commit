@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reminder only — never blocks the commit. Whether a devlog entry is actually
-# warranted is a judgment call (see docs/DEVLOG.md and CLAUDE.md), not
+# warranted is a judgment call (see docs/DEVLOG.md and docs/WORKFLOW.md), not
 # something this script can decide; it just makes sure the question gets
 # asked before the commit lands.
 set -euo pipefail
@@ -13,7 +13,7 @@ cat >&2 <<'EOF'
 reminder: this commit does not touch docs/DEVLOG.md.
   If this change is meaningful for project status (a decision, a milestone,
   notable progress) add a brief, high-level note to it before finishing.
-  Small/trivial changes don't need one — see docs/DEVLOG.md and CLAUDE.md.
+  Small/trivial changes don't need one — see docs/DEVLOG.md, docs/WORKFLOW.md.
 EOF
 
 exit 0
