@@ -21,7 +21,7 @@ name = "voxicons"
 path = "generators/icons.rs"
 
 [dependencies]
-ron = "0.8"
+ron = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Only used by voxicons, to post-process vengi-thumbnailer's opaque PNG
