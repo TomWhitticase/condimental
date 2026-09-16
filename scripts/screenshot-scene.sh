@@ -132,6 +132,11 @@
 # non-origin tile: "any tile of a multi-tile machine identifies it" is the
 # claim, and hovering the origin would not show it.)
 #
+# Pass --title to photograph the TITLE SCREEN — the menu as the player first
+# sees it: the wordmark, the splash line and the three buttons over the 3D
+# factory backdrop that stands behind them (`title_scene.gd`). --menu is the
+# same screen with its load list open.
+#
 # Pass --menu to photograph the MAIN MENU instead of the game — it renders
 # menu.tscn, having first written a real save so its load list has a row in
 # it, and removes that save again afterwards. Pass --pause to open the
@@ -174,7 +179,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--bottleneck] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--contracts] [--payout] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--board] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--bottleneck] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--contracts] [--payout] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

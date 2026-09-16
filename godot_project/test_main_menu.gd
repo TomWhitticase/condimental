@@ -24,7 +24,10 @@
 #     shown, the session is left alone, and no scene change is attempted,
 #   * New Game arms a new game, and the world that comes up is tick 0 and
 #     empty,
-#   * the autosave slot is listed and labelled as the autosave.
+#   * the autosave slot is listed and labelled as the autosave,
+#   * the title screen behind it is the real factory: a lit backdrop in the
+#     same hall, on the game's own floor, with a drifting perspective camera
+#     and a splash line — and the save list still fits under it.
 #
 # It writes real files under `user://saves/`, because that is the thing being
 # tested, and removes exactly the ones it wrote on the way out. It never
@@ -40,6 +43,14 @@ const FIXTURE_SLOT := "zz test fixture"
 const CORRUPT_SLOT := "zz test corrupt"
 
 var _cleanup_paths: Array = []
+
+
+func _find_all(node: Node, type_name: String, out: Array) -> Array:
+	if node.is_class(type_name):
+		out.append(node)
+	for child in node.get_children():
+		_find_all(child, type_name, out)
+	return out
 
 
 func _fail(msg: String) -> void:
@@ -139,6 +150,67 @@ func _initialize() -> void:
 		_fail("the menu needs a title — it is the first thing the player sees")
 		return
 
+	# --- The title screen: a real factory behind the menu ------------------
+	# The backdrop is a hand-composed 3D scene (title_scene.gd), not a flat
+	# plate, and it is built from the SAME voxel assets, floor helpers and
+	# hall environment the game uses so the two cannot drift. None of that is
+	# visible to any other check: the menu would still open, still list saves
+	# and still start a game with an empty grey rectangle behind it.
+	var backdrop: Node3D = menu._title_scene
+	if backdrop == null:
+		_fail("the menu has no TitleScene backdrop — the title screen is the factory itself")
+		return
+	# As with `main` above: `_ready` only fires on the engine's own next-frame
+	# processing, which this headless script-mode SceneTree never runs.
+	backdrop._ready()
+	if backdrop.name != "TitleScene":
+		_fail("the backdrop should name itself, found '%s'" % backdrop.name)
+		return
+	var title_cameras := _find_all(backdrop, "Camera3D", [])
+	if title_cameras.size() != 1:
+		_fail("the title backdrop needs exactly one camera, found %d" % title_cameras.size())
+		return
+	var title_camera: Camera3D = title_cameras[0]
+	if title_camera.projection != Camera3D.PROJECTION_PERSPECTIVE:
+		_fail("the title camera is a photograph of the hall, so it is perspective, not the game's orthographic view (see title_scene.gd's note)")
+		return
+	var title_env := _find_all(backdrop, "WorldEnvironment", [])
+	if title_env.is_empty() or title_env[0].environment == null:
+		_fail("the title backdrop has no WorldEnvironment — it must stand in the same lit hall the game does")
+		return
+	var title_sky: Environment = title_env[0].environment
+	if title_sky.background_mode != Environment.BG_SKY or title_sky.sky == null \
+			or not (title_sky.sky.sky_material is ShaderMaterial):
+		_fail("the title backdrop must use the factory-interior sky, the same one main.gd builds (factory_environment.gd is shared for exactly this reason)")
+		return
+	if backdrop.get_node_or_null("Floor") == null:
+		_fail("the title backdrop has no Floor — the poster stands on the game's own floor tiles")
+		return
+	var plant := backdrop.get_node_or_null("Plant")
+	if plant == null or plant.get_child_count() < 10:
+		_fail("the title backdrop should show the whole chain; found %d models" % (0 if plant == null else plant.get_child_count()))
+		return
+	if _find_all(backdrop.get_node("Floor"), "MultiMeshInstance3D", []).is_empty():
+		_fail("the title floor must be instanced the way the game's is")
+		return
+	# The camera drifts, which is the difference between a title screen and a
+	# paused game. Wall time, deliberately: there is no simulation here to
+	# take a tick from (title_scene.gd's `_process`).
+	var drift_from := title_camera.position.x
+	backdrop._process(6.0)
+	if is_equal_approx(title_camera.position.x, drift_from):
+		_fail("the title camera must drift — a still frame reads as a paused game")
+		return
+
+	# The splash line, the one piece of pure decoration on the screen.
+	var splash: Label = menu.find_child("SplashText", true, false)
+	if splash == null or splash.text.strip_edges() == "":
+		_fail("the splash line is missing or blank")
+		return
+	if is_zero_approx(splash.rotation):
+		_fail("the splash line is tilted — that tilt is the whole Minecraft reference")
+		return
+
 	# The load view is closed to begin with, and the three buttons are what
 	# is showing.
 	if menu._load_open:
@@ -158,6 +230,20 @@ func _initialize() -> void:
 		return
 	if menu._empty_label.visible:
 		_fail("the empty-state line must hide itself once there are saves")
+		return
+	# The list is capped by what the WINDOW has left after the wordmark, the
+	# plate and BACK — not by a flat number. A flat one put BACK off the
+	# bottom edge once the wordmark moved out of the panel, and no headless
+	# check noticed (menu.gd's `_list_height_budget`).
+	var save_scroll: ScrollContainer = menu.find_child("SaveScroll", true, false)
+	if save_scroll == null:
+		_fail("the save list has no scroll container")
+		return
+	var list_ceiling := maxf(menu._list_height_budget(), menu.SAVE_LIST_MIN_HEIGHT)
+	if save_scroll.custom_minimum_size.y > list_ceiling + 1.0:
+		_fail("the save list is %.0fpx tall in a window that leaves it %.0fpx — BACK would fall off the bottom" % [
+			save_scroll.custom_minimum_size.y, list_ceiling,
+		])
 		return
 	for i in range(1, menu._save_rows.size()):
 		if int(menu._save_rows[i - 1]["modified_unix"]) < int(menu._save_rows[i]["modified_unix"]):
@@ -300,5 +386,5 @@ func _initialize() -> void:
 	print("MAIN_MENU_OK: three buttons, a save list newest-first with its slot and time,")
 	print("              a chosen save coming back as the same factory, a corrupt one")
 	print("              refused with load_ron's own reason and nothing moved, and New")
-	print("              Game arming a tick-0 empty world")
+	print("              Game arming a tick-0 empty world, behind a drifting factory")
 	quit(0)

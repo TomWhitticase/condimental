@@ -37,6 +37,13 @@ below is history and should only ever be appended to.)*
 - **The world is indoors (2026-09-16).** The backdrop is a factory-interior
   sky shader, not weather, and the scene's lighting is the hall's rather than
   a sun's. See the log entry below.
+- **The menu is a title screen (2026-09-16).** The game opens on the factory
+  itself — a hand-composed 3D still life of the shipped chain in the same
+  hall, with a drifting camera, a big wordmark and a daily splash line — not
+  on a flat plate. It loads none of `main.tscn` and runs no simulation, and
+  it is built from the game's own assets, lighting and floor helpers
+  (`title_scene.gd`, `voxel_assets.gd`, `factory_environment.gd`). See the
+  log entry below.
 - **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Work reaches `main` through pull requests, and deferrals become issues
   (2026-09-16).** Nothing is pushed to `main` directly — a `pre-push` hook
@@ -104,6 +111,47 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-16 — a title screen: the factory behind the menu
+
+The game opened on a flat charcoal plate. It now opens on a **title screen**
+in the sense Minecraft and Factorio mean it: the factory itself, standing in
+the hall, photographed. The shipped chain runs across the frame — hopper,
+crusher, mixer, the 2x2 cooking vat, bottler, packer, dock, with tomatoes on
+the belts going in and boxes coming out — a second line of plant stands off
+in the haze behind it, and the camera drifts slowly along the line so the
+screen reads as a place rather than as a paused game. Over it: a 114pt
+hazard-yellow wordmark, the tagline, and a tilted yellow **splash line**
+picked from a fixed list by the date.
+
+**It is art, not a simulation.** None of `main.tscn` is loaded and no
+`SimBridge` is created: `godot_project/title_scene.gd` is about twenty
+hand-placed models on a floor, which costs a handful of `.vox` loads rather
+than the game. That is what answers the argument the original flat plate was
+chosen on. The parts it shares with the game were **extracted, not copied** —
+`voxel_assets.gd` (the `.vox` loading, the per-class materials, the mesh
+cache) and `factory_environment.gd` (the sky shader's uniforms, the
+environment, the lights) both came out of `main.gd`, which now calls them,
+and the floor helpers became `static` — so re-rendering the voxels or
+re-tuning the lighting changes the title screen with the game instead of
+leaving a stale poster behind.
+
+The camera here is perspective, not the game's orthographic view: §1's rule
+governs how the game is *played*, and the converging roof and the receding
+line are the whole subject of a photograph. Its framing came out of a
+camera-projection search after three rendered compositions were rejected.
+
+The menu was rearranged around it — the wordmark out of the plate, the column
+set to one side of the vanishing point, a gradient scrim holding the text
+against whatever the drifting camera is pointing at. That turned up one real
+regression, now UI_UX.md §2b point 35: the save list's flat 450px cap pushed
+the BACK button off the bottom edge under the taller wordmark. The list is
+now sized from the window less its measured chrome, and `test_main_menu.gd`
+asserts both that budget and the backdrop itself (camera, hall, floor,
+models, drift, splash).
+
+Full reasoning in `docs/DECISIONS.md`; the rule is in `docs/DECISIONS_LOG.md`
+and UI_UX.md §5d.
 
 ### 2026-09-16 — The backdrop is now the inside of a factory
 

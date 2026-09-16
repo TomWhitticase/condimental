@@ -25,6 +25,81 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-16: **The main menu is a title screen: the factory itself, hand
+  composed, behind the menu.** The owner asked for "a splash screen similar
+  to minecraft/factorio using our assets". Both of those games open on the
+  same thing: their own world, photographed, with the wordmark over it and a
+  joke underneath. Ours opened on a flat charcoal plate with one hazard band.
+
+  That plate was a decision, not an oversight, and its argument was good:
+  `main.tscn` costs a full voxel load, a simulation and a lit 3D frame, and
+  the player is on this screen for two seconds. Standing the real game up
+  behind a menu to be looked at briefly is a poor trade. **The reversal
+  answers that argument rather than overruling it**: `title_scene.gd` loads
+  none of `main.tscn` and creates no `SimBridge`. It is about twenty
+  hand-placed models — the shipped chain, in the order it runs — a floor, and
+  the hall environment. A handful of `.vox` loads, not the game.
+
+  Three things were weighed against this. **A pre-rendered panorama**
+  (Minecraft's literal approach — six images) was rejected because the art
+  here is generated: every re-render of the voxel models or re-tune of the
+  lighting would silently leave the title screen showing an older game, and
+  nothing would fail. **Running the real scene behind the menu** was rejected
+  on the cost above, and because a simulated line means a title screen whose
+  belts back up while nobody is watching. **Doing nothing** was the status
+  quo and is what the owner asked to change.
+
+  The rule that keeps this honest is that the poster is built from the game's
+  own parts, extracted rather than copied: `voxel_assets.gd` (the `.vox`
+  loading, the per-class materials, the mesh cache) and
+  `factory_environment.gd` (the sky shader's uniforms, the environment, the
+  two lights) came straight out of `main.gd`, which now calls them, and the
+  floor helpers `_floor_variant_for` / `_floor_hash` / `_floor_yaw_steps_for`
+  became `static` so the menu lays the same worn tiles in the same places. A
+  second copy of any of that would be exactly the palette drift UI_UX.md §2a
+  point 5 forbids. Re-render the voxels and this screen changes with them.
+
+  **It is art, not a simulation, and that is stated in the file.** Nothing
+  ticks; the tomatoes, bottles and boxes on the belts were put there by hand;
+  the 2x2 vat is placed by the same footprint-centring rule the game uses but
+  by nothing else. The sim's rules do not apply to a poster. The one clock is
+  wall time — the camera's slow drift, 74 seconds a cycle — which is the
+  single documented exception to "every animation clock is
+  `sim.current_tick()`": there is no simulation on this screen to take a tick
+  from, and nothing here is reproduced from a save. A perfectly still title
+  screen reads as a paused game rather than as a place.
+
+  The camera is **perspective**, where the game is orthographic. UI_UX.md §1
+  is a rule about how the game is *played* — it keeps the factory readable
+  and the grid honest. A title screen is a photograph of the hall, and the
+  converging roof trusses and the line receding into the haze are the whole
+  subject; an orthographic poster throws away the depth the backdrop exists
+  to show. The framing was found by a camera-projection search rather than by
+  eye: three earlier compositions were rendered and rejected — a background
+  fluid tank swallowing the frame, the chain reduced to a distant strip of
+  empty floor, and the chain entirely hidden behind the menu plate — before
+  the broadside at tile (-3.1, 4.2), yaw -35°, pitch -3° put the mixer, vat,
+  bottler, packer and dock across the open half of the screen.
+
+  Over it, the menu was rearranged to suit a photograph. The wordmark left
+  the plate, grew to 114pt hazard yellow, and took the subtitle and a tilted
+  yellow splash line with it; the column stands to one side because a plate
+  in the middle covers the vanishing point the whole composition is aimed at;
+  a gradient scrim washes the left edge, because an outline alone cannot hold
+  white text against both a lit skylight and a dark plinth as the camera
+  drifts past. The **splash line is picked from a fixed list by the date**,
+  not by `randf()` — it changes day to day like Minecraft's, and a review
+  screenshot rendered twice in one session is still the same frame
+  (`godot_project/CLAUDE.md`, "visual randomness is derived from an index").
+
+  One regression came out of the rearrangement and is recorded as UI_UX.md
+  §2b point 35: the save list's flat 450px cap fit under a title *inside* the
+  plate and pushed BACK off the bottom edge under a 114pt one above it. It is
+  now measured — the viewport less the wordmark, the plate's padding and the
+  load view's own furniture, read off the nodes so it follows the fonts. The
+  headless menu test asserts the list never exceeds that budget, which is the
+  check that was missing when the constant stopped being right.
+
 - 2026-09-16: **The backdrop is the inside of a factory hall, not the
   sky.** The owner asked for a skybox that makes the game look like it is
   always inside a massive factory. The backdrop had already been argued

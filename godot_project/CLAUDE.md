@@ -37,7 +37,10 @@ Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
 ## Presentation invariants
 
 - **Every animation/celebration clock is `sim.current_tick()`**, never wall
-  time — pause freezes them and screenshot runs stay reproducible.
+  time — pause freezes them and screenshot runs stay reproducible. The one
+  exception is the title screen (`title_scene.gd`'s camera drift,
+  `menu.gd`'s splash pulse): there is no simulation on that screen to take a
+  tick from.
 - **Never colour alone** (UI_UX §7): pair every status colour with a glyph,
   word, shape or position.
 - **One meter language**: `_build_meter`/`_set_meter` only. A bar exists
@@ -78,7 +81,12 @@ save-file rules** (dir, listing, slot sanitizer, reserved `autosave` slot);
 `sim_core` does no file I/O. `music.gd` — autoload; the one looping track,
 ducked (not stopped) under pause, skipped headless. `audio.gd` — every cue,
 synthesised. `menu.gd` — main menu; validates a save through a throwaway
-`SimBridge` **before** the scene changes. `test_layouts.gd` — shared fixture,
+`SimBridge` **before** the scene changes. `title_scene.gd` — the menu's 3D
+backdrop, a hand-placed poster of the chain; **art, not a sim** (nothing
+ticks, nothing is placed by a command). `voxel_assets.gd` and
+`factory_environment.gd` — the `.vox`/material loading and the hall's
+sky/lights, shared by `main.gd` and the title screen so the two cannot drift;
+neither is a place for new logic. `test_layouts.gd` — shared fixture,
 builds factories through real purchase/place commands.
 
 ## Running things

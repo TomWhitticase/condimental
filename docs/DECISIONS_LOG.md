@@ -18,6 +18,24 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-16 **The main menu is a title screen: the factory itself, hand
+  composed, behind the menu.** Owner's brief ("a splash screen similar to
+  minecraft/factorio using our assets"). This **reverses** the earlier "flat
+  charcoal plate is enough" call, and answers its argument rather than
+  ignoring it: `godot_project/title_scene.gd` loads NONE of `main.tscn` and
+  creates no simulation — it is ~20 hand-placed models of the shipped chain
+  on the game's own floor, in the §3 hall, with a perspective camera that
+  drifts on wall time. It is art, not a sim: nothing ticks, and the items on
+  the belts were placed by hand. To stop the poster drifting from the game,
+  the shared parts were EXTRACTED rather than copied — `voxel_assets.gd`
+  (loading, materials, meshes), `factory_environment.gd` (sky, environment,
+  lights), and `main.gd`'s floor helpers made `static`. The wordmark,
+  subtitle and a date-picked tilted splash line stand outside the plate, over
+  a gradient scrim, in a column set to one side of the vanishing point. A
+  list inside the menu is now capped by `_list_height_budget` — the window
+  less the measured chrome — not by a constant.
+  Full record in `docs/DECISIONS.md`.
+
 - 2026-09-16 **The backdrop is the inside of a factory hall, not the
   sky.** Owner's brief. `godot_project/factory_interior_sky.gdshader` is a
   sky shader that ray-marches nothing and intersects one box centred on the

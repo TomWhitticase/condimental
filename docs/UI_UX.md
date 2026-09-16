@@ -233,6 +233,18 @@ into sequence. They sit where they were discovered.
     not, show the plain tile and let the prompt (§5a) say the rest in
     words.
 
+35. **A list that scrolls is capped by what the window has left, measured,
+    not by a constant.** The main menu's save list had a flat 450px cap,
+    which fit while the title sat inside the plate. The wordmark then moved
+    out of the plate and grew to 114pt for the title screen (§5d), and at
+    1600x900 that same list pushed the BACK button clean off the bottom
+    edge. `menu.gd`'s `_list_height_budget` now subtracts the wordmark, the
+    plate's padding and the load view's own furniture — measured off the
+    nodes with `get_combined_minimum_size`, so it follows the fonts — from
+    the viewport, and the list takes what is left. A constant that was
+    right once is only right until the layout around it moves; and only a
+    rendered frame shows that it stopped being right (point 12).
+
 ## 3. Theme & setting
 
 **A grounded, semi-realistic 21st-century industrial food factory**:
@@ -505,10 +517,25 @@ Both are built from §5's ingredients (dark plate, hazard-yellow rule,
 outlined text), not a stock engine theme: the main menu is the first thing a
 player sees.
 
-**Main menu**: one centred plate (a `CenterContainer`, so it re-centres when
-labels resize) with title, subtitle and New Game / Load Game / Quit over a
-backdrop with one edged hazard band. Load Game **replaces** the buttons with
-the save list. A row shows the slot name and the file's mtime (not the tick
+**Main menu**: a **title screen** — the factory itself, in 3D, standing in
+the §3 hall behind the menu (`title_scene.gd`), the way Minecraft's panorama
+and Factorio's title art do. It is a hand-composed still life of the shipped
+chain, not `main.tscn` and not a simulation: nothing ticks, the items on the
+belts were put there by hand, and the camera drifts slowly so the screen
+reads as a place rather than as a paused game. Its models, materials, floor
+variants and lighting all come from the game's own pipeline
+(`voxel_assets.gd`, `factory_environment.gd`, `main.gd`'s floor helpers are
+shared, not copied), so the poster cannot go stale. The camera is
+**perspective** here — the fixed orthographic rule (§1) governs how the game
+is *played*, and depth is the whole subject of a photograph of the hall.
+
+Over it: the wordmark, subtitle and a tilted yellow **splash line** (picked
+from a fixed list by the date, so it changes day to day and a review
+screenshot still repeats), then a dark plate with New Game / Load Game /
+Quit. The column stands to one side rather than centred — a plate in the
+middle would cover the vanishing point the composition is aimed at — over a
+gradient scrim that keeps the text legible whatever the drifting camera is
+pointing at. Load Game **replaces** the buttons with the save list. A row shows the slot name and the file's mtime (not the tick
 count, which would mean parsing every file). The autosave is listed and
 labelled. An empty list says so in a sentence.
 
