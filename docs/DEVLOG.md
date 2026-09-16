@@ -139,6 +139,24 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-16 — the title screen loses its scrim
+
+The main menu laid a dark gradient band across the middle of the viewport
+behind its text — 82% black at full strength, fading to clear at both edges —
+on the argument that text over a photograph needs a backing. The owner did not
+want it, and the rendered frame backs that up: it dimmed the skylight ribbons
+and the far plant line that the same day's `TITLE_HAZE_DENSITY = 0.0` decision
+had gone out of its way to make crisp, and its soft edges read as a shadow
+lying on the picture rather than as anything standing in the hall.
+
+It is gone, and the contrast it was buying is bought by the text itself: the
+wordmark's outline goes 9px → 14px (`TITLE_OUTLINE`) and the tagline and
+splash line 5px → 8px (`STRAP_OUTLINE`), both named constants now rather than
+numbers at the call site, because they are load-bearing. The button plate was
+never relying on the scrim — it is α 0.94 in its own right. `test_main_menu.gd`
+now refuses any full-rect overlay child of the menu, since restoring the scrim
+would otherwise leave every check green.
+
 ### 2026-09-16 — The factory emits light
 
 The follow-up to the entry below, and the close of **issue #25**. `emissive`

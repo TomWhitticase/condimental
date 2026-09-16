@@ -25,6 +25,53 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-16: **The title screen's scrim is gone — nothing is washed over the
+  hall.** "In the splash screen, get rid of the dark haze/shadowy effect
+  that's behind the menu text, I don't like how it looks." The owner's call,
+  and it reverses one clause of the centred-menu record below.
+
+  **What it was.** `menu.gd::_build_backdrop` laid a `TextureRect` over the
+  whole viewport, filled with a four-stop horizontal `GradientTexture2D`:
+  `SCRIM_INK` (0.03, 0.03, 0.04, α 0.82) opaque across the middle 40% of the
+  screen, falling to clear at both edges (`SCRIM_CORE = 0.30`). Its stated
+  job was "the price of putting text over a photograph" — holding the
+  wordmark's contrast wherever the drifting camera happened to be pointing.
+
+  **Why it goes.** The rendered frame is the argument. At 82% black over the
+  middle of the screen it is not a subtle wash: it dims the skylight ribbons,
+  the clerestory glazing and the far plant line — the exact crispness the
+  same 2026-09-16 haze decision below went to the trouble of buying with
+  `TITLE_HAZE_DENSITY = 0.0` — and because its edges are a gradient and the
+  hall behind it is not, it reads as a soft shadow lying *on* the picture
+  rather than as anything in the scene. The screen exists to show the player
+  a working factory; a band across its middle is the one thing on it working
+  against that.
+
+  **What pays for the contrast instead.** Two things, both of which were
+  already most of the way there:
+
+  - **The text carries its own edge.** The wordmark's outline goes 9px → 14px
+    at `UI_SCALE` (`TITLE_OUTLINE`) and the tagline and splash line go 5px →
+    8px (`STRAP_OUTLINE`). These are deliberately heavier than any outline
+    inside a plate, and they are named constants beside `COLUMN_MARGIN`
+    rather than `_i(9)` at the call site, because they are now load-bearing
+    rather than decoration. An outline follows the glyph, so it costs a few
+    pixels around the letters instead of a third of the frame.
+  - **The plate was never relying on the scrim.** `PLATE_BG` is α 0.94 with a
+    hazard rule along its top; the three buttons are as legible over a lit
+    skylight as over a dark plinth either way.
+
+  Checked in the rendered frame at 1600x900 (`--title`), which is the only
+  place this is visible: wordmark, tagline and splash all still read, and the
+  hall behind them comes up at full brightness.
+
+  **And it is asserted.** `test_main_menu.gd` now refuses any full-rect
+  `ColorRect`/`TextureRect`/`Panel` child of the menu, and checks the
+  wordmark's outline against `TITLE_OUTLINE`. This is a purely rendered
+  symptom — put the scrim back and every other check in that file still
+  passes — which is the standing reason (UI_UX §2b point 12) for pinning it
+  in a test rather than trusting the next reader of the comment.
+
 - 2026-09-16: **An emissive voxel emits its own colour, and that takes the
   pipeline's one material shader.** Issue #25: nothing in the factory was
   emitting. Every `emissive` voxel — machine status lamps, the cooking vat's

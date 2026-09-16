@@ -211,6 +211,26 @@ func _initialize() -> void:
 		_fail("the title camera must drift — a still frame reads as a paused game")
 		return
 
+	# NOTHING IS WASHED OVER THE HALL. The menu used to lay a dark gradient
+	# band across the middle of the screen behind its text; the owner did not
+	# want it, and the whole point of standing a real factory back there is
+	# that it is seen. This is a purely rendered symptom — put the scrim back
+	# and every other check here still passes — so it is asserted: no
+	# full-screen tinted overlay may sit between the backdrop and the column.
+	# Instead the standalone labels carry their own outline (menu.gd's
+	# `TITLE_OUTLINE`/`STRAP_OUTLINE`), which is checked below.
+	for wash in menu.get_children():
+		if not (wash is ColorRect or wash is TextureRect or wash is Panel):
+			continue
+		if wash.anchor_right < 1.0 or wash.anchor_bottom < 1.0:
+			continue
+		_fail("'%s' covers the whole menu — the hall behind it is the screen, not a backing for text" % wash.name)
+		return
+	var wordmark: Label = menu.find_child("Title", true, false)
+	if wordmark.label_settings.outline_size < menu.TITLE_OUTLINE:
+		_fail("the wordmark stands on the hall with nothing behind it; its outline is the contrast")
+		return
+
 	# The splash line, the one piece of pure decoration on the screen.
 	var splash: Label = menu.find_child("SplashText", true, false)
 	if splash == null or splash.text.strip_edges() == "":
