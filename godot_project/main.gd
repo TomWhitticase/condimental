@@ -1097,6 +1097,11 @@ const STOCK_ICON_SIZE := Vector2(28, 28) * UI_SCALE
 ## below it and from the clipboard above it. One number, so the three gaps
 ## cannot drift apart.
 const STOCK_PANEL_MARGIN := 16.0 * UI_SCALE
+## The clipboard's inset from the top and right edges of the window, the one
+## number `_stock_ceiling_y` is measured against to decide how tall the
+## clipboard may grow. NOT `UI_SCALE`d: it is the offset handed to
+## `PRESET_TOP_RIGHT`, which is in window pixels.
+const CONTRACT_PANEL_MARGIN := 16
 ## Wide enough that the longest shipped display name and a four-digit count
 ## sit on one row without the name eliding. Bought stock reaches four digits
 ## (`--payout`'s fixture buys a thousand vinegar), and a plate that resized
@@ -4903,7 +4908,7 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	# Anchored to the top-right corner with a fixed margin, sized to its own
 	# content — independent of however tall the machine-line panel ends up
 	# being.
-	_contract_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 16)
+	_contract_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, CONTRACT_PANEL_MARGIN)
 
 
 ## Rebuilds the docket stack from a `contracts` array. Called once at build
@@ -5291,7 +5296,7 @@ func _hotbar_reserved_height() -> float:
 	return HOTBAR_SLOT_SIZE.y * HOTBAR_SELECTED_SCALE + HOTBAR_BOTTOM_MARGIN * 3.0
 
 
-func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float, snap_rows := false) -> void:
+func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float, snap_rows := false, hard_available := INF) -> void:
 	if scroll == null or grid == null:
 		return
 	var natural: float = grid.get_combined_minimum_size().y
@@ -5312,6 +5317,14 @@ func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float, 
 	# the half-row it shows past the cap is the thing that says "scroll".
 	if snap_rows:
 		cap = _whole_rows_height(grid, cap)
+	# Both floors above — `_ui_px(110)` and a whole row — may exceed what the
+	# caller said was available, which is how the panel takes a little of the
+	# column back from whatever is under it. `hard_available` is where that
+	# stops: the height past which the thing under it would have nowhere left
+	# to go at all. Past that the list is cut wherever it falls, ragged, and
+	# that is the right answer — a panel drawn ON another panel is a worse
+	# fault than a card cut through a line (issue #13).
+	cap = minf(cap, maxf(0.0, hard_available - chrome))
 	scroll.custom_minimum_size.y = minf(natural, cap)
 
 
@@ -8480,6 +8493,36 @@ func _stock_reserved_height() -> float:
 	if height <= 0.0:
 		height = _stock_panel.get_combined_minimum_size().y
 	return height + STOCK_PANEL_MARGIN * 2.0
+
+
+## The lowest `y` anything hung above this plate may reach: where its top
+## edge would be if it had shrunk to its floor of chrome plus one row.
+## `_stock_reserved_height`'s twin at the other end — that one is what the
+## plate WANTS and the clipboard is capped against, this is what it will take
+## regardless, and so the line the clipboard may never grow across
+## (`_update_contract_panel`). A plate drawn ON the clipboard is a worse
+## fault than either of the two things the caps are there to avoid.
+##
+## An absolute `y` rather than a height, because the two numbers a height
+## would have to be subtracted from are both approximations of this one:
+## `_update_contract_panel`'s column reserves the hotbar's flyout strip that
+## this plate is too far right to meet, and the margin between the two panels
+## is one gap, not each of their margins. Measuring the same `floor_y` this
+## plate is positioned against costs a second reading of the hotbar and gets
+## the real answer — at 1280x720 the approximations were a whole docket out.
+##
+## `INF` when there is no plate to collide with: no plate, no limit.
+func _stock_ceiling_y() -> float:
+	if _stock_panel == null or not _stock_panel.visible:
+		return INF
+	var vp := get_viewport()
+	if vp == null or vp.get_visible_rect().size.y <= 0.0:
+		return INF
+	var floor_y: float = vp.get_visible_rect().size.y - _hotbar_reserved_height() - STOCK_PANEL_MARGIN
+	if _hotbar_panel != null and _hotbar_panel.size.y > 0.0:
+		floor_y = _hotbar_panel.get_global_rect().position.y - STOCK_PANEL_MARGIN
+	var chrome: float = _stock_panel.get_combined_minimum_size().y - _stock_scroll.custom_minimum_size.y
+	return floor_y - (chrome + _stock_row_height()) - STOCK_PANEL_MARGIN
 
 
 ## The plate at its full list height, capped by the share of the column it is
@@ -12311,14 +12354,25 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 	# to nothing, so "no viewport" means "no cap", not "a cap of zero".
 	var viewport := get_viewport()
 	if viewport != null and viewport.get_visible_rect().size.y > 0.0:
+		var column: float = (
+			viewport.get_visible_rect().size.y - _hotbar_reserved_height() - _ui_px(24.0)
+		)
+		# Where the stack's floors stop mattering: the line the plate below
+		# stands on once it has given up everything but one row
+		# (`_stock_ceiling_y`), measured from this panel's own top edge.
+		var hard: float = INF
+		var ceiling_y: float = _stock_ceiling_y()
+		if is_finite(ceiling_y):
+			var top: float = CONTRACT_PANEL_MARGIN
+			if _contract_panel.size.y > 0.0:
+				top = _contract_panel.get_global_rect().position.y
+			hard = maxf(0.0, ceiling_y - top)
 		_fit_grid_scroll(
 			_contract_cards_scroll,
 			_contract_cards_box,
-			viewport.get_visible_rect().size.y
-				- _hotbar_reserved_height()
-				- _stock_reserved_height()
-				- _ui_px(24.0),
-			true
+			column - _stock_reserved_height(),
+			true,
+			hard
 		)
 	else:
 		_contract_cards_scroll.custom_minimum_size.y = _contract_cards_box.get_combined_minimum_size().y
@@ -12329,7 +12383,7 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 	# only computes offsets once, at the moment it's called — without this,
 	# the panel stays sized/positioned for its build-time (near-empty) text
 	# and later, wider text spills past its right edge.
-	_contract_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 16)
+	_contract_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, CONTRACT_PANEL_MARGIN)
 
 
 ## True when the built dockets already correspond, in order, to the reported
@@ -12441,6 +12495,20 @@ func _update_staff_alert() -> void:
 	_staff_alert_panel.visible = not state.is_empty()
 	if not state.is_empty():
 		_staff_alert_label.text = String(state["text"])
+	# ONE hint line at a time (issue #13). The board hint and this strip are
+	# both advice about what to do next, and the clipboard has room for one:
+	# the strip's two lines plus the hint's one were what pushed the stock
+	# plate below the clipboard off its third row at 1600x900 once the docket
+	# stack floored at a whole docket (`_whole_rows_height`).
+	#
+	# The hint is the one that yields, and not only because it is the shorter
+	# line. A factory that cannot crew the orders it is already running has
+	# no business being told where to sign more — hiring is the next action,
+	# and the strip names its key. The way to the board is still printed in
+	# the legend (`C: contracts`) and on the empty-board line, so it is never
+	# the only copy of it on screen.
+	if _contract_hint_label != null:
+		_contract_hint_label.visible = not _staff_alert_panel.visible
 	if _staff_alert_known_short < 0:
 		_staff_alert_known_short = short
 		return

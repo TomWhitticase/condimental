@@ -347,7 +347,14 @@ factory tropes; the sauce theme comes through in what the factory processes.
   the wage line it belongs with, in the docket's one warning red with a
   glyph, the words and the key — `▲ SHORT-STAFFED — hire 2 manufacturing ·
   press H` — naming only the categories actually short and disappearing
-  entirely when none are, never reading `0 short`; and the panel opening
+  entirely when none are, never reading `0 short`. **The column shows one
+  hint line at a time** (2026-09-16, issue #13): while the strip is up the
+  board's own `C: contracts board — sign more orders` hint is hidden, because
+  the two say the same kind of thing in the same place and the right-hand
+  column cannot afford both — at 1600x900 those two lines were the
+  difference between a whole docket plus the full stock plate and a docket
+  cut through a sentence. The strip is the line that yields last: it carries
+  a number and a key, the hint carries only a key. And the panel opening
   with a one-sentence verdict above its first row (`▲ 2 short — hire 1
   manufacturing, 1 packaging`, `✔ every machine has its crew`, or `nothing
   placed asks for staff yet`), three states in three inks, the green spent
@@ -602,6 +609,18 @@ reserved one row's worth, the clipboard grew into the slack, and stock
 stayed at one row for good. **A reserved height is what a plate wants, not
 what it currently has.** The docket stack scrolls by design (§5c's last
 resort); this readout does not, so the clipboard is the one that yields.
+
+**Where the yielding stops** (issue #13): both panels also have *floors* —
+one whole docket, one whole stock row — and at 1280x720 with a full board
+the two floors do not both fit in the column. Ranked worst to least worst,
+the faults are: a panel drawn ON another panel; a card cut through the
+middle of a line; a list showing less than it could. So the clipboard may
+grow past what the plate reserved, taking the column back a docket at a
+time, up to the line the plate stands on once it has given up all but one
+row (`_stock_ceiling_y`) — and at that line the stack is cut wherever it
+falls, ragged, rather than either panel overlapping the other. That ragged
+cut is only reachable at 1280x720 with every contract signed; the shipped
+1600x900 window shows whole dockets and the whole plate.
 
 **The legend folds, and folding is not a modal.** Its plate gains a heading
 row — `CONTROLS` and a button naming its key — and folds to that stub, so
