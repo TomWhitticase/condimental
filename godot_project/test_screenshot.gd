@@ -64,6 +64,10 @@
 # vat, so its hover reads `starved · short of manufacturing staff` and
 # `crew: 2 manufacturing`. Implies `--populate`.
 #
+# `--short-staffed` builds the same UNDERSTAFFED LINE and opens no panel and
+# hovers nothing, so the always-visible SHORT-STAFFED strip on the clipboard
+# is what the shot reviews. Implies `--populate`.
+#
 # `--production` builds the bottleneck line and opens the PRODUCTION panel
 # (P) over it — the production-stats epic's screen, reviewed on a line
 # with every stage counted and a contract paid. Implies `--populate`.
@@ -188,6 +192,12 @@ var _understaffed := false
 ## fed reference line, so the footer's shortfall sentence is what the shot
 ## reviews rather than the meters `--staff` already covers.
 var _staff_shortfall := false
+## `--short-staffed` builds the same understaffed line as `--understaffed`
+## but opens NOTHING and hovers nothing: the shot exists to prove the
+## always-visible SHORT-STAFFED strip on the clipboard is unmissable with no
+## panel up, which is the one thing a `--staff` or `--understaffed` shot
+## cannot show (both put a panel or a tooltip over the screen).
+var _short_staffed := false
 var _hotbar_key := ""
 var _stock := false
 ## `--contracts` waits for a STATE, not a tick count: a fixed count drifts
@@ -271,6 +281,10 @@ func _initialize() -> void:
 	_staff_shortfall = args.has("--staff-shortfall")
 	if _staff_shortfall:
 		_fixture = "shortfall"
+		_populate = true
+	_short_staffed = args.has("--short-staffed")
+	if _short_staffed:
+		_fixture = "understaffed"
 		_populate = true
 	_first_person = args.has("--first-person")
 	_hover = args.has("--hover")

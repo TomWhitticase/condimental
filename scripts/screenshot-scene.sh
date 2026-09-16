@@ -96,6 +96,13 @@
 # than the meters --staff already covers (the quality pass, ticket 4). It
 # implies --populate.
 #
+# Pass --short-staffed to build the same UNDERSTAFFED LINE with NO panel open
+# and nothing hovered, so the always-visible SHORT-STAFFED strip on the
+# clipboard (`▲ SHORT-STAFFED — hire 2 manufacturing  ·  press H`) is what the
+# shot reviews — the one readout --staff and --understaffed cannot show,
+# since both cover the screen with a panel or a tooltip. It implies
+# --populate.
+#
 # Pass --production to build the bottleneck line and open the PRODUCTION
 # panel (P) over it: what the factory made and used per item over a
 # window or all time, biggest first, with per-minute rates and bars (the
@@ -157,7 +164,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--bottleneck] [--staff] [--staff-shortfall] [--production] [--understaffed] [--contracts] [--payout] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--board] [--no-hud] [--stock] [--hotbar N] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--bottleneck] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--contracts] [--payout] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--menu] [--pause] [--shop] [--market] [--board] [--no-hud] [--stock] [--hotbar N] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

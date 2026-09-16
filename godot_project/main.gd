@@ -1189,6 +1189,31 @@ var _staff_rows_box: VBoxContainer
 var _staff_rows: Array = [] # Array[Dictionary], see _build_staff_row
 var _staff_row_ids: Array = []
 var _staff_footer_label: Label
+## The panel's one-sentence verdict under the heading, and its own ink (it
+## recolours between the level green and the warning red, so it cannot share
+## a settings object with anything else). See `_staff_summary_state`.
+var _staff_summary_label: Label
+var _staff_summary_settings_obj: LabelSettings
+## The verdict's third ink (nothing has asked for staff yet): the panel's own
+## body colour, captured when the panel is built so no new colour is coined.
+var _staff_summary_idle_color := Color(0.86, 0.87, 0.90, 1.0)
+## The static legend of how staffing works (`STAFF_RULES`), drawn once.
+var _staff_scroll_box: VBoxContainer
+var _staff_rules_label: Label
+## The two row skins, plain and SHORT, built once by `_staff_row_style`.
+var _staff_row_styles: Dictionary = {}
+## The always-visible SHORT-STAFFED strip on the clipboard, and its own ink.
+## The one thing outside this panel that says the factory is understaffed
+## (the staffing ticket's requirement 1); hidden entirely when nothing is
+## short. See `_staff_alert_state` / `_update_staff_alert`.
+var _staff_alert_panel: PanelContainer
+var _staff_alert_label: Label
+var _staff_alert_settings: LabelSettings
+## The shortfall the alert last showed, so the cue fires when the factory
+## GOES short rather than on every frame it still is. -1 until the first
+## poll, which primes it — a rebuild or a loaded save must not sound an
+## alarm for a shortfall the player has not just caused.
+var _staff_alert_known_short := -1
 var _staff_open := false
 ## The last `staff_snapshot_json` read, parsed. Polled on the tick like the
 ## machine load (see `_poll_staff`); `{}` until the first poll.
@@ -1254,6 +1279,21 @@ const STAFF_CATEGORY_BLURBS := {
 	"packaging": "bottles and seals a finished batch",
 	"logistics": "loads pallets and trucks so a delivery can ship",
 }
+## The three rules of the staffing model, printed in the panel's own legend
+## (see `_staff_rules_text`). Content, not layout: an array so a test can
+## assert each rule is present and a line can be added without touching the
+## label that draws them.
+const STAFF_RULES := [
+	"a machine that cannot get its WHOLE crew stops — it never runs short-handed",
+	"payday bills every head employed for any part of the period, so firing just before one saves nothing",
+	"a head the money does not reach goes unpaid and idles until the next payday — unpaid twice and they leave",
+]
+## The SHORT-STAFFED strip on the clipboard: the docket's own paper tone
+## (the card's, a shade darker than the sheet) inside the clipboard's ONE
+## warning red, so the alert adds no colour the board did not already own
+## (UI_UX.md §5). It is the only always-visible thing that says the factory
+## is understaffed.
+const STAFF_ALERT_BG := Color(0.83, 0.77, 0.60, 1.0)
 ## The active contract ids the clipboard saw on its last poll. The wire has
 ## no "contract lost" event — a lost contract simply stops being listed and
 ## reads `active: false` on the board — so the announcement is a diff of two
@@ -2381,7 +2421,11 @@ func _rebuild_world() -> void:
 	_seed_splitter_states()
 	_seed_crews()
 	# Polled here as well as on the tick, so a loaded save's panel and a
-	# fresh world's both read right on their first frame.
+	# fresh world's both read right on their first frame. The clipboard's
+	# SHORT-STAFFED strip re-primes with it: a rebuilt or loaded factory
+	# that is already short is a state, not an event, and must not sound
+	# like one (see `_update_staff_alert`).
+	_staff_alert_known_short = -1
 	_poll_staff()
 	# The load records, once, right now — not on the next poll tick. A
 	# rebuild is also what a LOADED game goes through in `_ready`, and a
@@ -4365,6 +4409,45 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_wages_label.label_settings = _contract_wages_settings
 	body.add_child(_contract_wages_label)
 
+	# SHORT-STAFFED, on the always-visible clipboard (the staffing ticket's
+	# requirement 1). Until this strip, the ONLY thing in the game that said
+	# a machine was standing idle for want of a head was that machine's own
+	# hover — a fact the player had to go looking for, about a factory that
+	# had already stopped earning. It goes here, under the wage bill it is
+	# the other half of, rather than in a second toast convention: the money
+	# line, the wages line and this are one column about what the factory
+	# costs and what is stopping it.
+	#
+	# A strip rather than another line of text, because it has to be
+	# unmissable: the docket's paper inside the clipboard's ONE warning red
+	# (no new colour), its glyph and words carrying the message on their own
+	# if the colour is not seen at all (UI_UX.md §7). It is a CHILD of the
+	# clipboard, so it can never land on another fixed plate (§2b point 33) —
+	# the board simply grows a strip when the factory is short and loses it
+	# again when it is not.
+	var alert_style := StyleBoxFlat.new()
+	alert_style.bg_color = STAFF_ALERT_BG
+	alert_style.border_color = CONTRACT_LAST_CHANCE_COLOR
+	alert_style.set_border_width_all(_ui_i(2))
+	alert_style.set_content_margin_all(_ui_px(5.0))
+
+	_staff_alert_panel = PanelContainer.new()
+	_staff_alert_panel.name = "StaffAlert"
+	_staff_alert_panel.add_theme_stylebox_override("panel", alert_style)
+	_staff_alert_panel.visible = false
+	body.add_child(_staff_alert_panel)
+
+	_staff_alert_settings = LabelSettings.new()
+	_staff_alert_settings.font_size = _ui_font()
+	_staff_alert_settings.font_color = CONTRACT_LAST_CHANCE_COLOR
+	_staff_alert_settings.outline_size = 0
+
+	_staff_alert_label = Label.new()
+	_staff_alert_label.name = "StaffAlertLabel"
+	_staff_alert_label.label_settings = _staff_alert_settings
+	_staff_alert_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_staff_alert_panel.add_child(_staff_alert_label)
+
 	_checkbox_style_unchecked = StyleBoxFlat.new()
 	_checkbox_style_unchecked.bg_color = Color(0.80, 0.74, 0.57, 1.0) # a shade darker than the paper
 	_checkbox_style_unchecked.border_color = Color(0.27, 0.29, 0.32, 1.0)
@@ -5942,20 +6025,55 @@ func _build_staff_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_staff_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	heading.add_child(_staff_money_label)
 
+	# The verdict, before any row: "is this factory staffed" answered in one
+	# sentence at the top of the panel (the staffing ticket's requirement 2).
+	# Its own settings object, recoloured per state by `_update_staff_panel`.
+	_staff_summary_settings_obj = _staff_summary_settings()
+	# The idle verdict's ink is the panel's own body colour, not a new one:
+	# no new colours beyond the established palette.
+	_staff_summary_idle_color = base_settings.font_color
+	_staff_summary_label = Label.new()
+	_staff_summary_label.name = "StaffSummary"
+	_staff_summary_label.label_settings = _staff_summary_settings_obj
+	body.add_child(_staff_summary_label)
+
 	_staff_scroll = ScrollContainer.new()
 	_staff_scroll.name = "StaffScroll"
 	_staff_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_staff_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	body.add_child(_staff_scroll)
 
+	# Everything that scrolls lives in one box: the rows, then the rules.
+	# The legend is IN the scroll, not under the footer, for UI_UX.md §2b
+	# point 32's reason — `_fit_grid_scroll` takes the scroll's cap from the
+	# PANEL's available height, so every line added as panel chrome is a line
+	# clipped off the rows. Four lines of small print outside the scroll cost
+	# a whole category row; inside it they cost nothing and are still one
+	# flick away, which is the right price for text read once.
+	_staff_scroll_box = VBoxContainer.new()
+	_staff_scroll_box.name = "StaffScrollBox"
+	_staff_scroll_box.add_theme_constant_override("separation", _ui_i(10))
+	_staff_scroll_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_staff_scroll.add_child(_staff_scroll_box)
+
 	_staff_rows_box = VBoxContainer.new()
 	_staff_rows_box.name = "StaffRows"
 	_staff_rows_box.add_theme_constant_override("separation", _ui_i(6))
 	_staff_rows_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_staff_scroll.add_child(_staff_rows_box)
+	_staff_scroll_box.add_child(_staff_rows_box)
 
 	_poll_staff()
 	_rebuild_staff_rows(_staff_snapshot.get("categories", []))
+
+	# The rules of the model, in small print at the end of the scrolled
+	# list (requirement 4). Static — they are the simulation's rules, not
+	# this factory's state — so they are set once here and never touched by
+	# a poll.
+	_staff_rules_label = Label.new()
+	_staff_rules_label.name = "StaffRules"
+	_staff_rules_label.label_settings = _staff_meta_settings()
+	_staff_rules_label.text = _staff_rules_text()
+	_staff_scroll_box.add_child(_staff_rules_label)
 
 	_staff_footer_label = Label.new()
 	_staff_footer_label.name = "StaffFooter"
@@ -5977,7 +6095,7 @@ func _position_staff_panel() -> void:
 		return
 	var reserved := _hotbar_reserved_height()
 	var bounds := vp.get_visible_rect().size
-	_fit_grid_scroll(_staff_scroll, _staff_rows_box, bounds.y - reserved - _ui_px(16.0))
+	_fit_grid_scroll(_staff_scroll, _staff_scroll_box, bounds.y - reserved - _ui_px(16.0))
 	var panel_size := _staff_panel.get_combined_minimum_size()
 	_staff_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
 
@@ -6009,14 +6127,25 @@ func _staff_rows_match(categories: Array) -> bool:
 
 
 ## The dark row a category sits on: a step lighter than the plate so four
-## rows read as four rows, with the plate's own hairline.
-func _staff_row_style() -> StyleBoxFlat:
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.11, 0.11, 0.13, 0.92)
-	style.border_color = Color(0.30, 0.31, 0.34, 0.95)
-	style.set_border_width_all(_ui_i(1))
-	style.set_content_margin_all(_ui_px(6.0))
-	return style
+## rows read as four rows, with the plate's own hairline. A SHORT row takes
+## the warning colour as a heavier border (the docket's own idiom for "this
+## one is in trouble", UI_UX.md §5) — never a red fill, which would read as
+## a different kind of row rather than the same row in trouble.
+##
+## The two styles are built ONCE and handed out, not rebuilt per update: the
+## panel re-reads every row on every frame it is open, and the quality pass
+## (ticket 3) already had to undo one readout that allocated a stylebox per
+## element per frame.
+func _staff_row_style(short: bool = false) -> StyleBoxFlat:
+	if _staff_row_styles.is_empty():
+		for is_short in [false, true]:
+			var style := StyleBoxFlat.new()
+			style.bg_color = Color(0.11, 0.11, 0.13, 0.92)
+			style.border_color = METER_FILL_WARN if is_short else Color(0.30, 0.31, 0.34, 0.95)
+			style.set_border_width_all(_ui_i(3) if is_short else _ui_i(1))
+			style.set_content_margin_all(_ui_px(6.0))
+			_staff_row_styles[is_short] = style
+	return _staff_row_styles[short]
 
 
 ## One category: ticket 2's icon, the name, `hired N` and the wage under it,
@@ -6059,11 +6188,25 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	text_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(text_col)
 
+	# The name and, beside it, the row's own verdict chip: "▲ SHORT" or
+	# "✔ CREWED" (the staffing ticket's requirement 2). A meter is a shape
+	# and this is the word for the same fact, at the place the eye lands
+	# first on a row — UI_UX.md §7 again: glyph, word AND colour.
+	var name_row := HBoxContainer.new()
+	name_row.add_theme_constant_override("separation", _ui_i(8))
+	text_col.add_child(name_row)
+
 	var name_label := Label.new()
 	name_label.name = "Name"
 	name_label.label_settings = _contract_name_settings_dark()
 	name_label.text = String(category.get("name", id))
-	text_col.add_child(name_label)
+	name_row.add_child(name_label)
+
+	var state_label := Label.new()
+	state_label.name = "State"
+	state_label.label_settings = _staff_state_settings()
+	state_label.visible = false
+	name_row.add_child(state_label)
 
 	# `hired 4  ·  wage 2 / head / period` on ONE line: with each on its own
 	# the row stood three lines tall and the fourth category scrolled off
@@ -6150,12 +6293,15 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	buttons.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(buttons)
 
+	# Wide enough for "HIRE +1 · 2/period" at the button's own type size: a
+	# button that says what the click does and what it costs is the staffing
+	# ticket's requirement 3, and a clipped one would say neither.
 	var hire_button := Button.new()
 	hire_button.name = "Hire_%s" % id
-	hire_button.text = "HIRE"
+	hire_button.text = "HIRE +1"
 	hire_button.focus_mode = Control.FOCUS_NONE
-	hire_button.custom_minimum_size = _ui_v(Vector2(84, 32))
-	hire_button.add_theme_font_size_override("font_size", _ui_font(-1))
+	hire_button.custom_minimum_size = _ui_v(Vector2(132, 32))
+	hire_button.add_theme_font_size_override("font_size", _ui_font(-2))
 	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
 		hire_button.add_theme_stylebox_override(state, _shop_slot_style(state))
 	hire_button.pressed.connect(_staff_hire.bind(index))
@@ -6163,10 +6309,10 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 
 	var fire_button := Button.new()
 	fire_button.name = "Fire_%s" % id
-	fire_button.text = "FIRE"
+	fire_button.text = "FIRE −1"
 	fire_button.focus_mode = Control.FOCUS_NONE
 	fire_button.custom_minimum_size = _ui_v(Vector2(84, 32))
-	fire_button.add_theme_font_size_override("font_size", _ui_font(-1))
+	fire_button.add_theme_font_size_override("font_size", _ui_font(-2))
 	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
 		fire_button.add_theme_stylebox_override(state, _shop_slot_style(state))
 	fire_button.pressed.connect(_staff_fire.bind(index))
@@ -6190,10 +6336,30 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	demand_label.label_settings = _staff_meta_settings()
 	row_wrap.add_child(demand_label)
 
+	# What hiring this shortfall would put back to work, in the machines'
+	# own names — the staffing ticket's requirement 5, built out of the
+	# demand sources above rather than out of any new sim fact.
+	var unblock_label := Label.new()
+	unblock_label.name = "Unblock"
+	unblock_label.label_settings = _staff_warn_settings()
+	unblock_label.visible = false
+	row_wrap.add_child(unblock_label)
+
+	# WHY a disabled HIRE is disabled (requirement 3): grey alone says only
+	# "not now", never "and here is what would change it".
+	var blocked_label := Label.new()
+	blocked_label.name = "HireBlocked"
+	blocked_label.label_settings = _staff_warn_settings()
+	blocked_label.visible = false
+	row_wrap.add_child(blocked_label)
+
 	return {
 		"id": id,
 		"panel": panel,
 		"name_label": name_label,
+		"state_label": state_label,
+		"unblock_label": unblock_label,
+		"blocked_label": blocked_label,
 		"hired_label": hired_label,
 		"wage_label": wage_label,
 		"meter": meter,
@@ -6249,6 +6415,30 @@ func _staff_warn_settings() -> LabelSettings:
 	return settings
 
 
+## The row's verdict chip beside its name ("▲ SHORT" / "✔ CREWED"). Its own
+## object per row, since its colour is the row's state — sharing one would
+## paint every row with the last row's verdict.
+func _staff_state_settings() -> LabelSettings:
+	var settings := LabelSettings.new()
+	settings.font_size = _ui_font(-1)
+	settings.font_color = METER_FILL_WARN
+	settings.outline_size = _ui_i(3)
+	settings.outline_color = Color(0, 0, 0, 0.85)
+	return settings
+
+
+## The panel's verdict line under the heading: body size a step up, coloured
+## by `_staff_summary_state`. Its own object for `_staff_state_settings`'s
+## reason.
+func _staff_summary_settings() -> LabelSettings:
+	var settings := LabelSettings.new()
+	settings.font_size = _ui_font(1)
+	settings.font_color = METER_FILL_LEVEL
+	settings.outline_size = _ui_i(3)
+	settings.outline_color = Color(0, 0, 0, 0.85)
+	return settings
+
+
 ## Whether the staff pools are due a re-read: never read yet, or
 ## LOAD_POLL_TICKS of simulation since the last one. The machine load's
 ## rule (`_machine_load_poll_due`), on its own stamp so a HIRE's immediate
@@ -6294,13 +6484,21 @@ func _staff_status_text(category: Dictionary) -> String:
 ##   meter          {"fraction", "color"} — assigned over demand, red when
 ##                  short; a demand of 0 is an empty bar reading "0 / 0"
 ##   meter_text     "4 / 4"
-##   short_text     "2 short" when short > 0, else ""
+##   short_text     "▲ 2 short" when short > 0, else "" (the glyph is the
+##                  staffing ticket's: a shortfall is read at a glance, and
+##                  the warning colour is never the whole message)
+##   state_text     the row's own verdict chip beside its name — "▲ SHORT",
+##                  "✔ CREWED", or "" for a category nothing asks for
+##   state_color    that chip's ink
+##   short_row      true when this row is the reason the HUD is shouting
 ##   note           the idle sentence when the category has nothing hired
 ##                  and nothing asking for it, else "" (the meter shows)
 ##   fire_enabled   headcount > 0
 ##   hire_enabled   the wire's own `can_hire` (ticket 1's hire-refusal rule;
 ##                  Godot never re-derives it — it needs the whole-factory
 ##                  bill, not this row's own numbers)
+##   hire_text      what the HIRE button's click does AND costs
+##   fire_text      what FIRE's click does
 ##   status_text    `_staff_status_text`'s AFTER-payday line
 func _staff_row_state(category: Dictionary) -> Dictionary:
 	var headcount := int(category.get("headcount", 0))
@@ -6312,6 +6510,11 @@ func _staff_row_state(category: Dictionary) -> Dictionary:
 	var note := ""
 	if headcount == 0 and demand == 0 and STAFF_IDLE_NOTES.has(id):
 		note = String(STAFF_IDLE_NOTES[id])
+	var state_text := ""
+	if short > 0:
+		state_text = "▲ SHORT"
+	elif demand > 0:
+		state_text = "✔ CREWED"
 	return {
 		"hired_text": "hired %d" % headcount,
 		"wage_text": "wage %d / head / period" % wage,
@@ -6320,12 +6523,161 @@ func _staff_row_state(category: Dictionary) -> Dictionary:
 			"color": METER_FILL_WARN if short > 0 else METER_FILL_LEVEL,
 		},
 		"meter_text": "%d / %d" % [assigned, demand],
-		"short_text": ("%d short" % short) if short > 0 else "",
+		"short_text": ("▲ %d short" % short) if short > 0 else "",
+		"state_text": state_text,
+		"state_color": METER_FILL_WARN if short > 0 else METER_FILL_LEVEL,
+		"short_row": short > 0,
 		"note": note,
 		"fire_enabled": headcount > 0,
 		"hire_enabled": bool(category.get("can_hire", true)),
+		"hire_text": _staff_hire_button_text(category),
+		"fire_text": "FIRE −1",
 		"status_text": _staff_status_text(category),
 	}
+
+
+## What a click on HIRE does and what it costs, on the button itself: the
+## staffing ticket's own complaint was that a bare "HIRE" says neither.
+## "HIRE +1 · 2/period" — the head it adds and the wage it adds to every
+## payday from now on, which is the recurring cost GAMEPLAY.md §5 makes the
+## third spend axis. A category with no wage on the wire says only what the
+## click does, rather than printing a cost of nothing.
+func _staff_hire_button_text(category: Dictionary) -> String:
+	var wage := int(category.get("wage", 0))
+	if wage <= 0:
+		return "HIRE +1"
+	return "HIRE +1 · %d/period" % wage
+
+
+## WHY a disabled HIRE is disabled, in words rather than in grey (ticket 1's
+## hire-refusal rule: `money >= next_bill + wage`, so nobody is hired who
+## cannot be paid). Every figure is the wire's — the balance, the bill it
+## reports as `next_bill`, and the row's own wage — so this sentence can
+## never quote a number the sim disagrees with. "" while `can_hire` is true,
+## which is the common case, so the row shows nothing extra.
+func _staff_hire_blocked_text(category: Dictionary, snapshot: Dictionary) -> String:
+	if bool(category.get("can_hire", true)):
+		return ""
+	var wage := int(category.get("wage", 0))
+	var bill := _staff_next_bill(snapshot)
+	var money := int(floor(float(snapshot.get("money", 0.0))))
+	return "✗ cannot hire — %d in hand; the next payday needs %d, plus %d for the new head" % [
+		money, bill, wage,
+	]
+
+
+## What hiring this category's shortfall would actually unblock, named from
+## the same `asked for by:` sources the WHY line uses (`_staff_demand_sources_for`).
+## The sim's own rule makes this honest without inventing a fact: a machine
+## that cannot get its WHOLE crew stalls, and a category whose `short` is 0
+## has assigned == demand, so clearing the shortfall is exactly "every one of
+## these gets its crew". "" when nothing is short — there is nothing to
+## unblock — and a bare hire count when nothing placed names the category
+## (a shortfall with no source is not a sentence this can complete).
+func _staff_hire_unblocks_text(short: int, sources: Array) -> String:
+	if short <= 0:
+		return ""
+	if sources.is_empty():
+		return "hire %d and nothing goes short" % short
+	var names: Array = []
+	for source in sources:
+		names.append(String(source["kind"]).replace("_", " "))
+	if names.size() == 1:
+		return "hire %d → the %s gets its crew again" % [short, names[0]]
+	return "hire %d → %s all get their crew again" % [
+		short, ", ".join(PackedStringArray(names)),
+	]
+
+
+## The panel's verdict, under the heading, before any row is read: is this
+## factory staffed or not, in one sentence. The staffing ticket's lead —
+## a player who opens H must not have to compare four meters to answer it.
+## Returns `{"text", "short"}`; `short` is the total heads missing across
+## every category (0 when nothing is short), which is also what the HUD
+## alert outside the panel is keyed on.
+##
+## Three states, and each is a real one: something is short (name the
+## categories and the heads to hire), nothing is short but something is
+## asking (every machine has its crew), or nothing is asking at all — which
+## is a new game, not a staffed one, and must not be congratulated as if it
+## were.
+func _staff_summary_state(snapshot: Dictionary) -> Dictionary:
+	var parts: Array = []
+	var total_short := 0
+	var total_demand := 0
+	for category in snapshot.get("categories", []):
+		total_demand += int(category.get("demand", 0))
+		var short := int(category.get("short", 0))
+		if short <= 0:
+			continue
+		total_short += short
+		parts.append("%d %s" % [short, _staff_category_word(category)])
+	if total_short > 0:
+		return {
+			"text": "▲ %d short — hire %s" % [total_short, ", ".join(PackedStringArray(parts))],
+			"short": total_short,
+			"state": "short",
+		}
+	if total_demand > 0:
+		return {"text": "✔ every machine has its crew", "short": 0, "state": "crewed"}
+	return {"text": "nothing placed asks for staff yet", "short": 0, "state": "idle"}
+
+
+## A category's display name, lowercased, for prose ("hire 2 manufacturing").
+## The wire's `name` when it has one, its id otherwise — never a table here.
+func _staff_category_word(category: Dictionary) -> String:
+	return String(category.get("name", category.get("id", ""))).to_lower()
+
+
+## The always-visible SHORT-STAFFED alert (the staffing ticket's first
+## requirement): the one thing outside the H panel that says the factory is
+## understaffed, drawn on the clipboard beside the money and the wage bill —
+## where the player is already looking — rather than as a second toast
+## convention.
+##
+## `{}` when nothing is short, so the strip disappears entirely rather than
+## reading "0 short"; `{"text", "short"}` otherwise, naming every short
+## category, the heads to hire and the key that opens the panel. Glyph, words
+## and colour together (UI_UX.md §7) — the colour is added by the caller.
+## Every figure is the wire's own `short`; Godot never recomputes it.
+func _staff_alert_state(snapshot: Dictionary) -> Dictionary:
+	if snapshot.is_empty():
+		return {}
+	var parts: Array = []
+	var total := 0
+	for category in snapshot.get("categories", []):
+		var short := int(category.get("short", 0))
+		if short <= 0:
+			continue
+		total += short
+		parts.append("%d %s" % [short, _staff_category_word(category)])
+	if total == 0:
+		return {}
+	return {
+		"text": "▲ SHORT-STAFFED — hire %s  ·  press H" % ", ".join(PackedStringArray(parts)),
+		"short": total,
+	}
+
+
+## The rules of the staffing model, in the panel, in plain words (the
+## staffing ticket's fourth requirement). Three sentences, each one a rule
+## that is real in `sim_core` and was invisible in the UI until now — a
+## player could only learn them by losing heads:
+##
+##   * a machine that cannot get its WHOLE crew stalls (GAMEPLAY.md §7:
+##     it does not run degraded),
+##   * notice pay — a head is billed for any period it worked any part of,
+##     so firing just before payday saves nothing (the quality pass,
+##     ticket 1),
+##   * unpaid once is idle, unpaid twice is gone (same ticket).
+##
+## Kept to three lines of small print, not an essay: the panel is a control
+## surface first.
+func _staff_rules_text() -> String:
+	var lines: Array[String] = ["how staffing works"]
+	for rule in STAFF_RULES:
+		lines.append("·  %s" % String(rule))
+	return "\n".join(PackedStringArray(lines))
 
 
 ## The upcoming wage bill: every hired head at its category's wage — the
@@ -6426,7 +6778,13 @@ func _staff_footer_text(snapshot: Dictionary, current_tick: int) -> String:
 	var walked_out := int(snapshot.get("walked_out_last_payday", 0))
 	if walked_out > 0:
 		lines.append("✗ %d left unpaid last payday" % walked_out)
-	lines.append("HIRE and FIRE move one head; hiring is free, wages are paid every period    H/ESC: close")
+	# "hiring is free" used to end this line and is gone: a hire is refused
+	# unless the balance covers the next bill plus the new wage (the quality
+	# pass, ticket 1), and the rules legend under this footer now says what
+	# a head actually costs.
+	# The rules legend lives at the end of the scrolled list (see
+	# `_build_staff_panel`), so the one always-visible line says it is there.
+	lines.append("HIRE and FIRE move one head    scroll for how staffing works    H/ESC: close")
 	return "\n".join(PackedStringArray(lines))
 
 
@@ -6513,6 +6871,22 @@ func _update_staff_panel() -> void:
 		_rebuild_staff_rows(categories)
 	_staff_money_label.text = "Money: %.0f" % float(_staff_snapshot.get("money", 0.0))
 
+	# The verdict first, so the panel answers "am I short" before any row is
+	# read (the staffing ticket's requirement 2).
+	var summary := _staff_summary_state(_staff_snapshot)
+	_staff_summary_label.text = String(summary["text"])
+	# Three states, three inks: the warn red when short, the level green only
+	# for an actual verdict of "crewed", and plain body ink when nothing has
+	# asked for staff yet — a green tick over an idle line would read as a
+	# pass mark the factory has not earned.
+	match String(summary.get("state", "idle")):
+		"short":
+			_staff_summary_settings_obj.font_color = METER_FILL_WARN
+		"crewed":
+			_staff_summary_settings_obj.font_color = METER_FILL_LEVEL
+		_:
+			_staff_summary_settings_obj.font_color = _staff_summary_idle_color
+
 	for i in range(min(categories.size(), _staff_rows.size())):
 		var row: Dictionary = _staff_rows[i]
 		var state := _staff_row_state(categories[i])
@@ -6532,11 +6906,29 @@ func _update_staff_panel() -> void:
 		row["short_label"].visible = state["short_text"] != ""
 		row["fire_button"].disabled = not bool(state["fire_enabled"])
 		row["hire_button"].disabled = not bool(state["hire_enabled"])
+		row["hire_button"].text = state["hire_text"]
+		row["fire_button"].text = state["fire_text"]
 		row["status_label"].text = state["status_text"]
 		row["status_label"].visible = state["status_text"] != ""
-		row["demand_label"].text = _staff_demand_text(
-			_staff_demand_sources_for(String(categories[i].get("id", "")), _placements, _crews)
+		# The row's own verdict chip, and the warning border that goes with
+		# it: a short row must be obvious without reading its meter.
+		var state_label: Label = row["state_label"]
+		state_label.text = state["state_text"]
+		state_label.visible = state["state_text"] != ""
+		state_label.label_settings.font_color = state["state_color"]
+		row["panel"].add_theme_stylebox_override(
+			"panel", _staff_row_style(bool(state["short_row"]))
 		)
+		var sources := _staff_demand_sources_for(
+			String(categories[i].get("id", "")), _placements, _crews
+		)
+		row["demand_label"].text = _staff_demand_text(sources)
+		var unblock := _staff_hire_unblocks_text(int(categories[i].get("short", 0)), sources)
+		row["unblock_label"].text = unblock
+		row["unblock_label"].visible = unblock != ""
+		var blocked := _staff_hire_blocked_text(categories[i], _staff_snapshot)
+		row["blocked_label"].text = blocked
+		row["blocked_label"].visible = blocked != ""
 
 	_staff_footer_label.text = _staff_footer_text(_staff_snapshot, sim.current_tick())
 	_position_staff_panel()
@@ -10942,6 +11334,7 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 	_update_money_flyout()
 	_update_contract_dock(econ.get("delivery_stock", []))
 	_update_contract_wages(money)
+	_update_staff_alert()
 
 	var contracts: Array = econ.get("contracts", [])
 	_announce_contract_changes(contracts, econ.get("board", []))
@@ -11095,6 +11488,28 @@ func _update_contract_wages(money: float) -> void:
 	_contract_wages_settings.font_color = (
 		CONTRACT_RISK_COLOR if bool(state["short"]) else _contract_meta_settings.font_color
 	)
+
+
+## Draws `_staff_alert_state` onto the clipboard's SHORT-STAFFED strip, and
+## sounds the refusal cue the first frame a factory goes short — the same
+## cue every "no" in this game shares (UI_UX.md §8), fired once on the
+## transition rather than on every frame of it. The first poll after a
+## rebuild only primes the remembered count, so a loaded save that was
+## already short does not sound like something the player just did.
+func _update_staff_alert() -> void:
+	if _staff_alert_panel == null:
+		return
+	var state := _staff_alert_state(_staff_snapshot)
+	var short: int = int(state.get("short", 0))
+	_staff_alert_panel.visible = not state.is_empty()
+	if not state.is_empty():
+		_staff_alert_label.text = String(state["text"])
+	if _staff_alert_known_short < 0:
+		_staff_alert_known_short = short
+		return
+	if short > _staff_alert_known_short:
+		_cue(FactoryAudio.REFUSED)
+	_staff_alert_known_short = short
 
 
 func _update_contract_dock(stock: Array) -> void:
