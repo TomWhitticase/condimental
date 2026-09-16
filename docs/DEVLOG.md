@@ -139,6 +139,26 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-16 — BBQ sauce, the second sauce, is planned
+
+Every one of the nine contracts on the board asks for `boxed_ketchup`, so
+GAMEPLAY.md §6's central claim — that contracts demand a mix and therefore
+force a diversified factory — has never once been exercised in play. The
+second sauce exists to turn that pillar on rather than to add content.
+
+BBQ won it because it needs no mechanic §11 still lists as undecided (mayo
+needs spoilage, hot sauce needs corrosion), because it fits on the machines
+already shipped, and because it consumes **finished ketchup** — making the
+sauce list a branching dependency tree from the second entry onward. Its
+mixer taps the same ketchup pipe the bottler drinks from, so every box of
+BBQ is a box of ketchup that was not shipped.
+
+The plan is `docs/BBQ_SAUCE_PLAN.md`, with the numbers five worker tickets
+depend on. Three of them cost something in the sim: a machine kind may run
+several recipes (chosen by what its inputs satisfy, not by a player-facing
+picker), a recipe may draw more than one fluid network, and `validate_chain`
+becomes a graph check rather than a line check. Nothing is built yet.
+
 ### 2026-09-16 — the title screen loses its scrim
 
 The main menu laid a dark gradient band across the middle of the viewport
