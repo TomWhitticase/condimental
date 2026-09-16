@@ -146,6 +146,18 @@ pub const ASSETS: &[Asset] = &[
     Asset { name: "item_ketchup_pail", build: item_ketchup_pail },
     Asset { name: "item_bottle", build: item_bottle },
     Asset { name: "item_box", build: item_box },
+    // The second sauce's two finished goods (`docs/BBQ_SAUCE_PLAN.md`).
+    // `bottled_bbq` and `boxed_bbq` are separate item ids made on the same
+    // bottler and packer, so they are separate models rather than a tint:
+    // which sauce is on a belt is fixed by `data/recipes.ron`, not live
+    // state, and a per-item tint would move colour out of palette.ron (the
+    // reasoning `liquid_ketchup` records there). Registered here BEFORE the
+    // items exist in `data/` — the epic's ticket 2 adds them — because
+    // `main.gd`'s ITEM_MODEL_FALLBACK is a shipping box, so a new item id
+    // arriving without a model ships bulk sauce in sealed cardboard and
+    // every structural test still passes (§2b point 12).
+    Asset { name: "item_bottle_bbq", build: item_bottle_bbq },
+    Asset { name: "item_box_bbq", build: item_box_bbq },
     // The coin a paid contract throws off the dock (the payout-feedback
     // ticket). Not an item and not a building — the one asset in this list
     // that never occupies a tile.
@@ -1353,27 +1365,110 @@ fn pail(p: &Palette, body: &str, contents: &str, handle: &str) -> VoxModel {
     m
 }
 
+/// The shipped ketchup bottle. Bright `ketchup_red` behind glass, cream
+/// label — the colour the whole chain has been working toward since the
+/// tomato.
 pub fn item_bottle(p: &Palette) -> VoxModel {
+    bottle(p, "ketchup_red", "label_cream")
+}
+
+/// The BBQ bottle (the second-sauce epic, `docs/BBQ_SAUCE_PLAN.md`).
+///
+/// Same vessel, different sauce: `bottled_bbq` is a separate item made on the
+/// same bottler, so it has to read as the same bottle carrying something
+/// else rather than as a different object. The contents carry the whole
+/// distinction and they carry it by VALUE, not hue — `bbq_brown` is about a
+/// third of `ketchup_red`'s luminance — because at the size an item renders
+/// on a belt (half a tile, ~16px) two warm reds a shade apart are not a
+/// difference a player can act on, and this camera sees a bottle's shadow
+/// side (§2b point 13). Dark body, bright cap: the silhouette stays a
+/// bottle, the body reads as filled with something almost black.
+///
+/// The label goes kraft rather than cream for the same reason at one step
+/// down: a band that is only slightly darker than the cap would read as the
+/// same label in different light, while kraft against the dark body is
+/// plainly a different livery.
+pub fn item_bottle_bbq(p: &Palette) -> VoxModel {
+    bottle(p, "bbq_brown", "label_kraft")
+}
+
+/// A bottle of finished sauce: a body of `contents` with a `label` band
+/// around it, a narrower glass neck and a cap.
+///
+/// Parameterised over its two colours rather than copied per sauce (the
+/// second-sauce epic): the shoulder ellipsoid has to be the same colour as
+/// the body and sit exactly where the cylinder ends or the neck reads as a
+/// jar's, which is precisely the relationship a second hand-written
+/// generator drifts on.
+fn bottle(p: &Palette, contents: &str, label: &str) -> VoxModel {
     let mut m = item_volume();
-    m.cylinder_z((8, 8), 4.0, (0, 7), p.idx("ketchup_red"));
-    m.cylinder_z((8, 8), 4.2, (2, 4), p.idx("label_cream"));
+    m.cylinder_z((8, 8), 4.0, (0, 7), p.idx(contents));
+    m.cylinder_z((8, 8), 4.2, (2, 4), p.idx(label));
     // Shoulder tapers into a distinctly narrower neck — without the gap the
     // cap sits straight on the body and the silhouette reads as a jar.
-    m.ellipsoid((8, 8, 8), (4.0, 4.0, 2.0), p.idx("ketchup_red"));
+    m.ellipsoid((8, 8, 8), (4.0, 4.0, 2.0), p.idx(contents));
     m.cylinder_z((8, 8), 1.6, (10, 12), p.idx("glass_pale"));
     m.cylinder_z((8, 8), 2.4, (13, 14), p.idx("cap_white"));
     m
 }
 
+/// The shipped case of ketchup, the item the dock ships and every contract
+/// on the board asks for.
 pub fn item_box(p: &Palette) -> VoxModel {
+    box_of_sauce(p, "label_cream")
+}
+
+/// The BBQ case (the second-sauce epic).
+///
+/// **The carton does not change — the label does.** A case is cardboard
+/// because it is a cardboard box, and a second sauce shipping in mahogany
+/// cartons would say the packaging is different rather than that the
+/// contents are; the project owner asked for the label to carry it. So the
+/// two shipping labels swap cream for `label_bbq`, the sauce's own dark
+/// brown, and that is the entire difference.
+///
+/// Dark patches rather than another pale colour, deliberately. A box is the
+/// smallest thing on the belt, and against `cardboard` a second light label
+/// would be a hue shift of a few points at ~16px — the two cases would be
+/// the same object. Reversing the CONTRAST DIRECTION (bright patches on a
+/// mid carton, or dark ones) survives any size the box renders at, and it
+/// is what a printed label on kraft actually looks like. §2b point 21's
+/// warning about dark accents reading as holes is about a dark mark on a
+/// machine's shadow-side FACE; these sit on a small bright object with a
+/// `cardboard_dark` tape seam already crossing the same face, and the
+/// rendered pair was checked at real size before this was kept.
+pub fn item_box_bbq(p: &Palette) -> VoxModel {
+    box_of_sauce(p, "label_bbq")
+}
+
+/// A taped shipping case, labelled on both of its long faces.
+///
+/// `label` is the only thing a caller chooses: everything else about a case
+/// is the same case (the second-sauce epic).
+///
+/// **The `y = 13` labels are new, and they are for the ICON.** The `y = 2`
+/// pair is what the fixed isometric camera sees (§2b point 11); the icon
+/// pass renders the same model from the OPPOSITE corner (§2b point 35), so
+/// until this a case's icon was a blank carton — and with two sauces
+/// shipping in cases, `boxed_ketchup` and `boxed_bbq` had the same blank
+/// carton on the contract clipboard, in the larder and in the production
+/// panel, which is UI_UX.md §2b point 12's silent failure with the two most
+/// valuable items in the game. A second pair of labels is also just what a
+/// shipping case looks like. It changes `item_box`, deliberately: the face
+/// it is printed on is one the game camera cannot see, so no rendered frame
+/// of the factory moves, and the first-person view gains a box that is
+/// labelled from both sides rather than one that is labelled from one.
+fn box_of_sauce(p: &Palette, label: &str) -> VoxModel {
     let mut m = item_volume();
     m.cuboid((2, 13), (2, 13), (0, 10), p.idx("cardboard"));
     // Taped seam over the top and down the front.
     m.cuboid((7, 8), (2, 13), (10, 10), p.idx("cardboard_dark"));
     m.cuboid((7, 8), (2, 2), (0, 10), p.idx("cardboard_dark"));
-    // Shipping label.
-    m.cuboid((3, 6), (2, 2), (4, 8), p.idx("label_cream"));
-    m.cuboid((9, 12), (2, 2), (4, 8), p.idx("label_cream"));
+    // Shipping labels: the camera's face, then the icon's.
+    for y in [2, 13] {
+        m.cuboid((3, 6), (y, y), (4, 8), p.idx(label));
+        m.cuboid((9, 12), (y, y), (4, 8), p.idx(label));
+    }
     m
 }
 
@@ -5189,5 +5284,63 @@ mod tests {
         assert!(m.filled(2, 11, 0) && m.filled(2, 18, 0), "the -X jaw has two lips");
         assert!(!m.filled(29, 17, 0), "the +X jaw is open at its mouth");
         assert!(m.filled(29, 14, 0) && m.filled(29, 21, 0), "the +X jaw has two lips");
+    }
+
+    /// The two sauces' finished goods are the SAME OBJECTS in a different
+    /// livery (`docs/BBQ_SAUCE_PLAN.md`): one bottler makes both bottles and
+    /// one packer makes both cases, so a BBQ bottle that had gained a
+    /// different silhouette would be claiming a machine the factory has not
+    /// got. Occupied voxels identical, colours not — which is also what
+    /// keeps `bottle`/`box_of_sauce` honest as shared helpers, since a
+    /// second hand-written generator is free to drift and this would say so.
+    #[test]
+    fn a_bbq_item_is_its_ketchup_counterpart_in_another_livery() {
+        let p = palette();
+        for (ketchup, bbq, what) in [
+            (item_bottle(&p), item_bottle_bbq(&p), "bottle"),
+            (item_box(&p), item_box_bbq(&p), "case"),
+        ] {
+            let shape: Vec<_> = ketchup.voxels.keys().collect();
+            let bbq_shape: Vec<_> = bbq.voxels.keys().collect();
+            assert_eq!(shape, bbq_shape, "the BBQ {what} has the ketchup {what}'s silhouette");
+            assert_ne!(
+                ketchup.voxels, bbq.voxels,
+                "the BBQ {what} is not the ketchup {what} repainted in the same colours"
+            );
+        }
+    }
+
+    /// **A case's carton does not change between sauces — its LABEL does**
+    /// (the project owner's call, `docs/BBQ_SAUCE_PLAN.md`). A box is the
+    /// smallest thing on a belt, and a second sauce shipping in a differently
+    /// coloured carton would read as different packaging rather than as
+    /// different contents.
+    ///
+    /// Stated as "exactly the label voxels differ" rather than by counting
+    /// them: the label is two patches of a known size, and the interesting
+    /// failure is a future edit tinting the CARTON, which a count would miss.
+    #[test]
+    fn only_a_case_s_label_tells_the_two_sauces_apart() {
+        let p = palette();
+        let ketchup = item_box(&p);
+        let bbq = item_box_bbq(&p);
+        let differing: Vec<_> = ketchup
+            .voxels
+            .iter()
+            .filter(|(at, colour)| bbq.voxels.get(at) != Some(colour))
+            .map(|(at, _)| *at)
+            .collect();
+        assert!(!differing.is_empty(), "the two cases are not the same model");
+        for (x, y, z) in differing {
+            assert!(
+                y == 2 || y == 13,
+                "only a labelled face differs, at ({x}, {y}, {z})"
+            );
+            assert!(
+                (3..=6).contains(&x) || (9..=12).contains(&x),
+                "only a label patch differs, at ({x}, {y}, {z})"
+            );
+            assert!((4..=8).contains(&z), "only a label patch differs, at ({x}, {y}, {z})");
+        }
     }
 }
