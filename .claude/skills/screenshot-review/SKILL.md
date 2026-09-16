@@ -82,5 +82,12 @@ The script opens a real window briefly, so it needs a display and a `godot`
 binary (`GODOT_BIN` overrides). It is slow — pick the one fixture that shows
 what you changed rather than sweeping every flag.
 
+## Into a pull request
+
+Every PR body embeds at least one of these PNGs (docs/WORKFLOW.md, "Every pull
+request shows the change"). `scripts/pr-screenshot.sh shot.png` publishes one
+to the `pr-media` branch and prints the markdown to paste — reading it first is
+still the point; publishing an unread frame verifies nothing.
+
 Deeper: `docs/UI_UX.md` (§2b for the traps, §5/§5e for panel and meter rules),
 and the script's own header for the reasoning behind each fixture.

@@ -25,6 +25,54 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-16: **Every pull request body embeds a screenshot, no
+  exceptions.** The owner's instruction was that PRs always include visual
+  elements, and the first question was whether to scope it to visual
+  changes. It is not scoped, deliberately. This project is reviewed as a
+  frame — the one check that catches a stale content-id lookup is a human
+  looking at a PNG (UI_UX.md §2b point 12) — and a conditional rule turns
+  into an author deciding their own change is not visual, which is exactly
+  the session that also skipped `screenshot-scene.sh`. A change with no
+  visual surface still has a state it affects: the panel whose numbers
+  moved, the line that backs up, or `--build` as it stands at that commit.
+  The screenshot does not replace the words; "How it was verified" still
+  carries what the PNG showed, because an image is evidence of a frame and
+  not of a reading of it.
+
+  **The mechanism is forced by two facts about this repo.** `gh` cannot
+  attach a file to a PR body — GitHub's upload endpoint needs a browser
+  session, not a token — and the PNGs `screenshot-scene.sh` writes are
+  gitignored, so there is nothing to link to. `scripts/pr-screenshot.sh`
+  therefore pushes them through the contents API to **`pr-media`**, an
+  orphan branch (no parents, no shared history) that is never merged into
+  `main`, so review images never enter the history that feeds the
+  changelog and can be pruned without touching source.
+
+  **The URL form is the part that is easy to get wrong, and it was
+  checked rather than assumed** (`gh api /markdown` shows what GitHub does
+  to each link). This repository is private. A
+  `raw.githubusercontent.com` link is a different origin, needs a token,
+  and renders as a broken image for every reader; a
+  `github.com/<owner>/<repo>/blob/<branch>/<path>?raw=true` link is
+  same-origin, is left un-proxied by GitHub's renderer, and is fetched
+  with the reader's own session, so it renders for anyone who can see the
+  repo. Both CI and the script treat the raw form as an error.
+
+  **It is enforced twice because a rule that only asks is a rule a hurried
+  session skips.** A `PreToolUse` hook
+  (`.claude/hooks/require-pr-screenshot.sh`) blocks a `gh pr create` or
+  `gh pr edit` whose body embeds no image, which is also why `--fill` no
+  longer opens a PR here: a commit message cannot hold an image. The hook
+  parses rather than substring-matches, and that is not over-engineering —
+  the first version blocked an edit to this very documentation because the
+  heredoc contained the words `gh pr create`. It strips heredoc bodies
+  before deciding whether the command *invokes* `gh`, then searches the
+  whole command *including* heredocs for the image, since that is where a
+  written-up body lives. The backstop is the `PR screenshot` CI job
+  (`scripts/check-pr-screenshot.sh`), which fails a body with no image, a
+  `raw.githubusercontent.com` link, or a link to a file that does not
+  exist — the last one being what catches an invented URL.
+
 - 2026-09-16: **Five HUD features the owner asked for, built in parallel:
   staffing made unmissable, buy-all in the market, a right-hand STOCK
   plate, a collapsible legend.** The brief was five sentences from the
