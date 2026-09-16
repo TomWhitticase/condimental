@@ -72,6 +72,16 @@
 # (P) over it — the production-stats epic's screen, reviewed on a line
 # with every stage counted and a contract paid. Implies `--populate`.
 #
+# `--full-dock` builds the FULL-DOCK LINE (test_layouts.gd's
+# `build_full_dock_line`: the reference line on auto-fill, run until the
+# shared delivery pool is at its 48-per-item ceiling) and freezes the frame
+# on a lit half of the dock lamps' pulse, so the clipboard's `48/48` /
+# `⚠ FULL` line, the belt standing still behind the dock and the pulsing
+# deck lamps are all in one shot. `--dock-lamp dark` takes the other half of
+# the pulse; two runs a `--dock-lamp` apart are the blink itself. Pair it
+# with `--closeup 26,0,12` to judge the lamps, which are floor-level and
+# small in a whole-line frame.
+#
 # `--populate` runs whatever has been built forward first so the screenshot
 # shows product actually moving, not an idle factory.
 #
@@ -259,6 +269,31 @@ const CRUSHING_REVIEW_TICK_LIMIT := 2000
 ## second beat to leave the mouth, so the shot shows a spray rather than one
 ## bit, and short of CRUSH_FLIGHT_TICKS so the first beat is still up.
 const CRUSHING_REVIEW_HOLD_TICKS := 6
+## `--full-dock` photographs a delivery pool at its ceiling: the clipboard's
+## ON THE DOCK line reading `48/48` in warning red under `⚠ FULL — belt
+## backing up`, the boxes standing still on the belt the dock has stopped
+## taking from, and the dock's deck lamps PULSING rather than steady. Both
+## states arrived with the dock-capacity change and neither could be
+## photographed on demand: `--bottleneck` leaves the pool around 20 of 48.
+##
+## `Layouts.build_full_dock_line` does the waiting (some 25 000 ticks against
+## the starter contract's appetite); what is left here is the same freeze
+## `--payout` and `--crushing` need, plus which HALF of the blink to stop on.
+## A pulse is a rhythm rather than a state, so a single frame can land on the
+## dark half and photograph a dock that looks like it holds nothing — this
+## picks the half deliberately instead, and two runs a `--dock-lamp` apart
+## are how a reviewer sees the blink itself.
+var _full_dock := false
+## `--dock-lamp dark` for the other half of the pulse; lit by default, since
+## a lit lamp over a full pool is the state worth reviewing and a dark one is
+## indistinguishable from an empty dock's.
+var _dock_lamp_dark := false
+## How long to hunt for a tick that is both full AND on the wanted half of
+## the blink. A whole pulse is DOCK_FULL_PULSE_TICKS (12), so this is only
+## generous because a contract may ship mid-hunt and drop the pool off its
+## ceiling for a cadence — in which case the line refills and the next
+## crossing is taken.
+const FULL_DOCK_HOLD_TICK_LIMIT := 2000
 var _ghost_kind := ""
 var _ghost_blocked := false
 var _remove_mode := false
@@ -350,6 +385,13 @@ func _initialize() -> void:
 	if _crushing:
 		_fixture = "chain"
 		_populate = true
+	_full_dock = args.has("--full-dock")
+	if _full_dock:
+		# NOT --populate: the fixture runs itself to the state it is named
+		# for, and `_run_chain_forward`'s own spawns on top of that would
+		# only be more ticks against an already-full pool.
+		_fixture = "full_dock"
+	_dock_lamp_dark = _string_arg(args, "--dock-lamp") == "dark"
 	_hotbar_key = _string_arg(args, "--hotbar")
 	_stock = args.has("--stock")
 	_legend_collapsed = args.has("--legend-collapsed")
@@ -422,6 +464,8 @@ func _build_fixture() -> void:
 			Layouts.build_understaffed_line(_main.sim)
 		"shortfall":
 			Layouts.build_underfunded_line(_main.sim)
+		"full_dock":
+			Layouts.build_full_dock_line(_main.sim)
 		_:
 			Layouts.build_demo_line(_main.sim)
 	# Every fixture is stocked, whether or not this run will tick: a
@@ -430,6 +474,20 @@ func _build_fixture() -> void:
 	Layouts.stock_larder(_main.sim)
 	_main._rebuild_world()
 	_main._refresh_owned_counts()
+	# A fixture that TICKS its way to a state — the bottleneck, understaffed
+	# and full-dock lines all do — banks a whole run's earnings and settles a
+	# whole run's contract windows between two polls of the clipboard. Left
+	# alone, the next poll announces the lot at once: a "+9308" money flyout
+	# and a "+1000" payout burst, both of them sitting over the dock line the
+	# shot came for, for twenty payments the player never watched arrive.
+	# Both counters seed themselves on their first poll (`main.gd`'s
+	# `_flash_money_change` and `_detect_payouts`: nothing to compare against
+	# yet) and this asks for that same seeding again, now that the world has
+	# moved. Deliberately NOT done for `--populate`/`--payout`, which tick
+	# from here on with the panel polled as they go, so their celebrations
+	# are of payments that happened in frame.
+	_main._last_money = INF
+	_main._payout_seen.clear()
 	_reframe()
 
 
@@ -777,6 +835,47 @@ func _run_to_crushing() -> void:
 	_main.set_process(false)
 
 
+## Stops the clock on a tick where the delivery pool is at its ceiling AND
+## the dock's lamps are on the wanted half of their pulse, then freezes.
+##
+## `Layouts.build_full_dock_line` has already run the line to full by the
+## time this is called; the loop here is the alignment, and it re-checks
+## fullness on every step rather than assuming it, because a contract that
+## ships mid-hunt takes the pool off its ceiling for a cadence and would
+## otherwise be photographed as a dock that merely holds some stock.
+func _run_to_full_dock() -> void:
+	var held := false
+	for i in range(FULL_DOCK_HOLD_TICK_LIMIT):
+		if Layouts.delivery_full(_main.sim) and _dock_lamp_on_wanted_half():
+			held = true
+			break
+		_main.sim.tick()
+		_main._apply_dirty_chunks()
+		_main._update_belt_frame()
+		_main._update_machine_motion()
+	if not held:
+		printerr("SCREENSHOT_NOTE: --full-dock never found a %s tick with the pool full — the shot is of whatever the line reached"
+			% ("dark" if _dock_lamp_dark else "lit"))
+	_main._refresh_buffers()
+	_main._update_fluid_network()
+	_main._update_contract_panel()
+	# Frozen for `--payout`'s reason, and one step more so: the lamps read
+	# `sim.current_tick()`, so eight more ticks a frame across the warm-up
+	# would hand back a coin-flip on which half of the pulse is in frame —
+	# the exact thing this flag exists to make deterministic.
+	_main.set_process(false)
+
+
+## Whether the dock's lamps are lit or dark this tick, matched against what
+## `--dock-lamp` asked for. The rule itself is `main.gd`'s — this asks the
+## scene rather than re-deriving the phase, so the threshold stays in one
+## place (`godot_project/CLAUDE.md`: Godot renders, the sim decides, and a
+## test script re-deriving a presentation rule is the same mistake).
+func _dock_lamp_on_wanted_half() -> bool:
+	var lit: bool = _main._dock_lamp_lit(true, true, _main.sim.current_tick())
+	return lit != _dock_lamp_dark
+
+
 func _contract_board_is_mixed() -> bool:
 	var econ: Dictionary = JSON.parse_string(_main.sim.economy_snapshot_json())
 	var stock := 0
@@ -932,6 +1031,8 @@ func _process(_delta: float) -> bool:
 		_run_to_payout()
 	if _frames == 2 and _crushing:
 		_run_to_crushing()
+	if _frames == 2 and _full_dock:
+		_run_to_full_dock()
 	if _frames == 2 and _stock:
 		_stock_the_hotbar()
 	# Through the real setter, not by hiding the label: the point of the shot

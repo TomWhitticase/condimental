@@ -124,6 +124,20 @@
 # window or all time, biggest first, with per-minute rates and bars (the
 # production-stats epic — Factorio's P screen). It implies --populate.
 #
+# Pass --full-dock to build the FULL-DOCK LINE (test_layouts.gd's
+# `build_full_dock_line`): the shipped line on auto-fill, run until it has
+# made boxes faster than its contracts ask for them and the shared delivery
+# pool sits at its 48-per-item ceiling. That is the one state the
+# dock-capacity change added and nothing else can reach on demand
+# (--bottleneck leaves the pool around 20 of 48): the clipboard's ON THE DOCK
+# line reads 48/48 in warning red under `⚠ FULL — belt backing up`, the boxes
+# stand still on the belt the dock has stopped taking from, and the dock's
+# deck lamps PULSE instead of holding steady. The shot is FROZEN on a lit
+# half of that pulse, since a pulse is a rhythm rather than a state and a
+# stray frame would photograph a dark lamp; add --dock-lamp dark for the
+# other half, and take both to see the blink. The lamps are floor-level, so
+# --closeup 26,0,12 (the dock's tile) is the frame to judge them in.
+#
 # Pass --populate to run whatever was built forward first, so the shot shows
 # product moving instead of an idle factory. Pass --first-person to review
 # that camera mode's lighting/skybox instead of the default isometric one.
@@ -189,7 +203,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--bottleneck] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--bottleneck] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--full-dock [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

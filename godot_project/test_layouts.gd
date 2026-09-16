@@ -393,6 +393,67 @@ static func build_underfunded_line(sim) -> void:
 	fund(sim, 8)
 
 
+## THE FULL-DOCK LINE (the dock-capacity change, 2026-09-16) — the fixture
+## `scripts/screenshot-scene.sh --full-dock` photographs: the reference line
+## on auto-fill, run until the shared delivery pool is at its ceiling and
+## the dock has to REFUSE the belt feeding it.
+##
+## Nothing here is broken. The pool holds `DELIVERY_STOCK_CAPACITY` (48) of
+## any one item, contracts are the only thing that drains it, and a line
+## making boxes faster than its contracts ask for them fills that pool up —
+## after which the dock stops taking, the belt behind it backs up, the
+## clipboard's ON THE DOCK line reads `48/48` in warning red with
+## `⚠ FULL — belt backing up` under it, and the dock's deck lamps switch
+## from steady to PULSING (`main.gd`'s `_dock_lamp_lit`). Those are the two
+## presentation states the dock-capacity work added and nothing could
+## photograph on demand.
+##
+## Reaching it takes ~22 900 ticks against the starter contract's appetite —
+## it asks for 2 boxes every 1 000 and the line makes rather more than that
+## (`sim_core/tests/dock.rs`'s
+## `a_full_pool_backs_the_line_up_instead_of_losing_product` measures the
+## same climb) — so this waits for the STATE and caps the wait, the way
+## `build_understaffed_line` does: a sim change that stops the pool ever
+## filling should leave a note rather than hang the shot.
+##
+## `FULL_DOCK_STOCK` is sized for the whole climb with room to spare, and
+## bought AFTER the balance is topped up: a larder that runs dry at tick
+## 12 000 photographs as a half-full dock, and `stock` is refused outright
+## when the money is not there — which is what the shipped line's own bill
+## leaves, since it costs ~1 100 of the 3 000 a new game starts with.
+const FULL_DOCK_STOCK := 3000
+const FULL_DOCK_FUNDS := 30000
+const FULL_DOCK_MAX_TICKS := 40000
+
+static func build_full_dock_line(sim) -> void:
+	build_reference_line(sim)
+	# Funded BEFORE the stocking, not after: `fund` SETS the balance rather
+	# than adding to it, so funding second would leave the larder empty and
+	# then hand the empty line a fortune. The stocking spends ~18 000 of
+	# this at the shipped prices, and ~40 paydays cost 560 of the rest.
+	fund(sim, FULL_DOCK_FUNDS)
+	stock_larder(sim, FULL_DOCK_STOCK)
+	for tile in [Vector2i(-1, 0), Vector2i(4, 1)]:
+		sim.issue_command_json(JSON.stringify({
+			"type": "set_hopper_auto_fill", "tile": [tile.x, tile.y], "enabled": true,
+		}))
+	sim.issue_command_json(JSON.stringify({
+		"type": "set_tank_auto_fill", "tile": [5, 2], "enabled": true,
+	}))
+	for i in range(FULL_DOCK_MAX_TICKS):
+		sim.tick()
+		if delivery_full(sim):
+			return
+
+
+## Whether the shared delivery pool is at its ceiling — the sim's own
+## verdict off `economy_snapshot_json`, never a count compared here against a
+## capacity read separately.
+static func delivery_full(sim) -> bool:
+	var econ = JSON.parse_string(sim.economy_snapshot_json())
+	return econ is Dictionary and bool(econ.get("delivery_full", false))
+
+
 ## THE PIPE GALLERY (the pipes & conveyors overhaul, ticket 6) — the fixture
 ## `test_pipe_shapes.gd` asserts and `scripts/screenshot-scene.sh
 ## --pipe-gallery` photographs. Every pipe shape at every turn, from real
