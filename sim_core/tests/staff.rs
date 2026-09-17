@@ -24,9 +24,8 @@ use sim_core::sim::save::{MoneyBits, SavedStaff};
 use sim_core::sim::types::Money;
 use sim_core::sim::{
     ContractRegistry, Direction, MachineRegistry, PlayerCommand, RecipeRegistry, STARTING_MONEY,
-    StaffCatalog,
-    StaffLoadError, StaffPools, StallKind, TileSnapshot, WorkState, World, command_from_json,
-    reference_chain, reference_chain_with_budget,
+    StaffCatalog, StaffLoadError, StaffPools, StallKind, TileSnapshot, WorkState, World,
+    command_from_json, reference_chain, reference_chain_with_budget,
 };
 
 fn recipes() -> RecipeRegistry {
@@ -167,7 +166,10 @@ fn the_establishment_tracks_what_is_placed_and_never_the_tick() {
 
     // The shipped chain: crusher 1 + mixer 1 + cooking vat 2.
     let before = required(&world, "manufacturing");
-    assert_eq!(before, 4, "the reference chain's manufacturing establishment");
+    assert_eq!(
+        before, 4,
+        "the reference chain's manufacturing establishment"
+    );
 
     // Running the factory for a long while does not move it, however the
     // line ebbs and flows. `demand` is free to breathe underneath.
@@ -182,7 +184,10 @@ fn the_establishment_tracks_what_is_placed_and_never_the_tick() {
     }
 
     // A second crusher asks for one more cook, the moment it is placed.
-    world.issue_command(PlayerCommand::Purchase { kind: "crusher".into(), quantity: 1 });
+    world.issue_command(PlayerCommand::Purchase {
+        kind: "crusher".into(),
+        quantity: 1,
+    });
     world.issue_command(PlayerCommand::Place {
         kind: "crusher".into(),
         tile: (12, 12),
@@ -376,10 +381,7 @@ fn firing_one_manufacturing_head_idles_exactly_the_last_manufacturing_machine() 
     // `starved` for an INPUT before the line backs up — never for staff.
     for tile in [crusher, mixer] {
         assert!(
-            matches!(
-                stall_of(&world, tile),
-                None | Some((StallKind::Input, _))
-            ),
+            matches!(stall_of(&world, tile), None | Some((StallKind::Input, _))),
             "{tile:?} before: belt-limited at most, got {:?}",
             stall_of(&world, tile)
         );

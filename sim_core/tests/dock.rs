@@ -36,7 +36,7 @@
 mod common;
 
 use sim_core::sim::{
-    ContractRegistry, DELIVERY_STOCK_CAPACITY, DOCK_CAPACITY, DockSnapshot, Direction,
+    ContractRegistry, DELIVERY_STOCK_CAPACITY, DOCK_CAPACITY, Direction, DockSnapshot,
     RecipeRegistry, TileSnapshot, World, reference_chain_with_budget,
 };
 
@@ -117,9 +117,7 @@ fn the_dock_stands_at_the_end_of_its_own_belt_past_the_last_machine() {
     // time now, where the pre-placement chain built one four-tile segment.
     for x in 22..=25 {
         assert!(
-            layout
-                .iter()
-                .any(|p| p.kind == "belt" && p.tile == (x, 0)),
+            layout.iter().any(|p| p.kind == "belt" && p.tile == (x, 0)),
             "a belt tile must stand at ({x}, 0)"
         );
     }
@@ -180,7 +178,10 @@ fn every_tile_of_the_dock_and_its_belt_resolves() {
     for tile in [(27, 0), (26, 1), (27, 1)] {
         match world.query_tile(tile) {
             Some(TileSnapshot::Dock { origin_tile, .. }) => {
-                assert_eq!(origin_tile, dock.tile, "{tile:?} must resolve to the dock's origin");
+                assert_eq!(
+                    origin_tile, dock.tile,
+                    "{tile:?} must resolve to the dock's origin"
+                );
             }
             other => panic!("expected the dock at {tile:?}, got {other:?}"),
         }
@@ -508,10 +509,7 @@ fn a_full_pool_backs_the_line_up_instead_of_losing_product() {
             "a full pool must make the dock REFUSE the belt, not hold product itself —              the dock is a pass-through at every fill level"
         );
 
-        if stock
-            .iter()
-            .any(|(_, qty)| *qty == DELIVERY_STOCK_CAPACITY)
-        {
+        if stock.iter().any(|(_, qty)| *qty == DELIVERY_STOCK_CAPACITY) {
             filled = true;
             break;
         }
@@ -548,4 +546,3 @@ fn a_full_pool_backs_the_line_up_instead_of_losing_product() {
         "with the pool full the dock's belt must hold the boxes it cannot hand over"
     );
 }
-

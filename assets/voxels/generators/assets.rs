@@ -26,10 +26,22 @@ pub const ASSETS: &[Asset] = &[
     // `_floor_variant_for` picks one per tile from the tile's own
     // coordinates, so a world gets a floor with some life in it out of four
     // models — see the factory-floor section below.
-    Asset { name: "floor_tile", build: floor_tile },
-    Asset { name: "floor_tile_worn", build: floor_tile_worn },
-    Asset { name: "floor_tile_patch", build: floor_tile_patch },
-    Asset { name: "floor_tile_drain", build: floor_tile_drain },
+    Asset {
+        name: "floor_tile",
+        build: floor_tile,
+    },
+    Asset {
+        name: "floor_tile_worn",
+        build: floor_tile_worn,
+    },
+    Asset {
+        name: "floor_tile_patch",
+        build: floor_tile_patch,
+    },
+    Asset {
+        name: "floor_tile_drain",
+        build: floor_tile_drain,
+    },
     // The belt family (the "Pipes & Conveyors Overhaul" plan's ticket 2):
     // three shapes, `BELT_FRAMES` animation frames each, all authored for a
     // +X product path. The scene picks the shape from each tile's `links`
@@ -37,115 +49,322 @@ pub const ASSETS: &[Asset] = &[
     // and `_belt_frame_for_tick`); `belt_f0` is also the build menu's icon
     // and the ghost. The old `belt`/`belt_inlet`/`belt_outlet` names are
     // gone — see the conveyor section's header.
-    Asset { name: "belt_f0", build: belt_f0 },
-    Asset { name: "belt_f1", build: belt_f1 },
-    Asset { name: "belt_f2", build: belt_f2 },
-    Asset { name: "belt_f3", build: belt_f3 },
-    Asset { name: "belt_corner_left_f0", build: belt_corner_left_f0 },
-    Asset { name: "belt_corner_left_f1", build: belt_corner_left_f1 },
-    Asset { name: "belt_corner_left_f2", build: belt_corner_left_f2 },
-    Asset { name: "belt_corner_left_f3", build: belt_corner_left_f3 },
-    Asset { name: "belt_corner_right_f0", build: belt_corner_right_f0 },
-    Asset { name: "belt_corner_right_f1", build: belt_corner_right_f1 },
-    Asset { name: "belt_corner_right_f2", build: belt_corner_right_f2 },
-    Asset { name: "belt_corner_right_f3", build: belt_corner_right_f3 },
+    Asset {
+        name: "belt_f0",
+        build: belt_f0,
+    },
+    Asset {
+        name: "belt_f1",
+        build: belt_f1,
+    },
+    Asset {
+        name: "belt_f2",
+        build: belt_f2,
+    },
+    Asset {
+        name: "belt_f3",
+        build: belt_f3,
+    },
+    Asset {
+        name: "belt_corner_left_f0",
+        build: belt_corner_left_f0,
+    },
+    Asset {
+        name: "belt_corner_left_f1",
+        build: belt_corner_left_f1,
+    },
+    Asset {
+        name: "belt_corner_left_f2",
+        build: belt_corner_left_f2,
+    },
+    Asset {
+        name: "belt_corner_left_f3",
+        build: belt_corner_left_f3,
+    },
+    Asset {
+        name: "belt_corner_right_f0",
+        build: belt_corner_right_f0,
+    },
+    Asset {
+        name: "belt_corner_right_f1",
+        build: belt_corner_right_f1,
+    },
+    Asset {
+        name: "belt_corner_right_f2",
+        build: belt_corner_right_f2,
+    },
+    Asset {
+        name: "belt_corner_right_f3",
+        build: belt_corner_right_f3,
+    },
     // Epic B's conveyor splitter and the lit arrow that says which of its two
     // outputs takes the next item. Grouped with the belts rather than with
     // the machines below because that is what a splitter is (see
     // `machine_splitter`); the `machine_` prefix on the body is only there
     // because `main.gd`'s MACHINE_MODELS keys `data/machines.ron` kinds, and
     // a splitter has a footprint in that file like every other placed thing.
-    Asset { name: "machine_splitter", build: machine_splitter },
-    Asset { name: "splitter_arrow", build: splitter_arrow },
-    Asset { name: "machine", build: machine },
+    Asset {
+        name: "machine_splitter",
+        build: machine_splitter,
+    },
+    Asset {
+        name: "splitter_arrow",
+        build: splitter_arrow,
+    },
+    Asset {
+        name: "machine",
+        build: machine,
+    },
     // The kinds `data/machines.ron` names that have a silhouette of their
     // own (the "Machines improvement" milestone, ticket 4). `machine` above
     // stays the fallback for every kind that doesn't — see `main.gd`'s
     // MACHINE_MODELS.
-    Asset { name: "machine_crusher", build: machine_crusher },
-    Asset { name: "machine_mixer", build: machine_mixer },
-    Asset { name: "machine_cooking_vat", build: machine_cooking_vat },
+    Asset {
+        name: "machine_crusher",
+        build: machine_crusher,
+    },
+    Asset {
+        name: "machine_mixer",
+        build: machine_mixer,
+    },
+    Asset {
+        name: "machine_cooking_vat",
+        build: machine_cooking_vat,
+    },
     // The two downstream kinds. They fell back to the generic `machine`
     // above until the "Visual overhaul round 2" epic's ticket 2, which is
     // exactly what the project owner's review of the rendered scene named
     // ("some machines are still missing assets or just reuse assets") —
     // every kind in `data/machines.ron` now has a silhouette of its own.
-    Asset { name: "machine_bottler", build: machine_bottler },
-    Asset { name: "machine_packer", build: machine_packer },
+    Asset {
+        name: "machine_bottler",
+        build: machine_bottler,
+    },
+    Asset {
+        name: "machine_packer",
+        build: machine_packer,
+    },
     // The chain's exit (the delivery-dock ticket): the tile finished cases
     // leave the world through. Not a processing kind — see `machine_dock`.
-    Asset { name: "machine_dock", build: machine_dock },
+    Asset {
+        name: "machine_dock",
+        build: machine_dock,
+    },
     // The motion overlays: one small model per processing kind holding only
     // the parts that move, in `MACHINE_FRAMES` arrangements, drawn over the
     // body by `main.gd` only while the machine is actually mid-process. See
     // the "Machine motion" section for the rules every family here follows.
     // The generic `machine` gets one too, for the reason it gets junction
     // hardware: a kind with no bespoke model must still look like it works.
-    Asset { name: "machine_motion_f0", build: machine_motion_f0 },
-    Asset { name: "machine_motion_f1", build: machine_motion_f1 },
-    Asset { name: "machine_motion_f2", build: machine_motion_f2 },
-    Asset { name: "machine_motion_f3", build: machine_motion_f3 },
-    Asset { name: "machine_crusher_motion_f0", build: machine_crusher_motion_f0 },
-    Asset { name: "machine_crusher_motion_f1", build: machine_crusher_motion_f1 },
-    Asset { name: "machine_crusher_motion_f2", build: machine_crusher_motion_f2 },
-    Asset { name: "machine_crusher_motion_f3", build: machine_crusher_motion_f3 },
-    Asset { name: "machine_mixer_motion_f0", build: machine_mixer_motion_f0 },
-    Asset { name: "machine_mixer_motion_f1", build: machine_mixer_motion_f1 },
-    Asset { name: "machine_mixer_motion_f2", build: machine_mixer_motion_f2 },
-    Asset { name: "machine_mixer_motion_f3", build: machine_mixer_motion_f3 },
-    Asset { name: "machine_cooking_vat_motion_f0", build: machine_cooking_vat_motion_f0 },
-    Asset { name: "machine_cooking_vat_motion_f1", build: machine_cooking_vat_motion_f1 },
-    Asset { name: "machine_cooking_vat_motion_f2", build: machine_cooking_vat_motion_f2 },
-    Asset { name: "machine_cooking_vat_motion_f3", build: machine_cooking_vat_motion_f3 },
-    Asset { name: "machine_bottler_motion_f0", build: machine_bottler_motion_f0 },
-    Asset { name: "machine_bottler_motion_f1", build: machine_bottler_motion_f1 },
-    Asset { name: "machine_bottler_motion_f2", build: machine_bottler_motion_f2 },
-    Asset { name: "machine_bottler_motion_f3", build: machine_bottler_motion_f3 },
-    Asset { name: "machine_packer_motion_f0", build: machine_packer_motion_f0 },
-    Asset { name: "machine_packer_motion_f1", build: machine_packer_motion_f1 },
-    Asset { name: "machine_packer_motion_f2", build: machine_packer_motion_f2 },
-    Asset { name: "machine_packer_motion_f3", build: machine_packer_motion_f3 },
-    Asset { name: "hopper", build: hopper },
-    Asset { name: "hopper_fill", build: hopper_fill },
+    Asset {
+        name: "machine_motion_f0",
+        build: machine_motion_f0,
+    },
+    Asset {
+        name: "machine_motion_f1",
+        build: machine_motion_f1,
+    },
+    Asset {
+        name: "machine_motion_f2",
+        build: machine_motion_f2,
+    },
+    Asset {
+        name: "machine_motion_f3",
+        build: machine_motion_f3,
+    },
+    Asset {
+        name: "machine_crusher_motion_f0",
+        build: machine_crusher_motion_f0,
+    },
+    Asset {
+        name: "machine_crusher_motion_f1",
+        build: machine_crusher_motion_f1,
+    },
+    Asset {
+        name: "machine_crusher_motion_f2",
+        build: machine_crusher_motion_f2,
+    },
+    Asset {
+        name: "machine_crusher_motion_f3",
+        build: machine_crusher_motion_f3,
+    },
+    Asset {
+        name: "machine_mixer_motion_f0",
+        build: machine_mixer_motion_f0,
+    },
+    Asset {
+        name: "machine_mixer_motion_f1",
+        build: machine_mixer_motion_f1,
+    },
+    Asset {
+        name: "machine_mixer_motion_f2",
+        build: machine_mixer_motion_f2,
+    },
+    Asset {
+        name: "machine_mixer_motion_f3",
+        build: machine_mixer_motion_f3,
+    },
+    Asset {
+        name: "machine_cooking_vat_motion_f0",
+        build: machine_cooking_vat_motion_f0,
+    },
+    Asset {
+        name: "machine_cooking_vat_motion_f1",
+        build: machine_cooking_vat_motion_f1,
+    },
+    Asset {
+        name: "machine_cooking_vat_motion_f2",
+        build: machine_cooking_vat_motion_f2,
+    },
+    Asset {
+        name: "machine_cooking_vat_motion_f3",
+        build: machine_cooking_vat_motion_f3,
+    },
+    Asset {
+        name: "machine_bottler_motion_f0",
+        build: machine_bottler_motion_f0,
+    },
+    Asset {
+        name: "machine_bottler_motion_f1",
+        build: machine_bottler_motion_f1,
+    },
+    Asset {
+        name: "machine_bottler_motion_f2",
+        build: machine_bottler_motion_f2,
+    },
+    Asset {
+        name: "machine_bottler_motion_f3",
+        build: machine_bottler_motion_f3,
+    },
+    Asset {
+        name: "machine_packer_motion_f0",
+        build: machine_packer_motion_f0,
+    },
+    Asset {
+        name: "machine_packer_motion_f1",
+        build: machine_packer_motion_f1,
+    },
+    Asset {
+        name: "machine_packer_motion_f2",
+        build: machine_packer_motion_f2,
+    },
+    Asset {
+        name: "machine_packer_motion_f3",
+        build: machine_packer_motion_f3,
+    },
+    Asset {
+        name: "hopper",
+        build: hopper,
+    },
+    Asset {
+        name: "hopper_fill",
+        build: hopper_fill,
+    },
     // The pipe run's supply vessel and the liquid column inside it (the
     // "Visual overhaul round 2" epic: ticket 1 made the tank a real,
     // player-loadable building, this ticket draws it).
-    Asset { name: "fluid_tank", build: fluid_tank },
-    Asset { name: "fluid_tank_fill", build: fluid_tank_fill },
+    Asset {
+        name: "fluid_tank",
+        build: fluid_tank,
+    },
+    Asset {
+        name: "fluid_tank_fill",
+        build: fluid_tank_fill,
+    },
     // The pipe family ("Pipes & Conveyors Overhaul" ticket 3): shapes, the
     // fittings Godot overlays on any open leg, and one fluid body per shape.
     // See the pipe section's header for the face convention.
-    Asset { name: "pipe", build: pipe },
-    Asset { name: "pipe_corner", build: pipe_corner },
-    Asset { name: "pipe_tee", build: pipe_tee },
-    Asset { name: "pipe_cross", build: pipe_cross },
-    Asset { name: "pipe_end", build: pipe_end },
-    Asset { name: "pipe_fitting_machine", build: pipe_fitting_machine },
-    Asset { name: "pipe_fitting_tank", build: pipe_fitting_tank },
-    Asset { name: "pipe_fluid", build: pipe_fluid },
-    Asset { name: "pipe_fluid_corner", build: pipe_fluid_corner },
-    Asset { name: "pipe_fluid_tee", build: pipe_fluid_tee },
-    Asset { name: "pipe_fluid_cross", build: pipe_fluid_cross },
-    Asset { name: "pipe_fluid_end", build: pipe_fluid_end },
-    Asset { name: "item_tomato", build: item_tomato },
+    Asset {
+        name: "pipe",
+        build: pipe,
+    },
+    Asset {
+        name: "pipe_corner",
+        build: pipe_corner,
+    },
+    Asset {
+        name: "pipe_tee",
+        build: pipe_tee,
+    },
+    Asset {
+        name: "pipe_cross",
+        build: pipe_cross,
+    },
+    Asset {
+        name: "pipe_end",
+        build: pipe_end,
+    },
+    Asset {
+        name: "pipe_fitting_machine",
+        build: pipe_fitting_machine,
+    },
+    Asset {
+        name: "pipe_fitting_tank",
+        build: pipe_fitting_tank,
+    },
+    Asset {
+        name: "pipe_fluid",
+        build: pipe_fluid,
+    },
+    Asset {
+        name: "pipe_fluid_corner",
+        build: pipe_fluid_corner,
+    },
+    Asset {
+        name: "pipe_fluid_tee",
+        build: pipe_fluid_tee,
+    },
+    Asset {
+        name: "pipe_fluid_cross",
+        build: pipe_fluid_cross,
+    },
+    Asset {
+        name: "pipe_fluid_end",
+        build: pipe_fluid_end,
+    },
+    Asset {
+        name: "item_tomato",
+        build: item_tomato,
+    },
     // The chain's second raw ingredient (the chain-rework epic). It needed a
     // model of its own for UI_UX.md §2b point 12's reason: `main.gd`'s
     // ITEM_MODELS falls back to a shipping box, so a new item id with no
     // entry ships bulk produce down the belt in sealed cardboard and every
     // structural test still passes.
-    Asset { name: "item_sugar", build: item_sugar },
+    Asset {
+        name: "item_sugar",
+        build: item_sugar,
+    },
     // The chain's THIRD raw ingredient, and the first *fluid* with a model
     // of its own. Nothing carries vinegar on a belt, so this is not a belt
     // item — it is what a shipment of the stuff looks like where the player
     // handles it as stock (`main.gd`'s FLUID_MODELS: the market slot and the
     // larder chip), both of which used to borrow the pipe's icon and so read
     // as "a pipe" rather than as vinegar.
-    Asset { name: "item_vinegar", build: item_vinegar },
-    Asset { name: "item_paste_pail", build: item_paste_pail },
-    Asset { name: "item_mix_pail", build: item_mix_pail },
-    Asset { name: "item_ketchup_pail", build: item_ketchup_pail },
-    Asset { name: "item_bottle", build: item_bottle },
-    Asset { name: "item_box", build: item_box },
+    Asset {
+        name: "item_vinegar",
+        build: item_vinegar,
+    },
+    Asset {
+        name: "item_paste_pail",
+        build: item_paste_pail,
+    },
+    Asset {
+        name: "item_mix_pail",
+        build: item_mix_pail,
+    },
+    Asset {
+        name: "item_ketchup_pail",
+        build: item_ketchup_pail,
+    },
+    Asset {
+        name: "item_bottle",
+        build: item_bottle,
+    },
+    Asset {
+        name: "item_box",
+        build: item_box,
+    },
     // The second sauce's two finished goods (`docs/BBQ_SAUCE_PLAN.md`).
     // `bottled_bbq` and `boxed_bbq` are separate item ids made on the same
     // bottler and packer, so they are separate models rather than a tint:
@@ -156,24 +375,48 @@ pub const ASSETS: &[Asset] = &[
     // `main.gd`'s ITEM_MODEL_FALLBACK is a shipping box, so a new item id
     // arriving without a model ships bulk sauce in sealed cardboard and
     // every structural test still passes (§2b point 12).
-    Asset { name: "item_bottle_bbq", build: item_bottle_bbq },
-    Asset { name: "item_box_bbq", build: item_box_bbq },
+    Asset {
+        name: "item_bottle_bbq",
+        build: item_bottle_bbq,
+    },
+    Asset {
+        name: "item_box_bbq",
+        build: item_box_bbq,
+    },
     // The coin a paid contract throws off the dock (the payout-feedback
     // ticket). Not an item and not a building — the one asset in this list
     // that never occupies a tile.
-    Asset { name: "coin", build: coin },
+    Asset {
+        name: "coin",
+        build: coin,
+    },
     // The pulp the crusher throws while it works (the crusher-particles
     // change). Never occupies a tile either, and never appears in a menu —
     // it exists only to be thrown.
-    Asset { name: "crush_bit", build: crush_bit },
+    Asset {
+        name: "crush_bit",
+        build: crush_bit,
+    },
     // The staff-category icons (the staff-pools epic, ticket 2): four more
     // props that never occupy a tile, one per `data/staff.ron` category,
     // drawn only to be rendered by `voxicons` for the staff panel. See the
     // "Staff category icons" section.
-    Asset { name: "staff_manufacturing", build: staff_manufacturing },
-    Asset { name: "staff_maintenance", build: staff_maintenance },
-    Asset { name: "staff_packaging", build: staff_packaging },
-    Asset { name: "staff_logistics", build: staff_logistics },
+    Asset {
+        name: "staff_manufacturing",
+        build: staff_manufacturing,
+    },
+    Asset {
+        name: "staff_maintenance",
+        build: staff_maintenance,
+    },
+    Asset {
+        name: "staff_packaging",
+        build: staff_packaging,
+    },
+    Asset {
+        name: "staff_logistics",
+        build: staff_logistics,
+    },
 ];
 
 /// Items are modelled at half a tile so a finished bottle reads as an object
@@ -252,8 +495,18 @@ fn floor_hash(x: i32, y: i32, salt: i64) -> i64 {
 fn floor_slab(p: &Palette) -> VoxModel {
     let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, FLOOR_VOXELS]);
     let last = TILE_VOXELS as i32 - 1;
-    m.cuboid((0, last), (0, last), (0, FLOOR_TOP - 1), p.idx("concrete_dark"));
-    m.cuboid((0, last), (0, last), (FLOOR_TOP, FLOOR_TOP), p.idx("concrete_slab"));
+    m.cuboid(
+        (0, last),
+        (0, last),
+        (0, FLOOR_TOP - 1),
+        p.idx("concrete_dark"),
+    );
+    m.cuboid(
+        (0, last),
+        (0, last),
+        (FLOOR_TOP, FLOOR_TOP),
+        p.idx("concrete_slab"),
+    );
     m
 }
 
@@ -463,8 +716,18 @@ pub fn floor_tile_drain(p: &Palette) -> VoxModel {
     // Symmetric about the tile midline between voxels 15 and 16.
     let (cy0, cy1) = FLOOR_DRAIN_Y;
     // The concrete lip the grating sits in, then the channel void below it.
-    m.cuboid((0, last), (cy0 - 1, cy1 + 1), (FLOOR_TOP, FLOOR_TOP), p.idx("concrete_shade"));
-    m.cuboid((0, last), (cy0, cy1), (FLOOR_TOP - 1, FLOOR_TOP), p.idx("drain_grate"));
+    m.cuboid(
+        (0, last),
+        (cy0 - 1, cy1 + 1),
+        (FLOOR_TOP, FLOOR_TOP),
+        p.idx("concrete_shade"),
+    );
+    m.cuboid(
+        (0, last),
+        (cy0, cy1),
+        (FLOOR_TOP - 1, FLOOR_TOP),
+        p.idx("drain_grate"),
+    );
 
     // Grating bars across the channel, flush with the walking surface. In
     // `concrete` rather than in the mottle tone: the bars are the only part
@@ -473,7 +736,12 @@ pub fn floor_tile_drain(p: &Palette) -> VoxModel {
     // them every time the mottle is pulled closer to the slab.
     let mut x = 0;
     while x <= last {
-        m.cuboid((x, x + 1), (cy0, cy1), (FLOOR_TOP, FLOOR_TOP), p.idx("concrete"));
+        m.cuboid(
+            (x, x + 1),
+            (cy0, cy1),
+            (FLOOR_TOP, FLOOR_TOP),
+            p.idx("concrete"),
+        );
         x += 4;
     }
     m
@@ -628,7 +896,10 @@ belt_frame_fns! {
 
 /// One belt tile of `shape` at animation `phase` (`0..BELT_FRAMES`).
 pub fn belt_shape(p: &Palette, shape: BeltShape, phase: u32) -> VoxModel {
-    assert!(phase < BELT_FRAMES, "belt phase {phase} is not in 0..{BELT_FRAMES}");
+    assert!(
+        phase < BELT_FRAMES,
+        "belt phase {phase} is not in 0..{BELT_FRAMES}"
+    );
     match shape {
         BeltShape::Straight => belt_straight(p, phase),
         BeltShape::Corner(turn) => belt_corner(p, turn, phase),
@@ -659,8 +930,22 @@ fn belt_straight(p: &Palette, phase: u32) -> VoxModel {
     // Hazard striping on the outer face of each frame (UI_UX.md §3). Both
     // rails, because either can be the camera-facing one once the tile is
     // turned.
-    m.hazard_stripe_x((0, last), (4, 4), (5, 6), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
-    m.hazard_stripe_x((0, last), (27, 27), (5, 6), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    m.hazard_stripe_x(
+        (0, last),
+        (4, 4),
+        (5, 6),
+        3,
+        p.idx("hazard_yellow"),
+        p.idx("hazard_black"),
+    );
+    m.hazard_stripe_x(
+        (0, last),
+        (27, 27),
+        (5, 6),
+        3,
+        p.idx("hazard_yellow"),
+        p.idx("hazard_black"),
+    );
     // Idlers under the belt. Fixed in every frame: the belt moves over
     // them, they do not travel with it. The two nearest the faces are what
     // shows under the rubber's end where a run stops in the open.
@@ -669,7 +954,12 @@ fn belt_straight(p: &Palette, phase: u32) -> VoxModel {
     }
 
     // Running surface, then the cleat standing on it.
-    m.cuboid((0, last), (l0, l1), (BELT_SURFACE_Z - 1, BELT_SURFACE_Z), p.idx("rubber"));
+    m.cuboid(
+        (0, last),
+        (l0, l1),
+        (BELT_SURFACE_Z - 1, BELT_SURFACE_Z),
+        p.idx("rubber"),
+    );
     for x in 0..=last {
         for y in l0..=l1 {
             let cell = straight_surface_cell(x, y).expect("lane cell");
@@ -708,7 +998,11 @@ fn belt_corner(p: &Palette, turn: Turn, phase: u32) -> VoxModel {
                 // look away from the lane.
                 if r < 5.0 || r >= 27.0 {
                     for z in 5..=6 {
-                        let c = if (x + y + z).rem_euclid(6) < 3 { "hazard_yellow" } else { "hazard_black" };
+                        let c = if (x + y + z).rem_euclid(6) < 3 {
+                            "hazard_yellow"
+                        } else {
+                            "hazard_black"
+                        };
                         m.set(x, y, z, p.idx(c));
                     }
                 }
@@ -717,7 +1011,12 @@ fn belt_corner(p: &Palette, turn: Turn, phase: u32) -> VoxModel {
                 m.set(x, y, 2, p.idx("rubber_dark"));
             }
             if let Some(cell) = corner_surface_cell(x, y) {
-                m.cuboid((x, x), (y, y), (BELT_SURFACE_Z - 1, BELT_SURFACE_Z), p.idx("rubber"));
+                m.cuboid(
+                    (x, x),
+                    (y, y),
+                    (BELT_SURFACE_Z - 1, BELT_SURFACE_Z),
+                    p.idx("rubber"),
+                );
                 if cleat_covers(&cell, phase) {
                     m.set(x, y, BELT_CLEAT_Z, p.idx("rubber_dark"));
                 }
@@ -758,7 +1057,10 @@ pub fn straight_surface_cell(x: i32, y: i32) -> Option<SurfaceCell> {
     if !(0..TILE_VOXELS as i32).contains(&x) || !(l0..=l1).contains(&y) {
         return None;
     }
-    Some(SurfaceCell { u: x as f32 + 0.5, v: y as f32 + 0.5 - TILE_VOXELS as f32 / 2.0 })
+    Some(SurfaceCell {
+        u: x as f32 + 0.5,
+        v: y as f32 + 0.5 - TILE_VOXELS as f32 / 2.0,
+    })
 }
 
 /// Polar coordinates of a cell centre about the LEFT corner's pivot, the
@@ -782,7 +1084,10 @@ pub fn corner_surface_cell(x: i32, y: i32) -> Option<SurfaceCell> {
     }
     let quarter = std::f32::consts::FRAC_PI_2;
     let u_per_rad = TILE_VOXELS as f32 / quarter;
-    Some(SurfaceCell { u: theta * u_per_rad, v: r - TILE_VOXELS as f32 / 2.0 })
+    Some(SurfaceCell {
+        u: theta * u_per_rad,
+        v: r - TILE_VOXELS as f32 / 2.0,
+    })
 }
 
 /// Distance wrapped into one tile's pattern period, `-16..16`.
@@ -950,7 +1255,14 @@ pub fn machine_splitter(p: &Palette) -> VoxModel {
 
     // Hazard striping on the outer face of the rails the camera can see
     // (UI_UX.md §3), matching `belt_body`'s.
-    m.hazard_stripe_x((0, last), (4, 4), (5, 6), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    m.hazard_stripe_x(
+        (0, last),
+        (4, 4),
+        (5, 6),
+        3,
+        p.idx("hazard_yellow"),
+        p.idx("hazard_black"),
+    );
 
     // Rollers: one pair under the through lane, one under the branch stub.
     for x in [3, 28] {
@@ -989,7 +1301,12 @@ pub fn machine_splitter(p: &Palette) -> VoxModel {
             m.set(x, y, deck.1, p.idx("steel_dark"));
         }
     }
-    for (x, y) in [(t0 + 2, t0 + 2), (t1 - 2, t0 + 2), (t0 + 2, t1 - 2), (t1 - 2, t1 - 2)] {
+    for (x, y) in [
+        (t0 + 2, t0 + 2),
+        (t1 - 2, t0 + 2),
+        (t0 + 2, t1 - 2),
+        (t1 - 2, t1 - 2),
+    ] {
         m.set(x, y, deck.1, p.idx("steel_dark"));
     }
 
@@ -1085,10 +1402,28 @@ pub fn machine(p: &Palette) -> VoxModel {
     // overhaul pass's root-cause fix for the connection issue).
     m.cuboid((0, last), (0, last), (0, 1), p.idx("concrete_dark"));
     // Hazard skirt around the plinth top edge.
-    m.hazard_stripe_x((0, last), (0, 0), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
-    m.hazard_stripe_x((0, last), (last, last), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    m.hazard_stripe_x(
+        (0, last),
+        (0, 0),
+        (2, 2),
+        3,
+        p.idx("hazard_yellow"),
+        p.idx("hazard_black"),
+    );
+    m.hazard_stripe_x(
+        (0, last),
+        (last, last),
+        (2, 2),
+        3,
+        p.idx("hazard_yellow"),
+        p.idx("hazard_black"),
+    );
     for y in 0i32..=last {
-        let a = if (y + 2).rem_euclid(6) < 3 { p.idx("hazard_yellow") } else { p.idx("hazard_black") };
+        let a = if (y + 2).rem_euclid(6) < 3 {
+            p.idx("hazard_yellow")
+        } else {
+            p.idx("hazard_black")
+        };
         m.set(0, y, 2, a);
         m.set(last, y, 2, a);
     }
@@ -1615,7 +1950,12 @@ pub fn staff_manufacturing(p: &Palette) -> VoxModel {
     let yellow = p.idx("hazard_yellow");
     // The brim: a flat disc with a longer peak on the camera-facing -X side.
     m.cylinder_z_f(HAT_C, HAT_BRIM_R, (0, 1), yellow);
-    m.cylinder_z_f((HAT_C.0 - HAT_PEAK, HAT_C.1), HAT_BRIM_R - 1.5, (0, 1), yellow);
+    m.cylinder_z_f(
+        (HAT_C.0 - HAT_PEAK, HAT_C.1),
+        HAT_BRIM_R - 1.5,
+        (0, 1),
+        yellow,
+    );
     // The crown, sliced: an elliptical profile, wider than it is tall, with
     // one crest running front to back a voxel proud of the shell.
     for z in HAT_BASE_Z..=HAT_BASE_Z + HAT_H {
@@ -1745,7 +2085,12 @@ pub fn staff_logistics(p: &Palette) -> VoxModel {
         m.cuboid((0, 1), (y0 + 1, y1 - 1), (2, 4), light);
     }
     // The carriage that joins the forks, and the pump housing behind it.
-    m.cuboid((FORK_X1 - 2, FORK_X1 + 2), (FORK_Y[0].0, FORK_Y[1].1), (2, 7), steel);
+    m.cuboid(
+        (FORK_X1 - 2, FORK_X1 + 2),
+        (FORK_Y[0].0, FORK_Y[1].1),
+        (2, 7),
+        steel,
+    );
     m.cuboid((FORK_X1 + 1, FORK_X1 + 5), (11, 20), (0, 12), dark);
     // Steer wheels either side of the housing.
     m.cylinder_y_f((FORK_X1 as f32 + 3.5, 2.5), 2.5, (8, 10), rubber);
@@ -1903,12 +2248,22 @@ fn pipe_stand(m: &mut VoxModel, p: &Palette) {
 /// between the belt beside it and the floor under it. Making the *tube*
 /// the bright, continuous thing is what lets the eye follow the run.
 fn pipe_leg_x(m: &mut VoxModel, p: &Palette, x: (i32, i32)) {
-    m.cylinder_x_f((PIPE_C, PIPE_AXIS_Z as f32), PIPE_OUTER_R, x, p.idx("steel_light"));
+    m.cylinder_x_f(
+        (PIPE_C, PIPE_AXIS_Z as f32),
+        PIPE_OUTER_R,
+        x,
+        p.idx("steel_light"),
+    );
 }
 
 /// The +Y twin of [`pipe_leg_x`].
 fn pipe_leg_y(m: &mut VoxModel, p: &Palette, y: (i32, i32)) {
-    m.cylinder_y_f((PIPE_C, PIPE_AXIS_Z as f32), PIPE_OUTER_R, y, p.idx("steel_light"));
+    m.cylinder_y_f(
+        (PIPE_C, PIPE_AXIS_Z as f32),
+        PIPE_OUTER_R,
+        y,
+        p.idx("steel_light"),
+    );
 }
 
 /// Cuts the sight window through the top of a +X leg over `x`: the bore's
@@ -1938,7 +2293,12 @@ fn pipe_bore_y(m: &mut VoxModel, y: (i32, i32)) {
 /// no end flange at all: their hub is their identity, and a flange on a leg
 /// would stack against a neighbour's half the time.
 fn pipe_joint_flange(m: &mut VoxModel, p: &Palette) {
-    m.cylinder_x_f((PIPE_C, PIPE_AXIS_Z as f32), PIPE_OUTER_R + 1.0, (0, 1), p.idx("steel"));
+    m.cylinder_x_f(
+        (PIPE_C, PIPE_AXIS_Z as f32),
+        PIPE_OUTER_R + 1.0,
+        (0, 1),
+        p.idx("steel"),
+    );
 }
 
 /// A plain length of pipe: one tile of the run, open on both X faces.
@@ -1997,8 +2357,20 @@ pub fn pipe_end(p: &Palette) -> VoxModel {
     pipe_bore_x(&mut m, (0, last - 2));
     pipe_window_x(&mut m, PIPE_WINDOW);
     // Blind flange over the still-solid last two voxels of tube.
-    m.cylinder_x_f((PIPE_C, PIPE_AXIS_Z as f32), PIPE_OUTER_R + 1.0, (last - 1, last), p.idx("steel_light"));
-    for (y, z) in [(15, PIPE_AXIS_Z + 4), (16, PIPE_AXIS_Z + 4), (15, PIPE_AXIS_Z - 4), (16, PIPE_AXIS_Z - 4), (11, PIPE_AXIS_Z), (20, PIPE_AXIS_Z)] {
+    m.cylinder_x_f(
+        (PIPE_C, PIPE_AXIS_Z as f32),
+        PIPE_OUTER_R + 1.0,
+        (last - 1, last),
+        p.idx("steel_light"),
+    );
+    for (y, z) in [
+        (15, PIPE_AXIS_Z + 4),
+        (16, PIPE_AXIS_Z + 4),
+        (15, PIPE_AXIS_Z - 4),
+        (16, PIPE_AXIS_Z - 4),
+        (11, PIPE_AXIS_Z),
+        (20, PIPE_AXIS_Z),
+    ] {
         m.set(last, y, z, p.idx("brass"));
     }
     m
@@ -2008,7 +2380,11 @@ pub fn pipe_end(p: &Palette) -> VoxModel {
 /// legs. Each shape draws its legs solid first, calls this, then carves its
 /// leg bores — the hub's cavity joins them.
 fn pipe_hub(m: &mut VoxModel, p: &Palette) {
-    m.sphere_f((PIPE_C, PIPE_C, PIPE_AXIS_Z as f32), PIPE_HUB_R, p.idx("steel_light"));
+    m.sphere_f(
+        (PIPE_C, PIPE_C, PIPE_AXIS_Z as f32),
+        PIPE_HUB_R,
+        p.idx("steel_light"),
+    );
 }
 
 fn pipe_hub_bore(m: &mut VoxModel) {
@@ -2100,8 +2476,18 @@ pub fn pipe_fitting_machine(p: &Palette) -> VoxModel {
     let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 24]);
     let last = TILE_VOXELS as i32 - 1;
     let axis = (PIPE_C, PIPE_AXIS_Z as f32);
-    m.cylinder_x_f(axis, PIPE_OUTER_R + PIPE_FITTING_MARGIN, (PIPE_FITTING_X0, last - 2), p.idx("steel_light"));
-    m.cylinder_x_f(axis, PIPE_OUTER_R + 1.0 + PIPE_FITTING_MARGIN, (last - 1, last), p.idx("brass"));
+    m.cylinder_x_f(
+        axis,
+        PIPE_OUTER_R + PIPE_FITTING_MARGIN,
+        (PIPE_FITTING_X0, last - 2),
+        p.idx("steel_light"),
+    );
+    m.cylinder_x_f(
+        axis,
+        PIPE_OUTER_R + 1.0 + PIPE_FITTING_MARGIN,
+        (last - 1, last),
+        p.idx("brass"),
+    );
     m.carve_cylinder_x_f(axis, PIPE_BORE_R + 0.4, (PIPE_FITTING_X0, last));
     m
 }
@@ -2126,19 +2512,54 @@ pub fn pipe_fitting_tank(p: &Palette) -> VoxModel {
     // Radii: the brass band clears the tube by the margin; the flange
     // clears a straight's joint flange (`PIPE_OUTER_R + 1`) by it too, for
     // the reason `pipe_fitting_machine` gives.
-    m.cylinder_x_f(axis, PIPE_OUTER_R + 0.2 + PIPE_FITTING_MARGIN, (PIPE_FITTING_X0, PIPE_FITTING_X0 + 1), p.idx("brass"));
-    m.cylinder_x_f(axis, PIPE_OUTER_R + 1.0 + PIPE_FITTING_MARGIN, (PIPE_FITTING_X0 + 2, last), p.idx("steel_light"));
+    m.cylinder_x_f(
+        axis,
+        PIPE_OUTER_R + 0.2 + PIPE_FITTING_MARGIN,
+        (PIPE_FITTING_X0, PIPE_FITTING_X0 + 1),
+        p.idx("brass"),
+    );
+    m.cylinder_x_f(
+        axis,
+        PIPE_OUTER_R + 1.0 + PIPE_FITTING_MARGIN,
+        (PIPE_FITTING_X0 + 2, last),
+        p.idx("steel_light"),
+    );
     m.carve_cylinder_x_f(axis, PIPE_BORE_R + 0.4, (PIPE_FITTING_X0, last));
     // Valve: bonnet on the flange, cap, stem, hand wheel. The bonnet is
     // `steel`, not `steel_dark`: it stands in the tank's own shadow, and
     // the first render showed a dark bonnet as a black block against the
     // tank's dark base (the same lesson as the pipe stands).
-    m.cuboid((PIPE_FITTING_X0, last), (13, 18), (PIPE_AXIS_Z + 1, PIPE_AXIS_Z + 8), p.idx("steel"));
-    m.cuboid((PIPE_FITTING_X0 + 1, last - 1), (14, 17), (PIPE_AXIS_Z + 9, PIPE_AXIS_Z + 10), p.idx("steel_light"));
-    m.cuboid((29, 29), (15, 16), (PIPE_AXIS_Z + 11, PIPE_AXIS_Z + 12), p.idx("steel_dark"));
-    m.cylinder_z_f((28.5, PIPE_C), 3.5, (PIPE_AXIS_Z + 13, PIPE_AXIS_Z + 13), p.idx("brass"));
+    m.cuboid(
+        (PIPE_FITTING_X0, last),
+        (13, 18),
+        (PIPE_AXIS_Z + 1, PIPE_AXIS_Z + 8),
+        p.idx("steel"),
+    );
+    m.cuboid(
+        (PIPE_FITTING_X0 + 1, last - 1),
+        (14, 17),
+        (PIPE_AXIS_Z + 9, PIPE_AXIS_Z + 10),
+        p.idx("steel_light"),
+    );
+    m.cuboid(
+        (29, 29),
+        (15, 16),
+        (PIPE_AXIS_Z + 11, PIPE_AXIS_Z + 12),
+        p.idx("steel_dark"),
+    );
+    m.cylinder_z_f(
+        (28.5, PIPE_C),
+        3.5,
+        (PIPE_AXIS_Z + 13, PIPE_AXIS_Z + 13),
+        p.idx("brass"),
+    );
     m.carve_cylinder_z_f((28.5, PIPE_C), 1.6, (PIPE_AXIS_Z + 13, PIPE_AXIS_Z + 13));
-    m.cuboid((28, 29), (15, 16), (PIPE_AXIS_Z + 13, PIPE_AXIS_Z + 13), p.idx("brass"));
+    m.cuboid(
+        (28, 29),
+        (15, 16),
+        (PIPE_AXIS_Z + 13, PIPE_AXIS_Z + 13),
+        p.idx("brass"),
+    );
     m
 }
 
@@ -2242,7 +2663,6 @@ pub fn pipe_fluid_end(p: &Palette) -> VoxModel {
 // `machine()` on purpose: they should read as members of one factory, not as
 // four unrelated props.
 
-
 // --- Where each machine is cut into a fixed half and a moving half ---------
 //
 // Every number below is read from TWO places — the body generator and the
@@ -2335,10 +2755,28 @@ fn machine_footing_rect(
     let (ylo, yhi) = y_span;
     m.cuboid((xlo, xhi), (ylo, yhi), (0, 1), p.idx("concrete_dark"));
     // Hazard skirt around all four edges of the plinth top (UI_UX.md §3).
-    m.hazard_stripe_x((xlo, xhi), (ylo, ylo), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
-    m.hazard_stripe_x((xlo, xhi), (yhi, yhi), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    m.hazard_stripe_x(
+        (xlo, xhi),
+        (ylo, ylo),
+        (2, 2),
+        3,
+        p.idx("hazard_yellow"),
+        p.idx("hazard_black"),
+    );
+    m.hazard_stripe_x(
+        (xlo, xhi),
+        (yhi, yhi),
+        (2, 2),
+        3,
+        p.idx("hazard_yellow"),
+        p.idx("hazard_black"),
+    );
     for y in ylo..=yhi {
-        let a = if (y + 2).rem_euclid(6) < 3 { p.idx("hazard_yellow") } else { p.idx("hazard_black") };
+        let a = if (y + 2).rem_euclid(6) < 3 {
+            p.idx("hazard_yellow")
+        } else {
+            p.idx("hazard_black")
+        };
         m.set(xlo, y, 2, a);
         m.set(xhi, y, 2, a);
     }
@@ -2352,7 +2790,12 @@ fn machine_footing_rect(
         }
     }
     // Machined rim the vessel/throat sits on.
-    m.cuboid((bxlo, bxhi), (bylo, byhi), (skirt_top + 1, skirt_top + 2), p.idx("steel"));
+    m.cuboid(
+        (bxlo, bxhi),
+        (bylo, byhi),
+        (skirt_top + 1, skirt_top + 2),
+        p.idx("steel"),
+    );
 }
 
 /// Control panel plus its two status lamps, on the **-Y face** — the one the
@@ -2361,9 +2804,24 @@ fn machine_footing_rect(
 fn control_panel(m: &mut VoxModel, p: &Palette, x: (i32, i32), z: (i32, i32), face_y: i32) {
     let mid = (z.0 + z.1) / 2;
     m.cuboid(x, (face_y, face_y), z, p.idx("steel_light"));
-    m.cuboid((x.0 + 2, x.1 - 2), (face_y - 1, face_y - 1), (z.0 + 1, z.1 - 1), p.idx("hazard_black"));
-    m.cuboid((x.0 - 5, x.0 - 3), (face_y - 1, face_y), (mid - 1, mid + 1), p.idx("status_green"));
-    m.cuboid((x.1 + 3, x.1 + 5), (face_y - 1, face_y), (mid - 1, mid + 1), p.idx("status_amber"));
+    m.cuboid(
+        (x.0 + 2, x.1 - 2),
+        (face_y - 1, face_y - 1),
+        (z.0 + 1, z.1 - 1),
+        p.idx("hazard_black"),
+    );
+    m.cuboid(
+        (x.0 - 5, x.0 - 3),
+        (face_y - 1, face_y),
+        (mid - 1, mid + 1),
+        p.idx("status_green"),
+    );
+    m.cuboid(
+        (x.1 + 3, x.1 + 5),
+        (face_y - 1, face_y),
+        (mid - 1, mid + 1),
+        p.idx("status_amber"),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2456,7 +2914,12 @@ fn machine_infeed(m: &mut VoxModel, p: &Palette, lane: (i32, i32)) {
     // (see `VoxModel::erase`). Carving through whatever the machine itself
     // had here is deliberate — this housing IS the machine's inlet, not a
     // box parked next to one.
-    m.cuboid((0, d), (l0 - 2, l1 + 2), (floor, roof), p.idx("steel_light"));
+    m.cuboid(
+        (0, d),
+        (l0 - 2, l1 + 2),
+        (floor, roof),
+        p.idx("steel_light"),
+    );
     m.carve_cuboid((0, d - 1), (l0, l1), (floor + 1, roof - 2));
 
     // The camera-facing side, cut away from just above the apron to just
@@ -2477,8 +2940,18 @@ fn machine_infeed(m: &mut VoxModel, p: &Palette, lane: (i32, i32)) {
     // the finished piece read as an empty portal frame with a lit box behind
     // it. The floor is what is seen, so the floor is what has to be black.
     m.cuboid((0, d - 1), (l0, l1), (floor, floor), p.idx("hazard_black"));
-    m.cuboid((0, d - 1), (l1 + 1, l1 + 2), (floor + 1, roof - 2), p.idx("hazard_black"));
-    m.cuboid((d - 2, d), (l0, l1), (floor, roof - 2), p.idx("hazard_black"));
+    m.cuboid(
+        (0, d - 1),
+        (l1 + 1, l1 + 2),
+        (floor + 1, roof - 2),
+        p.idx("hazard_black"),
+    );
+    m.cuboid(
+        (d - 2, d),
+        (l0, l1),
+        (floor, roof - 2),
+        p.idx("hazard_black"),
+    );
     // Brass threshold on the lip, where the belt's dead-plate hands over —
     // the one bright thing inside the opening, and the same accent every
     // other "product passes through here" fitting in the factory carries.
@@ -2489,7 +2962,12 @@ fn machine_infeed(m: &mut VoxModel, p: &Palette, lane: (i32, i32)) {
     // from its bright wall. NOT a full hazard stripe — a stripe is half
     // black, and black on the piece's only camera-facing edge turned the
     // whole hood into a dark bar in the first render.
-    m.cuboid((0, d), (l0 - 2, l0 - 2), (roof - 1, roof - 1), p.idx("hazard_yellow"));
+    m.cuboid(
+        (0, d),
+        (l0 - 2, l0 - 2),
+        (roof - 1, roof - 1),
+        p.idx("hazard_yellow"),
+    );
     // Corner posts either side of the window (the window carve above cuts
     // through the near wall, so these are redrawn after it): the roof has to
     // visibly stand on something.
@@ -2522,22 +3000,42 @@ fn machine_outfeed(m: &mut VoxModel, p: &Palette, lane: (i32, i32), last: i32) {
     // reason the infeed's is: the opening reads by contrast against the
     // frame, so the frame has to be the palette's brightest metal and the
     // hole has to be genuinely black.
-    m.cuboid((last - 3, last), (l0 - 2, l1 + 2), (floor, head), p.idx("steel_light"));
+    m.cuboid(
+        (last - 3, last),
+        (l0 - 2, l1 + 2),
+        (floor, head),
+        p.idx("steel_light"),
+    );
     m.carve_cuboid((last - 2, last), (l0, l1), (floor + 1, head - 2));
     // The back of the mouth. Its normal is +X, i.e. straight at the camera,
     // which is what turns a cut-out silhouette into a hole with depth.
-    m.cuboid((last - 3, last - 3), (l0, l1), (floor, head - 2), p.idx("hazard_black"));
+    m.cuboid(
+        (last - 3, last - 3),
+        (l0, l1),
+        (floor, head - 2),
+        p.idx("hazard_black"),
+    );
 
     // Discharge lip, level with the belt beside it and running out to the
     // tile edge so there is nothing between the two.
-    m.cuboid((last - 3, last), (l0, l1), (floor, floor), p.idx("steel_light"));
+    m.cuboid(
+        (last - 3, last),
+        (l0, l1),
+        (floor, floor),
+        p.idx("steel_light"),
+    );
     // A brass band across the head of the opening — the same accent the
     // pipe fittings' flanges and the tank valve's hand wheel carry, and
     // for the same reason: it marks a fitting product actually passes
     // through. A hazard stripe was tried here first and rendered as a dark
     // bar, because half a stripe is black and this edge is the only part of
     // the piece the camera looks straight at.
-    m.cuboid((last - 2, last), (l0 - 1, l1 + 1), (head - 1, head - 1), p.idx("brass"));
+    m.cuboid(
+        (last - 2, last),
+        (l0 - 1, l1 + 1),
+        (head - 1, head - 1),
+        p.idx("brass"),
+    );
 }
 
 /// The **fluid** half of a junction: a nozzle standing off one of the
@@ -2598,7 +3096,12 @@ fn machine_fluid_port(m: &mut VoxModel, p: &Palette, lane_y: i32, face: Face, la
         Face::LowX => (2, REACH - 2),
         Face::HighX => (last_x - REACH + 2, last_x - 2),
     };
-    m.cuboid(gusset, (lane_y - 1, lane_y + 1), (9, PIPE_AXIS_Z - 3), p.idx("steel_dark"));
+    m.cuboid(
+        gusset,
+        (lane_y - 1, lane_y + 1),
+        (9, PIPE_AXIS_Z - 3),
+        p.idx("steel_dark"),
+    );
 }
 
 /// GAMEPLAY.md §2 tier 1's raw-ingredient prep, `data/machines.ron`'s 1x1
@@ -2647,7 +3150,14 @@ pub fn machine_crusher(p: &Palette) -> VoxModel {
     m.carve_cuboid((8, 23), (9, 22), (17, 25));
     m.cuboid((7, 24), (8, 23), (24, 24), p.idx("steel_light"));
     m.carve_cuboid((8, 23), (9, 22), (24, 25));
-    m.hazard_stripe_x((7, 24), (8, 8), (24, 24), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    m.hazard_stripe_x(
+        (7, 24),
+        (8, 8),
+        (24, 24),
+        3,
+        p.idx("hazard_yellow"),
+        p.idx("hazard_black"),
+    );
 
     // The two crushing rolls, drawn AFTER the pocket is carved so they
     // stand in it. Bright steel against brass so the pair reads as two
@@ -2659,8 +3169,18 @@ pub fn machine_crusher(p: &Palette) -> VoxModel {
     // turning belong to `machine_crusher_motion`, in the annulus this core
     // stops at, and a roll drawn out to its full radius here would z-fight
     // every one of them.
-    m.cylinder_y((12, 16), CRUSHER_ROLL_CORE_R, CRUSHER_ROLL_Y, p.idx("steel_light"));
-    m.cylinder_y((20, 16), CRUSHER_ROLL_CORE_R, CRUSHER_ROLL_Y, p.idx("brass"));
+    m.cylinder_y(
+        (12, 16),
+        CRUSHER_ROLL_CORE_R,
+        CRUSHER_ROLL_Y,
+        p.idx("steel_light"),
+    );
+    m.cylinder_y(
+        (20, 16),
+        CRUSHER_ROLL_CORE_R,
+        CRUSHER_ROLL_Y,
+        p.idx("brass"),
+    );
 
     // The identity of the machine: two big driven flywheels standing proud
     // of the camera-facing (-Y) face, on the roll shafts.
@@ -2778,14 +3298,29 @@ pub fn machine_mixer(p: &Palette) -> VoxModel {
     // its axis at x = 17 so its west wall stands clear of the two feed
     // housings (which reach x = 8) and its east wall reaches far enough to
     // carry the discharge nozzle.
-    m.cylinder_y((MIXER_DRUM_X, MIXER_DRUM_Z), 11.0, (5, last_y - 5), p.idx("steel"));
+    m.cylinder_y(
+        (MIXER_DRUM_X, MIXER_DRUM_Z),
+        11.0,
+        (5, last_y - 5),
+        p.idx("steel"),
+    );
     // Bands, the same seam language every other vessel on the line carries.
     for y in [9, 26, 37, 54] {
-        m.cylinder_y((MIXER_DRUM_X, MIXER_DRUM_Z), 11.6, (y, y), p.idx("steel_light"));
+        m.cylinder_y(
+            (MIXER_DRUM_X, MIXER_DRUM_Z),
+            11.6,
+            (y, y),
+            p.idx("steel_light"),
+        );
     }
     // Dished ends, so the drum is a vessel rather than a length of duct.
     for (y, r) in [(4, 9.0f32), (3, 6.5), (last_y - 4, 9.0), (last_y - 3, 6.5)] {
-        m.cylinder_y((MIXER_DRUM_X, MIXER_DRUM_Z), r, (y, y), p.idx("steel_light"));
+        m.cylinder_y(
+            (MIXER_DRUM_X, MIXER_DRUM_Z),
+            r,
+            (y, y),
+            p.idx("steel_light"),
+        );
     }
 
     // Hollow it, then cut the sight window through the crown — `pipe_body`'s
@@ -2799,7 +3334,11 @@ pub fn machine_mixer(p: &Palette) -> VoxModel {
     // tile is enough to show the agitator turning and leaves the drum's own
     // round back to read along, exactly the trade `pipe_body` records about
     // the pipe run's sight glass.
-    m.carve_cuboid((MIXER_DRUM_X - 5, MIXER_DRUM_X + 5), (24, last_y - 24), (MIXER_DRUM_Z + 1, 29));
+    m.carve_cuboid(
+        (MIXER_DRUM_X - 5, MIXER_DRUM_X + 5),
+        (24, last_y - 24),
+        (MIXER_DRUM_Z + 1, 29),
+    );
 
     // Ribbon agitator: a shaft down the drum's axis, carrying a helical
     // ribbon. This is the part the window exists to show, so it sits high in
@@ -2807,16 +3346,36 @@ pub fn machine_mixer(p: &Palette) -> VoxModel {
     // has to TURN, so only the shaft is here. The ribbon itself is
     // `machine_mixer_motion`, wound about this same axis at
     // `MIXER_RIBBON_R`, well clear of both the shaft and the drum wall.
-    m.cylinder_y((MIXER_DRUM_X, MIXER_DRUM_Z), 1.8, (4, last_y - 4), p.idx("steel_light"));
+    m.cylinder_y(
+        (MIXER_DRUM_X, MIXER_DRUM_Z),
+        1.8,
+        (4, last_y - 4),
+        p.idx("steel_light"),
+    );
 
     // Drive end: a motor and gearbox on the far (+Y) end of the shaft.
     // Far, not near, and that is the camera again: `control_panel`'s own doc
     // records that low local Y is the face this camera looks at, so a drive
     // that bulky on the near end would stand between the viewer and the
     // sight window this machine is identified by.
-    m.cuboid((11, 23), (last_y - 7, last_y - 1), (10, 22), p.idx("paint_blue"));
-    m.cuboid((11, 23), (last_y - 7, last_y - 1), (23, 23), p.idx("steel_dark"));
-    m.cylinder_y((MIXER_DRUM_X, MIXER_DRUM_Z), 4.0, (last_y - 8, last_y - 6), p.idx("brass"));
+    m.cuboid(
+        (11, 23),
+        (last_y - 7, last_y - 1),
+        (10, 22),
+        p.idx("paint_blue"),
+    );
+    m.cuboid(
+        (11, 23),
+        (last_y - 7, last_y - 1),
+        (23, 23),
+        p.idx("steel_dark"),
+    );
+    m.cylinder_y(
+        (MIXER_DRUM_X, MIXER_DRUM_Z),
+        4.0,
+        (last_y - 8, last_y - 6),
+        p.idx("brass"),
+    );
 
     // Vinegar inlet: the stub reaching north off the sim-y = 1 half, toward
     // the pipe run the reference chain lays one row north of the footprint.
@@ -2824,9 +3383,19 @@ pub fn machine_mixer(p: &Palette) -> VoxModel {
     // two are one spool piece split across a tile boundary, and the pair
     // only reads as a connection because they are the same diameter, the
     // same bright steel and carry their brass flange at the same boundary.
-    m.cylinder_y((MIXER_DRUM_X - 1, PIPE_AXIS_Z), 3.0, (0, 9), p.idx("steel_light"));
+    m.cylinder_y(
+        (MIXER_DRUM_X - 1, PIPE_AXIS_Z),
+        3.0,
+        (0, 9),
+        p.idx("steel_light"),
+    );
     m.cylinder_y((MIXER_DRUM_X - 1, PIPE_AXIS_Z), 4.0, (0, 1), p.idx("brass"));
-    m.cuboid((MIXER_DRUM_X - 2, MIXER_DRUM_X), (2, 7), (9, PIPE_AXIS_Z - 3), p.idx("steel_dark"));
+    m.cuboid(
+        (MIXER_DRUM_X - 2, MIXER_DRUM_X),
+        (2, 7),
+        (9, PIPE_AXIS_Z - 3),
+        p.idx("steel_dark"),
+    );
 
     // The two feed chutes: a hooded transfer housing per inlet tile, then a
     // short throat from each up into the drum's crown, so what arrives on
@@ -2835,8 +3404,18 @@ pub fn machine_mixer(p: &Palette) -> VoxModel {
     machine_infeed(&mut m, p, origin_lane);
     for lane in [near_lane, origin_lane] {
         let mid = (lane.0 + lane.1) / 2;
-        m.cuboid((6, 10), (mid - 3, mid + 3), (BELT_SURFACE_Z, 24), p.idx("steel_light"));
-        m.cuboid((10, MIXER_DRUM_X - 6), (mid - 2, mid + 2), (22, 24), p.idx("steel_light"));
+        m.cuboid(
+            (6, 10),
+            (mid - 3, mid + 3),
+            (BELT_SURFACE_Z, 24),
+            p.idx("steel_light"),
+        );
+        m.cuboid(
+            (10, MIXER_DRUM_X - 6),
+            (mid - 2, mid + 2),
+            (22, 24),
+            p.idx("steel_light"),
+        );
     }
 
     // The liquid discharge, on the outlet face at the origin row.
@@ -2900,7 +3479,14 @@ pub fn machine_cooking_vat(p: &Palette) -> VoxModel {
     // Access platform, handrail and ladder — the industrial language
     // UI_UX.md §3 asks for, and what actually sells the vat's size.
     m.cuboid((14, 50), (2, 8), (30, 31), p.idx("steel_dark"));
-    m.hazard_stripe_x((14, 50), (2, 2), (30, 31), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    m.hazard_stripe_x(
+        (14, 50),
+        (2, 2),
+        (30, 31),
+        3,
+        p.idx("hazard_yellow"),
+        p.idx("hazard_black"),
+    );
     for x in [14, 22, 30, 38, 46, 50] {
         m.cuboid((x, x), (2, 2), (32, 37), p.idx("steel_dark"));
     }
@@ -2992,7 +3578,12 @@ pub fn machine_bottler(p: &Palette) -> VoxModel {
     // that spindle onto the bottle is `machine_bottler_motion`'s, cut as a
     // ring around it so the two never share a voxel.
     m.cuboid((23, 25), (16, 22), (25, 26), p.idx("steel_light"));
-    m.cylinder_z((BOTTLER_CAP_X, 16), BOTTLER_SPINDLE_R, (22, 25), p.idx("steel_dark"));
+    m.cylinder_z(
+        (BOTTLER_CAP_X, 16),
+        BOTTLER_SPINDLE_R,
+        (22, 25),
+        p.idx("steel_dark"),
+    );
 
     // The chain rework made this the stage where the product stops being a
     // fluid: liquid ketchup is drawn from the pipe run touching this machine
@@ -3281,7 +3872,13 @@ pub fn machine_crusher_motion(p: &Palette, phase: u32) -> VoxModel {
         for (u, v) in arm_cells((x, 16), (CRUSHER_HUB_R, CRUSHER_SPOKE_R), 4, 1.7, angle) {
             m.cuboid((u, u), (1, 2), (v, v), p.idx("steel_dark"));
         }
-        for (u, v) in arm_cells((x, 16), (CRUSHER_ROLL_CORE_R, CRUSHER_ROLL_R), 8, 1.0, angle) {
+        for (u, v) in arm_cells(
+            (x, 16),
+            (CRUSHER_ROLL_CORE_R, CRUSHER_ROLL_R),
+            8,
+            1.0,
+            angle,
+        ) {
             if v < CRUSHER_POCKET_FLOOR_Z {
                 continue;
             }
@@ -3371,11 +3968,22 @@ pub fn machine_bottler_motion(p: &Palette, phase: u32) -> VoxModel {
     // two bottles. They lengthen rather than detach: the top stays on its
     // hanger at z = 24 and the tip reaches down.
     for x in BOTTLER_FILL_X {
-        m.cylinder_z((x, 16), BOTTLER_NOZZLE_R, (22 + drop, 24), p.idx("steel_light"));
+        m.cylinder_z(
+            (x, 16),
+            BOTTLER_NOZZLE_R,
+            (22 + drop, 24),
+            p.idx("steel_light"),
+        );
     }
     // The capping chuck, riding the body's spindle down over the last
     // bottle's neck.
-    for (u, v) in arm_cells((BOTTLER_CAP_X, 16), (BOTTLER_SPINDLE_R, BOTTLER_CHUCK_R), 1, 64.0, 0.0) {
+    for (u, v) in arm_cells(
+        (BOTTLER_CAP_X, 16),
+        (BOTTLER_SPINDLE_R, BOTTLER_CHUCK_R),
+        1,
+        64.0,
+        0.0,
+    ) {
         m.cuboid((u, u), (v, v), (21 + drop, 22 + drop), p.idx("brass"));
     }
     m
@@ -3399,7 +4007,12 @@ pub fn machine_packer_motion(p: &Palette, phase: u32) -> VoxModel {
     let mut m = VoxModel::tile();
     let dx = PACKER_TRAVEL[phase as usize];
     m.cuboid((16 + dx, 18 + dx), (18, 25), (22, 24), p.idx("steel_dark"));
-    m.cylinder_y((19 + dx, PACKER_ROLL_Z), PACKER_ROLL_R, (19, 22), p.idx("brass"));
+    m.cylinder_y(
+        (19 + dx, PACKER_ROLL_Z),
+        PACKER_ROLL_R,
+        (19, 22),
+        p.idx("brass"),
+    );
     m
 }
 
@@ -3461,10 +4074,28 @@ pub fn fluid_tank(p: &Palette) -> VoxModel {
     // Plinth + hazard skirt, flush with the tile's own edges, matching every
     // machine's footing (see `machine_footing`'s doc for why flush).
     m.cuboid((0, last), (0, last), (0, 1), p.idx("concrete_dark"));
-    m.hazard_stripe_x((0, last), (0, 0), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
-    m.hazard_stripe_x((0, last), (last, last), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    m.hazard_stripe_x(
+        (0, last),
+        (0, 0),
+        (2, 2),
+        3,
+        p.idx("hazard_yellow"),
+        p.idx("hazard_black"),
+    );
+    m.hazard_stripe_x(
+        (0, last),
+        (last, last),
+        (2, 2),
+        3,
+        p.idx("hazard_yellow"),
+        p.idx("hazard_black"),
+    );
     for y in 0i32..=last {
-        let a = if (y + 2).rem_euclid(6) < 3 { p.idx("hazard_yellow") } else { p.idx("hazard_black") };
+        let a = if (y + 2).rem_euclid(6) < 3 {
+            p.idx("hazard_yellow")
+        } else {
+            p.idx("hazard_black")
+        };
         m.set(0, y, 2, a);
         m.set(last, y, 2, a);
     }
@@ -3487,7 +4118,11 @@ pub fn fluid_tank(p: &Palette) -> VoxModel {
     // and albedo are the two things that decide whether a tank reads, and
     // both were wrong; see `TANK_FILL_HEIGHT` for the height half.
     m.cylinder_z((c, c), TANK_OUTER_R, (6, 30), p.idx("steel_light"));
-    m.ellipsoid((c, c, 30), (TANK_OUTER_R, TANK_OUTER_R, 4.0), p.idx("steel"));
+    m.ellipsoid(
+        (c, c, 30),
+        (TANK_OUTER_R, TANK_OUTER_R, 4.0),
+        p.idx("steel"),
+    );
     // Carve only up to the springing line of the head, NOT through it: an
     // earlier cut carved into the dome, whose crown is narrower than
     // `TANK_INNER_R` up there, so the whole top came away and the tank
@@ -3501,7 +4136,11 @@ pub fn fluid_tank(p: &Palette) -> VoxModel {
     // Level gauge: a slot down the camera-facing wall, framed above and
     // below by re-drawn rings so it reads as a fitted gauge rather than as
     // damage. The frame rings are drawn AFTER the cut for that reason.
-    m.carve_cuboid((c - 4, c + 4), (0, c - 6), (TANK_FILL_Z0 + 1, TANK_FILL_Z0 + TANK_FILL_HEIGHT + 1));
+    m.carve_cuboid(
+        (c - 4, c + 4),
+        (0, c - 6),
+        (TANK_FILL_Z0 + 1, TANK_FILL_Z0 + TANK_FILL_HEIGHT + 1),
+    );
 
     for z in [TANK_FILL_Z0, TANK_FILL_Z0 + TANK_FILL_HEIGHT + 2] {
         m.cylinder_z((c, c), TANK_OUTER_R, (z, z), p.idx("steel_light"));
@@ -3519,7 +4158,12 @@ pub fn fluid_tank(p: &Palette) -> VoxModel {
     m.cylinder_x((c, PIPE_AXIS_Z), 3.0, (20, last), p.idx("steel_light"));
     m.cylinder_x((c, PIPE_AXIS_Z), 4.2, (last - 1, last), p.idx("brass"));
     // Gusset under the spout, so it lands on the vessel rather than floating.
-    m.cuboid((22, last), (c - 1, c + 1), (PIPE_AXIS_Z - 6, PIPE_AXIS_Z - 3), p.idx("steel_dark"));
+    m.cuboid(
+        (22, last),
+        (c - 1, c + 1),
+        (PIPE_AXIS_Z - 6, PIPE_AXIS_Z - 3),
+        p.idx("steel_dark"),
+    );
 
     // Fill point on top: a man-way and a short vent stack, which is how a
     // player's "load the tank" action reads as a physical thing.
@@ -3561,7 +4205,12 @@ pub fn fluid_tank_fill(p: &Palette) -> VoxModel {
         )
     };
     let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 1]);
-    m.cylinder_z((TANK_CENTER, TANK_CENTER), TANK_INNER_R, (0, 0), p.idx("fluid_pale"));
+    m.cylinder_z(
+        (TANK_CENTER, TANK_CENTER),
+        TANK_INNER_R,
+        (0, 0),
+        p.idx("fluid_pale"),
+    );
     m
 }
 
@@ -3606,8 +4255,22 @@ pub fn hopper(p: &Palette) -> VoxModel {
     // floor at exactly that seam (the visual-overhaul pass's fix).
     let last = TILE_VOXELS as i32 - 1;
     m.cuboid((0, last), (0, last), (0, 1), p.idx("concrete_dark"));
-    m.hazard_stripe_x((0, last), (0, 0), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
-    m.hazard_stripe_x((0, last), (last, last), (2, 2), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    m.hazard_stripe_x(
+        (0, last),
+        (0, 0),
+        (2, 2),
+        3,
+        p.idx("hazard_yellow"),
+        p.idx("hazard_black"),
+    );
+    m.hazard_stripe_x(
+        (0, last),
+        (last, last),
+        (2, 2),
+        3,
+        p.idx("hazard_yellow"),
+        p.idx("hazard_black"),
+    );
 
     // Four corner columns running the full height, with the funnel slung
     // between them — how a real bulk hopper is actually supported, and (the
@@ -3635,14 +4298,24 @@ pub fn hopper(p: &Palette) -> VoxModel {
     // Straight box section: walls 2 thick, open at the top. Product level
     // only ever shows here (see HOPPER_FILL_Z0's note above).
     let outer = HOPPER_INNER_HALF + 2;
-    m.cuboid((c - outer, c + outer), (c - outer, c + outer), (HOPPER_FILL_Z0, 30), p.idx("steel"));
+    m.cuboid(
+        (c - outer, c + outer),
+        (c - outer, c + outer),
+        (HOPPER_FILL_Z0, 30),
+        p.idx("steel"),
+    );
     m.carve_cuboid(
         (c - HOPPER_INNER_HALF, c + HOPPER_INNER_HALF),
         (c - HOPPER_INNER_HALF, c + HOPPER_INNER_HALF),
         (HOPPER_FILL_Z0, 31),
     );
     // Flared loading lip, and hazard striping on the camera-facing wall.
-    m.cuboid((c - outer - 1, c + outer + 1), (c - outer - 1, c + outer + 1), (30, 30), p.idx("steel_light"));
+    m.cuboid(
+        (c - outer - 1, c + outer + 1),
+        (c - outer - 1, c + outer + 1),
+        (30, 30),
+        p.idx("steel_light"),
+    );
     m.carve_cuboid(
         (c - HOPPER_INNER_HALF, c + HOPPER_INNER_HALF),
         (c - HOPPER_INNER_HALF, c + HOPPER_INNER_HALF),
@@ -3788,7 +4461,12 @@ pub fn machine_dock(p: &Palette) -> VoxModel {
     // pit with a lit rail round it, not as a platform goods stand on.
     m.cuboid((0, last), (0, last), (0, 1), p.idx("concrete_dark"));
     m.cuboid((0, last), (0, last), (2, deck - 1), p.idx("concrete_light"));
-    m.cuboid((1, last - 1), (1, last - 1), (2, deck - 1), p.idx("concrete"));
+    m.cuboid(
+        (1, last - 1),
+        (1, last - 1),
+        (2, deck - 1),
+        p.idx("concrete"),
+    );
     m.cuboid((0, last), (0, last), (deck, deck), p.idx("concrete_light"));
     // One expansion joint along each tile boundary, scored into the wearing
     // surface. A 64x64 slab poured in one piece is not a thing, and without
@@ -3803,9 +4481,20 @@ pub fn machine_dock(p: &Palette) -> VoxModel {
     // voxels, not three: half a hazard stripe is black, and this band runs
     // the full length of both camera-facing edges — the wider first cut put
     // more black on the dock than anything else.
-    m.hazard_stripe_x((0, last), (0, 0), (deck - 1, deck), 3, p.idx("hazard_yellow"), p.idx("hazard_black"));
+    m.hazard_stripe_x(
+        (0, last),
+        (0, 0),
+        (deck - 1, deck),
+        3,
+        p.idx("hazard_yellow"),
+        p.idx("hazard_black"),
+    );
     for y in 0..=last {
-        let a = if (y + 2).rem_euclid(6) < 3 { p.idx("hazard_yellow") } else { p.idx("hazard_black") };
+        let a = if (y + 2).rem_euclid(6) < 3 {
+            p.idx("hazard_yellow")
+        } else {
+            p.idx("hazard_black")
+        };
         for z in (deck - 1)..=deck {
             m.set(last, y, z, a);
         }
@@ -3818,7 +4507,12 @@ pub fn machine_dock(p: &Palette) -> VoxModel {
     // a bay this wide rather than the one-tile version's two, spaced so the
     // rhythm reads as a wall of a real dock rather than as two lumps.
     for (y0, y1) in [(6, 11), (29, 34), (52, 57)] {
-        m.cuboid((last - 1, last), (y0, y1), (deck - 6, deck - 1), p.idx("rubber_dark"));
+        m.cuboid(
+            (last - 1, last),
+            (y0, y1),
+            (deck - 6, deck - 1),
+            p.idx("rubber_dark"),
+        );
     }
 
     // --- The despatch wall, on the FAR side --------------------------------
@@ -3835,9 +4529,19 @@ pub fn machine_dock(p: &Palette) -> VoxModel {
     // open is also what a real bay looks like — the conveyor comes in at the
     // end of the building, not through the middle of it.
     let wall_face_y = DOCK_WALL_FACE_Y;
-    m.cuboid((DOCK_WALL_WEST_X, last), (wall_face_y, last), (deck + 1, 27), p.idx("paint_blue"));
+    m.cuboid(
+        (DOCK_WALL_WEST_X, last),
+        (wall_face_y, last),
+        (deck + 1, 27),
+        p.idx("paint_blue"),
+    );
     for x in (DOCK_WALL_WEST_X + 2..=62).step_by(4) {
-        m.cuboid((x, x), (wall_face_y, wall_face_y), (deck + 1, 25), p.idx("steel_dark"));
+        m.cuboid(
+            (x, x),
+            (wall_face_y, wall_face_y),
+            (deck + 1, 25),
+            p.idx("steel_dark"),
+        );
     }
 
     // The despatch openings, carved through to a black back wall — real
@@ -3848,17 +4552,47 @@ pub fn machine_dock(p: &Palette) -> VoxModel {
     // mirrored case), so the floor is black and the frame around it is the
     // palette's brightest metal.
     for (x0, x1) in DOCK_DOOR_SPANS {
-        m.cuboid((x0 - 3, x1 + 3), (wall_face_y - 2, wall_face_y), (deck + 1, 23), p.idx("steel_light"));
+        m.cuboid(
+            (x0 - 3, x1 + 3),
+            (wall_face_y - 2, wall_face_y),
+            (deck + 1, 23),
+            p.idx("steel_light"),
+        );
         m.carve_cuboid((x0, x1), (wall_face_y - 2, last - 1), (deck + 1, 21));
-        m.cuboid((x0, x1), (last, last), (deck + 1, 21), p.idx("hazard_black"));
-        m.cuboid((x0, x1), (wall_face_y - 2, last - 1), (deck + 1, deck + 1), p.idx("hazard_black"));
+        m.cuboid(
+            (x0, x1),
+            (last, last),
+            (deck + 1, 21),
+            p.idx("hazard_black"),
+        );
+        m.cuboid(
+            (x0, x1),
+            (wall_face_y - 2, last - 1),
+            (deck + 1, deck + 1),
+            p.idx("hazard_black"),
+        );
         // Brass threshold at the lip: the same accent every other fitting
         // product physically passes through carries.
-        m.cuboid((x0, x1), (wall_face_y - 2, wall_face_y - 2), (deck + 1, deck + 1), p.idx("brass"));
+        m.cuboid(
+            (x0, x1),
+            (wall_face_y - 2, wall_face_y - 2),
+            (deck + 1, deck + 1),
+            p.idx("brass"),
+        );
         // The roller shutter, wound up above the opening — what says this
         // opening is a door rather than a window.
-        m.cuboid((x0 - 1, x1 + 1), (wall_face_y - 3, wall_face_y - 2), (22, 23), p.idx("steel_dark"));
-        m.cuboid((x0 - 1, x1 + 1), (wall_face_y - 3, wall_face_y - 3), (22, 22), p.idx("steel_light"));
+        m.cuboid(
+            (x0 - 1, x1 + 1),
+            (wall_face_y - 3, wall_face_y - 2),
+            (22, 23),
+            p.idx("steel_dark"),
+        );
+        m.cuboid(
+            (x0 - 1, x1 + 1),
+            (wall_face_y - 3, wall_face_y - 3),
+            (22, 22),
+            p.idx("steel_light"),
+        );
     }
 
     // --- Canopy over the bay ----------------------------------------------
@@ -3873,10 +4607,25 @@ pub fn machine_dock(p: &Palette) -> VoxModel {
     // shades, and the deck is where the goods stand.
     let canopy_face_y = DOCK_CANOPY_FACE_Y;
     let canopy_x = (DOCK_WALL_WEST_X + 2, 61);
-    m.cuboid(canopy_x, (canopy_face_y, wall_face_y), (26, 27), p.idx("steel"));
-    m.cuboid(canopy_x, (canopy_face_y, canopy_face_y), (25, 25), p.idx("hazard_yellow"));
+    m.cuboid(
+        canopy_x,
+        (canopy_face_y, wall_face_y),
+        (26, 27),
+        p.idx("steel"),
+    );
+    m.cuboid(
+        canopy_x,
+        (canopy_face_y, canopy_face_y),
+        (25, 25),
+        p.idx("hazard_yellow"),
+    );
     for x in [canopy_x.0, 37, 38, canopy_x.1] {
-        m.cuboid((x, x), (canopy_face_y + 1, wall_face_y), (24, 25), p.idx("steel_dark"));
+        m.cuboid(
+            (x, x),
+            (canopy_face_y + 1, wall_face_y),
+            (24, 25),
+            p.idx("steel_dark"),
+        );
     }
 
     // A bay light under the canopy's leading edge above each door — hung one
@@ -3887,8 +4636,18 @@ pub fn machine_dock(p: &Palette) -> VoxModel {
     // which is correct — there is one shared delivery pool, not one per door.
     for (x0, x1) in DOCK_DOOR_SPANS {
         let mid = (x0 + x1) / 2;
-        m.cuboid((mid - 3, mid + 3), (canopy_face_y - 2, canopy_face_y - 1), (24, 25), p.idx("steel_light"));
-        m.cuboid((mid - 2, mid + 2), (canopy_face_y - 2, canopy_face_y - 2), (23, 24), p.idx("status_amber"));
+        m.cuboid(
+            (mid - 3, mid + 3),
+            (canopy_face_y - 2, canopy_face_y - 1),
+            (24, 25),
+            p.idx("steel_light"),
+        );
+        m.cuboid(
+            (mid - 2, mid + 2),
+            (canopy_face_y - 2, canopy_face_y - 2),
+            (23, 24),
+            p.idx("status_amber"),
+        );
     }
 
     // --- The junctions -----------------------------------------------------
@@ -4074,20 +4833,41 @@ mod tests {
         // Intake (-X), straight output (+X) and branch output (+Y): a lane
         // runs out to the tile edge at the belt's own running height on all
         // three, so product never meets a wall.
-        assert!(m.filled(0, mid, deck), "the -X intake lane stops short of the tile edge");
-        assert!(m.filled(last, mid, deck), "the +X straight output stops short of the tile edge");
-        assert!(m.filled(mid, last, deck), "the +Y branch output stops short of the tile edge");
+        assert!(
+            m.filled(0, mid, deck),
+            "the -X intake lane stops short of the tile edge"
+        );
+        assert!(
+            m.filled(last, mid, deck),
+            "the +X straight output stops short of the tile edge"
+        );
+        assert!(
+            m.filled(mid, last, deck),
+            "the +Y branch output stops short of the tile edge"
+        );
         // ...and nothing stands in any of them.
         for z in (deck + 1)..=(deck + 4) {
             assert!(!m.filled(0, mid, z), "something blocks the intake lane");
-            assert!(!m.filled(last, mid, z), "something blocks the straight output");
-            assert!(!m.filled(mid, last, z), "something blocks the branch output");
+            assert!(
+                !m.filled(last, mid, z),
+                "something blocks the straight output"
+            );
+            assert!(
+                !m.filled(mid, last, z),
+                "something blocks the branch output"
+            );
         }
         // The fourth side is a rail, not an output. It is BELOW the deck, as
         // a belt's own side frame is, so it closes the tile without standing
         // in front of the table the camera has to see into.
-        assert!(m.filled(mid, 5, 6), "the -Y side has no rail, so the tile reads as open on all four sides");
-        assert!(!m.filled(mid, 5, deck + 1), "the -Y rail stands above the deck and would occlude the table");
+        assert!(
+            m.filled(mid, 5, 6),
+            "the -Y side has no rail, so the tile reads as open on all four sides"
+        );
+        assert!(
+            !m.filled(mid, 5, deck + 1),
+            "the -Y rail stands above the deck and would occlude the table"
+        );
 
         // Both arrow grooves are real recesses, one voxel down, and they do
         // not overlap — two arrows crossing at the tile centre render as one
@@ -4097,22 +4877,38 @@ mod tests {
         let branch: std::collections::BTreeSet<(i32, i32)> =
             splitter_arrow_cells(1).into_iter().collect();
         assert!(!straight.is_empty(), "the straight arrow is empty");
-        assert_eq!(straight.len(), branch.len(), "a quarter turn must not change an arrow's size");
+        assert_eq!(
+            straight.len(),
+            branch.len(),
+            "a quarter turn must not change an arrow's size"
+        );
         assert!(
             straight.is_disjoint(&branch),
             "the two arrow grooves overlap, so neither reads as an arrow"
         );
         for &(x, y) in straight.union(&branch) {
-            assert!(!m.filled(x, y, SPLITTER_ARROW_Z), "the arrow groove at {x},{y} was painted, not cut");
-            assert!(m.filled(x, y, SPLITTER_ARROW_Z - 1), "the arrow groove at {x},{y} has no floor to sit on");
+            assert!(
+                !m.filled(x, y, SPLITTER_ARROW_Z),
+                "the arrow groove at {x},{y} was painted, not cut"
+            );
+            assert!(
+                m.filled(x, y, SPLITTER_ARROW_Z - 1),
+                "the arrow groove at {x},{y} has no floor to sit on"
+            );
         }
 
         // The lit slab fills exactly the straight groove, so it sits flush
         // rather than standing proud of the deck in the product's way.
         let arrow = splitter_arrow(&p);
-        let lit: std::collections::BTreeSet<(i32, i32)> =
-            arrow.voxels.keys().map(|&(x, y, _)| (x as i32, y as i32)).collect();
-        assert_eq!(lit, straight, "the lit arrow does not match the groove cut for it");
+        let lit: std::collections::BTreeSet<(i32, i32)> = arrow
+            .voxels
+            .keys()
+            .map(|&(x, y, _)| (x as i32, y as i32))
+            .collect();
+        assert_eq!(
+            lit, straight,
+            "the lit arrow does not match the groove cut for it"
+        );
     }
 
     #[test]
@@ -4217,8 +5013,14 @@ mod tests {
     fn junction_surfaces_sit_exactly_at_the_belts_running_height() {
         let p = palette();
         let belt = belt(&p);
-        assert!(belt.filled(0, 16, BELT_SURFACE_Z), "BELT_SURFACE_Z is not the belt's top voxel");
-        assert!(!belt.filled(0, 16, BELT_SURFACE_Z + 1), "BELT_SURFACE_Z is not the belt's TOP");
+        assert!(
+            belt.filled(0, 16, BELT_SURFACE_Z),
+            "BELT_SURFACE_Z is not the belt's top voxel"
+        );
+        assert!(
+            !belt.filled(0, 16, BELT_SURFACE_Z + 1),
+            "BELT_SURFACE_Z is not the belt's TOP"
+        );
 
         for j in machines(&p) {
             for lane in &j.belt_inlets {
@@ -4342,7 +5144,10 @@ mod tests {
         let mid = (FLOOR_DRAIN_Y.0 + FLOOR_DRAIN_Y.1) / 2;
         let drain_colours = [p.idx("drain_grate"), p.idx("concrete")];
         for x in [0, last] {
-            let here = m.voxels.get(&(x as u32, mid as u32, FLOOR_TOP as u32)).copied();
+            let here = m
+                .voxels
+                .get(&(x as u32, mid as u32, FLOOR_TOP as u32))
+                .copied();
             assert!(
                 here.is_some_and(|c| drain_colours.contains(&c)),
                 "the drain channel does not reach x = {x}, so a run of them is a row of puddles"
@@ -4394,7 +5199,11 @@ mod tests {
             for phase in 0..BELT_FRAMES {
                 let m = belt_shape(&p, shape, phase);
                 let cells = cleat_cells(&m);
-                assert!(cells.len() >= 16, "{name} f{phase}: cleat has only {} cells", cells.len());
+                assert!(
+                    cells.len() >= 16,
+                    "{name} f{phase}: cleat has only {} cells",
+                    cells.len()
+                );
                 let (mut near_edge, mut inner) = (0, 0);
                 for &(x, y) in &cells {
                     assert_eq!(
@@ -4406,14 +5215,18 @@ mod tests {
                         m.filled(x, y, BELT_SURFACE_Z),
                         "{name} f{phase}: cleat cell {x},{y} floats — nothing under it at the running height"
                     );
-                    let cell = surface_cell(shape, x, y)
-                        .unwrap_or_else(|| panic!("{name} f{phase}: cleat cell {x},{y} is off the lane"));
+                    let cell = surface_cell(shape, x, y).unwrap_or_else(|| {
+                        panic!("{name} f{phase}: cleat cell {x},{y} is off the lane")
+                    });
                     let trail = cleat_trail_u(&cell, phase);
                     assert!(
                         (0.0..CLEAT_LEN).contains(&trail),
                         "{name} f{phase}: cleat cell {x},{y} is outside the bar along the path"
                     );
-                    assert!(cell.v.abs() < CLEAT_HALF_WIDTH, "{name} f{phase}: cleat cell {x},{y} reaches the rubber's edge");
+                    assert!(
+                        cell.v.abs() < CLEAT_HALF_WIDTH,
+                        "{name} f{phase}: cleat cell {x},{y} reaches the rubber's edge"
+                    );
                     if cell.v.abs() >= CLEAT_HALF_WIDTH - 1.5 {
                         near_edge += 1;
                     }
@@ -4421,15 +5234,27 @@ mod tests {
                         inner += 1;
                     }
                 }
-                assert!(near_edge >= 2, "{name} f{phase}: the cleat does not span the lane");
-                assert!(inner >= 1, "{name} f{phase}: the cleat has a gap on the centre line");
+                assert!(
+                    near_edge >= 2,
+                    "{name} f{phase}: the cleat does not span the lane"
+                );
+                assert!(
+                    inner >= 1,
+                    "{name} f{phase}: the cleat has a gap on the centre line"
+                );
                 // Nothing on the running surface, or above it, is signage
                 // colour, and nothing but the cleat stands above the rubber.
                 for (&(x, y, z), &c) in &m.voxels {
                     let (x, y, z) = (x as i32, y as i32, z as i32);
                     if surface_cell(shape, x, y).is_some() && z >= BELT_SURFACE_Z {
-                        assert_ne!(c, yellow, "{name} f{phase}: a signage-colour mark at {x},{y},{z} — an arrow is back");
-                        assert!(z <= BELT_CLEAT_Z, "{name} f{phase}: something stands in the lane at {x},{y},{z}");
+                        assert_ne!(
+                            c, yellow,
+                            "{name} f{phase}: a signage-colour mark at {x},{y},{z} — an arrow is back"
+                        );
+                        assert!(
+                            z <= BELT_CLEAT_Z,
+                            "{name} f{phase}: something stands in the lane at {x},{y},{z}"
+                        );
                     }
                 }
             }
@@ -4439,17 +5264,24 @@ mod tests {
     #[test]
     fn the_four_frames_of_a_straight_belt_differ_only_by_the_phase_shift() {
         let p = palette();
-        let frames: Vec<VoxModel> = (0..BELT_FRAMES).map(|k| belt_shape(&p, BeltShape::Straight, k)).collect();
+        let frames: Vec<VoxModel> = (0..BELT_FRAMES)
+            .map(|k| belt_shape(&p, BeltShape::Straight, k))
+            .collect();
         let tile = TILE_VOXELS as i32;
         let (l0, l1) = BELT_LANE;
-        let on_lane = |x: i32, y: i32, z: i32| (l0..=l1).contains(&y) && z >= BELT_SURFACE_Z - 1 && x < tile;
+        let on_lane =
+            |x: i32, y: i32, z: i32| (l0..=l1).contains(&y) && z >= BELT_SURFACE_Z - 1 && x < tile;
         for (k, frame) in frames.iter().enumerate() {
             let shift = k as i32 * BELT_FRAME_SHIFT;
             for x in 0..tile {
                 for y in 0..tile {
                     for z in 0..16 {
                         let expected = if on_lane(x, y, z) {
-                            frames[0].voxels.get(&(((x - shift).rem_euclid(tile)) as u32, y as u32, z as u32))
+                            frames[0].voxels.get(&(
+                                ((x - shift).rem_euclid(tile)) as u32,
+                                y as u32,
+                                z as u32,
+                            ))
                         } else {
                             frames[0].voxels.get(&(x as u32, y as u32, z as u32))
                         };
@@ -4464,7 +5296,10 @@ mod tests {
         }
         for a in 0..frames.len() {
             for b in (a + 1)..frames.len() {
-                assert_ne!(frames[a].voxels, frames[b].voxels, "belt f{a} and f{b} are the same model");
+                assert_ne!(
+                    frames[a].voxels, frames[b].voxels,
+                    "belt f{a} and f{b} are the same model"
+                );
             }
         }
     }
@@ -4474,18 +5309,30 @@ mod tests {
         let p = palette();
         for turn in [Turn::Left, Turn::Right] {
             let shape = BeltShape::Corner(turn);
-            let frames: Vec<VoxModel> = (0..BELT_FRAMES).map(|k| belt_shape(&p, shape, k)).collect();
+            let frames: Vec<VoxModel> =
+                (0..BELT_FRAMES).map(|k| belt_shape(&p, shape, k)).collect();
             let structure = |m: &VoxModel| -> Vec<((u32, u32, u32), u8)> {
-                m.voxels.iter().filter(|&(&(_, _, z), _)| (z as i32) < BELT_CLEAT_Z).map(|(&k, &c)| (k, c)).collect()
+                m.voxels
+                    .iter()
+                    .filter(|&(&(_, _, z), _)| (z as i32) < BELT_CLEAT_Z)
+                    .map(|(&k, &c)| (k, c))
+                    .collect()
             };
             let mut apexes = Vec::new();
             for (k, frame) in frames.iter().enumerate() {
-                assert_eq!(structure(frame), structure(&frames[0]), "{turn:?} corner f{k}: structure differs from f0");
+                assert_eq!(
+                    structure(frame),
+                    structure(&frames[0]),
+                    "{turn:?} corner f{k}: structure differs from f0"
+                );
                 // Where the cleat actually stands, read back off the voxels:
                 // the circular mean of its centre-line cells' `u` (circular
                 // because a frame can straddle the tile edge).
                 let (mut sx, mut sy, mut n) = (0.0f32, 0.0f32, 0);
-                for c in cleat_cells(frame).into_iter().filter_map(|(x, y)| surface_cell(shape, x, y)) {
+                for c in cleat_cells(frame)
+                    .into_iter()
+                    .filter_map(|(x, y)| surface_cell(shape, x, y))
+                {
                     if c.v.abs() < 1.0 {
                         let a = c.u / TILE_VOXELS as f32 * std::f32::consts::TAU;
                         sx += a.cos();
@@ -4505,7 +5352,11 @@ mod tests {
             }
             for a in 0..frames.len() {
                 for b in (a + 1)..frames.len() {
-                    assert_ne!(cleat_cells(&frames[a]), cleat_cells(&frames[b]), "{turn:?} corner f{a} and f{b} share a cleat");
+                    assert_ne!(
+                        cleat_cells(&frames[a]),
+                        cleat_cells(&frames[b]),
+                        "{turn:?} corner f{a} and f{b} share a cleat"
+                    );
                 }
             }
         }
@@ -4532,16 +5383,36 @@ mod tests {
                     // Exit face (+X) and entry face carry the lane at the
                     // belt's running height, exactly BELT_LANE wide, with
                     // nothing standing in it.
-                    assert_eq!(m.filled(last, i, BELT_SURFACE_Z), in_lane, "{name}: +X face lane wrong at y = {i}");
-                    assert_eq!(m.filled(i, entry_y, BELT_SURFACE_Z), in_lane, "{name}: entry face lane wrong at x = {i}");
+                    assert_eq!(
+                        m.filled(last, i, BELT_SURFACE_Z),
+                        in_lane,
+                        "{name}: +X face lane wrong at y = {i}"
+                    );
+                    assert_eq!(
+                        m.filled(i, entry_y, BELT_SURFACE_Z),
+                        in_lane,
+                        "{name}: entry face lane wrong at x = {i}"
+                    );
                     for z in (BELT_CLEAT_Z + 1)..16 {
-                        assert!(!m.filled(last, i, z), "{name}: +X face blocked at y = {i}, z = {z}");
-                        assert!(!m.filled(i, entry_y, z), "{name}: entry face blocked at x = {i}, z = {z}");
+                        assert!(
+                            !m.filled(last, i, z),
+                            "{name}: +X face blocked at y = {i}, z = {z}"
+                        );
+                        assert!(
+                            !m.filled(i, entry_y, z),
+                            "{name}: entry face blocked at x = {i}, z = {z}"
+                        );
                     }
                     // The other two faces carry no belt at all.
                     for z in 0..16 {
-                        assert!(!m.filled(0, i, z), "{name}: the -X face is not closed at y = {i}, z = {z}");
-                        assert!(!m.filled(i, closed_y, z), "{name}: the closed Y face is not closed at x = {i}, z = {z}");
+                        assert!(
+                            !m.filled(0, i, z),
+                            "{name}: the -X face is not closed at y = {i}, z = {z}"
+                        );
+                        assert!(
+                            !m.filled(i, closed_y, z),
+                            "{name}: the closed Y face is not closed at x = {i}, z = {z}"
+                        );
                     }
                 }
                 // Rails meet a straight tile's rails voxel for voxel at
@@ -4574,9 +5445,15 @@ mod tests {
             let m = belt_shape(&p, BeltShape::Straight, phase);
             for y in l0..=l1 {
                 for x in [0, last] {
-                    assert!(m.filled(x, y, BELT_SURFACE_Z), "belt f{phase}: lane stops short at x = {x}, y = {y}");
+                    assert!(
+                        m.filled(x, y, BELT_SURFACE_Z),
+                        "belt f{phase}: lane stops short at x = {x}, y = {y}"
+                    );
                     for z in (BELT_CLEAT_Z + 1)..16 {
-                        assert!(!m.filled(x, y, z), "belt f{phase}: face blocked at x = {x}, y = {y}, z = {z}");
+                        assert!(
+                            !m.filled(x, y, z),
+                            "belt f{phase}: face blocked at x = {x}, y = {y}, z = {z}"
+                        );
                     }
                 }
             }
@@ -4603,14 +5480,25 @@ mod tests {
         // no cleat pattern of its own.
         for x in 0..=3 {
             for y in l0..=l1 {
-                assert_eq!(m.voxels.get(&(x, y as u32, BELT_SURFACE_Z as u32)), Some(&rubber), "splitter intake at {x},{y} is not plain rubber");
-                assert!(!m.filled(x as i32, y, BELT_CLEAT_Z), "splitter intake carries a belt cleat at {x},{y}");
+                assert_eq!(
+                    m.voxels.get(&(x, y as u32, BELT_SURFACE_Z as u32)),
+                    Some(&rubber),
+                    "splitter intake at {x},{y} is not plain rubber"
+                );
+                assert!(
+                    !m.filled(x as i32, y, BELT_CLEAT_Z),
+                    "splitter intake carries a belt cleat at {x},{y}"
+                );
             }
         }
         // Rails identical to the belt's on the -X face.
         for y in 0..=last {
             for z in 4..=8 {
-                assert_eq!(m.filled(0, y, z), belt.filled(0, y, z), "splitter -X face differs from a belt at y = {y}, z = {z}");
+                assert_eq!(
+                    m.filled(0, y, z),
+                    belt.filled(0, y, z),
+                    "splitter -X face differs from a belt at y = {y}, z = {z}"
+                );
             }
         }
     }
@@ -4705,7 +5593,12 @@ mod tests {
         South,
     }
 
-    const ALL_FACES: [PipeFace; 4] = [PipeFace::East, PipeFace::West, PipeFace::North, PipeFace::South];
+    const ALL_FACES: [PipeFace; 4] = [
+        PipeFace::East,
+        PipeFace::West,
+        PipeFace::North,
+        PipeFace::South,
+    ];
 
     /// The voxel of `face`'s boundary plane at `(along, up)`, where `along`
     /// is the in-plane horizontal index and `up` the Z.
@@ -4744,9 +5637,24 @@ mod tests {
         use PipeFace::*;
         vec![
             ("pipe", pipe(p), pipe_fluid(p), vec![East, West]),
-            ("pipe_corner", pipe_corner(p), pipe_fluid_corner(p), vec![East, North]),
-            ("pipe_tee", pipe_tee(p), pipe_fluid_tee(p), vec![East, West, North]),
-            ("pipe_cross", pipe_cross(p), pipe_fluid_cross(p), vec![East, West, North, South]),
+            (
+                "pipe_corner",
+                pipe_corner(p),
+                pipe_fluid_corner(p),
+                vec![East, North],
+            ),
+            (
+                "pipe_tee",
+                pipe_tee(p),
+                pipe_fluid_tee(p),
+                vec![East, West, North],
+            ),
+            (
+                "pipe_cross",
+                pipe_cross(p),
+                pipe_fluid_cross(p),
+                vec![East, West, North, South],
+            ),
             ("pipe_end", pipe_end(p), pipe_fluid_end(p), vec![West]),
         ]
     }
@@ -4760,7 +5668,11 @@ mod tests {
                     face_open(&shape, face),
                     open.contains(&face),
                     "{name}: face {face:?} should be {}",
-                    if open.contains(&face) { "open" } else { "closed" }
+                    if open.contains(&face) {
+                        "open"
+                    } else {
+                        "closed"
+                    }
                 );
             }
         }
@@ -4777,7 +5689,10 @@ mod tests {
         assert!(face_open(&turned, PipeFace::West) && face_open(&turned, PipeFace::South));
         assert!(!face_open(&turned, PipeFace::East) && !face_open(&turned, PipeFace::North));
         let once = pipe_corner(&p).rotated_cw(1);
-        assert!(face_open(&once, PipeFace::South) && face_open(&once, PipeFace::East), "one CW turn: +X -> south, north -> east");
+        assert!(
+            face_open(&once, PipeFace::South) && face_open(&once, PipeFace::East),
+            "one CW turn: +X -> south, north -> east"
+        );
     }
 
     /// Each fluid body lies inside its shape's bore: every voxel of the slab
@@ -4787,7 +5702,10 @@ mod tests {
     fn every_fluid_body_lies_inside_its_shapes_bore_and_reaches_only_open_faces() {
         let p = palette();
         for (name, shape, fluid, open) in pipe_shapes(&p) {
-            assert_eq!(fluid.size[2], 1, "{name}: the fluid body must be one voxel tall");
+            assert_eq!(
+                fluid.size[2], 1,
+                "{name}: the fluid body must be one voxel tall"
+            );
             for &(x, y, _) in fluid.voxels.keys() {
                 for z in PIPE_BORE_Z0 + 1..=PIPE_AXIS_Z {
                     assert!(
@@ -4805,7 +5723,11 @@ mod tests {
                     reaches,
                     open.contains(&face),
                     "{name}: the fluid body {} reach face {face:?}",
-                    if open.contains(&face) { "must" } else { "must not" }
+                    if open.contains(&face) {
+                        "must"
+                    } else {
+                        "must not"
+                    }
                 );
             }
         }
@@ -4819,18 +5741,29 @@ mod tests {
     fn every_pipe_shape_has_a_sight_window_cut_to_the_top() {
         let p = palette();
         for (name, shape, _, _) in pipe_shapes(&p) {
-            let window = if name == "pipe" || name == "pipe_end" { PIPE_WINDOW } else { PIPE_LEG_WINDOW };
+            let window = if name == "pipe" || name == "pipe_end" {
+                PIPE_WINDOW
+            } else {
+                PIPE_LEG_WINDOW
+            };
             let top = shape.size[2] as i32 - 1;
             for x in window.0..=window.1 {
                 for y in PIPE_BORE_Y.0..=PIPE_BORE_Y.1 {
                     for z in PIPE_BORE_Z0 + 1..=top {
-                        assert!(!shape.filled(x, y, z), "{name}: window voxel ({x}, {y}, {z}) is not empty");
+                        assert!(
+                            !shape.filled(x, y, z),
+                            "{name}: window voxel ({x}, {y}, {z}) is not empty"
+                        );
                     }
                 }
             }
             // ...and it is a window, not a missing wall: the tube is still
             // there just outside it, either side.
-            assert!(shape.filled(window.0 - 1, PIPE_BORE_Y.0, PIPE_AXIS_Z + 3) || shape.filled(window.1 + 1, PIPE_BORE_Y.0, PIPE_AXIS_Z + 3), "{name}: no tube wall frames the window");
+            assert!(
+                shape.filled(window.0 - 1, PIPE_BORE_Y.0, PIPE_AXIS_Z + 3)
+                    || shape.filled(window.1 + 1, PIPE_BORE_Y.0, PIPE_AXIS_Z + 3),
+                "{name}: no tube wall frames the window"
+            );
         }
     }
 
@@ -4842,24 +5775,53 @@ mod tests {
         let p = palette();
         let last = TILE_VOXELS as i32 - 1;
         for (name, fitting, r) in [
-            ("pipe_fitting_machine", pipe_fitting_machine(&p), PIPE_OUTER_R + 1.0 + PIPE_FITTING_MARGIN),
-            ("pipe_fitting_tank", pipe_fitting_tank(&p), PIPE_OUTER_R + 1.0 + PIPE_FITTING_MARGIN),
+            (
+                "pipe_fitting_machine",
+                pipe_fitting_machine(&p),
+                PIPE_OUTER_R + 1.0 + PIPE_FITTING_MARGIN,
+            ),
+            (
+                "pipe_fitting_tank",
+                pipe_fitting_tank(&p),
+                PIPE_OUTER_R + 1.0 + PIPE_FITTING_MARGIN,
+            ),
         ] {
             // The flange is centred on the tile midline, half a voxel from
             // voxel 15/16, so its reach along an axis is sqrt(r² - ¼).
             let reach = (r * r - 0.25).sqrt().floor() as i32;
-            for (y, z) in [(15, PIPE_AXIS_Z + reach), (16, PIPE_AXIS_Z - reach), (15 - reach, PIPE_AXIS_Z), (16 + reach, PIPE_AXIS_Z)] {
-                assert!(fitting.filled(last, y, z), "{name}: flange does not reach ({y}, {z}) on the boundary");
+            for (y, z) in [
+                (15, PIPE_AXIS_Z + reach),
+                (16, PIPE_AXIS_Z - reach),
+                (15 - reach, PIPE_AXIS_Z),
+                (16 + reach, PIPE_AXIS_Z),
+            ] {
+                assert!(
+                    fitting.filled(last, y, z),
+                    "{name}: flange does not reach ({y}, {z}) on the boundary"
+                );
             }
             // Checked on the UNDERSIDE: the tank fitting's valve stands on
             // top of its flange.
-            assert!(!fitting.filled(last, 15, PIPE_AXIS_Z - reach - 1), "{name}: flange is larger than its documented radius");
+            assert!(
+                !fitting.filled(last, 15, PIPE_AXIS_Z - reach - 1),
+                "{name}: flange is larger than its documented radius"
+            );
             for a in [15, 16] {
-                assert!(!fitting.filled(last, a, PIPE_AXIS_Z), "{name}: the bore is plugged at the boundary");
+                assert!(
+                    !fitting.filled(last, a, PIPE_AXIS_Z),
+                    "{name}: the bore is plugged at the boundary"
+                );
             }
             for &(x, _, z) in fitting.voxels.keys() {
-                let floor = if (z as i32) <= PIPE_AXIS_Z + PIPE_OUTER_R as i32 + 2 { PIPE_FITTING_X0 } else { PIPE_FITTING_TOP_X0 };
-                assert!(x as i32 >= floor, "{name}: hardware at x = {x}, z = {z} would cover a leg window");
+                let floor = if (z as i32) <= PIPE_AXIS_Z + PIPE_OUTER_R as i32 + 2 {
+                    PIPE_FITTING_X0
+                } else {
+                    PIPE_FITTING_TOP_X0
+                };
+                assert!(
+                    x as i32 >= floor,
+                    "{name}: hardware at x = {x}, z = {z} would cover a leg window"
+                );
             }
         }
     }
@@ -4896,7 +5858,14 @@ mod tests {
                     if !shape.filled(x, y, z) {
                         continue;
                     }
-                    for (nx, ny, nz) in [(x + 1, y, z), (x - 1, y, z), (x, y + 1, z), (x, y - 1, z), (x, y, z + 1), (x, y, z - 1)] {
+                    for (nx, ny, nz) in [
+                        (x + 1, y, z),
+                        (x - 1, y, z),
+                        (x, y + 1, z),
+                        (x, y - 1, z),
+                        (x, y, z + 1),
+                        (x, y, z - 1),
+                    ] {
                         if radial(ny, nz) < radial(y, z) || nx < 0 || nx >= TILE_VOXELS as i32 {
                             continue;
                         }
@@ -4964,15 +5933,31 @@ mod tests {
         };
         vec![
             ("machine", machine(p), frames(machine_motion)),
-            ("machine_crusher", machine_crusher(p), frames(machine_crusher_motion)),
-            ("machine_mixer", machine_mixer(p), frames(machine_mixer_motion)),
+            (
+                "machine_crusher",
+                machine_crusher(p),
+                frames(machine_crusher_motion),
+            ),
+            (
+                "machine_mixer",
+                machine_mixer(p),
+                frames(machine_mixer_motion),
+            ),
             (
                 "machine_cooking_vat",
                 machine_cooking_vat(p),
                 frames(machine_cooking_vat_motion),
             ),
-            ("machine_bottler", machine_bottler(p), frames(machine_bottler_motion)),
-            ("machine_packer", machine_packer(p), frames(machine_packer_motion)),
+            (
+                "machine_bottler",
+                machine_bottler(p),
+                frames(machine_bottler_motion),
+            ),
+            (
+                "machine_packer",
+                machine_packer(p),
+                frames(machine_packer_motion),
+            ),
         ]
     }
 
@@ -5133,7 +6118,8 @@ mod tests {
             let n = MACHINE_FRAMES as usize;
             for k in 1..n {
                 assert_eq!(
-                    table[k], table[n - k],
+                    table[k],
+                    table[n - k],
                     "{name} is not symmetric about its midpoint, so its cycle does not close"
                 );
             }
@@ -5159,8 +6145,9 @@ mod tests {
             if name == "machine_crusher" {
                 continue;
             }
-            let counts: Vec<usize> =
-                (0..MACHINE_FRAMES).map(|k| build(&p, k).voxels.len()).collect();
+            let counts: Vec<usize> = (0..MACHINE_FRAMES)
+                .map(|k| build(&p, k).voxels.len())
+                .collect();
             let lo = *counts.iter().min().unwrap() as f32;
             let hi = *counts.iter().max().unwrap() as f32;
             assert!(
@@ -5197,7 +6184,10 @@ mod tests {
     // -- Staff category icons (the staff-pools epic, ticket 2) -----------
 
     fn staff_assets() -> Vec<&'static Asset> {
-        ASSETS.iter().filter(|a| a.name.starts_with("staff_")).collect()
+        ASSETS
+            .iter()
+            .filter(|a| a.name.starts_with("staff_"))
+            .collect()
     }
 
     /// The four category props exist, are not empty, and are authored in
@@ -5223,7 +6213,11 @@ mod tests {
         for asset in staff {
             let m = (asset.build)(&p);
             assert!(!m.is_empty(), "{} is empty", asset.name);
-            assert_eq!(m.size, [TILE_VOXELS; 3], "{} is not a 32^3 volume", asset.name);
+            assert_eq!(
+                m.size, [TILE_VOXELS; 3],
+                "{} is not a 32^3 volume",
+                asset.name
+            );
             for &(x, y, z) in m.voxels.keys() {
                 assert!(
                     x < TILE_VOXELS && y < TILE_VOXELS && z < TILE_VOXELS,
@@ -5281,9 +6275,15 @@ mod tests {
     fn spanner_jaws_are_open() {
         let m = staff_maintenance(&palette());
         assert!(!m.filled(2, 14, 0), "the -X jaw is open at its mouth");
-        assert!(m.filled(2, 11, 0) && m.filled(2, 18, 0), "the -X jaw has two lips");
+        assert!(
+            m.filled(2, 11, 0) && m.filled(2, 18, 0),
+            "the -X jaw has two lips"
+        );
         assert!(!m.filled(29, 17, 0), "the +X jaw is open at its mouth");
-        assert!(m.filled(29, 14, 0) && m.filled(29, 21, 0), "the +X jaw has two lips");
+        assert!(
+            m.filled(29, 14, 0) && m.filled(29, 21, 0),
+            "the +X jaw has two lips"
+        );
     }
 
     /// The two sauces' finished goods are the SAME OBJECTS in a different
@@ -5302,7 +6302,10 @@ mod tests {
         ] {
             let shape: Vec<_> = ketchup.voxels.keys().collect();
             let bbq_shape: Vec<_> = bbq.voxels.keys().collect();
-            assert_eq!(shape, bbq_shape, "the BBQ {what} has the ketchup {what}'s silhouette");
+            assert_eq!(
+                shape, bbq_shape,
+                "the BBQ {what} has the ketchup {what}'s silhouette"
+            );
             assert_ne!(
                 ketchup.voxels, bbq.voxels,
                 "the BBQ {what} is not the ketchup {what} repainted in the same colours"
@@ -5330,7 +6333,10 @@ mod tests {
             .filter(|(at, colour)| bbq.voxels.get(at) != Some(colour))
             .map(|(at, _)| *at)
             .collect();
-        assert!(!differing.is_empty(), "the two cases are not the same model");
+        assert!(
+            !differing.is_empty(),
+            "the two cases are not the same model"
+        );
         for (x, y, z) in differing {
             assert!(
                 y == 2 || y == 13,
@@ -5340,7 +6346,10 @@ mod tests {
                 (3..=6).contains(&x) || (9..=12).contains(&x),
                 "only a label patch differs, at ({x}, {y}, {z})"
             );
-            assert!((4..=8).contains(&z), "only a label patch differs, at ({x}, {y}, {z})");
+            assert!(
+                (4..=8).contains(&z),
+                "only a label patch differs, at ({x}, {y}, {z})"
+            );
         }
     }
 }

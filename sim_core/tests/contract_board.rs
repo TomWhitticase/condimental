@@ -76,15 +76,22 @@ fn the_sign_contract_command_parses_from_json_and_buys_an_offer_out_of_money() {
         .expect("an unsigned offer");
     let before = world.money();
 
-    let cmd = command_from_json(&format!(r#"{{"type": "sign_contract", "id": "{}"}}"#, offer.id))
-        .expect("sign_contract must parse");
+    let cmd = command_from_json(&format!(
+        r#"{{"type": "sign_contract", "id": "{}"}}"#,
+        offer.id
+    ))
+    .expect("sign_contract must parse");
     match &cmd {
         PlayerCommand::SignContract { id } => assert_eq!(id, &offer.id),
         other => panic!("expected SignContract, got {other:?}"),
     }
     world.issue_command(cmd);
 
-    assert_eq!(world.money(), before - offer.price, "the fee left the one money counter");
+    assert_eq!(
+        world.money(),
+        before - offer.price,
+        "the fee left the one money counter"
+    );
     assert!(world.economy().is_active(&offer.id));
     let signed = world.economy().contract(&offer.id).unwrap();
     assert_eq!(
@@ -116,15 +123,27 @@ fn an_offer_cannot_be_held_twice() {
     sign(&mut world, &offer.id);
     let after_first = world.money();
     sign(&mut world, &offer.id);
-    assert_eq!(world.money(), after_first, "a second signature is a silent no-op");
     assert_eq!(
-        active_ids(&world).iter().filter(|id| **id == offer.id).count(),
+        world.money(),
+        after_first,
+        "a second signature is a silent no-op"
+    );
+    assert_eq!(
+        active_ids(&world)
+            .iter()
+            .filter(|id| **id == offer.id)
+            .count(),
         1,
         "one of each contract, never two"
     );
 
     // The starter is active from tick 0 and is just as unsignable.
-    let starter = ContractRegistry::bundled().starters().next().unwrap().id.clone();
+    let starter = ContractRegistry::bundled()
+        .starters()
+        .next()
+        .unwrap()
+        .id
+        .clone();
     sign(&mut world, &starter);
     assert_eq!(world.money(), after_first);
 }
@@ -160,18 +179,36 @@ fn an_unaffordable_or_unknown_signature_changes_nothing() {
 #[test]
 fn a_contract_left_unserved_for_its_strikes_is_lost_and_goes_back_on_the_board() {
     let mut world = world();
-    let starter = ContractRegistry::bundled().starters().next().unwrap().clone();
-    assert!(starter.strikes >= 2, "the shipped starter forgives at least one miss");
+    let starter = ContractRegistry::bundled()
+        .starters()
+        .next()
+        .unwrap()
+        .clone();
+    assert!(
+        starter.strikes >= 2,
+        "the shipped starter forgives at least one miss"
+    );
 
     // Every window is missed: nothing is ever placed, let alone delivered.
     let first_loss_tick = starter.cadence_ticks * u64::from(starter.strikes);
     while world.current_tick() < first_loss_tick - 1 {
         world.tick();
     }
-    let active = world.economy().contract(&starter.id).expect("still active one tick before");
-    assert_eq!(active.consecutive_misses, starter.strikes - 1, "one strike from gone");
+    let active = world
+        .economy()
+        .contract(&starter.id)
+        .expect("still active one tick before");
+    assert_eq!(
+        active.consecutive_misses,
+        starter.strikes - 1,
+        "one strike from gone"
+    );
     let snapshot = world.economy_snapshot();
-    let card = snapshot.contracts.iter().find(|c| c.id == starter.id).unwrap();
+    let card = snapshot
+        .contracts
+        .iter()
+        .find(|c| c.id == starter.id)
+        .unwrap();
     assert_eq!(card.consecutive_misses, starter.strikes - 1);
     assert_eq!(card.strikes, starter.strikes);
     assert!(!card.satisfied);
@@ -181,7 +218,10 @@ fn a_contract_left_unserved_for_its_strikes_is_lost_and_goes_back_on_the_board()
         !world.economy().is_active(&starter.id),
         "the strikes are used up: the contract is gone"
     );
-    assert!(active_ids(&world).is_empty(), "a new game has nothing else running");
+    assert!(
+        active_ids(&world).is_empty(),
+        "a new game has nothing else running"
+    );
     assert_eq!(world.economy().times_lost(&starter.id), 1);
     let snapshot = world.economy_snapshot();
     assert!(snapshot.contracts.is_empty());
@@ -209,7 +249,10 @@ fn a_contract_left_unserved_for_its_strikes_is_lost_and_goes_back_on_the_board()
     let again = world.economy().contract(&starter.id).expect("re-signed");
     assert_eq!(again.deliveries_missed, 0);
     assert_eq!(again.consecutive_misses, 0);
-    assert_eq!(again.next_delivery_tick, world.current_tick() + starter.cadence_ticks);
+    assert_eq!(
+        again.next_delivery_tick,
+        world.current_tick() + starter.cadence_ticks
+    );
 }
 
 #[test]

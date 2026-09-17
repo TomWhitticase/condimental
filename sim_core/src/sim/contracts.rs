@@ -36,7 +36,7 @@
 use serde::Deserialize;
 
 use super::recipe::RecipeRegistry;
-use super::types::{Money, ItemId};
+use super::types::{ItemId, Money};
 
 /// The schema version this build of sim_core understands. Bump this and
 /// reject/migrate on mismatch (ARCHITECTURE.md §4) whenever [`Contract`]'s
@@ -472,7 +472,10 @@ mod tests {
         assert_eq!(big.payout, Money::from_num(90));
         assert_eq!(big.price, Money::from_num(150));
         assert_eq!(big.strikes, 2);
-        assert!(!big.starter, "`starter` defaults to false when the line is absent");
+        assert!(
+            !big.starter,
+            "`starter` defaults to false when the line is absent"
+        );
         assert!(registry.get("small").unwrap().starter);
         assert_eq!(registry.position("big"), Some(1));
         let starters: Vec<&str> = registry.starters().map(|c| c.id.as_str()).collect();
@@ -599,7 +602,10 @@ mod tests {
         // by the version check itself.
         let stamped = EXAMPLE.replacen("schema_version: 2", "schema_version: 1", 1);
         let err = ContractRegistry::from_ron_str(&stamped).unwrap_err();
-        assert!(matches!(err, ContractLoadError::UnsupportedSchemaVersion { found: 1, .. }));
+        assert!(matches!(
+            err,
+            ContractLoadError::UnsupportedSchemaVersion { found: 1, .. }
+        ));
     }
 
     #[test]
@@ -696,7 +702,9 @@ mod tests {
     fn a_contract_asking_for_an_unproducible_item_is_an_error_not_a_silent_never_paying_contract() {
         let text = EXAMPLE.replacen(r#"("bottled_ketchup", 1)"#, r#"("chilli_mayo", 1)"#, 1);
         let registry = ContractRegistry::from_ron_str(&text).unwrap();
-        let err = registry.validate_producible(&bundled_recipes()).unwrap_err();
+        let err = registry
+            .validate_producible(&bundled_recipes())
+            .unwrap_err();
         match err {
             ContractLoadError::UnproducibleItem {
                 ref contract,

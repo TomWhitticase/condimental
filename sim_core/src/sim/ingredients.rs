@@ -464,7 +464,10 @@ mod tests {
         let catalog = IngredientCatalog::from_ron_str(EXAMPLE).unwrap();
         assert_eq!(catalog.get("sugar").unwrap().price, 3);
         assert!(catalog.get("nothing_like_this").is_none());
-        assert_eq!(catalog.ids(), vec!["sugar".to_string(), "tomato".to_string()]);
+        assert_eq!(
+            catalog.ids(),
+            vec!["sugar".to_string(), "tomato".to_string()]
+        );
     }
 
     #[test]
@@ -472,7 +475,10 @@ mod tests {
         let text = EXAMPLE.replacen("schema_version: 1", "schema_version: 7", 1);
         assert!(matches!(
             IngredientCatalog::from_ron_str(&text).unwrap_err(),
-            IngredientLoadError::UnsupportedSchemaVersion { found: 7, supported: 1 }
+            IngredientLoadError::UnsupportedSchemaVersion {
+                found: 7,
+                supported: 1
+            }
         ));
     }
 
@@ -516,7 +522,11 @@ mod tests {
         );
         assert_eq!(
             raw_ingredient_ids(&registry),
-            vec!["tomato".to_string(), "sugar".to_string(), "vinegar".to_string()],
+            vec![
+                "tomato".to_string(),
+                "sugar".to_string(),
+                "vinegar".to_string()
+            ],
             "paste and the liquid mix are produced by the chain, so neither is raw"
         );
     }
@@ -532,7 +542,11 @@ mod tests {
             .expect("data/ingredients.ron must price every raw ingredient data/recipes.ron needs");
         assert_eq!(
             raw_ingredient_ids(&registry),
-            vec!["tomato".to_string(), "sugar".to_string(), "vinegar".to_string()],
+            vec![
+                "tomato".to_string(),
+                "sugar".to_string(),
+                "vinegar".to_string()
+            ],
             "the shipped chain's raw ingredients — if this changed deliberately, price the \
              new one in data/ingredients.ron"
         );
@@ -565,10 +579,18 @@ mod tests {
         owned.add("tomato", 10);
         assert_eq!(owned.take("tomato", 4), 4);
         assert_eq!(owned.count("tomato"), 6);
-        assert_eq!(owned.take("tomato", 100), 6, "taking more than owned is a clamp");
+        assert_eq!(
+            owned.take("tomato", 100),
+            6,
+            "taking more than owned is a clamp"
+        );
         assert_eq!(owned.count("tomato"), 0);
         assert_eq!(owned.take("tomato", 1), 0, "an exhausted id takes nothing");
-        assert_eq!(owned.iter().count(), 0, "an exhausted id is erased, not left at zero");
+        assert_eq!(
+            owned.iter().count(),
+            0,
+            "an exhausted id is erased, not left at zero"
+        );
         assert_eq!(owned.take("never_bought", 1), 0);
     }
 
@@ -609,6 +631,9 @@ mod tests {
         assert!(snapshot.entries[0].affordable);
         assert_eq!(snapshot.entries[1].id, "sugar");
         assert_eq!(snapshot.entries[1].owned, 0);
-        assert!(!snapshot.entries[1].affordable, "3 each, with 2 in the bank");
+        assert!(
+            !snapshot.entries[1].affordable,
+            "3 each, with 2 in the bank"
+        );
     }
 }

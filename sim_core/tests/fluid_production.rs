@@ -23,9 +23,7 @@
 
 use sim_core::sim::machines::MachineRegistry;
 use sim_core::sim::types::Money;
-use sim_core::sim::{
-    ContractRegistry, Direction, PlayerCommand, RecipeRegistry, World,
-};
+use sim_core::sim::{ContractRegistry, Direction, PlayerCommand, RecipeRegistry, World};
 
 /// A world with money and nothing built.
 fn funded(recipes: RecipeRegistry) -> World {
@@ -392,7 +390,11 @@ fn two_stages_joined_only_by_a_fluid_are_a_valid_chain() {
     )
     .expect("test recipe text must parse");
     let world = funded(recipes);
-    assert_eq!(world.placement_count(), 0, "the world builds, and builds empty");
+    assert_eq!(
+        world.placement_count(),
+        0,
+        "the world builds, and builds empty"
+    );
 }
 
 /// ...and a typo'd fluid id is still a construction-time panic, which is the

@@ -95,7 +95,7 @@ use std::collections::BTreeMap;
 
 use super::contracts::{Contract, ContractRegistry};
 use super::inventory::Inventory;
-use super::types::{Money, ItemId};
+use super::types::{ItemId, Money};
 
 /// What a new game starts with in the bank (the "Real Placement" epic's
 /// ticket 1).
@@ -626,7 +626,10 @@ impl Economy {
                         .mix
                         .iter()
                         .map(|(item, required)| {
-                            (item.clone(), self.delivery_buffer.count(item).min(*required))
+                            (
+                                item.clone(),
+                                self.delivery_buffer.count(item).min(*required),
+                            )
                         })
                         .collect(),
                     satisfied: self.mix_satisfied(&active.contract),
@@ -689,7 +692,10 @@ mod tests {
     }
 
     fn active_ids(econ: &Economy) -> Vec<&str> {
-        econ.contracts.iter().map(|c| c.contract.id.as_str()).collect()
+        econ.contracts
+            .iter()
+            .map(|c| c.contract.id.as_str())
+            .collect()
     }
 
     fn paid(events: &[ContractEvent]) -> Vec<&str> {
@@ -728,7 +734,11 @@ mod tests {
         econ.money = Money::MAX - Money::from_num(1);
         econ.deposit("boxed_ketchup", 10);
         let events = econ.tick(100);
-        assert!(events.iter().any(|e| matches!(e, ContractEvent::Paid { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ContractEvent::Paid { .. }))
+        );
         assert_eq!(econ.money, Money::MAX);
         assert!(econ.money > Money::ZERO, "it did not wrap");
     }
@@ -750,7 +760,11 @@ mod tests {
         // "slow" runs to 250.
         let events = econ.tick(100);
 
-        assert_eq!(paid(&events), vec!["fast"], "only the 100-tick contract should have settled");
+        assert_eq!(
+            paid(&events),
+            vec!["fast"],
+            "only the 100-tick contract should have settled"
+        );
         assert_eq!(econ.money, Money::from_num(50));
         assert_eq!(
             econ.delivery_buffer.count("boxed_ketchup"),
@@ -855,7 +869,8 @@ mod tests {
     }
 
     #[test]
-    fn a_missed_delivery_can_still_pay_out_once_enough_accumulates_and_a_paid_window_clears_the_strike() {
+    fn a_missed_delivery_can_still_pay_out_once_enough_accumulates_and_a_paid_window_clears_the_strike()
+     {
         let mut econ = fixture();
         econ.deposit("boxed_ketchup", 1); // short by one for "fast"
         let events = econ.tick(100);
@@ -872,7 +887,10 @@ mod tests {
         );
         assert_eq!(econ.contract("fast").unwrap().deliveries_missed, 1);
         assert_eq!(econ.contract("fast").unwrap().consecutive_misses, 1);
-        assert!(econ.is_active("fast"), "one miss is one short of 'fast''s two strikes");
+        assert!(
+            econ.is_active("fast"),
+            "one miss is one short of 'fast''s two strikes"
+        );
 
         econ.deposit("boxed_ketchup", 1); // the missing unit arrives later
         assert_eq!(paid(&econ.tick(200)), vec!["fast"]);
@@ -882,7 +900,11 @@ mod tests {
             0,
             "a paid window forgives the run of misses"
         );
-        assert_eq!(econ.contract("fast").unwrap().deliveries_missed, 1, "the lifetime tally stays");
+        assert_eq!(
+            econ.contract("fast").unwrap().deliveries_missed,
+            1,
+            "the lifetime tally stays"
+        );
     }
 
     #[test]
@@ -890,20 +912,32 @@ mod tests {
         let mut econ = fixture();
         // Nothing delivered: "fast" (2 strikes) misses at 100 and is lost at 200.
         let first = econ.tick(100);
-        assert!(!first.contains(&ContractEvent::Lost { id: "fast".to_string() }));
+        assert!(!first.contains(&ContractEvent::Lost {
+            id: "fast".to_string()
+        }));
         assert!(econ.is_active("fast"));
 
         let second = econ.tick(200);
         let lost_at = second
             .iter()
-            .position(|e| *e == ContractEvent::Lost { id: "fast".to_string() })
+            .position(|e| {
+                *e == ContractEvent::Lost {
+                    id: "fast".to_string(),
+                }
+            })
             .expect("'fast' must be lost on its second consecutive miss");
         assert_eq!(
             second[lost_at - 1],
-            ContractEvent::Missed { id: "fast".to_string(), consecutive_misses: 2 },
+            ContractEvent::Missed {
+                id: "fast".to_string(),
+                consecutive_misses: 2
+            },
             "Lost always follows the Missed that caused it"
         );
-        assert!(!econ.is_active("fast"), "a lost contract leaves the active list on that tick");
+        assert!(
+            !econ.is_active("fast"),
+            "a lost contract leaves the active list on that tick"
+        );
         assert_eq!(active_ids(&econ), vec!["slow", "impossible"]);
         assert_eq!(econ.times_lost("fast"), 1);
         assert_eq!(econ.times_lost("slow"), 0);
@@ -931,7 +965,9 @@ mod tests {
         econ.try_sign("offer", 0).unwrap();
         assert!(econ.is_active("offer"));
         let events = econ.tick(150);
-        assert!(events.contains(&ContractEvent::Lost { id: "offer".to_string() }));
+        assert!(events.contains(&ContractEvent::Lost {
+            id: "offer".to_string()
+        }));
         assert!(!econ.is_active("offer"));
     }
 
@@ -941,9 +977,16 @@ mod tests {
         econ.money = Money::from_num(100);
 
         assert_eq!(econ.try_sign("offer", 40), Ok(()));
-        assert_eq!(econ.money, Money::from_num(70), "the fee is the offer's price");
+        assert_eq!(
+            econ.money,
+            Money::from_num(70),
+            "the fee is the offer's price"
+        );
         let signed = econ.contract("offer").expect("now active");
-        assert_eq!(signed.next_delivery_tick, 190, "first window ends one cadence after signing");
+        assert_eq!(
+            signed.next_delivery_tick, 190,
+            "first window ends one cadence after signing"
+        );
         assert_eq!(signed.window_start_tick(), 40);
         assert_eq!(signed.deliveries_made, 0);
         assert_eq!(signed.consecutive_misses, 0);
@@ -964,8 +1007,18 @@ mod tests {
             Err(SignRefusal::AlreadySigned),
             "one signature per offer"
         );
-        assert_eq!(econ.money, Money::from_num(970), "a refused signature costs nothing");
-        assert_eq!(econ.contracts.iter().filter(|c| c.contract.id == "offer").count(), 1);
+        assert_eq!(
+            econ.money,
+            Money::from_num(970),
+            "a refused signature costs nothing"
+        );
+        assert_eq!(
+            econ.contracts
+                .iter()
+                .filter(|c| c.contract.id == "offer")
+                .count(),
+            1
+        );
         assert_eq!(
             econ.try_sign("fast", 0),
             Err(SignRefusal::AlreadySigned),
@@ -980,7 +1033,10 @@ mod tests {
         assert_eq!(econ.try_sign("offer", 0), Err(SignRefusal::CannotAfford));
         assert_eq!(econ.money, Money::from_num(29));
         assert!(!econ.is_active("offer"));
-        assert_eq!(econ.try_sign("midnight_kebab_van", 0), Err(SignRefusal::Unknown));
+        assert_eq!(
+            econ.try_sign("midnight_kebab_van", 0),
+            Err(SignRefusal::Unknown)
+        );
         assert_eq!(econ.money, Money::from_num(29));
     }
 
@@ -994,13 +1050,28 @@ mod tests {
         assert!(!econ.is_active("fast"));
 
         assert_eq!(econ.try_sign("fast", 250), Ok(()));
-        assert_eq!(econ.money, Money::from_num(90), "the starter's price applies when it is re-signed");
+        assert_eq!(
+            econ.money,
+            Money::from_num(90),
+            "the starter's price applies when it is re-signed"
+        );
         let again = econ.contract("fast").unwrap();
         assert_eq!(again.next_delivery_tick, 350);
-        assert_eq!(again.deliveries_missed, 0, "a new signature is a new agreement");
+        assert_eq!(
+            again.deliveries_missed, 0,
+            "a new signature is a new agreement"
+        );
         assert_eq!(again.consecutive_misses, 0);
-        assert_eq!(active_ids(&econ), vec!["fast", "slow", "impossible"], "back at its file rank");
-        assert_eq!(econ.times_lost("fast"), 1, "but the board remembers it was lost");
+        assert_eq!(
+            active_ids(&econ),
+            vec!["fast", "slow", "impossible"],
+            "back at its file rank"
+        );
+        assert_eq!(
+            econ.times_lost("fast"),
+            1,
+            "but the board remembers it was lost"
+        );
     }
 
     #[test]
@@ -1040,7 +1111,11 @@ mod tests {
         assert!(!impossible.satisfied);
 
         let ids: Vec<&str> = snap.board.iter().map(|o| o.id.as_str()).collect();
-        assert_eq!(ids, vec!["fast", "offer", "slow", "impossible"], "the board is in file order");
+        assert_eq!(
+            ids,
+            vec!["fast", "offer", "slow", "impossible"],
+            "the board is in file order"
+        );
         let offer = &snap.board[1];
         assert!(!offer.active);
         assert!(!offer.starter);
@@ -1048,7 +1123,10 @@ mod tests {
         assert!(!offer.affordable, "25 in the bank does not cover a 30 fee");
         assert!(snap.board[0].active);
         assert!(snap.board[0].starter);
-        assert!(snap.board[0].affordable, "affordability is reported for active offers too");
+        assert!(
+            snap.board[0].affordable,
+            "affordability is reported for active offers too"
+        );
         assert_eq!(offer.times_lost, 0);
     }
 
@@ -1060,7 +1138,10 @@ mod tests {
             1,
             "a new game starts with exactly one contract — the starter — and buys the rest"
         );
-        assert!(econ.board().len() > econ.contracts.len(), "there must be something to buy");
+        assert!(
+            econ.board().len() > econ.contracts.len(),
+            "there must be something to buy"
+        );
         assert_eq!(econ.money, Money::from_num(0));
         for active in &econ.contracts {
             assert_eq!(

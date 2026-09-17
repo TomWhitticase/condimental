@@ -12,8 +12,8 @@ mod common;
 
 use sim_core::sim::types::Direction;
 use sim_core::sim::{
-    ContractRegistry, Money, LOAD_BUCKET_TICKS, LOAD_WINDOW_TICKS, MachineRegistry, PlayerCommand, RecipeRegistry,
-    StallKind, TileSnapshot, WorkState, World, reference_chain_with_budget,
+    ContractRegistry, LOAD_BUCKET_TICKS, LOAD_WINDOW_TICKS, MachineRegistry, Money, PlayerCommand,
+    RecipeRegistry, StallKind, TileSnapshot, WorkState, World, reference_chain_with_budget,
 };
 
 fn recipes() -> RecipeRegistry {
@@ -44,7 +44,8 @@ const WATCH_TICKS: u32 = LOAD_WINDOW_TICKS;
 
 /// The reference chain, stocked, kept fed every tick, run until it settles.
 fn settled_line() -> World {
-    let mut world = reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE);
+    let mut world =
+        reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE);
     common::stock_up(&mut world);
     for _ in 0..SETTLE_TICKS {
         common::supply(&mut world);
@@ -129,7 +130,10 @@ fn the_shipped_line_reads_its_bottleneck_off_the_load_lights() {
         vat.statuses.iter().all(|&s| s == WorkState::Working),
         "{vat:?}"
     );
-    assert_eq!(vat.last.load.percent, 100, "a saturated vat reads exactly full: {vat:?}");
+    assert_eq!(
+        vat.last.load.percent, 100,
+        "a saturated vat reads exactly full: {vat:?}"
+    );
     // A warmed-up ring clears a whole bucket the tick after it fills, so
     // `observed` sits between a window less one bucket and a full window.
     assert!(
@@ -237,23 +241,37 @@ fn the_wire_shape_is_the_one_the_plan_promises() {
     for entry in entries {
         // `serde_json::Value` sorts object keys; the wire's own order is
         // the struct's (`tile`, `load`, `stall`), and Godot reads by key.
-        let keys: Vec<&str> = entry.as_object().unwrap().keys().map(String::as_str).collect();
+        let keys: Vec<&str> = entry
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
         assert_eq!(keys, ["load", "stall", "tile"]);
         let load = entry["load"].as_object().unwrap();
         let mut load_keys: Vec<&str> = load.keys().map(String::as_str).collect();
         load_keys.sort_unstable();
         assert_eq!(
             load_keys,
-            ["blocked", "observed", "percent", "starved", "status", "window", "working"]
+            [
+                "blocked", "observed", "percent", "starved", "status", "window", "working"
+            ]
         );
         let status = load["status"].as_str().unwrap();
-        assert!(matches!(status, "working" | "starved" | "blocked"), "{status}");
+        assert!(
+            matches!(status, "working" | "starved" | "blocked"),
+            "{status}"
+        );
         if let Some(stall) = entry["stall"].as_object() {
             let kind = stall["kind"].as_str().unwrap();
             assert!(
                 matches!(
                     kind,
-                    "input" | "fluid_input" | "no_supply_pipe" | "output" | "fluid_output"
+                    "input"
+                        | "fluid_input"
+                        | "no_supply_pipe"
+                        | "output"
+                        | "fluid_output"
                         | "no_outlet_pipe"
                 ),
                 "{kind}"
@@ -275,7 +293,10 @@ fn the_wire_shape_is_the_one_the_plan_promises() {
             (!stall.is_null()).then_some(stall)
         })
         .expect("a blocked crusher reports a stall within one window");
-    assert_eq!(crusher_stall, serde_json::json!({"kind": "output", "item": "tomato_paste"}));
+    assert_eq!(
+        crusher_stall,
+        serde_json::json!({"kind": "output", "item": "tomato_paste"})
+    );
 }
 
 /// A machine that has never been fed: starved, and it names the first
@@ -317,7 +338,10 @@ fn a_machine_placed_and_never_fed_reads_starved_for_its_first_input() {
     assert_eq!(entry.load.starved, 100);
     assert_eq!(entry.load.working, 0);
     assert_eq!(entry.load.percent, 0);
-    let stall = entry.stall.as_ref().expect("an unfed machine says what it waits for");
+    let stall = entry
+        .stall
+        .as_ref()
+        .expect("an unfed machine says what it waits for");
     assert_eq!(stall.kind, StallKind::Input);
     assert_eq!(stall.item, "tomato");
 }

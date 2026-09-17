@@ -405,7 +405,8 @@ fn rotating_a_splitter_reroutes_what_it_carries() {
     let mut j = Junction::build(3, 3, 6);
     // One clockwise turn: east becomes south, so what was the branch run is
     // now the straight-through and what was the straight run is neither.
-    j.world.issue_command(PlayerCommand::Rotate { tile: (0, 0) });
+    j.world
+        .issue_command(PlayerCommand::Rotate { tile: (0, 0) });
     // The hopper still points east into the splitter, so it still feeds it.
     for _ in 0..3000 {
         j.world.tick();
@@ -511,7 +512,8 @@ fn removing_a_loaded_splitter_takes_its_contents_with_it() {
         j.world.tick();
     }
     assert!(items_on(&j.world, &[(0, 0)]) > 0);
-    j.world.issue_command(PlayerCommand::Remove { tile: (0, 0) });
+    j.world
+        .issue_command(PlayerCommand::Remove { tile: (0, 0) });
     assert!(j.world.query_tile((0, 0)).is_none());
     assert_eq!(
         items_on(&j.world, &j.carriers()),
@@ -526,8 +528,8 @@ fn removing_a_loaded_splitter_takes_its_contents_with_it() {
 #[test]
 fn the_splitter_wire_form_has_the_documented_shape() {
     let j = Junction::build(2, 2, 4);
-    let value = serde_json::to_value(j.world.chunk_snapshot((0, 0)))
-        .expect("a chunk snapshot serializes");
+    let value =
+        serde_json::to_value(j.world.chunk_snapshot((0, 0))).expect("a chunk snapshot serializes");
     let splitters = value["splitters"]
         .as_array()
         .expect("a chunk snapshot has a splitters array");

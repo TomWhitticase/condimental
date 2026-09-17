@@ -48,7 +48,10 @@ pub struct VoxModel {
 
 impl VoxModel {
     pub fn new(size: [u32; 3]) -> Self {
-        Self { size, voxels: BTreeMap::new() }
+        Self {
+            size,
+            voxels: BTreeMap::new(),
+        }
     }
 
     /// A standard one-tile asset volume (UI_UX.md §2's 32×32×32 scale).
@@ -68,13 +71,7 @@ impl VoxModel {
     }
 
     /// Inclusive-bounds solid cuboid — the workhorse primitive.
-    pub fn cuboid(
-        &mut self,
-        x: (i32, i32),
-        y: (i32, i32),
-        z: (i32, i32),
-        color: u8,
-    ) -> &mut Self {
+    pub fn cuboid(&mut self, x: (i32, i32), y: (i32, i32), z: (i32, i32), color: u8) -> &mut Self {
         for zz in z.0..=z.1 {
             for yy in y.0..=y.1 {
                 for xx in x.0..=x.1 {
@@ -102,7 +99,12 @@ impl VoxModel {
     /// inside it is only visible if the drum is genuinely hollow, and a bore
     /// filled with an "air" colour would still mesh as a solid plug (see
     /// [`Self::erase`]).
-    pub fn carve_cylinder_z(&mut self, center: (i32, i32), radius: f32, z: (i32, i32)) -> &mut Self {
+    pub fn carve_cylinder_z(
+        &mut self,
+        center: (i32, i32),
+        radius: f32,
+        z: (i32, i32),
+    ) -> &mut Self {
         self.cylinder_z_inner(center, radius, z, None)
     }
 
@@ -276,16 +278,33 @@ impl VoxModel {
     /// footprint centre land on the same voxels as its neighbour; an
     /// integer centre (16) is half a voxel off the midline and a run of
     /// tiles at mixed facings steps by one voxel at every joint.
-    pub fn cylinder_x_f(&mut self, center: (f32, f32), radius: f32, x: (i32, i32), color: u8) -> &mut Self {
+    pub fn cylinder_x_f(
+        &mut self,
+        center: (f32, f32),
+        radius: f32,
+        x: (i32, i32),
+        color: u8,
+    ) -> &mut Self {
         self.cylinder_x_f_inner(center, radius, x, Some(color))
     }
 
     /// [`Self::cylinder_x_f`] in reverse.
-    pub fn carve_cylinder_x_f(&mut self, center: (f32, f32), radius: f32, x: (i32, i32)) -> &mut Self {
+    pub fn carve_cylinder_x_f(
+        &mut self,
+        center: (f32, f32),
+        radius: f32,
+        x: (i32, i32),
+    ) -> &mut Self {
         self.cylinder_x_f_inner(center, radius, x, None)
     }
 
-    fn cylinder_x_f_inner(&mut self, center: (f32, f32), radius: f32, x: (i32, i32), color: Option<u8>) -> &mut Self {
+    fn cylinder_x_f_inner(
+        &mut self,
+        center: (f32, f32),
+        radius: f32,
+        x: (i32, i32),
+        color: Option<u8>,
+    ) -> &mut Self {
         let r2 = radius * radius;
         let span = (radius + 1.0).ceil() as i32;
         let (cy, cz) = (center.0.round() as i32, center.1.round() as i32);
@@ -306,16 +325,33 @@ impl VoxModel {
     }
 
     /// The +Y twin of [`Self::cylinder_x_f`]: `center` is `(x, z)`.
-    pub fn cylinder_y_f(&mut self, center: (f32, f32), radius: f32, y: (i32, i32), color: u8) -> &mut Self {
+    pub fn cylinder_y_f(
+        &mut self,
+        center: (f32, f32),
+        radius: f32,
+        y: (i32, i32),
+        color: u8,
+    ) -> &mut Self {
         self.cylinder_y_f_inner(center, radius, y, Some(color))
     }
 
     /// [`Self::cylinder_y_f`] in reverse.
-    pub fn carve_cylinder_y_f(&mut self, center: (f32, f32), radius: f32, y: (i32, i32)) -> &mut Self {
+    pub fn carve_cylinder_y_f(
+        &mut self,
+        center: (f32, f32),
+        radius: f32,
+        y: (i32, i32),
+    ) -> &mut Self {
         self.cylinder_y_f_inner(center, radius, y, None)
     }
 
-    fn cylinder_y_f_inner(&mut self, center: (f32, f32), radius: f32, y: (i32, i32), color: Option<u8>) -> &mut Self {
+    fn cylinder_y_f_inner(
+        &mut self,
+        center: (f32, f32),
+        radius: f32,
+        y: (i32, i32),
+        color: Option<u8>,
+    ) -> &mut Self {
         let r2 = radius * radius;
         let span = (radius + 1.0).ceil() as i32;
         let (cx, cz) = (center.0.round() as i32, center.1.round() as i32);
@@ -337,16 +373,33 @@ impl VoxModel {
 
     /// The +Z twin, for a hand wheel or a hub whose centre is on the tile
     /// midline: `center` is `(x, y)`.
-    pub fn cylinder_z_f(&mut self, center: (f32, f32), radius: f32, z: (i32, i32), color: u8) -> &mut Self {
+    pub fn cylinder_z_f(
+        &mut self,
+        center: (f32, f32),
+        radius: f32,
+        z: (i32, i32),
+        color: u8,
+    ) -> &mut Self {
         self.cylinder_z_f_inner(center, radius, z, Some(color))
     }
 
     /// [`Self::cylinder_z_f`] in reverse.
-    pub fn carve_cylinder_z_f(&mut self, center: (f32, f32), radius: f32, z: (i32, i32)) -> &mut Self {
+    pub fn carve_cylinder_z_f(
+        &mut self,
+        center: (f32, f32),
+        radius: f32,
+        z: (i32, i32),
+    ) -> &mut Self {
         self.cylinder_z_f_inner(center, radius, z, None)
     }
 
-    fn cylinder_z_f_inner(&mut self, center: (f32, f32), radius: f32, z: (i32, i32), color: Option<u8>) -> &mut Self {
+    fn cylinder_z_f_inner(
+        &mut self,
+        center: (f32, f32),
+        radius: f32,
+        z: (i32, i32),
+        color: Option<u8>,
+    ) -> &mut Self {
         let r2 = radius * radius;
         let span = (radius + 1.0).ceil() as i32;
         let (cx, cy) = (center.0.round() as i32, center.1.round() as i32);
@@ -377,14 +430,27 @@ impl VoxModel {
         self.sphere_f_inner(center, radius, None)
     }
 
-    fn sphere_f_inner(&mut self, center: (f32, f32, f32), radius: f32, color: Option<u8>) -> &mut Self {
+    fn sphere_f_inner(
+        &mut self,
+        center: (f32, f32, f32),
+        radius: f32,
+        color: Option<u8>,
+    ) -> &mut Self {
         let r2 = radius * radius;
         let span = (radius + 1.0).ceil() as i32;
-        let (cx, cy, cz) = (center.0.round() as i32, center.1.round() as i32, center.2.round() as i32);
+        let (cx, cy, cz) = (
+            center.0.round() as i32,
+            center.1.round() as i32,
+            center.2.round() as i32,
+        );
         for zz in (cz - span)..=(cz + span) {
             for yy in (cy - span)..=(cy + span) {
                 for xx in (cx - span)..=(cx + span) {
-                    let (dx, dy, dz) = (xx as f32 - center.0, yy as f32 - center.1, zz as f32 - center.2);
+                    let (dx, dy, dz) = (
+                        xx as f32 - center.0,
+                        yy as f32 - center.1,
+                        zz as f32 - center.2,
+                    );
                     if dx * dx + dy * dy + dz * dz <= r2 {
                         match color {
                             Some(c) => self.set(xx, yy, zz, c),
@@ -476,7 +542,11 @@ impl VoxModel {
         for zz in z.0..=z.1 {
             for yy in y.0..=y.1 {
                 for xx in x.0..=x.1 {
-                    let color = if ((xx + zz).rem_euclid(period * 2)) < period { a } else { b };
+                    let color = if ((xx + zz).rem_euclid(period * 2)) < period {
+                        a
+                    } else {
+                        b
+                    };
                     self.set(xx, yy, zz, color);
                 }
             }
@@ -595,7 +665,10 @@ pub fn encode(model: &VoxModel, palette: &Palette) -> Vec<u8> {
     children.extend_from_slice(&chunk(b"nSHP", nshp, Vec::new()));
 
     let mut layr = 0u32.to_le_bytes().to_vec();
-    layr.extend_from_slice(&vox_dict(&[("_name", "asset".into()), ("_hidden", "0".into())]));
+    layr.extend_from_slice(&vox_dict(&[
+        ("_name", "asset".into()),
+        ("_hidden", "0".into()),
+    ]));
     layr.extend_from_slice(&(-1i32).to_le_bytes());
     children.extend_from_slice(&chunk(b"LAYR", layr, Vec::new()));
 
@@ -618,15 +691,24 @@ pub fn encode(model: &VoxModel, palette: &Palette) -> Vec<u8> {
         let props: Vec<(&str, String)> = match entry.class {
             MaterialClass::Metal => vec![
                 ("_type", "_metal".into()),
-                ("_weight", format!("{:.3}", palette.material(entry.class).metallic)),
-                ("_rough", format!("{:.3}", palette.material(entry.class).roughness)),
+                (
+                    "_weight",
+                    format!("{:.3}", palette.material(entry.class).metallic),
+                ),
+                (
+                    "_rough",
+                    format!("{:.3}", palette.material(entry.class).roughness),
+                ),
                 ("_spec", "0.900".into()),
                 ("_ior", "0.300".into()),
             ],
             MaterialClass::Emissive => vec![
                 ("_type", "_emit".into()),
                 ("_weight", "1.000".into()),
-                ("_flux", format!("{:.3}", palette.material(entry.class).emission_energy)),
+                (
+                    "_flux",
+                    format!("{:.3}", palette.material(entry.class).emission_energy),
+                ),
             ],
             // A liquid is written as a plain diffuse material with its own
             // roughness: MagicaVoxel's `_glass`/`_media` types describe
@@ -636,7 +718,10 @@ pub fn encode(model: &VoxModel, palette: &Palette) -> Vec<u8> {
             MaterialClass::Matte | MaterialClass::Liquid => vec![
                 ("_type", "_diffuse".into()),
                 ("_weight", "1.000".into()),
-                ("_rough", format!("{:.3}", palette.material(entry.class).roughness)),
+                (
+                    "_rough",
+                    format!("{:.3}", palette.material(entry.class).roughness),
+                ),
             ],
         };
         let mut matl = (entry.index as u32).to_le_bytes().to_vec();

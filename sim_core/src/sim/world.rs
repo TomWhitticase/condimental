@@ -1678,7 +1678,12 @@ impl World {
         machines: MachineRegistry,
         contracts: ContractRegistry,
     ) -> Self {
-        Self::with_content_and_money(recipes, machines, contracts, Money::from_num(STARTING_MONEY))
+        Self::with_content_and_money(
+            recipes,
+            machines,
+            contracts,
+            Money::from_num(STARTING_MONEY),
+        )
     }
 
     /// [`World::with_content`], but starting from a chosen balance instead
@@ -2723,7 +2728,8 @@ impl World {
         self.room_ahead.clear();
         for index in 0..belts.len() {
             let room = room_at_start(self, belt_ahead[index]);
-            self.room_ahead.push(room.unwrap_or(self.item_min_spacing()));
+            self.room_ahead
+                .push(room.unwrap_or(self.item_min_spacing()));
         }
         for (index, _) in splitters.iter().enumerate() {
             // A splitter's item goes to whichever side takes it, so the
@@ -2735,7 +2741,8 @@ impl World {
                 .iter()
                 .filter_map(|&output| room_at_start(self, output))
                 .max();
-            self.room_ahead.push(room.unwrap_or(self.item_min_spacing()));
+            self.room_ahead
+                .push(room.unwrap_or(self.item_min_spacing()));
         }
         for (index, &carrier) in belts.iter().chain(splitters.iter()).enumerate() {
             let moved = {
@@ -3510,9 +3517,7 @@ impl World {
             };
             match self.body_kind(entity) {
                 Some(BodyKind::Belt) => snapshot.belts.push(self.belt_snapshot(entity)),
-                Some(BodyKind::Splitter) => {
-                    snapshot.splitters.push(self.splitter_snapshot(entity))
-                }
+                Some(BodyKind::Splitter) => snapshot.splitters.push(self.splitter_snapshot(entity)),
                 _ => {}
             }
         }

@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # rustfmt and clippy, as RATCHETS rather than as all-or-nothing gates.
 #
-# Why a ratchet. Both tools currently have a backlog on this repo (32
-# unformatted files, 28 clippy warnings, none of them wrong code — issues #28
-# and #29 track burning both down). Turning either into `-D warnings` today
-# would paint CI red on every pull request until someone lands a
-# four-thousand-line mechanical reformat, and a red-by-default check is a
-# check everybody learns to ignore. Turning it off entirely gives agents no
-# signal at all.
+# Why a ratchet. Clippy currently has a backlog on this repo (28 warnings,
+# none of them wrong code — issue #29 tracks burning it down). Turning it
+# into `-D warnings` today would paint CI red on every pull request until
+# someone clears it, and a red-by-default check is a check everybody learns
+# to ignore. Turning it off entirely gives agents no signal at all.
+#
+# fmt's backlog was burned down in full (issue #28) — FMT_BASELINE=0 below
+# is now an ordinary all-or-nothing gate in ratchet's clothing; it stays a
+# ratchet only so a future backlog (if one ever accrues) has somewhere to
+# register instead of failing CI outright.
 #
 # So: the counts below are a high-water mark. New code cannot push them up —
 # a newly added .rs file has to be formatted, and new code cannot introduce a
@@ -24,7 +27,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root" || exit 1
 
 # High-water marks. Lower freely, never raise. See the header.
-FMT_BASELINE=32      # unformatted files — burn-down tracked by issue #28
+FMT_BASELINE=0       # unformatted files — burn-down tracked by issue #28
 CLIPPY_BASELINE=28   # clippy warnings   — burn-down tracked by issue #29
 
 status=0

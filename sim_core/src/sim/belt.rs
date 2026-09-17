@@ -524,7 +524,10 @@ mod tests {
             belt.try_spawn("b".into());
         }
         for _ in 0..30 {
-            assert_eq!(plain.tick(fx(0.1)), toward.tick_toward(fx(0.1), fx(SPACING)));
+            assert_eq!(
+                plain.tick(fx(0.1)),
+                toward.tick_toward(fx(0.1), fx(SPACING))
+            );
             assert_eq!(plain.snapshot_positions(), toward.snapshot_positions());
         }
         // ...and more room than a footprint changes nothing either.

@@ -243,7 +243,8 @@ mod tests {
     #[test]
     fn rejects_older_data_rather_than_silently_defaulting_it() {
         for (older, expected) in [(1u32, 1u32), (2, 2)] {
-            let text = EXAMPLE.replacen("schema_version: 3", &format!("schema_version: {older}"), 1);
+            let text =
+                EXAMPLE.replacen("schema_version: 3", &format!("schema_version: {older}"), 1);
             let err = RecipeRegistry::from_ron_str(&text).unwrap_err();
             assert!(matches!(
                 err,

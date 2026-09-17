@@ -636,10 +636,20 @@ mod tests {
 
         for tick in 0..500 {
             network.tick();
-            machine.tick(tick, &recipes, Some(tap(&mut network, 0)), None, None, &mut ledger);
+            machine.tick(
+                tick,
+                &recipes,
+                Some(tap(&mut network, 0)),
+                None,
+                None,
+                &mut ledger,
+            );
         }
 
-        assert!(machine.process.is_none(), "must never start a craft without its fluid");
+        assert!(
+            machine.process.is_none(),
+            "must never start a craft without its fluid"
+        );
         assert_eq!(machine.output.count("ketchup"), 0);
         assert_eq!(
             machine.input.count("tomato_sauce"),
@@ -672,8 +682,18 @@ mod tests {
         let (mut network, mut tank) = supplied_network();
         let before = network.segments()[1].volume;
 
-        machine.tick(0, &recipes, Some(tap(&mut network, 1)), None, None, &mut ledger);
-        assert!(machine.process.is_some(), "craft must start once fluid is available");
+        machine.tick(
+            0,
+            &recipes,
+            Some(tap(&mut network, 1)),
+            None,
+            None,
+            &mut ledger,
+        );
+        assert!(
+            machine.process.is_some(),
+            "craft must start once fluid is available"
+        );
         assert_eq!(
             network.segments()[1].volume,
             before - Fx::from_num(2),
@@ -683,7 +703,14 @@ mod tests {
         for tick in 1..=10 {
             network.discharge_from_tank(&mut tank, 0);
             network.tick();
-            machine.tick(tick, &recipes, Some(tap(&mut network, 1)), None, None, &mut ledger);
+            machine.tick(
+                tick,
+                &recipes,
+                Some(tap(&mut network, 1)),
+                None,
+                None,
+                &mut ledger,
+            );
         }
         assert_eq!(machine.output.count("ketchup"), 1);
     }
@@ -715,7 +742,11 @@ mod tests {
     fn one_tile_network(fluid: &str, capacity: i32, volume: i32) -> FluidNetwork {
         let mut network = FluidNetwork::new(
             Some(fluid.to_string()),
-            vec![PipeSegment::new((0, 0), Direction::East, Fx::from_num(capacity))],
+            vec![PipeSegment::new(
+                (0, 0),
+                Direction::East,
+                Fx::from_num(capacity),
+            )],
             vec![],
         );
         network.deposit_at(0, fluid, Fx::from_num(volume));
@@ -730,8 +761,18 @@ mod tests {
         let mut inflow = one_tile_network("ketchup_mix", 10, 4);
         let mut outflow = one_tile_network("ketchup", 10, 0);
 
-        machine.tick(0, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)), None, &mut ledger);
-        assert!(machine.process.is_some(), "a fluid-only input must start a craft");
+        machine.tick(
+            0,
+            &recipes,
+            Some(tap(&mut inflow, 0)),
+            Some(tap(&mut outflow, 0)),
+            None,
+            &mut ledger,
+        );
+        assert!(
+            machine.process.is_some(),
+            "a fluid-only input must start a craft"
+        );
         assert_eq!(
             inflow.segments()[0].volume,
             Fx::from_num(3),
@@ -744,7 +785,14 @@ mod tests {
         );
 
         for tick in 1..=5 {
-            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)), None, &mut ledger);
+            machine.tick(
+                tick,
+                &recipes,
+                Some(tap(&mut inflow, 0)),
+                Some(tap(&mut outflow, 0)),
+                None,
+                &mut ledger,
+            );
         }
         assert!(machine.process.is_none());
         assert_eq!(outflow.segments()[0].volume, Fx::from_num(1));
@@ -761,17 +809,35 @@ mod tests {
         let mut outflow = one_tile_network("ketchup", 10, 10); // brim full
 
         for tick in 0..=5 {
-            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)), None, &mut ledger);
+            machine.tick(
+                tick,
+                &recipes,
+                Some(tap(&mut inflow, 0)),
+                Some(tap(&mut outflow, 0)),
+                None,
+                &mut ledger,
+            );
         }
         assert!(
             machine.process.is_some(),
             "the batch is finished but has nowhere to go, so it is still held"
         );
-        assert_eq!(outflow.segments()[0].volume, Fx::from_num(10), "nothing spilled");
+        assert_eq!(
+            outflow.segments()[0].volume,
+            Fx::from_num(10),
+            "nothing spilled"
+        );
 
         // Make room, and the very next tick the held batch lands.
         outflow.draw_at(0, "ketchup", Fx::from_num(2));
-        machine.tick(6, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)), None, &mut ledger);
+        machine.tick(
+            6,
+            &recipes,
+            Some(tap(&mut inflow, 0)),
+            Some(tap(&mut outflow, 0)),
+            None,
+            &mut ledger,
+        );
         assert!(machine.process.is_none());
         assert_eq!(outflow.segments()[0].volume, Fx::from_num(9));
     }
@@ -784,7 +850,14 @@ mod tests {
         let mut inflow = one_tile_network("ketchup_mix", 10, 10);
 
         for tick in 0..500 {
-            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), None, None, &mut ledger);
+            machine.tick(
+                tick,
+                &recipes,
+                Some(tap(&mut inflow, 0)),
+                None,
+                None,
+                &mut ledger,
+            );
         }
         assert!(
             machine.process.is_some(),
@@ -806,7 +879,14 @@ mod tests {
         let mut outflow = one_tile_network("water", 10, 0);
 
         for tick in 0..500 {
-            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)), None, &mut ledger);
+            machine.tick(
+                tick,
+                &recipes,
+                Some(tap(&mut inflow, 0)),
+                Some(tap(&mut outflow, 0)),
+                None,
+                &mut ledger,
+            );
         }
         assert!(machine.process.is_some());
         assert_eq!(outflow.segments()[0].volume, Fx::ZERO);
@@ -824,10 +904,20 @@ mod tests {
         for tick in 0..500 {
             network.discharge_from_tank(&mut tank, 0);
             network.tick();
-            machine.tick(tick, &recipes, Some(tap(&mut network, 1)), None, None, &mut ledger);
+            machine.tick(
+                tick,
+                &recipes,
+                Some(tap(&mut network, 1)),
+                None,
+                None,
+                &mut ledger,
+            );
         }
 
-        assert!(machine.process.is_none(), "vinegar recipe must not run on a water pipe");
+        assert!(
+            machine.process.is_none(),
+            "vinegar recipe must not run on a water pipe"
+        );
     }
 
     // ---- the load window (machine-load epic) -------------------------------
@@ -837,12 +927,20 @@ mod tests {
         let mut window = LoadWindow::new();
         assert_eq!(window.observed(), 0);
         assert_eq!(window.percent(), 0);
-        assert_eq!(window.status(), WorkState::Starved, "nothing observed reads starved");
+        assert_eq!(
+            window.status(),
+            WorkState::Starved,
+            "nothing observed reads starved"
+        );
 
         for _ in 0..LOAD_WINDOW_TICKS * 3 {
             window.record(WorkState::Working);
         }
-        assert_eq!(window.observed(), LOAD_WINDOW_TICKS, "three windows' worth still fit in one");
+        assert_eq!(
+            window.observed(),
+            LOAD_WINDOW_TICKS,
+            "three windows' worth still fit in one"
+        );
         assert_eq!(window.working(), LOAD_WINDOW_TICKS);
         assert_eq!(window.percent(), 100);
         assert_eq!(window.status(), WorkState::Working);
@@ -851,7 +949,11 @@ mod tests {
         for _ in 0..LOAD_WINDOW_TICKS {
             window.record(WorkState::Starved);
         }
-        assert_eq!(window.working(), 0, "the ring forgets what is more than a window old");
+        assert_eq!(
+            window.working(),
+            0,
+            "the ring forgets what is more than a window old"
+        );
         assert_eq!(window.starved(), LOAD_WINDOW_TICKS);
         assert_eq!(window.status(), WorkState::Starved);
 
@@ -895,8 +997,8 @@ mod tests {
         for _ in 0..(LOAD_BUCKET_TICKS * 7 + 3) {
             window.record(WorkState::Working);
         }
-        let restored = LoadWindow::restore(window.buckets(), window.cursor())
-            .expect("its own ring restores");
+        let restored =
+            LoadWindow::restore(window.buckets(), window.cursor()).expect("its own ring restores");
         assert_eq!(restored, window);
 
         assert!(LoadWindow::restore(&window.buckets()[..LOAD_BUCKETS - 1], 0).is_none());
@@ -955,8 +1057,15 @@ mod tests {
             machine.input.add("tomato", short);
             machine.tick(tick, &recipes, None, None, None, &mut ledger);
         }
-        assert!(machine.process.is_some(), "the last batch is finished and held");
-        assert_eq!(machine.output.count("tomato_sauce"), 10, "output is brim full");
+        assert!(
+            machine.process.is_some(),
+            "the last batch is finished and held"
+        );
+        assert_eq!(
+            machine.output.count("tomato_sauce"),
+            10,
+            "output is brim full"
+        );
         assert_eq!(machine.load.starved(), 0, "it was never short of tomatoes");
         assert_eq!(machine.load.status(), WorkState::Blocked);
         assert!(machine.load.blocked() > machine.load.working());
@@ -971,7 +1080,14 @@ mod tests {
         let mut inflow = one_tile_network("ketchup_mix", 10, 10);
         let mut outflow = one_tile_network("ketchup", 10, 10); // brim full
         for tick in 0..100 {
-            machine.tick(tick, &recipes, Some(tap(&mut inflow, 0)), Some(tap(&mut outflow, 0)), None, &mut ledger);
+            machine.tick(
+                tick,
+                &recipes,
+                Some(tap(&mut inflow, 0)),
+                Some(tap(&mut outflow, 0)),
+                None,
+                &mut ledger,
+            );
         }
         // Ticks 0..=4 working (start + 4 advancing), then held from tick 5 on.
         assert_eq!(machine.load.working(), 5);
@@ -994,10 +1110,18 @@ mod tests {
         for tick in 1..10 {
             machine.tick(tick, &recipes, None, None, None, &mut ledger);
         }
-        assert_eq!(ledger.produced_total("tomato_sauce"), 0, "not before it lands");
+        assert_eq!(
+            ledger.produced_total("tomato_sauce"),
+            0,
+            "not before it lands"
+        );
         machine.tick(10, &recipes, None, None, None, &mut ledger);
         assert_eq!(ledger.produced_total("tomato_sauce"), 1);
-        assert_eq!(ledger.consumed_total("tomato"), 4, "starting is the only consumption");
+        assert_eq!(
+            ledger.consumed_total("tomato"),
+            4,
+            "starting is the only consumption"
+        );
         assert_eq!(ledger.kind_of("tomato"), Some(StatKind::Item));
     }
 
@@ -1025,8 +1149,18 @@ mod tests {
         let (mut network, _tank) = supplied_network();
         let mut machine = Machine::new("ketchup".into(), 10, 10);
         machine.input.add("tomato_sauce", 1);
-        machine.tick(0, &recipes, Some(tap(&mut network, 1)), None, None, &mut ledger);
-        assert!(machine.process.is_some(), "the fixture must be able to start");
+        machine.tick(
+            0,
+            &recipes,
+            Some(tap(&mut network, 1)),
+            None,
+            None,
+            &mut ledger,
+        );
+        assert!(
+            machine.process.is_some(),
+            "the fixture must be able to start"
+        );
         assert_eq!(ledger.consumed_total("vinegar"), 2);
         assert_eq!(ledger.kind_of("vinegar"), Some(StatKind::Fluid));
         assert_eq!(ledger.consumed_total("tomato_sauce"), 1);
