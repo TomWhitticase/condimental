@@ -186,6 +186,11 @@ func _ready() -> void:
 	if _root_box != null:
 		_refresh_saves()
 		return
+	# The main menu is unconditionally a cursor screen — three buttons and a
+	# save list — so it asserts a visible cursor rather than trusting
+	# whatever mode the previous scene left behind (#22: quitting to the
+	# menu from first-person used to leave the mouse captured).
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_build_backdrop()
 	_build_panel()
