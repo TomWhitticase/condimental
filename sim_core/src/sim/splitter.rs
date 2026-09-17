@@ -129,8 +129,9 @@ pub const SPLITTER_KIND: &str = "splitter";
 /// An enum rather than an index so no call site can invent a third output or
 /// confuse the two: `Straight` is always the placement's own facing and
 /// `Branch` is always one quarter turn clockwise from it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Side {
     /// The output on the splitter's own facing — where a belt tile in its

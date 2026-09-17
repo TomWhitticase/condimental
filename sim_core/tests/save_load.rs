@@ -24,7 +24,9 @@ mod common;
 
 use sim_core::sim::save::{SaveData, SavedBody};
 use sim_core::sim::types::Money;
-use sim_core::sim::{SavedProduction, PlayerCommand, RecipeRegistry, World, reference_chain_with_budget};
+use sim_core::sim::{
+    PlayerCommand, RecipeRegistry, SavedProduction, World, reference_chain_with_budget,
+};
 
 fn recipes() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
@@ -103,7 +105,8 @@ fn fingerprint(world: &World) -> String {
 /// [`assert_mid_flight`]): a fixture that quietly stopped exercising a
 /// mid-craft machine would turn the whole file green while proving less.
 fn mid_flight_world() -> World {
-    let mut world = reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE);
+    let mut world =
+        reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE);
     common::stock_up(&mut world);
     for _ in 0..3000 {
         common::supply(&mut world);
@@ -235,7 +238,8 @@ fn a_saved_factory_comes_back_running_state_identical() {
 /// forward-compatibility note — nothing has shipped with a save file yet.
 #[test]
 fn auto_fill_survives_a_save_and_keeps_working_after_the_load() {
-    let mut original = reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE);
+    let mut original =
+        reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE);
     common::stock_up(&mut original);
     for hopper in original.hopper_snapshots() {
         original.issue_command(PlayerCommand::SetHopperAutoFill {
@@ -296,7 +300,8 @@ fn auto_fill_survives_a_save_and_keeps_working_after_the_load() {
 /// automatic.
 #[test]
 fn a_mixed_set_of_auto_fill_flags_round_trips_exactly() {
-    let mut world = reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE);
+    let mut world =
+        reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE);
     common::stock_up(&mut world);
 
     // One hopper on, one off; the tank on.
@@ -549,7 +554,8 @@ fn a_save_from_another_build_and_a_file_that_is_not_a_save_are_both_refused() {
 /// percentage fee), a decimal round trip would start losing a bit per save.
 #[test]
 fn money_survives_to_the_bit() {
-    let mut world = reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE + 137);
+    let mut world =
+        reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE + 137);
     common::stock_up(&mut world);
     for _ in 0..1200 {
         common::supply(&mut world);
@@ -729,8 +735,14 @@ fn a_save_without_a_production_ledger_loads_empty_and_a_corrupt_one_is_refused()
     // in the struct: strip it out of the RON text and load that.
     let text = data.to_ron();
     let start = text.find("production:").expect("the save names the field");
-    let end = text[start..].find("),
-").expect("the empty ledger is one tuple") + start + 3;
+    let end = text[start..]
+        .find(
+            "),
+",
+        )
+        .expect("the empty ledger is one tuple")
+        + start
+        + 3;
     let without = format!("{}{}", &text[..start], &text[end..]);
     assert!(!without.contains("production"), "{without}");
     World::from_save_ron(&without, recipes()).expect("a save with no ledger field must load");

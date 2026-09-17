@@ -146,9 +146,7 @@ fn main() {
             // emitting a `pipe_fluid.liquid.png` the moment a fourth
             // material class was added in milestone 6 — exactly the drift a
             // literal list invites.
-            !stem.contains('.')
-                && !is_later_animation_frame(stem)
-                && !is_motion_overlay(stem)
+            !stem.contains('.') && !is_later_animation_frame(stem) && !is_motion_overlay(stem)
         })
         .collect();
     entries.sort();

@@ -86,8 +86,8 @@
 mod common;
 
 use sim_core::sim::{
-    BeltSnapshot, DockSnapshot, Fx, MachineSnapshot, PlayerCommand, RecipeRegistry,
-    TileSnapshot, World, reference_chain_with_budget,
+    BeltSnapshot, DockSnapshot, Fx, MachineSnapshot, PlayerCommand, RecipeRegistry, TileSnapshot,
+    World, reference_chain_with_budget,
 };
 
 /// Enough money to buy the stock this file loads, on top of the shop bill
@@ -344,7 +344,11 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
     });
     for (i, raw) in ["tomato", "sugar"].iter().enumerate() {
         let loaded = total_raw_equivalent(&world, raw, &registry) - before_fill[i];
-        let expected = if *raw == "tomato" { TOMATO_UNITS } else { SUGAR_UNITS };
+        let expected = if *raw == "tomato" {
+            TOMATO_UNITS
+        } else {
+            SUGAR_UNITS
+        };
         assert_eq!(
             loaded,
             Fx::from_num(expected),
@@ -368,7 +372,11 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
 
         shipped = the_dock(&world).shipped_total;
         for raw in ["tomato", "sugar"] {
-            let loaded = if raw == "tomato" { TOMATO_UNITS } else { SUGAR_UNITS };
+            let loaded = if raw == "tomato" {
+                TOMATO_UNITS
+            } else {
+                SUGAR_UNITS
+            };
             assert_conserved(
                 &world,
                 &registry,
@@ -386,7 +394,8 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
     }
 
     assert_eq!(
-        shipped, 1,
+        shipped,
+        1,
         "exactly one unit of '{final_item}' should have made it through all {} stages — \
          crushed on a belt, mixed and cooked entirely in pipe, bottled back onto a belt, \
          packed and shipped — with no player command whatsoever",
@@ -452,7 +461,11 @@ fn the_middle_of_the_chain_moves_product_through_pipes_with_no_tank_behind_them(
         "the mixer is on the producing end of it"
     );
     assert_eq!(mix.producers[0].machine_recipe, "ketchup_mix");
-    assert_eq!(mix.taps.len(), 1, "and the cooking vat is on the drawing end");
+    assert_eq!(
+        mix.taps.len(),
+        1,
+        "and the cooking vat is on the drawing end"
+    );
     assert_eq!(mix.taps[0].machine_recipe, "ketchup");
 
     let cooked = networks
@@ -511,7 +524,10 @@ fn an_unfed_chain_ships_nothing_and_the_dock_stays_empty() {
 
     let (_, machines) = full_chain_snapshot(&world);
     for machine in &machines {
-        assert!(machine.output.is_empty(), "no machine should hold output yet");
+        assert!(
+            machine.output.is_empty(),
+            "no machine should hold output yet"
+        );
     }
 }
 
@@ -529,9 +545,7 @@ fn the_removed_collect_output_command_no_longer_parses() {
     // removal rather than a broken parser.
     assert!(sim_core::sim::command_from_json(r#"{"type": "fill_hopper"}"#).is_some());
     assert!(sim_core::sim::command_from_json(r#"{"type": "fill_fluid_tank"}"#).is_some());
-    assert!(
-        sim_core::sim::command_from_json(r#"{"type": "purchase", "kind": "belt"}"#).is_some()
-    );
+    assert!(sim_core::sim::command_from_json(r#"{"type": "purchase", "kind": "belt"}"#).is_some());
     // ...including the one the ingredient economy added.
     assert!(
         sim_core::sim::command_from_json(r#"{"type": "buy_ingredient", "item": "tomato"}"#)
@@ -545,7 +559,10 @@ fn query_tile_reflects_every_stage_belt_and_machine_position() {
     let ordered = registry.ordered().to_vec();
     let mut world = reference_chain_with_budget(registry, BUDGET);
     buy(&mut world, "tomato", 4);
-    world.issue_command(PlayerCommand::FillHopper { amount: 4, tile: None });
+    world.issue_command(PlayerCommand::FillHopper {
+        amount: 4,
+        tile: None,
+    });
     world.tick();
 
     // `world_layout` replaced `chain_layout`: it reports every placement, so
@@ -628,7 +645,10 @@ fn query_tile_reflects_every_stage_belt_and_machine_position() {
 fn dirty_chunks_report_touched_chunks_and_clear_between_ticks() {
     let mut world = reference_chain_with_budget(recipes(), BUDGET);
     buy(&mut world, "tomato", 4);
-    world.issue_command(PlayerCommand::FillHopper { amount: 4, tile: None });
+    world.issue_command(PlayerCommand::FillHopper {
+        amount: 4,
+        tile: None,
+    });
     world.tick();
     // The five recipe-driven stages run x = 0..26 and fit inside chunk (0,0)
     // (ARCHITECTURE.md §3.1's 32x32 chunks); the tomato hopper stands at the

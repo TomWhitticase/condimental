@@ -139,6 +139,17 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-17 — The fmt backlog is cleared
+
+`cargo fmt --all` landed as one commit (#28): 32 of the repo's 46 Rust files
+were unformatted, purely accumulated drift, no behavior change. Chosen to
+land at a quiet moment (no other Rust-touching branch open) since a
+repo-wide reformat conflicts with anything in flight. `FMT_BASELINE` in
+`scripts/check-rust-lint.sh` drops to 0 — the ratchet mechanism stays, but at
+zero it now behaves like an ordinary `cargo fmt --all --check` gate.
+`CLIPPY_BASELINE` (issue #29) is untouched; clippy's backlog is a separate,
+judgment-heavy burn-down.
+
 ### 2026-09-16 — The repo is `condimental` too
 
 The name change reached GitHub: `TomWhitticase/sauce-factory` →
