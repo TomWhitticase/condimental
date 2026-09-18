@@ -11,7 +11,10 @@
 //!
 //! - a fluid output leaves by the face the machine points at, exactly as a
 //!   solid one does;
-//! - a fluid input comes from any *other* pipe touching the footprint;
+//! - a fluid input comes from an *other* pipe touching the footprint — one
+//!   run per input since the BBQ epic, matched by fluid id, which for a
+//!   one-fluid recipe like every one in this file is the single run it
+//!   touches;
 //! - so a machine standing between two runs is unambiguous without the
 //!   player labelling either of them, and a machine wrapped in one run reads
 //!   as its outlet and gets no inlet at all.
@@ -135,8 +138,9 @@ fn a_machine_deposits_its_fluid_output_into_the_run_off_its_outlet_face() {
     assert_eq!(
         networks[0].fluid.as_deref(),
         Some("ketchup_mix"),
-        "a network's fluid is named by whichever machine reaches it first — including one \
-         that reaches it to *deposit*"
+        "a run a machine deposits into is named from what that machine can make — the \
+         BBQ epic turned this into `resolve_network_fluids`'s narrowing, but a run with \
+         exactly one possible fluid still resolves to it"
     );
     assert!(
         networks[0].tank_tiles.is_empty(),
