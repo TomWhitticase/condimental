@@ -147,6 +147,33 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-18 — A case's print moves to its lid, and the two sauces separate
+
+Issue #40: `boxed_ketchup` and `boxed_bbq` were tellable apart closeup and
+not at the framing a player actually plays at. Measured rather than argued —
+on the item-gallery frame at default zoom, where a case is about 30px, the
+two cases' mean brightness was **1.2/255 apart**, i.e. nothing. The two
+label patches were 5x6px each and on the camera's shadow-side face.
+
+The fix is the same print on the **lid**, one panel either side of the tape
+seam, in each sauce's own label colour — no new palette entry, no new voxel,
+no change to either case's silhouette, since every voxel it paints was
+already carton. The lid is the face this camera lights and sees most of, so
+the same two colours now measure **26.5/255 apart** on the same frame, about
+twenty times the separation. **The carton is untouched** (the project owner's
+ruling): kraft margins all round the panels and the tape seam still crossing
+between them. Print on the two short faces as well measured better still
+(43.2/255) and was rejected — at closeup the kraft stopped being the thing
+you see, so the case read as coloured *packaging* rather than a printed box.
+
+The lesson, which is why the numbers are here: at this camera a mark on the
+lit top face is worth several of the same mark on a side face. `item_box`
+changes too, deliberately — the pair has to contrast, and both sauces' cases
+gain a positive identity instead of one being "the marked one". The
+distinction is value, not hue, so it survives colour blindness. Followed on
+as #57 (re-check on a real mixed line once BBQ is in `data/`) and #58 (the
+stale `cargo run -p voxgen` invocation in docs and the CI hint).
+
 ### 2026-09-18 — The PR-screenshot hook looks at the pull request now
 
 `.claude/hooks/require-pr-screenshot.sh` decided whether a command needed a
