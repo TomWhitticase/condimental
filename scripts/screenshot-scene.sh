@@ -95,6 +95,15 @@
 # the items on it are exactly the ones the shot asked for; add --closeup
 # 3,0,12 to fill the frame with them.
 #
+# Pass --bbq to build the BBQ LINE (test_layouts.gd's
+# `build_bbq_running_line`): both sauces on one floor — the shipped ketchup
+# line on row 0 and the BBQ branch three rows north of it, joined by the
+# single pipe that taps finished ketchup out of the vat's outlet run — funded,
+# fully crewed, auto-filled and run 15 000 ticks, so boxes of both are moving
+# when the shutter opens. It implies --populate. Add --board --board-end to
+# put the BBQ tier of the board over it, which is where the epic's mixed
+# orders read.
+#
 # Pass --bottleneck to build the BOTTLENECK LINE (test_layouts.gd's
 # `build_bottleneck_line`): the whole shipped line with its hoppers and tank
 # on auto-fill, run until it has backed up behind the 240-tick cooking vat,
@@ -182,7 +191,10 @@
 # raw ingredients are bought (the chain-rework epic) — or --board to open the
 # CONTRACTS BOARD, where contracts are signed and lost ones signed again (the
 # contract-board epic). --contracts signs every offer before it runs the
-# line, so the clipboard photographs the whole board competing.
+# line, so the clipboard photographs the whole board competing. --board-end
+# winds that board to its last offer: it lists contracts.ron in file order
+# and shows about four at a time, so a tier appended to the end of the file
+# is below the fold until something scrolls there.
 #
 # Pass --no-hud to hide the HUD entirely. Closeups are for reviewing whether
 # a belt or a pipe actually meets a machine, and the contract clipboard and
@@ -214,7 +226,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--item-gallery] [--bottleneck] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--full-dock [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--item-gallery] [--bottleneck] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--full-dock [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board [--board-end]] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

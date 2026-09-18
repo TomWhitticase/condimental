@@ -131,13 +131,21 @@ fn a_hopper_stands_at_the_head_of_its_own_feed_lane_one_per_raw_ingredient() {
     assert_eq!(
         hoppers.len(),
         2,
-        "the shipped chain has two raw solid ingredients, so it has two hoppers"
+        "the reference LINE — the ketchup line this fixture lays out — has two raw solid \
+         ingredients, so it has two hoppers. The BBQ branch's two (spice mix and molasses) \
+         are raw as well, but they belong to a branch this fixture does not build"
     );
     assert_eq!(
         world.raw_items(),
-        ["tomato".to_string(), "sugar".to_string()],
+        [
+            "tomato".to_string(),
+            "sugar".to_string(),
+            "spice_mix".to_string(),
+            "molasses".to_string()
+        ],
         "raw = consumed by some recipe, produced by none — read out of data/recipes.ron, \
-         never named in Rust"
+         never named in Rust. This is the whole FILE's list, which is why it is longer than \
+         the fixture's hopper count"
     );
 
     for hopper in &hoppers {

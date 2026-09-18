@@ -87,7 +87,7 @@ mod common;
 
 use sim_core::sim::{
     BeltSnapshot, DockSnapshot, Fx, MachineSnapshot, PlayerCommand, RecipeRegistry, TileSnapshot,
-    World, reference_chain_with_budget,
+    World, linear_prefix, reference_chain_with_budget,
 };
 
 /// Enough money to buy the stock this file loads, on top of the shop bill
@@ -297,7 +297,10 @@ const VINEGAR_UNITS: u32 = 60;
 #[test]
 fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
     let registry = recipes();
-    let ordered = registry.ordered();
+    // The reference LINE, not every recipe in the file: since the BBQ epic
+    // `recipes.ron` is a graph, and this fixture lays out its linear prefix
+    // (the ketchup line). The BBQ branch is `tests/bbq_branch.rs`'s.
+    let ordered = linear_prefix(&registry);
     // Five stages: crush, mix, cook, bottle, pack. The chain-rework epic
     // removed the aging rack and turned the two middle links into pipe runs,
     // so mass now has to survive two hand-offs that are not belt hand-offs at
@@ -307,8 +310,8 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
     assert_eq!(
         ordered.len(),
         5,
-        "expected the shipped 5-stage chain (crusher, mixer, cooking vat, bottler, packer), \
-         got {} recipe(s) — if a stage was added or removed deliberately, update this",
+        "expected the shipped 5-stage ketchup line (crusher, mixer, cooking vat, bottler, \
+         packer), got {} stage(s) — if a stage was added or removed deliberately, update this",
         ordered.len()
     );
     let final_recipe = ordered.last().unwrap().clone();
@@ -556,7 +559,8 @@ fn the_removed_collect_output_command_no_longer_parses() {
 #[test]
 fn query_tile_reflects_every_stage_belt_and_machine_position() {
     let registry = recipes();
-    let ordered = registry.ordered().to_vec();
+    // The stages the fixture actually lays out, not every recipe in the file.
+    let ordered = linear_prefix(&registry).to_vec();
     let mut world = reference_chain_with_budget(registry, BUDGET);
     buy(&mut world, "tomato", 4);
     world.issue_command(PlayerCommand::FillHopper {
@@ -574,7 +578,7 @@ fn query_tile_reflects_every_stage_belt_and_machine_position() {
     assert_eq!(
         machines.len(),
         ordered.len(),
-        "one machine per recipe in the data file"
+        "one machine per stage of the reference line"
     );
 
     for (placement, recipe) in machines.iter().zip(ordered.iter()) {

@@ -35,6 +35,14 @@ below is history and should only ever be appended to.)*
   `full-verify`), `audit.yml`, and `claude.yml`/`claude-review.yml` (dormant
   until an `ANTHROPIC_API_KEY` secret exists). `docs/WORKFLOW.md`,
   "What CI runs", is the table. See the log entry below.
+- **There are two sauces (2026-09-18).** `data/recipes.ron` forks: ketchup
+  plus spice mix and molasses go into a mixer for `bbq_mix`, that plus liquid
+  smoke into a cooking vat for `bbq`, then the same bottler and packer. No new
+  machine kind — a BBQ line is a *branch* tapped off the pipe leaving the
+  ketchup vat, so the two sauces compete for one vat's output, and the 600-tick
+  BBQ cook against the vat's 240 splits it 3 ketchup to 2 BBQ. Two of the four
+  new contracts name both sauces. BBQ is ungated so far; the unlock ladder is
+  the next ticket. See the log entry below.
 - **Agent context restructured (2026-09-16).** `CLAUDE.md` is 72 lines and
   `@`-includes nothing; it maps a task to the doc that covers it. The
   condensed decisions log lives in `docs/DECISIONS_LOG.md`, workflow in
@@ -146,6 +154,53 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-18 — BBQ sauce exists, and the board asks for both
+
+The second sauce is content. `data/recipes.ron` grew four entries, all on
+machine kinds the player already owns — ketchup + spice mix + molasses into
+`bbq_mix` in a **mixer**, `bbq_mix` + liquid smoke into `bbq` in a **cooking
+vat**, then the same bottler and packer as before. No new machine, no new
+Rust behaviour: every capability this needed landed with the previous ticket.
+A BBQ line is a *branch*, tapped off the pipe run leaving the ketchup vat, so
+the two sauces compete for one vat's output and a player's first real
+decision is how to split it.
+
+**The cook time is a ratio.** 600 ticks in the BBQ vat against the ketchup
+vat's 240 means the branch draws one ketchup per 600 ticks and leaves 2.5 per
+1000 for bottling — exactly 3 boxed ketchup for every 2 boxed BBQ, which is
+exactly what `grill_pub`, the first mixed order, asks for. Measured on a
+running factory over 24 000 ticks, not just arithmetic:
+`the_two_sauces_split_one_vat_three_to_two` in `sim_core/tests/bbq_branch.rs`
+fails loudly if either number moves without the other.
+
+**Two of the four new contracts name both sauces**, which is the first time
+GAMEPLAY.md §6's central claim — a mix is all-or-nothing, so diversify — has
+ever been in front of a player. It was implemented and tested from the start
+and had nothing to point at.
+
+**Nothing in `sim_core/src/` changed behaviour.** What did change is the test
+fixture. `sim::reference_chain` walked *every* recipe in the file and laid
+them out in a line, which quietly worked only because the file was a line;
+the moment it forked, the fixture parked the BBQ mixer's hopper on the
+ketchup packer and took about a hundred and forty tests down. It now walks
+`linear_prefix` — the recipes that actually chain, one after another — and
+the branch gets a fixture of its own, `sim::bbq_branch`. Both are pinned by
+an exact placement list (`reference.rs`'s own `mod tests`), so the next
+content change cannot shove the shipped layout sideways in silence.
+
+`data/recipes.ron`'s header described rules that stopped being true last
+ticket (issue #44) and is rewritten: it now carries the table of which
+recipes share a kind, and `recipes_on_a_kind_take_disjoint_inputs` pins the
+property that makes file order a tiebreak that never actually breaks a tie.
+
+Two things noticed and deferred: a pipe run that stays ambiguous stalls its
+machines with nothing said to the player (#54), and bolting this branch onto
+a single ketchup line starves the starter contract for the few thousand ticks
+the new pipes take to prime (#55).
+
+`data/unlocks.ron` is untouched — BBQ ships ungated and the next ticket gates
+it.
 
 ### 2026-09-18 — A case's print moves to its lid, and the two sauces separate
 

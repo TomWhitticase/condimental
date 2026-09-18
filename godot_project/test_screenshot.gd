@@ -55,6 +55,12 @@
 # shipping case's LABEL, which the model previews cannot (they are rendered
 # from the opposite corner).
 #
+# `--bbq` builds the BBQ LINE (test_layouts.gd's `build_bbq_running_line`:
+# both sauces on one floor, the second one branching north off the ketchup
+# line's outlet run, funded, crewed and run until boxes of both are moving).
+# Implies `--populate`. With `--board --board-end` the shot is of the BBQ
+# tier of the contracts board, mixed orders and all.
+#
 # `--bottleneck` builds the BOTTLENECK LINE (test_layouts.gd's
 # `build_bottleneck_line`: the reference line on auto-fill, run until it has
 # backed up behind the cooking vat), the fixture the machine-load epic's
@@ -202,6 +208,12 @@ var _no_hud := false
 var _contracts := false
 ## `--board` opens the contracts board menu (the contract-board epic).
 var _board := false
+## `--board-end` scrolls that board to its last offer. The board lists
+## `contracts.ron` in file order and shows about four at a time, so a tier
+## appended to the end of the file — the BBQ one — is off the bottom of an
+## unscrolled board. A player reaches it with the wheel; this reaches it
+## through the same ScrollContainer, and does nothing without `--board`.
+var _board_end := false
 var _staff := false
 ## `--production` opens the PRODUCTION panel (P) over the settled bottleneck
 ## line — the fixture with every stage counted and a contract paid, so the
@@ -400,6 +412,7 @@ func _initialize() -> void:
 			_config_tile = Vector2i(int(parts[0]), int(parts[1]))
 	_market = args.has("--market")
 	_board = args.has("--board")
+	_board_end = args.has("--board-end")
 	_no_hud = args.has("--no-hud")
 	_contents = int(_string_arg(args, "--contents")) if _string_arg(args, "--contents") != "" else -1
 	_contracts = args.has("--contracts")
@@ -418,6 +431,13 @@ func _initialize() -> void:
 		# for, and `_run_chain_forward`'s own spawns on top of that would
 		# only be more ticks against an already-full pool.
 		_fixture = "full_dock"
+	# Last of the fixture flags on purpose: --contracts, --payout and
+	# --crushing each force the plain shipped line, and --bbq is meant to be
+	# combined with the first of those (the mixed orders are the half of this
+	# epic the clipboard shows), so it has the final say.
+	if args.has("--bbq"):
+		_fixture = "bbq"
+		_populate = true
 	_dock_lamp_dark = _string_arg(args, "--dock-lamp") == "dark"
 	_hotbar_key = _string_arg(args, "--hotbar")
 	_stock = args.has("--stock")
@@ -489,6 +509,8 @@ func _build_fixture() -> void:
 			Layouts.build_item_gallery(_main.sim)
 		"bottleneck":
 			Layouts.build_bottleneck_line(_main.sim)
+		"bbq":
+			Layouts.build_bbq_running_line(_main.sim)
 		"understaffed":
 			Layouts.build_understaffed_line(_main.sim)
 		"shortfall":
@@ -1064,6 +1086,11 @@ func _process(_delta: float) -> bool:
 		_main._set_market_open(true)
 	if _frames == 2 and _board:
 		_main._set_contract_board_open(true)
+	# A frame later than the open, deliberately: the offers are built and the
+	# ScrollContainer sized in the same update that opens the board, and its
+	# scroll ceiling is whatever the layout pass has settled on by then.
+	if _frames == 3 and _board and _board_end:
+		_scroll_board_to_end()
 	if _frames == 2 and _staff:
 		_main._set_staff_open(true)
 	if _frames == 2 and _production:
@@ -1100,6 +1127,24 @@ func _process(_delta: float) -> bool:
 	if _frames < WARMUP_FRAMES:
 		return false
 	return _write_frame()
+
+
+## Winds the board's own scroll container to the bottom — the same control a
+## player's wheel drives, so the shot is of a board a player could be looking
+## at rather than of a panel this script rearranged.
+func _scroll_board_to_end() -> void:
+	var scroll: ScrollContainer = _main._board_scroll
+	if scroll == null:
+		printerr("SCREENSHOT_FAIL: --board-end, but the board has no scroll container")
+		return
+	var bar := scroll.get_v_scroll_bar()
+	if bar == null or bar.max_value <= bar.page:
+		printerr(
+			"SCREENSHOT_FAIL: --board-end, but the board already fits on one "
+			+ "screen — there is nothing below the fold to scroll to"
+		)
+		return
+	scroll.scroll_vertical = int(bar.max_value)
 
 
 func _write_frame() -> bool:

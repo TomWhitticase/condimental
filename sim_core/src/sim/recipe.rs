@@ -326,4 +326,65 @@ mod tests {
         assert!(recipe.outputs.is_empty());
         assert_eq!(recipe.fluid_outputs, vec![("ketchup_mix".to_string(), 1)]);
     }
+
+    /// No two recipes on one machine kind take the same set of inputs — in
+    /// fact no two of them share a single input id.
+    ///
+    /// This is what makes `data/recipes.ron`'s file order a tiebreak that
+    /// never actually decides anything, and it is the reason there is no
+    /// player-facing recipe picker. A machine re-picks, every idle tick,
+    /// whichever of its kind's recipes its *current inputs* satisfy
+    /// (`super::machine::Machine::choose`), so the plumbing and the hoppers
+    /// are the picker: a mixer on the vinegar pipe beside a sugar hopper can
+    /// only ever blend ketchup mix, and one on the ketchup pipe beside spice
+    /// and molasses hoppers can only ever blend BBQ mix. Neither can be fed
+    /// the other's ingredients by accident, because no ingredient is in both
+    /// lists.
+    ///
+    /// Break this and the tiebreak starts mattering: two recipes a machine
+    /// could both run means reordering the file silently changes what a
+    /// factory makes, and a player would have no way to ask for the other
+    /// one. If a future sauce genuinely needs two recipes with overlapping
+    /// inputs on one kind, that is the moment the picker has to be designed
+    /// — not the moment to quietly reorder this file.
+    #[test]
+    fn recipes_on_a_kind_take_disjoint_inputs() {
+        let registry = RecipeRegistry::from_ron_str(include_str!("../../../data/recipes.ron"))
+            .expect("data/recipes.ron must parse");
+        let mut kinds: Vec<&str> = registry
+            .ordered()
+            .iter()
+            .map(|r| r.machine.as_str())
+            .collect();
+        kinds.sort_unstable();
+        kinds.dedup();
+        for kind in kinds {
+            let recipes: Vec<&Recipe> = registry.for_machine(kind).collect();
+            for (index, recipe) in recipes.iter().enumerate() {
+                for other in &recipes[index + 1..] {
+                    let inputs = |r: &Recipe| -> Vec<String> {
+                        r.inputs
+                            .iter()
+                            .chain(r.fluid_inputs.iter())
+                            .map(|(id, _)| id.clone())
+                            .collect()
+                    };
+                    let mine = inputs(recipe);
+                    let shared: Vec<String> = inputs(other)
+                        .into_iter()
+                        .filter(|id| mine.contains(id))
+                        .collect();
+                    assert!(
+                        shared.is_empty(),
+                        "'{}' and '{}' both run on the {kind} and both consume {shared:?}. \
+                         Recipes sharing a machine kind must take disjoint inputs, so that \
+                         what a machine is plumbed to *is* which recipe it runs and file \
+                         order never decides anything. See this test's doc comment.",
+                        recipe.id,
+                        other.id
+                    );
+                }
+            }
+        }
+    }
 }

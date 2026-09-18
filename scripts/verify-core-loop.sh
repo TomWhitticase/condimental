@@ -190,6 +190,7 @@ run_godot_script test_machine_load.gd MACHINE_LOAD_OK "machine load in the hover
 run_godot_script test_staff_panel.gd STAFF_PANEL_OK "the staff panel (H): rows from staff_snapshot_json, HIRE/FIRE through the real commands, an understaffed machine and dock in hover, one modal at a time — the staff pools MVP, ticket 3"
 run_godot_script test_production_stats.gd PRODUCTION_STATS_OK "the production panel (P): rows sorted and formatted from production_snapshot_json, windows and all time, a running line counted, one modal at a time, polled only while open — the production-stats epic"
 run_godot_script test_audio.gd AUDIO_OK "sound effects for every player action and the looping music track: streams deterministic and unclipped, cues fired from the handlers that know the outcome, the score ducked under the pause menu — audio, 2026-09-12"
+run_godot_script test_bbq_branch.gd BBQ_BRANCH_OK "the second sauce, as a branch: the BBQ line built beside the shipped one through real commands, every pipe run named, a mixed order on the clipboard and a box of BBQ made and delivered — the BBQ epic, ticket 2"
 
 echo
 echo "PASS: real placement + milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"
@@ -202,6 +203,7 @@ echo "      + instanced belts/pipes/items timed on the stress line"
 echo "      + pipe shapes, fittings and fluid bodies from the wire's links,"
 echo "      + belt shapes from links, animation frames, corner arcs and belt hover,"
 echo "      + the payout celebration a real contract payout fires, and its decay to nothing,"
+echo "      + the second sauce running as a branch off the first, and shipping,"
 echo "      all verified"
 echo "      headlessly (sim_core tests"
 echo "      + gdext boundary + interaction + 3D scene structure + pan/zoom + contract panel"
