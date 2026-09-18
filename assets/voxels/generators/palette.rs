@@ -118,10 +118,9 @@ impl Palette {
 
         let mut materials = BTreeMap::new();
         for class in MaterialClass::all() {
-            let def = file
-                .materials
-                .get(class.name())
-                .unwrap_or_else(|| panic!("palette.ron is missing material class '{}'", class.name()));
+            let def = file.materials.get(class.name()).unwrap_or_else(|| {
+                panic!("palette.ron is missing material class '{}'", class.name())
+            });
             materials.insert(class, *def);
         }
 
@@ -139,12 +138,19 @@ impl Palette {
                 index,
                 rgb: parse_hex(&row.rgb),
                 class: MaterialClass::from_name(&row.class).unwrap_or_else(|| {
-                    panic!("palette colour '{}' has unknown class '{}'", row.name, row.class)
+                    panic!(
+                        "palette colour '{}' has unknown class '{}'",
+                        row.name, row.class
+                    )
                 }),
             });
         }
 
-        Self { entries, by_name, materials }
+        Self {
+            entries,
+            by_name,
+            materials,
+        }
     }
 
     /// Palette index for a colour name. Panics on an unknown name — a
@@ -162,7 +168,10 @@ impl Palette {
     }
 
     pub fn rgb_of(&self, index: u8) -> Option<[u8; 3]> {
-        self.entries.iter().find(|e| e.index == index).map(|e| e.rgb)
+        self.entries
+            .iter()
+            .find(|e| e.index == index)
+            .map(|e| e.rgb)
     }
 
     pub fn class_of(&self, index: u8) -> MaterialClass {

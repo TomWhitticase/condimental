@@ -455,8 +455,14 @@ mod tests {
         assert_eq!(fp.tiles_facing((4, 0), Direction::East), fp.tiles((4, 0)));
         // The inlet is the origin's own column and the outlet the far one —
         // "the origin is the tile the stage's belt feeds into", verbatim.
-        assert_eq!(fp.inlet_tiles((4, 0), Direction::East), vec![(4, 0), (4, 1)]);
-        assert_eq!(fp.outlet_tiles((4, 0), Direction::East), vec![(6, 0), (6, 1)]);
+        assert_eq!(
+            fp.inlet_tiles((4, 0), Direction::East),
+            vec![(4, 0), (4, 1)]
+        );
+        assert_eq!(
+            fp.outlet_tiles((4, 0), Direction::East),
+            vec![(6, 0), (6, 1)]
+        );
         assert_eq!(
             fp.inlet_neighbours((4, 0), Direction::East),
             vec![(3, 0), (3, 1)]
@@ -493,8 +499,14 @@ mod tests {
             "the anchor is still the min-X/min-Y corner"
         );
         // Facing north, the outlet is the top row and the inlet the bottom.
-        assert_eq!(fp.outlet_tiles((4, 0), Direction::North), vec![(4, 2), (5, 2)]);
-        assert_eq!(fp.inlet_tiles((4, 0), Direction::North), vec![(4, 0), (5, 0)]);
+        assert_eq!(
+            fp.outlet_tiles((4, 0), Direction::North),
+            vec![(4, 2), (5, 2)]
+        );
+        assert_eq!(
+            fp.inlet_tiles((4, 0), Direction::North),
+            vec![(4, 0), (5, 0)]
+        );
         assert_eq!(
             fp.outlet_neighbours((4, 0), Direction::North),
             vec![(4, 3), (5, 3)]
@@ -587,10 +599,7 @@ mod tests {
     #[test]
     fn loads_footprints_by_kind_id() {
         let registry = MachineRegistry::from_ron_str(EXAMPLE).unwrap();
-        assert_eq!(
-            registry.footprint_of("cooker"),
-            Some(Footprint::ONE_BY_ONE)
-        );
+        assert_eq!(registry.footprint_of("cooker"), Some(Footprint::ONE_BY_ONE));
         assert_eq!(
             registry.footprint_of("crusher"),
             Some(Footprint {
@@ -704,10 +713,7 @@ mod tests {
     fn rejects_a_negative_height_footprint() {
         let text = EXAMPLE.replacen("height_tiles: 3", "height_tiles: -2", 1);
         let err = MachineRegistry::from_ron_str(&text).unwrap_err();
-        assert!(matches!(
-            err,
-            MachineLoadError::DegenerateFootprint { .. }
-        ));
+        assert!(matches!(err, MachineLoadError::DegenerateFootprint { .. }));
     }
 
     #[test]
@@ -777,14 +783,7 @@ mod tests {
         };
         assert_eq!(
             fp.tiles((10, 5)),
-            vec![
-                (10, 5),
-                (11, 5),
-                (12, 5),
-                (10, 6),
-                (11, 6),
-                (12, 6)
-            ]
+            vec![(10, 5), (11, 5), (12, 5), (10, 6), (11, 6), (12, 6)]
         );
     }
 }

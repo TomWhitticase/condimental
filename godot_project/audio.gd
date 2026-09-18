@@ -339,7 +339,7 @@ const MUSIC_BEATS_PER_BAR := 4
 ## i–VI–III–VII loop for the first half and a ii°-less turnaround
 ## (i–VI–iv–V) for the second, so the loop point lands on the dominant and
 ## resolves back onto the first bar rather than just restarting. A
-## sauce-factory score is warm and slightly tired at the end of a shift,
+## CONDIMENTAL score is warm and slightly tired at the end of a shift,
 ## which is what a minor key at 92 BPM is.
 const MUSIC_CHORDS := [
 	[50, 53, 57], # Dm

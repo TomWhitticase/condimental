@@ -1,6 +1,6 @@
 <div align="center">
 
-# Sauce Factory
+# CONDIMENTAL
 
 **Condiment production, automated.** A Factorio-like factory-automation game about
 making sauce — tomatoes and sugar in one end, boxed ketchup out of the loading dock
@@ -112,8 +112,8 @@ same way. An Android export has been proven working; iOS is blocked (see
 ### 2. Build
 
 ```bash
-git clone https://github.com/TomWhitticase/sauce-factory.git
-cd sauce-factory
+git clone https://github.com/TomWhitticase/condimental.git
+cd condimental
 cargo xtask
 ```
 
@@ -143,7 +143,7 @@ scripts/make-demo-saves.sh
 ```
 
 Saves live in Godot's per-user data directory, not in the repo (on macOS:
-`~/Library/Application Support/Godot/app_userdata/Sauce Factory/saves`). The running
+`~/Library/Application Support/Godot/app_userdata/CONDIMENTAL/saves`). The running
 game prints the resolved path once at startup.
 
 ### 4. Check it works (optional)
@@ -268,7 +268,7 @@ The design docs are authoritative and explain *why* each choice was made:
 
 ## How this project is built
 
-Sauce Factory is developed almost entirely by AI coding agents working in parallel
+CONDIMENTAL is developed almost entirely by AI coding agents working in parallel
 worktrees, with a human owner directing and playtesting. That only works with real
 engineering discipline around it, so the repository is set up to be legible to an agent
 that starts every session with no memory of the last one:
@@ -318,12 +318,12 @@ statistics, save/load, and a music and sound pass).
 | **More sauce** (content) | BBQ (a long slow-cook stage), mayo (refrigeration and a cold chain), hot sauce (acid-resistant equipment, fermentation), then aged and derived sauces — chilli mayo needs mayo *and* hot sauce, so the sauce list becomes a dependency tree |
 | **Multiplayer** (stretch) | Designed for in the architecture, deliberately deferred |
 
-The current open backlog is [GitHub issues](https://github.com/TomWhitticase/sauce-factory/issues);
+The current open backlog is [GitHub issues](https://github.com/TomWhitticase/condimental/issues);
 `docs/DEVLOG.md` is what has actually been built, dated.
 
 ## Releases
 
-None yet. Sauce Factory is **pre-alpha** — the core loop closes and it is genuinely
+None yet. CONDIMENTAL is **pre-alpha** — the core loop closes and it is genuinely
 playable, but there is no packaged build, no balance pass on any of the placeholder
 numbers, and save files are rejected rather than migrated when the schema moves. Build
 from source as above.

@@ -84,6 +84,17 @@
 # (they are at (0,0), (3,0), (3,3), (0,3) for right turns and (6,0), (9,0),
 # (9,3), (6,3) for left) to judge one junction.
 #
+# Pass --item-gallery to build the ITEM GALLERY (test_layouts.gd's
+# `build_item_gallery`): a bare belt run with one of each FINISHED-GOODS
+# model standing on it, ketchup bottle, BBQ bottle, ketchup case, BBQ case,
+# at the size an item really renders on a belt. It is the only frame that
+# can judge whether two sauces are tellable apart, and the only one that
+# shows a case's shipping label at all — assets/voxels/previews/ is rendered
+# from vengi's camera, the opposite corner to the game's (UI_UX.md §2b point
+# 35), which is the face the labels are not on. Nothing feeds the run, so
+# the items on it are exactly the ones the shot asked for; add --closeup
+# 3,0,12 to fill the frame with them.
+#
 # Pass --bottleneck to build the BOTTLENECK LINE (test_layouts.gd's
 # `build_bottleneck_line`): the whole shipped line with its hoppers and tank
 # on auto-fill, run until it has backed up behind the 240-tick cooking vat,
@@ -203,7 +214,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--bottleneck] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--full-dock [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--item-gallery] [--bottleneck] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--full-dock [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

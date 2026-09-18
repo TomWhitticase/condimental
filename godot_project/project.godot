@@ -10,7 +10,7 @@ config_version=5
 
 [application]
 
-config/name="Sauce Factory"
+config/name="CONDIMENTAL"
 config/description="Isometric voxel presentation of the data-driven production chain (UI_UX.md)."
 ; The game opens on the MAIN MENU, not straight into a factory (the
 ; "Save/load + a real main menu" epic). menu.tscn changes scene to

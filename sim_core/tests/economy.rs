@@ -172,7 +172,11 @@ fn full_chain_delivers_against_a_contract_and_pays_out_exactly_that_contracts_pa
         "money must increase by exactly one contract payout once the mix is delivered"
     );
     assert_eq!(
-        world.economy().contract("corner_shop").unwrap().deliveries_made,
+        world
+            .economy()
+            .contract("corner_shop")
+            .unwrap()
+            .deliveries_made,
         1
     );
 }
@@ -281,7 +285,8 @@ fn several_contracts_settle_independently_against_one_real_chain() {
         quick.deliveries_made
     );
     assert_eq!(
-        slow.deliveries_made, 1,
+        slow.deliveries_made,
+        1,
         "a {slow_cadence}-tick contract should have settled exactly once by tick {}",
         world.current_tick()
     );
@@ -359,7 +364,10 @@ fn one_delivered_unit_pays_one_contract_not_every_contract_that_wants_it() {
          contract this would read 20, which is the free-money bug the shared-pool rule exists \
          to prevent"
     );
-    assert_eq!(world.economy().contract("first").unwrap().deliveries_made, 1);
+    assert_eq!(
+        world.economy().contract("first").unwrap().deliveries_made,
+        1
+    );
     assert_eq!(
         world.economy().contract("second").unwrap().deliveries_made,
         0,
@@ -380,19 +388,32 @@ fn the_economy_snapshot_reports_one_entry_per_shipped_contract() {
     // are signed); the whole board rides along beside them.
     let ids: Vec<&str> = snapshot.contracts.iter().map(|c| c.id.as_str()).collect();
     let expected: Vec<&str> = board.starters().map(|c| c.id.as_str()).collect();
-    assert_eq!(ids, expected, "a new world's active contracts are the starters, in contracts.ron order");
+    assert_eq!(
+        ids, expected,
+        "a new world's active contracts are the starters, in contracts.ron order"
+    );
     assert_eq!(snapshot.board.len(), board.len());
-    assert!(snapshot.board.len() >= 2, "several contracts must ship, to be signed");
+    assert!(
+        snapshot.board.len() >= 2,
+        "several contracts must ship, to be signed"
+    );
     let offered: Vec<&str> = snapshot.board.iter().map(|o| o.id.as_str()).collect();
     let all: Vec<&str> = board.ordered().iter().map(|c| c.id.as_str()).collect();
     assert_eq!(offered, all, "board order must match contracts.ron order");
     for offer in &snapshot.board {
-        assert_eq!(offer.active, offer.starter, "in a new world exactly the starters are active");
+        assert_eq!(
+            offer.active, offer.starter,
+            "in a new world exactly the starters are active"
+        );
         assert!(offer.price > 0.0);
         assert!(offer.strikes >= 1);
     }
 
-    assert_eq!(snapshot.money, f64::from(common::WAGE_RESERVE), "stocked, untouched: the reserve");
+    assert_eq!(
+        snapshot.money,
+        f64::from(common::WAGE_RESERVE),
+        "stocked, untouched: the reserve"
+    );
     assert!(
         snapshot.delivery_stock.is_empty(),
         "a fresh world has delivered nothing yet"

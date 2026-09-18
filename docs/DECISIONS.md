@@ -1,4 +1,4 @@
-# Sauce Factory — Decision records (full history)
+# CONDIMENTAL — Decision records (full history)
 
 This file holds the **full, verbatim decision records** that used to live in
 `CLAUDE.md`'s decisions log, `docs/UI_UX.md` §2b and `docs/ARCHITECTURE.md`
@@ -24,6 +24,130 @@ matches what code comments and data files cite.
 ---
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
+
+- 2026-09-16: **The game is called CONDIMENTAL.** "sauce-factory was just a
+  temporary name, ive now come up with the name 'CONDIMENTAL'". The owner's
+  call, and the only naming decision this project has ever actually made —
+  `sauce-factory` was never chosen, it was what the directory happened to be
+  called on day one.
+
+  **What it means, and where it stops.** CONDIMENTAL is the *title*: the
+  wordmark on the menu (`menu.gd`'s `title.text`), `config/name`, the
+  `package/name` of the mobile exports, and the heading of every design doc.
+  It is styled all-caps because that is how the owner wrote it and because
+  `menu.gd` was already setting the wordmark in caps.
+
+  It is not a theme change. "Sauce" is still what the game is about and still
+  the noun in every recipe, ingredient, contract and plan — `boxed_ketchup`
+  does not become `boxed_condiment`, and `docs/BBQ_SAUCE_PLAN.md` keeps its
+  name. A rename that reached into `data/*.ron` would be a content change
+  wearing a rename's clothes.
+
+  **The three places the old name deliberately survives.** A later agent will
+  grep for `sauce-factory`, find these, and want to be helpful. It should not
+  be.
+
+  1. *The local checkout and the worktree paths.* `orca/projects/sauce-factory`
+     and `orca/workspaces/sauce-factory/*` keep the old name. Three live
+     worktrees and their running sessions resolve through those paths — a
+     worktree's `.git` file is an absolute path into the parent's
+     `.git/worktrees/` — so renaming the directory breaks every one of them to
+     buy nothing. Git does not care what a checkout is called.
+
+     (The *GitHub* repo was `TomWhitticase/sauce-factory` when this record was
+     written, with the rename left as the owner's call. See the addendum
+     below: they made it the same day.)
+  2. *Dated history.* DEVLOG.md's log and this file's older records say
+     "Sauce Factory" because that is what it was called on those dates. A log
+     that edits its own past to agree with the present is worth less than one
+     that does not.
+  3. *The archived `*_PLAN.md` files*, for the same reason — including
+     `PIPES_AND_CONVEYORS_PLAN.md`'s worker prompt, which is quoted verbatim
+     and should stay a faithful quote.
+
+  **The one real consequence: saves move.** `user://` resolves through
+  `config/name`, so the save directory went from
+  `app_userdata/Sauce Factory/` to `app_userdata/CONDIMENTAL/`. Existing
+  local saves are not migrated and not listed — they sit in the old
+  directory. This is accepted rather than solved: the project is pre-alpha
+  and already *rejects* saves whose schema has moved rather than migrating
+  them, so a save surviving a rename would be a stronger guarantee than a
+  save survives an ordinary week. Anyone who wants an old save back can move
+  the directory by hand.
+
+  **What did not move.** The crate is still `sim_core`, so every library
+  filename in `sim_core.gdextension` is unchanged, and `entry_symbol` is
+  still gdext's default `gdext_rust_init` — the `ExtensionLibrary` struct was
+  renamed to `CondimentalExtension` for readability only, and no binding
+  depends on its name. The Android/iOS ids moved from `com.saucefactory.spike`
+  to `com.condimental.spike`, which costs nothing because nothing has ever
+  been published under either.
+
+  **Addendum, 2026-09-16, hours later: the repo is renamed too.** "go ahead
+  and rename it from sauce-factory to condimental." `gh repo rename` →
+  `TomWhitticase/condimental`, and the current-tense links went with it: the
+  clone instructions in README.md, the issues link, the two
+  `ISSUE_TEMPLATE/config.yml` URLs, `claude.yml`'s description of where the
+  agent is, and DEVLOG.md's **Repo:** line.
+
+  Two things made this cheap. GitHub **redirects a renamed repo's old paths
+  indefinitely**, so no link was ever dead — not the ones in this file's
+  history, not the `pr-media` screenshot URLs embedded in every past PR body,
+  which is why those are left alone. And the tooling never hardcoded the name:
+  `pr-screenshot.sh` and `check-pr-screenshot.sh` both derive it from
+  `gh repo view --json nameWithOwner`, so they followed the rename with no
+  edit at all. That is worth preserving — a script that spells out the repo is
+  a script that breaks the next time something is renamed.
+
+  `git remote set-url` was handled by `gh` itself, and because the three
+  worktrees share one `.git`, that single update reached all of them.
+
+- 2026-09-16: **The title screen's scrim is gone — nothing is washed over the
+  hall.** "In the splash screen, get rid of the dark haze/shadowy effect
+  that's behind the menu text, I don't like how it looks." The owner's call,
+  and it reverses one clause of the centred-menu record below.
+
+  **What it was.** `menu.gd::_build_backdrop` laid a `TextureRect` over the
+  whole viewport, filled with a four-stop horizontal `GradientTexture2D`:
+  `SCRIM_INK` (0.03, 0.03, 0.04, α 0.82) opaque across the middle 40% of the
+  screen, falling to clear at both edges (`SCRIM_CORE = 0.30`). Its stated
+  job was "the price of putting text over a photograph" — holding the
+  wordmark's contrast wherever the drifting camera happened to be pointing.
+
+  **Why it goes.** The rendered frame is the argument. At 82% black over the
+  middle of the screen it is not a subtle wash: it dims the skylight ribbons,
+  the clerestory glazing and the far plant line — the exact crispness the
+  same 2026-09-16 haze decision below went to the trouble of buying with
+  `TITLE_HAZE_DENSITY = 0.0` — and because its edges are a gradient and the
+  hall behind it is not, it reads as a soft shadow lying *on* the picture
+  rather than as anything in the scene. The screen exists to show the player
+  a working factory; a band across its middle is the one thing on it working
+  against that.
+
+  **What pays for the contrast instead.** Two things, both of which were
+  already most of the way there:
+
+  - **The text carries its own edge.** The wordmark's outline goes 9px → 14px
+    at `UI_SCALE` (`TITLE_OUTLINE`) and the tagline and splash line go 5px →
+    8px (`STRAP_OUTLINE`). These are deliberately heavier than any outline
+    inside a plate, and they are named constants beside `COLUMN_MARGIN`
+    rather than `_i(9)` at the call site, because they are now load-bearing
+    rather than decoration. An outline follows the glyph, so it costs a few
+    pixels around the letters instead of a third of the frame.
+  - **The plate was never relying on the scrim.** `PLATE_BG` is α 0.94 with a
+    hazard rule along its top; the three buttons are as legible over a lit
+    skylight as over a dark plinth either way.
+
+  Checked in the rendered frame at 1600x900 (`--title`), which is the only
+  place this is visible: wordmark, tagline and splash all still read, and the
+  hall behind them comes up at full brightness.
+
+  **And it is asserted.** `test_main_menu.gd` now refuses any full-rect
+  `ColorRect`/`TextureRect`/`Panel` child of the menu, and checks the
+  wordmark's outline against `TITLE_OUTLINE`. This is a purely rendered
+  symptom — put the scrim back and every other check in that file still
+  passes — which is the standing reason (UI_UX §2b point 12) for pinning it
+  in a test rather than trusting the next reader of the comment.
 
 - 2026-09-16: **An emissive voxel emits its own colour, and that takes the
   pipeline's one material shader.** Issue #25: nothing in the factory was

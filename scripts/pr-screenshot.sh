@@ -80,12 +80,20 @@ for f in "$@"; do
   caption=$(printf '%s' "$name" | tr '_-' '  ')
 
   sha=$(gh api "repos/$repo/contents/$path?ref=$media_branch" -q .sha 2>/dev/null || true)
+  # The base64 blob goes through --rawfile, not --arg: Linux caps a single
+  # argv string at MAX_ARG_STRLEN (128 KiB), which a 1600x900 PNG clears
+  # easily and `jq -n --arg c "$(openssl base64 ...)"` blew past with
+  # "Argument list too long" — a size that never showed up in development
+  # on macOS, which has no such per-argument cap.
+  b64_file="$(mktemp)"
+  openssl base64 -A -in "$f" >"$b64_file"
   payload=$(jq -n \
-    --arg c "$(openssl base64 -A -in "$f")" \
+    --rawfile c "$b64_file" \
     --arg m "chore: pr screenshot for $branch" \
     --arg b "$media_branch" \
     --arg s "$sha" \
     '{message:$m, content:$c, branch:$b} + (if $s == "" then {} else {sha:$s} end)')
+  rm -f "$b64_file"
   printf '%s' "$payload" | gh api -X PUT "repos/$repo/contents/$path" --input - >/dev/null
 
   echo "![$caption](https://github.com/$repo/blob/$media_branch/$path?raw=true)"

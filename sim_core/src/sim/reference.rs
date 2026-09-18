@@ -354,7 +354,10 @@ fn plan(recipes: &RecipeRegistry, machines: &MachineRegistry) -> Vec<Order> {
     for dx in 0..STAGE_BELT_TILES {
         orders.push(Order::east(BELT_KIND, (cursor_x + dx, CHAIN_ROW_Y)));
     }
-    orders.push(Order::east(DOCK_KIND, (cursor_x + STAGE_BELT_TILES, CHAIN_ROW_Y)));
+    orders.push(Order::east(
+        DOCK_KIND,
+        (cursor_x + STAGE_BELT_TILES, CHAIN_ROW_Y),
+    ));
 
     orders
 }

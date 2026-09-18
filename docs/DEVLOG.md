@@ -1,4 +1,4 @@
-# Sauce Factory — Development Log & Status Tracker
+# CONDIMENTAL — Development Log & Status Tracker
 
 This doc answers "what's actually been done, and what's the state of things
 right now" for whoever (human or agent) picks this project up cold. It's a
@@ -26,6 +26,15 @@ below is history and should only ever be appended to.)*
   Godot proofs, no failures) and has been rendered and played. A fresh
   worktree still needs `cargo xtask` and **two** `godot --import` passes
   before the world is visible. See the log entry below.
+- **CI runs the tests now (2026-09-16).** Seven workflows under
+  `.github/workflows/`: `rust.yml` (sim_core + voxgen tests, `cargo xtask`,
+  a fmt/clippy ratchet, and a check that `assets/voxels/models` still matches
+  its generators), `invariants.yml` (the CLAUDE.md rules that can be grepped
+  for, `shellcheck`, `actionlint`), the two older lint/screenshot backstops,
+  `verify.yml` (the full Godot gate — nightly, on demand, or on a PR labelled
+  `full-verify`), `audit.yml`, and `claude.yml`/`claude-review.yml` (dormant
+  until an `ANTHROPIC_API_KEY` secret exists). `docs/WORKFLOW.md`,
+  "What CI runs", is the table. See the log entry below.
 - **Agent context restructured (2026-09-16).** `CLAUDE.md` is 72 lines and
   `@`-includes nothing; it maps a task to the doc that covers it. The
   condensed decisions log lives in `docs/DECISIONS_LOG.md`, workflow in
@@ -61,7 +70,7 @@ below is history and should only ever be appended to.)*
   lens to cream. Status lamps still report their state through **albedo** as
   well as emission, so an OFF lamp reads off in any lighting. See the log
   entry below.
-- **Repo:** Private GitHub repo (`TomWhitticase/sauce-factory`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
+- **Repo:** Private GitHub repo (`TomWhitticase/condimental`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Work reaches `main` through pull requests, and deferrals become issues
   (2026-09-16).** Nothing is pushed to `main` directly — a `pre-push` hook
   refuses it — and anything noticed but consciously not fixed is filed with
@@ -185,6 +194,140 @@ There is still no ambient occlusion, which Godot has on — three.js's
 `SSAOPass` assumes a perspective camera and this viewer is orthographic
 (**issue #49**). So the browser supplements the render checks in UI_UX.md §2a
 point 3 and does not replace them.
+### 2026-09-17 — The fmt backlog is cleared
+
+`cargo fmt --all` landed as one commit (#28): 32 of the repo's 46 Rust files
+were unformatted, purely accumulated drift, no behavior change. Chosen to
+land at a quiet moment (no other Rust-touching branch open) since a
+repo-wide reformat conflicts with anything in flight. `FMT_BASELINE` in
+`scripts/check-rust-lint.sh` drops to 0 — the ratchet mechanism stays, but at
+zero it now behaves like an ordinary `cargo fmt --all --check` gate.
+`CLIPPY_BASELINE` (issue #29) is untouched; clippy's backlog is a separate,
+judgment-heavy burn-down.
+
+### 2026-09-16 — The repo is `condimental` too
+
+The name change reached GitHub: `TomWhitticase/sauce-factory` →
+[`TomWhitticase/condimental`](https://github.com/TomWhitticase/condimental).
+Every current-tense link was swept with it — the clone instructions and issues
+link in README.md, the two `ISSUE_TEMPLATE/config.yml` URLs, `claude.yml`'s
+line about which repo the agent is in, and the **Repo:** line in the status
+section above.
+
+Nothing was ever pointing at a dead URL, because GitHub redirects a renamed
+repo's old paths indefinitely. That is also why the old links are left alone
+where they are history: the `#1`–`#4` issue links in the log below, the ones
+in `PIPES_AND_CONVEYORS_PLAN.md`, and — the ones that would have been genuinely
+annoying to fix — the `pr-media` screenshot URLs baked into every past PR body.
+They all still resolve.
+
+The tooling needed no edit: `pr-screenshot.sh` and `check-pr-screenshot.sh`
+both ask `gh repo view --json nameWithOwner` rather than spelling the repo out,
+so they picked up the new name on their own. Worth keeping that way.
+
+**The local directories are deliberately NOT renamed.** `orca/projects/sauce-factory`
+and `orca/workspaces/sauce-factory/*` stay as they are. A worktree's `.git` is
+an absolute path into the parent checkout's `.git/worktrees/`, and there were
+three live worktrees with sessions running in them at the time; renaming the
+directory breaks all of them and git does not care what a checkout is called.
+
+### 2026-09-16 — The game is called CONDIMENTAL
+
+`sauce-factory` was always a working title. The game's name is **CONDIMENTAL**,
+styled all-caps — it is what the title screen says, what `project.godot` calls
+the application, and what the design docs are titled.
+
+The rename stops at the name. "Sauce" is still the theme and still the noun in
+every recipe, ingredient and plan; only the title changed. Three things keep
+the old name deliberately:
+
+- **The repo and the worktree paths** are still `sauce-factory`, so every
+  `github.com/TomWhitticase/sauce-factory/...` link in the docs is left exactly
+  as it is. Rewriting them before the repo is renamed would 404 them; after a
+  rename GitHub redirects the old paths, so there is no hurry either way.
+  Renaming the GitHub repo is the owner's to do.
+- **This log and DECISIONS.md** are dated history. Past entries say
+  "Sauce Factory" because that is what it was called at the time.
+- **The archived `*_PLAN.md` files**, for the same reason — including the
+  worker prompts quoted verbatim inside them.
+
+One consequence worth knowing: `user://` resolves through `config/name`, so
+saves now live in `app_userdata/CONDIMENTAL/` rather than
+`app_userdata/Sauce Factory/`. Any pre-existing local save is not migrated —
+it is simply in the old directory, and the game will not list it. That is
+acceptable at pre-alpha, where the schema is not migrated either.
+
+The gdext entry struct is `CondimentalExtension` now; the crate is still
+`sim_core` and `entry_symbol` is still gdext's default `gdext_rust_init`, so
+no library filename or binding moved. Android/iOS ids went from
+`com.saucefactory.spike` to `com.condimental.spike`, which is free because
+nothing has ever been published under either.
+
+### 2026-09-16 — BBQ sauce has a bottle and a case
+
+The second sauce's finished goods, drawn ahead of the content that makes them
+(`docs/BBQ_SAUCE_PLAN.md`'s ticket 4; `bottled_bbq` and `boxed_bbq` do not
+exist in `data/` yet and will not until ticket 2 lands). `item_bottle` and
+`item_box` are now thin callers of a shared `bottle`/`box_of_sauce`
+parameterised by livery, with `item_bottle_bbq` and `item_box_bbq` beside
+them and both ids mapped in `main.gd`'s `ITEM_MODELS`.
+
+The distinction is carried by VALUE, not hue, in both directions: a bottle of
+BBQ is a deep molasses `bbq_brown` where ketchup is vivid `ketchup_red`, and
+a case of BBQ has DARK labels where ketchup's are near-white cream. At the
+size an item renders on a belt — half a tile — two warm colours a shade apart
+are not a difference a player can act on; reversing the contrast direction
+survives any zoom. The carton itself does not change, per the project owner:
+a case is a cardboard box whichever sauce is in it, and only the print on it
+says which.
+
+Two things fell out of rendering it. The model previews could not review a
+case at all — they are shot from vengi's camera, the opposite corner to the
+game's (UI_UX.md §2b point 35), which is the face the labels are not on — so
+`scripts/screenshot-scene.sh --item-gallery` now stands one of each
+finished-goods model on a bare belt run, through the scene's own item
+drawing. And for the same reason **`boxed_ketchup`'s icon has never shown its
+label**: a case is labelled on both long faces now, which changes `item_box`
+on a face the isometric camera cannot see, and is what stops the contract
+clipboard showing the same blank carton for two different items.
+
+### 2026-09-16 — BBQ sauce, the second sauce, is planned
+
+Every one of the nine contracts on the board asks for `boxed_ketchup`, so
+GAMEPLAY.md §6's central claim — that contracts demand a mix and therefore
+force a diversified factory — has never once been exercised in play. The
+second sauce exists to turn that pillar on rather than to add content.
+
+BBQ won it because it needs no mechanic §11 still lists as undecided (mayo
+needs spoilage, hot sauce needs corrosion), because it fits on the machines
+already shipped, and because it consumes **finished ketchup** — making the
+sauce list a branching dependency tree from the second entry onward. Its
+mixer taps the same ketchup pipe the bottler drinks from, so every box of
+BBQ is a box of ketchup that was not shipped.
+
+The plan is `docs/BBQ_SAUCE_PLAN.md`, with the numbers five worker tickets
+depend on. Three of them cost something in the sim: a machine kind may run
+several recipes (chosen by what its inputs satisfy, not by a player-facing
+picker), a recipe may draw more than one fluid network, and `validate_chain`
+becomes a graph check rather than a line check. Nothing is built yet.
+
+### 2026-09-16 — the title screen loses its scrim
+
+The main menu laid a dark gradient band across the middle of the viewport
+behind its text — 82% black at full strength, fading to clear at both edges —
+on the argument that text over a photograph needs a backing. The owner did not
+want it, and the rendered frame backs that up: it dimmed the skylight ribbons
+and the far plant line that the same day's `TITLE_HAZE_DENSITY = 0.0` decision
+had gone out of its way to make crisp, and its soft edges read as a shadow
+lying on the picture rather than as anything standing in the hall.
+
+It is gone, and the contrast it was buying is bought by the text itself: the
+wordmark's outline goes 9px → 14px (`TITLE_OUTLINE`) and the tagline and
+splash line 5px → 8px (`STRAP_OUTLINE`), both named constants now rather than
+numbers at the call site, because they are load-bearing. The button plate was
+never relying on the scrim — it is α 0.94 in its own right. `test_main_menu.gd`
+now refuses any full-rect overlay child of the menu, since restoring the scrim
+would otherwise leave every check green.
 
 ### 2026-09-16 — The factory emits light
 
@@ -218,6 +361,39 @@ glow pass is what the eye reads, and it is the half a headless test can hold.
 `test_presentation.gd` asserts both, plus that the `emissive` material is the
 shader and no other class is.
 
+### 2026-09-16 — CI grew up: the checks a session skips now run anyway
+
+The repository had two workflows — commit-message linting and the
+PR-screenshot backstop — and neither of them ran a single test. Everything
+that actually proves this project works was, until today, only ever run by
+whoever happened to remember to run it. That is a bad bet in a repo built
+mostly by agents in separate worktrees, and it had already been taken: the
+workspace has 32 unformatted files and 28 clippy warnings, and nothing had
+ever said so.
+
+Seven workflows now. `rust.yml` runs `cargo test -p sim_core`, `cargo test -p
+voxgen` and `cargo xtask` on every pull request, plus a regenerate-and-diff of
+`assets/voxels/models` — voxgen's output turns out to be byte-reproducible, so
+an edited generator with a stale `.vox` beside it is now caught instead of
+quietly rendering the old model in the screenshot the PR is judged on.
+`invariants.yml` checks the rules that fail silently: a `test_*.gd` nobody
+wired into `verify-core-loop.sh`, a marker the runner greps for that the
+script never prints, a `res://` path into a deleted file, a doc link into a
+renamed one, plus `shellcheck` and `actionlint`. `verify.yml` runs the full
+Godot gate nightly, on demand, or on a PR labelled `full-verify` — not on
+every push, because it costs minutes and a 100MB download. `audit.yml` is
+`cargo audit`. `claude.yml` and `claude-review.yml` answer `@claude` and
+post a first-pass review against CLAUDE.md's own rules; both no-op until an
+API-key secret exists. Dependabot, a path labeller and CODEOWNERS fill in the
+rest.
+
+The fmt/clippy backlog is handled as a **ratchet** rather than a gate:
+`scripts/check-rust-lint.sh` holds a high-water mark, so new code cannot add
+an unformatted file or a warning, while the existing 32 and 28 are burned down
+under issues #28 and #29. A gate that is red on day one is a gate that is
+ignored by day three. The same reasoning kept the full Godot verify off the
+PR path until it has been seen green on Linux — it has only ever run on the
+macOS machines this project is developed on.
 ### 2026-09-16 — The README is the front door, with pictures
 
 The root `README.md` had described a milestone-1 scaffold with "no gameplay

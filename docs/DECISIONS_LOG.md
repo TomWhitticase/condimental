@@ -1,4 +1,4 @@
-# Sauce Factory — Decisions log (condensed)
+# CONDIMENTAL — Decisions log (condensed)
 
 Every entry here is **the rule**, newest first. The full reasoning behind each
 one is in [DECISIONS.md](DECISIONS.md), Part A, under the same date and title.
@@ -17,6 +17,31 @@ When you make a non-trivial design decision not covered by
 See [WORKFLOW.md](WORKFLOW.md).
 
 ---
+
+- 2026-09-16 **The game is called CONDIMENTAL, and so is the repo.** All-caps
+  wherever it is the title: the menu's `title.text`, `config/name`, the
+  design-doc headings. The GitHub repo was renamed the same day —
+  `TomWhitticase/condimental` — and every current-tense link was swept with it;
+  GitHub redirects the old paths, so nothing held a dead URL in between.
+  `sauce-factory` survives *deliberately* in three places, so **do not sweep
+  them**: **dated history** in DEVLOG.md and DECISIONS.md, the archived
+  `*_PLAN.md` files (including the worker prompts quoted verbatim), and the
+  **local checkout and worktree paths** (`orca/projects/sauce-factory`,
+  `orca/workspaces/sauce-factory/*`) — live worktrees and running sessions
+  point at those, and renaming a directory out from under them breaks them for
+  no gain. "Sauce" stays the theme and the noun in every recipe. `user://`
+  resolves through `config/name`, so saves moved to `app_userdata/CONDIMENTAL/`
+  and pre-rename saves are not migrated.
+- 2026-09-16 **Nothing is washed over the title screen's hall.** The main
+  menu's gradient scrim is **removed**: no full-screen tinted overlay may sit
+  between `title_scene.gd`'s backdrop and the menu column, asserted in
+  `test_main_menu.gd`. Legibility over the drifting 3D frame is bought by the
+  text carrying its own edge — `menu.gd`'s `TITLE_OUTLINE` (14px at
+  `UI_SCALE`) on the wordmark and `STRAP_OUTLINE` (8px) on the tagline and
+  splash line — and by the button plate already being near-opaque
+  (`PLATE_BG`). This reverses the scrim clause of the centred-menu entry
+  below; the centring and the camera framing stand.
+  Full record in `docs/DECISIONS.md`.
 
 - 2026-09-16 **An emissive voxel emits its OWN colour, through the one
   shader in the pipeline.** `emissive` is built as a `ShaderMaterial`

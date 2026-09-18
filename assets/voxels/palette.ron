@@ -236,5 +236,41 @@
         // (point 21).
         (name: "paint_grey",      rgb: "#7A8088", class: "matte"),
 
+        // --- BBQ sauce, the game's second sauce (docs/BBQ_SAUCE_PLAN.md) ---
+        // `bbq_brown` is what is IN a `bottled_bbq` bottle, and it is the
+        // one colour that has to carry "this belt is not carrying ketchup"
+        // at the size an item actually renders — half a tile, and this
+        // camera sees a bottle's shadow side. Against `ketchup_red`
+        // #BE160E it is a deep desaturated molasses: the same warm family,
+        // far less chroma and far less light, which is the pair a player
+        // can tell apart at a glance where two saturated reds a shade
+        // apart are not. It is deliberately NOT another entry in the
+        // `liquid_*` set above: nothing carries BBQ in an open pail, so
+        // this colour is only ever seen through a bottle's glass and
+        // printed on a case, and matte is what both of those are. The
+        // fluid in the pipe run stays `fluid_pale` tinted by main.gd's
+        // FLUID_TINTS, exactly like every other fluid.
+        (name: "bbq_brown",       rgb: "#4E2419", class: "matte"),
+        // The BBQ bottle's label band, where ketchup's is `label_cream`
+        // #E5DCC5. Kraft paper rather than a second near-white: a band only
+        // a few points off the cap reads as the same label in different
+        // light, and the two bottles have to be one glance apart. Its own
+        // entry rather than borrowing `sack_kraft` (the sugar sack) because
+        // that colour is chosen to stay tellable apart from `cardboard` on
+        // a belt, which is a different job from sitting on a dark bottle.
+        (name: "label_kraft",     rgb: "#C7A97A", class: "matte"),
+        // The BBQ case's two shipping labels, where ketchup's are
+        // `label_cream`. **The carton itself does not change** — a case is
+        // a cardboard box whichever sauce is in it, and only the print on
+        // it says which (the project owner's call). That leaves the label
+        // doing all the work on the smallest object on the belt, so it
+        // reverses the CONTRAST DIRECTION rather than shifting hue: bright
+        // patches on a mid carton for ketchup, dark ones for BBQ. Darker
+        // than `cardboard_dark` #875F35, the tape seam crossing the same
+        // face, so a label is not mistaken for more tape; a touch warmer
+        // and lighter than `bbq_brown` itself, so it reads as ink on a box
+        // rather than as a window into the sauce.
+        (name: "label_bbq",       rgb: "#4A2C1E", class: "matte"),
+
     ],
 )

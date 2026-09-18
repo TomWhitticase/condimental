@@ -247,7 +247,11 @@ fn placing_with_a_zero_owned_count_is_a_no_op() {
 
     assert_eq!(world.placement_count(), 0, "nothing may appear unpaid for");
     assert!(world.query_tile((0, 0)).is_none());
-    assert_eq!(world.owned_count("crusher"), 0, "and no count went negative");
+    assert_eq!(
+        world.owned_count("crusher"),
+        0,
+        "and no count went negative"
+    );
 }
 
 /// An unknown kind, and a kind that is priced but has no recipe to run, are
@@ -287,7 +291,11 @@ fn placing_into_an_occupied_tile_is_refused_whole() {
     for tile in [(4, 0), (4, 0)] {
         place(&mut world, "belt", tile, Direction::East);
     }
-    assert_eq!(world.owned_count("belt"), 3, "no unit may be spent on a refusal");
+    assert_eq!(
+        world.owned_count("belt"),
+        3,
+        "no unit may be spent on a refusal"
+    );
     assert_eq!(world.placement_count(), 1);
 
     // The 2x2 case: a cooking vat covers four tiles, so all four are
@@ -336,7 +344,11 @@ fn removing_an_empty_tile_is_a_no_op() {
     world.issue_command(PlayerCommand::Remove { tile: (7, 7) });
 
     assert_eq!(world.placement_count(), 1);
-    assert_eq!(world.owned_count("belt"), 0, "nothing may be credited for nothing");
+    assert_eq!(
+        world.owned_count("belt"),
+        0,
+        "nothing may be credited for nothing"
+    );
 }
 
 /// Four rotations is a full turn, and a rotation changes only the facing —
@@ -474,7 +486,9 @@ fn belt_items(world: &World, tile: (i32, i32)) -> usize {
 
 fn machine_state(world: &World, tile: (i32, i32)) -> (String, Option<(u64, u64)>) {
     match world.query_tile(tile) {
-        Some(TileSnapshot::Machine { recipe, process, .. }) => (recipe, process),
+        Some(TileSnapshot::Machine {
+            recipe, process, ..
+        }) => (recipe, process),
         other => panic!("expected a machine at {tile:?}, got {other:?}"),
     }
 }
@@ -811,7 +825,11 @@ fn a_fill_command_can_name_which_hopper_to_load() {
         tile: Some((9, 9)),
     });
     assert_eq!(
-        world.hopper_snapshots().iter().map(|h| h.quantity).sum::<u32>(),
+        world
+            .hopper_snapshots()
+            .iter()
+            .map(|h| h.quantity)
+            .sum::<u32>(),
         5
     );
 }
@@ -920,7 +938,11 @@ fn placing_a_pipe_between_two_runs_merges_them_without_losing_fluid() {
     build(&mut world, "pipe", (2, 0), Direction::East);
 
     let after = world.fluid_snapshots();
-    assert_eq!(after.len(), 1, "the gap is closed, so it is one network now");
+    assert_eq!(
+        after.len(),
+        1,
+        "the gap is closed, so it is one network now"
+    );
     assert_eq!(after[0].segments.len(), 3);
     assert_eq!(
         after[0].total_volume, before,
@@ -939,8 +961,10 @@ fn the_three_new_commands_parse_from_json() {
     buy(&mut world, "belt", 2);
 
     world.issue_command(
-        command_from_json(r#"{"type": "place", "kind": "belt", "tile": [4, 2], "direction": "north"}"#)
-            .expect("place must parse"),
+        command_from_json(
+            r#"{"type": "place", "kind": "belt", "tile": [4, 2], "direction": "north"}"#,
+        )
+        .expect("place must parse"),
     );
     match world.query_tile((4, 2)) {
         Some(TileSnapshot::Belt { direction, .. }) => assert_eq!(direction, Direction::North),
@@ -977,8 +1001,10 @@ fn the_three_new_commands_parse_from_json() {
     assert!(command_from_json(r#"{"type": "remove"}"#).is_none());
     // ...and an unknown direction is a malformed command, not a default.
     assert!(
-        command_from_json(r#"{"type": "place", "kind": "belt", "tile": [0, 0], "direction": "up"}"#)
-            .is_none()
+        command_from_json(
+            r#"{"type": "place", "kind": "belt", "tile": [0, 0], "direction": "up"}"#
+        )
+        .is_none()
     );
 }
 
@@ -994,12 +1020,18 @@ fn placement_commands_dirty_the_chunks_they_touch() {
     // A footprint straddling the x = 32 boundary must dirty both chunks.
     place(&mut world, "cooking_vat", (31, 0), Direction::East);
     let dirty = world.dirty_chunks().to_vec();
-    assert!(dirty.contains(&(0, 0)) && dirty.contains(&(1, 0)), "{dirty:?}");
+    assert!(
+        dirty.contains(&(0, 0)) && dirty.contains(&(1, 0)),
+        "{dirty:?}"
+    );
 
     world.tick();
     world.issue_command(PlayerCommand::Remove { tile: (32, 1) });
     let dirty = world.dirty_chunks().to_vec();
-    assert!(dirty.contains(&(0, 0)) && dirty.contains(&(1, 0)), "{dirty:?}");
+    assert!(
+        dirty.contains(&(0, 0)) && dirty.contains(&(1, 0)),
+        "{dirty:?}"
+    );
 }
 
 /// A hopper placed on a world whose recipes have a raw ingredient holds that

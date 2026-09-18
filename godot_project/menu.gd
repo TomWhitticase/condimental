@@ -82,15 +82,18 @@ const SPLASH_LINES := [
 ## hall, lit by the same two lights. What it buys is the first screen telling
 ## the player what the game is, which a charcoal rectangle cannot.
 ##
-## The scrim below is the price of putting text over a photograph: a dark
-## wash behind the menu column, so the wordmark and the buttons keep their
-## contrast wherever the drifting camera happens to be. It is centred with
-## the column and falls away to nothing at both edges, leaving the hall
-## itself clear on either side of the menu.
-const SCRIM_INK := Color(0.03, 0.03, 0.04, 0.82)
-## Where the wash is at full strength (0 = left edge, 1 = right edge). The
-## band is symmetric about the middle, so these are mirrored.
-const SCRIM_CORE := 0.30
+## **Nothing is washed over the hall.** There used to be a scrim here — a
+## dark gradient band, opaque across the middle of the screen and falling to
+## clear at both edges — on the argument that text over a photograph needs a
+## backing. The owner looked at it and did not want it ("get rid of the dark
+## haze/shadowy effect behind the menu text"), which is decisive, and the
+## rendered frame agrees: it read as a shadow lying on the picture, and it
+## dimmed the one thing the screen exists to show. The contrast it was
+## buying is bought instead by the text carrying its own edge — the wordmark
+## and the strap get a heavier outline (`TITLE_OUTLINE`, `STRAP_OUTLINE`)
+## than anything inside a plate needs — and by the menu plate below being a
+## near-opaque plate in its own right (`PLATE_BG`).
+
 ## **Every size here is measured in `main.gd`'s `UI_SCALE`**, read from that
 ## script rather than repeated, so the menu and the HUD cannot drift apart
 ## (the menu was written alongside the 2026-09-09 UI-scale pass and
@@ -106,6 +109,14 @@ var UI_SCALE: float = MainScript.UI_SCALE
 ## and standing it off to one side to protect the composition behind it puts
 ## the decoration first. The backdrop was reframed around that instead.
 var COLUMN_MARGIN: float = 86.0 * UI_SCALE
+
+## Outline sizes for the labels that stand on the hall itself rather than on
+## a plate — the wordmark, and the tagline/splash row under it. Both are
+## deliberately heavier than any outline inside a plate: with the scrim gone
+## this is the only contrast they have, and the camera drifts a lit skylight
+## and a dark plinth behind them in turn.
+var TITLE_OUTLINE: int = int(round(14.0 * UI_SCALE))
+var STRAP_OUTLINE: int = int(round(8.0 * UI_SCALE))
 
 ## The same 15px design base `main.gd`'s `UI_FONT_BASE` uses; every font
 ## size here is an offset from it, scaled — `main.gd`'s `_ui_font` rule.
@@ -175,6 +186,11 @@ func _ready() -> void:
 	if _root_box != null:
 		_refresh_saves()
 		return
+	# The main menu is unconditionally a cursor screen — three buttons and a
+	# save list — so it asserts a visible cursor rather than trusting
+	# whatever mode the previous scene left behind (#22: quitting to the
+	# menu from first-person used to leave the mouse captured).
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_build_backdrop()
 	_build_panel()
@@ -199,32 +215,9 @@ func _build_backdrop() -> void:
 	_title_scene = TitleScene.new()
 	add_child(_title_scene)
 
-	# A dark wash from the left edge, fading out before the middle of the
-	# screen. Without it the wordmark sits over whatever the drifting camera
-	# is pointing at — a lit skylight one minute, a dark plinth the next —
-	# and an outline alone cannot hold text against both.
-	var clear := Color(SCRIM_INK.r, SCRIM_INK.g, SCRIM_INK.b, 0.0)
-	var gradient := Gradient.new()
-	# Four stops: clear at both edges, full across the middle where the
-	# column stands. `Gradient` starts with two, so the inner pair is added.
-	gradient.set_color(0, clear)
-	gradient.set_color(1, clear)
-	gradient.add_point(SCRIM_CORE, SCRIM_INK)
-	gradient.add_point(1.0 - SCRIM_CORE, SCRIM_INK)
-	var texture := GradientTexture2D.new()
-	texture.gradient = gradient
-	texture.width = 256
-	texture.height = 1
-	texture.fill_from = Vector2(0.0, 0.0)
-	texture.fill_to = Vector2(1.0, 0.0)
-
-	var scrim := TextureRect.new()
-	scrim.name = "Scrim"
-	scrim.texture = texture
-	scrim.stretch_mode = TextureRect.STRETCH_SCALE
-	scrim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	scrim.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(scrim)
+	# And nothing over it. The hall is the screen; the text carries its own
+	# contrast in its outline — see the note on the scrim that used to be
+	# here, above `TITLE_OUTLINE`.
 
 
 func _build_panel() -> void:
@@ -321,10 +314,9 @@ func _build_wordmark(column: VBoxContainer) -> void:
 	var title := Label.new()
 	title.name = "Title"
 	# A heavier outline than anything else in the game: this text stands over
-	# a lit 3D frame, not over a plate, and the scrim behind it is a wash
-	# rather than a background.
-	title.label_settings = _settings(TITLE_FONT_SIZE, HAZARD, _i(9))
-	title.text = "SAUCE FACTORY"
+	# a lit 3D frame with nothing behind it at all.
+	title.label_settings = _settings(TITLE_FONT_SIZE, HAZARD, TITLE_OUTLINE)
+	title.text = "CONDIMENTAL"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(title)
 
@@ -339,7 +331,7 @@ func _build_wordmark(column: VBoxContainer) -> void:
 
 	var subtitle := Label.new()
 	subtitle.name = "Subtitle"
-	subtitle.label_settings = _settings(SUBTITLE_FONT_SIZE, INK, _i(5))
+	subtitle.label_settings = _settings(SUBTITLE_FONT_SIZE, INK, STRAP_OUTLINE)
 	subtitle.text = "condiment production, automated"
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	subtitle.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -359,7 +351,7 @@ func _build_wordmark(column: VBoxContainer) -> void:
 
 	_splash_label = Label.new()
 	_splash_label.name = "SplashText"
-	_splash_label.label_settings = _settings(SPLASH_FONT_SIZE, SPLASH_INK, _i(5))
+	_splash_label.label_settings = _settings(SPLASH_FONT_SIZE, SPLASH_INK, STRAP_OUTLINE)
 	_splash_label.text = _splash_line()
 	_splash_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_splash_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER

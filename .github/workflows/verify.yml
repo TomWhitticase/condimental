@@ -1,0 +1,99 @@
+name: Headless verify (Godot)
+
+# scripts/verify-core-loop.sh in full: cargo tests, `cargo xtask`, two Godot
+# import passes and ~30 headless Godot scripts, each grepped for its own
+# success marker (docs/WORKFLOW.md, "Verification"). It is THE gate — and it
+# takes minutes, needs a 100MB Godot download, and has never been run on
+# Linux, only on the macOS machines this project is developed on.
+#
+# So it is not on the pull-request path by default. It runs:
+#   - nightly, so a Linux-only break is found within a day;
+#   - on demand (Actions -> Run workflow);
+#   - on a pull request labelled `full-verify`, which is how you ask for it
+#     on a change that deserves it — anything touching the wire format,
+#     godot_project/, xtask or the data files.
+#
+# Once this has been green on a few branches, promote it: add a plain
+# `pull_request:` trigger and make it a required check. Until then a red run
+# here means "look at it", not "the branch is broken".
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 03:00 UTC daily. Nothing depends on the time; it is just off-peak.
+    - cron: '0 3 * * *'
+  pull_request:
+    types: [labeled, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    name: verify-core-loop.sh
+    # `labeled` fires for every label, and `synchronize` for every push to a
+    # labelled PR — both are filtered down to "the PR carries full-verify".
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'full-verify')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # The Godot version is read from project.godot rather than pinned here,
+      # so a project upgrade cannot leave CI testing the old engine.
+      - name: Work out which Godot this project wants
+        id: godot
+        run: |
+          version=$(sed -n 's/^config\/features=PackedStringArray("\([0-9.]*\)".*/\1/p' godot_project/project.godot)
+          if [ -z "$version" ]; then
+            echo "::error::could not read config/features out of godot_project/project.godot"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Godot $version"
+
+      - name: Cache the Godot binary
+        id: godot-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/godot-bin
+          key: godot-${{ steps.godot.outputs.version }}-stable-linux-x86_64
+
+      - name: Download Godot
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        env:
+          V: ${{ steps.godot.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/godot-bin
+          url="https://github.com/godotengine/godot-builds/releases/download/${V}-stable/Godot_v${V}-stable_linux.x86_64.zip"
+          curl -fsSL -o /tmp/godot.zip "$url"
+          unzip -q /tmp/godot.zip -d ~/godot-bin
+          mv ~/godot-bin/Godot_v"${V}"-stable_linux.x86_64 ~/godot-bin/godot
+          chmod +x ~/godot-bin/godot
+
+      - name: godot --version
+        run: ~/godot-bin/godot --headless --version
+
+      # The script drives cargo, xtask, both import passes and every headless
+      # script itself — CI deliberately adds nothing, so that what runs here
+      # is exactly what a developer runs locally before opening a PR.
+      - name: scripts/verify-core-loop.sh
+        run: |
+          export GODOT_BIN="$HOME/godot-bin/godot"
+          scripts/verify-core-loop.sh
+
+      - name: Godot import log (on failure)
+        if: failure()
+        run: tail -n 200 /tmp/godot-import.log || true

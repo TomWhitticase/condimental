@@ -1,0 +1,77 @@
+name: Claude review
+
+# An automatic first-pass review on every pull request, against THIS
+# project's rules rather than generic style advice.
+#
+# It is deliberately a reviewer, not a gate: it posts comments and never
+# fails the run. The gates are the other workflows, which are deterministic
+# and can be argued with.
+#
+# SETUP: same secret as .github/workflows/claude.yml.
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+  id-token: write
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+    steps:
+      - name: No API key configured
+        if: env.HAS_KEY != 'true'
+        run: |
+          echo "::notice::Set the ANTHROPIC_API_KEY (or CLAUDE_CODE_OAUTH_TOKEN) repository secret to enable automatic review. Skipping."
+
+      - uses: actions/checkout@v7
+        if: env.HAS_KEY == 'true'
+        with:
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        if: env.HAS_KEY == 'true'
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # One comment, updated in place, instead of a new wall of text per
+          # push.
+          use_sticky_comment: 'true'
+          track_progress: 'true'
+          prompt: |
+            Review this pull request. Read CLAUDE.md first; it is the
+            authority, and the docs it links are where the reasoning lives.
+
+            Check, in this order, and say plainly when something is fine:
+
+            1. The rules that always apply (CLAUDE.md). Gameplay logic in
+               GDScript instead of Rust; recipes, prices, machines or
+               contracts hardcoded in Rust instead of data/*.ron; f32/f64 in
+               shared simulation state instead of Fx/Money; a deviation from
+               a design doc that was not discussed.
+            2. Determinism. Iteration over a HashMap/HashSet in tick order,
+               time or randomness that is not seeded from the simulation,
+               anything that makes two runs of the same save differ.
+            3. Correctness of the diff itself: the bug a reader would find in
+               review, not a style preference.
+            4. The workflow rules in docs/WORKFLOW.md: a screenshot embedded
+               in the body, a DEVLOG entry when the change deserves one, and
+               `Closes #N` for the issues it settles.
+
+            Be specific and cite file:line. Do not restate the diff. If the
+            change is small and correct, say so in two lines — a review
+            nobody reads is worse than none. Do not approve or request
+            changes formally; leave the human the call.
+          claude_args: '--max-turns 20'

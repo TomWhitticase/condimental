@@ -61,10 +61,22 @@ impl StatWindow {
 /// hour. Factorio's 10h and 50h are dropped — no session here is that long
 /// — and "all time" is the pair of lifetime totals, not a window.
 pub const STAT_WINDOWS: [StatWindow; 4] = [
-    StatWindow { id: "5s", ticks: 150 },
-    StatWindow { id: "1m", ticks: 1_800 },
-    StatWindow { id: "10m", ticks: 18_000 },
-    StatWindow { id: "1h", ticks: 108_000 },
+    StatWindow {
+        id: "5s",
+        ticks: 150,
+    },
+    StatWindow {
+        id: "1m",
+        ticks: 1_800,
+    },
+    StatWindow {
+        id: "10m",
+        ticks: 18_000,
+    },
+    StatWindow {
+        id: "1h",
+        ticks: 108_000,
+    },
 ];
 
 /// How many windows there are — the length of every per-window array.
@@ -294,8 +306,16 @@ impl ProductionLedger {
                 .map(|(id, stats)| ItemStatsSnapshot {
                     id: id.clone(),
                     kind: stats.kind,
-                    produced: stats.produced.iter().map(|ring| ring.iter().sum()).collect(),
-                    consumed: stats.consumed.iter().map(|ring| ring.iter().sum()).collect(),
+                    produced: stats
+                        .produced
+                        .iter()
+                        .map(|ring| ring.iter().sum())
+                        .collect(),
+                    consumed: stats
+                        .consumed
+                        .iter()
+                        .map(|ring| ring.iter().sum())
+                        .collect(),
                     produced_total: stats.produced_total,
                     consumed_total: stats.consumed_total,
                 })

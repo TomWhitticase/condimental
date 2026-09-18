@@ -64,11 +64,7 @@ fn buying_an_ingredient_debits_the_one_money_counter_and_credits_stock() {
          payout credits and an equipment purchase debits"
     );
     assert_eq!(world.owned_ingredient("tomato"), 20);
-    assert_eq!(
-        world.owned_ingredient("sugar"),
-        0,
-        "and nothing else moved"
-    );
+    assert_eq!(world.owned_ingredient("sugar"), 0, "and nothing else moved");
 }
 
 /// Every refusal `BuyIngredient` documents, each checked to leave the world
@@ -117,7 +113,11 @@ fn a_refused_ingredient_purchase_is_a_total_no_op() {
 #[test]
 fn an_unstocked_factory_can_be_filled_with_nothing_and_produces_nothing() {
     let mut world = reference_chain(recipes());
-    assert_eq!(world.money(), Money::ZERO, "the fixture spent its whole bill");
+    assert_eq!(
+        world.money(),
+        Money::ZERO,
+        "the fixture spent its whole bill"
+    );
 
     for _ in 0..2_000 {
         world.issue_command(PlayerCommand::FillHopper {
@@ -387,7 +387,11 @@ fn ingredient_stock_and_equipment_inventory_are_separate_ledgers() {
     let placements = world.placement_count();
 
     common::buy(&mut world, "tomato", 10);
-    assert_eq!(world.owned_count("tomato"), 0, "an item id is not a buildable kind");
+    assert_eq!(
+        world.owned_count("tomato"),
+        0,
+        "an item id is not a buildable kind"
+    );
     assert_eq!(world.placement_count(), placements, "buying places nothing");
 
     world.issue_command(PlayerCommand::Purchase {
@@ -400,5 +404,9 @@ fn ingredient_stock_and_equipment_inventory_are_separate_ledgers() {
         0,
         "a buildable kind is not an ingredient"
     );
-    assert_eq!(world.owned_ingredient("tomato"), 10, "and stock is untouched");
+    assert_eq!(
+        world.owned_ingredient("tomato"),
+        10,
+        "and stock is untouched"
+    );
 }

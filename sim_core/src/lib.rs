@@ -13,10 +13,10 @@ use godot::prelude::*;
 
 use sim::{RecipeRegistry, World, decode_chunk_id, encode_chunk_id};
 
-struct SauceFactoryExtension;
+struct CondimentalExtension;
 
 #[gdextension]
-unsafe impl ExtensionLibrary for SauceFactoryExtension {}
+unsafe impl ExtensionLibrary for CondimentalExtension {}
 
 /// The bundled recipe content (ARCHITECTURE.md §3.6) — `data/recipes.ron`
 /// is the single source of truth; embedding it at compile time keeps

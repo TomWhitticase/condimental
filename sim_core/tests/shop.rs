@@ -32,8 +32,8 @@ mod common;
 
 use sim_core::sim::types::Money;
 use sim_core::sim::{
-    MachineRegistry, PlayerCommand, RecipeRegistry, ShopCatalog, World,
-    command_from_json, reference_chain, reference_chain_with_budget,
+    MachineRegistry, PlayerCommand, RecipeRegistry, ShopCatalog, World, command_from_json,
+    reference_chain, reference_chain_with_budget,
 };
 
 fn recipes() -> RecipeRegistry {
@@ -332,7 +332,10 @@ fn shop_snapshot_json_has_the_documented_shape() {
             vec!["affordable", "crew", "kind", "owned", "price"],
             "each entry has exactly these five fields (`crew` since the staff pools MVP epic)"
         );
-        assert!(entry["crew"].is_array(), "crew is the kind's staff list, empty for a tile");
+        assert!(
+            entry["crew"].is_array(),
+            "crew is the kind's staff list, empty for a tile"
+        );
         assert!(entry["kind"].is_string());
         assert!(
             entry["price"].as_f64().unwrap() >= 1.0,
@@ -429,7 +432,11 @@ fn a_reference_chain_world_owns_nothing_and_has_spent_everything() {
 #[test]
 fn a_fresh_world_is_empty_and_holds_only_starting_money() {
     let world = World::new(recipes());
-    assert_eq!(world.placement_count(), 0, "a new game starts with a bare floor");
+    assert_eq!(
+        world.placement_count(),
+        0,
+        "a new game starts with a bare floor"
+    );
     assert!(world.all_chunks().is_empty());
     assert_eq!(
         world.money(),
@@ -501,4 +508,3 @@ fn starting_money_covers_the_reference_chain_with_room_to_spare() {
 fn starting_money_is_the_documented_value() {
     assert_eq!(sim_core::sim::STARTING_MONEY, 3000);
 }
-

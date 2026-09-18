@@ -123,10 +123,8 @@ fn chain_on(kinds: &[&str]) -> RecipeRegistry {
             next = i + 1
         ));
     }
-    RecipeRegistry::from_ron_str(&format!(
-        "( schema_version: 3, recipes: [{recipes}] )"
-    ))
-    .expect("generated recipe text must parse")
+    RecipeRegistry::from_ron_str(&format!("( schema_version: 3, recipes: [{recipes}] )"))
+        .expect("generated recipe text must parse")
 }
 
 /// A registry of `(id, width, height)` kinds, plus the three 1x1 kinds every
@@ -500,7 +498,11 @@ fn the_pipe_run_clears_a_tall_fluid_fed_machine_instead_of_overlapping_it() {
     .unwrap();
     // The vat is 2x3: it occupies rows 0, 1 and 2, so the pipe run has to
     // rise to row 3 to stay adjacent-but-not-overlapping.
-    let world = reference_chain_with(recipes, kinds(&[("bottler", 1, 1), ("cooking_vat", 2, 3)]), ContractRegistry::bundled());
+    let world = reference_chain_with(
+        recipes,
+        kinds(&[("bottler", 1, 1), ("cooking_vat", 2, 3)]),
+        ContractRegistry::bundled(),
+    );
     let fluid = the_network(&world).expect("this chain has a pipe run");
     assert_eq!(fluid.taps[0].machine_tile, (9, 0));
     assert_eq!(
@@ -553,8 +555,8 @@ fn a_machine_straddling_a_chunk_boundary_appears_in_both_chunks() {
     for chunk in [(0, 0), (1, 0)] {
         let snapshot = world.chunk_snapshot(chunk);
         let found = snapshot.machines.iter().find(|m| m.kind == "cooking_vat");
-        let found = found
-            .unwrap_or_else(|| panic!("chunk {chunk:?} must report the straddling machine"));
+        let found =
+            found.unwrap_or_else(|| panic!("chunk {chunk:?} must report the straddling machine"));
         // Identical in both, including an origin tile that is outside chunk
         // (1, 0) — the documented de-duplication contract.
         assert_eq!(found.tile, (24, 0));
@@ -605,7 +607,10 @@ fn a_change_to_a_straddling_machine_dirties_both_of_its_chunks() {
         item: "tomato".to_string(),
         quantity: 4,
     });
-    world.issue_command(PlayerCommand::FillHopper { amount: 4, tile: None });
+    world.issue_command(PlayerCommand::FillHopper {
+        amount: 4,
+        tile: None,
+    });
 
     let mut seen: HashSet<(i32, i32)> = HashSet::new();
     for _ in 0..400 {

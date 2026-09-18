@@ -633,6 +633,18 @@ const ITEM_MODELS := {
 	"ketchup": "item_ketchup_pail",
 	"bottled_ketchup": "item_bottle",
 	"boxed_ketchup": "item_box",
+	# The second sauce (`docs/BBQ_SAUCE_PLAN.md`). Separate item ids on the
+	# same bottler and packer, so separate models: a belt carrying BBQ has to
+	# be tellable from a belt carrying ketchup at a glance, and the fallback
+	# below would make every crate of either the same cardboard box.
+	#
+	# **These two keys are mapped BEFORE the items exist.** The epic's ticket
+	# 2 adds them to `data/recipes.ron`; until it lands nothing produces
+	# either and both entries are simply unreachable, exactly like
+	# `ketchup_mix` above. That is the safe order — the doc above records
+	# what the other one costs.
+	"bottled_bbq": "item_bottle_bbq",
+	"boxed_bbq": "item_box_bbq",
 }
 const ITEM_MODEL_FALLBACK := "item_box"
 
@@ -1731,7 +1743,7 @@ func _apply_pending_session() -> void:
 	# is a note where two are noise.
 	if not _printed_saves_dir:
 		_printed_saves_dir = true
-		print("Sauce Factory saves: %s" % GameSaves.resolved_saves_dir())
+		print("CONDIMENTAL saves: %s" % GameSaves.resolved_saves_dir())
 	var session := _session()
 	if session == null or String(session.pending_action) != "load":
 		sim.new_game()
@@ -1741,7 +1753,7 @@ func _apply_pending_session() -> void:
 	var text: String = GameSaves.read_save(path)
 	var refusal: String = sim.load_ron(text) if text != "" else "could not read %s" % path
 	if refusal != "":
-		printerr("Sauce Factory: could not load %s — %s" % [path, refusal])
+		printerr("CONDIMENTAL: could not load %s — %s" % [path, refusal])
 		sim.new_game()
 		_save_slot = DEFAULT_SLOT
 		return
@@ -11400,7 +11412,7 @@ func _autosave(reason := "") -> void:
 		GameSaves.AUTOSAVE_SLOT, String(sim.save_ron()), true
 	)
 	if error != "":
-		printerr("Sauce Factory: autosave failed — %s" % error)
+		printerr("CONDIMENTAL: autosave failed — %s" % error)
 		return
 	if reason == "timer":
 		_show_hotbar_flyout("Autosaved")

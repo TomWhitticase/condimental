@@ -82,8 +82,9 @@ pub type TileCoord = (i32, i32);
 /// is fed from that side. See [`super::machines`]'s module doc for the
 /// footprint half of that convention (which edge of a rotated rectangle
 /// counts as the inlet and which as the outlet).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
     North,
@@ -217,10 +218,7 @@ mod tests {
 
     #[test]
     fn a_direction_serializes_as_its_lowercase_name() {
-        assert_eq!(
-            serde_json::to_string(&Direction::East).unwrap(),
-            "\"east\""
-        );
+        assert_eq!(serde_json::to_string(&Direction::East).unwrap(), "\"east\"");
         assert_eq!(
             serde_json::from_str::<Direction>("\"south\"").unwrap(),
             Direction::South

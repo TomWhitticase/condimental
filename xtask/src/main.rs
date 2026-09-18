@@ -179,12 +179,18 @@ fn copy_voxel_models(root: &Path) {
         }
         let name = path.file_name().expect("directory entry must have a name");
         fs::copy(&path, dest_dir.join(name)).unwrap_or_else(|e| {
-            panic!("xtask: failed to copy {} into godot_project/voxels: {e}", path.display())
+            panic!(
+                "xtask: failed to copy {} into godot_project/voxels: {e}",
+                path.display()
+            )
         });
         copied += 1;
     }
 
-    println!("xtask: staged {copied} voxel asset files -> {}", dest_dir.display());
+    println!(
+        "xtask: staged {copied} voxel asset files -> {}",
+        dest_dir.display()
+    );
 }
 
 /// Mirrors `assets/voxels/icons/` into `godot_project/voxels/icons/` — same
@@ -238,5 +244,8 @@ fn copy_voxel_icons(root: &Path) {
         copied += 1;
     }
 
-    println!("xtask: staged {copied} icon files -> {}", dest_dir.display());
+    println!(
+        "xtask: staged {copied} icon files -> {}",
+        dest_dir.display()
+    );
 }
