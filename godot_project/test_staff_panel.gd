@@ -55,7 +55,11 @@
 #   * the build-menu card shows a machine's crew and its cost per period
 #     under the price, and nothing for a belt,
 #   * the panel polls on the tick at LOAD_POLL_TICKS, the pause menu
-#     freezes it, and a rebuild reads the wire before the first frame.
+#     freezes it, and a rebuild reads the wire before the first frame,
+#   * all four category rows fit the panel's scroll at 1600x900 (issue #7),
+#     each showing exactly one of its five sentences with the rest on the
+#     row's hover, the bar captioned on its own line, and the shortfall and
+#     the working figure never sharing the slot after the bar.
 extends SceneTree
 
 const Layouts = preload("res://test_layouts.gd")
@@ -284,7 +288,7 @@ func _run_checks() -> void:
 	}
 	var blocked_text: String = main._staff_hire_blocked_text(
 		{"id": "manufacturing", "wage": 2, "can_hire": false}, blocked_snapshot)
-	for needle in ["cannot hire", "8 in hand", "%d" % main._staff_next_bill(blocked_snapshot), "2 for the new head"]:
+	for needle in ["cannot hire", "8 in hand", "%d due" % main._staff_next_bill(blocked_snapshot), "2 / period"]:
 		if blocked_text.find(needle) < 0:
 			_fail("a blocked HIRE says WHY in words ('%s'), got '%s'" % [needle, blocked_text])
 	if blocked_text.find("✗") != 0:
@@ -952,6 +956,74 @@ func _run_checks() -> void:
 	main._rebuild_world()
 	if int(main._staff_snapshot["categories"][2]["headcount"]) != int(_category("packaging").get("headcount", 0)):
 		_fail("after a load, before any tick, the panel reads the saved crew")
+
+	# --- 11. four rows at once at 1600x900, one sentence each (issue #7) -----
+	# The panel's whole job is comparison BETWEEN categories, so the four have
+	# to be on screen together at the smallest size UI_UX.md §5c designs for.
+	# They were not: seven stacked elements made a row 147px tall, the scroll
+	# caps at 400px there, and the fourth category sat below the cut.
+	main.sim.new_game()
+	Layouts.build_understaffed_line(main.sim)
+	main._rebuild_world()
+	main._set_staff_open(true)
+	root.size = Vector2i(1600, 900)
+	main._position_hotbar()
+	main._position_crew_panel()
+	main._update_contract_panel()
+	main._position_stock_panel()
+	main._update_staff_panel()
+	if main._staff_rows.size() != 4:
+		_fail("the wire's four categories are four rows, got %d" % main._staff_rows.size())
+	var scroll_cap: float = main._staff_scroll.custom_minimum_size.y
+	var rows_height := 0.0
+	var row_separation := float(main._staff_rows_box.get_theme_constant("separation"))
+	for row in main._staff_rows:
+		if rows_height > 0.0:
+			rows_height += row_separation
+		rows_height += (row["panel"] as Control).get_combined_minimum_size().y
+	if rows_height > scroll_cap + 0.5:
+		_fail("all four rows must fit the scroll at 1600x900: %.1f of rows, %.1f of cap" % [
+			rows_height, scroll_cap,
+		])
+	# The height came off the row by ranking its five sentences, not by
+	# shrinking the type: exactly one of them shows, and the rest are the
+	# row's hover, so nothing a row used to print is actually gone from it.
+	for row in main._staff_rows:
+		var in_slot: Array = []
+		for key in main.STAFF_SENTENCE_ORDER:
+			if (row[key] as Control).visible:
+				in_slot.append(key)
+		if in_slot.size() > 1:
+			_fail("row %s shows %d sentences at once (%s); the slot holds one" % [
+				row["id"], in_slot.size(), ", ".join(PackedStringArray(in_slot)),
+			])
+		var tooltip := String((row["panel"] as Control).tooltip_text)
+		for key in main.STAFF_SENTENCE_ORDER:
+			var text := String(row[key].text)
+			if text == "" or in_slot.has(key):
+				continue
+			if tooltip.find(text) < 0:
+				_fail("row %s drops '%s' instead of moving it to the hover" % [row["id"], text])
+	# A short row leads with what hiring would unblock, not with its blurb.
+	var ranked := _row("manufacturing")
+	if not ranked["unblock_label"].visible:
+		_fail("a short row's sentence is what hiring it would unblock, got '%s'" % [
+			ranked["blurb_label"].text if ranked["blurb_label"].visible else "nothing",
+		])
+	if ranked["blurb_label"].visible:
+		_fail("the blurb yields the slot to the row's own news")
+	# And the bar keeps its caption beside it rather than on a line of its own.
+	if not ranked["meter_caption"].visible or ranked["meter_caption"].get_parent() != ranked["meter_row"]:
+		_fail("the meter's caption reads as its label, on the bar's own line")
+	if ranked["meter"].get_parent() != ranked["meter_row"]:
+		_fail("the bar and its caption share a line")
+	# The shortfall and the per-tick working figure never share that line:
+	# one is an instruction, the other a flow figure that moves under it.
+	if ranked["short_label"].visible and ranked["working_label"].visible:
+		_fail("'%s' and '%s' are both in the slot after the bar" % [
+			ranked["short_label"].text, ranked["working_label"].text,
+		])
+	main._set_staff_open(false)
 
 	if _failed:
 		quit(1)

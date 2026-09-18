@@ -5226,7 +5226,19 @@ func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float, 
 	# to go at all. Past that the list is cut wherever it falls, ragged, and
 	# that is the right answer — a panel drawn ON another panel is a worse
 	# fault than a card cut through a line (issue #13).
-	cap = minf(cap, maxf(0.0, hard_available - chrome))
+	var hard_cap: float = maxf(0.0, hard_available - chrome)
+	if snap_rows and hard_cap < cap:
+		# The hard limit has cut BELOW the last whole row, so `snap_rows`
+		# above has already been overruled and the list would be cut wherever
+		# the column ran out — through the middle of a checklist line, which
+		# reads as a rendering fault (issue #17). The panel cannot grow and it
+		# cannot overlap what is under it, so the cut stays where the column
+		# put it and moves UP to the nearest line boundary inside the card it
+		# falls in: still "as much as fits", now ending on an edge a reader
+		# can see was meant.
+		cap = _line_boundary_height(grid, hard_cap)
+	else:
+		cap = minf(cap, hard_cap)
 	scroll.custom_minimum_size.y = minf(natural, cap)
 
 
@@ -5269,6 +5281,90 @@ func _whole_rows_height(box: Control, cap: float) -> float:
 		fitted = used
 		rows += 1
 	return cap if rows == 0 else fitted
+
+
+## The tallest height not greater than `cap` that ends on a line boundary —
+## between two rows of `box` where it can, and otherwise between two LINES
+## of the row the cut falls inside. `_whole_rows_height`'s finer-grained
+## sibling, for the case where the column is too short for even that: it has
+## no floor and it never grows the cut, because the only reason it is called
+## is that a hard limit (another panel's top edge) already refused one.
+##
+## "Lines" are the row's own top-level children — a docket's header, each
+## checklist line, its status, its strikes, its countdown — measured through
+## the card's content margin the way `_whole_rows_height` measures through
+## the box's separation. Nothing here knows what a docket IS; a card that
+## grows a line gets the new boundary for free.
+##
+## Returns `cap` unchanged when not one whole line fits: a clipboard with no
+## docket at all in it has lost the "there is more below" cue as well as the
+## docket, which is worse than the ragged edge. That is the half of issue #17
+## a 1280x720 column cannot pay for.
+func _line_boundary_height(box: Control, cap: float) -> float:
+	if box == null or cap <= 0.0:
+		return maxf(cap, 0.0)
+	var separation: float = 0.0
+	if box is BoxContainer:
+		separation = float(box.get_theme_constant("separation"))
+	var used: float = 0.0
+	var boundary: float = 0.0
+	var rows: int = 0
+	for child in box.get_children():
+		var row := child as Control
+		if row == null or not row.visible:
+			continue
+		if rows > 0:
+			used += separation
+		var row_top: float = used
+		used += row.get_combined_minimum_size().y
+		if used > cap:
+			var inner: float = _row_line_boundary(row, cap - row_top)
+			if inner > 0.0:
+				return row_top + inner
+			return boundary if boundary > 0.0 else cap
+		boundary = used
+		rows += 1
+	return cap if rows == 0 else boundary
+
+
+## The tallest height not greater than `cap`, measured from `row`'s top, that
+## ends under a whole one of its lines. 0.0 when not one line fits.
+##
+## The row's content margin counts: a cut at the top line's baseline with the
+## card's padding left out would end a pixel above the text it is keeping.
+func _row_line_boundary(row: Control, cap: float) -> float:
+	if row == null or cap <= 0.0:
+		return 0.0
+	var body: Control = null
+	for child in row.get_children():
+		var control := child as Control
+		if control != null and control.visible:
+			body = control
+			break
+	if body == null:
+		return 0.0
+	var used: float = 0.0
+	if row is PanelContainer:
+		var style: StyleBox = (row as PanelContainer).get_theme_stylebox("panel")
+		if style != null:
+			used = style.get_margin(SIDE_TOP)
+	var separation: float = 0.0
+	if body is BoxContainer:
+		separation = float(body.get_theme_constant("separation"))
+	var boundary: float = 0.0
+	var lines: int = 0
+	for child in body.get_children():
+		var line := child as Control
+		if line == null or not line.visible:
+			continue
+		if lines > 0:
+			used += separation
+		used += line.get_combined_minimum_size().y
+		if used > cap:
+			break
+		boundary = used
+		lines += 1
+	return boundary
 
 
 ## One icon slot. A Button rather than a Panel so pressing it is the whole
@@ -6585,15 +6681,25 @@ func _staff_row_style(short: bool = false) -> StyleBoxFlat:
 	return _staff_row_styles[short]
 
 
-## One category: ticket 2's icon, the name, `hired N` and the wage under it,
-## the assigned/demand meter with both numbers printed ON it and the
-## shortfall in words beside it, HIRE / FIRE, and — below the row — a static
-## blurb of what the category does and the dynamic WHY line naming what asks
-## for it (ticket 4). Returns `{"id", "panel", "name_label", "hired_label",
-## "wage_label", "meter", "meter_label", "short_label", "note_label",
-## "status_label", "blurb_label", "demand_label", "working_label",
-## "hire_button",
-## "fire_button"}` for `_update_staff_panel` to drive.
+## One category, TWO LINES TALL and no more (issue #7): ticket 2's icon, the
+## name and its verdict chip, `hired N` and the wage under it, the
+## hired/asked-for meter with both numbers printed ON it, what the row is
+## doing or what to do about it beside the bar, HIRE / FIRE, and — under the
+## bar — the row's ONE sentence (`_staff_row_sentence`).
+##
+## The row used to stack seven things: the four above plus the category blurb,
+## the `asked for by:` WHY line, the working count, and — when the money ran
+## out — the hire-refusal reason, each on a full-width line of its own. At
+## 147px a row, two and a half of the four categories fitted the panel at
+## 1600x900, and the panel's whole job is comparing categories (issue #7). The
+## height is spent where the comparison happens; everything else earns its
+## place by sharing a line or by taking its turn in the one sentence slot.
+##
+## Returns `{"id", "panel", "name_label", "hired_label",
+## "wage_label", "meter", "meter_caption", "meter_row", "meter_label",
+## "short_label", "note_label", "status_label", "blurb_label", "demand_label",
+## "working_label", "hire_button", "fire_button"}` for `_update_staff_panel`
+## to drive.
 func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	var id := String(category.get("id", "?"))
 	var panel := PanelContainer.new()
@@ -6601,14 +6707,10 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	panel.add_theme_stylebox_override("panel", _staff_row_style())
 	_staff_rows_box.add_child(panel)
 
-	var row_wrap := VBoxContainer.new()
-	row_wrap.name = "RowWrap"
-	row_wrap.add_theme_constant_override("separation", _ui_i(2))
-	panel.add_child(row_wrap)
-
 	var row := HBoxContainer.new()
+	row.name = "Row"
 	row.add_theme_constant_override("separation", _ui_i(14))
-	row_wrap.add_child(row)
+	panel.add_child(row)
 
 	var icon := TextureRect.new()
 	icon.name = "Icon"
@@ -6668,27 +6770,37 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	wage_label.label_settings = _staff_meta_settings()
 	meta_row.add_child(wage_label)
 
-	# The meter column: assigned / demand as a bar with the two numbers on
-	# it (position AND digits, UI_UX.md §7), the shortfall in words under
-	# it, or — for a category with nothing hired and nothing asking — a
-	# sentence in the meter's place.
+	# The meter column: the bar with hired over asked-for printed ON it
+	# (position AND digits, UI_UX.md §7), its caption beside it the way the
+	# clipboard's ON THE DOCK line captions its own bar, what the row is doing
+	# or what to do about it in the slot after it, and — under all of that —
+	# the row's one sentence. A category with nothing hired and nothing asking
+	# shows a sentence in the bar's place instead.
 	var meter_col := VBoxContainer.new()
+	meter_col.name = "MeterColumn"
 	meter_col.add_theme_constant_override("separation", _ui_i(3))
 	meter_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	meter_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(meter_col)
 
+	# The bar, its caption and the slot after it, all on ONE line. The caption
+	# was a line of its own above the bar and cost four lines across the four
+	# rows to say the same four words; beside the bar it costs none and reads
+	# as its label (issue #7).
+	var meter_row := HBoxContainer.new()
+	meter_row.name = "MeterRow"
+	meter_row.add_theme_constant_override("separation", _ui_i(10))
+	meter_col.add_child(meter_row)
+
 	var meter_caption := Label.new()
 	meter_caption.name = "MeterCaption"
 	meter_caption.label_settings = _staff_meta_settings()
-	meter_caption.text = "assigned / asked for"
-	meter_col.add_child(meter_caption)
-
-	# The bar and its shortfall side by side, so "2 short" sits where the
-	# missing part of the bar would be.
-	var meter_row := HBoxContainer.new()
-	meter_row.add_theme_constant_override("separation", _ui_i(10))
-	meter_col.add_child(meter_row)
+	# What the two numbers on the bar ARE: the wire's headcount over the
+	# establishment the placed machinery asks for, which is what `meter_text`
+	# prints.
+	meter_caption.text = "hired / asked for"
+	meter_caption.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	meter_row.add_child(meter_caption)
 
 	var meter := _build_meter(meter_row, STAFF_METER_WIDTH, METER_FILL_LEVEL,
 		METER_TRACK_COLOR, METER_BORDER_COLOR, STAFF_METER_HEIGHT)
@@ -6704,25 +6816,32 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	meter_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	meter.add_child(meter_label)
 
+	# The slot after the bar carries ONE of two facts, never both: the
+	# shortfall in words while the row is short, and — when there is nothing
+	# to do about it — the per-tick working count that used to have a line of
+	# its own. "What to do" outranks "what it is doing".
 	var short_label := Label.new()
 	short_label.name = "Short"
 	short_label.label_settings = _staff_warn_settings()
 	short_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	meter_row.add_child(short_label)
 
+	# "3 of 4 working right now" — the per-tick activity figure, kept as a
+	# quiet sub-line. It is deliberately NOT the row's headline: it moves
+	# with production flow, and reading a hiring decision off it was the bug
+	# the establishment fixed (`_staff_working_text`).
+	var working_label := Label.new()
+	working_label.name = "Working"
+	working_label.label_settings = _staff_meta_settings()
+	working_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	working_label.visible = false
+	meter_row.add_child(working_label)
+
 	var note_label := Label.new()
 	note_label.name = "Note"
 	note_label.label_settings = _staff_meta_settings()
 	note_label.visible = false
 	meter_col.add_child(note_label)
-
-	# The AFTER-payday indicator (ticket 4): unpaid/left, in the same warning
-	# colour the shortfall label uses, hidden when neither happened.
-	var status_label := Label.new()
-	status_label.name = "Status"
-	status_label.label_settings = _staff_warn_settings()
-	status_label.visible = false
-	meter_col.add_child(status_label)
 
 	# HIRE beside FIRE, the build menu's own button skin. Each moves ONE
 	# head through the real command; the panel re-reads the wire at once.
@@ -6757,42 +6876,22 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	fire_button.pressed.connect(_staff_fire.bind(index))
 	buttons.add_child(fire_button)
 
-	# What the category does — static content from `STAFF_CATEGORY_BLURBS`,
-	# set once here rather than on every `_update_staff_panel` poll, since it
-	# never changes while the row stands.
-	var blurb_label := Label.new()
-	blurb_label.name = "Blurb"
-	blurb_label.label_settings = _staff_meta_settings()
-	blurb_label.text = String(STAFF_CATEGORY_BLURBS.get(id, ""))
-	blurb_label.visible = blurb_label.text != ""
-	row_wrap.add_child(blurb_label)
+	# THE ROW'S ONE SENTENCE, under the bar: five labels in one slot, of which
+	# `_staff_row_sentence` leaves exactly one visible. Each was a permanent
+	# line of its own and four of the five say nothing most of the time, so
+	# between them they cost every row four lines to show one fact (issue #7).
+	# They are separate labels rather than one, because two of them are the
+	# row's warning ink and three are its small print, and a colour is never
+	# the whole message (UI_UX.md §7) — the words differ too.
 
-	# The WHY line: what asks for this category, from `_crews`. Dynamic
-	# (placing or removing a machine changes it), so `_update_staff_panel`
-	# fills it on every poll.
-	var demand_label := Label.new()
-	demand_label.name = "Demand"
-	demand_label.label_settings = _staff_meta_settings()
-	row_wrap.add_child(demand_label)
-
-	# "3 of 4 working right now" — the per-tick activity figure, kept as a
-	# quiet sub-line. It is deliberately NOT the row's headline: it moves
-	# with production flow, and reading a hiring decision off it was the bug
-	# the establishment fixed (`_staff_working_text`).
-	var working_label := Label.new()
-	working_label.name = "Working"
-	working_label.label_settings = _staff_meta_settings()
-	working_label.visible = false
-	row_wrap.add_child(working_label)
-
-	# What hiring this shortfall would put back to work, in the machines'
-	# own names — the staffing ticket's requirement 5, built out of the
-	# demand sources above rather than out of any new sim fact.
-	var unblock_label := Label.new()
-	unblock_label.name = "Unblock"
-	unblock_label.label_settings = _staff_warn_settings()
-	unblock_label.visible = false
-	row_wrap.add_child(unblock_label)
+	# The AFTER-payday indicator (ticket 4): unpaid/left, in the same warning
+	# colour the shortfall label uses. It outranks the rest: a head that is
+	# already idle is worse news than one that was never hired.
+	var status_label := Label.new()
+	status_label.name = "Status"
+	status_label.label_settings = _staff_warn_settings()
+	status_label.visible = false
+	meter_col.add_child(status_label)
 
 	# WHY a disabled HIRE is disabled (requirement 3): grey alone says only
 	# "not now", never "and here is what would change it".
@@ -6800,7 +6899,39 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 	blocked_label.name = "HireBlocked"
 	blocked_label.label_settings = _staff_warn_settings()
 	blocked_label.visible = false
-	row_wrap.add_child(blocked_label)
+	meter_col.add_child(blocked_label)
+
+	# What hiring this shortfall would put back to work, in the machines'
+	# own names — the staffing ticket's requirement 5, built out of the
+	# demand sources rather than out of any new sim fact. It names the same
+	# machines the WHY line does, which is why the two never both show.
+	var unblock_label := Label.new()
+	unblock_label.name = "Unblock"
+	unblock_label.label_settings = _staff_warn_settings()
+	unblock_label.visible = false
+	meter_col.add_child(unblock_label)
+
+	# The WHY line: what asks for this category, from `_crews`. Dynamic
+	# (placing or removing a machine changes it), so `_update_staff_panel`
+	# fills it on every poll.
+	var demand_label := Label.new()
+	demand_label.name = "Demand"
+	demand_label.label_settings = _staff_meta_settings()
+	demand_label.visible = false
+	meter_col.add_child(demand_label)
+
+	# What the category does — static content from `STAFF_CATEGORY_BLURBS`,
+	# set once here rather than on every `_update_staff_panel` poll, since it
+	# never changes while the row stands. It is the sentence a row shows when
+	# nothing asks for the category, which is the case UI_UX.md §5 put it
+	# there for: a category nobody has needed yet is still explained. On a row
+	# that has something more urgent to say it is the row's hover instead.
+	var blurb_label := Label.new()
+	blurb_label.name = "Blurb"
+	blurb_label.label_settings = _staff_meta_settings()
+	blurb_label.text = String(STAFF_CATEGORY_BLURBS.get(id, ""))
+	blurb_label.visible = false
+	meter_col.add_child(blurb_label)
 
 	return {
 		"id": id,
@@ -6812,6 +6943,8 @@ func _build_staff_row(category: Dictionary, index: int) -> Dictionary:
 		"hired_label": hired_label,
 		"wage_label": wage_label,
 		"meter": meter,
+		"meter_row": meter_row,
+		"meter_caption": meter_caption,
 		"meter_label": meter_label,
 		"short_label": short_label,
 		"note_label": note_label,
@@ -7057,9 +7190,7 @@ func _staff_hire_blocked_text(category: Dictionary, snapshot: Dictionary) -> Str
 	var wage := int(category.get("wage", 0))
 	var bill := _staff_next_bill(snapshot)
 	var money := int(floor(float(snapshot.get("money", 0.0))))
-	return "✗ cannot hire — %d in hand; the next payday needs %d, plus %d for the new head" % [
-		money, bill, wage,
-	]
+	return "✗ cannot hire — %d in hand, %d due, %d / period" % [money, bill, wage]
 
 
 ## What hiring this category's shortfall would actually unblock, named from
@@ -7083,6 +7214,55 @@ func _staff_hire_unblocks_text(short: int, sources: Array) -> String:
 	return "hire %d → %s all get their crew again" % [
 		short, ", ".join(PackedStringArray(names)),
 	]
+
+
+## The sentence slot's ranking, worst news first. Also the order the hover
+## lists them in, so the two readings agree.
+const STAFF_SENTENCE_ORDER := [
+	"status_label",
+	"blocked_label",
+	"unblock_label",
+	"demand_label",
+	"blurb_label",
+]
+
+
+## Leaves EXACTLY ONE of a row's five sentences visible, and hands the rest
+## to the row's hover.
+##
+## All five used to be permanent lines, and a row was as tall as the worst
+## case even in the common one: four categories at 147px did not fit the
+## panel's 400px of scroll at 1600x900, which is issue #7. They are not
+## redundant — each says something the others do not — but they are ranked,
+## and a row that shows its worst news first loses nothing by making the
+## reader hover for the rest.
+##
+## Worst-first: a head already idle after payday (`status`), then a hire that
+## cannot happen and why (`blocked`), then what clearing the shortfall would
+## unblock (`unblock`), then what asks for the category at all (`demand`),
+## and last the blurb — which is what a row with no news of its own shows,
+## and which is exactly the untouched category UI_UX.md §5 wants explained.
+##
+## Returns the key of the one left visible, "" if the row had nothing to say.
+func _staff_row_sentence(row: Dictionary) -> String:
+	var shown := ""
+	for key in STAFF_SENTENCE_ORDER:
+		var label: Label = row[key]
+		var take_slot: bool = shown == "" and label.text != ""
+		label.visible = take_slot
+		if take_slot:
+			shown = key
+	# The hover carries every sentence the slot could not, in the same order,
+	# so nothing that used to be on the row is actually gone from it.
+	var rest: Array = []
+	for key in STAFF_SENTENCE_ORDER:
+		if key == shown:
+			continue
+		var text := String(row[key].text)
+		if text != "":
+			rest.append(text)
+	row["panel"].tooltip_text = "\n".join(PackedStringArray(rest))
+	return shown
 
 
 ## The panel's verdict, under the heading, before any row is read: is this
@@ -7400,24 +7580,33 @@ func _update_staff_panel() -> void:
 		var state := _staff_row_state(categories[i])
 		row["hired_label"].text = state["hired_text"]
 		row["wage_label"].text = state["wage_text"]
+		# A category nothing has asked for has no ceiling, so it has no bar:
+		# the whole meter line gives way to the idle note, which then stands
+		# where the bar would have been rather than under an empty track.
 		var idle: bool = state["note"] != ""
 		row["note_label"].text = state["note"]
 		row["note_label"].visible = idle
+		row["meter_row"].visible = not idle
 		row["meter"].visible = not idle
-		row["meter"].get_parent().visible = not idle
-		row["meter"].get_parent().get_parent().get_node("MeterCaption").visible = not idle
 		if not idle:
 			var meter: Dictionary = state["meter"]
 			_set_meter(row["meter"], float(meter["fraction"]), meter["color"])
 			row["meter_label"].text = state["meter_text"]
-		row["short_label"].text = state["short_text"]
-		row["short_label"].visible = state["short_text"] != ""
+		# The slot after the bar: the shortfall while there is one, and the
+		# per-tick working count only when there is nothing to do about it.
+		# Both at once would put a hiring instruction and a flow figure side
+		# by side, which is the confusion the establishment fixed.
+		var short_text: String = state["short_text"]
+		var working: String = state["working_text"]
+		row["short_label"].text = short_text
+		row["short_label"].visible = short_text != ""
+		row["working_label"].text = working
+		row["working_label"].visible = working != "" and short_text == ""
 		row["fire_button"].disabled = not bool(state["fire_enabled"])
 		row["hire_button"].disabled = not bool(state["hire_enabled"])
 		row["hire_button"].text = state["hire_text"]
 		row["fire_button"].text = state["fire_text"]
 		row["status_label"].text = state["status_text"]
-		row["status_label"].visible = state["status_text"] != ""
 		# The row's own verdict chip, and the warning border that goes with
 		# it: a short row must be obvious without reading its meter.
 		var state_label: Label = row["state_label"]
@@ -7431,15 +7620,13 @@ func _update_staff_panel() -> void:
 			String(categories[i].get("id", "")), _placements, _crews
 		)
 		row["demand_label"].text = _staff_demand_text(sources)
-		var working: String = state["working_text"]
-		row["working_label"].text = working
-		row["working_label"].visible = working != ""
-		var unblock := _staff_hire_unblocks_text(int(categories[i].get("short", 0)), sources)
-		row["unblock_label"].text = unblock
-		row["unblock_label"].visible = unblock != ""
-		var blocked := _staff_hire_blocked_text(categories[i], _staff_snapshot)
-		row["blocked_label"].text = blocked
-		row["blocked_label"].visible = blocked != ""
+		row["unblock_label"].text = _staff_hire_unblocks_text(
+			int(categories[i].get("short", 0)), sources
+		)
+		row["blocked_label"].text = _staff_hire_blocked_text(categories[i], _staff_snapshot)
+		# One of those five is shown; the rest become the row's hover, so a
+		# row says one thing at a time and still carries all of them.
+		_staff_row_sentence(row)
 
 	_staff_footer_label.text = _staff_footer_text(_staff_snapshot, sim.current_tick())
 	_position_staff_panel()

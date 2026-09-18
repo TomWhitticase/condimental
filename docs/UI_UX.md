@@ -369,8 +369,21 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   at zero, HIRE disabled the moment the wire's own `can_hire` says a head
   cannot be afforded, not only after the click is refused. A category
   says so in a sentence in place of an empty bar
-  (`nothing to maintain yet`), plain-sentence company for two more lines:
-  what asks for that category, and what the category does. **WHY:**
+  (`nothing to maintain yet`). **A row is two lines, not seven**
+  (2026-09-18, issue #7): name and verdict chip over `hired 4  ·  wage 2 /
+  head / period` in one column; the bar with its `hired / asked for`
+  caption beside it — a caption on a line of its own cost four lines
+  across the four rows to say four words — and after the bar the shortfall
+  (`▲ hire 2`) while there is one, or the per-tick `2 of 4 working right
+  now` when there is not, never both: an instruction and a flow figure
+  side by side read as one number. Under the bar, **one sentence**, the
+  worst news the row has, ranked *unpaid heads > cannot hire and why >
+  what hiring would unblock > WHY > what the category does*; the rest are
+  the row's hover. Seven stacked elements made a row 147px tall, the
+  panel's scroll caps at 400px at 1600x900, and the fourth category sat
+  below the cut — in the one panel whose whole job is comparison BETWEEN
+  categories. Condensing the row is the fix; a taller panel or smaller
+  type would have been §5c's last resort taken first. **WHY:**
   `asked for by: crusher ×1, mixer ×1, cooking vat ×2` counts placements
   by kind in the order the factory first asked, or `nothing placed asks
   for staff yet` on an empty line — before this a shortfall's cause lived
@@ -686,10 +699,24 @@ the faults are: a panel drawn ON another panel; a card cut through the
 middle of a line; a list showing less than it could. So the clipboard may
 grow past what the plate reserved, taking the column back a docket at a
 time, up to the line the plate stands on once it has given up all but one
-row (`_stock_ceiling_y`) — and at that line the stack is cut wherever it
-falls, ragged, rather than either panel overlapping the other. That ragged
-cut is only reachable at 1280x720 with every contract signed; the shipped
-1600x900 window shows whole dockets and the whole plate.
+row (`_stock_ceiling_y`) — and at that line the stack is cut short of a
+whole docket rather than either panel overlapping the other.
+
+**But "cut short" still lands on an edge** (2026-09-18, issue #17): where
+the clipboard cannot keep a whole docket it keeps whole *lines* of one,
+cutting under the last header, checklist line, status, strike row or
+countdown that fits (`_line_boundary_height`). The ordering above is
+unchanged — the clamp still wins, and the cut still goes down, never up.
+It is the third rank that got sharper: "a list showing less than it could"
+now means a docket showing fewer of its own lines, not a docket sliced
+through one. The one case this cannot reach is 1280x720 with the strip
+down and a full board, where the column leaves the clipboard 12px and the
+first line boundary inside a docket is 43px: snapping there would show no
+docket at all, and a clipboard with neither a docket nor the cue that
+there are dockets is worse than the ragged edge. That case keeps the
+ragged cut, and issue #17 stays open for it — the answer there is a
+shorter docket, which is a content decision, not a layout one. The
+shipped 1600x900 window shows whole dockets and the whole plate.
 
 **The legend folds, and folding is not a modal.** Its plate gains a heading
 row — `CONTROLS` and a button naming its key — and folds to that stub, so
