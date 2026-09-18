@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CONDIMENTAL · voxel asset browser</title>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/build/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <header>
+      <h1>voxel assets</h1>
+      <input id="search" type="search" placeholder="search  (/)" autocomplete="off" spellcheck="false">
+      <div id="counts" class="muted"></div>
+    </header>
+    <nav id="list"></nav>
+  </aside>
+
+  <main id="stage">
+    <div id="viewport"></div>
+    <div id="hud">
+      <div id="hud-title"></div>
+      <div id="hud-hint" class="muted">drag to orbit · scroll to zoom · shift-drag to pan</div>
+    </div>
+    <div id="toolbar">
+      <div class="group" id="views">
+        <button data-view="game" title="the fixed isometric the game renders (1)">game</button>
+        <button data-view="front" title="+X (2)">front</button>
+        <button data-view="side" title="+Z (3)">side</button>
+        <button data-view="top" title="above (4)">top</button>
+      </div>
+      <div class="group">
+        <button id="spin" title="turntable (r)">spin</button>
+        <button id="play" title="cycle animation frames (space)">play</button>
+        <button id="grid-toggle" class="on" title="tile grid (g)">grid</button>
+        <button id="bg-toggle" title="the game's own haze / the hall / dark (b)">bg: haze</button>
+      </div>
+      <div class="group" id="classes"></div>
+    </div>
+    <div id="variations"></div>
+  </main>
+
+  <aside id="details"></aside>
+</div>
+<div id="error"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

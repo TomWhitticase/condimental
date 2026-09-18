@@ -35,3 +35,10 @@ assets/voxels/previews/
 # ignoring it keeps `git status` honest so a real untracked file stands out.
 # CLAUDE.md itself is the source of truth and IS tracked.
 /AGENTS.md
+
+# three.js, downloaded on first run of tools/asset-browser (never edited,
+# never a source of truth) — the tool re-fetches it if it is missing.
+/tools/asset-browser/web/vendor/
+
+# Python bytecode from the dev tools in tools/
+__pycache__/
