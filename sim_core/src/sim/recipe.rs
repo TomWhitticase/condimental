@@ -5,7 +5,7 @@
 //! module only knows how to parse and look recipes up; it has no opinion on
 //! what any specific recipe contains.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::Deserialize;
 
@@ -128,15 +128,28 @@ impl std::error::Error for RecipeLoadError {}
 
 /// Recipes keyed by id, looked up by `Machine` (ARCHITECTURE.md §3.2) each
 /// tick it needs to check what it's making. Also preserves the data file's
-/// own list order (`ordered()`) — milestone 4's `World` treats that order as
-/// its demo production chain's stage sequence (see `world.rs`'s module doc),
-/// which is exactly what makes "add a recipe to extend the chain" a
-/// data-file-only change (ARCHITECTURE.md §3.6/§10): no Rust code encodes
-/// which recipe comes after which, the file's own ordering does.
+/// own list order (`ordered()`), which is what makes "add a recipe to extend
+/// the chain" a data-file-only change (ARCHITECTURE.md §3.6/§10): no Rust
+/// code encodes which recipe comes after which, the file's own ordering
+/// does.
+///
+/// **That order is a tiebreak, not a sequence, since the BBQ epic.** The
+/// file used to describe exactly one production line, one stage per entry,
+/// and `world.rs` enforced that consecutive entries chained. It now
+/// describes a production *graph* — ketchup and BBQ share a mixer, a
+/// cooking vat, a bottler and a packer — so what the order means is
+/// narrower and sharper: when a machine's current inputs satisfy more than
+/// one of its kind's recipes, **the earlier entry wins**. See
+/// [`Self::for_machine`].
 #[derive(Debug, Default)]
 pub struct RecipeRegistry {
     recipes: Vec<Recipe>,
     by_id: HashMap<RecipeId, usize>,
+    /// Every recipe a machine *kind* can run, in file order — the 1:many
+    /// inverse of [`Recipe::machine`]. `BTreeMap` rather than `HashMap`
+    /// because `world.rs` walks it when it decides what a network carries
+    /// (ARCHITECTURE.md §3.9's iteration-order rule).
+    by_machine: BTreeMap<String, Vec<usize>>,
 }
 
 impl RecipeRegistry {
@@ -154,14 +167,41 @@ impl RecipeRegistry {
             .enumerate()
             .map(|(i, r)| (r.id.clone(), i))
             .collect();
+        let mut by_machine: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        for (i, recipe) in file.recipes.iter().enumerate() {
+            by_machine
+                .entry(recipe.machine.clone())
+                .or_default()
+                .push(i);
+        }
         Ok(Self {
             recipes: file.recipes,
             by_id,
+            by_machine,
         })
     }
 
     pub fn get(&self, id: &str) -> Option<&Recipe> {
         self.by_id.get(id).map(|&i| &self.recipes[i])
+    }
+
+    /// Every recipe `kind` can run, **in file order** — empty for a kind no
+    /// recipe names, which is what makes such a kind unplaceable
+    /// (`world.rs`'s `can_construct`).
+    ///
+    /// A kind used to name exactly one recipe, and a second was a
+    /// construction-time panic. Several are ordinary content since the BBQ
+    /// epic: a mixer blends ketchup mix or BBQ mix, a cooking vat cooks
+    /// either, and which one a *placed* machine runs is decided by what is
+    /// in its buffers and its pipes at the moment a craft starts, never by
+    /// the player (`machine.rs`'s `Machine::choose`). This order is the
+    /// tiebreak when more than one is satisfiable.
+    pub fn for_machine(&self, kind: &str) -> impl Iterator<Item = &Recipe> {
+        self.by_machine
+            .get(kind)
+            .map_or(&[][..], |v| v.as_slice())
+            .iter()
+            .map(|&i| &self.recipes[i])
     }
 
     /// Recipes in data-file order — see the struct doc for why this order
