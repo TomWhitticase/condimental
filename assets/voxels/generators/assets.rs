@@ -1759,8 +1759,8 @@ pub fn item_box(p: &Palette) -> VoxModel {
 /// because it is a cardboard box, and a second sauce shipping in mahogany
 /// cartons would say the packaging is different rather than that the
 /// contents are; the project owner asked for the label to carry it. So the
-/// two shipping labels swap cream for `label_bbq`, the sauce's own dark
-/// brown, and that is the entire difference.
+/// print swaps cream for `label_bbq`, the sauce's own dark brown, and that
+/// is the entire difference.
 ///
 /// Dark patches rather than another pale colour, deliberately. A box is the
 /// smallest thing on the belt, and against `cardboard` a second light label
@@ -1772,14 +1772,38 @@ pub fn item_box(p: &Palette) -> VoxModel {
 /// machine's shadow-side FACE; these sit on a small bright object with a
 /// `cardboard_dark` tape seam already crossing the same face, and the
 /// rendered pair was checked at real size before this was kept.
+///
+/// **Where that print goes is the whole of issue #40**, and the answer is
+/// the lid rather than a bigger label — see [`box_of_sauce`].
 pub fn item_box_bbq(p: &Palette) -> VoxModel {
     box_of_sauce(p, "label_bbq")
 }
 
-/// A taped shipping case, labelled on both of its long faces.
+/// A taped shipping case, printed on both of its long faces and on its lid.
 ///
 /// `label` is the only thing a caller chooses: everything else about a case
 /// is the same case (the second-sauce epic).
+///
+/// **The LID print is what makes the two sauces' cases tellable apart at
+/// whole-factory zoom** (issue #40). The two side labels alone did not: at
+/// the framing a player actually plays at a case is about 30px and a label
+/// patch about 5x6px of it, on the camera's SHADOW-side face, and the
+/// rendered pair measured 1.2/255 apart in mean brightness — i.e. nothing.
+/// The lid is the same print on the face this camera lights and sees most
+/// of, so the same two colours buy about twenty times the separation
+/// (26.5/255 on the same frame) for no new colour, no new voxel and no
+/// change to the silhouette: every voxel this paints was already carton.
+/// That ratio, not the patch size, is the lesson — at this camera a mark on
+/// the lit top face is worth several of the same mark on a side face, which
+/// is §2b point 21 read forwards rather than as a warning.
+///
+/// Print on the two SHORT faces as well was the next cut and was rejected:
+/// it measured better still (43.2/255) and at closeup the kraft had stopped
+/// being the thing you see, so the case read as coloured packaging rather
+/// than as a printed box — the one reading the project owner ruled out. The
+/// lid panels stop two voxels short of the carton's edges and leave the tape
+/// seam crossing between them for that reason: the box has to stay a
+/// cardboard box with print on it.
 ///
 /// **The `y = 13` labels are new, and they are for the ICON.** The `y = 2`
 /// pair is what the fixed isometric camera sees (§2b point 11); the icon
@@ -1804,6 +1828,9 @@ fn box_of_sauce(p: &Palette, label: &str) -> VoxModel {
         m.cuboid((3, 6), (y, y), (4, 8), p.idx(label));
         m.cuboid((9, 12), (y, y), (4, 8), p.idx(label));
     }
+    // The LID print, one panel either side of the tape (issue #40).
+    m.cuboid((3, 6), (4, 11), (10, 10), p.idx(label));
+    m.cuboid((9, 12), (4, 11), (10, 10), p.idx(label));
     m
 }
 
@@ -6319,11 +6346,18 @@ mod tests {
     /// coloured carton would read as different packaging rather than as
     /// different contents.
     ///
-    /// Stated as "exactly the label voxels differ" rather than by counting
-    /// them: the label is two patches of a known size, and the interesting
+    /// Stated as "exactly the print voxels differ" rather than by counting
+    /// them: the print is panels of a known size, and the interesting
     /// failure is a future edit tinting the CARTON, which a count would miss.
+    ///
+    /// Three print regions since issue #40: the label on the camera's face,
+    /// the label on the icon's, and the LID panels that carry the
+    /// distinction at whole-factory zoom. The lid is listed here rather than
+    /// folded into a looser bound because "the top of the box may differ"
+    /// and "the box may differ" are one voxel apart — the tape seam at
+    /// `x = 7..8` and the carton's edges have to stay out of it.
     #[test]
-    fn only_a_case_s_label_tells_the_two_sauces_apart() {
+    fn only_a_case_s_print_tells_the_two_sauces_apart() {
         let p = palette();
         let ketchup = item_box(&p);
         let bbq = item_box_bbq(&p);
@@ -6338,17 +6372,46 @@ mod tests {
             "the two cases are not the same model"
         );
         for (x, y, z) in differing {
-            assert!(
-                y == 2 || y == 13,
-                "only a labelled face differs, at ({x}, {y}, {z})"
-            );
+            // Both print regions leave the carton's side edges and the tape
+            // seam between the panels in plain kraft.
             assert!(
                 (3..=6).contains(&x) || (9..=12).contains(&x),
-                "only a label patch differs, at ({x}, {y}, {z})"
+                "only a print panel differs, at ({x}, {y}, {z})"
             );
+            let on_a_labelled_face = (y == 2 || y == 13) && (4..=8).contains(&z);
+            let on_the_lid = z == 10 && (4..=11).contains(&y);
             assert!(
-                (4..=8).contains(&z),
-                "only a label patch differs, at ({x}, {y}, {z})"
+                on_a_labelled_face || on_the_lid,
+                "only a labelled face or the lid differs, at ({x}, {y}, {z})"
+            );
+        }
+    }
+
+    /// **The lid print paints voxels that were already carton** (issue #40):
+    /// a case's SILHOUETTE is unchanged by it, which is what lets a fix for
+    /// "the two cases look alike" ship without touching the packer, the
+    /// belt or `a_bbq_item_is_its_ketchup_counterpart_in_another_livery`.
+    /// Asserted against the lid's own geometry rather than a stored fixture,
+    /// since the claim is about the top FACE being solid, not about a count.
+    #[test]
+    fn the_lid_print_replaces_carton_rather_than_adding_to_it() {
+        let p = palette();
+        let case = item_box(&p);
+        for x in 2..=13 {
+            for y in 2..=13 {
+                assert!(
+                    case.filled(x, y, 10),
+                    "the lid is solid at ({x}, {y}) with or without print"
+                );
+            }
+        }
+        // And the seam still crosses between the two panels.
+        let dark = p.idx("cardboard_dark");
+        for y in 2..=13 {
+            assert_eq!(
+                case.voxels.get(&(7, y, 10)),
+                Some(&dark),
+                "the tape seam survives the lid print at y = {y}"
             );
         }
     }
