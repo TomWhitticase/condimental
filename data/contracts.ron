@@ -53,19 +53,23 @@
 //   starter       (optional, default false) active in a new game without
 //                 being signed. At least one contract must be a starter.
 //
-// EVERY CONTRACT BELOW ASKS FOR `boxed_ketchup`, AND THAT IS NOT A DESIGN
-// STATEMENT. GAMEPLAY.md §6's mixes are meant to name several *different*
-// sauces; the chain in `data/recipes.ron` currently produces exactly one
-// sellable product, and the delivery dock at the chain's tail only ever
-// receives what that one line's final stage makes, so any contract naming a
-// different item would be permanently unsatisfiable content rather than
-// interesting content. The multi-item `mix` shape is fully implemented and
-// tested — what is missing is a second sauce line to point it at, which is
-// future content work (GAMEPLAY.md §2's tier table), not a limitation of
-// this file. What the board below DOES create today is the real thing: a
-// ladder of commitment (bigger orders, stiffer terms, better rates) whose
-// bottom rungs one line can carry and whose top rungs keep asking for one
-// more line.
+// THE BOARD ASKS FOR TWO SAUCES (2026-09-18, the BBQ epic). Until BBQ landed,
+// every contract here asked for `boxed_ketchup` — not as a design statement
+// but because the chain produced exactly one sellable product, so a contract
+// naming anything else would have been permanently unsatisfiable content
+// rather than interesting content. GAMEPLAY.md §6's central claim — that
+// contracts demand a *mix*, so a diversified factory is the correct strategy
+// — was therefore fully implemented, fully tested, and never once exercised
+// in play.
+//
+// `data/recipes.ron` now has a second branch, so the BBQ tier at the bottom
+// of this file is that claim finally put in front of the player: two of its
+// four orders name both sauces, and because a mix is all-or-nothing, a
+// factory that makes plenty of ketchup and no BBQ earns nothing from them.
+// What the board creates is still the same ladder of commitment (bigger
+// orders, stiffer terms, better rates) whose bottom rungs one line can carry
+// and whose top rungs keep asking for one more line — it now has a second
+// rail.
 //
 // BALANCE NOTE (rewritten 2026-09-11, when the board grew from four
 // contracts to nine — the growth tier was written against the three-contract
@@ -77,7 +81,14 @@
 //
 //   starter tier   (corner_shop + diner_supply + market_stall)  ~3.9 / 1000
 //   growth tier    (the six orders below them)                 ~19.2 / 1000
-//   whole board                                                ~23.0 / 1000
+//   BBQ tier       (the four below those, in VAT output)        ~7.0 / 1000
+//   whole board                                                ~30.0 / 1000
+//
+// The BBQ tier is quoted in vat output rather than in boxes because that is
+// the only unit the two sauces share: it asks for 2.5 boxed_ketchup and ~4.5
+// boxed_bbq per 1000 ticks, and every one of those BBQ boxes eats a ketchup
+// the same vats had to make. Counting it any other way understates what a
+// mixed order costs to serve, which is the whole point of it.
 //
 // The starter tier is deliberately just inside ONE line's capacity — but
 // only `corner_shop` is `starter: true` (auto-active from tick 0, per the
@@ -97,9 +108,14 @@
 // and a fully built-out board is a real target rather than a ceiling
 // reached in the first ten minutes.
 //
-// Rates per box RISE WITH COMMITMENT, on every tier: the small, frequent
-// order pays worst per box (24) and the big, slow pallet order pays best
-// (40). Big orders are also the ones that are impossible to serve from a
+// Rates per box RISE WITH COMMITMENT, WITHIN A SAUCE: on the ketchup orders
+// the small, frequent one pays worst per box (24) and the big, slow pallet
+// order pays best (40); on the BBQ orders the same shape runs 60 to 65. The
+// qualifier is new with the BBQ tier and it is not a loophole — BBQ pays
+// better per box at EVERY size because it is a costlier box to make (23 in
+// raws against 11, `data/ingredients.ron`), so comparing a BBQ order's rate
+// against a ketchup order's says nothing about commitment. Big orders are
+// also the ones that are impossible to serve from a
 // single line — a 20-box pallet on a 5000-tick cadence needs a whole line
 // devoted to it — so a better per-box rate is the reward for building the
 // capacity to reach it, and a player who cannot yet fill it loses that
@@ -119,9 +135,10 @@
 // per GAMEPLAY.md §10; change them here and in the prose above together.
 //
 // A box that no contract has ordered is still ingredients turned into
-// unsold stock (`data/ingredients.ron`, ~11 per box), so a line built
-// beyond the board's demand is still a loss — the board grew, the rule did
-// not.
+// unsold stock (`data/ingredients.ron`, ~11 per box of ketchup and ~23 per
+// box of BBQ), so a line built beyond the board's demand is still a loss —
+// and converting ketchup nobody ordered into BBQ nobody ordered doubles the
+// loss rather than hedging it. The board grew twice; the rule did not.
 (
     schema_version: 2,
     contracts: [
@@ -238,9 +255,9 @@
             strikes: 2,
         ),
         // The pallet order: twenty boxes every 5000 ticks at the best rate
-        // on the board (40/box). A whole line's throughput, held back for
-        // 5000 ticks — the endgame order on this board until a second sauce
-        // exists to write a mixed order for.
+        // any KETCHUP order pays (40/box). A whole line's throughput, held
+        // back for 5000 ticks — the top of the ketchup ladder, and what the
+        // BBQ tier below is measured against.
         Contract(
             id: "export_pallet",
             name: "Export Pallet Order",
@@ -248,6 +265,107 @@
             cadence_ticks: 5000,
             payout: 800,
             price: 1200,
+            strikes: 2,
+        ),
+
+        // --- The BBQ tier ---
+        // The orders that finally make `mix` mean what GAMEPLAY.md §6 always
+        // said it meant. Everything above asks for one sauce; two of the
+        // four below ask for two, and an all-or-nothing mix of two sauces is
+        // a different demand from the sum of its parts — the factory has to
+        // hold BOTH lines running in the same window or the whole delivery
+        // earns nothing.
+        //
+        // LISTED LAST, so the priority rule above is undisturbed: a player
+        // who has not built a BBQ branch never sees a BBQ order skim the
+        // shared pool ahead of the ketchup orders they built for. Within the
+        // tier the order again runs small to large.
+        //
+        // NOTE THE EXISTING CONTRACTS ARE UNTOUCHED. Amending a live order
+        // to demand BBQ would silently break a factory that was serving it
+        // perfectly well, and the player would lose a contract to a patch
+        // rather than to a mistake. New demand arrives as new offers.
+        //
+        // BBQ PAYS ~60 PER BOX where ketchup pays 24-40, and both sit at
+        // roughly the same third-of-revenue ingredient ratio: a box of BBQ
+        // costs 23 in raws against a box of ketchup's 11
+        // (`data/ingredients.ron`), 11 of that 23 being the ketchup it eats.
+        // So the per-box rate rule from the note above ("bigger orders pay
+        // better") now holds WITHIN each sauce rather than across the whole
+        // board — a 2-box BBQ order out-earning a 3-box ketchup order per
+        // box is BBQ being worth more, not a small order being overpaid.
+        //
+        // WHAT THE TIER ASKS FOR, in the balance note's unit. The four add
+        // 2.5 boxed_ketchup and ~4.5 boxed_bbq per 1000 ticks. Every box of
+        // BBQ eats a box's worth of ketchup, so in VAT output — the thing a
+        // line actually produces — that is ~7.0 more per 1000 on top of the
+        // ketchup board's ~23.0, taking the whole board from about six
+        // lines' worth of demand to about seven and a quarter.
+
+        // The tutorial order for the second sauce: two boxes on a slow
+        // cadence, cheap to sign, and THREE strikes where the rest of the
+        // tier gets two. That is deliberate and it is the same call
+        // `corner_shop` got — this is the first order for a line the player
+        // has never built, and a branch will miss a window or two while it
+        // is being plumbed. Losing the order that taught you the sauce would
+        // be a dead end, not a lesson.
+        Contract(
+            id: "smokehouse_trial",
+            name: "Smokehouse Trial",
+            mix: [("boxed_bbq", 2)],
+            cadence_ticks: 2500,
+            payout: 120,
+            price: 200,
+            strikes: 3,
+        ),
+        // **THE FIRST MIXED ORDER, AND THE REASON THE COOK IS 600 TICKS.**
+        // Three ketchup and two BBQ is not a round number picked for
+        // variety: it is exactly what one ketchup line with one BBQ branch
+        // bolted onto it naturally produces. The vat makes one ketchup per
+        // 240 ticks; the BBQ branch draws one of them per 600; the
+        // remainder bottles out as ketchup at one per 400 — so the factory
+        // settles at 3 ketchup : 2 BBQ all by itself, and the obvious build
+        // serves this order without the player tuning a thing. That is the
+        // teaching: a mixed order is a RATIO, and the ratio is a property of
+        // the factory you already built.
+        //
+        // `data/recipes.ron`'s `bbq` entry states the same arithmetic from
+        // the other end. The cook time and these mixes move together or not
+        // at all.
+        Contract(
+            id: "grill_pub",
+            name: "Grill Pub Chain",
+            mix: [("boxed_ketchup", 3), ("boxed_bbq", 2)],
+            cadence_ticks: 3000,
+            payout: 210,
+            price: 350,
+            strikes: 2,
+        ),
+        // The same 3:2 shape at double the size on a slower cadence — two
+        // lines-plus-branches' worth. Proof that the ratio scales: a player
+        // who understood `grill_pub` knows exactly what this one needs, and
+        // needs only to build more of it.
+        Contract(
+            id: "roadhouse_group",
+            name: "Roadhouse Group",
+            mix: [("boxed_ketchup", 6), ("boxed_bbq", 4)],
+            cadence_ticks: 4000,
+            payout: 440,
+            price: 700,
+            strikes: 2,
+        ),
+        // The BBQ pallet, and the best rate on the board (65/box): ten boxes
+        // of the slow sauce every 5000 ticks, which at a 600-tick cook is
+        // more than one branch can make — it takes the ketchup output of
+        // several lines converted wholesale. `export_pallet`'s counterpart
+        // on the BBQ side, and the top of the board.
+        Contract(
+            id: "bbq_festival",
+            name: "Barbecue Festival",
+            mix: [("boxed_bbq", 10)],
+            cadence_ticks: 5000,
+            payout: 650,
+            price: 1000,
             strikes: 2,
         ),
     ],

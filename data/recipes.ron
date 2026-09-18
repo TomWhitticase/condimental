@@ -5,29 +5,64 @@
 // silently misreading a changed shape.
 //
 // Milestone 4 (First full chain) turned this into a real multi-step
-// production line: one stage per entry below, IN THIS FILE'S ORDER, each
-// stage's output chaining into the next stage's input.
+// production line. Since the BBQ epic (2026-09-18) it is a **production
+// GRAPH**: the ketchup entries still run head to tail in file order, and the
+// BBQ entries after them hang off the middle of that line rather than
+// continuing it.
 //
-// **WHAT THAT ORDER MEANS SINCE THE "REAL PLACEMENT" EPIC.** `World` no
-// longer builds anything from it: the player places every belt tile, pipe
-// tile and machine, and flow is derived from what ends up adjacent to what.
-// So this file's order is no longer *geometry* — but it is still the
-// production line as **content**, and three things read it. (1)
-// `validate_chain` still enforces that consecutive entries chain by a
-// shared id — solid OR fluid, see below — so a typo is still a
-// construction-time error rather than a machine that silently never starts.
+// **WHAT THIS FILE'S ORDER MEANS.** `World` builds nothing from it: the
+// player places every belt tile, pipe tile and machine, and flow is derived
+// from what ends up adjacent to what. So the order is not *geometry* — but
+// it is still content that three things read.
+//
+// (1) `validate_chain` checks that the recipes form ONE CONNECTED GRAPH. It
+// floods outward from the first entry, and a recipe sharing no ingredient id
+// with the rest is a construction-time panic — so a typo'd id is still
+// caught at load rather than showing up as a machine that silently never
+// starts. **It no longer requires that *consecutive* entries chain**, which
+// is what let the BBQ branch exist at all: a fork is legal, a second
+// disconnected line is not.
+//
 // (2) An item that some recipe consumes and no recipe produces is by
 // definition a *raw ingredient*, which is what a hopper holds and what
-// `data/ingredients.ron` has to price. (3) `sim::reference_chain` — the
-// test fixture that rebuilds the shipped layout out of ordinary purchase
-// and placement commands — lays the line out in exactly this order. Adding
-// a processing step is therefore still a pure data-file edit; what changed
-// is that the player, not `World`, decides where the new machine stands.
+// `data/ingredients.ron` has to price. That rule is what makes finished
+// `ketchup` NOT a raw even though the BBQ mixer consumes it.
 //
-// One rule this order now also implies: **a machine kind runs exactly one
-// recipe.** A placed machine runs whichever recipe names its `machine`
-// kind, so two recipes on one kind is a construction-time panic rather than
-// a silent pick (there is no recipe-selection mechanic, deliberately).
+// (3) `sim::reference_chain` — the test fixture that rebuilds the shipped
+// layout out of ordinary purchase and placement commands — lays out the
+// **linear prefix** of this file, i.e. the ketchup line, and stops at the
+// first entry that does not continue it. The BBQ branch has its own fixture
+// (`sim::bbq_branch`), because a branch is not something a one-row,
+// west-to-east layout rule can express. Adding a processing step to the
+// ketchup line is therefore still a pure data-file edit; adding a new
+// *branch* needs a fixture to go with it.
+//
+// **A MACHINE KIND MAY NAME SEVERAL RECIPES** (BBQ epic; this used to say
+// "exactly one"). A placed machine re-picks, on each idle tick, whichever of
+// its kind's recipes its current inputs satisfy, with THIS FILE'S ORDER as
+// the deterministic tiebreak. There is still no recipe-selection mechanic
+// and deliberately no player-facing picker: what a machine makes is decided
+// by what you plumb into it.
+//
+// **WHY THE ORDER BELOW IS SAFE.** The tiebreak only bites when one
+// machine's current inputs satisfy two of its kind's recipes at once, and on
+// the shipped content that cannot happen: every pair of recipes sharing a
+// machine kind takes **completely disjoint input ids**.
+//
+//   mixer        tomato_paste + sugar + vinegar  vs  spice_mix + molasses + ketchup
+//   cooking_vat  ketchup_mix                     vs  bbq_mix + liquid_smoke
+//   bottler      ketchup                         vs  bbq
+//   packer       bottled_ketchup                 vs  bottled_bbq
+//
+// A mixer fed the BBQ branch's ingredients cannot satisfy `ketchup_mix` —
+// it has no paste, no sugar and no vinegar — and a mixer on the ketchup line
+// cannot satisfy `bbq_mix`. So file order never actually decides anything
+// here, and reordering this file could not change what any machine makes.
+// `recipe.rs`'s `recipes_on_a_kind_take_disjoint_inputs` pins that, because
+// it is the property that keeps "no picker" honest: the day two recipes on
+// one kind DO overlap, the player gets a machine whose output depends on a
+// file order they cannot see, and that is the point at which this design
+// needs revisiting rather than a quiet tiebreak.
 //
 // FLUIDS, BOTH WAYS (schema_version 3). Milestone 6 added the optional
 // `fluid_inputs` field — (fluid id, whole units) drawn per craft from the
@@ -35,6 +70,12 @@
 // epic adds its mirror, `fluid_outputs`: whole units *deposited* into a
 // network at the end of a craft. Both default to empty, so a recipe that
 // names neither is an ordinary belt-in/belt-out stage.
+//
+// **A recipe may draw SEVERAL fluids** (BBQ epic; the old one-fluid-input
+// cap is gone). Each entry in `fluid_inputs` is matched at tick time to a
+// touching pipe run carrying that fluid id. Fluid *outputs* are still capped
+// at one, and it still leaves by the outlet face. The BBQ cook is the recipe
+// that needed this: it draws piped mix and tanked liquid smoke at once.
 //
 // Together they are what lets the middle of this chain be **piped rather
 // than belted**, which is what a real sauce line looks like: crushed paste
@@ -45,26 +86,26 @@
 // again, and the two stages in between have no belt attached to them at
 // all.
 //
-// A machine taps at most one network per role — one to draw from, one to
-// deposit into (`validate_fluid_scope`) — and which is which is geometric:
-// **a fluid output leaves by the face the machine points at, exactly as a
-// solid one does; a fluid input may come from any other pipe touching the
-// footprint.** See `sim_core/src/sim/world.rs`'s module doc.
+// A machine deposits into at most one network, and draws from one network
+// per fluid it needs (`validate_fluid_scope`), and which is which is
+// geometric: **a fluid output leaves by the face the machine points at,
+// exactly as a solid one does; a fluid input may come from any other pipe
+// touching the footprint.** See `sim_core/src/sim/world.rs`'s module doc.
 //
-// The chain below is a simplified stand-in for GAMEPLAY.md §2's tier 1/2
-// tomato-sauce/ketchup progression. It is not the final ketchup recipe:
-// real ketchup wants spices as well, and this file keeps every stage to a
-// shape the current topology can express (no belt-side convergence beyond
-// what a hopper standing beside a feed belt already provides).
+// The ketchup entries below are a simplified stand-in for GAMEPLAY.md §2's
+// tier 1/2 tomato-sauce/ketchup progression, and the BBQ entries its tier 3.
+// Neither is a final recipe; this file keeps every stage to a shape the
+// current topology can express (no belt-side convergence beyond what a
+// hopper standing beside a feed belt already provides).
 //
 // PROCESS TIMES follow the work each machine does, so the line has a
 // visible bottleneck rather than a row of interchangeable stages. Of the
-// three front-end processing stages: crushing is mechanical and the
-// quickest of them (80 ticks — a little over a second at ARCHITECTURE.md
-// §3.9's 60 ticks/sec), blending is a little slower still (90), and the
-// cook-down is the longest step on the whole line (240, three times the
-// crush) — which is precisely why the cooking vat is also the biggest
-// machine on the line (`data/machines.ron`).
+// ketchup line's three front-end processing stages: crushing is mechanical
+// and the quickest of them (80 ticks — a little over a second at
+// ARCHITECTURE.md §3.9's 60 ticks/sec), blending is a little slower still
+// (90), and the cook-down is the longest step on THAT line (240, three
+// times the crush) — which is precisely why the cooking vat is also the
+// biggest machine on it (`data/machines.ron`).
 //
 // **The ORDER of those three is the claim, and it is load-bearing**: this
 // comment, `data/machines.ron`'s cooking-vat note and CLAUDE.md's decisions
@@ -75,8 +116,15 @@
 // read as instant beside its neighbours — a stage the player never sees
 // working is a stage that does not look like it is doing anything. 80 keeps
 // it comfortably under the mixer's 90, so the crusher still out-produces the
-// stage it feeds and the line's bottleneck stays where it was designed to be
-// (the vat).
+// stage it feeds and the ketchup line's bottleneck stays where it was
+// designed to be (the vat).
+//
+// The **BBQ cook at 600 is now the longest process in the game**, two and a
+// half times the ketchup cook, and it is deliberately not on the ketchup
+// line: it sits on the branch, so it slows BBQ production without touching
+// the shipped line's 240-tick bottleneck at all. A player who never builds
+// a BBQ branch sees exactly the timings they saw before. See that recipe's
+// own note for why 600 specifically.
 //
 // WHAT WAS REMOVED. This file used to carry a sixth stage, `aged_ketchup`
 // on an `aging_rack`, added by ARCHITECTURE.md §9 milestone 7 to prove the
@@ -157,6 +205,93 @@
             id: "boxed_ketchup",
             inputs: [("bottled_ketchup", 1)],
             outputs: [("boxed_ketchup", 1)],
+            machine: "packer",
+            time_ticks: 40,
+        ),
+
+        // --- BBQ sauce: the second sauce, and the first BRANCH ---
+        //
+        // Four more stages, no new machine kind: each one is a second recipe
+        // on a kind the ketchup line already uses. What makes them a branch
+        // rather than a continuation is the first one's fluid input — it
+        // draws `ketchup`, which the cooking vat above produces, so this is
+        // a second path *off* the ketchup line rather than five more stages
+        // on the end of it. GAMEPLAY.md §3 calls that a derived sauce.
+        //
+        // The whole point is the shared tank. The ketchup a player sells and
+        // the ketchup they cook into BBQ come out of the same vat, so every
+        // box of BBQ is a box of ketchup not shipped — which is what gives
+        // GAMEPLAY.md §6's mixed contracts their teeth. Serving `grill_pub`
+        // (`data/contracts.ron`) is not "run two lines", it is "build enough
+        // ketchup for both".
+
+        // BBQ mix: finished ketchup thickened and spiced. Liquid ketchup
+        // arrives by pipe from the ketchup vat's run; spice mix and molasses
+        // arrive on two belt lanes, exactly as paste and sugar do at the
+        // ketchup mixer (and for the same reason the mixer is 1x2 — one
+        // inlet tile per solid, `data/machines.ron`).
+        //
+        // 90 ticks, the same as `ketchup_mix`: it is the same machine doing
+        // the same work, and a second blend time would be a number with no
+        // story behind it.
+        Recipe(
+            id: "bbq_mix",
+            inputs: [("spice_mix", 1), ("molasses", 1)],
+            fluid_inputs: [("ketchup", 1)],
+            outputs: [],
+            fluid_outputs: [("bbq_mix", 1)],
+            machine: "mixer",
+            time_ticks: 90,
+        ),
+        // The BBQ cook: the longest process in the game at 600 ticks, and
+        // the first recipe to draw **two** fluids — the mix off the BBQ
+        // mixer's pipe run, and liquid smoke out of a tank the player fills.
+        // Two draws is what `sim_core`'s fluid scope was widened for; each
+        // is matched to a touching pipe run by fluid id, and the one deposit
+        // still leaves by the outlet face.
+        //
+        // **600 IS LOAD-BEARING, AND IT IS A RATIO, NOT A FLAVOUR NOTE.**
+        // At a 600-tick cook this branch draws one ketchup per 600 ticks
+        // from a ketchup line that makes one per 240 (the vat above is that
+        // line's bottleneck), so the remainder bottles out as ketchup at one
+        // per 400. One ketchup line plus one BBQ branch therefore settles at
+        // **3 ketchup : 2 BBQ** — and `grill_pub` is a 3 + 2 order for
+        // exactly that reason, so the obvious factory serves the first mixed
+        // contract without tuning, and every larger mixed order on the board
+        // is the same shape scaled up.
+        //
+        // So this number and those contract mixes move together or not at
+        // all: change the cook and `data/contracts.ron`'s mixed orders stop
+        // matching what a factory naturally makes, and the claim above (and
+        // in `docs/BBQ_SAUCE_PLAN.md` §2.1) becomes false. Same rule the
+        // crush/blend/cook ordering already states above.
+        Recipe(
+            id: "bbq",
+            inputs: [],
+            fluid_inputs: [("bbq_mix", 1), ("liquid_smoke", 1)],
+            outputs: [],
+            fluid_outputs: [("bbq", 1)],
+            machine: "cooking_vat",
+            time_ticks: 600,
+        ),
+        // Bottling, the BBQ side: liquid in, solid bottle out on the belt,
+        // 60 ticks — the mirror of `bottled_ketchup` on a second bottler.
+        Recipe(
+            id: "bottled_bbq",
+            inputs: [],
+            fluid_inputs: [("bbq", 1)],
+            outputs: [("bottled_bbq", 1)],
+            machine: "bottler",
+            time_ticks: 60,
+        ),
+        // Packing, the BBQ side: 40 ticks, and `boxed_bbq` is the second
+        // thing this factory can sell. Both branches' boxes ride ordinary
+        // belt into the same dock — the delivery pool does not care which
+        // sauce a box holds, only `data/contracts.ron` does.
+        Recipe(
+            id: "boxed_bbq",
+            inputs: [("bottled_bbq", 1)],
+            outputs: [("boxed_bbq", 1)],
             machine: "packer",
             time_ticks: 40,
         ),

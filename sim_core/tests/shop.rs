@@ -33,7 +33,7 @@ mod common;
 use sim_core::sim::types::Money;
 use sim_core::sim::{
     MachineRegistry, PlayerCommand, RecipeRegistry, ShopCatalog, World, command_from_json,
-    reference_chain, reference_chain_with_budget,
+    linear_prefix, reference_chain, reference_chain_with_budget,
 };
 
 fn recipes() -> RecipeRegistry {
@@ -419,8 +419,9 @@ fn a_reference_chain_world_owns_nothing_and_has_spent_everything() {
             .iter()
             .filter(|p| p.recipe.is_some())
             .count(),
-        recipes().ordered().len(),
-        "one placed machine per recipe, put there by the same commands a player uses"
+        linear_prefix(&recipes()).len(),
+        "one placed machine per stage of the reference LINE — the ketchup line, not every \
+         recipe in the file: the BBQ branch has its own fixture"
     );
 }
 

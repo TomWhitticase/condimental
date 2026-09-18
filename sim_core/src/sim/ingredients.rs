@@ -545,10 +545,22 @@ mod tests {
             vec![
                 "tomato".to_string(),
                 "sugar".to_string(),
-                "vinegar".to_string()
+                "vinegar".to_string(),
+                "spice_mix".to_string(),
+                "molasses".to_string(),
+                "liquid_smoke".to_string(),
             ],
             "the shipped chain's raw ingredients — if this changed deliberately, price the \
              new one in data/ingredients.ron"
+        );
+        // Finished ketchup is the case worth stating outright: the BBQ mixer
+        // consumes it, so it reads like an input, but the cooking vat
+        // produces it, so it is NOT raw — it has no price and no hopper, and
+        // a BBQ branch gets it by building enough ketchup line to make it.
+        assert!(
+            !raw_ingredient_ids(&registry).contains(&"ketchup".to_string()),
+            "ketchup is produced by the chain, so a derived sauce consuming it must not make \
+             it a purchasable raw"
         );
     }
 

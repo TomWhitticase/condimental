@@ -519,22 +519,31 @@ mod tests {
     /// (2026-09-11): the first three contracts — the starter tier — fit
     /// inside ONE line's throughput, and the board as a whole asks for
     /// several lines' worth, so a second line always has an order to go
-    /// after. Measured against the chain's own bottleneck (the slowest
-    /// recipe) rather than a literal, so a tuning pass that changes the
-    /// vat's cook time moves the expectation with it.
+    /// after. Measured against the chain's own bottleneck rather than a
+    /// literal, so a tuning pass that changes the vat's cook time moves the
+    /// expectation with it.
     ///
-    /// Also pins the per-box rate rule from the same note: a bigger order
-    /// never pays worse per box than a smaller one.
+    /// **"One line" means one KETCHUP line** (the BBQ epic made that
+    /// distinction necessary). The bottleneck is taken over the reference
+    /// LINE's stages, not over every recipe in the file: the BBQ cook is 600
+    /// ticks, and reading that as the shipped line's bottleneck would say a
+    /// first factory is two and a half times slower than it is — which is
+    /// exactly the false conclusion this test drew the moment BBQ landed.
+    ///
+    /// Also pins the per-box rate rule from the same note, which the BBQ
+    /// tier narrowed: a bigger order never pays worse per box than a smaller
+    /// one **of the same sauce**. Across sauces the comparison is
+    /// meaningless — BBQ pays better per box at every size because it is a
+    /// costlier box to make — so mixed orders are excluded outright.
     #[test]
     fn the_bundled_board_is_a_starter_tier_within_one_line_plus_a_growth_tier_beyond_it() {
         let board = ContractRegistry::bundled();
         let recipes = bundled_recipes();
-        let bottleneck_ticks = recipes
-            .ordered()
+        let bottleneck_ticks = super::super::reference::linear_prefix(&recipes)
             .iter()
             .map(|r| r.time_ticks)
             .max()
-            .expect("the chain has recipes") as f64;
+            .expect("the reference line has stages") as f64;
         // One line's steady state: one finished unit per bottleneck cycle.
         let one_line_per_1000 = 1000.0 / bottleneck_ticks;
         let demand_per_1000 = |c: &Contract| -> f64 {
@@ -547,34 +556,63 @@ mod tests {
         let whole: f64 = contracts.iter().map(demand_per_1000).sum();
         assert!(
             starter <= one_line_per_1000,
-            "the starter tier ({starter:.2}/1000 ticks) must be servable by one line \
+            "the starter tier ({starter:.2}/1000 ticks) must be servable by one ketchup line \
              ({one_line_per_1000:.2}/1000 ticks)"
         );
+        // A lower bound, and deliberately so: a box of BBQ costs a box's
+        // worth of ketchup on top of its own branch, so counting boxes
+        // understates what the BBQ tier really asks a factory for.
         assert!(
             whole >= 3.0 * one_line_per_1000,
             "the whole board ({whole:.2}/1000 ticks) must ask for several lines' worth \
              ({one_line_per_1000:.2}/1000 ticks each), or a second line has nothing to sell to"
         );
 
-        // Bigger orders pay at least as well per box.
-        let mut by_size: Vec<(u32, f64)> = contracts
-            .iter()
-            .map(|c| {
-                let boxes: u32 = c.mix.iter().map(|(_, q)| q).sum();
-                (boxes, c.payout.to_num::<f64>() / boxes as f64)
-            })
-            .collect();
-        by_size.sort_by(|a, b| a.0.cmp(&b.0));
-        for pair in by_size.windows(2) {
-            assert!(
-                pair[1].1 >= pair[0].1,
-                "a {}-box order pays {:.1}/box, less than a {}-box order's {:.1}/box",
-                pair[1].0,
-                pair[1].1,
-                pair[0].0,
-                pair[0].1
-            );
+        // Bigger orders pay at least as well per box, within one sauce.
+        let mut by_item: std::collections::BTreeMap<&str, Vec<(u32, f64)>> =
+            std::collections::BTreeMap::new();
+        for contract in contracts.iter() {
+            // Single-sauce orders only: a mixed order's payout is a blend of
+            // two different per-box rates and belongs to neither ladder.
+            if let [(item, quantity)] = contract.mix.as_slice() {
+                by_item.entry(item.as_str()).or_default().push((
+                    *quantity,
+                    contract.payout.to_num::<f64>() / *quantity as f64,
+                ));
+            }
         }
+        assert!(
+            by_item.len() >= 2,
+            "the board must offer single-sauce ladders for more than one sauce — the whole \
+             point of a second sauce is that there is something else to specialise in"
+        );
+        for (item, sizes) in by_item.iter_mut() {
+            sizes.sort_by(|a, b| a.0.cmp(&b.0));
+            for pair in sizes.windows(2) {
+                assert!(
+                    pair[1].1 >= pair[0].1,
+                    "a {}-box order of {item} pays {:.1}/box, less than a {}-box order's {:.1}/box",
+                    pair[1].0,
+                    pair[1].1,
+                    pair[0].0,
+                    pair[0].1
+                );
+            }
+        }
+
+        // The board must actually exercise the multi-item `mix` shape, which
+        // is the thing GAMEPLAY.md §6 claims and which no ketchup-only board
+        // could ever put in front of a player.
+        let mixed: Vec<&str> = contracts
+            .iter()
+            .filter(|c| c.mix.len() > 1)
+            .map(|c| c.id.as_str())
+            .collect();
+        assert!(
+            !mixed.is_empty(),
+            "no contract on the board asks for more than one item, so the all-or-nothing \
+             mixed order — the reason contracts are not a spot market — is untested content"
+        );
     }
 
     #[test]

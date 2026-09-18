@@ -568,11 +568,25 @@ fn a_tank_connects_to_the_pipe_off_its_outlet_on_every_facing() {
 fn a_machine_tap_and_a_machine_producer_are_reported_on_the_tapped_tile() {
     let mut world = funded();
     build(&mut world, "mixer", (5, 0), East); // covers (5,0) and (5,1)
+    // The tank at the head of the touching run is REQUIRED since the BBQ
+    // epic, and it is required for a reason worth stating. A `mixer` now has
+    // two recipes — ketchup mix draws vinegar, BBQ mix draws finished
+    // ketchup — so a bare pipe touching a bare mixer could be carrying
+    // either, and `resolve_network_fluids` leaves a run it cannot narrow to
+    // ONE possibility unnamed (never a panic; the machines on it simply
+    // stall). A tank-fed run is intersected with the RAW fluids, and
+    // ketchup is not raw, so the tank is what collapses the pair to vinegar.
+    // That is the real disambiguator in a real factory too: what you plumb
+    // into a machine is what decides what it makes.
+    build(&mut world, "fluid_tank", (4, 2), East);
     build(&mut world, "pipe", (5, 2), East); // touches the north tile: the vinegar tap
     build(&mut world, "pipe", (6, 0), East); // off the outlet face: the product run
     build(&mut world, "pipe", (6, 1), East); // also off the outlet face, second tile
 
-    assert_eq!(pipe(&world, (5, 2)), pipe_links(vec![conn(South, Machine)]));
+    assert_eq!(
+        pipe(&world, (5, 2)),
+        pipe_links(vec![conn(South, Machine), conn(West, Tank)])
+    );
     assert_eq!(
         pipe(&world, (6, 0)),
         pipe_links(vec![conn(North, Pipe), conn(West, Machine)])

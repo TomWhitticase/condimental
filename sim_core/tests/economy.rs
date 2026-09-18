@@ -28,7 +28,8 @@ mod common;
 use sim_core::sim::types::Money;
 use sim_core::sim::{
     ContractRegistry, DELIVERY_STOCK_CAPACITY, DockSnapshot, MachineRegistry, PlayerCommand,
-    RecipeRegistry, World, reference_chain_with_budget, reference_chain_with_content_and_budget,
+    RecipeRegistry, World, linear_prefix, reference_chain_with_budget,
+    reference_chain_with_content_and_budget,
 };
 
 /// The reference chain's one dock — where every delivery this file measures
@@ -131,7 +132,7 @@ fn run_until_shipped(world: &mut World, target: u32) -> u32 {
 #[test]
 fn full_chain_delivers_against_a_contract_and_pays_out_exactly_that_contracts_payout() {
     let registry = recipes();
-    let final_item = registry.ordered().last().unwrap().id.clone();
+    let final_item = linear_prefix(&registry).last().unwrap().id.clone();
 
     let board = contracts();
     let corner_shop = board.get("corner_shop").expect("shipped starter contract");
@@ -222,7 +223,7 @@ fn money_stays_zero_through_a_cadence_boundary_with_nothing_delivered() {
 #[test]
 fn several_contracts_settle_independently_against_one_real_chain() {
     let registry = recipes();
-    let final_item = registry.ordered().last().unwrap().id.clone();
+    let final_item = linear_prefix(&registry).last().unwrap().id.clone();
 
     // Cadences chosen relative to milestone 7's aging-rack-bottlenecked
     // throughput (roughly one unit per ~2600 ticks in steady state, an
@@ -311,7 +312,7 @@ fn several_contracts_settle_independently_against_one_real_chain() {
 #[test]
 fn one_delivered_unit_pays_one_contract_not_every_contract_that_wants_it() {
     let registry = recipes();
-    let final_item = registry.ordered().last().unwrap().id.clone();
+    let final_item = linear_prefix(&registry).last().unwrap().id.clone();
 
     // Two identical contracts, both due at tick 1000, each wanting one unit.
     // Exactly one unit is ever collected, so exactly one may be paid — and

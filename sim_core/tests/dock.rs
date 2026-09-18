@@ -37,7 +37,7 @@ mod common;
 
 use sim_core::sim::{
     ContractRegistry, DELIVERY_STOCK_CAPACITY, DOCK_CAPACITY, Direction, DockSnapshot,
-    RecipeRegistry, TileSnapshot, World, reference_chain_with_budget,
+    RecipeRegistry, TileSnapshot, World, linear_prefix, reference_chain_with_budget,
 };
 
 /// Exactly `common::stock_up`'s ingredient bill, so a stocked world starts
@@ -241,7 +241,9 @@ fn the_docks_chunk_is_reported_alongside_the_chains() {
 #[test]
 fn the_chain_ships_and_earns_with_no_player_command_but_refilling() {
     let mut world = world();
-    let final_item = recipes().ordered().last().unwrap().outputs[0].0.clone();
+    let final_item = linear_prefix(&recipes()).last().unwrap().outputs[0]
+        .0
+        .clone();
 
     // Two boxes is the shipped starter contract's whole mix, so reaching it
     // means the loop `GAMEPLAY.md` §1 describes has closed by itself.

@@ -271,6 +271,148 @@ static func build_reference_line(sim) -> void:
 const REFERENCE_LINE_PLACEMENTS := 37
 
 
+## THE BBQ BRANCH (the BBQ epic) — the shipped line above plus the second
+## sauce hanging off the middle of it, 872 on top of the reference line's 959
+## and so still inside the 3000 a new game starts with.
+##
+## It mirrors `sim::bbq_branch` tile for tile — that fixture's doc comment
+## carries the picture and the reasoning, and
+## `sim_core/src/sim/reference.rs` pins both layouts to an exact coordinate
+## list, so a content change that moves either one fails there first with a
+## better message than a Godot test could give.
+##
+## The three joints worth knowing before moving anything here:
+##
+##   * the SINGLE PIPE at (14, -1) is the branch. It touches the ketchup
+##     line's outlet run below it and the BBQ mixer above it, which is how
+##     finished ketchup gets out of one line and into the other;
+##   * the LIQUID SMOKE run keeps to the east half of row -1. Three tiles
+##     further west its head would touch the ketchup run and the two
+##     networks would merge — pipes join pipes, which is also why this run
+##     crossing over the ketchup line's exit BELTS is harmless;
+##   * the branch gets its OWN DOCK. Every dock feeds the same shared
+##     delivery pool, so a second one is free and much clearer than merging
+##     two product streams onto one belt.
+static func build_bbq_branch(sim) -> void:
+	build_reference_line(sim)
+
+	# Two raw solids, one lane each into its own tile of the 1x2 mixer's
+	# inlet face — the same arrangement, and the same reason, as the ketchup
+	# mixer's sugar and tomato paste lanes.
+	place(sim, "hopper", Vector2i(9, -3), "east", "spice_mix")
+	place(sim, "hopper", Vector2i(9, -2), "east", "molasses")
+	for x in [10, 11, 12, 13]:
+		place(sim, "belt", Vector2i(x, -3), "east")
+		place(sim, "belt", Vector2i(x, -2), "east")
+	place(sim, "mixer", Vector2i(14, -3), "east")  # 1x2: also covers y=-2
+
+	# The branch itself.
+	place(sim, "pipe", Vector2i(14, -1), "east")
+
+	# Mixer -> vat, off the mixer's outlet face, and the liquid smoke the vat
+	# needs alongside the BBQ mix.
+	for x in [15, 16]:
+		place(sim, "pipe", Vector2i(x, -3), "east")
+	place(sim, "cooking_vat", Vector2i(17, -3), "east")  # 2x2
+	place(sim, "fluid_tank", Vector2i(16, -1), "east")
+	for x in [17, 18, 19, 20]:
+		place(sim, "pipe", Vector2i(x, -1), "east")
+
+	# Vat -> bottler -> packer -> its own dock.
+	for x in [19, 20]:
+		place(sim, "pipe", Vector2i(x, -3), "east")
+	place(sim, "bottler", Vector2i(21, -3), "east")
+	for x in [22, 23, 24, 25]:
+		place(sim, "belt", Vector2i(x, -3), "east")
+	place(sim, "packer", Vector2i(26, -3), "east")
+	for x in [27, 28, 29, 30]:
+		place(sim, "belt", Vector2i(x, -3), "east")
+	place(sim, "dock", Vector2i(31, -3), "east")
+
+
+## How many placements `build_bbq_branch` makes — the reference line's 37
+## plus 33 of its own.
+const BBQ_BRANCH_PLACEMENTS := 70
+
+
+## How long the BBQ line runs before `scripts/screenshot-scene.sh --bbq`
+## photographs it, and how deep its larder is.
+##
+## 15 000 ticks is chosen between two walls. Below about 6 000 the branch is
+## still priming its two new pipe runs and the ketchup bottler is starved, so
+## the shot shows one sauce; past about 30 000 the delivery pool hits its
+## ceiling and the packers back up, so the shot shows a stalled factory. In
+## between, both lines run at the 3:2 split `data/contracts.ron`'s mixed
+## orders are written against and there are boxes of both sauces on the
+## floor.
+const BBQ_SETTLE_TICKS := 15000
+const BBQ_STOCK := 1200
+
+
+## THE BBQ LINE, RUNNING — what `scripts/screenshot-scene.sh --bbq`
+## photographs: the branch above, funded, fully crewed, auto-filled and run
+## until both sauces are moving at once.
+##
+## It funds itself rather than living inside a new game's 3000, for the same
+## reason `build_bottleneck_line` does: two lines, a bigger crew and 15 000
+## ticks of raws cost more than a new game has, and what this fixture is for
+## is the PICTURE of a working two-sauce factory. That a player can afford to
+## BUILD it is a separate claim, proved separately, from a real starting
+## balance, by `test_bbq_branch.gd`.
+static func build_bbq_running_line(sim) -> void:
+	build_bbq_branch(sim)
+	fund(sim, 30000)
+	stock_larder(sim, BBQ_STOCK)
+	# Both lines' hoppers and both tanks, so nothing has to be hand-fed
+	# during the run.
+	for tile in [Vector2i(-1, 0), Vector2i(4, 1), Vector2i(9, -3), Vector2i(9, -2)]:
+		sim.issue_command_json(JSON.stringify({
+			"type": "set_hopper_auto_fill", "tile": [tile.x, tile.y], "enabled": true,
+		}))
+	for tile in [Vector2i(5, 2), Vector2i(16, -1)]:
+		sim.issue_command_json(JSON.stringify({
+			"type": "set_tank_auto_fill", "tile": [tile.x, tile.y], "enabled": true,
+		}))
+	# A second line needs a bigger crew, and an understaffed factory runs
+	# slow everywhere rather than only on the new machines (GAMEPLAY.md §7) —
+	# which would quietly turn this into a photograph of the staffing
+	# mechanic instead of of the branch.
+	hire_until_staffed(sim)
+	# Both BBQ contracts that ask for one sauce, plus the mixed order: the
+	# clipboard in the shot then shows what the epic added to the board.
+	for id in ["smokehouse_trial", "grill_pub"]:
+		sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": id}))
+	for _i in range(BBQ_SETTLE_TICKS):
+		sim.tick()
+	# The starter contract is the casualty of building this branch onto a
+	# single ketchup line: for the few thousand ticks the BBQ pipes take to
+	# prime, the branch drinks everything the vat makes and the ketchup
+	# bottler delivers nothing, so the Corner Shop order strikes out. That is
+	# the mechanic doing its job and the game says so in words — but it is
+	# not what this shot is of, so the fixture takes the game's own advice and
+	# signs those three back up once both lines are running.
+	#
+	# Three and not the whole board: the clipboard's docket list is height
+	# capped and scrolls, so a fully signed board pushes the mixed order out
+	# of frame — and the mixed order is the half of this epic the clipboard
+	# is here to show. An already-active id is refused, harmlessly.
+	for id in ["corner_shop", "smokehouse_trial", "grill_pub"]:
+		sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": id}))
+
+
+## Hires into every category the simulation reports short, until none is.
+static func hire_until_staffed(sim) -> void:
+	for _attempt in range(64):
+		var short: Array = []
+		for category in JSON.parse_string(sim.staff_snapshot_json()).get("categories", []):
+			if int(category.get("short", 0)) > 0:
+				short.append(String(category.get("id", "")))
+		if short.is_empty():
+			return
+		for category in short:
+			sim.issue_command_json(JSON.stringify({"type": "hire", "category": category}))
+
+
 ## THE BOTTLENECK LINE (the machine-load epic, ticket 3) — the fixture
 ## `test_machine_load.gd` asserts and `scripts/screenshot-scene.sh
 ## --bottleneck` photographs: the reference line, with every hopper and the

@@ -300,7 +300,10 @@ fn every_raw_ingredient_the_shipped_chain_needs_is_priced_and_buyable() {
         vec![
             "tomato".to_string(),
             "sugar".to_string(),
-            "vinegar".to_string()
+            "vinegar".to_string(),
+            "spice_mix".to_string(),
+            "molasses".to_string(),
+            "liquid_smoke".to_string(),
         ]
     );
 
@@ -318,10 +321,16 @@ fn every_raw_ingredient_the_shipped_chain_needs_is_priced_and_buyable() {
         );
     }
 
-    // Only the *solid* raws are hopper contents; vinegar goes in a tank.
+    // Only the *solid* raws are hopper contents; vinegar and liquid smoke go
+    // in tanks.
     assert_eq!(
         world.raw_items(),
-        ["tomato".to_string(), "sugar".to_string()]
+        [
+            "tomato".to_string(),
+            "sugar".to_string(),
+            "spice_mix".to_string(),
+            "molasses".to_string()
+        ]
     );
 }
 
@@ -338,7 +347,7 @@ fn the_ingredients_snapshot_json_has_the_documented_shape() {
     let entries = snapshot["entries"].as_array().expect("an entries array");
     assert_eq!(
         entries.len(),
-        3,
+        6,
         "every priced ingredient is listed, including ones the player has none of"
     );
     assert_eq!(

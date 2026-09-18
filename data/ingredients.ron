@@ -22,10 +22,14 @@
 // distinction a runtime check instead of a type.
 //
 // WHAT COUNTS AS RAW. An id here is an item or fluid that some recipe in
-// `data/recipes.ron` *consumes* and no recipe *produces* — tomato and sugar
-// on the solid side, vinegar on the fluid side. Everything else in the chain
-// (tomato paste, the liquid mix, the cooked ketchup, bottles, boxes) is made
-// by the factory and therefore is never bought. `IngredientCatalog::
+// `data/recipes.ron` *consumes* and no recipe *produces* — tomato, sugar,
+// spice mix and molasses on the solid side, vinegar and liquid smoke on the
+// fluid side. Everything else in the chain (tomato paste, the liquid mixes,
+// the cooked sauces, bottles, boxes) is made by the factory and therefore is
+// never bought. **Finished ketchup is the clearest case**: the BBQ mixer
+// consumes it, so it looks like an input, but the cooking vat produces it,
+// so it is not raw and has no price here — a BBQ branch buys ketchup by
+// building enough line to make it. `IngredientCatalog::
 // validate_covers` checks that direction against the shipped recipe file, so
 // a new raw ingredient with no price is caught by a test rather than
 // discovered as a hopper that can never be filled. It is deliberately NOT a
@@ -33,7 +37,7 @@
 // perfectly coherent, it just cannot be bought, which is the same call
 // `contracts.rs` made about an unsatisfiable contract.
 //
-// A SOLID AND A FLUID SHARE ONE LEDGER, ON PURPOSE. `ItemId` and `FluidId`
+// SOLIDS AND FLUIDS SHARE ONE LEDGER, ON PURPOSE. `ItemId` and `FluidId`
 // are both plain `String` aliases (`sim/types.rs`), the ids never collide,
 // and what the player is buying in both cases is *stock measured in whole
 // units*. One catalog and one ledger is therefore one mechanism, not two
@@ -43,10 +47,9 @@
 // PRICES ARE PLACEHOLDERS, like `shop.ron`'s (GAMEPLAY.md §10 puts real
 // balance in a future pass). What they encode is a shape:
 //
-//   1. One boxed ketchup — the only thing the chain sells — costs
-//      4 tomato + 1 sugar + 2 vinegar to make, i.e. 4 + 3 + 4 = 11 in
-//      ingredients.
-//   2. The shipped contract board pays between 24 and 30 per box. So
+//   1. One boxed ketchup costs 4 tomato + 1 sugar + 2 vinegar to make,
+//      i.e. 4 + 3 + 4 = 11 in ingredients.
+//   2. The contract board pays between 24 and 40 per box of ketchup. So
 //      ingredients are roughly a third of revenue: a running factory is
 //      comfortably profitable, but overproducing into a delivery pool no
 //      contract wants is a real waste of money rather than a free
@@ -55,6 +58,22 @@
 //      which makes them the biggest line on the bill — bulk produce
 //      behaving like bulk produce. Sugar is the dearest per unit (it is
 //      refined) and the smallest line.
+//   4. **One boxed BBQ holds the same shape, and it inherits half its
+//      bill.** It costs 1 ketchup + 1 spice mix + 1 molasses + 1 liquid
+//      smoke, and finished ketchup is not raw, so the arithmetic recurses:
+//      11 (the ketchup a box of BBQ eats) + 5 + 4 + 3 = **23 per box**, of
+//      which 11 is the ketchup. Its contracts pay 60-65 per box, so the
+//      ratio lands in the same third-of-revenue band the ketchup line sits
+//      in — which is the point. Converting a line's output to BBQ is worth
+//      roughly 40% more revenue for one extra mixer, one extra vat and four
+//      more heads; good enough to be the obvious next move, not so good
+//      that a ketchup-only board becomes a mistake.
+//
+// That recursion is also why the BBQ raws are priced where they are rather
+// than by their own flavour logic: the three of them come to 12, which is
+// about what the ketchup they are blended into costs, so a box of BBQ is
+// half inherited sauce and half new ingredients — legible on the bill, and
+// it keeps the BBQ margin from running away from the ketchup margin.
 (
     schema_version: 1,
     entries: [
@@ -76,6 +95,33 @@
         IngredientEntry(
             id: "vinegar",
             price: 2,
+        ),
+
+        // --- The BBQ branch's three raws ---
+        // BBQ buys no tomatoes: its bulk input is finished ketchup, which
+        // the factory already makes (`data/recipes.ron`). What it buys is
+        // the three things that turn ketchup into something else.
+
+        // The dearest raw in the game, and the one that carries the flavour:
+        // a blended spice is bought already ground and mixed, so it prices
+        // like a refined good rather than produce. One per batch.
+        IngredientEntry(
+            id: "spice_mix",
+            price: 5,
+        ),
+        // The sweetener BBQ uses where ketchup uses sugar — unrefined, so a
+        // shade cheaper per unit than sugar, and likewise one per batch.
+        IngredientEntry(
+            id: "molasses",
+            price: 4,
+        ),
+        // The second raw fluid, and the reason a BBQ branch needs a
+        // `fluid_tank` of its own: the BBQ cook draws it straight into the
+        // vat alongside the piped mix. Cheapest of the three — it is bought
+        // by the drum and used a unit at a time.
+        IngredientEntry(
+            id: "liquid_smoke",
+            price: 3,
         ),
     ],
 )
