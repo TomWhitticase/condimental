@@ -130,6 +130,62 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-18 — A browser for the voxel assets
+
+`scripts/asset-browser.sh` (`tools/asset-browser/`) opens every asset in
+`assets/voxels/` as a searchable list beside a 3D viewer you can turn. It
+exists because reviewing an asset had two speeds and nothing in between: a
+single isometric preview PNG per model, or the whole factory through
+`screenshot-scene.sh`. Neither answers "what does this thing look like from
+the other side, what variations does it have, and what is it made of".
+
+Everything on screen is read live from files already in the repo — the
+`.vox` models themselves, `index.json`, `materials.json`, `palette.ron`, the
+`///` doc comment on the generator function, `main.gd`'s model tables and
+`data/machines.ron`'s footprints — so the browser cannot drift from the
+pipeline, and a `cargo run -p voxgen` shows up **without a reload**: the page
+polls a stamp of those files' mtimes every 1.5s and rebuilds what changed,
+toasting the assets that are new. The 79 models fold
+into 44 assets by the naming the pipeline already uses (`_f0..f3` frames,
+`_motion` overlays cut out of a body, `_fill`), with motion drawn over its
+host and `play` cycling the frames; `pipe_fluid*` and `splitter_arrow` are
+offered on top of the host they are meaningless without.
+
+It is Python 3 stdlib plus three.js fetched once into a gitignored
+`web/vendor/`: no build step, no npm, nothing new for CI to run.
+
+The viewer is lit like the game, which closes **issue #37**: the two
+directional lights of `factory_environment.gd` at their Godot angles and
+energies, the factory-interior sky as an environment map, ACES tonemapping and
+a bloom pass in place of Godot's glow, so a status lamp glows in its own colour
+here as it does on the factory floor. Godot splits one thing three.js does not:
+`ambient_light_energy` scales sky *irradiance* only, while
+`REFLECTION_SOURCE_SKY` reflections arrive at full sky radiance — three.js has
+a single `environmentIntensity` for both. The split is restored as
+`environmentIntensity` (answering to the metal) plus a `HemisphereLight` (the
+diffuse ambient, which reflects in nothing), and both numbers were set by
+measurement rather than by eye: render the frame, re-render with a
+`MeshNormalMaterial` override, classify each pixel by the world direction its
+face points, and compare luma percentiles per material class against pixels
+sampled from `screenshot-scene.sh --fixture vat`. Stainless lands at #d4d4d3
+on top against the game's #d2d3d4, #666c6f on the camera-facing flank against
+#646969, painted blue #153d57 against #173b58.
+
+That test is what found the real bug. Every model was being drawn from the
+*inside*: `buildClassMesh` emitted its two triangles in the order the corner
+lists read, which is clockwise seen from outside, i.e. back-facing — so with
+`side: FrontSide` three.js culled the near surface of every model and shaded
+the far one. It looked like a lighting problem (washed out, no contrast, both
+directional lights apparently inert) and was a winding problem; a vat read as
+a hollow white shell. Worth remembering as a class of bug: when *every* light
+seems to do nothing, check which way the faces point before touching a single
+light.
+
+There is still no ambient occlusion, which Godot has on — three.js's
+`SSAOPass` assumes a perspective camera and this viewer is orthographic
+(**issue #49**). So the browser supplements the render checks in UI_UX.md §2a
+point 3 and does not replace them.
+
 ### 2026-09-16 — The factory emits light
 
 The follow-up to the entry below, and the close of **issue #25**. `emissive`

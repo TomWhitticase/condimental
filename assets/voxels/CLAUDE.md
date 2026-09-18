@@ -90,6 +90,11 @@ cargo test -p voxgen                # voxel asserts: openings empty, frames
 cargo xtask                         # stage into godot_project/voxels/
 ```
 
+- `scripts/asset-browser.sh` opens every asset at once in a browser you can
+  turn — variations, palette, footprint and the generator's own doc comment
+  side by side. It is a reading of the `.vox` files lit the way the game
+  lights them (ported, not shared — and with no ambient occlusion), so it
+  supplements the render checks below rather than replacing them.
 - **Review the rendered asset, not the generator, and budget a rework pass
   per asset** (§2b point 9) — looking changes the design.
 - `vengi-thumbnailer` renders through OpenGL and **needs a real video
