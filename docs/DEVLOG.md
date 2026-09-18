@@ -147,6 +147,36 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-18 — The PR-screenshot hook looks at the pull request now
+
+`.claude/hooks/require-pr-screenshot.sh` decided whether a command needed a
+screenshot by reading the command's own text and nothing else, which misfired
+both ways (issue #50, both halves hit for real while landing PR #45).
+
+A `gh pr edit <n> --add-label full-verify` was refused: it carries no body, so
+it carries no image, so the hook blocked it — even though the PR's body already
+embedded one. That is the worst possible case to block, because `full-verify` is
+the label that switches on the Godot gate and the changes that deserve the gate
+are the ones you label *after* opening the PR; the workaround it taught was
+`gh api .../labels`, which routes around the guard entirely. An edit with no
+body-bearing flag now asks GitHub for the body that is already there. If that
+lookup fails — offline, not logged in, an unparseable selector — the hook
+**fails open**, deliberately: such an edit cannot remove an image, and CI's
+`body-embeds-an-image` check still sees the PR. `gh pr create`, and any edit
+that rewrites the body, stay fail-closed.
+
+The other half: writing *about* the rule tripped the rule. The invocation
+scan split the raw command on `;`/`&&`/newline, so `gh pr edit` quoted inside
+a `--body` counted as a command — filing issue #50 was itself blocked, from a
+plain `gh issue create`. The scan tokenises with `shlex` now, so a quoted
+argument is one word and `gh` has to be in command position; newline stays a
+separator, so two commands on two lines are still two commands.
+
+The hook has a test for the first time (`.claude/hooks/test_require_pr_screenshot.py`,
+19 cases, `gh` stubbed so it needs no network), run by `invariants.yml`. Half
+the cases are the bug and half are the rule — a guard that stopped guarding
+would be a worse outcome than the bug.
+
 ### 2026-09-18 — A browser for the voxel assets
 
 `scripts/asset-browser.sh` (`tools/asset-browser/`) opens every asset in
