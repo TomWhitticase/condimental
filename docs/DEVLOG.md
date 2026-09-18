@@ -202,6 +202,118 @@ the new pipes take to prime (#55).
 `data/unlocks.ron` is untouched — BBQ ships ungated and the next ticket gates
 it.
 
+### 2026-09-18 — A case's print moves to its lid, and the two sauces separate
+
+Issue #40: `boxed_ketchup` and `boxed_bbq` were tellable apart closeup and
+not at the framing a player actually plays at. Measured rather than argued —
+on the item-gallery frame at default zoom, where a case is about 30px, the
+two cases' mean brightness was **1.2/255 apart**, i.e. nothing. The two
+label patches were 5x6px each and on the camera's shadow-side face.
+
+The fix is the same print on the **lid**, one panel either side of the tape
+seam, in each sauce's own label colour — no new palette entry, no new voxel,
+no change to either case's silhouette, since every voxel it paints was
+already carton. The lid is the face this camera lights and sees most of, so
+the same two colours now measure **26.5/255 apart** on the same frame, about
+twenty times the separation. **The carton is untouched** (the project owner's
+ruling): kraft margins all round the panels and the tape seam still crossing
+between them. Print on the two short faces as well measured better still
+(43.2/255) and was rejected — at closeup the kraft stopped being the thing
+you see, so the case read as coloured *packaging* rather than a printed box.
+
+The lesson, which is why the numbers are here: at this camera a mark on the
+lit top face is worth several of the same mark on a side face. `item_box`
+changes too, deliberately — the pair has to contrast, and both sauces' cases
+gain a positive identity instead of one being "the marked one". The
+distinction is value, not hue, so it survives colour blindness. Followed on
+as #57 (re-check on a real mixed line once BBQ is in `data/`) and #58 (the
+stale `cargo run -p voxgen` invocation in docs and the CI hint).
+
+### 2026-09-18 — The PR-screenshot hook looks at the pull request now
+
+`.claude/hooks/require-pr-screenshot.sh` decided whether a command needed a
+screenshot by reading the command's own text and nothing else, which misfired
+both ways (issue #50, both halves hit for real while landing PR #45).
+
+A `gh pr edit <n> --add-label full-verify` was refused: it carries no body, so
+it carries no image, so the hook blocked it — even though the PR's body already
+embedded one. That is the worst possible case to block, because `full-verify` is
+the label that switches on the Godot gate and the changes that deserve the gate
+are the ones you label *after* opening the PR; the workaround it taught was
+`gh api .../labels`, which routes around the guard entirely. An edit with no
+body-bearing flag now asks GitHub for the body that is already there. If that
+lookup fails — offline, not logged in, an unparseable selector — the hook
+**fails open**, deliberately: such an edit cannot remove an image, and CI's
+`body-embeds-an-image` check still sees the PR. `gh pr create`, and any edit
+that rewrites the body, stay fail-closed.
+
+The other half: writing *about* the rule tripped the rule. The invocation
+scan split the raw command on `;`/`&&`/newline, so `gh pr edit` quoted inside
+a `--body` counted as a command — filing issue #50 was itself blocked, from a
+plain `gh issue create`. The scan tokenises with `shlex` now, so a quoted
+argument is one word and `gh` has to be in command position; newline stays a
+separator, so two commands on two lines are still two commands.
+
+The hook has a test for the first time (`.claude/hooks/test_require_pr_screenshot.py`,
+19 cases, `gh` stubbed so it needs no network), run by `invariants.yml`. Half
+the cases are the bug and half are the rule — a guard that stopped guarding
+would be a worse outcome than the bug.
+
+### 2026-09-18 — A browser for the voxel assets
+
+`scripts/asset-browser.sh` (`tools/asset-browser/`) opens every asset in
+`assets/voxels/` as a searchable list beside a 3D viewer you can turn. It
+exists because reviewing an asset had two speeds and nothing in between: a
+single isometric preview PNG per model, or the whole factory through
+`screenshot-scene.sh`. Neither answers "what does this thing look like from
+the other side, what variations does it have, and what is it made of".
+
+Everything on screen is read live from files already in the repo — the
+`.vox` models themselves, `index.json`, `materials.json`, `palette.ron`, the
+`///` doc comment on the generator function, `main.gd`'s model tables and
+`data/machines.ron`'s footprints — so the browser cannot drift from the
+pipeline, and a `cargo run -p voxgen` shows up **without a reload**: the page
+polls a stamp of those files' mtimes every 1.5s and rebuilds what changed,
+toasting the assets that are new. The 79 models fold
+into 44 assets by the naming the pipeline already uses (`_f0..f3` frames,
+`_motion` overlays cut out of a body, `_fill`), with motion drawn over its
+host and `play` cycling the frames; `pipe_fluid*` and `splitter_arrow` are
+offered on top of the host they are meaningless without.
+
+It is Python 3 stdlib plus three.js fetched once into a gitignored
+`web/vendor/`: no build step, no npm, nothing new for CI to run.
+
+The viewer is lit like the game, which closes **issue #37**: the two
+directional lights of `factory_environment.gd` at their Godot angles and
+energies, the factory-interior sky as an environment map, ACES tonemapping and
+a bloom pass in place of Godot's glow, so a status lamp glows in its own colour
+here as it does on the factory floor. Godot splits one thing three.js does not:
+`ambient_light_energy` scales sky *irradiance* only, while
+`REFLECTION_SOURCE_SKY` reflections arrive at full sky radiance — three.js has
+a single `environmentIntensity` for both. The split is restored as
+`environmentIntensity` (answering to the metal) plus a `HemisphereLight` (the
+diffuse ambient, which reflects in nothing), and both numbers were set by
+measurement rather than by eye: render the frame, re-render with a
+`MeshNormalMaterial` override, classify each pixel by the world direction its
+face points, and compare luma percentiles per material class against pixels
+sampled from `screenshot-scene.sh --fixture vat`. Stainless lands at #d4d4d3
+on top against the game's #d2d3d4, #666c6f on the camera-facing flank against
+#646969, painted blue #153d57 against #173b58.
+
+That test is what found the real bug. Every model was being drawn from the
+*inside*: `buildClassMesh` emitted its two triangles in the order the corner
+lists read, which is clockwise seen from outside, i.e. back-facing — so with
+`side: FrontSide` three.js culled the near surface of every model and shaded
+the far one. It looked like a lighting problem (washed out, no contrast, both
+directional lights apparently inert) and was a winding problem; a vat read as
+a hollow white shell. Worth remembering as a class of bug: when *every* light
+seems to do nothing, check which way the faces point before touching a single
+light.
+
+There is still no ambient occlusion, which Godot has on — three.js's
+`SSAOPass` assumes a perspective camera and this viewer is orthographic
+(**issue #49**). So the browser supplements the render checks in UI_UX.md §2a
+point 3 and does not replace them.
 ### 2026-09-17 — the sim can express a branching chain
 
 The three sim costs the BBQ plan named are paid, against a test fixture

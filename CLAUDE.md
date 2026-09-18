@@ -49,7 +49,8 @@ sim_core/       the Rust simulation (src/sim/ is pure, src/lib.rs is the gdext e
 godot_project/  the Godot 4 presentation layer
 assets/voxels/  voxel asset pipeline — generators are the source, models/ is output
 xtask/          `cargo xtask`: build sim_core, stage the lib and models for Godot
-scripts/        verification, voxel build, screenshot review
+scripts/        verification, voxel build, screenshot review, asset browser
+tools/          dev tools that are not part of the game (asset-browser/)
 docs/           design docs and history
 ```
 

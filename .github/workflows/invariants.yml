@@ -39,6 +39,12 @@ jobs:
       - name: shellcheck
         run: shellcheck -S error scripts/*.sh .githooks/*
 
+      # The PR-screenshot hook is the one guard that runs BEFORE CI sees a
+      # pull request, so nothing else would catch it regressing. Its test
+      # stubs `gh`; it needs no network and no login.
+      - name: .claude/hooks test
+        run: python3 .claude/hooks/test_require_pr_screenshot.py
+
       # The workflows in this directory have no other test. actionlint also
       # shellchecks every `run:` block.
       - name: actionlint
