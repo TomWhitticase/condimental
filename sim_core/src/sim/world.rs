@@ -218,7 +218,7 @@ use super::dock::{DOCK_CAPACITY, DOCK_KIND, Dock};
 use super::economy::{ContractEvent, Economy, EconomySnapshot, STARTING_MONEY};
 use super::fluid::{
     FLUID_TANK_CAPACITY, FLUID_TANK_FILL_AMOUNT, FLUID_TANK_KIND, FluidNetwork, FluidTank,
-    FluidTap, PipeSegment,
+    FluidTap, PipeNaming, PipeSegment,
 };
 use super::hopper::{HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, HOPPER_KIND, Hopper};
 use super::ingredients::{
@@ -886,7 +886,17 @@ impl MachineLoadSnapshot {
 /// {"kind": "fluid_output",   "item": "ketchup"}  // finished, outlet pipe cannot accept
 /// {"kind": "no_outlet_pipe", "item": "ketchup"}  // finished, deposits, no tap
 /// {"kind": "staff",          "item": "manufacturing"} // refused its crew; item = category id
+/// {"kind": "unnameable_pipe","item": "liquid_smoke"} // a run is here, nothing can name it
+/// {"kind": "ambiguous_pipe", "item": "liquid_smoke"} // a run is here, it could be several fluids
 /// ```
+///
+/// The last two are issue #54's, and they replace a *wrong* answer rather
+/// than filling a silence: a machine on a run the naming pass could not
+/// name used to report `no_supply_pipe` — "you have not plumbed this in" —
+/// while pointing at a pipe the player had plumbed in perfectly well. They
+/// are reported in place of `no_supply_pipe`/`fluid_input` on the draw side
+/// and of `fluid_output` on the deposit side, whenever the run that would
+/// have served is unnamed (see [`PipeNaming`]).
 ///
 /// It describes **this tick's** situation, independently of the window's
 /// `status`: a machine may be `working` over the last ten seconds and
@@ -903,7 +913,7 @@ pub struct Stall {
     pub item: String,
 }
 
-/// The seven ways a machine can be waiting — see [`Stall`]. Serialized in
+/// The nine ways a machine can be waiting — see [`Stall`]. Serialized in
 /// `snake_case`, exactly as listed there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -916,6 +926,16 @@ pub enum StallKind {
     NoOutletPipe,
     /// Refused its crew on the last tick; `item` is the category id.
     Staff,
+    /// A pipe run *is* attached for this fluid, but nothing in the factory
+    /// can say what it carries ([`PipeNaming::Unnameable`]) — so it can
+    /// neither supply nor accept, for good. `item` is the fluid the recipe
+    /// wanted. Issue #54.
+    UnnameablePipe,
+    /// The attached run could be carrying any of several fluids
+    /// ([`PipeNaming::Ambiguous`]) and the resolver will not guess, so it
+    /// carries none. `item` is the fluid the recipe wanted. Issue #54, and
+    /// #43 for the case that produces it.
+    AmbiguousPipe,
 }
 
 /// One entry of [`World::machine_load_snapshots`]: the machine's origin
@@ -951,6 +971,12 @@ pub struct MachineLoadEntry {
 /// `is_source` marks a tile some fluid tank discharges into. Since
 /// placement it is derived from where tanks actually stand, so it moves when
 /// the player moves a tank, and a run with no tank has none at all.
+///
+/// `naming` is the whole *run*'s state ([`PipeNaming`]), repeated on every
+/// one of its tiles — a per-run fact on a per-tile record, deliberately, so
+/// a renderer walking a chunk's pipes can draw a faulted run without first
+/// stitching the chunk back into networks (issue #54). It is the same value
+/// [`FluidSnapshot::naming`] carries for the run these tiles belong to.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PipeSnapshot {
     pub tile: TileCoord,
@@ -959,6 +985,7 @@ pub struct PipeSnapshot {
     pub capacity: f64,
     pub pressure: f64,
     pub is_source: bool,
+    pub naming: PipeNaming,
 }
 
 /// One raw-ingredient hopper — placement plus live fill level. The *same*
@@ -1127,6 +1154,7 @@ pub struct FluidTapSnapshot {
 /// ```json
 /// {
 ///   "fluid": "vinegar",
+///   "naming": "carries", "candidates": ["vinegar"],
 ///   "total_volume": 27.5, "total_capacity": 40.0, "pressure": 0.6875,
 ///   "segments": [ { "tile": [5, 1], "direction": "east", "volume": 10.0,
 ///                   "capacity": 10.0, "pressure": 1.0, "is_source": true } ],
@@ -1155,6 +1183,15 @@ pub struct FluidTapSnapshot {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FluidSnapshot {
     pub fluid: Option<FluidId>,
+    /// Why `fluid` is what it is — and, when it is `null`, which of the
+    /// three very different reasons for that applies. See [`PipeNaming`];
+    /// `candidates` below is the list an `ambiguous` run is ambiguous
+    /// between.
+    pub naming: PipeNaming,
+    /// Every id the naming pass could not rule out, in id order: one entry
+    /// when the run is named, none when nothing can name it, several when
+    /// it is ambiguous.
+    pub candidates: Vec<FluidId>,
     pub total_volume: f64,
     pub total_capacity: f64,
     /// Network-wide fill fraction, `total_volume / total_capacity`.
@@ -1231,6 +1268,7 @@ pub enum TileSnapshot {
         crew: Vec<CrewEntry>,
     },
     /// `{"kind": "pipe", "direction": "east", "fluid": "vinegar",
+    ///   "naming": "carries", "candidates": ["vinegar"],
     ///   "volume": 7.5, "capacity": 10.0, "pressure": 0.75,
     ///   "is_source": false, "is_inlet": true,
     ///   "links": {"connections": [{"to": "west", "kind": "pipe"}]}}` —
@@ -1240,6 +1278,11 @@ pub enum TileSnapshot {
     Pipe {
         direction: Direction,
         fluid: Option<FluidId>,
+        /// The run's naming state and what it narrowed to — the same two
+        /// fields [`FluidSnapshot`] carries, so a hover panel can say *why*
+        /// a run is unnamed from the one call it already makes.
+        naming: PipeNaming,
+        candidates: Vec<FluidId>,
         volume: f64,
         capacity: f64,
         pressure: f64,
@@ -3659,9 +3702,10 @@ impl World {
         }
         for (&tile, &(network, segment)) in &self.topology.pipe_index {
             if chunk_of(tile) == id {
-                snapshot.pipes.push(pipe_snapshot(
-                    &self.topology.networks[network].segments()[segment],
-                ));
+                let run = &self.topology.networks[network];
+                snapshot
+                    .pipes
+                    .push(pipe_snapshot(run, &run.segments()[segment]));
             }
         }
         for &hopper in &self.topology.hoppers {
@@ -3807,7 +3851,13 @@ impl World {
                     } else {
                         (network.total_volume() / total_capacity).to_num::<f64>()
                     },
-                    segments: network.segments().iter().map(pipe_snapshot).collect(),
+                    naming: network.naming(),
+                    candidates: network.candidates().to_vec(),
+                    segments: network
+                        .segments()
+                        .iter()
+                        .map(|segment| pipe_snapshot(network, segment))
+                        .collect(),
                     taps: self.tap_snapshots(&self.topology.machine_taps, index, false),
                     producers: self.tap_snapshots(&self.topology.machine_output_taps, index, true),
                     tank_tiles: self
@@ -4002,7 +4052,24 @@ impl World {
                         {
                             return stall(StallKind::FluidInput, fluid);
                         }
-                        None => return stall(StallKind::NoSupplyPipe, fluid),
+                        // A run IS here and it is unnamed: say so, rather
+                        // than "no supply pipe" about a pipe the player can
+                        // see they have laid (issue #54). Only reached once
+                        // no touching run carries the fluid at all, so a
+                        // working line beside a broken one still reports the
+                        // working line's own shortfall.
+                        None => {
+                            return match taps.iter().find_map(|(network, _)| {
+                                let naming = self.topology.networks[*network].naming();
+                                naming.is_fault().then_some(naming)
+                            }) {
+                                Some(PipeNaming::Ambiguous) => {
+                                    stall(StallKind::AmbiguousPipe, fluid)
+                                }
+                                Some(_) => stall(StallKind::UnnameablePipe, fluid),
+                                None => stall(StallKind::NoSupplyPipe, fluid),
+                            };
+                        }
                     }
                 }
                 None
@@ -4021,6 +4088,21 @@ impl World {
                     match tap {
                         None => return stall(StallKind::NoOutletPipe, fluid),
                         Some((network, segment)) => {
+                            // The outlet run's naming first, for the draw
+                            // side's reason: an unnamed run refuses a
+                            // deposit however empty it is, and "outlet pipe
+                            // full" about an empty pipe is the answer that
+                            // sent issue #54's author to a test harness.
+                            let naming = self.topology.networks[network].naming();
+                            if naming.is_fault() {
+                                return stall(
+                                    match naming {
+                                        PipeNaming::Ambiguous => StallKind::AmbiguousPipe,
+                                        _ => StallKind::UnnameablePipe,
+                                    },
+                                    fluid,
+                                );
+                            }
                             if !self.topology.networks[network].can_accept_at(
                                 segment,
                                 fluid,
@@ -4196,6 +4278,8 @@ impl World {
                 TileSnapshot::Pipe {
                     direction: placement.direction,
                     fluid: network.fluid.clone(),
+                    naming: network.naming(),
+                    candidates: network.candidates().to_vec(),
                     volume: segment.volume.to_num::<f64>(),
                     capacity: segment.capacity.to_num::<f64>(),
                     pressure: segment.pressure().to_num::<f64>(),
@@ -4540,7 +4624,12 @@ struct Plumbing {
 ///    a mixer plumbed so it can never draw still names what it would fill.
 /// 3. **Naming.** A run whose set has narrowed to exactly one id carries
 ///    it. Two or more left is genuine ambiguity; none left is a
-///    contradiction; either way the run stays **unnamed**.
+///    contradiction; either way the run stays **unnamed** — but it records
+///    *which* of the two it was, and what it narrowed to, in
+///    [`FluidNetwork::naming`] and `candidates`. That is the whole of issue
+///    #54: the two have different fixes (turn a source round; separate two
+///    merged runs), and before this pass said which, neither reached the
+///    player at all.
 ///
 /// Step 2 repeats until a sweep changes nothing. Sets only ever shrink and
 /// each sweep is computed from the previous sweep's sets and applied all at
@@ -4553,7 +4642,12 @@ struct Plumbing {
 /// **An unnamed run is not an error.** `can_supply_at`/`can_accept_at`
 /// reject one, so its machines stall — the same graceful "not plumbed yet"
 /// a player sees for most of the time they spend laying a run, and never a
-/// panic.
+/// panic. It is, however, **said out loud** since issue #54: an unnamed run
+/// something is plumbed to reports [`PipeNaming::Unnameable`] or
+/// [`PipeNaming::Ambiguous`] rather than being indistinguishable from a run
+/// that is merely empty, and the machines on it stall with
+/// [`StallKind::UnnameablePipe`]/[`StallKind::AmbiguousPipe`] instead of the
+/// misleading "no supply pipe" they used to report while pointing at a pipe.
 fn resolve_network_fluids(
     networks: &mut [FluidNetwork],
     plumbing: &[Plumbing],
@@ -4638,12 +4732,26 @@ fn resolve_network_fluids(
         possible = narrowed;
     }
 
-    // 3.
-    for (network, ids) in networks.iter_mut().zip(&possible) {
-        let mut ids = ids.iter();
-        if let (Some(only), None) = (ids.next(), ids.next()) {
-            network.fluid = Some(only.clone());
+    // 3. Naming, with its reason (issue #54). Exactly one id left names the
+    // run; none or several leaves it unnamed, and those are two different
+    // mistakes with two different fixes, so the run records which — and
+    // whether anything is actually plumbed to it, because a run nobody has
+    // connected to yet is the ordinary state of pipe a player is still
+    // laying and must not read as a fault.
+    let mut attached: Vec<bool> = networks
+        .iter()
+        .map(|network| network.segments().iter().any(|segment| segment.is_source))
+        .collect();
+    for machine in plumbing {
+        if let Some(network) = machine.output {
+            attached[network] = true;
         }
+        for &network in &machine.inputs {
+            attached[network] = true;
+        }
+    }
+    for ((network, ids), attached) in networks.iter_mut().zip(possible).zip(attached) {
+        network.set_naming(ids.into_iter().collect(), attached);
     }
 }
 
@@ -4765,7 +4873,7 @@ fn is_belt_like(body: BodyKind) -> bool {
     matches!(body, BodyKind::Belt | BodyKind::Splitter)
 }
 
-fn pipe_snapshot(segment: &PipeSegment) -> PipeSnapshot {
+fn pipe_snapshot(network: &FluidNetwork, segment: &PipeSegment) -> PipeSnapshot {
     PipeSnapshot {
         tile: segment.tile,
         direction: segment.direction,
@@ -4773,6 +4881,7 @@ fn pipe_snapshot(segment: &PipeSegment) -> PipeSnapshot {
         capacity: segment.capacity.to_num::<f64>(),
         pressure: segment.pressure().to_num::<f64>(),
         is_source: segment.is_source,
+        naming: network.naming(),
     }
 }
 

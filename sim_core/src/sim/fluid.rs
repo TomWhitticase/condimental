@@ -379,6 +379,51 @@ impl FluidTank {
     }
 }
 
+/// What `world.rs`'s naming pass made of a run — the *outcome* of the
+/// narrowing described in `resolve_network_fluids`, not a second opinion
+/// about it. Kept beside [`FluidNetwork::fluid`] and written with it, so a
+/// run can never report a reason that disagrees with what it carries.
+///
+/// It exists because three of these four states used to be one state on the
+/// wire (`fluid: null`) and they mean completely different things to a
+/// player: a run still being laid is fine, a run nothing can name never
+/// works, and a run that could be two things never works for a *different*
+/// reason and has a different fix (issue #54).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PipeNaming {
+    /// Narrowed to exactly one id: [`FluidNetwork::fluid`] names it, and
+    /// every machine on the run can draw and deposit. The only working
+    /// state, and the only one where `fluid` is `Some`.
+    Carries,
+    /// Narrowed to nothing, and nothing is plumbed to the run yet — no
+    /// machine touches it, no tank discharges into it. A length of pipe the
+    /// player has just laid, which is an ordinary in-progress state and
+    /// deliberately NOT a fault: nothing is stalled by it.
+    Unplumbed,
+    /// Narrowed to nothing **although a machine or a tank is attached**:
+    /// nothing in the factory can say what this run carries, so everything
+    /// on it is stuck for good. Usually a source facing the wrong way — a
+    /// tank discharges only into the pipe it *faces* — which is exactly how
+    /// issue #54 was hit.
+    Unnameable,
+    /// Narrowed to several: the run could be any of
+    /// [`FluidNetwork::candidates`] and the resolver will not guess (issue
+    /// #43). Usually two sources merged into one run. Also stuck, and with
+    /// a different fix: separate the runs rather than turn something round.
+    Ambiguous,
+}
+
+impl PipeNaming {
+    /// Whether this state stalls everything on the run **and is the
+    /// player's to fix** — the two unnamed-with-something-attached states,
+    /// not the run that is merely unfinished. What the wire means by "show
+    /// this run as faulted".
+    pub fn is_fault(self) -> bool {
+        matches!(self, PipeNaming::Unnameable | PipeNaming::Ambiguous)
+    }
+}
+
 /// A connected group of pipe segments carrying one fluid type
 /// (ARCHITECTURE.md §3.2's `FluidNetwork`).
 ///
@@ -400,6 +445,15 @@ pub struct FluidNetwork {
     /// [`FluidNetwork::can_supply_at`] compares against a named fluid and
     /// an unnamed network matches nothing.
     pub fluid: Option<FluidId>,
+    /// Why `fluid` is what it is — see [`PipeNaming`] and
+    /// [`Self::set_naming`].
+    naming: PipeNaming,
+    /// Every id the narrowing pass could not rule out, in id order. One
+    /// entry when the run is named (the id it carries), none when nothing
+    /// can name it, several when it is ambiguous — which is the list a
+    /// hover panel prints so the player can see *which* two fluids have
+    /// been merged.
+    candidates: Vec<FluidId>,
     segments: Vec<PipeSegment>,
     /// Adjacent index pairs, `(a, b)` with `a < b`, in a deterministic
     /// order — the graph edges of this connected component. Computed once
@@ -428,8 +482,14 @@ impl FluidNetwork {
                 segments.len()
             );
         }
+        let (naming, candidates) = match &fluid {
+            Some(id) => (PipeNaming::Carries, vec![id.clone()]),
+            None => (PipeNaming::Unplumbed, Vec::new()),
+        };
         Self {
             fluid,
+            naming,
+            candidates,
             segments,
             links,
         }
@@ -437,6 +497,41 @@ impl FluidNetwork {
 
     pub fn segments(&self) -> &[PipeSegment] {
         &self.segments
+    }
+
+    /// Records what `world.rs`'s narrowing pass left this run with:
+    /// `candidates` is every id it could not rule out (in id order), and
+    /// `attached` is whether anything depends on the run — a machine
+    /// drawing from or filling it, or a tank discharging into it.
+    ///
+    /// The **only** way `fluid` and the naming are set together, which
+    /// is the point: naming is not a second derivation that could drift, it
+    /// is the same decision recorded with its reason. `pub(crate)` because a
+    /// run's id belongs to that one pass (see `resolve_network_fluids`).
+    pub(crate) fn set_naming(&mut self, candidates: Vec<FluidId>, attached: bool) {
+        self.naming = match candidates.len() {
+            1 => PipeNaming::Carries,
+            0 if attached => PipeNaming::Unnameable,
+            0 => PipeNaming::Unplumbed,
+            _ => PipeNaming::Ambiguous,
+        };
+        self.fluid = match self.naming {
+            PipeNaming::Carries => candidates.first().cloned(),
+            _ => None,
+        };
+        self.candidates = candidates;
+    }
+
+    /// Why this run carries what it carries — see [`PipeNaming`].
+    pub fn naming(&self) -> PipeNaming {
+        self.naming
+    }
+
+    /// Every id the narrowing pass could not rule out, in id order: one
+    /// when the run is named, none when nothing can name it, several when
+    /// it is ambiguous.
+    pub fn candidates(&self) -> &[FluidId] {
+        &self.candidates
     }
 
     pub fn links(&self) -> &[(usize, usize)] {

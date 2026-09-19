@@ -302,6 +302,11 @@ pub const ASSETS: &[Asset] = &[
         name: "pipe_fitting_tank",
         build: pipe_fitting_tank,
     },
+    // The clamp on a run the sim cannot name (issue #54), overlaid per tile.
+    Asset {
+        name: "pipe_fault",
+        build: pipe_fault,
+    },
     Asset {
         name: "pipe_fluid",
         build: pipe_fluid,
@@ -2587,6 +2592,60 @@ pub fn pipe_fitting_tank(p: &Palette) -> VoxModel {
         (PIPE_AXIS_Z + 13, PIPE_AXIS_Z + 13),
         p.idx("brass"),
     );
+    m
+}
+
+/// The clamp Godot stands on every tile of a run the simulation cannot name
+/// (issue #54 — `sim::PipeNaming`'s `unnameable` and `ambiguous`). A run
+/// that carries nothing readable is empty, and so is a run that is merely
+/// waiting for its first fill; the two used to render identically, which is
+/// exactly how a whole branch of the factory sat idle without a word.
+///
+/// **It says "stopped", not "empty".** A hazard-striped block bolted
+/// straight over the tube, wider and taller than the tube it covers, so a
+/// faulted run reads as a line of beads rather than as a smooth pipe — a
+/// silhouette a monochrome screenshot still carries (UI_UX.md §7: never
+/// colour alone). It is signage, not a lamp: `matte` hazard striping, no
+/// emissive, and no post — the andon poles came down on 2026-09-12 and the
+/// hover panel is the readout, so this marks WHERE to look and the panel
+/// says what is wrong.
+///
+/// **Square in X and Y about [`PIPE_C`], so it never turns.** A run's tiles
+/// face whichever way the run runs; a marker overlaid on each of them would
+/// otherwise need §2b point 29's four-facing check. Built symmetric under a
+/// quarter turn instead (pinned by
+/// `a_pipe_fault_clamp_is_unchanged_by_a_quarter_turn`), it sits at the same
+/// yaw on a straight, a corner or a tee and covers the tube of each.
+pub fn pipe_fault(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::tile();
+    let (yellow, black) = (p.idx("hazard_yellow"), p.idx("hazard_black"));
+    // Radius `PIPE_HUB_R + 1` from the axis on both horizontal axes: one
+    // voxel clear of the widest casting a shape has at mid-tile, so the
+    // clamp is never coplanar with what it covers (`PIPE_FITTING_MARGIN`'s
+    // lesson, §2b point 24).
+    let half = PIPE_HUB_R + 1.0;
+    let span = (
+        (PIPE_C - half).ceil() as i32,
+        (PIPE_C + half).floor() as i32,
+    );
+    let z = (PIPE_AXIS_Z - 6, PIPE_AXIS_Z + 7);
+    // Hazard bands ACROSS the clamp rather than [`VoxModel::hazard_stripe_x`]'s
+    // diagonal: that stripe varies with x, and anything varying with x reads
+    // one way on an east/west run and another on a north/south one. Banding
+    // by height is the same signage and is the same from every side.
+    for zz in z.0..=z.1 {
+        let band = if ((zz - z.0) / 3) % 2 == 0 {
+            yellow
+        } else {
+            black
+        };
+        m.cuboid(span, span, (zz, zz), band);
+    }
+    // A black cap band along the top edge: the block's own top face is the
+    // one this camera sees most of, and a solid dark band there separates
+    // the clamp from the bright `steel_light` tube by VALUE as well as by
+    // shape (§2b point 11).
+    m.cuboid(span, span, (z.1 - 1, z.1), black);
     m
 }
 
@@ -5904,6 +5963,84 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// The fault clamp (issue #54) is overlaid on a tile whose own facing is
+    /// whatever its run's is, and `main.gd` stands it at a fixed yaw rather
+    /// than at its host's. That is only safe while the model is unchanged by
+    /// a quarter turn — otherwise the striping would run one way on an
+    /// east/west run and the other on a north/south one, which is §2b point
+    /// 29's defect with the check skipped rather than passed.
+    #[test]
+    fn a_pipe_fault_clamp_is_unchanged_by_a_quarter_turn() {
+        let clamp = pipe_fault(&palette());
+        assert_eq!(
+            clamp.voxels,
+            clamp.rotated_cw(1).voxels,
+            "the fault clamp must look the same on a run at any facing"
+        );
+    }
+
+    /// And it must actually COVER the tube it marks, on both horizontal
+    /// axes: the marker's whole job is that a faulted run cannot be mistaken
+    /// for a merely empty one, and a clamp narrower than the pipe would read
+    /// as a band tucked inside it. Checked against a straight and against
+    /// that straight turned, because a run's tiles face both ways.
+    #[test]
+    fn a_pipe_fault_clamp_covers_the_tube_it_marks() {
+        let p = palette();
+        let clamp = pipe_fault(&p);
+        for turns in [0, 1] {
+            let shape = pipe(&p).rotated_cw(turns);
+            let mut covered = 0;
+            for &(x, y, z) in shape.voxels.keys() {
+                let (x, y, z) = (x as i32, y as i32, z as i32);
+                // Only the mid-tile slice of TUBE the clamp straddles is its
+                // business: the rest of the run is deliberately left in view
+                // so a marked run still reads as a run, and the support
+                // stand below z = 11 is floor hardware, not pipe.
+                let along = if turns == 0 { x } else { y };
+                if z < PIPE_AXIS_Z - PIPE_OUTER_R as i32 || !clamp.filled(along, PIPE_C as i32, z) {
+                    continue;
+                }
+                assert!(
+                    clamp.filled(x, y, z),
+                    "turned {turns}: the tube at ({x}, {y}, {z}) is inside the clamp's span but \
+                     not inside the clamp — it would poke out of its own marker"
+                );
+                covered += 1;
+            }
+            assert!(
+                covered > 0,
+                "turned {turns}: the clamp covers no tube at all"
+            );
+        }
+    }
+
+    /// Hazard striping, both colours, and NO emissive: this is signage on a
+    /// dead run, not a lamp. The andon stack lights came down on 2026-09-12
+    /// (DECISIONS.md) and an emissive marker would be the same poles in
+    /// another shape.
+    #[test]
+    fn a_pipe_fault_clamp_is_matte_hazard_signage() {
+        let p = palette();
+        let clamp = pipe_fault(&p);
+        for class in [
+            MaterialClass::Metal,
+            MaterialClass::Emissive,
+            MaterialClass::Liquid,
+        ] {
+            assert!(
+                clamp.filter_class(&p, class).is_empty(),
+                "the fault clamp must carry no {class:?} voxels"
+            );
+        }
+        for name in ["hazard_yellow", "hazard_black"] {
+            assert!(
+                clamp.voxels.values().any(|&c| c == p.idx(name)),
+                "the fault clamp must be striped in {name}"
+            );
         }
     }
 

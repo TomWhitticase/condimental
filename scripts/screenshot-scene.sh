@@ -104,6 +104,15 @@
 # put the BBQ tier of the board over it, which is where the epic's mixed
 # orders read.
 #
+# Pass --stalled-run to build the STALLED RUN (test_layouts.gd's
+# `build_stalled_pipe_run`): the BBQ branch with its liquid-smoke tank turned
+# off its own run — issue #54's own mistake — so that run is one the
+# simulation cannot name and every machine on it waits forever. It is the
+# frame that shows a DEAD run (hazard clamps along it) beside the merely
+# EMPTY runs either side of it, which used to look identical, with the cursor
+# on the dead run so the hover gives the reason. Deliberately NOT populated:
+# a factory run forward has no empty runs left to compare against.
+#
 # Pass --bottleneck to build the BOTTLENECK LINE (test_layouts.gd's
 # `build_bottleneck_line`): the whole shipped line with its hoppers and tank
 # on auto-fill, run until it has backed up behind the 240-tick cooking vat,
@@ -226,7 +235,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--item-gallery] [--bottleneck] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--full-dock [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board [--board-end]] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--item-gallery] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--full-dock [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board [--board-end]] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
