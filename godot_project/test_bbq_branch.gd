@@ -173,6 +173,24 @@ refused place is silent"
 			_fail("the run at %s must carry %s, not '%s'" % [pair[0], pair[1], _fluid_on(pair[0])])
 			return
 
+	# BBQ is gated now (`data/unlocks.ron`): its ingredients and its orders
+	# are held back until the ketchup line has demonstrably run. This test
+	# is about the branch itself, not about the gate — `sim_core/tests/
+	# unlocks.rs` owns that — so it puts the world on the far side of the
+	# gate first, the way a player who had made the deliveries would find
+	# it. The threshold is read off the wire rather than written out here,
+	# so a balance pass on that file cannot leave this asserting against
+	# the wrong side of it.
+	var econ_gates: Dictionary = JSON.parse_string(main.sim.economy_snapshot_json())
+	var threshold := 0
+	for unlock in econ_gates.get("unlocks", []):
+		threshold = maxi(threshold, int(unlock.get("after_deliveries", 0)))
+	if threshold == 0:
+		_fail("data/unlocks.ron gates nothing — the BBQ tier should be behind a gate")
+		return
+	Layouts.deliver(main.sim, threshold)
+	main._rebuild_world()
+
 	# The board can ask for two products in one order now — something it
 	# could not express before this epic.
 	var mixed := 0

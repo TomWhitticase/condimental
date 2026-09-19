@@ -1890,11 +1890,10 @@ impl World {
     /// `hopper_items` is not filtered, deliberately — see
     /// [`IngredientsSnapshot`]'s field doc.
     pub fn ingredients_snapshot(&self) -> IngredientsSnapshot {
-        self.ingredients.snapshot(
-            self.economy.money,
-            &self.raw_items,
-            |id| self.economy.ingredient_unlocked(id),
-        )
+        self.ingredients
+            .snapshot(self.economy.money, &self.raw_items, |id| {
+                self.economy.ingredient_unlocked(id)
+            })
     }
 
     /// Lifetime successful contract deliveries — the counter every

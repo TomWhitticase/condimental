@@ -85,7 +85,11 @@ fn the_counter_advances_once_per_satisfied_window_and_not_at_all_without_one() {
     // nothing to run *on*. `corner_shop` is active from tick 0 and its
     // windows come round every 1 000 ticks, so this passes several of them.
     let mut starving = reference_chain_with_budget(recipes(), BUDGET);
-    assert_eq!(starving.lifetime_deliveries(), 0, "a new game has shipped nothing");
+    assert_eq!(
+        starving.lifetime_deliveries(),
+        0,
+        "a new game has shipped nothing"
+    );
     for _ in 0..5_000 {
         starving.tick();
     }
@@ -273,10 +277,16 @@ fn the_counter_and_the_gates_it_opens_survive_a_save_round_trip() {
          contracts — a lost contract must not re-lock a tier"
     );
     for id in ingredients.iter() {
-        assert!(loaded.ingredient_unlocked(id), "'{id}' must stay unlocked across a load");
+        assert!(
+            loaded.ingredient_unlocked(id),
+            "'{id}' must stay unlocked across a load"
+        );
     }
     for id in contracts.iter() {
-        assert!(loaded.contract_unlocked(id), "'{id}' must stay unlocked across a load");
+        assert!(
+            loaded.contract_unlocked(id),
+            "'{id}' must stay unlocked across a load"
+        );
     }
     assert_eq!(
         loaded.to_save_ron(),

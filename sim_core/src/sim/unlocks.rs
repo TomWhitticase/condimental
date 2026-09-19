@@ -468,7 +468,11 @@ mod tests {
     fn loads_in_file_order_and_indexes_both_lists() {
         let unlocks = example();
         assert_eq!(
-            unlocks.ordered().iter().map(|u| u.id.as_str()).collect::<Vec<_>>(),
+            unlocks
+                .ordered()
+                .iter()
+                .map(|u| u.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["bbq_sauce", "later"]
         );
         assert_eq!(
