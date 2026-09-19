@@ -244,6 +244,9 @@
   "pipe_end": [
     "metal"
   ],
+  "pipe_fault": [
+    "matte"
+  ],
   "pipe_fitting_machine": [
     "metal"
   ],

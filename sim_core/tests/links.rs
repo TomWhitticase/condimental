@@ -968,7 +968,7 @@ fn query_tile_json_carries_links_on_belts_splitters_and_pipes() {
     let pipe = serde_json::to_string(&world.query_tile((0, 1)).unwrap()).unwrap();
     assert_eq!(
         pipe,
-        r#"{"kind":"pipe","direction":"east","fluid":null,"volume":0.0,"capacity":10.0,"pressure":0.0,"is_source":false,"is_inlet":false,"links":{"connections":[{"to":"east","kind":"pipe"}]}}"#
+        r#"{"kind":"pipe","direction":"east","fluid":null,"naming":"unplumbed","candidates":[],"volume":0.0,"capacity":10.0,"pressure":0.0,"is_source":false,"is_inlet":false,"links":{"connections":[{"to":"east","kind":"pipe"}]}}"#
     );
 
     // And it is the same object `world_layout` reports.
