@@ -96,6 +96,7 @@ use std::collections::BTreeMap;
 use super::contracts::{Contract, ContractRegistry};
 use super::inventory::Inventory;
 use super::types::{ItemId, Money};
+use super::unlocks::{UnlockRegistry, UnlockSnapshot};
 
 /// What a new game starts with in the bank (the "Real Placement" epic's
 /// ticket 1).
@@ -263,6 +264,11 @@ pub enum SignRefusal {
     AlreadySigned,
     /// The fee is more than the balance; nothing moved.
     CannotAfford,
+    /// The offer is behind a progression gate that has not opened
+    /// (`data/unlocks.ron`). The board does not list it either, so this is
+    /// the refusal a command forged by hand gets — the gate is a rule in
+    /// the simulation, not a filter presentation applies on its own.
+    Locked,
 }
 
 /// Money plus every active contract's delivery state. Owned directly by
@@ -292,6 +298,28 @@ pub struct Economy {
     /// the board can say "lost twice" beside an offer; nothing in the
     /// settle logic reads it.
     pub losses: BTreeMap<String, u32>,
+    /// Every progression gate, in `data/unlocks.ron` order. Content, so
+    /// read-only, and here beside `board` for `board`'s reason: it is the
+    /// other half of the answer to "what may this player sign", and
+    /// [`Economy::try_sign`] has to consult it on a path that is already
+    /// the economy's. See [`super::unlocks`] for why a gate is two lists of
+    /// ids rather than a flag on a recipe.
+    unlocks: UnlockRegistry,
+    /// **Lifetime successful contract deliveries** — satisfied delivery
+    /// windows, over the whole life of this save. The one number every
+    /// progression gate is keyed off (`data/unlocks.ron`).
+    ///
+    /// Incremented exactly where [`ContractEvent::Paid`] is raised, so a
+    /// missed window counts for nothing; a lost contract does not take its
+    /// past deliveries back, so it never decreases. Persisted simulation
+    /// state — part of the lockstep, and a `u32` rather than a `Money`-like
+    /// fixed-point value because it counts whole events (ARCHITECTURE.md
+    /// §3.9 is about fractional quantities, and there is no half delivery).
+    ///
+    /// Saturating on increment. At one delivery per hundred ticks it would
+    /// take about three hundred thousand hours of play to reach `u32::MAX`,
+    /// but the alternative is a wrap that would close every gate at once.
+    pub lifetime_deliveries: u32,
 }
 
 /// A presentation-facing snapshot of economy state (ARCHITECTURE.md §4/§5) —
@@ -324,7 +352,27 @@ pub struct EconomySnapshot {
     /// Every offer on the board, in file order, active or not — what the
     /// contracts board menu is built from, the way `shop_snapshot_json`'s
     /// `entries` build the build menu.
+    ///
+    /// **Offers behind a progression gate that has not opened are absent**
+    /// (`data/unlocks.ron`), so this is what the player may sign rather
+    /// than everything `contracts.ron` holds. The filtering is here and not
+    /// in Godot for the usual reason — the sim decides, presentation
+    /// renders — and it is genuine: `SignContract` on a locked id is
+    /// refused (`SignRefusal::Locked`) whether or not a row was ever drawn.
     pub board: Vec<ContractOfferSnapshot>,
+    /// **Lifetime successful deliveries** — the counter every gate below is
+    /// keyed off, on the wire so a UI can show progress toward the next one
+    /// without knowing the rule.
+    pub lifetime_deliveries: u32,
+    /// Every progression gate in `data/unlocks.ron` order, open or not.
+    ///
+    /// Presentation's job with this is the announcement: diff the open set
+    /// against the one last drawn and toast whatever just opened, exactly
+    /// as the active-contract list is diffed to announce a signature or a
+    /// loss. Nothing else should read it — a locked ingredient is already
+    /// absent from `ingredients_snapshot_json`, and a locked contract is
+    /// already absent from `board`.
+    pub unlocks: Vec<UnlockSnapshot>,
 }
 
 /// One active contract, as presentation sees it.
@@ -401,6 +449,19 @@ impl Economy {
     /// [`super::reference::reference_chain`], which buys a whole factory) or
     /// deliberately broke, and where a loaded save will restore its balance.
     pub fn with_money(contracts: &ContractRegistry, money: Money) -> Self {
+        Self::with_content(contracts, UnlockRegistry::bundled(), money)
+    }
+
+    /// [`Economy::with_money`], but with an explicit set of progression
+    /// gates instead of the bundled `data/unlocks.ron` — the seam a test
+    /// uses to drive a threshold the shipped content does not have, and the
+    /// one [`super::unlocks::UnlockRegistry::ungated`] uses to get the
+    /// shipped gate out of the way of a test that is about something else.
+    pub fn with_content(
+        contracts: &ContractRegistry,
+        unlocks: UnlockRegistry,
+        money: Money,
+    ) -> Self {
         Self {
             money,
             contracts: contracts
@@ -414,6 +475,8 @@ impl Economy {
             // ceiling is per item rather than one total.
             delivery_buffer: Inventory::new(DELIVERY_STOCK_CAPACITY),
             losses: BTreeMap::new(),
+            unlocks,
+            lifetime_deliveries: 0,
         }
     }
 
@@ -426,6 +489,28 @@ impl Economy {
     /// The board of offers this economy was built from, in file order.
     pub fn board(&self) -> &ContractRegistry {
         &self.board
+    }
+
+    /// The progression gates this economy was built with, in file order.
+    /// Read by `World` to filter the ingredient market, which is the other
+    /// list a gate holds back (see [`super::unlocks`]).
+    pub fn unlocks(&self) -> &UnlockRegistry {
+        &self.unlocks
+    }
+
+    /// Whether the market may sell `id` right now — the answer `World`'s
+    /// `BuyIngredient` arm and `ingredients_snapshot` both ask.
+    pub fn ingredient_unlocked(&self, id: &str) -> bool {
+        self.unlocks
+            .ingredient_available(id, self.lifetime_deliveries)
+    }
+
+    /// Whether the board may offer `id` right now. [`Self::try_sign`]
+    /// refuses anything this says no to, so hiding a locked row is
+    /// presentation agreeing with the sim rather than enforcing anything.
+    pub fn contract_unlocked(&self, id: &str) -> bool {
+        self.unlocks
+            .contract_available(id, self.lifetime_deliveries)
     }
 
     /// Adds finished product into the shared delivery pool — called from
@@ -487,13 +572,21 @@ impl Economy {
     /// activates it with a fresh clock (first window ends one cadence from
     /// now) and zero counters, and slots it into the active list at its
     /// **file-order** position so priority under scarcity stays the
-    /// board's. Refuses — changing nothing — an unknown id, an offer that is
-    /// already active (one signature per offer, module doc) and a fee the
-    /// balance does not cover.
+    /// board's. Refuses — changing nothing — an unknown id, an offer behind
+    /// a progression gate that has not opened (`data/unlocks.ron`), an
+    /// offer that is already active (one signature per offer, module doc)
+    /// and a fee the balance does not cover.
     pub fn try_sign(&mut self, id: &str, current_tick: u64) -> Result<(), SignRefusal> {
         let Some(contract) = self.board.get(id).cloned() else {
             return Err(SignRefusal::Unknown);
         };
+        // Before the active check, though the two can never both hold: a
+        // gate is a rule in the simulation, not a filter on the board's
+        // rendering, so a command naming a locked id is refused here rather
+        // than relying on the row never having been drawn.
+        if !self.contract_unlocked(id) {
+            return Err(SignRefusal::Locked);
+        }
         if self.is_active(id) {
             return Err(SignRefusal::AlreadySigned);
         }
@@ -591,6 +684,12 @@ impl Economy {
             self.money = self.money.saturating_add(self.contracts[i].contract.payout);
             self.contracts[i].deliveries_made += 1;
             self.contracts[i].consecutive_misses = 0;
+            // The lifetime counter every progression gate reads, incremented
+            // HERE and nowhere else: one satisfied window, one delivery. A
+            // missed window above takes this path's `continue` and counts
+            // for nothing, which is the whole point of keying gates off it
+            // (`data/unlocks.ron`).
+            self.lifetime_deliveries = self.lifetime_deliveries.saturating_add(1);
             events.push(ContractEvent::Paid { id });
         }
         // Highest index first, so earlier removals never shift a later one.
@@ -648,6 +747,7 @@ impl Economy {
                 .board
                 .ordered()
                 .iter()
+                .filter(|offer| self.contract_unlocked(&offer.id))
                 .map(|offer| ContractOfferSnapshot {
                     id: offer.id.clone(),
                     name: offer.name.clone(),
@@ -660,6 +760,21 @@ impl Economy {
                     active: self.is_active(&offer.id),
                     affordable: self.money >= offer.price,
                     times_lost: self.times_lost(&offer.id),
+                })
+                .collect(),
+            lifetime_deliveries: self.lifetime_deliveries,
+            unlocks: self
+                .unlocks
+                .ordered()
+                .iter()
+                .map(|unlock| UnlockSnapshot {
+                    id: unlock.id.clone(),
+                    name: unlock.name.clone(),
+                    open: unlock.is_open(self.lifetime_deliveries),
+                    deliveries: self.lifetime_deliveries,
+                    after_deliveries: unlock.after_deliveries,
+                    ingredients: unlock.ingredients.len(),
+                    contracts: unlock.contracts.len(),
                 })
                 .collect(),
         }

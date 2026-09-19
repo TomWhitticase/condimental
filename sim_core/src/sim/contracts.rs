@@ -366,6 +366,13 @@ impl ContractRegistry {
         self.contracts.iter().find(|c| c.id == id)
     }
 
+    /// Every contract id, in file order — a stable list for an error
+    /// message naming what *is* on the board (see
+    /// [`super::unlocks::UnlockRegistry::validate_covers`]).
+    pub fn ids(&self) -> Vec<String> {
+        self.contracts.iter().map(|c| c.id.clone()).collect()
+    }
+
     /// Where `id` sits in file order — the priority rank a signed contract
     /// takes in the active list, whenever it is signed.
     pub fn position(&self, id: &str) -> Option<usize> {

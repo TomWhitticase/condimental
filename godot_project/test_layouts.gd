@@ -714,6 +714,34 @@ static func fund(sim, amount: int) -> void:
 		push_error("fund(): load_ron refused the patched save: %s" % error)
 
 
+## Sets the lifetime delivery counter — the one number every progression
+## gate in `data/unlocks.ron` is resolved against — through the same
+## save/load door `fund` uses, and for the same reason: the counter is
+## simulation state with no command that sets it, and the alternative is
+## running a Godot fixture for the ten thousand ticks it takes to earn ten
+## deliveries honestly. `sim_core/tests/unlocks.rs` is what earns them
+## honestly; a fixture here only needs to be ON one side of the gate or the
+## other so a panel can be photographed in both states.
+##
+## `save_ron` writes it as a plain integer (`lifetime_deliveries: N`), and a
+## save from before the field existed simply has no such line — so this
+## inserts one rather than only substituting, and a world already past the
+## gate is left alone by the substitution path.
+static func deliver(sim, deliveries: int) -> void:
+	var text: String = sim.save_ron()
+	var regex := RegEx.new()
+	regex.compile("lifetime_deliveries:\\s*\\d+")
+	var patched: String = text
+	if regex.search(text) != null:
+		patched = regex.sub(text, "lifetime_deliveries: %d" % deliveries)
+	else:
+		push_error("deliver(): this save has no lifetime_deliveries field")
+		return
+	var error: String = sim.load_ron(patched)
+	if error != "":
+		push_error("deliver(): load_ron refused the patched save: %s" % error)
+
+
 ## THE STRESS LINE (the pipes & conveyors overhaul, ticket 4) — the fixture
 ## `test_perf.gd` times and `scripts/screenshot-scene.sh --stress`
 ## photographs. Big on purpose, where every other fixture here is small: it

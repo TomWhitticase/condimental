@@ -110,8 +110,24 @@
 //! landed and did exactly what this note reserved: `SavedHopper` and
 //! `SavedTank` each gained one `#[serde(default)] auto_fill: bool`, and the
 //! schema version stayed at 1. `SavedMachine::recipe` is the third, added
-//! by the BBQ epic on the same terms. After this batch ships, a field
-//! addition is a version bump like any other shape change.
+//! by the BBQ epic on the same terms, and [`SaveData::lifetime_deliveries`]
+//! is the fourth. After this batch ships, a field addition is a version
+//! bump like any other shape change.
+//!
+//! **What a pre-gate save loads as, and why that is right.**
+//! `lifetime_deliveries` defaults to zero, so a save written before
+//! progression gates existed loads as a factory that has delivered nothing
+//! and finds the BBQ tier locked again — however many deliveries it
+//! actually made. That is deliberate, and it is the *kinder* of the two
+//! options: the alternative (assume an old save has earned every gate) hands
+//! a returning player an unlocked tier with no announcement, which is
+//! exactly the silent gate `data/unlocks.ron` exists to avoid. Re-earning it
+//! costs ten delivery windows on a line that is already built and running —
+//! a couple of minutes — and it ends with the toast they would otherwise
+//! never have seen. Nothing else about the save is affected: no ingredient
+//! is taken away, no signed contract is cancelled, and a contract signed
+//! before the gate existed keeps running (the active list is restored
+//! verbatim, and `try_sign` is the only thing a gate refuses).
 
 use std::collections::BTreeMap;
 
@@ -209,6 +225,21 @@ pub struct SaveData {
     /// which is the same as never.
     #[serde(default)]
     pub contracts_lost: Vec<(String, u32)>,
+    /// Lifetime successful contract deliveries
+    /// ([`super::economy::Economy::lifetime_deliveries`]) — the counter
+    /// every progression gate in `data/unlocks.ron` is keyed off.
+    ///
+    /// **The counter and not the gates.** Which tiers are open is derived
+    /// from this against the *current* data file every time it is asked, so
+    /// a balance pass on `unlocks.ron` re-reads correctly for every existing
+    /// save; storing "bbq_sauce is unlocked" would freeze a save against the
+    /// numbers in that file on the day it was written.
+    ///
+    /// `#[serde(default)]` under the same rule as `auto_fill` and
+    /// `SavedMachine::recipe` — see the module doc for what a pre-gate save
+    /// therefore loads as, and why that is the right call.
+    #[serde(default)]
+    pub lifetime_deliveries: u32,
     /// The production ledger (`sim::stats::ProductionLedger`), rings
     /// verbatim, so a loaded factory's P screen reads exactly what the
     /// saved one did. `#[serde(default)]` for the same reason as
@@ -878,6 +909,7 @@ impl World {
                 .iter()
                 .map(|(id, count)| (id.clone(), *count))
                 .collect(),
+            lifetime_deliveries: self.economy().lifetime_deliveries,
             production: saved_production(self.production()),
             staff: Some(SavedStaff {
                 headcount: self.staff().headcounts().into_iter().collect(),
@@ -1583,11 +1615,17 @@ fn restore_ledgers(world: &mut World, data: &SaveData) {
         economy.insert_in_board_order(active);
     }
     economy.losses = data.contracts_lost.iter().cloned().collect();
+    // Restored, never recomputed from `deliveries_made`: that sum would
+    // count only the contracts still active, so a save that lost one — or
+    // that was written before this field existed — would quietly re-lock a
+    // tier the player had earned. It is its own number for that reason.
+    economy.lifetime_deliveries = data.lifetime_deliveries;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sim::contracts::Contract;
     use crate::sim::reference::reference_chain;
 
     const RECIPES_RON: &str = include_str!("../../../data/recipes.ron");
@@ -1863,21 +1901,28 @@ mod tests {
     #[test]
     fn signed_lost_and_strike_state_survives_a_round_trip_in_board_order() {
         let mut world = reference_chain(recipes());
-        // Sign every offer, so the active list is longer than the starters.
-        // Funded from the board's own signing fees rather than a literal, so
-        // a bigger (or dearer) board cannot silently leave offers unsigned
-        // and turn the assertion below into a comparison of two short lists.
-        let ids: Vec<String> = world
+        // Sign every offer that is SIGNABLE, so the active list is longer
+        // than the starters. Funded from those offers' own signing fees
+        // rather than a literal, so a bigger (or dearer) board cannot
+        // silently leave offers unsigned and turn the assertion below into a
+        // comparison of two short lists.
+        //
+        // Signable and not simply "every offer": since `data/unlocks.ron`,
+        // part of the shipped board is behind a progression gate and
+        // `try_sign` refuses it at zero lifetime deliveries. What this test
+        // is about is that a signed contract keeps its FILE-ORDER rank
+        // through a save, and a gated offer that never became active has no
+        // rank to keep.
+        let signable: Vec<Contract> = world
             .economy()
             .board()
             .ordered()
             .iter()
-            .map(|c| c.id.clone())
+            .filter(|c| world.contract_unlocked(&c.id))
+            .cloned()
             .collect();
-        let signing_bill = world
-            .economy()
-            .board()
-            .ordered()
+        let ids: Vec<String> = signable.iter().map(|c| c.id.clone()).collect();
+        let signing_bill = signable
             .iter()
             .fold(Money::from_num(0), |sum, c| sum + c.price);
         world.restore_money(signing_bill + Money::from_num(100));
@@ -1898,10 +1943,7 @@ mod tests {
         // Run until exactly the quickest-to-lose offer is gone (the one
         // with the smallest cadence x strikes), which leaves the others
         // active — some of them with a strike on the record.
-        let last = world
-            .economy()
-            .board()
-            .ordered()
+        let last = signable
             .iter()
             .min_by_key(|c| c.cadence_ticks * u64::from(c.strikes))
             .unwrap()

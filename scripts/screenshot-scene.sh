@@ -196,6 +196,14 @@
 # and shows about four at a time, so a tier appended to the end of the file
 # is below the fold until something scrolls there.
 #
+# Pass --unlocked to put the world past every progression gate in
+# data/unlocks.ron (the shipped one opens after ten deliveries), so --market,
+# --board and the larder photograph with the BBQ tier released — the "after"
+# half of a before/after pair, where the same command without the flag is the
+# "before". Pass --unlock-toast instead to cross the gate one frame before
+# the shutter, which is the only way to catch the one-line announcement: it
+# shows for six seconds and then fades.
+#
 # Pass --no-hud to hide the HUD entirely. Closeups are for reviewing whether
 # a belt or a pipe actually meets a machine, and the contract clipboard and
 # the hotbar cover the top-right and the bottom of the frame — which is where
@@ -226,7 +234,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--item-gallery] [--bottleneck] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--full-dock [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board [--board-end]] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--item-gallery] [--bottleneck] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--full-dock [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -1,0 +1,131 @@
+// Progression gates (docs/BBQ_SAUCE_PLAN.md §5) — the content that decides
+// WHEN a tier of the game becomes available, and what it makes available.
+// Data, never hardcoded in sim_core, exactly like `recipes.ron`,
+// `machines.ron`, `shop.ron`, `ingredients.ron` and `contracts.ron`; the
+// loader is `sim_core::sim::unlocks::UnlockRegistry`.
+//
+// `schema_version` follows ARCHITECTURE.md §4's data-file versioning rule:
+// the loader rejects a mismatched version rather than silently misreading a
+// changed shape, the same way every other data file's loader does.
+//
+// WHY THIS FILE EXISTS. Until it did, the game gated NOTHING: a new game
+// could buy every ingredient and sign every contract in `contracts.ron`,
+// so the only thing that grew as you played was the balance. That was fine
+// while there was one sauce — there was nothing to hold back. BBQ is the
+// second sauce, and handing a player the whole two-sauce board on their
+// first minute makes the ketchup line look like a chore standing between
+// them and the interesting one. So BBQ arrives, with an announcement, once
+// the ketchup line has demonstrably run.
+//
+// WHAT A GATE GATES, AND WHAT IT DELIBERATELY DOES NOT. An `Unlock` names
+// two lists and only two: `ingredients`, the ids removed from the market
+// (`data/ingredients.ron`) until it opens, and `contracts`, the ids removed
+// from the contracts board (`data/contracts.ron`) until it opens. Both are
+// enforced in the simulation — `BuyIngredient` and `SignContract` are
+// REFUSED for a locked id, not merely hidden from a panel — so a gate is a
+// rule rather than a decoration on the UI.
+//
+// **NO RECIPE IS EVER LOCKED, and there is no field here to lock one with.**
+// The BBQ recipes sit in `data/recipes.ron` from a new game. They are simply
+// unbuildable (their raws cannot be bought) and unsellable (nobody is
+// asking). That is the whole reason this shape was chosen over an
+// `unlocked: bool` on a recipe: a locked recipe would be a state every
+// placed machine consults on every tick, on the hottest path in the
+// simulation, to answer a question that changes at most a handful of times
+// in a session. A gate that is a filter on two lists costs the tick nothing
+// at all.
+//
+// WHY THE GROUP IS NAMED, RATHER THAN EACH ENTRY CARRYING ITS OWN
+// `unlock_after`. The announcement is the point of the gate — a gate that
+// opens silently is a gate the player never experiences — and an
+// announcement needs a subject. "BBQ Sauce unlocked" is a sentence;
+// "spice_mix unlocked, molasses unlocked, liquid_smoke unlocked, smokehouse
+// trial unlocked, …" is a log. `name` is what the toast says, so it is
+// player-facing prose and not an id.
+//
+// THE TRIGGER IS LIFETIME SUCCESSFUL CONTRACT DELIVERIES. Not money, not
+// elapsed ticks, not machines placed. Money can be sat on, ticks pass while
+// you read the keybinds, and a placed machine need never run — but a
+// delivery is proof that a whole line ran end to end and something was
+// shipped. It counts satisfied delivery windows only (`Economy::tick`'s
+// `Paid` event); a missed window counts for nothing, and a lost contract
+// does not take its past deliveries back. It is lifetime and never
+// decreases, so a gate, once open, stays open.
+//
+// FIELDS, per unlock:
+//   id                stable content id (the save format does not key on it
+//                     — see below — but tests and the toast's diff do)
+//   name              what the player reads in the announcement
+//   after_deliveries  lifetime successful deliveries that open it; at least
+//                     1, since 0 would be a gate that is open in a new game
+//                     and therefore not a gate
+//   ingredients       `data/ingredients.ron` ids held back until it opens
+//   contracts         `data/contracts.ron` ids held back until it opens
+//
+// At least one of the two lists must be non-empty: an unlock that releases
+// nothing is content that does nothing, and the loader rejects it rather
+// than shipping a gate with no effect. No id may be gated by two unlocks.
+//
+// WHAT IS SAVED. The counter, and nothing else — `SaveData` stores
+// `lifetime_deliveries` and derives every gate's state from it against THIS
+// file. Saving "bbq_sauce is unlocked" instead would freeze a save against
+// the numbers in this file on the day it was written; deriving it means a
+// balance pass here re-reads correctly for every existing save.
+(
+    schema_version: 1,
+    unlocks: [
+        // THE FIRST GATE IN THE GAME (docs/BBQ_SAUCE_PLAN.md §5, the BBQ
+        // epic, 2026-09-18).
+        //
+        // TEN, and why. The starter contracts ask for 2-3 boxes every
+        // 1200-2000 ticks, so ten satisfied windows is somewhere between
+        // ninety seconds and three minutes of a line that works, depending
+        // on how many orders the player has signed. That is long enough
+        // that the ketchup chain has been built, fed, staffed and watched
+        // through several delivery windows — the whole core loop, at least
+        // once each — and short enough that it lands inside a first
+        // session rather than being something a player reads about and
+        // never sees. It is also a number the player can watch approach:
+        // every docket on the clipboard counts its own deliveries.
+        //
+        // TEN EVEN THOUGH IT DOES NOT SOLVE ISSUE #55, and why raising it
+        // would not either. #55 is that building the BBQ branch starves
+        // the ketchup line for roughly 6 000 ticks while two new pipe runs
+        // and a vat prime, which is six missed `corner_shop` windows
+        // against a three-strike contract: the reward for building the
+        // thing the game just unlocked is losing the order that paid for
+        // it. The issue offers "let the tier arrive with breathing room"
+        // as the cheap content-side fix — push this number up until the
+        // player has a second ketchup line by the time BBQ lands.
+        //
+        // It was considered and rejected, because a delivery count cannot
+        // buy anyone a second line. Nothing in the game asks for one, so a
+        // higher threshold does not produce one; it only means MORE time
+        // spent signing MORE ketchup contracts off the board, and every
+        // one of those is starved by the same 6 000 ticks. Raising the
+        // number raises the number of orders the trap can take. It would
+        // trade a slower first session for a worse accident, and it would
+        // hide a real missing affordance behind a balance value that reads
+        // as arbitrary to whoever meets it next.
+        //
+        // The fix #55 actually wants is its first option — say so at
+        // placement time, before it costs anything, which the simulation
+        // has the information to do and no surface to say it on. That is a
+        // presentation ticket, not this file. So: ten, and the trap stays
+        // open and documented rather than papered over with a number.
+        Unlock(
+            id: "bbq_sauce",
+            name: "BBQ Sauce",
+            after_deliveries: 10,
+            // The BBQ branch's three raws (`data/ingredients.ron`).
+            // Finished ketchup is its fourth input and is NOT here: the
+            // factory makes it, so it was never on the market to hold back.
+            ingredients: ["spice_mix", "molasses", "liquid_smoke"],
+            // Every contract that asks for BBQ, including `grill_pub` and
+            // `roadhouse_group`, which ask for ketchup as well. A mixed
+            // order is still a BBQ order — signing one before the branch
+            // exists would be signing up to strike out.
+            contracts: ["smokehouse_trial", "grill_pub", "roadhouse_group", "bbq_festival"],
+        ),
+    ],
+)

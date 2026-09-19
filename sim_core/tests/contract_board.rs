@@ -57,7 +57,26 @@ fn a_new_game_starts_with_exactly_the_boards_starters_and_offers_the_rest() {
         "and there must be bigger contracts to work toward"
     );
     let snapshot = world.economy_snapshot();
-    assert_eq!(snapshot.board.len(), board.len());
+    // Every offer EXCEPT the ones a progression gate holds back
+    // (`data/unlocks.ron`): the board a new game reads is what it may
+    // actually sign, not everything `contracts.ron` holds.
+    let gated: Vec<&str> = board
+        .ordered()
+        .iter()
+        .filter(|c| !world.contract_unlocked(&c.id))
+        .map(|c| c.id.as_str())
+        .collect();
+    assert!(
+        !gated.is_empty(),
+        "the shipped content must gate something, or this test proves nothing"
+    );
+    assert_eq!(snapshot.board.len(), board.len() - gated.len());
+    for id in &gated {
+        assert!(
+            !snapshot.board.iter().any(|o| o.id == *id),
+            "'{id}' is behind a closed gate and must not be on a new game's board"
+        );
+    }
     assert_eq!(
         snapshot.board.iter().filter(|o| o.active).count(),
         1,

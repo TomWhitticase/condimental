@@ -1293,6 +1293,15 @@ var _market_money_label: Label
 ## One dictionary per ingredient, in `data/ingredients.ron` order:
 ## {id, button, icon, price_label, owned_label}.
 var _market_slots: Array = []
+## The row the slots hang off, and the settings they were styled from, kept
+## so `_rebuild_market_slots` can build more of them later. The market is no
+## longer fixed-length: a progression gate (`data/unlocks.ron`) holds
+## ingredients off `ingredients_snapshot_json`'s `entries` until it opens,
+## so the panel grows mid-session and has to notice — the same guard the
+## contracts board already runs (`_board_rows_match`).
+var _market_row: HBoxContainer
+var _market_base_settings: LabelSettings
+var _market_slot_ids: Array = []
 var _market_open := false
 
 # --- The contracts board (the contract-board epic, 2026-09-10) -------------
@@ -1453,6 +1462,14 @@ const STAFF_RULES := [
 ## build, so a loaded save's missing contracts are not announced as losses.
 var _known_active_contract_ids: Array = []
 var _known_active_primed := false
+## The same idiom again for progression gates (`data/unlocks.ron`, the BBQ
+## epic): `economy_snapshot_json`'s `unlocks` carries each gate's `open`
+## already resolved by the simulation, and there is no "unlocked" event on
+## the wire either, so an unlock is the ids that turned open between two
+## polls. Primed on the first poll after a scene build for the same reason
+## a loss is — a save loaded past the threshold has already been told.
+var _known_open_unlock_ids: Array = []
+var _known_unlocks_primed := false
 ## The one-line announcement under the top edge ("✗ CONTRACT LOST: ...",
 ## "✔ SIGNED: ..."). Held, then faded, like the hotbar's name flyout — the
 ## same idiom because it is the same kind of thing: a sentence about what
@@ -1560,6 +1577,13 @@ var _crew_plate_style: StyleBoxFlat
 var _crew_afford_label: Label
 var _larder_entries: Dictionary = {} # item id -> count Label
 var _stock_row_nodes: Dictionary = {} # item id -> HBoxContainer (dimmed at zero)
+## The ids the rows were built for, and the settings they were built from,
+## so `_rebuild_stock_rows` can build more later. The larder is the market's
+## list, so a progression gate (`data/unlocks.ron`) grows it mid-session the
+## same way — and this plate is always on screen, so a stale one is the more
+## visible of the two.
+var _larder_ids: Array = []
+var _stock_base_settings: LabelSettings
 
 # --------------------------------------------------------------------------
 # The pause menu, saving and autosave (the "Save/load + a real main menu"
@@ -4789,6 +4813,8 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_rebuild_contract_cards(econ.get("contracts", []))
 	_known_active_contract_ids.clear()
 	_known_active_primed = false
+	_known_open_unlock_ids.clear()
+	_known_unlocks_primed = false
 
 	# The announcement line: a lone outlined label along the top edge, in the
 	# HUD's own hazard accent, that the clipboard's poll fills when a contract
@@ -5711,6 +5737,7 @@ func _build_ingredient_market(hud: CanvasLayer, base_settings: LabelSettings) ->
 	# array holding two slots per ingredient — half of them pointing at
 	# buttons in an orphaned HUD layer.
 	_market_slots.clear()
+	_market_slot_ids.clear()
 
 	_market_panel = PanelContainer.new()
 	_market_panel.name = "IngredientMarket"
@@ -5755,9 +5782,10 @@ func _build_ingredient_market(hud: CanvasLayer, base_settings: LabelSettings) ->
 	row.name = "MarketRow"
 	row.add_theme_constant_override("separation", _ui_i(8))
 	body.add_child(row)
+	_market_row = row
+	_market_base_settings = base_settings
 
-	for entry in _ingredients_snapshot().get("entries", []):
-		_build_market_slot(row, base_settings, _market_slots.size(), String(entry.get("id", "")))
+	_rebuild_market_slots(_ingredients_snapshot().get("entries", []))
 
 	var footer := Label.new()
 	footer.label_settings = base_settings
@@ -5921,11 +5949,43 @@ func _market_asset_for(item_id: String) -> String:
 	return PIPE_ASSET
 
 
+## Rebuilds the crates from an `entries` array, `_rebuild_board_rows`'s
+## counterpart and for the same reason: the market is a list the simulation
+## decides the length of, and a panel built once at `_ready()` would still be
+## showing three crates after a gate put six on sale.
+func _rebuild_market_slots(entries: Array) -> void:
+	for slot in _market_slots:
+		var button: Node = slot["button"]
+		if is_instance_valid(button):
+			if button.get_parent() != null:
+				button.get_parent().remove_child(button)
+			button.queue_free()
+	_market_slots.clear()
+	_market_slot_ids.clear()
+	if _market_row == null or _market_base_settings == null:
+		return
+	for entry in entries:
+		var id := String(entry.get("id", ""))
+		_build_market_slot(_market_row, _market_base_settings, _market_slots.size(), id)
+		_market_slot_ids.append(id)
+
+
+func _market_slots_match(entries: Array) -> bool:
+	if entries.size() != _market_slot_ids.size():
+		return false
+	for i in range(entries.size()):
+		if String(entries[i].get("id", "")) != String(_market_slot_ids[i]):
+			return false
+	return true
+
+
 func _update_ingredient_market() -> void:
 	if _market_panel == null:
 		return
 	var snapshot := _ingredients_snapshot()
 	var entries: Array = snapshot.get("entries", [])
+	if not _market_slots_match(entries):
+		_rebuild_market_slots(entries)
 	_market_money_label.text = "Money: %.0f" % float(snapshot.get("money", 0.0))
 	_position_market_panel()
 
@@ -8133,6 +8193,52 @@ func _announce_contract_changes(contracts: Array, board: Array) -> void:
 	_known_active_primed = true
 
 
+## Diffs `unlocks` against the last poll and announces any gate that just
+## opened — the one moment in the game where the shop and the board both
+## grow, so it gets the same one-line notice a signature does rather than a
+## widget of its own (UI_UX.md §5: one announcement mechanism).
+##
+## What it says is built from the snapshot, not written out here: `name` is
+## the tier's player-facing name from `data/unlocks.ron`, and the counts say
+## which halves of the game changed, so a later gate that only opens
+## contracts does not claim to have stocked the shop as well.
+##
+## The first poll after a scene build only primes, exactly like
+## `_announce_contract_changes`: loading a save that is already past the
+## threshold must not re-announce a tier the player earned sessions ago.
+func _announce_unlocks(unlocks: Array) -> void:
+	var open_ids: Array = []
+	for unlock in unlocks:
+		if bool(unlock.get("open", false)):
+			open_ids.append(String(unlock.get("id", "")))
+	if _known_unlocks_primed:
+		for unlock in unlocks:
+			var id := String(unlock.get("id", ""))
+			if not bool(unlock.get("open", false)) or _known_open_unlock_ids.has(id):
+				continue
+			var opened: Array[String] = []
+			if int(unlock.get("ingredients", 0)) > 0:
+				opened.append("new ingredients in the shop")
+			if int(unlock.get("contracts", 0)) > 0:
+				opened.append("new orders on the board")
+			var tier_name := String(unlock.get("name", id))
+			var text := "★ %s unlocked" % tier_name
+			if not opened.is_empty():
+				text += " — %s" % ", ".join(opened)
+			# Queued behind whatever is showing rather than over it: an
+			# unlock lands on a delivery, and a delivery is exactly when a
+			# contract notice is most likely to be mid-fade.
+			if Time.get_ticks_msec() < _contract_notice_until_msec:
+				_contract_notice_queue.append(text)
+			else:
+				_show_contract_notice(text)
+			# The payout cue, not a new one: this IS the celebration sound,
+			# and an unlock arrives on the delivery that earned it.
+			_cue(FactoryAudio.PAYOUT)
+	_known_open_unlock_ids = open_ids
+	_known_unlocks_primed = true
+
+
 func _board_name_for(id: String, board: Array) -> String:
 	for offer in board:
 		if String(offer.get("id", "")) == id:
@@ -8218,6 +8324,7 @@ func _build_stock_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	# carries, and the reason this dictionary is rebuilt rather than added to.
 	_larder_entries.clear()
 	_stock_row_nodes.clear()
+	_larder_ids.clear()
 
 	_stock_panel = PanelContainer.new()
 	_stock_panel.name = "StockPanel"
@@ -8273,8 +8380,8 @@ func _build_stock_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_stock_rows.add_theme_constant_override("separation", _ui_i(5))
 	_stock_scroll.add_child(_stock_rows)
 
-	for entry in _ingredients_snapshot().get("entries", []):
-		_build_stock_row(base_settings, String(entry.get("id", "")))
+	_stock_base_settings = base_settings
+	_rebuild_stock_rows(_ingredients_snapshot().get("entries", []))
 
 	var hint_settings := LabelSettings.new()
 	hint_settings.font_size = _ui_font(-2)
@@ -8989,12 +9096,42 @@ func _stock_rect() -> Rect2:
 ## or the one number that explains why FILL did nothing is stale exactly when
 ## it matters. Keeps its name through the move to the right-hand plate —
 ## `test_chain_rework.gd` drives it directly.
+## `_rebuild_market_slots`'s counterpart for the always-on larder plate.
+func _rebuild_stock_rows(entries: Array) -> void:
+	for row in _stock_row_nodes.values():
+		if is_instance_valid(row):
+			if row.get_parent() != null:
+				row.get_parent().remove_child(row)
+			row.queue_free()
+	_larder_entries.clear()
+	_stock_row_nodes.clear()
+	_larder_ids.clear()
+	if _stock_rows == null or _stock_base_settings == null:
+		return
+	for entry in entries:
+		var id := String(entry.get("id", ""))
+		_build_stock_row(_stock_base_settings, id)
+		_larder_ids.append(id)
+
+
+func _larder_rows_match(entries: Array) -> bool:
+	if entries.size() != _larder_ids.size():
+		return false
+	for i in range(entries.size()):
+		if String(entries[i].get("id", "")) != String(_larder_ids[i]):
+			return false
+	return true
+
+
 func _update_larder() -> void:
 	_update_crew_panel()
 	_position_stock_panel()
+	var listed: Array = _ingredients_snapshot().get("entries", [])
+	if not _larder_rows_match(listed):
+		_rebuild_stock_rows(listed)
 	if _larder_entries.is_empty():
 		return
-	for entry in _ingredients_snapshot().get("entries", []):
+	for entry in listed:
 		var item_id := String(entry.get("id", ""))
 		if not _larder_entries.has(item_id):
 			continue
@@ -12737,6 +12874,7 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 
 	var contracts: Array = econ.get("contracts", [])
 	_announce_contract_changes(contracts, econ.get("board", []))
+	_announce_unlocks(econ.get("unlocks", []))
 	if not _contract_cards_match(contracts):
 		_rebuild_contract_cards(contracts)
 	# Nothing running is a real state now (the contract-board epic): say so,

@@ -130,6 +130,7 @@ use super::machines::MachineRegistry;
 use super::recipe::{Recipe, RecipeRegistry};
 use super::shop::ShopCatalog;
 use super::types::{Direction, Money, TileCoord};
+use super::unlocks::UnlockRegistry;
 use super::world::{BELT_KIND, PIPE_KIND, PlayerCommand, World};
 
 /// How many belt tiles feed a stage that has solid inputs, and how many run
@@ -475,14 +476,34 @@ fn plan(recipes: &RecipeRegistry, machines: &MachineRegistry) -> Vec<Order> {
 /// Nothing on the ketchup line moves. `the_bbq_branch_layout_is_pinned` in
 /// this file holds both fixtures to an exact coordinate list so that stays
 /// true.
+/// **The world it returns has every progression gate open**, and it has to:
+/// since `data/unlocks.ron`, the three BBQ raws are behind a gate and
+/// `BuyIngredient` refuses them until ten contract deliveries have been
+/// made, so a caller could build this branch and never fill a hopper. That
+/// is not the fixture dodging a rule — it is the fixture stating its
+/// premise. A player building this branch has, by definition, run the
+/// ketchup line long enough to be offered BBQ, and the counter is the only
+/// thing that says so. (The machines and belts are bought before it is set,
+/// which changes nothing: a gate holds back ingredients and contracts, not
+/// equipment.) The threshold is read from the shipped file rather than
+/// written as a literal, so a balance pass on `unlocks.ron` cannot leave
+/// this fixture one delivery short.
 pub fn bbq_branch(recipes: RecipeRegistry, budget: u32) -> World {
-    build(
+    let deliveries = UnlockRegistry::bundled()
+        .ordered()
+        .iter()
+        .map(|unlock| unlock.after_deliveries)
+        .max()
+        .unwrap_or(0);
+    let mut world = build(
         recipes,
         MachineRegistry::bundled(),
         ContractRegistry::bundled(),
         Money::from_num(budget),
         bbq_plan,
-    )
+    );
+    world.restore_lifetime_deliveries(deliveries);
+    world
 }
 
 /// The row the BBQ branch's machines sit on. Three north of the chain row,

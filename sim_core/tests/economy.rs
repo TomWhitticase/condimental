@@ -393,14 +393,23 @@ fn the_economy_snapshot_reports_one_entry_per_shipped_contract() {
         ids, expected,
         "a new world's active contracts are the starters, in contracts.ron order"
     );
-    assert_eq!(snapshot.board.len(), board.len());
     assert!(
         snapshot.board.len() >= 2,
         "several contracts must ship, to be signed"
     );
+    // Every offer a progression gate is not holding back (`data/unlocks.ron`),
+    // in contracts.ron order: the board lists what may actually be signed.
     let offered: Vec<&str> = snapshot.board.iter().map(|o| o.id.as_str()).collect();
-    let all: Vec<&str> = board.ordered().iter().map(|c| c.id.as_str()).collect();
-    assert_eq!(offered, all, "board order must match contracts.ron order");
+    let unlocked: Vec<&str> = board
+        .ordered()
+        .iter()
+        .filter(|c| world.contract_unlocked(&c.id))
+        .map(|c| c.id.as_str())
+        .collect();
+    assert_eq!(
+        offered, unlocked,
+        "board order must match contracts.ron order"
+    );
     for offer in &snapshot.board {
         assert_eq!(
             offer.active, offer.starter,

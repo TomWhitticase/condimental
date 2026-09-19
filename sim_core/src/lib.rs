@@ -544,6 +544,38 @@ impl SimBridge {
     /// `"active": false` (with `times_lost` bumped) on the board; there is
     /// no event on the wire, so a UI that wants to announce a loss diffs
     /// the ids between two polls.
+    ///
+    /// **The BBQ epic (2026-09-18) added progression gates, again without
+    /// removing anything.** Two new top-level fields sit beside `board`:
+    ///
+    /// ```json
+    /// "lifetime_deliveries": 7,
+    /// "unlocks": [
+    ///   {"id": "bbq_sauce", "name": "BBQ Sauce", "open": false,
+    ///    "deliveries": 7, "after_deliveries": 10,
+    ///    "ingredients": 3, "contracts": 4}
+    /// ]
+    /// ```
+    ///
+    /// `lifetime_deliveries` is every delivery window this save has ever
+    /// satisfied — it never decreases, and losing a contract does not take
+    /// its past deliveries back. `unlocks` is `data/unlocks.ron` in file
+    /// order, each entry already resolved against that counter: `open`
+    /// is the answer, `deliveries`/`after_deliveries` are the progress a
+    /// HUD can draw as "7/10". `name` is player-facing prose, so it is
+    /// what an announcement says, and `ingredients`/`contracts` are how
+    /// many ids it puts on sale and on the board — counts, not lists, so
+    /// the announcement can name the halves of the game that changed
+    /// without assuming every gate touches both.
+    ///
+    /// **`board` is filtered by those gates**, and so is
+    /// `ingredients_snapshot_json`'s `entries`: an offer behind a closed
+    /// gate is simply absent, the way a lost contract is absent from
+    /// `contracts`. Do not re-derive that filter in GDScript — the
+    /// simulation refuses `sign_contract` and `buy_ingredient` for a locked
+    /// id too, so the wire and the rules already agree. Like a contract
+    /// loss, an unlock raises no event: a UI that wants to announce one
+    /// diffs `unlocks[].open` between two polls.
     #[func]
     fn economy_snapshot_json(&self) -> GString {
         let snapshot = self.world.economy_snapshot();
@@ -702,11 +734,22 @@ impl SimBridge {
     /// building you place and can pick back up, an entry here is stock a
     /// machine eats (GAMEPLAY.md §5). `entries` is in
     /// `data/ingredients.ron`'s own order and lists every priced
-    /// ingredient, including ones the player currently has none of.
+    /// ingredient, including ones the player currently has none of —
+    /// **except any a progression gate is still holding back**
+    /// (`data/unlocks.ron`; the BBQ epic, 2026-09-18). A locked ingredient
+    /// is absent rather than flagged, because there is nothing a panel
+    /// could usefully do with it: `buy_ingredient` is refused for it in the
+    /// simulation, so listing it greyed out would only advertise a price
+    /// nobody can pay. `economy_snapshot_json`'s `unlocks` is where a HUD
+    /// reads what is still to come, and how close it is.
     ///
-    /// This is also the list of ids a hopper may be placed holding — see
-    /// `issue_command_json` on `place`'s `item` field — minus any that are
-    /// fluids, which go in a tank instead.
+    /// Beside it, `hopper_items` is the list of ids a hopper may be placed
+    /// holding — see `issue_command_json` on `place`'s `item` field — which
+    /// is `entries` minus any that are fluids, plus any a gate is holding
+    /// back. It is deliberately **not** gate-filtered: it is a placement
+    /// rule the simulation actually enforces on `place`, not a shop
+    /// listing, and a hopper set to an ingredient nobody can buy yet is
+    /// simply a hopper that stays empty.
     #[func]
     fn ingredients_snapshot_json(&self) -> GString {
         let snapshot = self.world.ingredients_snapshot();

@@ -387,7 +387,21 @@ impl Ingredients {
     /// in a hopper. [`super::world::World::ingredients_snapshot`] hands over
     /// its own [`super::world::World::raw_items`], which is the single
     /// definition of that set.
-    pub fn snapshot(&self, money: Money, hopper_items: &[String]) -> IngredientsSnapshot {
+    ///
+    /// `unlocked` is passed in for the same kind of reason — a progression
+    /// gate is keyed off the economy's lifetime delivery count
+    /// ([`super::unlocks`]), which is not this module's to know — and
+    /// mirrors [`super::shop::Shop::snapshot`]'s `crew_of`. An entry it
+    /// says no to is **omitted**, not flagged: the market lists what can be
+    /// bought. The refusal itself lives in `World`'s `BuyIngredient` arm,
+    /// so a hidden row is presentation agreeing with the simulation rather
+    /// than enforcing anything.
+    pub fn snapshot(
+        &self,
+        money: Money,
+        hopper_items: &[String],
+        unlocked: impl Fn(&str) -> bool,
+    ) -> IngredientsSnapshot {
         IngredientsSnapshot {
             money: money.to_num::<f64>(),
             hopper_items: hopper_items.to_vec(),
@@ -395,6 +409,7 @@ impl Ingredients {
                 .catalog
                 .entries()
                 .iter()
+                .filter(|entry| unlocked(&entry.id))
                 .map(|entry| IngredientSnapshot {
                     id: entry.id.clone(),
                     price: entry.price_money().to_num::<f64>(),
@@ -420,14 +435,25 @@ impl Ingredients {
 ///  ]}
 /// ```
 ///
-/// `hopper_items` is `entries` minus the fluids: the ids a hopper may
-/// legally be placed holding (see [`super::world::PlayerCommand::Place`]'s
-/// `item` field). It is on the wire because presentation genuinely cannot
-/// work it out — an id's price says nothing about whether it is a solid —
-/// and because the alternative is a Godot-side list of literals that a
-/// third raw ingredient would silently make wrong. Its order is
-/// `data/recipes.ron`'s own order of first appearance, so a UI cycling
-/// through it presents them in the order the production line uses them.
+/// `hopper_items` is the ids a hopper may legally be placed holding (see
+/// [`super::world::PlayerCommand::Place`]'s `item` field). It is on the
+/// wire because presentation genuinely cannot work it out — an id's price
+/// says nothing about whether it is a solid — and because the alternative
+/// is a Godot-side list of literals that a third raw ingredient would
+/// silently make wrong. Its order is `data/recipes.ron`'s own order of
+/// first appearance, so a UI cycling through it presents them in the order
+/// the production line uses them.
+///
+/// **It is deliberately NOT filtered by progression gates, so it is no
+/// longer `entries` minus the fluids.** `entries` is a market listing and
+/// a gate holds things back from it; `hopper_items` is a *placement rule*
+/// — the set `World::raw_items` will actually accept — and the simulation
+/// does not refuse a hopper set to a locked ingredient. It does not need
+/// to: that hopper can never be filled, because the ingredient cannot be
+/// bought, which is exactly the "present but unbuildable" state
+/// `data/unlocks.ron` describes for the recipes themselves. Filtering here
+/// would make the wire disagree with what `Place` accepts, which is the
+/// more expensive kind of wrong.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct IngredientsSnapshot {
     pub money: f64,
@@ -632,7 +658,7 @@ mod tests {
         let mut ingredients = Ingredients::new(IngredientCatalog::from_ron_str(EXAMPLE).unwrap());
         ingredients.owned.add("tomato", 12);
         let hopper_items = ["tomato".to_string(), "sugar".to_string()];
-        let snapshot = ingredients.snapshot(Money::from_num(2), &hopper_items);
+        let snapshot = ingredients.snapshot(Money::from_num(2), &hopper_items, |_| true);
         assert_eq!(snapshot.entries.len(), 2);
         assert_eq!(
             snapshot.hopper_items, hopper_items,
@@ -646,6 +672,29 @@ mod tests {
         assert!(
             !snapshot.entries[1].affordable,
             "3 each, with 2 in the bank"
+        );
+    }
+
+    /// A locked ingredient is OMITTED from the market listing rather than
+    /// flagged — the market lists what can be bought (`data/unlocks.ron`).
+    /// `hopper_items` is passed through untouched, which is the whole point
+    /// of it being a separate list: it is a placement rule, not a listing.
+    #[test]
+    fn the_snapshot_omits_an_ingredient_a_gate_holds_back() {
+        let ingredients = Ingredients::new(IngredientCatalog::from_ron_str(EXAMPLE).unwrap());
+        let hopper_items = ["tomato".to_string(), "sugar".to_string()];
+        let snapshot = ingredients.snapshot(Money::from_num(50), &hopper_items, |id| id != "sugar");
+        assert_eq!(
+            snapshot
+                .entries
+                .iter()
+                .map(|e| e.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["tomato"]
+        );
+        assert_eq!(
+            snapshot.hopper_items, hopper_items,
+            "a gate filters the market, never the set of ids a hopper may hold"
         );
     }
 }
