@@ -1,4 +1,4 @@
-//! `cargo run -p voxgen` — regenerates every voxel model in
+//! `cargo run -p voxgen --bin voxgen` — regenerates every voxel model in
 //! `assets/voxels/models/` from the generators in this directory
 //! (UI_UX.md §2a).
 //!

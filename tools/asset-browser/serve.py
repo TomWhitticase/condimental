@@ -6,7 +6,7 @@
 Serves the web app in `web/`, plus two JSON endpoints built live from the
 repo: `/api/catalog` (every asset, grouped, with its generator's prose) and
 `/api/model/<name>` (one model's voxels, split by material class the way
-Godot draws it). Nothing is cached to disk, so a `cargo run -p voxgen` is
+Godot draws it). Nothing is cached to disk, so a `cargo run -p voxgen --bin voxgen` is
 visible on reload.
 """
 

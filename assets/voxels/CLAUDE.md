@@ -82,12 +82,12 @@ Reasoning lives in `docs/UI_UX.md` §2a/§2b and `docs/DECISIONS.md` Part B —
 ## Workflow
 
 ```
-scripts/build-voxels.sh             # models + previews + icons (needs vengi)
-cargo run -p voxgen                 # models only, no vengi needed
-cargo run -p voxgen --bin voxicons  # icons only
-cargo test -p voxgen                # voxel asserts: openings empty, frames
-                                    #   differ, even heights, symmetry
-cargo xtask                         # stage into godot_project/voxels/
+scripts/build-voxels.sh              # models + previews + icons (needs vengi)
+cargo run -p voxgen --bin voxgen     # models only, no vengi needed
+cargo run -p voxgen --bin voxicons   # icons only
+cargo test -p voxgen                 # voxel asserts: openings empty, frames
+                                     #   differ, even heights, symmetry
+cargo xtask                          # stage into godot_project/voxels/
 ```
 
 - `scripts/asset-browser.sh` opens every asset at once in a browser you can

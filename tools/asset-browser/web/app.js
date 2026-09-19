@@ -754,7 +754,7 @@ function select(id, { push = true } = {}) {
 // ------------------------------------------------------------- live reload
 //
 // An asset enters the game exactly one way — a generator in
-// `generators/assets.rs` and `cargo run -p voxgen` — and that run rewrites
+// `generators/assets.rs` and `cargo run -p voxgen --bin voxgen` — and that run rewrites
 // `models/`. The server stamps those files; the page watches the stamp and
 // rebuilds the catalog in place when it moves. So a newly generated asset
 // walks into the sidebar on its own, and an asset you are LOOKING at while

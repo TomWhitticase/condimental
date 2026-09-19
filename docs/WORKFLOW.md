@@ -28,7 +28,7 @@ never hand-copy into them. **It builds a DEBUG `sim_core`** unless passed
 `--release`, which matters whenever you read a performance number — every
 timing in the decisions log is a debug measurement. Regenerating voxel models
 is a separate, explicit step: `scripts/build-voxels.sh` (models + gitignored
-preview PNGs + committed icons), or `cargo run -p voxgen [--bin voxicons]`;
+preview PNGs + committed icons), or `cargo run -p voxgen --bin voxgen|voxicons`;
 `vengi-thumbnailer` renders the previews and icons and needs a real video
 driver (`SDL_VIDEODRIVER=dummy` fails). **Godot needs `--import` twice on a
 cold `.godot/` cache** — the `.vox` importer is an editor plugin and only

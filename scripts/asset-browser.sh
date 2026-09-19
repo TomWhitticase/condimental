@@ -3,7 +3,7 @@
 # assets/voxels/, searchable, in a 3D viewer you can turn.
 #
 # Reads the committed pipeline output live — no build step. If you have just
-# changed a generator, run `cargo run -p voxgen` first and reload the page.
+# changed a generator, run `cargo run -p voxgen --bin voxgen` first and reload the page.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

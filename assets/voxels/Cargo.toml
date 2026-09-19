@@ -9,6 +9,11 @@ name = "voxgen"
 version = "0.1.0"
 edition = "2024"
 publish = false
+# The package ships two binaries, so a bare `cargo run -p voxgen` cannot pick
+# one on its own — it errors out. Naming the default here means the form a
+# reader types from memory resolves to the model generator, which is the one
+# they meant; `--bin voxicons` still reaches the other.
+default-run = "voxgen"
 
 [[bin]]
 name = "voxgen"
