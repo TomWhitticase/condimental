@@ -28,7 +28,8 @@ mod common;
 use sim_core::sim::types::Money;
 use sim_core::sim::{
     ContractRegistry, FLUID_TANK_CAPACITY, IngredientCatalog, PlayerCommand, RecipeRegistry,
-    command_from_json, raw_ingredient_ids, reference_chain, reference_chain_with_budget,
+    bbq_branch, command_from_json, raw_ingredient_ids, reference_chain,
+    reference_chain_with_budget,
 };
 
 fn recipes() -> RecipeRegistry {
@@ -307,15 +308,25 @@ fn every_raw_ingredient_the_shipped_chain_needs_is_priced_and_buyable() {
         ]
     );
 
-    let mut world = reference_chain_with_budget(recipes(), 200);
+    // Every raw is *priced*. Whether it is on sale yet is the progression
+    // gate's business (`data/unlocks.ron`), so this runs in a world that has
+    // earned every tier — `bbq_branch` states that premise — and proves the
+    // stronger thing: once nothing is held back, every raw can be bought.
+    // `tests/unlocks.rs` owns the other half, that a gated raw is refused.
+    let mut world = bbq_branch(recipes(), 2_000);
     for item in &raw {
+        assert!(
+            world.ingredient_unlocked(item),
+            "'{item}' must be on sale in a world that has earned every gate"
+        );
+        let before = world.owned_ingredient(item);
         world.issue_command(PlayerCommand::BuyIngredient {
             item: item.clone(),
             quantity: 1,
         });
         assert_eq!(
             world.owned_ingredient(item),
-            1,
+            before + 1,
             "'{item}' is raw, so it has to be buyable — otherwise the hopper or tank \
              holding it can never be filled"
         );
@@ -347,9 +358,16 @@ fn the_ingredients_snapshot_json_has_the_documented_shape() {
     let entries = snapshot["entries"].as_array().expect("an entries array");
     assert_eq!(
         entries.len(),
-        6,
-        "every priced ingredient is listed, including ones the player has none of"
+        3,
+        "every priced ingredient a gate is not holding back is listed, including \
+         ones the player has none of"
     );
+    for held_back in ["spice_mix", "molasses", "liquid_smoke"] {
+        assert!(
+            !entries.iter().any(|e| e["id"] == held_back),
+            "'{held_back}' is behind a closed gate and must not be on the market"
+        );
+    }
     assert_eq!(
         entries[0],
         serde_json::json!({

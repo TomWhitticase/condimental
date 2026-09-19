@@ -210,6 +210,23 @@ var _contents := -1
 ## to miss a panel. The HUD has its own screenshots (--shop, --market,
 ## --hover-*); a junction shot does not need it in frame.
 var _no_hud := false
+## `--unlocked` puts the world on the far side of every progression gate in
+## `data/unlocks.ron` — the shipped one takes ten deliveries — so the market,
+## the larder and the board photograph with the BBQ tier released. Combine it
+## with `--market` or `--board` to shoot the "after" half of a before/after
+## pair; without it those panels show the "before" half, which is what a new
+## game actually looks like.
+##
+## It sets the counter through `test_layouts.gd`'s `deliver`, i.e. the save
+## file, rather than running a chain for the ten thousand ticks it would take
+## to earn them: this is a camera, and `sim_core/tests/unlocks.rs` is what
+## earns the gate honestly.
+var _unlocked := false
+## `--unlock-toast` crosses the gate WHILE the HUD is watching, one frame
+## before the shutter, so the announcement line is up in the frame. The
+## notice is the only part of this feature that cannot be photographed from
+## a settled state — it exists for one moment and then fades.
+var _unlock_toast := false
 var _contracts := false
 ## `--board` opens the contracts board menu (the contract-board epic).
 var _board := false
@@ -418,6 +435,8 @@ func _initialize() -> void:
 	_market = args.has("--market")
 	_board = args.has("--board")
 	_board_end = args.has("--board-end")
+	_unlocked = args.has("--unlocked")
+	_unlock_toast = args.has("--unlock-toast")
 	_no_hud = args.has("--no-hud")
 	_contents = int(_string_arg(args, "--contents")) if _string_arg(args, "--contents") != "" else -1
 	_contracts = args.has("--contracts")
@@ -492,6 +511,27 @@ func _string_arg(args: Array, flag: String) -> String:
 		if arg.begins_with(flag + "="):
 			return arg.substr(flag.length() + 1)
 	return ""
+
+
+## Moves the lifetime delivery counter to `offset` away from the last gate
+## in `data/unlocks.ron` — 0 to sit exactly on the threshold, -1 to sit one
+## delivery short of it. The threshold is read off the wire, never written
+## out here, so a balance pass on that file cannot leave these shots
+## photographing the wrong side of the gate.
+func _cross_gates(offset: int) -> void:
+	var econ: Dictionary = JSON.parse_string(_main.sim.economy_snapshot_json())
+	var threshold := 0
+	for unlock in econ.get("unlocks", []):
+		threshold = maxi(threshold, int(unlock.get("after_deliveries", 0)))
+	if threshold == 0:
+		push_error("_cross_gates(): data/unlocks.ron gates nothing")
+		return
+	Layouts.deliver(_main.sim, maxi(0, threshold + offset))
+	# `deliver` goes through save/load, so the rendered world is rebuilt from
+	# the reloaded one — identical by construction, but the scene has to be
+	# told, exactly as `_build_fixture` tells it.
+	_main._rebuild_world()
+	_main._refresh_owned_counts()
 
 
 ## Builds whatever the flags asked for, through the same purchase/place
@@ -1060,6 +1100,11 @@ func _process(_delta: float) -> bool:
 		return _write_frame()
 	if _frames == 1 and (_build or _fixture != ""):
 		_build_fixture()
+	# Straight after the fixture and before anything opens a panel: the gate
+	# decides what the market, the larder and the board have in them, so it
+	# has to be settled before they are drawn.
+	if _frames == 1 and (_unlocked or _unlock_toast):
+		_cross_gates(-1 if _unlock_toast else 0)
 	if _frames == 1 and _first_person:
 		_enter_first_person()
 	if _frames == 2 and _populate:
@@ -1095,6 +1140,13 @@ func _process(_delta: float) -> bool:
 		var hud := _main.get_node_or_null("HUD")
 		if hud != null:
 			hud.visible = false
+	# The crossing itself, with the HUD already primed one delivery short —
+	# which is the only way the announcement fires, and is exactly what a
+	# playing session does when its tenth delivery settles.
+	if _frames == 2 and _unlock_toast:
+		_cross_gates(0)
+		_main._update_contract_panel()
+		_main._update_larder()
 	if _frames == 2 and _market:
 		_main._set_market_open(true)
 	if _frames == 2 and _board:

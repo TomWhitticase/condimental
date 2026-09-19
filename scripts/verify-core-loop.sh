@@ -192,6 +192,7 @@ run_godot_script test_production_stats.gd PRODUCTION_STATS_OK "the production pa
 run_godot_script test_audio.gd AUDIO_OK "sound effects for every player action and the looping music track: streams deterministic and unclipped, cues fired from the handlers that know the outcome, the score ducked under the pause menu — audio, 2026-09-12"
 run_godot_script test_bbq_branch.gd BBQ_BRANCH_OK "the second sauce, as a branch: the BBQ line built beside the shipped one through real commands, every pipe run named, a mixed order on the clipboard and a box of BBQ made and delivered — the BBQ epic, ticket 2"
 run_godot_script test_pipe_fault.gd PIPE_FAULT_OK "a run the simulation cannot name says so: hazard clamps on the dead run and not on an empty one, the hover naming both fluids it could carry, the vat blaming the run rather than claiming there is no pipe, and every clamp coming down when the tank is turned back — issue #54"
+run_godot_script test_unlocks.gd UNLOCKS_OK "the first progression gate: a new game's market, larder and board list only what data/unlocks.ron has released, crossing the threshold grows all three in place and is announced once by name, a save already past it is not re-announced — the BBQ epic, ticket 3"
 
 echo
 echo "PASS: real placement + milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"

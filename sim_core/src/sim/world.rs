@@ -1927,9 +1927,36 @@ impl World {
 
     /// The raw-ingredient market plus the stock the player owns and their
     /// money, in one object — see [`IngredientsSnapshot`].
+    ///
+    /// **An ingredient behind a progression gate that has not opened is
+    /// absent from `entries`** (`data/unlocks.ron`, [`super::unlocks`]).
+    /// `hopper_items` is not filtered, deliberately — see
+    /// [`IngredientsSnapshot`]'s field doc.
     pub fn ingredients_snapshot(&self) -> IngredientsSnapshot {
         self.ingredients
-            .snapshot(self.economy.money, &self.raw_items)
+            .snapshot(self.economy.money, &self.raw_items, |id| {
+                self.economy.ingredient_unlocked(id)
+            })
+    }
+
+    /// Lifetime successful contract deliveries — the counter every
+    /// progression gate is keyed off. Read-only; it is written by
+    /// [`Economy::tick`] and by a load, never by a caller.
+    pub fn lifetime_deliveries(&self) -> u32 {
+        self.economy.lifetime_deliveries
+    }
+
+    /// Whether the market may sell `id` right now. The same answer
+    /// `ingredients_snapshot` filters on and `BuyIngredient` refuses
+    /// against — one rule, asked in one place.
+    pub fn ingredient_unlocked(&self, id: &str) -> bool {
+        self.economy.ingredient_unlocked(id)
+    }
+
+    /// Whether the board may offer `id` right now. [`Economy::try_sign`]
+    /// refuses anything this says no to.
+    pub fn contract_unlocked(&self, id: &str) -> bool {
+        self.economy.contract_unlocked(id)
     }
 
     /// How many units of a raw ingredient the player owns and has **not**
@@ -3369,6 +3396,16 @@ impl World {
                 // the other ledger: priced first, then paid for, then
                 // credited, with every failure landing before anything has
                 // changed. No chunk is dirtied — stock is not a tile.
+                //
+                // One check `Purchase` has no equivalent of: an ingredient
+                // behind a progression gate that has not opened is REFUSED
+                // here, not merely hidden from the market panel
+                // (`data/unlocks.ron`). A gate is a rule in the simulation;
+                // the snapshot's filtered `entries` is presentation agreeing
+                // with it, and a command forged by hand lands here.
+                if !self.economy.ingredient_unlocked(&item) {
+                    return;
+                }
                 let Some(cost) = self.ingredients.cost_of(&item, quantity) else {
                     return;
                 };
@@ -4406,6 +4443,20 @@ impl World {
     /// has to do so twice: once to fund each rebuild purchase, and once at
     /// the end to install the saved balance, so those purchases cannot leak
     /// into it.
+    /// Sets the lifetime delivery counter outright — the seam a load uses
+    /// to put back what [`Economy::tick`] counted, and the one
+    /// [`super::reference::bbq_branch`] uses to say "this factory belongs to
+    /// a player who has already earned the BBQ tier".
+    ///
+    /// [`restore_money`](Self::restore_money)'s rule, for its reason: the
+    /// counter otherwise only ever moves through a satisfied delivery
+    /// window, and a second public way to raise it would be a cheat surface
+    /// on the real API. It reaches a state a player genuinely reaches, and
+    /// `pub(super)` keeps it out of reach of anything but this module tree.
+    pub(super) fn restore_lifetime_deliveries(&mut self, deliveries: u32) {
+        self.economy.lifetime_deliveries = deliveries;
+    }
+
     pub(super) fn restore_money(&mut self, money: Money) {
         self.economy.money = money;
     }

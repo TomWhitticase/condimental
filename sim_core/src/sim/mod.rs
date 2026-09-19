@@ -21,6 +21,7 @@ pub mod splitter;
 pub mod staff;
 pub mod stats;
 pub mod types;
+pub mod unlocks;
 pub mod world;
 
 pub use contracts::{Contract, ContractRegistry};
@@ -63,6 +64,7 @@ pub use stats::{
     STAT_WINDOW_COUNT, STAT_WINDOWS, StatKind, StatWindow, WindowSnapshot,
 };
 pub use types::{Direction, Fx, Money, decode_chunk_id, encode_chunk_id};
+pub use unlocks::{Unlock, UnlockRegistry, UnlockSnapshot};
 pub use world::{
     BELT_KIND, BeltSnapshot, ChunkSnapshot, ConveyorLinks, DockSnapshot, FluidSnapshot,
     FluidTankSnapshot, FluidTapSnapshot, HopperSnapshot, LinkInput, LinkKind, LinkOutput, Links,
