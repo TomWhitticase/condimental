@@ -34,9 +34,9 @@ silently wipes any hand edit.
 4. **Regenerate:**
 
    ```
-   scripts/build-voxels.sh              # models + review PNGs + icons (needs vengi)
-   cargo run -p voxgen                  # models only, no vengi — fastest inner loop
-   cargo run -p voxgen --bin voxicons   # icons only (needs vengi)
+   scripts/build-voxels.sh             # models + review PNGs + icons (needs vengi)
+   cargo run -p voxgen --bin voxgen    # models only, no vengi — fastest inner loop
+   cargo run -p voxgen --bin voxicons  # icons only (needs vengi)
    ```
 
    `build-voxels.sh` runs `voxgen`, renders a 512px isometric preview per
