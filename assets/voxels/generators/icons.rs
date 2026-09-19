@@ -131,7 +131,9 @@ fn main() {
     std::fs::create_dir_all(&icons_dir).expect("failed to create assets/voxels/icons");
 
     let mut entries: Vec<PathBuf> = std::fs::read_dir(&models_dir)
-        .expect("failed to read assets/voxels/models — run `cargo run -p voxgen` first")
+        .expect(
+            "failed to read assets/voxels/models — run `cargo run -p voxgen --bin voxgen` first",
+        )
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("vox"))

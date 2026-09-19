@@ -94,7 +94,7 @@ jobs:
         run: |
           if ! git diff --quiet -- assets/voxels/models; then
             echo "::error::assets/voxels/models is out of date with assets/voxels/generators."
-            echo "Run 'scripts/build-voxels.sh' (or 'cargo run -p voxgen') and commit the result."
+            echo "Run 'scripts/build-voxels.sh' (or 'cargo run -p voxgen --bin voxgen') and commit the result."
             git diff --stat -- assets/voxels/models
             exit 1
           fi

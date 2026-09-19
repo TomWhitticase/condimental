@@ -30,7 +30,7 @@ browser cannot drift from the pipeline:
 | footprint | `data/machines.ron` |
 | the UI icon strip | `assets/voxels/icons/<name>.png` |
 
-Re-run `cargo run -p voxgen` and the change is there **without reloading the
+Re-run `cargo run -p voxgen --bin voxgen` and the change is there **without reloading the
 page**: it polls `/api/stamp` (the mtimes of `models/`, `index.json`,
 `palette.ron`, `assets.rs`, `main.gd` and `machines.ron`) every 1.5s, and on
 any change refetches the catalog, rebuilds the meshes in hand and toasts what

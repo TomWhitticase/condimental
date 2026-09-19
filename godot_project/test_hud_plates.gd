@@ -687,6 +687,27 @@ func _check_docket_case(strip: bool, window: Vector2i) -> bool:
 				where, cut, str(whole)
 			])
 			return false
+	else:
+		# The clamp has overruled the docket boundary, which is allowed — a
+		# plate with nowhere to stand is the worse fault, and that ordering
+		# is the one UI_UX.md §5 fixes. But "cut ragged" was never the whole
+		# of it: the cut still has to land on an edge the reader can see was
+		# meant, so inside the docket it falls in it goes up to the bottom of
+		# one of that docket's own LINES (issue #17).
+		var lines: Array = _docket_line_boundaries()
+		var lands_on_line := false
+		for boundary in lines:
+			if absf(cut - float(boundary)) <= 0.5:
+				lands_on_line = true
+		# Under the first line there is no boundary left but zero, and a
+		# clipboard cut to zero has lost the dockets AND the cue that there
+		# are dockets. That case keeps its ragged edge on purpose; it is the
+		# half of issue #17 that only a shorter docket can pay for.
+		if not lands_on_line and cut >= float(lines[1]) - 0.5:
+			_fail("at %s the clamped stack is cut at %.0fpx, inside a line — lines end at %s" % [
+				where, cut, str(lines)
+			])
+			return false
 
 	# The plate under it obeys the same rule, and this is where it matters:
 	# the clipboard's floor is a whole docket now, so this is the tightest
@@ -707,6 +728,45 @@ func _check_docket_case(strip: bool, window: Vector2i) -> bool:
 		])
 		return false
 	return true
+
+
+## Every height the stack can be cut at without slicing through a line: a
+## docket boundary, or — inside a docket — the bottom of one of its own lines,
+## measured through the card's top padding. `_docket_boundaries`' finer
+## sibling, for the cut the no-overlap clamp forces inside a card, and
+## measured off the real cards for the same reason. Starts at 0.0: the top
+## edge of the first docket is a boundary too.
+func _docket_line_boundaries() -> Array:
+	var separation: float = float(main._contract_cards_box.get_theme_constant("separation"))
+	var out: Array = [0.0]
+	var running: float = 0.0
+	var cards: int = 0
+	for child in main._contract_cards_box.get_children():
+		var card := child as Control
+		if card == null or not card.visible:
+			continue
+		if cards > 0:
+			running += separation
+		var card_top: float = running
+		var body := card.get_child(0) as Control
+		if body != null:
+			var style: StyleBox = (card as PanelContainer).get_theme_stylebox("panel")
+			var inner: float = card_top + (style.get_margin(SIDE_TOP) if style != null else 0.0)
+			var body_separation: float = float(body.get_theme_constant("separation"))
+			var lines: int = 0
+			for line_child in body.get_children():
+				var line := line_child as Control
+				if line == null or not line.visible:
+					continue
+				if lines > 0:
+					inner += body_separation
+				inner += line.get_combined_minimum_size().y
+				out.append(inner)
+				lines += 1
+		running = card_top + card.get_combined_minimum_size().y
+		out.append(running)
+		cards += 1
+	return out
 
 
 ## The heights at which the docket stack has a boundary: the first docket,

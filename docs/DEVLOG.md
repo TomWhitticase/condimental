@@ -155,6 +155,42 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-18 — Two HUD panels that ran out of room
+
+**The staff panel shows all four categories at 1600x900 again (issue #7).**
+It was showing about two and a half: a row was seven stacked elements tall
+(147px), the scroll caps at 400px there, and the fourth category was below
+the cut — in the one panel whose job is comparing categories. The fix is the
+row, not the panel: the bar's caption moved onto the bar's own line
+(`hired / asked for`, four words that were costing four lines), the per-tick
+`2 of 4 working right now` moved into the slot after the bar and shows only
+when there is no shortfall to put there, and the five sentences a row can
+say — unpaid heads, why HIRE is disabled, what hiring would unblock, what
+asks for the category, what the category does — became **one** slot that
+shows the worst of them and hands the rest to the row's hover
+(`_staff_row_sentence`, `STAFF_SENTENCE_ORDER`). 147px → 85px, four rows in
+367px of a 400px cap, in every state including the underfunded fixture. No
+panel grew and no type shrank. `✗ cannot hire —` also lost its long form for
+the one UI_UX.md has documented since the staffing ticket (`8 in hand, 14
+due, 2 / period`).
+
+**A clipboard cut short now stops on a line (issue #17, partly).** When the
+column has no room for a whole docket, `_fit_grid_scroll` keeps whole *lines*
+of the one it is cutting instead of stopping wherever the clamp fell
+(`_line_boundary_height` / `_row_line_boundary`). UI_UX.md §5's ordering is
+untouched — never overlap, then cut on a boundary, then show as much as fits;
+the clamp still wins and the cut still only moves down. At 1600x900 the cut
+went from 102px (through a checklist row) to 81px; with the SHORT-STAFFED
+strip up, 146px. **Not fixed:** 1280x720 with the strip down and a full
+board, where the column leaves the clipboard 12px and the first line boundary
+inside a docket is 43px. Snapping there shows no docket at all, which loses
+the "there is more below" cue as well as the docket, so that one case keeps
+its ragged edge and #17 stays open with the numbers on it. The answer there
+is a shorter docket — a content decision, not a layout one.
+`test_hud_plates.gd` kept its assertion about what set the cut and gained the
+line-boundary one for the clamped case it used to skip; `test_staff_panel.gd`
+gained the four-rows-fit-at-1600x900 proof and a one-sentence-per-row proof.
+
 ### 2026-09-18 — BBQ sauce exists, and the board asks for both
 
 The second sauce is content. `data/recipes.ron` grew four entries, all on
@@ -372,6 +408,7 @@ recipe its kind names" — the *no player-facing picker* half of that decision
 stands and is in fact what made this possible; only the "one" is gone.
 `data/recipes.ron`'s header still describes the old rules and is issue #44,
 left alone because the next ticket of this epic owns that file.
+
 ### 2026-09-17 — The fmt backlog is cleared
 
 `cargo fmt --all` landed as one commit (#28): 32 of the repo's 46 Rust files
