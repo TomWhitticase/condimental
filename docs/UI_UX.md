@@ -73,7 +73,7 @@ Layout (built exactly this way):
 
 ```
 assets/voxels/
-  Cargo.toml        # crate `voxgen` — `cargo run -p voxgen`
+  Cargo.toml        # crate `voxgen` — `cargo run -p voxgen --bin voxgen`
   palette.ron       # shared palette: colour AND material class
   generators/       # one generator per asset, plus vox.rs, icons.rs
   models/           # generated .vox — committed build output

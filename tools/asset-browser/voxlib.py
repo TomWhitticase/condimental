@@ -2,7 +2,7 @@
 
 Everything here is derived from files already in the repo — `models/*.vox`,
 `models/index.json`, `palette.ron` and the generators themselves — so the
-browser can never disagree with what `cargo run -p voxgen` last wrote. There
+browser can never disagree with what `cargo run -p voxgen --bin voxgen` last wrote. There
 is no build step and no second copy of any asset fact.
 """
 

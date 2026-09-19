@@ -12,7 +12,7 @@
 //! exactly the same treatment: Godot can only load from inside `res://`,
 //! the committed source of truth lives outside it, and neither copy should
 //! ever be made by hand. Regenerating either is a separate, explicit step
-//! (`cargo run -p voxgen` / `cargo run -p voxgen --bin voxicons`, or
+//! (`cargo run -p voxgen --bin voxgen` / `cargo run -p voxgen --bin voxicons`, or
 //! `scripts/build-voxels.sh` which does both plus previews) — xtask only
 //! copies what is already there, so the common build stays fast.
 
@@ -154,7 +154,7 @@ fn copy_voxel_models(root: &Path) {
 
     if !src_dir.is_dir() {
         eprintln!(
-            "xtask: no {} — run `cargo run -p voxgen` to generate the voxel models",
+            "xtask: no {} — run `cargo run -p voxgen --bin voxgen` to generate the voxel models",
             src_dir.display()
         );
         return;

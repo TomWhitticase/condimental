@@ -7,17 +7,17 @@ plus the UI-icon extension of it described in §5.
 |---|---|
 | `palette.ron` | **Source.** The single source of truth for every colour *and* every material class (matte / metal / emissive) in the game's art. Every generator references it; none invent their own colours. |
 | `generators/` | **Source.** The `voxgen` crate — one small Rust function per asset, built from composable primitives, plus the `voxicons` binary (`generators/icons.rs`) that turns a model into a UI icon. This, not the `.vox`/icon `.png` files, is what an asset actually *is*. |
-| `models/` | **Build output, committed.** Regenerate with `cargo run -p voxgen`. Never hand-edit a `.vox` here: the next regeneration will silently wipe the change. |
+| `models/` | **Build output, committed.** Regenerate with `cargo run -p voxgen --bin voxgen`. Never hand-edit a `.vox` here: the next regeneration will silently wipe the change. |
 | `icons/` | **Build output, committed.** Small (64px), transparent-background, tightly-cropped PNG icons — one per combined model, for UI use (UI_UX.md §5). Regenerate with `cargo run -p voxgen --bin voxicons` (needs `vengi`, see below). Committed like `models/`, not gitignored like `previews/`, because `godot_project/main.gd` loads these at runtime. |
 | `previews/` | **Build output, gitignored.** Isometric PNGs for visual review, plus `scene.png`, a full render of the game scene. **Not the same thing as `icons/`** — see "Icons vs. previews" below. |
 
 ## Commands
 
 ```
-scripts/build-voxels.sh              # regenerate models, then render previews AND icons
-cargo run -p voxgen                  # regenerate models only (no vengi needed)
-cargo run -p voxgen --bin voxicons   # regenerate icons only (needs vengi)
-cargo xtask                          # stage models/ and icons/ into godot_project/voxels/ for Godot
+scripts/build-voxels.sh             # regenerate models, then render previews AND icons
+cargo run -p voxgen --bin voxgen    # regenerate models only (no vengi needed)
+cargo run -p voxgen --bin voxicons  # regenerate icons only (needs vengi)
+cargo xtask                         # stage models/ and icons/ into godot_project/voxels/ for Godot
 scripts/screenshot-scene.sh          # render the real scene to previews/scene.png
 ```
 
@@ -56,6 +56,6 @@ regenerate icons or vice versa; `scripts/build-voxels.sh` runs both.
 UI_UX.md §2a point 4 allows a one-off `.vox` sculpted by hand in
 `vengi-voxedit` with no generator behind it. There are none right now. If one
 is ever added, mark it clearly here so nobody goes looking for a generator
-that does not exist — and note that `cargo run -p voxgen` writes only what
+that does not exist — and note that `cargo run -p voxgen --bin voxgen` writes only what
 its generators produce, so a hand-authored file in `models/` would survive a
 regeneration but would not be reproducible from source.
