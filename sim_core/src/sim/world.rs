@@ -3703,7 +3703,9 @@ impl World {
         for (&tile, &(network, segment)) in &self.topology.pipe_index {
             if chunk_of(tile) == id {
                 let run = &self.topology.networks[network];
-                snapshot.pipes.push(pipe_snapshot(run, &run.segments()[segment]));
+                snapshot
+                    .pipes
+                    .push(pipe_snapshot(run, &run.segments()[segment]));
             }
         }
         for &hopper in &self.topology.hoppers {

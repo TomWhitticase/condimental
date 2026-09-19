@@ -107,7 +107,10 @@ fn every_run_of_the_shipped_branch_is_named_and_merely_empty() {
 #[test]
 fn a_tank_turned_off_its_run_leaves_the_run_ambiguous() {
     let mut world = branch();
-    assert_eq!(run_at(&world, (17, -1)).fluid.as_deref(), Some("liquid_smoke"));
+    assert_eq!(
+        run_at(&world, (17, -1)).fluid.as_deref(),
+        Some("liquid_smoke")
+    );
 
     world.issue_command(PlayerCommand::Rotate { tile: (16, -1) });
 

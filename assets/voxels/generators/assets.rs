@@ -2624,14 +2624,21 @@ pub fn pipe_fault(p: &Palette) -> VoxModel {
     // clamp is never coplanar with what it covers (`PIPE_FITTING_MARGIN`'s
     // lesson, §2b point 24).
     let half = PIPE_HUB_R + 1.0;
-    let span = ((PIPE_C - half).ceil() as i32, (PIPE_C + half).floor() as i32);
+    let span = (
+        (PIPE_C - half).ceil() as i32,
+        (PIPE_C + half).floor() as i32,
+    );
     let z = (PIPE_AXIS_Z - 6, PIPE_AXIS_Z + 7);
     // Hazard bands ACROSS the clamp rather than [`VoxModel::hazard_stripe_x`]'s
     // diagonal: that stripe varies with x, and anything varying with x reads
     // one way on an east/west run and another on a north/south one. Banding
     // by height is the same signage and is the same from every side.
     for zz in z.0..=z.1 {
-        let band = if ((zz - z.0) / 3) % 2 == 0 { yellow } else { black };
+        let band = if ((zz - z.0) / 3) % 2 == 0 {
+            yellow
+        } else {
+            black
+        };
         m.cuboid(span, span, (zz, zz), band);
     }
     // A black cap band along the top edge: the block's own top face is the
@@ -5987,7 +5994,7 @@ mod tests {
         for turns in [0, 1] {
             let shape = pipe(&p).rotated_cw(turns);
             let mut covered = 0;
-            for (&(x, y, z), _) in shape.voxels.iter() {
+            for &(x, y, z) in shape.voxels.keys() {
                 let (x, y, z) = (x as i32, y as i32, z as i32);
                 // Only the mid-tile slice of TUBE the clamp straddles is its
                 // business: the rest of the run is deliberately left in view
@@ -6004,7 +6011,10 @@ mod tests {
                 );
                 covered += 1;
             }
-            assert!(covered > 0, "turned {turns}: the clamp covers no tube at all");
+            assert!(
+                covered > 0,
+                "turned {turns}: the clamp covers no tube at all"
+            );
         }
     }
 
@@ -6016,7 +6026,11 @@ mod tests {
     fn a_pipe_fault_clamp_is_matte_hazard_signage() {
         let p = palette();
         let clamp = pipe_fault(&p);
-        for class in [MaterialClass::Metal, MaterialClass::Emissive, MaterialClass::Liquid] {
+        for class in [
+            MaterialClass::Metal,
+            MaterialClass::Emissive,
+            MaterialClass::Liquid,
+        ] {
             assert!(
                 clamp.filter_class(&p, class).is_empty(),
                 "the fault clamp must carry no {class:?} voxels"
