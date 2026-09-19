@@ -32,7 +32,7 @@ pub use economy::{
 };
 pub use fluid::{
     FLUID_TANK_CAPACITY, FLUID_TANK_FILL_AMOUNT, FLUID_TANK_KIND, FluidNetwork, FluidTank,
-    FluidTap, PipeSegment,
+    FluidTap, PipeNaming, PipeSegment,
 };
 pub use hopper::{HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, HOPPER_KIND, Hopper};
 pub use ingredients::{

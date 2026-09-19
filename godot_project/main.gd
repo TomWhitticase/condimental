@@ -221,6 +221,12 @@ const PIPE_FLUID_ASSETS := {
 	"pipe_end": "pipe_fluid_end",
 }
 const PIPE_FLUID_ASSET := "pipe_fluid"
+## The hazard clamp overlaid on a run the simulation cannot name, and the
+## two `FluidSnapshot.naming` verdicts that put it there (issue #54). The
+## other two — `carries` and `unplumbed` — are not faults: the first works,
+## and the second is what a run looks like while it is still being laid.
+const PIPE_FAULT_ASSET := "pipe_fault"
+const PIPE_FAULT_NAMINGS := {"unnameable": true, "ambiguous": true}
 # Where the liquid sits inside the pipe, stated in voxels against
 # assets/voxels/generators/assets.rs's PIPE_BORE_Z0 / PIPE_BORE_HEIGHT — the
 # same mirroring BELT_SURFACE_VOXELS already does for the belt. The fluid
@@ -770,6 +776,7 @@ var _pipe_tiles: Dictionary = {} # "x,y" -> Vector2i(network index, segment inde
 var _pipe_shapes: Dictionary = {} # "x,y" -> shape record from `_pipe_shape_for`, decided from `links`
 var _pipe_fittings: Dictionary = {} # "x,y" -> Array of fitting records from `_pipe_fitting_for`
 var _pipe_fluid_nodes: Dictionary = {} # "net:seg" -> Node3D, the liquid body in that segment
+var _pipe_fault_nodes: Dictionary = {} # "x,y" -> Node3D, the hazard clamp on a run that cannot be named
 var _last_fluid: Array = [] # last fluid snapshot array; [] when nothing is plumbed
 
 # --- Buffer buildings: hoppers, fluid tanks and delivery docks -------------
@@ -2548,6 +2555,7 @@ func _rebuild_world() -> void:
 	_fluid_tank_nodes.clear()
 	_dock_nodes.clear()
 	_pipe_fluid_nodes.clear()
+	_pipe_fault_nodes.clear()
 	# The instanced tiles and item pools are children of "World" and went
 	# with it; their bookkeeping goes too, so a stale slot index can never
 	# point into a MultiMesh that no longer exists.
@@ -3448,6 +3456,64 @@ func _update_fluid_network() -> void:
 				continue
 			var pressure: float = clampf(float(segment.get("pressure", 0.0)), 0.0, 1.0)
 			_apply_level(node, pressure, FLUID_MIN_VISIBLE_PRESSURE, PIPE_BORE_HEIGHT_VOXELS)
+	_update_pipe_fault_markers()
+
+
+## Stands a hazard clamp (`PIPE_FAULT_ASSET`) on every tile of every run the
+## simulation says it cannot name, and takes it off again the moment the
+## player fixes the run — issue #54.
+##
+## **Why it exists at all.** An unnamed run is empty and a working run
+## waiting for its first fill is empty, and until this they rendered
+## identically: a bare pipe with an invisible liquid body. One of them means
+## "any moment now" and the other means "this will never work", which is how
+## a whole branch of the factory was built stalled without a word.
+##
+## **The verdict comes from the wire, never from here** (`CLAUDE.md`'s first
+## rule). `FluidSnapshot.naming` is the sim's own, one of `carries` /
+## `unplumbed` / `unnameable` / `ambiguous`, and only the last two are
+## faults: a run joined to nothing is `unplumbed`, which is what every run
+## looks like while the player is still laying it, and marking that would be
+## noise on ordinary building. Nothing in this function looks at whether
+## `fluid` is null.
+##
+## Keyed by TILE rather than by `(network, segment)` like the liquid bodies
+## beside it: the topology renumbers networks on every placement, and the
+## clamps have to survive a run being split or joined without a full rebuild
+## — so the desired set is recomputed from the snapshot each poll and
+## reconciled against what stands.
+func _update_pipe_fault_markers() -> void:
+	if _world_root == null:
+		return
+	var faulted: Dictionary = {}
+	for network in _last_fluid:
+		if not PIPE_FAULT_NAMINGS.has(String(network.get("naming", ""))):
+			continue
+		for segment in network.get("segments", []):
+			var tile := _pair_to_tile(segment.get("tile", [0, 0]))
+			faulted[_tile_key(tile)] = tile
+	for key in _pipe_fault_nodes.keys():
+		if faulted.has(key):
+			continue
+		var stale: Node3D = _pipe_fault_nodes[key]
+		_pipe_fault_nodes.erase(key)
+		if stale != null and is_instance_valid(stale):
+			stale.get_parent().remove_child(stale)
+			_release_render_resources(stale)
+			stale.free()
+	for key in faulted:
+		if _pipe_fault_nodes.has(key):
+			continue
+		var tile: Vector2i = faulted[key]
+		var node := _asset_node(PIPE_FAULT_ASSET)
+		node.name = "%s_%s" % [PIPE_FAULT_ASSET, key]
+		node.position = _tile_origin(tile.x, tile.y, FLOOR_Y)
+		# No yaw: the clamp is square about the tile's midline and unchanged
+		# by a quarter turn (`a_pipe_fault_clamp_is_unchanged_by_a_quarter_turn`),
+		# so it covers a straight, a corner and a tee alike without ever
+		# being turned to its host's facing.
+		_world_root.add_child(node)
+		_pipe_fault_nodes[key] = node
 
 
 ## The liquid body sitting in one pipe segment's bore, created on first
@@ -3674,6 +3740,17 @@ func _stall_reason_text(stall) -> String:
 			return "waiting for %s in the pipe" % item
 		"no_supply_pipe":
 			return "no supply pipe for %s" % item
+		# The two kinds a run that cannot be named produces (issue #54).
+		# They REPLACE what this machine used to say — "no supply pipe" about
+		# a pipe the player had laid, or "outlet pipe full" about an empty
+		# one — so the sentence has to name the run as the thing at fault and
+		# point at the fix, which differs between them: nothing can name this
+		# run (a source facing the wrong way) versus this run could be
+		# several things (two sources merged into it).
+		"unnameable_pipe":
+			return "its pipe run carries nothing — check what feeds it"
+		"ambiguous_pipe":
+			return "its pipe run could carry more than one fluid"
 		"output":
 			return "output full"
 		"fluid_output":
@@ -12717,7 +12794,41 @@ func _pipe_hover_text(tile: Vector2i, direction: String) -> String:
 			float(segment.get("capacity", 0.0)),
 			clampf(float(segment.get("pressure", 0.0)), 0.0, 1.0) * 100.0,
 		])
+		var fault := _pipe_fault_text(network)
+		if fault != "":
+			lines.append(fault)
 	return "\n".join(PackedStringArray(lines))
+
+
+## Why a run carries nothing, when the simulation says nothing can ever fill
+## it — issue #54, where a tank left facing bare ground stalled a whole
+## branch of the factory and the game said only "empty run", the same words
+## it says about a run that is working and waiting for its first fill.
+##
+## **The verdict is the sim's own** (`FluidSnapshot.naming`, one of `carries`
+## / `unplumbed` / `unnameable` / `ambiguous`). Nothing here infers it from
+## the absence of a fluid id: `unplumbed` is also fluid-less and is NOT a
+## fault — it is what every run looks like while the player is still laying
+## it, and a warning on it would be noise on ordinary building.
+##
+## The two faults read differently because their fixes differ: `unnameable`
+## means nothing can name this run (a source facing the wrong way, #54's own
+## mistake); `ambiguous` means it could be several things, and the several
+## are named because which two have been confused IS the diagnosis. Pure
+## given a snapshot, so a test drives it with one.
+func _pipe_fault_text(network: Dictionary) -> String:
+	match String(network.get("naming", "")):
+		"unnameable":
+			return "⚠ DEAD RUN  ·  nothing that reaches this run can fill it\ncheck what feeds it — a tank or machine facing the wrong way"
+		"ambiguous":
+			var names: Array = []
+			for candidate in network.get("candidates", []):
+				names.append(_item_display_name(String(candidate)))
+			if names.is_empty():
+				return "⚠ DEAD RUN  ·  more than one fluid could reach this run"
+			return "⚠ DEAD RUN  ·  %s could reach this run\nsplit them onto runs of their own" % \
+				" or ".join(PackedStringArray(names))
+	return ""
 
 
 ## The connections sentence of `_pipe_hover_text`, split out so a test can

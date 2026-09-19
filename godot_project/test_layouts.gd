@@ -400,6 +400,40 @@ static func build_bbq_running_line(sim) -> void:
 		sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": id}))
 
 
+## THE STALLED RUN (issue #54) — the fixture `test_pipe_fault.gd` asserts
+## and `scripts/screenshot-scene.sh --stalled-run` photographs: the BBQ
+## branch exactly as it ships, with ONE mistake made in it.
+##
+## The mistake is the one the branch was actually built with. A fluid tank
+## discharges only into the pipe it FACES, so the liquid-smoke tank at
+## (16, -1), turned off its run, stops pinning that run to liquid smoke; the
+## run narrows to two fluids instead of one, the simulation refuses to guess
+## which, and every machine on it waits forever. Nothing about it used to be
+## visible: an unnamed run and a run merely waiting for its first fill are
+## both empty pipe.
+##
+## Deliberately NOT run forward. The comparison the shot has to make is
+## between a DEAD run and a merely EMPTY one, and a settled factory has no
+## empty runs left in it — so the whole branch stands unfilled, the smoke run
+## flagged and its neighbours, equally empty, not.
+static func build_stalled_pipe_run(sim) -> void:
+	build_bbq_branch(sim)
+	sim.issue_command_json(JSON.stringify({
+		"type": "rotate", "tile": [STALLED_TANK.x, STALLED_TANK.y],
+	}))
+
+
+## The liquid-smoke tank `build_stalled_pipe_run` turns away from its run,
+## the first tile of the run that is left dead, and a tile of the run beside
+## it that is merely empty — the three things any check or shot of that
+## fixture needs to name.
+const STALLED_TANK := Vector2i(16, -1)
+const STALLED_RUN_TILE := Vector2i(18, -1)
+const STALLED_NEIGHBOUR_TILE := Vector2i(15, -3)
+## What the dead run narrowed to, in the order the simulation reports it.
+const STALLED_RUN_CANDIDATES := ["ketchup_mix", "liquid_smoke"]
+
+
 ## Hires into every category the simulation reports short, until none is.
 static func hire_until_staffed(sim) -> void:
 	for _attempt in range(64):

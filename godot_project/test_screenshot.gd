@@ -183,6 +183,11 @@ var _hover_hopper := false
 var _hover_tank := false
 var _hover_dock := false
 var _hover_splitter := false
+## `--stalled-run` (issue #54): the BBQ branch with its liquid-smoke tank
+## turned off its own run, cursor parked on a tile of the run that leaves
+## dead. The one frame that can show a DEAD run and a merely EMPTY one side
+## by side, with the hover saying which is which.
+var _stalled_run := false
 var _shop := false
 ## `--config TX,TY` clicks the hopper or tank standing on that tile once
 ## the fixture is built, so the frame shows its configuration panel — the
@@ -457,6 +462,12 @@ func _initialize() -> void:
 	if args.has("--bbq"):
 		_fixture = "bbq"
 		_populate = true
+	_stalled_run = args.has("--stalled-run")
+	if _stalled_run:
+		# NOT --populate: the shot compares a DEAD run with a merely EMPTY
+		# one, and a factory run forward has no empty runs left in it (the
+		# fixture's own doc says why).
+		_fixture = "stalled_run"
 	_dock_lamp_dark = _string_arg(args, "--dock-lamp") == "dark"
 	_hotbar_key = _string_arg(args, "--hotbar")
 	_stock = args.has("--stock")
@@ -551,6 +562,8 @@ func _build_fixture() -> void:
 			Layouts.build_bottleneck_line(_main.sim)
 		"bbq":
 			Layouts.build_bbq_running_line(_main.sim)
+		"stalled_run":
+			Layouts.build_stalled_pipe_run(_main.sim)
 		"understaffed":
 			Layouts.build_understaffed_line(_main.sim)
 		"shortfall":
@@ -1149,6 +1162,8 @@ func _process(_delta: float) -> bool:
 		_main._set_production_open(true)
 	if _frames == 2 and _understaffed:
 		_hover_over_tile(Layouts.UNDERSTAFFED_VAT)
+	if _frames == 2 and _stalled_run:
+		_hover_over_tile(Layouts.STALLED_RUN_TILE)
 	if _frames == 2 and _staff_shortfall:
 		_main._set_staff_open(true)
 	if _frames == 2 and _contracts:

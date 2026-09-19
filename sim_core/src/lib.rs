@@ -288,14 +288,26 @@ impl SimBridge {
     /// (adjacency is no longer "consecutive entries" — a run can turn).
     ///
     /// ```json
-    /// [{"fluid": "vinegar", "total_volume": 27.5, "total_capacity": 40.0,
+    /// [{"fluid": "vinegar", "naming": "carries", "candidates": ["vinegar"],
+    ///   "total_volume": 27.5, "total_capacity": 40.0,
     ///   "pressure": 0.6875,
     ///   "segments": [{"tile": [6, 1], "direction": "east", "volume": 10.0,
-    ///                 "capacity": 10.0, "pressure": 1.0, "is_source": true}],
+    ///                 "capacity": 10.0, "pressure": 1.0, "is_source": true,
+    ///                 "naming": "carries"}],
     ///   "taps": [{"machine_tile": [9, 0], "machine_recipe": "ketchup_mix",
     ///             "units_per_craft": 2, "segment_index": 3}],
     ///   "tank_tiles": [[5, 1]]}]
     /// ```
+    ///
+    /// **`naming` is why `fluid` is what it is** (issue #54), and it is the
+    /// field to drive a fault treatment from: `carries` works, `unplumbed`
+    /// is pipe nobody has connected yet, and `unnameable`/`ambiguous` are
+    /// the two ways a run stalls everything on it for good — nothing can
+    /// name it, or it could be any of `candidates` and the sim will not
+    /// guess. Rendering `fluid: null` as one state draws those three as
+    /// one, which is exactly the bug. Every segment repeats its run's
+    /// `naming` so the `pipes` array of a chunk snapshot can be drawn
+    /// without stitching the networks back together.
     ///
     /// Read this every frame you want to redraw fluid, like
     /// `economy_snapshot_json` and unlike `chunk_snapshot_json`: fluid volume
