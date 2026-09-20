@@ -519,9 +519,29 @@ crate has two as well — **left-click buys one crate, SHIFT+left-click buys
 every unit the balance covers** — and each slot prints what the shift
 gesture would fetch *right now* (`shift: buy 123`) under the crate's price,
 dimmed to `shift: buy 0` when nothing is affordable, because a modifier
-nobody can see is a modifier nobody uses. A hopper's
-contents are chosen on the ghost (**Q** cycles raw items; the prompt names
-it; the ghost shows a tinted fill).
+nobody can see is a modifier nobody uses.
+
+**What a hopper or a tank will hold is not chosen on the ghost.** The ghost
+carries the *first* raw the simulation offers — `hopper_items[0]`, i.e.
+`World::raw_items` in wire order — drawn as a tinted fill and named in the
+prompt, so the click is still specific about what it is about to place. It
+is changed afterwards, by **clicking the placed building** and using the
+picker in its own configuration panel; the prompt says so on the
+ghost, `click it once placed to change contents`, and says it only when
+there is more than one raw to choose between, because a hint about a choice
+that does not exist is noise. The fluid tank works the same way and through the
+same picker (issue #43, 2026-09-20), so there is one gesture for "what does
+this vessel hold" rather than one per vessel.
+
+This replaced a **Q** key that cycled the ghost's contents before the click
+(along with global **SPACE** and **V** for filling, and the sim's
+`CycleHopperItem` command, all deleted). The reason is worth keeping: a
+keybind on the ghost can only configure a thing that has not been built yet,
+so the answer to "I placed the wrong one" was to remove it and place it
+again. Configuring the *placed* building makes the bin retargetable in place
+and puts every vessel-feeding verb — level, FILL, AUTO-FILL, contents — on
+one panel reached one way. `test_config_panel.gd` pins it and
+`scripts/screenshot-scene.sh --config TX,TY` photographs it.
 
 **SHIFT buys back what the click places** (2026-09-16). Laying a run of belt
 otherwise costs two trips to the build menu per handful — buy ten, place
