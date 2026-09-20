@@ -181,6 +181,21 @@ const FIXTURE_NAMES: PackedStringArray = [
 	"stalled_run", "understaffed", "shortfall", "full_dock",
 ]
 
+## The fixtures whose whole claim is a factory that is WORKING, and which are
+## therefore checked against the simulation before the shutter fires
+## (issue #94). Each of these settles for thousands of ticks and is
+## photographed as a going concern: a line that has jammed, gone unstaffed or
+## run its hoppers dry is not the subject, it is a broken shot that looks
+## exactly like a good one.
+##
+## Deliberately NOT every fixture. The galleries produce nothing by design,
+## `stalled_run`, `understaffed` and `shortfall` photograph the failure
+## itself, and an empty world has nothing to be healthy about — asserting on
+## those would be asserting the opposite of what they are for. Fixtures
+## outside this list still get the `SCREENSHOT_HEALTH:` line; they are just
+## not failed on it.
+const HEALTHY_FIXTURES: PackedStringArray = ["bbq", "bottleneck", "full_dock"]
+
 var _frames := 0
 var _out := "user://scene.png"
 var _fixture := ""
@@ -196,6 +211,11 @@ var _flag_fixture_flag := ""
 ## runs once after it — and that one pass would build a fixture and print a
 ## second, more confusing failure.
 var _refused := false
+## `--allow-unhealthy` waives the health check for a shot that means to
+## photograph a factory in trouble. The check is the default and the waiver is
+## typed out, because the failure it catches — a frame of a broken line,
+## reported as a success — is invisible to the reviewer looking at the PNG.
+var _allow_unhealthy := false
 var _populate := false
 var _first_person := false
 var _hover := false
@@ -526,6 +546,7 @@ func _initialize() -> void:
 	if _ghost_kind == "":
 		_ghost_kind = _string_arg(args, "--ghost-blocked")
 		_ghost_blocked = _ghost_kind != ""
+	_allow_unhealthy = args.has("--allow-unhealthy")
 	_remove_mode = args.has("--remove-mode")
 	_title = args.has("--title")
 	_menu = args.has("--menu") or _title
@@ -1303,6 +1324,18 @@ func _process(_delta: float) -> bool:
 		# PNG that was just refused.
 		if _refused:
 			return true
+		# A fixture that could not build what it promised. `Layouts` latches
+		# rather than asserting, because `assert()` does not halt the calling
+		# chain here — the marker printed, the fixture ran on and the run
+		# reported SCREENSHOT_OK with a dead branch in frame (issue #110).
+		var complaint: String = Layouts.fixture_failure()
+		if complaint != "":
+			printerr(
+				"SCREENSHOT_FAIL: the '%s' fixture did not build what it promises: %s"
+				% [_fixture, complaint]
+			)
+			_refuse()
+			return true
 	# Straight after the fixture and before anything opens a panel: the gate
 	# decides what the market, the larder and the board have in them, so it
 	# has to be settled before they are drawn.
@@ -1417,7 +1450,61 @@ func _scroll_board_to_end() -> void:
 	scroll.scroll_vertical = int(bar.max_value)
 
 
+## Reads the factory in frame out of the simulation and prints it as one
+## greppable `SCREENSHOT_HEALTH:` line, returning a complaint when the shot is
+## of something broken (issue #94).
+##
+## Every screenshot in a PR body is evidence, and the evidence used to be
+## unchecked: the `--bbq` fixture spent a wave rendering a frame with a
+## CONTRACT LOST banner in it, `SCREENSHOT_OK:` printed and the harness exited
+## 0 — only reading the PNG caught it. A lost contract and a line that made
+## nothing are the two states that mean "this factory is not running", and
+## both are cheap to read off the snapshots the HUD already uses.
+##
+## Reported for every fixture, enforced for `HEALTHY_FIXTURES` and waived by
+## `--allow-unhealthy`.
+func _frame_health() -> String:
+	if _menu or _fixture == "" or _main == null or _main.sim == null:
+		return ""
+	var economy = JSON.parse_string(_main.sim.economy_snapshot_json())
+	var production = JSON.parse_string(_main.sim.production_snapshot_json())
+	if not (economy is Dictionary) or not (production is Dictionary):
+		return "the economy/production snapshot did not parse"
+	var active := 0
+	var lost := 0
+	for offer in economy.get("contracts", []):
+		if bool(offer.get("active", false)):
+			active += 1
+		lost += int(offer.get("times_lost", 0))
+	var made := PackedStringArray()
+	var produced := 0
+	for item in production.get("items", []):
+		var total := int(item.get("produced_total", 0))
+		if total > 0:
+			produced += total
+			made.append("%s:%d" % [String(item.get("id", "?")), total])
+	print("SCREENSHOT_HEALTH: contracts=%d lost=%d made=%s" % [
+		active, lost, ",".join(made) if made.size() > 0 else "nothing",
+	])
+	if _allow_unhealthy or not HEALTHY_FIXTURES.has(_fixture):
+		return ""
+	if lost > 0:
+		return (
+			"the '%s' fixture lost %d contract(s) before the shutter — " % [_fixture, lost]
+			+ "the frame has a factory in trouble in it, not the working line this shot claims"
+		)
+	if produced == 0:
+		return "the '%s' fixture produced nothing at all during its settle" % _fixture
+	return ""
+
+
 func _write_frame() -> bool:
+	var complaint := _frame_health()
+	if complaint != "":
+		printerr("SCREENSHOT_FAIL: %s" % complaint)
+		printerr("  (--allow-unhealthy photographs it anyway, for a shot that means to.)")
+		_refuse()
+		return true
 	var image := root.get_texture().get_image()
 	if _menu_review_path != "" and FileAccess.file_exists(_menu_review_path):
 		DirAccess.remove_absolute(_menu_review_path)

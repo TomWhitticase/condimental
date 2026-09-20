@@ -356,7 +356,7 @@ const BBQ_STOCK := 1200
 ## on that file moves the shot's run length rather than breaking it, and
 ## tight enough that a gate which can never open fails the fixture instead of
 ## hanging it. Reaching this ceiling is a HARD FAILURE — the wait below
-## prints `BBQ_FIXTURE_FAIL:` and asserts rather than building on, because a
+## latches `BBQ_FIXTURE_FAIL:` and returns rather than building on, because a
 ## branch built behind a shut gate cannot buy its raws and never makes a box.
 const BBQ_GATE_TICK_CEILING := 40000
 
@@ -364,6 +364,43 @@ const BBQ_GATE_TICK_CEILING := 40000
 ## dominate the run; the gate is checked on the same 250-tick grid the
 ## balance measurements in `docs/DECISIONS.md` were taken on.
 const BBQ_GATE_POLL_TICKS := 250
+
+
+## The complaint of the first fixture failure this run, or "" while nothing
+## has gone wrong. Read it with `fixture_failure()`.
+##
+## **A latch rather than an `assert`.** `assert()` does not halt the calling
+## chain here, so "print a marker and assert" printed the marker and then
+## built on regardless: the shutter fired, `SCREENSHOT_OK:` printed, a PNG
+## was written and the run exited 0 with a dead-branch photograph in it
+## (issue #110). A caller that reads this latch refuses in every build,
+## release included, which is the property `assert` does not have.
+##
+## **The FIRST failure wins.** A broken snapshot used to raise its marker
+## once per poll — 322 times in the issue's break test — and then raise the
+## gate marker too, so a broken wire read in the log as a shut gate, which is
+## the precise confusion the marker was added to remove.
+static var _fixture_failure := ""
+
+
+## The first fixture failure, or "" if the fixture built what it promised.
+## `test_screenshot.gd` checks this immediately after `_build_fixture()` and
+## refuses the run; anything else that builds a fixture should do the same.
+static func fixture_failure() -> String:
+	return _fixture_failure
+
+
+## Latches a fixture failure under `marker` and prints it once.
+##
+## The marker is the caller's, so a grep that already looks for
+## `BBQ_FIXTURE_FAIL:` keeps working while other fixtures can name
+## themselves. Every caller must return straight after calling this: the
+## latch stops the run at the next check, it cannot unwind the stack.
+static func fail_fixture(marker: String, message: String) -> void:
+	if _fixture_failure != "":
+		return
+	_fixture_failure = message
+	printerr("%s: %s" % [marker, message])
 
 
 ## True once `data/unlocks.ron` has opened at least one gate — which, with
@@ -376,12 +413,15 @@ const BBQ_GATE_POLL_TICKS := 250
 ##
 ## A snapshot that will not parse is NOT "the gate is shut" — it is the wire
 ## broken, and returning `false` for it would let a fixture wait out its
-## ceiling and then build anyway. It aborts instead (review of PR #98).
+## ceiling and then build anyway. It latches a fixture failure instead, and
+## the caller must stop on it: `false` is still returned because this returns
+## a bool, and it is `fixture_failure()` that says which kind of false it is.
 static func any_unlock_open(sim) -> bool:
 	var economy = JSON.parse_string(sim.economy_snapshot_json())
 	if not (economy is Dictionary):
-		printerr("BBQ_FIXTURE_FAIL: economy_snapshot_json did not parse as a Dictionary")
-		assert(false, "economy_snapshot_json did not parse as a Dictionary")
+		fail_fixture(
+			"BBQ_FIXTURE_FAIL", "economy_snapshot_json did not parse as a Dictionary"
+		)
 		return false
 	for unlock in economy.get("unlocks", []):
 		if bool(unlock.get("open", false)):
@@ -496,7 +536,14 @@ static func build_bbq_running_line(sim) -> void:
 	#    active, exactly as a new game starts, so the deliveries that open
 	#    the gate also bank the stock that pays for the transient below.
 	var waited := 0
-	while waited < BBQ_GATE_TICK_CEILING and not any_unlock_open(sim):
+	while waited < BBQ_GATE_TICK_CEILING:
+		if any_unlock_open(sim):
+			break
+		# A snapshot that would not parse has already latched. Leave NOW
+		# rather than ticking out the remaining ceiling and then reporting a
+		# shut gate on top of it (issue #110).
+		if fixture_failure() != "":
+			return
 		for _i in range(BBQ_GATE_POLL_TICKS):
 			sim.tick()
 		waited += BBQ_GATE_POLL_TICKS
@@ -504,14 +551,17 @@ static func build_bbq_running_line(sim) -> void:
 	# three BBQ raws from a market that still has them locked, so
 	# `stock_larder` silently buys nothing and the branch is a complete line
 	# that never makes a box — which is the exact bug this fixture was
-	# rebuilt to stop photographing. Say so loudly (review of PR #98).
+	# rebuilt to stop photographing. Say so loudly, and stop: the rest of this
+	# function would build the dead branch the marker exists to prevent.
+	if fixture_failure() != "":
+		return
 	if not any_unlock_open(sim):
-		printerr(
-			"BBQ_FIXTURE_FAIL: no unlock open after %d ticks (ceiling %d) — "
-			% [waited, BBQ_GATE_TICK_CEILING]
+		fail_fixture(
+			"BBQ_FIXTURE_FAIL",
+			"no unlock open after %d ticks (ceiling %d) — " % [waited, BBQ_GATE_TICK_CEILING]
 			+ "the BBQ raws are still locked, so the branch would never run"
 		)
-		assert(false, "the BBQ gate never opened; the fixture would build a dead branch")
+		return
 
 	# 3. Build the branch the moment it is unlocked. `build_bbq_branch`
 	#    re-issues the ketchup line's placements first; every one of them is
