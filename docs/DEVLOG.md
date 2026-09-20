@@ -787,6 +787,61 @@ passed on the command line — headless Chrome captures on a load heuristic
 that lands before a model has been fetched, so the page hands back its own
 canvas instead of being photographed.
 
+### 2026-09-20 — Tooling: the build signs itself, the hook can read a path, the cursor belongs to the run
+
+Three tooling defects off the deferred queue (#77, #53, #4). None of them is
+in the game; all three are in the machinery the game is verified with, and
+each one had already cost somebody a round of investigation.
+
+**`cargo xtask` re-signs the library it stages (issue #77).** Overwriting
+`godot_project/bin/libsim_core.dylib` invalidates the signature macOS
+recorded for that path, and the kernel then SIGKILLs anything that loads it:
+every headless run — `scripts/verify-core-loop.sh`, every
+`scripts/screenshot-scene.sh` — died with **exit 137, no stderr, no marker**,
+while `godot --version` still exited 0 and `codesign --verify` called the
+library valid. It read as a broken engine. xtask is what replaced the file,
+so xtask now runs `codesign -s - --force` on it and prints that it did, before
+the two `--import` passes that are themselves the first thing to load it.
+Two calls settled in the issue: a signing failure **warns and leaves the
+library staged** rather than failing the build (a machine with no Xcode
+command line tools must still be able to build; CI's `cargo test` never loads
+the dylib), and it applies **only to the loaded dylib, not the staged `.vox`
+output** — the kill is about code the dynamic linker maps in, and signing
+thousands of data files would cost seconds a build to change nothing.
+
+**The PR-screenshot hook can open the body file it is given (issue #53).**
+`.claude/hooks/require-pr-screenshot.sh` `open()`s any `--body-file` path in
+the command, but it is not a shell: `--body-file $SCRATCH/body.md` was opened
+as the literal characters `$SCRATCH`, failed, and counted as "no image" —
+refusing a body whose first line was the screenshot. It now expands `$VARS`
+over the environment the hook was actually given, plus `~`, and nothing else;
+no subshell, so `--body "$(cat body.md)"` is still refused. Both halves are
+tested: `$SCRATCH/body.md` and `~/body.md` pass, while a missing file, an
+undefined variable, a command substitution and an expanded file with no image
+in it are all still blocked (25 cases in
+`.claude/hooks/test_require_pr_screenshot.py`).
+
+**The `--hover` cursor drift, diagnosed (issue #4).** The cause was not the
+tile→screen mapping, which is exact: it is that `Input.warp_mouse` moves the
+machine's ONE pointer, which outlives the process and is shared with every
+other window on the desktop. That leaks two ways, both reproduced. A run
+asking for no hover inherited the tile the last run parked on — `--fixture
+bottleneck --payout` came back wearing the previous `--hover-dock` run's
+tooltip, over a frozen scene that had stopped refreshing the numbers in it,
+which is the sighting in the issue's comment. And two `screenshot-scene.sh`
+runs at once (a wave of parallel worktrees makes this ordinary) fight over
+that pointer: run A aimed at the dock, run B warped to a hopper, and A's frame
+would have carried the hopper's tooltip while claiming to be the dock shot.
+So the script owns the cursor for the whole run now: every run **parks** it on
+empty ground first (asking the scene's own `_hover_text_at_tile` where is
+quiet), a `--hover*` flag then aims it, it is **re-asserted** three frames
+before the shutter (which is also what makes `--closeup` safe, since that
+re-aims the camera after the parking), and the frame is only written if the
+cursor really is over what it was aimed at. A mismatch is `SCREENSHOT_FAIL`
+and no PNG, the same refusal #70 gave a wrong fixture: a tooltip belonging to
+the wrong thing is precisely the frame this script exists not to hand back.
+Every run now prints `SCREENSHOT_CURSOR:` beside `SCREENSHOT_FIXTURE`.
+
 ### 2026-09-20 — Three issues off the board: names, fluid colour, honest frames
 
 A no-new-features pass over the deferred queue. Nothing here changes what
