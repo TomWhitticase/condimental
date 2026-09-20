@@ -128,7 +128,11 @@ fn with_money(world: &World, money: u32) -> World {
 fn a_mothballed_machine_drops_out_of_the_establishment_and_comes_back_with_it() {
     let mut world = running_line(1_200);
     let vat = tile_of(&world, "cooking_vat");
-    assert_eq!(required(&world, "manufacturing"), 4, "crusher 1 + mixer 1 + vat 2");
+    assert_eq!(
+        required(&world, "manufacturing"),
+        4,
+        "crusher 1 + mixer 1 + vat 2"
+    );
 
     mothball(&mut world, vat, true);
     assert_eq!(
@@ -169,7 +173,10 @@ fn a_mothballed_machine_asks_for_nobody_and_makes_nothing() {
     let mut world = running_line(3_000);
     let vat = tile_of(&world, "cooking_vat");
     let shipped_before = world.dock_snapshots()[0].shipped_total;
-    assert!(shipped_before > 0, "the line is running before we switch it off");
+    assert!(
+        shipped_before > 0,
+        "the line is running before we switch it off"
+    );
 
     mothball(&mut world, vat, true);
     let demand_peak_off = {
@@ -251,7 +258,10 @@ fn returning_a_machine_to_service_resumes_the_craft_it_was_part_way_through() {
     for _ in 0..left_to_run - 1 {
         common::supply(&mut world);
         world.tick();
-        assert!(progress(&world).is_some(), "still the same craft, still running");
+        assert!(
+            progress(&world).is_some(),
+            "still the same craft, still running"
+        );
     }
     common::supply(&mut world);
     world.tick();
@@ -277,7 +287,10 @@ const SPARE_CRUSHERS: u32 = 8;
 fn overbuilt_line(money: u32) -> World {
     let mut world = running_line(1_200);
     for i in 0..SPARE_CRUSHERS as i32 {
-        world.issue_command(PlayerCommand::Purchase { kind: "crusher".into(), quantity: 1 });
+        world.issue_command(PlayerCommand::Purchase {
+            kind: "crusher".into(),
+            quantity: 1,
+        });
         world.issue_command(PlayerCommand::Place {
             kind: "crusher".into(),
             tile: (2 * i, 10),
@@ -287,13 +300,23 @@ fn overbuilt_line(money: u32) -> World {
     }
     assert_eq!(required(&world, "manufacturing"), 4 + SPARE_CRUSHERS);
     for _ in 0..SPARE_CRUSHERS {
-        world.issue_command(PlayerCommand::Hire { category: "manufacturing".into() });
+        world.issue_command(PlayerCommand::Hire {
+            category: "manufacturing".into(),
+        });
     }
     // And one shipping clerk hired ahead of the second dock, which is the
     // next thing they mean to build.
-    world.issue_command(PlayerCommand::Hire { category: "logistics".into() });
+    world.issue_command(PlayerCommand::Hire {
+        category: "logistics".into(),
+    });
     assert_eq!(headcount(&world, "manufacturing"), 4 + SPARE_CRUSHERS);
-    assert_eq!((required(&world, "logistics"), headcount(&world, "logistics")), (1, 2));
+    assert_eq!(
+        (
+            required(&world, "logistics"),
+            headcount(&world, "logistics")
+        ),
+        (1, 2)
+    );
 
     to_payday_eve(&mut world);
     with_money(&world, money)
@@ -327,7 +350,11 @@ fn mothballing_takes_a_factory_that_missed_a_payday_back_out_of_arrears() {
     ticks(&mut world, 1);
     assert_eq!(world.staff().unpaid_last_payday(), 1, "one head in arrears");
     assert_eq!(world.staff().pool("logistics").unwrap().unpaid, 1);
-    assert_eq!(world.staff().walked_out_last_payday(), 0, "nobody walks out on the first miss");
+    assert_eq!(
+        world.staff().walked_out_last_payday(),
+        0,
+        "nobody walks out on the first miss"
+    );
     let money_at_the_miss = world.money();
     // The factory is still shipping — the clerk who WAS paid is enough to
     // keep the dock working — which is the runway the escape hatch needs.
@@ -341,14 +368,22 @@ fn mothballing_takes_a_factory_that_missed_a_payday_back_out_of_arrears() {
     for i in 0..SPARE_CRUSHERS as i32 {
         mothball(&mut world, (2 * i, 10), true);
     }
-    assert_eq!(required(&world, "manufacturing"), 4, "back to the shipped line's crew");
+    assert_eq!(
+        required(&world, "manufacturing"),
+        4,
+        "back to the shipped line's crew"
+    );
 
     // Which is what makes the firing safe to do: the payroll can now be
     // cut to the establishment without leaving a machine uncrewed.
     for _ in 0..SPARE_CRUSHERS {
-        world.issue_command(PlayerCommand::Fire { category: "manufacturing".into() });
+        world.issue_command(PlayerCommand::Fire {
+            category: "manufacturing".into(),
+        });
     }
-    world.issue_command(PlayerCommand::Fire { category: "logistics".into() });
+    world.issue_command(PlayerCommand::Fire {
+        category: "logistics".into(),
+    });
     assert_eq!(
         world.staff().bill_per_period(),
         14,
@@ -369,20 +404,30 @@ fn mothballing_takes_a_factory_that_missed_a_payday_back_out_of_arrears() {
     ticks(&mut world, 1);
     assert_eq!(world.staff().last_bill(), bill);
     assert_eq!(
-        (world.staff().unpaid_last_payday(), world.staff().walked_out_last_payday()),
+        (
+            world.staff().unpaid_last_payday(),
+            world.staff().walked_out_last_payday()
+        ),
         (0, 0),
         "the line kept shipping through the arrears, so the notice bill was met in full"
     );
 
     // And from here the factory pays its way. Two more paydays, each met
     // out of income, each one leaving more in the bank than the last.
-    assert_eq!(world.staff().next_bill(), 14, "the smaller bill, from now on");
+    assert_eq!(
+        world.staff().next_bill(),
+        14,
+        "the smaller bill, from now on"
+    );
     let mut balance = world.money();
     for payday in 0..2 {
         to_payday_eve(&mut world);
         ticks(&mut world, 1);
         assert_eq!(
-            (world.staff().unpaid_last_payday(), world.staff().walked_out_last_payday()),
+            (
+                world.staff().unpaid_last_payday(),
+                world.staff().walked_out_last_payday()
+            ),
             (0, 0),
             "payday {payday} after the escape must be met in full"
         );
@@ -410,7 +455,11 @@ fn mothballing_takes_a_factory_that_missed_a_payday_back_out_of_arrears() {
         common::supply(&mut control);
         control.tick();
     }
-    assert_eq!(control.staff().bill_per_period(), bill, "the control never cut its payroll");
+    assert_eq!(
+        control.staff().bill_per_period(),
+        bill,
+        "the control never cut its payroll"
+    );
     assert_eq!(required(&control, "manufacturing"), 4 + SPARE_CRUSHERS);
     assert!(
         world.money() > control.money(),
@@ -492,7 +541,9 @@ fn crewed_is_false_for_exactly_the_placements_that_go_without() {
         "the shipped crew covers the shipped line exactly"
     );
 
-    world.issue_command(PlayerCommand::Fire { category: "manufacturing".into() });
+    world.issue_command(PlayerCommand::Fire {
+        category: "manufacturing".into(),
+    });
     let vat = tile_of(&world, "cooking_vat");
     assert_eq!(
         uncrewed(&world),
@@ -507,9 +558,14 @@ fn crewed_is_false_for_exactly_the_placements_that_go_without() {
         assert_eq!(entry.crewed, entry.tile != vat, "at {:?}", entry.tile);
     }
     match world.query_tile(vat) {
-        Some(TileSnapshot::Machine { crewed, mothballed, .. }) => {
+        Some(TileSnapshot::Machine {
+            crewed, mothballed, ..
+        }) => {
             assert!(!crewed);
-            assert!(!mothballed, "short of a head is not the same as switched off");
+            assert!(
+                !mothballed,
+                "short of a head is not the same as switched off"
+            );
         }
         other => panic!("expected the vat, got {other:?}"),
     }
@@ -517,7 +573,9 @@ fn crewed_is_false_for_exactly_the_placements_that_go_without() {
     // Hiring the head back clears it, with no tick in between: `crewed` is
     // derived at snapshot time, so it cannot lag a `Hire` that dirties no
     // tile at all.
-    world.issue_command(PlayerCommand::Hire { category: "manufacturing".into() });
+    world.issue_command(PlayerCommand::Hire {
+        category: "manufacturing".into(),
+    });
     assert!(uncrewed(&world).is_empty());
 }
 
@@ -530,7 +588,9 @@ fn a_mothballed_machine_reads_crewed_and_frees_the_head_for_the_machine_behind_i
     let mut world = running_line(1_200);
     let crusher = tile_of(&world, "crusher");
     let vat = tile_of(&world, "cooking_vat");
-    world.issue_command(PlayerCommand::Fire { category: "manufacturing".into() });
+    world.issue_command(PlayerCommand::Fire {
+        category: "manufacturing".into(),
+    });
     assert_eq!(uncrewed(&world), vec![vat]);
 
     // Switching off the crusher — first in stable order — hands its cook
@@ -545,7 +605,10 @@ fn a_mothballed_machine_reads_crewed_and_frees_the_head_for_the_machine_behind_i
         .into_iter()
         .find(|e| e.tile == crusher)
         .unwrap();
-    assert!(entry.crewed, "a machine asking for nobody is not short of anybody");
+    assert!(
+        entry.crewed,
+        "a machine asking for nobody is not short of anybody"
+    );
     assert!(entry.mothballed);
 }
 
@@ -555,11 +618,15 @@ fn a_mothballed_machine_reads_crewed_and_frees_the_head_for_the_machine_behind_i
 
 #[test]
 fn the_set_mothballed_command_round_trips_through_json() {
-    let parsed = command_from_json(r#"{"type": "set_mothballed", "tile": [12, 0], "enabled": true}"#)
-        .expect("the wire form parses");
+    let parsed =
+        command_from_json(r#"{"type": "set_mothballed", "tile": [12, 0], "enabled": true}"#)
+            .expect("the wire form parses");
     assert!(matches!(
         parsed,
-        PlayerCommand::SetMothballed { tile: (12, 0), enabled: true }
+        PlayerCommand::SetMothballed {
+            tile: (12, 0),
+            enabled: true
+        }
     ));
     // `enabled` defaults to true, like the other two switches, so a caller
     // that omits it switches the machine off rather than silently on.
@@ -567,7 +634,10 @@ fn the_set_mothballed_command_round_trips_through_json() {
         .expect("the wire form parses without `enabled`");
     assert!(matches!(
         defaulted,
-        PlayerCommand::SetMothballed { tile: (12, 0), enabled: true }
+        PlayerCommand::SetMothballed {
+            tile: (12, 0),
+            enabled: true
+        }
     ));
 }
 
@@ -589,7 +659,11 @@ fn only_a_machine_can_be_mothballed() {
         mothball(&mut world, tile, true);
     }
     assert_eq!(world.to_save_ron(), before, "nothing was recorded");
-    assert_eq!(required(&world, "logistics"), 1, "the dock still wants its clerk");
+    assert_eq!(
+        required(&world, "logistics"),
+        1,
+        "the dock still wants its clerk"
+    );
 }
 
 /// `World::new` builds nothing and the registries are the shipped ones —
@@ -603,6 +677,10 @@ fn the_fixture_still_describes_the_shipped_content() {
         ContractRegistry::bundled(),
         Money::ZERO,
     );
-    assert_eq!(required(&empty, "manufacturing"), 0, "an empty world needs nobody");
+    assert_eq!(
+        required(&empty, "manufacturing"),
+        0,
+        "an empty world needs nobody"
+    );
     assert!(uncrewed(&empty).is_empty());
 }
