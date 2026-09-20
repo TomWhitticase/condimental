@@ -41,8 +41,10 @@ def stub_gh(directory, stdout="", code=0):
 
 
 class HookCase(unittest.TestCase):
-    def run_hook(self, command, gh_stdout="", gh_code=0, path_has_gh=True):
+    def run_hook(self, command, gh_stdout="", gh_code=0, path_has_gh=True,
+                 env_extra=None):
         env = dict(os.environ)
+        env.update(env_extra or {})
         with tempfile.TemporaryDirectory() as bin_dir:
             if path_has_gh:
                 stub_gh(bin_dir, gh_stdout, gh_code)
@@ -179,6 +181,64 @@ class WhenGitHubCannotBeReached(HookCase):
         done = self.run_hook('gh pr create --body "no picture"',
                              gh_stdout="gh: not authenticated", gh_code=1)
         self.assertEqual(done.returncode, 2, done.stdout)
+
+
+class IssueFiftyThree(HookCase):
+    """A `--body-file` path the hook is not a shell for.
+
+    The hook `open()`s the path it finds in the command text, so a variable or
+    a `~` in it used to be read as those literal characters, fail, and count
+    as "no image" — refusing a body that opens with the screenshot. The two
+    halves are inseparable: expanding must rescue the paths a shell would have
+    resolved WITHOUT rescuing a body that really has no image in it.
+    """
+
+    def write_body(self, directory, text):
+        path = os.path.join(directory, "body.md")
+        with open(path, "w") as handle:
+            handle.write(text)
+        return path
+
+    def test_a_variable_in_the_path_is_expanded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.write_body(tmp, "## Screenshots\n\n%s\n" % IMAGE_MD)
+            self.assertAllowed("gh pr create --title t --body-file $SCRATCH/body.md",
+                               env_extra={"SCRATCH": tmp})
+
+    def test_a_tilde_in_the_path_is_expanded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.write_body(tmp, "## Screenshots\n\n%s\n" % IMAGE_MD)
+            self.assertAllowed("gh pr create --title t --body-file ~/body.md",
+                               env_extra={"HOME": tmp})
+
+    def test_an_expanded_path_with_no_image_is_still_blocked(self):
+        # The half that must not regress: expansion finds the body, and the
+        # body is what gets judged.
+        with tempfile.TemporaryDirectory() as tmp:
+            self.write_body(tmp, "A body with words in it and no picture.\n")
+            self.assertBlocked("gh pr create --title t --body-file $SCRATCH/body.md",
+                               env_extra={"SCRATCH": tmp})
+
+    def test_a_genuinely_missing_body_file_is_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertBlocked(
+                "gh pr create --title t --body-file %s/nowhere.md" % tmp)
+
+    def test_an_undefined_variable_is_left_standing_and_blocked(self):
+        # Nothing to expand to, so the path stays literal, fails to open, and
+        # the command is refused exactly as it was before the fix.
+        self.assertBlocked(
+            "gh pr create --title t --body-file $NO_SUCH_VAR_HERE/body.md")
+
+    def test_command_substitution_is_never_run(self):
+        # `--body "$(cat body.md)"` is the other half of issue #53, and stays
+        # refused: the hook reads the command text, and a subshell is not a
+        # path it can open.
+        with tempfile.TemporaryDirectory() as tmp:
+            self.write_body(tmp, "## Screenshots\n\n%s\n" % IMAGE_MD)
+            done = self.run_hook(
+                'gh pr create --title t --body "$(cat %s/body.md)"' % tmp)
+            self.assertEqual(done.returncode, 2, done.stdout)
 
 
 class CommandsThatAreNotPullRequests(HookCase):
