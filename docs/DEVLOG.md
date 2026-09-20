@@ -238,6 +238,47 @@ pointer that had been moved when nothing had moved it; the explained frame is
 now written, as its own docstring always promised, and every refusal lists
 its candidate causes as candidates.
 
+A third correction, from the re-review, and the largest of the three: **a
+flag that cannot do what it was asked must refuse, not shrug.** Every one of
+the seven `--hover*` helpers was guarded by `if tile != HOVER_NONE`, so a
+flag whose target was not in the fixture aimed at nothing at all and the run
+went on to photograph the parked cursor and report success. `--fixture
+full_dock --hover-splitter` — that line has no splitter — handed back a clean
+frame of the dock with `SCREENSHOT_OK` on it and exit 0, and plain `--hover`
+did the same against the empty world, which is the shortest command the
+script takes. Nothing in the output said the flag had been dropped. That is
+issue #70's failure wearing another hat: a plausible frame of the wrong thing
+at a zero exit status, handed to a reviewer as evidence.
+
+Fixed for the SET rather than for the seven, because a hole this shape is
+worth closing once. The flags are one table in `godot_project/hover_targets.gd`
+— flag, what it looks for in words, and a finder over `world_layout_json` —
+`test_screenshot.gd` has a single loop over it and no other way to aim a
+hover flag, and a finder that comes back empty REFUSES with the flag, the
+target and the world it looked in (with "you built no world at all" for the
+empty case, rather than a confusing complaint about a missing dock). Three
+things keep the next one honest: `test_hover_targets.gd` drives every row
+against every fixture **headlessly**, which is new — the screenshot harness
+needs a window, so until now nothing in CI knew the hover flags existed;
+`scripts/check-invariants.sh` fails if `test_screenshot.gd` names a `--hover*`
+flag the table does not have; and `--ghost-blocked` and `--remove-mode`, the
+only other flags that aim at something the world may not contain, refuse on
+the same grounds (an empty world made `--ghost-blocked` photograph the VALID
+state).
+
+The sweep that came with it found one more of the same kind, and it is fixed
+too: a hover target the camera is **not showing** — `--fixture chain
+--closeup 26,0,8 --hover-hopper` — could not be reached, because the window
+server clamps a warp to the window, so the run failed at the shutter blaming
+a hand on the mouse for a tile that was nine thousand pixels off the left
+edge. The aim now checks the projection against the viewport first and says
+exactly that. What the sweep did NOT find was a spurious refusal: 43
+combinations, every one that should render did. One run refused at the
+shutter naming a tile nobody asked for, while four sibling worktrees were
+running Godot, and passed six times in a row afterwards — which is the
+parallel-pointer case the message already lists, measured rather than
+assumed, and now recorded in `screenshot-scene.sh`'s own header.
+
 ### 2026-09-20 — Three issues off the board: names, fluid colour, honest frames
 
 A no-new-features pass over the deferred queue. Nothing here changes what

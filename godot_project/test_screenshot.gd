@@ -118,7 +118,22 @@
 # one tile (deliberately not its origin — "hovering anywhere on a multi-tile
 # machine identifies it" is the claim, and hovering the origin would not show
 # it). All of them share one implementation (`_hover_over_tile`) and differ
-# only in how they pick the tile out of `world_layout_json`.
+# only in how they pick the tile out of `world_layout_json` — which is
+# `hover_targets.gd`, one table, read by the one loop in
+# `_apply_hover_flags`.
+#
+# A HOVER FLAG THAT CANNOT FIND ITS TARGET REFUSES. Each of these used to be
+# its own little function guarded by `if tile != HOVER_NONE`, so a flag whose
+# target was not in the world aimed at nothing and the run photographed the
+# parked cursor and said SCREENSHOT_OK: `--fixture full_dock
+# --hover-splitter` handed back a clean frame of the dock, and plain `--hover`
+# did it against the empty world. Nothing in the output said the flag had
+# been dropped. That is a frame answering a question nobody asked at exit 0 —
+# issue #70's class exactly, and the opposite of what the cursor guard below
+# promises — so it is now one refusal for the whole set, naming the flag, the
+# target and the fixture. `--ghost-blocked` and `--remove-mode` are the only
+# other flags that aim at something the world may not contain, and they
+# refuse on the same grounds.
 #
 # THE CURSOR IS GLOBAL, AND THIS SCRIPT OWNS IT FOR THE WHOLE RUN (issue #4).
 # `Input.warp_mouse` moves the machine's ONE pointer, which outlives the
@@ -189,6 +204,7 @@ extends SceneTree
 
 const Layouts = preload("res://test_layouts.gd")
 const GameSaves = preload("res://game_session.gd")
+const HoverTargets = preload("res://hover_targets.gd")
 
 ## Enough frames for shadow atlases, SSAO and glow to be resolved — a
 ## screenshot on frame 1 shows an unlit, shadowless scene and is misleading.
@@ -232,13 +248,11 @@ var _flag_fixture_flag := ""
 var _refused := false
 var _populate := false
 var _first_person := false
-var _hover := false
-var _hover_pipe := false
-var _hover_vat := false
-var _hover_hopper := false
-var _hover_tank := false
-var _hover_dock := false
-var _hover_splitter := false
+## The --hover* flags this command line asked for, out of `hover_targets.gd`
+## — not seven booleans, so there is exactly one list of hover flags in the
+## project and no way to ask for one without a finder and a refusal behind it
+## (see `_apply_hover_flags`).
+var _hover_flags: PackedStringArray = []
 ## The tile the cursor is supposed to be over when the shutter opens, and
 ## whether a --hover* flag asked for it (as opposed to `_park_cursor` having
 ## put it somewhere harmless). Both are the cursor bookkeeping issue #4 needed
@@ -501,13 +515,7 @@ func _initialize() -> void:
 		_pick_fixture("understaffed", "--short-staffed")
 		_populate = true
 	_first_person = args.has("--first-person")
-	_hover = args.has("--hover")
-	_hover_pipe = args.has("--hover-pipe")
-	_hover_vat = args.has("--hover-vat")
-	_hover_hopper = args.has("--hover-hopper")
-	_hover_tank = args.has("--hover-tank")
-	_hover_dock = args.has("--hover-dock")
-	_hover_splitter = args.has("--hover-splitter")
+	_hover_flags = HoverTargets.requested_flags(args)
 	_shop = args.has("--shop")
 	var config_arg := _string_arg(args, "--config")
 	if config_arg != "":
@@ -808,10 +816,35 @@ func _enter_first_person() -> void:
 ## window server rather than a fact: `_settle_cursor` makes it again just
 ## before the shutter and `_check_cursor` proves it stuck. See the cursor note
 ## in this file's header.
-func _hover_over_tile(tile: Vector2i) -> void:
+##
+## Returns false having REFUSED if the tile is not in frame. In isometric the
+## pointer cannot be put outside the window — the window server clamps the
+## warp to the edge — so the shutter check would fire a few frames later and
+## blame a hand on the mouse for a tile the camera simply is not showing
+## (`--fixture chain --closeup 26,0,8 --hover-hopper` did exactly that). A
+## cause this run CAN see, it names.
+func _hover_over_tile(tile: Vector2i) -> bool:
+	if not _in_first_person():
+		var world_point: Vector3 = _main._tile_origin(
+			tile.x, tile.y, _main.BELT_SURFACE_Y
+		)
+		var point: Vector2 = _main._camera.unproject_position(world_point)
+		var frame: Rect2 = root.get_visible_rect()
+		if not frame.has_point(point):
+			printerr(
+				"SCREENSHOT_FAIL: tile %s is not in frame — it projects to %s in a \
+%dx%d window, and the pointer cannot be put outside that, so the tooltip would \
+belong to whatever the edge of the frame is over. Widen the shot (a bigger \
+--closeup size, or drop it), raise the resolution, or aim at something the \
+camera is showing."
+				% [str(tile), str(point.round()), int(frame.size.x), int(frame.size.y)]
+			)
+			_refuse()
+			return false
 	_cursor_tile = tile
 	_cursor_hovered = true
 	_aim_at_tile(tile)
+	return true
 
 
 ## Puts whatever this view's tooltip is driven by over `tile`: the pointer in
@@ -874,77 +907,58 @@ func _in_first_person() -> bool:
 	return _main != null and _main._view_mode == _main.ViewMode.FIRST_PERSON
 
 
-## The first placed thing of a given kind, or HOVER_NONE. Everything the
-## hover flags need comes out of `world_layout_json`, so none of them types a
-## tile in — which is what keeps them meaningful when the fixture changes.
-const HOVER_NONE := Vector2i(-999999, -999999)
+## "Nowhere" — `hover_targets.gd`'s own sentinel, re-exported under the name
+## this file has always used for it. Everything the hover flags need comes
+## out of `world_layout_json`, so none of them types a tile in, which is what
+## keeps them meaningful when a fixture moves its dock.
+const HOVER_NONE := HoverTargets.NONE
+
+
+## Every placement in the world, as the hover table reads it.
+func _layout() -> Array:
+	return JSON.parse_string(_main.sim.world_layout_json())
 
 
 func _first_tile_of(predicate: Callable) -> Vector2i:
-	for placement in JSON.parse_string(_main.sim.world_layout_json()):
-		if predicate.call(placement):
-			var pair: Array = placement["tile"]
-			return Vector2i(int(pair[0]), int(pair[1]))
-	return HOVER_NONE
+	return HoverTargets.first_matching(_layout(), predicate)
 
 
-func _first_tile_of_kind(kind: String) -> Vector2i:
-	return _first_tile_of(func(p): return String(p["kind"]) == kind)
-
-
-## The first placement that RUNS A RECIPE — a machine, as opposed to a belt,
-## a pipe or one of the buffer buildings.
 func _first_machine_tile() -> Vector2i:
-	return _first_tile_of(func(p): return p.get("recipe") != null)
+	return HoverTargets.first_machine(_layout())
 
 
-func _hover_over_first_machine() -> void:
-	var tile := _first_machine_tile()
-	if tile != HOVER_NONE:
-		_hover_over_tile(tile)
-
-
-func _hover_over_pipe() -> void:
-	var tile := _first_tile_of_kind("pipe")
-	if tile != HOVER_NONE:
-		_hover_over_tile(tile)
-
-
-## The far corner of the first multi-tile machine — NOT its origin, see this
-## file's header. Does nothing if nothing placed is bigger than one tile,
-## rather than silently hovering something else.
-func _hover_over_multi_tile_machine() -> void:
-	for placement in JSON.parse_string(_main.sim.world_layout_json()):
-		var size: Vector2i = _main._footprint_size(placement.get("footprint"))
-		if size == Vector2i.ONE:
-			continue
-		var pair: Array = placement["tile"]
-		_hover_over_tile(Vector2i(int(pair[0]), int(pair[1])) + size - Vector2i.ONE)
-		return
-
-
-func _hover_over_hopper() -> void:
-	var tile := _first_tile_of_kind("hopper")
-	if tile != HOVER_NONE:
-		_hover_over_tile(tile)
-
-
-func _hover_over_fluid_tank() -> void:
-	var tile := _first_tile_of_kind("fluid_tank")
-	if tile != HOVER_NONE:
-		_hover_over_tile(tile)
-
-
-func _hover_over_dock() -> void:
-	var tile := _first_tile_of_kind("dock")
-	if tile != HOVER_NONE:
-		_hover_over_tile(tile)
-
-
-func _hover_over_splitter() -> void:
-	var tile := _first_tile_of_kind("splitter")
-	if tile != HOVER_NONE:
-		_hover_over_tile(tile)
+## Aims at whatever each --hover* flag on the command line asked for, and
+## REFUSES if one of them cannot find its target.
+##
+## The refusal is the point, and it is why this is a loop over a table
+## instead of seven `_hover_over_x()` functions. Each of those was guarded by
+## `if tile != HOVER_NONE`, so a flag whose target was not in the fixture
+## aimed at nothing at all and the run went on to photograph the parked
+## cursor and report success: `--fixture full_dock --hover-splitter` gave
+## back a clean frame of the dock, `SCREENSHOT_OK`, exit 0, and no line
+## anywhere saying the flag had been dropped. A frame that answers a
+## different question than the one asked, at a zero exit status, is issue
+## #70's failure wearing another hat — and this file's own header promises
+## the opposite (a frame is written only if the cursor really is over what it
+## aimed at). One loop, one refusal, and an eighth flag is a row in
+## `hover_targets.gd` that cannot be added without both.
+##
+## Order is the table's, so when more than one is given the last one wins the
+## cursor — the precedence these flags have always had.
+func _apply_hover_flags() -> void:
+	var layout := _layout()
+	for row in HoverTargets.rows_for(_hover_flags, _main._footprint_size):
+		var tile: Vector2i = HoverTargets.tile_for(row, layout)
+		if tile == HOVER_NONE:
+			printerr(HoverTargets.refusal(row, _fixture, _flag_fixture_flag, layout))
+			_refuse()
+			return
+		if not _hover_over_tile(tile):
+			# Out of frame; `_hover_over_tile` has said so and refused. Named
+			# here too, because which FLAG asked is only knowable from here.
+			printerr("SCREENSHOT_NOTE: that tile is what %s asked for — %s"
+				% [row["flag"], row["looks_for"]])
+			return
 
 
 ## Screen positions `_park_cursor` tries, in this order, as fractions of the
@@ -1208,9 +1222,23 @@ func _enter_ghost_mode() -> void:
 		var occupied := _first_machine_tile()
 		if occupied == HOVER_NONE:
 			occupied = _first_tile_of(func(_p): return true)
-		if occupied != HOVER_NONE:
-			target = occupied
-	_hover_over_tile(target)
+		if occupied == HOVER_NONE:
+			# The --hover* hole, in the one other place a flag aims at
+			# something the world may not contain. With nothing placed there
+			# is nothing for the ghost to overlap, and what used to come back
+			# was a frame of the VALID state under the flag that asks for the
+			# INVALID one — plausible, wrong, and exit 0.
+			printerr(
+				"SCREENSHOT_FAIL: --ghost-blocked needs something already placed for \
+the ghost to sit on, and this world is empty. Ask for a fixture (--fixture, or a \
+flag that implies one); --ghost %s on its own is the valid state."
+				% _ghost_kind
+			)
+			_refuse()
+			return
+		target = occupied
+	if not _hover_over_tile(target):
+		return
 	_main._update_ghost()
 
 
@@ -1227,8 +1255,19 @@ func _enter_remove_mode() -> void:
 	var tile := _first_machine_tile()
 	if tile == HOVER_NONE:
 		tile = _first_tile_of(func(_p): return true)
-	if tile != HOVER_NONE:
-		_hover_over_tile(tile)
+	if tile == HOVER_NONE:
+		# As above: remove mode over an empty world photographs the mode
+		# with nothing under the cursor to remove, which is not the shot the
+		# flag asks for.
+		printerr(
+			"SCREENSHOT_FAIL: --remove-mode has nothing to stand over — this world is \
+empty, so the frame would show remove mode with no target under the cursor. Ask \
+for a fixture (--fixture, or a flag that implies one)."
+		)
+		_refuse()
+		return
+	if not _hover_over_tile(tile):
+		return
 	_main._update_ghost()
 
 
@@ -1427,7 +1466,8 @@ func _select_hotbar_key() -> void:
 	_main._unhandled_input(event)
 	# Park the cursor on open ground so the ghost selection put in the
 	# player's hand reads as valid rather than blocked.
-	_hover_over_tile(_open_ground_tile())
+	if not _hover_over_tile(_open_ground_tile()):
+		return
 	_main._update_ghost()
 	_main._update_hotbar()
 
@@ -1536,24 +1576,21 @@ func _process(_delta: float) -> bool:
 		_enter_closeup()
 	if _frames == 2 and _item_gallery:
 		_stand_item_gallery()
-	if _frames == 2 and _hover:
-		_hover_over_first_machine()
-	if _frames == 2 and _hover_pipe:
-		_hover_over_pipe()
-	if _frames == 2 and _hover_vat:
-		_hover_over_multi_tile_machine()
-	if _frames == 2 and _hover_hopper:
-		_hover_over_hopper()
-	if _frames == 2 and _hover_tank:
-		_hover_over_fluid_tank()
-	if _frames == 2 and _hover_dock:
-		_hover_over_dock()
-	if _frames == 2 and _hover_splitter:
-		_hover_over_splitter()
+	if _frames == 2 and not _hover_flags.is_empty():
+		_apply_hover_flags()
+		# Straight out, rather than letting the rest of this frame set up a
+		# shot nothing will be written from: a refusal's own message is the
+		# only output a refused run should have to be read for.
+		if _refused:
+			return true
 	if _frames == 2 and _ghost_kind != "":
 		_enter_ghost_mode()
+		if _refused:
+			return true
 	if _frames == 2 and _remove_mode:
 		_enter_remove_mode()
+		if _refused:
+			return true
 	if _frames == 2 and _shop:
 		_open_shop_menu()
 	if _frames == 2 and _no_hud:
@@ -1581,9 +1618,11 @@ func _process(_delta: float) -> bool:
 	if _frames == 2 and _production:
 		_main._set_production_open(true)
 	if _frames == 2 and _understaffed:
-		_hover_over_tile(Layouts.UNDERSTAFFED_VAT)
+		if not _hover_over_tile(Layouts.UNDERSTAFFED_VAT):
+			return true
 	if _frames == 2 and _stalled_run:
-		_hover_over_tile(Layouts.STALLED_RUN_TILE)
+		if not _hover_over_tile(Layouts.STALLED_RUN_TILE):
+			return true
 	if _frames == 2 and _staff_shortfall:
 		_main._set_staff_open(true)
 	if _frames == 2 and _contracts:
