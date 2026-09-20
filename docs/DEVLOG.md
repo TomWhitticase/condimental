@@ -647,24 +647,35 @@ payday missed the next one harder. The only lever was `Remove`, which
 refunds the machine to the shed — a fine answer for a machine you regret
 buying, a terrible one for a line you want back next period.
 
-**Mothballing.** `set_mothballed` switches a machine off: it drops out of
-the establishment, so the wage bill it was driving can be fired away; it
-produces nothing; and it HOLDS the batch it was part-way through rather than
-losing it or finishing it, so switching it back on resumes. It persists
-across a save with no schema bump. The switch lives on the click-to-
-configure panel, which grew a third shape for machines — not a keybind, for
-the same reason Q, SPACE and V were retired.
+**Mothballing.** `set_mothballed` switches a building off: it drops out of
+the establishment, produces nothing, and HOLDS the batch it was part-way
+through rather than losing it or finishing it, so switching it back on
+resumes. The switch lives on the click-to-configure panel, which grew a
+third shape — not a keybind, for the same reason Q, SPACE and V were
+retired. It persists across a save, joining `schema_version` 2 alongside a
+tank's declared fluid rather than claiming a version of its own.
 
-Machines only. A hopper, a tank and the **dock** are refused: the dock is
-the only route from product to money, and a mothballed dock is a factory
-that cannot recover at all. The build-ahead second-dock case that leaves
-open is issue #86.
+**Standing crew down is what makes it worth anything.** Review caught the
+first attempt doing nothing: it shrank `required` but never touched
+`bill_per_period` or `next_bill`, so an A/B over four paydays came back
+bit-identical. It now stands crew down — a mothballed building's heads come
+off the payroll, the bill falls on the tick the switch is thrown, nobody is
+fired and nobody walks out. Mothballing on payday eve buys notice pay, not
+free labour. The four-payday A/B that used to tie now ends 44 against 86.
 
-Stated plainly, because a test had to work around it: this rescues a factory
-that is *heading into* arrears, not one that has already missed a payday
-with a single shipping clerk. Notice pay holds the next bill at the old
-figure for a period and `staff.ron` pays logistics last, so by then the dock
-has already stopped. Issue #85, with the four candidate fixes.
+**Anything that asks for a crew can be switched off**, decided by the
+kind's `staff` list in `data/machines.ron` rather than by a Rust type — so
+the **dock** can be, and has to be able to be: while it is on,
+`required("logistics")` never reaches zero and a factory with no income
+cannot get its bill down to nothing. A hopper, a tank, a belt, a pipe and a
+splitter ask for nobody and are refused. The same rule now drives the
+panel, which asks the content instead of consulting a kind list kept in
+GDScript.
+
+What mothballing does not do is conjure income: a standing order lost to
+three missed windows while the factory was dark costs money to re-sign.
+The acceptance test says so out loud rather than claiming a recovery it did
+not see. That is issue #85, still open.
 
 **Naming the machine.** Every placement now reports `crewed` — the
 establishment's stable answer to *if everything placed wanted to run at

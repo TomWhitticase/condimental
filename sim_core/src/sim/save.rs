@@ -115,9 +115,15 @@
 //! reserved it said what ends it: "after this batch ships, a field addition
 //! is a version bump like any other shape change".
 //!
-//! **`schema_version` is therefore 2**, and [`SavedTank::fluid`] is the
-//! field that moved it (issue #43: a tank declares what it holds). A v1
-//! file is **rejected**, not migrated — the rule ARCHITECTURE.md §4 sets
+//! **`schema_version` is therefore 2**, and version 2 is this sweep's
+//! batch: [`SavedTank::fluid`] is the field that moved it (issue #43: a
+//! tank declares what it holds), and [`SavedMachine::mothballed`] and
+//! [`SavedDock::mothballed`] (issue #19: a crewed building can be switched
+//! off) joined the same number rather than each claiming one of their own.
+//! Three shape changes reviewed and merged in the same sweep are one shape
+//! change as far as a file is concerned — no build ever wrote a save with
+//! one of them and not the others — so a third and a fourth version would
+//! name states that never existed. A v1 file is **rejected**, not migrated — the rule ARCHITECTURE.md §4 sets
 //! for this format and every other loader in this crate follows — and the
 //! cost of that is bounded by the same fact the window rested on: no
 //! release has ever written a save file, so the only v1 files in existence
@@ -444,10 +450,13 @@ pub struct SavedMachine {
     /// off, or the load hands them back a wage bill they had deliberately
     /// cut.
     ///
-    /// `#[serde(default)]` without bumping `schema_version` 1, like
-    /// `SavedHopper::auto_fill`, `load`, `refused_by` and `recipe` above: an
-    /// older save loads with every machine in service, which is what it was
-    /// written with.
+    /// `#[serde(default)]`, but **not** under the closed field-addition
+    /// window: it is part of what makes the format version 2, alongside
+    /// `SavedTank::fluid` (see the module doc). The default still earns its
+    /// keep between two version-2 builds in this sweep — a file written
+    /// before this field existed loads with every machine in service, which
+    /// is what it was written with — and a v1 file never reaches it, having
+    /// already been refused.
     #[serde(default)]
     pub mothballed: bool,
 }

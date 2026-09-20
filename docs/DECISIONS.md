@@ -731,12 +731,38 @@ matches what code comments and data files cite.
 
   **What was built.** `PlayerCommand::SetMothballed { tile, enabled }`,
   wire `{"type": "set_mothballed", "tile": [x, y], "enabled": true}`. A
-  mothballed machine is skipped by `World::recompute_establishment`, so
-  `StaffPools::set_required` falls the moment the switch is thrown and the
-  surplus heads can be fired. `Machine::tick` returns early, advancing
-  `start_tick` in step with the clock so the batch is HELD rather than lost
-  or completed. It records `WorkState::Starved` and reports
-  `StallKind::Mothballed`.
+  mothballed placement is skipped by `World::recompute_establishment`, so
+  `StaffPools::set_required` falls the moment the switch is thrown.
+  `Machine::tick` returns early, advancing `start_tick` in step with the
+  clock so the batch is HELD rather than lost or completed. It records
+  `WorkState::Starved` and reports `StallKind::Mothballed`.
+
+  **Standing crew down: the correction that made this work at all.** The
+  first round stopped at the establishment, and review proved it did
+  nothing — an A/B over four paydays came back BIT-IDENTICAL, because
+  `required` never entered `bill_per_period` or `next_bill`. Shrinking the
+  requirement only told the player they *could* fire someone; the ruling
+  was that firing is not an acceptable escape hatch, since it destroys a
+  trained crew the factory then pays to re-hire. So the pools now stand
+  crew down:
+
+  - `stood_down = min(headcount - required, the mothballed requirement)`,
+  - `on_payroll() = headcount - stood_down`,
+  - `bill_per_period` = Σ `on_payroll()` × wage, so the bill falls on the
+    tick the switch is thrown, with nobody fired,
+  - `next_bill` = Σ `owed` × wage, and `sync_payroll` only ever RAISES
+    `owed` towards `on_payroll()`. Only payday lowers it. Mothballing on
+    payday eve therefore buys **notice pay**, not free labour — the same
+    principle `Fire` already followed,
+  - a stood-down head **never walks out**: `left` is capped by
+    `on_payroll()`. This is the whole point. Firing loses the crew;
+    mothballing parks it.
+
+  The test the reviewer wished existed is now in `tests/mothball.rs`:
+  `four_paydays_with_and_without_mothballing_end_on_different_balances`
+  runs their exact experiment on two clones of one world and asserts the
+  balances DIVERGE — the control pays four full bills, the mothballed
+  factory pays one notice period and then nothing.
 
   **Why not a fourth `WorkState`.** `LoadBucket` rides the save, so a fourth
   counter is a schema change to record something the existing three already
@@ -744,15 +770,26 @@ matches what code comments and data files cite.
   *why*, which is where every other "not working, and here is the reason"
   already lives.
 
-  **Why machines only.** `try_set_mothballed` looks up a `Machine`
-  component, so a hopper, a tank and the dock are silently refused — and
-  that turned out to be the right shape rather than an accident, so it is
-  now pinned by a test. The dock is the only route from product to money; a
-  mothballed dock is a factory that cannot recover at all. A spare dock's
-  escape is `Remove`, which hands it back to the shed losing nothing but its
-  position. The build-ahead case (a second dock placed early, whose
-  logistics head you cannot release without removing it) is filed as a
-  deferred issue.
+  **Why any kind that asks for a crew — reversing "machines only".** The
+  first round refused anything without a `Machine` component, on the
+  argument that the dock is the only route from product to money so
+  switching it off strands the player. Measurement killed that: with the
+  dock always on, `required("logistics")` never reaches 0, the clerk stays
+  on the payroll, and a factory with no income cannot get its bill to zero
+  however much of the line it switches off. The escape hatch did not
+  actually reach the bottom.
+
+  So the test is now the CONTENT's: a placement may be mothballed iff its
+  kind has a non-empty `staff` list in `data/machines.ron`. A hopper, a
+  tank, a belt, a pipe and a splitter ask for nobody, so switching one off
+  would release nobody and they are refused byte-exactly (pinned by
+  `only_a_crewed_placement_can_be_mothballed`). The dock asks for one
+  logistics clerk, so it is switchable. This is the same rule the rest of
+  the game follows — content decides what a kind is — and it retired
+  `_config_kind_is_machine`, a hardcoded kind list in GDScript, in favour
+  of `_config_can_mothball`, which asks whether the polled crew is
+  non-empty. The build-ahead case that was going to be a deferred issue is
+  simply answered: a spare dock is switched off like anything else.
 
   **Why no new data number.** Mothballing has no cost and no direct saving;
   what it changes is which heads the establishment asks for, and the figures
@@ -768,17 +805,24 @@ matches what code comments and data files cite.
   acting on a building the player could not see, and a fourth global key
   would be that mistake with a new letter.
 
-  **What it does NOT rescue, stated plainly.** A factory that has already
-  missed a payday with a single logistics head is still finished. Two things
-  compound: notice pay holds `next_bill` at the old figure for a full
-  period after a Fire, and `data/staff.ron` pays logistics LAST on purpose
-  ("if a factory must leave someone unpaid it should idle a shipping clerk
-  before a cook"), so the first refusal stops the dock and with it all
-  income. Mothballing rescues the factory that is still shipping — the
-  acceptance test gives the player a spare logistics head for exactly that
-  reason, so one paid clerk keeps the line earning while the bill comes
-  down. The terminal case is a deferred issue, not something to fix by
-  reordering `staff.ron`: that order is a deliberate, commented decision.
+  **What it does NOT rescue, stated plainly.** Mothballing gets a factory
+  out of ARREARS and keeps its crew: the acceptance test
+  (`mothballing_is_what_takes_a_broke_factory_out_of_arrears_and_a_control
+  _proves_it`) shows the control losing its clerk at the second payday and
+  the other six heads at the third, while the mothballed factory loses
+  nobody, clears what it owes, comes back to (4, 2, 1) and SHIPS again —
+  and the control cannot even afford to re-hire a logistics head. So
+  `Closes #19` stands.
+
+  What mothballing cannot do is conjure income. A `corner_shop` standing
+  order is lost to three consecutive missed windows during a shutdown, and
+  re-signing costs 40, which a factory that just came out of arrears has
+  not got; the reference line takes ~2200 ticks to ship its first box, so a
+  player who enters the spiral before their first delivery has no way back
+  even with every machine switched off. The acceptance test asserts that
+  honestly rather than claiming a recovery it did not see. That residue is
+  issue #85 (a contract lapsing during a shutdown), which stays OPEN — it
+  is a contract-board question, not a payroll one.
 
   **`crewed`, and why it is not the last tick.** `PlacementSnapshot.crewed`
   and `MachineLoadEntry.crewed` come from `World::uncrewed_placements`,
