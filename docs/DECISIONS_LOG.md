@@ -18,6 +18,21 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-20 **A width fix must be MEASURED at every window size, and
+  `snap_rows` is for rows the player signs.** Two regressions from the width
+  pass above, both from a fit applied unconditionally. `_build_contract_board_row`
+  split the offer sentence onto its own line always: load-bearing at 1280x720
+  (unsplit 1324px against 1264px available) but not at 1600x900 (1380px in a
+  1600px window), where the taller 157px card needed 489px for three against a
+  484px cap and the board lost a whole offer — five pixels. `_fit_contract_board_split`
+  now measures the unsplit panel against `_modal_available_width()` and breaks
+  only when it must, which is the doctrine that entry already states. Second:
+  `snap_rows` costs height to buy a tidy edge, so it is **only** for a stack
+  whose rows are decisions the player signs — an offer, a hire — where half a
+  card is half a choice. A production row is a readout; the production panel
+  drops it (it was 161px short of its column at 1600x900) and joins the build
+  menu in letting the half-row past the cut say "scroll".
+
 - 2026-09-20 **A modal panel yields WIDTH before it is clipped, and an
   unreachable control outranks every other layout rule.** Height has yielded
   since the scale change; nothing made a panel yield width, so at 1280x720 the
@@ -35,10 +50,13 @@ See [WORKFLOW.md](WORKFLOW.md).
   `SHOP_SLOT_COLUMNS`/`MARKET_SLOT_COLUMNS` are now the MOST a grid takes, not
   what it always takes); **(3) the list scrolls**, as it already did. A
   sentence too long for one line is **broken at a join it already has** (the
-  board's mix and terms are two labels), never reflowed: **`autowrap_mode` is
-  banned in this layout** — a wrapping Label reports a 1px minimum width and a
-  height shaped at whatever width it was last *drawn* at, and this layout is
-  measurement-driven with a headless test for its proof. Both `x` and `y` are
+  board's mix and terms are two labels), never reflowed: **no `autowrap_mode`
+  on a Label whose width a fit pass measures** — a wrapping Label reports a
+  1px minimum width and a height shaped at whatever width it was last *drawn*
+  at, and this layout is measurement-driven with a headless test for its
+  proof. Where the width is pinned first — by a fixed-size ancestor or by the
+  Label's own `custom_minimum_size.x` — the minimum decides nothing and wrapping
+  is fine; that is the case at all 14 live sites. Both `x` and `y` are
   clamped everywhere a modal is positioned, and the market is pushed clear of
   the clipboard, STOCK and CREW plates (`_plate_rect`, `_pushed_clear_of`).
 - 2026-09-20 **A headless layout test cannot prove a real width; only

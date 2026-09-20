@@ -77,10 +77,17 @@ Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
   it cannot be clicked** (UI_UX §5c). Width yields in this order: prose to
   the row's hover (`_fit_staff_width`), then fewer grid columns
   (`_fit_grid_columns` — `SHOP_SLOT_COLUMNS`/`MARKET_SLOT_COLUMNS` are the
-  *most* a grid takes), then scroll. **`autowrap_mode` is banned**: a
-  wrapping Label reports a 1px minimum width and a height shaped at whatever
-  width it was last *drawn* at, which is meaningless under `--headless`.
-  Break a long sentence at a join it already has.
+  *most* a grid takes), then scroll. **No `autowrap_mode` on a Label whose
+  width a fit pass measures**: a wrapping Label reports a 1px minimum width
+  and a height shaped at whatever width it was last *drawn* at, which is
+  meaningless under `--headless`, so a panel measured around one is measured
+  around nothing. Break such a sentence at a join it already has. It is used
+  legitimately 14 times, every one of them with the width pinned first — by a
+  fixed-size ancestor (`SHOP_SLOT_SIZE`, `MARKET_SLOT_SIZE`,
+  `CONFIG_PICKER_SLOT_SIZE`) or by the Label's own `custom_minimum_size.x`
+  (`CONFIG_PANEL_WIDTH`, `CREW_TEXT_WIDTH`, `PAUSE_BUTTON_MIN_SIZE.x`) — so the
+  pin dominates the 1px and the measurement stays honest. Pin the width or do
+  not wrap.
 - **A headless test cannot prove a width.** Headless font metrics are
   narrower than a real window's, and `get_combined_minimum_size()` can
   underreport what is on screen — take `maxf(minimum, size)` when
