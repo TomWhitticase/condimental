@@ -18,6 +18,23 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-20 **A tank declares what it holds, and the save format's
+  field-addition window is closed.** `FluidTank` carries an optional declared
+  fluid, set by `PlayerCommand::SetTankFluid` and **seeded into**
+  `resolve_network_fluids` rather than recorded beside its answer: a declared
+  tank's run is a singleton before any narrowing runs, which is the only thing
+  that can tell two tank-fed raw runs into one two-fluid machine apart (issue
+  #43). An undeclared tank is unchanged — its fluid is still derived from the
+  run it discharges into — so the shipped chain needs no labelling. Two
+  contradicting declarations on one run leave it `Ambiguous`; the resolver
+  still never guesses. Because the declaration is an *input* to naming,
+  `World::from_save_with_content` recomputes the topology after restoring
+  bodies. The field bumped **`SAVE_SCHEMA_VERSION` to 2** and a v1 save is
+  **refused, not migrated**, with both numbers in the message: the "a
+  `#[serde(default)]` addition is not a shape change" window `save.rs` opened
+  closed when that batch shipped, and this crate rejects rather than migrates
+  everywhere else (ARCHITECTURE §4). Cost is bounded because no release has
+  ever written a save. Full record in `docs/DECISIONS.md`.
 - 2026-09-16 **The game is called CONDIMENTAL, and so is the repo.** All-caps
   wherever it is the title: the menu's `title.text`, `config/name`, the
   design-doc headings. The GitHub repo was renamed the same day —

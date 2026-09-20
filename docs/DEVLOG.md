@@ -81,11 +81,16 @@ below is history and should only ever be appended to.)*
 - **The sim can express a branching chain (2026-09-17).** A machine kind may
   have several recipes and a placed machine runs whichever its current inputs
   satisfy (file order breaks a tie, and there is deliberately no player-facing
-  picker); a recipe may draw several fluid networks, matched by fluid id;
-  `validate_chain` is a connectivity check over a graph. A pipe run's fluid is
-  now derived by shrinking possibility sets rather than by whichever machine
-  reached it first, and which recipe a machine is on is saved. `data/*.ron` is
-  untouched — the BBQ chain itself is the next ticket. See the log entry below.
+  picker); a recipe may draw several fluid networks, matched by fluid id. A
+  pipe run's fluid is now derived by shrinking possibility sets rather than by
+  whichever machine reached it first, and which recipe a machine is on is
+  saved. `data/*.ron` is untouched — the BBQ chain itself is the next ticket.
+  **Amended 2026-09-20 (below):** `validate_chain` no longer demands one
+  connected component, so `recipes.ron` may hold independent production lines;
+  and where the graph cannot name a pipe run, a **tank declares what it
+  holds** and its declaration replaces the run's candidate set. The save is
+  schema 2 for it, and a v1 save is refused rather than migrated. See the log
+  entries below.
 - **Repo:** Private GitHub repo (`TomWhitticase/condimental`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Work reaches `main` through pull requests, and deferrals become issues
   (2026-09-16).** Nothing is pushed to `main` directly — a `pre-push` hook
@@ -154,6 +159,59 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-20 — A tank says what it holds, and a recipe file may fork
+
+Two fluid-identity issues off the board, both latent: neither bites the
+shipped chain today, and both would have bitten the next content addition.
+
+**A recipe file may hold independent production lines (issue #42).**
+`validate_chain` demanded that every recipe be reachable from recipe 0 by a
+shared ingredient id — a proxy for "nothing in this file is unreachable" that
+happened to hold while every recipe descended from tomato. Mayonnaise (eggs +
+oil, GAMEPLAY §2 tier 4) shares nothing with ketchup, so adding it to
+`data/recipes.ron` would have panicked the game at load with a message about
+connectivity. The rule is now per component and about obtainability, not
+about the graph's shape: every component must contain at least one recipe
+whose machine the player can buy and whose inputs are all raw or made
+upstream, and every recipe must be reachable within its own component from
+one of those. A file with two self-sufficient lines constructs; a component
+with no buyable machine, or one whose only inputs nothing produces, still
+panics at load. `machines.validate_covers` runs first so a missing machine is
+named as a missing machine rather than surfacing as an unstartable component.
+
+**A tank declares its fluid (issue #43).** Pipe runs are named by what the
+machines at their ends claim, so two tank-fed runs feeding one machine that
+draws two *raw* fluids are indistinguishable — the graph offers no way to say
+which tank is the vinegar. `resolve_network_fluids` takes a declaration set
+per run now, seeded from the tanks on it: a declared tank *replaces* its run's
+candidate set with a singleton rather than intersecting, so the player's
+statement wins outright and a contradiction between two tanks on one run is
+reported as `Ambiguous` instead of silently picked. Only a raw fluid may be
+declared, and switching a declared tank empties it, exactly as a hopper's
+retarget does. The player-facing half is the tank's config panel: it now
+offers the raw fluids in the same picker the hopper uses, marks the declared
+one, and tells you in a line beneath whether the name was read from the pipe
+run or stated by you.
+
+`tests/tank_fluid.rs` builds the issue's exact case — one mixer drawing two
+raw fluids, two tank-fed runs — and proves both that the graph alone leaves
+it `Ambiguous` and that two declarations resolve it and the machine runs.
+The two-fluid machine could not be photographed: no machine in
+`data/recipes.ron` draws two raw fluids yet (that is why the bug is latent),
+and a Godot fixture cannot inject a recipe.
+
+**The save format's field-addition window is closed.** A declared fluid is
+persisted state, so `SAVE_SCHEMA_VERSION` is 2 and a v1 save is refused by
+number rather than migrated, per ARCHITECTURE §4. Declarations restore before
+topology is re-derived, because pipe naming is *derived* from them — a loaded
+world would otherwise be named as though nothing had been declared. The main
+menu's demo saves are v1 and stop loading until someone runs
+`scripts/make-demo-saves.sh`, which is what that script is for; they live in
+Godot's user directory, not the repo, so this pass cannot do it for you.
+`test_save_load.gd` reads the version out of the save it just wrote instead of
+spelling it, so the next bump does not quietly turn its refusal case into
+"loads fine".
 
 ### 2026-09-20 — Three issues off the board: names, fluid colour, honest frames
 

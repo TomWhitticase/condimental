@@ -25,8 +25,12 @@
 #     panel closes itself when the build menu, the market, build mode or
 #     removal of the building takes the screen,
 #   * a tank's panel names the fluid its run carries and fills the tank, an
-#     unplumbed tank says "Not connected to a pipe run", and the picker is
-#     hopper-only,
+#     unplumbed tank says "Not connected to a pipe run", and its picker
+#     offers the raw FLUIDS with nothing marked while the fluid is merely
+#     derived,
+#   * declaring a tank's fluid from that picker (issue #43) reaches the
+#     simulation, marks the slot, retitles the panel and stops the tank
+#     reading as unconnected,
 #   * SPACE, V and Q no longer touch any hopper or tank.
 #
 # What it does not assert is how the panel LOOKS — that is
@@ -404,15 +408,31 @@ func _run_checks() -> void:
 		_fail("the remove command did not remove hopper B")
 		return
 
-	# --- 9. A tank: the fluid its run carries, FILL, AUTO-FILL, no picker ---
+	# --- 9. A tank: the fluid its run carries, FILL, AUTO-FILL, its picker ---
 	main._config_click_at_tile(TANK)
 	if not main._config_open or main._config_kind != "fluid_tank" or main._config_tile != TANK:
 		_fail("clicking the tank did not open a tank panel (open=%s, kind=%s)" % [
 			main._config_open, main._config_kind
 		])
 		return
-	if main._config_picker_box.visible:
-		_fail("a tank's panel shows the hopper's item picker")
+	# The picker is on both kinds since issue #43, built from the raw FLUIDS
+	# this time — and with nothing marked, because this tank's fluid was
+	# derived from its run rather than chosen by anybody.
+	if not main._config_picker_box.visible:
+		_fail("a tank's panel has no contents picker")
+		return
+	if main._config_picker_slots.size() != main._tank_fluids.size() \
+			or main._tank_fluids.is_empty():
+		_fail("the tank picker has %d slots for %s" % [
+			main._config_picker_slots.size(), str(main._tank_fluids)
+		])
+		return
+	for slot in main._config_picker_slots:
+		if slot["mark"].visible:
+			_fail("an undeclared tank marks '%s' as chosen — nobody chose it" % slot["item"])
+			return
+	if main._config_picker_note.text != "read from the pipe run — pick one to say for certain":
+		_fail("an undeclared but named tank's note reads '%s'" % main._config_picker_note.text)
 		return
 	var tank := _tank_snapshot(TANK)
 	if tank.is_empty():
@@ -494,11 +514,55 @@ func _run_checks() -> void:
 	if not main._config_open or main._config_tile != LONE_TANK:
 		_fail("clicking the unplumbed tank did not open its panel")
 		return
-	if main._config_title.text != "Fluid Tank — unconnected":
-		_fail("an unplumbed tank's title is '%s', expected 'Fluid Tank — unconnected'" % main._config_title.text)
+	# "no fluid chosen" rather than "unconnected" since issue #43: a tank
+	# with no fluid is now something the player can fix from this panel,
+	# and two different causes (no pipe, or a run nothing can name) share
+	# the title. The FILL reason below is what tells them apart.
+	if main._config_title.text != "Fluid Tank — no fluid chosen":
+		_fail("an unplumbed tank's title is '%s', expected 'Fluid Tank — no fluid chosen'" % main._config_title.text)
 		return
 	if not main._config_fill_button.disabled or main._config_fill_reason.text != "Not connected to a pipe run":
 		_fail("an unplumbed tank's FILL is not blocked with 'Not connected to a pipe run' (got '%s')" % main._config_fill_reason.text)
+		return
+	if main._config_picker_note.text != "nothing can name this run — pick what this tank holds":
+		_fail("an unnamed tank's picker note reads '%s'" % main._config_picker_note.text)
+		return
+
+	# --- 10b. Declaring a tank's fluid (issue #43) ---------------------------
+	# The player-facing half of #43: two tank-fed runs into one machine that
+	# draws two raw fluids cannot be told apart by the simulation, so the
+	# tank is told. Proven here on the tank nothing else names, which is the
+	# same state both runs of that layout are in.
+	var declared_index: int = main._tank_fluids.size() - 1
+	var declared_fluid := String(main._tank_fluids[declared_index])
+	main._on_config_picker_pressed(declared_index)
+	_repoll()
+	var lone := _tank_snapshot(LONE_TANK)
+	if String(lone.get("declared", "")) != declared_fluid:
+		_fail("set_tank_fluid did not declare %s (wire says %s)" % [
+			declared_fluid, str(lone.get("declared"))
+		])
+		return
+	if main._fluid_id_of(lone) != declared_fluid:
+		_fail("a declared tank's fluid is '%s', expected '%s'" % [
+			main._fluid_id_of(lone), declared_fluid
+		])
+		return
+	if main._config_title.text != "Fluid Tank — %s" % main._item_display_name(declared_fluid):
+		_fail("a declared tank's title reads '%s'" % main._config_title.text)
+		return
+	if main._config_picker_note.text != "switching empties the tank":
+		_fail("a declared tank's picker note reads '%s'" % main._config_picker_note.text)
+		return
+	var marked: Array = []
+	for slot in main._config_picker_slots:
+		if slot["mark"].visible:
+			marked.append(String(slot["item"]))
+	if marked != [declared_fluid]:
+		_fail("a declared tank marks %s, expected only %s" % [str(marked), declared_fluid])
+		return
+	if main._config_fill_reason.text == "Not connected to a pipe run":
+		_fail("a declared tank still reads as unconnected")
 		return
 	main._close_config_panel()
 
@@ -531,5 +595,5 @@ func _run_checks() -> void:
 			_fail("the legend still advertises a removed fill/contents key: %s" % legend)
 			return
 
-	print("CONFIG_PANEL_OK: click opens/toggles/retargets/closes, FILL per building with reasons, AUTO-FILL round-trips and keeps a %d-unit hopper and a %.0f-unit tank full, picker retargets a placed hopper, ESC/menus/modes/removal close it, unplumbed tank refused, SPACE/V/Q inert" % [capacity, tank_capacity])
+	print("CONFIG_PANEL_OK: click opens/toggles/retargets/closes, FILL per building with reasons, AUTO-FILL round-trips and keeps a %d-unit hopper and a %.0f-unit tank full, picker retargets a placed hopper and declares a tank's fluid, ESC/menus/modes/removal close it, unplumbed tank refused, SPACE/V/Q inert" % [capacity, tank_capacity])
 	quit(0)

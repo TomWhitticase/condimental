@@ -494,6 +494,30 @@ pub enum PlayerCommand {
     /// refusal [`Self::FillFluidTank`] already makes, rather than a second
     /// rule about when the toggle itself is allowed.
     SetTankAutoFill { tile: TileCoord, enabled: bool },
+    /// Declares that the tank at `tile` holds `fluid` — the fluid twin of
+    /// [`Self::SetHopperItem`], and the answer to issue #43.
+    ///
+    /// A tank's fluid used to be *derived*: whatever the run it discharges
+    /// into turned out to carry. That works while the run can be worked
+    /// out, and one shape defeats it — a machine drawing two raw fluids
+    /// from two tank-fed runs, where both runs seed to the same pair and
+    /// nothing tells them apart. Both stay unnamed, the machine stalls, and
+    /// no command the player could issue says which drum is which. This is
+    /// that command; see [`super::fluid::FluidTank`] for why the
+    /// declaration is an input to the naming rather than a second copy of
+    /// its answer.
+    ///
+    /// A silent no-op on an empty tile, on a tile that is not a tank, and
+    /// on a fluid that is not raw ([`World::raw_fluids`] — a tank is how
+    /// fluid enters the graph from outside, and only raws come in).
+    /// Declaring what the tank **already** holds is a no-op, contents and
+    /// all, for [`Self::SetHopperItem`]'s reason: a picker redraws its own
+    /// selection. A real change **empties the tank** (that volume is the
+    /// old fluid) and keeps the auto-fill flag, exactly as a hopper
+    /// retarget does — and, unlike a hopper retarget, it re-runs the
+    /// topology pass, because what a declared tank holds is one of the
+    /// facts [`resolve_network_fluids`] starts from.
+    SetTankFluid { tile: TileCoord, fluid: FluidId },
     /// Hires one head into a staff category (the staff pools MVP epic,
     /// GAMEPLAY.md §7). **Free, and never refused for a known category** —
     /// wages are the cost (§5), paid every pay period by `World::tick`, and
@@ -603,6 +627,12 @@ enum PlayerCommandDto {
         #[serde(default = "default_auto_fill_enabled")]
         enabled: bool,
     },
+    /// `{"type": "set_tank_fluid", "tile": [5, 1], "fluid": "vinegar"}` —
+    /// exactly `set_hopper_item`'s shape, and both required for its reason.
+    SetTankFluid {
+        tile: TileCoord,
+        fluid: FluidId,
+    },
     Hire {
         category: String,
     },
@@ -667,6 +697,9 @@ impl From<PlayerCommandDto> for PlayerCommand {
             PlayerCommandDto::SignContract { id } => PlayerCommand::SignContract { id },
             PlayerCommandDto::SetHopperAutoFill { tile, enabled } => {
                 PlayerCommand::SetHopperAutoFill { tile, enabled }
+            }
+            PlayerCommandDto::SetTankFluid { tile, fluid } => {
+                PlayerCommand::SetTankFluid { tile, fluid }
             }
             PlayerCommandDto::SetTankAutoFill { tile, enabled } => {
                 PlayerCommand::SetTankAutoFill { tile, enabled }
@@ -1035,19 +1068,21 @@ pub struct HopperSnapshot {
 /// {
 ///   "tile": [5, 1], "kind": "fluid_tank", "direction": "east",
 ///   "footprint": { "width_tiles": 1, "height_tiles": 1 },
-///   "fluid": "vinegar", "quantity": 30.0, "capacity": 120.0,
-///   "fill": 0.25, "auto_fill": false, "pipe_tile": [6, 1]
+///   "fluid": "vinegar", "declared": "vinegar", "quantity": 30.0,
+///   "capacity": 120.0, "fill": 0.25, "auto_fill": false,
+///   "pipe_tile": [6, 1]
 /// }
 /// ```
 ///
 /// - `quantity`/`capacity` are **floating-point**, unlike the hopper's: a
 ///   fluid volume is continuous (pressure equalization moves partial units
 ///   around).
-/// - **`fluid` is nullable**, and is the fluid of the network this tank
-///   discharges into — which is decided by whichever machine taps that
-///   network (see [`super::fluid`]). A tank connected to nothing, or to a
+/// - **`fluid` is nullable**, and is what this tank holds: its `declared`
+///   fluid if it has one, otherwise the fluid of the network it discharges
+///   into — which is decided by whichever machine taps that network (see
+///   [`super::fluid`]). An *undeclared* tank connected to nothing, or to a
 ///   run no machine taps, reports `null`: it holds volume, and nothing has
-///   yet said what that volume is.
+///   yet said what that volume is. A declared one always answers.
 /// - **`pipe_tile` is nullable** for [`HopperSnapshot::belt_tile`]'s reason:
 ///   it is the pipe tile off this tank's outlet face, and there may not be
 ///   one.
@@ -1058,6 +1093,16 @@ pub struct FluidTankSnapshot {
     pub direction: Direction,
     pub footprint: Footprint,
     pub fluid: Option<FluidId>,
+    /// What the player has **said** this tank holds, or `null` if they have
+    /// not said — [`PlayerCommand::SetTankFluid`], issue #43.
+    ///
+    /// Deliberately a second field rather than a flag on `fluid`: a picker
+    /// needs to show its own current selection (which is this, and is
+    /// blank until the player chooses), while the panel's "holding:" line
+    /// wants the effective answer (which is `fluid`, and may come from the
+    /// run). Where both are set they are equal, because the declaration is
+    /// what seeded the run's name.
+    pub declared: Option<FluidId>,
     pub quantity: f64,
     pub capacity: f64,
     pub fill: f64,
@@ -1943,10 +1988,12 @@ impl World {
     /// `hopper_items` is not filtered, deliberately — see
     /// [`IngredientsSnapshot`]'s field doc.
     pub fn ingredients_snapshot(&self) -> IngredientsSnapshot {
-        self.ingredients
-            .snapshot(self.economy.money, &self.raw_items, |id| {
-                self.economy.ingredient_unlocked(id)
-            })
+        self.ingredients.snapshot(
+            self.economy.money,
+            &self.raw_items,
+            self.raw_fluids.iter().cloned().collect(),
+            |id| self.economy.ingredient_unlocked(id),
+        )
     }
 
     /// Every content id that names itself, as `id -> display name`.
@@ -2003,6 +2050,15 @@ impl World {
     /// [`Self::raw_items`]'s field doc for what "raw" means.
     pub fn raw_items(&self) -> &[ItemId] {
         &self.raw_items
+    }
+
+    /// The fluid half of [`Self::raw_items`]: every fluid consumed by some
+    /// recipe and produced by none, so the only ones that can enter the
+    /// graph through a tank. The set [`PlayerCommand::SetTankFluid`]
+    /// validates a declaration against, and the list a tank's fluid picker
+    /// offers (`IngredientsSnapshot::tank_fluids`).
+    pub fn raw_fluids(&self) -> &BTreeSet<FluidId> {
+        &self.raw_fluids
     }
 
     /// How many of `kind` the player owns and has **not** placed. A thin
@@ -2276,6 +2332,25 @@ impl World {
     /// One entry per placement, so a 2x2 cooking vat is one crew and not
     /// four: the ECS holds one entity per placement, however many tiles it
     /// covers.
+    /// Re-derives the whole topology once `save.rs` has finished restoring
+    /// live state — the load-time counterpart of the `Place` commands that
+    /// drive it during play.
+    ///
+    /// Loading rebuilds structure through real `Purchase`/`Place`, and each
+    /// of those recomputes the topology on its own. A tank's **declared**
+    /// fluid, though, is restored afterwards with the bodies, and a
+    /// declaration is an *input* to pipe naming
+    /// ([`resolve_network_fluids`]) rather than a record of its output. So
+    /// without this pass a loaded world is named as though every tank were
+    /// undeclared, and the very layout issue #43 exists for — two tank-fed
+    /// raw runs into one machine — comes back ambiguous and stuck however
+    /// it was saved. Nothing else is disturbed: the pass carries pipe
+    /// volumes across by tile, which is what lets it run on a live world at
+    /// all.
+    pub(super) fn recompute_topology_after_restore(&mut self) {
+        self.recompute_topology();
+    }
+
     pub(super) fn recompute_establishment(&mut self) {
         let mut establishment: BTreeMap<String, u32> = BTreeMap::new();
         let entities: Vec<Entity> = self.ecs.iter().map(|e| e.entity()).collect();
@@ -2721,12 +2796,26 @@ impl World {
         }
 
         // --- what each run carries. Every tank discharge is marked by now,
-        // which is what gives the propagation somewhere to start.
+        // which is what gives the propagation somewhere to start — and the
+        // declared ones are gathered here, one set per run, because a run
+        // two tanks discharge into is named by both of them at once.
+        let mut declared: Vec<BTreeSet<FluidId>> = vec![BTreeSet::new(); topology.networks.len()];
+        for &(tank, network, _) in &topology.tank_discharges {
+            if let Some(fluid) = self
+                .ecs
+                .get::<&FluidTank>(tank)
+                .ok()
+                .and_then(|body| body.declared().cloned())
+            {
+                declared[network].insert(fluid);
+            }
+        }
         resolve_network_fluids(
             &mut topology.networks,
             &plumbing,
             &self.recipes,
             &self.raw_fluids,
+            &declared,
         );
 
         // A side order that is a property of the geometry (north, east,
@@ -3477,6 +3566,9 @@ impl World {
             PlayerCommand::SetTankAutoFill { tile, enabled } => {
                 self.try_set_tank_auto_fill(tile, enabled);
             }
+            PlayerCommand::SetTankFluid { tile, fluid } => {
+                self.try_set_tank_fluid(tile, &fluid);
+            }
             // Neither dirties a chunk: a head is not a tile. Both are silent
             // about an unknown category, `Hire` about a balance that could
             // not pay the next bill plus the new wage (the quality pass:
@@ -3613,6 +3705,35 @@ impl World {
         tank.set_auto_fill(enabled);
         drop(tank);
         self.mark_placement_dirty(entity);
+        true
+    }
+
+    /// [`PlayerCommand::SetTankFluid`] — `try_set_hopper_item`'s twin,
+    /// against a tank, with one extra step at the end.
+    ///
+    /// That step is the topology recompute. `sim_core/CLAUDE.md` says the
+    /// pass runs on `Place`/`Remove`/`Rotate` and never per tick, and this
+    /// does not weaken that rule: it is the same rule, applied to the same
+    /// kind of thing. A declared fluid is a *seed* of
+    /// [`resolve_network_fluids`], so changing it changes what the runs in
+    /// this world carry exactly as moving a machine does, and a discrete
+    /// player action is precisely what the pass is allowed to cost.
+    fn try_set_tank_fluid(&mut self, tile: TileCoord, fluid: &str) -> bool {
+        if !self.raw_fluids.iter().any(|raw| raw == fluid) {
+            return false;
+        }
+        let Some(&entity) = self.topology.grid.get(&tile) else {
+            return false;
+        };
+        let Ok(mut tank) = self.ecs.get::<&mut FluidTank>(entity) else {
+            return false;
+        };
+        if !tank.declare(fluid.to_string()) {
+            return false;
+        }
+        drop(tank);
+        self.mark_placement_dirty(entity);
+        self.recompute_topology();
         true
     }
 
@@ -4223,7 +4344,10 @@ impl World {
             kind: placement.kind,
             direction: placement.direction,
             footprint: placement.footprint,
-            fluid: discharge.and_then(|(network, _)| self.topology.networks[network].fluid.clone()),
+            fluid: body.declared().cloned().or_else(|| {
+                discharge.and_then(|(network, _)| self.topology.networks[network].fluid.clone())
+            }),
+            declared: body.declared().cloned(),
             quantity: body.volume().to_num::<f64>(),
             capacity: body.capacity().to_num::<f64>(),
             // `FluidTank::pressure` is the tank's own fill fraction, which is
@@ -4264,11 +4388,26 @@ impl World {
             .map(|&(_, belt)| self.position_of(belt))
     }
 
-    /// The fluid a tank is currently holding, which is the fluid of the
-    /// network it discharges into — read off the topology's own links, so it
-    /// can never disagree with [`FluidTankSnapshot::fluid`], which is
-    /// derived the same way.
+    /// The fluid a tank is currently holding: **what it declares**, and
+    /// failing that the fluid of the network it discharges into.
+    ///
+    /// The fallback is what keeps every tank that predates issue #43
+    /// behaving as it did — an undeclared tank is still named by its run,
+    /// which is right for the common case of one tank feeding one line. The
+    /// declaration wins where there is one because it is also what seeded
+    /// that run ([`resolve_network_fluids`]), so the two agree wherever the
+    /// run resolved at all, and the declaration is the only answer where it
+    /// did not. Read off the topology's own links, so it can never disagree
+    /// with [`FluidTankSnapshot::fluid`], which is derived the same way.
     fn tank_fluid(&self, tank: Entity) -> Option<FluidId> {
+        if let Some(declared) = self
+            .ecs
+            .get::<&FluidTank>(tank)
+            .ok()
+            .and_then(|body| body.declared().cloned())
+        {
+            return Some(declared);
+        }
         self.topology
             .tank_discharges
             .iter()
@@ -4775,7 +4914,10 @@ struct Plumbing {
 ///    raw fluid — nothing else enters the graph from outside. A run off a
 ///    machine's outlet face can hold anything that kind's recipes make.
 ///    Every other run starts empty, which is why a length of pipe joined to
-///    nothing stays unnamed.
+///    nothing stays unnamed. A run whose tank **declares** what it holds
+///    (`PlayerCommand::SetTankFluid`, issue #43) starts as that one id and
+///    nothing else: the player has said, and no amount of geometry
+///    outranks that.
 /// 2. **Narrowing.** A recipe is *feasible* for a machine when its fluid
 ///    output is still possible on the outlet run and each of its fluid
 ///    inputs can be matched, by id, to a distinct run touching the
@@ -4801,6 +4943,14 @@ struct Plumbing {
 /// order and the naming is identical
 /// (`pipe_naming_is_independent_of_placement_order`).
 ///
+/// **Why a declaration had to exist.** Steps 1 and 2 are both about what
+/// the *layout* implies, and one layout implies nothing: a machine drawing
+/// two raw fluids from two tank-fed runs seeds both runs to the same pair,
+/// and the narrowing step intersects both with that same pair, so neither
+/// ever reaches one id. Both runs stay unnamed and the machine stalls.
+/// There was no bug to fix in the propagation — the information simply was
+/// not in the world, and the only place it exists is the player's head.
+///
 /// **An unnamed run is not an error.** `can_supply_at`/`can_accept_at`
 /// reject one, so its machines stall — the same graceful "not plumbed yet"
 /// a player sees for most of the time they spend laying a run, and never a
@@ -4815,6 +4965,7 @@ fn resolve_network_fluids(
     plumbing: &[Plumbing],
     recipes: &RecipeRegistry,
     raw_fluids: &BTreeSet<FluidId>,
+    declared: &[BTreeSet<FluidId>],
 ) {
     // 1. Only a *machine* claims an id for a run: what it would deposit
     // there, or — for a run no machine fills — what it would draw from
@@ -4844,8 +4995,8 @@ fn resolve_network_fluids(
         .zip(drawn_by)
         .map(|(filled, drawn)| if filled.is_empty() { drawn } else { filled })
         .collect();
-    // A tank names nothing by itself — its own fluid is whatever the run it
-    // discharges into carries (`PlayerCommand::FillFluidTank`). What it
+    // A tank that has not been asked names nothing by itself — its own
+    // fluid is whatever the run it discharges into carries. What it
     // contributes is the opposite of a claim: it is the only way into the
     // graph from outside, and the only thing that comes in from outside is
     // a **raw** fluid, so a run a tank feeds can hold nothing else. That is
@@ -4854,6 +5005,24 @@ fn resolve_network_fluids(
     for (network, ids) in networks.iter().zip(possible.iter_mut()) {
         if network.segments().iter().any(|segment| segment.is_source) {
             ids.retain(|fluid| raw_fluids.contains(fluid));
+        }
+    }
+    // A tank that HAS been asked (`PlayerCommand::SetTankFluid`, issue #43)
+    // pins its run outright, and that is the whole of the fix: two runs
+    // into one two-fluid machine are told apart by the player saying which
+    // drum is which, because nothing about the geometry ever could.
+    //
+    // It **replaces** the set rather than intersecting with it, so that a
+    // declared tank names its run even when no machine is plumbed to it
+    // yet — the player can fill a tank before building what drinks from it,
+    // which they could not before. Disagreement is not silently resolved:
+    // two tanks declaring different fluids into one run leave two ids and
+    // the run reads `Ambiguous`, and a declaration no machine there can use
+    // narrows to nothing and reads `Unnameable`. Both are the graceful
+    // unnamed state with a reason attached, which is what step 3 is for.
+    for (ids, declared) in possible.iter_mut().zip(declared) {
+        if !declared.is_empty() {
+            *ids = declared.clone();
         }
     }
 

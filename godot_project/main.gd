@@ -878,6 +878,14 @@ var _placement_label: Label
 ## and a picker on the placed building is both fewer keys and the more
 ## forgiving order.
 var _hopper_items: Array = [] # item ids a hopper may legally hold, from the sim
+## `_hopper_items`' fluid twin: the raw fluid ids a TANK may be declared to
+## hold, from `ingredients_snapshot_json`'s `tank_fluids`
+## (`World::raw_fluids`). It exists for issue #43 — two tank-fed runs into
+## one machine that draws two raw fluids are indistinguishable by geometry,
+## so the tank says which it is and the simulation seeds its run from that.
+## Content again, not a Godot table: a fourth raw fluid appears in the
+## picker with no edit here.
+var _tank_fluids: Array = [] # fluid ids a tank may be declared to hold
 ## The ghost's product body — a `hopper_fill` slab tinted with the chosen
 ## item, so the ghost previews WHAT the hopper will hold as well as where it
 ## goes. Colour alone would not be enough (UI_UX.md §7); the prompt names the
@@ -5922,6 +5930,14 @@ func _refresh_hopper_items() -> void:
 	_hopper_items = items.duplicate()
 
 
+## `_refresh_hopper_items` for tanks. Separate call rather than one that
+## reads both, so the hopper path is byte-for-byte what it was.
+func _refresh_tank_fluids() -> void:
+	var snapshot := _ingredients_snapshot()
+	var fluids: Array = snapshot.get("tank_fluids", [])
+	_tank_fluids = fluids.duplicate()
+
+
 ## What the hopper currently being placed will hold — always the FIRST raw
 ## ingredient, since the contents choice moved onto the placed building (see
 ## `_hopper_items`). "" when the kind in hand is not a hopper, or when the
@@ -9498,8 +9514,9 @@ var _config_panel: PanelContainer
 var _config_tile := Vector2i.ZERO
 var _config_open := false
 ## `HOPPER_KIND` or `FLUID_TANK_KIND` — the two kinds that have anything to
-## configure. A machine's settings are its recipe, which is content; a belt
-## has none at all.
+## configure, and since issue #43 the two that configure the same three
+## things: level, auto-fill and contents. A machine's settings are its
+## recipe, which is content; a belt has none at all.
 var _config_kind := ""
 var _config_title: Label
 var _config_title_icon: TextureRect
@@ -9513,7 +9530,14 @@ var _config_auto_button: Button
 var _config_auto_enabled := false
 var _config_picker_box: VBoxContainer
 var _config_picker_row: HBoxContainer
+var _config_picker_heading: Label
+var _config_picker_note: Label
 var _config_picker_slots: Array = [] # [{item, button, mark}]
+## What the picker's note says under a HOPPER's slots. A tank's is chosen
+## per state by `_tank_picker_note`, because an undeclared tank has
+## something a hopper never has to explain: where its fluid came from if
+## the player never said.
+const HOPPER_PICKER_NOTE := "switching empties the hopper"
 ## The panel's fixed content width. Fixed rather than derived so the level
 ## bar has a width to scale against on the frame the panel opens, and so the
 ## picker row does not resize the whole panel when a third ingredient ships.
@@ -9523,7 +9547,11 @@ const CONFIG_PANEL_WIDTH := 260.0 * UI_SCALE
 ## top of it. `_position_config_panel` flips and clamps from here.
 const CONFIG_PANEL_OFFSET := Vector2(30.0, -40.0) * UI_SCALE
 const CONFIG_LEVEL_BAR_HEIGHT := 14.0 * UI_SCALE
-const CONFIG_PICKER_SLOT_SIZE := Vector2(58.0, 62.0) * UI_SCALE
+## Tall enough for a TWO-LINE name under the icon. One line fitted while the
+## picker was hoppers only and every raw solid was one short word; the fluid
+## side brought "Liquid Smoke", which wrapped and spilled out of the slot
+## over the note beneath it.
+const CONFIG_PICKER_SLOT_SIZE := Vector2(58.0, 78.0) * UI_SCALE
 const CONFIG_PICKER_ICON_SIZE := Vector2(30.0, 30.0) * UI_SCALE
 
 
@@ -9676,33 +9704,36 @@ func _build_config_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void
 	auto_note.text = "tops up from stock every tick; never buys"
 	body.add_child(auto_note)
 
-	# --- The contents picker (hoppers only) --------------------------------
+	# --- The contents picker (hoppers and, since issue #43, tanks) ---------
 	_config_picker_box = VBoxContainer.new()
 	_config_picker_box.name = "ConfigPicker"
 	_config_picker_box.add_theme_constant_override("separation", _ui_i(4))
 	_config_picker_box.visible = false
 	body.add_child(_config_picker_box)
 
-	var picker_heading := Label.new()
-	picker_heading.label_settings = stock_settings
-	picker_heading.text = "CONTENTS"
-	_config_picker_box.add_child(picker_heading)
+	_config_picker_heading = Label.new()
+	_config_picker_heading.name = "ConfigPickerHeading"
+	_config_picker_heading.label_settings = stock_settings
+	_config_picker_heading.text = "CONTENTS"
+	_config_picker_box.add_child(_config_picker_heading)
 
 	_config_picker_row = HBoxContainer.new()
 	_config_picker_row.name = "ConfigPickerRow"
 	_config_picker_row.add_theme_constant_override("separation", _ui_i(6))
 	_config_picker_box.add_child(_config_picker_row)
 
-	var picker_note := Label.new()
-	picker_note.name = "ConfigPickerNote"
-	picker_note.label_settings = note_settings
-	picker_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	picker_note.custom_minimum_size.x = CONFIG_PANEL_WIDTH
+	_config_picker_note = Label.new()
+	_config_picker_note.name = "ConfigPickerNote"
+	_config_picker_note.label_settings = note_settings
+	_config_picker_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_config_picker_note.custom_minimum_size.x = CONFIG_PANEL_WIDTH
 	# The simulation's own rule, said out loud rather than discovered: a
 	# hopper is single-item, so there is no "half tomato, half sugar" state
-	# and `SetHopperItem` empties it (see `Hopper::retarget`).
-	picker_note.text = "switching empties the hopper"
-	_config_picker_box.add_child(picker_note)
+	# and `SetHopperItem` empties it (see `Hopper::retarget`). A tank is the
+	# same rule and the same sentence, and `_tank_picker_note` has more to
+	# say besides — see it.
+	_config_picker_note.text = HOPPER_PICKER_NOTE
+	_config_picker_box.add_child(_config_picker_note)
 
 	var footer := Label.new()
 	footer.label_settings = note_settings
@@ -9710,11 +9741,13 @@ func _build_config_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void
 	body.add_child(footer)
 
 
-## One picker slot per raw ingredient the SIMULATION allows in a hopper
-## (`_hopper_items`, i.e. `World::raw_items` over the wire) — so a third
-## ingredient in `data/ingredients.ron` appears here with no Godot edit, the
-## same property the market and the larder already have. Rebuilt on open
-## rather than once, because the list is content and a load can change it.
+## One picker slot per raw ingredient the SIMULATION allows in the building
+## being configured — `World::raw_items` over the wire for a hopper,
+## `World::raw_fluids` for a tank — so a third ingredient in
+## `data/ingredients.ron` appears here with no Godot edit, the same property
+## the market and the larder already have. Rebuilt on open rather than once,
+## because the list is content, a load can change it, and the two kinds do
+## not share a list.
 func _rebuild_config_picker() -> void:
 	if _config_picker_row == null:
 		return
@@ -9722,8 +9755,21 @@ func _rebuild_config_picker() -> void:
 		_config_picker_row.remove_child(child)
 		child.queue_free()
 	_config_picker_slots.clear()
-	for index in range(_hopper_items.size()):
-		_build_config_picker_slot(index, String(_hopper_items[index]))
+	var choices := _config_picker_choices()
+	for index in range(choices.size()):
+		_build_config_picker_slot(index, String(choices[index]))
+
+
+## The list the picker is built from: a hopper's raw SOLIDS, a tank's raw
+## FLUIDS. Both come off `ingredients_snapshot_json` and both are the
+## simulation's own idea of what the building may hold, so neither is a
+## table this file keeps.
+func _config_picker_choices() -> Array:
+	if _config_kind == HOPPER_KIND:
+		return _hopper_items
+	if _config_kind == FLUID_TANK_KIND:
+		return _tank_fluids
+	return []
 
 
 func _build_config_picker_slot(index: int, item_id: String) -> void:
@@ -9795,10 +9841,14 @@ func _open_config_panel(origin: Vector2i, kind: String) -> void:
 	_config_tile = origin
 	_config_kind = kind
 	_config_open = true
-	_config_picker_box.visible = kind == HOPPER_KIND
+	# Both configurable kinds carry a picker now: a hopper picks the solid
+	# it feeds, a tank the raw fluid it holds (issue #43).
+	_config_picker_box.visible = kind == HOPPER_KIND or kind == FLUID_TANK_KIND
 	if kind == HOPPER_KIND:
 		_refresh_hopper_items()
-		_rebuild_config_picker()
+	elif kind == FLUID_TANK_KIND:
+		_refresh_tank_fluids()
+	_rebuild_config_picker()
 	# The panel is driven from the polled snapshots, so make sure they are
 	# current before the first frame it is drawn on rather than a frame late.
 	_refresh_buffers()
@@ -9908,13 +9958,16 @@ func _update_config_hopper(key: String) -> void:
 	_apply_config_fill_state(_config_hopper_fill_blocker(snapshot))
 	_apply_config_auto_state(bool(snapshot.get("auto_fill", false)))
 	_update_config_picker(item)
+	# Shared label, two kinds — a hopper's sentence is a constant, a tank's
+	# depends on its state (see `_tank_picker_note`).
+	_config_picker_note.text = HOPPER_PICKER_NOTE
 
 
 func _update_config_tank(key: String) -> void:
 	var snapshot: Dictionary = _fluid_tank_states.get(key, {})
 	var fluid := _fluid_id_of(snapshot)
 	_config_title.text = "Fluid Tank — %s" % (
-		_item_display_name(fluid) if fluid != "" else "unconnected"
+		_item_display_name(fluid) if fluid != "" else "no fluid chosen"
 	)
 	_config_title_icon.texture = _icon_for_asset(
 		_market_asset_for(fluid) if fluid != "" else FLUID_TANK_ASSET
@@ -9928,6 +9981,35 @@ func _update_config_tank(key: String) -> void:
 	)
 	_apply_config_fill_state(_config_tank_fill_blocker(snapshot))
 	_apply_config_auto_state(bool(snapshot.get("auto_fill", false)))
+	# The tick marks what the player DECLARED, not what the run turned out
+	# to carry: those are the same id on a declared tank, and on an
+	# undeclared one the run's name is the graph's answer rather than a
+	# choice, so marking it would claim a decision nobody made. The note
+	# below says which of the two the panel is showing.
+	var declared := _declared_fluid_of(snapshot)
+	_update_config_picker(declared)
+	_config_picker_note.text = _tank_picker_note(declared, fluid)
+
+
+## A tank's declared fluid — `null` on the wire, and "" here, for every tank
+## whose fluid is still being read off the pipe run it discharges into
+## (`FluidTankSnapshot::declared`).
+func _declared_fluid_of(snapshot: Dictionary) -> String:
+	var value = snapshot.get("declared")
+	return String(value) if value != null else ""
+
+
+## What the picker says under a TANK's slots, in the three states a tank can
+## be in. The undeclared-but-named case is the one worth spelling out: the
+## panel is showing an answer the factory derived, which the player is free
+## to overrule and which they have to overrule if they want a second raw
+## fluid on a second run (issue #43).
+func _tank_picker_note(declared: String, carried: String) -> String:
+	if declared != "":
+		return "switching empties the tank"
+	if carried != "":
+		return "read from the pipe run — pick one to say for certain"
+	return "nothing can name this run — pick what this tank holds"
 
 
 ## Why FILL on a hopper's panel is off, or "" if it is not. The per-building
@@ -9960,7 +10042,14 @@ func _config_tank_fill_blocker(snapshot: Dictionary) -> String:
 		return "This tank is not reporting a level yet"
 	var fluid := _fluid_id_of(snapshot)
 	if fluid == "":
-		return "Not connected to a pipe run"
+		# Two different "no fluid" states, and only one of them is about a
+		# missing pipe. A tank that IS plumbed but whose run nothing can
+		# name — the whole of issue #43 — used to read as unconnected,
+		# which sent the player looking for a pipe that was already there.
+		# It is fixed from this very panel now, so the message says so.
+		if snapshot.get("pipe_tile") == null:
+			return "Not connected to a pipe run"
+		return "Pick what this tank holds below — its run cannot name itself"
 	if float(snapshot.get("quantity", 0.0)) >= float(snapshot.get("capacity", 0.0)):
 		return "Full — nothing more will fit"
 	if int(_owned_ingredient_counts().get(fluid, 0)) <= 0:
@@ -10100,19 +10189,34 @@ func _on_config_auto_pressed() -> void:
 	})
 
 
-## The item picker. `set_hopper_item` names the ingredient outright — the
-## command that replaced `cycle_hopper_item` and the **Q** key with it: a
-## picker that already shows the choices should not have to press "next"
-## until it arrives at one.
+## The contents picker, for both kinds. `set_hopper_item` names the
+## ingredient outright — the command that replaced `cycle_hopper_item` and
+## the **Q** key with it: a picker that already shows the choices should not
+## have to press "next" until it arrives at one. `set_tank_fluid` is its
+## fluid-side twin and the player-facing half of issue #43.
 func _on_config_picker_pressed(index: int) -> void:
-	if not _config_open or _config_kind != HOPPER_KIND:
+	if not _config_open:
+		return
+	if _config_kind != HOPPER_KIND and _config_kind != FLUID_TANK_KIND:
 		return
 	if index < 0 or index >= _config_picker_slots.size():
+		return
+	var chosen := String(_config_picker_slots[index]["item"])
+	if _config_kind == FLUID_TANK_KIND:
+		# `set_tank_fluid` is the same shape of command against the fluid
+		# side: it declares what the drum holds, and the simulation seeds
+		# the run it discharges into from that (issue #43). Gameplay logic
+		# stays in Rust — this only names the tile and the id.
+		_issue_config_command({
+			"type": "set_tank_fluid",
+			"tile": [_config_tile.x, _config_tile.y],
+			"fluid": chosen,
+		})
 		return
 	_issue_config_command({
 		"type": "set_hopper_item",
 		"tile": [_config_tile.x, _config_tile.y],
-		"item": String(_config_picker_slots[index]["item"]),
+		"item": chosen,
 	})
 
 

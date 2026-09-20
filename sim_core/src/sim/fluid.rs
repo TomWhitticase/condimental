@@ -209,9 +209,24 @@ pub const FLUID_TANK_FILL_AMOUNT: u32 = 30;
 /// A capped, player-loadable buffer of one fluid — the network's only
 /// supply, and the fluid twin of [`super::hopper::Hopper`].
 ///
-/// It holds no fluid *id* of its own: a [`FluidNetwork`] carries exactly one
-/// fluid type and owns its tank, so the id would be a second copy of the
-/// same fact and therefore a second thing that can disagree.
+/// **It may declare what it holds** (issue #43), and that is the one place
+/// a fluid id enters the graph by being *said* rather than derived. It used
+/// to hold no id at all, on the argument that a [`FluidNetwork`] carries
+/// exactly one fluid type and owns its tank, so an id here would be a
+/// second copy of the same fact and therefore a second thing that can
+/// disagree. That argument had a hole: it assumed the run could always work
+/// out what it carries. Two tank-fed runs into one machine that draws two
+/// raw fluids are indistinguishable — both seed to the same pair, nothing
+/// narrows either, both stay unnamed and the machine stalls with no
+/// explanation. Nothing in the world knows which drum the player meant,
+/// because nothing ever asked them.
+///
+/// So the declaration is **`None` by default and authoritative when set**:
+/// an undeclared tank behaves exactly as every tank did before, deriving
+/// its fluid from the run it discharges into, and a declared one pins that
+/// run to a single id (`world::resolve_network_fluids`). The two copies
+/// cannot disagree because the declaration is the *input* to the derivation
+/// rather than a parallel record of its result.
 ///
 /// It is drained by nothing in this type: [`FluidNetwork::tick`] equalizes
 /// it against the run's supply segment with the same pressure rule it uses
@@ -224,6 +239,7 @@ pub struct FluidTank {
     volume: Fx,
     capacity: Fx,
     auto_fill: bool,
+    fluid: Option<FluidId>,
 }
 
 impl FluidTank {
@@ -235,6 +251,9 @@ impl FluidTank {
             capacity,
             // ...and is filled by hand until the player says otherwise.
             auto_fill: false,
+            // ...and says nothing about what it holds until asked, which is
+            // the behaviour every tank had before it could be asked.
+            fluid: None,
         }
     }
 
@@ -245,12 +264,42 @@ impl FluidTank {
     /// ever produce: `fill` is the player's way in, this is the loader's.
     /// The volume is clamped into `[0, capacity]` so a hand-edited save
     /// cannot create a tank holding more than it can.
-    pub(crate) fn restore(capacity: Fx, volume: Fx, auto_fill: bool) -> Self {
+    pub(crate) fn restore(
+        capacity: Fx,
+        volume: Fx,
+        auto_fill: bool,
+        fluid: Option<FluidId>,
+    ) -> Self {
         Self {
             volume: volume.max(Fx::ZERO).min(capacity),
             capacity,
             auto_fill,
+            fluid,
         }
+    }
+
+    /// What the player has said this tank holds, or `None` if they have not
+    /// said — see this type's doc. Never the *derived* fluid: that is
+    /// `World::tank_fluid`, which asks this first and falls back to the run.
+    pub fn declared(&self) -> Option<&FluidId> {
+        self.fluid.as_ref()
+    }
+
+    /// Declares what this tank holds, reporting whether anything changed.
+    ///
+    /// **A real change empties the tank**, which is
+    /// [`super::hopper::Hopper::retarget`]'s rule and for its reason: the
+    /// volume in here is thirty units of the *old* fluid, and keeping it
+    /// would relabel it rather than move it. Re-declaring what is already
+    /// declared changes nothing and costs nothing, so a UI may send it
+    /// freely.
+    pub(crate) fn declare(&mut self, fluid: FluidId) -> bool {
+        if self.fluid.as_deref() == Some(fluid.as_str()) {
+            return false;
+        }
+        self.fluid = Some(fluid);
+        self.volume = Fx::ZERO;
+        true
     }
 
     pub fn volume(&self) -> Fx {

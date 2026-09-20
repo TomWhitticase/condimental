@@ -532,12 +532,25 @@ fn a_save_from_another_build_and_a_file_that_is_not_a_save_are_both_refused() {
     let world = World::new(recipes());
     let text = world.to_save_ron();
 
-    let from_the_future = text.replace("schema_version: 1", "schema_version: 2");
+    let from_the_future = text.replace("schema_version: 2", "schema_version: 3");
     let Err(error) = World::from_save_ron(&from_the_future, recipes()) else {
         panic!("a different schema version must be refused, never migrated");
     };
     let error = error.to_string();
-    assert!(error.contains("schema_version 2"), "unhelpful: {error}");
+    assert!(error.contains("schema_version 3"), "unhelpful: {error}");
+
+    // ...and the same in the other direction: a v1 file is every save
+    // written before a tank could declare what it holds (issue #43), and it
+    // is refused with both numbers rather than migrated.
+    let from_the_past = text.replace("schema_version: 2", "schema_version: 1");
+    let Err(error) = World::from_save_ron(&from_the_past, recipes()) else {
+        panic!("a save predating the tank's declared fluid must be refused, never migrated");
+    };
+    let error = error.to_string();
+    assert!(
+        error.contains("schema_version 1") && error.contains("supports 2"),
+        "unhelpful: {error}"
+    );
 
     let Err(error) = World::from_save_ron("this is not a save file", recipes()) else {
         panic!("garbage must be refused");
