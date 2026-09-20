@@ -34,6 +34,13 @@
 #     stub names the key that brings it back,
 #   * folding is not a modal: it neither closes an open menu nor is closed
 #     by ESC, and F1 works with a menu open,
+#   * every modal the player can open (E, M, C, P, H) asks for no more width
+#     than the window has, sits wholly inside it, and leaves no button drawn
+#     outside it — at 1600x900 AND at 1280x720, with the world past every
+#     progression gate so the market and the board are as full as they get
+#     (issue #62: the staff panel's minimum was 1350px, so at 1280x720 it was
+#     clipped on both edges and FIRE −1 could not be clicked at all; issues
+#     #69 and #17 are the same rule on the market row and the docket stack),
 #   * everything that measures the legend reads its CURRENT rect — a panel
 #     near the cursor may use the space a folded legend gave up, and still
 #     never lands on the stub or on the stock plate (§2b point 33).
@@ -83,6 +90,21 @@ const CREW_SNAPSHOT := {
 const DOCKET_CASES := [
 	[false, BIG], [false, SMALL], [true, BIG], [true, SMALL],
 ]
+## Every modal the player can open: the key that opens it, the setter behind
+## that key, and the panel it puts on the screen. Each one is checked at BOTH
+## window sizes, because the rule they are checked against is the new first
+## line of UI_UX.md §5f — a control the player cannot reach outranks every
+## other layout rule (issue #62: the staff panel's own minimum width was
+## 1350px, so at 1280x720 it hung off both edges and FIRE −1 could not be
+## clicked at all).
+const MODAL_CASES := [
+	["E", "_set_shop_menu_open", "_shop_menu"],
+	["M", "_set_market_open", "_market_panel"],
+	["C", "_set_contract_board_open", "_board_panel"],
+	["P", "_set_production_open", "_production_panel"],
+	["H", "_set_staff_open", "_staff_panel"],
+]
+
 ## Frames a case is given before it is read — one to apply it, the rest for
 ## Godot's deferred minimum-size invalidation (`_sweep_step`). It has always
 ## settled by the second; the third is slack.
@@ -96,6 +118,10 @@ var _summary := ""
 ## settle in (see `_sweep_step`).
 var _case := 0
 var _frame := 0
+## The modal sweep's own cursor, a case per (modal, window) pair, and whether
+## the docket sweep before it has been put away (`_finish_sweep`).
+var _modal := 0
+var _swept := false
 
 
 func _fail(msg: String) -> void:
@@ -114,7 +140,13 @@ func _process(_delta: float) -> bool:
 		_ran = true
 		_run_checks()
 		return false
-	return _sweep_step()
+	if _case < DOCKET_CASES.size():
+		return _sweep_step()
+	if not _swept:
+		_swept = true
+		_finish_sweep()
+		return false
+	return _modal_step()
 
 
 ## The window is 64x64 under `--script`, so every geometry check sets a real
@@ -610,12 +642,6 @@ func _run_checks() -> void:
 ## body (test_staff_panel.gd owns the real understaffed fixture). It is
 ## re-applied every frame because `main._process` re-polls the real one.
 func _sweep_step() -> bool:
-	if _case >= DOCKET_CASES.size():
-		main._staff_snapshot = {}
-		_resize(BIG)
-		print("HUD_PLATES_OK: %s; and the docket stack is cut between dockets, the board hint yields to the SHORT-STAFFED strip, and neither plate lands on the other, at both sizes with the strip up and down" % _summary)
-		quit(0)
-		return true
 	var strip: bool = bool(DOCKET_CASES[_case][0])
 	var window: Vector2i = DOCKET_CASES[_case][1]
 	main._staff_snapshot = SHORT_STAFFED_SNAPSHOT if strip else {}
@@ -643,11 +669,20 @@ func _check_docket_case(strip: bool, window: Vector2i) -> bool:
 			"up" if strip else "down", str(window), main._crew_hint.text
 		])
 		return false
-	# Issue #13's trade is off: the board hint no longer competes with an
-	# alarm that is not on its plate.
+	# Issue #13's trade is off against the SHORT-STAFFED strip: the board hint
+	# no longer competes with an alarm that is not on its plate. It does still
+	# yield its line to the docket stack, but only for the one thing worth a
+	# line of advice — a stack cut ABOVE the first docket's first line, which
+	# is a heading sliced through its own type (issue #17). So when the hint is
+	# down, the line it gave up has to be a line the stack got back.
 	if not main._contract_hint_label.visible:
-		_fail("at %s the board hint is down with nothing on the clipboard to yield to" % where)
-		return false
+		var first_line: float = main._first_line_boundary(main._contract_cards_box)
+		var bought: float = main._contract_cards_scroll.custom_minimum_size.y
+		if bought < first_line - 0.5:
+			_fail("at %s the board hint is down and the stack still shows no whole docket line (%.0f < %.0f)" % [
+				where, bought, first_line
+			])
+			return false
 
 	# Neither plate is drawn ON the other. This is the fault that outranks
 	# every cut below: the earlier section checks it too, but only with the
@@ -699,11 +734,11 @@ func _check_docket_case(strip: bool, window: Vector2i) -> bool:
 		for boundary in lines:
 			if absf(cut - float(boundary)) <= 0.5:
 				lands_on_line = true
-		# Under the first line there is no boundary left but zero, and a
-		# clipboard cut to zero has lost the dockets AND the cue that there
-		# are dockets. That case keeps its ragged edge on purpose; it is the
-		# half of issue #17 that only a shorter docket can pay for.
-		if not lands_on_line and cut >= float(lines[1]) - 0.5:
+		# There is no escape hatch under the first line any more: the
+		# clipboard buys that line back by dropping the board hint
+		# (`_update_contract_panel`), so a cut between zero and the first line
+		# means that trade did not happen.
+		if not lands_on_line:
 			_fail("at %s the clamped stack is cut at %.0fpx, inside a line — lines end at %s" % [
 				where, cut, str(lines)
 			])
@@ -786,3 +821,160 @@ func _docket_boundaries() -> Array:
 		running += card.get_combined_minimum_size().y
 		out.append(running)
 	return out
+
+
+## One case of the modal sweep per call, and SEVERAL FRAMES per case, for the
+## reason `_sweep_step` writes down: a modal's minimum size is invalidated in a
+## deferred call, so the frame that opened it still reports the size it had
+## while it was closed.
+##
+## The first call also puts the world past every progression gate, the way
+## `test_screenshot.gd --unlocked` does. Without it the market has three crates
+## and fits anything; issue #69 is about the six the unlocked game sells.
+func _modal_step() -> bool:
+	if _modal == 0 and _frame == 0:
+		_unlock_everything()
+	if _modal >= MODAL_CASES.size() * 2:
+		_open_only("")
+		_resize(BIG)
+		print("HUD_PLATES_OK: %s; and every modal (%s) fits inside the window with every button reachable, at 1600x900 and at 1280x720" % [
+			_summary, ", ".join(_modal_keys())
+		])
+		quit(0)
+		return true
+	var case: Array = MODAL_CASES[_modal / 2]
+	var window: Vector2i = BIG if _modal % 2 == 0 else SMALL
+	_open_only(String(case[1]))
+	_resize(window)
+	_reposition_modals()
+	_frame += 1
+	if _frame < SETTLE_FRAMES:
+		return false
+	if not _check_modal_case(String(case[0]), String(case[2]), window):
+		return true
+	_modal += 1
+	_frame = 0
+	return false
+
+
+## Between the two sweeps: the docket sweep's fixture is put away, so the
+## modal sweep starts from the clean staff snapshot and the window it sets
+## itself.
+func _finish_sweep() -> void:
+	main._staff_snapshot = {}
+	_resize(BIG)
+	_summary += "; the docket stack is cut between dockets and the board hint buys back the first docket line when the stack cannot show one, and neither plate lands on the other, at both sizes with the strip up and down"
+	_frame = 0
+
+
+func _modal_keys() -> Array:
+	var keys: Array = []
+	for case in MODAL_CASES:
+		keys.append(String(case[0]))
+	return keys
+
+
+## Past every progression gate, so the market holds every crate the shop sells
+## and the board every offer. Lifted from `test_screenshot.gd --unlocked`:
+## `deliver` goes through save/load, so the rendered world is rebuilt from the
+## reloaded one.
+func _unlock_everything() -> void:
+	var econ: Dictionary = JSON.parse_string(main.sim.economy_snapshot_json())
+	var threshold := 0
+	for unlock in econ.get("unlocks", []):
+		threshold = maxi(threshold, int(unlock.get("after_deliveries", 0)))
+	if threshold == 0:
+		_fail("data/unlocks.ron gates nothing — the market case would prove nothing")
+		return
+	Layouts.deliver(main.sim, threshold)
+	main._rebuild_world()
+	main._refresh_owned_counts()
+
+
+## Opens exactly one modal, by the name of its setter, and closes the rest.
+## One at a time is the game's own rule (`_set_staff_open` and its siblings
+## close each other), and it is also what makes a width failure readable.
+func _open_only(setter: String) -> void:
+	for case in MODAL_CASES:
+		main.call(String(case[1]), String(case[1]) == setter)
+
+
+## The positioning passes a live frame runs for the modals, after `_resize`
+## has run the ones for the fixed plates.
+func _reposition_modals() -> void:
+	main._position_shop_menu()
+	main._position_market_panel()
+	main._position_contract_board()
+	main._position_production_panel()
+	main._position_staff_panel()
+
+
+## False when the case failed (`_fail` has already asked to quit).
+func _check_modal_case(key: String, panel_name: String, window: Vector2i) -> bool:
+	var where := "%s at %s" % [key, str(window)]
+	var panel: Control = main.get(panel_name) as Control
+	if panel == null or not panel.visible:
+		_fail("%s did not open the panel it owns (%s)" % [where, panel_name])
+		return false
+	# The width the panel ASKS for, not the width it got: a Control clamped to
+	# a window narrower than its minimum still reports the clamped size, while
+	# its children lay out at the minimum and hang off the edge. The minimum is
+	# the number the player feels.
+	var wanted: Vector2 = panel.get_combined_minimum_size()
+	if wanted.x > float(window.x) + 0.5:
+		_fail("%s asks for %.0fpx of width in a %dpx window — it is clipped on both edges" % [
+			where, wanted.x, window.x
+		])
+		return false
+	var rect: Rect2 = panel.get_global_rect()
+	if rect.position.x < -0.5 or rect.end.x > float(window.x) + 0.5:
+		_fail("%s is off the side of the window (%s)" % [where, str(rect)])
+		return false
+	if rect.position.y < -0.5 or rect.end.y > float(window.y) + 0.5:
+		_fail("%s is off the top or bottom of the window (%s)" % [where, str(rect)])
+		return false
+	# And the rule the panel's rect does not cover: a button is only pressed
+	# where it is DRAWN, so every one of them has to be inside the window even
+	# when the panel that holds them is not.
+	var stray: Button = _unreachable_button(panel, window)
+	if stray != null:
+		_fail("%s puts %s ('%s') outside the window at %s — the player cannot click it" % [
+			where, stray.name, stray.text, str(stray.get_global_rect())
+		])
+		return false
+	return true
+
+
+## The first visible button of this panel that is not wholly inside the
+## window and cannot be brought into it, or null. Walks the whole subtree: the
+## one that started issue #62 was FIRE −1, four containers down a scrolling
+## row.
+##
+## A button below the fold of a ScrollContainer is NOT unreachable — it is
+## what a scroll bar is for — so an enclosing scroll that still scrolls on the
+## axis the button is off on excuses it. A scroll with that axis DISABLED does
+## not: that is the staff panel's case, where the rows could not be pulled
+## sideways and FIRE −1 was simply gone.
+func _unreachable_button(node: Node, window: Vector2i, scrolls_x := false, scrolls_y := false) -> Button:
+	for child in node.get_children():
+		var control := child as Control
+		if control == null or not control.visible:
+			continue
+		var button := control as Button
+		if button != null:
+			var rect: Rect2 = button.get_global_rect()
+			var off_x: bool = rect.position.x < -0.5 or rect.end.x > float(window.x) + 0.5
+			var off_y: bool = rect.position.y < -0.5 or rect.end.y > float(window.y) + 0.5
+			if rect.size.x > 0.0 and ((off_x and not scrolls_x) or (off_y and not scrolls_y)):
+				return button
+		var scroll := control as ScrollContainer
+		var down_x: bool = scrolls_x
+		var down_y: bool = scrolls_y
+		if scroll != null:
+			down_x = down_x or scroll.horizontal_scroll_mode != ScrollContainer.SCROLL_MODE_DISABLED
+			down_y = down_y or scroll.vertical_scroll_mode != ScrollContainer.SCROLL_MODE_DISABLED
+		var found: Button = _unreachable_button(control, window, down_x, down_y)
+		if found != null:
+			return found
+	return null
+

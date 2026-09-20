@@ -139,6 +139,19 @@ below is history and should only ever be appended to.)*
   slot. Raw stock moved off the hotbar onto a **right-hand STOCK plate**,
   one row per priced ingredient. The keybind legend **folds to a labelled
   stub** (its button, or F1).
+- **The HUD fits 1280x720 (DONE, 2026-09-20; issues #62, #63, #69, #17).**
+  Every panel knew how to yield height and none knew how to yield width, so
+  at the smallest supported window the staff panel, build menu and contracts
+  board were clipped on both edges with `FIRE −1` and `SIGN` off the screen.
+  **A control the player cannot reach now outranks every other layout rule**
+  (UI_UX §5c/§5f): a modal measures the window and gives width back by moving
+  a row's prose to its hover, then taking fewer grid columns, then scrolling.
+  The market wraps into a grid and dodges the right-hand plates, the staff
+  explainer is shown whole or not at all, and the clipboard spends its hint's
+  line to keep the docket cut on a line boundary. `test_hud_plates.gd` sweeps
+  all five modals at 1280x720. Two findings deferred as issues: the machine
+  hover cannot clear an open legend at that size, and headless font metrics
+  are narrower than a real window's — so only a render can prove a width.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -154,6 +167,68 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-20 — The HUD fits a 1280x720 window (issues #62, #63, #69, #17)
+
+Four layout issues, one root cause: every panel in the game knew how to yield
+HEIGHT and none of them knew how to yield WIDTH. At 1600x900 that never
+showed. At 1280x720 — the smallest window the project claims to support — the
+staff panel wanted 1350px, the build menu 1412px and the contracts board
+1380px, and a centred panel wider than its window is clipped on *both* edges.
+What went was the outermost column of each: the icons on the left, and on the
+right `FIRE −1`, the only way to undo a hire, and `SIGN`, the only way to take
+a contract. The panels looked fine in the middle. You could not play the game
+from them.
+
+**The rule this pass adds** is that **a control the player cannot reach is the
+worst thing a layout can do** — above every fault UI_UX §5f already ranked.
+Width is now a budget like height (`_modal_available_width`), and a modal too
+wide for its window gives width back in a fixed order: a row's prose moves to
+its hover (`_fit_staff_width` — the staff row's ranked sentence, the per-tick
+figure and the meter caption, all already on the tooltip); then a grid of
+cards takes fewer columns and balances them (`_fit_grid_columns`, so six
+crates are 3+3 and never 5+1, and `SHOP_SLOT_COLUMNS`/`MARKET_SLOT_COLUMNS`
+now mean *the most* a grid takes); then the list scrolls, as it already did.
+`autowrap_mode` is deliberately **not** used — a wrapping Label reports a 1px
+minimum width and a height shaped at whatever width it was last *drawn* at, so
+it measures as nonsense under `--headless`, where this layout's proof lives. A
+sentence that must be narrower is broken at a join it already has: the board's
+offer is now a mix line and a terms line.
+
+**The other three.** The ingredient market was a fixed `HBoxContainer` that
+neither wrapped nor scrolled — six crates measured 1260px in a 1280px window,
+and a seventh ingredient would simply have been off the edge; it is a
+`GridContainer` in a scroll now, clamped on `x` as well as `y` and pushed
+clear of the clipboard, STOCK and CREW plates rather than reprinting `Money:`
+a few pixels from theirs (#69). The staff panel's scroll box is flat instead
+of nested, because the cut snaps between the *children* of the box it is
+given and the nesting left it nothing to snap to but the explainer's own
+lines (#63). And the clipboard's board hint is now a line the docket stack may
+spend: at 1280x720 with every offer signed the stack was down to 12px against
+a 43px first line boundary, which is the one case §5f had conceded to #17, and
+dropping "sign more orders" from a clipboard whose every order is signed buys
+exactly the line that puts the cut back on a boundary.
+
+**Two things worth knowing before trusting a measurement.** Godot's headless
+font metrics are **narrower** than a real window's: the staff panel passed the
+new headless assertion at the very size the rendered frame clipped, and the
+missing 262px was only found by instrumenting the fit during a real
+`screenshot-scene.sh` run. A headless assertion is the regression net; the
+render is the acceptance. And `get_combined_minimum_size()` can *under*report
+what is on screen — the machine hover reported 299px wide while being drawn at
+545px, and was positioned as if its right-hand 246px did not exist — so
+anything placing a panel now takes `maxf(minimum, size)`. Where no position
+clears every plate at all, `_panel_position_near` scores every candidate by
+total overlapped area and keeps the least bad one rather than pushing off one
+plate onto the next.
+
+`test_hud_plates.gd` sweeps all five modals (E, M, C, P, H) at 1280x720 and
+asserts no panel is wider than the window, none is drawn off it, and no button
+is unreachable — excusing only a button under a scroll's fold. Rendered and
+read at both sizes. Two findings are deferred rather than fixed: the machine
+hover still cannot clear an open legend at 1280x720 (the geometry leaves
+nowhere to stand; the answer is a self-folding legend or a shorter tooltip,
+which is a content decision), and the headless-metrics gap itself.
 
 ### 2026-09-20 — Three issues off the board: names, fluid colour, honest frames
 
