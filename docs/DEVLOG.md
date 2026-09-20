@@ -161,15 +161,27 @@ Three tooling defects off the deferred queue (#77, #53, #4). None of them is
 in the game; all three are in the machinery the game is verified with, and
 each one had already cost somebody a round of investigation.
 
-**`cargo xtask` re-signs the library it stages (issue #77).** Overwriting
-`godot_project/bin/libsim_core.dylib` invalidates the signature macOS
-recorded for that path, and the kernel then SIGKILLs anything that loads it:
-every headless run — `scripts/verify-core-loop.sh`, every
-`scripts/screenshot-scene.sh` — died with **exit 137, no stderr, no marker**,
-while `godot --version` still exited 0 and `codesign --verify` called the
-library valid. It read as a broken engine. xtask is what replaced the file,
-so xtask now runs `codesign -s - --force` on it and prints that it did, before
-the two `--import` passes that are themselves the first thing to load it.
+**`cargo xtask` re-signs the library it stages (issue #77).** The sighting
+behind the issue is a headless run dying with **exit 137, no stderr, no
+marker**, while `godot --version` still exited 0 and `codesign --verify`
+called the library valid — it read as a broken engine, and re-signing by hand
+cured it. xtask is what replaces the file, so xtask now runs
+`codesign -s - --force` on it and prints that it did, before the two
+`--import` passes that are themselves the first thing to load it.
+
+**Said plainly, because review asked the right question of it: that kill was
+not reproduced to order.** Comment the call out, force a relink, run headless
+Godot — and it passes, because the Rust linker already emits
+`flags=0x20002(adhoc,linker-signed)`, so the staged copy is normally valid
+before xtask touches it. Neither a `com.apple.quarantine` xattr nor a byte
+flipped in a signed library brought the kill back either. What IS reproducible
+is the shape of the failure when the signature really is gone:
+`codesign --remove-signature` on the staged copy gives
+`dlopen(...): Trying to load an unsigned library`, no GDExtension, a
+`SimBridge` parse error out of `main.gd` — and **exit 0**. So the status code
+is useless in both directions (137 with no output, or 0 with no marker), which
+is the argument for keeping a call this cheap rather than for claiming it is
+proven load-bearing.
 Two calls settled in the issue: a signing failure **warns and leaves the
 library staged** rather than failing the build (a machine with no Xcode
 command line tools must still be able to build; CI's `cargo test` never loads
@@ -209,6 +221,22 @@ cursor really is over what it was aimed at. A mismatch is `SCREENSHOT_FAIL`
 and no PNG, the same refusal #70 gave a wrong fixture: a tooltip belonging to
 the wrong thing is precisely the frame this script exists not to hand back.
 Every run now prints `SCREENSHOT_CURSOR:` beside `SCREENSHOT_FIXTURE`.
+
+Two corrections from review, both about a guard being confidently wrong —
+which is the thing this ticket is against, so they are the ticket, not a
+footnote. **A guard must check what is actually in the frame.** In first
+person `main.gd` reads the tooltip from the SCREEN CENTRE, not the pointer,
+so asserting on the pointer there failed `--first-person --hover-dock` at the
+shutter and blamed a parallel worktree for a pointer nothing had touched. The
+harness now asks the same question the frame does (`_hover_query_pos`), and a
+`--hover*` flag in first person **turns the camera** instead of warping the
+pointer — `--first-person --hover-dock` is "stand in the hall and look at the
+dock", which is a review shot worth having. **And a guard must not invent a
+cause.** The "nowhere on screen is empty ground" fallback printed a NOTE
+explaining the tooltip and then refused anyway, with a message about a
+pointer that had been moved when nothing had moved it; the explained frame is
+now written, as its own docstring always promised, and every refusal lists
+its candidate causes as candidates.
 
 ### 2026-09-20 — Three issues off the board: names, fluid colour, honest frames
 
