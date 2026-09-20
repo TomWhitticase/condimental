@@ -21,8 +21,8 @@ mod common;
 use sim_core::sim::save::MoneyBits;
 use sim_core::sim::types::Money;
 use sim_core::sim::{
-    ContractRegistry, Direction, MachineRegistry, PlayerCommand, RecipeRegistry, StallKind,
-    TileSnapshot, WorkState, World, command_from_json, reference_chain_with_budget,
+    ContractRegistry, MachineRegistry, PlayerCommand, RecipeRegistry, StallKind, TileSnapshot,
+    WorkState, World, command_from_json, reference_chain_with_budget,
 };
 
 fn recipes() -> RecipeRegistry {
@@ -90,9 +90,34 @@ fn uncrewed(world: &World) -> Vec<(i32, i32)> {
         .collect()
 }
 
+/// What the docks have shipped in their lifetimes — the factory's whole
+/// income, and so the whole of what an idle line costs it.
+fn shipped(world: &World) -> u32 {
+    world.dock_snapshots().iter().map(|d| d.shipped_total).sum()
+}
+
 fn ticks(world: &mut World, n: u32) {
     for _ in 0..n {
         common::supply(world);
+        world.tick();
+    }
+}
+
+/// `ticks` with the deliveries of raw material cut off — the line runs
+/// itself dry and then stands still. What it is for: a factory that is
+/// earning nothing either way, so the ONLY thing moving the balance is the
+/// wage bill, which is the one thing under test here.
+fn dry_ticks(world: &mut World, n: u32) {
+    for _ in 0..n {
+        world.tick();
+    }
+}
+
+/// Runs to the tick a payday lands on and through it, with nothing
+/// resupplied.
+fn to_next_dry_payday(world: &mut World) {
+    let target = world.staff().next_payday_tick();
+    while world.current_tick() < target {
         world.tick();
     }
 }
@@ -121,9 +146,13 @@ fn with_money(world: &World, money: u32) -> World {
 
 /// THE WHOLE POINT: a mothballed machine is out of the establishment.
 ///
-/// Nothing else in the game can lower `required` without tearing the
-/// machine down and losing what it cost, which is what made the spiral
-/// one-way.
+/// The only other way to lower `required` is `Remove`, which is not free:
+/// the equipment does go back to the shed (`try_remove` credits the owned
+/// count, so the purchase is not lost), but the machine's input and output
+/// buffers and whatever batch it was half way through are despawned with
+/// it, and the player has to re-place it and re-link the line. Mothballing
+/// keeps all of that standing — which is what makes the spiral escapable
+/// rather than one-way.
 #[test]
 fn a_mothballed_machine_drops_out_of_the_establishment_and_comes_back_with_it() {
     let mut world = running_line(1_200);
@@ -275,198 +304,420 @@ fn returning_a_machine_to_service_resumes_the_craft_it_was_part_way_through() {
 // The escape hatch (issue #19)
 // ---------------------------------------------------------------------
 
-/// How many spare crushers the overbuilt fixture places. Each is a
-/// one-tile, one-cook machine, placed away from the line and connected to
-/// nothing — a player's half-built second line.
-const SPARE_CRUSHERS: u32 = 8;
+/// The shipped line's own wage bill: manufacturing 4, packaging 2,
+/// logistics 1, every head at wage 2.
+const SHIPPED_BILL: u32 = 14;
 
-/// A factory that has built more than it can pay for: the shipped line
-/// plus a second line's worth of crushers, crewed to the establishment
-/// they create, and one shipping clerk hired ahead of the second dock.
-/// Its balance is then stated at `money`.
-fn overbuilt_line(money: u32) -> World {
+/// **The state issue #19 describes**, built the way a player reaches it:
+/// the shipped line, running and fed, with the balance stated at `money`
+/// on payday eve. Nothing is over-built and nobody is over-hired — the
+/// establishment is exactly the line's, which is the point. What follows
+/// is the spiral: the payday cannot be met, every head the money did not
+/// reach stops working, a factory with nobody working earns nothing, and
+/// the next payday is no smaller than the one just missed.
+fn broke_on_payday_eve(money: u32) -> World {
     let mut world = running_line(1_200);
-    for i in 0..SPARE_CRUSHERS as i32 {
-        world.issue_command(PlayerCommand::Purchase {
-            kind: "crusher".into(),
-            quantity: 1,
-        });
-        world.issue_command(PlayerCommand::Place {
-            kind: "crusher".into(),
-            tile: (2 * i, 10),
-            direction: Direction::East,
-            item: None,
-        });
-    }
-    assert_eq!(required(&world, "manufacturing"), 4 + SPARE_CRUSHERS);
-    for _ in 0..SPARE_CRUSHERS {
-        world.issue_command(PlayerCommand::Hire {
-            category: "manufacturing".into(),
-        });
-    }
-    // And one shipping clerk hired ahead of the second dock, which is the
-    // next thing they mean to build.
-    world.issue_command(PlayerCommand::Hire {
-        category: "logistics".into(),
-    });
-    assert_eq!(headcount(&world, "manufacturing"), 4 + SPARE_CRUSHERS);
-    assert_eq!(
-        (
-            required(&world, "logistics"),
-            headcount(&world, "logistics")
-        ),
-        (1, 2)
-    );
-
     to_payday_eve(&mut world);
-    with_money(&world, money)
+    let world = with_money(&world, money);
+    assert_eq!(world.staff().next_bill(), SHIPPED_BILL);
+    world
 }
 
-/// **THE ACCEPTANCE TEST for issue #19.** A factory is driven into arrears
-/// — a payday its balance could not cover, a head left unpaid — mothballs
-/// the machinery it cannot afford to crew, and climbs back out.
+/// Every placement in the world, switched off. The player's move: the line
+/// is standing idle anyway, so shut it.
+fn mothball_everything(world: &mut World) {
+    for tile in world
+        .world_layout()
+        .iter()
+        .map(|p| p.tile)
+        .collect::<Vec<_>>()
+    {
+        mothball(world, tile, true);
+    }
+}
+
+fn switch_everything_back_on(world: &mut World) {
+    for tile in world
+        .world_layout()
+        .iter()
+        .map(|p| p.tile)
+        .collect::<Vec<_>>()
+    {
+        mothball(world, tile, false);
+    }
+}
+
+/// Runs to the tick a payday lands on and through it.
+fn to_next_payday(world: &mut World) {
+    to_payday_eve(world);
+    ticks(world, 1);
+}
+
+/// **The reviewer's own A/B, and the number that had to move.** The first
+/// round of this work was rejected because running four paydays with and
+/// without mothballing gave bit-identical balances: `required` fell, and
+/// not one coin followed it. This is that experiment, and it is the
+/// regression guard for the whole mechanic — cut `stood_down` out of
+/// `bill_per_period` and this fails on the first payday.
 ///
-/// Every step of the climb is asserted, because each was a separate part
-/// of the complaint: the ESTABLISHMENT falls (nothing else could lower it
-/// without demolishing the machine), the WAGE BILL falls with the firing
-/// that the smaller establishment invites, the notice-pay period costs
-/// exactly one more full bill and no more, and from the payday after that
-/// the factory is paying its way and its balance is climbing.
+/// The fixture is the shipped line with no ingredients bought, so neither
+/// factory earns anything and the ONLY thing that can move either balance
+/// is payroll. Both start on 100 with the same seven heads.
+///
+/// * The control is billed 14 four times and ends on 44.
+/// * The mothballed factory is billed 14 ONCE — the notice period it was
+///   already half way through, which is what stops switching off on payday
+///   eve being a free period of labour — and then nothing. It ends on 86.
+///
+/// Both keep all seven heads: this is what mothballing costs against
+/// firing, which would have ended with 86 and an empty factory.
 #[test]
-fn mothballing_takes_a_factory_that_missed_a_payday_back_out_of_arrears() {
-    // One coin short of the bill — the crunch payday.
-    let bill = 2 * (4 + SPARE_CRUSHERS + 2 + 2);
-    let mut world = overbuilt_line(bill - 1);
-    assert_eq!(world.staff().bill_per_period(), bill);
-    assert_eq!(world.staff().next_bill(), bill);
+fn four_paydays_with_and_without_mothballing_end_on_different_balances() {
+    let placed = reference_chain_with_budget(recipes(), 0);
+    let mut world = with_money(&placed, 100);
+    let mut control = World::from_save_ron(&world.to_save_ron(), recipes()).expect("clone");
+    assert_eq!(world.staff().bill_per_period(), SHIPPED_BILL);
+
+    mothball_everything(&mut world);
     assert_eq!(
-        world.staff().shortfall(world.money()),
-        1,
-        "the wire warns before the payday, not after"
+        world.staff().bill_per_period(),
+        0,
+        "the run rate falls the instant the switch is thrown"
+    );
+    assert_eq!(
+        control.staff().bill_per_period(),
+        SHIPPED_BILL,
+        "and the control is still paying for the same seven heads"
     );
 
-    // The payday lands. Heads are paid one at a time down `staff.ron`, so
-    // the coin runs out on the LAST head — the second dock's clerk.
+    for payday in 0..4 {
+        to_next_dry_payday(&mut world);
+        to_next_dry_payday(&mut control);
+        assert_eq!(
+            shipped(&world) + shipped(&control),
+            0,
+            "payday {payday}: neither factory has earned a thing, so wages are the whole story"
+        );
+    }
+
+    assert_eq!(
+        control.money(),
+        Money::from_num(100 - 4 * SHIPPED_BILL),
+        "four full bills"
+    );
+    assert_eq!(
+        world.money(),
+        Money::from_num(100 - SHIPPED_BILL),
+        "one notice period, then nothing"
+    );
+    assert_eq!(
+        (
+            headcount(&world, "manufacturing"),
+            headcount(&world, "packaging"),
+            headcount(&world, "logistics")
+        ),
+        (4, 2, 1),
+        "and it kept the crew it saved the money on"
+    );
+}
+
+/// **THE ACCEPTANCE TEST for issue #19**, and the one the first round of
+/// this work did not have.
+///
+/// Two factories in the identical broken state — a missed payday, every
+/// head in arrears, nothing running, nothing earning. One of them throws
+/// the switch; the other plays on. The escape hatch exists if and only if
+/// those two histories DIVERGE, so the control is not decoration here, it
+/// is the measurement.
+///
+/// What the switch buys, in order:
+///
+/// * the run rate (`bill_per_period`) falls the instant it is thrown,
+/// * the crew does NOT walk out at the next payday, which is the one the
+///   two-strike rule would otherwise have taken them at,
+/// * the payday after that bills nothing, so the arrears CLEAR with every
+///   head still on the books,
+/// * and the line switched back on is the line that went off — same crew,
+///   no re-hiring, and the money climbs from there.
+///
+/// The control does none of it: it is billed in full at a payday it cannot
+/// meet, its whole crew walks out on the second strike, and it ends with
+/// an empty factory it has no money to re-staff.
+#[test]
+fn mothballing_is_what_takes_a_broke_factory_out_of_arrears_and_a_control_proves_it() {
+    // One coin short of the bill, on payday eve.
+    let mut world = broke_on_payday_eve(SHIPPED_BILL - 1);
     ticks(&mut world, 1);
-    assert_eq!(world.staff().unpaid_last_payday(), 1, "one head in arrears");
+    assert_eq!(
+        world.staff().unpaid_last_payday(),
+        1,
+        "the money reaches all but the last head down staff.ron — the shipping clerk"
+    );
     assert_eq!(world.staff().pool("logistics").unwrap().unpaid, 1);
+    assert_eq!(
+        uncrewed(&world),
+        vec![tile_of(&world, "dock")],
+        "issue #20's headline case: the dock is the placement going without"
+    );
+
+    // The spiral: the clerk in arrears does not work, so the dock ships
+    // nothing, so nothing is earned towards the payday that follows.
+    let shipped_before = shipped(&world);
+    ticks(&mut world, 400);
+    assert_eq!(
+        shipped(&world),
+        shipped_before,
+        "an unpaid clerk is the whole income of this factory, and they are not at work"
+    );
+
+    // Both futures start HERE, from one save, so nothing but the switch
+    // can account for the difference.
+    let mut control = World::from_save_ron(&world.to_save_ron(), recipes()).expect("clone");
+
+    // The escape: shut the line.
+    mothball_everything(&mut world);
+    assert_eq!(
+        (
+            required(&world, "manufacturing"),
+            required(&world, "logistics")
+        ),
+        (0, 0),
+        "nothing switched on asks for anybody"
+    );
+    assert_eq!(
+        world.staff().bill_per_period(),
+        0,
+        "the run rate falls the instant the switch is thrown — issue #19's whole complaint"
+    );
+    assert_eq!(
+        world.staff().next_bill(),
+        SHIPPED_BILL,
+        "but the period already half-worked is still billed: the notice-pay rule, \
+         which is what stops mothballing on payday eve being a free period of labour"
+    );
+
+    // The payday the two-strike rule takes the clerk at — the one head
+    // already a period in arrears. The shutdown is still inside its notice
+    // period here, so it is billed the full 14 it cannot pay; the
+    // difference is that a stood-down head is never the one shown the
+    // door, so nobody leaves.
+    to_next_payday(&mut world);
+    to_next_payday(&mut control);
     assert_eq!(
         world.staff().walked_out_last_payday(),
         0,
-        "nobody walks out on the first miss"
-    );
-    let money_at_the_miss = world.money();
-    // The factory is still shipping — the clerk who WAS paid is enough to
-    // keep the dock working — which is the runway the escape hatch needs.
-    // A control copy of this exact moment, left alone, is what the escape
-    // is measured against at the bottom.
-    let untouched = World::from_save_ron(&world.to_save_ron(), recipes()).expect("clone");
-
-    // The escape: switch the half-built second line off. The establishment
-    // falls the moment the command lands — this is the move that nothing
-    // in the game could make before.
-    for i in 0..SPARE_CRUSHERS as i32 {
-        mothball(&mut world, (2 * i, 10), true);
-    }
-    assert_eq!(
-        required(&world, "manufacturing"),
-        4,
-        "back to the shipped line's crew"
-    );
-
-    // Which is what makes the firing safe to do: the payroll can now be
-    // cut to the establishment without leaving a machine uncrewed.
-    for _ in 0..SPARE_CRUSHERS {
-        world.issue_command(PlayerCommand::Fire {
-            category: "manufacturing".into(),
-        });
-    }
-    world.issue_command(PlayerCommand::Fire {
-        category: "logistics".into(),
-    });
-    assert_eq!(
-        world.staff().bill_per_period(),
-        14,
-        "the wage bill falls to the shipped line's"
+        "a stood-down head does not walk out, however deep the arrears"
     );
     assert_eq!(
-        world.staff().pool("logistics").unwrap().unpaid,
-        0,
-        "firing takes the head in arrears first, so the arrears go with it"
+        control.staff().walked_out_last_payday(),
+        1,
+        "the control's clerk, unpaid twice, is gone"
     );
-    assert!(uncrewed(&world).is_empty(), "nothing is left short");
-
-    // One more full bill: every head was employed in part of this period,
-    // so notice pay charges for all of them one last time. That is the
-    // rule, and it is the price of the escape.
-    assert_eq!(world.staff().next_bill(), bill, "notice pay, in full");
-    to_payday_eve(&mut world);
-    ticks(&mut world, 1);
-    assert_eq!(world.staff().last_bill(), bill);
     assert_eq!(
         (
-            world.staff().unpaid_last_payday(),
-            world.staff().walked_out_last_payday()
+            headcount(&world, "logistics"),
+            headcount(&control, "logistics")
         ),
-        (0, 0),
-        "the line kept shipping through the arrears, so the notice bill was met in full"
+        (1, 0)
     );
 
-    // And from here the factory pays its way. Two more paydays, each met
-    // out of income, each one leaving more in the bank than the last.
+    // And the payday after it. For the shutdown: nobody on the payroll, so
+    // nothing billed, so nobody unpaid — the arrears are gone and the crew
+    // is intact. For the control: the six heads it could not pay last time
+    // are on their second strike, and they all walk.
+    to_next_payday(&mut world);
+    to_next_payday(&mut control);
     assert_eq!(
-        world.staff().next_bill(),
-        14,
-        "the smaller bill, from now on"
+        (world.staff().next_bill(), world.staff().unpaid()),
+        (0, 0),
+        "a shutdown settles at a bill of zero and clears what it owed"
     );
-    let mut balance = world.money();
-    for payday in 0..2 {
-        to_payday_eve(&mut world);
-        ticks(&mut world, 1);
-        assert_eq!(
-            (
-                world.staff().unpaid_last_payday(),
-                world.staff().walked_out_last_payday()
-            ),
-            (0, 0),
-            "payday {payday} after the escape must be met in full"
-        );
-        assert!(
-            world.money() > balance,
-            "payday {payday}: the balance must be climbing, was {balance} now {}",
-            world.money()
-        );
-        balance = world.money();
-    }
-    assert!(
-        balance > money_at_the_miss,
-        "the factory is better off than it was at the miss: {balance} vs {money_at_the_miss}"
+    assert_eq!(
+        (
+            headcount(&world, "manufacturing"),
+            headcount(&world, "packaging"),
+            headcount(&world, "logistics")
+        ),
+        (4, 2, 1),
+        "every head that went into the shutdown came out of it"
     );
+    assert_eq!(
+        control.staff().walked_out_last_payday(),
+        6,
+        "the control loses the rest of its crew on their second strike"
+    );
+    assert_eq!(headcount(&control, "manufacturing"), 0);
 
-    // WHAT THE ESCAPE WAS WORTH. The control ran the same ticks carrying
-    // the crew it had built for, and it is still paying for eight crushers
-    // that never crushed anything. Mothballing is not the difference
-    // between living and dying here — a line that out-earns its bill
-    // recovers from one missed payday either way — it is the difference
-    // between paying for what you use and paying for what you own, and
-    // that is a whole establishment and more than half the wage bill.
-    let mut control = untouched;
+    // Reopen. No hiring, no `can_hire` gate, nothing re-trained: the
+    // establishment is back where it was and every head is still there to
+    // fill it.
+    switch_everything_back_on(&mut world);
+    assert_eq!(world.staff().bill_per_period(), SHIPPED_BILL);
+    assert!(uncrewed(&world).is_empty(), "fully crewed again");
+
+    // And the decisive difference, in the one currency that is not money:
+    // the factory that threw the switch MAKES THINGS AGAIN, and the one
+    // that played on cannot, because it has nobody left to make them with.
+    let (was_world, was_control) = (shipped(&world), shipped(&control));
     while control.current_tick() < world.current_tick() {
         common::supply(&mut control);
         control.tick();
     }
-    assert_eq!(
-        control.staff().bill_per_period(),
-        bill,
-        "the control never cut its payroll"
-    );
-    assert_eq!(required(&control, "manufacturing"), 4 + SPARE_CRUSHERS);
+    for _ in 0..2 {
+        to_next_payday(&mut world);
+        to_next_payday(&mut control);
+    }
     assert!(
-        world.money() > control.money(),
-        "the mothballed factory is ahead: {} vs {}",
-        world.money(),
-        control.money()
+        shipped(&world) > was_world,
+        "the reopened line ships again: {was_world} -> {}",
+        shipped(&world)
     );
+    assert_eq!(
+        shipped(&control),
+        was_control,
+        "an empty factory ships nothing, ever"
+    );
+    assert_eq!(
+        (
+            headcount(&control, "manufacturing"),
+            headcount(&control, "logistics")
+        ),
+        (0, 0)
+    );
+    assert!(
+        !control.staff().can_hire("logistics", control.money()),
+        "and it cannot buy its people back: `can_hire` refuses while the balance \
+         cannot cover the next bill, and a factory that ships nothing has no balance"
+    );
+
+    // WHAT THIS DOES NOT CLAIM. The shutdown got the crew and the arrears
+    // back under control; it did not conjure income. Shipping resumes, but
+    // the standing order was lost to missed windows while the line stood
+    // still, and signing it again costs money this balance has not got
+    // (`data/contracts.ron`: "a lost contract is never free to recover").
+    // That residue is issue #85, filed against this same work and left
+    // open deliberately — mothballing is the bill escape, not a cash one.
+    assert_eq!(
+        world
+            .economy_snapshot()
+            .board
+            .iter()
+            .filter(|offer| offer.active)
+            .count(),
+        0,
+        "the standing order did not survive the shutdown — issue #85"
+    );
+}
+
+/// The reviewer's question, asked directly: is it the MOTHBALLING that
+/// moves the money, or was it the firing all along?
+///
+/// Three factories from one identical broke save. One mothballs and fires
+/// nobody; one fires its way down to the same bill and mothballs nothing;
+/// one does neither. The first two both survive — that is the point, they
+/// are alternatives — but they are not the same move, and the difference
+/// is the crew: the factory that fired is left unable to buy its people
+/// back, because [`StaffPools::can_hire`] refuses while the balance cannot
+/// cover the next bill.
+///
+/// Before the stand-down rule these two histories were bit-identical, and
+/// that identity was the proof that mothballing did nothing at all.
+#[test]
+fn mothballing_and_firing_are_not_the_same_move() {
+    let mut broke = broke_on_payday_eve(SHIPPED_BILL - 1);
+    ticks(&mut broke, 401);
+
+    let mut mothballed = World::from_save_ron(&broke.to_save_ron(), recipes()).expect("clone");
+    let mut fired = World::from_save_ron(&broke.to_save_ron(), recipes()).expect("clone");
+
+    mothball_everything(&mut mothballed);
+    for category in ["manufacturing", "packaging", "logistics"] {
+        for _ in 0..headcount(&fired, category) {
+            fired.issue_command(PlayerCommand::Fire {
+                category: category.into(),
+            });
+        }
+    }
+    assert_eq!(
+        (
+            mothballed.staff().bill_per_period(),
+            fired.staff().bill_per_period()
+        ),
+        (0, 0),
+        "two ways to the same run rate"
+    );
+
+    // Three paydays on, both are clear of arrears — and only one of them
+    // still has a factory's worth of people.
+    for _ in 0..3 {
+        to_next_payday(&mut mothballed);
+        to_next_payday(&mut fired);
+    }
+    assert_eq!(
+        (mothballed.staff().unpaid(), fired.staff().unpaid()),
+        (0, 0)
+    );
+    assert_eq!(
+        (
+            headcount(&mothballed, "manufacturing"),
+            headcount(&fired, "manufacturing")
+        ),
+        (4, 0),
+        "the escape that keeps the crew, and the escape that spends it"
+    );
+    assert!(
+        !fired.staff().can_hire("manufacturing", fired.money()),
+        "and the one that spent it cannot buy it back — the trap firing leaves"
+    );
+
+    // Reopening costs the mothballed factory one command per machine and
+    // nothing else.
+    switch_everything_back_on(&mut mothballed);
+    assert_eq!(mothballed.staff().bill_per_period(), SHIPPED_BILL);
+    assert!(uncrewed(&mothballed).is_empty());
+}
+
+/// Standing down is capped by the machinery that is actually off: a head
+/// hired beyond the establishment still costs full wage, so over-hiring is
+/// as expensive as it ever was and mothballing one machine cannot carry a
+/// payroll of ten.
+#[test]
+fn only_the_crew_of_mothballed_machinery_comes_off_the_payroll() {
+    let mut world = running_line(200);
+    for _ in 0..3 {
+        world.issue_command(PlayerCommand::Hire {
+            category: "manufacturing".into(),
+        });
+    }
+    assert_eq!(headcount(&world, "manufacturing"), 7);
+    assert_eq!(
+        world.staff().bill_per_period(),
+        SHIPPED_BILL + 6,
+        "three surplus heads at wage 2"
+    );
+
+    // The vat is a two-cook machine, so switching it off stands two down —
+    // not the three that are surplus.
+    let vat = tile_of(&world, "cooking_vat");
+    mothball(&mut world, vat, true);
+    let manufacturing = world.staff().pool("manufacturing").unwrap();
+    assert_eq!(
+        (manufacturing.stood_down, manufacturing.on_payroll()),
+        (2, 5)
+    );
+    assert_eq!(
+        world.staff().bill_per_period(),
+        SHIPPED_BILL + 2,
+        "the surplus is still paid in full; only the vat's two came off"
+    );
+
+    // And a head fired out of the surplus is one less head to pay, not a
+    // second saving on the same two.
+    world.issue_command(PlayerCommand::Fire {
+        category: "manufacturing".into(),
+    });
+    assert_eq!(world.staff().pool("manufacturing").unwrap().stood_down, 2);
+    assert_eq!(world.staff().bill_per_period(), SHIPPED_BILL);
 }
 
 // ---------------------------------------------------------------------
@@ -641,29 +892,44 @@ fn the_set_mothballed_command_round_trips_through_json() {
     ));
 }
 
-/// The command is a machine's. A hopper, a tank, a belt and a pipe ask for
-/// nobody, so there is nothing to release; the DOCK asks for one clerk but
-/// is the only route product has to money, so switching it off is never
-/// the move and the escape hatch for a spare one is `Remove`, which hands
-/// it back to the shed with nothing lost but its position
-/// (`docs/DECISIONS.md`, 2026-09-20). Every one of them is refused rather
-/// than silently recording a switch nothing reads.
+/// **The rule is the crew list, not the Rust type.** A placement may be
+/// switched off iff its kind asks for a crew in `machines.ron`: the
+/// command exists to take wages off the bill (issue #19), so switching off
+/// a hopper, a tank, a belt or a pipe would cost production and save
+/// nothing, while the DOCK — which does draw a clerk — must be switchable,
+/// or a factory with no income can never get its bill to zero and never
+/// climbs out of arrears (`docs/DECISIONS.md`, 2026-09-20). Asking the
+/// content keeps the answer in `machines.ron` where a new crewed kind
+/// inherits it for free.
+///
+/// The refusals are silent and byte-exact: a refused command must leave the
+/// world identical rather than record a switch nothing reads.
 #[test]
-fn only_a_machine_can_be_mothballed() {
+fn only_a_crewed_placement_can_be_mothballed() {
     let mut world = running_line(600);
     let hopper = tile_of(&world, "hopper");
     let tank = tile_of(&world, "fluid_tank");
-    let dock = tile_of(&world, "dock");
+    let belt = tile_of(&world, "belt");
+    let pipe = tile_of(&world, "pipe");
     let before = world.to_save_ron();
-    for tile in [hopper, tank, dock, (-999, -999)] {
+    for tile in [hopper, tank, belt, pipe, (-999, -999)] {
         mothball(&mut world, tile, true);
     }
-    assert_eq!(world.to_save_ron(), before, "nothing was recorded");
+    assert_eq!(
+        world.to_save_ron(),
+        before,
+        "a kind that asks for nobody has nothing to stand down, so nothing is recorded"
+    );
+
+    // The dock is the other side of the same rule.
+    let dock = tile_of(&world, "dock");
+    mothball(&mut world, dock, true);
     assert_eq!(
         required(&world, "logistics"),
-        1,
-        "the dock still wants its clerk"
+        0,
+        "a switched-off dock stops asking for its clerk"
     );
+    assert_ne!(world.to_save_ron(), before, "and the switch is persisted");
 }
 
 /// `World::new` builds nothing and the registries are the shipped ones —

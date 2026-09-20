@@ -165,6 +165,12 @@ pub struct Dock {
     /// behind it backs up. On the wire as `DockSnapshot::understaffed`;
     /// saved (`save.rs`).
     understaffed: bool,
+    /// Whether the player has MOTHBALLED this dock (issue #19): switched
+    /// off, so it claims no clerk, ships nothing and takes nothing off the
+    /// belt behind it. Persisted (`save.rs`), and the reason a factory
+    /// that cannot make payroll can get its wage bill all the way to zero
+    /// — the dock is the last thing on the line still asking for a crew.
+    mothballed: bool,
 }
 
 impl Dock {
@@ -173,6 +179,7 @@ impl Dock {
             buffer: Inventory::new(capacity_per_item),
             shipped_total: 0,
             understaffed: false,
+            mothballed: false,
         }
     }
 
@@ -188,12 +195,25 @@ impl Dock {
         contents: Vec<(ItemId, u32)>,
         shipped_total: u32,
         understaffed: bool,
+        mothballed: bool,
     ) -> Self {
         Self {
             buffer: Inventory::restore(capacity_per_item, contents),
             shipped_total,
             understaffed,
+            mothballed,
         }
+    }
+
+    /// Whether the player has switched this dock off (issue #19).
+    pub fn mothballed(&self) -> bool {
+        self.mothballed
+    }
+
+    /// `World::try_set_mothballed` throws the switch. Nothing else may:
+    /// this is a player command, not a consequence of the line's state.
+    pub(crate) fn set_mothballed(&mut self, off: bool) {
+        self.mothballed = off;
     }
 
     pub fn understaffed(&self) -> bool {

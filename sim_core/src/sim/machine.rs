@@ -391,6 +391,16 @@ impl Machine {
             // still, progress is never lost — so returning a machine to
             // service resumes the batch it was in the middle of.
             if let Some(process) = self.process.as_mut() {
+                // This is the one place a process advancing on its own DOES
+                // dirty the chunk, against the rule in this method's doc, and
+                // it has to: Godot derives progress from `start_tick` against
+                // the live tick count, so a paused batch whose `start_tick`
+                // moved silently would keep filling its bar on screen while
+                // the sim stood still. The cost is one chunk re-read per tick
+                // per mothballed machine that is holding a part-finished
+                // batch — bounded by how many the player switched off
+                // mid-craft, and it stops the moment that batch is resumed
+                // and finished or the machine is emptied.
                 process.start_tick += 1;
                 changed = true;
             }

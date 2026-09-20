@@ -517,6 +517,10 @@ pub struct SavedDock {
     /// `refused_by`. `#[serde(default)]`.
     #[serde(default)]
     pub understaffed: bool,
+    /// `Dock::mothballed` — the player's switch, same shape and same
+    /// `#[serde(default)]` reason as `SavedMachine::mothballed`.
+    #[serde(default)]
+    pub mothballed: bool,
 }
 
 /// One contract's live state, matched to content by `id` on load.
@@ -905,6 +909,7 @@ impl World {
                         contents: dock.slots().to_vec(),
                         shipped_total: dock.shipped_total(),
                         understaffed: dock.understaffed(),
+                        mothballed: dock.mothballed(),
                     })
                 }
                 _ => {
@@ -1505,6 +1510,7 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                             saved.contents.clone(),
                             saved.shipped_total,
                             saved.understaffed,
+                            saved.mothballed,
                         ),
                     )
                     .expect("the entity was just placed");
