@@ -238,6 +238,12 @@
 #
 #   scripts/screenshot-scene.sh out.png 1600x900 --build --config=-1,0 --contents 1
 #
+# --contents-refill on top of that buys the fluid the tank was just declared
+# to hold and pumps it back through the run, so the picker's note is shot
+# saying what a *second* switch would destroy ("switching destroys 89.7 units
+# — this tank and the run it feeds"). Without it the note is shot in its
+# unquantified form, because pressing the picker slot is the destructive act.
+#
 # (the demo line's hopper stands at (-1, 0); note the `=` form, since a
 # value starting with `-` would otherwise be read as another flag. Note also
 # that the RESOLUTION IS POSITIONAL and must be given whenever any flag is:
@@ -254,7 +260,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--item-gallery] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--full-dock [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N]] [--closeup TX,TY[,SIZE]]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--item-gallery] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--full-dock [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

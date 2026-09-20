@@ -34,7 +34,19 @@ See [WORKFLOW.md](WORKFLOW.md).
   `#[serde(default)]` addition is not a shape change" window `save.rs` opened
   closed when that batch shipped, and this crate rejects rather than migrates
   everywhere else (ARCHITECTURE §4). Cost is bounded because no release has
-  ever written a save. Full record in `docs/DECISIONS.md`.
+  ever written a save. **Amended in review of the pull request:** changing a
+  declaration destroys the **pipe run's** fluid as well as the tank's
+  (`World::try_set_tank_fluid` purges every run the tank discharges into
+  *before* the recompute, which carries volumes across by tile and would
+  otherwise hand sixty bought units of vinegar back as liquid smoke). The
+  fluid is destroyed, not credited or moved, and the picker's note names the
+  total it will destroy before the click — declaring is a consented
+  destructive act, not a refused one, because refusing it while the run is
+  non-empty leaves a mis-declared tank with no way to drain its run. And a
+  declaration no machine on the run has any recipe for makes that run read
+  `Unnameable` rather than `Carries`, so the blame lands on the tank the
+  player mis-declared instead of on the machine's outlet. Full record in
+  `docs/DECISIONS.md`.
 - 2026-09-16 **The game is called CONDIMENTAL, and so is the repo.** All-caps
   wherever it is the title: the menu's `title.text`, `config/name`, the
   design-doc headings. The GitHub repo was renamed the same day —

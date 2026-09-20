@@ -116,6 +116,48 @@ matches what code comments and data files cite.
   `validate_chain`, because "this kind has no footprint" is the more basic
   fault and should be the message the player gets.
 
+  **Amended in review of the pull request: a declaration change destroys the
+  run as well as the tank.** The first cut emptied only the `FluidTank`, and
+  that was measurably not enough: `recompute_topology` rebuilds the fluid
+  networks and *carries volumes across by tile*, so the pipe run the tank
+  feeds kept everything it held and the rebuild simply renamed it. The
+  reviewer measured 59.9968 units of bought vinegar becoming liquid smoke, on
+  shipped content, through the shipped picker, never purchased. Two fixes
+  were possible. **Refusing the switch while the run is non-empty** was
+  considered and rejected: a player who mis-declares a tank would then have no
+  way to drain the run they no longer want — the machines on it will not drink
+  the wrong fluid, so nothing empties it, and the mistake is permanent. So the
+  emptying is carried *through* the recompute instead:
+  `World::try_set_tank_fluid` calls `purge_runs_fed_by`, which finds every
+  network the tank discharges into via `topology.tank_discharges`, calls
+  `FluidNetwork::purge` on each and dirties the pipe tiles, all *before*
+  `recompute_topology` runs, so the rebuild carries zeroes across. The volume
+  is **destroyed, not credited and not moved** — there is no refund and no
+  transfer to a neighbouring run; `switching_a_declared_tank_purges_the_run_it_fed_rather_than_relabelling_it`
+  asserts conservation in the negative by summing every *other* run and tank
+  before and after and requiring the total to be unchanged. Destruction is
+  acceptable only because it is consented to, which is the UI half of the
+  rule: the picker's note names what the click will cost before it happens —
+  "switching destroys 89.7 units — this tank and the run it feeds" when there
+  is something to lose, and the unquantified "switching empties this tank and
+  the run it feeds" when there is not (`main.gd`'s `_tank_picker_note` /
+  `_tank_doomed_volume`; section 10c of `test_config_panel.gd` computes its
+  expected number straight off the wire, because an assertion built from the
+  same helper it is testing passes even when the helper ignores the run — that
+  was tried, and it did).
+
+  **And an unusable declaration blames the tank, not the outlet.** The code
+  claimed a declaration no machine on the run could use would read
+  `Unnameable`; it did not — the run read `Carries` and the machine
+  downstream stalled, so the blame landed on an innocent outlet. Step 2b of
+  `resolve_network_fluids` now clears a declared run's candidate set when no
+  recipe of any machine kind drinking from it takes that fluid, which makes
+  the run read `Unnameable` and points the player at the tank they just
+  mis-declared. It tests the machine **kind**'s recipes, not the layout as it
+  stands this instant, so a run does not flicker `Unnameable` while a line is
+  half laid; a run nothing drinks from yet, or one fed by a machine outlet, is
+  left alone.
+
 - 2026-09-16: **The game is called CONDIMENTAL.** "sauce-factory was just a
   temporary name, ive now come up with the name 'CONDIMENTAL'". The owner's
   call, and the only naming decision this project has ever actually made —

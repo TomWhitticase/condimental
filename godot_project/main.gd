@@ -9988,7 +9988,7 @@ func _update_config_tank(key: String) -> void:
 	# below says which of the two the panel is showing.
 	var declared := _declared_fluid_of(snapshot)
 	_update_config_picker(declared)
-	_config_picker_note.text = _tank_picker_note(declared, fluid)
+	_config_picker_note.text = _tank_picker_note(declared, fluid, _tank_doomed_volume(snapshot))
 
 
 ## A tank's declared fluid — `null` on the wire, and "" here, for every tank
@@ -9999,17 +9999,51 @@ func _declared_fluid_of(snapshot: Dictionary) -> String:
 	return String(value) if value != null else ""
 
 
-## What the picker says under a TANK's slots, in the three states a tank can
+## What the picker says under a TANK's slots, in the four states a tank can
 ## be in. The undeclared-but-named case is the one worth spelling out: the
-## panel is showing an answer the factory derived, which the player is free
-## to overrule and which they have to overrule if they want a second raw
-## fluid on a second run (issue #43).
-func _tank_picker_note(declared: String, carried: String) -> String:
+## panel is showing an answer the factory derived, and the player is free to
+## overrule it — and has to overrule it if they want a second raw fluid on a
+## second run (issue #43).
+##
+## The declared case names **what switching will destroy, before the click**,
+## because switching destroys more than this panel is showing. It empties the
+## tank, which is the rule a hopper's retarget already has, and it also purges
+## the pipe run the tank feeds (`World::try_set_tank_fluid`) — that fluid was
+## bought and it is gone. Found in review of the pull request that added
+## declaring: the sim was silently relabelling the run instead, and the fix
+## makes a destructive act destructive, so the player has to be told first
+## rather than left to discover it from a number that dropped.
+func _tank_picker_note(declared: String, carried: String, doomed: float) -> String:
 	if declared != "":
-		return "switching empties the tank"
+		if doomed > 0.0:
+			return "switching destroys %.1f units — this tank and the run it feeds" % doomed
+		return "switching empties this tank and the run it feeds"
 	if carried != "":
 		return "read from the pipe run — pick one to say for certain"
 	return "nothing can name this run — pick what this tank holds"
+
+
+## How much fluid a declaration change would destroy: what the tank holds
+## plus what the run it discharges into holds. Both are polled snapshots, so
+## this is a read, never a second source of truth — the sim does the
+## destroying and `_tank_run_volume` only reports what is standing in the way.
+func _tank_doomed_volume(snapshot: Dictionary) -> float:
+	return float(snapshot.get("quantity", 0.0)) + _tank_run_volume(snapshot)
+
+
+## The volume in the pipe run this tank discharges into, or 0.0 when it is
+## not connected to one. `pipe_tile` is the tile the tank pours into;
+## `_pipe_tiles` turns that into the run's index in the polled fluid array,
+## which is the same lookup hover uses.
+func _tank_run_volume(snapshot: Dictionary) -> float:
+	var pipe_tile = snapshot.get("pipe_tile")
+	if pipe_tile == null:
+		return 0.0
+	var found: Vector2i = _pipe_tiles.get(_tile_key(_pair_to_tile(pipe_tile)), Vector2i(-1, -1))
+	if found.x < 0 or found.x >= _last_fluid.size():
+		return 0.0
+	var run: Dictionary = _last_fluid[found.x]
+	return float(run.get("total_volume", 0.0))
 
 
 ## Why FILL on a hopper's panel is off, or "" if it is not. The per-building

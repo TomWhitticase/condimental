@@ -610,6 +610,30 @@ impl FluidNetwork {
         }
     }
 
+    /// Destroys everything this network holds, reporting how much was
+    /// destroyed.
+    ///
+    /// The counterpart of [`FluidTank::declare`]'s emptying, and it exists
+    /// for the identical reason one tile further downstream. Emptying the
+    /// tank alone is only half the job: `World::recompute_topology` carries
+    /// pipe volumes across **by tile**, as live play requires, so the sixty
+    /// units already discharged into the run survive the rebuild and start
+    /// answering to the new name — the exact relabelling `declare`'s doc
+    /// says the emptying exists to prevent. The volume is **destroyed**, not
+    /// moved: nothing is credited anywhere, and the fluid was bought once
+    /// and is gone (see `World::try_set_tank_fluid`).
+    ///
+    /// `pub(crate)` beside [`Self::restore_volume_at`] and for its reason:
+    /// volume otherwise only moves through the four metered paths, and a
+    /// declaration change is the one player action allowed to vaporize it.
+    pub(crate) fn purge(&mut self) -> Fx {
+        let destroyed = self.total_volume();
+        for segment in &mut self.segments {
+            segment.volume = Fx::ZERO;
+        }
+        destroyed
+    }
+
     /// Which segment sits on `tile`, if any — how `world.rs` turns a tile
     /// (a tank's discharge target, a machine's tap) into an index into this
     /// network.

@@ -3709,15 +3709,40 @@ impl World {
     }
 
     /// [`PlayerCommand::SetTankFluid`] — `try_set_hopper_item`'s twin,
-    /// against a tank, with one extra step at the end.
+    /// against a tank, with two extra steps at the end.
     ///
-    /// That step is the topology recompute. `sim_core/CLAUDE.md` says the
+    /// The last is the topology recompute. `sim_core/CLAUDE.md` says the
     /// pass runs on `Place`/`Remove`/`Rotate` and never per tick, and this
     /// does not weaken that rule: it is the same rule, applied to the same
     /// kind of thing. A declared fluid is a *seed* of
     /// [`resolve_network_fluids`], so changing it changes what the runs in
     /// this world carry exactly as moving a machine does, and a discrete
     /// player action is precisely what the pass is allowed to cost.
+    ///
+    /// **The one before it is what makes the emptying honest.**
+    /// [`FluidTank::declare`] zeroes the tank so that the old fluid is not
+    /// relabelled as the new one — and on its own that is only true of the
+    /// tank. The recompute carries pipe volumes across by tile (it must:
+    /// a player laying one more tile of pipe would otherwise drain the run),
+    /// so whatever the tank had already discharged into the run survived the
+    /// rebuild and came back under the new name. Measured on shipped
+    /// content through the shipped picker: sixty units of vinegar became
+    /// sixty units of liquid smoke, never bought, on one click.
+    ///
+    /// So the emptying is carried through: every run this tank discharges
+    /// into is [purged](FluidNetwork::purge) in the same breath, *before*
+    /// the recompute, so the rebuild carries zeroes across rather than a
+    /// lie. The fluid is destroyed, not moved — nothing is credited, no
+    /// stock returns, and `ProductionLedger` is not told a thing was used,
+    /// because nothing used it.
+    ///
+    /// That the destruction is **larger than the tank** is why
+    /// `main.gd`'s picker says what will be lost before the click rather
+    /// than after: declaring is a destructive act, and the player consents
+    /// to it. Refusing the switch while the run still holds the old fluid
+    /// was the alternative, and it is the worse game — it leaves a player
+    /// who mis-declared a tank with no way to drain the run they no longer
+    /// want.
     fn try_set_tank_fluid(&mut self, tile: TileCoord, fluid: &str) -> bool {
         if !self.raw_fluids.iter().any(|raw| raw == fluid) {
             return false;
@@ -3732,9 +3757,42 @@ impl World {
             return false;
         }
         drop(tank);
+        self.purge_runs_fed_by(entity);
         self.mark_placement_dirty(entity);
         self.recompute_topology();
         true
+    }
+
+    /// Destroys what every run `tank` discharges into is holding, and marks
+    /// each drained pipe tile so the change reaches the screen.
+    ///
+    /// Walks `tank_discharges` rather than the tank's neighbours because
+    /// that list is already the answer to "which network, which segment",
+    /// computed by the topology pass — and a tank facing a junction may
+    /// legitimately have more than one entry. See
+    /// [`Self::try_set_tank_fluid`] for why this exists at all.
+    fn purge_runs_fed_by(&mut self, tank: Entity) {
+        let networks: BTreeSet<usize> = self
+            .topology
+            .tank_discharges
+            .iter()
+            .filter(|&&(entity, _, _)| entity == tank)
+            .map(|&(_, network, _)| network)
+            .collect();
+        for network in networks {
+            if self.topology.networks[network].purge() > Fx::ZERO {
+                let tiles: Vec<TileCoord> = self.topology.networks[network]
+                    .segments()
+                    .iter()
+                    .map(|segment| segment.tile)
+                    .collect();
+                for tile in tiles {
+                    if let Some(&pipe) = self.topology.grid.get(&tile) {
+                        self.mark_placement_dirty(pipe);
+                    }
+                }
+            }
+        }
     }
 
     /// Which of `candidates` a tile-addressed command applies to: the one
@@ -5012,14 +5070,14 @@ fn resolve_network_fluids(
     // into one two-fluid machine are told apart by the player saying which
     // drum is which, because nothing about the geometry ever could.
     //
-    // It **replaces** the set rather than intersecting with it, so that a
+    // It **replaces** the set rather than intersecting with it, so a
     // declared tank names its run even when no machine is plumbed to it
-    // yet — the player can fill a tank before building what drinks from it,
-    // which they could not before. Disagreement is not silently resolved:
-    // two tanks declaring different fluids into one run leave two ids and
-    // the run reads `Ambiguous`, and a declaration no machine there can use
-    // narrows to nothing and reads `Unnameable`. Both are the graceful
-    // unnamed state with a reason attached, which is what step 3 is for.
+    // yet — a player can fill a tank before building what drinks from it,
+    // as they could not before. Disagreement is not silently resolved:
+    // two tanks declaring different fluids into one run leave two ids on
+    // the run and it reads `Ambiguous`. A declaration no machine on the run
+    // can use is caught by step 2b below, which is where a statement the
+    // layout contradicts is turned back into an unnamed run.
     for (ids, declared) in possible.iter_mut().zip(declared) {
         if !declared.is_empty() {
             *ids = declared.clone();
@@ -5061,6 +5119,52 @@ fn resolve_network_fluids(
             break;
         }
         possible = narrowed;
+    }
+
+    // 2b. A declaration the machines on the run cannot use is a
+    // contradiction, and it is reported on the run the player declared.
+    //
+    // Step 1 replaces the set and step 2 never touches it again — a machine
+    // with no feasible recipe `continue`s rather than emptying its runs — so
+    // a tank declared as something the machine it feeds cannot drink came
+    // out `Carries`, confidently named, while the *outlet* run took the
+    // blame for the stall. That is the wrong tile: the mistake is the
+    // declaration, and issue #54's rule is that a run the simulation cannot
+    // make sense of says so rather than pointing somewhere else.
+    //
+    // The test is about the machine's **kind**, not about today's
+    // half-built layout: a run is contradicted only when no recipe of any
+    // machine drawing from it takes the declared fluid at all. A recipe
+    // that is merely infeasible right now — because the player has not
+    // finished plumbing its other input — must not condemn the
+    // declaration, or the run would flicker Unnameable while a line is
+    // being laid. A run nothing drinks from is left alone for the same
+    // reason: declaring a tank before building is explicitly allowed.
+    for network in 0..possible.len() {
+        if declared[network].is_empty() || possible[network].is_empty() {
+            continue;
+        }
+        let drinkers: Vec<&Plumbing> = plumbing
+            .iter()
+            .filter(|machine| machine.inputs.contains(&network))
+            .collect();
+        // A run some machine fills is not the player's to contradict: the
+        // disagreement there is between a declaration and a product, which
+        // the narrowing step already has its own answer for.
+        if drinkers.is_empty() || plumbing.iter().any(|m| m.output == Some(network)) {
+            continue;
+        }
+        let usable = drinkers.iter().any(|machine| {
+            recipes.for_machine(&machine.kind).any(|recipe| {
+                recipe
+                    .fluid_inputs
+                    .iter()
+                    .any(|(fluid, _)| possible[network].contains(fluid))
+            })
+        });
+        if !usable {
+            possible[network].clear();
+        }
     }
 
     // 3. Naming, with its reason (issue #54). Exactly one id left names the

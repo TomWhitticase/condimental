@@ -30,7 +30,8 @@
 #     derived,
 #   * declaring a tank's fluid from that picker (issue #43) reaches the
 #     simulation, marks the slot, retitles the panel and stops the tank
-#     reading as unconnected,
+#     reading as unconnected, and the note beneath it names how much fluid
+#     switching would destroy — the tank's AND the run's — before the click,
 #   * SPACE, V and Q no longer touch any hopper or tank.
 #
 # What it does not assert is how the panel LOOKS — that is
@@ -88,6 +89,22 @@ func _tank_snapshot(tile: Vector2i) -> Dictionary:
 	return {}
 
 
+## What the pipe run this tank discharges into is holding, read straight off
+## the wire rather than through `main`'s cached poll — the panel's warning is
+## the thing under test, so its expected number must not be computed by the
+## same function that produces it.
+func _run_volume_fed_by(tank: Dictionary) -> float:
+	var pipe_tile = tank.get("pipe_tile")
+	if pipe_tile == null:
+		return 0.0
+	for run in JSON.parse_string(main.sim.fluid_snapshots_json()):
+		for segment in run.get("segments", []):
+			var at: Array = segment["tile"]
+			if int(at[0]) == int(pipe_tile[0]) and int(at[1]) == int(pipe_tile[1]):
+				return float(run.get("total_volume", 0.0))
+	return 0.0
+
+
 func _owned(item: String) -> int:
 	return int(main._owned_ingredient_counts().get(item, 0))
 
@@ -103,6 +120,11 @@ func _press_key(keycode: Key) -> void:
 ## frames, so it polls the same way by hand after anything it changes.
 func _repoll() -> void:
 	main._refresh_buffers()
+	# `_process` re-reads the fluid networks every frame too, and since
+	# issue #43's purge the tank panel's warning counts the run's volume as
+	# well as the tank's — so a poll that skipped this would read a stale
+	# number that no player could ever see.
+	main._update_fluid_network()
 	main._update_config_panel()
 
 
@@ -551,9 +573,52 @@ func _run_checks() -> void:
 	if main._config_title.text != "Fluid Tank — %s" % main._item_display_name(declared_fluid):
 		_fail("a declared tank's title reads '%s'" % main._config_title.text)
 		return
-	if main._config_picker_note.text != "switching empties the tank":
-		_fail("a declared tank's picker note reads '%s'" % main._config_picker_note.text)
+	# The note names what switching would destroy, before the click. This
+	# tank is empty and feeds no run, so there is nothing to warn about yet.
+	if main._config_picker_note.text != "switching empties this tank and the run it feeds":
+		_fail("a declared empty tank's picker note reads '%s'" % main._config_picker_note.text)
 		return
+	# --- 10c. The warning counts the run, not just the tank -----------------
+	# Switching a declaration purges the pipe run as well as the tank (the
+	# sim would otherwise relabel what is already in the run as the new
+	# fluid — found in review of this ticket's pull request). That is more
+	# than this panel shows a level for, so the note says how much goes
+	# BEFORE the click rather than leaving the player to notice a number
+	# that dropped.
+	main._config_click_at_tile(TANK)
+	var fluid_slot: int = main._tank_fluids.find(fluid)
+	if fluid_slot < 0:
+		_fail("the tank picker does not offer '%s', which is what its run carries" % fluid)
+		return
+	main._on_config_picker_pressed(fluid_slot)
+	Layouts.stock(main.sim, fluid, 256)
+	# FILL buys one crate at a time and the mixer drinks what reaches it, so
+	# fill to the brim and let only a few ticks pass: the point is a tank AND
+	# a run that both hold something when the picker is next drawn.
+	for _i in range(4):
+		main._on_config_fill_pressed()
+	for _i in range(5):
+		main.sim.tick()
+	main._apply_dirty_chunks()
+	_repoll()
+	var topped_up := _tank_snapshot(TANK)
+	var in_tank := float(topped_up.get("quantity", 0.0))
+	var in_run := _run_volume_fed_by(topped_up)
+	if in_tank <= 0.0 or in_run <= 0.0:
+		_fail("tank holds %.1f and its run %.1f — the warning proves nothing" % [in_tank, in_run])
+		return
+	# Spelled out from the wire, not from `_tank_doomed_volume`: a warning
+	# that counted only the tank would match itself and pass while lying.
+	var warning := "switching destroys %.1f units — this tank and the run it feeds" % (
+		in_tank + in_run
+	)
+	if main._config_picker_note.text != warning:
+		_fail("a filled tank's note reads '%s', expected '%s'" % [
+			main._config_picker_note.text, warning
+		])
+		return
+
+	main._config_click_at_tile(LONE_TANK)
 	var marked: Array = []
 	for slot in main._config_picker_slots:
 		if slot["mark"].visible:
@@ -595,5 +660,5 @@ func _run_checks() -> void:
 			_fail("the legend still advertises a removed fill/contents key: %s" % legend)
 			return
 
-	print("CONFIG_PANEL_OK: click opens/toggles/retargets/closes, FILL per building with reasons, AUTO-FILL round-trips and keeps a %d-unit hopper and a %.0f-unit tank full, picker retargets a placed hopper and declares a tank's fluid, ESC/menus/modes/removal close it, unplumbed tank refused, SPACE/V/Q inert" % [capacity, tank_capacity])
+	print("CONFIG_PANEL_OK: click opens/toggles/retargets/closes, FILL per building with reasons, AUTO-FILL round-trips and keeps a %d-unit hopper and a %.0f-unit tank full, picker retargets a placed hopper and declares a tank's fluid after warning what switching destroys, ESC/menus/modes/removal close it, unplumbed tank refused, SPACE/V/Q inert" % [capacity, tank_capacity])
 	quit(0)

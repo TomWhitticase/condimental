@@ -213,6 +213,19 @@ Godot's user directory, not the repo, so this pass cannot do it for you.
 spelling it, so the next bump does not quietly turn its refusal case into
 "loads fine".
 
+**Declaring is destructive, and says so first.** Review caught that emptying
+only the tank was not enough: `recompute_topology` carries pipe volumes
+across by tile, so the run the tank feeds was silently *relabelled* — sixty
+bought units of vinegar came back as liquid smoke. A declaration change now
+purges the tank *and* every run it discharges into, before the recompute, and
+the fluid is destroyed rather than credited or moved; the config picker names
+the total it is about to destroy so the player consents to it instead of
+discovering it. Refusing the switch while the run holds something was the
+other option and was rejected: it strands a mis-declared tank with no way to
+drain its run. A declaration no machine on the run has a recipe for now makes
+that run read `Unnameable` rather than `Carries`, so the blame lands on the
+tank the player just mis-declared instead of on the machine's outlet.
+
 ### 2026-09-20 — Three issues off the board: names, fluid colour, honest frames
 
 A no-new-features pass over the deferred queue. Nothing here changes what

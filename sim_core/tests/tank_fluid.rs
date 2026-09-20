@@ -209,6 +209,27 @@ fn volume_at(world: &World, tile: (i32, i32)) -> f64 {
         .unwrap_or_else(|| panic!("no pipe run covers {tile:?}"))
 }
 
+/// Every drop of fluid in the world *except* the run covering `run_tile`
+/// and the tank at `tank_tile` — the two a declaration is allowed to
+/// empty. Conservation is the point: a purge must **destroy** what it
+/// takes, and a number that goes up here would mean it was quietly moved
+/// somewhere else instead.
+fn fluid_elsewhere(world: &World, run_tile: (i32, i32), tank_tile: (i32, i32)) -> f64 {
+    let runs: f64 = world
+        .fluid_snapshots()
+        .into_iter()
+        .filter(|run| !run.segments.iter().any(|segment| segment.tile == run_tile))
+        .map(|run| run.total_volume)
+        .sum();
+    let tanks: f64 = world
+        .fluid_tank_snapshots()
+        .into_iter()
+        .filter(|tank| tank.tile != tank_tile)
+        .map(|tank| tank.quantity)
+        .sum();
+    runs + tanks
+}
+
 /// Keeps both tanks topped up and runs the line.
 fn run_for(world: &mut World, ticks: u32) {
     for _ in 0..ticks {
@@ -424,6 +445,64 @@ fn switching_a_declared_tank_to_another_fluid_empties_it() {
     assert_eq!(tank_at(&world, SOUTH_TANK).quantity, filled);
 }
 
+/// **The emptying carries through the pipe run, or it is not an emptying.**
+///
+/// `FluidTank::declare` zeroes the tank so the old fluid is not relabelled
+/// as the new one. On its own that is only true of the tank: the topology
+/// recompute a declaration triggers carries pipe volumes across *by tile*,
+/// so everything the tank had already discharged into the run survived the
+/// rebuild and came back answering to the new name. Sixty units of vinegar
+/// became sixty units of sugar, never bought — the exact relabelling the
+/// emptying exists to prevent, one tile downstream of where it was
+/// prevented. Found in adversarial review of the pull request that added
+/// the declaration, and reproduced there on shipped content through the
+/// shipped picker.
+///
+/// The fluid must be **destroyed**, not moved: the player bought it, it is
+/// gone, and no other run or tank in the world gains a drop.
+#[test]
+fn switching_a_declared_tank_purges_the_run_it_fed_rather_than_relabelling_it() {
+    let mut world = declared_line();
+    run_for(&mut world, 200);
+
+    let run_before = volume_at(&world, SOUTH_RUN);
+    let elsewhere_before = fluid_elsewhere(&world, SOUTH_RUN, SOUTH_TANK);
+    assert!(
+        run_before > 0.0,
+        "the south run must be holding vinegar, or this proves nothing"
+    );
+    assert_eq!(naming_at(&world, SOUTH_RUN).0.as_deref(), Some("vinegar"));
+    assert!(tank_at(&world, SOUTH_TANK).quantity > 0.0);
+
+    declare(&mut world, SOUTH_TANK, "sugar");
+
+    assert_eq!(
+        naming_at(&world, SOUTH_RUN).0.as_deref(),
+        Some("sugar"),
+        "the declaration is what the run is named from, so the name does move"
+    );
+    assert_eq!(
+        volume_at(&world, SOUTH_RUN),
+        0.0,
+        "but the vinegar in the run does not come with it"
+    );
+    assert_eq!(tank_at(&world, SOUTH_TANK).quantity, 0.0);
+    assert_eq!(
+        fluid_elsewhere(&world, SOUTH_RUN, SOUTH_TANK),
+        elsewhere_before,
+        "destroyed, not moved: nothing anywhere else in the world gained a drop"
+    );
+
+    // And the line runs on from empty rather than being wedged by the
+    // purge: the tank refills from stock and the run fills with sugar.
+    run_for(&mut world, 200);
+    assert!(
+        volume_at(&world, SOUTH_RUN) > 0.0,
+        "the purged run must fill again with what was declared"
+    );
+    assert_eq!(naming_at(&world, SOUTH_RUN).0.as_deref(), Some("sugar"));
+}
+
 /// Two tanks discharging into one run, declaring different fluids, is
 /// ambiguous rather than first-one-wins. A declaration is a fact the
 /// resolver is given, so two contradictory facts are still no answer — and
@@ -457,6 +536,66 @@ fn the_set_tank_fluid_command_parses_from_json() {
         tank_at(&world, SOUTH_TANK).declared.as_deref(),
         Some("vinegar")
     );
+}
+
+/// A declaration the machines on the run cannot use says so **on that
+/// run**, rather than naming it confidently and letting the stall surface
+/// somewhere else.
+///
+/// Declaring replaces the candidate set and the narrowing step skips a
+/// machine with no feasible recipe, so before step 2b existed a mixer fed
+/// by a tank declared `liquid_smoke` — which no mixer recipe draws — left
+/// the feed run reading `Carries liquid_smoke` while the mixer's *outlet*
+/// took the blame. No panic and no wrong craft, but the panel pointed the
+/// player at the wrong tile. Issue #54's rule is that a run the simulation
+/// cannot make sense of says so.
+///
+/// Shipped content on purpose: `liquid_smoke` is raw, so it is offered by
+/// the picker on every tank, and the cooking vat drinks it — it is the
+/// mixer that cannot.
+#[test]
+fn a_declaration_no_machine_on_the_run_can_use_is_unnameable() {
+    let recipes = RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
+        .expect("data/recipes.ron must parse");
+    let mut world = funded(recipes);
+    for &(kind, tile, direction) in LAYOUT {
+        if tile == NORTH_RUN || tile == NORTH_TANK {
+            continue;
+        }
+        place(&mut world, kind, tile, direction);
+    }
+
+    // Undeclared, the graph names it: vinegar is the one raw fluid a mixer
+    // draws, so the run a tank feeds it through can hold nothing else.
+    let (fluid, naming, _) = naming_at(&world, SOUTH_RUN);
+    assert_eq!(fluid.as_deref(), Some("vinegar"));
+    assert_eq!(naming, PipeNaming::Carries);
+
+    declare(&mut world, SOUTH_TANK, "liquid_smoke");
+
+    let (fluid, naming, candidates) = naming_at(&world, SOUTH_RUN);
+    assert_eq!(
+        naming,
+        PipeNaming::Unnameable,
+        "the mixer has no recipe that drinks liquid smoke, so the player's \
+         statement and the layout contradict each other"
+    );
+    assert_eq!(fluid, None, "and a contradicted run carries nothing");
+    assert!(
+        candidates.is_empty(),
+        "nothing survives the contradiction, which is what Unnameable means"
+    );
+
+    // The tank still reports what the player said — the declaration is not
+    // thrown away, so the panel can show the mistake and let them fix it.
+    assert_eq!(
+        tank_at(&world, SOUTH_TANK).declared.as_deref(),
+        Some("liquid_smoke")
+    );
+
+    // Putting it back is the fix, and it takes effect immediately.
+    declare(&mut world, SOUTH_TANK, "vinegar");
+    assert_eq!(naming_at(&world, SOUTH_RUN).1, PipeNaming::Carries);
 }
 
 // =====================================================================
