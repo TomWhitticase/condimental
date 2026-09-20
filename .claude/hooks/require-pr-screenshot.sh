@@ -17,7 +17,13 @@ issue #50 was itself blocked, from a plain `gh issue create`, because its body
 quoted the blocked command in a fenced block.
 
 Deciding whether the body carries an image means searching the whole command
-INCLUDING heredocs, because that is where a written-up body usually lives.
+INCLUDING heredocs, because that is where a written-up body usually lives, and
+OPENING any `--body-file` the way the shell would have (issue #53): the hook is
+not a shell, so `--body-file $SCRATCH/body.md` used to be opened as the literal
+nine characters `$SCRATCH`, fail, and count as "no image" — refusing a body
+whose first line was the screenshot. `expand_body_path` below expands `$VARS`
+and `~` and nothing else; a path that needs a subshell (`--body "$(cat x.md)"`)
+is still unreadable here, and still refused.
 
 Deciding about `gh pr edit` means looking at the PULL REQUEST, not just the
 command. `gh pr edit 45 --add-label full-verify` carries no image because it
@@ -32,6 +38,7 @@ Run its test with:  python3 .claude/hooks/test_require_pr_screenshot.py
 """
 
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -56,6 +63,30 @@ VALUE_FLAGS = ("--add-assignee", "--add-label", "--add-project",
                "--repo", "-R")
 
 TIMEOUT_S = 10
+
+
+def expand_body_path(raw):
+    """A `--body-file` argument as the shell that ran it would have opened it.
+
+    Deliberately the two bounded expansions and no more (issue #53):
+
+    * `os.path.expandvars` over THIS PROCESS'S environment — which is the
+      environment the command was about to be run in, since a PreToolUse hook
+      is spawned from it. `$SCRATCH/body.md` therefore resolves to the same
+      file `gh` would have opened. An undefined variable is left standing, so
+      the path simply fails to open and the command is refused, as before.
+    * `os.path.expanduser` for a leading `~`.
+
+    No subshell, ever: `$(cat body.md)` is not a path, is never run, and a
+    `--body` carrying one is still judged on the command text alone.
+
+    The one over-read this accepts is a single-quoted `'$SCRATCH/body.md'`,
+    which a shell would keep literal and this expands anyway. It cannot let an
+    image-less PR through — the file `gh` then opens is the literal one, which
+    does not exist, so no PR is created at all — and the alternative is
+    re-implementing quote removal that `shlex` has already done elsewhere.
+    """
+    return os.path.expanduser(os.path.expandvars(raw.strip("'\"")))
 
 
 def strip_heredocs(command):
@@ -179,9 +210,12 @@ if not commands:
 text = command
 for path in BODY_FILE.findall(strip_heredocs(command)):
     try:
-        with open(path.strip("'\"")) as handle:
+        with open(expand_body_path(path)) as handle:
             text += "\n" + handle.read()
     except OSError:
+        # A body file that genuinely is not there stays "no image": the
+        # command is about to fail anyway, and a guard that guesses guesses
+        # towards guarding.
         pass
 
 if IMAGE.search(text):
