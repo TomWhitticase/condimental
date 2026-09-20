@@ -530,7 +530,8 @@ func _initialize() -> void:
 	_title = args.has("--title")
 	_menu = args.has("--menu") or _title
 	_pause = args.has("--pause")
-	_parse_closeup(args)
+	if not _parse_closeup(args):
+		return
 	_resolve_fixture()
 	_apply_fluid_gallery_defaults(args)
 	# The world this frame actually came from, printed whether or not
@@ -555,12 +556,6 @@ func _initialize() -> void:
 	# live here and crashed with "base object of type Nil".)
 
 
-## Records the fixture a convenience flag implies. The LAST caller wins,
-## which is the precedence this file has always had and which
-## `scripts/screenshot-scene.sh` documents (`--bbq` is deliberately parsed
-## last, so `--contracts --bbq` is the BBQ line with the contracts board
-## over it). What changed with issue #70 is only that this no longer
-## overwrites an explicit `--fixture`; `_resolve_fixture` decides that.
 ## Stops the run with a non-zero status. `quit()` alone leaves one more
 ## `_process` pass to come, so this also latches `_refused`.
 func _refuse() -> void:
@@ -568,6 +563,12 @@ func _refuse() -> void:
 	quit(1)
 
 
+## Records the fixture a convenience flag implies. The LAST caller wins,
+## which is the precedence this file has always had and which
+## `scripts/screenshot-scene.sh` documents (`--bbq` is deliberately parsed
+## last, so `--contracts --bbq` is the BBQ line with the contracts board
+## over it). What changed with issue #70 is only that this no longer
+## overwrites an explicit `--fixture`; `_resolve_fixture` decides that.
 func _pick_fixture(fixture: String, flag: String) -> void:
 	_flag_fixture = fixture
 	_flag_fixture_flag = flag
@@ -734,22 +735,48 @@ func _reframe() -> void:
 
 ## `--closeup TX,TY[,SIZE]` — the argument is one comma-separated token so
 ## it survives the `--` passthrough without an argument-order convention.
-func _parse_closeup(args: Array) -> void:
+## Both `--closeup 9,-2.5,14` and `--closeup=9,-2.5,14` are accepted, because
+## `_string_arg` takes the `=` form and two argument styles in one script
+## disagreeing about it is a trap (issue #114).
+##
+## **A `--closeup` this cannot read stops the run.** It used to fall through
+## and render a whole-factory frame at default zoom with `SCREENSHOT_OK:` and
+## exit 0, so the reviewer measured a picture nobody asked for — the one
+## failure a screenshot review cannot catch by looking. Returns false when it
+## refused.
+func _parse_closeup(args: Array) -> bool:
 	for i in range(args.size()):
-		if String(args[i]) != "--closeup":
+		var arg := String(args[i])
+		if not arg.begins_with("--closeup"):
 			continue
-		if i + 1 >= args.size():
-			return
-		var parts: PackedStringArray = String(args[i + 1]).split(",")
-		if parts.size() < 2:
-			return
+		var value := ""
+		if arg == "--closeup":
+			if i + 1 < args.size():
+				value = String(args[i + 1])
+		elif arg.begins_with("--closeup="):
+			value = arg.substr("--closeup=".length())
+		else:
+			printerr(
+				"SCREENSHOT_FAIL: unknown flag '%s'. Did you mean --closeup TX,TY[,SIZE]?" % arg
+			)
+			_refuse()
+			return false
+		var parts: PackedStringArray = value.split(",")
+		if value == "" or parts.size() < 2:
+			printerr(
+				"SCREENSHOT_FAIL: --closeup wants TX,TY[,SIZE] as one comma-separated token, got '%s'"
+				% value
+			)
+			_refuse()
+			return false
 		_closeup = true
 		# Fractional on purpose: a junction sits ON a tile boundary, so the
 		# frame worth photographing is usually "half a tile past the belt".
 		_closeup_tile = Vector2(float(parts[0]), float(parts[1]))
 		if parts.size() >= 3:
 			_closeup_size = float(parts[2])
-		return
+		return true
+	return true
 
 
 ## The two framing choices `--fluid-gallery` makes for itself, applied after
