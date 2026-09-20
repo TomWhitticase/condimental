@@ -309,6 +309,81 @@ hover still cannot clear an open legend at 1280x720 (the geometry leaves
 nowhere to stand; the answer is a self-folding legend or a shorter tooltip,
 which is a content decision), and the headless-metrics gap itself.
 
+### 2026-09-20 — Two balance calls, both measured, neither one a number change
+
+A pass over two BBQ balance/legibility issues that ended with the shipped
+values kept — and with the evidence for keeping them written down, because in
+both cases the cheap fix is the wrong one and nothing in the repo said so.
+**Both sets of numbers were then corrected the same day under review**, which
+is the more useful half of this entry.
+
+**The bank at the moment of building decides whether the BBQ branch costs you
+the board (issue #55, still OPEN).** Building the BBQ branch off a running
+ketchup line stops boxed-ketchup output for about 8 500 ticks: the new pipe
+runs and the second vat fill from the *existing* fluid network, roughly 35
+boxes' worth of throughput into priming pipework before any comes back.
+Delivery windows keep counting; three misses lose a contract. The issue's
+cheap fix is to raise `after_deliveries` in `data/unlocks.ron` until the
+player has slack by the time BBQ lands, so the number was swept — with the
+protocol written down this time, because "when were the extra contracts
+signed" turned out to move every number in the sweep. One order at the shipped
+gate banks 22 and loses nothing; three orders signed **at the gate** bank the
+same 22 and lose one; the same three signed **at tick 0** bank 7 and lose two.
+An emulated gate of 40 banks 24 and loses nothing at all. So **ten stays** —
+not because no number can work, but because 40 deliveries is nowhere near the
+first session ten exists to sit inside — and #55 stays open with the
+measurements posted on it. The two real fixes are filed: a warning at
+placement time (#92) and a fluid network that will not hand a new consumer
+100% of a network the old one lives on (#93).
+
+The first version of this entry claimed the whole board is lost at *every*
+gate, including a 50 000-tick run. It does not reproduce. Two mistakes:
+contracts signed at different moments were reported as one experiment, and
+`market_stall`'s death at tick 1 500 was counted against the branch when the
+no-branch control loses it too. The corrected table and the protocol are in
+`data/unlocks.ron`'s comment.
+
+`test_layouts.gd`'s `--bbq` fixture was rebuilt to prove the setup: a splitter
+merges the BBQ branch onto the ketchup exit belt so both cartons ride one
+line, and the re-sign loop that used to paper over a lost contract is gone.
+The fixture now also **fails loudly** rather than photographing a dead branch:
+if the unlock gate has not opened by its tick ceiling, or if a snapshot will
+not parse, it prints a `BBQ_FIXTURE_FAIL:` marker and asserts.
+
+**The two sauce cartons read apart, and the first measurement that said
+otherwise was wrong (issue #57, closed).** With both boxes on one belt at
+whole-factory framing, `boxed_bbq` reads 117.2 mean luma against a
+`boxed_ketchup` on the same belt in the same frame at 156.7 — a **39.5/255**
+gap, independently reproduced at 42.5 by review. Against the method's anchors
+(1.2/255 = invisible, ~26/255 = reads reliably) that clears the threshold by
+half again. So the lid print introduced on 2026-09-18 does its job and **the
+art is unchanged**.
+
+The useful part is how nearly it went the other way, twice. The first pass
+measured a 5.3/255 gap and concluded the art fails, because the silhouette
+mask used the warm-pixel test earlier passes used (`r > g > b and r - b > 18`)
+and `label_cream` renders near-neutral at (241, 239, 234) — the mask excluded
+the printed panels, the exact pixels under test, and scored the cardboard
+around them. It was caught when the one candidate that visibly repaints the
+art measured *identical* to shipped. The corrected mask is the case's whole
+silhouette with interior holes filled. The second miss was the control: the
+gap was first judged against a 12.6 "noise floor" measured on cases standing
+back to back in the packer queue — a different pixel population from a single
+case on dark belt — and those six windows' coordinates were never written
+down anywhere. **That floor and the ratio built on it are withdrawn.** The
+same-kind control is one case on the shared belt across 14 renders, spread
+5.0/255, with every window's coordinates in the record. Rules now written
+down: **validate a legibility mask by measuring a candidate that visibly
+changes the art before quoting any number it produces**, and **a control must
+be the same subject kind as the subject, with its windows logged.** A chroma
+metric was tested at the same time and came out negative — dC separates the
+cartons by 3.7 against a same-carton 4.0 — because a coloured panel is a
+handful of pixels and light-against-dark is the whole lid.
+
+Also filed along the way: a screenshot fixture is never asserted to be
+actually running before the shutter (#94), and the clipboard shows one docket
+at 1600x900 with three contracts signed (#95).
+
 
 ### 2026-09-20 — Three issues off the board: names, fluid colour, honest frames
 
