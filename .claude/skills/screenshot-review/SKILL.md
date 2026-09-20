@@ -32,10 +32,16 @@ scrolls — review there unless you are specifically checking a smaller window.
 
 ## Flags (read from the script; the root CLAUDE.md's list is stale)
 
+**Which world you got** — every run prints `SCREENSHOT_FIXTURE: <name>`
+beside `SCREENSHOT_OK`. An explicit `--fixture` beats a convenience flag's
+implied one (the run prints a `SCREENSHOT_NOTE` saying so, and the flag's
+panel/ticks still apply), and an unknown `--fixture` name is refused with a
+non-zero status rather than quietly building the demo line (issue #70).
+
 **What to build** — `--build` (demo line: belts turning north into a crusher,
-a pipe run south — three facings in one frame) · `--fixture NAME` where NAME
-is `machines | fluids | vat | splitter | chain | stress | pipes | gallery |
-demo` · `--stress` (1500-tile serpentine, implies `--populate`, prints a
+a pipe run south — three facings in one frame; the same as `--fixture demo`)
+· `--fixture NAME` where NAME is `machines | fluids | vat | splitter | chain
+| stress | pipes | gallery | demo` · `--stress` (1500-tile serpentine, implies `--populate`, prints a
 `SCREENSHOT_RENDER` line with object/primitive/draw-call counts) ·
 `--pipe-gallery` · `--belt-gallery` (every belt shape and junction at every
 facing) · `--bottleneck` (whole line backed up behind the vat; implies
