@@ -70,7 +70,9 @@ Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
 - **A cursor-following panel positions against the fixed HUD plates**
   (hotbar reserved height, legend, clipboard), not just viewport edges, and
   every candidate is judged *after* the clamp (`_panel_position_near`,
-  `_pushed_clear_of` — UI_UX §2b point 33).
+  `_pushed_clear_of` — UI_UX §2b point 33). The right-hand column is **one
+  list** — `_contract_panel_rect`, `_stock_rect`, `_crew_rect` — never a
+  branch per plate, and a panel flipped aside lands its edge *on* the bound.
 - **No modal is ever wider than the window, and no control is drawn where
   it cannot be clicked** (UI_UX §5c). Width yields in this order: prose to
   the row's hover (`_fit_staff_width`), then fewer grid columns

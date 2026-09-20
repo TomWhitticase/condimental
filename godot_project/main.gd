@@ -10402,7 +10402,10 @@ func _position_config_panel() -> void:
 	var size := _config_panel.get_combined_minimum_size()
 	var anchor := bounds * 0.5
 	var placement := _placement_at_tile(_config_tile)
-	if not placement.is_empty():
+	# `is_inside_tree` because a headless test can open this panel before the 3D
+	# subtree is built, and `unproject_position` on a detached camera logs an
+	# engine error every frame. Centre-screen is the right answer there anyway.
+	if not placement.is_empty() and _camera.is_inside_tree():
 		var direction := _placement_direction(placement)
 		var footprint := _rotated_footprint(
 			_footprint_size(placement.get("footprint")), direction
@@ -10420,18 +10423,36 @@ func _position_config_panel() -> void:
 	# is the one readout that says whether a FILL on this very panel can
 	# succeed, so covering it with this panel would hide the answer to the
 	# question the panel is asking (UI_UX.md §2b point 33).
-	var right_bound := bounds.x
-	if _contract_panel != null and _contract_panel.visible:
-		var clip := _contract_panel.get_global_rect()
-		if pos.y < clip.end.y and pos.y + size.y > clip.position.y:
-			right_bound = minf(right_bound, clip.position.x)
-	var stock := _stock_rect()
-	if stock.size.y > 0.0 and pos.y < stock.end.y and pos.y + size.y > stock.position.y:
-		right_bound = minf(right_bound, stock.position.x)
-	if pos.x + size.x > right_bound:
-		pos.x = anchor.x - CONFIG_PANEL_OFFSET.x - size.x
-	pos.x = clampf(pos.x, 8.0, maxf(8.0, bounds.x - size.x - 8.0))
+	# The CREW plate is the third tenant of that column and was missing from
+	# this bound (issue #88): it arrived after the bound was written, so a
+	# panel that cleared the clipboard and the stock plate was drawn straight
+	# over the wage bill and the payday countdown — and a fluid tank's panel,
+	# which is taller than a hopper's, sat squarely on it. ONE list rather
+	# than a branch per plate, so the next thing on that edge is an entry
+	# here rather than another case nobody remembers to add.
+	#
+	# `y` is clamped BEFORE the plates are consulted, because the bound has to
+	# be judged against where the panel will actually be DRAWN and not where it
+	# first asked to go (§2b point 33, the rule `_panel_position_near` learned
+	# the same way). At 1280x720 a tank's panel is taller than the band below
+	# the clipboard, so the clamp lifted it up into the clipboard's rows after
+	# a test against its old `y` had decided the clipboard was nowhere near it.
 	pos.y = clampf(pos.y, 8.0, maxf(8.0, bounds.y - _hotbar_reserved_height() - size.y))
+	var right_bound := bounds.x
+	for plate in [_contract_panel_rect(), _stock_rect(), _crew_rect()]:
+		if plate.size.y <= 0.0:
+			continue
+		if pos.y < plate.end.y and pos.y + size.y > plate.position.y:
+			right_bound = minf(right_bound, plate.position.x)
+	# Flipped to the building's other side — and no further right than the
+	# bound itself. The flip used to be a fixed offset from the anchor, which
+	# is not the same as clearing anything: at 1280x720 the clipboard's left
+	# edge is 580px in and a panel flipped by the offset alone landed at 70,
+	# 525 wide, so its last 15px were still on the clipboard. Landing its right
+	# edge ON the bound is what the bound is for.
+	if pos.x + size.x > right_bound:
+		pos.x = minf(anchor.x - CONFIG_PANEL_OFFSET.x - size.x, right_bound - size.x)
+	pos.x = clampf(pos.x, 8.0, maxf(8.0, bounds.x - size.x - 8.0))
 	_config_panel.position = pos
 	_config_panel.size = size
 

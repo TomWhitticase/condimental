@@ -126,6 +126,30 @@ matches what code comments and data files cite.
   at that one window size is filed rather than fudged: the real answer is a
   legend that folds itself or a shorter tooltip, which is a content decision.
 
+  **The same lesson, a third time: the configuration panel** (issue #88, folded
+  in because it turned out to be this fix and not a separate one). The panel a
+  click on a hopper or tank opens has always had a documented bound meant to
+  keep it off the right-hand column, and it was failing in two ways at once.
+  The bound named the clipboard and the stock plate in two hand-written
+  branches; the CREW plate arrived on that column in the 2026-09-16 playtest
+  pass and nobody added a third branch, so a panel that cleared the other two
+  was drawn over the wage bill and the payday countdown. And the branches
+  tested an UNCLAMPED `y`: a fluid tank's panel is taller than the band between
+  the clipboard and the hotbar, so the final clamp lifted it up into rows the
+  test had just decided it was nowhere near — §2b point 33's "judge after the
+  clamp", in the one panel that had not learned it. Even with both fixed the
+  flip itself was wrong: `anchor.x - offset - size.x` is a fixed displacement,
+  not a guarantee, and at 1280x720 it landed the panel's last 15px on a
+  clipboard whose left edge is 580px in. It now clamps `y` first, loops one
+  list of three rects, and flips the panel's right edge ON to the bound.
+  The legend stays off that list for `_position_market_panel`'s reason: at
+  1280x720 no position clears both it and the column, and covering a static
+  keybind reference the player can fold with F1 beats covering a live readout.
+  The headless assertion has to point the camera AT the building first — the
+  panel is anchored to the building's projected position, so a building off the
+  side of the frame puts the panel on a window edge and the check passes
+  vacuously, which the first version of it did.
+
   **Two smaller rules from the same pass.** The staff panel's scroll box is
   now FLAT — rows and explainer in one `VBoxContainer` — because
   `_whole_rows_height` snaps between the CHILDREN of the box it is given, and

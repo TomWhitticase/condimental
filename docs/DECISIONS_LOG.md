@@ -55,6 +55,22 @@ See [WORKFLOW.md](WORKFLOW.md).
   overlapped area (`_hud_overlap_area`) and keeps the smallest, ties going to
   the earlier preference — pushing off one plate at a time can land on the
   next, and did.
+- 2026-09-20 **A panel that dodges the right-hand column consults ONE list of
+  plates, after its own clamp.** `_position_config_panel`'s right-hand bound
+  named the clipboard and STOCK in two hand-written branches; the CREW plate
+  arrived on that column later and was never added, and the bound was computed
+  against an unclamped `y`, so a tank's panel — taller than the band below the
+  clipboard — was lifted by the clamp into rows a test against its old `y` had
+  decided were nowhere near it (issue #88). It now clamps `y` first, loops
+  `[_contract_panel_rect(), _stock_rect(), _crew_rect()]`, and flips the panel
+  so its right edge lands ON the bound rather than at a fixed offset from the
+  anchor, which is not the same as clearing anything. The legend is
+  deliberately not on that list: at 1280x720 nothing clears both it and the
+  column, and a static keybind reference the player can fold with F1 is the
+  right thing to cover in preference to a live readout — the same ranking
+  `_position_market_panel` makes. Asserted headlessly by `test_hud_plates.gd`
+  with the camera looking AT the building, since a building off the side of
+  the frame puts the panel on a window edge and proves nothing.
 - 2026-09-20 **The clipboard's board hint is a line the docket stack may
   spend.** `_update_contract_panel` — the one place that knows what the stack
   got — hides `_contract_hint_label` when, and only when, the cut it made is

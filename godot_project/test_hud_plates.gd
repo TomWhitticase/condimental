@@ -105,6 +105,11 @@ const MODAL_CASES := [
 	["H", "_set_staff_open", "_staff_panel"],
 ]
 
+## The tile the docket sweep's own hopper stands on (`_run_checks` places it),
+## reused by the configuration sweep: the panel that opens on a click has to
+## clear the right-hand column like any other (issue #88).
+const CONFIG_TILE := Vector2i(-6, 0)
+
 ## Frames a case is given before it is read — one to apply it, the rest for
 ## Godot's deferred minimum-size invalidation (`_sweep_step`). It has always
 ## settled by the second; the third is slack.
@@ -122,6 +127,8 @@ var _frame := 0
 ## the docket sweep before it has been put away (`_finish_sweep`).
 var _modal := 0
 var _swept := false
+## The configuration sweep's cursor, one case per window size.
+var _cfg := 0
 
 
 func _fail(msg: String) -> void:
@@ -835,13 +842,7 @@ func _modal_step() -> bool:
 	if _modal == 0 and _frame == 0:
 		_unlock_everything()
 	if _modal >= MODAL_CASES.size() * 2:
-		_open_only("")
-		_resize(BIG)
-		print("HUD_PLATES_OK: %s; and every modal (%s) fits inside the window with every button reachable, at 1600x900 and at 1280x720" % [
-			_summary, ", ".join(_modal_keys())
-		])
-		quit(0)
-		return true
+		return _config_step()
 	var case: Array = MODAL_CASES[_modal / 2]
 	var window: Vector2i = BIG if _modal % 2 == 0 else SMALL
 	_open_only(String(case[1]))
@@ -855,6 +856,87 @@ func _modal_step() -> bool:
 	_modal += 1
 	_frame = 0
 	return false
+
+
+## The last sweep: the panel a CLICK on a building opens (issue #88). It is
+## not a modal — it is positioned beside the building it belongs to, and it
+## keeps clear of the right-hand column by flipping to the building's other
+## side (`_position_config_panel`). The CREW plate arrived on that column
+## after the flip was written and was never added to it, so a panel that
+## cleared the clipboard and STOCK was drawn straight over the wage bill.
+##
+## The legend is deliberately NOT checked here: at 1280x720 there is no
+## position that clears both it and the column, and covering a static keybind
+## reference the player can fold beats covering a live readout — the same
+## ranking `_position_config_panel`'s own comment makes.
+func _config_step() -> bool:
+	if _cfg >= 2:
+		_close_config()
+		_open_only("")
+		_resize(BIG)
+		print("HUD_PLATES_OK: %s; every modal (%s) fits inside the window with every button reachable, at 1600x900 and at 1280x720; and a building's configuration panel keeps clear of all three right-hand plates at both sizes" % [
+			_summary, ", ".join(_modal_keys())
+		])
+		quit(0)
+		return true
+	var window: Vector2i = BIG if _cfg == 0 else SMALL
+	_open_only("")
+	_resize(window)
+	_open_config()
+	main._position_config_panel()
+	_frame += 1
+	if _frame < SETTLE_FRAMES:
+		return false
+	if not _check_config_case(window):
+		return true
+	_cfg += 1
+	_frame = 0
+	return false
+
+
+## Opens it with the camera LOOKING AT the building, which is what a player
+## who is about to configure something has just done. It matters: the panel is
+## anchored to the building's projected position, so a building off the left of
+## the frame puts the panel on the left edge and proves nothing — centred, the
+## panel opens over the right-hand column and has to flip to clear it, which is
+## the case issue #88 was about.
+func _open_config() -> void:
+	main._camera_focus = main._tile_origin(CONFIG_TILE.x, CONFIG_TILE.y, 0.0)
+	main._update_camera_transform()
+	if not main._config_open:
+		main._config_click_at_tile(CONFIG_TILE)
+
+
+func _close_config() -> void:
+	if main._config_open:
+		main._config_click_at_tile(CONFIG_TILE)
+
+
+## False when the case failed (`_fail` has already asked to quit).
+func _check_config_case(window: Vector2i) -> bool:
+	var where := "the configuration panel at %s" % str(window)
+	if not main._config_open or main._config_panel == null or not main._config_panel.visible:
+		_fail("%s never opened on the hopper at %s" % [where, str(CONFIG_TILE)])
+		return false
+	var rect: Rect2 = main._config_panel.get_global_rect()
+	if rect.position.x < -0.5 or rect.end.x > float(window.x) + 0.5:
+		_fail("%s is off the side of the window (%s)" % [where, str(rect)])
+		return false
+	for named in [
+		["the contracts clipboard", main._contract_panel_rect()],
+		["the STOCK plate", main._stock_rect()],
+		["the CREW plate", main._crew_rect()],
+	]:
+		var plate: Rect2 = named[1]
+		if plate.size.x <= 0.0 or plate.size.y <= 0.0:
+			continue
+		var overlap: Rect2 = rect.intersection(plate)
+		if overlap.size.x > 0.5 and overlap.size.y > 0.5:
+			_fail("%s covers %s by %.0fx%.0fpx" % [
+				where, String(named[0]), overlap.size.x, overlap.size.y
+			])
+			return false
+	return true
 
 
 ## Between the two sweeps: the docket sweep's fixture is put away, so the

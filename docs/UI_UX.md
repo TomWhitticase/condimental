@@ -604,6 +604,18 @@ regression proof is a headless test. A sentence that must get narrower is
 **broken at a join it already has** (the board's offer is a mix label and a
 terms label) — a break at a fixed point, not a reflow.
 
+**A panel that dodges the right-hand column consults one list, after its own
+clamp** (2026-09-20, issue #88). The clipboard, STOCK and CREW plates are
+three tenants of one edge, so a panel avoiding them takes them as a list
+(`_contract_panel_rect`, `_stock_rect`, `_crew_rect`) rather than a branch
+each — a branch each is how CREW came to be missing from
+`_position_config_panel` for four days. The avoidance is judged **after** the
+panel's own clamp, per §2b point 33, and a panel flipped aside lands its edge
+**on** the bound rather than at a fixed offset from its anchor. The legend is
+deliberately not in that list: at 1280x720 nothing clears both it and the
+column, and a keybind reference the player can fold with F1 is the right thing
+to cover in preference to a live readout.
+
 **A headless test cannot prove a width; only the render can.** Godot's
 headless font metrics are narrower than a real window's: the staff panel
 passed the headless assertion at the very size the rendered frame clipped.

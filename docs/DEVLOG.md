@@ -152,6 +152,8 @@ below is history and should only ever be appended to.)*
   all five modals at 1280x720. Two findings deferred as issues: the machine
   hover cannot clear an open legend at that size, and headless font metrics
   are narrower than a real window's — so only a render can prove a width.
+  Issue #88 (a building's configuration panel over the STOCK, CREW and
+  CONTRACTS plates) was folded in, being the same fix.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -168,7 +170,7 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
-### 2026-09-20 — The HUD fits a 1280x720 window (issues #62, #63, #69, #17)
+### 2026-09-20 — The HUD fits a 1280x720 window (issues #62, #63, #69, #17, #88)
 
 Four layout issues, one root cause: every panel in the game knew how to yield
 HEIGHT and none of them knew how to yield WIDTH. At 1600x900 that never
@@ -222,9 +224,23 @@ clears every plate at all, `_panel_position_near` scores every candidate by
 total overlapped area and keeps the least bad one rather than pushing off one
 plate onto the next.
 
+**And the panel a click opens, folded in (issue #88).** The configuration
+panel's documented bound was failing three ways at once, all of them this
+pass's own lesson: it named the clipboard and STOCK but not the CREW plate
+that joined that column later; it tested an unclamped `y`, so the clamp lifted
+a tank's panel into rows the test had just cleared it of; and its flip was a
+fixed displacement from the anchor rather than a landing on the bound, which
+left 15px of panel on the clipboard at 1280x720. One list of three rects,
+clamped first, flipped onto the bound. The legend stays off that list
+deliberately — at 1280x720 nothing clears both it and the column, and a
+keybind reference the player can fold with F1 is the right thing to cover in
+preference to a live readout.
+
 `test_hud_plates.gd` sweeps all five modals (E, M, C, P, H) at 1280x720 and
 asserts no panel is wider than the window, none is drawn off it, and no button
-is unreachable — excusing only a button under a scroll's fold. Rendered and
+is unreachable — excusing only a button under a scroll's fold. A sixth case
+opens a building's configuration panel with the camera looking at the building
+and asserts it covers none of the three plates. Rendered and
 read at both sizes. Two findings are deferred rather than fixed: the machine
 hover still cannot clear an open legend at 1280x720 (the geometry leaves
 nowhere to stand; the answer is a self-folding legend or a shorter tooltip,
