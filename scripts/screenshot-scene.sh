@@ -241,11 +241,11 @@
 # worktrees all passed and reported their own correct tile, and 138
 # `CGWarpMouseCursorPosition` warps fired at the desktop DURING a
 # --hover-dock run left it pixel-identical — an unfocused Godot window does
-# not pick up another process's warp. Against: a 43-run sweep taken while
-# four sibling worktrees were running Godot refused ONCE, at the shutter,
-# naming a tile nobody had asked for, and the same command then passed six
-# times in a row. So the failure mode is real, rare, and exactly what the
-# refusal describes. Re-run it before you read anything into it, and
+# not pick up another process's warp. Against: two 48-run sweeps taken while
+# sibling worktrees were running Godot each refused ONCE, at the shutter,
+# naming a tile nobody had asked for — a different case each time, and each
+# one then passed six times in a row on its own. So the failure mode is
+# real, rare, and exactly what the refusal describes. Re-run it before you read anything into it, and
 # serialise only if it keeps happening; do not serialise on principle.
 #
 # Pass --title to photograph the TITLE SCREEN — the menu as the player first

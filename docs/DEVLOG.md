@@ -854,6 +854,21 @@ and no PNG, the same refusal #70 gave a wrong fixture: a tooltip belonging to
 the wrong thing is precisely the frame this script exists not to hand back.
 Every run now prints `SCREENSHOT_CURSOR:` beside `SCREENSHOT_FIXTURE`.
 
+The sweep that came with it found one more of the same kind, and it is fixed
+too: a hover target the camera is **not showing** — `--fixture chain
+--closeup 26,0,8 --hover-hopper` — could not be reached, because the window
+server clamps a warp to the window, so the run failed at the shutter blaming
+a hand on the mouse for a tile that was nine thousand pixels off the left
+edge. The aim now checks the projection against the viewport first and says
+exactly that. What the sweep did NOT find was a spurious refusal: 48
+combinations — 41 that must render, 7 that must refuse — and every one did
+what it should, before the merge with main and again after it. Across two sweeps one run each
+refused at the shutter naming a tile nobody asked for — a different case
+each time, both while sibling worktrees were running Godot, and both passing
+six times in a row afterwards — which is the parallel-pointer case the
+message already lists, measured rather than assumed, and now recorded in
+`screenshot-scene.sh`'s own header.
+
 Two corrections from review, both about a guard being confidently wrong —
 which is the thing this ticket is against, so they are the ticket, not a
 footnote. **A guard must check what is actually in the frame.** In first
