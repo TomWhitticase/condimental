@@ -120,6 +120,23 @@
 # it). All of them share one implementation (`_hover_over_tile`) and differ
 # only in how they pick the tile out of `world_layout_json`.
 #
+# THE CURSOR IS GLOBAL, AND THIS SCRIPT OWNS IT FOR THE WHOLE RUN (issue #4).
+# `Input.warp_mouse` moves the machine's ONE pointer, which outlives the
+# process and is shared with every other window on the desktop — including a
+# second `screenshot-scene.sh` running in a parallel worktree. Left alone that
+# leaks both ways: a run asking for no hover at all inherits whatever tile the
+# LAST run parked on and photographs its tooltip (`--fixture bottleneck
+# --payout` came back with a dock tooltip from the `--hover-dock` run before
+# it, reading numbers the frozen scene never refreshed, and cost a round of
+# investigation to rule out as a game bug), and a run that does ask for a
+# hover can have the pointer moved out from under it between the warp and the
+# shutter 43 frames later. So: every run PARKS the cursor on empty ground
+# first (`_park_cursor`), any --hover* flag then aims it, it is RE-ASSERTED a
+# few frames before the shutter (`_settle_cursor`), and the frame is only
+# written if the cursor really is over the tile it was aimed at
+# (`_check_cursor`) — a mismatch REFUSES, since a tooltip belonging to the
+# wrong thing is exactly the frame this script exists not to hand back.
+#
 # `--shop` opens the build menu (docs/UI_UX.md §5) before rendering.
 #
 # `--stock` buys an assorted starting kit (belts, pipes, a hopper, a tank and
@@ -164,6 +181,10 @@ const GameSaves = preload("res://game_session.gd")
 ## screenshot on frame 1 shows an unlit, shadowless scene and is misleading.
 const WARMUP_FRAMES := 45
 
+## The frame `_settle_cursor` re-asserts the cursor on — three before the
+## shutter, so main.gd has frames left to lay the tooltip out with it.
+const CURSOR_SETTLE_FRAME := WARMUP_FRAMES - 3
+
 ## Spawn attempts, and simulation ticks between them, used by `--populate`.
 ## Driven straight through the scene's real input and tick path rather than
 ## poking at simulation state — this is a screenshot of the actual game.
@@ -205,6 +226,12 @@ var _hover_hopper := false
 var _hover_tank := false
 var _hover_dock := false
 var _hover_splitter := false
+## The tile the cursor is supposed to be over when the shutter opens, and
+## whether a --hover* flag asked for it (as opposed to `_park_cursor` having
+## put it somewhere harmless). Both are the cursor bookkeeping issue #4 needed
+## — see this file's header.
+var _cursor_tile := Vector2i(-999999, -999999)
+var _cursor_hovered := false
 ## `--stalled-run` (issue #54): the BBQ branch with its liquid-smoke tank
 ## turned off its own run, cursor parked on a tile of the run that leaves
 ## dead. The one frame that can show a DEAD run and a merely EMPTY one side
@@ -754,7 +781,18 @@ func _enter_first_person() -> void:
 ## the `_ready()` timing note in `_initialize` above, which is exactly why
 ## this can't run any earlier than `_process`). Every --hover* flag is this
 ## one function plus a different way of picking the tile.
+##
+## The tile is REMEMBERED (`_cursor_tile`), because a warp is a request to the
+## window server rather than a fact: `_settle_cursor` makes it again just
+## before the shutter and `_check_cursor` proves it stuck. See the cursor note
+## in this file's header.
 func _hover_over_tile(tile: Vector2i) -> void:
+	_cursor_tile = tile
+	_cursor_hovered = true
+	_warp_to_tile(tile)
+
+
+func _warp_to_tile(tile: Vector2i) -> void:
 	var world_point: Vector3 = _main._tile_origin(tile.x, tile.y, _main.BELT_SURFACE_Y)
 	Input.warp_mouse(_main._camera.unproject_position(world_point))
 
@@ -830,6 +868,137 @@ func _hover_over_splitter() -> void:
 	var tile := _first_tile_of_kind("splitter")
 	if tile != HOVER_NONE:
 		_hover_over_tile(tile)
+
+
+## Screen positions `_park_cursor` tries, in this order, as fractions of the
+## viewport: the four corners first, then the edge midpoints. Corners first
+## because the factory is framed in the middle, so a corner is the likeliest
+## patch of empty floor — and because a parked cursor near the middle of the
+## frame would sit over the machines the shot came for the moment anything is
+## built one tile further out.
+const PARK_POINTS: Array[Vector2] = [
+	Vector2(0.03, 0.04), Vector2(0.97, 0.04), Vector2(0.03, 0.96), Vector2(0.97, 0.96),
+	Vector2(0.5, 0.04), Vector2(0.5, 0.96), Vector2(0.03, 0.5), Vector2(0.97, 0.5),
+]
+
+## How far around a candidate point the ground must also be empty, in pixels.
+## A warp lands on whole pixels and `unproject_position` does not, so a point
+## chosen right on a tile boundary could park a pixel over into the machine
+## next door.
+const PARK_CLEARANCE_PX := 4.0
+
+
+## Puts the cursor somewhere that says nothing, and records where.
+##
+## Called on every run before anything opens (and again from
+## `_settle_cursor`), because the pointer this script inherits is the one the
+## LAST run left behind — see the cursor note in this file's header. Without
+## it, `--payout` photographs the dock tooltip of the `--hover-dock` run
+## before it.
+##
+## "Says nothing" is asked of the scene itself (`_hover_text_at_tile`, the
+## same query the tooltip is drawn from) rather than derived here, so a kind
+## of building that starts talking in future is covered without this knowing
+## about it. The first candidate that is clear WITH ITS SURROUNDINGS wins; if
+## the factory covers every one of them the run says so and parks on the
+## first, which is a frame with an explained tooltip rather than a mystery.
+func _park_cursor() -> void:
+	if _menu:
+		return
+	var size: Vector2 = root.get_visible_rect().size
+	for fraction in PARK_POINTS:
+		var point := Vector2(fraction.x * size.x, fraction.y * size.y)
+		if not _ground_is_quiet_around(point):
+			continue
+		Input.warp_mouse(point)
+		_cursor_tile = _main._tile_under_screen_pos(point)
+		_cursor_hovered = false
+		return
+	var fallback := Vector2(PARK_POINTS[0].x * size.x, PARK_POINTS[0].y * size.y)
+	Input.warp_mouse(fallback)
+	_cursor_tile = _main._tile_under_screen_pos(fallback)
+	_cursor_hovered = false
+	printerr(
+		"SCREENSHOT_NOTE: nowhere on screen is empty ground, so the cursor is parked on %s; "
+		% _cursor_tile + "the tooltip in this frame is that tile's, not a leftover"
+	)
+
+
+func _ground_is_quiet_around(point: Vector2) -> bool:
+	for offset in [Vector2.ZERO, Vector2(PARK_CLEARANCE_PX, 0.0), Vector2(-PARK_CLEARANCE_PX, 0.0),
+			Vector2(0.0, PARK_CLEARANCE_PX), Vector2(0.0, -PARK_CLEARANCE_PX)]:
+		var tile: Vector2i = _main._tile_under_screen_pos(point + offset)
+		if _main._hover_text_at_tile(tile) != "":
+			return false
+	return true
+
+
+## Makes the cursor's placement true again a few frames before the shutter.
+##
+## The warp happens on frame 2 and the frame is written on WARMUP_FRAMES; in
+## between, anything that moves the machine's one pointer moves this shot —
+## a parallel worktree taking its own screenshot, a hand on the mouse, the
+## window server settling. Re-asserting costs a warp and removes the whole
+## class of "sometimes it points at the wrong thing".
+##
+## Re-PARKING (rather than re-warping to the remembered tile) is what makes
+## `--closeup` safe: the closeup re-aims the camera on frame 2, after the
+## parking on frame 1, so the tile that was empty floor in the wide shot can
+## be a machine filling half the zoomed frame.
+##
+## The tooltip is then refreshed by hand because `--payout`, `--crushing` and
+## `--full-dock` FREEZE the scene (`_main.set_process(false)`), so main.gd is
+## not polling anything by now and would keep drawing the tooltip it last
+## drew — which is the stale-numbers half of issue #4.
+func _settle_cursor() -> void:
+	if _menu:
+		return
+	if _cursor_hovered:
+		_warp_to_tile(_cursor_tile)
+	else:
+		_park_cursor()
+	_main._update_hover_tooltip()
+
+
+## Whether the frame about to be written is of the cursor it was asked for.
+##
+## The two claims are different, and each is checked as itself. A --hover*
+## flag claims a particular tile, so the tile under the cursor must BE that
+## tile. A parked cursor claims only that nothing is under it, so what is
+## checked is that the scene has nothing to say there — which is also immune
+## to the pixel of rounding a warp introduces, where an exact tile comparison
+## on a tile boundary would fail for no reason.
+func _check_cursor() -> bool:
+	if _menu:
+		return true
+	var tile: Vector2i = _main._tile_under_screen_pos(root.get_mouse_position())
+	if _cursor_hovered:
+		if tile != _cursor_tile:
+			printerr(
+				"SCREENSHOT_FAIL: the hover flag aimed the cursor at tile %s, but when the "
+				% _cursor_tile
+				+ "shutter opened it was over %s — this frame's tooltip belongs to the wrong "
+				% tile
+				+ "thing (issue #4). Something moved the pointer mid-run: another "
+				+ "screenshot-scene.sh in a parallel worktree, or a hand on the mouse."
+			)
+			return false
+		print("SCREENSHOT_CURSOR: hovering tile %s" % _cursor_tile)
+		return true
+	if _main._hover_text_at_tile(tile) != "":
+		printerr(
+			"SCREENSHOT_FAIL: nothing asked for a hover, but the cursor ended up over tile %s, "
+			% tile + "whose tooltip is in this frame (issue #4). Something moved the pointer "
+			+ "after it was parked."
+		)
+		return false
+	# FIRST_PERSON looking at the sky is the ordinary way to have no tile at
+	# all under the cursor, and it is the quietest park there is.
+	if tile == _main.HOVER_NO_TILE:
+		print("SCREENSHOT_CURSOR: parked off the floor, no tile under it")
+	else:
+		print("SCREENSHOT_CURSOR: parked on empty ground at tile %s" % tile)
+	return true
 
 
 ## Loads both consumables and ticks, so the shot shows product moving rather
@@ -1203,6 +1372,11 @@ func _process(_delta: float) -> bool:
 		_cross_gates(-1 if _unlock_toast else 0)
 	if _frames == 1 and _first_person:
 		_enter_first_person()
+	# Before main.gd has drawn a single tooltip, and before any --hover* flag
+	# on frame 2 aims it somewhere on purpose: the pointer this run starts
+	# with is the one the run before it left behind (issue #4).
+	if _frames == 1:
+		_park_cursor()
 	if _frames == 2 and _populate:
 		_run_chain_forward()
 	# The closeup is applied BEFORE any hover flag: a hover warps the OS cursor
@@ -1287,8 +1461,16 @@ func _process(_delta: float) -> bool:
 	# exactly what a review of it wants to see.
 	if _frames == 3 and _pause:
 		_open_pause_menu()
+	# Late enough that everything above has settled (the closeup has re-aimed
+	# the camera, a frozen scene has stopped), early enough that main.gd's own
+	# processing gets frames to redraw with.
+	if _frames == CURSOR_SETTLE_FRAME:
+		_settle_cursor()
 	if _frames < WARMUP_FRAMES:
 		return false
+	if not _check_cursor():
+		_refuse()
+		return true
 	return _write_frame()
 
 

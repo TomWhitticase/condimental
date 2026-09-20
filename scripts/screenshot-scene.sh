@@ -196,6 +196,19 @@
 # non-origin tile: "any tile of a multi-tile machine identifies it" is the
 # claim, and hovering the origin would not show it.)
 #
+# **THE CURSOR IS THE MACHINE'S, NOT THIS RUN'S** (issue #4). These flags warp
+# the one real pointer, which outlives the process, so every run now says
+# where the cursor ended up beside SCREENSHOT_FIXTURE: `SCREENSHOT_CURSOR:
+# hovering tile (26, 0)` for a hover flag, `parked on empty ground ...` for a
+# run that asked for none — a run with no --hover* parks the cursor clear of
+# everything rather than inheriting the tile the last run left it on, which
+# is how a `--payout` frame came back wearing the previous `--hover-dock`
+# run's tooltip. If something else moves the pointer between the aim and the
+# shutter — most likely a SECOND screenshot-scene.sh running at the same time
+# in another worktree — the run is REFUSED with SCREENSHOT_FAIL and writes no
+# PNG, because the tooltip in that frame belongs to the wrong thing. Two of
+# these cannot run at once; take them one after another.
+#
 # Pass --title to photograph the TITLE SCREEN — the menu as the player first
 # sees it: the wordmark, the splash line and the three buttons over the 3D
 # factory backdrop that stands behind them (`title_scene.gd`). --menu is the
