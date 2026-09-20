@@ -211,6 +211,18 @@
 # non-origin tile: "any tile of a multi-tile machine identifies it" is the
 # claim, and hovering the origin would not show it.)
 #
+# **A HOVER FLAG THAT FINDS NOTHING IS REFUSED**, with the flag, what it
+# looked for and the world it looked in — no PNG, non-zero status. It used to
+# aim at nothing at all, so `--fixture full_dock --hover-splitter` (that line
+# has no splitter in it) came back as a clean frame of the dock with
+# SCREENSHOT_OK on it, and plain `--hover` did the same against the empty
+# world: a picture that answers a question nobody asked, which is the trap
+# issue #70 was about. Which fixture contains what is above; the seven flags
+# and their targets are one table, `godot_project/hover_targets.gd`, checked
+# against every fixture headlessly by test_hover_targets.gd. --ghost-blocked
+# and --remove-mode refuse on an empty world for the same reason: neither has
+# anything to stand on, and --ghost-blocked's frame would be the VALID state.
+#
 # **THE CURSOR IS THE MACHINE'S, NOT THIS RUN'S** (issue #4). These flags warp
 # the one real pointer, which outlives the process, so every run now says
 # where the cursor ended up beside SCREENSHOT_FIXTURE: `SCREENSHOT_CURSOR:
@@ -224,13 +236,17 @@
 # usual candidates rather than picking one, since this process cannot see
 # which of them happened.
 #
-# Parallel runs are FINE in practice, and that was measured rather than
-# assumed: three concurrent pairs of renders in two worktrees all passed and
-# reported their own correct tile, and 138 `CGWarpMouseCursorPosition` warps
-# fired at the desktop DURING a --hover-dock run left it pixel-identical —
-# an unfocused Godot window does not pick up another process's warp. Serialise
-# them if you see a SCREENSHOT_FAIL naming a tile you never asked for; do not
-# serialise them on principle.
+# Parallel runs are USUALLY fine, and both halves of that were measured
+# rather than assumed. In favour: three concurrent pairs of renders in two
+# worktrees all passed and reported their own correct tile, and 138
+# `CGWarpMouseCursorPosition` warps fired at the desktop DURING a
+# --hover-dock run left it pixel-identical — an unfocused Godot window does
+# not pick up another process's warp. Against: a 43-run sweep taken while
+# four sibling worktrees were running Godot refused ONCE, at the shutter,
+# naming a tile nobody had asked for, and the same command then passed six
+# times in a row. So the failure mode is real, rare, and exactly what the
+# refusal describes. Re-run it before you read anything into it, and
+# serialise only if it keeps happening; do not serialise on principle.
 #
 # Pass --title to photograph the TITLE SCREEN — the menu as the player first
 # sees it: the wordmark, the splash line and the three buttons over the 3D
