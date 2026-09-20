@@ -50,6 +50,18 @@
 //! GAMEPLAY.md §1's one non-negative counter does not allow; softer than
 //! a cliff. A zero-wage head is never unpaid and never leaves.
 //!
+//! **The way out of arrears is MOTHBALLING** (issue #19). Unpaid heads idle
+//! the machines they crew, which cuts the income that would have paid them,
+//! so before mothballing existed a factory that missed one payday could
+//! only watch the next one miss harder. A mothballed machine
+//! (`PlayerCommand::SetMothballed`) asks for no crew, so it drops out of
+//! the ESTABLISHMENT ([`StaffPools::set_required`]) and the surplus heads
+//! it was holding can be fired down to a wage bill the factory can actually
+//! meet — they are still owed their notice pay at the next payday, so it
+//! costs one more period, and the two-strike rule buys exactly that period.
+//! Switching the machine back on puts its crew back in the establishment
+//! and resumes the batch it was mid-way through.
+//!
 //! Integers throughout except the money itself, which is the economy's
 //! `Money` (ARCHITECTURE.md §3.9). Pools are a `Vec` in file order — the panel
 //! order and the payday order — never a hash map.
@@ -530,8 +542,9 @@ impl StaffPools {
     /// Sets the ESTABLISHMENT — how many heads of each category the placed
     /// machinery needs to be fully crewed — from a per-category total.
     ///
-    /// Called from `World::recompute_topology`, which is reached only by
-    /// `Place`, `Remove` and `Rotate`, so this figure is **stable during
+    /// Called from `World::recompute_establishment`, which is reached by
+    /// `Place`, `Remove`, `Rotate` and `SetMothballed` — all four of them
+    /// deliberate player actions — so this figure is **stable during
     /// play**: it cannot move because a belt ran dry or a vat finished a
     /// batch. That stability is the whole point. `demand` (what was asked
     /// for this tick) breathes with production flow, which made
@@ -540,7 +553,12 @@ impl StaffPools {
     /// (docs/DECISIONS.md, the 2026-09-16 establishment record).
     ///
     /// Categories the caller does not mention are set to zero, so a factory
-    /// whose last crusher was removed stops asking for cooks. An unknown
+    /// whose last crusher was removed — or whose last crusher was
+    /// MOTHBALLED, which is the same thing to the payroll (issue #19) —
+    /// stops asking for cooks. Mothballing is the reason this number can
+    /// fall without the player tearing anything down: it is how a factory
+    /// that cannot make payroll shrinks its establishment far enough to
+    /// fire its way back into the black and switch the line on again. An unknown
     /// category id is ignored rather than rejected: the catalog is the
     /// authority on what exists, and `validate_machines` has already proved
     /// every machine's crew names a real category.

@@ -518,6 +518,32 @@ pub enum PlayerCommand {
     /// topology pass, because what a declared tank holds is one of the
     /// facts [`resolve_network_fluids`] starts from.
     SetTankFluid { tile: TileCoord, fluid: FluidId },
+
+    /// **Switches the machine at `tile` off, or back on** — mothballing
+    /// (issue #19, GAMEPLAY.md §11's open question answered).
+    ///
+    /// A mothballed machine asks for no crew, so the ESTABLISHMENT
+    /// ([`World::recompute_establishment`]) falls by that machine's whole
+    /// crew the instant this lands, and the player may then FIRE the heads
+    /// it was holding on the books and shrink their wage bill to something
+    /// their smaller factory can pay. It also produces nothing: it starts
+    /// no craft, advances no timer and deposits nothing, and a craft it was
+    /// in the middle of is PAUSED where it stood, not lost.
+    ///
+    /// **Machines only, and deliberately so.** A hopper, tank, belt, pipe
+    /// or splitter asks for no crew, so switching one off would release
+    /// nobody; the dock asks for one logistics head and is the only way
+    /// product becomes money, so switching it off is never the move a
+    /// player in arrears wants. A tile holding any of them — or an empty
+    /// tile — is a silent no-op, the `Purchase` convention, as is setting
+    /// the state the machine already has.
+    ///
+    /// Tile-addressed like [`Self::Rotate`]: any tile of a multi-tile
+    /// footprint resolves. It dirties the machine's chunk (unlike `Hire`
+    /// and `Fire`, this one IS about a tile) but does not rebuild the
+    /// topology: nothing about what is adjacent to what has changed, only
+    /// the establishment, which is recomputed on its own.
+    SetMothballed { tile: TileCoord, enabled: bool },
     /// Hires one head into a staff category (the staff pools MVP epic,
     /// GAMEPLAY.md §7). **Free, and never refused for a known category** —
     /// wages are the cost (§5), paid every pay period by `World::tick`, and
@@ -633,6 +659,15 @@ enum PlayerCommandDto {
         tile: TileCoord,
         fluid: FluidId,
     },
+    /// `{"type": "set_mothballed", "tile": [12, 0], "enabled": true}` —
+    /// `enabled` optional, defaulting to `true` for the auto-fill toggles'
+    /// reason: a toggle sends the state it wants, and "switch it off" is
+    /// the state this command exists for.
+    SetMothballed {
+        tile: TileCoord,
+        #[serde(default = "default_auto_fill_enabled")]
+        enabled: bool,
+    },
     Hire {
         category: String,
     },
@@ -703,6 +738,9 @@ impl From<PlayerCommandDto> for PlayerCommand {
             }
             PlayerCommandDto::SetTankAutoFill { tile, enabled } => {
                 PlayerCommand::SetTankAutoFill { tile, enabled }
+            }
+            PlayerCommandDto::SetMothballed { tile, enabled } => {
+                PlayerCommand::SetMothballed { tile, enabled }
             }
             PlayerCommandDto::Hire { category } => PlayerCommand::Hire { category },
             PlayerCommandDto::Fire { category } => PlayerCommand::Fire { category },
@@ -861,6 +899,12 @@ pub struct MachineSnapshot {
     pub output: Vec<(ItemId, u32)>,
     pub load: MachineLoadSnapshot,
     pub stall: Option<Stall>,
+    /// Whether the player has switched this machine OFF
+    /// ([`PlayerCommand::SetMothballed`]). Unlike `load` and `stall` beside
+    /// it this one DOES dirty the chunk when it changes — it moves only
+    /// when the player toggles it, which is a discrete action, so the
+    /// chunk-driven renderer learns about it the same tick.
+    pub mothballed: bool,
 }
 
 /// What share of the recent past a machine spent working, starved or
@@ -946,7 +990,7 @@ pub struct Stall {
     pub item: String,
 }
 
-/// The nine ways a machine can be waiting — see [`Stall`]. Serialized in
+/// The ten ways a machine can be waiting — see [`Stall`]. Serialized in
 /// `snake_case`, exactly as listed there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -969,19 +1013,38 @@ pub enum StallKind {
     /// carries none. `item` is the fluid the recipe wanted. Issue #54, and
     /// #43 for the case that produces it.
     AmbiguousPipe,
+    /// **Switched off by the player** — mothballed (issue #19). `item` is
+    /// empty: nothing is being waited for, which is the point. Reported
+    /// ahead of every other kind, because a machine that is off has no
+    /// meaningful supply state and "waiting for Tomato" about one is a lie
+    /// the player then has to debug.
+    Mothballed,
 }
 
 /// One entry of [`World::machine_load_snapshots`]: the machine's origin
 /// tile (its key in every other snapshot), its load and its stall.
 ///
 /// ```json
-/// {"tile": [4, 0], "load": {...}, "stall": {"kind": "input", "item": "tomato"}}
+/// {"tile": [4, 0], "load": {...}, "stall": {"kind": "input", "item": "tomato"},
+///  "crewed": true, "mothballed": false}
 /// ```
+///
+/// `crewed` and `mothballed` ride the POLLED entry rather than only the
+/// layout, because both can change with no tile dirtied: `crewed` moves on
+/// a `Hire`, a `Fire` or a payday's walk-out, none of which touches a chunk
+/// (`staff.rs`: "a head is not a tile"), and this is the channel Godot's
+/// machine-load readout already reads every frame it redraws.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct MachineLoadEntry {
     pub tile: TileCoord,
     pub load: MachineLoadSnapshot,
     pub stall: Option<Stall>,
+    /// Whether the hired headcount covers this machine's crew — issue #20.
+    /// See [`World::uncrewed_placements`]; `false` is "this is the machine
+    /// standing idle for want of a head".
+    pub crewed: bool,
+    /// Whether the player has switched this machine off — issue #19.
+    pub mothballed: bool,
 }
 
 /// One pipe tile, for rendering (milestone 6 — ARCHITECTURE.md §3.4).
@@ -1292,15 +1355,19 @@ pub enum TileSnapshot {
     ///   "load": {"working": 600, "starved": 0, "blocked": 0,
     ///            "observed": 600, "window": 600, "percent": 100,
     ///            "status": "working"},
-    ///   "stall": null,
-    ///   "crew": [{"category": "manufacturing", "count": 2}]}`
+    ///   "stall": null, "mothballed": false,
+    ///   "crew": [{"category": "manufacturing", "count": 2}],
+    ///   "crewed": true}`
     ///
     /// `machine_kind` is spelled out rather than reusing `kind`, which this
     /// enum already spends on its own variant tag. `load` and `stall` are
     /// the same objects [`MachineSnapshot`] carries, so hover can say how
     /// loaded a machine is and why it waits without a second call. `crew`
     /// is the kind's `machines.ron` `staff` requirement (the staff pools
-    /// MVP epic), for hover's "crew: 2 manufacturing".
+    /// MVP epic), for hover's "crew: 2 manufacturing"; `crewed` is whether
+    /// it actually got those people this tick (issue #20), so hover can say
+    /// "short of manufacturing staff" about *this* machine rather than
+    /// leaving the player to diff the staff screen against the floor.
     Machine {
         machine_kind: String,
         direction: Direction,
@@ -1309,8 +1376,10 @@ pub enum TileSnapshot {
         recipe: RecipeId,
         process: Option<(u64, u64)>,
         load: MachineLoadSnapshot,
+        mothballed: bool,
         stall: Option<Stall>,
         crew: Vec<CrewEntry>,
+        crewed: bool,
     },
     /// `{"kind": "pipe", "direction": "east", "fluid": "vinegar",
     ///   "naming": "carries", "candidates": ["vinegar"],
@@ -1381,8 +1450,13 @@ pub enum TileSnapshot {
         /// The kind's `staff` requirement and whether the dock was refused
         /// it on the last tick it held something (the staff pools MVP
         /// epic) — hover's "crew: 1 logistics" and "held · short of
-        /// logistics staff".
+        /// logistics staff". `crewed` is the same per-placement fact every
+        /// other placement carries (issue #20); for a dock holding nothing
+        /// it is the only one of the two that is meaningful, since
+        /// `understaffed` only moves on a tick the dock had something to
+        /// ship.
         crew: Vec<CrewEntry>,
+        crewed: bool,
         understaffed: bool,
     },
 }
@@ -1571,6 +1645,14 @@ pub struct PlacementSnapshot {
     pub footprint: Footprint,
     pub occupies: Vec<TileCoord>,
     pub recipe: Option<RecipeId>,
+    /// Whether the hired headcount covers this placement's crew (issue
+    /// #20) — see [`World::uncrewed_placements`] for the rule and why it is
+    /// derived here rather than stored. `true` for everything that asks for
+    /// nobody, and for a mothballed machine.
+    ///
+    /// Before `links`, which stays last: it is the only optional key here,
+    /// and `tests/links.rs` pins that shape byte for byte.
+    pub crewed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub links: Option<Links>,
 }
@@ -2307,6 +2389,25 @@ impl World {
     // Topology
     // -----------------------------------------------------------------
 
+    /// Re-derives the whole topology once `save.rs` has finished restoring
+    /// live state — the load-time counterpart of the `Place` commands that
+    /// drive it during play.
+    ///
+    /// Loading rebuilds structure through real `Purchase`/`Place`, and each
+    /// of those recomputes the topology on its own. A tank's **declared**
+    /// fluid, though, is restored afterwards with the bodies, and a
+    /// declaration is an *input* to pipe naming
+    /// ([`resolve_network_fluids`]) rather than a record of its output. So
+    /// without this pass a loaded world is named as though every tank were
+    /// undeclared, and the very layout issue #43 exists for — two tank-fed
+    /// raw runs into one machine — comes back ambiguous and stuck however
+    /// it was saved. Nothing else is disturbed: the pass carries pipe
+    /// volumes across by tile, which is what lets it run on a live world at
+    /// all.
+    pub(super) fn recompute_topology_after_restore(&mut self) {
+        self.recompute_topology();
+    }
+
     /// Sums the ESTABLISHMENT — every head the placed machinery needs to be
     /// fully crewed, whether or not any of it is running — and hands it to
     /// [`StaffPools::set_required`].
@@ -2332,30 +2433,22 @@ impl World {
     /// One entry per placement, so a 2x2 cooking vat is one crew and not
     /// four: the ECS holds one entity per placement, however many tiles it
     /// covers.
-    /// Re-derives the whole topology once `save.rs` has finished restoring
-    /// live state — the load-time counterpart of the `Place` commands that
-    /// drive it during play.
     ///
-    /// Loading rebuilds structure through real `Purchase`/`Place`, and each
-    /// of those recomputes the topology on its own. A tank's **declared**
-    /// fluid, though, is restored afterwards with the bodies, and a
-    /// declaration is an *input* to pipe naming
-    /// ([`resolve_network_fluids`]) rather than a record of its output. So
-    /// without this pass a loaded world is named as though every tank were
-    /// undeclared, and the very layout issue #43 exists for — two tank-fed
-    /// raw runs into one machine — comes back ambiguous and stuck however
-    /// it was saved. Nothing else is disturbed: the pass carries pipe
-    /// volumes across by tile, which is what lets it run on a live world at
-    /// all.
-    pub(super) fn recompute_topology_after_restore(&mut self) {
-        self.recompute_topology();
-    }
-
+    /// **A MOTHBALLED machine is not in the establishment** (issue #19).
+    /// That is the whole of mothballing's effect on the staffing model: the
+    /// requirement is what is placed *and switched on*, so a player who
+    /// over-built can switch the surplus off, watch `required` fall below
+    /// `headcount`, and let the difference go. Also called by
+    /// `try_set_mothballed`, which is why this is not only reached through
+    /// [`Self::recompute_topology`].
     pub(super) fn recompute_establishment(&mut self) {
         let mut establishment: BTreeMap<String, u32> = BTreeMap::new();
         let entities: Vec<Entity> = self.ecs.iter().map(|e| e.entity()).collect();
         for entity in entities {
             if self.ecs.get::<&Position>(entity).is_err() {
+                continue;
+            }
+            if self.is_mothballed(entity) {
                 continue;
             }
             let kind = self.placement_of(entity).kind;
@@ -2368,6 +2461,101 @@ impl World {
         }
         let establishment: Vec<(String, u32)> = establishment.into_iter().collect();
         self.staff.set_required(&establishment);
+    }
+
+    /// Whether `entity` is a machine the player has switched off. `false`
+    /// for everything that is not a machine — nothing else can be
+    /// mothballed (see [`PlayerCommand::SetMothballed`]).
+    fn is_mothballed(&self, entity: Entity) -> bool {
+        self.ecs
+            .get::<&Machine>(entity)
+            .map(|m| m.mothballed)
+            .unwrap_or(false)
+    }
+
+    /// **Which placements the hired headcount CANNOT crew** — issue #20's
+    /// per-placement fact, the one the HUD could not say. The game already
+    /// said *that* the factory was short and *how many* heads to hire; what
+    /// it never said was WHICH machine was standing idle for want of one,
+    /// so a player on a large line had to hunt tile by tile. Every entity
+    /// in this set is such a machine.
+    ///
+    /// Derived, never stored: it costs no save-schema change, and it cannot
+    /// go stale the way a cached flag would, because the two things it
+    /// depends on — what is placed and how many heads are hired — move for
+    /// completely different reasons (a `Place`, and a `Hire`/`Fire`/payday
+    /// that dirties no tile at all). Recomputing it at snapshot time is
+    /// what keeps it honest; a walk of a few hundred placements is nothing
+    /// beside the chunk read it rides along with.
+    ///
+    /// **The ESTABLISHMENT, handed out in the order the tick claims in** —
+    /// `topology.machines`, then `topology.docks`, whole crew or nothing
+    /// (`staff.rs`: "per tick, in stable order, whole crew or nothing"), so
+    /// the machine this names is the one the first-come rule really leaves
+    /// short.
+    ///
+    /// It is deliberately NOT a replay of the last tick. The tick claims
+    /// only for a machine that would otherwise have worked, so a per-tick
+    /// reading flickers as the line ebbs — the vat reads crewed on the
+    /// ticks the crusher happened to be waiting for a tomato — and that is
+    /// the exact flapping the 2026-09-16 establishment change existed to
+    /// end. This asks the stable question instead: *if everything that is
+    /// placed wanted to run at once, who would go without?* A machine
+    /// placed and idle still holds its place in the queue here, because it
+    /// still holds its place in `required`. What happened on one particular
+    /// tick is already on the wire as the `staff` stall
+    /// (`Machine::refused_by`), and the two are meant to be read together.
+    ///
+    /// It allocates against `headcount`, **not** `available`, for
+    /// `StaffPools::short`'s reason: a head in arrears is on the books, and
+    /// the fix for one is paying them, not hiring a second. Arrears are
+    /// reported as their own warning (the per-tick `staff` stall and the
+    /// panel's unpaid count) rather than smeared into this one.
+    ///
+    /// A placement whose kind asks for nobody — a belt, a pipe, a hopper, a
+    /// tank — is crewed vacuously, as is a MOTHBALLED machine: it needs no
+    /// crew, so it is not waiting for one. Reported as the set of the
+    /// UNCREWED, which is the short list on any factory worth looking at
+    /// and makes "everything else is fine" the default.
+    fn uncrewed_placements(&self) -> BTreeSet<Entity> {
+        let mut budget: BTreeMap<&str, u32> = self
+            .staff
+            .catalog()
+            .categories()
+            .iter()
+            .zip(self.staff.pools())
+            .map(|(category, pool)| (category.id.as_str(), pool.headcount))
+            .collect();
+        let mut uncrewed = BTreeSet::new();
+        let ordered = self.topology.machines.iter().chain(&self.topology.docks);
+        for &entity in ordered {
+            if self.is_mothballed(entity) {
+                continue;
+            }
+            let kind = self.placement_of(entity).kind;
+            let crew: &[(String, u32)] =
+                self.machines.get(&kind).map_or(&[], |k| k.staff.as_slice());
+            let affordable = crew.iter().all(|(category, count)| {
+                budget.get(category.as_str()).copied().unwrap_or(0) >= *count
+            });
+            if affordable {
+                for (category, count) in crew {
+                    if let Some(left) = budget.get_mut(category.as_str()) {
+                        *left -= *count;
+                    }
+                }
+            } else {
+                uncrewed.insert(entity);
+            }
+        }
+        uncrewed
+    }
+
+    /// Whether one placement has the heads it needs on the books — see
+    /// [`Self::uncrewed_placements`], which this is the single-entity
+    /// reading of. Used by the hover query, which asks about one tile.
+    fn is_crewed(&self, entity: Entity) -> bool {
+        !self.uncrewed_placements().contains(&entity)
     }
 
     /// Rebuilds everything derived from where things stand: the occupancy
@@ -3569,6 +3757,9 @@ impl World {
             PlayerCommand::SetTankFluid { tile, fluid } => {
                 self.try_set_tank_fluid(tile, &fluid);
             }
+            PlayerCommand::SetMothballed { tile, enabled } => {
+                self.try_set_mothballed(tile, enabled);
+            }
             // Neither dirties a chunk: a head is not a tile. Both are silent
             // about an unknown category, `Hire` about a balance that could
             // not pay the next bill plus the new wage (the quality pass:
@@ -3795,6 +3986,34 @@ impl World {
         }
     }
 
+    /// [`PlayerCommand::SetMothballed`]. Silent no-op on an empty tile, on
+    /// anything that is not a machine, and on the state it already has.
+    ///
+    /// **[`Self::recompute_establishment`], not
+    /// [`Self::recompute_topology`].** Switching a machine off changes
+    /// exactly one derived thing — how many heads the placed machinery
+    /// needs — and none of the things the topology pass exists to rebuild:
+    /// the occupancy grid, the hand-off links and the fluid networks are
+    /// all still what they were, and a mothballed machine keeps its taps so
+    /// that returning it to service needs no rebuild either. Calling the
+    /// narrow one keeps the rule that a full rebuild happens on
+    /// `Place`/`Remove`/`Rotate` and nowhere else.
+    fn try_set_mothballed(&mut self, tile: TileCoord, enabled: bool) -> bool {
+        let Some(&entity) = self.topology.grid.get(&tile) else {
+            return false;
+        };
+        let Ok(mut machine) = self.ecs.get::<&mut Machine>(entity) else {
+            return false;
+        };
+        if machine.mothballed == enabled {
+            return false;
+        }
+        machine.mothballed = enabled;
+        drop(machine);
+        self.recompute_establishment();
+        self.mark_placement_dirty(entity);
+        true
+    }
     /// Which of `candidates` a tile-addressed command applies to: the one
     /// whose footprint covers `tile`, or — when no tile was given — all of
     /// them. See [`PlayerCommand::FillHopper`] for why "all of them" is the
@@ -3984,6 +4203,9 @@ impl World {
     /// Everything currently placed, in tile order — see
     /// [`PlacementSnapshot`], and note this **replaces `chain_layout`**.
     pub fn world_layout(&self) -> Vec<PlacementSnapshot> {
+        // Computed once for the whole walk rather than per placement: it is
+        // one answer about the whole factory, not a property of a tile.
+        let uncrewed = self.uncrewed_placements();
         self.topology
             .all
             .iter()
@@ -4002,6 +4224,7 @@ impl World {
                     tile: origin,
                     direction: placement.direction,
                     footprint: placement.footprint,
+                    crewed: !uncrewed.contains(&entity),
                 }
             })
             .collect()
@@ -4036,17 +4259,21 @@ impl World {
     /// every few ticks is cheap. `ChunkSnapshot` and `query_tile` carry the
     /// identical `load`/`stall` objects for a consumer that already has one.
     pub fn machine_load_snapshots(&self) -> Vec<MachineLoadEntry> {
+        let uncrewed = self.uncrewed_placements();
         self.topology
             .machines
             .iter()
             .map(|&machine| {
                 let body = self.ecs.get::<&Machine>(machine).unwrap();
                 let load = MachineLoadSnapshot::of(&body.load);
+                let mothballed = body.mothballed;
                 drop(body);
                 MachineLoadEntry {
                     tile: self.position_of(machine),
                     load,
                     stall: self.machine_stall(machine),
+                    crewed: !uncrewed.contains(&machine),
+                    mothballed,
                 }
             })
             .collect()
@@ -4227,6 +4454,7 @@ impl World {
             input: body.input.iter().cloned().collect(),
             output: body.output.iter().cloned().collect(),
             load: MachineLoadSnapshot::of(&body.load),
+            mothballed: body.mothballed,
             stall: self.machine_stall(machine),
         }
     }
@@ -4237,6 +4465,14 @@ impl World {
     /// same taps `tick` would hand it, without moving anything.
     fn machine_stall(&self, machine: Entity) -> Option<Stall> {
         let body = self.ecs.get::<&Machine>(machine).ok()?;
+        if body.mothballed {
+            // Ahead of everything: a machine that is off is not waiting for
+            // anything, and its buffers say nothing about why it is idle.
+            return Some(Stall {
+                kind: StallKind::Mothballed,
+                item: String::new(),
+            });
+        }
         // The six older kinds first; only when none of them applies can a
         // crew refusal be the reason (it is asked for only on a tick the
         // machine would otherwise have worked, so the two never compete).
@@ -4531,11 +4767,13 @@ impl World {
                     recipe: body.recipe.clone(),
                     process: body.process.map(|p| (p.start_tick, p.required_ticks)),
                     load: MachineLoadSnapshot::of(&body.load),
+                    mothballed: body.mothballed,
                     stall: {
                         drop(body);
                         self.machine_stall(entity)
                     },
                     crew,
+                    crewed: self.is_crewed(entity),
                 }
             }
             BodyKind::Pipe => {
@@ -4598,6 +4836,7 @@ impl World {
                     capacity_per_item: snapshot.capacity_per_item,
                     shipped_total: snapshot.shipped_total,
                     crew: crew_entries(self.crew_of_kind(&placement.kind)),
+                    crewed: self.is_crewed(entity),
                     understaffed: snapshot.understaffed,
                 }
             }

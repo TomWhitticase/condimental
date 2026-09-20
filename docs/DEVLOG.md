@@ -455,6 +455,55 @@ Also filed along the way: a screenshot fixture is never asserted to be
 actually running before the shutter (#94), and the clipboard shows one docket
 at 1600x900 with three contracts signed (#95).
 
+### 2026-09-20 — Mothballing, and naming the machine that is going without
+
+The two halves of one complaint about the staff pools: there was no way out
+of the unpaid spiral (#19), and no way to tell which machine was the one
+short of crew (#20).
+
+**The spiral had no exit.** Unpaid heads idle the machines they crew, which
+cuts the income that would have paid them, so a factory that missed one
+payday missed the next one harder. The only lever was `Remove`, which
+refunds the machine to the shed — a fine answer for a machine you regret
+buying, a terrible one for a line you want back next period.
+
+**Mothballing.** `set_mothballed` switches a machine off: it drops out of
+the establishment, so the wage bill it was driving can be fired away; it
+produces nothing; and it HOLDS the batch it was part-way through rather than
+losing it or finishing it, so switching it back on resumes. It persists
+across a save with no schema bump. The switch lives on the click-to-
+configure panel, which grew a third shape for machines — not a keybind, for
+the same reason Q, SPACE and V were retired.
+
+Machines only. A hopper, a tank and the **dock** are refused: the dock is
+the only route from product to money, and a mothballed dock is a factory
+that cannot recover at all. The build-ahead second-dock case that leaves
+open is issue #86.
+
+Stated plainly, because a test had to work around it: this rescues a factory
+that is *heading into* arrears, not one that has already missed a payday
+with a single shipping clerk. Notice pay holds the next bill at the old
+figure for a period and `staff.ron` pays logistics last, so by then the dock
+has already stopped. Issue #85, with the four candidate fixes.
+
+**Naming the machine.** Every placement now reports `crewed` — the
+establishment's stable answer to *if everything placed wanted to run at
+once, who goes without?* Deliberately not a replay of the last tick, which
+flickers as the line ebbs; that flapping is what the establishment model
+existed to end. The hover says it in the same words a `staff` stall gives,
+through the one helper both go through so they cannot drift.
+
+The load bar needed one new idea. An uncrewed machine does no work, so its
+window decays to 0% and there is no fill left to turn amber at exactly the
+moment the player needs telling. So the track's **border** carries the
+colour instead: the fill is the quantity, the border is the state, and the
+words above it still say which state it is. A mothballed machine beats both
+and reads `○ switched off` on an unlit grey bar — the player chose it, and
+nothing about it is a fault. No in-world pole; the hover panel is still the
+one place status lives.
+
+The dock's own held line still flickers the old way, for a channel reason —
+issue #87.
 
 ### 2026-09-20 — Three issues off the board: names, fluid colour, honest frames
 

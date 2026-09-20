@@ -287,6 +287,26 @@ implementation history (epics, tickets, balancing passes) behind each one.
   firing is free and immediate but still pays out the period; an unpaid
   head is idled once and gone the second time (no debt, no reputation
   meter).
+- **A machine can be MOTHBALLED, and that is the way out of arrears**
+  (`set_mothballed`, 2026-09-20; full record in
+  [DECISIONS.md](DECISIONS.md)). A mothballed machine asks for no crew, so
+  it drops out of the establishment and the surplus heads can be fired down
+  to a bill the factory can meet; it produces nothing and HOLDS the batch it
+  was part-way through, so switching it back on resumes rather than
+  restarts. Machines only — a hopper, a tank and the **dock** are refused,
+  because the dock is the only route from product to money and a spare one's
+  escape is `Remove`. It costs nothing and saves nothing directly, so there
+  is no new balance number: what it changes is which heads the establishment
+  asks for. It does **not** rescue a factory that has already missed a
+  payday with a single logistics head — notice pay holds the next bill at
+  the old figure for a period, and `staff.ron` pays logistics last, so the
+  dock has already stopped shipping. That terminal case is open.
+- **Every placement reports whether it has its crew** (`crewed`, 2026-09-20)
+  — the establishment's stable answer to *if everything placed wanted to run
+  at once, who goes without?*, allocated in the order the tick claims in.
+  Deliberately not a replay of the last tick, which flickers as the line
+  ebbs. It is what lets the UI name the one machine that is short instead of
+  only saying the factory is.
 - **Money and contract state are plain fields on `sim_core::sim::
   economy::Economy`**, owned by `World`, not ECS entities — no per-entity
   multiplicity to justify that. `money` is a single fixed-point (`types::Money`,
@@ -314,10 +334,16 @@ implementation history (epics, tickets, balancing passes) behind each one.
 - Does an idle machine cost anything? **Decided 2026-09-16 (§7): no, but it
   still needs a crew on the books.** The requirement is what is PLACED, so
   buying a machine you are not yet feeding raises the bill immediately. That
-  is the price of a stable number. The open part is whether a machine should
-  be *mothballable* — switched off deliberately, releasing its crew — so a
-  player can build ahead without paying ahead. Nothing in the wire or the save
-  format precludes it; it is a balance question, not a technical one.
+  is the price of a stable number. ~~The open part is whether a machine
+  should be *mothballable* — switched off deliberately, releasing its crew —
+  so a player can build ahead without paying ahead.~~ **Decided 2026-09-20
+  (§7, the mothballing bullet):** yes, and it is a machine's escape from the
+  unpaid spiral as much as a way to build ahead. `set_mothballed` drops the
+  machine out of the establishment, stops its output and HOLDS its batch;
+  machines only, so a dock still cannot be switched off. It does not rescue
+  a factory that has already missed a payday with a single shipping clerk —
+  see the decision record for why, and the open issue for the candidate
+  fixes.
 - Is there a reputation/trust score gating access to higher-tier contracts, separate from equipment-tier gating?
 - When staff demand exceeds headcount in a category, which machines lose out — player-set priority, first-come-first-served, or proportional throttling across all of them? **MVP-provisional (2026-09-12, §9's staff-pools bullet):** first-come in the simulation's stable machine order, so the same machine is always the one short; player-set priority is the expected replacement and needs no wire change.
 - Is there a one-time recruiting/training cost on top of the recurring per-head wage, and can headcount be reduced (firing) freely or with a penalty/delay? **MVP-provisional (2026-09-12), amended by the quality pass (2026-09-13):** no recruiting fee, but a hire needs the balance to cover the next bill plus the new wage; firing is free and immediate, but the fired head is still paid for the period it worked any part of (notice pay); a head that cannot be paid on payday is idled, not lost, and leaves only if the next payday cannot pay it either. Still placeholders for the balancing pass, not decisions.

@@ -26,7 +26,13 @@
 #     tick,
 #   * a real status change is polled through `_advance_simulation` as a
 #     fresh line starts up, the pause menu freezes polling, and the cadence
-#     is LOAD_POLL_TICKS of simulation.
+#     is LOAD_POLL_TICKS of simulation,
+#   * the two staffing facts the same record carries (issues #19 and #20):
+#     a machine going without its crew says so in the stall's own words and
+#     turns its bar amber even on the frames it has no live stall, a
+#     MOTHBALLED machine reads "switched off" with a fourth glyph and an
+#     unlit bar rather than as a fault, and both really arrive over the
+#     wire for every machine on the line.
 extends SceneTree
 
 const Layouts = preload("res://test_layouts.gd")
@@ -321,6 +327,64 @@ func _run_checks() -> void:
 	_step()
 	if main._load_polled_tick == after_poll:
 		_fail("LOAD_POLL_TICKS ticks after a poll, the next one is due")
+
+	# --- 7. the staffing readout (issues #19 and #20) ------------------------
+	# Two things the same polled record now carries that are NOT statuses,
+	# and both of them beat the status when they are true.
+	var staff_probe := "88,88"
+	# #20: a machine going without its crew says so on every frame, not just
+	# on the ticks it got as far as asking and being refused. The words are
+	# the ones a `staff` stall gives, so the two readings cannot contradict.
+	main._crews[staff_probe] = [{"category": "manufacturing", "count": 2}]
+	if main._uncrewed_reason_text(staff_probe) != "short of manufacturing staff":
+		_fail("an uncrewed machine's words are '%s'" % main._uncrewed_reason_text(staff_probe))
+	if main._stall_reason_text({"kind": "staff", "item": "manufacturing"}) \
+			!= main._uncrewed_reason_text(staff_probe):
+		_fail("the stall and the establishment say different things about the same shortage")
+	main._machine_load[staff_probe] = {
+		"status": "starved", "reason": null, "crewed": false, "mothballed": false,
+		"load": {"percent": 12, "window": window, "status": "starved"},
+	}
+	var uncrewed_line: String = main._machine_load_text(staff_probe)
+	if uncrewed_line != "%s starved  ·  12%% busy  ·  short of manufacturing staff" % glyphs["starved"]:
+		_fail("an uncrewed machine with no live stall reads '%s'" % uncrewed_line)
+	if main._load_bar_color(main._machine_load[staff_probe]) != main.METER_FILL_PROGRESS:
+		_fail("an uncrewed machine's load bar is not amber")
+	# A live stall is the more specific answer and keeps its place.
+	main._machine_load[staff_probe]["reason"] = {"kind": "input", "item": "sugar"}
+	if main._machine_load_text(staff_probe).find("waiting for") < 0:
+		_fail("the uncrewed words displaced a live stall reason")
+	# #19: mothballed beats everything, because it is not a fault.
+	main._machine_load[staff_probe] = {
+		"status": "starved", "reason": {"kind": "mothballed", "item": ""},
+		"crewed": true, "mothballed": true,
+		"load": {"percent": 12, "window": window, "status": "starved"},
+	}
+	if main._stall_reason_text({"kind": "mothballed", "item": ""}) != "switched off":
+		_fail("the mothballed stall kind reads '%s'" % main._stall_reason_text({"kind": "mothballed", "item": ""}))
+	var off_line: String = main._machine_load_text(staff_probe)
+	if off_line.find("switched off") < 0 or off_line.find(main.LOAD_OFF_GLYPH) < 0:
+		_fail("a mothballed machine's line is '%s' — it needs the glyph and the words" % off_line)
+	if off_line.find("starved") >= 0:
+		_fail("a machine the player switched off must not be reported as starved: '%s'" % off_line)
+	if main._load_bar_color(main._machine_load[staff_probe]) != main.METER_FILL_OFF:
+		_fail("a mothballed machine's load bar is not the unlit fill")
+	if main.LOAD_OFF_GLYPH in glyphs.values():
+		_fail("the switched-off glyph must be a fourth shape, not one of the three statuses")
+	main._machine_load.erase(staff_probe)
+	main._crews.erase(staff_probe)
+
+	# And the two facts really do come off the wire, for every machine on
+	# the line, rather than being defaults this file supplies.
+	for key in expected.keys():
+		var record: Dictionary = main._machine_load.get(key, {})
+		if not record.has("crewed") or not record.has("mothballed"):
+			_fail("the polled record for %s carries no staffing facts: %s" % [key, str(record)])
+			continue
+		if not bool(record["crewed"]):
+			_fail("a funded line's %s reads uncrewed" % key)
+		if bool(record["mothballed"]):
+			_fail("nothing on this line was switched off, but %s reads mothballed" % key)
 
 	if _failed:
 		quit(1)
