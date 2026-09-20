@@ -105,14 +105,31 @@
 //!
 //! # Forward compatibility
 //!
-//! Nothing has shipped with a save file yet, so **`schema_version` 1 is
-//! whatever this batch of work merges with**. The auto-fill ticket has since
-//! landed and did exactly what this note reserved: `SavedHopper` and
-//! `SavedTank` each gained one `#[serde(default)] auto_fill: bool`, and the
-//! schema version stayed at 1. `SavedMachine::recipe` is the third, added
-//! by the BBQ epic on the same terms, and [`SaveData::lifetime_deliveries`]
-//! is the fourth. After this batch ships, a field addition is a version
-//! bump like any other shape change.
+//! **That window is closed.** It ran while nothing had shipped with a save
+//! file: `schema_version` 1 was whatever the save batch merged with, and
+//! four fields were added inside it on those terms — `auto_fill` on
+//! `SavedHopper` and `SavedTank` (the auto-fill ticket), `SavedMachine::
+//! recipe` (the BBQ epic) and [`SaveData::lifetime_deliveries`] (the
+//! progression gates) — each a one-line `#[serde(default)]`, which is what
+//! the per-kind body records are named-field structs for. The note that
+//! reserved it said what ends it: "after this batch ships, a field addition
+//! is a version bump like any other shape change".
+//!
+//! **`schema_version` is therefore 2**, and [`SavedTank::fluid`] is the
+//! field that moved it (issue #43: a tank declares what it holds). A v1
+//! file is **rejected**, not migrated — the rule ARCHITECTURE.md §4 sets
+//! for this format and every other loader in this crate follows — and the
+//! cost of that is bounded by the same fact the window rested on: no
+//! release has ever written a save file, so the only v1 files in existence
+//! are development ones. [`SaveError::UnsupportedSchemaVersion`] names both
+//! numbers so the refusal reads as "this save predates a change" rather
+//! than as a parse failure.
+//!
+//! A field addition from here on is a bump, for real this time. Adding one
+//! `#[serde(default)]` and leaving the version alone would mean a v2 file
+//! written by an older build and one written by a newer one are both "v2"
+//! and are not the same shape, which is the exact ambiguity the version
+//! number exists to prevent.
 //!
 //! **What a pre-gate save loads as, and why that is right.**
 //! `lifetime_deliveries` defaults to zero, so a save written before
@@ -152,7 +169,7 @@ use super::world::{BELT_KIND, PIPE_KIND, PlayerCommand, World};
 /// The save format's version. Bumped whenever the shape below changes;
 /// a file naming any other version is rejected, never migrated — see the
 /// module doc, and every other loader in this crate.
-pub const SAVE_SCHEMA_VERSION: u32 = 1;
+pub const SAVE_SCHEMA_VERSION: u32 = 2;
 
 /// A fixed-point value as its raw `I16F16` bits — see the module doc for why
 /// a save never stores one as decimal text.
@@ -456,6 +473,23 @@ pub struct SavedTank {
     /// `SavedHopper::auto_fill`'s twin (`sim::fluid::FluidTank::auto_fill`).
     #[serde(default)]
     pub auto_fill: bool,
+    /// What the player declared this tank holds, or `None` if they never
+    /// did — `sim::fluid::FluidTank::declared`, issue #43. **The field that
+    /// took this format to `schema_version` 2** (see the module doc).
+    ///
+    /// It has to be saved because it is the one fluid fact that is *said*
+    /// rather than derived: everything else about a network — its shape,
+    /// what it carries, which tile a tank discharges into — is rebuilt by
+    /// `World::recompute_topology` from the placements, and a declaration
+    /// is an input to that pass, not an output of it. Dropping it would
+    /// reload the two-tank layout it exists for as two unnamed runs and a
+    /// stalled machine.
+    ///
+    /// Still `Option`, and still defaulted, because *undeclared* is a real
+    /// and ordinary state — every tank in a one-fluid line is in it — and
+    /// not a missing value.
+    #[serde(default)]
+    pub fluid: Option<ItemId>,
 }
 
 /// A dock's buffer (normally empty — it is a pass-through, see
@@ -546,6 +580,15 @@ pub enum SaveError {
     /// build's recipes, so no hopper could legally hold it.
     UnknownHopperItem {
         item: String,
+        tile: TileCoord,
+        raw: Vec<String>,
+    },
+    /// A tank **declared** to hold something that is not a raw fluid of
+    /// this build's recipes — `UnknownHopperItem`'s twin, and refused for
+    /// its reason. `PlayerCommand::SetTankFluid` would not have accepted
+    /// it either.
+    UnknownTankFluid {
+        fluid: String,
         tile: TileCoord,
         raw: Vec<String>,
     },
@@ -667,6 +710,13 @@ impl std::fmt::Display for SaveError {
                 f,
                 "the hopper at {tile:?} holds '{item}', which is not a raw ingredient of \
                  this build's recipes (raw: {}) — a hopper can only ever hold one of those",
+                raw.join(", ")
+            ),
+            SaveError::UnknownTankFluid { fluid, tile, raw } => write!(
+                f,
+                "the tank at {tile:?} is declared to hold '{fluid}', which is not a raw fluid \
+                 of this build's recipes (raw: {}) — a tank is how fluid enters the graph from \
+                 outside, and only raws come in",
                 raw.join(", ")
             ),
             SaveError::UnknownMachineRecipe {
@@ -829,6 +879,7 @@ impl World {
                     SavedBody::FluidTank(SavedTank {
                         volume_bits: FxBits::of(tank.volume()),
                         auto_fill: tank.auto_fill(),
+                        fluid: tank.declared().cloned(),
                     })
                 }
                 DOCK_KIND => {
@@ -992,6 +1043,9 @@ impl World {
         validate(&world, &data)?;
         rebuild_structure(&mut world, &data)?;
         restore_bodies(&mut world, &data)?;
+        // A tank's declared fluid only just arrived, and pipe naming is
+        // derived from it — see `World::recompute_topology_after_restore`.
+        world.recompute_topology_after_restore();
         restore_ledgers(&mut world, &data);
         world.restore_production(restore_production(&data.production)?);
         restore_staff(&mut world, &data)?;
@@ -1091,7 +1145,24 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
                     });
                 }
             }
-            SavedBody::Pipe(_) | SavedBody::FluidTank(_) => {}
+            SavedBody::FluidTank(tank) => {
+                // A declared fluid is validated exactly as a hopper's item
+                // is, and rejected for the same reason: content changed
+                // under the save, and this crate's loader convention is to
+                // say so rather than to guess. An *undeclared* tank is not
+                // an error — it is the ordinary state of every tank on a
+                // one-fluid line.
+                if let Some(fluid) = &tank.fluid
+                    && !world.raw_fluids().contains(fluid)
+                {
+                    return Err(SaveError::UnknownTankFluid {
+                        fluid: fluid.clone(),
+                        tile: placement.tile,
+                        raw: world.raw_fluids().iter().cloned().collect(),
+                    });
+                }
+            }
+            SavedBody::Pipe(_) => {}
         }
     }
 
@@ -1395,7 +1466,7 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                     .ecs_mut()
                     .insert_one(
                         entity,
-                        FluidTank::restore(capacity, volume, saved.auto_fill),
+                        FluidTank::restore(capacity, volume, saved.auto_fill, saved.fluid.clone()),
                     )
                     .expect("the entity was just placed");
             }
@@ -1666,15 +1737,47 @@ mod tests {
 
         // ...and the text path reports it as a version problem rather than
         // as whatever the shape change happens to break.
-        let text = a_save()
-            .to_ron()
-            .replace("schema_version: 1", "schema_version: 99");
+        let text = a_save().to_ron().replace(
+            &format!("schema_version: {SAVE_SCHEMA_VERSION}"),
+            "schema_version: 99",
+        );
         match SaveData::from_ron(&text) {
             Err(SaveError::UnsupportedSchemaVersion { found, supported }) => {
                 assert_eq!((found, supported), (99, SAVE_SCHEMA_VERSION));
             }
             other => panic!("expected a version error, got {other:?}"),
         }
+    }
+
+    /// The v1 refusal issue #43 created, said out loud. A v1 file is every
+    /// save written before a tank could declare what it holds; this build
+    /// will not load one, and the thing that matters is that it says *why*
+    /// — both version numbers, so the message reads as "this save predates
+    /// a change" rather than as a corrupt file. Migration is deliberately
+    /// not on the table (ARCHITECTURE.md §4, and this module's doc).
+    #[test]
+    fn a_version_one_save_is_refused_with_both_numbers_in_the_message() {
+        let text = a_save().to_ron().replace(
+            &format!("schema_version: {SAVE_SCHEMA_VERSION}"),
+            "schema_version: 1",
+        );
+        let error = SaveData::from_ron(&text).expect_err("a v1 save is not loadable by this build");
+        assert!(
+            matches!(
+                error,
+                SaveError::UnsupportedSchemaVersion {
+                    found: 1,
+                    supported: 2
+                }
+            ),
+            "expected a version refusal naming 1 and 2, got {error:?}"
+        );
+        let message = error.to_string();
+        assert!(
+            message.contains("schema_version 1") && message.contains("supports 2"),
+            "the refusal must name both versions so it does not read as a parse failure: \
+             {message}"
+        );
     }
 
     #[test]

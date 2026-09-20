@@ -81,11 +81,16 @@ below is history and should only ever be appended to.)*
 - **The sim can express a branching chain (2026-09-17).** A machine kind may
   have several recipes and a placed machine runs whichever its current inputs
   satisfy (file order breaks a tie, and there is deliberately no player-facing
-  picker); a recipe may draw several fluid networks, matched by fluid id;
-  `validate_chain` is a connectivity check over a graph. A pipe run's fluid is
-  now derived by shrinking possibility sets rather than by whichever machine
-  reached it first, and which recipe a machine is on is saved. `data/*.ron` is
-  untouched — the BBQ chain itself is the next ticket. See the log entry below.
+  picker); a recipe may draw several fluid networks, matched by fluid id. A
+  pipe run's fluid is now derived by shrinking possibility sets rather than by
+  whichever machine reached it first, and which recipe a machine is on is
+  saved. `data/*.ron` is untouched — the BBQ chain itself is the next ticket.
+  **Amended 2026-09-20 (below):** `validate_chain` no longer demands one
+  connected component, so `recipes.ron` may hold independent production lines;
+  and where the graph cannot name a pipe run, a **tank declares what it
+  holds** and its declaration replaces the run's candidate set. The save is
+  schema 2 for it, and a v1 save is refused rather than migrated. See the log
+  entries below.
 - **Repo:** Private GitHub repo (`TomWhitticase/condimental`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Work reaches `main` through pull requests, and deferrals become issues
   (2026-09-16).** Nothing is pushed to `main` directly — a `pre-push` hook
@@ -255,6 +260,72 @@ Not fixed here and still open: issue #106 (a mid-word break in the contents
 picker) and issue #99 (the legend), neither of which is this review's
 subject.
 
+### 2026-09-20 — A tank says what it holds, and a recipe file may fork
+
+Two fluid-identity issues off the board, both latent: neither bites the
+shipped chain today, and both would have bitten the next content addition.
+
+**A recipe file may hold independent production lines (issue #42).**
+`validate_chain` demanded that every recipe be reachable from recipe 0 by a
+shared ingredient id — a proxy for "nothing in this file is unreachable" that
+happened to hold while every recipe descended from tomato. Mayonnaise (eggs +
+oil, GAMEPLAY §2 tier 4) shares nothing with ketchup, so adding it to
+`data/recipes.ron` would have panicked the game at load with a message about
+connectivity. The rule is now per component and about obtainability, not
+about the graph's shape: every component must contain at least one recipe
+whose machine the player can buy and whose inputs are all raw or made
+upstream, and every recipe must be reachable within its own component from
+one of those. A file with two self-sufficient lines constructs; a component
+with no buyable machine, or one whose only inputs nothing produces, still
+panics at load. `machines.validate_covers` runs first so a missing machine is
+named as a missing machine rather than surfacing as an unstartable component.
+
+**A tank declares its fluid (issue #43).** Pipe runs are named by what the
+machines at their ends claim, so two tank-fed runs feeding one machine that
+draws two *raw* fluids are indistinguishable — the graph offers no way to say
+which tank is the vinegar. `resolve_network_fluids` takes a declaration set
+per run now, seeded from the tanks on it: a declared tank *replaces* its run's
+candidate set with a singleton rather than intersecting, so the player's
+statement wins outright and a contradiction between two tanks on one run is
+reported as `Ambiguous` instead of silently picked. Only a raw fluid may be
+declared, and switching a declared tank empties it, exactly as a hopper's
+retarget does. The player-facing half is the tank's config panel: it now
+offers the raw fluids in the same picker the hopper uses, marks the declared
+one, and tells you in a line beneath whether the name was read from the pipe
+run or stated by you.
+
+`tests/tank_fluid.rs` builds the issue's exact case — one mixer drawing two
+raw fluids, two tank-fed runs — and proves both that the graph alone leaves
+it `Ambiguous` and that two declarations resolve it and the machine runs.
+The two-fluid machine could not be photographed: no machine in
+`data/recipes.ron` draws two raw fluids yet (that is why the bug is latent),
+and a Godot fixture cannot inject a recipe.
+
+**The save format's field-addition window is closed.** A declared fluid is
+persisted state, so `SAVE_SCHEMA_VERSION` is 2 and a v1 save is refused by
+number rather than migrated, per ARCHITECTURE §4. Declarations restore before
+topology is re-derived, because pipe naming is *derived* from them — a loaded
+world would otherwise be named as though nothing had been declared. The main
+menu's demo saves are v1 and stop loading until someone runs
+`scripts/make-demo-saves.sh`, which is what that script is for; they live in
+Godot's user directory, not the repo, so this pass cannot do it for you.
+`test_save_load.gd` reads the version out of the save it just wrote instead of
+spelling it, so the next bump does not quietly turn its refusal case into
+"loads fine".
+
+**Declaring is destructive, and says so first.** Review caught that emptying
+only the tank was not enough: `recompute_topology` carries pipe volumes
+across by tile, so the run the tank feeds was silently *relabelled* — sixty
+bought units of vinegar came back as liquid smoke. A declaration change now
+purges the tank *and* every run it discharges into, before the recompute, and
+the fluid is destroyed rather than credited or moved; the config picker names
+the total it is about to destroy so the player consents to it instead of
+discovering it. Refusing the switch while the run holds something was the
+other option and was rejected: it strands a mis-declared tank with no way to
+drain its run. A declaration no machine on the run has a recipe for now makes
+that run read `Unnameable` rather than `Carries`, so the blame lands on the
+tank the player just mis-declared instead of on the machine's outlet.
+
 ### 2026-09-20 — The BBQ ingredients get faces, and all six fluids stand in one frame
 
 Two more of the BBQ branch's presentation gaps, both of the same family as
@@ -393,6 +464,81 @@ read at both sizes. Two findings are deferred rather than fixed: the machine
 hover still cannot clear an open legend at 1280x720 (the geometry leaves
 nowhere to stand; the answer is a self-folding legend or a shorter tooltip,
 which is a content decision), and the headless-metrics gap itself.
+
+### 2026-09-20 — Two balance calls, both measured, neither one a number change
+
+A pass over two BBQ balance/legibility issues that ended with the shipped
+values kept — and with the evidence for keeping them written down, because in
+both cases the cheap fix is the wrong one and nothing in the repo said so.
+**Both sets of numbers were then corrected the same day under review**, which
+is the more useful half of this entry.
+
+**The bank at the moment of building decides whether the BBQ branch costs you
+the board (issue #55, still OPEN).** Building the BBQ branch off a running
+ketchup line stops boxed-ketchup output for about 8 500 ticks: the new pipe
+runs and the second vat fill from the *existing* fluid network, roughly 35
+boxes' worth of throughput into priming pipework before any comes back.
+Delivery windows keep counting; three misses lose a contract. The issue's
+cheap fix is to raise `after_deliveries` in `data/unlocks.ron` until the
+player has slack by the time BBQ lands, so the number was swept — with the
+protocol written down this time, because "when were the extra contracts
+signed" turned out to move every number in the sweep. One order at the shipped
+gate banks 22 and loses nothing; three orders signed **at the gate** bank the
+same 22 and lose one; the same three signed **at tick 0** bank 7 and lose two.
+An emulated gate of 40 banks 24 and loses nothing at all. So **ten stays** —
+not because no number can work, but because 40 deliveries is nowhere near the
+first session ten exists to sit inside — and #55 stays open with the
+measurements posted on it. The two real fixes are filed: a warning at
+placement time (#92) and a fluid network that will not hand a new consumer
+100% of a network the old one lives on (#93).
+
+The first version of this entry claimed the whole board is lost at *every*
+gate, including a 50 000-tick run. It does not reproduce. Two mistakes:
+contracts signed at different moments were reported as one experiment, and
+`market_stall`'s death at tick 1 500 was counted against the branch when the
+no-branch control loses it too. The corrected table and the protocol are in
+`data/unlocks.ron`'s comment.
+
+`test_layouts.gd`'s `--bbq` fixture was rebuilt to prove the setup: a splitter
+merges the BBQ branch onto the ketchup exit belt so both cartons ride one
+line, and the re-sign loop that used to paper over a lost contract is gone.
+The fixture now also **fails loudly** rather than photographing a dead branch:
+if the unlock gate has not opened by its tick ceiling, or if a snapshot will
+not parse, it prints a `BBQ_FIXTURE_FAIL:` marker and asserts.
+
+**The two sauce cartons read apart, and the first measurement that said
+otherwise was wrong (issue #57, closed).** With both boxes on one belt at
+whole-factory framing, `boxed_bbq` reads 117.2 mean luma against a
+`boxed_ketchup` on the same belt in the same frame at 156.7 — a **39.5/255**
+gap, independently reproduced at 42.5 by review. Against the method's anchors
+(1.2/255 = invisible, ~26/255 = reads reliably) that clears the threshold by
+half again. So the lid print introduced on 2026-09-18 does its job and **the
+art is unchanged**.
+
+The useful part is how nearly it went the other way, twice. The first pass
+measured a 5.3/255 gap and concluded the art fails, because the silhouette
+mask used the warm-pixel test earlier passes used (`r > g > b and r - b > 18`)
+and `label_cream` renders near-neutral at (241, 239, 234) — the mask excluded
+the printed panels, the exact pixels under test, and scored the cardboard
+around them. It was caught when the one candidate that visibly repaints the
+art measured *identical* to shipped. The corrected mask is the case's whole
+silhouette with interior holes filled. The second miss was the control: the
+gap was first judged against a 12.6 "noise floor" measured on cases standing
+back to back in the packer queue — a different pixel population from a single
+case on dark belt — and those six windows' coordinates were never written
+down anywhere. **That floor and the ratio built on it are withdrawn.** The
+same-kind control is one case on the shared belt across 14 renders, spread
+5.0/255, with every window's coordinates in the record. Rules now written
+down: **validate a legibility mask by measuring a candidate that visibly
+changes the art before quoting any number it produces**, and **a control must
+be the same subject kind as the subject, with its windows logged.** A chroma
+metric was tested at the same time and came out negative — dC separates the
+cartons by 3.7 against a same-carton 4.0 — because a coloured panel is a
+handful of pixels and light-against-dark is the whole lid.
+
+Also filed along the way: a screenshot fixture is never asserted to be
+actually running before the shutter (#94), and the clipboard shows one docket
+at 1600x900 with three contracts signed (#95).
 
 
 ### 2026-09-20 — Three issues off the board: names, fluid colour, honest frames

@@ -112,6 +112,29 @@ This is the central economic mechanic and the main departure from a plain Factor
 
 **Progression coupling:** early contracts should only demand tier-1/2 sauces (accessible from the start), and higher-value contracts should demand mixes that reach into tiers the player hasn't unlocked yet — creating the pull to invest contract earnings into the next equipment tier specifically to become eligible for the next tier of contract, rather than equipment unlocks being disconnected from what the contract board is asking for.
 
+**Expansion is a cost the contract board charges, and nobody warns you**
+(measured 2026-09-20, re-measured after review, issue #55). Building the BBQ
+branch off a running ketchup line stops boxed-ketchup output for about
+8 000-9 000 ticks: the new pipe runs and the second vat fill from the
+*existing* network, so roughly 35 boxes' worth of throughput goes into priming
+pipework before a single BBQ box exists. Delivery windows keep ticking through
+that, and three missed windows lose a contract. **What decides whether it
+costs you an order is how many finished boxes are banked at the moment you
+build** — a player with 22 banked and one order loses nothing, 22 banked and
+three orders loses one, 7 banked and three orders loses two. The unlock gate
+(`data/unlocks.ron`) only steers that bank by proxy, and badly, because
+signing more contracts is both how a player reaches a delivery count sooner
+and what makes the transient cost more; pushed to 40 deliveries it does cover
+even the three-order player, but 40 deliveries is far outside the first
+session the gate exists to sit inside. **A progression gate is a poor
+instrument for a transient cost.** The right ones are a warning at placement
+time, before the player commits, and a fluid network that does not let a
+brand-new consumer take 100% of a network the old one is living on. Both are
+still to build (issues #92, #93); the measured table and the protocol behind
+it are in `data/unlocks.ron`'s comment and the full record is in
+`docs/DECISIONS.md`.
+
+
 ---
 
 ## 7. Staff — a resource pool, not NPCs
