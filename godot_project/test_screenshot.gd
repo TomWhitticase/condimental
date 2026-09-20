@@ -349,6 +349,11 @@ func _initialize() -> void:
 		_out = args[0]
 	_build = args.has("--build")
 	_fixture = _string_arg(args, "--fixture")
+	# The convenience flags below overwrite `_fixture` unconditionally, so an
+	# explicit `--fixture` would be silently discarded. Remember it and
+	# re-assert it once, after they have all run (see below), rather than
+	# guarding each of the ten blocks.
+	var explicit_fixture := _fixture
 	_populate = args.has("--populate")
 	if args.has("--stress"):
 		_fixture = "stress"
@@ -418,6 +423,15 @@ func _initialize() -> void:
 		# for, and `_run_chain_forward`'s own spawns on top of that would
 		# only be more ticks against an already-full pool.
 		_fixture = "full_dock"
+	# An explicit `--fixture NAME` wins over any convenience flag's default:
+	# re-assert it now that every block above has had its (unconditional) say.
+	# A convenience flag that also opens a panel (e.g. `--staff`) still does
+	# so — only the world it defaulted to is overridden — and we say when the
+	# two disagreed, so a frame can be traced back to what was asked for.
+	if explicit_fixture != "":
+		if _fixture != "" and _fixture != explicit_fixture:
+			print("SCREENSHOT_FIXTURE: --fixture %s overrides convenience default %s" % [explicit_fixture, _fixture])
+		_fixture = explicit_fixture
 	_dock_lamp_dark = _string_arg(args, "--dock-lamp") == "dark"
 	_hotbar_key = _string_arg(args, "--hotbar")
 	_stock = args.has("--stock")
@@ -495,8 +509,18 @@ func _build_fixture() -> void:
 			Layouts.build_underfunded_line(_main.sim)
 		"full_dock":
 			Layouts.build_full_dock_line(_main.sim)
-		_:
+		"", "demo":
+			# Nothing was asked for (a bare `--build`), or the demo line was
+			# named outright: it is the deliberate default either way.
 			Layouts.build_demo_line(_main.sim)
+		_:
+			# A named `--fixture` that matches no arm is a typo, not a request
+			# for the demo line: fail loudly rather than photograph a plausible
+			# world the caller never asked for, with a zero exit status.
+			push_error("test_screenshot: unknown --fixture '%s' (no such layout)" % _fixture)
+			quit(1)
+			return
+	print("SCREENSHOT_FIXTURE: %s" % (_fixture if _fixture != "" else "demo"))
 	# Every fixture is stocked, whether or not this run will tick: a
 	# screenshot of a factory with an empty larder is a screenshot of a
 	# factory that cannot start, and the larder strip would say so.
