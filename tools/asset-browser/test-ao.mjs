@@ -12,7 +12,12 @@
 // open is not something to check by eye on a vat: it is two lines of
 // arithmetic on a cube.
 
-import { AO_BASELINE, AO_OFFSET, AO_RADIUS, aoField } from './web/ao.mjs';
+import { AO_BASELINE, AO_OFFSET, AO_POWER, AO_RADIUS, aoField } from './web/ao.mjs';
+
+// AO_RADIUS is the game's ssao_radius in voxels and need not be a whole
+// number (0.45 m is 4.5 of them); every index here is a cell, so step out by
+// the whole cells that reach covers.
+const REACH = Math.ceil(AO_RADIUS);
 
 let failures = 0;
 
@@ -51,9 +56,9 @@ for (const [dx, dy, dz] of DIRS) {
   // Every vertex of the face, corners and edges included: a vertex on the
   // cube's edge sees the neighbouring wall, but only through the tangential
   // axes, and a flat flank of this size has interior vertices a whole
-  // AO_RADIUS clear of any edge. Measure those.
-  for (let a = AO_RADIUS + 1; a < N - AO_RADIUS; a += 1) {
-    for (let b = AO_RADIUS + 1; b < N - AO_RADIUS; b += 1) {
+  // reach clear of any edge. Measure those.
+  for (let a = REACH + 1; a < N - REACH; a += 1) {
+    for (let b = REACH + 1; b < N - REACH; b += 1) {
       const p = dx ? [planeOf(dx), a, b] : dy ? [a, planeOf(dy), b] : [a, b, planeOf(dz)];
       const dark = 1 - cube(p[0], p[1], p[2], dx, dy, dz);
       if (dark > worst) { worst = dark; where = p; }
@@ -115,14 +120,30 @@ for (const axis of [0, 1, 2]) {
   // Floor vertex right against the wall, versus one far out on the open floor.
   const crease = 1 - ell(9, 24, 8, 0, 0, 1);
   const open = 1 - ell(M - 4, 24, 8, 0, 0, 1);
-  check('an inner corner is occluded', crease > 0.25,
+  // Loose on purpose: how deep a crease goes is AO_POWER's business (a gamma
+  // on the occlusion, as in Godot), and this assertion is only that the bake
+  // has not become a constant. What the number should be is measured, by
+  // calibrate-ao.py, against the game.
+  check('an inner corner is occluded', crease > 0.10,
     `crease ${(crease * 100).toFixed(1)}% occluded`);
   check('the open floor beside it is not', open < 1e-9,
     `open floor ${(open * 100).toFixed(4)}%`);
   // …and it fades with distance rather than switching on at the wall.
-  const mid = 1 - ell(9 + AO_RADIUS, 24, 8, 0, 0, 1);
+  const mid = 1 - ell(9 + REACH, 24, 8, 0, 0, 1);
   check('the crease fades outward', crease > mid && mid >= 0,
-    `${(crease * 100).toFixed(1)}% at the wall, ${(mid * 100).toFixed(1)}% AO_RADIUS out`);
+    `${(crease * 100).toFixed(1)}% at the wall, ${(mid * 100).toFixed(1)}% ${REACH} voxels out`);
+
+  // AO_POWER is what makes this a crease finder rather than a wash, and
+  // dropping it is the shape of mistake that no strength can correct: a
+  // mildly occluded vertex must lose a larger share of its darkening than a
+  // deeply occluded one. Inverting the gamma recovers the raw occlusions, so
+  // this compares the shaded ratio against the unshaped one.
+  const shallow = 1 - ell(11, 24, 8, 0, 0, 1);
+  const raw = (dark) => (dark > 0 ? Math.pow(dark, 1 / AO_POWER) : 0);
+  check('the power curve suppresses a wash harder than a crease',
+    shallow / crease < 0.9 * (raw(shallow) / raw(crease)),
+    `shallow:crease ${(shallow / crease).toFixed(3)} shaded against `
+    + `${(raw(shallow) / raw(crease)).toFixed(3)} raw, at AO_POWER ${AO_POWER}`);
 }
 
 // The baseline is the whole reason an open flank cancels; a zero here would

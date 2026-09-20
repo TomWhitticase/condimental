@@ -27,7 +27,7 @@
 /// the sample distance below follow from it, so the two cannot drift apart.
 /// `calibrate-ao.py` reads `ssao_radius` out of `factory_environment.gd` and
 /// refuses to derive a strength against a stale one.
-export const AO_RADIUS = 9;
+export const AO_RADIUS = 4.5;
 
 /// Three box passes make a near-Gaussian; a box radius of a third of the
 /// reach puts the kernel's own support at about AO_RADIUS.
@@ -38,6 +38,15 @@ export const AO_BOX = Math.max(1, Math.round(AO_RADIUS / AO_PASSES));
 /// that the face's own voxel is off the kernel's centre and near enough that
 /// a crease one voxel deep still reads.
 export const AO_OFFSET = AO_BOX;
+
+/// The game's `ssao_power`, applied the way Godot applies it: as a gamma on
+/// the occlusion, before any strength. It is what makes SSAO a crease finder
+/// rather than a wash — at 1.6 a fully buried vertex keeps its darkening
+/// while a vertex a fifth occluded loses two thirds of its. Porting the reach
+/// and the strength but not this one was a shape mismatch, not a scale one,
+/// and no strength could have fixed it. `calibrate-ao.py` reads it out of
+/// `factory_environment.gd` alongside the radius.
+export const AO_POWER = 1.6;
 
 // How dark the deepest crease goes: the ONE knob, and not a number anybody
 // chose by eye. `calibrate-ao.py` renders the game's vat fixture with
@@ -51,7 +60,7 @@ export const AO_OFFSET = AO_BOX;
 // It is so much smaller than one because the browser is meant to show what
 // the game shows, so that nobody can approve a form that only reads under
 // browser-only occlusion.
-export const AO_STRENGTH = 0.294;
+export const AO_STRENGTH = 5.067;
 
 /// One box-blur pass along one axis of a 3D field, running-sum so the cost is
 /// the field's size and not the kernel's. Everything outside the field counts
@@ -146,6 +155,6 @@ export function aoField(classes, size) {
     if (sx < -pad || sy < -pad || sz < -pad) return 1;
     if (sx >= size[0] + pad || sy >= size[1] + pad || sz >= size[2] + pad) return 1;
     const occ = (field[idx(sx, sy, sz)] - AO_BASELINE) / (1 - AO_BASELINE);
-    return 1 - Math.min(1, Math.max(0, occ));
+    return 1 - Math.pow(Math.min(1, Math.max(0, occ)), AO_POWER);
   };
 }
