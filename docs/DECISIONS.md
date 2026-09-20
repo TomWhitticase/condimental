@@ -25,47 +25,80 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
-- 2026-09-20: **A progression gate cannot pay for a transient cost.** Issue
-  #55: building the BBQ branch off a running ketchup line starves the starter
-  contract while the new pipes prime, and `corner_shop` strikes out and is
-  lost. The issue's own cheap fix was "let the tier arrive with breathing
-  room" — raise `after_deliveries` in `data/unlocks.ron` until the player has
-  slack by the time BBQ lands. The BBQ epic had already rejected that in the
-  file's comment, by argument. This pass rejected it again, by measurement,
-  and kept **10** unchanged.
+- 2026-09-20: **The bank at the moment of building decides whether the BBQ
+  branch costs you the board.** Issue #55: building the BBQ branch off a
+  running ketchup line starves the starter contract while the new pipes prime,
+  and `corner_shop` strikes out and is lost. The issue's own cheap fix was
+  "let the tier arrive with breathing room" — raise `after_deliveries` in
+  `data/unlocks.ron` until the player has slack by the time BBQ lands. This
+  pass swept the number, kept **10** unchanged, and **left #55 open**.
 
-  **What the transient costs.** A headless probe builds `test_layouts.gd`'s
-  reference line through real commands, signs contracts, ticks to the unlock
-  gate, calls `build_bbq_branch`, and samples `production_snapshot_json` and
-  `economy_snapshot_json` every 250 ticks. `boxed_ketchup`'s `produced_total`
-  flatlines for about **8 500 ticks** from the moment the branch is placed:
-  the two new pipe runs and the second cooking vat fill from the *existing*
-  fluid network, and roughly **35 boxes' worth of throughput** disappears into
-  pipework before any of it comes back. Delivery windows keep counting
-  through it; three misses lose a contract.
+  **This record was corrected on the day it was written** (review of PR #98).
+  The first version claimed the whole board is lost at *every* gate tried,
+  including a 50 000-tick run, and concluded categorically that no gate value
+  can help. Neither claim reproduces. What went wrong is worth keeping: the
+  runs behind it were not all the same experiment, because the PR never
+  stated **when the extra contracts were signed**, and that single unstated
+  variable moves every number below. A measurement whose protocol is not
+  written down is not a measurement.
 
-  **The sweep.** Gate values 4, 6, 10, 14 and 20 were each run twice: once
-  with the single starter order signed, once with all three.
+  **The protocol.** Every run: build `test_layouts.gd`'s reference ketchup
+  line through real purchase and place commands; fund it; stock the larder
+  with 1 200 of each raw; leave hopper and tank auto-fill on; hire until fully
+  staffed; sign the starter contracts **at the stated moment**; wait for the
+  stated lifetime-delivery count; build the BBQ branch and its mixed exit;
+  settle 15 000 ticks; read `economy_snapshot_json` and
+  `production_snapshot_json`, sampled every 250 ticks. "Bank" is finished
+  `boxed_ketchup` on hand at the moment the branch goes in. A gate value other
+  than ten is **emulated** by waiting for that many lifetime deliveries before
+  building — the shipped gate is long open by then and nothing else reads the
+  number, so it is exactly equivalent and needs no rebuild per value.
 
-  | gate | boxes banked at the gate | one order | three orders |
+  **What the transient costs.** `boxed_ketchup`'s `produced_total` flatlines
+  for about **8 500 ticks** from the moment the branch is placed: the two new
+  pipe runs and the second cooking vat fill from the *existing* fluid network,
+  and roughly **35 boxes' worth of throughput** disappears into pipework
+  before any of it comes back. Delivery windows keep counting through it;
+  three misses lose a contract.
+
+  **The corrected sweep.**
+
+  | when contracts were signed | gate | bank at build | lost to the branch |
   |---|---|---|---|
-  | 4 | 9 | `corner_shop` LOST | board lost |
-  | 6 | 13 | survives | board lost |
-  | 10 (shipped) | 22 | survives | board lost |
-  | 14, 20 | more | survives | board lost |
+  | one order only | 10 | 22 | none |
+  | three, at the gate | 10 | 22 | `diner_supply` |
+  | three, at tick 0 | 10 | 7 | `corner_shop`, `diner_supply` |
+  | three, at tick 0 | 20 (emulated) | 12 | two |
+  | three, at tick 0 | 30 (emulated) | 19 | one |
+  | three, at tick 0 | 40 (emulated) | 24 | **none** |
+  | one order, soaked to 50 000 ticks | life 48 | 46 | none |
+  | three at tick 0, soaked to 50 000 | life 68 | 43 | none |
 
-  A run left to 50 000 ticks — 97 lifetime deliveries, far past any gate worth
-  shipping — still loses the board: 19 boxes banked against the ~33 that three
-  concurrent orders need to cover the transient.
+  **The control that the first version was missing.** With three orders signed
+  at tick 0 and **no branch ever built**, `market_stall` still strikes out at
+  tick 1 500. That death is the ketchup line's own start-up, not the BBQ
+  branch, and the first version counted it against the branch. Signing three
+  orders at the gate instead, with no branch, loses nothing.
 
-  **Why the number cannot work, stated as a rule.** The counter is
-  *anti-correlated* with the slack it is supposed to guarantee. The only way a
-  player raises a delivery count is by signing more contracts, and every extra
-  contract is another mouth the same 8 500 ticks has to feed. Raising the gate
-  raises the number of orders the trap can take. It would also hide a missing
-  affordance behind a balance value that reads as arbitrary to whoever meets
-  it next — the worst kind of number, one that is load-bearing for a reason
-  nobody can see.
+  **The rule, stated from what reproduces.** The deciding variable is the
+  **bank at the moment of building**. The number of concurrent orders matters
+  only through the bank it leaves: three orders signed at the gate bank the
+  same 22 as one order and lose one contract; the same three signed at tick 0
+  bank 7, because the early windows ate the stock, and lose two. A delivery
+  count steers that bank *by proxy, and badly*, because signing more contracts
+  is both how a player reaches the count sooner and what makes the transient
+  cost more. **Pushed far enough the gate does work** — 40 deliveries leaves
+  the three-order player 24 banked and costs them nothing — so the categorical
+  "no number can fix this" is false, and was removed from `data/unlocks.ron`,
+  `docs/GAMEPLAY.md`, `docs/DECISIONS_LOG.md` and this record.
+
+  **Why ten is kept anyway.** Forty deliveries is not "inside a first
+  session", which is the entire reason ten was chosen (see the file's comment
+  above the number). Buying #55 with a gate of 40 pays for a transient with
+  the thing the gate exists to deliver, and it hides a missing affordance
+  behind a balance value that reads as arbitrary to whoever meets it next —
+  the worst kind of number, one that is load-bearing for a reason nobody can
+  see.
 
   **What was NOT chosen, and why.** Priming the pipes on placement was ruled
   out before this pass: it breaks fluid conservation, the one property the
@@ -77,8 +110,9 @@ matches what code comments and data files cite.
   **What the fix actually is**, both outside this pass's ownership and both
   filed: a warning at placement time, before the player commits (#92), and a
   fluid network that will not hand a brand-new consumer 100% of a network the
-  old one is living on (#93). The measured table lives in `data/unlocks.ron`'s
-  own comment so the next person to reach for that number meets the evidence
+  old one is living on (#93). **#55 stays open**, with these measurements
+  posted on it. The table and the protocol live in `data/unlocks.ron`'s own
+  comment so the next person to reach for that number meets the evidence
   first, and the player-facing shape of it is in `docs/GAMEPLAY.md` §6.
 
 - 2026-09-20: **A legibility mask must be proved to contain the pixels in
@@ -114,12 +148,34 @@ matches what code comments and data files cite.
 
   **What it then measured.** On a real mixed line — a splitter merging the BBQ
   branch's packer output onto the ketchup exit belt, cases alternating, whole
-  factory framing, case ≈ 20×21 px — BBQ reads **117.2** against the nearest
-  of six ketchup cases at **147.7**: a **30.5/255** gap against ketchup's own
-  **12.6** spread, 2.4×. dE76 says 13.5 against a worst same-carton 5.4, 2.5×.
-  It holds across three independent renders (BBQ 117.2 / 121.7 / 116.8). The
-  dock's contract-clipboard icons separate by 28.5 luma, 11.6 dE76. The
-  method's anchors are 1.2/255 = invisible and ~26/255 = reads reliably.
+  factory framing, case ≈ 20×21 px — a `boxed_ketchup` and a `boxed_bbq` on
+  the **same belt in the same frame** read **156.7** and **117.2**: a
+  **39.5/255** gap. Review reproduced it independently at 152.87 vs 110.35,
+  **42.5**. The windows are 26×26 at (964,561) and (1023,538) of
+  `bbq_mixed.png`, aligned by silhouette overlap; the mask is 260 px and was
+  verified to contain all 45 of the window's near-neutral `label_cream`
+  pixels. The dock's contract-clipboard icons separate by 28.5 luma, 11.6
+  dE76. The method's anchors are 1.2/255 = invisible and ~26/255 = reads
+  reliably, so a 39.5 gap clears the reading threshold by half again.
+
+  **A control must be the same subject kind as the subject — and every window
+  must be logged** (corrected the same day, review of PR #98). The first
+  version of this record judged that gap against a "noise floor" of **12.6**,
+  taken from six `boxed_ketchup` windows at (663,330), (676,337), (688,315),
+  (726,337), (751,380) and (776,366) — cases standing **back to back in the
+  packer queue**, touching, each window therefore containing its neighbours'
+  cardboard. That is a different pixel population from one case alone on dark
+  belt, which is what the claim is about, and the six coordinates appeared
+  nowhere in the PR, the issue or this record: unreproducible. **The 12.6
+  floor and the 2.4× ratio built on it are withdrawn.** The same-kind control
+  is a single `boxed_bbq` on the shared exit belt measured across **14
+  independent renders** at the belt positions and animation frames they
+  caught: 117.03 to 122.05, a spread of **5.02/255** (windows logged per
+  render, x 963-967, y 560-563, 26×26). It bounds render-to-render and
+  small-position variation; it does not sample lighting along the whole belt
+  run, because every re-render put the case within five pixels of the same
+  spot. The claim that carries the ruling is the **pairwise gap**, which two
+  people reproduced from different frames.
 
   **Chroma, tested and negative.** A hue metric was worth trying before
   touching art, so CIELAB dC (`hypot(da*, db*)`, lighting-invariant) ran

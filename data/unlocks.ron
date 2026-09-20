@@ -88,52 +88,69 @@
         // never sees. It is also a number the player can watch approach:
         // every docket on the clipboard counts its own deliveries.
         //
-        // TEN EVEN THOUGH IT DOES NOT SOLVE ISSUE #55 — now MEASURED, not
-        // argued (the balance pass, 2026-09-20). #55 is that building the
-        // BBQ branch starves the ketchup line while two new pipe runs and a
-        // vat prime, which is several missed `corner_shop` windows against a
-        // three-strike contract: the reward for building the thing the game
-        // just unlocked is losing the order that paid for it. The issue
-        // offers "let the tier arrive with breathing room" as the cheap
-        // content-side fix — push this number up until the player has slack
-        // by the time BBQ lands. So this number was swept, by building the
-        // reference line, opening the branch at a chosen delivery count and
-        // watching the board:
+        // TEN EVEN THOUGH IT DOES NOT FIX ISSUE #55 — measured, not
+        // argued, and re-measured after review (the balance pass,
+        // 2026-09-20). #55 is that building the BBQ branch starves the
+        // ketchup line while two new pipe runs and a vat prime, which is
+        // several missed windows against three-strike contracts: the reward
+        // for building the thing the game just unlocked is losing the order
+        // that paid for it. The issue offers "let the tier arrive with
+        // breathing room" as the cheap content-side fix — push this number up
+        // until the player has slack by the time BBQ lands. So it was swept.
         //
-        //   what the transient costs   boxed_ketchup output stops for about
-        //                              8 500 ticks; roughly 35 boxes' worth
-        //                              of throughput is absorbed into the
-        //                              new pipes and vat before any of it
-        //                              comes back out
-        //   gate 4                     9 boxes banked at the gate —
-        //                              corner_shop strikes out and is LOST
-        //   gate 6                     13 banked — survives
-        //   gate 10 (shipped)          22 banked — survives
+        // THE PROTOCOL, because every number below moves if it changes.
+        // Each run: build the shipped ketchup line through real purchase and
+        // place commands; fund it; stock the larder with 1 200 of each raw;
+        // leave hopper and tank auto-fill on; hire until fully staffed; sign
+        // the starter contracts AT THE STATED MOMENT; wait for the stated
+        // lifetime-delivery count; build the BBQ branch and its mixed exit;
+        // then settle 15 000 ticks and read the board. "Bank" is finished
+        // boxed_ketchup on hand at the moment the branch goes in. A gate
+        // value other than ten is EMULATED by waiting for that many lifetime
+        // deliveries before building — the shipped gate is long open by then
+        // and nothing else reads the number, so it is exactly equivalent.
         //
-        // So a higher gate DOES buy a minimally-committed player the slack,
-        // and ten already clears it with room. What it cannot do is help the
-        // player the issue is actually about. With all three starter orders
-        // signed on the one line — the committed player, the one who did
-        // what the game encouraged — the whole board is lost at EVERY gate
-        // tried, including a run left to 50 000 ticks and 97 lifetime
-        // deliveries before the branch went in: 19 boxes banked against the
-        // ~33 three concurrent orders need through the transient. The
-        // counter is anti-correlated with the slack it is supposed to
-        // guarantee, because the way a player raises it is by signing more
-        // contracts, and every extra contract is another mouth the same
-        // 8 500 ticks has to feed. Raising the number raises the number of
-        // orders the trap can take.
+        //   what the transient costs  boxed_ketchup output stops for about
+        //                             8 500 ticks; roughly 35 boxes' worth of
+        //                             throughput is absorbed into the new
+        //                             pipes and vat before any comes back out
+        //   1 order, gate 10          bank 22 — nothing lost
+        //   3 orders signed AT THE
+        //     GATE, gate 10           bank 22 — diner_supply lost
+        //   3 orders signed at tick
+        //     0, gate 10              bank 7 — corner_shop and diner_supply
+        //                             lost to the branch
+        //   emulated gate 20          bank 12 — 2 lost
+        //   emulated gate 30          bank 19 — 1 lost
+        //   emulated gate 40          bank 24 — NOTHING lost to the branch
         //
-        // Hence: TEN, kept because it measures safe for the player who can
-        // be saved this way, not because it fixes #55. The fix #55 actually
-        // wants is its first option — say so at placement time, before it
+        // THE CONTROL MATTERS: with three orders signed at tick 0 and NO
+        // branch ever built, market_stall still strikes out at tick 1 500.
+        // That death is the ketchup line starting up, not the BBQ branch, and
+        // it is why the "3 orders at tick 0" rows above count only what the
+        // branch took.
+        //
+        // WHAT THE SWEEP ACTUALLY SHOWS. The deciding variable is the BANK AT
+        // THE MOMENT OF BUILDING — not the number of concurrent orders, which
+        // matters only through the bank it leaves. A delivery count steers
+        // that bank by proxy and badly, because signing more contracts is both
+        // how a player reaches the count sooner and what makes the transient
+        // cost more. Pushed far enough the gate DOES work: forty deliveries
+        // leaves the three-order player 24 banked and costs them nothing. But
+        // forty is not "inside a first session", which is the entire reason
+        // ten was chosen above, and a gate bought that way would be paying for
+        // a transient with the thing the gate exists to deliver.
+        //
+        // Hence: TEN, kept because raising it to a value that would fix #55
+        // costs more than #55 does. The trap stays open and documented rather
+        // than papered over with a number, and #55 stays OPEN. The fixes it
+        // wants are its own first option — say so at placement time, before it
         // costs anything, which the simulation has the information to do and
-        // no surface to say it on (issue #92); alternatively the fluid
-        // network could stop letting a brand-new consumer take 100% of a
-        // network the old one is living on (issue #93). Both are outside
-        // this file. So the trap stays open and documented rather than
-        // papered over with a number. Full record: `docs/DECISIONS.md`,
-        // 2026-09-20, "A progression gate cannot pay for a transient cost".
+        // no surface to say it on (issue #92) — or a fluid network that will
+        // not let a brand-new consumer take 100% of a network the old one is
+        // living on (issue #93). Both are outside this file. Full record:
+        // `docs/DECISIONS.md`, 2026-09-20, "The bank at the moment of building
+        // decides whether the BBQ branch costs you the board".
         Unlock(
             id: "bbq_sauce",
             name: "BBQ Sauce",

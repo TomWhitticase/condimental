@@ -355,7 +355,9 @@ const BBQ_STOCK := 1200
 ## starter order alone; this ceiling is generous enough that a balance pass
 ## on that file moves the shot's run length rather than breaking it, and
 ## tight enough that a gate which can never open fails the fixture instead of
-## hanging it.
+## hanging it. Reaching this ceiling is a HARD FAILURE — the wait below
+## prints `BBQ_FIXTURE_FAIL:` and asserts rather than building on, because a
+## branch built behind a shut gate cannot buy its raws and never makes a box.
 const BBQ_GATE_TICK_CEILING := 40000
 
 ## How often the wait above checks the gate. A snapshot parse per tick would
@@ -371,9 +373,15 @@ const BBQ_GATE_POLL_TICKS := 250
 ## is a rule in `sim_core` (`BuyIngredient` and `SignContract` are REFUSED
 ## for a locked id), and a fixture that re-derived the threshold in GDScript
 ## would be the presentation layer deciding a gameplay question.
+##
+## A snapshot that will not parse is NOT "the gate is shut" — it is the wire
+## broken, and returning `false` for it would let a fixture wait out its
+## ceiling and then build anyway. It aborts instead (review of PR #98).
 static func any_unlock_open(sim) -> bool:
 	var economy = JSON.parse_string(sim.economy_snapshot_json())
 	if not (economy is Dictionary):
+		printerr("BBQ_FIXTURE_FAIL: economy_snapshot_json did not parse as a Dictionary")
+		assert(false, "economy_snapshot_json did not parse as a Dictionary")
 		return false
 	for unlock in economy.get("unlocks", []):
 		if bool(unlock.get("open", false)):
@@ -492,6 +500,18 @@ static func build_bbq_running_line(sim) -> void:
 		for _i in range(BBQ_GATE_POLL_TICKS):
 			sim.tick()
 		waited += BBQ_GATE_POLL_TICKS
+	# The ceiling is a failure, not a fallback. Building on past it buys the
+	# three BBQ raws from a market that still has them locked, so
+	# `stock_larder` silently buys nothing and the branch is a complete line
+	# that never makes a box — which is the exact bug this fixture was
+	# rebuilt to stop photographing. Say so loudly (review of PR #98).
+	if not any_unlock_open(sim):
+		printerr(
+			"BBQ_FIXTURE_FAIL: no unlock open after %d ticks (ceiling %d) — "
+			% [waited, BBQ_GATE_TICK_CEILING]
+			+ "the BBQ raws are still locked, so the branch would never run"
+		)
+		assert(false, "the BBQ gate never opened; the fixture would build a dead branch")
 
 	# 3. Build the branch the moment it is unlocked. `build_bbq_branch`
 	#    re-issues the ketchup line's placements first; every one of them is

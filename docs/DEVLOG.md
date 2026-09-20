@@ -157,54 +157,74 @@ below is history and should only ever be appended to.)*
 
 ### 2026-09-20 — Two balance calls, both measured, neither one a number change
 
-A pass over the two BBQ balance/legibility issues that ended with the shipped
+A pass over two BBQ balance/legibility issues that ended with the shipped
 values kept — and with the evidence for keeping them written down, because in
-both cases the cheap fix was the wrong one and nothing in the repo said so.
+both cases the cheap fix is the wrong one and nothing in the repo said so.
+**Both sets of numbers were then corrected the same day under review**, which
+is the more useful half of this entry.
 
-**A progression gate cannot pay for a transient cost (issue #55).** Building
-the BBQ branch off a running ketchup line stops boxed-ketchup output for
-about 8 500 ticks: the new pipe runs and the second vat fill from the
-*existing* fluid network, and roughly 35 boxes go into priming pipework before
-any come back. Delivery windows keep counting; three misses lose a contract.
-The issue's cheap fix was to raise `after_deliveries` in `data/unlocks.ron`
-until the player has slack by the time BBQ lands, so the number was swept —
-4, 6, 10, 14, 20, each run with one starter order and with three. A higher
-gate does save the player running one (4 → 9 boxes banked and `corner_shop`
-lost; 6 → 13, survives; the shipped 10 → 22, survives) and cannot save the
-player running three, who loses the whole board at every gate tried,
-including a run left to 50 000 ticks and 97 lifetime deliveries. The counter
-is anti-correlated with the slack it is supposed to buy: a player raises it by
-signing more contracts, and each one is another mouth the same transient has
-to feed. So **ten stays**, now with the table in the file's own comment, and
-the two real fixes are filed — a warning at placement time (#92) and a fluid
-network that will not hand a new consumer 100% of a network the old one lives
-on (#93). `test_layouts.gd`'s `--bbq` fixture was rebuilt to prove it: a
-splitter merges the BBQ branch onto the ketchup exit belt so both cartons ride
-one line, and the re-sign loop that used to paper over the lost contract is
-gone. The frame shows three live contracts and no CONTRACT LOST banner.
+**The bank at the moment of building decides whether the BBQ branch costs you
+the board (issue #55, still OPEN).** Building the BBQ branch off a running
+ketchup line stops boxed-ketchup output for about 8 500 ticks: the new pipe
+runs and the second vat fill from the *existing* fluid network, roughly 35
+boxes' worth of throughput into priming pipework before any comes back.
+Delivery windows keep counting; three misses lose a contract. The issue's
+cheap fix is to raise `after_deliveries` in `data/unlocks.ron` until the
+player has slack by the time BBQ lands, so the number was swept — with the
+protocol written down this time, because "when were the extra contracts
+signed" turned out to move every number in the sweep. One order at the shipped
+gate banks 22 and loses nothing; three orders signed **at the gate** bank the
+same 22 and lose one; the same three signed **at tick 0** bank 7 and lose two.
+An emulated gate of 40 banks 24 and loses nothing at all. So **ten stays** —
+not because no number can work, but because 40 deliveries is nowhere near the
+first session ten exists to sit inside — and #55 stays open with the
+measurements posted on it. The two real fixes are filed: a warning at
+placement time (#92) and a fluid network that will not hand a new consumer
+100% of a network the old one lives on (#93).
+
+The first version of this entry claimed the whole board is lost at *every*
+gate, including a 50 000-tick run. It does not reproduce. Two mistakes:
+contracts signed at different moments were reported as one experiment, and
+`market_stall`'s death at tick 1 500 was counted against the branch when the
+no-branch control loses it too. The corrected table and the protocol are in
+`data/unlocks.ron`'s comment.
+
+`test_layouts.gd`'s `--bbq` fixture was rebuilt to prove the setup: a splitter
+merges the BBQ branch onto the ketchup exit belt so both cartons ride one
+line, and the re-sign loop that used to paper over a lost contract is gone.
+The fixture now also **fails loudly** rather than photographing a dead branch:
+if the unlock gate has not opened by its tick ceiling, or if a snapshot will
+not parse, it prints a `BBQ_FIXTURE_FAIL:` marker and asserts.
 
 **The two sauce cartons read apart, and the first measurement that said
-otherwise was wrong (issue #57).** With both boxes alternating on one belt at
-whole-factory framing, `box_of_bbq` reads 117.2 mean luma against the nearest
-of six `box_of_ketchup` cases at 147.7 — a 30.5/255 gap against ketchup's own
-12.6 spread, holding across three independent renders, with the dock's
-clipboard icons separating by 28.5. So the lid print introduced on 2026-09-18
-does its job and **the art is unchanged**.
+otherwise was wrong (issue #57, closed).** With both boxes on one belt at
+whole-factory framing, `boxed_bbq` reads 117.2 mean luma against a
+`boxed_ketchup` on the same belt in the same frame at 156.7 — a **39.5/255**
+gap, independently reproduced at 42.5 by review. Against the method's anchors
+(1.2/255 = invisible, ~26/255 = reads reliably) that clears the threshold by
+half again. So the lid print introduced on 2026-09-18 does its job and **the
+art is unchanged**.
 
-The useful part is how nearly it went the other way. The first pass measured a
-5.3/255 gap and concluded the art fails, because the silhouette mask used the
-warm-pixel test the earlier passes used (`r > g > b and r - b > 18`) and
-`label_cream` renders near-neutral at (241, 239, 234) — the mask excluded the
-printed panels, the exact pixels under test, and scored the cardboard around
-them. It was caught only because a candidate that visibly repaints the art
-measured *identical* to shipped. The corrected mask is the case's whole
-silhouette with interior holes filled. Both the retracted and the corrected
-numbers are on #57 on purpose, and the rule is now recorded: **validate a
-legibility mask by measuring a candidate that visibly changes the art before
-quoting any number it produces.** A chroma metric was tested at the same time
-and came out negative — dC separates the cartons by 3.7 against a same-carton
-4.0, worse than noise, because at 20 px a red-on-kraft panel is a handful of
-pixels and light-against-dark is the whole lid.
+The useful part is how nearly it went the other way, twice. The first pass
+measured a 5.3/255 gap and concluded the art fails, because the silhouette
+mask used the warm-pixel test earlier passes used (`r > g > b and r - b > 18`)
+and `label_cream` renders near-neutral at (241, 239, 234) — the mask excluded
+the printed panels, the exact pixels under test, and scored the cardboard
+around them. It was caught when the one candidate that visibly repaints the
+art measured *identical* to shipped. The corrected mask is the case's whole
+silhouette with interior holes filled. The second miss was the control: the
+gap was first judged against a 12.6 "noise floor" measured on cases standing
+back to back in the packer queue — a different pixel population from a single
+case on dark belt — and those six windows' coordinates were never written
+down anywhere. **That floor and the ratio built on it are withdrawn.** The
+same-kind control is one case on the shared belt across 14 renders, spread
+5.0/255, with every window's coordinates in the record. Rules now written
+down: **validate a legibility mask by measuring a candidate that visibly
+changes the art before quoting any number it produces**, and **a control must
+be the same subject kind as the subject, with its windows logged.** A chroma
+metric was tested at the same time and came out negative — dC separates the
+cartons by 3.7 against a same-carton 4.0 — because a coloured panel is a
+handful of pixels and light-against-dark is the whole lid.
 
 Also filed along the way: a screenshot fixture is never asserted to be
 actually running before the shutter (#94), and the clipboard shows one docket
