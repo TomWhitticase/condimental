@@ -1122,6 +1122,14 @@ const SHOP_CARD_ICON_SIZE := Vector2(30, 30) * UI_SCALE
 ## above the hotbar unused. So here the honest budget is the card's height,
 ## and the crate keeps the big icon that makes it readable as a crate.
 const MARKET_SLOT_SIZE := Vector2(128, 178) * UI_SCALE
+## The most crates the market ever puts on one line — the build menu's
+## `SHOP_SLOT_COLUMNS` for the other half of the same shop, and read the same
+## way: the MOST it takes, not the number it always takes
+## (`_fit_grid_columns` measures the window, issue #69). Six because that is
+## what `data/ingredients.ron` prices with the BBQ tier open and one row of
+## six fits the shipped 1600x900 window; a seventh ingredient wraps rather
+## than widening the panel.
+const MARKET_SLOT_COLUMNS := 6
 ## How many catalog entries get a number key at all. Ten — 1..9 then 0, the
 ## row a Minecraft or Terraria hotbar occupies. A catalog longer than this
 ## simply leaves its tail click-only rather than inventing a second key
@@ -1329,7 +1337,11 @@ var _market_slots: Array = []
 ## ingredients off `ingredients_snapshot_json`'s `entries` until it opens,
 ## so the panel grows mid-session and has to notice — the same guard the
 ## contracts board already runs (`_board_rows_match`).
-var _market_row: HBoxContainer
+var _market_row: GridContainer
+## The ScrollContainer around that grid — the market's half of
+## `_fit_grid_scroll`, so two rows of crates in a short window scroll rather
+## than running under the hotbar (issue #69).
+var _market_scroll: ScrollContainer
 var _market_base_settings: LabelSettings
 var _market_slot_ids: Array = []
 var _market_open := false
@@ -1378,6 +1390,9 @@ var _staff_panel: PanelContainer
 var _staff_money_label: Label
 var _staff_scroll: ScrollContainer
 var _staff_rows_box: VBoxContainer
+## True while the window is too narrow for the staff rows to carry their prose
+## as well as their controls — see `_fit_staff_width`.
+var _staff_prose_hidden := false
 var _staff_rows: Array = [] # Array[Dictionary], see _build_staff_row
 var _staff_row_ids: Array = []
 var _staff_footer_label: Label
@@ -1390,7 +1405,6 @@ var _staff_summary_settings_obj: LabelSettings
 ## body colour, captured when the panel is built so no new colour is coined.
 var _staff_summary_idle_color := Color(0.86, 0.87, 0.90, 1.0)
 ## The static legend of how staffing works (`STAFF_RULES`), drawn once.
-var _staff_scroll_box: VBoxContainer
 var _staff_rules_label: Label
 ## The two row skins, plain and SHORT, built once by `_staff_row_style`.
 var _staff_row_styles: Dictionary = {}
@@ -5290,23 +5304,117 @@ func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_position_shop_menu()
 
 
+# --- Width: what a modal panel gives up when the window is too narrow ------
+#
+# Height has yielded since the 2026-09-09 scale change — `_fit_grid_scroll`
+# caps a list and it scrolls (UI_UX.md §5c's deliberate last resort). Nothing
+# made a panel yield WIDTH, so at 1280x720 the staff panel (minimum 1350px),
+# the build menu (1412px) and the contracts board all simply overran the
+# window and were clipped on BOTH edges — with the FIRE and SIGN buttons off
+# the screen entirely (issues #62, #69). A control the player cannot reach
+# outranks every other layout rule, so this is where width stops.
+#
+# Three ways to give width back, in the order the panels use them:
+#
+#   1. **A sentence moves to the hover** (`_staff_prose_hidden`). The staff
+#      row already ranks five sentences and shows one, with the rest on the
+#      row's tooltip; at a window this narrow the fifth goes there too. It is
+#      the row's widest part and the only part of it that is already readable
+#      somewhere else.
+#   2. **A grid of cards takes fewer columns** (`_fit_grid_columns`). The build
+#      menu and the market are icon slots of a fixed size, so there is nothing
+#      in them to move to a hover; six across becomes five or three, which is
+#      the same thing `SHOP_SLOT_COLUMNS` has been re-tuned by hand three times
+#      for, now measured from the window instead.
+#   3. **The list scrolls**, which it already did.
+#
+# What never yields: the panel is never cut off at the window's edge, and
+# nothing on it is drawn where the player cannot click it.
+#
+# What is NOT used: `autowrap_mode`. A wrapping Label reports a minimum width
+# of one pixel and a minimum height shaped at whatever width it last had, and
+# it is only ever reshaped when it is drawn — so under `--headless`, where
+# nothing draws, a wrapped sentence reports 1x1609 and every panel measured
+# around it is nonsense. The layout here is measurement-driven end to end
+# (`_fit_grid_scroll`, `_whole_rows_height`) and its proof is a headless test,
+# so a control whose size cannot be measured without drawing it cannot be part
+# of it. Prose that does not fit moves; it does not reflow.
+
+## The gap a modal keeps from the left and right edges of the window. In
+## WINDOW pixels rather than `_ui_px`: this is the last few pixels before a
+## control would be off the screen, not a design margin that should grow with
+## the UI scale.
+const MODAL_EDGE_MARGIN := 8.0
+
+
+## How wide a modal panel may be at this window size. `INF` before there is a
+## viewport to measure (a headless `--script` run reaches this), which reads
+## as "no limit" everywhere below and leaves the panel at its natural width.
+func _modal_available_width() -> float:
+	var vp := get_viewport()
+	if vp == null:
+		return INF
+	var bounds := vp.get_visible_rect().size
+	if bounds.x <= 0.0:
+		return INF
+	return maxf(0.0, bounds.x - MODAL_EDGE_MARGIN * 2.0)
+
+
+## Gives `grid` the most columns its `panel` can wear at this window size,
+## and returns the number it settled on.
+##
+## Measured by ASKING, one column at a time, rather than by dividing the
+## window by a card: the panel's real width is the grid plus its margins,
+## its scrollbar and whichever of its heading and footer is longest, and
+## every one of those has moved at least once (`SHOP_SLOT_COLUMNS` has been
+## re-tuned by hand three times as the catalog grew). Six tries at most, each
+## one a cached minimum-size read.
+##
+## Then BALANCED: five columns for six crates is a row of five and a lonely
+## sixth, where three and three is two even rows. Fewer columns than the
+## width allows is always still narrow enough, so the balance cannot undo the
+## fit.
+func _fit_grid_columns(panel: Control, grid: GridContainer, count: int, max_columns: int) -> int:
+	if panel == null or grid == null or count <= 0:
+		return 1
+	var limit: int = max(1, min(max_columns, count))
+	var available: float = _modal_available_width()
+	var columns: int = limit
+	while columns > 1:
+		grid.columns = columns
+		if panel.get_combined_minimum_size().x <= available:
+			break
+		columns -= 1
+	var rows: int = int(ceilf(float(count) / float(max(1, columns))))
+	grid.columns = clampi(int(ceilf(float(count) / float(max(1, rows)))), 1, limit)
+	return grid.columns
+
+
 ## Centres the menu in the space ABOVE the hotbar rather than in the whole
 ## viewport. The strip is always on screen now, and a plain centred menu tall
 ## enough to reach it buries its own FOOTER under the plate — which is exactly
 ## where the two mouse buttons' meanings are written down, so the one line
 ## that explains buying was the one line the hotbar hid. Found in a rendered
 ## frame; nothing in the code could have shown it.
+##
+## The grid takes as many columns as the window has room for (issue #62): at
+## 1280x720 six cards across measured 1412px in a 1280px window and the menu
+## was clipped on both edges, heading, money line and the last card's crew
+## line with it. `SHOP_SLOT_COLUMNS` is the most it ever takes, not the number
+## it always takes.
 func _position_shop_menu() -> void:
 	if _shop_menu == null:
 		return
-	_shop_menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
 	var vp := get_viewport()
 	if vp == null:
 		return
 	var reserved := _hotbar_reserved_height()
 	var bounds := vp.get_visible_rect().size
+	_fit_grid_columns(_shop_menu, _shop_grid, _shop_slots.size(), SHOP_SLOT_COLUMNS)
 	_fit_grid_scroll(_shop_grid_scroll, _shop_grid, bounds.y - reserved - _ui_px(16.0))
+	_shop_menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
 	var menu_size := _shop_menu.get_combined_minimum_size()
+	_shop_menu.position.x = maxf(0.0, (bounds.x - menu_size.x) * 0.5)
 	_shop_menu.position.y = max(8.0, (bounds.y - reserved - menu_size.y) * 0.5)
 
 
@@ -5329,9 +5437,11 @@ func _hotbar_reserved_height() -> float:
 	return HOTBAR_SLOT_SIZE.y * HOTBAR_SELECTED_SCALE + HOTBAR_BOTTOM_MARGIN * 3.0
 
 
-func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float, snap_rows := false, hard_available := INF) -> void:
+## Returns the height it gave the scroll, so a caller that has something left
+## to trade can see what its trade bought (`_update_contract_panel`).
+func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float, snap_rows := false, hard_available := INF) -> float:
 	if scroll == null or grid == null:
-		return
+		return 0.0
 	var natural: float = grid.get_combined_minimum_size().y
 	scroll.custom_minimum_size.y = natural
 	var panel := scroll.get_parent()
@@ -5371,6 +5481,7 @@ func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float, 
 	else:
 		cap = minf(cap, hard_cap)
 	scroll.custom_minimum_size.y = minf(natural, cap)
+	return scroll.custom_minimum_size.y
 
 
 ## The tallest height not greater than `cap` that ends on a boundary between
@@ -5394,6 +5505,8 @@ func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float, 
 func _whole_rows_height(box: Control, cap: float) -> float:
 	if box == null:
 		return cap
+	if box is GridContainer:
+		return _whole_grid_rows_height(box as GridContainer, cap)
 	var separation: float = 0.0
 	if box is BoxContainer:
 		separation = float(box.get_theme_constant("separation"))
@@ -5411,6 +5524,50 @@ func _whole_rows_height(box: Control, cap: float) -> float:
 			break
 		fitted = used
 		rows += 1
+	return cap if rows == 0 else fitted
+
+
+## `_whole_rows_height` for a GRID, where a "row" is `columns` cards side by
+## side rather than one child. The market's crates wrap into one (issue #69),
+## and a crate cut in half loses the price and the stock line printed down
+## its lower half — the same fault a docket cut through a sentence is.
+##
+## The tallest cell in each line decides that line's height, the way
+## GridContainer itself lays them out; with cards of one fixed size that is
+## the card, and it stays right if one ever grows.
+func _whole_grid_rows_height(grid: GridContainer, cap: float) -> float:
+	var separation: float = float(grid.get_theme_constant("v_separation"))
+	var columns: int = max(1, grid.columns)
+	var used: float = 0.0
+	var fitted: float = 0.0
+	var rows: int = 0
+	var column: int = 0
+	var line_height: float = 0.0
+	for child in grid.get_children():
+		var cell := child as Control
+		if cell == null or not cell.visible:
+			continue
+		line_height = maxf(line_height, cell.get_combined_minimum_size().y)
+		column += 1
+		if column < columns:
+			continue
+		if rows > 0:
+			used += separation
+		used += line_height
+		if rows > 0 and used > cap:
+			return fitted
+		fitted = used
+		rows += 1
+		column = 0
+		line_height = 0.0
+	# A last, short line (six crates in four columns) counts as a whole one.
+	if column > 0:
+		if rows > 0:
+			used += separation
+		used += line_height
+		if rows == 0 or used <= cap:
+			fitted = used
+			rows += 1
 	return cap if rows == 0 else fitted
 
 
@@ -5463,7 +5620,7 @@ func _line_boundary_height(box: Control, cap: float) -> float:
 ##
 ## The row's content margin counts: a cut at the top line's baseline with the
 ## card's padding left out would end a pixel above the text it is keeping.
-func _row_line_boundary(row: Control, cap: float) -> float:
+func _row_line_boundary(row: Control, cap: float, first_only := false) -> float:
 	if row == null or cap <= 0.0:
 		return 0.0
 	var body: Control = null
@@ -5495,7 +5652,27 @@ func _row_line_boundary(row: Control, cap: float) -> float:
 			break
 		boundary = used
 		lines += 1
+		if first_only:
+			break
 	return boundary
+
+
+## The FIRST line boundary in `box` — the top card's top line, margin
+## included. The least a cut list can show and still end on an edge a reader
+## can see was meant: below this, `_line_boundary_height` has no boundary to
+## snap to and hands back the ragged cut it was given (issue #17).
+func _first_line_boundary(box: Control) -> float:
+	if box == null:
+		return 0.0
+	for child in box.get_children():
+		var row := child as Control
+		if row == null or not row.visible:
+			continue
+		var line: float = _row_line_boundary(row, INF, true)
+		# A row with no lines of its own — a bare meter, a spacer — is its
+		# own first boundary.
+		return line if line > 0.0 else row.get_combined_minimum_size().y
+	return 0.0
 
 
 ## One icon slot. A Button rather than a Panel so pressing it is the whole
@@ -6000,10 +6177,30 @@ func _build_ingredient_market(hud: CanvasLayer, base_settings: LabelSettings) ->
 	_market_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	heading.add_child(_market_money_label)
 
-	var row := HBoxContainer.new()
+	# A GRID, NOT A ROW, and inside a scroll (issue #69). One HBox of
+	# fixed-size crates has no width bound at all: three ingredients measured
+	# 648px and looked like a design, and the BBQ gate's six measured 1260px
+	# in a 1280px window — the crates filled the screen, the panel lay over
+	# the right-hand plates, and a seventh ingredient would simply have been
+	# off the edge with no way to reach it. Wrapping is the build menu's own
+	# answer to the same problem (`SHOP_SLOT_COLUMNS`) and the right one here
+	# too: a sideways scroll hides half the stock on sale behind a gesture,
+	# where a second row shows it. `_position_market_panel` picks the column
+	# count from the window, and the scroll is the same last resort the build
+	# menu's grid has (§5c) for when the rows are taller than the space above
+	# the hotbar.
+	_market_scroll = ScrollContainer.new()
+	_market_scroll.name = "MarketScroll"
+	_market_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_market_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	body.add_child(_market_scroll)
+
+	var row := GridContainer.new()
 	row.name = "MarketRow"
-	row.add_theme_constant_override("separation", _ui_i(8))
-	body.add_child(row)
+	row.columns = MARKET_SLOT_COLUMNS
+	row.add_theme_constant_override("h_separation", _ui_i(8))
+	row.add_theme_constant_override("v_separation", _ui_i(8))
+	_market_scroll.add_child(row)
 	_market_row = row
 	_market_base_settings = base_settings
 
@@ -6026,20 +6223,57 @@ func _build_ingredient_market(hud: CanvasLayer, base_settings: LabelSettings) ->
 ## Centred in the space above the hotbar, for `_position_shop_menu`'s reason
 ## and by the same arithmetic: a panel tall enough to reach the strip buries
 ## its own footer under it.
+##
+## And clamped on BOTH axes since issue #69, not only on `y`. The crates wrap
+## to as many columns as the window has room for (`_fit_grid_columns`), which
+## is what keeps the panel inside the window at all; the clamp below is the
+## backstop for a panel that is still wider or taller than the space it has,
+## and it is what stops a crate ever being drawn off an edge where no click
+## can reach it.
+##
+## Then PUSHED CLEAR of the right-hand column of fixed plates where there is
+## room to be — the clipboard, the stock plate and the CREW plate — the way
+## `_panel_position_near` already pushes a cursor-following panel (§2b point
+## 33). This panel carries its own `Money:` line, and centred over the
+## clipboard's it printed the same figure twice a few pixels apart. The
+## legend is deliberately NOT on that list: it is a keybind reference, top
+## left, that a shopping player is not reading, and dodging it as well leaves
+## a six-crate market nowhere to stand. `_pushed_clear_of` returns the panel
+## where it was when no direction clears, so a wide market stays centred
+## rather than jumping to an edge.
 func _position_market_panel() -> void:
 	if _market_panel == null:
 		return
-	_market_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
 	var vp := get_viewport()
 	if vp == null:
 		return
 	var reserved := _hotbar_reserved_height()
 	var bounds := vp.get_visible_rect().size
+	_fit_grid_columns(_market_panel, _market_row, _market_slots.size(), MARKET_SLOT_COLUMNS)
+	# The cut lands between two ROWS of crates, never through one: a crate cut
+	# in half loses its price and its stock line, which is text sliced through
+	# a line (issue #8's rule, in the one panel it had not reached).
+	_fit_grid_scroll(
+		_market_scroll, _market_row, bounds.y - reserved - _ui_px(16.0), true
+	)
+	_market_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
 	var panel_size := _market_panel.get_combined_minimum_size()
-	_market_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
+	var lower_bound: float = bounds.y - reserved
+	var rect := Rect2(
+		clampf((bounds.x - panel_size.x) * 0.5, 0.0, maxf(0.0, bounds.x - panel_size.x)),
+		clampf(
+			(lower_bound - panel_size.y) * 0.5, 8.0, maxf(8.0, lower_bound - panel_size.y)
+		),
+		panel_size.x,
+		panel_size.y
+	)
+	for plate in [_contract_panel_rect(), _stock_rect(), _crew_rect()]:
+		if plate.size.x > 0.0 and plate.size.y > 0.0:
+			rect = _pushed_clear_of(rect, plate, bounds.x, lower_bound)
+	_market_panel.position = rect.position
 
 
-func _build_market_slot(row: HBoxContainer, base_settings: LabelSettings, index: int, item_id: String) -> void:
+func _build_market_slot(row: GridContainer, base_settings: LabelSettings, index: int, item_id: String) -> void:
 	var button := Button.new()
 	button.name = "MarketSlot_%s" % item_id
 	button.custom_minimum_size = MARKET_SLOT_SIZE
@@ -6484,8 +6718,12 @@ func _position_contract_board() -> void:
 		return
 	var reserved := _hotbar_reserved_height()
 	var bounds := vp.get_visible_rect().size
-	_fit_grid_scroll(_board_scroll, _board_box, bounds.y - reserved - _ui_px(16.0))
+	# `snap_rows`: an offer is a card the player reads before agreeing to it,
+	# and the SIGN button is on the same line as the terms — half a card is
+	# half a decision (issue #62's rule, one down from an unreachable button).
+	_fit_grid_scroll(_board_scroll, _board_box, bounds.y - reserved - _ui_px(16.0), true)
 	var panel_size := _board_panel.get_combined_minimum_size()
+	_board_panel.position.x = maxf(0.0, (bounds.x - panel_size.x) * 0.5)
 	_board_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
 
 
@@ -6543,6 +6781,17 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 	# The mix, with the item's real icon (UI_UX.md §5) and its display name,
 	# then the cadence, the payout and the strike rule — every term a player
 	# is agreeing to, on the offer, before they click.
+	#
+	# On TWO lines, because that sentence is really two: what you deliver, and
+	# on what terms. Held on one line, a two-item mix ("3 × Boxed Ketchup, 2 ×
+	# Boxed BBQ Sauce every 3000 ticks · pays +210 · lost after 2 missed in a
+	# row") made the card 1324px wide and the board 1380px — wider than a
+	# 1280x720 window, clipped on both edges, with SIGN off the right of the
+	# screen (issue #62). Broken at the join the sentence already had, the
+	# column is as wide as its LONGER half instead of as wide as both, which is
+	# what puts it back inside the window. It is a break at a fixed point, not
+	# a reflow — see `autowrap_mode` under MODAL_EDGE_MARGIN for why the
+	# difference matters here.
 	var mix_row := HBoxContainer.new()
 	mix_row.add_theme_constant_override("separation", _ui_i(6))
 	text_col.add_child(mix_row)
@@ -6556,16 +6805,20 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 		icon.texture = _icon_for(item_id)
 		mix_row.add_child(icon)
 		parts.append("%d × %s" % [int(pair[1]), _item_display_name(item_id)])
+	var mix_label := Label.new()
+	mix_label.name = "OfferMix"
+	mix_label.label_settings = _contract_ink_settings
+	mix_label.text = ", ".join(PackedStringArray(parts))
+	mix_row.add_child(mix_label)
 	var terms_label := Label.new()
 	terms_label.name = "OfferTerms"
 	terms_label.label_settings = _contract_ink_settings
-	terms_label.text = "%s every %d ticks  ·  pays +%d  ·  lost after %d missed in a row" % [
-		", ".join(PackedStringArray(parts)),
+	terms_label.text = "every %d ticks  ·  pays +%d  ·  lost after %d missed in a row" % [
 		int(offer.get("cadence_ticks", 0)),
 		int(offer.get("payout", 0)),
 		int(offer.get("strikes", 1)),
 	]
-	mix_row.add_child(terms_label)
+	text_col.add_child(terms_label)
 
 	var status_label := Label.new()
 	status_label.name = "OfferStatus"
@@ -6587,6 +6840,7 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 		"id": String(offer.get("id", "")),
 		"panel": panel,
 		"name_label": name_label,
+		"mix_label": mix_label,
 		"terms_label": terms_label,
 		"status_label": status_label,
 		"sign_button": sign_button,
@@ -6769,17 +7023,19 @@ func _build_staff_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	# clipped off the rows. Four lines of small print outside the scroll cost
 	# a whole category row; inside it they cost nothing and are still one
 	# flick away, which is the right price for text read once.
-	_staff_scroll_box = VBoxContainer.new()
-	_staff_scroll_box.name = "StaffScrollBox"
-	_staff_scroll_box.add_theme_constant_override("separation", _ui_i(10))
-	_staff_scroll_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_staff_scroll.add_child(_staff_scroll_box)
-
+	#
+	# ONE box, not a box of rows nested in a box of everything: the snapping in
+	# `_whole_rows_height` cuts between the CHILDREN of the node it is given,
+	# and with the rows nested those children were "all four rows" and "the
+	# explainer" — so the only cut that was not the whole list was one through
+	# the explainer's own lines (issue #63). Flat, every boundary the player
+	# can see is a boundary the cut can land on, and the explainer is shown
+	# whole or not at all.
 	_staff_rows_box = VBoxContainer.new()
 	_staff_rows_box.name = "StaffRows"
 	_staff_rows_box.add_theme_constant_override("separation", _ui_i(6))
 	_staff_rows_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_staff_scroll_box.add_child(_staff_rows_box)
+	_staff_scroll.add_child(_staff_rows_box)
 
 	_poll_staff()
 	_rebuild_staff_rows(_staff_snapshot.get("categories", []))
@@ -6792,7 +7048,7 @@ func _build_staff_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_staff_rules_label.name = "StaffRules"
 	_staff_rules_label.label_settings = _staff_meta_settings()
 	_staff_rules_label.text = _staff_rules_text()
-	_staff_scroll_box.add_child(_staff_rules_label)
+	_staff_rows_box.add_child(_staff_rules_label)
 
 	_staff_footer_label = Label.new()
 	_staff_footer_label.name = "StaffFooter"
@@ -6814,9 +7070,66 @@ func _position_staff_panel() -> void:
 		return
 	var reserved := _hotbar_reserved_height()
 	var bounds := vp.get_visible_rect().size
-	_fit_grid_scroll(_staff_scroll, _staff_scroll_box, bounds.y - reserved - _ui_px(16.0))
+	_fit_staff_width()
+	_fit_grid_scroll(_staff_scroll, _staff_rows_box, bounds.y - reserved - _ui_px(16.0), true)
 	var panel_size := _staff_panel.get_combined_minimum_size()
+	_staff_panel.position.x = maxf(0.0, (bounds.x - panel_size.x) * 0.5)
 	_staff_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
+
+
+## Makes the panel fit the window by moving each row's PROSE to the row's
+## hover when it does not (issue #62).
+##
+## At 1280x720 the panel's minimum width was 1350px against 1264px of window:
+## it was clipped on BOTH edges, and FIRE −1 — the only way to undo a hire —
+## was off the right-hand one entirely. A control the player cannot reach
+## outranks every other layout rule, so something on that row had to go.
+##
+## What goes is the things on the row that are sentences ABOUT the row rather
+## than the row itself: the ranked sentence under the bar, the per-tick
+## "3 of 4 working right now" beside it, and the bar's "hired / asked for"
+## caption. Both are already readable elsewhere —
+## `_staff_row_sentence` puts the sentences it cannot show on the row's
+## tooltip and this puts the rest there with them, and the caption says what
+## the two numbers printed ON the bar mean, which the panel's own explainer
+## says as well. What stays is the icons, the meter, the numbers, the state
+## chip and the two buttons: what the panel is FOR (issue #7), and the only
+## parts of it that can be clicked.
+##
+## Measured, not assumed: the panel is asked whether it fits at its natural
+## width every time, so a wider window shows the prose again and a future row
+## that grows past the window gives its prose up without anyone re-tuning a
+## breakpoint.
+func _fit_staff_width() -> void:
+	if _staff_panel == null:
+		return
+	var available: float = _modal_available_width()
+	if not is_finite(available):
+		return
+	_staff_prose_hidden = false
+	_apply_staff_prose()
+	if _staff_panel.get_combined_minimum_size().x <= available:
+		return
+	_staff_prose_hidden = true
+	_apply_staff_prose()
+
+
+## Re-runs the prose rule on every row that is already built —
+## `_update_staff_panel` fills the five sentence labels' TEXT from the wire and
+## this decides which of them is on the row rather than on its hover, so the
+## width rule above can change its mind without waiting for the next poll.
+func _apply_staff_prose() -> void:
+	for row in _staff_rows:
+		var caption := row.get("meter_caption") as Label
+		if caption != null:
+			caption.visible = not _staff_prose_hidden
+		var note := row.get("note_label") as Label
+		if note != null:
+			note.visible = bool(row.get("note_wanted", false)) and not _staff_prose_hidden
+		var working := row.get("working_label") as Label
+		if working != null:
+			working.visible = bool(row.get("working_wanted", false)) and not _staff_prose_hidden
+		_staff_row_sentence(row)
 
 
 ## Rebuilds the category rows from the snapshot's `categories`. Content, so
@@ -6834,6 +7147,11 @@ func _rebuild_staff_rows(categories: Array) -> void:
 	for index in range(categories.size()):
 		_staff_rows.append(_build_staff_row(categories[index], index))
 		_staff_row_ids.append(String(categories[index].get("id", "")))
+	# The explainer shares the scrolled box with the rows and stays after
+	# them: a content change rebuilds the rows into the same box and would
+	# otherwise strand the small print in the middle of the list.
+	if is_instance_valid(_staff_rules_label) and _staff_rules_label.get_parent() == _staff_rows_box:
+		_staff_rows_box.move_child(_staff_rules_label, -1)
 
 
 func _staff_rows_match(categories: Array) -> bool:
@@ -7434,15 +7752,32 @@ func _staff_row_sentence(row: Dictionary) -> String:
 	var shown := ""
 	for key in STAFF_SENTENCE_ORDER:
 		var label: Label = row[key]
+		# `_staff_prose_hidden`: at a window too narrow for the row to
+		# carry both (`_fit_staff_width`), the slot is empty and all five
+		# sentences are on the hover. The ranking still runs, so the one that
+		# would have been shown is still the first one read there.
 		var take_slot: bool = shown == "" and label.text != ""
-		label.visible = take_slot
+		label.visible = take_slot and not _staff_prose_hidden
 		if take_slot:
 			shown = key
 	# The hover carries every sentence the slot could not, in the same order,
-	# so nothing that used to be on the row is actually gone from it.
+	# so nothing that used to be on the row is actually gone from it — and
+	# when the slot is gone as well, it carries all five.
 	var rest: Array = []
+	if _staff_prose_hidden:
+		# Everything the narrow row could not keep, in the order it reads on a
+		# wide one: why there is no bar, then what the bar's two numbers are.
+		var note := row.get("note_label") as Label
+		if note != null and bool(row.get("note_wanted", false)) and note.text != "":
+			rest.append(note.text)
+		var working := row.get("working_label") as Label
+		if working != null and bool(row.get("working_wanted", false)) and working.text != "":
+			rest.append(working.text)
+		var caption := row.get("meter_caption") as Label
+		if caption != null and not bool(row.get("note_wanted", false)):
+			rest.append(caption.text)
 	for key in STAFF_SENTENCE_ORDER:
-		if key == shown:
+		if key == shown and not _staff_prose_hidden:
 			continue
 		var text := String(row[key].text)
 		if text != "":
@@ -7771,7 +8106,11 @@ func _update_staff_panel() -> void:
 		# where the bar would have been rather than under an empty track.
 		var idle: bool = state["note"] != ""
 		row["note_label"].text = state["note"]
-		row["note_label"].visible = idle
+		# Remembered rather than read back off the label: at a narrow window
+		# the note is on the row's hover instead (`_fit_staff_width`), and
+		# this is what says where it belongs once the window is wide again.
+		row["note_wanted"] = idle
+		row["note_label"].visible = idle and not _staff_prose_hidden
 		row["meter_row"].visible = not idle
 		row["meter"].visible = not idle
 		if not idle:
@@ -7787,7 +8126,11 @@ func _update_staff_panel() -> void:
 		row["short_label"].text = short_text
 		row["short_label"].visible = short_text != ""
 		row["working_label"].text = working
-		row["working_label"].visible = working != "" and short_text == ""
+		# Wanted here, shown by `_apply_staff_prose`: the per-tick figure is the
+		# widest sentence on the row ("none working this moment" is 262px) and
+		# the first thing it gives up on a narrow window (issue #62).
+		row["working_wanted"] = working != "" and short_text == ""
+		row["working_label"].visible = bool(row["working_wanted"]) and not _staff_prose_hidden
 		row["fire_button"].disabled = not bool(state["fire_enabled"])
 		row["hire_button"].disabled = not bool(state["hire_enabled"])
 		row["hire_button"].text = state["hire_text"]
@@ -8031,8 +8374,9 @@ func _position_production_panel() -> void:
 		return
 	var reserved := _hotbar_reserved_height()
 	var bounds := vp.get_visible_rect().size
-	_fit_grid_scroll(_production_scroll, _production_rows_box, bounds.y - reserved - _ui_px(16.0))
+	_fit_grid_scroll(_production_scroll, _production_rows_box, bounds.y - reserved - _ui_px(16.0), true)
 	var panel_size := _production_panel.get_combined_minimum_size()
+	_production_panel.position.x = maxf(0.0, (bounds.x - panel_size.x) * 0.5)
 	_production_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
 
 
@@ -9396,12 +9740,31 @@ func _stock_wanted_height() -> float:
 ## (UI_UX.md §2b point 33). An empty `Rect2` when there is no plate; the
 ## minimum-size fallback is `_stock_reserved_height`'s, for its reason.
 func _stock_rect() -> Rect2:
-	if _stock_panel == null or not _stock_panel.visible:
+	return _plate_rect(_stock_panel)
+
+
+## The CREW plate's rect, and the clipboard's — `_stock_rect`'s siblings, so
+## the three tenants of the right-hand column can be handed to
+## `_pushed_clear_of` as one list (`_position_market_panel`).
+func _crew_rect() -> Rect2:
+	return _plate_rect(_crew_panel)
+
+
+func _contract_panel_rect() -> Rect2:
+	return _plate_rect(_contract_panel)
+
+
+## A fixed plate's rect on screen, or an empty `Rect2` when it is not up.
+## `global_position`, not `position`: a plate inside a layout container has a
+## local origin that is not the screen's (the config panel's own avoidance
+## makes the same call).
+func _plate_rect(plate: Control) -> Rect2:
+	if plate == null or not plate.visible:
 		return Rect2()
-	var size := _stock_panel.size
+	var size := plate.size
 	if size.y <= 0.0:
-		size = _stock_panel.get_combined_minimum_size()
-	return Rect2(_stock_panel.global_position, size)
+		size = plate.get_combined_minimum_size()
+	return Rect2(plate.global_position, size)
 
 
 ## Repolled every frame, like the hotbar it used to sit on: a stock count
@@ -10039,7 +10402,10 @@ func _position_config_panel() -> void:
 	var size := _config_panel.get_combined_minimum_size()
 	var anchor := bounds * 0.5
 	var placement := _placement_at_tile(_config_tile)
-	if not placement.is_empty():
+	# `is_inside_tree` because a headless test can open this panel before the 3D
+	# subtree is built, and `unproject_position` on a detached camera logs an
+	# engine error every frame. Centre-screen is the right answer there anyway.
+	if not placement.is_empty() and _camera.is_inside_tree():
 		var direction := _placement_direction(placement)
 		var footprint := _rotated_footprint(
 			_footprint_size(placement.get("footprint")), direction
@@ -10057,18 +10423,36 @@ func _position_config_panel() -> void:
 	# is the one readout that says whether a FILL on this very panel can
 	# succeed, so covering it with this panel would hide the answer to the
 	# question the panel is asking (UI_UX.md §2b point 33).
-	var right_bound := bounds.x
-	if _contract_panel != null and _contract_panel.visible:
-		var clip := _contract_panel.get_global_rect()
-		if pos.y < clip.end.y and pos.y + size.y > clip.position.y:
-			right_bound = minf(right_bound, clip.position.x)
-	var stock := _stock_rect()
-	if stock.size.y > 0.0 and pos.y < stock.end.y and pos.y + size.y > stock.position.y:
-		right_bound = minf(right_bound, stock.position.x)
-	if pos.x + size.x > right_bound:
-		pos.x = anchor.x - CONFIG_PANEL_OFFSET.x - size.x
-	pos.x = clampf(pos.x, 8.0, maxf(8.0, bounds.x - size.x - 8.0))
+	# The CREW plate is the third tenant of that column and was missing from
+	# this bound (issue #88): it arrived after the bound was written, so a
+	# panel that cleared the clipboard and the stock plate was drawn straight
+	# over the wage bill and the payday countdown — and a fluid tank's panel,
+	# which is taller than a hopper's, sat squarely on it. ONE list rather
+	# than a branch per plate, so the next thing on that edge is an entry
+	# here rather than another case nobody remembers to add.
+	#
+	# `y` is clamped BEFORE the plates are consulted, because the bound has to
+	# be judged against where the panel will actually be DRAWN and not where it
+	# first asked to go (§2b point 33, the rule `_panel_position_near` learned
+	# the same way). At 1280x720 a tank's panel is taller than the band below
+	# the clipboard, so the clamp lifted it up into the clipboard's rows after
+	# a test against its old `y` had decided the clipboard was nowhere near it.
 	pos.y = clampf(pos.y, 8.0, maxf(8.0, bounds.y - _hotbar_reserved_height() - size.y))
+	var right_bound := bounds.x
+	for plate in [_contract_panel_rect(), _stock_rect(), _crew_rect()]:
+		if plate.size.y <= 0.0:
+			continue
+		if pos.y < plate.end.y and pos.y + size.y > plate.position.y:
+			right_bound = minf(right_bound, plate.position.x)
+	# Flipped to the building's other side — and no further right than the
+	# bound itself. The flip used to be a fixed offset from the anchor, which
+	# is not the same as clearing anything: at 1280x720 the clipboard's left
+	# edge is 580px in and a panel flipped by the offset alone landed at 70,
+	# 525 wide, so its last 15px were still on the clipboard. Landing its right
+	# edge ON the bound is what the bound is for.
+	if pos.x + size.x > right_bound:
+		pos.x = minf(anchor.x - CONFIG_PANEL_OFFSET.x - size.x, right_bound - size.x)
+	pos.x = clampf(pos.x, 8.0, maxf(8.0, bounds.x - size.x - 8.0))
 	_config_panel.position = pos
 	_config_panel.size = size
 
@@ -13094,7 +13478,18 @@ func _apply_hover_panel_state(state: Dictionary) -> void:
 ## clamping on screen and then PUSHING clear, judging each candidate after the
 ## clamp rather than when it is chosen.
 func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
+	# The size this panel will be DRAWN at, which is not always the size it
+	# reports as its minimum. A Label's minimum width comes from its last
+	# shaping and a Label is only reshaped when it is drawn, so a panel whose
+	# text was set earlier in this same frame — which is every cursor panel
+	# here — can still report the width it had before. The hover tooltip
+	# reported 299x285 while being drawn 545x285, and was placed as if the
+	# right-hand 246px of it did not exist: over the legend's last line. Its
+	# CURRENT size is the one the layout pass actually gave it, so the larger
+	# of the two is the honest estimate, and erring large only ever buys more
+	# clearance.
 	var size := panel.get_combined_minimum_size()
+	size = Vector2(maxf(size.x, panel.size.x), maxf(size.y, panel.size.y))
 	var vp := get_viewport()
 	var bounds := vp.get_visible_rect().size if vp != null else Vector2(1600, 900)
 	# The hotbar sits over the bottom of the viewport (§5b) but isn't part of
@@ -13164,22 +13559,75 @@ func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
 	# clamp snapped it right back onto the plate it was fleeing). A second
 	# pass per plate in case clearing one slides the panel into another; with
 	# the three plates this repo has, one pass has always sufficed.
-	var pos: Vector2 = candidates[0]
-	var rect := Rect2(
-		clampf(pos.x, 0.0, maxf(0.0, bounds.x - size.x)),
-		clampf(pos.y, 0.0, maxf(0.0, lower_bound - size.y)),
-		size.x, size.y
-	)
+	var home := _clamped_on_screen(candidates[0], size, bounds.x, lower_bound)
+	var rect := home
 	for _pass in range(avoid.size() + 1):
 		for r in avoid:
 			rect = _pushed_clear_of(rect, r, bounds.x, lower_bound)
-	return rect.position
+	if _hud_overlap_area(rect, avoid) <= 0.0:
+		return rect.position
+
+	# Nothing clears every plate. At 1280x720 with the legend open there is
+	# genuinely nowhere to stand: a machine hover is 550x283, the legend is
+	# 757x259 and starts 24px in, which leaves 499px to its right, 24px above
+	# it and — once the hotbar has taken its strip — 282px below it, one
+	# pixel short. Pushing per plate in turn is no answer either: each push
+	# clears the plate it is given and can land on the next, and one pass
+	# across three plates put the tooltip over two of them at once.
+	#
+	# So when every position is a fault, take the least-bad one: score every
+	# position considered — the four quadrants, and the four ways off each
+	# plate — by how much HUD it covers IN TOTAL, and keep the smallest. Ties
+	# keep the earlier position, so the preference order above still decides
+	# whenever the overlap is the same.
+	var tried: Array[Rect2] = [rect]
+	for candidate in candidates:
+		tried.append(_clamped_on_screen(candidate, size, bounds.x, lower_bound))
+	for r in avoid:
+		for side in [
+			Vector2(r.position.x - size.x, home.position.y),
+			Vector2(r.position.x + r.size.x, home.position.y),
+			Vector2(home.position.x, r.position.y - size.y),
+			Vector2(home.position.x, r.position.y + r.size.y),
+		]:
+			tried.append(_clamped_on_screen(side, size, bounds.x, lower_bound))
+	var best: Rect2 = tried[0]
+	var best_area: float = _hud_overlap_area(best, avoid)
+	for option in tried:
+		var area: float = _hud_overlap_area(option, avoid)
+		if area < best_area:
+			best_area = area
+			best = option
+	return best.position
+
+
+## A rect of `size` at `pos`, clamped to the screen above the hotbar.
+func _clamped_on_screen(pos: Vector2, size: Vector2, bounds_x: float, lower_bound: float) -> Rect2:
+	return Rect2(
+		clampf(pos.x, 0.0, maxf(0.0, bounds_x - size.x)),
+		clampf(pos.y, 0.0, maxf(0.0, lower_bound - size.y)),
+		size.x, size.y
+	)
+
+
+## How much of `rect` covers the HUD plates in `avoid`, in square pixels: the
+## score a cursor panel's position is ranked by when no position is clear.
+func _hud_overlap_area(rect: Rect2, avoid: Array) -> float:
+	var total := 0.0
+	for r in avoid:
+		var overlap: Rect2 = rect.intersection(r)
+		total += maxf(0.0, overlap.size.x) * maxf(0.0, overlap.size.y)
+	return total
 
 
 ## Moves `rect` off to one side of `r` — whichever of the four directions
 ## (left/right/above/below, smaller-penetration axis tried first) still
-## clears `r` after being clamped back into the viewport. Returns `rect`
-## unchanged if no direction does (genuinely no room, an extreme case).
+## clears `r` after being clamped back into the viewport.
+##
+## Returns `rect` unchanged if no direction does (genuinely no room) — whose
+## caller then has a choice to make: `_position_market_panel` keeps the panel
+## centred, and `_panel_position_near` scores every position it can reach and
+## takes the one that covers the least HUD.
 func _pushed_clear_of(rect: Rect2, r: Rect2, bounds_x: float, lower_bound: float) -> Rect2:
 	var overlap := rect.intersection(r)
 	if overlap.size.x <= 0.0 or overlap.size.y <= 0.0:
@@ -13190,11 +13638,7 @@ func _pushed_clear_of(rect: Rect2, r: Rect2, bounds_x: float, lower_bound: float
 	var below := Vector2(rect.position.x, r.position.y + r.size.y)
 	var options := [left, right, above, below] if overlap.size.x <= overlap.size.y else [above, below, left, right]
 	for opt in options:
-		var clamped := Rect2(
-			clampf(opt.x, 0.0, maxf(0.0, bounds_x - rect.size.x)),
-			clampf(opt.y, 0.0, maxf(0.0, lower_bound - rect.size.y)),
-			rect.size.x, rect.size.y
-		)
+		var clamped := _clamped_on_screen(opt, rect.size, bounds_x, lower_bound)
 		if not clamped.intersects(r):
 			return clamped
 	return rect
@@ -13287,13 +13731,43 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 			if _contract_panel.size.y > 0.0:
 				top = _contract_panel.get_global_rect().position.y
 			hard = maxf(0.0, ceiling_y - top)
-		_fit_grid_scroll(
+		var stack_available: float = (
+			column - _stock_reserved_height() - _crew_reserved_height()
+		)
+		# The board hint is the clipboard's one line of advice and the only
+		# thing on this panel the stack can still take a line from. It keeps
+		# its line while the stack has a whole docket LINE to show, and gives
+		# it up when it has not (issue #17): at 1280x720 with every offer
+		# signed the stack is down to twelve pixels — a docket's heading cut
+		# through its own type — and the hint's line is exactly what buys the
+		# cut back onto the first boundary. "Sign more orders" is also the
+		# least useful sentence on a clipboard whose every order is signed.
+		#
+		# Issue #13 made the same trade against the SHORT-STAFFED strip and
+		# for the same reason: the clipboard has room for one line of advice,
+		# and a docket cut through a line outranks it.
+		if _contract_hint_label != null:
+			_contract_hint_label.visible = true
+		var cut: float = _fit_grid_scroll(
 			_contract_cards_scroll,
 			_contract_cards_box,
-			column - _stock_reserved_height() - _crew_reserved_height(),
+			stack_available,
 			true,
 			hard
 		)
+		if (
+			_contract_hint_label != null
+			and cut < _first_line_boundary(_contract_cards_box)
+			and _contract_cards_scroll.visible
+		):
+			_contract_hint_label.visible = false
+			_fit_grid_scroll(
+				_contract_cards_scroll,
+				_contract_cards_box,
+				stack_available,
+				true,
+				hard
+			)
 	else:
 		_contract_cards_scroll.custom_minimum_size.y = _contract_cards_box.get_combined_minimum_size().y
 
@@ -13431,9 +13905,10 @@ func _update_staff_alert() -> void:
 	# Issue #13 made the board hint yield to the SHORT-STAFFED strip, because
 	# the clipboard had room for one line of advice and hiring beat signing.
 	# The strip is on the CREW plate now and the two are no longer competing
-	# for the same pixels, so the hint is simply always up again.
-	if _contract_hint_label != null:
-		_contract_hint_label.visible = true
+	# for the same pixels. The hint's line is still the clipboard's to spend,
+	# but there is exactly ONE place that decides whether it is spent —
+	# `_update_contract_panel`, which is the only thing that knows what the
+	# docket stack got — so this no longer touches it.
 	if _staff_alert_known_short < 0:
 		_staff_alert_known_short = short
 		return
