@@ -18,6 +18,40 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-20 **A progression gate cannot pay for a transient cost.**
+  `data/unlocks.ron`'s `after_deliveries: 10` stays where it is, and the
+  reason is measured rather than argued (see the file's own comment for the
+  table). Building the BBQ branch stops boxed-ketchup output for ~8 500
+  ticks while the new pipes and vat prime off the existing fluid network, and
+  the contract board keeps counting windows through it. A higher gate saves a
+  player running ONE starter order (4 deliveries → 9 boxes banked,
+  `corner_shop` lost; 6 → 13, survives; 10 → 22, survives) and cannot save a
+  player running three, who loses the whole board at EVERY gate tried —
+  because the only way to raise a delivery count is to sign more contracts,
+  and each one is another mouth the same transient must feed. **Do not answer
+  "expansion starves the line" with a number in `unlocks.ron`.** The two real
+  fixes are a warning at placement time and a fluid network that will not
+  hand a brand-new consumer 100% of a network the old one lives on (issues
+  #92, #93). Full record in `docs/DECISIONS.md`.
+- 2026-09-20 **A legibility mask must be proved to contain the pixels in
+  question, before any number it produces is quoted.** The
+  fixed-mask-mean-luma method (`voxel-legibility-measurement`) is only as
+  honest as its silhouette mask: judging `box_of_ketchup` against
+  `box_of_bbq` with the warm-pixel mask the earlier passes used
+  (`r > g > b and r - b > 18`) silently dropped the printed panels, because
+  `label_cream` renders near-neutral at (241, 239, 234), and reported a
+  confident 5.3/255 for art that in fact separates by 30.5/255. **The mask is
+  the case's whole silhouette with interior holes filled** — largest warm
+  connected component, then flood the complement from the window border and
+  keep what the flood cannot reach — because the kraft outline encloses the
+  print on every face the camera sees. **Validate a mask by measuring a
+  candidate that visibly changes the art; if it scores the same as shipped,
+  the instrument is broken, not the candidate.** The measurement it now
+  supports: the shipped lid print separates the two cartons on a shared belt
+  by 30.5/255 luma against a 12.6 same-carton spread, so **#40's ruling
+  stands and the sauce cartons are not repainted** — and chroma is the weaker
+  channel at this size, not the stronger one. Full record in
+  `docs/DECISIONS.md`.
 - 2026-09-16 **The game is called CONDIMENTAL, and so is the repo.** All-caps
   wherever it is the title: the menu's `title.text`, `config/name`, the
   design-doc headings. The GitHub repo was renamed the same day —

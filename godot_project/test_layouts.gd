@@ -335,69 +335,196 @@ static func build_bbq_branch(sim) -> void:
 const BBQ_BRANCH_PLACEMENTS := 70
 
 
-## How long the BBQ line runs before `scripts/screenshot-scene.sh --bbq`
-## photographs it, and how deep its larder is.
+## How long the BBQ line runs once the branch is in, and how deep its
+## larder is.
 ##
-## 15 000 ticks is chosen between two walls. Below about 6 000 the branch is
-## still priming its two new pipe runs and the ketchup bottler is starved, so
-## the shot shows one sauce; past about 30 000 the delivery pool hits its
-## ceiling and the packers back up, so the shot shows a stalled factory. In
-## between, both lines run at the 3:2 split `data/contracts.ron`'s mixed
-## orders are written against and there are boxes of both sauces on the
-## floor.
+## 15 000 ticks is chosen between two walls, and it is counted from the
+## moment the branch is PLACED rather than from tick zero. Below about 9 000
+## the branch is still priming its two new pipe runs and the ketchup bottler
+## is starved, so the shot shows one sauce; past about 30 000 the delivery
+## pool hits its ceiling and the packers back up, so the shot shows a stalled
+## factory. In between, both lines run at the 3:2 split
+## `data/contracts.ron`'s mixed orders are written against and there are
+## boxes of both sauces on the floor.
 const BBQ_SETTLE_TICKS := 15000
 const BBQ_STOCK := 1200
+
+## How long the ketchup line is allowed to run on its own before the fixture
+## gives up waiting for `data/unlocks.ron`'s BBQ gate to open. The shipped
+## gate (ten deliveries) opens at about 12 000 ticks on one line serving the
+## starter order alone; this ceiling is generous enough that a balance pass
+## on that file moves the shot's run length rather than breaking it, and
+## tight enough that a gate which can never open fails the fixture instead of
+## hanging it.
+const BBQ_GATE_TICK_CEILING := 40000
+
+## How often the wait above checks the gate. A snapshot parse per tick would
+## dominate the run; the gate is checked on the same 250-tick grid the
+## balance measurements in `docs/DECISIONS.md` were taken on.
+const BBQ_GATE_POLL_TICKS := 250
+
+
+## True once `data/unlocks.ron` has opened at least one gate — which, with
+## one unlock shipped, means BBQ is buyable and its contracts signable.
+##
+## Read from the simulation's own snapshot rather than counted here: a gate
+## is a rule in `sim_core` (`BuyIngredient` and `SignContract` are REFUSED
+## for a locked id), and a fixture that re-derived the threshold in GDScript
+## would be the presentation layer deciding a gameplay question.
+static func any_unlock_open(sim) -> bool:
+	var economy = JSON.parse_string(sim.economy_snapshot_json())
+	if not (economy is Dictionary):
+		return false
+	for unlock in economy.get("unlocks", []):
+		if bool(unlock.get("open", false)):
+			return true
+	return false
+
+
+## THE MIXED EXIT (issue #57) — a splitter on the BBQ branch's exit run whose
+## side output drops onto the KETCHUP line's exit belt, so that one belt in
+## the frame carries both sauces alternating.
+##
+## WHY THE SHOT NEEDS IT. Whether `box_of_ketchup` and `box_of_bbq` can be
+## told apart was settled on `--item-gallery` (#40): four items on a bare
+## belt, one of each two tiles apart. What that cannot answer is how the pair
+## reads MIXED — alternating on a working belt, with a packer, a dock and the
+## contract clipboard in the same frame competing for the same glance. No
+## fixture could put that in one frame, because the shipped branch gives BBQ
+## its own dock.
+##
+## WHAT IT DOES NOT CHANGE. `build_bbq_branch` — the layout
+## `sim_core/src/sim/reference.rs` pins tile for tile — is untouched, and so
+## is its third joint: the branch still has its own dock, and the splitter's
+## STRAIGHT output still runs east into it. Only the side output is new, so
+## the frame shows both arrangements at once (two product streams kept apart,
+## and two merged) rather than replacing the shipped one with a merge.
+##
+## THE ROUTE, and why the splitter faces NORTH rather than along the run it
+## sits in. A splitter carries one direction: its placement's facing is the
+## STRAIGHT output and the second output is one quarter turn clockwise from
+## it (`sim::splitter`'s one direction rule). The branch runs east, the
+## ketchup line is NORTH of it (`Direction::North` is +y, so row -3 is below
+## row 0), and clockwise from east is south — the wrong way. Faced north, the
+## two outputs land exactly where this fixture wants them with no second
+## field and no new rule: STRAIGHT north onto the new run, CLOCKWISE east
+## onto the branch's own exit belt and its own dock.
+##
+## From (27, -2) the run heads west along a row that is clear east of the
+## cooking vat, then north across row -1 into the ketchup line's exit belt at
+## (22, 0), which carries both sauces for its last four tiles and onto the
+## dock's deck. Belts crossing the liquid-smoke run on row -1 are harmless:
+## only pipes join pipes (the branch's second joint says the same thing about
+## that run).
+static func build_mixed_exit(sim) -> void:
+	sim.issue_command_json(JSON.stringify({
+		"type": "remove", "tile": [MIXED_SPLITTER.x, MIXED_SPLITTER.y],
+	}))
+	place(sim, "splitter", MIXED_SPLITTER, "north")
+	for x in [27, 26, 25, 24, 23]:
+		place(sim, "belt", Vector2i(x, -2), "west")
+	place(sim, "belt", Vector2i(22, -2), "north")
+	place(sim, "belt", Vector2i(22, -1), "north")
+
+
+## The splitter that makes the exit mixed, and the belt the two sauces share
+## once it does — the two tiles any check or shot of the mixed line names.
+const MIXED_SPLITTER := Vector2i(27, -3)
+const MIXED_BELT := Vector2i(23, 0)
 
 
 ## THE BBQ LINE, RUNNING — what `scripts/screenshot-scene.sh --bbq`
 ## photographs: the branch above, funded, fully crewed, auto-filled and run
 ## until both sauces are moving at once.
 ##
+## **IT BUILDS IN THE ORDER THE GAME DICTATES** (issue #55), and that is the
+## whole shape of this fixture. `data/unlocks.ron` holds the three BBQ raws
+## back until ten contract deliveries have been made, so a fixture that
+## placed the branch at tick zero and stocked the larder in the same breath
+## bought no spice mix, no molasses and no liquid smoke — `stock_larder`
+## enumerates the ingredients the market is OFFERING, and a locked one is
+## absent from it. That is what this shot did between the gate landing and
+## this change: it photographed a complete BBQ branch that had never made a
+## single box, and every test of it passed, because nothing asserts that a
+## fixture's factory actually ran.
+##
+## So: the ketchup line runs on its own until the gate opens, and only then
+## is the branch placed, stocked, crewed and its contracts signed. That is
+## the sequence a player lives through, and it is the reason this fixture no
+## longer needs to sign the starter order back up — see below.
+##
+## **NO RE-SIGN, AND WHY THAT IS NOW HONEST** (issue #55). This fixture used
+## to sign three contracts again after the settle, because building the
+## branch starved the ketchup bottler for thousands of ticks and the Corner
+## Shop order struck out. Measured (`docs/DECISIONS.md`, the BBQ gate
+## ruling), that transient costs a one-line factory about 8 500 ticks of
+## ketchup — but a factory that has reached the gate serving the starter
+## order alone has banked about 22 boxes by then, and the order draws two per
+## 1 000 ticks from that bank without missing a window. The gate is what buys
+## the slack; the re-sign was papering over a fixture that built in the wrong
+## order.
+##
 ## It funds itself rather than living inside a new game's 3000, for the same
-## reason `build_bottleneck_line` does: two lines, a bigger crew and 15 000
+## reason `build_bottleneck_line` does: two lines, a bigger crew and 27 000
 ## ticks of raws cost more than a new game has, and what this fixture is for
 ## is the PICTURE of a working two-sauce factory. That a player can afford to
 ## BUILD it is a separate claim, proved separately, from a real starting
 ## balance, by `test_bbq_branch.gd`.
 static func build_bbq_running_line(sim) -> void:
-	build_bbq_branch(sim)
+	# 1. The ketchup line alone — everything a new game can reach.
+	build_reference_line(sim)
 	fund(sim, 30000)
 	stock_larder(sim, BBQ_STOCK)
-	# Both lines' hoppers and both tanks, so nothing has to be hand-fed
-	# during the run.
-	for tile in [Vector2i(-1, 0), Vector2i(4, 1), Vector2i(9, -3), Vector2i(9, -2)]:
+	for tile in [Vector2i(-1, 0), Vector2i(4, 1)]:
 		sim.issue_command_json(JSON.stringify({
 			"type": "set_hopper_auto_fill", "tile": [tile.x, tile.y], "enabled": true,
 		}))
-	for tile in [Vector2i(5, 2), Vector2i(16, -1)]:
+	sim.issue_command_json(JSON.stringify({
+		"type": "set_tank_auto_fill", "tile": [5, 2], "enabled": true,
+	}))
+	hire_until_staffed(sim)
+
+	# 2. Run it until the game offers BBQ. The starter order is the only one
+	#    active, exactly as a new game starts, so the deliveries that open
+	#    the gate also bank the stock that pays for the transient below.
+	var waited := 0
+	while waited < BBQ_GATE_TICK_CEILING and not any_unlock_open(sim):
+		for _i in range(BBQ_GATE_POLL_TICKS):
+			sim.tick()
+		waited += BBQ_GATE_POLL_TICKS
+
+	# 3. Build the branch the moment it is unlocked. `build_bbq_branch`
+	#    re-issues the ketchup line's placements first; every one of them is
+	#    refused on an occupied tile, harmlessly.
+	fund(sim, 30000)
+	build_bbq_branch(sim)
+	build_mixed_exit(sim)
+	fund(sim, 30000)
+	# The larder is stocked AGAIN, and this time the three BBQ raws are in
+	# the market to be bought — they were not, before the gate opened.
+	stock_larder(sim, BBQ_STOCK)
+	for tile in [Vector2i(9, -3), Vector2i(9, -2)]:
 		sim.issue_command_json(JSON.stringify({
-			"type": "set_tank_auto_fill", "tile": [tile.x, tile.y], "enabled": true,
+			"type": "set_hopper_auto_fill", "tile": [tile.x, tile.y], "enabled": true,
 		}))
+	sim.issue_command_json(JSON.stringify({
+		"type": "set_tank_auto_fill", "tile": [16, -1], "enabled": true,
+	}))
 	# A second line needs a bigger crew, and an understaffed factory runs
 	# slow everywhere rather than only on the new machines (GAMEPLAY.md §7) —
 	# which would quietly turn this into a photograph of the staffing
 	# mechanic instead of of the branch.
 	hire_until_staffed(sim)
 	# Both BBQ contracts that ask for one sauce, plus the mixed order: the
-	# clipboard in the shot then shows what the epic added to the board.
+	# clipboard in the shot then shows what the epic added to the board. Both
+	# signatures are accepted now and would have been REFUSED at tick zero —
+	# a BBQ contract is behind the same gate its ingredients are.
 	for id in ["smokehouse_trial", "grill_pub"]:
 		sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": id}))
+
+	# 4. Both lines running.
 	for _i in range(BBQ_SETTLE_TICKS):
 		sim.tick()
-	# The starter contract is the casualty of building this branch onto a
-	# single ketchup line: for the few thousand ticks the BBQ pipes take to
-	# prime, the branch drinks everything the vat makes and the ketchup
-	# bottler delivers nothing, so the Corner Shop order strikes out. That is
-	# the mechanic doing its job and the game says so in words — but it is
-	# not what this shot is of, so the fixture takes the game's own advice and
-	# signs those three back up once both lines are running.
-	#
-	# Three and not the whole board: the clipboard's docket list is height
-	# capped and scrolls, so a fully signed board pushes the mixed order out
-	# of frame — and the mixed order is the half of this epic the clipboard
-	# is here to show. An already-active id is refused, harmlessly.
-	for id in ["corner_shop", "smokehouse_trial", "grill_pub"]:
-		sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": id}))
 
 
 ## THE STALLED RUN (issue #54) — the fixture `test_pipe_fault.gd` asserts

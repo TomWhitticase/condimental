@@ -88,31 +88,52 @@
         // never sees. It is also a number the player can watch approach:
         // every docket on the clipboard counts its own deliveries.
         //
-        // TEN EVEN THOUGH IT DOES NOT SOLVE ISSUE #55, and why raising it
-        // would not either. #55 is that building the BBQ branch starves
-        // the ketchup line for roughly 6 000 ticks while two new pipe runs
-        // and a vat prime, which is six missed `corner_shop` windows
-        // against a three-strike contract: the reward for building the
-        // thing the game just unlocked is losing the order that paid for
-        // it. The issue offers "let the tier arrive with breathing room"
-        // as the cheap content-side fix — push this number up until the
-        // player has a second ketchup line by the time BBQ lands.
+        // TEN EVEN THOUGH IT DOES NOT SOLVE ISSUE #55 — now MEASURED, not
+        // argued (the balance pass, 2026-09-20). #55 is that building the
+        // BBQ branch starves the ketchup line while two new pipe runs and a
+        // vat prime, which is several missed `corner_shop` windows against a
+        // three-strike contract: the reward for building the thing the game
+        // just unlocked is losing the order that paid for it. The issue
+        // offers "let the tier arrive with breathing room" as the cheap
+        // content-side fix — push this number up until the player has slack
+        // by the time BBQ lands. So this number was swept, by building the
+        // reference line, opening the branch at a chosen delivery count and
+        // watching the board:
         //
-        // It was considered and rejected, because a delivery count cannot
-        // buy anyone a second line. Nothing in the game asks for one, so a
-        // higher threshold does not produce one; it only means MORE time
-        // spent signing MORE ketchup contracts off the board, and every
-        // one of those is starved by the same 6 000 ticks. Raising the
-        // number raises the number of orders the trap can take. It would
-        // trade a slower first session for a worse accident, and it would
-        // hide a real missing affordance behind a balance value that reads
-        // as arbitrary to whoever meets it next.
+        //   what the transient costs   boxed_ketchup output stops for about
+        //                              8 500 ticks; roughly 35 boxes' worth
+        //                              of throughput is absorbed into the
+        //                              new pipes and vat before any of it
+        //                              comes back out
+        //   gate 4                     9 boxes banked at the gate —
+        //                              corner_shop strikes out and is LOST
+        //   gate 6                     13 banked — survives
+        //   gate 10 (shipped)          22 banked — survives
         //
-        // The fix #55 actually wants is its first option — say so at
-        // placement time, before it costs anything, which the simulation
-        // has the information to do and no surface to say it on. That is a
-        // presentation ticket, not this file. So: ten, and the trap stays
-        // open and documented rather than papered over with a number.
+        // So a higher gate DOES buy a minimally-committed player the slack,
+        // and ten already clears it with room. What it cannot do is help the
+        // player the issue is actually about. With all three starter orders
+        // signed on the one line — the committed player, the one who did
+        // what the game encouraged — the whole board is lost at EVERY gate
+        // tried, including a run left to 50 000 ticks and 97 lifetime
+        // deliveries before the branch went in: 19 boxes banked against the
+        // ~33 three concurrent orders need through the transient. The
+        // counter is anti-correlated with the slack it is supposed to
+        // guarantee, because the way a player raises it is by signing more
+        // contracts, and every extra contract is another mouth the same
+        // 8 500 ticks has to feed. Raising the number raises the number of
+        // orders the trap can take.
+        //
+        // Hence: TEN, kept because it measures safe for the player who can
+        // be saved this way, not because it fixes #55. The fix #55 actually
+        // wants is its first option — say so at placement time, before it
+        // costs anything, which the simulation has the information to do and
+        // no surface to say it on (issue #92); alternatively the fluid
+        // network could stop letting a brand-new consumer take 100% of a
+        // network the old one is living on (issue #93). Both are outside
+        // this file. So the trap stays open and documented rather than
+        // papered over with a number. Full record: `docs/DECISIONS.md`,
+        // 2026-09-20, "A progression gate cannot pay for a transient cost".
         Unlock(
             id: "bbq_sauce",
             name: "BBQ Sauce",

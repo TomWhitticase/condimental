@@ -25,6 +25,132 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-20: **A progression gate cannot pay for a transient cost.** Issue
+  #55: building the BBQ branch off a running ketchup line starves the starter
+  contract while the new pipes prime, and `corner_shop` strikes out and is
+  lost. The issue's own cheap fix was "let the tier arrive with breathing
+  room" — raise `after_deliveries` in `data/unlocks.ron` until the player has
+  slack by the time BBQ lands. The BBQ epic had already rejected that in the
+  file's comment, by argument. This pass rejected it again, by measurement,
+  and kept **10** unchanged.
+
+  **What the transient costs.** A headless probe builds `test_layouts.gd`'s
+  reference line through real commands, signs contracts, ticks to the unlock
+  gate, calls `build_bbq_branch`, and samples `production_snapshot_json` and
+  `economy_snapshot_json` every 250 ticks. `boxed_ketchup`'s `produced_total`
+  flatlines for about **8 500 ticks** from the moment the branch is placed:
+  the two new pipe runs and the second cooking vat fill from the *existing*
+  fluid network, and roughly **35 boxes' worth of throughput** disappears into
+  pipework before any of it comes back. Delivery windows keep counting
+  through it; three misses lose a contract.
+
+  **The sweep.** Gate values 4, 6, 10, 14 and 20 were each run twice: once
+  with the single starter order signed, once with all three.
+
+  | gate | boxes banked at the gate | one order | three orders |
+  |---|---|---|---|
+  | 4 | 9 | `corner_shop` LOST | board lost |
+  | 6 | 13 | survives | board lost |
+  | 10 (shipped) | 22 | survives | board lost |
+  | 14, 20 | more | survives | board lost |
+
+  A run left to 50 000 ticks — 97 lifetime deliveries, far past any gate worth
+  shipping — still loses the board: 19 boxes banked against the ~33 that three
+  concurrent orders need to cover the transient.
+
+  **Why the number cannot work, stated as a rule.** The counter is
+  *anti-correlated* with the slack it is supposed to guarantee. The only way a
+  player raises a delivery count is by signing more contracts, and every extra
+  contract is another mouth the same 8 500 ticks has to feed. Raising the gate
+  raises the number of orders the trap can take. It would also hide a missing
+  affordance behind a balance value that reads as arbitrary to whoever meets
+  it next — the worst kind of number, one that is load-bearing for a reason
+  nobody can see.
+
+  **What was NOT chosen, and why.** Priming the pipes on placement was ruled
+  out before this pass: it breaks fluid conservation, the one property the
+  fluid system exists to guarantee. Shortening the pipe runs in the fixture
+  would fix the fixture, not the game. Giving `corner_shop` more strikes moves
+  the same cliff somewhere else and weakens every contract in the game to
+  patch one interaction.
+
+  **What the fix actually is**, both outside this pass's ownership and both
+  filed: a warning at placement time, before the player commits (#92), and a
+  fluid network that will not hand a brand-new consumer 100% of a network the
+  old one is living on (#93). The measured table lives in `data/unlocks.ron`'s
+  own comment so the next person to reach for that number meets the evidence
+  first, and the player-facing shape of it is in `docs/GAMEPLAY.md` §6.
+
+- 2026-09-20: **A legibility mask must be proved to contain the pixels in
+  question, before any number it produces is quoted.** Issue #57 asked whether
+  `box_of_ketchup` and `box_of_bbq` can be told apart once both ride one belt.
+  The `voxel-legibility-measurement` method answers that kind of question with
+  a fixed silhouette mask, mean luma inside it, 1:1 crops never upscaled to
+  judge. The first answer this pass produced was **wrong**, and catching it
+  is the durable part of the record.
+
+  **The broken instrument.** The mask was built with the warm-pixel test
+  earlier passes used: `r > g > b and r - b > 18`. That is right for kraft
+  cardboard and wrong for the print on it — `label_cream` renders at
+  **(241, 239, 234)**, `r - b = 7`, near-neutral. The mask therefore excluded
+  the printed lid panels: *exactly the pixels the question is about.* It
+  scored every candidate on the cardboard around them, reported a **5.3/255**
+  gap against a 17.0 noise floor, and concluded the art fails. A comment
+  saying so was posted on #57 and an owner question raised on it.
+
+  **How it was caught.** Candidate C1 — the print recoloured to each sauce's
+  own ink, a change visible across the room — measured *identical* to shipped.
+  That cannot happen if the mask covers the paint. It is the same class of
+  failure as a screenshot harness aiming at the wrong tile (#4): the
+  instrument drops the subject and then reports a confident number.
+
+  **The right mask.** The case's whole silhouette **with interior holes
+  filled** — largest warm connected component, then flood the complement from
+  the window border (4-connectivity) and keep everything the flood cannot
+  reach. It is correct for this subject because the kraft outline encloses the
+  print on every face the camera sees, so "inside the cardboard" is exactly
+  "on the carton". The mask grows 465 → 628 px on the gallery frame, 201 → 260
+  px on the mixed-line frame.
+
+  **What it then measured.** On a real mixed line — a splitter merging the BBQ
+  branch's packer output onto the ketchup exit belt, cases alternating, whole
+  factory framing, case ≈ 20×21 px — BBQ reads **117.2** against the nearest
+  of six ketchup cases at **147.7**: a **30.5/255** gap against ketchup's own
+  **12.6** spread, 2.4×. dE76 says 13.5 against a worst same-carton 5.4, 2.5×.
+  It holds across three independent renders (BBQ 117.2 / 121.7 / 116.8). The
+  dock's contract-clipboard icons separate by 28.5 luma, 11.6 dE76. The
+  method's anchors are 1.2/255 = invisible and ~26/255 = reads reliably.
+
+  **Chroma, tested and negative.** A hue metric was worth trying before
+  touching art, so CIELAB dC (`hypot(da*, db*)`, lighting-invariant) ran
+  alongside luma on the same mask and crops, with a chroma candidate, on the
+  deterministic `--item-gallery` fixture:
+
+  | candidate | dLuma | dL* | dC | dE76 |
+  |---|---|---|---|---|
+  | shipped (lid print) | **39.2** | 15.2 | 3.6 | 15.6 |
+  | sauce ink (chroma) | 6.1 | 5.5 | **13.7** | 14.8 |
+  | short faces (the cut on record) | **55.3** | 21.7 | 4.5 | 22.2 |
+
+  On the mixed frame, dC separates the two cartons by 3.7 against a
+  same-carton 4.0 — **worse than noise**. Chroma is the weaker channel at this
+  size, not the stronger one: a red-on-kraft panel is a handful of pixels at
+  20 px while light-against-dark is the whole lid. Trading a 39.2 luma gap for
+  a 6.1 one to buy 13.7 chroma barely moves total dE76 (15.6 → 14.8).
+
+  **The rulings.** (1) **The sauce cartons are not repainted** — the shipped
+  lid print does its job on a shared belt, in the packer queue, on the dock
+  and on the clipboard, so **#40's ruling stands** and the short-faces cut
+  recorded in `box_of_sauce`'s doc comment stays on the shelf. It measures
+  better (55.3) and is still the next cut if this ever needs headroom; it is
+  not needed, and it costs the kraft reading #40 ruled for. (2) **Validate a
+  mask by measuring a candidate that visibly changes the art.** If it scores
+  the same as shipped, the instrument is broken, not the candidate — and no
+  number from that mask may be quoted until it does. The retracted numbers and
+  the corrected ones are both on #57 on purpose: the comment that shows a
+  wrong number being caught is worth more to whoever reads it in six months
+  than a clean one that only shows the answer.
+
 - 2026-09-16: **The game is called CONDIMENTAL.** "sauce-factory was just a
   temporary name, ive now come up with the name 'CONDIMENTAL'". The owner's
   call, and the only naming decision this project has ever actually made —

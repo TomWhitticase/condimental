@@ -112,6 +112,26 @@ This is the central economic mechanic and the main departure from a plain Factor
 
 **Progression coupling:** early contracts should only demand tier-1/2 sauces (accessible from the start), and higher-value contracts should demand mixes that reach into tiers the player hasn't unlocked yet — creating the pull to invest contract earnings into the next equipment tier specifically to become eligible for the next tier of contract, rather than equipment unlocks being disconnected from what the contract board is asking for.
 
+**Expansion is a cost the contract board charges, and nobody warns you**
+(measured 2026-09-20, issue #55). Building the BBQ branch off a running
+ketchup line stops boxed-ketchup output for about 8 000-9 000 ticks: the new
+pipe runs and the second vat fill from the *existing* network, so roughly 35
+boxes' worth of throughput goes into priming pipework before a single BBQ box
+exists. Delivery windows keep ticking through that, and three missed windows
+lose a contract. The unlock gate (`data/unlocks.ron`) can buy slack for a
+player running one starter order — 4 lifetime deliveries banks 9 boxes and
+loses `corner_shop`, 6 banks 13 and survives, the shipped 10 banks 22 — but it
+cannot help a player running three, who loses the whole board at every gate
+tried, because the only way to raise the delivery count is to sign more
+contracts and every extra contract is another mouth the same transient has to
+feed. **A progression gate is the wrong instrument for a transient cost.** The
+right ones are a warning at placement time, before the player commits, and a
+fluid network that does not let a brand-new consumer take 100% of a network
+the old one is living on. Both are still to build (issues #92, #93); the
+measured table is in `data/unlocks.ron`'s comment and the full record is in
+`docs/DECISIONS.md`.
+
+
 ---
 
 ## 7. Staff — a resource pool, not NPCs

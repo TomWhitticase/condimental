@@ -155,6 +155,61 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-20 — Two balance calls, both measured, neither one a number change
+
+A pass over the two BBQ balance/legibility issues that ended with the shipped
+values kept — and with the evidence for keeping them written down, because in
+both cases the cheap fix was the wrong one and nothing in the repo said so.
+
+**A progression gate cannot pay for a transient cost (issue #55).** Building
+the BBQ branch off a running ketchup line stops boxed-ketchup output for
+about 8 500 ticks: the new pipe runs and the second vat fill from the
+*existing* fluid network, and roughly 35 boxes go into priming pipework before
+any come back. Delivery windows keep counting; three misses lose a contract.
+The issue's cheap fix was to raise `after_deliveries` in `data/unlocks.ron`
+until the player has slack by the time BBQ lands, so the number was swept —
+4, 6, 10, 14, 20, each run with one starter order and with three. A higher
+gate does save the player running one (4 → 9 boxes banked and `corner_shop`
+lost; 6 → 13, survives; the shipped 10 → 22, survives) and cannot save the
+player running three, who loses the whole board at every gate tried,
+including a run left to 50 000 ticks and 97 lifetime deliveries. The counter
+is anti-correlated with the slack it is supposed to buy: a player raises it by
+signing more contracts, and each one is another mouth the same transient has
+to feed. So **ten stays**, now with the table in the file's own comment, and
+the two real fixes are filed — a warning at placement time (#92) and a fluid
+network that will not hand a new consumer 100% of a network the old one lives
+on (#93). `test_layouts.gd`'s `--bbq` fixture was rebuilt to prove it: a
+splitter merges the BBQ branch onto the ketchup exit belt so both cartons ride
+one line, and the re-sign loop that used to paper over the lost contract is
+gone. The frame shows three live contracts and no CONTRACT LOST banner.
+
+**The two sauce cartons read apart, and the first measurement that said
+otherwise was wrong (issue #57).** With both boxes alternating on one belt at
+whole-factory framing, `box_of_bbq` reads 117.2 mean luma against the nearest
+of six `box_of_ketchup` cases at 147.7 — a 30.5/255 gap against ketchup's own
+12.6 spread, holding across three independent renders, with the dock's
+clipboard icons separating by 28.5. So the lid print introduced on 2026-09-18
+does its job and **the art is unchanged**.
+
+The useful part is how nearly it went the other way. The first pass measured a
+5.3/255 gap and concluded the art fails, because the silhouette mask used the
+warm-pixel test the earlier passes used (`r > g > b and r - b > 18`) and
+`label_cream` renders near-neutral at (241, 239, 234) — the mask excluded the
+printed panels, the exact pixels under test, and scored the cardboard around
+them. It was caught only because a candidate that visibly repaints the art
+measured *identical* to shipped. The corrected mask is the case's whole
+silhouette with interior holes filled. Both the retracted and the corrected
+numbers are on #57 on purpose, and the rule is now recorded: **validate a
+legibility mask by measuring a candidate that visibly changes the art before
+quoting any number it produces.** A chroma metric was tested at the same time
+and came out negative — dC separates the cartons by 3.7 against a same-carton
+4.0, worse than noise, because at 20 px a red-on-kraft panel is a handful of
+pixels and light-against-dark is the whole lid.
+
+Also filed along the way: a screenshot fixture is never asserted to be
+actually running before the shutter (#94), and the clipboard shows one docket
+at 1600x900 with three contracts signed (#95).
+
 ### 2026-09-20 — Three issues off the board: names, fluid colour, honest frames
 
 A no-new-features pass over the deferred queue. Nothing here changes what
