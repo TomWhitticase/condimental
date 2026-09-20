@@ -535,13 +535,16 @@ fn a_save_without_the_recipe_field_still_loads() {
 // =====================================================================
 
 /// `validate_chain` reads the file as a graph now rather than as a sequence,
-/// but it still fails loudly on a recipe joined to nothing — which is what a
-/// typo'd id looks like when it *breaks* the line. The other case, a typo
-/// that merely invents a new unpriced raw ingredient, is caught by
+/// and it still fails loudly on a recipe joined to nothing — which is what a
+/// typo'd id looks like when it *breaks* the line. Here the packer's input
+/// is misspelled, so it hangs off the rest of the file on its own and the
+/// only raw it could be fed by is an id nothing prices: a fragment nothing
+/// can set in motion. The other case, a typo that merely invents a new
+/// unpriced raw in a component some *other* recipe anchors, is caught by
 /// `IngredientCatalog::validate_covers` instead; see `validate_chain`'s doc
 /// for why the two nets are split that way.
 #[test]
-#[should_panic(expected = "share no ingredient id")]
+#[should_panic(expected = "nothing can set in motion")]
 fn a_recipe_joined_to_nothing_is_a_construction_time_panic() {
     let orphaned = RecipeRegistry::from_ron_str(
         r#"(
@@ -574,6 +577,129 @@ fn a_recipe_joined_to_nothing_is_a_construction_time_panic() {
 #[test]
 fn a_line_that_forks_is_still_one_line() {
     let _ = funded(tangy_branch());
+}
+
+/// **Two independent lines are content, not a fault** (issue #42). This is
+/// the shape the old one-connected-component rule would have false-panicked
+/// on: a tomato line and a smoke line that share not one id between them,
+/// which is exactly what mayonnaise (eggs and oil, GAMEPLAY.md §2 tier 4)
+/// will look like beside the tomato line it is landing next to. Both halves
+/// have a way in — a machine `data/shop.ron` sells, fed by raws
+/// `data/ingredients.ron` prices — so there is nothing here to reject.
+#[test]
+fn two_independent_production_lines_construct_fine() {
+    let two_lines = RecipeRegistry::from_ron_str(
+        r#"(
+            schema_version: 3,
+            recipes: [
+                Recipe(
+                    id: "tomato_paste",
+                    inputs: [("tomato", 1)],
+                    outputs: [("tomato_paste", 1)],
+                    machine: "crusher",
+                    time_ticks: 10,
+                ),
+                Recipe(
+                    id: "smoke_rub",
+                    inputs: [("spice_mix", 1)],
+                    fluid_inputs: [("liquid_smoke", 1)],
+                    outputs: [("smoke_rub", 1)],
+                    machine: "mixer",
+                    time_ticks: 10,
+                ),
+                Recipe(
+                    id: "boxed_smoke_rub",
+                    inputs: [("smoke_rub", 1)],
+                    outputs: [("boxed_smoke_rub", 1)],
+                    machine: "packer",
+                    time_ticks: 10,
+                ),
+            ],
+        )"#,
+    )
+    .expect("the file parses");
+    let mut world = funded(two_lines);
+    place(&mut world, "mixer", (0, 0), Direction::East);
+    assert!(
+        world.query_tile((0, 0)).is_some(),
+        "the second line is real content — its mixer buys and places like any other"
+    );
+}
+
+/// The half of the old rule that survives: a part of the file **nothing can
+/// set in motion** is still a construction-time panic. Here the second line
+/// is internally coherent and perfectly connected to itself, so the old
+/// component flood would not have saved us either — what is wrong with it is
+/// that its only raw is an id `data/ingredients.ron` does not price, so no
+/// player could ever feed it a single unit and both its machines would stand
+/// there forever with no clue why.
+#[test]
+#[should_panic(expected = "nothing can set in motion")]
+fn a_second_line_with_no_way_into_it_is_a_construction_time_panic() {
+    let unreachable = RecipeRegistry::from_ron_str(
+        r#"(
+            schema_version: 3,
+            recipes: [
+                Recipe(
+                    id: "tomato_paste",
+                    inputs: [("tomato", 1)],
+                    outputs: [("tomato_paste", 1)],
+                    machine: "crusher",
+                    time_ticks: 10,
+                ),
+                Recipe(
+                    id: "yolk_paste",
+                    inputs: [("egg_yolk", 1)],
+                    outputs: [("yolk_paste", 1)],
+                    machine: "crusher",
+                    time_ticks: 10,
+                ),
+                Recipe(
+                    id: "boxed_yolk_paste",
+                    inputs: [("yolk_paste", 1)],
+                    outputs: [("boxed_yolk_paste", 1)],
+                    machine: "packer",
+                    time_ticks: 10,
+                ),
+            ],
+        )"#,
+    )
+    .expect("the file parses — it is the content that is wrong");
+    let _ = funded(unreachable);
+}
+
+/// The other half: a line whose every recipe runs on a machine the shop does
+/// not sell can never be built, however well priced its raws are. `smoker`
+/// is in neither `data/machines.ron` nor `data/shop.ron` — the registry
+/// check catches the missing footprint first, which is the right order (no
+/// footprint is the more basic fault), so this asserts *that* message and
+/// stands as the record of where the two checks meet.
+#[test]
+#[should_panic(expected = "machine content error")]
+fn a_line_on_a_machine_nobody_sells_is_a_construction_time_panic() {
+    let unsellable = RecipeRegistry::from_ron_str(
+        r#"(
+            schema_version: 3,
+            recipes: [
+                Recipe(
+                    id: "tomato_paste",
+                    inputs: [("tomato", 1)],
+                    outputs: [("tomato_paste", 1)],
+                    machine: "crusher",
+                    time_ticks: 10,
+                ),
+                Recipe(
+                    id: "smoked_molasses",
+                    inputs: [("molasses", 1)],
+                    outputs: [("smoked_molasses", 1)],
+                    machine: "smoker",
+                    time_ticks: 10,
+                ),
+            ],
+        )"#,
+    )
+    .expect("the file parses");
+    let _ = funded(unsellable);
 }
 
 /// Two fluid inputs naming the same id stay a content error even now that a

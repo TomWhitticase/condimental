@@ -222,12 +222,12 @@ use super::fluid::{
 };
 use super::hopper::{HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, HOPPER_KIND, Hopper};
 use super::ingredients::{
-    DEFAULT_BUY_QUANTITY, Ingredients, IngredientsSnapshot, raw_ingredient_ids,
+    DEFAULT_BUY_QUANTITY, IngredientCatalog, Ingredients, IngredientsSnapshot, raw_ingredient_ids,
 };
 use super::machine::{LOAD_WINDOW_TICKS, LoadWindow, Machine, WorkState};
 use super::machines::{Footprint, MachineRegistry};
 use super::recipe::{Recipe, RecipeRegistry};
-use super::shop::{DEFAULT_PURCHASE_QUANTITY, Shop, ShopSnapshot};
+use super::shop::{DEFAULT_PURCHASE_QUANTITY, Shop, ShopCatalog, ShopSnapshot};
 use super::splitter::{SPLITTER_KIND, Side, Splitter};
 use super::staff::{CrewEntry, CrewRequest, StaffPools, StaffSnapshot, crew_entries};
 use super::stats::{ProductionLedger, ProductionSnapshot, StatKind};
@@ -1800,24 +1800,35 @@ impl World {
             !ordered.is_empty(),
             "recipes.ron must define at least one recipe"
         );
-        // Still enforced, though nothing lays out a chain any more: it is
-        // what makes the shipped file a coherent production line, what
-        // `reference_chain` builds against, and what makes "the first
-        // recipe's first input is the raw ingredient" true.
-        validate_chain(ordered);
-        validate_fluid_scope(ordered);
+        // Raw = consumed somewhere, produced nowhere. Computed before the
+        // content checks because `validate_chain` asks whether each part of
+        // the file has a *priced* way in, and "raw" is what decides which
+        // ids have to be priced at all.
+        let raws = raw_ingredient_ids(&recipes);
+        let shop = Shop::bundled();
+        let ingredients = Ingredients::bundled();
         // Every recipe's machine kind must exist in machines.ron — a
         // missing kind has no footprint, so a machine of that kind could
         // never be placed and its recipe would be silently unreachable.
-        // Same construction-time-panic rule as `validate_chain`.
+        // Same construction-time-panic rule as `validate_chain`, and
+        // checked *first* because no footprint is the more basic fault:
+        // otherwise a kind missing from both files fails as "nothing can
+        // start this line" when the plainer truth is "this machine does
+        // not exist".
         if let Err(e) = machines.validate_covers(&recipes) {
             panic!("machine content error: {e}");
         }
+        // Still enforced, though nothing lays out a chain any more: every
+        // part of the file must be content the player can reach, which is
+        // what `reference_chain` builds against and what makes "the first
+        // recipe's first input is the raw ingredient" true.
+        validate_chain(ordered, &raws, &shop.catalog, &ingredients.catalog);
+        validate_fluid_scope(ordered);
 
-        // Raw = consumed somewhere, produced nowhere. The two halves are
-        // split by where they arrive: a raw *solid* is what a hopper holds,
-        // a raw *fluid* is what a player-filled tank discharges. Both are
-        // bought from `data/ingredients.ron`.
+        // The two halves of raw are split by where they arrive: a raw
+        // *solid* is what a hopper holds, a raw *fluid* is what a
+        // player-filled tank discharges. Both are bought from
+        // `data/ingredients.ron`.
         let solid_inputs: Vec<&str> = ordered
             .iter()
             .flat_map(|r| r.inputs.iter().map(|(item, _)| item.as_str()))
@@ -1826,7 +1837,6 @@ impl World {
             .iter()
             .flat_map(|r| r.fluid_inputs.iter().map(|(fluid, _)| fluid.as_str()))
             .collect();
-        let raws = raw_ingredient_ids(&recipes);
         let raw_items: Vec<ItemId> = raws
             .iter()
             .filter(|id| solid_inputs.contains(&id.as_str()))
@@ -1853,8 +1863,8 @@ impl World {
             full_chunks: Vec::new(),
             revision: 0,
             economy: Economy::with_money(&contracts, money),
-            shop: Shop::bundled(),
-            ingredients: Ingredients::bundled(),
+            shop,
+            ingredients,
             staff: StaffPools::bundled(),
             topology: Topology::default(),
             production: ProductionLedger::new(),
@@ -4573,48 +4583,68 @@ impl World {
     }
 }
 
-/// Enforces that `data/recipes.ron` describes **one production line**: the
-/// graph whose nodes are recipes and whose edges join any two recipes
-/// sharing an id — solid or fluid, in either direction — must be connected.
-/// A clear panic here, at construction time before any tick runs, is the
-/// data-file equivalent of a compiler error.
+/// Enforces that every part of `data/recipes.ron` is content a player can
+/// actually reach: each connected component of the recipe graph must hold
+/// at least one recipe that can be **started** — its machine is for sale in
+/// `data/shop.ron`, and everything it consumes is obtainable. A clear panic
+/// here, at construction time before any tick runs, is the data-file
+/// equivalent of a compiler error.
 ///
-/// This used to be the stricter "recipe `i + 1` consumes something recipe
-/// `i` produces", reading the file as a sequence. The BBQ epic ends that:
-/// the file holds a *branching* chain (ketchup feeds both the bottler and
-/// the BBQ mixer), so consecutive entries no longer chain, while the thing
-/// that rule was really defending — that the file is one line and not a
-/// pile of unrelated fragments — still holds. Connectivity is the same
-/// claim without the ordering.
+/// "Obtainable" is a closure, not a one-step test: an id is obtainable when
+/// `data/ingredients.ron` prices it, or when some startable recipe makes it.
+/// The set grows outwards from what the market sells until it stops growing.
+/// That is what makes a whole line fed by an unpriced raw fail here even
+/// though its *last* stage, read on its own, runs on a machine the shop
+/// sells and consumes only what the stage before it makes.
+///
+/// The graph's nodes are recipes and its edges join any two sharing an id —
+/// solid or fluid, in either direction. What this used to demand is that
+/// the graph be *connected*: one component, every recipe reachable from the
+/// first by a shared id. That rule replaced an even stricter "recipe `i + 1`
+/// consumes something recipe `i` produces" in the BBQ epic, when the file
+/// became a *branching* chain (ketchup feeds both the bottler and the BBQ
+/// mixer) and consecutive entries stopped chaining.
+///
+/// **Connectivity is gone because the claim under it expired** (issue #42).
+/// "One component" says every sauce shares an ancestor with every other,
+/// which was true only while BBQ derived from ketchup, which derives from
+/// tomato. Mayonnaise is eggs and oil and is tier 4 in GAMEPLAY.md §2: it
+/// shares nothing with the tomato line, and the day its recipes land a
+/// perfectly valid file would have panicked here with a message reading
+/// like a typo report. A second production line is content, not a fault.
+///
+/// What survives is the half that was never about connectivity: **a
+/// component nobody can build or feed is dead weight**, and a stage joined
+/// to nothing is exactly that. An island of recipes with no purchasable
+/// machine can never be placed; an island whose supply bottoms out in an
+/// unpriced raw can never be started, which is what a typo'd input id
+/// produces (it is consumed-nowhere-produced, i.e. a new raw ingredient,
+/// and nobody priced it). Either way the player would watch a machine that
+/// never runs with no clue why — the error this check has always existed to
+/// turn into a load-time message.
 ///
 /// **Which net catches what.** These two cover the content errors between
 /// them, and neither does alone:
 ///
-/// - *This check* catches a **structural break**: a stage joined to nothing,
-///   or two halves of a file that never meet. That is the error where a
-///   machine would silently never start with no clue why.
+/// - *This check* catches a **structural break**: a fragment of a file that
+///   no purchase and no ingredient can ever set in motion.
 /// - [`super::ingredients::IngredientCatalog::validate_covers`] catches a
-///   **typo'd id**, as a test rather than a panic. A misspelled input is by
-///   definition consumed-nowhere-produced, i.e. a new raw ingredient, and
-///   raw ingredients must be priced — so the unpriced `tomatoe` fails
-///   there. `data/ingredients.ron`'s header says why that one is a test:
-///   pricing is a content judgement, not a load-time invariant.
-///
-/// **This rule encodes a claim that will expire.** "One connected
-/// component" means every sauce shares an ancestor with every other, which
-/// is true today only because BBQ derives from ketchup. The first sauce
-/// with an independent raw chain breaks it — mayonnaise is eggs and oil and
-/// shares nothing with tomato, and it is tier 4 in GAMEPLAY.md §2 — and it
-/// will false-panic here. When that lands, the fix is to require every
-/// component to be *internally* connected (i.e. drop this check for a
-/// per-component one, or a declared list of lines) rather than to weaken it
-/// to nothing. Tracked as a deferred issue.
-fn validate_chain(ordered: &[Recipe]) {
-    if ordered.len() < 2 {
-        return;
-    }
-    // Union-find would be overkill for a file this size: flood the
-    // component containing the first recipe and see if it reaches them all.
+///   **typo'd id**, as a test rather than a panic, and catches it even when
+///   the typo sits in a component some *other* recipe anchors. A misspelled
+///   input is by definition consumed-nowhere-produced, i.e. a new raw
+///   ingredient, and raw ingredients must be priced — so the unpriced
+///   `tomatoe` fails there. `data/ingredients.ron`'s header says why that
+///   one is a test: pricing is a content judgement, not a load-time
+///   invariant, and *every* raw being priced is a stronger claim than this
+///   one makes. This check asks only that each component have **one** way
+///   in, which is the difference between "your content is unbalanced" and
+///   "this half of your file is unreachable".
+fn validate_chain(
+    ordered: &[Recipe],
+    raws: &[String],
+    shop: &ShopCatalog,
+    ingredients: &IngredientCatalog,
+) {
     fn ids_of(recipe: &Recipe) -> BTreeSet<&str> {
         recipe
             .inputs
@@ -4630,33 +4660,91 @@ fn validate_chain(ordered: &[Recipe]) {
             )
             .collect()
     }
+    // Union-find would be overkill for a file this size: flood out from each
+    // recipe not yet in a component, which labels every one of them exactly
+    // once, in file order.
     let touched: Vec<BTreeSet<&str>> = ordered.iter().map(ids_of).collect();
-    let mut reached = vec![false; ordered.len()];
-    reached[0] = true;
-    let mut frontier = vec![0usize];
-    while let Some(index) = frontier.pop() {
-        for (other, ids) in touched.iter().enumerate() {
-            if !reached[other] && !ids.is_disjoint(&touched[index]) {
-                reached[other] = true;
-                frontier.push(other);
+    let mut component: Vec<usize> = vec![usize::MAX; ordered.len()];
+    let mut components = 0usize;
+    for seed in 0..ordered.len() {
+        if component[seed] != usize::MAX {
+            continue;
+        }
+        component[seed] = components;
+        let mut frontier = vec![seed];
+        while let Some(index) = frontier.pop() {
+            for (other, ids) in touched.iter().enumerate() {
+                if component[other] == usize::MAX && !ids.is_disjoint(&touched[index]) {
+                    component[other] = components;
+                    frontier.push(other);
+                }
             }
         }
+        components += 1;
     }
-    let orphans: Vec<&str> = ordered
+
+    // A recipe can be *started* when the player can buy the machine it runs
+    // on and can actually get hold of everything it consumes. "Get hold of"
+    // is a closure rather than a one-step test: a priced raw is obtainable,
+    // and so is anything a startable recipe makes. So the set grows from
+    // what the market sells outwards, and a recipe whose only supplier is
+    // itself unstartable never enters it — which is what makes a line
+    // fed by an unpriced raw fail here even though its *last* stage, read
+    // alone, looks perfectly buildable.
+    let mut obtainable: BTreeSet<&str> = raws
         .iter()
-        .zip(&reached)
-        .filter(|&(_, &seen)| !seen)
-        .map(|(recipe, _)| recipe.id.as_str())
+        .map(String::as_str)
+        .filter(|id| ingredients.get(id).is_some())
         .collect();
-    assert!(
-        orphans.is_empty(),
-        "recipes.ron chain error: recipe(s) {orphans:?} share no ingredient id with the line \
-         starting at '{}' — the file describes one production line, so every recipe must be \
-         joined to the rest of it by some id it consumes or produces, solid or fluid. (A \
-         misspelled id usually shows up as an unpriced raw ingredient in \
-         IngredientCatalog::validate_covers instead; this is the structural half.)",
-        ordered[0].id
-    );
+    let mut startable: Vec<bool> = vec![false; ordered.len()];
+    loop {
+        let mut grew = false;
+        for (index, recipe) in ordered.iter().enumerate() {
+            if startable[index] || shop.get(&recipe.machine).is_none() {
+                continue;
+            }
+            let fed = recipe
+                .inputs
+                .iter()
+                .chain(recipe.fluid_inputs.iter())
+                .all(|(id, _)| obtainable.contains(id.as_str()));
+            if !fed {
+                continue;
+            }
+            startable[index] = true;
+            grew = true;
+            for (id, _) in recipe.outputs.iter().chain(recipe.fluid_outputs.iter()) {
+                obtainable.insert(id.as_str());
+            }
+        }
+        if !grew {
+            break;
+        }
+    }
+    for index in 0..components {
+        let anchored = component
+            .iter()
+            .zip(&startable)
+            .any(|(&label, &started)| label == index && started);
+        if anchored {
+            continue;
+        }
+        let ids: Vec<&str> = ordered
+            .iter()
+            .zip(&component)
+            .filter(|&(_, &label)| label == index)
+            .map(|(recipe, _)| recipe.id.as_str())
+            .collect();
+        panic!(
+            "recipes.ron chain error: recipe(s) {ids:?} form a part of the file nothing can set \
+             in motion — not one of them runs on a machine `data/shop.ron` sells and is fed by \
+             ingredients the player can get, whether bought from `data/ingredients.ron` or made \
+             by another recipe that can itself be started. Several independent production lines \
+             are fine; a line with no way into it is not. (A misspelled id usually shows up here \
+             as an unpriced raw ingredient, and otherwise in \
+             IngredientCatalog::validate_covers.)"
+        );
+    }
 }
 
 /// One machine's plumbing as the topology pass found it — pure **geometry**,

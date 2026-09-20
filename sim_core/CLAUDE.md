@@ -40,8 +40,12 @@ the plan is `docs/ARCHITECTURE.md` §3/§4/§6/§10.
 - **`machines.rs` owns the footprint origin convention** — min-X/min-Y corner,
   occupying `[x, x+width) × [y, y+height)`, and the tile a belt feeds into.
   Read its module doc before touching rotation.
-- `validate_chain` panics at construction on a broken `recipes.ron` link (solid
-  or fluid): content errors fail at load, not silently at runtime.
+- `validate_chain` panics at construction on a part of `recipes.ron` nothing
+  can start — a component with no buyable machine or no obtainable input
+  (solid or fluid): content errors fail at load, not silently at runtime.
+  **Several independent production lines are fine**; it stopped demanding one
+  connected component in issue #42, because mayonnaise shares nothing with
+  tomato.
 
 ## Snapshots and dirtiness
 
