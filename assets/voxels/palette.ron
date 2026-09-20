@@ -299,14 +299,17 @@
         // and a bottle of the finished sauce are not the same brown.
         (name: "molasses_black",  rgb: "#2A160E", class: "liquid"),
         // The liquid-smoke drum's painted body, and **equal to
-        // `main.gd`'s FLUID_TINTS["liquid_smoke"]** (0.36, 0.32, 0.26) on
-        // purpose — the same rule `vinegar_amber` states: the drum you buy
-        // and the fluid standing in the run are the same substance, so
-        // they are one number in the one file that owns colour. A smoky
-        // desaturated grey-brown, which is what keeps it reading as a
-        // flavouring rather than as food beside five saturated ingredients,
-        // and far enough from `steel_dark` #6F7680 (its own hoops) to stay
-        // a painted drum rather than a bare one.
-        (name: "smoke_slate",     rgb: "#5C5242", class: "matte"),
+        // `main.gd`'s FLUID_TINTS["liquid_smoke"]** (0.302, 0.271, 0.129)
+        // on purpose — the same rule `vinegar_amber` states: the drum you
+        // buy and the fluid standing in the run are the same substance, so
+        // they are one number in the one file that owns colour. A dark
+        // olive-brown, which is what keeps it reading as a flavouring
+        // rather than as food beside five saturated ingredients, and far
+        // enough from `steel_dark` #6F7680 (its own hoops) to stay a
+        // painted drum rather than a bare one. It was #5C5242, a near-grey,
+        // until issue #100: that colour vanished into the steel bore when
+        // the same number was standing in a pipe, and the drum and the
+        // fluid move together by the rule above.
+        (name: "smoke_slate",     rgb: "#4D4521", class: "matte"),
     ],
 )

@@ -1716,17 +1716,21 @@ pub fn item_spice_mix(p: &Palette) -> VoxModel {
     m
 }
 
-/// One jar of molasses: a squat glass jar of something nearly black under a
-/// broad screw cap, with a kraft label round its belly.
+/// One jar of molasses: a narrow glass jar of something nearly black under a
+/// flat screw cap, with a kraft label round its belly.
 ///
-/// **Squat with a wide cap, where `item_bottle` is tall with a narrow
-/// neck** — and that contrast is the point rather than a detail. The finished
-/// BBQ bottle (`item_bottle_bbq`) is also a dark liquid behind glass under a
-/// kraft label, so the raw and the product would be one object drawn twice
-/// if this were another bottle. `bottle`'s own doc records that the gap
-/// between body and cap is what stops a bottle reading as a jar; this takes
-/// that gap away deliberately, so the two silhouettes part company at a
-/// glance and on a belt.
+/// **Straight-sided with a flat cap, where `item_bottle` is shouldered with
+/// a narrow neck** — and that contrast is the point rather than a detail.
+/// The finished BBQ bottle (`item_bottle_bbq`) is also a dark liquid behind
+/// glass under a kraft label, so the raw and the product would be one object
+/// drawn twice if this were another bottle. `bottle`'s own doc records that
+/// the gap between body and cap is what stops a bottle reading as a jar;
+/// this takes that gap away deliberately, so the two silhouettes part
+/// company at a glance and on a belt.
+///
+/// It is narrow and TALL, not squat: see the rework note in the body, where
+/// the first two cuts were squat and read as the spice tin standing next to
+/// it in the market row.
 ///
 /// The contents are `liquid`-class and nearly black, the glass above the
 /// fill line is not: the headspace band is what says "you are looking into a
@@ -6771,5 +6775,141 @@ mod tests {
                 "the tape seam survives the lid print at y = {y}"
             );
         }
+    }
+
+    /// Bounding span of every occupied voxel, as (width in X, depth in Y,
+    /// height in Z).
+    fn extent(m: &VoxModel) -> (u32, u32, u32) {
+        let span = |f: fn(&(u32, u32, u32)) -> u32| {
+            let lo = m.voxels.keys().map(f).min().unwrap();
+            let hi = m.voxels.keys().map(f).max().unwrap();
+            hi - lo + 1
+        };
+        (span(|at| at.0), span(|at| at.1), span(|at| at.2))
+    }
+
+    /// **The BBQ branch's three raws part company by OUTLINE before they
+    /// part by colour** (issue #67). They are bought from one plate that
+    /// shows all six ingredients at 64px side by side, where a thing is
+    /// identified by the proportion of its parts (UI_UX §2b point 31) — so
+    /// the tin is wide and low, the jar narrow and tall, and the drum
+    /// between them. This is the claim two rework passes were spent on, and
+    /// the one a later edit is most likely to undo by widening the jar or
+    /// raising the tin a couple of voxels "to balance the row".
+    #[test]
+    fn the_new_raw_ingredients_do_not_share_a_silhouette() {
+        let p = palette();
+        let (tin_w, _, tin_h) = extent(&item_spice_mix(&p));
+        let (jar_w, _, jar_h) = extent(&item_molasses(&p));
+        let (drum_w, _, drum_h) = extent(&item_liquid_smoke(&p));
+        assert!(
+            tin_w > tin_h,
+            "the spice tin is wider than it is tall ({tin_w} x {tin_h})"
+        );
+        assert!(
+            jar_h > jar_w,
+            "the molasses jar is taller than it is wide ({jar_w} x {jar_h})"
+        );
+        assert!(
+            jar_w < drum_w && drum_w < tin_w,
+            "the three widths stay ordered jar {jar_w} < drum {drum_w} < tin {tin_w}"
+        );
+        let outlines = [(tin_w, tin_h), (jar_w, jar_h), (drum_w, drum_h)];
+        for (i, a) in outlines.iter().enumerate() {
+            for b in &outlines[i + 1..] {
+                assert_ne!(a, b, "no two of the three have the same outline");
+            }
+        }
+    }
+
+    /// **A tin of spice has to show the spice** — its contents stand proud
+    /// of the rim, or the model is a tin and the market offers two steel
+    /// cylinders (the drum is the other). Asserted as "paprika above the
+    /// highest steel" rather than by a voxel count, because the failure
+    /// worth catching is a future edit deepening the tin until the heap
+    /// sinks into it.
+    #[test]
+    fn the_spice_tin_heaps_its_contents_above_the_rim() {
+        let p = palette();
+        let tin = item_spice_mix(&p);
+        let paprika = p.idx("spice_paprika");
+        let rim = p.idx("steel_light");
+        let top_of = |colour: u8| {
+            tin.voxels
+                .iter()
+                .filter(|&(_, &c)| c == colour)
+                .map(|(at, _)| at.2)
+                .max()
+                .unwrap_or(0)
+        };
+        assert!(
+            tin.voxels.values().any(|&c| c == paprika),
+            "the tin is painted from the palette's own `spice_paprika`"
+        );
+        assert!(
+            top_of(paprika) > top_of(rim),
+            "the heap ({}) stands above the rim ({})",
+            top_of(paprika),
+            top_of(rim)
+        );
+    }
+
+    /// **The jar keeps a band of empty glass above its fill line.** Its own
+    /// doc calls the headspace load-bearing and `pail`/`item_vinegar` play
+    /// the same trick: without it, a jar of something nearly black is a
+    /// black block, and "container of dark syrup" is exactly what has to
+    /// survive at 64px.
+    #[test]
+    fn the_molasses_jar_has_a_headspace_above_its_syrup() {
+        let p = palette();
+        let jar = item_molasses(&p);
+        let syrup = p.idx("molasses_black");
+        let glass = p.idx("glass_pale");
+        let fill_line = jar
+            .voxels
+            .iter()
+            .filter(|&(_, &c)| c == syrup)
+            .map(|(at, _)| at.2)
+            .max()
+            .expect("the jar holds syrup");
+        assert!(
+            jar.voxels
+                .iter()
+                .any(|(at, &c)| c == glass && at.2 > fill_line),
+            "empty glass stands above the fill line at z = {fill_line}"
+        );
+    }
+
+    /// **The drum is authored for VENGI's camera, not the game's** (§2b
+    /// point 35): nothing ever puts it on a belt or a tile — its only
+    /// consumer is the icon pass — and the two cameras look at opposite
+    /// corners of the same model. Its bung is therefore deliberately on the
+    /// -X/+Y side, which looks wrong in the game's frame and is right in the
+    /// only frame that exists. `item_vinegar` is the precedent; this test is
+    /// here because "fixing" it to match every other item is a one-line edit
+    /// that no render in this repo would catch.
+    #[test]
+    fn the_liquid_smoke_drum_faces_the_camera_that_photographs_it() {
+        let p = palette();
+        let drum = item_liquid_smoke(&p);
+        let centre = ITEM_VOXELS / 2;
+        let brass = p.idx("brass");
+        let bung: Vec<_> = drum
+            .voxels
+            .iter()
+            .filter(|&(_, &c)| c == brass)
+            .map(|(at, _)| *at)
+            .collect();
+        assert!(!bung.is_empty(), "the drum has a brass bung");
+        for (x, y, _) in bung {
+            assert!(
+                x < centre && y > centre,
+                "the bung sits on vengi's -X/+Y corner, not the game camera's"
+            );
+        }
+        assert!(
+            drum.voxels.values().any(|&c| c == p.idx("smoke_slate")),
+            "the drum's body is the palette's `smoke_slate`, the number FLUID_TINTS mirrors"
+        );
     }
 }

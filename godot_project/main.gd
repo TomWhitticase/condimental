@@ -285,12 +285,25 @@ const FLUID_TINTS := {
 	# ketchup cut with molasses and spice; the vat cooks it down) and the
 	# whole branch is BROWNER than the ketchup run is red. `liquid_smoke` is
 	# the odd one out on purpose — it is a flavouring, not a sauce, so it is
-	# a smoky desaturated grey-brown that reads as "not food" beside five
-	# saturated ones, and it is well clear of `hazard_yellow` and of
-	# `vinegar`'s amber, the other raw fluid a tank feeds.
+	# an olive-brown that reads as "not food" beside five saturated ones,
+	# and it is well clear of `hazard_yellow` and of `vinegar`'s amber, the
+	# other raw fluid a tank feeds.
+	#
+	# That last one was first written as a near-grey (0.36, 0.32, 0.26) and
+	# was WRONG, for a reason worth keeping here (issue #100): the body this
+	# tints stands inside a grey steel bore, so a near-grey fluid is the one
+	# colour that cannot be seen in a pipe no matter how its value is
+	# tuned — measured at 1:1 it was 11 luma from the steel either side of
+	# it, and a full run could not be found by eye at 1280x720 while the
+	# other five were obvious. A tint here needs CHROMA, not just contrast:
+	# hence the same olive-brown carried further from grey, which keeps the
+	# "flavouring, not sauce" reading it was picked for. `test_fluid_gallery.gd`
+	# now holds every tint to a saturation floor so the near-grey cannot
+	# come back.
 	"bbq_mix": Color(0.48, 0.25, 0.15),
 	"bbq": Color(0.33, 0.17, 0.11),
-	"liquid_smoke": Color(0.36, 0.32, 0.26),
+	# #4D4521, and equal to `palette.ron`'s `smoke_slate` — see there.
+	"liquid_smoke": Color(0.302, 0.271, 0.129),
 }
 const FLUID_TINT_FALLBACK := Color(0.60, 0.79, 0.86)
 

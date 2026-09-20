@@ -1014,7 +1014,20 @@ const BELT_GALLERY_LEFT_CORNERS := {
 ## a colour comparison wants. `fill_fluid_runs` below sets every volume
 ## through the save/load door instead. That makes this a still life and not
 ## a working factory, exactly as the pipe and belt galleries are.
-static func build_fluid_gallery(sim) -> void:
+##
+## Returns `check_fluid_gallery`'s complaint, or "" when the gallery really
+## is one. **The caller must refuse on a complaint** — `test_screenshot.gd`
+## writes no PNG and exits 1 — because every way this fixture degrades
+## leaves a frame that still looks like a factory (see `check_fluid_gallery`
+## below). It is returned rather than acted on here so that a headless
+## caller with no screenshot to suppress can decide for itself.
+##
+## READING the result: at the fixture's own framing this frame answers
+## "all six exist, named and standing" well, and "are these six tellable
+## apart" only roughly — two of the runs sit ~600px apart rather than side
+## by side. `--fluid-gallery --closeup <x>,<y>,6` is the route that answers
+## the second question, one run at a time at 1:1.
+static func build_fluid_gallery(sim) -> String:
 	# Run A, vinegar: a tank and two pipes into the first mixer's west side.
 	place(sim, "fluid_tank", Vector2i(0, 0), "east")
 	for x in [1, 2]:
@@ -1052,7 +1065,14 @@ static func build_fluid_gallery(sim) -> void:
 	fill_fluid_runs(sim)
 	var complaint := check_fluid_gallery(sim)
 	if complaint != "":
+		# Said out loud as well as returned: `push_error` is what a Godot
+		# log shows, and the return value is what actually stops the run.
+		# It is deliberately NOT the only thing that happens — issue #72's
+		# first cut pushed this error and then let the harness photograph
+		# the degraded gallery anyway, exit 0, which is the #70/#75 failure
+		# mode this repo has now fixed three times.
 		push_error("build_fluid_gallery(): %s" % complaint)
+	return complaint
 
 
 ## How many placements `build_fluid_gallery` makes: 12 pipes, 2 tanks,

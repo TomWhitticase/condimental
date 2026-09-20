@@ -649,7 +649,15 @@ func _build_fixture() -> void:
 		"gallery":
 			Layouts.build_belt_gallery(_main.sim)
 		"fluid_gallery":
-			Layouts.build_fluid_gallery(_main.sim)
+			# The one fixture that can be built and still not BE itself:
+			# move a pipe and two runs merge, and the frame comes back a
+			# perfectly good-looking factory missing a colour the reviewer
+			# was told it held. Refuse instead — no PNG, non-zero status.
+			var complaint: String = Layouts.build_fluid_gallery(_main.sim)
+			if complaint != "":
+				printerr("SCREENSHOT_FAIL: %s" % complaint)
+				_refuse()
+				return
 		"items":
 			Layouts.build_item_gallery(_main.sim)
 		"bottleneck":
@@ -736,11 +744,6 @@ func _parse_closeup(args: Array) -> void:
 		return
 
 
-## Aims the isometric camera at one tile, close in. Deliberately writes
-## `_camera_focus`/`_camera_size` and calls the scene's own
-## `_update_camera_transform` rather than posing the Camera3D directly, so
-## what this photographs is the same camera the game uses (UI_UX.md §1's
-## fixed angle included) at a zoom the player could also reach.
 ## The two framing choices `--fluid-gallery` makes for itself, applied after
 ## `_resolve_fixture` because that is the first point at which the settled
 ## fixture name is known (`_pick_fixture` only records a REQUEST, so that an
@@ -767,6 +770,11 @@ func _apply_fluid_gallery_defaults(args: Array) -> void:
 	_no_hud = true
 
 
+## Aims the isometric camera at one tile, close in. Deliberately writes
+## `_camera_focus`/`_camera_size` and calls the scene's own
+## `_update_camera_transform` rather than posing the Camera3D directly, so
+## what this photographs is the same camera the game uses (UI_UX.md §1's
+## fixed angle included) at a zoom the player could also reach.
 func _enter_closeup() -> void:
 	_main._camera_focus = Vector3(
 		_closeup_tile.x * _main.TILE, _main.TILE * 0.35, _closeup_tile.y * _main.TILE
@@ -1233,6 +1241,12 @@ func _process(_delta: float) -> bool:
 		return _write_frame()
 	if _frames == 1 and _fixture != "":
 		_build_fixture()
+		# `_refuse()` inside the build latches and calls `quit(1)`, but quit
+		# only takes effect between frames — without this the rest of THIS
+		# pass would go on to open panels and, at the last frame, write the
+		# PNG that was just refused.
+		if _refused:
+			return true
 	# Straight after the fixture and before anything opens a panel: the gate
 	# decides what the market, the larder and the board have in them, so it
 	# has to be settled before they are drawn.

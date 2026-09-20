@@ -194,12 +194,29 @@ six runs — vinegar, ketchup mix, ketchup, BBQ mix, liquid smoke, BBQ — and
 then fills them. Naming is topology alone, so no ticking is needed; pressure
 comes through the save-RON door `fund()` and `deliver()` already use, patching
 every `volume_bits` to 10 units, which is within both a pipe segment's
-capacity and a tank's. The fixture checks itself: if a run comes back
-unnameable, ambiguous, or at or below the pressure `main.gd` needs to draw a
-body at all, the build pushes an error naming which. It frames itself too —
-`_framing_bounds` pads a flat layout to 14 tiles on both axes and shrank the
-subject to nothing, so the fixture carries its own focus and ortho size as
-overridable defaults, and hides the HUD.
+capacity and a tank's. The fixture checks itself, and — after review — actually
+refuses: if a run comes back unnameable, ambiguous, or at or below the
+pressure `main.gd` needs to draw a body at all, the harness writes NO PNG and
+exits non-zero. The first cut only pushed an error and then photographed the
+degraded gallery anyway, exit 0, which is #70 and #75's failure mode for the
+third time and was caught by the reviewer emptying a run. `test_fluid_gallery.gd`
+runs the same check headlessly in `verify-core-loop.sh`, so the fixture cannot
+rot quietly between renders; it also refuses an empty world first, so its
+silence on the real gallery is evidence rather than a default. The frame
+frames itself too — `_framing_bounds` pads a flat layout to 14 tiles on both
+axes and shrank the subject to nothing, so the fixture carries its own focus
+and ortho size as overridable defaults, and hides the HUD.
+
+**And the gallery immediately earned its keep (issue #100).** With all six
+runs standing side by side it was obvious that `liquid_smoke` could not be
+seen at all: the tint #68 gave it was a near-grey, and the body it paints
+stands inside a grey steel bore — measured at 1:1 it was 11 luma from the
+steel either side of it, a full pipe nobody could find by eye. It is an
+olive-brown now (53 luma and 170 summed-RGB from the same steel), the drum in
+the market moves with it by the rule that keeps a substance one colour, and
+the new test holds every fluid tint to a SATURATION floor rather than a
+contrast one — the failure was chromatic, not tonal, and `vinegar` is no
+darker than the old smoke was.
 
 ### 2026-09-20 — Three issues off the board: names, fluid colour, honest frames
 
