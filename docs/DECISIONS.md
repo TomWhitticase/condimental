@@ -299,6 +299,189 @@ matches what code comments and data files cite.
   strip; the difference is that there is now exactly ONE place that decides,
   so `_update_staff_alert` no longer touches the hint.
 
+- 2026-09-20: **The bank at the moment of building decides whether the BBQ
+  branch costs you the board.** Issue #55: building the BBQ branch off a
+  running ketchup line starves the starter contract while the new pipes prime,
+  and `corner_shop` strikes out and is lost. The issue's own cheap fix was
+  "let the tier arrive with breathing room" — raise `after_deliveries` in
+  `data/unlocks.ron` until the player has slack by the time BBQ lands. This
+  pass swept the number, kept **10** unchanged, and **left #55 open**.
+
+  **This record was corrected on the day it was written** (review of PR #98).
+  The first version claimed the whole board is lost at *every* gate tried,
+  including a 50 000-tick run, and concluded categorically that no gate value
+  can help. Neither claim reproduces. What went wrong is worth keeping: the
+  runs behind it were not all the same experiment, because the PR never
+  stated **when the extra contracts were signed**, and that single unstated
+  variable moves every number below. A measurement whose protocol is not
+  written down is not a measurement.
+
+  **The protocol.** Every run: build `test_layouts.gd`'s reference ketchup
+  line through real purchase and place commands; fund it; stock the larder
+  with 1 200 of each raw; leave hopper and tank auto-fill on; hire until fully
+  staffed; sign the starter contracts **at the stated moment**; wait for the
+  stated lifetime-delivery count; build the BBQ branch and its mixed exit;
+  settle 15 000 ticks; read `economy_snapshot_json` and
+  `production_snapshot_json`, sampled every 250 ticks. "Bank" is finished
+  `boxed_ketchup` on hand at the moment the branch goes in. A gate value other
+  than ten is **emulated** by waiting for that many lifetime deliveries before
+  building — the shipped gate is long open by then and nothing else reads the
+  number, so it is exactly equivalent and needs no rebuild per value.
+
+  **What the transient costs.** `boxed_ketchup`'s `produced_total` flatlines
+  for about **8 500 ticks** from the moment the branch is placed: the two new
+  pipe runs and the second cooking vat fill from the *existing* fluid network,
+  and roughly **35 boxes' worth of throughput** disappears into pipework
+  before any of it comes back. Delivery windows keep counting through it;
+  three misses lose a contract.
+
+  **The corrected sweep.**
+
+  | when contracts were signed | gate | bank at build | lost to the branch |
+  |---|---|---|---|
+  | one order only | 10 | 22 | none |
+  | three, at the gate | 10 | 22 | `diner_supply` |
+  | three, at tick 0 | 10 | 7 | `corner_shop`, `diner_supply` |
+  | three, at tick 0 | 20 (emulated) | 12 | two |
+  | three, at tick 0 | 30 (emulated) | 19 | one |
+  | three, at tick 0 | 40 (emulated) | 24 | **none** |
+  | one order, soaked to 50 000 ticks | life 48 | 46 | none |
+  | three at tick 0, soaked to 50 000 | life 68 | 43 | none |
+
+  **The control that the first version was missing.** With three orders signed
+  at tick 0 and **no branch ever built**, `market_stall` still strikes out at
+  tick 1 500. That death is the ketchup line's own start-up, not the BBQ
+  branch, and the first version counted it against the branch. Signing three
+  orders at the gate instead, with no branch, loses nothing.
+
+  **The rule, stated from what reproduces.** The deciding variable is the
+  **bank at the moment of building**. The number of concurrent orders matters
+  only through the bank it leaves: three orders signed at the gate bank the
+  same 22 as one order and lose one contract; the same three signed at tick 0
+  bank 7, because the early windows ate the stock, and lose two. A delivery
+  count steers that bank *by proxy, and badly*, because signing more contracts
+  is both how a player reaches the count sooner and what makes the transient
+  cost more. **Pushed far enough the gate does work** — 40 deliveries leaves
+  the three-order player 24 banked and costs them nothing — so the categorical
+  "no number can fix this" is false, and was removed from `data/unlocks.ron`,
+  `docs/GAMEPLAY.md`, `docs/DECISIONS_LOG.md` and this record.
+
+  **Why ten is kept anyway.** Forty deliveries is not "inside a first
+  session", which is the entire reason ten was chosen (see the file's comment
+  above the number). Buying #55 with a gate of 40 pays for a transient with
+  the thing the gate exists to deliver, and it hides a missing affordance
+  behind a balance value that reads as arbitrary to whoever meets it next —
+  the worst kind of number, one that is load-bearing for a reason nobody can
+  see.
+
+  **What was NOT chosen, and why.** Priming the pipes on placement was ruled
+  out before this pass: it breaks fluid conservation, the one property the
+  fluid system exists to guarantee. Shortening the pipe runs in the fixture
+  would fix the fixture, not the game. Giving `corner_shop` more strikes moves
+  the same cliff somewhere else and weakens every contract in the game to
+  patch one interaction.
+
+  **What the fix actually is**, both outside this pass's ownership and both
+  filed: a warning at placement time, before the player commits (#92), and a
+  fluid network that will not hand a brand-new consumer 100% of a network the
+  old one is living on (#93). **#55 stays open**, with these measurements
+  posted on it. The table and the protocol live in `data/unlocks.ron`'s own
+  comment so the next person to reach for that number meets the evidence
+  first, and the player-facing shape of it is in `docs/GAMEPLAY.md` §6.
+
+- 2026-09-20: **A legibility mask must be proved to contain the pixels in
+  question, before any number it produces is quoted.** Issue #57 asked whether
+  `box_of_ketchup` and `box_of_bbq` can be told apart once both ride one belt.
+  The `voxel-legibility-measurement` method answers that kind of question with
+  a fixed silhouette mask, mean luma inside it, 1:1 crops never upscaled to
+  judge. The first answer this pass produced was **wrong**, and catching it
+  is the durable part of the record.
+
+  **The broken instrument.** The mask was built with the warm-pixel test
+  earlier passes used: `r > g > b and r - b > 18`. That is right for kraft
+  cardboard and wrong for the print on it — `label_cream` renders at
+  **(241, 239, 234)**, `r - b = 7`, near-neutral. The mask therefore excluded
+  the printed lid panels: *exactly the pixels the question is about.* It
+  scored every candidate on the cardboard around them, reported a **5.3/255**
+  gap against a 17.0 noise floor, and concluded the art fails. A comment
+  saying so was posted on #57 and an owner question raised on it.
+
+  **How it was caught.** Candidate C1 — the print recoloured to each sauce's
+  own ink, a change visible across the room — measured *identical* to shipped.
+  That cannot happen if the mask covers the paint. It is the same class of
+  failure as a screenshot harness aiming at the wrong tile (#4): the
+  instrument drops the subject and then reports a confident number.
+
+  **The right mask.** The case's whole silhouette **with interior holes
+  filled** — largest warm connected component, then flood the complement from
+  the window border (4-connectivity) and keep everything the flood cannot
+  reach. It is correct for this subject because the kraft outline encloses the
+  print on every face the camera sees, so "inside the cardboard" is exactly
+  "on the carton". The mask grows 465 → 628 px on the gallery frame, 201 → 260
+  px on the mixed-line frame.
+
+  **What it then measured.** On a real mixed line — a splitter merging the BBQ
+  branch's packer output onto the ketchup exit belt, cases alternating, whole
+  factory framing, case ≈ 20×21 px — a `boxed_ketchup` and a `boxed_bbq` on
+  the **same belt in the same frame** read **156.7** and **117.2**: a
+  **39.5/255** gap. Review reproduced it independently at 152.87 vs 110.35,
+  **42.5**. The windows are 26×26 at (964,561) and (1023,538) of
+  `bbq_mixed.png`, aligned by silhouette overlap; the mask is 260 px and was
+  verified to contain all 45 of the window's near-neutral `label_cream`
+  pixels. The dock's contract-clipboard icons separate by 28.5 luma, 11.6
+  dE76. The method's anchors are 1.2/255 = invisible and ~26/255 = reads
+  reliably, so a 39.5 gap clears the reading threshold by half again.
+
+  **A control must be the same subject kind as the subject — and every window
+  must be logged** (corrected the same day, review of PR #98). The first
+  version of this record judged that gap against a "noise floor" of **12.6**,
+  taken from six `boxed_ketchup` windows at (663,330), (676,337), (688,315),
+  (726,337), (751,380) and (776,366) — cases standing **back to back in the
+  packer queue**, touching, each window therefore containing its neighbours'
+  cardboard. That is a different pixel population from one case alone on dark
+  belt, which is what the claim is about, and the six coordinates appeared
+  nowhere in the PR, the issue or this record: unreproducible. **The 12.6
+  floor and the 2.4× ratio built on it are withdrawn.** The same-kind control
+  is a single `boxed_bbq` on the shared exit belt measured across **14
+  independent renders** at the belt positions and animation frames they
+  caught: 117.03 to 122.05, a spread of **5.02/255** (windows logged per
+  render, x 963-967, y 560-563, 26×26). It bounds render-to-render and
+  small-position variation; it does not sample lighting along the whole belt
+  run, because every re-render put the case within five pixels of the same
+  spot. The claim that carries the ruling is the **pairwise gap**, which two
+  people reproduced from different frames.
+
+  **Chroma, tested and negative.** A hue metric was worth trying before
+  touching art, so CIELAB dC (`hypot(da*, db*)`, lighting-invariant) ran
+  alongside luma on the same mask and crops, with a chroma candidate, on the
+  deterministic `--item-gallery` fixture:
+
+  | candidate | dLuma | dL* | dC | dE76 |
+  |---|---|---|---|---|
+  | shipped (lid print) | **39.2** | 15.2 | 3.6 | 15.6 |
+  | sauce ink (chroma) | 6.1 | 5.5 | **13.7** | 14.8 |
+  | short faces (the cut on record) | **55.3** | 21.7 | 4.5 | 22.2 |
+
+  On the mixed frame, dC separates the two cartons by 3.7 against a
+  same-carton 4.0 — **worse than noise**. Chroma is the weaker channel at this
+  size, not the stronger one: a red-on-kraft panel is a handful of pixels at
+  20 px while light-against-dark is the whole lid. Trading a 39.2 luma gap for
+  a 6.1 one to buy 13.7 chroma barely moves total dE76 (15.6 → 14.8).
+
+  **The rulings.** (1) **The sauce cartons are not repainted** — the shipped
+  lid print does its job on a shared belt, in the packer queue, on the dock
+  and on the clipboard, so **#40's ruling stands** and the short-faces cut
+  recorded in `box_of_sauce`'s doc comment stays on the shelf. It measures
+  better (55.3) and is still the next cut if this ever needs headroom; it is
+  not needed, and it costs the kraft reading #40 ruled for. (2) **Validate a
+  mask by measuring a candidate that visibly changes the art.** If it scores
+  the same as shipped, the instrument is broken, not the candidate — and no
+  number from that mask may be quoted until it does. The retracted numbers and
+  the corrected ones are both on #57 on purpose: the comment that shows a
+  wrong number being caught is worth more to whoever reads it in six months
+  than a clean one that only shows the answer.
+
+
 - 2026-09-16: **The game is called CONDIMENTAL.** "sauce-factory was just a
   temporary name, ive now come up with the name 'CONDIMENTAL'". The owner's
   call, and the only naming decision this project has ever actually made —

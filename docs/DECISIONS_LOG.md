@@ -107,6 +107,57 @@ See [WORKFLOW.md](WORKFLOW.md).
   what buys the cut back onto a boundary at 1280x720 with every offer signed,
   the case issue #17 had left ragged. `_update_staff_alert` no longer touches
   the hint.
+
+- 2026-09-20 **The bank at the moment of building decides whether the BBQ
+  branch costs you the board.** `data/unlocks.ron`'s `after_deliveries: 10`
+  stays where it is, and the reason is measured rather than argued — the
+  file's own comment carries the table AND the protocol each row was run
+  under, because "how many contracts were signed, and when" changes every
+  number here. Building the BBQ branch stops boxed-ketchup output for ~8 500
+  ticks while the new pipes and vat prime off the existing fluid network, and
+  the contract board keeps counting windows through it. Whether that costs a
+  contract is decided by **how many finished boxes are banked at the moment
+  the player builds**, not by how many orders are running: three orders
+  signed at the gate (bank 22) lose one of three, the same three signed at
+  tick 0 (bank 7, because the early windows ate the stock) lose two to the
+  branch, and one order (bank 22) loses none. **A delivery count controls
+  that bank only by proxy, and badly** — signing more contracts is both how a
+  player reaches the count sooner and what makes the transient cost more.
+  Pushed far enough it does work: an emulated gate of 40 deliveries (bank 24)
+  loses nothing to the branch with three orders signed. But 40 is not "inside
+  a first session", which is the whole reason ten was chosen, so **do not
+  answer "expansion starves the line" with a number in `unlocks.ron`** —
+  issue #55 stays open, and the fixes it wants are a warning at placement
+  time and a fluid network that will not hand a brand-new consumer 100% of a
+  network the old one lives on (issues #92, #93). Full record in
+  `docs/DECISIONS.md`.
+- 2026-09-20 **A legibility mask must be proved to contain the pixels in
+  question, before any number it produces is quoted.** The
+  fixed-mask-mean-luma method (`voxel-legibility-measurement`) is only as
+  honest as its silhouette mask: judging `box_of_ketchup` against
+  `box_of_bbq` with the warm-pixel mask the earlier passes used
+  (`r > g > b and r - b > 18`) silently dropped the printed panels, because
+  `label_cream` renders near-neutral at (241, 239, 234), and reported a
+  confident 5.3/255 for art that in fact separates by 39.5/255. **The mask is
+  the case's whole silhouette with interior holes filled** — largest warm
+  connected component, then flood the complement from the window border and
+  keep what the flood cannot reach — because the kraft outline encloses the
+  print on every face the camera sees. **Validate a mask by measuring a
+  candidate that visibly changes the art; if it scores the same as shipped,
+  the instrument is broken, not the candidate.** The measurement it now
+  supports: the shipped lid print separates the two cartons on a shared belt
+  by 39.5/255 luma (`bbq_mixed.png`, windows (964,561) and (1023,538), 26x26;
+  independently reproduced at 42.5 by review), so **#40's ruling stands and
+  the sauce cartons are not repainted** — and chroma is the weaker channel at
+  this size, not the stronger one. **A control must be the same subject kind
+  as the subject, and every window's coordinates must be logged.** The first
+  pass judged that gap against a 12.6 "noise floor" measured on cases
+  standing BACK TO BACK in the packer queue — a different pixel population
+  from one case alone on dark belt — and quoted a ratio from it: that floor
+  and that ratio are **withdrawn**. The same-kind control is one single case
+  on the shared belt across 14 renders, which spreads 5.0/255. Full record in
+  `docs/DECISIONS.md`.
+
 - 2026-09-16 **The game is called CONDIMENTAL, and so is the repo.** All-caps
   wherever it is the title: the menu's `title.text`, `config/name`, the
   design-doc headings. The GitHub repo was renamed the same day —
