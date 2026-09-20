@@ -424,13 +424,26 @@ matches what code comments and data files cite.
   branch's packer output onto the ketchup exit belt, cases alternating, whole
   factory framing, case ≈ 20×21 px — a `boxed_ketchup` and a `boxed_bbq` on
   the **same belt in the same frame** read **156.7** and **117.2**: a
-  **39.5/255** gap. Review reproduced it independently at 152.87 vs 110.35,
-  **42.5**. The windows are 26×26 at (964,561) and (1023,538) of
-  `bbq_mixed.png`, aligned by silhouette overlap; the mask is 260 px and was
-  verified to contain all 45 of the window's near-neutral `label_cream`
-  pixels. The dock's contract-clipboard icons separate by 28.5 luma, 11.6
+  **39.5/255** gap. The windows are 26×26 at (964,561) and (1023,538) of
+  `bbq_mixed.png`, aligned by silhouette overlap. The frame is
+  `TomWhitticase-iss-balance/20260920-152320-bbq_mixed.png` on the `pr-media`
+  branch, which is the only copy — per #82 the screenshot harness is not
+  reproducible run to run, so it cannot be re-rendered.
+
+  **The gap is implementation-sensitive; read it as a range, not a figure.**
+  Three independent implementations of the method as written above give
+  **30.4, 39.5 and 42.5** — a spread of 12 luma, larger than the 5.02
+  same-kind floor quoted below, because the written recipe does not pin the
+  mask down to the pixel (the same three give masks of 233 and 260 px). The
+  earlier claim here that the 260 px mask "contains all 45 of the window's
+  near-neutral `label_cream` pixels" did not reproduce — a re-implementation
+  got 23 of 45 — and is withdrawn (#111). What survives is what the ruling
+  needs: **every implementation clears the ~26/255 "reads reliably" anchor**,
+  the lowest of them by about 15%. The dock's contract-clipboard icons separate by 28.5 luma, 11.6
   dE76. The method's anchors are 1.2/255 = invisible and ~26/255 = reads
-  reliably, so a 39.5 gap clears the reading threshold by half again.
+  reliably, so the gap clears the reading threshold on every implementation of
+  the method tried — by half again on the most generous, by about 15% on the
+  least.
 
   **A control must be the same subject kind as the subject — and every window
   must be logged** (corrected the same day, review of PR #98). The first
