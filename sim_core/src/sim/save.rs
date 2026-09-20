@@ -436,6 +436,20 @@ pub struct SavedMachine {
     /// player never started.
     #[serde(default)]
     pub recipe: Option<RecipeId>,
+    /// Whether the player had switched this machine OFF
+    /// (`sim::machine::Machine::mothballed`, issue #19's escape hatch from
+    /// the unpaid spiral). A mothballed machine is out of the establishment,
+    /// so this is a payroll fact as much as a machine one: a factory
+    /// reopened from a save must still be off where the player switched it
+    /// off, or the load hands them back a wage bill they had deliberately
+    /// cut.
+    ///
+    /// `#[serde(default)]` without bumping `schema_version` 1, like
+    /// `SavedHopper::auto_fill`, `load`, `refused_by` and `recipe` above: an
+    /// older save loads with every machine in service, which is what it was
+    /// written with.
+    #[serde(default)]
+    pub mothballed: bool,
 }
 
 /// A [`LoadWindow`](super::machine::LoadWindow)'s ring, verbatim: one
@@ -913,6 +927,7 @@ impl World {
                         },
                         refused_by: machine.refused_by.clone(),
                         recipe: Some(machine.recipe.clone()),
+                        mothballed: machine.mothballed,
                     })
                 }
             };
@@ -1424,6 +1439,10 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                     });
                 machine.load = load;
                 machine.refused_by = saved.refused_by.clone();
+                // The establishment is recomputed once after every body is
+                // restored (see `load`), so setting this here is enough to
+                // put a mothballed machine's crew back out of the payroll.
+                machine.mothballed = saved.mothballed;
                 // `validate` already checked this names one of the kind's
                 // recipes; a save without the field keeps the recipe the
                 // `Place` above started the machine on.
@@ -1899,6 +1918,7 @@ mod tests {
             load: SavedLoad::default(),
             refused_by: None,
             recipe: None,
+            mothballed: false,
         });
         let message = refusal(data);
         assert!(message.contains("9999"), "{message}");

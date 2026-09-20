@@ -456,6 +456,13 @@ const MACHINE_TICKS_PER_CYCLE := 30
 ## and this table is also the order the sim spells the statuses, so it is
 ## the one place the words live.
 const LOAD_STATUS_GLYPHS := {"working": "●", "starved": "▲", "blocked": "■"}
+## The fourth shape, which is not a status: a MOTHBALLED machine (issue
+## #19) is not working, starved or blocked — it is switched off, and the
+## sim reports that as a stall kind rather than a fourth status, because
+## the load window it did no work in is honestly a starved window. An
+## unlit lens is the shape for "no state at all", and it is paired with
+## the words "switched off" every time it is drawn, per UI_UX.md §7.
+const LOAD_OFF_GLYPH := "○"
 ## How often the load is re-read from the simulation, in ticks. Load is
 ## polled rather than dirtied (ARCHITECTURE.md §4: it changes on every
 ## machine every tick), and one bucket of the sim's window (`LOAD_BUCKET_TICKS`,
@@ -3795,6 +3802,14 @@ func _poll_machine_load() -> void:
 		record["load"] = load
 		record["stall"] = stall
 		record["status"] = status
+		# The two staffing facts the same entry carries (issues #19 and
+		# #20). Unlike `stall` they are not per-tick truths that flicker,
+		# so they are taken as given rather than remembered across a
+		# status change: `crewed` is the sim's stable answer to "would
+		# this machine get its crew if everything ran at once", and
+		# `mothballed` is a switch the player threw.
+		record["crewed"] = bool(entry.get("crewed", true))
+		record["mothballed"] = bool(entry.get("mothballed", false))
 		_machine_load[key] = record
 
 
@@ -3834,6 +3849,11 @@ func _stall_reason_text(stall) -> String:
 			return "outlet pipe full"
 		"no_outlet_pipe":
 			return "no outlet pipe"
+		# Issue #19's. A switched-off machine is not waiting for anything,
+		# so it names the switch rather than a missing thing; `item` is
+		# empty on this kind and is deliberately not printed.
+		"mothballed":
+			return "switched off"
 	return ""
 
 
@@ -3854,6 +3874,8 @@ func _machine_load_text(origin_key: String) -> String:
 	if not _machine_load.has(origin_key):
 		return ""
 	var record: Dictionary = _machine_load[origin_key]
+	if bool(record.get("mothballed", false)):
+		return _mothballed_load_text(origin_key)
 	var load: Dictionary = record.get("load", {})
 	var status := String(record.get("status", ""))
 	var percent := int(load.get("percent", 0))
@@ -3864,9 +3886,38 @@ func _machine_load_text(origin_key: String) -> String:
 		return "%sflat out  ·  %d%% of the last %ds" % [lead, percent, window_seconds]
 	var line := "%s%s  ·  %d%% busy" % [lead, status, percent]
 	var reason := _stall_reason_text(record.get("reason"))
+	# ISSUE #20: the machine that is going without. The per-tick `staff`
+	# stall only appears on the ticks the machine actually asked and was
+	# refused, which on a line that ebbs is not every tick — so on the
+	# others the tooltip fell silent and the player was back to hunting.
+	# `crewed` is the stable answer, and it says it in the SAME WORDS the
+	# stall does, so the two readings never contradict each other.
+	if reason == "" and not bool(record.get("crewed", true)):
+		reason = _uncrewed_reason_text(origin_key)
 	if reason != "":
 		line += "  ·  %s" % reason
 	return line
+
+
+## The load line for a MOTHBALLED machine (issue #19), which is not a load
+## at all: the percentage is the tail of the work it did before the switch
+## was thrown, and saying "starved" about a machine the player deliberately
+## switched off reads as a fault rather than as their own decision. Pure
+## given `_machine_load`, like its neighbour.
+func _mothballed_load_text(origin_key: String) -> String:
+	return "%s  switched off  ·  no crew, no output" % LOAD_OFF_GLYPH
+
+
+## "short of manufacturing staff" for a machine the establishment cannot
+## crew — the words `_stall_reason_text` gives a `staff` stall, and the
+## words the dock's held line already uses, through the one helper all
+## three share so they can never drift apart. The categories come from the
+## CREW the sim published for this machine, never guessed from the pools.
+func _uncrewed_reason_text(origin_key: String) -> String:
+	var categories := _crew_categories_text(_crews.get(origin_key, []))
+	if categories == "":
+		return ""
+	return "short of %s staff" % categories
 
 
 func _set_machine_running(origin_key: String, running: bool) -> void:
@@ -3972,8 +4023,8 @@ const CROSSHAIR_THICKNESS := 2.0 * UI_SCALE # px, each bar's width
 ## its width. The configure hint is its own line now, so the panels line
 ## stays five short entries and neither line reaches the clipboard's left
 ## edge at this window size.
-const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    H: staff    P: production\nclick a hopper or tank: configure\nWASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
-const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    H: staff    P: production\nclick a hopper or tank: configure\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
+const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    H: staff    P: production\nclick a building: configure\nWASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
+const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    H: staff    P: production\nclick a building: configure\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
 
 
 ## The tile box the isometric camera frames at startup: whatever is placed,
@@ -4384,6 +4435,11 @@ const METER_FILL_PROGRESS := Color(0.90, 0.68, 0.16, 0.98)
 ## A COST or a countdown that has nearly run out — the one meter state that is
 ## a warning. Paired with a word every time it is used.
 const METER_FILL_WARN := Color(0.86, 0.38, 0.30, 0.98)
+## A MOTHBALLED machine's meter (issue #19): the lens is unlit, not
+## alarming. The bar still shows the tail of the work it did before the
+## switch was thrown, so it needs a fill colour — but a grey one, because
+## nothing is wrong and nothing is happening.
+const METER_FILL_OFF := Color(0.42, 0.44, 0.48, 0.98)
 
 
 ## Builds a meter and returns its TRACK; the moving bar is the track's `Fill`
@@ -4463,6 +4519,24 @@ func _set_meter(track: Panel, fraction: float, fill_color: Color = Color(0, 0, 0
 			var recoloured := style.duplicate()
 			recoloured.bg_color = fill_color
 			fill.add_theme_stylebox_override("panel", recoloured)
+
+
+## Recolours a meter's TRACK border. The fill is the quantity and the
+## border is not — which is exactly why the two new staffing states need it
+## (issues #19 and #20): a machine going without its crew does no work, so
+## its window decays to 0% and there is no fill left to be amber with, at
+## precisely the moment the player most needs to be told. The empty track
+## itself carries the state, with the words directly above it saying which
+## state it is (UI_UX.md §7 — the colour is never the only carrier).
+func _set_meter_outline(track: Panel, border_color: Color) -> void:
+	if track == null:
+		return
+	var style: StyleBoxFlat = track.get_theme_stylebox("panel")
+	if style == null or style.border_color == border_color:
+		return
+	var recoloured := style.duplicate()
+	recoloured.border_color = border_color
+	track.add_theme_stylebox_override("panel", recoloured)
 
 
 func _build_ui() -> void:
@@ -9875,8 +9949,10 @@ func _update_larder() -> void:
 # The building configuration panel (the click-to-configure ticket)
 # --------------------------------------------------------------------------
 
-## Clicking a placed hopper or fluid tank opens this panel; everything a
-## player used to do to those buildings with the keyboard is done here now.
+## Clicking a placed hopper, fluid tank or machine opens this panel;
+## everything a player used to do to those buildings with the keyboard is
+## done here now, and the machine's mothball switch (issue #19) was put here
+## rather than on a fourth global key for the reason below.
 ##
 ## WHY IT EXISTS. Three global keybinds used to configure buildings from
 ## anywhere on the map: **SPACE** filled EVERY hopper in the world, **V**
@@ -9903,10 +9979,13 @@ var _config_panel: PanelContainer
 ## re-resolve it every frame). Meaningful only while `_config_open`.
 var _config_tile := Vector2i.ZERO
 var _config_open := false
-## `HOPPER_KIND` or `FLUID_TANK_KIND` — the two kinds that have anything to
-## configure, and since issue #43 the two that configure the same three
-## things: level, auto-fill and contents. A machine's settings are its
-## recipe, which is content; a belt has none at all.
+## `HOPPER_KIND`, `FLUID_TANK_KIND` or any kind that asks for a crew. The
+## first two configure the same three things, and since issue #43 they
+## configure them identically: level, auto-fill and contents. A crewed
+## building configures exactly one thing — whether it is in service or
+## mothballed (issue #19) — which is the change a player makes to a machine,
+## or to the dock, after it is standing. A belt, a pipe and a splitter have
+## nothing at all.
 var _config_kind := ""
 var _config_title: Label
 var _config_title_icon: TextureRect
@@ -9923,6 +10002,21 @@ var _config_picker_row: HBoxContainer
 var _config_picker_heading: Label
 var _config_picker_note: Label
 var _config_picker_slots: Array = [] # [{item, button, mark}]
+## The hopper/tank-only rows, held so a crewed building's panel can hide
+## them: a machine has nothing to fill and nothing to auto-fill, and a FILL
+## button greyed out forever would read as a fault rather than as "not
+## applicable".
+var _config_fill_row: HBoxContainer
+var _config_auto_note: Label
+## The crewed-building section: the mothball switch and the sentence that
+## says what the switch has done (issue #19). Shown for any kind that asks
+## for a crew, which since the dock joined them is not only machines.
+var _config_machine_box: VBoxContainer
+var _config_machine_state: Label
+var _config_mothball_button: Button
+var _config_mothball_note: Label
+var _config_mothballed := false
+
 ## What the picker's note says under a HOPPER's slots. A tank's is chosen
 ## per state by `_tank_picker_note`, because an undeclared tank has
 ## something a hopper never has to explain: where its fluid came from if
@@ -10025,9 +10119,11 @@ func _build_config_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void
 	_config_level_fill = _config_level_track.get_node("Fill")
 
 	# --- Fill now, and the stock it draws from -----------------------------
-	var fill_row := HBoxContainer.new()
-	fill_row.add_theme_constant_override("separation", _ui_i(10))
-	body.add_child(fill_row)
+	_config_fill_row = HBoxContainer.new()
+	_config_fill_row.name = "ConfigFillRow"
+	_config_fill_row.add_theme_constant_override("separation", _ui_i(10))
+	body.add_child(_config_fill_row)
+	var fill_row := _config_fill_row
 
 	_config_fill_button = Button.new()
 	_config_fill_button.name = "ConfigFill"
@@ -10086,7 +10182,8 @@ func _build_config_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void
 	note_settings.outline_size = base_settings.outline_size
 	note_settings.outline_color = base_settings.outline_color
 
-	var auto_note := Label.new()
+	_config_auto_note = Label.new()
+	var auto_note := _config_auto_note
 	auto_note.name = "ConfigAutoNote"
 	auto_note.label_settings = note_settings
 	auto_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -10124,6 +10221,39 @@ func _build_config_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void
 	# say besides — see it.
 	_config_picker_note.text = HOPPER_PICKER_NOTE
 	_config_picker_box.add_child(_config_picker_note)
+
+	# --- The mothball switch (machines only) -------------------------------
+	# ISSUE #19's escape hatch, put where the player already goes to change
+	# a building's mind. Deliberately not a keybind: Q, SPACE and V were
+	# retired for acting on a building the player could not see, and a
+	# fourth global key would be the same mistake with a new letter.
+	_config_machine_box = VBoxContainer.new()
+	_config_machine_box.name = "ConfigMachine"
+	_config_machine_box.add_theme_constant_override("separation", _ui_i(4))
+	_config_machine_box.visible = false
+	body.add_child(_config_machine_box)
+
+	_config_machine_state = Label.new()
+	_config_machine_state.name = "ConfigMachineState"
+	_config_machine_state.label_settings = base_settings
+	_config_machine_state.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_config_machine_state.custom_minimum_size.x = CONFIG_PANEL_WIDTH
+	_config_machine_box.add_child(_config_machine_state)
+
+	_config_mothball_button = Button.new()
+	_config_mothball_button.name = "ConfigMothball"
+	_config_mothball_button.focus_mode = Control.FOCUS_NONE
+	_config_mothball_button.custom_minimum_size = Vector2(CONFIG_PANEL_WIDTH, _ui_px(30))
+	_config_mothball_button.pressed.connect(_on_config_mothball_pressed)
+	_config_machine_box.add_child(_config_mothball_button)
+
+	_config_mothball_note = Label.new()
+	_config_mothball_note.name = "ConfigMothballNote"
+	_config_mothball_note.label_settings = note_settings
+	_config_mothball_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_config_mothball_note.custom_minimum_size.x = CONFIG_PANEL_WIDTH
+	_config_machine_box.add_child(_config_mothball_note)
+	_apply_config_mothball_state(false)
 
 	var footer := Label.new()
 	footer.label_settings = note_settings
@@ -10231,9 +10361,19 @@ func _open_config_panel(origin: Vector2i, kind: String) -> void:
 	_config_tile = origin
 	_config_kind = kind
 	_config_open = true
-	# Both configurable kinds carry a picker now: a hopper picks the solid
-	# it feeds, a tank the raw fluid it holds (issue #43).
+	# One panel, three shapes. A machine has nothing to fill and nothing to
+	# keep filled, so those rows are HIDDEN rather than disabled: a FILL
+	# button greyed out forever on every crusher in the factory would read
+	# as a fault the player is meant to clear.
+	#
+	# Both fillable kinds carry a picker: a hopper picks the solid it feeds,
+	# a tank the raw fluid it holds (issue #43).
+	var is_machine := _config_kind_is_machine(kind)
 	_config_picker_box.visible = kind == HOPPER_KIND or kind == FLUID_TANK_KIND
+	_config_machine_box.visible = is_machine
+	_config_fill_row.visible = not is_machine
+	_config_auto_button.visible = not is_machine
+	_config_auto_note.visible = not is_machine
 	if kind == HOPPER_KIND:
 		_refresh_hopper_items()
 	elif kind == FLUID_TANK_KIND:
@@ -10286,8 +10426,8 @@ func _config_click() -> void:
 ## What a configuration click on `tile` does. Four cases, and three of them
 ## close: the same building again closes (a click is a toggle, which is what
 ## makes the panel dismissable with the gesture that opened it), a different
-## hopper or tank opens that one instead (only ever one panel), and empty
-## floor or any other kind closes outright rather than leaving a panel
+## configurable building opens that one instead (only ever one panel), and
+## empty floor or any other kind closes outright rather than leaving a panel
 ## describing something the player has stopped looking at.
 func _config_click_at_tile(tile: Vector2i) -> void:
 	if tile == HOVER_NO_TILE:
@@ -10295,14 +10435,28 @@ func _config_click_at_tile(tile: Vector2i) -> void:
 		return
 	var placement := _placement_at_tile(tile)
 	var kind := String(placement.get("kind", ""))
-	if kind != HOPPER_KIND and kind != FLUID_TANK_KIND:
+	var origin := _placement_origin(placement)
+	if not _config_kind_is_machine(kind) and kind != HOPPER_KIND and kind != FLUID_TANK_KIND:
 		_close_config_panel()
 		return
-	var origin := _placement_origin(placement)
 	if _config_open and _config_tile == origin:
 		_close_config_panel()
 		return
 	_open_config_panel(origin, kind)
+
+
+## Whether `kind` is a MACHINE, asked of the simulation rather than of a
+## list kept here: `_machine_states` is keyed by the origin of every machine
+## the chunk snapshots carry, so a crusher added to `data/machines.ron`
+## becomes mothballable with no Godot edit — the same property the hopper's
+## ingredient picker has. A belt, a splitter, a hopper, a tank and the dock
+## are all absent from it, which is exactly the set the simulation refuses
+## `set_mothballed` for (`World::try_set_mothballed` needs a `Machine`).
+func _config_kind_is_machine(kind: String) -> bool:
+	if kind == "" or kind == BELT_KIND or kind == PIPE_KIND or kind == SPLITTER_KIND \
+			or kind == HOPPER_KIND or kind == FLUID_TANK_KIND or kind == DOCK_KIND:
+		return false
+	return true
 
 
 ## Repolled every frame while the panel is up, exactly like the build menu
@@ -10329,8 +10483,10 @@ func _update_config_panel() -> void:
 	var key := _tile_key(_placement_origin(placement))
 	if _config_kind == HOPPER_KIND:
 		_update_config_hopper(key)
-	else:
+	elif _config_kind == FLUID_TANK_KIND:
 		_update_config_tank(key)
+	else:
+		_update_config_machine(key)
 	_position_config_panel()
 	_config_panel.visible = true
 
@@ -10434,6 +10590,89 @@ func _tank_run_volume(snapshot: Dictionary) -> float:
 		return 0.0
 	var run: Dictionary = _last_fluid[found.x]
 	return float(run.get("total_volume", 0.0))
+
+
+## A MACHINE's panel (issue #19). It shows the same three facts the hover
+## does — what it makes, how far through a batch it is, whether it has its
+## crew — and adds the one thing only a panel can do: the switch.
+##
+## The level bar is the BATCH, not a stock level, which is the one reading a
+## machine has that fits the bar `_build_meter` draws (its section header's
+## rule: a bar needs a genuine ceiling, and a recipe's `required_ticks` is
+## one). A mothballed machine's batch is frozen rather than lost, so the bar
+## holds where the switch caught it — that is the fact the panel is trying
+## to convey, and an emptied bar would claim the opposite.
+func _update_config_machine(key: String) -> void:
+	var machine: Dictionary = _machine_states.get(key, {})
+	var kind := String(machine.get("kind", _config_kind))
+	var recipe := String(machine.get("recipe", ""))
+	_config_title.text = "%s — %s" % [
+		_kind_display_name(kind),
+		_item_display_name(recipe) if recipe != "" else "no recipe",
+	]
+	_config_title_icon.texture = _icon_for_asset(_shop_asset_for(kind))
+	var mothballed := bool(machine.get("mothballed", false))
+	var process = machine.get("process")
+	if process == null:
+		_config_level_label.text = "between batches"
+		_set_config_level(0.0)
+	else:
+		var required := int(process[1])
+		var elapsed: int = clampi(sim.current_tick() - int(process[0]), 0, required)
+		_config_level_label.text = "batch: %s" % (
+			"held at %d%%" % int(round(_machine_progress(key) * 100.0)) if mothballed
+			else "%d%%  ·  %s left" % [
+				int(round(_machine_progress(key) * 100.0)),
+				_format_remaining(required - elapsed),
+			]
+		)
+		_set_config_level(_machine_progress(key))
+	_config_machine_state.text = _config_machine_state_text(key, mothballed)
+	_apply_config_mothball_state(mothballed)
+
+
+## The sentence above the switch: what this machine is doing to the payroll
+## right now. Three states, and each of them is the reason the player might
+## have come here — it is running and paid for, it is switched off and
+## costing nothing, or it is placed and staffed for but going without the
+## crew it needs, which is the case issue #20 is about and the case the
+## switch is the answer to.
+func _config_machine_state_text(key: String, mothballed: bool) -> String:
+	if mothballed:
+		return "switched off  ·  asks for no crew and makes nothing"
+	var crew_text := _crew_text(_crews.get(key, []))
+	var record: Dictionary = _machine_load.get(key, {})
+	if not bool(record.get("crewed", true)):
+		return "in service  ·  %s
+%s" % [
+			crew_text if crew_text != "" else "crewed",
+			_uncrewed_reason_text(key),
+		]
+	return "in service  ·  %s" % (crew_text if crew_text != "" else "needs no crew")
+
+
+## The switch itself, and the note under it that says what throwing it will
+## cost or save. Modelled on [`_apply_config_auto_state`] down to the plate,
+## so the two switches in this panel are visibly one kind of control — but
+## the LIT state is the one that means "running", which for this switch is
+## IN SERVICE rather than mothballed. Off is the recessed steel, which is
+## also what the machine itself now is.
+func _apply_config_mothball_state(mothballed: bool) -> void:
+	if _config_mothball_button == null:
+		return
+	_config_mothballed = mothballed
+	_config_mothball_button.text = (
+		"MOTHBALLED:  OFF" if mothballed else "IN SERVICE:  ON"
+	)
+	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+		_config_mothball_button.add_theme_stylebox_override(
+			state, _config_toggle_style(state, not mothballed)
+		)
+	_config_mothball_note.text = (
+		"click to return it to service — its crew goes back on the payroll and the held batch resumes"
+		if mothballed else
+		"click to mothball it — it keeps its place and its half-made batch, asks for no crew, and makes nothing"
+	)
 
 
 ## Why FILL on a hopper's panel is off, or "" if it is not. The per-building
@@ -10634,6 +10873,20 @@ func _on_config_auto_pressed() -> void:
 	})
 
 
+## The mothball switch (issue #19). The panel does not flip its own label —
+## it asks, and reads the answer back out of the next snapshot, exactly as
+## the auto-fill toggle does, so it can never show a state the simulation
+## refused.
+func _on_config_mothball_pressed() -> void:
+	if not _config_open or not _config_kind_is_machine(_config_kind):
+		return
+	_issue_config_command({
+		"type": "set_mothballed",
+		"tile": [_config_tile.x, _config_tile.y],
+		"enabled": not _config_mothballed,
+	})
+
+
 ## The contents picker, for both kinds. `set_hopper_item` names the
 ## ingredient outright — the command that replaced `cycle_hopper_item` and
 ## the **Q** key with it: a picker that already shows the choices should not
@@ -10665,7 +10918,7 @@ func _on_config_picker_pressed(index: int) -> void:
 	})
 
 
-## Issues one of the panel's four commands and redraws what they touch.
+## Issues one of the panel's five commands and redraws what they touch.
 ## Deliberately NOT `_issue_world_command`: none of these places, removes or
 ## rotates anything, so the whole world subtree does not need rebuilding —
 ## only the polled buffers the panel and the buildings themselves draw from.
@@ -13164,12 +13417,43 @@ func _hover_panel_state(tile: Vector2i) -> Dictionary:
 	# whole indicator; the question it answers is "how busy", and the colour
 	# says which way it is failing.
 	if _machine_load.has(key):
-		var load: Dictionary = _machine_load[key].get("load", {})
+		var record: Dictionary = _machine_load[key]
+		var load: Dictionary = record.get("load", {})
+		var bar_color := _load_bar_color(record)
 		state["load_meter"] = {
 			"fraction": clampf(float(load.get("percent", 0)) / 100.0, 0.0, 1.0),
-			"color": _load_status_color(String(_machine_load[key].get("status", ""))),
+			"color": bar_color,
+			# The two staffing states outline the whole track, because they
+			# are the two that drive the fill to nothing — see
+			# `_set_meter_outline`. A working, starved or blocked machine
+			# keeps the ordinary border it always had.
+			"outline": bar_color if _load_bar_is_staffing(record) else METER_BORDER_COLOR,
 		}
 	return state
+
+
+## The colour the hover's load bar is filled with, from the whole polled
+## record rather than the status alone, because two of the four things it
+## can say are not statuses (issues #19 and #20).
+##
+## In precedence order, and the order matters: a MOTHBALLED machine is grey
+## whatever its window says, because the player switched it off and nothing
+## about that is a fault; an UNCREWED machine is amber even on the ticks it
+## did not get as far as asking for its crew, which is the flicker #20 was
+## filed about; otherwise the status colour, as before.
+## Whether the load bar's colour is coming from a STAFFING fact rather than
+## from the machine's status — the two cases `_load_bar_color` answers
+## before it looks at the status at all.
+func _load_bar_is_staffing(record: Dictionary) -> bool:
+	return bool(record.get("mothballed", false)) or not bool(record.get("crewed", true))
+
+
+func _load_bar_color(record: Dictionary) -> Color:
+	if bool(record.get("mothballed", false)):
+		return METER_FILL_OFF
+	if not bool(record.get("crewed", true)):
+		return METER_FILL_PROGRESS
+	return _load_status_color(String(record.get("status", "")))
 
 
 ## The status colour of the hover's load bar: the three lens colours the
@@ -13308,6 +13592,11 @@ func _machine_hover_text(origin_key: String, kind: String, direction: String) ->
 		# experiences — rather than in ticks, which are an implementation
 		# detail of ARCHITECTURE.md §3.9's fixed timestep.
 		progress_text = "%.0f%%  ·  %s left" % [pct, _format_remaining(required - elapsed)]
+		# A MOTHBALLED machine's batch is frozen, not running (issue #19):
+		# the sim holds `start_tick` level with the clock, so "2s left"
+		# would be a countdown that never counts. It is held, and says so.
+		if bool(machine.get("mothballed", false)):
+			progress_text = "%.0f%%  ·  held" % pct
 	# The BUFFERS are no longer part of this sentence. They were printed as
 	# `in: tomato x8, sugar x1` — the wire format's own item ids, underscores
 	# and all, in a line that got longer the more a machine held. They are
@@ -13610,6 +13899,7 @@ func _apply_hover_panel_state(state: Dictionary) -> void:
 		_hover_load_meter.visible = not load_meter.is_empty()
 		if not load_meter.is_empty():
 			_set_meter(_hover_load_meter, float(load_meter.get("fraction", 0.0)), load_meter.get("color", METER_FILL_LEVEL))
+			_set_meter_outline(_hover_load_meter, load_meter.get("outline", METER_BORDER_COLOR))
 
 	# Only a MACHINE has buffers, and an idle one with nothing in it still has
 	# them — "this kind has no buffers" (a pipe, a belt) and "its buffers are

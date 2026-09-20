@@ -40,11 +40,19 @@ pub const FULL_LOAD_PERCENT: u32 = 95;
 /// | process complete                    | output deposited, cleared      | `Working` |
 /// | process complete                    | held (output or pipe full)     | `Blocked` |
 /// | would work, crew refused            | nothing (paused if mid-craft)  | `Starved` |
+/// | mothballed                          | nothing (paused if mid-craft)  | `Starved` |
 ///
-/// The last row is the staff pools MVP's: a machine waiting on people is
+/// The fifth row is the staff pools MVP's: a machine waiting on people is
 /// waiting on a resource, exactly like one waiting on sugar, so it records
 /// `Starved` and the andon shows amber; what distinguishes it is the stall
 /// reason (`Machine::refused_by`, the `staff` stall kind). No fourth state.
+///
+/// The last row is mothballing's (issue #19), and it takes the same answer
+/// for the same reason: a machine switched off did no work this tick, which
+/// is what this window measures, and *why* it did none is the stall's job to
+/// say (`StallKind::Mothballed`). A fourth `Off` state would have to be
+/// counted in [`LoadBucket`], which rides the save — a schema change to
+/// record a fact the window already records correctly.
 ///
 /// **The completion tick counts as work.** `Machine::tick` clears
 /// `process` on the tick a batch lands and starts the next on the tick
@@ -253,6 +261,18 @@ pub struct Machine {
     /// `staff` stall kind, after the six older kinds have found nothing.
     /// Saved (`save.rs`), since it shows in snapshots.
     pub refused_by: Option<String>,
+    /// **Switched off deliberately by the player** (`PlayerCommand::
+    /// SetMothballed`, issue #19's escape hatch from the unpaid spiral).
+    /// A mothballed machine asks for no crew, so it drops out of the
+    /// ESTABLISHMENT (`World::recompute_establishment`) and the player can
+    /// shrink their payroll to fit; it also starts nothing, advances
+    /// nothing and deposits nothing.
+    ///
+    /// Live state the player owns, so it is saved (`save.rs`'s
+    /// `SavedMachine::mothballed`) — a factory reopened from a save must
+    /// still be off where the player switched it off, or the load is a
+    /// hidden hiring bill.
+    pub mothballed: bool,
 }
 
 impl Machine {
@@ -264,6 +284,7 @@ impl Machine {
             process: None,
             load: LoadWindow::new(),
             refused_by: None,
+            mothballed: false,
         }
     }
 
@@ -361,6 +382,21 @@ impl Machine {
     ) -> bool {
         let mut changed = false;
         self.refused_by = None;
+        if self.mothballed {
+            // Switched off: no crew is asked for (which is the whole point —
+            // `recompute_establishment` has already dropped this machine's
+            // crew from the establishment), no buffer is touched and the
+            // ledger records nothing. A craft that was running is PAUSED
+            // exactly the way a crew refusal pauses one — `elapsed` stands
+            // still, progress is never lost — so returning a machine to
+            // service resumes the batch it was in the middle of.
+            if let Some(process) = self.process.as_mut() {
+                process.start_tick += 1;
+                changed = true;
+            }
+            self.load.record(WorkState::Starved);
+            return changed;
+        }
         let Some(running) = recipes.get(&self.recipe) else {
             // A machine with no recipe can never start, which is a
             // permanent starve; `World` refuses to place one, so this is

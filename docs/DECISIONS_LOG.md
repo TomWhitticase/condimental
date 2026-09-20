@@ -218,6 +218,48 @@ See [WORKFLOW.md](WORKFLOW.md).
   and that ratio are **withdrawn**. The same-kind control is one single case
   on the shared belt across 14 renders, which spreads 5.0/255. Full record in
   `docs/DECISIONS.md`.
+- 2026-09-20 **Mothballing is the way out of arrears, and it is machines
+  only.** A machine can be switched off (`PlayerCommand::SetMothballed`,
+  wire `set_mothballed`). A mothballed machine asks for no crew — it drops
+  out of the ESTABLISHMENT, so `StaffPools::set_required` falls and the
+  surplus heads can be fired down to a bill the factory can meet — produces
+  nothing, and HOLDS the batch it was part-way through rather than losing it
+  (`Machine::tick` advances `start_tick` in step with the clock). It is not
+  a fourth `WorkState`: the window it did no work in is honestly a starved
+  window, and `StallKind::Mothballed` carries the why. It persists as
+  `SavedMachine.mothballed`, `#[serde(default)]`, no `schema_version` bump.
+  **Only a `Machine` can be mothballed** — a hopper, a tank and the DOCK are
+  refused, because the dock is the only route from product to money and a
+  spare one's escape is `Remove`, which refunds it to the shed. No new
+  `data/*.ron` number: mothballing costs nothing and saves nothing directly,
+  and the figures that govern it (`wage`, `pay_period_ticks`) are already
+  data. The surface is the click-to-configure panel, which grew a third
+  shape for machines; **not** a keybind — Q, SPACE and V were retired for
+  acting on a building the player could not see. It does **not** rescue a
+  factory that has already missed a payday with a single logistics head:
+  notice pay holds the next bill at the old figure for one period, and
+  `data/staff.ron` pays logistics LAST, so the dock stops shipping. Filed as
+  a deferred issue rather than fixed here.
+  > Full record in `docs/DECISIONS.md`.
+
+- 2026-09-20 **`crewed` on a placement is the ESTABLISHMENT's answer, not a
+  replay of the last tick.** `PlacementSnapshot.crewed` and
+  `MachineLoadEntry.crewed` come from `World::uncrewed_placements`, which
+  hands each pool's `headcount` out in the order the tick claims in
+  (`topology.machines`, then `topology.docks`, whole crew or nothing) and
+  names whoever goes without. It deliberately does **not** read what the
+  last tick did: the tick only claims for a machine that would otherwise
+  have worked, so a per-tick reading flickers as the line ebbs — which is
+  the exact flapping the 2026-09-16 establishment change existed to end.
+  It is derived, so no save-schema change; `crewed` sits BEFORE `links` in
+  `PlacementSnapshot`, because `links` stays last and `tests/links.rs` pins
+  that shape byte for byte. Godot shows it in the hover's load line, in the
+  same words a `staff` stall gives (`_uncrewed_reason_text` and
+  `_stall_reason_text` share `_crew_categories_text`), and by outlining the
+  load bar amber — the track's BORDER, not its fill, because an uncrewed
+  machine does no work and has no fill left to colour. **No in-world pole**;
+  the hover panel is still the one place status lives.
+  > Full record in `docs/DECISIONS.md`.
 
 - 2026-09-16 **The game is called CONDIMENTAL, and so is the repo.** All-caps
   wherever it is the title: the menu's `title.text`, `config/name`, the

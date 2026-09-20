@@ -717,6 +717,98 @@ matches what code comments and data files cite.
   wrong number being caught is worth more to whoever reads it in six months
   than a clean one that only shows the answer.
 
+- 2026-09-20: **Mothballing, and `crewed` on a placement** (issues #19 and
+  #20). Two halves of one complaint about the staff pools: there was no way
+  out of the unpaid spiral, and no way to tell which machine was the one
+  going without.
+
+  **The spiral, measured.** Unpaid heads idle the machines they crew, which
+  cuts the income that would have paid them, so a factory that missed one
+  payday missed the next one harder. Before this there was exactly one lever
+  — `Remove` — and it refunds the machine to the shed, losing its position
+  and its half-made batch. That is a fine answer for a machine you regret
+  buying and a terrible one for a line you want back next period.
+
+  **What was built.** `PlayerCommand::SetMothballed { tile, enabled }`,
+  wire `{"type": "set_mothballed", "tile": [x, y], "enabled": true}`. A
+  mothballed machine is skipped by `World::recompute_establishment`, so
+  `StaffPools::set_required` falls the moment the switch is thrown and the
+  surplus heads can be fired. `Machine::tick` returns early, advancing
+  `start_tick` in step with the clock so the batch is HELD rather than lost
+  or completed. It records `WorkState::Starved` and reports
+  `StallKind::Mothballed`.
+
+  **Why not a fourth `WorkState`.** `LoadBucket` rides the save, so a fourth
+  counter is a schema change to record something the existing three already
+  record: the window really did contain no work. The stall kind carries the
+  *why*, which is where every other "not working, and here is the reason"
+  already lives.
+
+  **Why machines only.** `try_set_mothballed` looks up a `Machine`
+  component, so a hopper, a tank and the dock are silently refused — and
+  that turned out to be the right shape rather than an accident, so it is
+  now pinned by a test. The dock is the only route from product to money; a
+  mothballed dock is a factory that cannot recover at all. A spare dock's
+  escape is `Remove`, which hands it back to the shed losing nothing but its
+  position. The build-ahead case (a second dock placed early, whose
+  logistics head you cannot release without removing it) is filed as a
+  deferred issue.
+
+  **Why no new data number.** Mothballing has no cost and no direct saving;
+  what it changes is which heads the establishment asks for, and the figures
+  that govern that (`wage`, `pay_period_ticks`) are already in
+  `data/staff.ron`. A "mothball fee" would be a real balance lever and a
+  real data field — it is not being added on speculation.
+
+  **Where the switch lives.** The click-to-configure panel, which grew a
+  third shape: a machine's panel hides the FILL row, the AUTO-FILL switch
+  and the picker (hidden, not disabled — a FILL button greyed out forever on
+  every crusher reads as a fault to clear) and shows the batch as its level
+  bar plus a labelled switch. Not a keybind: Q, SPACE and V were retired for
+  acting on a building the player could not see, and a fourth global key
+  would be that mistake with a new letter.
+
+  **What it does NOT rescue, stated plainly.** A factory that has already
+  missed a payday with a single logistics head is still finished. Two things
+  compound: notice pay holds `next_bill` at the old figure for a full
+  period after a Fire, and `data/staff.ron` pays logistics LAST on purpose
+  ("if a factory must leave someone unpaid it should idle a shipping clerk
+  before a cook"), so the first refusal stops the dock and with it all
+  income. Mothballing rescues the factory that is still shipping — the
+  acceptance test gives the player a spare logistics head for exactly that
+  reason, so one paid clerk keeps the line earning while the bill comes
+  down. The terminal case is a deferred issue, not something to fix by
+  reordering `staff.ron`: that order is a deliberate, commented decision.
+
+  **`crewed`, and why it is not the last tick.** `PlacementSnapshot.crewed`
+  and `MachineLoadEntry.crewed` come from `World::uncrewed_placements`,
+  which allocates each pool's `headcount` in the order the tick claims in —
+  `topology.machines`, then `topology.docks`, whole crew or nothing — and
+  returns whoever cannot be afforded. The obvious alternative, recording
+  what the last tick actually refused, was rejected: the tick only claims
+  for a machine that would otherwise have worked, so the vat reads crewed on
+  every tick the crusher happened to be waiting for a tomato. That flicker
+  is precisely what the 2026-09-16 establishment change existed to end. The
+  question `crewed` answers is the stable one — *if everything placed wanted
+  to run at once, who goes without?*
+
+  It is derived, so nothing was added to the save. It is placed BEFORE
+  `links` in `PlacementSnapshot` because `links` is the only optional key
+  there and `tests/links.rs` pins the layout JSON byte for byte.
+
+  **How Godot shows it.** The hover's load line, in the same words a `staff`
+  stall gives — `_uncrewed_reason_text` and `_stall_reason_text` both go
+  through `_crew_categories_text`, so the two readings cannot drift — and
+  the load bar. The bar needed one new idea: an uncrewed machine does no
+  work, so its window decays to 0% and there is no FILL left to make amber
+  at exactly the moment the player needs telling. So the TRACK's border
+  carries the colour (`_set_meter_outline`), which is honest — the fill is
+  the quantity, the border is the state — and the words directly above it
+  still say which state it is (UI_UX §7). A mothballed machine takes
+  precedence over both and reads `○ switched off` on an unlit grey bar,
+  because the player chose it and nothing about it is a fault. **No in-world
+  pole**: the andon poles were removed on 2026-09-12 and the hover panel
+  remains the one place status lives.
 
 - 2026-09-16: **The game is called CONDIMENTAL.** "sauce-factory was just a
   temporary name, ive now come up with the name 'CONDIMENTAL'". The owner's
@@ -962,9 +1054,9 @@ matches what code comments and data files cite.
   Expansion is more expensive up front and less surprising later. Because
   the starting roster exactly equals the shipped line's establishment, a
   fresh game still starts perfectly staffed. Whether a machine should be
-  *mothballable* — switched off deliberately, releasing its crew — is left
-  open in GAMEPLAY §11; it is a balance question, and nothing in the wire or
-  the save format precludes it.
+  *mothballable* — switched off deliberately, releasing its crew — was left
+  open here and in GAMEPLAY §11. **Decided 2026-09-20 (the record above):**
+  yes, machines only, through `PlayerCommand::SetMothballed`.
 
   **The CREW plate, and what it displaced.** The second half of the same
   request: a permanent readout on the right-hand column showing who you

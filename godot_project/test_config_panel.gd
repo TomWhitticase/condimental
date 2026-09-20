@@ -32,6 +32,10 @@
 #     simulation, marks the slot, retitles the panel and stops the tank
 #     reading as unconnected, and the note beneath it names how much fluid
 #     switching would destroy — the tank's AND the run's — before the click,
+#   * a MACHINE opens the same panel (issue #19), with the hopper/tank rows
+#     hidden, and its mothball switch issues `set_mothballed`, reads its
+#     state back off the simulation, and puts "switched off" and the unlit
+#     glyph into the hover line and the unlit fill into the load bar,
 #   * SPACE, V and Q no longer touch any hopper or tank.
 #
 # What it does not assert is how the panel LOOKS — that is
@@ -47,7 +51,12 @@ const HOPPER_A := Vector2i(-4, 0)
 const HOPPER_B := Vector2i(-4, 4)
 const TANK := Vector2i(4, 2)
 const LONE_TANK := Vector2i(12, 12)
+const MIXER := Vector2i(0, 0)
 const MIXER_NON_ORIGIN := Vector2i(0, 1)
+## One tile of `build_fluid_run`'s own pipe run — a kind with nothing to
+## configure, which is what proves the panel did not simply start opening
+## for everything when it learned about machines.
+const PIPE_TILE := Vector2i(2, 2)
 const EMPTY_FLOOR := Vector2i(20, 20)
 
 var main
@@ -105,6 +114,14 @@ func _run_volume_fed_by(tank: Dictionary) -> float:
 	return 0.0
 
 
+func _machine_snapshot(tile: Vector2i) -> Dictionary:
+	for machine in JSON.parse_string(main.sim.machine_load_snapshots_json()):
+		var at: Array = machine["tile"]
+		if int(at[0]) == tile.x and int(at[1]) == tile.y:
+			return machine
+	return {}
+
+
 func _owned(item: String) -> int:
 	return int(main._owned_ingredient_counts().get(item, 0))
 
@@ -125,6 +142,10 @@ func _repoll() -> void:
 	# well as the tank's — so a poll that skipped this would read a stale
 	# number that no player could ever see.
 	main._update_fluid_network()
+	# The load record is polled on its own cadence in the live scene and
+	# carries the machine's staffing facts (issues #19 and #20), so a test
+	# with no frames has to ask for it by hand like everything else here.
+	main._poll_machine_load()
 	main._update_config_panel()
 
 
@@ -351,10 +372,22 @@ func _run_checks() -> void:
 	if main._config_title.text != "Hopper — %s" % main._item_display_name(first_item):
 		_fail("the retargeted panel still shows hopper A's title: '%s'" % main._config_title.text)
 		return
-	# Any other kind closes it, from any tile of its footprint.
+	# A MACHINE retargets it too now (issue #19): the panel grew a third
+	# shape rather than a second panel, and a non-origin footprint tile
+	# resolves to the origin exactly as a hopper's click does.
 	main._config_click_at_tile(MIXER_NON_ORIGIN)
+	if not main._config_open or main._config_tile != MIXER:
+		_fail("clicking the mixer's second tile did not open its panel at %s (open=%s, tile=%s)" % [
+			str(MIXER), main._config_open, str(main._config_tile)
+		])
+		return
+	if main._config_kind != "mixer":
+		_fail("the machine panel is about '%s', not the mixer" % main._config_kind)
+		return
+	# A pipe is still nothing to configure, and still closes it.
+	main._config_click_at_tile(PIPE_TILE)
 	if main._config_open:
-		_fail("clicking the mixer left a hopper's panel open")
+		_fail("clicking a pipe left a panel open")
 		return
 	main._config_click_at_tile(HOPPER_B)
 	main._config_click_at_tile(EMPTY_FLOOR)
@@ -631,7 +664,69 @@ func _run_checks() -> void:
 		return
 	main._close_config_panel()
 
-	# --- 11. The three old keys are gone -------------------------------------
+	# --- 11. The machine panel and its mothball switch (issue #19) ----------
+	# The escape hatch from the unpaid spiral, on the panel the player
+	# already opens to change a building's mind. What is checked here is the
+	# BOUNDARY — the right command, the state read back off the simulation's
+	# own snapshot rather than flipped locally, and the words. That the
+	# establishment and the wage bill actually fall is proved in Rust
+	# (`sim_core/tests/mothball.rs`), where it belongs.
+	main._config_click_at_tile(MIXER)
+	if not main._config_open or main._config_kind != "mixer":
+		_fail("clicking the mixer did not open a machine panel")
+		return
+	# A machine has nothing to fill and nothing to keep filled, so those
+	# rows are hidden rather than left disabled forever.
+	if main._config_fill_row.visible or main._config_auto_button.visible \
+			or main._config_auto_note.visible or main._config_picker_box.visible:
+		_fail("a machine's panel still shows the hopper/tank rows")
+		return
+	if not main._config_machine_box.visible:
+		_fail("a machine's panel hides the mothball switch")
+		return
+	if main._config_mothballed:
+		_fail("a freshly placed mixer reads as already mothballed")
+		return
+	if main._config_mothball_button.text != "IN SERVICE:  ON":
+		_fail("the switch on a running mixer reads '%s'" % main._config_mothball_button.text)
+		return
+	if main._config_machine_state.text.find("in service") < 0:
+		_fail("a running mixer's panel does not say it is in service: '%s'" % main._config_machine_state.text)
+		return
+
+	main._on_config_mothball_pressed()
+	_repoll()
+	if not _machine_snapshot(MIXER).get("mothballed", false):
+		_fail("the switch did not reach the simulation — the mixer is still in service")
+		return
+	if not main._config_mothballed or main._config_mothball_button.text != "MOTHBALLED:  OFF":
+		_fail("the panel did not read the mothballed state back: '%s'" % main._config_mothball_button.text)
+		return
+	# Never colour alone (UI_UX.md §7): the hover line carries the glyph AND
+	# the words, and the bar behind it goes to the unlit grey.
+	var mixer_key: String = main._tile_key(MIXER)
+	var load_text: String = main._machine_load_text(mixer_key)
+	if load_text.find("switched off") < 0 or load_text.find(main.LOAD_OFF_GLYPH) < 0:
+		_fail("a mothballed machine's load line is '%s'" % load_text)
+		return
+	if main._load_bar_color(main._machine_load[mixer_key]) != main.METER_FILL_OFF:
+		_fail("a mothballed machine's load bar is not the unlit fill")
+		return
+	if main._machine_hover_text(mixer_key, "mixer", "east").find("switched off") < 0:
+		_fail("the mixer's hover does not say it is switched off")
+		return
+
+	main._on_config_mothball_pressed()
+	_repoll()
+	if _machine_snapshot(MIXER).get("mothballed", true):
+		_fail("throwing the switch back did not return the mixer to service")
+		return
+	if main._config_mothballed or main._config_mothball_button.text != "IN SERVICE:  ON":
+		_fail("the panel did not read the returned-to-service state back")
+		return
+	main._close_config_panel()
+
+	# --- 12. The three old keys are gone -------------------------------------
 	var a_before := _hopper_snapshot(HOPPER_A)
 	var tank_before := _tank_snapshot(TANK)
 	var stock_before: Dictionary = main._owned_ingredient_counts().duplicate()
@@ -653,12 +748,12 @@ func _run_checks() -> void:
 		_fail("a bare keypress opened the configuration panel")
 		return
 	for legend in [main.ISO_HELP_TEXT, main.FP_HELP_TEXT]:
-		if legend.find("hopper or tank") < 0:
-			_fail("the legend does not say a hopper or tank is clicked to configure it")
+		if legend.find("click a building: configure") < 0:
+			_fail("the legend does not say a building is clicked to configure it")
 			return
 		if legend.find("Q:") >= 0 or legend.find("V:") >= 0 or legend.find("SPACE:") >= 0:
 			_fail("the legend still advertises a removed fill/contents key: %s" % legend)
 			return
 
-	print("CONFIG_PANEL_OK: click opens/toggles/retargets/closes, FILL per building with reasons, AUTO-FILL round-trips and keeps a %d-unit hopper and a %.0f-unit tank full, picker retargets a placed hopper and declares a tank's fluid after warning what switching destroys, ESC/menus/modes/removal close it, unplumbed tank refused, SPACE/V/Q inert" % [capacity, tank_capacity])
+	print("CONFIG_PANEL_OK: click opens/toggles/retargets/closes, FILL per building with reasons, AUTO-FILL round-trips and keeps a %d-unit hopper and a %.0f-unit tank full, picker retargets a placed hopper and declares a tank's fluid after warning what switching destroys, ESC/menus/modes/removal close it, unplumbed tank refused, a machine's mothball switch round-trips through the sim and reads back in words, SPACE/V/Q inert" % [capacity, tank_capacity])
 	quit(0)
