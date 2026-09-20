@@ -292,12 +292,14 @@ too: a hover target the camera is **not showing** — `--fixture chain
 server clamps a warp to the window, so the run failed at the shutter blaming
 a hand on the mouse for a tile that was nine thousand pixels off the left
 edge. The aim now checks the projection against the viewport first and says
-exactly that. What the sweep did NOT find was a spurious refusal: 43
-combinations, every one that should render did. One run refused at the
-shutter naming a tile nobody asked for, while four sibling worktrees were
-running Godot, and passed six times in a row afterwards — which is the
-parallel-pointer case the message already lists, measured rather than
-assumed, and now recorded in `screenshot-scene.sh`'s own header.
+exactly that. What the sweep did NOT find was a spurious refusal: 48
+combinations — 41 that must render, 7 that must refuse — and every one did
+what it should, before the merge with main and again after it. Across two sweeps one run each
+refused at the shutter naming a tile nobody asked for — a different case
+each time, both while sibling worktrees were running Godot, and both passing
+six times in a row afterwards — which is the parallel-pointer case the
+message already lists, measured rather than assumed, and now recorded in
+`screenshot-scene.sh`'s own header.
 
 ### 2026-09-20 — A tank says what it holds, and a recipe file may fork
 
