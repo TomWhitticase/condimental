@@ -430,7 +430,13 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   legend sits **inside** the scroll rather than under the footer for §2b
   point 32's reason — `_fit_grid_scroll` takes its cap from the panel's
   height, so four lines of chrome cost a whole category row — with one
-  always-visible footer line saying it is down there. A row
+  always-visible footer line saying it is down there. It shares **one flat
+  box** with the category rows (2026-09-20, issue #63): the scroll's cut
+  snaps between the *children* of the box it is given, so with the rows
+  nested a level down the only cut that was not "the whole list" was one
+  through the explainer's own lines. Flat, every boundary a reader can see is
+  a boundary the cut can land on, and the explainer is shown whole or not at
+  all. A row
   carries the same fact permanently: `▲ 2 unpaid, idle until payday` / `▲
   1 left last payday`, joined when both apply. E, M, C and H are one
   modal at a time; ESC closes whichever is up. Being short is also read
@@ -568,6 +574,56 @@ scale so twelve fit. `project.godot`'s window is 1600x900, where nothing
 scrolls; at 1280x720 the build grid scrolls slightly, a deliberate last
 resort over burying the footer.
 
+**Width yields too, and before it is clipped** (2026-09-20, issue #62).
+Height had yielded since this section was written; width had not, so at
+1280x720 the staff panel (1350px), the build menu (1412px) and the contracts
+board (1380px) were simply drawn off *both* edges of the window — taking the
+FIRE and SIGN buttons with them. **A control the player cannot reach is the
+worst thing a layout can do**, above every fault ranked in §5f. So a modal
+measures itself against `_modal_available_width()` (the viewport less
+`MODAL_EDGE_MARGIN`, in window pixels — it is the last gap before a control
+is off the screen, not a design margin that scales) and gives width back in
+this order:
+
+1. **A sentence moves to the row's hover.** The staff row already ranks five
+   sentences and shows one; at this width it shows none, and the hover
+   carries all five along with the per-tick figure and the meter caption
+   (`_fit_staff_width`, `_apply_staff_prose`). What stays is what can be
+   clicked.
+2. **A grid of cards takes fewer columns.** `_fit_grid_columns` asks the
+   panel whether it fits, one column at a time, then balances the rows (six
+   crates are 3+3, never 5+1). `SHOP_SLOT_COLUMNS` and `MARKET_SLOT_COLUMNS`
+   are **the most** a grid ever takes, not the number it always takes.
+3. **The list scrolls**, as above.
+
+**`autowrap_mode` is not used anywhere in this layout.** A wrapping Label
+reports a 1px minimum width and a height shaped at whatever width it was last
+*drawn* at — so under `--headless` it measures 1x1609 and every panel sized
+around it is nonsense. This layout is measurement-driven end to end and its
+regression proof is a headless test. A sentence that must get narrower is
+**broken at a join it already has** (the board's offer is a mix label and a
+terms label) — a break at a fixed point, not a reflow.
+
+**A panel that dodges the right-hand column consults one list, after its own
+clamp** (2026-09-20, issue #88). The clipboard, STOCK and CREW plates are
+three tenants of one edge, so a panel avoiding them takes them as a list
+(`_contract_panel_rect`, `_stock_rect`, `_crew_rect`) rather than a branch
+each — a branch each is how CREW came to be missing from
+`_position_config_panel` for four days. The avoidance is judged **after** the
+panel's own clamp, per §2b point 33, and a panel flipped aside lands its edge
+**on** the bound rather than at a fixed offset from its anchor. The legend is
+deliberately not in that list: at 1280x720 nothing clears both it and the
+column, and a keybind reference the player can fold with F1 is the right thing
+to cover in preference to a live readout.
+
+**A headless test cannot prove a width; only the render can.** Godot's
+headless font metrics are narrower than a real window's: the staff panel
+passed the headless assertion at the very size the rendered frame clipped.
+Headless assertions are the regression net, `scripts/screenshot-scene.sh` is
+the acceptance. Relatedly, `get_combined_minimum_size()` can *under*report
+what is on screen (the machine hover: 299px reported, 545px drawn), so
+anything positioning a panel takes `maxf(minimum, size)` on both axes.
+
 ### 5d. The screens around the game: the main menu and the pause menu
 
 Both are built from §5's ingredients (dark plate, hazard-yellow rule,
@@ -695,7 +751,8 @@ resort); this readout does not, so the clipboard is the one that yields.
 **Where the yielding stops** (issue #13): both panels also have *floors* —
 one whole docket, one whole stock row — and at 1280x720 with a full board
 the two floors do not both fit in the column. Ranked worst to least worst,
-the faults are: a panel drawn ON another panel; a card cut through the
+the faults are: **a control the player cannot reach** (2026-09-20, §5c);
+a panel drawn ON another panel; a card cut through the
 middle of a line; a list showing less than it could. So the clipboard may
 grow past what the plate reserved, taking the column back a docket at a
 time, up to the line the plate stands on once it has given up all but one
@@ -709,14 +766,24 @@ countdown that fits (`_line_boundary_height`). The ordering above is
 unchanged — the clamp still wins, and the cut still goes down, never up.
 It is the third rank that got sharper: "a list showing less than it could"
 now means a docket showing fewer of its own lines, not a docket sliced
-through one. The one case this cannot reach is 1280x720 with the strip
-down and a full board, where the column leaves the clipboard 12px and the
-first line boundary inside a docket is 43px: snapping there would show no
-docket at all, and a clipboard with neither a docket nor the cue that
-there are dockets is worse than the ragged edge. That case keeps the
-ragged cut, and issue #17 stays open for it — the answer there is a
-shorter docket, which is a content decision, not a layout one. The
-shipped 1600x900 window shows whole dockets and the whole plate.
+through one. The shipped 1600x900 window shows whole dockets and the whole
+plate.
+
+**The case that would not snap is bought with the hint's line** (2026-09-20,
+closing issue #17). At 1280x720 with every offer signed the column left the
+clipboard 12px where the first line boundary inside a docket is 43px:
+snapping there would have shown no docket at all, and a clipboard with
+neither a docket nor the cue that there are dockets is worse than a ragged
+edge — so that one case kept the ragged cut. The line it needed was already
+on the panel: the board hint. **The hint is a line the docket stack may
+spend.** `_update_contract_panel` — the one place that knows what the stack
+actually got — hides it when, and only when, the cut falls below the stack's
+first line boundary (`_first_line_boundary`), and re-fits; that line is
+exactly what puts the cut back on a boundary. "Sign more orders" is also the
+least useful sentence on a clipboard whose every order is signed. Issue #13
+made the same trade against the SHORT-STAFFED strip; the difference now is
+that there is exactly ONE owner of the hint's visibility, so
+`_update_staff_alert` no longer touches it.
 
 **The legend folds, and folding is not a modal.** Its plate gains a heading
 row — `CONTROLS` and a button naming its key — and folds to that stub, so

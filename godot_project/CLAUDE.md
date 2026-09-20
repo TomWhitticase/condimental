@@ -70,7 +70,21 @@ Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
 - **A cursor-following panel positions against the fixed HUD plates**
   (hotbar reserved height, legend, clipboard), not just viewport edges, and
   every candidate is judged *after* the clamp (`_panel_position_near`,
-  `_pushed_clear_of` — UI_UX §2b point 33).
+  `_pushed_clear_of` — UI_UX §2b point 33). The right-hand column is **one
+  list** — `_contract_panel_rect`, `_stock_rect`, `_crew_rect` — never a
+  branch per plate, and a panel flipped aside lands its edge *on* the bound.
+- **No modal is ever wider than the window, and no control is drawn where
+  it cannot be clicked** (UI_UX §5c). Width yields in this order: prose to
+  the row's hover (`_fit_staff_width`), then fewer grid columns
+  (`_fit_grid_columns` — `SHOP_SLOT_COLUMNS`/`MARKET_SLOT_COLUMNS` are the
+  *most* a grid takes), then scroll. **`autowrap_mode` is banned**: a
+  wrapping Label reports a 1px minimum width and a height shaped at whatever
+  width it was last *drawn* at, which is meaningless under `--headless`.
+  Break a long sentence at a join it already has.
+- **A headless test cannot prove a width.** Headless font metrics are
+  narrower than a real window's, and `get_combined_minimum_size()` can
+  underreport what is on screen — take `maxf(minimum, size)` when
+  positioning. `scripts/screenshot-scene.sh` at 1280x720 is the acceptance.
 - **Audio is synthesised into `AudioStreamWAV` at runtime**; no `.wav` in the
   repo. A cue is fired by the handler that knows the real outcome (compare
   money/owned before and after), never by the input — so a refused command
