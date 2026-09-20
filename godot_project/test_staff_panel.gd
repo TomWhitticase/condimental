@@ -86,6 +86,13 @@ func _process(_delta: float) -> bool:
 	if _ran:
 		return true
 	_ran = true
+	# Every check below reads the panel at the size UI_UX.md §5c designs the
+	# wide case for. It is set HERE rather than at the one check that says
+	# 1600x900 in its name because the panel's content now depends on the
+	# window: at 1280x720 a row's prose is on its hover instead of on the row
+	# (`_fit_staff_width`, issue #62), which is a layout rule test_hud_plates.gd
+	# owns. A `--script` run starts at the project's own window size.
+	root.size = Vector2i(1600, 900)
 	_run_checks()
 	return true
 

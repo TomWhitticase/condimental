@@ -177,8 +177,8 @@ const POPULATE_TICKS_PER_SPAWN := 10
 ## the same list written twice, and there is no third place to check.
 const FIXTURE_NAMES: PackedStringArray = [
 	"demo", "machines", "fluids", "vat", "splitter", "chain", "stress",
-	"pipes", "gallery", "items", "bottleneck", "bbq", "stalled_run",
-	"understaffed", "shortfall", "full_dock",
+	"pipes", "gallery", "items", "fluid_gallery", "bottleneck", "bbq",
+	"stalled_run", "understaffed", "shortfall", "full_dock",
 ]
 
 var _frames := 0
@@ -224,6 +224,13 @@ var _config_tile := Vector2i.ZERO
 ## hopper is photographed after being retargeted to another ingredient.
 var _market := false
 var _contents := -1
+
+## `--contents-refill` buys the fluid just declared and pumps it back into the
+## tank and its run, so the picker's note is photographed saying what a
+## *second* switch would destroy. Without it the frame necessarily shows the
+## unquantified wording: pressing the picker slot is itself the destructive
+## act, so the tank and its run are empty the instant the panel is shot.
+var _contents_refill := false
 ## `--no-hud` hides the whole HUD layer. It exists for `--closeup`: the
 ## contract clipboard and the hotbar between them cover the top-right and the
 ## bottom of the frame, which is exactly where a junction lands about half
@@ -391,6 +398,12 @@ const ITEM_GALLERY_ASSETS := [
 ]
 var _item_gallery := false
 
+## Where `--fluid-gallery` puts the camera when nothing else says: the
+## centre of `build_fluid_gallery`'s 17x3 strip, at the widest zoom that
+## still has all six runs inside 1600x900 with a margin.
+const FLUID_GALLERY_FOCUS := Vector2(8.0, 1.0)
+const FLUID_GALLERY_SIZE := 64.0
+
 ## `--closeup` target tile and orthographic width; `_closeup` gates both.
 const CLOSEUP_SIZE := 9.0
 var _closeup := false
@@ -425,6 +438,8 @@ func _initialize() -> void:
 		_pick_fixture("pipes", "--pipe-gallery")
 	if args.has("--belt-gallery"):
 		_pick_fixture("gallery", "--belt-gallery")
+	if args.has("--fluid-gallery"):
+		_pick_fixture("fluid_gallery", "--fluid-gallery")
 	_item_gallery = args.has("--item-gallery")
 	if _item_gallery:
 		_pick_fixture("items", "--item-gallery")
@@ -473,6 +488,7 @@ func _initialize() -> void:
 	_unlock_toast = args.has("--unlock-toast")
 	_no_hud = args.has("--no-hud")
 	_contents = int(_string_arg(args, "--contents")) if _string_arg(args, "--contents") != "" else -1
+	_contents_refill = args.has("--contents-refill")
 	_contracts = args.has("--contracts")
 	if _contracts:
 		_pick_fixture("chain", "--contracts")
@@ -514,8 +530,10 @@ func _initialize() -> void:
 	_title = args.has("--title")
 	_menu = args.has("--menu") or _title
 	_pause = args.has("--pause")
-	_parse_closeup(args)
+	if not _parse_closeup(args):
+		return
 	_resolve_fixture()
+	_apply_fluid_gallery_defaults(args)
 	# The world this frame actually came from, printed whether or not
 	# anything asked for one — a frame that cannot be traced back to its
 	# fixture is not evidence (issue #70).
@@ -538,12 +556,6 @@ func _initialize() -> void:
 	# live here and crashed with "base object of type Nil".)
 
 
-## Records the fixture a convenience flag implies. The LAST caller wins,
-## which is the precedence this file has always had and which
-## `scripts/screenshot-scene.sh` documents (`--bbq` is deliberately parsed
-## last, so `--contracts --bbq` is the BBQ line with the contracts board
-## over it). What changed with issue #70 is only that this no longer
-## overwrites an explicit `--fixture`; `_resolve_fixture` decides that.
 ## Stops the run with a non-zero status. `quit()` alone leaves one more
 ## `_process` pass to come, so this also latches `_refused`.
 func _refuse() -> void:
@@ -551,6 +563,12 @@ func _refuse() -> void:
 	quit(1)
 
 
+## Records the fixture a convenience flag implies. The LAST caller wins,
+## which is the precedence this file has always had and which
+## `scripts/screenshot-scene.sh` documents (`--bbq` is deliberately parsed
+## last, so `--contracts --bbq` is the BBQ line with the contracts board
+## over it). What changed with issue #70 is only that this no longer
+## overwrites an explicit `--fixture`; `_resolve_fixture` decides that.
 func _pick_fixture(fixture: String, flag: String) -> void:
 	_flag_fixture = fixture
 	_flag_fixture_flag = flag
@@ -639,6 +657,16 @@ func _build_fixture() -> void:
 			Layouts.build_pipe_gallery(_main.sim)
 		"gallery":
 			Layouts.build_belt_gallery(_main.sim)
+		"fluid_gallery":
+			# The one fixture that can be built and still not BE itself:
+			# move a pipe and two runs merge, and the frame comes back a
+			# perfectly good-looking factory missing a colour the reviewer
+			# was told it held. Refuse instead — no PNG, non-zero status.
+			var complaint: String = Layouts.build_fluid_gallery(_main.sim)
+			if complaint != "":
+				printerr("SCREENSHOT_FAIL: %s" % complaint)
+				_refuse()
+				return
 		"items":
 			Layouts.build_item_gallery(_main.sim)
 		"bottleneck":
@@ -707,22 +735,74 @@ func _reframe() -> void:
 
 ## `--closeup TX,TY[,SIZE]` — the argument is one comma-separated token so
 ## it survives the `--` passthrough without an argument-order convention.
-func _parse_closeup(args: Array) -> void:
+## Both `--closeup 9,-2.5,14` and `--closeup=9,-2.5,14` are accepted, because
+## `_string_arg` takes the `=` form and two argument styles in one script
+## disagreeing about it is a trap (issue #114).
+##
+## **A `--closeup` this cannot read stops the run.** It used to fall through
+## and render a whole-factory frame at default zoom with `SCREENSHOT_OK:` and
+## exit 0, so the reviewer measured a picture nobody asked for — the one
+## failure a screenshot review cannot catch by looking. Returns false when it
+## refused.
+func _parse_closeup(args: Array) -> bool:
 	for i in range(args.size()):
-		if String(args[i]) != "--closeup":
+		var arg := String(args[i])
+		if not arg.begins_with("--closeup"):
 			continue
-		if i + 1 >= args.size():
-			return
-		var parts: PackedStringArray = String(args[i + 1]).split(",")
-		if parts.size() < 2:
-			return
+		var value := ""
+		if arg == "--closeup":
+			if i + 1 < args.size():
+				value = String(args[i + 1])
+		elif arg.begins_with("--closeup="):
+			value = arg.substr("--closeup=".length())
+		else:
+			printerr(
+				"SCREENSHOT_FAIL: unknown flag '%s'. Did you mean --closeup TX,TY[,SIZE]?" % arg
+			)
+			_refuse()
+			return false
+		var parts: PackedStringArray = value.split(",")
+		if value == "" or parts.size() < 2:
+			printerr(
+				"SCREENSHOT_FAIL: --closeup wants TX,TY[,SIZE] as one comma-separated token, got '%s'"
+				% value
+			)
+			_refuse()
+			return false
 		_closeup = true
 		# Fractional on purpose: a junction sits ON a tile boundary, so the
 		# frame worth photographing is usually "half a tile past the belt".
 		_closeup_tile = Vector2(float(parts[0]), float(parts[1]))
 		if parts.size() >= 3:
 			_closeup_size = float(parts[2])
+		return true
+	return true
+
+
+## The two framing choices `--fluid-gallery` makes for itself, applied after
+## `_resolve_fixture` because that is the first point at which the settled
+## fixture name is known (`_pick_fixture` only records a REQUEST, so that an
+## explicit `--fixture` can still win and say so). Both are defaults: an
+## explicit `--closeup` was already parsed above and is left alone, and
+## `--no-hud` cannot be un-asked-for anyway.
+##
+##   * The scene's auto-framing pads a world out to EMPTY_WORLD_FRAME_TILES
+##     on both axes, which is right for a factory and wrong for this: the
+##     gallery is 17 tiles long and 3 deep, so the padding is most of the
+##     frame and the six colours the shot exists to compare come back a few
+##     pixels wide each.
+##   * The HUD goes, for the reason `_no_hud` already records one step
+##     further on: the subject is a line of pipe running corner to corner,
+##     and the legend and the clipboard sit on both ends of that diagonal.
+##     There is no framing that shows six runs and misses both panels.
+func _apply_fluid_gallery_defaults(args: Array) -> void:
+	if _fixture != "fluid_gallery":
 		return
+	if not _closeup:
+		_closeup = true
+		_closeup_tile = FLUID_GALLERY_FOCUS
+		_closeup_size = FLUID_GALLERY_SIZE
+	_no_hud = true
 
 
 ## Aims the isometric camera at one tile, close in. Deliberately writes
@@ -929,6 +1009,27 @@ func _open_config_at(tile: Vector2i) -> void:
 		return
 	if _contents >= 0:
 		_main._on_config_picker_pressed(_contents)
+		if _contents_refill:
+			_refill_declared_tank()
+
+
+## Fills a tank back up after `--contents` declared what it holds, through the
+## panel's own FILL button and the sim's own ticks — one crate is 30 units and
+## the run drinks, so it takes several presses and a few ticks for the pipe run
+## to carry anything worth warning about.
+func _refill_declared_tank() -> void:
+	var fluid: String = String(_main._tank_fluids[_contents]) if _contents < _main._tank_fluids.size() else ""
+	if fluid == "":
+		printerr("SCREENSHOT: --contents-refill: no fluid in picker slot %d" % _contents)
+		return
+	Layouts.fund(_main.sim, 5000)
+	Layouts.stock(_main.sim, fluid, 256)
+	for i in range(4):
+		_main._on_config_fill_pressed()
+	for i in range(5):
+		_main.sim.tick()
+	_main._apply_dirty_chunks()
+	_main._update_fluid_network()
 
 
 ## Drives the real chain across several contract cadence boundaries, feeding
@@ -1196,6 +1297,12 @@ func _process(_delta: float) -> bool:
 		return _write_frame()
 	if _frames == 1 and _fixture != "":
 		_build_fixture()
+		# `_refuse()` inside the build latches and calls `quit(1)`, but quit
+		# only takes effect between frames — without this the rest of THIS
+		# pass would go on to open panels and, at the last frame, write the
+		# PNG that was just refused.
+		if _refused:
+			return true
 	# Straight after the fixture and before anything opens a panel: the gate
 	# decides what the market, the larder and the board have in them, so it
 	# has to be settled before they are drawn.

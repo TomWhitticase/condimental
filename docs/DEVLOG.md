@@ -90,11 +90,16 @@ below is history and should only ever be appended to.)*
 - **The sim can express a branching chain (2026-09-17).** A machine kind may
   have several recipes and a placed machine runs whichever its current inputs
   satisfy (file order breaks a tie, and there is deliberately no player-facing
-  picker); a recipe may draw several fluid networks, matched by fluid id;
-  `validate_chain` is a connectivity check over a graph. A pipe run's fluid is
-  now derived by shrinking possibility sets rather than by whichever machine
-  reached it first, and which recipe a machine is on is saved. `data/*.ron` is
-  untouched — the BBQ chain itself is the next ticket. See the log entry below.
+  picker); a recipe may draw several fluid networks, matched by fluid id. A
+  pipe run's fluid is now derived by shrinking possibility sets rather than by
+  whichever machine reached it first, and which recipe a machine is on is
+  saved. `data/*.ron` is untouched — the BBQ chain itself is the next ticket.
+  **Amended 2026-09-20 (below):** `validate_chain` no longer demands one
+  connected component, so `recipes.ron` may hold independent production lines;
+  and where the graph cannot name a pipe run, a **tank declares what it
+  holds** and its declaration replaces the run's candidate set. The save is
+  schema 2 for it, and a v1 save is refused rather than migrated. See the log
+  entries below.
 - **Repo:** Private GitHub repo (`TomWhitticase/condimental`), `main` branch. Conventional Commits enforced via a local `commit-msg` hook + CI backstop (see CONTRIBUTING.md).
 - **Work reaches `main` through pull requests, and deferrals become issues
   (2026-09-16).** Nothing is pushed to `main` directly — a `pre-push` hook
@@ -148,6 +153,21 @@ below is history and should only ever be appended to.)*
   slot. Raw stock moved off the hotbar onto a **right-hand STOCK plate**,
   one row per priced ingredient. The keybind legend **folds to a labelled
   stub** (its button, or F1).
+- **The HUD fits 1280x720 (DONE, 2026-09-20; issues #62, #63, #69, #17).**
+  Every panel knew how to yield height and none knew how to yield width, so
+  at the smallest supported window the staff panel, build menu and contracts
+  board were clipped on both edges with `FIRE −1` and `SIGN` off the screen.
+  **A control the player cannot reach now outranks every other layout rule**
+  (UI_UX §5c/§5f): a modal measures the window and gives width back by moving
+  a row's prose to its hover, then taking fewer grid columns, then scrolling.
+  The market wraps into a grid and dodges the right-hand plates, the staff
+  explainer is shown whole or not at all, and the clipboard spends its hint's
+  line to keep the docket cut on a line boundary. `test_hud_plates.gd` sweeps
+  all five modals at 1280x720. Two findings deferred as issues: the machine
+  hover cannot clear an open legend at that size, and headless font metrics
+  are narrower than a real window's — so only a render can prove a width.
+  Issue #88 (a building's configuration panel over the STOCK, CREW and
+  CONTRACTS plates) was folded in, being the same fix.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -219,6 +239,286 @@ frames before it saves. That defeated the first glow sweep entirely (two
 renders of the same settings differed more than two different settings did),
 and both post-pass retunes above were measured through a tick-pinned harness
 instead.
+### 2026-09-20 — A tank says what it holds, and a recipe file may fork
+
+Two fluid-identity issues off the board, both latent: neither bites the
+shipped chain today, and both would have bitten the next content addition.
+
+**A recipe file may hold independent production lines (issue #42).**
+`validate_chain` demanded that every recipe be reachable from recipe 0 by a
+shared ingredient id — a proxy for "nothing in this file is unreachable" that
+happened to hold while every recipe descended from tomato. Mayonnaise (eggs +
+oil, GAMEPLAY §2 tier 4) shares nothing with ketchup, so adding it to
+`data/recipes.ron` would have panicked the game at load with a message about
+connectivity. The rule is now per component and about obtainability, not
+about the graph's shape: every component must contain at least one recipe
+whose machine the player can buy and whose inputs are all raw or made
+upstream, and every recipe must be reachable within its own component from
+one of those. A file with two self-sufficient lines constructs; a component
+with no buyable machine, or one whose only inputs nothing produces, still
+panics at load. `machines.validate_covers` runs first so a missing machine is
+named as a missing machine rather than surfacing as an unstartable component.
+
+**A tank declares its fluid (issue #43).** Pipe runs are named by what the
+machines at their ends claim, so two tank-fed runs feeding one machine that
+draws two *raw* fluids are indistinguishable — the graph offers no way to say
+which tank is the vinegar. `resolve_network_fluids` takes a declaration set
+per run now, seeded from the tanks on it: a declared tank *replaces* its run's
+candidate set with a singleton rather than intersecting, so the player's
+statement wins outright and a contradiction between two tanks on one run is
+reported as `Ambiguous` instead of silently picked. Only a raw fluid may be
+declared, and switching a declared tank empties it, exactly as a hopper's
+retarget does. The player-facing half is the tank's config panel: it now
+offers the raw fluids in the same picker the hopper uses, marks the declared
+one, and tells you in a line beneath whether the name was read from the pipe
+run or stated by you.
+
+`tests/tank_fluid.rs` builds the issue's exact case — one mixer drawing two
+raw fluids, two tank-fed runs — and proves both that the graph alone leaves
+it `Ambiguous` and that two declarations resolve it and the machine runs.
+The two-fluid machine could not be photographed: no machine in
+`data/recipes.ron` draws two raw fluids yet (that is why the bug is latent),
+and a Godot fixture cannot inject a recipe.
+
+**The save format's field-addition window is closed.** A declared fluid is
+persisted state, so `SAVE_SCHEMA_VERSION` is 2 and a v1 save is refused by
+number rather than migrated, per ARCHITECTURE §4. Declarations restore before
+topology is re-derived, because pipe naming is *derived* from them — a loaded
+world would otherwise be named as though nothing had been declared. The main
+menu's demo saves are v1 and stop loading until someone runs
+`scripts/make-demo-saves.sh`, which is what that script is for; they live in
+Godot's user directory, not the repo, so this pass cannot do it for you.
+`test_save_load.gd` reads the version out of the save it just wrote instead of
+spelling it, so the next bump does not quietly turn its refusal case into
+"loads fine".
+
+**Declaring is destructive, and says so first.** Review caught that emptying
+only the tank was not enough: `recompute_topology` carries pipe volumes
+across by tile, so the run the tank feeds was silently *relabelled* — sixty
+bought units of vinegar came back as liquid smoke. A declaration change now
+purges the tank *and* every run it discharges into, before the recompute, and
+the fluid is destroyed rather than credited or moved; the config picker names
+the total it is about to destroy so the player consents to it instead of
+discovering it. Refusing the switch while the run holds something was the
+other option and was rejected: it strands a mis-declared tank with no way to
+drain its run. A declaration no machine on the run has a recipe for now makes
+that run read `Unnameable` rather than `Carries`, so the blame lands on the
+tank the player just mis-declared instead of on the machine's outlet.
+
+### 2026-09-20 — The BBQ ingredients get faces, and all six fluids stand in one frame
+
+Two more of the BBQ branch's presentation gaps, both of the same family as
+the last pass: a lookup with a fallback quietly covering for content that
+had never been drawn.
+
+**Spice mix, molasses and liquid smoke are real objects now (issue #67).**
+The three ingredients the second sauce added had no voxel model, so
+`_market_asset_for` fell through to its pipe fallback and the shop offered
+three identical lengths of pipe — and the liquid-smoke tank's panel titled
+itself with one. Three generators join `assets.rs`: a wide steel tin heaped
+with paprika, a narrow tall jar of near-black syrup under a kraft label and
+a steel cap, and a hooped slate drum with a brass bung. They were designed as
+a *row* against tomato, sugar and vinegar rather than one at a time, because
+the market plate shows all six at 64px side by side — each takes a silhouette
+and a value none of the others has, which is what separates them at that
+size. The jar took three rework passes: as first drawn its tapered neck and
+wide cap ate 40% of the height and it read as a tin, exactly like its new
+neighbour. `palette.ron` gains `spice_paprika`, `molasses_black` and
+`smoke_slate`; the last is held equal to `main.gd`'s `liquid_smoke` tint, the
+same rule `vinegar_amber` already follows. `item_liquid_smoke` is icon-only,
+so like the vinegar jug it is built for vengi's camera and not the game's
+(§2b point 35) — its bung sits where the *opposite* corner will see it.
+
+The fallback is the real fix, though, and it is a test: `test_ingredient_models.gd`
+walks every id `data/ingredients.ron` unlocks and fails if any of them
+resolves to the pipe, if a fluid is missing from `FLUID_MODELS` or a solid
+from `ITEM_MODELS`, or if a named asset has no icon. It was proved to fail by
+removing an entry, not only to pass. The next ingredient someone adds gets
+told, rather than shipping green with a pipe for a face.
+
+**A frame that shows all six fluids at once (issue #72).** `bbq` and
+`bbq_mix` sat at zero pressure in every fixture, so the tints #68 added could
+not be photographed and had to be argued for in prose. `--fluid-gallery`
+stands one chain of tanks, pipes, mixers and vats whose topology *names* all
+six runs — vinegar, ketchup mix, ketchup, BBQ mix, liquid smoke, BBQ — and
+then fills them. Naming is topology alone, so no ticking is needed; pressure
+comes through the save-RON door `fund()` and `deliver()` already use, patching
+every `volume_bits` to 10 units, which is within both a pipe segment's
+capacity and a tank's. The fixture checks itself, and — after review — actually
+refuses: if a run comes back unnameable, ambiguous, or at or below the
+pressure `main.gd` needs to draw a body at all, the harness writes NO PNG and
+exits non-zero. The first cut only pushed an error and then photographed the
+degraded gallery anyway, exit 0, which is #70 and #75's failure mode for the
+third time and was caught by the reviewer emptying a run. `test_fluid_gallery.gd`
+runs the same check headlessly in `verify-core-loop.sh`, so the fixture cannot
+rot quietly between renders; it also refuses an empty world first, so its
+silence on the real gallery is evidence rather than a default. The frame
+frames itself too — `_framing_bounds` pads a flat layout to 14 tiles on both
+axes and shrank the subject to nothing, so the fixture carries its own focus
+and ortho size as overridable defaults, and hides the HUD.
+
+**And the gallery immediately earned its keep (issue #100).** With all six
+runs standing side by side it was obvious that `liquid_smoke` could not be
+seen at all: the tint #68 gave it was a near-grey, and the body it paints
+stands inside a grey steel bore — measured at 1:1 it was 11 luma from the
+steel either side of it, a full pipe nobody could find by eye. It is an
+olive-brown now (53 luma and 170 summed-RGB from the same steel), the drum in
+the market moves with it by the rule that keeps a substance one colour, and
+the new test holds every fluid tint to a SATURATION floor rather than a
+contrast one — the failure was chromatic, not tonal, and `vinegar` is no
+darker than the old smoke was.
+
+### 2026-09-20 — The HUD fits a 1280x720 window (issues #62, #63, #69, #17, #88)
+
+Four layout issues, one root cause: every panel in the game knew how to yield
+HEIGHT and none of them knew how to yield WIDTH. At 1600x900 that never
+showed. At 1280x720 — the smallest window the project claims to support — the
+staff panel wanted 1350px, the build menu 1412px and the contracts board
+1380px, and a centred panel wider than its window is clipped on *both* edges.
+What went was the outermost column of each: the icons on the left, and on the
+right `FIRE −1`, the only way to undo a hire, and `SIGN`, the only way to take
+a contract. The panels looked fine in the middle. You could not play the game
+from them.
+
+**The rule this pass adds** is that **a control the player cannot reach is the
+worst thing a layout can do** — above every fault UI_UX §5f already ranked.
+Width is now a budget like height (`_modal_available_width`), and a modal too
+wide for its window gives width back in a fixed order: a row's prose moves to
+its hover (`_fit_staff_width` — the staff row's ranked sentence, the per-tick
+figure and the meter caption, all already on the tooltip); then a grid of
+cards takes fewer columns and balances them (`_fit_grid_columns`, so six
+crates are 3+3 and never 5+1, and `SHOP_SLOT_COLUMNS`/`MARKET_SLOT_COLUMNS`
+now mean *the most* a grid takes); then the list scrolls, as it already did.
+`autowrap_mode` is deliberately **not** used — a wrapping Label reports a 1px
+minimum width and a height shaped at whatever width it was last *drawn* at, so
+it measures as nonsense under `--headless`, where this layout's proof lives. A
+sentence that must be narrower is broken at a join it already has: the board's
+offer is now a mix line and a terms line.
+
+**The other three.** The ingredient market was a fixed `HBoxContainer` that
+neither wrapped nor scrolled — six crates measured 1260px in a 1280px window,
+and a seventh ingredient would simply have been off the edge; it is a
+`GridContainer` in a scroll now, clamped on `x` as well as `y` and pushed
+clear of the clipboard, STOCK and CREW plates rather than reprinting `Money:`
+a few pixels from theirs (#69). The staff panel's scroll box is flat instead
+of nested, because the cut snaps between the *children* of the box it is
+given and the nesting left it nothing to snap to but the explainer's own
+lines (#63). And the clipboard's board hint is now a line the docket stack may
+spend: at 1280x720 with every offer signed the stack was down to 12px against
+a 43px first line boundary, which is the one case §5f had conceded to #17, and
+dropping "sign more orders" from a clipboard whose every order is signed buys
+exactly the line that puts the cut back on a boundary.
+
+**Two things worth knowing before trusting a measurement.** Godot's headless
+font metrics are **narrower** than a real window's: the staff panel passed the
+new headless assertion at the very size the rendered frame clipped, and the
+missing 262px was only found by instrumenting the fit during a real
+`screenshot-scene.sh` run. A headless assertion is the regression net; the
+render is the acceptance. And `get_combined_minimum_size()` can *under*report
+what is on screen — the machine hover reported 299px wide while being drawn at
+545px, and was positioned as if its right-hand 246px did not exist — so
+anything placing a panel now takes `maxf(minimum, size)`. Where no position
+clears every plate at all, `_panel_position_near` scores every candidate by
+total overlapped area and keeps the least bad one rather than pushing off one
+plate onto the next.
+
+**And the panel a click opens, folded in (issue #88).** The configuration
+panel's documented bound was failing three ways at once, all of them this
+pass's own lesson: it named the clipboard and STOCK but not the CREW plate
+that joined that column later; it tested an unclamped `y`, so the clamp lifted
+a tank's panel into rows the test had just cleared it of; and its flip was a
+fixed displacement from the anchor rather than a landing on the bound, which
+left 15px of panel on the clipboard at 1280x720. One list of three rects,
+clamped first, flipped onto the bound. The legend stays off that list
+deliberately — at 1280x720 nothing clears both it and the column, and a
+keybind reference the player can fold with F1 is the right thing to cover in
+preference to a live readout.
+
+`test_hud_plates.gd` sweeps all five modals (E, M, C, P, H) at 1280x720 and
+asserts no panel is wider than the window, none is drawn off it, and no button
+is unreachable — excusing only a button under a scroll's fold. A sixth case
+opens a building's configuration panel with the camera looking at the building
+and asserts it covers none of the three plates. Rendered and
+read at both sizes. Two findings are deferred rather than fixed: the machine
+hover still cannot clear an open legend at 1280x720 (the geometry leaves
+nowhere to stand; the answer is a self-folding legend or a shorter tooltip,
+which is a content decision), and the headless-metrics gap itself.
+
+### 2026-09-20 — Two balance calls, both measured, neither one a number change
+
+A pass over two BBQ balance/legibility issues that ended with the shipped
+values kept — and with the evidence for keeping them written down, because in
+both cases the cheap fix is the wrong one and nothing in the repo said so.
+**Both sets of numbers were then corrected the same day under review**, which
+is the more useful half of this entry.
+
+**The bank at the moment of building decides whether the BBQ branch costs you
+the board (issue #55, still OPEN).** Building the BBQ branch off a running
+ketchup line stops boxed-ketchup output for about 8 500 ticks: the new pipe
+runs and the second vat fill from the *existing* fluid network, roughly 35
+boxes' worth of throughput into priming pipework before any comes back.
+Delivery windows keep counting; three misses lose a contract. The issue's
+cheap fix is to raise `after_deliveries` in `data/unlocks.ron` until the
+player has slack by the time BBQ lands, so the number was swept — with the
+protocol written down this time, because "when were the extra contracts
+signed" turned out to move every number in the sweep. One order at the shipped
+gate banks 22 and loses nothing; three orders signed **at the gate** bank the
+same 22 and lose one; the same three signed **at tick 0** bank 7 and lose two.
+An emulated gate of 40 banks 24 and loses nothing at all. So **ten stays** —
+not because no number can work, but because 40 deliveries is nowhere near the
+first session ten exists to sit inside — and #55 stays open with the
+measurements posted on it. The two real fixes are filed: a warning at
+placement time (#92) and a fluid network that will not hand a new consumer
+100% of a network the old one lives on (#93).
+
+The first version of this entry claimed the whole board is lost at *every*
+gate, including a 50 000-tick run. It does not reproduce. Two mistakes:
+contracts signed at different moments were reported as one experiment, and
+`market_stall`'s death at tick 1 500 was counted against the branch when the
+no-branch control loses it too. The corrected table and the protocol are in
+`data/unlocks.ron`'s comment.
+
+`test_layouts.gd`'s `--bbq` fixture was rebuilt to prove the setup: a splitter
+merges the BBQ branch onto the ketchup exit belt so both cartons ride one
+line, and the re-sign loop that used to paper over a lost contract is gone.
+The fixture now also **fails loudly** rather than photographing a dead branch:
+if the unlock gate has not opened by its tick ceiling, or if a snapshot will
+not parse, it prints a `BBQ_FIXTURE_FAIL:` marker and asserts.
+
+**The two sauce cartons read apart, and the first measurement that said
+otherwise was wrong (issue #57, closed).** With both boxes on one belt at
+whole-factory framing, `boxed_bbq` reads 117.2 mean luma against a
+`boxed_ketchup` on the same belt in the same frame at 156.7 — a **39.5/255**
+gap, independently reproduced at 42.5 by review. Against the method's anchors
+(1.2/255 = invisible, ~26/255 = reads reliably) that clears the threshold by
+half again. So the lid print introduced on 2026-09-18 does its job and **the
+art is unchanged**.
+
+The useful part is how nearly it went the other way, twice. The first pass
+measured a 5.3/255 gap and concluded the art fails, because the silhouette
+mask used the warm-pixel test earlier passes used (`r > g > b and r - b > 18`)
+and `label_cream` renders near-neutral at (241, 239, 234) — the mask excluded
+the printed panels, the exact pixels under test, and scored the cardboard
+around them. It was caught when the one candidate that visibly repaints the
+art measured *identical* to shipped. The corrected mask is the case's whole
+silhouette with interior holes filled. The second miss was the control: the
+gap was first judged against a 12.6 "noise floor" measured on cases standing
+back to back in the packer queue — a different pixel population from a single
+case on dark belt — and those six windows' coordinates were never written
+down anywhere. **That floor and the ratio built on it are withdrawn.** The
+same-kind control is one case on the shared belt across 14 renders, spread
+5.0/255, with every window's coordinates in the record. Rules now written
+down: **validate a legibility mask by measuring a candidate that visibly
+changes the art before quoting any number it produces**, and **a control must
+be the same subject kind as the subject, with its windows logged.** A chroma
+metric was tested at the same time and came out negative — dC separates the
+cartons by 3.7 against a same-carton 4.0 — because a coloured panel is a
+handful of pixels and light-against-dark is the whole lid.
+
+Also filed along the way: a screenshot fixture is never asserted to be
+actually running before the shutter (#94), and the clipboard shows one docket
+at 1600x900 with three contracts signed (#95).
+
 
 ### 2026-09-20 — Three issues off the board: names, fluid colour, honest frames
 

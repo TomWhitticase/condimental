@@ -179,6 +179,462 @@ matches what code comments and data files cite.
   correctly, not evidence that it is inert. The eye-level numbers above come
   from a pose standing beside the line, not from the default first-person
   pose `test_screenshot.gd` reaches.
+- 2026-09-20: **A tank declares what it holds; the save format's
+  field-addition window is closed.** Two issues, one mechanism, and one
+  question that had to go back to the owner.
+
+  **The hole (#43).** `resolve_network_fluids` names a pipe run by arc
+  consistency: a run a tank discharges into can only carry a *raw* fluid, a
+  run off a machine's outlet face can only carry what that kind's recipes
+  make, and the feasible recipes of the machines touching a run narrow it
+  further. That is enough for every layout the shipped chain has. It runs
+  out on one machine drawing **two** raw fluids from **two** tank-fed runs:
+  both runs seed to the same pair of raws and nothing in the graph separates
+  them. Worse than stuck, in the single-recipe case it is *arbitrary* —
+  `feasible_naming` matches inputs to runs first-fit, so the runs are paired
+  off in tile order, and the player whose vinegar drum is on the other side
+  has no way to say so. Add a second recipe on the kind drawing one of the
+  two raws (a mixer that also makes plain syrup — ordinary content) and the
+  first-fit pairing stops being unique, no run narrows to one id, both go
+  `Ambiguous`, every machine on them stalls, and neither tank can even be
+  filled, because a fill needs to know what it is pouring.
+
+  **Why a declaration and not a cleverer resolver.** There was no bug in the
+  propagation to fix. Which drum the player filled with what is a fact about
+  the world that exists only in their head; no amount of graph reasoning
+  recovers information that was never in the graph. So the tank is asked.
+  `PlayerCommand::SetTankFluid { tile, fluid }` sets `FluidTank`'s optional
+  fluid, `World::recompute_topology` collects the declarations per network
+  and hands them to `resolve_network_fluids`, and a declared run's possible
+  set is **replaced** by the declaration before step 2 narrows anything.
+
+  Replaced rather than intersected, deliberately: a declared tank names its
+  run even when nothing is plumbed to it yet, so the player can fill a drum
+  before building what drinks from it — which they could not do before.
+  Disagreement is not silently resolved either: two tanks declaring
+  different fluids into one run leave two ids and the run reads `Ambiguous`,
+  and a declaration no machine there can use narrows to nothing and reads
+  `Unnameable`. Both are the graceful unnamed-with-a-reason state issue #54
+  built, not a new failure mode. An **undeclared** tank is untouched — its
+  fluid is still whatever its run turns out to carry — which is what keeps
+  the shipped chain a chain nobody has to label, and what
+  `an_undeclared_tank_still_takes_its_name_from_the_graph` pins.
+
+  **The load-time consequence, found by the test.** Loading rebuilds
+  structure through real `Place` commands and only then restores bodies. A
+  declaration arrives with the bodies, so every network had already been
+  named as though no tank had declared anything, and the very layout #43
+  exists for came back ambiguous and stuck however it was saved.
+  `World::from_save_with_content` now calls
+  `recompute_topology_after_restore` once the bodies are in. Pipe volumes
+  survive it: the pass carries them across by tile, which is what lets it
+  run on a live world at all.
+
+  **The save format (the owner's call, asked and answered).** The ticket
+  asked for "version and migrate the save", which contradicts
+  ARCHITECTURE §4 and `save.rs`'s own "rejected rather than migrated —
+  copying, deliberately, what every other loader in this crate does", so it
+  went back to the coordinator rather than being guessed. Three options
+  were on the table: (A) spend `save.rs`'s field-addition window and add
+  `SavedTank::fluid` as a `#[serde(default)]` with no bump; (B) build the
+  crate's first migration engine; (C) bump and reject.
+
+  (A) is spending a window that is already closed: `save.rs` said "nothing
+  has shipped with a save file yet, so schema_version 1 is whatever this
+  batch of work merges with" and then closed it explicitly — "after this
+  batch ships, a field addition is a version bump like any other shape
+  change" — and that batch (`auto_fill`, `SavedMachine::recipe`,
+  `lifetime_deliveries`) has been on `main` for a fortnight. (B) contradicts
+  two design docs for one ticket's convenience. **(C) is what the docs
+  already chose**: `SAVE_SCHEMA_VERSION` is 2, a v1 save is refused, and the
+  refusal names both numbers so it reads as "this save predates the tank
+  fluid change" rather than as a parse failure. The cost is bounded and will
+  never be this cheap again — no release has ever written a save. The
+  Forward-compatibility note in `save.rs` was rewritten so the next person
+  does not re-litigate it.
+
+  **Content validation moved too (#42), for a related reason.**
+  `validate_chain` demanded that every recipe be reachable from recipe 0 by
+  a shared ingredient id, which would have panicked at construction the
+  moment mayonnaise (eggs + oil, GAMEPLAY §2 tier 4) landed in
+  `recipes.ron`: a second production line shares nothing with tomato. The
+  rule is now per connected component, and what each component must contain
+  is a recipe that can actually be *started* — its machine is one
+  `data/shop.ron` sells, and its inputs are obtainable, where obtainable is
+  the fixpoint of priced raws plus the outputs of recipes that are
+  themselves startable. Several independent lines are fine; a line with no
+  way into it is not, and neither is one on a machine nobody sells. The
+  weaker "does any recipe in the component take a raw" rule was tried first
+  and rejected: a mid-line recipe with no raw inputs anchored a dead
+  component vacuously. `machines.validate_covers` now runs *before*
+  `validate_chain`, because "this kind has no footprint" is the more basic
+  fault and should be the message the player gets.
+
+  **Amended in review of the pull request: a declaration change destroys the
+  run as well as the tank.** The first cut emptied only the `FluidTank`, and
+  that was measurably not enough: `recompute_topology` rebuilds the fluid
+  networks and *carries volumes across by tile*, so the pipe run the tank
+  feeds kept everything it held and the rebuild simply renamed it. The
+  reviewer measured 59.9968 units of bought vinegar becoming liquid smoke, on
+  shipped content, through the shipped picker, never purchased. Two fixes
+  were possible. **Refusing the switch while the run is non-empty** was
+  considered and rejected: a player who mis-declares a tank would then have no
+  way to drain the run they no longer want — the machines on it will not drink
+  the wrong fluid, so nothing empties it, and the mistake is permanent. So the
+  emptying is carried *through* the recompute instead:
+  `World::try_set_tank_fluid` calls `purge_runs_fed_by`, which finds every
+  network the tank discharges into via `topology.tank_discharges`, calls
+  `FluidNetwork::purge` on each and dirties the pipe tiles, all *before*
+  `recompute_topology` runs, so the rebuild carries zeroes across. The volume
+  is **destroyed, not credited and not moved** — there is no refund and no
+  transfer to a neighbouring run; `switching_a_declared_tank_purges_the_run_it_fed_rather_than_relabelling_it`
+  asserts conservation in the negative by summing every *other* run and tank
+  before and after and requiring the total to be unchanged. Destruction is
+  acceptable only because it is consented to, which is the UI half of the
+  rule: the picker's note names what the click will cost before it happens —
+  "switching destroys 89.7 units — this tank and the run it feeds" when there
+  is something to lose, and the unquantified "switching empties this tank and
+  the run it feeds" when there is not (`main.gd`'s `_tank_picker_note` /
+  `_tank_doomed_volume`; section 10c of `test_config_panel.gd` computes its
+  expected number straight off the wire, because an assertion built from the
+  same helper it is testing passes even when the helper ignores the run — that
+  was tried, and it did).
+
+  **And an unusable declaration blames the tank, not the outlet.** The code
+  claimed a declaration no machine on the run could use would read
+  `Unnameable`; it did not — the run read `Carries` and the machine
+  downstream stalled, so the blame landed on an innocent outlet. Step 2b of
+  `resolve_network_fluids` now clears a declared run's candidate set when no
+  recipe of any machine kind drinking from it takes that fluid, which makes
+  the run read `Unnameable` and points the player at the tank they just
+  mis-declared. It tests the machine **kind**'s recipes, not the layout as it
+  stands this instant, so a run does not flicker `Unnameable` while a line is
+  half laid; a run nothing drinks from yet, or one fed by a machine outlet, is
+  left alone.
+- 2026-09-20: **A modal panel yields WIDTH before it is clipped, and an
+  unreachable control outranks every other layout rule.** (Issues #62, #63,
+  #69, #17.)
+
+  **The fault.** The 2026-09-09 scale change taught every list to yield
+  HEIGHT: `_fit_grid_scroll` caps it and it scrolls, UI_UX §5c's deliberate
+  last resort. Nothing ever made a panel yield WIDTH, because at the shipped
+  1600x900 nothing needed to. At 1280x720 — the smallest window the project
+  claims to support — three panels were simply wider than the screen and were
+  drawn off both edges of it: the staff panel wanted 1350px, the build menu
+  1412px, the contracts board 1380px. Clipping a centred panel takes the same
+  amount off each side, so what went was the outermost column on each: the
+  icons on the left, and on the right the FIRE −1 button — the only way to
+  undo a hire — and SIGN, the only way to take a contract. The panel looked
+  fine in the middle. You could not play the game from it.
+
+  **The rule that follows.** §5f already ranked layout faults worst-first: a
+  panel drawn ON another panel, a card cut through a line, a list showing less
+  than it could. None of them covers this, and this is worse than all of them:
+  a panel over a panel still leaves both readable if you close one, a cut card
+  still shows what it shows. **A control the player cannot reach is the worst
+  thing a layout can do**, and it goes on top of that list. Practically, that
+  makes width a budget like height: `_modal_available_width()` is the viewport
+  less `MODAL_EDGE_MARGIN` on each side, and every modal now measures itself
+  against it. The margin is in WINDOW pixels rather than `_ui_px` on purpose —
+  it is the last few pixels before a control is off the screen, not a design
+  gap that should scale with the UI.
+
+  **What is spent, in order.** Three things can give width back, and they are
+  ranked by how much the player loses.
+
+  1. *A sentence moves to the hover.* The staff row already ranks five
+     sentences and shows one, the rest on the row's tooltip (issue #7); at a
+     window this narrow the fifth goes there too, along with the per-tick
+     "3 of 4 working right now" and the meter's "hired / asked for" caption.
+     Nothing is lost — it is all one hover away, where four fifths of it
+     already lived — and what stays on the row is the icons, the meter, the
+     numbers, the state chip and the two buttons: the parts that can be
+     clicked. `_fit_staff_width` measures rather than assumes, so a wider
+     window shows the prose again and a future row that outgrows the window
+     gives its prose up with no breakpoint to re-tune. The wanted/shown split
+     (`note_wanted`, `working_wanted`) exists because the poll and the width
+     rule both want to set `visible`, and only one of them may own it.
+  2. *A grid of cards takes fewer columns.* The build menu and the market are
+     fixed-size icon slots; there is no prose in them to move. `SHOP_SLOT_COLUMNS`
+     had already been hand-tuned three times as the catalog grew, which is the
+     same decision made worse each time. `_fit_grid_columns` asks the panel
+     whether it fits, one column at a time, at most six tries of a cached
+     minimum-size read — measuring the *panel*, not dividing the window by a
+     card, because the real width is the grid plus margins plus scrollbar plus
+     whichever of heading and footer is longest, and every one of those has
+     moved. Then it balances: five columns for six crates is a row of five and
+     a lonely sixth where 3+3 is two even rows, and fewer columns than the
+     width allows is always still narrow enough, so balancing cannot undo the
+     fit. Both constants now read as *the most* a grid takes, not the number
+     it always takes.
+  3. *The list scrolls.* Already true.
+
+  **What is never done: `autowrap_mode`.** The obvious fix for a 1030px
+  sentence is to let it wrap. It cannot be used here. A wrapping Label reports
+  a minimum width of one pixel and a minimum height shaped at whatever width
+  it last had — and a Label is only reshaped when it is DRAWN. Under
+  `--headless`, where nothing draws, a wrapped sentence measures 1x1609 and
+  every panel sized around it is nonsense. This layout is measurement-driven
+  end to end (`_fit_grid_scroll`, `_whole_rows_height`, `_fit_grid_columns`)
+  and its regression proof is a headless test, so a control whose size cannot
+  be measured without drawing it cannot be part of it. Where a sentence must
+  get narrower it is **broken at a join it already has**: the board's offer is
+  now two labels, the mix and the terms, so the column is as wide as its
+  longer half rather than as wide as both. A break at a fixed point, not a
+  reflow.
+
+  **The measurement trap, twice.** The same "shaping happens on draw" rule bit
+  in two more places, and both are worth knowing before trusting a number.
+  First: **headless font metrics are narrower than a real window's.** The
+  staff panel measured 1339px against 1264px available headless, passed the
+  test, and was still clipped in the render at exactly that size; the fix
+  (dropping the 262px per-tick figure as well) was found by instrumenting
+  `_fit_staff_width` during a real `scripts/screenshot-scene.sh` run.
+  A headless assertion is a regression net. **The render is the acceptance.**
+  Second: `get_combined_minimum_size()` can UNDERREPORT what is on screen —
+  the machine hover reported 299x285 while being drawn at 545x285, and
+  `_panel_position_near` placed it as if its right-hand 246px did not exist,
+  over the legend's last line. The panel's *current* size is what the layout
+  pass actually gave it, so `maxf(minimum, size)` on both axes is the honest
+  estimate, and erring large only ever buys clearance.
+
+  **When nothing fits.** At 1280x720 with the legend open there is genuinely
+  nowhere for a machine hover to stand: 550x283 of tooltip, a 757x259 legend
+  starting 24px in, 499px to its right, 24px above and — after the hotbar
+  takes its strip — 282px below, one pixel short. Pushing off one plate at a
+  time is no answer: each push clears the plate it is given and can land on
+  the next, and one pass across three plates put the tooltip over two at once.
+  So when every position is a fault, `_panel_position_near` scores every
+  position it can reach — the four quadrants and the four ways off each plate,
+  each after the clamp — by total overlapped area (`_hud_overlap_area`) and
+  keeps the smallest, ties going to the earlier preference so §2b point 33's
+  ordering still decides whenever the overlap is equal. The remaining overlap
+  at that one window size is filed rather than fudged: the real answer is a
+  legend that folds itself or a shorter tooltip, which is a content decision.
+
+  **The same lesson, a third time: the configuration panel** (issue #88, folded
+  in because it turned out to be this fix and not a separate one). The panel a
+  click on a hopper or tank opens has always had a documented bound meant to
+  keep it off the right-hand column, and it was failing in two ways at once.
+  The bound named the clipboard and the stock plate in two hand-written
+  branches; the CREW plate arrived on that column in the 2026-09-16 playtest
+  pass and nobody added a third branch, so a panel that cleared the other two
+  was drawn over the wage bill and the payday countdown. And the branches
+  tested an UNCLAMPED `y`: a fluid tank's panel is taller than the band between
+  the clipboard and the hotbar, so the final clamp lifted it up into rows the
+  test had just decided it was nowhere near — §2b point 33's "judge after the
+  clamp", in the one panel that had not learned it. Even with both fixed the
+  flip itself was wrong: `anchor.x - offset - size.x` is a fixed displacement,
+  not a guarantee, and at 1280x720 it landed the panel's last 15px on a
+  clipboard whose left edge is 580px in. It now clamps `y` first, loops one
+  list of three rects, and flips the panel's right edge ON to the bound.
+  The legend stays off that list for `_position_market_panel`'s reason: at
+  1280x720 no position clears both it and the column, and covering a static
+  keybind reference the player can fold with F1 beats covering a live readout.
+  The headless assertion has to point the camera AT the building first — the
+  panel is anchored to the building's projected position, so a building off the
+  side of the frame puts the panel on a window edge and the check passes
+  vacuously, which the first version of it did.
+
+  **Two smaller rules from the same pass.** The staff panel's scroll box is
+  now FLAT — rows and explainer in one `VBoxContainer` — because
+  `_whole_rows_height` snaps between the CHILDREN of the box it is given, and
+  with the rows nested one level down its only choices were "the whole list"
+  and "a cut through the explainer's own lines" (issue #63). Flat, every
+  boundary a reader can see is a boundary the cut can land on, and the
+  explainer is shown whole or not at all. And the clipboard's board hint is a
+  line the docket stack may spend: `_update_contract_panel` — the only thing
+  that knows what the stack got — hides it when the cut it made falls below
+  the stack's first line boundary (`_first_line_boundary`), which is exactly
+  what buys the cut back onto a boundary at 1280x720 with every offer signed.
+  That was the case §5f had conceded to issue #17, and it closes it. "Sign
+  more orders" is also the least useful sentence on a clipboard whose every
+  order is signed. Issue #13 made the same trade against the SHORT-STAFFED
+  strip; the difference is that there is now exactly ONE place that decides,
+  so `_update_staff_alert` no longer touches the hint.
+
+- 2026-09-20: **The bank at the moment of building decides whether the BBQ
+  branch costs you the board.** Issue #55: building the BBQ branch off a
+  running ketchup line starves the starter contract while the new pipes prime,
+  and `corner_shop` strikes out and is lost. The issue's own cheap fix was
+  "let the tier arrive with breathing room" — raise `after_deliveries` in
+  `data/unlocks.ron` until the player has slack by the time BBQ lands. This
+  pass swept the number, kept **10** unchanged, and **left #55 open**.
+
+  **This record was corrected on the day it was written** (review of PR #98).
+  The first version claimed the whole board is lost at *every* gate tried,
+  including a 50 000-tick run, and concluded categorically that no gate value
+  can help. Neither claim reproduces. What went wrong is worth keeping: the
+  runs behind it were not all the same experiment, because the PR never
+  stated **when the extra contracts were signed**, and that single unstated
+  variable moves every number below. A measurement whose protocol is not
+  written down is not a measurement.
+
+  **The protocol.** Every run: build `test_layouts.gd`'s reference ketchup
+  line through real purchase and place commands; fund it; stock the larder
+  with 1 200 of each raw; leave hopper and tank auto-fill on; hire until fully
+  staffed; sign the starter contracts **at the stated moment**; wait for the
+  stated lifetime-delivery count; build the BBQ branch and its mixed exit;
+  settle 15 000 ticks; read `economy_snapshot_json` and
+  `production_snapshot_json`, sampled every 250 ticks. "Bank" is finished
+  `boxed_ketchup` on hand at the moment the branch goes in. A gate value other
+  than ten is **emulated** by waiting for that many lifetime deliveries before
+  building — the shipped gate is long open by then and nothing else reads the
+  number, so it is exactly equivalent and needs no rebuild per value.
+
+  **What the transient costs.** `boxed_ketchup`'s `produced_total` flatlines
+  for about **8 500 ticks** from the moment the branch is placed: the two new
+  pipe runs and the second cooking vat fill from the *existing* fluid network,
+  and roughly **35 boxes' worth of throughput** disappears into pipework
+  before any of it comes back. Delivery windows keep counting through it;
+  three misses lose a contract.
+
+  **The corrected sweep.**
+
+  | when contracts were signed | gate | bank at build | lost to the branch |
+  |---|---|---|---|
+  | one order only | 10 | 22 | none |
+  | three, at the gate | 10 | 22 | `diner_supply` |
+  | three, at tick 0 | 10 | 7 | `corner_shop`, `diner_supply` |
+  | three, at tick 0 | 20 (emulated) | 12 | two |
+  | three, at tick 0 | 30 (emulated) | 19 | one |
+  | three, at tick 0 | 40 (emulated) | 24 | **none** |
+  | one order, soaked to 50 000 ticks | life 48 | 46 | none |
+  | three at tick 0, soaked to 50 000 | life 68 | 43 | none |
+
+  **The control that the first version was missing.** With three orders signed
+  at tick 0 and **no branch ever built**, `market_stall` still strikes out at
+  tick 1 500. That death is the ketchup line's own start-up, not the BBQ
+  branch, and the first version counted it against the branch. Signing three
+  orders at the gate instead, with no branch, loses nothing.
+
+  **The rule, stated from what reproduces.** The deciding variable is the
+  **bank at the moment of building**. The number of concurrent orders matters
+  only through the bank it leaves: three orders signed at the gate bank the
+  same 22 as one order and lose one contract; the same three signed at tick 0
+  bank 7, because the early windows ate the stock, and lose two. A delivery
+  count steers that bank *by proxy, and badly*, because signing more contracts
+  is both how a player reaches the count sooner and what makes the transient
+  cost more. **Pushed far enough the gate does work** — 40 deliveries leaves
+  the three-order player 24 banked and costs them nothing — so the categorical
+  "no number can fix this" is false, and was removed from `data/unlocks.ron`,
+  `docs/GAMEPLAY.md`, `docs/DECISIONS_LOG.md` and this record.
+
+  **Why ten is kept anyway.** Forty deliveries is not "inside a first
+  session", which is the entire reason ten was chosen (see the file's comment
+  above the number). Buying #55 with a gate of 40 pays for a transient with
+  the thing the gate exists to deliver, and it hides a missing affordance
+  behind a balance value that reads as arbitrary to whoever meets it next —
+  the worst kind of number, one that is load-bearing for a reason nobody can
+  see.
+
+  **What was NOT chosen, and why.** Priming the pipes on placement was ruled
+  out before this pass: it breaks fluid conservation, the one property the
+  fluid system exists to guarantee. Shortening the pipe runs in the fixture
+  would fix the fixture, not the game. Giving `corner_shop` more strikes moves
+  the same cliff somewhere else and weakens every contract in the game to
+  patch one interaction.
+
+  **What the fix actually is**, both outside this pass's ownership and both
+  filed: a warning at placement time, before the player commits (#92), and a
+  fluid network that will not hand a brand-new consumer 100% of a network the
+  old one is living on (#93). **#55 stays open**, with these measurements
+  posted on it. The table and the protocol live in `data/unlocks.ron`'s own
+  comment so the next person to reach for that number meets the evidence
+  first, and the player-facing shape of it is in `docs/GAMEPLAY.md` §6.
+
+- 2026-09-20: **A legibility mask must be proved to contain the pixels in
+  question, before any number it produces is quoted.** Issue #57 asked whether
+  `box_of_ketchup` and `box_of_bbq` can be told apart once both ride one belt.
+  The `voxel-legibility-measurement` method answers that kind of question with
+  a fixed silhouette mask, mean luma inside it, 1:1 crops never upscaled to
+  judge. The first answer this pass produced was **wrong**, and catching it
+  is the durable part of the record.
+
+  **The broken instrument.** The mask was built with the warm-pixel test
+  earlier passes used: `r > g > b and r - b > 18`. That is right for kraft
+  cardboard and wrong for the print on it — `label_cream` renders at
+  **(241, 239, 234)**, `r - b = 7`, near-neutral. The mask therefore excluded
+  the printed lid panels: *exactly the pixels the question is about.* It
+  scored every candidate on the cardboard around them, reported a **5.3/255**
+  gap against a 17.0 noise floor, and concluded the art fails. A comment
+  saying so was posted on #57 and an owner question raised on it.
+
+  **How it was caught.** Candidate C1 — the print recoloured to each sauce's
+  own ink, a change visible across the room — measured *identical* to shipped.
+  That cannot happen if the mask covers the paint. It is the same class of
+  failure as a screenshot harness aiming at the wrong tile (#4): the
+  instrument drops the subject and then reports a confident number.
+
+  **The right mask.** The case's whole silhouette **with interior holes
+  filled** — largest warm connected component, then flood the complement from
+  the window border (4-connectivity) and keep everything the flood cannot
+  reach. It is correct for this subject because the kraft outline encloses the
+  print on every face the camera sees, so "inside the cardboard" is exactly
+  "on the carton". The mask grows 465 → 628 px on the gallery frame, 201 → 260
+  px on the mixed-line frame.
+
+  **What it then measured.** On a real mixed line — a splitter merging the BBQ
+  branch's packer output onto the ketchup exit belt, cases alternating, whole
+  factory framing, case ≈ 20×21 px — a `boxed_ketchup` and a `boxed_bbq` on
+  the **same belt in the same frame** read **156.7** and **117.2**: a
+  **39.5/255** gap. Review reproduced it independently at 152.87 vs 110.35,
+  **42.5**. The windows are 26×26 at (964,561) and (1023,538) of
+  `bbq_mixed.png`, aligned by silhouette overlap; the mask is 260 px and was
+  verified to contain all 45 of the window's near-neutral `label_cream`
+  pixels. The dock's contract-clipboard icons separate by 28.5 luma, 11.6
+  dE76. The method's anchors are 1.2/255 = invisible and ~26/255 = reads
+  reliably, so a 39.5 gap clears the reading threshold by half again.
+
+  **A control must be the same subject kind as the subject — and every window
+  must be logged** (corrected the same day, review of PR #98). The first
+  version of this record judged that gap against a "noise floor" of **12.6**,
+  taken from six `boxed_ketchup` windows at (663,330), (676,337), (688,315),
+  (726,337), (751,380) and (776,366) — cases standing **back to back in the
+  packer queue**, touching, each window therefore containing its neighbours'
+  cardboard. That is a different pixel population from one case alone on dark
+  belt, which is what the claim is about, and the six coordinates appeared
+  nowhere in the PR, the issue or this record: unreproducible. **The 12.6
+  floor and the 2.4× ratio built on it are withdrawn.** The same-kind control
+  is a single `boxed_bbq` on the shared exit belt measured across **14
+  independent renders** at the belt positions and animation frames they
+  caught: 117.03 to 122.05, a spread of **5.02/255** (windows logged per
+  render, x 963-967, y 560-563, 26×26). It bounds render-to-render and
+  small-position variation; it does not sample lighting along the whole belt
+  run, because every re-render put the case within five pixels of the same
+  spot. The claim that carries the ruling is the **pairwise gap**, which two
+  people reproduced from different frames.
+
+  **Chroma, tested and negative.** A hue metric was worth trying before
+  touching art, so CIELAB dC (`hypot(da*, db*)`, lighting-invariant) ran
+  alongside luma on the same mask and crops, with a chroma candidate, on the
+  deterministic `--item-gallery` fixture:
+
+  | candidate | dLuma | dL* | dC | dE76 |
+  |---|---|---|---|---|
+  | shipped (lid print) | **39.2** | 15.2 | 3.6 | 15.6 |
+  | sauce ink (chroma) | 6.1 | 5.5 | **13.7** | 14.8 |
+  | short faces (the cut on record) | **55.3** | 21.7 | 4.5 | 22.2 |
+
+  On the mixed frame, dC separates the two cartons by 3.7 against a
+  same-carton 4.0 — **worse than noise**. Chroma is the weaker channel at this
+  size, not the stronger one: a red-on-kraft panel is a handful of pixels at
+  20 px while light-against-dark is the whole lid. Trading a 39.2 luma gap for
+  a 6.1 one to buy 13.7 chroma barely moves total dE76 (15.6 → 14.8).
+
+  **The rulings.** (1) **The sauce cartons are not repainted** — the shipped
+  lid print does its job on a shared belt, in the packer queue, on the dock
+  and on the clipboard, so **#40's ruling stands** and the short-faces cut
+  recorded in `box_of_sauce`'s doc comment stays on the shelf. It measures
+  better (55.3) and is still the next cut if this ever needs headroom; it is
+  not needed, and it costs the kraft reading #40 ruled for. (2) **Validate a
+  mask by measuring a candidate that visibly changes the art.** If it scores
+  the same as shipped, the instrument is broken, not the candidate — and no
+  number from that mask may be quoted until it does. The retracted numbers and
+  the corrected ones are both on #57 on purpose: the comment that shows a
+  wrong number being caught is worth more to whoever reads it in six months
+  than a clean one that only shows the answer.
+
 
 - 2026-09-16: **The game is called CONDIMENTAL.** "sauce-factory was just a
   temporary name, ive now come up with the name 'CONDIMENTAL'". The owner's

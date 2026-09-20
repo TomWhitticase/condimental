@@ -222,12 +222,12 @@ use super::fluid::{
 };
 use super::hopper::{HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, HOPPER_KIND, Hopper};
 use super::ingredients::{
-    DEFAULT_BUY_QUANTITY, Ingredients, IngredientsSnapshot, raw_ingredient_ids,
+    DEFAULT_BUY_QUANTITY, IngredientCatalog, Ingredients, IngredientsSnapshot, raw_ingredient_ids,
 };
 use super::machine::{LOAD_WINDOW_TICKS, LoadWindow, Machine, WorkState};
 use super::machines::{Footprint, MachineRegistry};
 use super::recipe::{Recipe, RecipeRegistry};
-use super::shop::{DEFAULT_PURCHASE_QUANTITY, Shop, ShopSnapshot};
+use super::shop::{DEFAULT_PURCHASE_QUANTITY, Shop, ShopCatalog, ShopSnapshot};
 use super::splitter::{SPLITTER_KIND, Side, Splitter};
 use super::staff::{CrewEntry, CrewRequest, StaffPools, StaffSnapshot, crew_entries};
 use super::stats::{ProductionLedger, ProductionSnapshot, StatKind};
@@ -494,6 +494,30 @@ pub enum PlayerCommand {
     /// refusal [`Self::FillFluidTank`] already makes, rather than a second
     /// rule about when the toggle itself is allowed.
     SetTankAutoFill { tile: TileCoord, enabled: bool },
+    /// Declares that the tank at `tile` holds `fluid` — the fluid twin of
+    /// [`Self::SetHopperItem`], and the answer to issue #43.
+    ///
+    /// A tank's fluid used to be *derived*: whatever the run it discharges
+    /// into turned out to carry. That works while the run can be worked
+    /// out, and one shape defeats it — a machine drawing two raw fluids
+    /// from two tank-fed runs, where both runs seed to the same pair and
+    /// nothing tells them apart. Both stay unnamed, the machine stalls, and
+    /// no command the player could issue says which drum is which. This is
+    /// that command; see [`super::fluid::FluidTank`] for why the
+    /// declaration is an input to the naming rather than a second copy of
+    /// its answer.
+    ///
+    /// A silent no-op on an empty tile, on a tile that is not a tank, and
+    /// on a fluid that is not raw ([`World::raw_fluids`] — a tank is how
+    /// fluid enters the graph from outside, and only raws come in).
+    /// Declaring what the tank **already** holds is a no-op, contents and
+    /// all, for [`Self::SetHopperItem`]'s reason: a picker redraws its own
+    /// selection. A real change **empties the tank** (that volume is the
+    /// old fluid) and keeps the auto-fill flag, exactly as a hopper
+    /// retarget does — and, unlike a hopper retarget, it re-runs the
+    /// topology pass, because what a declared tank holds is one of the
+    /// facts [`resolve_network_fluids`] starts from.
+    SetTankFluid { tile: TileCoord, fluid: FluidId },
     /// Hires one head into a staff category (the staff pools MVP epic,
     /// GAMEPLAY.md §7). **Free, and never refused for a known category** —
     /// wages are the cost (§5), paid every pay period by `World::tick`, and
@@ -603,6 +627,12 @@ enum PlayerCommandDto {
         #[serde(default = "default_auto_fill_enabled")]
         enabled: bool,
     },
+    /// `{"type": "set_tank_fluid", "tile": [5, 1], "fluid": "vinegar"}` —
+    /// exactly `set_hopper_item`'s shape, and both required for its reason.
+    SetTankFluid {
+        tile: TileCoord,
+        fluid: FluidId,
+    },
     Hire {
         category: String,
     },
@@ -667,6 +697,9 @@ impl From<PlayerCommandDto> for PlayerCommand {
             PlayerCommandDto::SignContract { id } => PlayerCommand::SignContract { id },
             PlayerCommandDto::SetHopperAutoFill { tile, enabled } => {
                 PlayerCommand::SetHopperAutoFill { tile, enabled }
+            }
+            PlayerCommandDto::SetTankFluid { tile, fluid } => {
+                PlayerCommand::SetTankFluid { tile, fluid }
             }
             PlayerCommandDto::SetTankAutoFill { tile, enabled } => {
                 PlayerCommand::SetTankAutoFill { tile, enabled }
@@ -1035,19 +1068,21 @@ pub struct HopperSnapshot {
 /// {
 ///   "tile": [5, 1], "kind": "fluid_tank", "direction": "east",
 ///   "footprint": { "width_tiles": 1, "height_tiles": 1 },
-///   "fluid": "vinegar", "quantity": 30.0, "capacity": 120.0,
-///   "fill": 0.25, "auto_fill": false, "pipe_tile": [6, 1]
+///   "fluid": "vinegar", "declared": "vinegar", "quantity": 30.0,
+///   "capacity": 120.0, "fill": 0.25, "auto_fill": false,
+///   "pipe_tile": [6, 1]
 /// }
 /// ```
 ///
 /// - `quantity`/`capacity` are **floating-point**, unlike the hopper's: a
 ///   fluid volume is continuous (pressure equalization moves partial units
 ///   around).
-/// - **`fluid` is nullable**, and is the fluid of the network this tank
-///   discharges into — which is decided by whichever machine taps that
-///   network (see [`super::fluid`]). A tank connected to nothing, or to a
+/// - **`fluid` is nullable**, and is what this tank holds: its `declared`
+///   fluid if it has one, otherwise the fluid of the network it discharges
+///   into — which is decided by whichever machine taps that network (see
+///   [`super::fluid`]). An *undeclared* tank connected to nothing, or to a
 ///   run no machine taps, reports `null`: it holds volume, and nothing has
-///   yet said what that volume is.
+///   yet said what that volume is. A declared one always answers.
 /// - **`pipe_tile` is nullable** for [`HopperSnapshot::belt_tile`]'s reason:
 ///   it is the pipe tile off this tank's outlet face, and there may not be
 ///   one.
@@ -1058,6 +1093,16 @@ pub struct FluidTankSnapshot {
     pub direction: Direction,
     pub footprint: Footprint,
     pub fluid: Option<FluidId>,
+    /// What the player has **said** this tank holds, or `null` if they have
+    /// not said — [`PlayerCommand::SetTankFluid`], issue #43.
+    ///
+    /// Deliberately a second field rather than a flag on `fluid`: a picker
+    /// needs to show its own current selection (which is this, and is
+    /// blank until the player chooses), while the panel's "holding:" line
+    /// wants the effective answer (which is `fluid`, and may come from the
+    /// run). Where both are set they are equal, because the declaration is
+    /// what seeded the run's name.
+    pub declared: Option<FluidId>,
     pub quantity: f64,
     pub capacity: f64,
     pub fill: f64,
@@ -1800,24 +1845,35 @@ impl World {
             !ordered.is_empty(),
             "recipes.ron must define at least one recipe"
         );
-        // Still enforced, though nothing lays out a chain any more: it is
-        // what makes the shipped file a coherent production line, what
-        // `reference_chain` builds against, and what makes "the first
-        // recipe's first input is the raw ingredient" true.
-        validate_chain(ordered);
-        validate_fluid_scope(ordered);
+        // Raw = consumed somewhere, produced nowhere. Computed before the
+        // content checks because `validate_chain` asks whether each part of
+        // the file has a *priced* way in, and "raw" is what decides which
+        // ids have to be priced at all.
+        let raws = raw_ingredient_ids(&recipes);
+        let shop = Shop::bundled();
+        let ingredients = Ingredients::bundled();
         // Every recipe's machine kind must exist in machines.ron — a
         // missing kind has no footprint, so a machine of that kind could
         // never be placed and its recipe would be silently unreachable.
-        // Same construction-time-panic rule as `validate_chain`.
+        // Same construction-time-panic rule as `validate_chain`, and
+        // checked *first* because no footprint is the more basic fault:
+        // otherwise a kind missing from both files fails as "nothing can
+        // start this line" when the plainer truth is "this machine does
+        // not exist".
         if let Err(e) = machines.validate_covers(&recipes) {
             panic!("machine content error: {e}");
         }
+        // Still enforced, though nothing lays out a chain any more: every
+        // part of the file must be content the player can reach, which is
+        // what `reference_chain` builds against and what makes "the first
+        // recipe's first input is the raw ingredient" true.
+        validate_chain(ordered, &raws, &shop.catalog, &ingredients.catalog);
+        validate_fluid_scope(ordered);
 
-        // Raw = consumed somewhere, produced nowhere. The two halves are
-        // split by where they arrive: a raw *solid* is what a hopper holds,
-        // a raw *fluid* is what a player-filled tank discharges. Both are
-        // bought from `data/ingredients.ron`.
+        // The two halves of raw are split by where they arrive: a raw
+        // *solid* is what a hopper holds, a raw *fluid* is what a
+        // player-filled tank discharges. Both are bought from
+        // `data/ingredients.ron`.
         let solid_inputs: Vec<&str> = ordered
             .iter()
             .flat_map(|r| r.inputs.iter().map(|(item, _)| item.as_str()))
@@ -1826,7 +1882,6 @@ impl World {
             .iter()
             .flat_map(|r| r.fluid_inputs.iter().map(|(fluid, _)| fluid.as_str()))
             .collect();
-        let raws = raw_ingredient_ids(&recipes);
         let raw_items: Vec<ItemId> = raws
             .iter()
             .filter(|id| solid_inputs.contains(&id.as_str()))
@@ -1853,8 +1908,8 @@ impl World {
             full_chunks: Vec::new(),
             revision: 0,
             economy: Economy::with_money(&contracts, money),
-            shop: Shop::bundled(),
-            ingredients: Ingredients::bundled(),
+            shop,
+            ingredients,
             staff: StaffPools::bundled(),
             topology: Topology::default(),
             production: ProductionLedger::new(),
@@ -1933,10 +1988,12 @@ impl World {
     /// `hopper_items` is not filtered, deliberately — see
     /// [`IngredientsSnapshot`]'s field doc.
     pub fn ingredients_snapshot(&self) -> IngredientsSnapshot {
-        self.ingredients
-            .snapshot(self.economy.money, &self.raw_items, |id| {
-                self.economy.ingredient_unlocked(id)
-            })
+        self.ingredients.snapshot(
+            self.economy.money,
+            &self.raw_items,
+            self.raw_fluids.iter().cloned().collect(),
+            |id| self.economy.ingredient_unlocked(id),
+        )
     }
 
     /// Every content id that names itself, as `id -> display name`.
@@ -1993,6 +2050,15 @@ impl World {
     /// [`Self::raw_items`]'s field doc for what "raw" means.
     pub fn raw_items(&self) -> &[ItemId] {
         &self.raw_items
+    }
+
+    /// The fluid half of [`Self::raw_items`]: every fluid consumed by some
+    /// recipe and produced by none, so the only ones that can enter the
+    /// graph through a tank. The set [`PlayerCommand::SetTankFluid`]
+    /// validates a declaration against, and the list a tank's fluid picker
+    /// offers (`IngredientsSnapshot::tank_fluids`).
+    pub fn raw_fluids(&self) -> &BTreeSet<FluidId> {
+        &self.raw_fluids
     }
 
     /// How many of `kind` the player owns and has **not** placed. A thin
@@ -2266,6 +2332,25 @@ impl World {
     /// One entry per placement, so a 2x2 cooking vat is one crew and not
     /// four: the ECS holds one entity per placement, however many tiles it
     /// covers.
+    /// Re-derives the whole topology once `save.rs` has finished restoring
+    /// live state — the load-time counterpart of the `Place` commands that
+    /// drive it during play.
+    ///
+    /// Loading rebuilds structure through real `Purchase`/`Place`, and each
+    /// of those recomputes the topology on its own. A tank's **declared**
+    /// fluid, though, is restored afterwards with the bodies, and a
+    /// declaration is an *input* to pipe naming
+    /// ([`resolve_network_fluids`]) rather than a record of its output. So
+    /// without this pass a loaded world is named as though every tank were
+    /// undeclared, and the very layout issue #43 exists for — two tank-fed
+    /// raw runs into one machine — comes back ambiguous and stuck however
+    /// it was saved. Nothing else is disturbed: the pass carries pipe
+    /// volumes across by tile, which is what lets it run on a live world at
+    /// all.
+    pub(super) fn recompute_topology_after_restore(&mut self) {
+        self.recompute_topology();
+    }
+
     pub(super) fn recompute_establishment(&mut self) {
         let mut establishment: BTreeMap<String, u32> = BTreeMap::new();
         let entities: Vec<Entity> = self.ecs.iter().map(|e| e.entity()).collect();
@@ -2711,12 +2796,26 @@ impl World {
         }
 
         // --- what each run carries. Every tank discharge is marked by now,
-        // which is what gives the propagation somewhere to start.
+        // which is what gives the propagation somewhere to start — and the
+        // declared ones are gathered here, one set per run, because a run
+        // two tanks discharge into is named by both of them at once.
+        let mut declared: Vec<BTreeSet<FluidId>> = vec![BTreeSet::new(); topology.networks.len()];
+        for &(tank, network, _) in &topology.tank_discharges {
+            if let Some(fluid) = self
+                .ecs
+                .get::<&FluidTank>(tank)
+                .ok()
+                .and_then(|body| body.declared().cloned())
+            {
+                declared[network].insert(fluid);
+            }
+        }
         resolve_network_fluids(
             &mut topology.networks,
             &plumbing,
             &self.recipes,
             &self.raw_fluids,
+            &declared,
         );
 
         // A side order that is a property of the geometry (north, east,
@@ -3467,6 +3566,9 @@ impl World {
             PlayerCommand::SetTankAutoFill { tile, enabled } => {
                 self.try_set_tank_auto_fill(tile, enabled);
             }
+            PlayerCommand::SetTankFluid { tile, fluid } => {
+                self.try_set_tank_fluid(tile, &fluid);
+            }
             // Neither dirties a chunk: a head is not a tile. Both are silent
             // about an unknown category, `Hire` about a balance that could
             // not pay the next bill plus the new wage (the quality pass:
@@ -3604,6 +3706,93 @@ impl World {
         drop(tank);
         self.mark_placement_dirty(entity);
         true
+    }
+
+    /// [`PlayerCommand::SetTankFluid`] — `try_set_hopper_item`'s twin,
+    /// against a tank, with two extra steps at the end.
+    ///
+    /// The last is the topology recompute. `sim_core/CLAUDE.md` says the
+    /// pass runs on `Place`/`Remove`/`Rotate` and never per tick, and this
+    /// does not weaken that rule: it is the same rule, applied to the same
+    /// kind of thing. A declared fluid is a *seed* of
+    /// [`resolve_network_fluids`], so changing it changes what the runs in
+    /// this world carry exactly as moving a machine does, and a discrete
+    /// player action is precisely what the pass is allowed to cost.
+    ///
+    /// **The one before it is what makes the emptying honest.**
+    /// [`FluidTank::declare`] zeroes the tank so that the old fluid is not
+    /// relabelled as the new one — and on its own that is only true of the
+    /// tank. The recompute carries pipe volumes across by tile (it must:
+    /// a player laying one more tile of pipe would otherwise drain the run),
+    /// so whatever the tank had already discharged into the run survived the
+    /// rebuild and came back under the new name. Measured on shipped
+    /// content through the shipped picker: sixty units of vinegar became
+    /// sixty units of liquid smoke, never bought, on one click.
+    ///
+    /// So the emptying is carried through: every run this tank discharges
+    /// into is [purged](FluidNetwork::purge) in the same breath, *before*
+    /// the recompute, so the rebuild carries zeroes across rather than a
+    /// lie. The fluid is destroyed, not moved — nothing is credited, no
+    /// stock returns, and `ProductionLedger` is not told a thing was used,
+    /// because nothing used it.
+    ///
+    /// That the destruction is **larger than the tank** is why
+    /// `main.gd`'s picker says what will be lost before the click rather
+    /// than after: declaring is a destructive act, and the player consents
+    /// to it. Refusing the switch while the run still holds the old fluid
+    /// was the alternative, and it is the worse game — it leaves a player
+    /// who mis-declared a tank with no way to drain the run they no longer
+    /// want.
+    fn try_set_tank_fluid(&mut self, tile: TileCoord, fluid: &str) -> bool {
+        if !self.raw_fluids.iter().any(|raw| raw == fluid) {
+            return false;
+        }
+        let Some(&entity) = self.topology.grid.get(&tile) else {
+            return false;
+        };
+        let Ok(mut tank) = self.ecs.get::<&mut FluidTank>(entity) else {
+            return false;
+        };
+        if !tank.declare(fluid.to_string()) {
+            return false;
+        }
+        drop(tank);
+        self.purge_runs_fed_by(entity);
+        self.mark_placement_dirty(entity);
+        self.recompute_topology();
+        true
+    }
+
+    /// Destroys what every run `tank` discharges into is holding, and marks
+    /// each drained pipe tile so the change reaches the screen.
+    ///
+    /// Walks `tank_discharges` rather than the tank's neighbours because
+    /// that list is already the answer to "which network, which segment",
+    /// computed by the topology pass — and a tank facing a junction may
+    /// legitimately have more than one entry. See
+    /// [`Self::try_set_tank_fluid`] for why this exists at all.
+    fn purge_runs_fed_by(&mut self, tank: Entity) {
+        let networks: BTreeSet<usize> = self
+            .topology
+            .tank_discharges
+            .iter()
+            .filter(|&&(entity, _, _)| entity == tank)
+            .map(|&(_, network, _)| network)
+            .collect();
+        for network in networks {
+            if self.topology.networks[network].purge() > Fx::ZERO {
+                let tiles: Vec<TileCoord> = self.topology.networks[network]
+                    .segments()
+                    .iter()
+                    .map(|segment| segment.tile)
+                    .collect();
+                for tile in tiles {
+                    if let Some(&pipe) = self.topology.grid.get(&tile) {
+                        self.mark_placement_dirty(pipe);
+                    }
+                }
+            }
+        }
     }
 
     /// Which of `candidates` a tile-addressed command applies to: the one
@@ -4213,7 +4402,10 @@ impl World {
             kind: placement.kind,
             direction: placement.direction,
             footprint: placement.footprint,
-            fluid: discharge.and_then(|(network, _)| self.topology.networks[network].fluid.clone()),
+            fluid: body.declared().cloned().or_else(|| {
+                discharge.and_then(|(network, _)| self.topology.networks[network].fluid.clone())
+            }),
+            declared: body.declared().cloned(),
             quantity: body.volume().to_num::<f64>(),
             capacity: body.capacity().to_num::<f64>(),
             // `FluidTank::pressure` is the tank's own fill fraction, which is
@@ -4254,11 +4446,26 @@ impl World {
             .map(|&(_, belt)| self.position_of(belt))
     }
 
-    /// The fluid a tank is currently holding, which is the fluid of the
-    /// network it discharges into — read off the topology's own links, so it
-    /// can never disagree with [`FluidTankSnapshot::fluid`], which is
-    /// derived the same way.
+    /// The fluid a tank is currently holding: **what it declares**, and
+    /// failing that the fluid of the network it discharges into.
+    ///
+    /// The fallback is what keeps every tank that predates issue #43
+    /// behaving as it did — an undeclared tank is still named by its run,
+    /// which is right for the common case of one tank feeding one line. The
+    /// declaration wins where there is one because it is also what seeded
+    /// that run ([`resolve_network_fluids`]), so the two agree wherever the
+    /// run resolved at all, and the declaration is the only answer where it
+    /// did not. Read off the topology's own links, so it can never disagree
+    /// with [`FluidTankSnapshot::fluid`], which is derived the same way.
     fn tank_fluid(&self, tank: Entity) -> Option<FluidId> {
+        if let Some(declared) = self
+            .ecs
+            .get::<&FluidTank>(tank)
+            .ok()
+            .and_then(|body| body.declared().cloned())
+        {
+            return Some(declared);
+        }
         self.topology
             .tank_discharges
             .iter()
@@ -4573,48 +4780,68 @@ impl World {
     }
 }
 
-/// Enforces that `data/recipes.ron` describes **one production line**: the
-/// graph whose nodes are recipes and whose edges join any two recipes
-/// sharing an id — solid or fluid, in either direction — must be connected.
-/// A clear panic here, at construction time before any tick runs, is the
-/// data-file equivalent of a compiler error.
+/// Enforces that every part of `data/recipes.ron` is content a player can
+/// actually reach: each connected component of the recipe graph must hold
+/// at least one recipe that can be **started** — its machine is for sale in
+/// `data/shop.ron`, and everything it consumes is obtainable. A clear panic
+/// here, at construction time before any tick runs, is the data-file
+/// equivalent of a compiler error.
 ///
-/// This used to be the stricter "recipe `i + 1` consumes something recipe
-/// `i` produces", reading the file as a sequence. The BBQ epic ends that:
-/// the file holds a *branching* chain (ketchup feeds both the bottler and
-/// the BBQ mixer), so consecutive entries no longer chain, while the thing
-/// that rule was really defending — that the file is one line and not a
-/// pile of unrelated fragments — still holds. Connectivity is the same
-/// claim without the ordering.
+/// "Obtainable" is a closure, not a one-step test: an id is obtainable when
+/// `data/ingredients.ron` prices it, or when some startable recipe makes it.
+/// The set grows outwards from what the market sells until it stops growing.
+/// That is what makes a whole line fed by an unpriced raw fail here even
+/// though its *last* stage, read on its own, runs on a machine the shop
+/// sells and consumes only what the stage before it makes.
+///
+/// The graph's nodes are recipes and its edges join any two sharing an id —
+/// solid or fluid, in either direction. What this used to demand is that
+/// the graph be *connected*: one component, every recipe reachable from the
+/// first by a shared id. That rule replaced an even stricter "recipe `i + 1`
+/// consumes something recipe `i` produces" in the BBQ epic, when the file
+/// became a *branching* chain (ketchup feeds both the bottler and the BBQ
+/// mixer) and consecutive entries stopped chaining.
+///
+/// **Connectivity is gone because the claim under it expired** (issue #42).
+/// "One component" says every sauce shares an ancestor with every other,
+/// which was true only while BBQ derived from ketchup, which derives from
+/// tomato. Mayonnaise is eggs and oil and is tier 4 in GAMEPLAY.md §2: it
+/// shares nothing with the tomato line, and the day its recipes land a
+/// perfectly valid file would have panicked here with a message reading
+/// like a typo report. A second production line is content, not a fault.
+///
+/// What survives is the half that was never about connectivity: **a
+/// component nobody can build or feed is dead weight**, and a stage joined
+/// to nothing is exactly that. An island of recipes with no purchasable
+/// machine can never be placed; an island whose supply bottoms out in an
+/// unpriced raw can never be started, which is what a typo'd input id
+/// produces (it is consumed-nowhere-produced, i.e. a new raw ingredient,
+/// and nobody priced it). Either way the player would watch a machine that
+/// never runs with no clue why — the error this check has always existed to
+/// turn into a load-time message.
 ///
 /// **Which net catches what.** These two cover the content errors between
 /// them, and neither does alone:
 ///
-/// - *This check* catches a **structural break**: a stage joined to nothing,
-///   or two halves of a file that never meet. That is the error where a
-///   machine would silently never start with no clue why.
+/// - *This check* catches a **structural break**: a fragment of a file that
+///   no purchase and no ingredient can ever set in motion.
 /// - [`super::ingredients::IngredientCatalog::validate_covers`] catches a
-///   **typo'd id**, as a test rather than a panic. A misspelled input is by
-///   definition consumed-nowhere-produced, i.e. a new raw ingredient, and
-///   raw ingredients must be priced — so the unpriced `tomatoe` fails
-///   there. `data/ingredients.ron`'s header says why that one is a test:
-///   pricing is a content judgement, not a load-time invariant.
-///
-/// **This rule encodes a claim that will expire.** "One connected
-/// component" means every sauce shares an ancestor with every other, which
-/// is true today only because BBQ derives from ketchup. The first sauce
-/// with an independent raw chain breaks it — mayonnaise is eggs and oil and
-/// shares nothing with tomato, and it is tier 4 in GAMEPLAY.md §2 — and it
-/// will false-panic here. When that lands, the fix is to require every
-/// component to be *internally* connected (i.e. drop this check for a
-/// per-component one, or a declared list of lines) rather than to weaken it
-/// to nothing. Tracked as a deferred issue.
-fn validate_chain(ordered: &[Recipe]) {
-    if ordered.len() < 2 {
-        return;
-    }
-    // Union-find would be overkill for a file this size: flood the
-    // component containing the first recipe and see if it reaches them all.
+///   **typo'd id**, as a test rather than a panic, and catches it even when
+///   the typo sits in a component some *other* recipe anchors. A misspelled
+///   input is by definition consumed-nowhere-produced, i.e. a new raw
+///   ingredient, and raw ingredients must be priced — so the unpriced
+///   `tomatoe` fails there. `data/ingredients.ron`'s header says why that
+///   one is a test: pricing is a content judgement, not a load-time
+///   invariant, and *every* raw being priced is a stronger claim than this
+///   one makes. This check asks only that each component have **one** way
+///   in, which is the difference between "your content is unbalanced" and
+///   "this half of your file is unreachable".
+fn validate_chain(
+    ordered: &[Recipe],
+    raws: &[String],
+    shop: &ShopCatalog,
+    ingredients: &IngredientCatalog,
+) {
     fn ids_of(recipe: &Recipe) -> BTreeSet<&str> {
         recipe
             .inputs
@@ -4630,33 +4857,91 @@ fn validate_chain(ordered: &[Recipe]) {
             )
             .collect()
     }
+    // Union-find would be overkill for a file this size: flood out from each
+    // recipe not yet in a component, which labels every one of them exactly
+    // once, in file order.
     let touched: Vec<BTreeSet<&str>> = ordered.iter().map(ids_of).collect();
-    let mut reached = vec![false; ordered.len()];
-    reached[0] = true;
-    let mut frontier = vec![0usize];
-    while let Some(index) = frontier.pop() {
-        for (other, ids) in touched.iter().enumerate() {
-            if !reached[other] && !ids.is_disjoint(&touched[index]) {
-                reached[other] = true;
-                frontier.push(other);
+    let mut component: Vec<usize> = vec![usize::MAX; ordered.len()];
+    let mut components = 0usize;
+    for seed in 0..ordered.len() {
+        if component[seed] != usize::MAX {
+            continue;
+        }
+        component[seed] = components;
+        let mut frontier = vec![seed];
+        while let Some(index) = frontier.pop() {
+            for (other, ids) in touched.iter().enumerate() {
+                if component[other] == usize::MAX && !ids.is_disjoint(&touched[index]) {
+                    component[other] = components;
+                    frontier.push(other);
+                }
             }
         }
+        components += 1;
     }
-    let orphans: Vec<&str> = ordered
+
+    // A recipe can be *started* when the player can buy the machine it runs
+    // on and can actually get hold of everything it consumes. "Get hold of"
+    // is a closure rather than a one-step test: a priced raw is obtainable,
+    // and so is anything a startable recipe makes. So the set grows from
+    // what the market sells outwards, and a recipe whose only supplier is
+    // itself unstartable never enters it — which is what makes a line
+    // fed by an unpriced raw fail here even though its *last* stage, read
+    // alone, looks perfectly buildable.
+    let mut obtainable: BTreeSet<&str> = raws
         .iter()
-        .zip(&reached)
-        .filter(|&(_, &seen)| !seen)
-        .map(|(recipe, _)| recipe.id.as_str())
+        .map(String::as_str)
+        .filter(|id| ingredients.get(id).is_some())
         .collect();
-    assert!(
-        orphans.is_empty(),
-        "recipes.ron chain error: recipe(s) {orphans:?} share no ingredient id with the line \
-         starting at '{}' — the file describes one production line, so every recipe must be \
-         joined to the rest of it by some id it consumes or produces, solid or fluid. (A \
-         misspelled id usually shows up as an unpriced raw ingredient in \
-         IngredientCatalog::validate_covers instead; this is the structural half.)",
-        ordered[0].id
-    );
+    let mut startable: Vec<bool> = vec![false; ordered.len()];
+    loop {
+        let mut grew = false;
+        for (index, recipe) in ordered.iter().enumerate() {
+            if startable[index] || shop.get(&recipe.machine).is_none() {
+                continue;
+            }
+            let fed = recipe
+                .inputs
+                .iter()
+                .chain(recipe.fluid_inputs.iter())
+                .all(|(id, _)| obtainable.contains(id.as_str()));
+            if !fed {
+                continue;
+            }
+            startable[index] = true;
+            grew = true;
+            for (id, _) in recipe.outputs.iter().chain(recipe.fluid_outputs.iter()) {
+                obtainable.insert(id.as_str());
+            }
+        }
+        if !grew {
+            break;
+        }
+    }
+    for index in 0..components {
+        let anchored = component
+            .iter()
+            .zip(&startable)
+            .any(|(&label, &started)| label == index && started);
+        if anchored {
+            continue;
+        }
+        let ids: Vec<&str> = ordered
+            .iter()
+            .zip(&component)
+            .filter(|&(_, &label)| label == index)
+            .map(|(recipe, _)| recipe.id.as_str())
+            .collect();
+        panic!(
+            "recipes.ron chain error: recipe(s) {ids:?} form a part of the file nothing can set \
+             in motion — not one of them runs on a machine `data/shop.ron` sells and is fed by \
+             ingredients the player can get, whether bought from `data/ingredients.ron` or made \
+             by another recipe that can itself be started. Several independent production lines \
+             are fine; a line with no way into it is not. (A misspelled id usually shows up here \
+             as an unpriced raw ingredient, and otherwise in \
+             IngredientCatalog::validate_covers.)"
+        );
+    }
 }
 
 /// One machine's plumbing as the topology pass found it — pure **geometry**,
@@ -4687,7 +4972,10 @@ struct Plumbing {
 ///    raw fluid — nothing else enters the graph from outside. A run off a
 ///    machine's outlet face can hold anything that kind's recipes make.
 ///    Every other run starts empty, which is why a length of pipe joined to
-///    nothing stays unnamed.
+///    nothing stays unnamed. A run whose tank **declares** what it holds
+///    (`PlayerCommand::SetTankFluid`, issue #43) starts as that one id and
+///    nothing else: the player has said, and no amount of geometry
+///    outranks that.
 /// 2. **Narrowing.** A recipe is *feasible* for a machine when its fluid
 ///    output is still possible on the outlet run and each of its fluid
 ///    inputs can be matched, by id, to a distinct run touching the
@@ -4713,6 +5001,14 @@ struct Plumbing {
 /// order and the naming is identical
 /// (`pipe_naming_is_independent_of_placement_order`).
 ///
+/// **Why a declaration had to exist.** Steps 1 and 2 are both about what
+/// the *layout* implies, and one layout implies nothing: a machine drawing
+/// two raw fluids from two tank-fed runs seeds both runs to the same pair,
+/// and the narrowing step intersects both with that same pair, so neither
+/// ever reaches one id. Both runs stay unnamed and the machine stalls.
+/// There was no bug to fix in the propagation — the information simply was
+/// not in the world, and the only place it exists is the player's head.
+///
 /// **An unnamed run is not an error.** `can_supply_at`/`can_accept_at`
 /// reject one, so its machines stall — the same graceful "not plumbed yet"
 /// a player sees for most of the time they spend laying a run, and never a
@@ -4727,6 +5023,7 @@ fn resolve_network_fluids(
     plumbing: &[Plumbing],
     recipes: &RecipeRegistry,
     raw_fluids: &BTreeSet<FluidId>,
+    declared: &[BTreeSet<FluidId>],
 ) {
     // 1. Only a *machine* claims an id for a run: what it would deposit
     // there, or — for a run no machine fills — what it would draw from
@@ -4756,8 +5053,8 @@ fn resolve_network_fluids(
         .zip(drawn_by)
         .map(|(filled, drawn)| if filled.is_empty() { drawn } else { filled })
         .collect();
-    // A tank names nothing by itself — its own fluid is whatever the run it
-    // discharges into carries (`PlayerCommand::FillFluidTank`). What it
+    // A tank that has not been asked names nothing by itself — its own
+    // fluid is whatever the run it discharges into carries. What it
     // contributes is the opposite of a claim: it is the only way into the
     // graph from outside, and the only thing that comes in from outside is
     // a **raw** fluid, so a run a tank feeds can hold nothing else. That is
@@ -4766,6 +5063,24 @@ fn resolve_network_fluids(
     for (network, ids) in networks.iter().zip(possible.iter_mut()) {
         if network.segments().iter().any(|segment| segment.is_source) {
             ids.retain(|fluid| raw_fluids.contains(fluid));
+        }
+    }
+    // A tank that HAS been asked (`PlayerCommand::SetTankFluid`, issue #43)
+    // pins its run outright, and that is the whole of the fix: two runs
+    // into one two-fluid machine are told apart by the player saying which
+    // drum is which, because nothing about the geometry ever could.
+    //
+    // It **replaces** the set rather than intersecting with it, so a
+    // declared tank names its run even when no machine is plumbed to it
+    // yet — a player can fill a tank before building what drinks from it,
+    // as they could not before. Disagreement is not silently resolved:
+    // two tanks declaring different fluids into one run leave two ids on
+    // the run and it reads `Ambiguous`. A declaration no machine on the run
+    // can use is caught by step 2b below, which is where a statement the
+    // layout contradicts is turned back into an unnamed run.
+    for (ids, declared) in possible.iter_mut().zip(declared) {
+        if !declared.is_empty() {
+            *ids = declared.clone();
         }
     }
 
@@ -4804,6 +5119,52 @@ fn resolve_network_fluids(
             break;
         }
         possible = narrowed;
+    }
+
+    // 2b. A declaration the machines on the run cannot use is a
+    // contradiction, and it is reported on the run the player declared.
+    //
+    // Step 1 replaces the set and step 2 never touches it again — a machine
+    // with no feasible recipe `continue`s rather than emptying its runs — so
+    // a tank declared as something the machine it feeds cannot drink came
+    // out `Carries`, confidently named, while the *outlet* run took the
+    // blame for the stall. That is the wrong tile: the mistake is the
+    // declaration, and issue #54's rule is that a run the simulation cannot
+    // make sense of says so rather than pointing somewhere else.
+    //
+    // The test is about the machine's **kind**, not about today's
+    // half-built layout: a run is contradicted only when no recipe of any
+    // machine drawing from it takes the declared fluid at all. A recipe
+    // that is merely infeasible right now — because the player has not
+    // finished plumbing its other input — must not condemn the
+    // declaration, or the run would flicker Unnameable while a line is
+    // being laid. A run nothing drinks from is left alone for the same
+    // reason: declaring a tank before building is explicitly allowed.
+    for network in 0..possible.len() {
+        if declared[network].is_empty() || possible[network].is_empty() {
+            continue;
+        }
+        let drinkers: Vec<&Plumbing> = plumbing
+            .iter()
+            .filter(|machine| machine.inputs.contains(&network))
+            .collect();
+        // A run some machine fills is not the player's to contradict: the
+        // disagreement there is between a declaration and a product, which
+        // the narrowing step already has its own answer for.
+        if drinkers.is_empty() || plumbing.iter().any(|m| m.output == Some(network)) {
+            continue;
+        }
+        let usable = drinkers.iter().any(|machine| {
+            recipes.for_machine(&machine.kind).any(|recipe| {
+                recipe
+                    .fluid_inputs
+                    .iter()
+                    .any(|(fluid, _)| possible[network].contains(fluid))
+            })
+        });
+        if !usable {
+            possible[network].clear();
+        }
     }
 
     // 3. Naming, with its reason (issue #54). Exactly one id left names the
