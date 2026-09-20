@@ -1710,6 +1710,11 @@ func _ready() -> void:
 	# reason `SimBridge` has both `new_game()` and `load_ron()` behind one
 	# long-lived bridge.
 	_apply_pending_session()
+	# The labels content names itself by (`_display_names`). Read once, here,
+	# because it is `data/*.ron` read back and cannot change while a game runs
+	# — and read after `_apply_pending_session` only so there is a bridge to
+	# ask; a load does not change the answer.
+	_load_display_names()
 	_load_voxel_materials()
 	_build_environment()
 	# The world the player has built — NOTHING, in a new game. This is a real
@@ -5656,10 +5661,31 @@ func _shop_asset_for(kind: String) -> String:
 	return MACHINE_MODELS.get(kind, MACHINE_MODEL_FALLBACK)
 
 
+## The ids that carry a name of their own, from `display_names_json` —
+## `{"bbq": "BBQ", ...}`. Filled once by `_load_display_names` and read by
+## `_kind_display_name`; empty until then, which is the title-case fallback.
+var _display_names: Dictionary = {}
+
+
+## Reads the one map of content-supplied labels. Not polled: it is
+## `data/*.ron` read back, so it cannot change while a game is running.
+func _load_display_names() -> void:
+	var parsed = JSON.parse_string(sim.display_names_json())
+	_display_names = parsed if parsed is Dictionary else {}
+
+
 ## "cooking_vat" -> "Cooking Vat". Kind ids are content, so the menu titles
 ## itself from them rather than carrying a hand-written label per kind that
 ## a new `data/shop.ron` entry would silently miss.
+##
+## Title-casing is the FALLBACK, not the rule: content that title-cases
+## wrong names itself in `data/*.ron` and arrives here through
+## `_display_names` (issue #60 — the second sauce read as "Boxed Bbq"). The
+## table is deliberately tiny, so an id missing from it is the normal case
+## rather than a stale lookup.
 func _kind_display_name(kind: String) -> String:
+	if _display_names.has(kind):
+		return String(_display_names[kind])
 	var words: PackedStringArray = kind.split("_", false)
 	var out: Array[String] = []
 	for word in words:

@@ -769,6 +769,28 @@ impl SimBridge {
         GString::from(json.as_str())
     }
 
+    /// The content ids that carry a name of their own, as one flat JSON
+    /// object of `id -> display name`:
+    ///
+    /// ```json
+    /// {"bbq": "BBQ", "bbq_mix": "BBQ Mix", "bottled_bbq": "Bottled BBQ"}
+    /// ```
+    ///
+    /// **Read this once, at load, not per frame** — it is `data/*.ron`
+    /// read back and cannot change while a game is running.
+    ///
+    /// An id that is absent has no name in the data, which is the caller's
+    /// cue to title-case the id itself (`main.gd`'s `_kind_display_name`).
+    /// That is the common case by a wide margin: the object holds only the
+    /// handful of ids title-casing gets wrong, acronyms being the reason it
+    /// exists (`bbq` -> "Bbq"). See [`sim::World::display_names`].
+    #[func]
+    fn display_names_json(&self) -> GString {
+        let names = self.world.display_names();
+        let json = serde_json::to_string(&names).expect("display names must serialize");
+        GString::from(json.as_str())
+    }
+
     /// The whole world as a RON save file, as text
     /// (`sim::save::SaveData` — see that module's doc for the format and
     /// for why it is a full snapshot rather than ARCHITECTURE.md §4's
