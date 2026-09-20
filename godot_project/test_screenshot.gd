@@ -170,10 +170,32 @@ const WARMUP_FRAMES := 45
 const POPULATE_SPAWNS := 60
 const POPULATE_TICKS_PER_SPAWN := 10
 
+## EVERY fixture this harness can build, and the only names `--fixture`
+## accepts. `_build_fixture`'s `match` has one arm per name and no fallback:
+## a name here with no arm is a loud error rather than a quietly wrong
+## frame, which is the whole of issue #70. Keep the two in step — they are
+## the same list written twice, and there is no third place to check.
+const FIXTURE_NAMES: PackedStringArray = [
+	"demo", "machines", "fluids", "vat", "splitter", "chain", "stress",
+	"pipes", "gallery", "items", "bottleneck", "bbq", "stalled_run",
+	"understaffed", "shortfall", "full_dock",
+]
+
 var _frames := 0
 var _out := "user://scene.png"
-var _build := false
 var _fixture := ""
+## The fixture a convenience flag asked for, and the flag that asked. Kept
+## apart from `_fixture` so an explicit `--fixture` can be checked against
+## it: a flag used to overwrite `_fixture` outright, so
+## `--fixture understaffed --staff` photographed the reference line and said
+## nothing about it (issue #70).
+var _flag_fixture := ""
+var _flag_fixture_flag := ""
+## Set when `_initialize` refused the command line. `quit()` only asks the
+## tree to stop at the end of the current iteration, so `_process` still
+## runs once after it — and that one pass would build a fixture and print a
+## second, more confusing failure.
+var _refused := false
 var _populate := false
 var _first_person := false
 var _hover := false
@@ -381,41 +403,53 @@ func _initialize() -> void:
 	var args := OS.get_cmdline_user_args()
 	if args.size() > 0:
 		_out = args[0]
-	_build = args.has("--build")
 	_fixture = _string_arg(args, "--fixture")
+	if _fixture != "" and not FIXTURE_NAMES.has(_fixture):
+		# Refused rather than fallen back on. `_build_fixture`'s `_:` arm used
+		# to build the demo line for a name it did not know, so a typo came
+		# back as a plausible frame of the wrong world with a zero exit
+		# status (issue #70).
+		printerr(
+			"SCREENSHOT_FAIL: no fixture named '%s'. Known fixtures: %s"
+			% [_fixture, ", ".join(FIXTURE_NAMES)]
+		)
+		_refuse()
+		return
+	if args.has("--build"):
+		_pick_fixture("demo", "--build")
 	_populate = args.has("--populate")
 	if args.has("--stress"):
-		_fixture = "stress"
+		_pick_fixture("stress", "--stress")
 		_populate = true
 	if args.has("--pipe-gallery"):
-		_fixture = "pipes"
+		_pick_fixture("pipes", "--pipe-gallery")
 	if args.has("--belt-gallery"):
-		_fixture = "gallery"
+		_pick_fixture("gallery", "--belt-gallery")
 	_item_gallery = args.has("--item-gallery")
 	if _item_gallery:
-		_fixture = "items"
+		_pick_fixture("items", "--item-gallery")
 	if args.has("--bottleneck"):
-		_fixture = "bottleneck"
+		_pick_fixture("bottleneck", "--bottleneck")
 		_populate = true
 	_staff = args.has("--staff")
 	if _staff:
-		_fixture = "chain"
+		_pick_fixture("chain", "--staff")
 		_populate = true
 	_production = args.has("--production")
 	if _production:
-		_fixture = "bottleneck"
+		_pick_fixture("bottleneck", "--production")
 		_populate = true
 	_understaffed = args.has("--understaffed")
 	if _understaffed:
-		_fixture = "understaffed"
+		_pick_fixture("understaffed", "--understaffed")
 		_populate = true
 	_staff_shortfall = args.has("--staff-shortfall")
 	if _staff_shortfall:
-		_fixture = "shortfall"
+		_pick_fixture("shortfall", "--staff-shortfall")
 		_populate = true
 	_short_staffed = args.has("--short-staffed")
 	if _short_staffed:
-		_fixture = "understaffed"
+		_pick_fixture("understaffed", "--short-staffed")
 		_populate = true
 	_first_person = args.has("--first-person")
 	_hover = args.has("--hover")
@@ -441,33 +475,33 @@ func _initialize() -> void:
 	_contents = int(_string_arg(args, "--contents")) if _string_arg(args, "--contents") != "" else -1
 	_contracts = args.has("--contracts")
 	if _contracts:
-		_fixture = "chain"
+		_pick_fixture("chain", "--contracts")
 	_payout = args.has("--payout")
 	if _payout:
-		_fixture = "chain"
+		_pick_fixture("chain", "--payout")
 	_crushing = args.has("--crushing")
 	if _crushing:
-		_fixture = "chain"
+		_pick_fixture("chain", "--crushing")
 		_populate = true
 	_full_dock = args.has("--full-dock")
 	if _full_dock:
 		# NOT --populate: the fixture runs itself to the state it is named
 		# for, and `_run_chain_forward`'s own spawns on top of that would
 		# only be more ticks against an already-full pool.
-		_fixture = "full_dock"
+		_pick_fixture("full_dock", "--full-dock")
 	# Last of the fixture flags on purpose: --contracts, --payout and
 	# --crushing each force the plain shipped line, and --bbq is meant to be
 	# combined with the first of those (the mixed orders are the half of this
 	# epic the clipboard shows), so it has the final say.
 	if args.has("--bbq"):
-		_fixture = "bbq"
+		_pick_fixture("bbq", "--bbq")
 		_populate = true
 	_stalled_run = args.has("--stalled-run")
 	if _stalled_run:
 		# NOT --populate: the shot compares a DEAD run with a merely EMPTY
 		# one, and a factory run forward has no empty runs left in it (the
 		# fixture's own doc says why).
-		_fixture = "stalled_run"
+		_pick_fixture("stalled_run", "--stalled-run")
 	_dock_lamp_dark = _string_arg(args, "--dock-lamp") == "dark"
 	_hotbar_key = _string_arg(args, "--hotbar")
 	_stock = args.has("--stock")
@@ -481,6 +515,11 @@ func _initialize() -> void:
 	_menu = args.has("--menu") or _title
 	_pause = args.has("--pause")
 	_parse_closeup(args)
+	_resolve_fixture()
+	# The world this frame actually came from, printed whether or not
+	# anything asked for one — a frame that cannot be traced back to its
+	# fixture is not evidence (issue #70).
+	print("SCREENSHOT_FIXTURE: %s" % (_fixture if _fixture != "" else "none (empty world)"))
 	if _menu:
 		# The load list is the half of this screen worth reviewing, so give it
 		# something to list. Written before the scene is built, because
@@ -497,6 +536,50 @@ func _initialize() -> void:
 	# exist yet at this point. Anything that touches it has to wait for
 	# _process()'s first frame instead. (Learned the hard way: this used to
 	# live here and crashed with "base object of type Nil".)
+
+
+## Records the fixture a convenience flag implies. The LAST caller wins,
+## which is the precedence this file has always had and which
+## `scripts/screenshot-scene.sh` documents (`--bbq` is deliberately parsed
+## last, so `--contracts --bbq` is the BBQ line with the contracts board
+## over it). What changed with issue #70 is only that this no longer
+## overwrites an explicit `--fixture`; `_resolve_fixture` decides that.
+## Stops the run with a non-zero status. `quit()` alone leaves one more
+## `_process` pass to come, so this also latches `_refused`.
+func _refuse() -> void:
+	_refused = true
+	quit(1)
+
+
+func _pick_fixture(fixture: String, flag: String) -> void:
+	_flag_fixture = fixture
+	_flag_fixture_flag = flag
+
+
+## Settles `--fixture` against the convenience flags.
+##
+## **An explicit `--fixture` wins, and the override is announced.** A flag
+## used to overwrite it in silence, so `--fixture understaffed --staff`
+## photographed the reference line and reported a fully-crewed factory —
+## the opposite of what was asked for, with a zero exit status (issue #70).
+##
+## Only the FIXTURE is overridden. Everything else `--staff` means (open the
+## staff panel, run the line forward) still happens, which is what makes the
+## combination worth typing: the understaffed line with the staff panel over
+## it is a frame no single flag can ask for.
+func _resolve_fixture() -> void:
+	if _flag_fixture == "" or _fixture == _flag_fixture:
+		if _fixture == "":
+			_fixture = _flag_fixture
+		return
+	if _fixture == "":
+		_fixture = _flag_fixture
+		return
+	print(
+		"SCREENSHOT_NOTE: --fixture %s overrides %s's own fixture ('%s'); everything else \
+%s does still applies"
+		% [_fixture, _flag_fixture_flag, _flag_fixture, _flag_fixture_flag]
+	)
 
 
 ## `--flag value` (or `--flag=value`, for a value that starts with `-` and
@@ -570,8 +653,19 @@ func _build_fixture() -> void:
 			Layouts.build_underfunded_line(_main.sim)
 		"full_dock":
 			Layouts.build_full_dock_line(_main.sim)
-		_:
+		"demo":
 			Layouts.build_demo_line(_main.sim)
+		_:
+			# Unreachable: `_initialize` refuses a name that is not in
+			# `FIXTURE_NAMES`. If it ever fires, the two lists have drifted
+			# — say so rather than photograph the demo line, which is how
+			# a typo'd `--fixture` used to come back looking plausible.
+			printerr(
+				"SCREENSHOT_FAIL: fixture '%s' is in FIXTURE_NAMES with no arm here"
+				% _fixture
+			)
+			_refuse()
+			return
 	# Every fixture is stocked, whether or not this run will tick: a
 	# screenshot of a factory with an empty larder is a screenshot of a
 	# factory that cannot start, and the larder strip would say so.
@@ -1088,6 +1182,8 @@ func _open_pause_menu() -> void:
 
 
 func _process(_delta: float) -> bool:
+	if _refused:
+		return true
 	_frames += 1
 	# Build first: every flag below is about looking at something, and since
 	# the "Real Placement" epic there is nothing to look at until one of the
@@ -1098,7 +1194,7 @@ func _process(_delta: float) -> bool:
 		if _frames < WARMUP_FRAMES:
 			return false
 		return _write_frame()
-	if _frames == 1 and (_build or _fixture != ""):
+	if _frames == 1 and _fixture != "":
 		_build_fixture()
 	# Straight after the fixture and before anything opens a panel: the gate
 	# decides what the market, the larder and the board have in them, so it

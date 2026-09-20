@@ -11,11 +11,22 @@
 # at all this photographs exactly that — bare floor, a build menu key and
 # nothing else — which is a real state worth reviewing, not a broken one.
 #
-# Pass --build to lay down the demo line first: a hopper feeding belts that
+# Pass --build (the same thing as --fixture demo) to lay down the demo line first: a hopper feeding belts that
 # run east, TURN NORTH into a crusher facing WEST which discharges back west,
 # with a pipe run heading SOUTH beside it. Three of the four facings on belts
 # and the fourth on the pipes, which makes it the right subject for reviewing
 # per-tile rotation and the junction art's east-only fallback in one frame.
+# **WHICH FIXTURE YOU GET, AND HOW TO KNOW** (issue #70). Every run prints
+# `SCREENSHOT_FIXTURE: <name>` beside `SCREENSHOT_OK`, so a frame can be
+# traced back to the world it came from. An explicit --fixture WINS over the
+# convenience flags below, which each imply one: `--fixture understaffed
+# --staff` is the understaffed line with the staff panel over it, and the run
+# says so (`SCREENSHOT_NOTE: --fixture understaffed overrides --staff's own
+# fixture`). Everything else the flag means — the panel it opens, the ticks
+# it runs — still applies. A --fixture name that does not exist is REFUSED
+# with the list of names and a non-zero status; it used to build the demo
+# line and look plausible.
+#
 # Pass --fixture <machines|fluids|vat|splitter|chain|stress|pipes|gallery|demo> for a different one:
 # `machines` (a hopper, a machine and a dock), `fluids` (a tank, a pipe run
 # and the machine tapping it), `vat` (the 2x2 cooking vat alone), `splitter`
