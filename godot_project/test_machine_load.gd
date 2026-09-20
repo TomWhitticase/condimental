@@ -386,6 +386,43 @@ func _run_checks() -> void:
 		if bool(record["mothballed"]):
 			_fail("nothing on this line was switched off, but %s reads mothballed" % key)
 
+	# --- the wire itself, on a line where the answer is NOT the default ----------
+	#
+	# Everything above this point runs on a fully crewed line, where
+	# `crewed: true` is also what a cut wire would produce — so none of it
+	# can tell the two apart. THIS can: a fixture built by real commands,
+	# genuinely short of manufacturing heads, where the sim's answer for
+	# one machine is FALSE. Hardwire `record["crewed"]` in
+	# `_poll_machine_load` and this is the test that goes red.
+	main.sim.new_game()
+	Layouts.build_understaffed_line(main.sim)
+	main._rebuild_world()
+	var vat_key: String = main._tile_key(Layouts.UNDERSTAFFED_VAT)
+	if Layouts.understaffed_stall(main.sim, Layouts.UNDERSTAFFED_VAT) != Layouts.UNDERSTAFFED_CATEGORY:
+		_fail("the fixture's vat must be refused its crew on the wire before this proves anything")
+	var uncrewed_keys: Array = []
+	for key in main._machine_load.keys():
+		if not bool(main._machine_load[key].get("crewed", true)):
+			uncrewed_keys.append(key)
+	if uncrewed_keys != [vat_key]:
+		_fail("the sim says exactly the vat goes without its crew; the panel says %s" % str(uncrewed_keys))
+
+	# And the same for the switch, thrown by a real command rather than
+	# written into a dictionary here.
+	main.sim.issue_command_json(JSON.stringify({
+		"type": "set_mothballed", "tile": [Layouts.UNDERSTAFFED_VAT.x, Layouts.UNDERSTAFFED_VAT.y],
+		"enabled": true,
+	}))
+	main._rebuild_world()
+	if not bool(main._machine_load.get(vat_key, {}).get("mothballed", false)):
+		_fail("a machine switched off by command must poll back as mothballed")
+	var still_uncrewed: Array = []
+	for key in main._machine_load.keys():
+		if not bool(main._machine_load[key].get("crewed", true)):
+			still_uncrewed.append(key)
+	if not still_uncrewed.is_empty():
+		_fail("with the vat switched off nothing goes without a crew, but %s does" % str(still_uncrewed))
+
 	if _failed:
 		quit(1)
 		return

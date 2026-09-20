@@ -229,7 +229,9 @@ use super::machines::{Footprint, MachineRegistry};
 use super::recipe::{Recipe, RecipeRegistry};
 use super::shop::{DEFAULT_PURCHASE_QUANTITY, Shop, ShopCatalog, ShopSnapshot};
 use super::splitter::{SPLITTER_KIND, Side, Splitter};
-use super::staff::{CrewEntry, CrewRequest, StaffPools, StaffSnapshot, crew_entries};
+use super::staff::{
+    CrewEntry, CrewRequest, CrewSource, EstablishmentEntry, StaffPools, StaffSnapshot, crew_entries,
+};
 use super::stats::{ProductionLedger, ProductionSnapshot, StatKind};
 use super::types::{ChunkId, Direction, FluidId, Fx, ItemId, Money, RecipeId, TileCoord, chunk_of};
 
@@ -1217,6 +1219,10 @@ pub struct DockSnapshot {
     /// ship (the staff pools MVP epic; `Dock::understaffed`). While true
     /// the buffer is held and, at capacity, the belt behind it backs up.
     pub understaffed: bool,
+    /// Switched off by the player (issue #19): claims no clerk, ships
+    /// nothing, takes nothing off the belt. Distinct from `understaffed`,
+    /// which is the crew being refused rather than never asked for.
+    pub mothballed: bool,
     /// Whether the shared delivery pool has reached its per-item ceiling
     /// (`Economy::delivery_pool_full`), i.e. whether this dock is currently
     /// refusing boxes off its belt and the line behind it is backing up (the
@@ -1458,6 +1464,11 @@ pub enum TileSnapshot {
         crew: Vec<CrewEntry>,
         crewed: bool,
         understaffed: bool,
+        /// Switched off by the player (issue #19) — the same field a
+        /// machine tile carries, because the dock is the other placement
+        /// whose kind asks for a crew and so the other one that can be
+        /// switched off.
+        mothballed: bool,
     },
 }
 
@@ -2410,7 +2421,9 @@ impl World {
 
     /// Sums the ESTABLISHMENT — every head the placed machinery needs to be
     /// fully crewed, whether or not any of it is running — and hands it to
-    /// [`StaffPools::set_required`].
+    /// [`StaffPools::set_required`], together with the two things that
+    /// figure is useless without: what the MOTHBALLED machinery would need,
+    /// and which kinds are asking.
     ///
     /// Called from [`Self::recompute_topology`], which is reached only from
     /// `Place`, `Remove` and `Rotate`, so the staffing requirement moves
@@ -2418,7 +2431,8 @@ impl World {
     /// save loader after it restores the pools**: `StaffPools::restore`
     /// builds fresh pools, which would otherwise drop the establishment the
     /// replayed `Place` commands had just computed and load every world
-    /// needing nobody.
+    /// needing nobody. And by `try_set_mothballed`, which is a change to
+    /// the factory that moves no tile.
     ///
     /// The per-tick `demand` beside it cannot do this job: a machine asks
     /// for its crew only when its plan is to work (`machine.rs`, "The crew
@@ -2434,43 +2448,73 @@ impl World {
     /// four: the ECS holds one entity per placement, however many tiles it
     /// covers.
     ///
-    /// **A MOTHBALLED machine is not in the establishment** (issue #19).
-    /// That is the whole of mothballing's effect on the staffing model: the
-    /// requirement is what is placed *and switched on*, so a player who
-    /// over-built can switch the surplus off, watch `required` fall below
-    /// `headcount`, and let the difference go. Also called by
-    /// `try_set_mothballed`, which is why this is not only reached through
-    /// [`Self::recompute_topology`].
+    /// **A MOTHBALLED machine is not in the establishment** (issue #19) —
+    /// it is counted into `mothballed` instead, which is how many heads may
+    /// be STOOD DOWN with it. The requirement is what is placed *and
+    /// switched on*, so a player who cannot make payroll can switch a
+    /// machine off, watch `required` fall below `headcount`, and see the
+    /// wage bill fall with it without losing anybody
+    /// (`StaffPools::sync_payroll`). The kinds behind `required` ride along
+    /// as `sources` so the HUD can name them without a second walk of its
+    /// own — the walk is here, once, in the sim's own tile order.
     pub(super) fn recompute_establishment(&mut self) {
-        let mut establishment: BTreeMap<String, u32> = BTreeMap::new();
-        let entities: Vec<Entity> = self.ecs.iter().map(|e| e.entity()).collect();
-        for entity in entities {
+        let mut required: BTreeMap<String, u32> = BTreeMap::new();
+        let mut mothballed: BTreeMap<String, u32> = BTreeMap::new();
+        // Kinds in the order the world first met them, per category, so
+        // the HUD's `asked for by:` line is stable across a poll.
+        let mut sources: BTreeMap<String, Vec<CrewSource>> = BTreeMap::new();
+        for &entity in &self.topology.all {
             if self.ecs.get::<&Position>(entity).is_err() {
-                continue;
-            }
-            if self.is_mothballed(entity) {
                 continue;
             }
             let kind = self.placement_of(entity).kind;
             let Some(machine) = self.machines.get(&kind) else {
                 continue;
             };
+            let off = self.is_mothballed(entity);
             for (category, count) in &machine.staff {
-                *establishment.entry(category.clone()).or_insert(0) += *count;
+                if off {
+                    *mothballed.entry(category.clone()).or_insert(0) += *count;
+                    continue;
+                }
+                *required.entry(category.clone()).or_insert(0) += *count;
+                let lines = sources.entry(category.clone()).or_default();
+                match lines.iter_mut().find(|line| line.kind == kind) {
+                    Some(line) => line.count = line.count.saturating_add(*count),
+                    None => lines.push(CrewSource {
+                        kind: kind.clone(),
+                        count: *count,
+                    }),
+                }
             }
         }
-        let establishment: Vec<(String, u32)> = establishment.into_iter().collect();
+        let mut establishment: Vec<EstablishmentEntry> = Vec::new();
+        for category in required.keys().chain(mothballed.keys()) {
+            if establishment.iter().any(|e| &e.category == category) {
+                continue;
+            }
+            establishment.push(EstablishmentEntry {
+                category: category.clone(),
+                required: required.get(category).copied().unwrap_or(0),
+                mothballed: mothballed.get(category).copied().unwrap_or(0),
+                sources: sources.get(category).cloned().unwrap_or_default(),
+            });
+        }
         self.staff.set_required(&establishment);
     }
 
-    /// Whether `entity` is a machine the player has switched off. `false`
-    /// for everything that is not a machine — nothing else can be
-    /// mothballed (see [`PlayerCommand::SetMothballed`]).
+    /// Whether `entity` is a placement the player has switched off.
+    /// `false` for everything that cannot be mothballed — which is to say
+    /// everything that never asks for a crew (see
+    /// [`PlayerCommand::SetMothballed`]).
     fn is_mothballed(&self, entity: Entity) -> bool {
-        self.ecs
-            .get::<&Machine>(entity)
-            .map(|m| m.mothballed)
-            .unwrap_or(false)
+        if let Ok(machine) = self.ecs.get::<&Machine>(entity) {
+            return machine.mothballed;
+        }
+        if let Ok(dock) = self.ecs.get::<&Dock>(entity) {
+            return dock.mothballed();
+        }
+        false
     }
 
     /// **Which placements the hired headcount CANNOT crew** — issue #20's
@@ -2506,11 +2550,23 @@ impl World {
     /// tick is already on the wire as the `staff` stall
     /// (`Machine::refused_by`), and the two are meant to be read together.
     ///
-    /// It allocates against `headcount`, **not** `available`, for
-    /// `StaffPools::short`'s reason: a head in arrears is on the books, and
-    /// the fix for one is paying them, not hiring a second. Arrears are
-    /// reported as their own warning (the per-tick `staff` stall and the
-    /// panel's unpaid count) rather than smeared into this one.
+    /// It allocates against the heads that would actually turn up —
+    /// `headcount - unpaid` — and **not** against `headcount`. A head in
+    /// arrears is on the books but is not at their post
+    /// (`StaffPools::reset`), so a factory that missed a payday has
+    /// machines standing idle for want of a crew, which is precisely what
+    /// this set exists to name; budgeting against `headcount` reported
+    /// every one of them as crewed through the whole of an arrears (issue
+    /// #20's headline case, found in review). That is still an
+    /// establishment-stable figure and not a per-tick one: arrears move
+    /// only at a payday, hire or fire, never with production flow, so
+    /// nothing here flickers.
+    ///
+    /// `StaffPools::short` keeps the other reading deliberately — it
+    /// answers "how many must I HIRE", and hiring a second head to cover
+    /// an unpaid one is the wrong advice, paying them is. The two numbers
+    /// differ on purpose, and the HUD says which is which in words
+    /// (`_uncrewed_reason_text`).
     ///
     /// A placement whose kind asks for nobody — a belt, a pipe, a hopper, a
     /// tank — is crewed vacuously, as is a MOTHBALLED machine: it needs no
@@ -2524,7 +2580,12 @@ impl World {
             .categories()
             .iter()
             .zip(self.staff.pools())
-            .map(|(category, pool)| (category.id.as_str(), pool.headcount))
+            .map(|(category, pool)| {
+                (
+                    category.id.as_str(),
+                    pool.headcount.saturating_sub(pool.unpaid),
+                )
+            })
             .collect();
         let mut uncrewed = BTreeSet::new();
         let ordered = self.topology.machines.iter().chain(&self.topology.docks);
@@ -2626,8 +2687,6 @@ impl World {
                 );
             }
         }
-
-        self.recompute_establishment();
 
         let body_of = |entity: Entity| -> BodyKind {
             *self
@@ -3019,6 +3078,10 @@ impl World {
         topology.links = links;
 
         self.topology = topology;
+        // Last, and only here: the establishment walks `topology.all`, so
+        // it has to see the topology this pass just built rather than the
+        // one it replaced.
+        self.recompute_establishment();
     }
 
     fn position_of(&self, entity: Entity) -> TileCoord {
@@ -3356,7 +3419,16 @@ impl World {
                     .ecs
                     .get::<&mut Dock>(dock)
                     .expect("a dock placement carries a Dock");
-                if body.is_empty() {
+                if body.mothballed() {
+                    // Switched off: it claims no clerk and ships nothing,
+                    // and it is not "understaffed" either — nobody was
+                    // asked for, so there is no shortage to report. The
+                    // held goods stay held; `try_absorb_belt_into_dock`
+                    // refuses, so the belt behind it backs up.
+                    let was = body.understaffed();
+                    body.set_understaffed(false);
+                    (0, was)
+                } else if body.is_empty() {
                     // Nothing to ship, nobody asked for; the verdict of the
                     // last loaded tick stands.
                     (0, false)
@@ -3643,6 +3715,12 @@ impl World {
 
     fn try_absorb_belt_into_dock(&mut self, belt: Entity, dock: Entity) -> bool {
         let mut body = self.ecs.get::<&mut Dock>(dock).unwrap();
+        if body.mothballed() {
+            // A switched-off dock takes nothing off the belt, exactly as a
+            // switched-off machine refuses its input: the box stays where
+            // it is and the line backs up behind it.
+            return false;
+        }
         let mut segment = self.ecs.get::<&mut BeltSegment>(belt).unwrap();
         // The economy comes in read-only, as the pool's room check (the
         // dock-capacity change): a full pool leaves the box standing on the
@@ -3987,10 +4065,21 @@ impl World {
     }
 
     /// [`PlayerCommand::SetMothballed`]. Silent no-op on an empty tile, on
-    /// anything that is not a machine, and on the state it already has.
+    /// the state it already has, and on **anything whose kind asks for no
+    /// crew**.
+    ///
+    /// That last one is the whole rule, and it is asked of the content
+    /// rather than of the Rust type: a placement may be switched off iff
+    /// `machines.ron` gives its kind a non-empty `staff` list. Mothballing
+    /// exists to take wages off the bill (issue #19), so switching off a
+    /// belt, a pipe, a hopper or a tank would cost the player production
+    /// and save nothing — while the DOCK, which does draw a clerk, must be
+    /// switchable or the bill can never reach zero and a factory with no
+    /// income can never climb out of arrears. Spelling the rule as "only a
+    /// `Machine`" hard-codes in Rust an answer the data already holds.
     ///
     /// **[`Self::recompute_establishment`], not
-    /// [`Self::recompute_topology`].** Switching a machine off changes
+    /// [`Self::recompute_topology`].** Switching a placement off changes
     /// exactly one derived thing — how many heads the placed machinery
     /// needs — and none of the things the topology pass exists to rebuild:
     /// the occupancy grid, the hand-off links and the fluid networks are
@@ -4002,14 +4091,24 @@ impl World {
         let Some(&entity) = self.topology.grid.get(&tile) else {
             return false;
         };
-        let Ok(mut machine) = self.ecs.get::<&mut Machine>(entity) else {
-            return false;
-        };
-        if machine.mothballed == enabled {
+        if self.ecs.get::<&Position>(entity).is_err() {
             return false;
         }
-        machine.mothballed = enabled;
-        drop(machine);
+        let kind = self.placement_of(entity).kind;
+        let asks_for_a_crew = self
+            .machines
+            .get(&kind)
+            .is_some_and(|def| !def.staff.is_empty());
+        if !asks_for_a_crew || self.is_mothballed(entity) == enabled {
+            return false;
+        }
+        if let Ok(mut machine) = self.ecs.get::<&mut Machine>(entity) {
+            machine.mothballed = enabled;
+        } else if let Ok(mut dock) = self.ecs.get::<&mut Dock>(entity) {
+            dock.set_mothballed(enabled);
+        } else {
+            return false;
+        }
         self.recompute_establishment();
         self.mark_placement_dirty(entity);
         true
@@ -4667,6 +4766,7 @@ impl World {
             capacity_per_item: body.capacity_per_item(),
             shipped_total: body.shipped_total(),
             understaffed: body.understaffed(),
+            mothballed: body.mothballed(),
             full: self.economy.delivery_pool_full(),
         }
     }
@@ -4838,6 +4938,7 @@ impl World {
                     crew: crew_entries(self.crew_of_kind(&placement.kind)),
                     crewed: self.is_crewed(entity),
                     understaffed: snapshot.understaffed,
+                    mothballed: snapshot.mothballed,
                 }
             }
         };

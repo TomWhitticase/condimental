@@ -7815,7 +7815,7 @@ func _staff_hire_blocked_text(category: Dictionary, snapshot: Dictionary) -> Str
 
 
 ## What hiring this category's shortfall would actually unblock, named from
-## the same `asked for by:` sources the WHY line uses (`_staff_demand_sources_for`).
+## the same `asked for by:` sources the WHY line uses (`_staff_demand_sources`).
 ## The sim's own rule makes this honest without inventing a fact: a machine
 ## that cannot get its WHOLE crew stalls, and a category whose `short` is 0
 ## has assigned == demand, so clearing the shortfall is exactly "every one of
@@ -8262,9 +8262,7 @@ func _update_staff_panel() -> void:
 		row["panel"].add_theme_stylebox_override(
 			"panel", _staff_row_style(bool(state["short_row"]))
 		)
-		var sources := _staff_demand_sources_for(
-			String(categories[i].get("id", "")), _placements, _crews
-		)
+		var sources := _staff_demand_sources(categories[i])
 		row["demand_label"].text = _staff_demand_text(sources)
 		row["unblock_label"].text = _staff_hire_unblocks_text(
 			int(categories[i].get("short", 0)), sources
@@ -8772,36 +8770,27 @@ func _seed_crews() -> void:
 			_crews[_tile_key(origin)] = parsed["crew"]
 
 
-## What asks for a category, by KIND: every placement's crew (from
-## `_crews`, seeded per rebuild) that names `category_id`, totalled per kind
-## across every placement of it — a second crusher doubles the crusher's own
-## number rather than adding a second "crusher ×1" line. Order is first
-## encountered in `_placements` (the simulation's own tile order), so the
-## panel's WHY line is stable across a poll rather than reshuffling with a
-## dictionary's own order. Returns `[{"kind", "count"}]`, empty when nothing
-## placed asks for this category.
-func _staff_demand_sources_for(category_id: String, placements: Array, crews: Dictionary) -> Array:
-	var totals: Dictionary = {}
-	var order: Array = []
-	for placement in placements:
-		var crew = crews.get(_tile_key(_placement_origin(placement)), [])
-		if not (crew is Array):
-			continue
-		for entry in crew:
-			if String(entry.get("category", "")) != category_id:
-				continue
-			var kind := String(placement.get("kind", ""))
-			if not totals.has(kind):
-				totals[kind] = 0
-				order.append(kind)
-			totals[kind] += int(entry.get("count", 0))
-	var sources: Array = []
-	for kind in order:
-		sources.append({"kind": kind, "count": totals[kind]})
-	return sources
+## What asks for a category, by KIND — **read off the wire, not derived
+## here**. `staff_snapshot_json` carries `sources` per category:
+## `[{"kind", "count"}]` in the simulation's own tile order, totalled across
+## every placement of a kind, so a second crusher doubles the crusher's own
+## number rather than adding a second "crusher ×1" line.
+##
+## This used to be a Godot-side walk of `_placements` x `_crews`, and that
+## walk was WRONG the moment mothballing landed (issue #19): the sim drops a
+## switched-off machine out of the establishment, but a GDScript sum over
+## every placed crew went on counting it, so `required` said 2 while the
+## CREW caption and this WHY line still said 4. One number, one source —
+## `godot_project/CLAUDE.md`: never recompute a number the wire already
+## carries.
+func _staff_demand_sources(category) -> Array:
+	if not (category is Dictionary):
+		return []
+	var sources = category.get("sources", [])
+	return sources if sources is Array else []
 
 
-## The WHY line under a category row: `_staff_demand_sources_for`'s result
+## The WHY line under a category row: `_staff_demand_sources`'s result
 ## in words, kind names lowercase and space-separated (`cooking_vat` ->
 ## `cooking vat`) since this is prose, not `_kind_display_name`'s title-case
 ## card text. The exact sentence an empty factory reads
@@ -9189,7 +9178,7 @@ func _crew_plate_state(snapshot: Dictionary, current_tick: int) -> Dictionary:
 		var headcount := int(category.get("headcount", 0))
 		var required := int(category.get("required", 0))
 		var short := int(category.get("short", 0))
-		var sources := _staff_demand_sources_for(id, _placements, _crews)
+		var sources := _staff_demand_sources(category)
 		rows.append({
 			"id": id,
 			"count_text": "%d / %d" % [headcount, required],
@@ -10368,12 +10357,12 @@ func _open_config_panel(origin: Vector2i, kind: String) -> void:
 	#
 	# Both fillable kinds carry a picker: a hopper picks the solid it feeds,
 	# a tank the raw fluid it holds (issue #43).
-	var is_machine := _config_kind_is_machine(kind)
+	var crewed := _config_can_mothball(origin)
 	_config_picker_box.visible = kind == HOPPER_KIND or kind == FLUID_TANK_KIND
-	_config_machine_box.visible = is_machine
-	_config_fill_row.visible = not is_machine
-	_config_auto_button.visible = not is_machine
-	_config_auto_note.visible = not is_machine
+	_config_machine_box.visible = crewed
+	_config_fill_row.visible = not crewed
+	_config_auto_button.visible = not crewed
+	_config_auto_note.visible = not crewed
 	if kind == HOPPER_KIND:
 		_refresh_hopper_items()
 	elif kind == FLUID_TANK_KIND:
@@ -10436,7 +10425,7 @@ func _config_click_at_tile(tile: Vector2i) -> void:
 	var placement := _placement_at_tile(tile)
 	var kind := String(placement.get("kind", ""))
 	var origin := _placement_origin(placement)
-	if not _config_kind_is_machine(kind) and kind != HOPPER_KIND and kind != FLUID_TANK_KIND:
+	if not _config_can_mothball(origin) and kind != HOPPER_KIND and kind != FLUID_TANK_KIND:
 		_close_config_panel()
 		return
 	if _config_open and _config_tile == origin:
@@ -10445,18 +10434,22 @@ func _config_click_at_tile(tile: Vector2i) -> void:
 	_open_config_panel(origin, kind)
 
 
-## Whether `kind` is a MACHINE, asked of the simulation rather than of a
-## list kept here: `_machine_states` is keyed by the origin of every machine
-## the chunk snapshots carry, so a crusher added to `data/machines.ron`
-## becomes mothballable with no Godot edit — the same property the hopper's
-## ingredient picker has. A belt, a splitter, a hopper, a tank and the dock
-## are all absent from it, which is exactly the set the simulation refuses
-## `set_mothballed` for (`World::try_set_mothballed` needs a `Machine`).
-func _config_kind_is_machine(kind: String) -> bool:
-	if kind == "" or kind == BELT_KIND or kind == PIPE_KIND or kind == SPLITTER_KIND \
-			or kind == HOPPER_KIND or kind == FLUID_TANK_KIND or kind == DOCK_KIND:
-		return false
-	return true
+## Whether the building at footprint origin `origin` can be MOTHBALLED —
+## **asked of the content, not of a list kept here**. The simulation's rule
+## is that a placement may be switched off iff its kind asks for a crew
+## (`World::try_set_mothballed`), because the switch exists to take wages
+## off the bill; Godot already holds that same answer in `_crews`, seeded
+## per rebuild from `query_tile_json`. So a new crewed kind added to
+## `data/machines.ron` becomes switchable with no Godot edit, exactly as
+## the hopper's ingredient picker follows `ingredients.ron`.
+##
+## This used to be a hardcoded "everything except belt, pipe, splitter,
+## hopper, tank and dock" — which went wrong the moment the DOCK became
+## mothballable (it draws a clerk, and until it could be switched off a
+## factory's wage bill could never reach zero).
+func _config_can_mothball(origin: Vector2i) -> bool:
+	var crew = _crews.get(_tile_key(origin), [])
+	return crew is Array and not crew.is_empty()
 
 
 ## Repolled every frame while the panel is up, exactly like the build menu
@@ -10485,6 +10478,8 @@ func _update_config_panel() -> void:
 		_update_config_hopper(key)
 	elif _config_kind == FLUID_TANK_KIND:
 		_update_config_tank(key)
+	elif _config_kind == DOCK_KIND:
+		_update_config_dock(key)
 	else:
 		_update_config_machine(key)
 	_position_config_panel()
@@ -10631,6 +10626,26 @@ func _update_config_machine(key: String) -> void:
 	_apply_config_mothball_state(mothballed)
 
 
+## The dock's version of the same panel (issue #19). It gets the switch for
+## the same reason a machine does — it draws a crew — but it has no recipe
+## and no batch, so the level bar reads what it is HOLDING against its
+## per-item capacity, which is the ceiling the sim actually defines for it.
+func _update_config_dock(key: String) -> void:
+	var snapshot: Dictionary = _dock_states.get(key, {})
+	_config_title.text = _kind_display_name(String(snapshot.get("kind", _config_kind)))
+	_config_title_icon.texture = _icon_for_asset(_shop_asset_for(_config_kind))
+	var held := 0
+	for entry in snapshot.get("contents", []):
+		if entry is Array and entry.size() > 1:
+			held += int(entry[1])
+	var capacity := int(snapshot.get("capacity_per_item", 0))
+	_config_level_label.text = "holding: %d" % held
+	_set_config_level(0.0 if capacity <= 0 else clampf(float(held) / float(capacity), 0.0, 1.0))
+	var mothballed := bool(snapshot.get("mothballed", false))
+	_config_machine_state.text = _config_machine_state_text(key, mothballed)
+	_apply_config_mothball_state(mothballed)
+
+
 ## The sentence above the switch: what this machine is doing to the payroll
 ## right now. Three states, and each of them is the reason the player might
 ## have come here — it is running and paid for, it is switched off and
@@ -10669,9 +10684,9 @@ func _apply_config_mothball_state(mothballed: bool) -> void:
 			state, _config_toggle_style(state, not mothballed)
 		)
 	_config_mothball_note.text = (
-		"click to return it to service — its crew goes back on the payroll and the held batch resumes"
+		"click to return it to service — its crew goes back on the payroll and it picks up where it stopped"
 		if mothballed else
-		"click to mothball it — it keeps its place and its half-made batch, asks for no crew, and makes nothing"
+		"click to mothball it — it keeps its place and whatever it is holding, asks for no crew, and does nothing"
 	)
 
 
@@ -10878,7 +10893,7 @@ func _on_config_auto_pressed() -> void:
 ## the auto-fill toggle does, so it can never show a state the simulation
 ## refused.
 func _on_config_mothball_pressed() -> void:
-	if not _config_open or not _config_kind_is_machine(_config_kind):
+	if not _config_open or not _config_can_mothball(_config_tile):
 		return
 	_issue_config_command({
 		"type": "set_mothballed",
@@ -13432,6 +13447,13 @@ func _hover_panel_state(tile: Vector2i) -> Dictionary:
 	return state
 
 
+## Whether the load bar's colour is coming from a STAFFING fact rather than
+## from the machine's status — the two cases `_load_bar_color` answers
+## before it looks at the status at all.
+func _load_bar_is_staffing(record: Dictionary) -> bool:
+	return bool(record.get("mothballed", false)) or not bool(record.get("crewed", true))
+
+
 ## The colour the hover's load bar is filled with, from the whole polled
 ## record rather than the status alone, because two of the four things it
 ## can say are not statuses (issues #19 and #20).
@@ -13441,13 +13463,6 @@ func _hover_panel_state(tile: Vector2i) -> Dictionary:
 ## about that is a fault; an UNCREWED machine is amber even on the ticks it
 ## did not get as far as asking for its crew, which is the flicker #20 was
 ## filed about; otherwise the status colour, as before.
-## Whether the load bar's colour is coming from a STAFFING fact rather than
-## from the machine's status — the two cases `_load_bar_color` answers
-## before it looks at the status at all.
-func _load_bar_is_staffing(record: Dictionary) -> bool:
-	return bool(record.get("mothballed", false)) or not bool(record.get("crewed", true))
-
-
 func _load_bar_color(record: Dictionary) -> Color:
 	if bool(record.get("mothballed", false)):
 		return METER_FILL_OFF

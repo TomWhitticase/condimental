@@ -755,5 +755,57 @@ func _run_checks() -> void:
 			_fail("the legend still advertises a removed fill/contents key: %s" % legend)
 			return
 
-	print("CONFIG_PANEL_OK: click opens/toggles/retargets/closes, FILL per building with reasons, AUTO-FILL round-trips and keeps a %d-unit hopper and a %.0f-unit tank full, picker retargets a placed hopper and declares a tank's fluid after warning what switching destroys, ESC/menus/modes/removal close it, unplumbed tank refused, a machine's mothball switch round-trips through the sim and reads back in words, SPACE/V/Q inert" % [capacity, tank_capacity])
+	# --- 13. The DOCK gets the same switch (issue #19) -----------------------
+	# Last of all, because it replaces the world with the reference line.
+	# The rule is the crew list, not the Rust type: a placement may be
+	# switched off iff its kind asks for a crew, and the dock does — one
+	# logistics clerk. It has to be switchable, or a factory that cannot
+	# make payroll can never get its wage bill to zero. What is checked is
+	# that the panel asks the CONTENT rather than a list kept in GDScript:
+	# no hopper/tank row, the switch present, and the state read back off
+	# `dock_snapshots_json`.
+	main.sim.new_game()
+	Layouts.build_reference_line(main.sim)
+	main._rebuild_world()
+	var dock_tile := Vector2i(0, 0)
+	for placement in main._placements:
+		if String(placement.get("kind", "")) == main.DOCK_KIND:
+			dock_tile = main._placement_origin(placement)
+	main._config_click_at_tile(dock_tile)
+	if not main._config_open or main._config_kind != main.DOCK_KIND:
+		_fail("clicking the dock did not open its panel")
+		return
+	if not main._config_machine_box.visible:
+		_fail("the dock asks for a clerk, so its panel must carry the switch")
+		return
+	if main._config_fill_row.visible or main._config_auto_button.visible:
+		_fail("a dock has nothing to fill")
+		return
+	if main._config_mothballed:
+		_fail("a freshly placed dock reads as already mothballed")
+		return
+	main._on_config_mothball_pressed()
+	_repoll()
+	if not main._config_mothballed or main._config_mothball_button.text != "MOTHBALLED:  OFF":
+		_fail("the dock's switch did not read back off the simulation: '%s'" % main._config_mothball_button.text)
+		return
+	main._on_config_mothball_pressed()
+	_repoll()
+	if main._config_mothballed:
+		_fail("throwing the dock's switch back did not return it to service")
+		return
+	main._close_config_panel()
+
+	# A belt asks for nobody, so it has nothing to stand down and gets no
+	# panel at all — the same question, answered the other way.
+	var belt_tile := Vector2i(0, 0)
+	for placement in main._placements:
+		if String(placement.get("kind", "")) == main.BELT_KIND:
+			belt_tile = main._placement_origin(placement)
+	main._config_click_at_tile(belt_tile)
+	if main._config_open:
+		_fail("a belt asks for no crew and holds nothing, so it has no panel")
+		return
+
+	print("CONFIG_PANEL_OK: click opens/toggles/retargets/closes, FILL per building with reasons, AUTO-FILL round-trips and keeps a %d-unit hopper and a %.0f-unit tank full, picker retargets a placed hopper and declares a tank's fluid after warning what switching destroys, ESC/menus/modes/removal close it, unplumbed tank refused, the mothball switch round-trips through the sim on a machine AND on the dock and reads back in words, a belt gets no panel at all, SPACE/V/Q inert" % [capacity, tank_capacity])
 	quit(0)
