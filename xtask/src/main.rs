@@ -74,6 +74,10 @@ fn main() {
 
     println!("xtask: copied {} -> {}", src.display(), dest.display());
 
+    // Before anything loads it — `reimport_godot_assets` below is itself a
+    // Godot run that loads the extension.
+    codesign_staged_lib(&dest);
+
     copy_voxel_models(&root);
     copy_voxel_icons(&root);
 
@@ -86,6 +90,70 @@ fn main() {
 
 /// The command a human has to run if xtask cannot run it for them.
 const IMPORT_HINT: &str = "godot --headless --path godot_project --import";
+
+/// The command a human has to run if xtask cannot sign for them.
+const CODESIGN_HINT: &str = "codesign -s - --force godot_project/bin/libsim_core.dylib";
+
+/// Ad-hoc re-signs the dylib we just staged, on macOS only (issue #77).
+///
+/// Overwriting a `.dylib` invalidates the signature macOS recorded for that
+/// path, and the kernel then SIGKILLs any process that loads it. The failure
+/// is invisible from where it lands: every headless Godot run — the whole of
+/// `scripts/verify-core-loop.sh`, every `scripts/screenshot-scene.sh` render —
+/// dies with **exit 137, no stderr and no marker**, while `godot --version`
+/// still exits 0 and `codesign --verify` calls the library valid. It reads as
+/// a broken engine or a broken sandbox, and nothing printed anywhere points at
+/// a signature. xtask is what replaced the file, so xtask is what re-signs it:
+/// the same argument `reimport_godot_assets` makes about the `.import`
+/// sidecars it invalidates.
+///
+/// **Two decisions this settles** (both asked in the issue):
+///
+/// 1. *A signing failure WARNS; it does not fail xtask.* `codesign` ships with
+///    the Xcode command line tools, and building the library is useful on a
+///    machine that has never installed them — CI's `cargo test` never loads
+///    the dylib at all, and a Linux or Windows build has no signature to
+///    speak of. So a missing or failing `codesign` leaves the freshly staged
+///    library in place and prints the one command that fixes it, exactly as a
+///    missing `godot` does for the import passes. The build stays green; the
+///    person who then gets exit 137 has the hint in their scrollback.
+/// 2. *Only the loaded dylib is signed, not the staged `.vox` output.* The
+///    kill is a code-signing rule about executable code the dynamic linker
+///    maps in. `.vox` models and `.png` icons are data Godot reads through its
+///    own importer, are not mapped executable, and signing thousands of them
+///    would cost seconds per build to change nothing. Same for `--release`:
+///    it is the same `dest` path through the same copy, so it is signed by the
+///    same call with no extra case.
+fn codesign_staged_lib(dest: &Path) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    match Command::new("codesign")
+        .args(["-s", "-", "--force"])
+        .arg(dest)
+        .output()
+    {
+        Ok(output) if output.status.success() => {
+            println!("xtask: ad-hoc re-signed {} (codesign -s -)", dest.display());
+        }
+        Ok(output) => {
+            eprintln!(
+                "xtask: WARNING: codesign failed ({}) — the library is staged but UNSIGNED, \
+                 so a headless Godot run will die with exit 137 and no output. \
+                 Run `{CODESIGN_HINT}` by hand.\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Err(e) => {
+            eprintln!(
+                "xtask: WARNING: 'codesign' not runnable ({e}) — the library is staged but \
+                 UNSIGNED. Install the Xcode command line tools and run `{CODESIGN_HINT}`, \
+                 or every headless Godot run dies with exit 137 and no output."
+            );
+        }
+    }
+}
 
 /// Re-runs Godot's asset import over `godot_project/`, twice.
 ///
