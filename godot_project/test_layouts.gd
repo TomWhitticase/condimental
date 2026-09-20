@@ -968,3 +968,192 @@ const BELT_GALLERY_RIGHT_CORNERS := {
 const BELT_GALLERY_LEFT_CORNERS := {
 	"east": Vector2i(6, 0), "north": Vector2i(9, 0), "west": Vector2i(9, 3), "south": Vector2i(6, 3),
 }
+
+
+## THE FLUID GALLERY (issue #72) — all SIX fluids the game has, standing in
+## six pipe runs in one frame, so the question "are these six colours
+## actually tellable apart?" can be answered by looking at a picture instead
+## of by reasoning about six hex values.
+##
+## `main.gd`'s FLUID_TINTS grew from two entries to six across the BBQ epic
+## and was never once seen whole: the shipped line shows three of them, the
+## BBQ fixture four, and nothing showed `bbq_mix` beside `ketchup_mix` or
+## `bbq` beside `ketchup` — which are exactly the two pairs most likely to
+## collide, both being dark red-browns. The colours were reviewed in
+## isolation, which is not a review (UI_UX.md §2b point 9).
+##
+## **Naming a run is not the same as filling it, and this fixture does both
+## differently.** A run's fluid id comes from the MACHINE RECIPES either end
+## of it (`sim::world::resolve_network_fluids`), not from anything that has
+## ever flowed through it, so the naming here is pure topology and is exact
+## the moment the last pipe is placed — nothing has to run. The layout is
+## chosen so that each of the six runs narrows to exactly one candidate:
+##
+##   tank -> [A] -> mixer -> [B] -> vat -> [C] -> mixer -> [D] -> vat -> [F]
+##                                                          tank -> [E] ->
+##
+##   * A is tank-fed, so it is narrowed to RAW fluids, and the one raw fluid
+##     a mixer draws is vinegar.
+##   * B is filled by that mixer, whose two recipes make `ketchup_mix` and
+##     `bbq_mix`; `bbq_mix` needs ketchup on an input run and this mixer's
+##     only input run is A, so `ketchup_mix` is the only feasible one.
+##   * C is filled by a vat fed only by B, so `bbq` (which needs `bbq_mix`
+##     AND liquid smoke, on two distinct runs) is out and it is `ketchup`.
+##   * D is filled by the second mixer, fed only by C; `ketchup_mix` needs
+##     vinegar, so it is `bbq_mix`.
+##   * E is the second tank's run, drawn by the second vat: raw again, and
+##     the one raw fluid a vat draws is `liquid_smoke`.
+##   * F leaves that vat, which now has `bbq_mix` and `liquid_smoke` on two
+##     distinct input runs and no `ketchup_mix` anywhere: `bbq`.
+##
+## PRESSURE is the other half, and it is set directly rather than earned.
+## Priming these runs by simulation would mean two full ketchup sub-chains
+## feeding two mixers, a 600-tick BBQ cook and something like fifteen
+## thousand ticks — and the intermediate runs would still be draining into
+## the next machine at the moment of the shot, which is the opposite of what
+## a colour comparison wants. `fill_fluid_runs` below sets every volume
+## through the save/load door instead. That makes this a still life and not
+## a working factory, exactly as the pipe and belt galleries are.
+##
+## Returns `check_fluid_gallery`'s complaint, or "" when the gallery really
+## is one. **The caller must refuse on a complaint** — `test_screenshot.gd`
+## writes no PNG and exits 1 — because every way this fixture degrades
+## leaves a frame that still looks like a factory (see `check_fluid_gallery`
+## below). It is returned rather than acted on here so that a headless
+## caller with no screenshot to suppress can decide for itself.
+##
+## READING the result: at the fixture's own framing this frame answers
+## "all six exist, named and standing" well, and "are these six tellable
+## apart" only roughly — two of the runs sit ~600px apart rather than side
+## by side. `--fluid-gallery --closeup <x>,<y>,6` is the route that answers
+## the second question, one run at a time at 1:1.
+static func build_fluid_gallery(sim) -> String:
+	# Run A, vinegar: a tank and two pipes into the first mixer's west side.
+	place(sim, "fluid_tank", Vector2i(0, 0), "east")
+	for x in [1, 2]:
+		place(sim, "pipe", Vector2i(x, 0), "east")
+	place(sim, "mixer", Vector2i(3, 0), "east")  # 1x2: also covers y=1
+
+	# Run B, ketchup mix: off the mixer's outlet face into the first vat.
+	for x in [4, 5]:
+		place(sim, "pipe", Vector2i(x, 0), "east")
+	place(sim, "cooking_vat", Vector2i(6, 0), "east")  # 2x2: also x=7, y=1
+
+	# Run C, ketchup: out of that vat and into the second mixer.
+	for x in [8, 9]:
+		place(sim, "pipe", Vector2i(x, 0), "east")
+	place(sim, "mixer", Vector2i(10, 0), "east")
+
+	# Run D, BBQ mix: into the second vat.
+	for x in [11, 12]:
+		place(sim, "pipe", Vector2i(x, 0), "east")
+	place(sim, "cooking_vat", Vector2i(13, 0), "east")  # 2x2: also x=14, y=1
+
+	# Run E, liquid smoke. The tank TOUCHES the vat's north-west tile, which
+	# is how a machine taps a network (see `build_reference_line`), and the
+	# run keeps to row 2 so it never touches run D on row 0 — a tile closer
+	# and the two networks would merge into one unnameable run.
+	place(sim, "fluid_tank", Vector2i(13, 2), "east")
+	for x in [14, 15]:
+		place(sim, "pipe", Vector2i(x, 2), "east")
+
+	# Run F, BBQ: out of the second vat, with row 1 left empty between it
+	# and run E for the same reason.
+	for x in [15, 16]:
+		place(sim, "pipe", Vector2i(x, 0), "east")
+
+	fill_fluid_runs(sim)
+	var complaint := check_fluid_gallery(sim)
+	if complaint != "":
+		# Said out loud as well as returned: `push_error` is what a Godot
+		# log shows, and the return value is what actually stops the run.
+		# It is deliberately NOT the only thing that happens — issue #72's
+		# first cut pushed this error and then let the harness photograph
+		# the degraded gallery anyway, exit 0, which is the #70/#75 failure
+		# mode this repo has now fixed three times.
+		push_error("build_fluid_gallery(): %s" % complaint)
+	return complaint
+
+
+## How many placements `build_fluid_gallery` makes: 12 pipes, 2 tanks,
+## 2 mixers and 2 vats — 816 of the 3000 a new game starts with.
+const FLUID_GALLERY_PLACEMENTS := 12 + 2 + 2 + 2
+
+## Every fluid the game has. The gallery's whole claim is that it stands all
+## of them up at once, so the list it is checked against is written here
+## once rather than recounted from the layout.
+const FLUID_GALLERY_FLUIDS: PackedStringArray = [
+	"vinegar", "ketchup_mix", "ketchup", "bbq_mix", "liquid_smoke", "bbq",
+]
+
+
+## Asks the simulation whether the gallery is actually a gallery: all six
+## fluids present, each on a run the sim can NAME (`carries`, not `ambiguous`
+## or `unnameable`), each above the pressure `main.gd` will draw a body at.
+## Returns "" when it is, or what is wrong with it.
+##
+## This exists because every way this fixture can fail is a quiet one. Move
+## one pipe a tile and two runs merge into a single unnameable network; add
+## a machine and a run goes ambiguous; get the fill wrong and a run is named
+## but invisible. In all three cases the harness still renders a perfectly
+## good-looking factory, and the frame that comes back is simply missing a
+## colour the reviewer was told it contained — which is worse than no frame,
+## because it looks like an answer.
+static func check_fluid_gallery(sim) -> String:
+	var snapshots = JSON.parse_string(sim.fluid_snapshots_json())
+	if not (snapshots is Array):
+		return "fluid_snapshots_json did not return an array"
+	var seen := {}
+	for run in snapshots:
+		var fluid := String(run.get("fluid", ""))
+		var naming := String(run.get("naming", ""))
+		if naming != "carries":
+			return "a run is '%s' rather than carrying one fluid — the layout has merged or confused two networks" % naming
+		if float(run.get("pressure", 0.0)) <= FLUID_MIN_VISIBLE_PRESSURE:
+			return "the %s run is at pressure %s, at or below the %s main.gd needs to draw a body" % [
+				fluid, run.get("pressure", 0.0), FLUID_MIN_VISIBLE_PRESSURE,
+			]
+		seen[fluid] = true
+	var missing := []
+	for fluid in FLUID_GALLERY_FLUIDS:
+		if not seen.has(fluid):
+			missing.append(fluid)
+	if not missing.is_empty():
+		return "no run carries %s (the gallery has %d runs, and the point of it is all %d fluids at once)" % [
+			", ".join(missing), snapshots.size(), FLUID_GALLERY_FLUIDS.size(),
+		]
+	return ""
+
+
+## `main.gd`'s own floor for drawing a fluid body at all, restated as a
+## number here rather than reached through the scene: these are static
+## helpers with no `main` to ask.
+const FLUID_MIN_VISIBLE_PRESSURE := 0.02
+
+
+## Stands liquid in EVERY pipe and tank in the world at once, through the
+## same save/load door `fund` and `deliver` use and for the same reason: a
+## volume is simulation state and no player command sets one directly. The
+## honest alternative is to run the factory, and for a fixture whose whole
+## job is to hold six colours still side by side that is both far more
+## expensive and actively wrong — a running line is a line in which half the
+## runs are momentarily empty.
+##
+## `save_ron` writes both a pipe's and a tank's contents as `volume_bits`
+## (raw `Fx` bits, I16F16, so N = units * 65536), and load VALIDATES the
+## result against each buffer's real capacity — so this fills to
+## `PIPE_SEGMENT_CAPACITY`, the smaller of the two, and a tank simply comes
+## back a twelfth full rather than refused. Full, not a trickle, because
+## `main.gd` scales a fluid body's height by pressure: at the 0.02 floor of
+## FLUID_MIN_VISIBLE_PRESSURE there is one voxel of colour to judge.
+static func fill_fluid_runs(sim, units := 10) -> void:
+	var text: String = sim.save_ron()
+	var regex := RegEx.new()
+	regex.compile("volume_bits:\\s*-?\\d+")
+	if regex.search(text) == null:
+		push_error("fill_fluid_runs(): the save has no volume_bits field — nothing to fill")
+		return
+	var patched := regex.sub(text, "volume_bits: %d" % (units * 65536), true)
+	var error: String = sim.load_ron(patched)
+	if error != "":
+		push_error("fill_fluid_runs(): load_ron refused the patched save: %s" % error)
