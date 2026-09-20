@@ -36,6 +36,9 @@
 #     makes `bbq_mix`, with no picker anywhere in the UI,
 #   * A BOX OF BBQ IS MADE AND SHIPPED: `boxed_bbq` appears in the production
 #     panel's own snapshot and in the dock's delivery pool,
+#   * THE SAUCE IS SPELLED THE WAY A PLAYER WOULD WRITE IT: every BBQ id
+#     the HUD shows a label for comes back "BBQ", not the title-cased
+#     "Bbq" the formatter alone produces (issue #60),
 #   * THE CONTRACT BOARD OFFERS A MIXED ORDER — one docket asking for two
 #     different products at once, which is what the board could not express
 #     before this epic.
@@ -272,6 +275,33 @@ floor have to be tellable apart"
 		_fail("%d boxes of BBQ were made and none reached the dock" % _made("boxed_bbq"))
 		return
 
+	# NAMES. The HUD titles an item by title-casing its id, which mangles an
+	# acronym — `boxed_bbq` read as "Boxed Bbq" on the board and in the
+	# production panel. Content names itself now (`display_name` in
+	# `data/recipes.ron`, `display_names_json`), and this asserts the join
+	# end to end rather than the file: the ids come off the wire and the
+	# labels come out of the scene's own formatter.
+	for pair in [
+		["bbq_mix", "BBQ Mix"], ["bbq", "BBQ"],
+		["bottled_bbq", "Bottled BBQ"], ["boxed_bbq", "Boxed BBQ"],
+	]:
+		if main._item_display_name(pair[0]) != pair[1]:
+			_fail(
+				"'%s' is labelled '%s', not '%s' — an acronym title-cases wrong, so this id \
+must name itself in data/recipes.ron"
+				% [pair[0], main._item_display_name(pair[0]), pair[1]]
+			)
+			return
+	# The other half of the same rule: an id the formatter already gets right
+	# must NOT be in the map, or every label has a second copy to keep in step.
+	if main._item_display_name("boxed_ketchup") != "Boxed Ketchup":
+		_fail(
+			"'boxed_ketchup' is labelled '%s' — it title-cases correctly and should never \
+have needed naming in data"
+			% main._item_display_name("boxed_ketchup")
+		)
+		return
+
 	# THE PLUMBING IS THE PICKER. Checked here rather than at placement time
 	# because a machine's recipe is live state, re-picked every idle tick from
 	# what its inputs currently satisfy: a machine that has never run yet
@@ -288,8 +318,8 @@ floor have to be tellable apart"
 		"BBQ_BRANCH_OK: %d placements built from a new game's balance with the shipped line \
 unmoved, six pipe runs all named (the single tap at (14, -1) reading ketchup, the BBQ mixer's \
 outlet reading bbq_mix), %d mixed order(s) on the board, two mixers of one kind running \
-different recipes chosen by their plumbing alone, and %d boxes of BBQ made and %d delivered \
-in %d ticks"
+different recipes chosen by their plumbing alone, every BBQ label spelled 'BBQ' rather than \
+title-cased to 'Bbq', and %d boxes of BBQ made and %d delivered in %d ticks"
 		% [layout.size(), mixed, _made("boxed_bbq"), _delivered("boxed_bbq"), RUN_TICKS]
 	)
 	quit(0)

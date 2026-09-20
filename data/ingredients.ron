@@ -74,6 +74,11 @@
 // about what the ketchup they are blended into costs, so a box of BBQ is
 // half inherited sauce and half new ingredients — legible on the bill, and
 // it keeps the BBQ margin from running away from the ketchup margin.
+// As in `data/recipes.ron`: an entry may carry an optional `display_name`,
+// and this extension lets it be written as its value rather than as
+// `Some(...)`. No shipped raw needs one — every id here title-cases
+// correctly — but the field is here for the one that does not.
+#![enable(implicit_some)]
 (
     schema_version: 1,
     entries: [

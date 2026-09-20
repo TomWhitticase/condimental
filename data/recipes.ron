@@ -131,6 +131,11 @@
 // generic `TimedProcess` at a 2400-tick timescale. Ageing is not a mechanic
 // this game wants, so the stage is gone — deleted rather than disabled.
 // `TimedProcess` itself is untouched and still runs every craft cycle here.
+//
+// The RON extension below lets an optional field be written as its value
+// (`display_name: "BBQ"`) instead of `Some("BBQ")`. It changes nothing about
+// what this file means; it keeps a content file reading like content.
+#![enable(implicit_some)]
 (
     schema_version: 3,
     recipes: [
@@ -234,8 +239,17 @@
         // 90 ticks, the same as `ketchup_mix`: it is the same machine doing
         // the same work, and a second blend time would be a number with no
         // story behind it.
+        //
+        // FIRST OF THE FOUR IDS THAT NAME THEMSELVES. The HUD titles an item
+        // by title-casing its id, which is right for every other id in this
+        // file ("ketchup_mix" -> "Ketchup Mix") and wrong for an acronym:
+        // "bbq" came out as "Bbq" on the contract board and in the
+        // production panel. `display_name` is the fix, and it lives here
+        // rather than in a table in GDScript because a name is content. Omit
+        // it and title-casing is what happens — the common case by far.
         Recipe(
             id: "bbq_mix",
+            display_name: "BBQ Mix",
             inputs: [("spice_mix", 1), ("molasses", 1)],
             fluid_inputs: [("ketchup", 1)],
             outputs: [],
@@ -267,6 +281,7 @@
         // crush/blend/cook ordering already states above.
         Recipe(
             id: "bbq",
+            display_name: "BBQ",
             inputs: [],
             fluid_inputs: [("bbq_mix", 1), ("liquid_smoke", 1)],
             outputs: [],
@@ -278,6 +293,7 @@
         // 60 ticks — the mirror of `bottled_ketchup` on a second bottler.
         Recipe(
             id: "bottled_bbq",
+            display_name: "Bottled BBQ",
             inputs: [],
             fluid_inputs: [("bbq", 1)],
             outputs: [("bottled_bbq", 1)],
@@ -290,6 +306,7 @@
         // sauce a box holds, only `data/contracts.ron` does.
         Recipe(
             id: "boxed_bbq",
+            display_name: "Boxed BBQ",
             inputs: [("bottled_bbq", 1)],
             outputs: [("boxed_bbq", 1)],
             machine: "packer",
