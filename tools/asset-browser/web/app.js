@@ -9,6 +9,8 @@ import { RenderPass } from './vendor/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from './vendor/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from './vendor/examples/jsm/postprocessing/OutputPass.js';
 
+import { AO_STRENGTH, aoField } from './ao.mjs';
+
 const TILE = 32;                 // voxels per world tile (vox::TILE_VOXELS)
 const FRAME_MS = 180;            // animation speed for frame variations
 
@@ -381,131 +383,9 @@ tick();
 
 // ------------------------------------------------------------- occlusion
 //
-// The factory's WorldEnvironment runs SSAO (factory_environment.gd:
-// `ssao_radius` 0.9, `ssao_intensity` 2.4, `ssao_power` 1.6) and this viewer
-// ran without any, so every crease read flatter here than in the game
-// (issue #49). It is baked into the mesh instead of found in screen space,
-// for two reasons: three's stock `SSAOPass` reconstructs view-space depth as
-// if the camera were perspective and this camera is orthographic (patching
-// it means vendoring a copy of a file that is fetched, not committed), and
-// the voxel grid the occlusion is *about* is already in hand at mesh-build
-// time. Counting neighbours in a grid is cheaper and more exact than
-// inferring the same grid back out of a depth buffer.
-//
-// What is measured: occupancy, box-blurred to a near-Gaussian, sampled
-// AO_OFFSET voxels out along each vertex's own normal — how much solid sits
-// in the hemisphere that vertex looks into, which is the quantity SSAO
-// estimates, at the radius Godot uses (0.9 m / `VOXEL_UNIT` 0.1 = 9 voxels).
-//
-// AO is applied to INDIRECT DIFFUSE only, because that is what Godot's SSAO
-// dims: `ssao_light_affect` is left at 0, so the key and fill land on a
-// crease undimmed, and the sky reflection down a stainless flank — the thing
-// the lighting port was calibrated on — is not touched either.
-
-const AO_RADIUS = 9;    // voxels; ssao_radius 0.9 m at VOXEL_UNIT 0.1 m
-const AO_BOX = 3;       // box radius; three passes per axis ~= sigma 3.5
-const AO_PASSES = 3;
-const AO_OFFSET = 3;    // sample this far out along the normal
-
-// How dark the deepest crease goes: the ONE knob, and not a number anybody
-// chose by eye. `calibrate-ao.py` renders the game's vat fixture with
-// `factory_environment.gd`'s SSAO on and off, renders this browser on the
-// same model with the strength on and off, and divides one measured
-// darkening by the other. Re-derive it with a single command when the game's
-// `ssao_intensity` moves:
-//
-//     tools/asset-browser/calibrate-ao.py
-//
-// At today's shipped `ssao_intensity = 2.4` the game darkens its deepest
-// crease by 5.0%, and 0.294 here lands the browser's at 4.7% — which is why
-// this number is so much smaller than one: the browser is meant to show what
-// the game shows, so that nobody can approve a form that only reads under
-// browser-only occlusion.
-const AO_STRENGTH = 0.294;
-
-/// One box-blur pass along one axis of a 3D field, running-sum so the cost is
-/// the field's size and not the kernel's. Everything outside the field counts
-/// as empty, which is why the grid below is padded: a model's own edge must
-/// not read as occluded by the end of the array.
-function blurAxis(src, dst, dims, axis, radius) {
-  const strides = [1, dims[0], dims[0] * dims[1]];
-  const stride = strides[axis];
-  const n = dims[axis];
-  const [oa, ob] = [0, 1, 2].filter((a) => a !== axis);
-  const norm = 1 / (2 * radius + 1);
-  for (let b = 0; b < dims[ob]; b += 1) {
-    for (let a = 0; a < dims[oa]; a += 1) {
-      const base = a * strides[oa] + b * strides[ob];
-      let sum = 0;
-      for (let i = 0; i <= radius && i < n; i += 1) sum += src[base + i * stride];
-      for (let i = 0; i < n; i += 1) {
-        dst[base + i * stride] = sum * norm;
-        const add = i + radius + 1;
-        const drop = i - radius;
-        if (add < n) sum += src[base + add * stride];
-        if (drop >= 0) sum -= src[base + drop * stride];
-      }
-    }
-  }
-}
-
-/// What the same kernel reads AO_OFFSET voxels off the face of an infinite
-/// flat wall. It is not zero — a kernel centred outside a half-space still
-/// catches a fifth of it — and subtracting it is what keeps an open flank at
-/// exactly its measured colour instead of a fifth darker. The blur is
-/// separable, so a half-space is a 1-D step through it and this is that step,
-/// blurred by the very same passes rather than by a constant someone has to
-/// keep in step with them.
-const AO_BASELINE = (() => {
-  const n = 4 * (AO_PASSES * AO_BOX + AO_OFFSET + 2);
-  const wall = Math.floor(n / 2);
-  let src = new Float32Array(n);
-  let dst = new Float32Array(n);
-  for (let i = 0; i < wall; i += 1) src[i] = 1;
-  for (let p = 0; p < AO_PASSES; p += 1) {
-    blurAxis(src, dst, [n, 1, 1], 0, AO_BOX);
-    [src, dst] = [dst, src];
-  }
-  return src[wall + AO_OFFSET];
-})();
-
-/// The occlusion field of one model, over ALL of its classes at once: a
-/// stainless fitting darkens the painted body it is bolted to, which it
-/// cannot do if each class is blurred alone. (A class hidden from the chips
-/// still casts its occlusion, the same way hiding it does not re-cull the
-/// faces behind it.)
-function aoField(classes, size) {
-  const pad = AO_PASSES * AO_BOX + AO_OFFSET + 1;
-  const dims = [size[0] + 2 * pad, size[1] + 2 * pad, size[2] + 2 * pad];
-  const idx = (x, y, z) => (x + pad) + (y + pad) * dims[0] + (z + pad) * dims[0] * dims[1];
-  let src = new Float32Array(dims[0] * dims[1] * dims[2]);
-  let dst = new Float32Array(src.length);
-  for (const part of Object.values(classes)) {
-    const v = part.voxels;
-    for (let i = 0; i < v.length; i += 4) src[idx(v[i], v[i + 1], v[i + 2])] = 1;
-  }
-  for (let axis = 0; axis < 3; axis += 1) {
-    for (let p = 0; p < AO_PASSES; p += 1) {
-      blurAxis(src, dst, dims, axis, AO_BOX);
-      [src, dst] = [dst, src];
-    }
-  }
-  const field = src;
-
-  /// The openness at one vertex of one face: the field AO_OFFSET voxels out
-  /// along the face's normal, less what open wall reads there. 1 is open sky,
-  /// 0 is buried. Geometry only — how dark that is made to look is
-  /// AO_STRENGTH, at draw time, so it stays one knob and a measurable one.
-  return function ao(x, y, z, dx, dy, dz) {
-    const sx = x + dx * AO_OFFSET;
-    const sy = y + dy * AO_OFFSET;
-    const sz = z + dz * AO_OFFSET;
-    if (sx < -pad || sy < -pad || sz < -pad) return 1;
-    if (sx >= size[0] + pad || sy >= size[1] + pad || sz >= size[2] + pad) return 1;
-    const occ = (field[idx(sx, sy, sz)] - AO_BASELINE) / (1 - AO_BASELINE);
-    return 1 - Math.min(1, Math.max(0, occ));
-  };
-}
+// The bake itself is `ao.mjs` — arithmetic with no three.js in it, so
+// `test-ao.mjs` asserts on the same code the viewer runs. What is left here
+// is how it reaches the pixels.
 
 // One uniform object shared by every material, so the `ao` button — and
 // `calibrate-ao.py`'s `?ao=` override — is a single assignment rather than a
@@ -1150,8 +1030,10 @@ function wire() {
 ///
 ///     ?ao=0&view=game&facing=2&bare=1#machine_cooking_vat
 ///
-/// `ao` is the strength uniform (blank means AO_STRENGTH); `bare` strips the
-/// chrome down to the viewport; `shot=<name>` posts the next drawn frame to
+/// `ao` is the strength uniform (blank means AO_STRENGTH); `grid=0` takes the
+/// tile grid away, so what is left on the backdrop is the model and the
+/// shadow it casts and a measurement can tell which pixels are the subject;
+/// `bare` strips the chrome down to the viewport; `shot=<name>` posts the next drawn frame to
 /// the server's `--shot-dir` and is how a headless run gets pixels back
 /// (Chrome's own `--screenshot` fires on a load heuristic, before a model has
 /// been fetched). Nothing here is a second way to configure the viewer —
@@ -1165,6 +1047,7 @@ function applyQuery() {
     state.ao = aoStrength.value > 0;
     $('#ao-toggle').classList.toggle('on', state.ao);
   }
+  if (q.get('grid') === '0') $('#grid-toggle').click();
   if (q.get('bare') === '1') {
     for (const sel of ['#sidebar', '#details', '#toolbar', '#hud', '#variations']) {
       $(sel).style.display = 'none';
