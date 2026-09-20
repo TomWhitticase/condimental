@@ -272,5 +272,41 @@
         // rather than as a window into the sauce.
         (name: "label_bbq",       rgb: "#4A2C1E", class: "matte"),
 
+        // --- the BBQ branch's three RAW ingredients (issue #67) ---
+        // The three things a BBQ line buys, as the player handles them in
+        // the market and (for the two solids) on a belt. They had no
+        // colours here because they had no models: all three fell through
+        // `main.gd`'s `_market_asset_for` to the pipe, so the market drew
+        // three identical nozzles for three different shipments.
+        //
+        // `spice_paprika` is the ground blend heaped in its tin, and it is
+        // pushed deliberately toward ORANGE rather than toward the reds
+        // this palette is already full of: against `sauce_red` #9E2117 and
+        // `paint_red` #82372F it is the one warm tone with more yellow than
+        // blue in it, which is what keeps a tin of spice from reading as a
+        // pail of sauce at the size a market crate renders. It is also
+        // darker and redder than `vinegar_amber` #AD6B23, the other raw
+        // that is nearly this hue, because those two stand side by side in
+        // the market row and nowhere else — that adjacency, not the spice
+        // itself, is what set this number.
+        (name: "spice_paprika",   rgb: "#A8481C", class: "matte"),
+        // Molasses in its jar. Nearly black, and class `liquid` rather
+        // than `matte` for the reason `liquid_paste` records: syrup IS a
+        // wet surface, and at this value the gloss highlight is the only
+        // thing that separates "a jar of something thick" from "a jar
+        // painted a dark colour". Warmer and darker than `bbq_brown`
+        // #4E2419 (the sauce it ends up in), so an unopened jar of the raw
+        // and a bottle of the finished sauce are not the same brown.
+        (name: "molasses_black",  rgb: "#2A160E", class: "liquid"),
+        // The liquid-smoke drum's painted body, and **equal to
+        // `main.gd`'s FLUID_TINTS["liquid_smoke"]** (0.36, 0.32, 0.26) on
+        // purpose — the same rule `vinegar_amber` states: the drum you buy
+        // and the fluid standing in the run are the same substance, so
+        // they are one number in the one file that owns colour. A smoky
+        // desaturated grey-brown, which is what keeps it reading as a
+        // flavouring rather than as food beside five saturated ingredients,
+        // and far enough from `steel_dark` #6F7680 (its own hoops) to stay
+        // a painted drum rather than a bare one.
+        (name: "smoke_slate",     rgb: "#5C5242", class: "matte"),
     ],
 )

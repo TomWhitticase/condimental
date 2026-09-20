@@ -155,6 +155,52 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-20 — The BBQ ingredients get faces, and all six fluids stand in one frame
+
+Two more of the BBQ branch's presentation gaps, both of the same family as
+the last pass: a lookup with a fallback quietly covering for content that
+had never been drawn.
+
+**Spice mix, molasses and liquid smoke are real objects now (issue #67).**
+The three ingredients the second sauce added had no voxel model, so
+`_market_asset_for` fell through to its pipe fallback and the shop offered
+three identical lengths of pipe — and the liquid-smoke tank's panel titled
+itself with one. Three generators join `assets.rs`: a wide steel tin heaped
+with paprika, a narrow tall jar of near-black syrup under a kraft label and
+a steel cap, and a hooped slate drum with a brass bung. They were designed as
+a *row* against tomato, sugar and vinegar rather than one at a time, because
+the market plate shows all six at 64px side by side — each takes a silhouette
+and a value none of the others has, which is what separates them at that
+size. The jar took three rework passes: as first drawn its tapered neck and
+wide cap ate 40% of the height and it read as a tin, exactly like its new
+neighbour. `palette.ron` gains `spice_paprika`, `molasses_black` and
+`smoke_slate`; the last is held equal to `main.gd`'s `liquid_smoke` tint, the
+same rule `vinegar_amber` already follows. `item_liquid_smoke` is icon-only,
+so like the vinegar jug it is built for vengi's camera and not the game's
+(§2b point 35) — its bung sits where the *opposite* corner will see it.
+
+The fallback is the real fix, though, and it is a test: `test_ingredient_models.gd`
+walks every id `data/ingredients.ron` unlocks and fails if any of them
+resolves to the pipe, if a fluid is missing from `FLUID_MODELS` or a solid
+from `ITEM_MODELS`, or if a named asset has no icon. It was proved to fail by
+removing an entry, not only to pass. The next ingredient someone adds gets
+told, rather than shipping green with a pipe for a face.
+
+**A frame that shows all six fluids at once (issue #72).** `bbq` and
+`bbq_mix` sat at zero pressure in every fixture, so the tints #68 added could
+not be photographed and had to be argued for in prose. `--fluid-gallery`
+stands one chain of tanks, pipes, mixers and vats whose topology *names* all
+six runs — vinegar, ketchup mix, ketchup, BBQ mix, liquid smoke, BBQ — and
+then fills them. Naming is topology alone, so no ticking is needed; pressure
+comes through the save-RON door `fund()` and `deliver()` already use, patching
+every `volume_bits` to 10 units, which is within both a pipe segment's
+capacity and a tank's. The fixture checks itself: if a run comes back
+unnameable, ambiguous, or at or below the pressure `main.gd` needs to draw a
+body at all, the build pushes an error naming which. It frames itself too —
+`_framing_bounds` pads a flat layout to 14 tiles on both axes and shrank the
+subject to nothing, so the fixture carries its own focus and ortho size as
+overridable defaults, and hides the HUD.
+
 ### 2026-09-20 — Three issues off the board: names, fluid colour, honest frames
 
 A no-new-features pass over the deferred queue. Nothing here changes what

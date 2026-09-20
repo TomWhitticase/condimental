@@ -350,6 +350,22 @@ pub const ASSETS: &[Asset] = &[
         name: "item_vinegar",
         build: item_vinegar,
     },
+    // The BBQ branch's three raws (issue #67). Until now all three fell
+    // through `_market_asset_for` to the pipe, so the market drew one
+    // nozzle three times over; `item_liquid_smoke` joins `item_vinegar` in
+    // FLUID_MODELS and is likewise icon-only, the other two ride belts.
+    Asset {
+        name: "item_spice_mix",
+        build: item_spice_mix,
+    },
+    Asset {
+        name: "item_molasses",
+        build: item_molasses,
+    },
+    Asset {
+        name: "item_liquid_smoke",
+        build: item_liquid_smoke,
+    },
     Asset {
         name: "item_paste_pail",
         build: item_paste_pail,
@@ -1622,6 +1638,210 @@ pub fn item_vinegar(p: &Palette) -> VoxModel {
     m.cuboid((3, 5), (8, 8), (9, 9), glass);
     m.cuboid((3, 3), (8, 8), (6, 9), glass);
     m.cuboid((3, 4), (8, 8), (6, 6), glass);
+    m
+}
+
+/// The BBQ branch's three raw ingredients — a **spice tin**, a **molasses
+/// jar** and a **liquid-smoke drum** (issue #67).
+///
+/// All three went on sale the moment the BBQ gate opened and none of them
+/// had a model, so `main.gd`'s `_market_asset_for` fell through to
+/// `PIPE_ASSET` for each: the market drew three identical pipe nozzles for
+/// three different shipments, and a tank full of liquid smoke was titled
+/// "Fluid Tank — Liquid Smoke" beside a picture of a pipe. That is UI_UX.md
+/// §2b point 12's silent fallback again, in the same quiet form the vinegar
+/// jug was drawn to end.
+///
+/// **They are designed as a ROW, not as three objects**, because the frame
+/// that has to work is the market, where all six raws stand side by side:
+/// a red sphere (tomato), a kraft sack (sugar), an amber jug (vinegar), and
+/// then these three. So each takes a silhouette none of the others has —
+/// a low heaped tin, a squat capped jar, a straight-sided ribbed drum —
+/// and a value none of the others has, rather than three variations on
+/// "container". At icon scale it is the proportion of the parts that
+/// identifies a thing (§2b point 31), and the part doing the work here is
+/// respectively the heap, the cap and the hoops.
+///
+/// **Which camera each is authored for differs, and it follows what
+/// carries it.** `spice_mix` and `molasses` are solids: a hopper unloads
+/// them onto a belt and the game's fixed isometric camera sees them there
+/// (+X and low Y, §2b point 11), while the market renders the same model
+/// through `vengi`'s opposite corner (§2b point 35). Two cameras, so
+/// neither gets the detail to itself: the identifying marks on those two
+/// are either on TOP (both cameras look down) or wrapped all the way round
+/// the body, the way `item_vinegar`'s label band is. `liquid_smoke` is a
+/// fluid — nothing can carry it on a belt — so its only consumer is the
+/// icon pass, and it is authored for `vengi`'s corner alone, exactly as
+/// `item_vinegar` is and for the same reason.
+///
+/// One open tin of ground spice: a low steel can with the blend heaped
+/// above its rim.
+///
+/// **Open and heaped rather than a sealed tin**, which is the whole design:
+/// a closed tin is a cylinder, and this factory already has pails, bottles
+/// and a jug that are cylinders. The heap gives it a domed top nothing else
+/// on a belt has, and it puts the one thing that says *spice* — a coarse,
+/// dark orange-red powder, flecked rather than flat — on the surface both
+/// cameras look down at. The tin is deliberately the widest and shortest of
+/// the six raws for the same reason: at market-crate size a silhouette is
+/// read before a colour is.
+pub fn item_spice_mix(p: &Palette) -> VoxModel {
+    let mut m = item_volume();
+    let steel = p.idx("steel");
+    // The can: wide, short, and genuinely hollow, so the heap sits IN it
+    // rather than on it. Carved rather than drawn as a ring for the reason
+    // `pail` records — a filled bore still meshes as a solid plug.
+    m.cylinder_z((8, 8), 5.6, (0, 6), steel);
+    m.carve_cylinder_z((8, 8), 4.6, (1, 6));
+    // The rolled rim, a ring and not a disc, in the brightest metal on the
+    // item: it is the top edge of the silhouette and the one place the
+    // "metal keeps the brightest pixel" rule (UI_UX.md §4) can land without
+    // competing with the spice.
+    m.cylinder_z((8, 8), 6.0, (6, 6), p.idx("steel_light"));
+    m.carve_cylinder_z((8, 8), 4.8, (6, 6));
+    // The blend itself, filling the can and mounded above it. Its radius
+    // stays inside the rim's bore at every height it reaches (§2b point
+    // 19), so the powder never z-fights the wall it sits in.
+    let paprika = p.idx("spice_paprika");
+    m.cylinder_z((8, 8), 4.6, (1, 5), paprika);
+    m.ellipsoid((8, 8, 5), (4.6, 4.6, 4.0), paprika);
+    // Flecks of whole spice through the grind — `bbq_brown` rather than a
+    // black, which on a face this camera lights would read as a hole in the
+    // heap (§2b point 21). Fixed positions, never random: a review
+    // screenshot has to be repeatable.
+    for (x, y) in [(6, 7), (9, 6), (8, 10), (10, 9), (7, 8)] {
+        m.set(x, y, 8, p.idx("bbq_brown"));
+    }
+    m.set(8, 8, 9, p.idx("bbq_brown"));
+    m
+}
+
+/// One jar of molasses: a squat glass jar of something nearly black under a
+/// broad screw cap, with a kraft label round its belly.
+///
+/// **Squat with a wide cap, where `item_bottle` is tall with a narrow
+/// neck** — and that contrast is the point rather than a detail. The finished
+/// BBQ bottle (`item_bottle_bbq`) is also a dark liquid behind glass under a
+/// kraft label, so the raw and the product would be one object drawn twice
+/// if this were another bottle. `bottle`'s own doc records that the gap
+/// between body and cap is what stops a bottle reading as a jar; this takes
+/// that gap away deliberately, so the two silhouettes part company at a
+/// glance and on a belt.
+///
+/// The contents are `liquid`-class and nearly black, the glass above the
+/// fill line is not: the headspace band is what says "you are looking into a
+/// container" rather than at a dark block, which is the same trick `pail`
+/// and `item_vinegar` play.
+pub fn item_molasses(p: &Palette) -> VoxModel {
+    let mut m = item_volume();
+    let glass = p.idx("glass_pale");
+    // One straight-sided body, no shoulder and no neck. This took the two
+    // rework passes §2b point 9 says to budget: the first cut tapered
+    // through three radii in four voxels of height, which at this scale is
+    // a staircase rather than a shoulder, and the wide cap on top of it ate
+    // 40% of the silhouette. The second was still squat enough to read as a
+    // tin. It is narrow and tall now precisely BECAUSE the spice tin beside
+    // it in the market is wide and low — the pair has to differ in outline
+    // before it differs in colour.
+    m.cylinder_z((8, 8), 3.8, (0, 11), glass);
+    // Everything below the fill line is syrup, glass included — the same
+    // one-pass repaint `item_vinegar` uses, and for the same reason: a jar
+    // whose glass and contents are separately modelled is two shells that
+    // z-fight, and at 16 voxels nobody can see the difference anyway.
+    // The four voxels of empty glass left above it are load-bearing: that
+    // band is the only thing saying "container of something dark" rather
+    // than "dark block".
+    let syrup = p.idx("molasses_black");
+    for z in 0..=9 {
+        for y in 0..ITEM_VOXELS as i32 {
+            for x in 0..ITEM_VOXELS as i32 {
+                if m.filled(x, y, z) {
+                    m.set(x, y, z, syrup);
+                }
+            }
+        }
+    }
+    // A tamper band under the cap, and it is there for a rendering reason
+    // rather than a realistic one: `glass_pale` and `steel_light` sit within
+    // 35 of each other in luma, so an empty glass headspace touching a steel
+    // cap merged into one pale block and the jar read as a pale cylinder
+    // with stripes. One dark ring between them separates the two, and it is
+    // also the step the cap screws down onto.
+    m.cylinder_z((8, 8), 3.4, (12, 12), p.idx("bbq_brown"));
+    // The cap: two voxels tall, overhanging that band. Steel rather than a
+    // painted colour because it is the top of the silhouette and the only
+    // bright thing on an almost-black item, so it is what a player's eye
+    // lands on first — but two voxels, not four, because the thing being
+    // identified is the JAR.
+    m.cylinder_z((8, 8), 4.2, (13, 14), p.idx("steel_light"));
+    // The label, wrapped all the way round on the surface voxels rather
+    // than laid on one face as a slab (`item_vinegar`'s band, for the
+    // reason given there): this model is seen from the game's camera on a
+    // belt and from vengi's in the market, and a band on one side is
+    // invisible from the other. Sideways exposure only, so it cannot creep
+    // over the shoulder.
+    let kraft = p.idx("label_kraft");
+    for z in 3..=5 {
+        for y in 0..ITEM_VOXELS as i32 {
+            for x in 0..ITEM_VOXELS as i32 {
+                if !m.filled(x, y, z) {
+                    continue;
+                }
+                let exposed = !m.filled(x + 1, y, z)
+                    || !m.filled(x - 1, y, z)
+                    || !m.filled(x, y + 1, z)
+                    || !m.filled(x, y - 1, z);
+                if exposed {
+                    m.set(x, y, z, kraft);
+                }
+            }
+        }
+    }
+    m
+}
+
+/// One drum of liquid smoke — the BBQ branch's raw FLUID, and the second
+/// asset (after `item_vinegar`) that exists purely to be an icon.
+///
+/// Nothing carries liquid smoke on a belt: it is bought, poured into a
+/// `fluid_tank` and drawn by the BBQ vat. Its only consumers are the market
+/// crate, the larder chip and the fluid tank's own configuration panel, all
+/// of which render `assets/voxels/icons/`, so this is authored for
+/// **vengi's camera — the -X/+Y corner** (§2b point 35), not the game's.
+/// That is why the bung sits where it does; put it on the game-facing side
+/// and the icon is a plain cylinder.
+///
+/// **The body carries the fluid's own colour** (`smoke_slate`, equal to
+/// `main.gd`'s `FLUID_TINTS["liquid_smoke"]`), which is `item_vinegar`'s
+/// rule: the drum in the market and the liquid standing in the run are the
+/// same substance, so a player who has seen one recognises the other. What
+/// keeps it from being a grey cylinder is the hardware — two rolling hoops
+/// and a chime at each end, in bright stainless — and those also satisfy
+/// §4's "metal keeps the brightest pixel" on an otherwise dark, matte
+/// object.
+pub fn item_liquid_smoke(p: &Palette) -> VoxModel {
+    let mut m = item_volume();
+    let steel = p.idx("steel");
+    // The painted body: straight-sided and full height, so the silhouette
+    // is a drum rather than a pot. Nothing else in the raws is a plain
+    // vertical cylinder — the tin is low, the jar is capped, the jug is
+    // bellied — so the straightness is doing identification work.
+    m.cylinder_z((8, 8), 4.8, (0, 13), p.idx("smoke_slate"));
+    // Two rolling hoops, proud of the body the way a real drum's are, and
+    // the chimes that cap each end. Drawn wide and then the top chime
+    // re-opened, so the lid inside it stays visible from above — both
+    // cameras look down, and a solid disc here would hide the bung.
+    for z in [(4, 5), (8, 9)] {
+        m.cylinder_z((8, 8), 5.2, z, steel);
+    }
+    m.cylinder_z((8, 8), 5.2, (0, 0), p.idx("steel_light"));
+    m.cylinder_z((8, 8), 5.2, (13, 13), p.idx("steel_light"));
+    m.cylinder_z((8, 8), 4.0, (13, 13), p.idx("smoke_slate"));
+    // The bung, on the corner vengi's camera actually sees (this function's
+    // doc), standing one voxel proud of the lid so it reads as a fitting
+    // rather than as a stain. Brass, the one warm accent, on a lid face
+    // that is lit from this angle rather than in shadow (§2b point 21).
+    m.cylinder_z((5, 10), 1.4, (14, 14), p.idx("brass"));
     m
 }
 

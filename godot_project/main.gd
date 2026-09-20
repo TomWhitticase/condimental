@@ -674,6 +674,14 @@ const ITEM_MODELS := {
 	# what the other one costs.
 	"bottled_bbq": "item_bottle_bbq",
 	"boxed_bbq": "item_box_bbq",
+	# The BBQ branch's two raw SOLIDS (issue #67). Both are bought, held in
+	# a hopper and unloaded onto a belt into the mixer, so both genuinely
+	# ride a conveyor and belong in this table rather than in FLUID_MODELS
+	# below. Until now neither had a model at all: `_market_asset_for` fell
+	# through to the pipe for both, so the market offered a paprika blend
+	# and a drum of syrup as two identical pipe nozzles.
+	"spice_mix": "item_spice_mix",
+	"molasses": "item_molasses",
 }
 const ITEM_MODEL_FALLBACK := "item_box"
 
@@ -688,6 +696,12 @@ const ITEM_MODEL_FALLBACK := "item_box"
 ## is where every fluid stood before vinegar got a jug of its own.
 const FLUID_MODELS := {
 	"vinegar": "item_vinegar",
+	# The BBQ branch's raw fluid (issue #67), and the second entry this
+	# table has ever had. Same story as vinegar: nothing carries liquid
+	# smoke on a belt, so a market crate of it and the chip in the larder
+	# both borrowed the pipe's icon, and a fluid tank titled "Liquid Smoke"
+	# was captioned with a picture of a pipe.
+	"liquid_smoke": "item_liquid_smoke",
 }
 
 ## Which voxel model's icon stands for each *buildable kind* in the build
