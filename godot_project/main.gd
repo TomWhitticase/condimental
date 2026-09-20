@@ -268,6 +268,29 @@ const FLUID_TINTS := {
 	# (the pails' colours) so a fluid keeps its identity wherever it appears.
 	"ketchup_mix": Color(0.69, 0.23, 0.15),
 	"ketchup": Color(0.77, 0.10, 0.05),
+	# The BBQ branch's three fluids (issue #68). They have no `liquid_*`
+	# entry in `palette.ron` to mirror, and deliberately so — that file
+	# records that nothing carries BBQ in an open pail, so the only voxels
+	# ever painted `bbq_brown` are a bottle's contents and a case's print,
+	# and the fluid in the run is this number instead. They are picked
+	# against `bbq_brown` (#4E2419) rather than from nowhere: the run is the
+	# same substance as the bottle, lifted because a bore is a shadowed
+	# surface and a tint that dark reads as an EMPTY pipe rather than a full
+	# one, which is the failure `vinegar`'s note above already records from
+	# the other end (too pale reads as water).
+	#
+	# The three have to stay tellable apart from each other AND from the
+	# ketchup pair a few tiles south, so they move along two axes the way
+	# `ketchup_mix`/`ketchup` move along one: the cook DARKENS (the mix is
+	# ketchup cut with molasses and spice; the vat cooks it down) and the
+	# whole branch is BROWNER than the ketchup run is red. `liquid_smoke` is
+	# the odd one out on purpose — it is a flavouring, not a sauce, so it is
+	# a smoky desaturated grey-brown that reads as "not food" beside five
+	# saturated ones, and it is well clear of `hazard_yellow` and of
+	# `vinegar`'s amber, the other raw fluid a tank feeds.
+	"bbq_mix": Color(0.48, 0.25, 0.15),
+	"bbq": Color(0.33, 0.17, 0.11),
+	"liquid_smoke": Color(0.36, 0.32, 0.26),
 }
 const FLUID_TINT_FALLBACK := Color(0.60, 0.79, 0.86)
 
