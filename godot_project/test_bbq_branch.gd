@@ -27,6 +27,10 @@
 #     the single tap tile at (14, -1) that reads `ketchup` because it hangs
 #     off the ketchup line's outlet run, and the BBQ mixer's own outlet run
 #     that reads `bbq_mix` even though a mixer could make either,
+#   * EVERY RUN IS DRAWN AS ITS OWN LIQUID: each of the six fluid ids has a
+#     `FLUID_TINTS` entry of its own and no two of the six are the same
+#     colour (issue #68 — three of them fell through to the neutral fallback,
+#     so the whole BBQ half of the factory ran pale blue water),
 #   * A MACHINE PICKS ITS RECIPE FROM ITS PLUMBING: the two mixers are the
 #     same kind on the same board and one makes `ketchup_mix` while the other
 #     makes `bbq_mix`, with no picker anywhere in the UI,
@@ -74,6 +78,13 @@ const KETCHUP_TAP := Vector2i(14, -1)
 const BBQ_MIX_RUN := Vector2i(15, -3)
 const SMOKE_RUN := Vector2i(18, -1)
 const BBQ_RUN := Vector2i(19, -3)
+
+## How far apart two fluids' tints have to be, summed over RGB, to count as
+## two liquids rather than one (issue #68). Low on purpose: this is a guard
+## against a forgotten or copied entry, not a judgement about colour — what
+## the six actually look like side by side is a rendered-frame review, which
+## is how the pale-blue BBQ runs were found in the first place.
+const FLUID_TINT_MIN_DISTANCE := 0.08
 
 var main: Node
 var _ran := false
@@ -172,6 +183,46 @@ refused place is silent"
 		if _fluid_on(pair[0]) != pair[1]:
 			_fail("the run at %s must carry %s, not '%s'" % [pair[0], pair[1], _fluid_on(pair[0])])
 			return
+
+	# …and all six are DRAWN as six different liquids (issue #68). A fluid
+	# with no `FLUID_TINTS` entry does not fail anywhere — it renders in the
+	# neutral fallback — so the whole BBQ half of the factory ran pale blue
+	# water for two merges, which is the silent-fallback failure `ITEM_MODELS`
+	# records about `tomato_paste`. Asserting against the FALLBACK rather
+	# than against three named colours keeps the art call where it belongs
+	# (main.gd's table, reviewed in a rendered frame) while still catching
+	# the next fluid id that ships without one.
+	for network in networks:
+		var fluid_id := String(network.get("fluid", ""))
+		if not main.FLUID_TINTS.has(fluid_id):
+			_fail(
+				"the run carrying '%s' has no FLUID_TINTS entry — it renders in the neutral \
+fallback, which reads as water rather than as sauce"
+				% fluid_id
+			)
+			return
+	# Two fluids a few tiles apart that a player cannot tell apart are the
+	# same bug one step later, so the six colours are also checked for being
+	# six. The threshold is deliberately loose — it refuses a copied-and-
+	# forgotten duplicate, not a deliberate shade pair like ketchup_mix and
+	# ketchup, which sit 0.31 apart.
+	var seen: Dictionary = {}
+	for network in networks:
+		var fluid_id := String(network.get("fluid", ""))
+		var tint: Color = main.FLUID_TINTS[fluid_id]
+		for other_id in seen:
+			var other: Color = seen[other_id]
+			var distance := (
+				absf(tint.r - other.r) + absf(tint.g - other.g) + absf(tint.b - other.b)
+			)
+			if distance < FLUID_TINT_MIN_DISTANCE:
+				_fail(
+					"'%s' and '%s' are tinted the same liquid (distance %.3f) — two runs on one \
+floor have to be tellable apart"
+					% [fluid_id, other_id, distance]
+				)
+				return
+		seen[fluid_id] = tint
 
 	# BBQ is gated now (`data/unlocks.ron`): its ingredients and its orders
 	# are held back until the ketchup line has demonstrably run. This test
