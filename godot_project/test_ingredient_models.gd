@@ -21,7 +21,15 @@
 #   * the model each one names is a real asset with a loadable icon, not a
 #     key pointing at nothing (a typo'd value is as silent as a missing one),
 #   * a fluid's entry lives in FLUID_MODELS and a solid's in ITEM_MODELS —
-#     the split those two tables document, since no belt can carry a fluid.
+#     the split those two tables document, since no belt can carry a fluid,
+#   * every raw solid a hopper may legally be SET TO has a HOPPER_FILL_TINTS
+#     entry (issue #80). That is the same silent per-id fallback one table
+#     over: `HOPPER_FILL_TINT_FALLBACK` is a beige, so `spice_mix` and
+#     `molasses` shipped as two different raws drawn the same pale sand.
+#     The set is the simulation's own `hopper_items` — the list the placed
+#     hopper's picker is built from — and never a second hand-written one,
+#     because a guard that has to be updated by hand is the bug rather than
+#     the fix (the ruling PR #84's review made, recorded in issue #108).
 #
 # **It crosses the unlock gates first.** `ingredients_snapshot_json` is
 # filtered by what the player has unlocked, so on a fresh world it reports
@@ -111,7 +119,27 @@ func _initialize() -> void:
 			])
 			return
 
-	print("INGREDIENT_MODELS_OK: all %d ingredients (%s) resolve to a real model icon, none to the pipe fallback" % [
-		ids.size(), ", ".join(ids),
+	# The hopper's fill tint, from the same source the GAME asks. `ITEM_MODELS`
+	# above is keyed by every item a BELT can carry; this table is keyed only
+	# by what a hopper can be set to hold, which is a strictly smaller set and
+	# a different question, so it gets its own pass rather than a branch in
+	# the loop above. `hopper_items` is `World::raw_items` and is deliberately
+	# NOT filtered by the unlock gates (see its field doc), so this reads the
+	# same four ids on a fresh world as on a finished one — the gates crossed
+	# above are for the ingredient entries, not for this.
+	var hopper_items: Array = _main._ingredients_snapshot().get("hopper_items", [])
+	if hopper_items.is_empty():
+		_fail("the simulation offers a hopper NO contents at all — this check would be vacuous")
+		return
+	for item in hopper_items:
+		var raw_id := String(item)
+		if not _main.HOPPER_FILL_TINTS.has(raw_id):
+			_fail("raw solid '%s' can be put in a hopper but has no HOPPER_FILL_TINTS entry — its heap draws in HOPPER_FILL_TINT_FALLBACK %s, so it is the same pale sand as every other untinted raw. Add it to HOPPER_FILL_TINTS in main.gd, using that ingredient's own colour from assets/voxels/palette.ron." % [
+				raw_id, str(_main.HOPPER_FILL_TINT_FALLBACK),
+			])
+			return
+
+	print("INGREDIENT_MODELS_OK: all %d ingredients (%s) resolve to a real model icon, none to the pipe fallback; all %d raw solids a hopper accepts (%s) have a fill tint of their own, none the fallback" % [
+		ids.size(), ", ".join(ids), hopper_items.size(), ", ".join(PackedStringArray(hopper_items)),
 	])
 	quit(0)
