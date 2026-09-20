@@ -96,16 +96,34 @@ const CODESIGN_HINT: &str = "codesign -s - --force godot_project/bin/libsim_core
 
 /// Ad-hoc re-signs the dylib we just staged, on macOS only (issue #77).
 ///
-/// Overwriting a `.dylib` invalidates the signature macOS recorded for that
-/// path, and the kernel then SIGKILLs any process that loads it. The failure
-/// is invisible from where it lands: every headless Godot run — the whole of
-/// `scripts/verify-core-loop.sh`, every `scripts/screenshot-scene.sh` render —
-/// dies with **exit 137, no stderr and no marker**, while `godot --version`
-/// still exits 0 and `codesign --verify` calls the library valid. It reads as
-/// a broken engine or a broken sandbox, and nothing printed anywhere points at
-/// a signature. xtask is what replaced the file, so xtask is what re-signs it:
-/// the same argument `reimport_godot_assets` makes about the `.import`
-/// sidecars it invalidates.
+/// A `.dylib` macOS will not vouch for is a `.dylib` nothing can load, and
+/// every way that goes wrong here is quiet. xtask is what replaced the file,
+/// so xtask is what re-signs it: the same argument `reimport_godot_assets`
+/// makes about the `.import` sidecars it invalidates.
+///
+/// **What is measured, and what is not** — the cost of this call is one
+/// `codesign` invocation, and the cost of believing the wrong story about it
+/// is another afternoon:
+///
+/// * The kill that prompted the issue is REAL AND RECORDED — a headless run
+///   dying with **exit 137, no stderr and no marker**, cured by re-signing by
+///   hand — but it is INTERMITTENT AND WAS NOT REPRODUCED TO ORDER. Removing
+///   this call, forcing a relink and running headless Godot does not bring it
+///   back, because the Rust linker already emits a signature of its own
+///   (`codesign -dv` reports `flags=0x20002(adhoc,linker-signed)`), so the
+///   staged copy is usually valid before this touches it. A passing headless
+///   run therefore does NOT demonstrate that this call does anything.
+/// * What IS reproducible, and is the reason to keep it: an unsigned staged
+///   library fails **green**. `codesign --remove-signature` on the staged
+///   copy and then a headless run gives `dlopen(...): Trying to load an
+///   unsigned library`, then `Can't open GDExtension dynamic library`, then a
+///   `SimBridge` parse error out of main.gd — and Godot **exits 0**.
+///   Whichever way the signature goes bad the exit status is useless: 137
+///   with no output, or 0 with no marker.
+///
+/// So this is insurance, priced accordingly: one cheap call on a path that
+/// has already cost someone an afternoon, and a warning rather than a failure
+/// when it cannot be made (below).
 ///
 /// **Two decisions this settles** (both asked in the issue):
 ///
@@ -139,7 +157,8 @@ fn codesign_staged_lib(dest: &Path) {
         Ok(output) => {
             eprintln!(
                 "xtask: WARNING: codesign failed ({}) — the library is staged but UNSIGNED, \
-                 so a headless Godot run will die with exit 137 and no output. \
+                 so a headless Godot run will not load it: either exit 137 with no output, \
+                 or exit 0 with a SimBridge parse error and no marker. \
                  Run `{CODESIGN_HINT}` by hand.\n{}",
                 output.status,
                 String::from_utf8_lossy(&output.stderr).trim()
@@ -149,7 +168,8 @@ fn codesign_staged_lib(dest: &Path) {
             eprintln!(
                 "xtask: WARNING: 'codesign' not runnable ({e}) — the library is staged but \
                  UNSIGNED. Install the Xcode command line tools and run `{CODESIGN_HINT}`, \
-                 or every headless Godot run dies with exit 137 and no output."
+                 or no headless Godot run will load it: either exit 137 with no output, \
+                 or exit 0 with a SimBridge parse error and no marker."
             );
         }
     }

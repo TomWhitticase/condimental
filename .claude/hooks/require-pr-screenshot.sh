@@ -20,7 +20,7 @@ Deciding whether the body carries an image means searching the whole command
 INCLUDING heredocs, because that is where a written-up body usually lives, and
 OPENING any `--body-file` the way the shell would have (issue #53): the hook is
 not a shell, so `--body-file $SCRATCH/body.md` used to be opened as the literal
-nine characters `$SCRATCH`, fail, and count as "no image" — refusing a body
+eight characters `$SCRATCH`, fail, and count as "no image" — refusing a body
 whose first line was the screenshot. `expand_body_path` below expands `$VARS`
 and `~` and nothing else; a path that needs a subshell (`--body "$(cat x.md)"`)
 is still unreadable here, and still refused.
@@ -70,11 +70,22 @@ def expand_body_path(raw):
 
     Deliberately the two bounded expansions and no more (issue #53):
 
-    * `os.path.expandvars` over THIS PROCESS'S environment — which is the
-      environment the command was about to be run in, since a PreToolUse hook
-      is spawned from it. `$SCRATCH/body.md` therefore resolves to the same
-      file `gh` would have opened. An undefined variable is left standing, so
-      the path simply fails to open and the command is refused, as before.
+    * `os.path.expandvars` over THIS PROCESS'S environment — the environment
+      the command was about to be run in, since a PreToolUse hook is spawned
+      from it. So `$SCRATCH/body.md` resolves to the same file `gh` would
+      have opened WHENEVER `SCRATCH` IS IN THAT ENVIRONMENT — an exported
+      variable, or one the session was started with, which is the shape
+      issue #53 was filed about.
+
+      It does NOT see a variable the command sets for itself. `export
+      SCRATCH=/tmp/x; gh pr create --body-file $SCRATCH/body.md` on one line
+      is still refused: the assignment happens in the shell `gh` runs in,
+      which does not exist yet when the hook is asked about it. That refusal
+      is correct rather than a gap — the hook cannot read a file whose path
+      has not been decided — and the fix on the caller's side is to export
+      the variable in an earlier command, or to pass the expanded path.
+      An undefined variable is left standing either way, so the path simply
+      fails to open and the command is refused, as before.
     * `os.path.expanduser` for a leading `~`.
 
     No subshell, ever: `$(cat body.md)` is not a path, is never run, and a

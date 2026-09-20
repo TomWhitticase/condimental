@@ -190,6 +190,12 @@
 # Pass --populate to run whatever was built forward first, so the shot shows
 # product moving instead of an idle factory. Pass --first-person to review
 # that camera mode's lighting/skybox instead of the default isometric one.
+# It combines with the --hover* flags, and there they TURN THE CAMERA rather
+# than the pointer: in first person the tooltip is whatever the CROSSHAIR is
+# over (main.gd queries the screen centre), so --first-person --hover-dock is
+# "stand in the hall and look at the dock", and a --first-person shot with no
+# hover flag keeps the pose it was given and simply reports what the
+# crosshair found.
 #
 # Pass --ghost KIND to enter placement mode with the ghost over open ground
 # (the VALID state), or --ghost-blocked KIND with it over something already
@@ -212,11 +218,19 @@
 # run that asked for none — a run with no --hover* parks the cursor clear of
 # everything rather than inheriting the tile the last run left it on, which
 # is how a `--payout` frame came back wearing the previous `--hover-dock`
-# run's tooltip. If something else moves the pointer between the aim and the
-# shutter — most likely a SECOND screenshot-scene.sh running at the same time
-# in another worktree — the run is REFUSED with SCREENSHOT_FAIL and writes no
-# PNG, because the tooltip in that frame belongs to the wrong thing. Two of
-# these cannot run at once; take them one after another.
+# run's tooltip. If the pointer is somewhere else by the time the shutter
+# opens, the run is REFUSED with SCREENSHOT_FAIL and writes no PNG, because
+# the tooltip in that frame belongs to the wrong thing; the message lists the
+# usual candidates rather than picking one, since this process cannot see
+# which of them happened.
+#
+# Parallel runs are FINE in practice, and that was measured rather than
+# assumed: three concurrent pairs of renders in two worktrees all passed and
+# reported their own correct tile, and 138 `CGWarpMouseCursorPosition` warps
+# fired at the desktop DURING a --hover-dock run left it pixel-identical —
+# an unfocused Godot window does not pick up another process's warp. Serialise
+# them if you see a SCREENSHOT_FAIL naming a tile you never asked for; do not
+# serialise them on principle.
 #
 # Pass --title to photograph the TITLE SCREEN — the menu as the player first
 # sees it: the wordmark, the splash line and the three buttons over the 3D
