@@ -155,6 +155,53 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-20 — Three issues off the board: names, fluid colour, honest frames
+
+A no-new-features pass over the deferred queue. Nothing here changes what
+the game does; all three were cases of the presentation layer saying
+something untrue.
+
+**Content names itself (issue #60).** The HUD titled an item by title-casing
+its id, which is right for every id the game shipped with and wrong the
+moment content contained an acronym: the second sauce read as "Boxed Bbq" on
+the contract board, in the production panel and in every tooltip. A recipe or
+an ingredient entry may now carry an optional `display_name` in `data/*.ron`;
+`World::display_names` gathers both files' into one map, `display_names_json`
+carries it, and `main.gd`'s `_kind_display_name` consults it before falling
+back to title-casing. The fallback is still the rule — only the four BBQ ids
+name themselves, and a test asserts that every id title-casing gets right
+stays *out* of the map, so no label has a second copy to keep in step. A
+blank name is refused at load beside the other content errors. `schema_version`
+is unchanged: an optional field leaves old data valid. Both data files enable
+RON's `implicit_some`, so a content file reads like content
+(`display_name: "BBQ"`, not `Some("BBQ")`).
+
+**The BBQ branch's three fluids each have a colour (issue #68).** `bbq_mix`,
+`bbq` and `liquid_smoke` had no `FLUID_TINTS` entry, so all three drew in the
+neutral fallback — three runs of pale blue on a factory whose whole point is
+that it makes a second, browner sauce. The tints are picked against
+`palette.ron`'s `bbq_brown` and lifted for the shadowed bore, and
+`test_bbq_branch.gd` now fails if a run the fixture names has no tint, or if
+two tints land within a summed-RGB distance of each other. `bbq` and
+`bbq_mix` sit at zero pressure in every existing fixture and so could not be
+photographed — stated in the PR rather than glossed, and filed as #72.
+
+**The screenshot harness stopped swapping fixtures behind your back (issue
+#70).** `--fixture NAME` was parsed first and then overwritten unconditionally
+by any of sixteen convenience flags, so `--fixture understaffed --staff`
+photographed the *reference* line and reported a fully-crewed factory, with
+nothing on stdout and a zero exit status. An explicit `--fixture` wins now
+and the override is announced; only the fixture is overridden, so the panel
+the flag opens and the ticks it runs still apply. An unknown `--fixture` name
+is refused with the list of known names instead of falling through to the
+demo line and looking plausible, and every run prints
+`SCREENSHOT_FIXTURE: <name>` beside `SCREENSHOT_OK`. This one matters beyond
+tooling: a rendered frame is the evidence every PR is reviewed on.
+
+Also closed **#58** — `cargo run -p voxgen` was fixed on `main` by #64
+(`default-run = "voxgen"` plus `--bin voxgen` spelled out in every doc), and
+the issue had simply outlived it.
+
 ### 2026-09-18 — Two HUD panels that ran out of room
 
 **The staff panel shows all four categories at 1600x900 again (issue #7).**
