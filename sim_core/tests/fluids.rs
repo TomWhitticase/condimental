@@ -993,6 +993,7 @@ fn the_fluid_tank_json_shape_is_what_presentation_is_told_to_expect() {
             "direction": "east",
             "footprint": { "width_tiles": 1, "height_tiles": 1 },
             "fluid": "vinegar",
+            "declared": null,
             "quantity": 30.0,
             "capacity": 120.0,
             "fill": 0.25,

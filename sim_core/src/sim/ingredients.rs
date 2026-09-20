@@ -442,11 +442,13 @@ impl Ingredients {
         &self,
         money: Money,
         hopper_items: &[String],
+        tank_fluids: Vec<String>,
         unlocked: impl Fn(&str) -> bool,
     ) -> IngredientsSnapshot {
         IngredientsSnapshot {
             money: money.to_num::<f64>(),
             hopper_items: hopper_items.to_vec(),
+            tank_fluids,
             entries: self
                 .catalog
                 .entries()
@@ -471,6 +473,7 @@ impl Ingredients {
 /// ```json
 /// {"money": 2913.0,
 ///  "hopper_items": ["tomato", "sugar"],
+///  "tank_fluids": ["vinegar"],
 ///  "entries": [
 ///    {"id": "tomato", "price": 1.0, "owned": 40, "affordable": true},
 ///    {"id": "sugar", "price": 3.0, "owned": 0, "affordable": true}
@@ -500,6 +503,15 @@ impl Ingredients {
 pub struct IngredientsSnapshot {
     pub money: f64,
     pub hopper_items: Vec<String>,
+    /// `hopper_items`' fluid twin: the ids a tank may be **declared** to
+    /// hold (`world::PlayerCommand::SetTankFluid`, issue #43), which is
+    /// `World::raw_fluids` verbatim. On the wire for `hopper_items`'
+    /// reason — an id's price says nothing about whether it is a fluid —
+    /// and, like it, deliberately **not** filtered by progression gates: it
+    /// is the placement rule, not the market listing, and the simulation
+    /// does not refuse a tank declared to a locked fluid either. Sorted,
+    /// because `raw_fluids` is a `BTreeSet` (ARCHITECTURE.md §3.9).
+    pub tank_fluids: Vec<String>,
     pub entries: Vec<IngredientSnapshot>,
 }
 
@@ -739,11 +751,21 @@ mod tests {
         let mut ingredients = Ingredients::new(IngredientCatalog::from_ron_str(EXAMPLE).unwrap());
         ingredients.owned.add("tomato", 12);
         let hopper_items = ["tomato".to_string(), "sugar".to_string()];
-        let snapshot = ingredients.snapshot(Money::from_num(2), &hopper_items, |_| true);
+        let snapshot = ingredients.snapshot(
+            Money::from_num(2),
+            &hopper_items,
+            vec!["vinegar".to_string()],
+            |_| true,
+        );
         assert_eq!(snapshot.entries.len(), 2);
         assert_eq!(
             snapshot.hopper_items, hopper_items,
             "the hopper-legal ids are reported verbatim, not re-derived from the catalog"
+        );
+        assert_eq!(
+            snapshot.tank_fluids,
+            vec!["vinegar".to_string()],
+            "and so are the tank-legal ones — a price says nothing about solid or fluid"
         );
         assert_eq!(snapshot.entries[0].id, "tomato");
         assert_eq!(snapshot.entries[0].owned, 12);
@@ -764,7 +786,12 @@ mod tests {
     fn the_snapshot_omits_an_ingredient_a_gate_holds_back() {
         let ingredients = Ingredients::new(IngredientCatalog::from_ron_str(EXAMPLE).unwrap());
         let hopper_items = ["tomato".to_string(), "sugar".to_string()];
-        let snapshot = ingredients.snapshot(Money::from_num(50), &hopper_items, |id| id != "sugar");
+        let snapshot = ingredients.snapshot(
+            Money::from_num(50),
+            &hopper_items,
+            vec!["vinegar".to_string()],
+            |id| id != "sugar",
+        );
         assert_eq!(
             snapshot
                 .entries

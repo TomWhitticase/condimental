@@ -247,6 +247,16 @@ into sequence. They sit where they were discovered.
     right once is only right until the layout around it moves; and only a
     rendered frame shows that it stopped being right (point 12).
 
+38. **A destructive action names what it destroys, before the click.**
+    Declaring what a fluid tank holds empties the tank *and* the pipe run it
+    feeds — the sim destroys that volume rather than crediting or moving it
+    (issue #43). The config picker's note therefore reads "switching destroys
+    89.7 units — this tank and the run it feeds" whenever there is something
+    to lose, and drops the number when there is not. The alternative,
+    refusing the switch while the run is full, is worse: it strands a
+    mis-declared tank with no way to drain its run. Destruction the player
+    consented to is fine; destruction they discover afterwards is not.
+
 ## 3. Theme & setting
 
 **A grounded, semi-realistic 21st-century industrial food factory**:

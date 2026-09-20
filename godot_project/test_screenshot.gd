@@ -224,6 +224,13 @@ var _config_tile := Vector2i.ZERO
 ## hopper is photographed after being retargeted to another ingredient.
 var _market := false
 var _contents := -1
+
+## `--contents-refill` buys the fluid just declared and pumps it back into the
+## tank and its run, so the picker's note is photographed saying what a
+## *second* switch would destroy. Without it the frame necessarily shows the
+## unquantified wording: pressing the picker slot is itself the destructive
+## act, so the tank and its run are empty the instant the panel is shot.
+var _contents_refill := false
 ## `--no-hud` hides the whole HUD layer. It exists for `--closeup`: the
 ## contract clipboard and the hotbar between them cover the top-right and the
 ## bottom of the frame, which is exactly where a junction lands about half
@@ -481,6 +488,7 @@ func _initialize() -> void:
 	_unlock_toast = args.has("--unlock-toast")
 	_no_hud = args.has("--no-hud")
 	_contents = int(_string_arg(args, "--contents")) if _string_arg(args, "--contents") != "" else -1
+	_contents_refill = args.has("--contents-refill")
 	_contracts = args.has("--contracts")
 	if _contracts:
 		_pick_fixture("chain", "--contracts")
@@ -974,6 +982,27 @@ func _open_config_at(tile: Vector2i) -> void:
 		return
 	if _contents >= 0:
 		_main._on_config_picker_pressed(_contents)
+		if _contents_refill:
+			_refill_declared_tank()
+
+
+## Fills a tank back up after `--contents` declared what it holds, through the
+## panel's own FILL button and the sim's own ticks — one crate is 30 units and
+## the run drinks, so it takes several presses and a few ticks for the pipe run
+## to carry anything worth warning about.
+func _refill_declared_tank() -> void:
+	var fluid: String = String(_main._tank_fluids[_contents]) if _contents < _main._tank_fluids.size() else ""
+	if fluid == "":
+		printerr("SCREENSHOT: --contents-refill: no fluid in picker slot %d" % _contents)
+		return
+	Layouts.fund(_main.sim, 5000)
+	Layouts.stock(_main.sim, fluid, 256)
+	for i in range(4):
+		_main._on_config_fill_pressed()
+	for i in range(5):
+		_main.sim.tick()
+	_main._apply_dirty_chunks()
+	_main._update_fluid_network()
 
 
 ## Drives the real chain across several contract cadence boundaries, feeding

@@ -33,6 +33,10 @@ the plan is `docs/ARCHITECTURE.md` §3/§4/§6/§10.
   tick**: a full single-threaded rebuild of occupancy, hand-off links and fluid
   networks (volumes carried across by tile). `rayon`/partitioning is milestone
   8, deliberately unbuilt.
+- **Changing a tank's declaration empties the tank *and* every run it feeds**,
+  before the recompute (`try_set_tank_fluid` → `purge_runs_fed_by`). Carrying
+  volumes across by tile would otherwise relabel the fluid already in the
+  pipes; the purged volume is destroyed, never credited or moved.
 - **`sim::reference_chain` is the shared test fixture**, built only through the
   public command API — it can do nothing a player cannot; all placements `East`.
 - **`Direction::East` = `+X` is the regression anchor** and `default()`;
@@ -40,8 +44,12 @@ the plan is `docs/ARCHITECTURE.md` §3/§4/§6/§10.
 - **`machines.rs` owns the footprint origin convention** — min-X/min-Y corner,
   occupying `[x, x+width) × [y, y+height)`, and the tile a belt feeds into.
   Read its module doc before touching rotation.
-- `validate_chain` panics at construction on a broken `recipes.ron` link (solid
-  or fluid): content errors fail at load, not silently at runtime.
+- `validate_chain` panics at construction on a part of `recipes.ron` nothing
+  can start — a component with no buyable machine or no obtainable input
+  (solid or fluid): content errors fail at load, not silently at runtime.
+  **Several independent production lines are fine**; it stopped demanding one
+  connected component in issue #42, because mayonnaise shares nothing with
+  tomato.
 
 ## Snapshots and dirtiness
 

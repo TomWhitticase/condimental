@@ -18,6 +18,35 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-20 **A tank declares what it holds, and the save format's
+  field-addition window is closed.** `FluidTank` carries an optional declared
+  fluid, set by `PlayerCommand::SetTankFluid` and **seeded into**
+  `resolve_network_fluids` rather than recorded beside its answer: a declared
+  tank's run is a singleton before any narrowing runs, which is the only thing
+  that can tell two tank-fed raw runs into one two-fluid machine apart (issue
+  #43). An undeclared tank is unchanged — its fluid is still derived from the
+  run it discharges into — so the shipped chain needs no labelling. Two
+  contradicting declarations on one run leave it `Ambiguous`; the resolver
+  still never guesses. Because the declaration is an *input* to naming,
+  `World::from_save_with_content` recomputes the topology after restoring
+  bodies. The field bumped **`SAVE_SCHEMA_VERSION` to 2** and a v1 save is
+  **refused, not migrated**, with both numbers in the message: the "a
+  `#[serde(default)]` addition is not a shape change" window `save.rs` opened
+  closed when that batch shipped, and this crate rejects rather than migrates
+  everywhere else (ARCHITECTURE §4). Cost is bounded because no release has
+  ever written a save. **Amended in review of the pull request:** changing a
+  declaration destroys the **pipe run's** fluid as well as the tank's
+  (`World::try_set_tank_fluid` purges every run the tank discharges into
+  *before* the recompute, which carries volumes across by tile and would
+  otherwise hand sixty bought units of vinegar back as liquid smoke). The
+  fluid is destroyed, not credited or moved, and the picker's note names the
+  total it will destroy before the click — declaring is a consented
+  destructive act, not a refused one, because refusing it while the run is
+  non-empty leaves a mis-declared tank with no way to drain its run. And a
+  declaration no machine on the run has any recipe for makes that run read
+  `Unnameable` rather than `Carries`, so the blame lands on the tank the
+  player mis-declared instead of on the machine's outlet. Full record in
+  `docs/DECISIONS.md`.
 - 2026-09-20 **A modal panel yields WIDTH before it is clipped, and an
   unreachable control outranks every other layout rule.** Height has yielded
   since the scale change; nothing made a panel yield width, so at 1280x720 the

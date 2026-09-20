@@ -25,6 +25,138 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-20: **A tank declares what it holds; the save format's
+  field-addition window is closed.** Two issues, one mechanism, and one
+  question that had to go back to the owner.
+
+  **The hole (#43).** `resolve_network_fluids` names a pipe run by arc
+  consistency: a run a tank discharges into can only carry a *raw* fluid, a
+  run off a machine's outlet face can only carry what that kind's recipes
+  make, and the feasible recipes of the machines touching a run narrow it
+  further. That is enough for every layout the shipped chain has. It runs
+  out on one machine drawing **two** raw fluids from **two** tank-fed runs:
+  both runs seed to the same pair of raws and nothing in the graph separates
+  them. Worse than stuck, in the single-recipe case it is *arbitrary* —
+  `feasible_naming` matches inputs to runs first-fit, so the runs are paired
+  off in tile order, and the player whose vinegar drum is on the other side
+  has no way to say so. Add a second recipe on the kind drawing one of the
+  two raws (a mixer that also makes plain syrup — ordinary content) and the
+  first-fit pairing stops being unique, no run narrows to one id, both go
+  `Ambiguous`, every machine on them stalls, and neither tank can even be
+  filled, because a fill needs to know what it is pouring.
+
+  **Why a declaration and not a cleverer resolver.** There was no bug in the
+  propagation to fix. Which drum the player filled with what is a fact about
+  the world that exists only in their head; no amount of graph reasoning
+  recovers information that was never in the graph. So the tank is asked.
+  `PlayerCommand::SetTankFluid { tile, fluid }` sets `FluidTank`'s optional
+  fluid, `World::recompute_topology` collects the declarations per network
+  and hands them to `resolve_network_fluids`, and a declared run's possible
+  set is **replaced** by the declaration before step 2 narrows anything.
+
+  Replaced rather than intersected, deliberately: a declared tank names its
+  run even when nothing is plumbed to it yet, so the player can fill a drum
+  before building what drinks from it — which they could not do before.
+  Disagreement is not silently resolved either: two tanks declaring
+  different fluids into one run leave two ids and the run reads `Ambiguous`,
+  and a declaration no machine there can use narrows to nothing and reads
+  `Unnameable`. Both are the graceful unnamed-with-a-reason state issue #54
+  built, not a new failure mode. An **undeclared** tank is untouched — its
+  fluid is still whatever its run turns out to carry — which is what keeps
+  the shipped chain a chain nobody has to label, and what
+  `an_undeclared_tank_still_takes_its_name_from_the_graph` pins.
+
+  **The load-time consequence, found by the test.** Loading rebuilds
+  structure through real `Place` commands and only then restores bodies. A
+  declaration arrives with the bodies, so every network had already been
+  named as though no tank had declared anything, and the very layout #43
+  exists for came back ambiguous and stuck however it was saved.
+  `World::from_save_with_content` now calls
+  `recompute_topology_after_restore` once the bodies are in. Pipe volumes
+  survive it: the pass carries them across by tile, which is what lets it
+  run on a live world at all.
+
+  **The save format (the owner's call, asked and answered).** The ticket
+  asked for "version and migrate the save", which contradicts
+  ARCHITECTURE §4 and `save.rs`'s own "rejected rather than migrated —
+  copying, deliberately, what every other loader in this crate does", so it
+  went back to the coordinator rather than being guessed. Three options
+  were on the table: (A) spend `save.rs`'s field-addition window and add
+  `SavedTank::fluid` as a `#[serde(default)]` with no bump; (B) build the
+  crate's first migration engine; (C) bump and reject.
+
+  (A) is spending a window that is already closed: `save.rs` said "nothing
+  has shipped with a save file yet, so schema_version 1 is whatever this
+  batch of work merges with" and then closed it explicitly — "after this
+  batch ships, a field addition is a version bump like any other shape
+  change" — and that batch (`auto_fill`, `SavedMachine::recipe`,
+  `lifetime_deliveries`) has been on `main` for a fortnight. (B) contradicts
+  two design docs for one ticket's convenience. **(C) is what the docs
+  already chose**: `SAVE_SCHEMA_VERSION` is 2, a v1 save is refused, and the
+  refusal names both numbers so it reads as "this save predates the tank
+  fluid change" rather than as a parse failure. The cost is bounded and will
+  never be this cheap again — no release has ever written a save. The
+  Forward-compatibility note in `save.rs` was rewritten so the next person
+  does not re-litigate it.
+
+  **Content validation moved too (#42), for a related reason.**
+  `validate_chain` demanded that every recipe be reachable from recipe 0 by
+  a shared ingredient id, which would have panicked at construction the
+  moment mayonnaise (eggs + oil, GAMEPLAY §2 tier 4) landed in
+  `recipes.ron`: a second production line shares nothing with tomato. The
+  rule is now per connected component, and what each component must contain
+  is a recipe that can actually be *started* — its machine is one
+  `data/shop.ron` sells, and its inputs are obtainable, where obtainable is
+  the fixpoint of priced raws plus the outputs of recipes that are
+  themselves startable. Several independent lines are fine; a line with no
+  way into it is not, and neither is one on a machine nobody sells. The
+  weaker "does any recipe in the component take a raw" rule was tried first
+  and rejected: a mid-line recipe with no raw inputs anchored a dead
+  component vacuously. `machines.validate_covers` now runs *before*
+  `validate_chain`, because "this kind has no footprint" is the more basic
+  fault and should be the message the player gets.
+
+  **Amended in review of the pull request: a declaration change destroys the
+  run as well as the tank.** The first cut emptied only the `FluidTank`, and
+  that was measurably not enough: `recompute_topology` rebuilds the fluid
+  networks and *carries volumes across by tile*, so the pipe run the tank
+  feeds kept everything it held and the rebuild simply renamed it. The
+  reviewer measured 59.9968 units of bought vinegar becoming liquid smoke, on
+  shipped content, through the shipped picker, never purchased. Two fixes
+  were possible. **Refusing the switch while the run is non-empty** was
+  considered and rejected: a player who mis-declares a tank would then have no
+  way to drain the run they no longer want — the machines on it will not drink
+  the wrong fluid, so nothing empties it, and the mistake is permanent. So the
+  emptying is carried *through* the recompute instead:
+  `World::try_set_tank_fluid` calls `purge_runs_fed_by`, which finds every
+  network the tank discharges into via `topology.tank_discharges`, calls
+  `FluidNetwork::purge` on each and dirties the pipe tiles, all *before*
+  `recompute_topology` runs, so the rebuild carries zeroes across. The volume
+  is **destroyed, not credited and not moved** — there is no refund and no
+  transfer to a neighbouring run; `switching_a_declared_tank_purges_the_run_it_fed_rather_than_relabelling_it`
+  asserts conservation in the negative by summing every *other* run and tank
+  before and after and requiring the total to be unchanged. Destruction is
+  acceptable only because it is consented to, which is the UI half of the
+  rule: the picker's note names what the click will cost before it happens —
+  "switching destroys 89.7 units — this tank and the run it feeds" when there
+  is something to lose, and the unquantified "switching empties this tank and
+  the run it feeds" when there is not (`main.gd`'s `_tank_picker_note` /
+  `_tank_doomed_volume`; section 10c of `test_config_panel.gd` computes its
+  expected number straight off the wire, because an assertion built from the
+  same helper it is testing passes even when the helper ignores the run — that
+  was tried, and it did).
+
+  **And an unusable declaration blames the tank, not the outlet.** The code
+  claimed a declaration no machine on the run could use would read
+  `Unnameable`; it did not — the run read `Carries` and the machine
+  downstream stalled, so the blame landed on an innocent outlet. Step 2b of
+  `resolve_network_fluids` now clears a declared run's candidate set when no
+  recipe of any machine kind drinking from it takes that fluid, which makes
+  the run read `Unnameable` and points the player at the tank they just
+  mis-declared. It tests the machine **kind**'s recipes, not the layout as it
+  stands this instant, so a run does not flicker `Unnameable` while a line is
+  half laid; a run nothing drinks from yet, or one fed by a machine outlet, is
+  left alone.
 - 2026-09-20: **A modal panel yields WIDTH before it is clipped, and an
   unreachable control outranks every other layout rule.** (Issues #62, #63,
   #69, #17.)
