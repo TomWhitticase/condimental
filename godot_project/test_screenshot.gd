@@ -1021,6 +1021,17 @@ func _refill_declared_tank() -> void:
 ## frame is of the state a player reaches by clicking the machine that is
 ## going without its crew and throwing the one switch that is there, not of
 ## a widget this script posed.
+##
+## **The level bar in this frame is empty, and that is correct.** Review
+## asked for a HELD batch here; this fixture cannot produce one, because the
+## vat is precisely the machine the understaffed line denies a crew, so it
+## has never started a craft to hold. Delaying this call by any number of
+## frames does not change that — nothing about the vat advances while it is
+## uncrewed. What the frame is evidence for is the other half: `required`
+## falls from 4 to 2 and the CREW plate follows it, naming `crusher, mixer`
+## and no vat. The held-batch promise is pinned headlessly instead, by
+## `sim_core/tests/mothball.rs`, which asserts `elapsed` stands still across
+## a mothballing and the same batch finishes on the other side.
 func _mothball_the_vat() -> void:
 	var tile: Vector2i = Layouts.UNDERSTAFFED_VAT
 	_main._config_click_at_tile(tile)

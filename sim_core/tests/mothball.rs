@@ -103,18 +103,11 @@ fn ticks(world: &mut World, n: u32) {
     }
 }
 
-/// `ticks` with the deliveries of raw material cut off — the line runs
-/// itself dry and then stands still. What it is for: a factory that is
-/// earning nothing either way, so the ONLY thing moving the balance is the
-/// wage bill, which is the one thing under test here.
-fn dry_ticks(world: &mut World, n: u32) {
-    for _ in 0..n {
-        world.tick();
-    }
-}
-
-/// Runs to the tick a payday lands on and through it, with nothing
-/// resupplied.
+/// Runs to the tick a payday lands on and through it, with the deliveries
+/// of raw material cut off — the line runs itself dry and then stands
+/// still. What that is for: a factory earning nothing either way, so the
+/// ONLY thing moving the balance is the wage bill, which is the one thing
+/// under test here.
 fn to_next_dry_payday(world: &mut World) {
     let target = world.staff().next_payday_tick();
     while world.current_tick() < target {
