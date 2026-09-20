@@ -157,6 +157,147 @@ matches what code comments and data files cite.
   stands this instant, so a run does not flicker `Unnameable` while a line is
   half laid; a run nothing drinks from yet, or one fed by a machine outlet, is
   left alone.
+- 2026-09-20: **A modal panel yields WIDTH before it is clipped, and an
+  unreachable control outranks every other layout rule.** (Issues #62, #63,
+  #69, #17.)
+
+  **The fault.** The 2026-09-09 scale change taught every list to yield
+  HEIGHT: `_fit_grid_scroll` caps it and it scrolls, UI_UX §5c's deliberate
+  last resort. Nothing ever made a panel yield WIDTH, because at the shipped
+  1600x900 nothing needed to. At 1280x720 — the smallest window the project
+  claims to support — three panels were simply wider than the screen and were
+  drawn off both edges of it: the staff panel wanted 1350px, the build menu
+  1412px, the contracts board 1380px. Clipping a centred panel takes the same
+  amount off each side, so what went was the outermost column on each: the
+  icons on the left, and on the right the FIRE −1 button — the only way to
+  undo a hire — and SIGN, the only way to take a contract. The panel looked
+  fine in the middle. You could not play the game from it.
+
+  **The rule that follows.** §5f already ranked layout faults worst-first: a
+  panel drawn ON another panel, a card cut through a line, a list showing less
+  than it could. None of them covers this, and this is worse than all of them:
+  a panel over a panel still leaves both readable if you close one, a cut card
+  still shows what it shows. **A control the player cannot reach is the worst
+  thing a layout can do**, and it goes on top of that list. Practically, that
+  makes width a budget like height: `_modal_available_width()` is the viewport
+  less `MODAL_EDGE_MARGIN` on each side, and every modal now measures itself
+  against it. The margin is in WINDOW pixels rather than `_ui_px` on purpose —
+  it is the last few pixels before a control is off the screen, not a design
+  gap that should scale with the UI.
+
+  **What is spent, in order.** Three things can give width back, and they are
+  ranked by how much the player loses.
+
+  1. *A sentence moves to the hover.* The staff row already ranks five
+     sentences and shows one, the rest on the row's tooltip (issue #7); at a
+     window this narrow the fifth goes there too, along with the per-tick
+     "3 of 4 working right now" and the meter's "hired / asked for" caption.
+     Nothing is lost — it is all one hover away, where four fifths of it
+     already lived — and what stays on the row is the icons, the meter, the
+     numbers, the state chip and the two buttons: the parts that can be
+     clicked. `_fit_staff_width` measures rather than assumes, so a wider
+     window shows the prose again and a future row that outgrows the window
+     gives its prose up with no breakpoint to re-tune. The wanted/shown split
+     (`note_wanted`, `working_wanted`) exists because the poll and the width
+     rule both want to set `visible`, and only one of them may own it.
+  2. *A grid of cards takes fewer columns.* The build menu and the market are
+     fixed-size icon slots; there is no prose in them to move. `SHOP_SLOT_COLUMNS`
+     had already been hand-tuned three times as the catalog grew, which is the
+     same decision made worse each time. `_fit_grid_columns` asks the panel
+     whether it fits, one column at a time, at most six tries of a cached
+     minimum-size read — measuring the *panel*, not dividing the window by a
+     card, because the real width is the grid plus margins plus scrollbar plus
+     whichever of heading and footer is longest, and every one of those has
+     moved. Then it balances: five columns for six crates is a row of five and
+     a lonely sixth where 3+3 is two even rows, and fewer columns than the
+     width allows is always still narrow enough, so balancing cannot undo the
+     fit. Both constants now read as *the most* a grid takes, not the number
+     it always takes.
+  3. *The list scrolls.* Already true.
+
+  **What is never done: `autowrap_mode`.** The obvious fix for a 1030px
+  sentence is to let it wrap. It cannot be used here. A wrapping Label reports
+  a minimum width of one pixel and a minimum height shaped at whatever width
+  it last had — and a Label is only reshaped when it is DRAWN. Under
+  `--headless`, where nothing draws, a wrapped sentence measures 1x1609 and
+  every panel sized around it is nonsense. This layout is measurement-driven
+  end to end (`_fit_grid_scroll`, `_whole_rows_height`, `_fit_grid_columns`)
+  and its regression proof is a headless test, so a control whose size cannot
+  be measured without drawing it cannot be part of it. Where a sentence must
+  get narrower it is **broken at a join it already has**: the board's offer is
+  now two labels, the mix and the terms, so the column is as wide as its
+  longer half rather than as wide as both. A break at a fixed point, not a
+  reflow.
+
+  **The measurement trap, twice.** The same "shaping happens on draw" rule bit
+  in two more places, and both are worth knowing before trusting a number.
+  First: **headless font metrics are narrower than a real window's.** The
+  staff panel measured 1339px against 1264px available headless, passed the
+  test, and was still clipped in the render at exactly that size; the fix
+  (dropping the 262px per-tick figure as well) was found by instrumenting
+  `_fit_staff_width` during a real `scripts/screenshot-scene.sh` run.
+  A headless assertion is a regression net. **The render is the acceptance.**
+  Second: `get_combined_minimum_size()` can UNDERREPORT what is on screen —
+  the machine hover reported 299x285 while being drawn at 545x285, and
+  `_panel_position_near` placed it as if its right-hand 246px did not exist,
+  over the legend's last line. The panel's *current* size is what the layout
+  pass actually gave it, so `maxf(minimum, size)` on both axes is the honest
+  estimate, and erring large only ever buys clearance.
+
+  **When nothing fits.** At 1280x720 with the legend open there is genuinely
+  nowhere for a machine hover to stand: 550x283 of tooltip, a 757x259 legend
+  starting 24px in, 499px to its right, 24px above and — after the hotbar
+  takes its strip — 282px below, one pixel short. Pushing off one plate at a
+  time is no answer: each push clears the plate it is given and can land on
+  the next, and one pass across three plates put the tooltip over two at once.
+  So when every position is a fault, `_panel_position_near` scores every
+  position it can reach — the four quadrants and the four ways off each plate,
+  each after the clamp — by total overlapped area (`_hud_overlap_area`) and
+  keeps the smallest, ties going to the earlier preference so §2b point 33's
+  ordering still decides whenever the overlap is equal. The remaining overlap
+  at that one window size is filed rather than fudged: the real answer is a
+  legend that folds itself or a shorter tooltip, which is a content decision.
+
+  **The same lesson, a third time: the configuration panel** (issue #88, folded
+  in because it turned out to be this fix and not a separate one). The panel a
+  click on a hopper or tank opens has always had a documented bound meant to
+  keep it off the right-hand column, and it was failing in two ways at once.
+  The bound named the clipboard and the stock plate in two hand-written
+  branches; the CREW plate arrived on that column in the 2026-09-16 playtest
+  pass and nobody added a third branch, so a panel that cleared the other two
+  was drawn over the wage bill and the payday countdown. And the branches
+  tested an UNCLAMPED `y`: a fluid tank's panel is taller than the band between
+  the clipboard and the hotbar, so the final clamp lifted it up into rows the
+  test had just decided it was nowhere near — §2b point 33's "judge after the
+  clamp", in the one panel that had not learned it. Even with both fixed the
+  flip itself was wrong: `anchor.x - offset - size.x` is a fixed displacement,
+  not a guarantee, and at 1280x720 it landed the panel's last 15px on a
+  clipboard whose left edge is 580px in. It now clamps `y` first, loops one
+  list of three rects, and flips the panel's right edge ON to the bound.
+  The legend stays off that list for `_position_market_panel`'s reason: at
+  1280x720 no position clears both it and the column, and covering a static
+  keybind reference the player can fold with F1 beats covering a live readout.
+  The headless assertion has to point the camera AT the building first — the
+  panel is anchored to the building's projected position, so a building off the
+  side of the frame puts the panel on a window edge and the check passes
+  vacuously, which the first version of it did.
+
+  **Two smaller rules from the same pass.** The staff panel's scroll box is
+  now FLAT — rows and explainer in one `VBoxContainer` — because
+  `_whole_rows_height` snaps between the CHILDREN of the box it is given, and
+  with the rows nested one level down its only choices were "the whole list"
+  and "a cut through the explainer's own lines" (issue #63). Flat, every
+  boundary a reader can see is a boundary the cut can land on, and the
+  explainer is shown whole or not at all. And the clipboard's board hint is a
+  line the docket stack may spend: `_update_contract_panel` — the only thing
+  that knows what the stack got — hides it when the cut it made falls below
+  the stack's first line boundary (`_first_line_boundary`), which is exactly
+  what buys the cut back onto a boundary at 1280x720 with every offer signed.
+  That was the case §5f had conceded to issue #17, and it closes it. "Sign
+  more orders" is also the least useful sentence on a clipboard whose every
+  order is signed. Issue #13 made the same trade against the SHORT-STAFFED
+  strip; the difference is that there is now exactly ONE place that decides,
+  so `_update_staff_alert` no longer touches the hint.
 
 - 2026-09-16: **The game is called CONDIMENTAL.** "sauce-factory was just a
   temporary name, ive now come up with the name 'CONDIMENTAL'". The owner's

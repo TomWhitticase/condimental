@@ -47,6 +47,66 @@ See [WORKFLOW.md](WORKFLOW.md).
   `Unnameable` rather than `Carries`, so the blame lands on the tank the
   player mis-declared instead of on the machine's outlet. Full record in
   `docs/DECISIONS.md`.
+- 2026-09-20 **A modal panel yields WIDTH before it is clipped, and an
+  unreachable control outranks every other layout rule.** Height has yielded
+  since the scale change; nothing made a panel yield width, so at 1280x720 the
+  staff panel (1350px), the build menu (1412px) and the contracts board
+  (1380px) overran the window and were clipped on both edges with FIRE −1 and
+  SIGN off the screen. UI_UX §5f's ranking gains a new worst fault above "a
+  panel drawn ON another panel": **a control the player cannot reach**. Every
+  modal now measures `_modal_available_width()` (the viewport less
+  `MODAL_EDGE_MARGIN`, in window pixels, not `_ui_px`) and gives width back in
+  this order: **(1) prose moves to the row's hover** (`_fit_staff_width`,
+  `_apply_staff_prose` — the ranked sentence, the per-tick figure and the
+  meter caption, all already readable on the tooltip); **(2) a grid of cards
+  takes fewer columns** (`_fit_grid_columns`, measured by asking the panel one
+  column at a time, then balanced so six crates are 3+3 and not 5+1;
+  `SHOP_SLOT_COLUMNS`/`MARKET_SLOT_COLUMNS` are now the MOST a grid takes, not
+  what it always takes); **(3) the list scrolls**, as it already did. A
+  sentence too long for one line is **broken at a join it already has** (the
+  board's mix and terms are two labels), never reflowed: **`autowrap_mode` is
+  banned in this layout** — a wrapping Label reports a 1px minimum width and a
+  height shaped at whatever width it was last *drawn* at, and this layout is
+  measurement-driven with a headless test for its proof. Both `x` and `y` are
+  clamped everywhere a modal is positioned, and the market is pushed clear of
+  the clipboard, STOCK and CREW plates (`_plate_rect`, `_pushed_clear_of`).
+- 2026-09-20 **A headless layout test cannot prove a real width; only
+  `scripts/screenshot-scene.sh` can.** Godot's headless font metrics are
+  NARROWER than a real window's: the staff panel measured 1264px available
+  against a 1339px minimum headless, passed `test_hud_plates.gd`, and was
+  still clipped in the rendered frame at the same size. Headless assertions
+  are the regression net; the render is the acceptance. For the same reason a
+  Control's `get_combined_minimum_size()` may UNDERREPORT what is on screen
+  (the machine hover reported 299x285 while drawn at 545x285, and was placed
+  as if its right-hand 246px did not exist), so anything positioning a panel
+  takes `maxf(minimum, panel.size)` on both axes. And where no position clears
+  every fixed plate, `_panel_position_near` scores each candidate by total
+  overlapped area (`_hud_overlap_area`) and keeps the smallest, ties going to
+  the earlier preference — pushing off one plate at a time can land on the
+  next, and did.
+- 2026-09-20 **A panel that dodges the right-hand column consults ONE list of
+  plates, after its own clamp.** `_position_config_panel`'s right-hand bound
+  named the clipboard and STOCK in two hand-written branches; the CREW plate
+  arrived on that column later and was never added, and the bound was computed
+  against an unclamped `y`, so a tank's panel — taller than the band below the
+  clipboard — was lifted by the clamp into rows a test against its old `y` had
+  decided were nowhere near it (issue #88). It now clamps `y` first, loops
+  `[_contract_panel_rect(), _stock_rect(), _crew_rect()]`, and flips the panel
+  so its right edge lands ON the bound rather than at a fixed offset from the
+  anchor, which is not the same as clearing anything. The legend is
+  deliberately not on that list: at 1280x720 nothing clears both it and the
+  column, and a static keybind reference the player can fold with F1 is the
+  right thing to cover in preference to a live readout — the same ranking
+  `_position_market_panel` makes. Asserted headlessly by `test_hud_plates.gd`
+  with the camera looking AT the building, since a building off the side of
+  the frame puts the panel on a window edge and proves nothing.
+- 2026-09-20 **The clipboard's board hint is a line the docket stack may
+  spend.** `_update_contract_panel` — the one place that knows what the stack
+  got — hides `_contract_hint_label` when, and only when, the cut it made is
+  below the stack's first line boundary (`_first_line_boundary`); that line is
+  what buys the cut back onto a boundary at 1280x720 with every offer signed,
+  the case issue #17 had left ragged. `_update_staff_alert` no longer touches
+  the hint.
 - 2026-09-16 **The game is called CONDIMENTAL, and so is the repo.** All-caps
   wherever it is the title: the menu's `title.text`, `config/name`, the
   design-doc headings. The GitHub repo was renamed the same day —
