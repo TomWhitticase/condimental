@@ -285,12 +285,25 @@ const FLUID_TINTS := {
 	# ketchup cut with molasses and spice; the vat cooks it down) and the
 	# whole branch is BROWNER than the ketchup run is red. `liquid_smoke` is
 	# the odd one out on purpose — it is a flavouring, not a sauce, so it is
-	# a smoky desaturated grey-brown that reads as "not food" beside five
-	# saturated ones, and it is well clear of `hazard_yellow` and of
-	# `vinegar`'s amber, the other raw fluid a tank feeds.
+	# an olive-brown that reads as "not food" beside five saturated ones,
+	# and it is well clear of `hazard_yellow` and of `vinegar`'s amber, the
+	# other raw fluid a tank feeds.
+	#
+	# That last one was first written as a near-grey (0.36, 0.32, 0.26) and
+	# was WRONG, for a reason worth keeping here (issue #100): the body this
+	# tints stands inside a grey steel bore, so a near-grey fluid is the one
+	# colour that cannot be seen in a pipe no matter how its value is
+	# tuned — measured at 1:1 it was 11 luma from the steel either side of
+	# it, and a full run could not be found by eye at 1280x720 while the
+	# other five were obvious. A tint here needs CHROMA, not just contrast:
+	# hence the same olive-brown carried further from grey, which keeps the
+	# "flavouring, not sauce" reading it was picked for. `test_fluid_gallery.gd`
+	# now holds every tint to a saturation floor so the near-grey cannot
+	# come back.
 	"bbq_mix": Color(0.48, 0.25, 0.15),
 	"bbq": Color(0.33, 0.17, 0.11),
-	"liquid_smoke": Color(0.36, 0.32, 0.26),
+	# #4D4521, and equal to `palette.ron`'s `smoke_slate` — see there.
+	"liquid_smoke": Color(0.302, 0.271, 0.129),
 }
 const FLUID_TINT_FALLBACK := Color(0.60, 0.79, 0.86)
 
@@ -674,6 +687,14 @@ const ITEM_MODELS := {
 	# what the other one costs.
 	"bottled_bbq": "item_bottle_bbq",
 	"boxed_bbq": "item_box_bbq",
+	# The BBQ branch's two raw SOLIDS (issue #67). Both are bought, held in
+	# a hopper and unloaded onto a belt into the mixer, so both genuinely
+	# ride a conveyor and belong in this table rather than in FLUID_MODELS
+	# below. Until now neither had a model at all: `_market_asset_for` fell
+	# through to the pipe for both, so the market offered a paprika blend
+	# and a drum of syrup as two identical pipe nozzles.
+	"spice_mix": "item_spice_mix",
+	"molasses": "item_molasses",
 }
 const ITEM_MODEL_FALLBACK := "item_box"
 
@@ -688,6 +709,12 @@ const ITEM_MODEL_FALLBACK := "item_box"
 ## is where every fluid stood before vinegar got a jug of its own.
 const FLUID_MODELS := {
 	"vinegar": "item_vinegar",
+	# The BBQ branch's raw fluid (issue #67), and the second entry this
+	# table has ever had. Same story as vinegar: nothing carries liquid
+	# smoke on a belt, so a market crate of it and the chip in the larder
+	# both borrowed the pipe's icon, and a fluid tank titled "Liquid Smoke"
+	# was captioned with a picture of a pipe.
+	"liquid_smoke": "item_liquid_smoke",
 }
 
 ## Which voxel model's icon stands for each *buildable kind* in the build

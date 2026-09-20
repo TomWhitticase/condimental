@@ -241,6 +241,69 @@ drain its run. A declaration no machine on the run has a recipe for now makes
 that run read `Unnameable` rather than `Carries`, so the blame lands on the
 tank the player just mis-declared instead of on the machine's outlet.
 
+### 2026-09-20 — The BBQ ingredients get faces, and all six fluids stand in one frame
+
+Two more of the BBQ branch's presentation gaps, both of the same family as
+the last pass: a lookup with a fallback quietly covering for content that
+had never been drawn.
+
+**Spice mix, molasses and liquid smoke are real objects now (issue #67).**
+The three ingredients the second sauce added had no voxel model, so
+`_market_asset_for` fell through to its pipe fallback and the shop offered
+three identical lengths of pipe — and the liquid-smoke tank's panel titled
+itself with one. Three generators join `assets.rs`: a wide steel tin heaped
+with paprika, a narrow tall jar of near-black syrup under a kraft label and
+a steel cap, and a hooped slate drum with a brass bung. They were designed as
+a *row* against tomato, sugar and vinegar rather than one at a time, because
+the market plate shows all six at 64px side by side — each takes a silhouette
+and a value none of the others has, which is what separates them at that
+size. The jar took three rework passes: as first drawn its tapered neck and
+wide cap ate 40% of the height and it read as a tin, exactly like its new
+neighbour. `palette.ron` gains `spice_paprika`, `molasses_black` and
+`smoke_slate`; the last is held equal to `main.gd`'s `liquid_smoke` tint, the
+same rule `vinegar_amber` already follows. `item_liquid_smoke` is icon-only,
+so like the vinegar jug it is built for vengi's camera and not the game's
+(§2b point 35) — its bung sits where the *opposite* corner will see it.
+
+The fallback is the real fix, though, and it is a test: `test_ingredient_models.gd`
+walks every id `data/ingredients.ron` unlocks and fails if any of them
+resolves to the pipe, if a fluid is missing from `FLUID_MODELS` or a solid
+from `ITEM_MODELS`, or if a named asset has no icon. It was proved to fail by
+removing an entry, not only to pass. The next ingredient someone adds gets
+told, rather than shipping green with a pipe for a face.
+
+**A frame that shows all six fluids at once (issue #72).** `bbq` and
+`bbq_mix` sat at zero pressure in every fixture, so the tints #68 added could
+not be photographed and had to be argued for in prose. `--fluid-gallery`
+stands one chain of tanks, pipes, mixers and vats whose topology *names* all
+six runs — vinegar, ketchup mix, ketchup, BBQ mix, liquid smoke, BBQ — and
+then fills them. Naming is topology alone, so no ticking is needed; pressure
+comes through the save-RON door `fund()` and `deliver()` already use, patching
+every `volume_bits` to 10 units, which is within both a pipe segment's
+capacity and a tank's. The fixture checks itself, and — after review — actually
+refuses: if a run comes back unnameable, ambiguous, or at or below the
+pressure `main.gd` needs to draw a body at all, the harness writes NO PNG and
+exits non-zero. The first cut only pushed an error and then photographed the
+degraded gallery anyway, exit 0, which is #70 and #75's failure mode for the
+third time and was caught by the reviewer emptying a run. `test_fluid_gallery.gd`
+runs the same check headlessly in `verify-core-loop.sh`, so the fixture cannot
+rot quietly between renders; it also refuses an empty world first, so its
+silence on the real gallery is evidence rather than a default. The frame
+frames itself too — `_framing_bounds` pads a flat layout to 14 tiles on both
+axes and shrank the subject to nothing, so the fixture carries its own focus
+and ortho size as overridable defaults, and hides the HUD.
+
+**And the gallery immediately earned its keep (issue #100).** With all six
+runs standing side by side it was obvious that `liquid_smoke` could not be
+seen at all: the tint #68 gave it was a near-grey, and the body it paints
+stands inside a grey steel bore — measured at 1:1 it was 11 luma from the
+steel either side of it, a full pipe nobody could find by eye. It is an
+olive-brown now (53 luma and 170 summed-RGB from the same steel), the drum in
+the market moves with it by the rule that keeps a substance one colour, and
+the new test holds every fluid tint to a SATURATION floor rather than a
+contrast one — the failure was chromatic, not tonal, and `vinegar` is no
+darker than the old smoke was.
+
 ### 2026-09-20 — The HUD fits a 1280x720 window (issues #62, #63, #69, #17, #88)
 
 Four layout issues, one root cause: every panel in the game knew how to yield
@@ -316,6 +379,7 @@ read at both sizes. Two findings are deferred rather than fixed: the machine
 hover still cannot clear an open legend at 1280x720 (the geometry leaves
 nowhere to stand; the answer is a self-folding legend or a shorter tooltip,
 which is a content decision), and the headless-metrics gap itself.
+
 
 ### 2026-09-20 — Three issues off the board: names, fluid colour, honest frames
 
