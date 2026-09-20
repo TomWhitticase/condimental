@@ -12,6 +12,11 @@ import { OutputPass } from './vendor/examples/jsm/postprocessing/OutputPass.js';
 const TILE = 32;                 // voxels per world tile (vox::TILE_VOXELS)
 const FRAME_MS = 180;            // animation speed for frame variations
 
+// The simulation's own clockwise order (`Direction::rotate_cw`, restated in
+// main.gd's DIRECTIONS), so facing N is a yaw of N * 90 degrees — the whole
+// of what a rotated placement does to a mesh (UI_UX.md §2b point 18).
+const FACINGS = ['east', 'south', 'west', 'north'];
+
 const state = {
   catalog: null,
   asset: null,
@@ -22,7 +27,9 @@ const state = {
   playing: false,
   spinning: false,
   view: 'game',
+  facing: 0,                     // index into FACINGS; 0 is as authored
   grid: true,
+  ao: true,
   backdrop: 0,                   // index into BACKDROPS
   query: '',
 };
@@ -229,6 +236,40 @@ scene.add(shadowPlane);
 const root = new THREE.Group();          // holds the model, spun by turntable
 scene.add(root);
 
+// The placement's facing, which is a different rotation from the turntable
+// above and has to stay separate from it: the turntable is the reviewer
+// walking round a machine, this is the machine itself put down the other way
+// round. It sits at the origin because the origin IS the footprint centre at
+// ground level (the `.vox` encoder's rule, assets/voxels/CLAUDE.md), so a
+// yaw applied here is the same mesh about the same pivot the game spins it
+// about — not the mesh's own centre, which for an off-centre part is a
+// different point and a different picture.
+const facingRoot = new THREE.Group();
+root.add(facingRoot);
+
+function setFacing(i) {
+  state.facing = ((i % 4) + 4) % 4;
+  // main.gd's `_direction_yaw`: index * 90 degrees about +Y, and three.js
+  // turns about +Y exactly as Godot does (local +X goes to (cos t, 0, -sin t)
+  // in both), so this is the game's rotation, not a lookalike.
+  facingRoot.rotation.y = state.facing * Math.PI / 2;
+  document.querySelectorAll('#facings button').forEach((b) =>
+    b.classList.toggle('on', Number(b.dataset.facing) === state.facing));
+  renderHudTitle();
+  if (state.asset) renderDetails();
+}
+
+/// The models on screen, and — when it is not the authored one — the facing
+/// they are turned to, because a screenshot of this viewer has to say which
+/// of the four it is.
+function renderHudTitle(names) {
+  if (names) renderHudTitle.names = names;
+  const facing = state.facing
+    ? `   ·   facing ${FACINGS[state.facing]} (${state.facing * 90}°)`
+    : '';
+  $('#hud-title').textContent = (renderHudTitle.names || []).join('  +  ') + facing;
+}
+
 const gridRoot = new THREE.Group();
 scene.add(gridRoot);
 
@@ -319,13 +360,186 @@ function setView(which) {
 // poke the scene ("why is that face dark?") is part of the job.
 window.viewer = { THREE, scene, camera, renderer, composer, root, state };
 
+// Set by `?shot=`, cleared by the frame that honours it.
+let pendingShot = null;
+
 function tick() {
   requestAnimationFrame(tick);
   if (state.spinning) root.rotation.y += 0.006;
   controls.update();
   composer.render();
+  // In the same frame as the draw, because a canvas without
+  // `preserveDrawingBuffer` is empty by the next one.
+  if (pendingShot) {
+    const name = pendingShot;
+    pendingShot = null;
+    renderer.domElement.toBlob((png) => fetch(`/api/shot?name=${name}`,
+      { method: 'POST', body: png }));
+  }
 }
 tick();
+
+// ------------------------------------------------------------- occlusion
+//
+// The factory's WorldEnvironment runs SSAO (factory_environment.gd:
+// `ssao_radius` 0.9, `ssao_intensity` 2.4, `ssao_power` 1.6) and this viewer
+// ran without any, so every crease read flatter here than in the game
+// (issue #49). It is baked into the mesh instead of found in screen space,
+// for two reasons: three's stock `SSAOPass` reconstructs view-space depth as
+// if the camera were perspective and this camera is orthographic (patching
+// it means vendoring a copy of a file that is fetched, not committed), and
+// the voxel grid the occlusion is *about* is already in hand at mesh-build
+// time. Counting neighbours in a grid is cheaper and more exact than
+// inferring the same grid back out of a depth buffer.
+//
+// What is measured: occupancy, box-blurred to a near-Gaussian, sampled
+// AO_OFFSET voxels out along each vertex's own normal — how much solid sits
+// in the hemisphere that vertex looks into, which is the quantity SSAO
+// estimates, at the radius Godot uses (0.9 m / `VOXEL_UNIT` 0.1 = 9 voxels).
+//
+// AO is applied to INDIRECT DIFFUSE only, because that is what Godot's SSAO
+// dims: `ssao_light_affect` is left at 0, so the key and fill land on a
+// crease undimmed, and the sky reflection down a stainless flank — the thing
+// the lighting port was calibrated on — is not touched either.
+
+const AO_RADIUS = 9;    // voxels; ssao_radius 0.9 m at VOXEL_UNIT 0.1 m
+const AO_BOX = 3;       // box radius; three passes per axis ~= sigma 3.5
+const AO_PASSES = 3;
+const AO_OFFSET = 3;    // sample this far out along the normal
+
+// How dark the deepest crease goes: the ONE knob, and not a number anybody
+// chose by eye. `calibrate-ao.py` renders the game's vat fixture with
+// `factory_environment.gd`'s SSAO on and off, renders this browser on the
+// same model with the strength on and off, and divides one measured
+// darkening by the other. Re-derive it with a single command when the game's
+// `ssao_intensity` moves:
+//
+//     tools/asset-browser/calibrate-ao.py
+//
+// At today's shipped `ssao_intensity = 2.4` the game darkens its deepest
+// crease by 5.0%, and 0.294 here lands the browser's at 4.7% — which is why
+// this number is so much smaller than one: the browser is meant to show what
+// the game shows, so that nobody can approve a form that only reads under
+// browser-only occlusion.
+const AO_STRENGTH = 0.294;
+
+/// One box-blur pass along one axis of a 3D field, running-sum so the cost is
+/// the field's size and not the kernel's. Everything outside the field counts
+/// as empty, which is why the grid below is padded: a model's own edge must
+/// not read as occluded by the end of the array.
+function blurAxis(src, dst, dims, axis, radius) {
+  const strides = [1, dims[0], dims[0] * dims[1]];
+  const stride = strides[axis];
+  const n = dims[axis];
+  const [oa, ob] = [0, 1, 2].filter((a) => a !== axis);
+  const norm = 1 / (2 * radius + 1);
+  for (let b = 0; b < dims[ob]; b += 1) {
+    for (let a = 0; a < dims[oa]; a += 1) {
+      const base = a * strides[oa] + b * strides[ob];
+      let sum = 0;
+      for (let i = 0; i <= radius && i < n; i += 1) sum += src[base + i * stride];
+      for (let i = 0; i < n; i += 1) {
+        dst[base + i * stride] = sum * norm;
+        const add = i + radius + 1;
+        const drop = i - radius;
+        if (add < n) sum += src[base + add * stride];
+        if (drop >= 0) sum -= src[base + drop * stride];
+      }
+    }
+  }
+}
+
+/// What the same kernel reads AO_OFFSET voxels off the face of an infinite
+/// flat wall. It is not zero — a kernel centred outside a half-space still
+/// catches a fifth of it — and subtracting it is what keeps an open flank at
+/// exactly its measured colour instead of a fifth darker. The blur is
+/// separable, so a half-space is a 1-D step through it and this is that step,
+/// blurred by the very same passes rather than by a constant someone has to
+/// keep in step with them.
+const AO_BASELINE = (() => {
+  const n = 4 * (AO_PASSES * AO_BOX + AO_OFFSET + 2);
+  const wall = Math.floor(n / 2);
+  let src = new Float32Array(n);
+  let dst = new Float32Array(n);
+  for (let i = 0; i < wall; i += 1) src[i] = 1;
+  for (let p = 0; p < AO_PASSES; p += 1) {
+    blurAxis(src, dst, [n, 1, 1], 0, AO_BOX);
+    [src, dst] = [dst, src];
+  }
+  return src[wall + AO_OFFSET];
+})();
+
+/// The occlusion field of one model, over ALL of its classes at once: a
+/// stainless fitting darkens the painted body it is bolted to, which it
+/// cannot do if each class is blurred alone. (A class hidden from the chips
+/// still casts its occlusion, the same way hiding it does not re-cull the
+/// faces behind it.)
+function aoField(classes, size) {
+  const pad = AO_PASSES * AO_BOX + AO_OFFSET + 1;
+  const dims = [size[0] + 2 * pad, size[1] + 2 * pad, size[2] + 2 * pad];
+  const idx = (x, y, z) => (x + pad) + (y + pad) * dims[0] + (z + pad) * dims[0] * dims[1];
+  let src = new Float32Array(dims[0] * dims[1] * dims[2]);
+  let dst = new Float32Array(src.length);
+  for (const part of Object.values(classes)) {
+    const v = part.voxels;
+    for (let i = 0; i < v.length; i += 4) src[idx(v[i], v[i + 1], v[i + 2])] = 1;
+  }
+  for (let axis = 0; axis < 3; axis += 1) {
+    for (let p = 0; p < AO_PASSES; p += 1) {
+      blurAxis(src, dst, dims, axis, AO_BOX);
+      [src, dst] = [dst, src];
+    }
+  }
+  const field = src;
+
+  /// The openness at one vertex of one face: the field AO_OFFSET voxels out
+  /// along the face's normal, less what open wall reads there. 1 is open sky,
+  /// 0 is buried. Geometry only — how dark that is made to look is
+  /// AO_STRENGTH, at draw time, so it stays one knob and a measurable one.
+  return function ao(x, y, z, dx, dy, dz) {
+    const sx = x + dx * AO_OFFSET;
+    const sy = y + dy * AO_OFFSET;
+    const sz = z + dz * AO_OFFSET;
+    if (sx < -pad || sy < -pad || sz < -pad) return 1;
+    if (sx >= size[0] + pad || sy >= size[1] + pad || sz >= size[2] + pad) return 1;
+    const occ = (field[idx(sx, sy, sz)] - AO_BASELINE) / (1 - AO_BASELINE);
+    return 1 - Math.min(1, Math.max(0, occ));
+  };
+}
+
+// One uniform object shared by every material, so the `ao` button — and
+// `calibrate-ao.py`'s `?ao=` override — is a single assignment rather than a
+// walk of the scene graph.
+const aoStrength = { value: AO_STRENGTH };
+
+// three has no vertex-attribute AO — `aoMap` is a texture on a second UV set,
+// which a voxel mesh has no use for — so the baked value rides in as an
+// attribute and lands exactly where `<aomap_fragment>` would have put a map's.
+const AO_CHUNK = `
+  float ambientOcclusion = 1.0 - voxAoStrength * ( 1.0 - vVoxAo );
+  reflectedLight.indirectDiffuse *= ambientOcclusion;
+`;
+
+/// Adds the baked AO to whatever `material` already does in its own
+/// `onBeforeCompile` (the emissive class has one), rather than replacing it.
+function withBakedAo(material) {
+  const already = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    if (already) already(shader, renderer);
+    shader.uniforms.voxAoStrength = aoStrength;
+    shader.vertexShader = 'attribute float voxAo;\nvarying float vVoxAo;\n' +
+      shader.vertexShader.replace('void main() {', 'void main() {\n\tvVoxAo = voxAo;');
+    shader.fragmentShader = 'uniform float voxAoStrength;\nvarying float vVoxAo;\n' +
+      shader.fragmentShader.replace('#include <aomap_fragment>',
+        `#include <aomap_fragment>\n${AO_CHUNK}`);
+  };
+  // Bound, because the default implementation three supplies reads
+  // `this.onBeforeCompile` — called loose it throws, and a material's program
+  // is then never compiled at all (a black viewport, 2026-09-20).
+  const key = material.customProgramCacheKey.bind(material);
+  material.customProgramCacheKey = () => `voxAo|${key()}`;
+  return material;
+}
 
 // ------------------------------------------------------------ mesh building
 
@@ -342,7 +556,7 @@ const FACES = [
 // "front" here is the same face as "front" in the game.
 const keyOf = (x, y, z) => x | (y << 8) | (z << 16);
 
-function buildClassMesh(voxels, palette, size, material) {
+function buildClassMesh(voxels, palette, size, material, ao) {
   const filled = new Set();
   for (let i = 0; i < voxels.length; i += 4) {
     filled.add(keyOf(voxels[i], voxels[i + 1], voxels[i + 2]));
@@ -350,6 +564,7 @@ function buildClassMesh(voxels, palette, size, material) {
   const pos = [];
   const nrm = [];
   const col = [];
+  const occ = [];
   const c = new THREE.Color();
   const ox = size[0] / 2;
   const oy = size[1] / 2;
@@ -369,16 +584,23 @@ function buildClassMesh(voxels, palette, size, material) {
         z + cz,               // three y  = vox z (up)
         -(y + cy) + oy,       // three z  = -vox y
       ]);
+      // Occlusion is read at the quad's own corners, so it varies ACROSS one
+      // voxel face: a face running into a crease is shaded along its length,
+      // the way a screen-space pass would shade it, rather than stepping a
+      // flat value per voxel.
+      const shade = face.corners.map(([cx, cy, cz]) =>
+        ao(x + cx, y + cy, z + cz, dx, dy, dz));
       // Wound the other way round the quad than the corner lists read: the
       // lists go clockwise seen from outside, and a clockwise triangle is a
       // BACK face, culled — which left every model drawn from the inside,
       // lit by whatever was behind it. (2026-09-17: that is what made a vat
       // look like a hollow white shell you could see through.)
-      const [a, b, d, e] = quad;
-      for (const v of [a, d, b, a, e, d]) {
+      for (const i of [0, 2, 1, 0, 3, 2]) {
+        const v = quad[i];
         pos.push(v[0], v[1], v[2]);
         nrm.push(dx, dz, -dy);
         col.push(c.r, c.g, c.b);
+        occ.push(shade[i]);
       }
     }
   }
@@ -387,6 +609,7 @@ function buildClassMesh(voxels, palette, size, material) {
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.setAttribute('voxAo', new THREE.Float32BufferAttribute(occ, 1));
   return new THREE.Mesh(geo, material);
 }
 
@@ -416,7 +639,7 @@ function materialFor(cls) {
     };
     mat.customProgramCacheKey = () => `voxEmission:${energy}`;
   }
-  return mat;
+  return withBakedAo(mat);
 }
 
 async function modelPayload(name) {
@@ -433,8 +656,11 @@ async function modelGroup(name) {
   const payload = await modelPayload(name);
   const group = new THREE.Group();
   group.name = name;
+  const ao = aoField(payload.classes, payload.size);
   for (const [cls, part] of Object.entries(payload.classes)) {
-    const mesh = buildClassMesh(part.voxels, payload.palette, payload.size, materialFor(cls));
+    const mesh = buildClassMesh(
+      part.voxels, payload.palette, payload.size, materialFor(cls), ao
+    );
     mesh.userData.cls = cls;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -479,10 +705,10 @@ async function renderCurrent({ refit = false, quiet = false } = {}) {
     fail(String(err));
     return;
   }
-  root.clear();
+  facingRoot.clear();
   let size = [1, 1, 1];
   for (const g of loaded) {
-    root.add(g);
+    facingRoot.add(g);
     const s = g.userData.size;
     size = [Math.max(size[0], s[0]), Math.max(size[1], s[1]), Math.max(size[2], s[2])];
   }
@@ -496,7 +722,7 @@ async function renderCurrent({ refit = false, quiet = false } = {}) {
     resize();
     setView(state.view);
   }
-  $('#hud-title').textContent = names.join('  +  ');
+  renderHudTitle(names);
   renderVariations();
   // Playback re-renders every frame; rebuilding the details panel that
   // often would fight the reader's scroll position for no new information.
@@ -646,7 +872,14 @@ function renderDetails() {
   if (model.bbox) put('occupied', `${model.bbox.size.join(' × ')}`);
   put('voxels', model.voxels.toLocaleString());
   put('file', `${(model.bytes / 1024).toFixed(1)} KiB`);
-  if (asset.footprint) put('footprint', `${asset.footprint[0]} × ${asset.footprint[1]} tiles`);
+  if (asset.footprint) {
+    // A quarter turn SWAPS the extents (main.gd's `_rotated_footprint`), so
+    // the tiles a 1x2 mixer claims are not the tiles it claims turned.
+    const [fw, fh] = asset.footprint;
+    put('footprint', state.facing % 2
+      ? `${fw} × ${fh} tiles · ${fh} × ${fw} facing ${FACINGS[state.facing]}`
+      : `${fw} × ${fh} tiles`);
+  }
   facts.appendChild(dl);
   const chips = el('div');
   for (const cls of model.classes) {
@@ -747,8 +980,9 @@ function select(id, { push = true } = {}) {
   state.classes = {};
   renderClassToggles();
   renderList();
-  renderCurrent({ refit: true });
+  const drawn = renderCurrent({ refit: true });
   if (push) location.hash = id;
+  return drawn;
 }
 
 // ------------------------------------------------------------- live reload
@@ -793,7 +1027,7 @@ async function reloadCatalog() {
 
   // Every mesh in hand was built from the old .vox bytes. Drop the lot —
   // detached from the scene first, since the render loop is still running.
-  root.clear();
+  facingRoot.clear();
   cache.clear();
   for (const group of groups.values()) {
     group.traverse((n) => {
@@ -845,6 +1079,14 @@ function wire() {
   document.querySelectorAll('#views button').forEach((b) => {
     b.onclick = () => setView(b.dataset.view);
   });
+  document.querySelectorAll('#facings button').forEach((b) => {
+    b.onclick = () => setFacing(Number(b.dataset.facing));
+  });
+  $('#ao-toggle').onclick = (e) => {
+    state.ao = !state.ao;
+    aoStrength.value = state.ao ? AO_STRENGTH : 0;
+    e.currentTarget.classList.toggle('on', state.ao);
+  };
   $('#spin').onclick = (e) => {
     state.spinning = !state.spinning;
     e.currentTarget.classList.toggle('on', state.spinning);
@@ -874,6 +1116,12 @@ function wire() {
     if (e.key === 'r') $('#spin').click();
     if (e.key === 'g') $('#grid-toggle').click();
     if (e.key === 'b') $('#bg-toggle').click();
+    if (e.key === 'o') $('#ao-toggle').click();
+    // One step clockwise, which is the step the game's own R makes
+    // (`Direction::rotate_cw`); shift-F walks back the other way.
+    if (e.key === 'f' || e.key === 'F') {
+      setFacing((state.facing + (e.key === 'F' ? 3 : 1)) % 4);
+    }
     if (['1', '2', '3', '4'].includes(e.key)) {
       setView(['game', 'front', 'side', 'top'][Number(e.key) - 1]);
     }
@@ -895,6 +1143,38 @@ function wire() {
   });
 }
 
+/// The query string is the automation seam: `calibrate-ao.py` needs the same
+/// model twice at two AO strengths, framed identically and with nothing but
+/// the model in the frame, and a browser that can only be driven by hand
+/// cannot be measured against the game at all.
+///
+///     ?ao=0&view=game&facing=2&bare=1#machine_cooking_vat
+///
+/// `ao` is the strength uniform (blank means AO_STRENGTH); `bare` strips the
+/// chrome down to the viewport; `shot=<name>` posts the next drawn frame to
+/// the server's `--shot-dir` and is how a headless run gets pixels back
+/// (Chrome's own `--screenshot` fires on a load heuristic, before a model has
+/// been fetched). Nothing here is a second way to configure the viewer —
+/// every switch is the one the buttons already throw.
+function applyQuery() {
+  const q = new URLSearchParams(location.search);
+  if (q.has('view')) setView(q.get('view'));
+  if (q.has('facing')) setFacing(Number(q.get('facing')));
+  if (q.has('ao')) {
+    aoStrength.value = Number(q.get('ao'));
+    state.ao = aoStrength.value > 0;
+    $('#ao-toggle').classList.toggle('on', state.ao);
+  }
+  if (q.get('bare') === '1') {
+    for (const sel of ['#sidebar', '#details', '#toolbar', '#hud', '#variations']) {
+      $(sel).style.display = 'none';
+    }
+    document.querySelector('#app').style.gridTemplateColumns = 'minmax(0, 1fr)';
+    resize();
+  }
+  if (q.has('shot')) pendingShot = q.get('shot');
+}
+
 async function boot() {
   try {
     const res = await fetch('/api/catalog');
@@ -908,7 +1188,9 @@ async function boot() {
   resize();
   const wanted = decodeURIComponent(location.hash.slice(1));
   const first = state.catalog.assets.find((a) => a.id === wanted) || state.catalog.assets[0];
-  select(first.id, { push: false });
+  await select(first.id, { push: false });
+  applyQuery();
+  document.body.dataset.ready = '1';
   pollSources();
   setInterval(pollSources, POLL_MS);
 }

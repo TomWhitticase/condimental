@@ -455,6 +455,62 @@ Also filed along the way: a screenshot fixture is never asserted to be
 actually running before the shutter (#94), and the clipboard shows one docket
 at 1600x900 with three contracts signed (#95).
 
+### 2026-09-20 — The asset browser spins a model, and its shadows are measured
+
+Two asset-browser issues, and the second turned into a measurement.
+
+**A facing control (issue #36).** The browser drew every model once, in the
+facing it was authored in, so the two things UI_UX.md §2b asserts about
+rotation could be read in the doc and not seen: a carved doorway does not
+survive a 180° spin (point 18), and an overlay that lines up on its host does
+so in one facing out of four (point 29). There are **E S W N** buttons and an
+`f` key now, in the sim's own clockwise order, and they spin the model the
+way a placement does — a yaw about the **footprint origin**, which is what
+the `.vox` origin already is (the footprint's centre at ground level), not
+about the mesh's centre. The details panel's footprint line swaps its extents
+with it, as `_rotated_footprint` does. The dock is the asset that makes the
+point: at east and south you are looking into its loading bays, at west they
+are a blank blue wall.
+
+**Ambient occlusion, at the game's own strength (issue #49).** Baked per
+voxel rather than screen-space: the occupancy grid the mesh is built from is
+box-blurred to a near-Gaussian at Godot's own radius (`ssao_radius` 0.9 m =
+9 voxels), sampled along each face's normal, and the flat-half-space baseline
+is subtracted so an open flank keeps exactly the colour the README's table
+pins. It dims indirect diffuse only, as Godot's SSAO does with
+`ssao_light_affect` at 0. The three.js `SSAOPass` was not the route — it does
+not define `PERSPECTIVE_CAMERA=0`, this viewer's camera is orthographic, and
+`web/vendor/` is fetched rather than vendored, so patching it means vendoring
+a copy; and the voxel grid the occlusion is *about* is already in hand at
+mesh-build time, which is cheaper and more exact than inferring that grid
+back out of a depth buffer.
+
+The strength is one constant and nobody chose it. `tools/asset-browser/
+calibrate-ao.py` renders the game's vat fixture with `factory_environment.gd`'s
+SSAO on and off, renders the browser on the same model with its AO on and
+off, and divides one deepest-crease darkening by the other: the game 5.04%,
+the browser 4.70% at `AO_STRENGTH = 0.294`. It re-derives in one command when
+the game's SSAO is retuned. Deliberately no stronger than the game — a
+browser that darkened creases harder than the renderer it stands in for is
+review tooling that lies, and would let a form be approved that only reads
+under browser-only occlusion.
+
+That measurement also caught something about the game rather than the
+browser: at the shipped `ssao_intensity = 2.4` under `ambient_light_energy
+= 1.2`, Godot's SSAO moves the deepest crease by 5% and 0.13% of the lit
+frame, and in a first-person control pair it darkened **no** pixel by more
+than 2%. It is not broken — at `ssao_intensity 16` the same pair takes its
+darkest pixel down 26% — it is a number chosen where it could barely reach
+the screen.
+The frames and the figures went to the environment work rather than to a
+deferred issue.
+
+Two seams came with it, both narrow. The viewer takes its switches from the
+query string as well as its buttons (`?view=game&facing=2&ao=0&bare=1`), and
+`serve.py` grows a `POST /api/shot` that exists **only** when `--shot-dir` is
+passed on the command line — headless Chrome captures on a load heuristic
+that lands before a model has been fetched, so the page hands back its own
+canvas instead of being photographed.
 
 ### 2026-09-20 — Three issues off the board: names, fluid colour, honest frames
 
