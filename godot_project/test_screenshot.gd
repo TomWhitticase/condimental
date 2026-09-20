@@ -227,8 +227,8 @@ const POPULATE_TICKS_PER_SPAWN := 10
 ## the same list written twice, and there is no third place to check.
 const FIXTURE_NAMES: PackedStringArray = [
 	"demo", "machines", "fluids", "vat", "splitter", "chain", "stress",
-	"pipes", "gallery", "items", "bottleneck", "bbq", "stalled_run",
-	"understaffed", "shortfall", "full_dock",
+	"pipes", "gallery", "items", "fluid_gallery", "bottleneck", "bbq",
+	"stalled_run", "understaffed", "shortfall", "full_dock",
 ]
 
 var _frames := 0
@@ -287,6 +287,13 @@ var _config_tile := Vector2i.ZERO
 ## hopper is photographed after being retargeted to another ingredient.
 var _market := false
 var _contents := -1
+
+## `--contents-refill` buys the fluid just declared and pumps it back into the
+## tank and its run, so the picker's note is photographed saying what a
+## *second* switch would destroy. Without it the frame necessarily shows the
+## unquantified wording: pressing the picker slot is itself the destructive
+## act, so the tank and its run are empty the instant the panel is shot.
+var _contents_refill := false
 ## `--no-hud` hides the whole HUD layer. It exists for `--closeup`: the
 ## contract clipboard and the hotbar between them cover the top-right and the
 ## bottom of the frame, which is exactly where a junction lands about half
@@ -454,6 +461,12 @@ const ITEM_GALLERY_ASSETS := [
 ]
 var _item_gallery := false
 
+## Where `--fluid-gallery` puts the camera when nothing else says: the
+## centre of `build_fluid_gallery`'s 17x3 strip, at the widest zoom that
+## still has all six runs inside 1600x900 with a margin.
+const FLUID_GALLERY_FOCUS := Vector2(8.0, 1.0)
+const FLUID_GALLERY_SIZE := 64.0
+
 ## `--closeup` target tile and orthographic width; `_closeup` gates both.
 const CLOSEUP_SIZE := 9.0
 var _closeup := false
@@ -488,6 +501,8 @@ func _initialize() -> void:
 		_pick_fixture("pipes", "--pipe-gallery")
 	if args.has("--belt-gallery"):
 		_pick_fixture("gallery", "--belt-gallery")
+	if args.has("--fluid-gallery"):
+		_pick_fixture("fluid_gallery", "--fluid-gallery")
 	_item_gallery = args.has("--item-gallery")
 	if _item_gallery:
 		_pick_fixture("items", "--item-gallery")
@@ -530,6 +545,7 @@ func _initialize() -> void:
 	_unlock_toast = args.has("--unlock-toast")
 	_no_hud = args.has("--no-hud")
 	_contents = int(_string_arg(args, "--contents")) if _string_arg(args, "--contents") != "" else -1
+	_contents_refill = args.has("--contents-refill")
 	_contracts = args.has("--contracts")
 	if _contracts:
 		_pick_fixture("chain", "--contracts")
@@ -573,6 +589,7 @@ func _initialize() -> void:
 	_pause = args.has("--pause")
 	_parse_closeup(args)
 	_resolve_fixture()
+	_apply_fluid_gallery_defaults(args)
 	# The world this frame actually came from, printed whether or not
 	# anything asked for one — a frame that cannot be traced back to its
 	# fixture is not evidence (issue #70).
@@ -696,6 +713,16 @@ func _build_fixture() -> void:
 			Layouts.build_pipe_gallery(_main.sim)
 		"gallery":
 			Layouts.build_belt_gallery(_main.sim)
+		"fluid_gallery":
+			# The one fixture that can be built and still not BE itself:
+			# move a pipe and two runs merge, and the frame comes back a
+			# perfectly good-looking factory missing a colour the reviewer
+			# was told it held. Refuse instead — no PNG, non-zero status.
+			var complaint: String = Layouts.build_fluid_gallery(_main.sim)
+			if complaint != "":
+				printerr("SCREENSHOT_FAIL: %s" % complaint)
+				_refuse()
+				return
 		"items":
 			Layouts.build_item_gallery(_main.sim)
 		"bottleneck":
@@ -780,6 +807,32 @@ func _parse_closeup(args: Array) -> void:
 		if parts.size() >= 3:
 			_closeup_size = float(parts[2])
 		return
+
+
+## The two framing choices `--fluid-gallery` makes for itself, applied after
+## `_resolve_fixture` because that is the first point at which the settled
+## fixture name is known (`_pick_fixture` only records a REQUEST, so that an
+## explicit `--fixture` can still win and say so). Both are defaults: an
+## explicit `--closeup` was already parsed above and is left alone, and
+## `--no-hud` cannot be un-asked-for anyway.
+##
+##   * The scene's auto-framing pads a world out to EMPTY_WORLD_FRAME_TILES
+##     on both axes, which is right for a factory and wrong for this: the
+##     gallery is 17 tiles long and 3 deep, so the padding is most of the
+##     frame and the six colours the shot exists to compare come back a few
+##     pixels wide each.
+##   * The HUD goes, for the reason `_no_hud` already records one step
+##     further on: the subject is a line of pipe running corner to corner,
+##     and the legend and the clipboard sit on both ends of that diagonal.
+##     There is no framing that shows six runs and misses both panels.
+func _apply_fluid_gallery_defaults(args: Array) -> void:
+	if _fixture != "fluid_gallery":
+		return
+	if not _closeup:
+		_closeup = true
+		_closeup_tile = FLUID_GALLERY_FOCUS
+		_closeup_size = FLUID_GALLERY_SIZE
+	_no_hud = true
 
 
 ## Aims the isometric camera at one tile, close in. Deliberately writes
@@ -1287,6 +1340,27 @@ func _open_config_at(tile: Vector2i) -> void:
 		return
 	if _contents >= 0:
 		_main._on_config_picker_pressed(_contents)
+		if _contents_refill:
+			_refill_declared_tank()
+
+
+## Fills a tank back up after `--contents` declared what it holds, through the
+## panel's own FILL button and the sim's own ticks — one crate is 30 units and
+## the run drinks, so it takes several presses and a few ticks for the pipe run
+## to carry anything worth warning about.
+func _refill_declared_tank() -> void:
+	var fluid: String = String(_main._tank_fluids[_contents]) if _contents < _main._tank_fluids.size() else ""
+	if fluid == "":
+		printerr("SCREENSHOT: --contents-refill: no fluid in picker slot %d" % _contents)
+		return
+	Layouts.fund(_main.sim, 5000)
+	Layouts.stock(_main.sim, fluid, 256)
+	for i in range(4):
+		_main._on_config_fill_pressed()
+	for i in range(5):
+		_main.sim.tick()
+	_main._apply_dirty_chunks()
+	_main._update_fluid_network()
 
 
 ## Drives the real chain across several contract cadence boundaries, feeding
@@ -1555,6 +1629,12 @@ func _process(_delta: float) -> bool:
 		return _write_frame()
 	if _frames == 1 and _fixture != "":
 		_build_fixture()
+		# `_refuse()` inside the build latches and calls `quit(1)`, but quit
+		# only takes effect between frames — without this the rest of THIS
+		# pass would go on to open panels and, at the last frame, write the
+		# PNG that was just refused.
+		if _refused:
+			return true
 	# Straight after the fixture and before anything opens a panel: the gate
 	# decides what the market, the larder and the board have in them, so it
 	# has to be settled before they are drawn.

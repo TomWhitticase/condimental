@@ -97,8 +97,18 @@ func _initialize() -> void:
 		return
 
 	# A save from another build is refused the same way, by version rather
-	# than by whatever the shape change happens to break.
-	var from_the_future := save_text.replace("schema_version: 1", "schema_version: 2")
+	# than by whatever the shape change happens to break. The version this
+	# build writes is read out of the save rather than spelled here, so a
+	# schema bump does not quietly turn this case into "loads fine".
+	var version_line := RegEx.new()
+	version_line.compile("schema_version: (\\d+)")
+	var found := version_line.search(save_text)
+	if found == null:
+		_fail("a save must carry a schema_version")
+		return
+	var from_the_future := save_text.replace(
+		found.get_string(), "schema_version: %d" % (int(found.get_string(1)) + 1)
+	)
 	var version_refusal: String = sim.load_ron(from_the_future)
 	if not version_refusal.contains("schema_version"):
 		_fail("a save from another build must be refused by version, got '%s'" % version_refusal)

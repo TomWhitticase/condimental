@@ -88,31 +88,69 @@
         // never sees. It is also a number the player can watch approach:
         // every docket on the clipboard counts its own deliveries.
         //
-        // TEN EVEN THOUGH IT DOES NOT SOLVE ISSUE #55, and why raising it
-        // would not either. #55 is that building the BBQ branch starves
-        // the ketchup line for roughly 6 000 ticks while two new pipe runs
-        // and a vat prime, which is six missed `corner_shop` windows
-        // against a three-strike contract: the reward for building the
-        // thing the game just unlocked is losing the order that paid for
-        // it. The issue offers "let the tier arrive with breathing room"
-        // as the cheap content-side fix — push this number up until the
-        // player has a second ketchup line by the time BBQ lands.
+        // TEN EVEN THOUGH IT DOES NOT FIX ISSUE #55 — measured, not
+        // argued, and re-measured after review (the balance pass,
+        // 2026-09-20). #55 is that building the BBQ branch starves the
+        // ketchup line while two new pipe runs and a vat prime, which is
+        // several missed windows against three-strike contracts: the reward
+        // for building the thing the game just unlocked is losing the order
+        // that paid for it. The issue offers "let the tier arrive with
+        // breathing room" as the cheap content-side fix — push this number up
+        // until the player has slack by the time BBQ lands. So it was swept.
         //
-        // It was considered and rejected, because a delivery count cannot
-        // buy anyone a second line. Nothing in the game asks for one, so a
-        // higher threshold does not produce one; it only means MORE time
-        // spent signing MORE ketchup contracts off the board, and every
-        // one of those is starved by the same 6 000 ticks. Raising the
-        // number raises the number of orders the trap can take. It would
-        // trade a slower first session for a worse accident, and it would
-        // hide a real missing affordance behind a balance value that reads
-        // as arbitrary to whoever meets it next.
+        // THE PROTOCOL, because every number below moves if it changes.
+        // Each run: build the shipped ketchup line through real purchase and
+        // place commands; fund it; stock the larder with 1 200 of each raw;
+        // leave hopper and tank auto-fill on; hire until fully staffed; sign
+        // the starter contracts AT THE STATED MOMENT; wait for the stated
+        // lifetime-delivery count; build the BBQ branch and its mixed exit;
+        // then settle 15 000 ticks and read the board. "Bank" is finished
+        // boxed_ketchup on hand at the moment the branch goes in. A gate
+        // value other than ten is EMULATED by waiting for that many lifetime
+        // deliveries before building — the shipped gate is long open by then
+        // and nothing else reads the number, so it is exactly equivalent.
         //
-        // The fix #55 actually wants is its first option — say so at
-        // placement time, before it costs anything, which the simulation
-        // has the information to do and no surface to say it on. That is a
-        // presentation ticket, not this file. So: ten, and the trap stays
-        // open and documented rather than papered over with a number.
+        //   what the transient costs  boxed_ketchup output stops for about
+        //                             8 500 ticks; roughly 35 boxes' worth of
+        //                             throughput is absorbed into the new
+        //                             pipes and vat before any comes back out
+        //   1 order, gate 10          bank 22 — nothing lost
+        //   3 orders signed AT THE
+        //     GATE, gate 10           bank 22 — diner_supply lost
+        //   3 orders signed at tick
+        //     0, gate 10              bank 7 — corner_shop and diner_supply
+        //                             lost to the branch
+        //   emulated gate 20          bank 12 — 2 lost
+        //   emulated gate 30          bank 19 — 1 lost
+        //   emulated gate 40          bank 24 — NOTHING lost to the branch
+        //
+        // THE CONTROL MATTERS: with three orders signed at tick 0 and NO
+        // branch ever built, market_stall still strikes out at tick 1 500.
+        // That death is the ketchup line starting up, not the BBQ branch, and
+        // it is why the "3 orders at tick 0" rows above count only what the
+        // branch took.
+        //
+        // WHAT THE SWEEP ACTUALLY SHOWS. The deciding variable is the BANK AT
+        // THE MOMENT OF BUILDING — not the number of concurrent orders, which
+        // matters only through the bank it leaves. A delivery count steers
+        // that bank by proxy and badly, because signing more contracts is both
+        // how a player reaches the count sooner and what makes the transient
+        // cost more. Pushed far enough the gate DOES work: forty deliveries
+        // leaves the three-order player 24 banked and costs them nothing. But
+        // forty is not "inside a first session", which is the entire reason
+        // ten was chosen above, and a gate bought that way would be paying for
+        // a transient with the thing the gate exists to deliver.
+        //
+        // Hence: TEN, kept because raising it to a value that would fix #55
+        // costs more than #55 does. The trap stays open and documented rather
+        // than papered over with a number, and #55 stays OPEN. The fixes it
+        // wants are its own first option — say so at placement time, before it
+        // costs anything, which the simulation has the information to do and
+        // no surface to say it on (issue #92) — or a fluid network that will
+        // not let a brand-new consumer take 100% of a network the old one is
+        // living on (issue #93). Both are outside this file. Full record:
+        // `docs/DECISIONS.md`, 2026-09-20, "The bank at the moment of building
+        // decides whether the BBQ branch costs you the board".
         Unlock(
             id: "bbq_sauce",
             name: "BBQ Sauce",

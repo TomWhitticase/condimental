@@ -335,69 +335,216 @@ static func build_bbq_branch(sim) -> void:
 const BBQ_BRANCH_PLACEMENTS := 70
 
 
-## How long the BBQ line runs before `scripts/screenshot-scene.sh --bbq`
-## photographs it, and how deep its larder is.
+## How long the BBQ line runs once the branch is in, and how deep its
+## larder is.
 ##
-## 15 000 ticks is chosen between two walls. Below about 6 000 the branch is
-## still priming its two new pipe runs and the ketchup bottler is starved, so
-## the shot shows one sauce; past about 30 000 the delivery pool hits its
-## ceiling and the packers back up, so the shot shows a stalled factory. In
-## between, both lines run at the 3:2 split `data/contracts.ron`'s mixed
-## orders are written against and there are boxes of both sauces on the
-## floor.
+## 15 000 ticks is chosen between two walls, and it is counted from the
+## moment the branch is PLACED rather than from tick zero. Below about 9 000
+## the branch is still priming its two new pipe runs and the ketchup bottler
+## is starved, so the shot shows one sauce; past about 30 000 the delivery
+## pool hits its ceiling and the packers back up, so the shot shows a stalled
+## factory. In between, both lines run at the 3:2 split
+## `data/contracts.ron`'s mixed orders are written against and there are
+## boxes of both sauces on the floor.
 const BBQ_SETTLE_TICKS := 15000
 const BBQ_STOCK := 1200
+
+## How long the ketchup line is allowed to run on its own before the fixture
+## gives up waiting for `data/unlocks.ron`'s BBQ gate to open. The shipped
+## gate (ten deliveries) opens at about 12 000 ticks on one line serving the
+## starter order alone; this ceiling is generous enough that a balance pass
+## on that file moves the shot's run length rather than breaking it, and
+## tight enough that a gate which can never open fails the fixture instead of
+## hanging it. Reaching this ceiling is a HARD FAILURE — the wait below
+## prints `BBQ_FIXTURE_FAIL:` and asserts rather than building on, because a
+## branch built behind a shut gate cannot buy its raws and never makes a box.
+const BBQ_GATE_TICK_CEILING := 40000
+
+## How often the wait above checks the gate. A snapshot parse per tick would
+## dominate the run; the gate is checked on the same 250-tick grid the
+## balance measurements in `docs/DECISIONS.md` were taken on.
+const BBQ_GATE_POLL_TICKS := 250
+
+
+## True once `data/unlocks.ron` has opened at least one gate — which, with
+## one unlock shipped, means BBQ is buyable and its contracts signable.
+##
+## Read from the simulation's own snapshot rather than counted here: a gate
+## is a rule in `sim_core` (`BuyIngredient` and `SignContract` are REFUSED
+## for a locked id), and a fixture that re-derived the threshold in GDScript
+## would be the presentation layer deciding a gameplay question.
+##
+## A snapshot that will not parse is NOT "the gate is shut" — it is the wire
+## broken, and returning `false` for it would let a fixture wait out its
+## ceiling and then build anyway. It aborts instead (review of PR #98).
+static func any_unlock_open(sim) -> bool:
+	var economy = JSON.parse_string(sim.economy_snapshot_json())
+	if not (economy is Dictionary):
+		printerr("BBQ_FIXTURE_FAIL: economy_snapshot_json did not parse as a Dictionary")
+		assert(false, "economy_snapshot_json did not parse as a Dictionary")
+		return false
+	for unlock in economy.get("unlocks", []):
+		if bool(unlock.get("open", false)):
+			return true
+	return false
+
+
+## THE MIXED EXIT (issue #57) — a splitter on the BBQ branch's exit run whose
+## side output drops onto the KETCHUP line's exit belt, so that one belt in
+## the frame carries both sauces alternating.
+##
+## WHY THE SHOT NEEDS IT. Whether `box_of_ketchup` and `box_of_bbq` can be
+## told apart was settled on `--item-gallery` (#40): four items on a bare
+## belt, one of each two tiles apart. What that cannot answer is how the pair
+## reads MIXED — alternating on a working belt, with a packer, a dock and the
+## contract clipboard in the same frame competing for the same glance. No
+## fixture could put that in one frame, because the shipped branch gives BBQ
+## its own dock.
+##
+## WHAT IT DOES NOT CHANGE. `build_bbq_branch` — the layout
+## `sim_core/src/sim/reference.rs` pins tile for tile — is untouched, and so
+## is its third joint: the branch still has its own dock, and the splitter's
+## STRAIGHT output still runs east into it. Only the side output is new, so
+## the frame shows both arrangements at once (two product streams kept apart,
+## and two merged) rather than replacing the shipped one with a merge.
+##
+## THE ROUTE, and why the splitter faces NORTH rather than along the run it
+## sits in. A splitter carries one direction: its placement's facing is the
+## STRAIGHT output and the second output is one quarter turn clockwise from
+## it (`sim::splitter`'s one direction rule). The branch runs east, the
+## ketchup line is NORTH of it (`Direction::North` is +y, so row -3 is below
+## row 0), and clockwise from east is south — the wrong way. Faced north, the
+## two outputs land exactly where this fixture wants them with no second
+## field and no new rule: STRAIGHT north onto the new run, CLOCKWISE east
+## onto the branch's own exit belt and its own dock.
+##
+## From (27, -2) the run heads west along a row that is clear east of the
+## cooking vat, then north across row -1 into the ketchup line's exit belt at
+## (22, 0), which carries both sauces for its last four tiles and onto the
+## dock's deck. Belts crossing the liquid-smoke run on row -1 are harmless:
+## only pipes join pipes (the branch's second joint says the same thing about
+## that run).
+static func build_mixed_exit(sim) -> void:
+	sim.issue_command_json(JSON.stringify({
+		"type": "remove", "tile": [MIXED_SPLITTER.x, MIXED_SPLITTER.y],
+	}))
+	place(sim, "splitter", MIXED_SPLITTER, "north")
+	for x in [27, 26, 25, 24, 23]:
+		place(sim, "belt", Vector2i(x, -2), "west")
+	place(sim, "belt", Vector2i(22, -2), "north")
+	place(sim, "belt", Vector2i(22, -1), "north")
+
+
+## The splitter that makes the exit mixed, and the belt the two sauces share
+## once it does — the two tiles any check or shot of the mixed line names.
+const MIXED_SPLITTER := Vector2i(27, -3)
+const MIXED_BELT := Vector2i(23, 0)
 
 
 ## THE BBQ LINE, RUNNING — what `scripts/screenshot-scene.sh --bbq`
 ## photographs: the branch above, funded, fully crewed, auto-filled and run
 ## until both sauces are moving at once.
 ##
+## **IT BUILDS IN THE ORDER THE GAME DICTATES** (issue #55), and that is the
+## whole shape of this fixture. `data/unlocks.ron` holds the three BBQ raws
+## back until ten contract deliveries have been made, so a fixture that
+## placed the branch at tick zero and stocked the larder in the same breath
+## bought no spice mix, no molasses and no liquid smoke — `stock_larder`
+## enumerates the ingredients the market is OFFERING, and a locked one is
+## absent from it. That is what this shot did between the gate landing and
+## this change: it photographed a complete BBQ branch that had never made a
+## single box, and every test of it passed, because nothing asserts that a
+## fixture's factory actually ran.
+##
+## So: the ketchup line runs on its own until the gate opens, and only then
+## is the branch placed, stocked, crewed and its contracts signed. That is
+## the sequence a player lives through, and it is the reason this fixture no
+## longer needs to sign the starter order back up — see below.
+##
+## **NO RE-SIGN, AND WHY THAT IS NOW HONEST** (issue #55). This fixture used
+## to sign three contracts again after the settle, because building the
+## branch starved the ketchup bottler for thousands of ticks and the Corner
+## Shop order struck out. Measured (`docs/DECISIONS.md`, the BBQ gate
+## ruling), that transient costs a one-line factory about 8 500 ticks of
+## ketchup — but a factory that has reached the gate serving the starter
+## order alone has banked about 22 boxes by then, and the order draws two per
+## 1 000 ticks from that bank without missing a window. The gate is what buys
+## the slack; the re-sign was papering over a fixture that built in the wrong
+## order.
+##
 ## It funds itself rather than living inside a new game's 3000, for the same
-## reason `build_bottleneck_line` does: two lines, a bigger crew and 15 000
+## reason `build_bottleneck_line` does: two lines, a bigger crew and 27 000
 ## ticks of raws cost more than a new game has, and what this fixture is for
 ## is the PICTURE of a working two-sauce factory. That a player can afford to
 ## BUILD it is a separate claim, proved separately, from a real starting
 ## balance, by `test_bbq_branch.gd`.
 static func build_bbq_running_line(sim) -> void:
-	build_bbq_branch(sim)
+	# 1. The ketchup line alone — everything a new game can reach.
+	build_reference_line(sim)
 	fund(sim, 30000)
 	stock_larder(sim, BBQ_STOCK)
-	# Both lines' hoppers and both tanks, so nothing has to be hand-fed
-	# during the run.
-	for tile in [Vector2i(-1, 0), Vector2i(4, 1), Vector2i(9, -3), Vector2i(9, -2)]:
+	for tile in [Vector2i(-1, 0), Vector2i(4, 1)]:
 		sim.issue_command_json(JSON.stringify({
 			"type": "set_hopper_auto_fill", "tile": [tile.x, tile.y], "enabled": true,
 		}))
-	for tile in [Vector2i(5, 2), Vector2i(16, -1)]:
+	sim.issue_command_json(JSON.stringify({
+		"type": "set_tank_auto_fill", "tile": [5, 2], "enabled": true,
+	}))
+	hire_until_staffed(sim)
+
+	# 2. Run it until the game offers BBQ. The starter order is the only one
+	#    active, exactly as a new game starts, so the deliveries that open
+	#    the gate also bank the stock that pays for the transient below.
+	var waited := 0
+	while waited < BBQ_GATE_TICK_CEILING and not any_unlock_open(sim):
+		for _i in range(BBQ_GATE_POLL_TICKS):
+			sim.tick()
+		waited += BBQ_GATE_POLL_TICKS
+	# The ceiling is a failure, not a fallback. Building on past it buys the
+	# three BBQ raws from a market that still has them locked, so
+	# `stock_larder` silently buys nothing and the branch is a complete line
+	# that never makes a box — which is the exact bug this fixture was
+	# rebuilt to stop photographing. Say so loudly (review of PR #98).
+	if not any_unlock_open(sim):
+		printerr(
+			"BBQ_FIXTURE_FAIL: no unlock open after %d ticks (ceiling %d) — "
+			% [waited, BBQ_GATE_TICK_CEILING]
+			+ "the BBQ raws are still locked, so the branch would never run"
+		)
+		assert(false, "the BBQ gate never opened; the fixture would build a dead branch")
+
+	# 3. Build the branch the moment it is unlocked. `build_bbq_branch`
+	#    re-issues the ketchup line's placements first; every one of them is
+	#    refused on an occupied tile, harmlessly.
+	fund(sim, 30000)
+	build_bbq_branch(sim)
+	build_mixed_exit(sim)
+	fund(sim, 30000)
+	# The larder is stocked AGAIN, and this time the three BBQ raws are in
+	# the market to be bought — they were not, before the gate opened.
+	stock_larder(sim, BBQ_STOCK)
+	for tile in [Vector2i(9, -3), Vector2i(9, -2)]:
 		sim.issue_command_json(JSON.stringify({
-			"type": "set_tank_auto_fill", "tile": [tile.x, tile.y], "enabled": true,
+			"type": "set_hopper_auto_fill", "tile": [tile.x, tile.y], "enabled": true,
 		}))
+	sim.issue_command_json(JSON.stringify({
+		"type": "set_tank_auto_fill", "tile": [16, -1], "enabled": true,
+	}))
 	# A second line needs a bigger crew, and an understaffed factory runs
 	# slow everywhere rather than only on the new machines (GAMEPLAY.md §7) —
 	# which would quietly turn this into a photograph of the staffing
 	# mechanic instead of of the branch.
 	hire_until_staffed(sim)
 	# Both BBQ contracts that ask for one sauce, plus the mixed order: the
-	# clipboard in the shot then shows what the epic added to the board.
+	# clipboard in the shot then shows what the epic added to the board. Both
+	# signatures are accepted now and would have been REFUSED at tick zero —
+	# a BBQ contract is behind the same gate its ingredients are.
 	for id in ["smokehouse_trial", "grill_pub"]:
 		sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": id}))
+
+	# 4. Both lines running.
 	for _i in range(BBQ_SETTLE_TICKS):
 		sim.tick()
-	# The starter contract is the casualty of building this branch onto a
-	# single ketchup line: for the few thousand ticks the BBQ pipes take to
-	# prime, the branch drinks everything the vat makes and the ketchup
-	# bottler delivers nothing, so the Corner Shop order strikes out. That is
-	# the mechanic doing its job and the game says so in words — but it is
-	# not what this shot is of, so the fixture takes the game's own advice and
-	# signs those three back up once both lines are running.
-	#
-	# Three and not the whole board: the clipboard's docket list is height
-	# capped and scrolls, so a fully signed board pushes the mixed order out
-	# of frame — and the mixed order is the half of this epic the clipboard
-	# is here to show. An already-active id is refused, harmlessly.
-	for id in ["corner_shop", "smokehouse_trial", "grill_pub"]:
-		sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": id}))
 
 
 ## THE STALLED RUN (issue #54) — the fixture `test_pipe_fault.gd` asserts
@@ -968,3 +1115,192 @@ const BELT_GALLERY_RIGHT_CORNERS := {
 const BELT_GALLERY_LEFT_CORNERS := {
 	"east": Vector2i(6, 0), "north": Vector2i(9, 0), "west": Vector2i(9, 3), "south": Vector2i(6, 3),
 }
+
+
+## THE FLUID GALLERY (issue #72) — all SIX fluids the game has, standing in
+## six pipe runs in one frame, so the question "are these six colours
+## actually tellable apart?" can be answered by looking at a picture instead
+## of by reasoning about six hex values.
+##
+## `main.gd`'s FLUID_TINTS grew from two entries to six across the BBQ epic
+## and was never once seen whole: the shipped line shows three of them, the
+## BBQ fixture four, and nothing showed `bbq_mix` beside `ketchup_mix` or
+## `bbq` beside `ketchup` — which are exactly the two pairs most likely to
+## collide, both being dark red-browns. The colours were reviewed in
+## isolation, which is not a review (UI_UX.md §2b point 9).
+##
+## **Naming a run is not the same as filling it, and this fixture does both
+## differently.** A run's fluid id comes from the MACHINE RECIPES either end
+## of it (`sim::world::resolve_network_fluids`), not from anything that has
+## ever flowed through it, so the naming here is pure topology and is exact
+## the moment the last pipe is placed — nothing has to run. The layout is
+## chosen so that each of the six runs narrows to exactly one candidate:
+##
+##   tank -> [A] -> mixer -> [B] -> vat -> [C] -> mixer -> [D] -> vat -> [F]
+##                                                          tank -> [E] ->
+##
+##   * A is tank-fed, so it is narrowed to RAW fluids, and the one raw fluid
+##     a mixer draws is vinegar.
+##   * B is filled by that mixer, whose two recipes make `ketchup_mix` and
+##     `bbq_mix`; `bbq_mix` needs ketchup on an input run and this mixer's
+##     only input run is A, so `ketchup_mix` is the only feasible one.
+##   * C is filled by a vat fed only by B, so `bbq` (which needs `bbq_mix`
+##     AND liquid smoke, on two distinct runs) is out and it is `ketchup`.
+##   * D is filled by the second mixer, fed only by C; `ketchup_mix` needs
+##     vinegar, so it is `bbq_mix`.
+##   * E is the second tank's run, drawn by the second vat: raw again, and
+##     the one raw fluid a vat draws is `liquid_smoke`.
+##   * F leaves that vat, which now has `bbq_mix` and `liquid_smoke` on two
+##     distinct input runs and no `ketchup_mix` anywhere: `bbq`.
+##
+## PRESSURE is the other half, and it is set directly rather than earned.
+## Priming these runs by simulation would mean two full ketchup sub-chains
+## feeding two mixers, a 600-tick BBQ cook and something like fifteen
+## thousand ticks — and the intermediate runs would still be draining into
+## the next machine at the moment of the shot, which is the opposite of what
+## a colour comparison wants. `fill_fluid_runs` below sets every volume
+## through the save/load door instead. That makes this a still life and not
+## a working factory, exactly as the pipe and belt galleries are.
+##
+## Returns `check_fluid_gallery`'s complaint, or "" when the gallery really
+## is one. **The caller must refuse on a complaint** — `test_screenshot.gd`
+## writes no PNG and exits 1 — because every way this fixture degrades
+## leaves a frame that still looks like a factory (see `check_fluid_gallery`
+## below). It is returned rather than acted on here so that a headless
+## caller with no screenshot to suppress can decide for itself.
+##
+## READING the result: at the fixture's own framing this frame answers
+## "all six exist, named and standing" well, and "are these six tellable
+## apart" only roughly — two of the runs sit ~600px apart rather than side
+## by side. `--fluid-gallery --closeup <x>,<y>,6` is the route that answers
+## the second question, one run at a time at 1:1.
+static func build_fluid_gallery(sim) -> String:
+	# Run A, vinegar: a tank and two pipes into the first mixer's west side.
+	place(sim, "fluid_tank", Vector2i(0, 0), "east")
+	for x in [1, 2]:
+		place(sim, "pipe", Vector2i(x, 0), "east")
+	place(sim, "mixer", Vector2i(3, 0), "east")  # 1x2: also covers y=1
+
+	# Run B, ketchup mix: off the mixer's outlet face into the first vat.
+	for x in [4, 5]:
+		place(sim, "pipe", Vector2i(x, 0), "east")
+	place(sim, "cooking_vat", Vector2i(6, 0), "east")  # 2x2: also x=7, y=1
+
+	# Run C, ketchup: out of that vat and into the second mixer.
+	for x in [8, 9]:
+		place(sim, "pipe", Vector2i(x, 0), "east")
+	place(sim, "mixer", Vector2i(10, 0), "east")
+
+	# Run D, BBQ mix: into the second vat.
+	for x in [11, 12]:
+		place(sim, "pipe", Vector2i(x, 0), "east")
+	place(sim, "cooking_vat", Vector2i(13, 0), "east")  # 2x2: also x=14, y=1
+
+	# Run E, liquid smoke. The tank TOUCHES the vat's north-west tile, which
+	# is how a machine taps a network (see `build_reference_line`), and the
+	# run keeps to row 2 so it never touches run D on row 0 — a tile closer
+	# and the two networks would merge into one unnameable run.
+	place(sim, "fluid_tank", Vector2i(13, 2), "east")
+	for x in [14, 15]:
+		place(sim, "pipe", Vector2i(x, 2), "east")
+
+	# Run F, BBQ: out of the second vat, with row 1 left empty between it
+	# and run E for the same reason.
+	for x in [15, 16]:
+		place(sim, "pipe", Vector2i(x, 0), "east")
+
+	fill_fluid_runs(sim)
+	var complaint := check_fluid_gallery(sim)
+	if complaint != "":
+		# Said out loud as well as returned: `push_error` is what a Godot
+		# log shows, and the return value is what actually stops the run.
+		# It is deliberately NOT the only thing that happens — issue #72's
+		# first cut pushed this error and then let the harness photograph
+		# the degraded gallery anyway, exit 0, which is the #70/#75 failure
+		# mode this repo has now fixed three times.
+		push_error("build_fluid_gallery(): %s" % complaint)
+	return complaint
+
+
+## How many placements `build_fluid_gallery` makes: 12 pipes, 2 tanks,
+## 2 mixers and 2 vats — 816 of the 3000 a new game starts with.
+const FLUID_GALLERY_PLACEMENTS := 12 + 2 + 2 + 2
+
+## Every fluid the game has. The gallery's whole claim is that it stands all
+## of them up at once, so the list it is checked against is written here
+## once rather than recounted from the layout.
+const FLUID_GALLERY_FLUIDS: PackedStringArray = [
+	"vinegar", "ketchup_mix", "ketchup", "bbq_mix", "liquid_smoke", "bbq",
+]
+
+
+## Asks the simulation whether the gallery is actually a gallery: all six
+## fluids present, each on a run the sim can NAME (`carries`, not `ambiguous`
+## or `unnameable`), each above the pressure `main.gd` will draw a body at.
+## Returns "" when it is, or what is wrong with it.
+##
+## This exists because every way this fixture can fail is a quiet one. Move
+## one pipe a tile and two runs merge into a single unnameable network; add
+## a machine and a run goes ambiguous; get the fill wrong and a run is named
+## but invisible. In all three cases the harness still renders a perfectly
+## good-looking factory, and the frame that comes back is simply missing a
+## colour the reviewer was told it contained — which is worse than no frame,
+## because it looks like an answer.
+static func check_fluid_gallery(sim) -> String:
+	var snapshots = JSON.parse_string(sim.fluid_snapshots_json())
+	if not (snapshots is Array):
+		return "fluid_snapshots_json did not return an array"
+	var seen := {}
+	for run in snapshots:
+		var fluid := String(run.get("fluid", ""))
+		var naming := String(run.get("naming", ""))
+		if naming != "carries":
+			return "a run is '%s' rather than carrying one fluid — the layout has merged or confused two networks" % naming
+		if float(run.get("pressure", 0.0)) <= FLUID_MIN_VISIBLE_PRESSURE:
+			return "the %s run is at pressure %s, at or below the %s main.gd needs to draw a body" % [
+				fluid, run.get("pressure", 0.0), FLUID_MIN_VISIBLE_PRESSURE,
+			]
+		seen[fluid] = true
+	var missing := []
+	for fluid in FLUID_GALLERY_FLUIDS:
+		if not seen.has(fluid):
+			missing.append(fluid)
+	if not missing.is_empty():
+		return "no run carries %s (the gallery has %d runs, and the point of it is all %d fluids at once)" % [
+			", ".join(missing), snapshots.size(), FLUID_GALLERY_FLUIDS.size(),
+		]
+	return ""
+
+
+## `main.gd`'s own floor for drawing a fluid body at all, restated as a
+## number here rather than reached through the scene: these are static
+## helpers with no `main` to ask.
+const FLUID_MIN_VISIBLE_PRESSURE := 0.02
+
+
+## Stands liquid in EVERY pipe and tank in the world at once, through the
+## same save/load door `fund` and `deliver` use and for the same reason: a
+## volume is simulation state and no player command sets one directly. The
+## honest alternative is to run the factory, and for a fixture whose whole
+## job is to hold six colours still side by side that is both far more
+## expensive and actively wrong — a running line is a line in which half the
+## runs are momentarily empty.
+##
+## `save_ron` writes both a pipe's and a tank's contents as `volume_bits`
+## (raw `Fx` bits, I16F16, so N = units * 65536), and load VALIDATES the
+## result against each buffer's real capacity — so this fills to
+## `PIPE_SEGMENT_CAPACITY`, the smaller of the two, and a tank simply comes
+## back a twelfth full rather than refused. Full, not a trickle, because
+## `main.gd` scales a fluid body's height by pressure: at the 0.02 floor of
+## FLUID_MIN_VISIBLE_PRESSURE there is one voxel of colour to judge.
+static func fill_fluid_runs(sim, units := 10) -> void:
+	var text: String = sim.save_ron()
+	var regex := RegEx.new()
+	regex.compile("volume_bits:\\s*-?\\d+")
+	if regex.search(text) == null:
+		push_error("fill_fluid_runs(): the save has no volume_bits field — nothing to fill")
+		return
+	var patched := regex.sub(text, "volume_bits: %d" % (units * 65536), true)
+	var error: String = sim.load_ron(patched)
+	if error != "":
+		push_error("fill_fluid_runs(): load_ron refused the patched save: %s" % error)
