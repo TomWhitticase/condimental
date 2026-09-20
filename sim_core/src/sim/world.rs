@@ -1939,6 +1939,29 @@ impl World {
             })
     }
 
+    /// Every content id that names itself, as `id -> display name`.
+    ///
+    /// The presentation layer title-cases an id when it wants a label
+    /// (`main.gd`'s `_kind_display_name`), which is right for almost
+    /// everything and wrong for an id that is an acronym: `bbq` came out
+    /// as "Bbq". Rather than teach the formatter a list of exceptions —
+    /// which would put content in GDScript — a recipe or an ingredient may
+    /// carry a `display_name` in `data/*.ron`, and this is the one map of
+    /// them. An id that is absent is absent on purpose: the title-case
+    /// fallback says it correctly.
+    ///
+    /// Recipes and ingredients share one id space (a recipe's id is its
+    /// product's), so one map serves both. A recipe wins a collision,
+    /// which cannot happen today: no shipped raw declares a name.
+    pub fn display_names(&self) -> BTreeMap<String, String> {
+        self.ingredients
+            .catalog
+            .display_names()
+            .chain(self.recipes.display_names())
+            .map(|(id, name)| (id.to_string(), name.to_string()))
+            .collect()
+    }
+
     /// Lifetime successful contract deliveries — the counter every
     /// progression gate is keyed off. Read-only; it is written by
     /// [`Economy::tick`] and by a load, never by a caller.

@@ -97,6 +97,32 @@ pub struct Recipe {
     /// How long a single craft takes, in sim ticks (ARCHITECTURE.md §3.5's
     /// tick-counted `TimedProcess`, never wall-clock time).
     pub time_ticks: u64,
+    /// What to call this recipe's product in front of a player, when
+    /// title-casing the id gets it wrong.
+    ///
+    /// **Optional, and usually absent.** The presentation layer titles
+    /// itself from ids — `tomato_paste` → "Tomato Paste" — precisely so a
+    /// new entry in this file needs no matching edit in GDScript
+    /// (ARCHITECTURE.md §3.6/§10). That formatter is right for every id
+    /// that is words, and wrong for an id that is an initialism: `bbq`
+    /// title-cases to "Bbq", which is how the HUD came to call the second
+    /// sauce "Boxed Bbq" (issue #60).
+    ///
+    /// So content names itself where it must, and stays quiet where the
+    /// formatter is already right. A missing value is not a defect and
+    /// never will be: it means "the fallback says it correctly", which is
+    /// the answer for all but four of the shipped ids. That is what keeps
+    /// this from becoming the hand-written label table the formatter's own
+    /// doc warns about — such a table goes stale silently, while this one
+    /// cannot, because the thing it labels is defined three lines above it.
+    ///
+    /// The id it labels is **this recipe's id**, which is also its
+    /// product's id: every entry in this file is named after what it makes.
+    /// [`RecipeRegistry::from_ron_str`] rejects a recipe whose
+    /// `display_name` is blank, and `world.rs` gathers these into one map
+    /// for the presentation layer ([`super::world::World::display_names`]).
+    #[serde(default)]
+    pub display_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -108,7 +134,17 @@ struct RecipeFile {
 #[derive(Debug)]
 pub enum RecipeLoadError {
     Parse(ron::error::SpannedError),
-    UnsupportedSchemaVersion { found: u32, supported: u32 },
+    UnsupportedSchemaVersion {
+        found: u32,
+        supported: u32,
+    },
+    /// A `display_name` that is present but empty or whitespace. Absent
+    /// means "title-case the id", which is a real answer; blank means a
+    /// panel captioned with nothing, which is not — and it would show up
+    /// only as a gap in a rendered frame, so it is caught here instead.
+    BlankDisplayName {
+        id: String,
+    },
 }
 
 impl std::fmt::Display for RecipeLoadError {
@@ -119,6 +155,11 @@ impl std::fmt::Display for RecipeLoadError {
                 f,
                 "recipes.ron schema_version {found} is not supported by this build \
                  (supports {supported}) — migrate the data file or update sim_core"
+            ),
+            RecipeLoadError::BlankDisplayName { id } => write!(
+                f,
+                "recipe '{id}' has a blank display_name — omit the field to title-case \
+                 the id instead"
             ),
         }
     }
@@ -160,6 +201,17 @@ impl RecipeRegistry {
                 found: file.schema_version,
                 supported: CURRENT_SCHEMA_VERSION,
             });
+        }
+        for recipe in &file.recipes {
+            if recipe
+                .display_name
+                .as_ref()
+                .is_some_and(|name| name.trim().is_empty())
+            {
+                return Err(RecipeLoadError::BlankDisplayName {
+                    id: recipe.id.clone(),
+                });
+            }
         }
         let by_id = file
             .recipes
@@ -209,6 +261,19 @@ impl RecipeRegistry {
     pub fn ordered(&self) -> &[Recipe] {
         &self.recipes
     }
+
+    /// Every id in this file that carries a name of its own, as
+    /// `(id, display name)` pairs in file order — see
+    /// [`Recipe::display_name`]. Recipes that leave the field out are
+    /// absent, which is the presentation layer's cue to title-case the id.
+    pub fn display_names(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.recipes.iter().filter_map(|recipe| {
+            recipe
+                .display_name
+                .as_deref()
+                .map(|name| (recipe.id.as_str(), name))
+        })
+    }
 }
 
 #[cfg(test)]
@@ -227,6 +292,12 @@ mod tests {
             ),
         ],
     )"#;
+
+    /// The file the game actually ships, loaded the way `lib.rs` loads it.
+    fn shipped() -> RecipeRegistry {
+        RecipeRegistry::from_ron_str(include_str!("../../../data/recipes.ron"))
+            .expect("bundled data/recipes.ron must parse")
+    }
 
     #[test]
     fn loads_recipe_by_id() {
@@ -386,5 +457,49 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The reason [`Recipe::display_name`] exists: the presentation layer
+    /// title-cases an id to label it, and an acronym comes out of that
+    /// mangled ("Bbq"). These four ids are the ones in the shipped file
+    /// that name themselves, so the assertion is on the names rather than
+    /// only on the mechanism.
+    #[test]
+    fn the_bbq_ids_carry_their_own_names_because_title_casing_mangles_an_acronym() {
+        let registry = shipped();
+        let names: BTreeMap<&str, &str> = registry.display_names().collect();
+        assert_eq!(names.get("bbq_mix"), Some(&"BBQ Mix"));
+        assert_eq!(names.get("bbq"), Some(&"BBQ"));
+        assert_eq!(names.get("bottled_bbq"), Some(&"Bottled BBQ"));
+        assert_eq!(names.get("boxed_bbq"), Some(&"Boxed BBQ"));
+    }
+
+    /// The other half of the same rule: a recipe whose id title-cases
+    /// correctly must NOT carry a name, or the file grows a second copy of
+    /// every label to keep in step with the first.
+    #[test]
+    fn a_recipe_whose_id_title_cases_correctly_stays_out_of_the_map() {
+        let registry = shipped();
+        let names: BTreeMap<&str, &str> = registry.display_names().collect();
+        for id in ["tomato_paste", "ketchup_mix", "ketchup", "boxed_ketchup"] {
+            assert!(
+                !names.contains_key(id),
+                "'{id}' title-cases correctly, so naming it in data would be a duplicate                  label to keep in step — omit the field instead"
+            );
+        }
+    }
+
+    #[test]
+    fn a_blank_display_name_is_rejected_rather_than_drawn_as_an_empty_label() {
+        let text = EXAMPLE.replacen(
+            "id: \"tomato_sauce\",",
+            "id: \"tomato_sauce\", display_name: Some(\"  \"),",
+            1,
+        );
+        let err = RecipeRegistry::from_ron_str(&text).unwrap_err();
+        assert!(
+            matches!(err, RecipeLoadError::BlankDisplayName { ref id } if id == "tomato_sauce"),
+            "a blank name would ship as an item with no label at all, got {err:?}"
+        );
     }
 }

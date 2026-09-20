@@ -80,6 +80,15 @@ pub struct IngredientEntry {
     /// Price of **one unit**, in the same money
     /// [`super::economy::Economy::money`] counts. Must be at least 1.
     pub price: i64,
+    /// What to call this ingredient in front of a player, when title-casing
+    /// the id gets it wrong — [`super::recipe::Recipe::display_name`]'s
+    /// twin, and its doc is the one that explains why the field is
+    /// optional and why absence is the normal answer. No shipped raw needs
+    /// one (`liquid_smoke` title-cases correctly); the field exists so that
+    /// the day a raw is named after an initialism, naming it is a data
+    /// edit rather than a GDScript one.
+    #[serde(default)]
+    pub display_name: Option<String>,
 }
 
 impl IngredientEntry {
@@ -113,6 +122,12 @@ pub enum IngredientLoadError {
         id: String,
         price: i64,
     },
+    /// A `display_name` that is present but blank —
+    /// [`super::recipe::RecipeLoadError::BlankDisplayName`]'s twin, for
+    /// its reason.
+    BlankDisplayName {
+        id: String,
+    },
     /// `data/recipes.ron` needs an ingredient nothing here prices. See
     /// [`IngredientCatalog::validate_covers`] — reported, never a
     /// `World`-construction panic.
@@ -141,6 +156,11 @@ impl std::fmt::Display for IngredientLoadError {
                 "ingredients.ron prices '{id}' at {price} — a price must be at least 1, \
                  since an ingredient that costs nothing is the free-and-infinite supply \
                  this file exists to replace (GAMEPLAY.md §5)"
+            ),
+            IngredientLoadError::BlankDisplayName { id } => write!(
+                f,
+                "ingredients.ron gives '{id}' a blank display_name — omit the field to \
+                 title-case the id instead"
             ),
             IngredientLoadError::UnpricedIngredient { ingredient, priced } => write!(
                 f,
@@ -190,6 +210,15 @@ impl IngredientCatalog {
                     id: entry.id.clone(),
                 });
             }
+            if entry
+                .display_name
+                .as_ref()
+                .is_some_and(|name| name.trim().is_empty())
+            {
+                return Err(IngredientLoadError::BlankDisplayName {
+                    id: entry.id.clone(),
+                });
+            }
         }
         Ok(Self {
             entries: file.entries,
@@ -212,6 +241,19 @@ impl IngredientCatalog {
 
     pub fn get(&self, id: &str) -> Option<&IngredientEntry> {
         self.by_id.get(id).map(|&i| &self.entries[i])
+    }
+
+    /// Every id in this file that carries a name of its own, as
+    /// `(id, display name)` pairs in file order —
+    /// [`super::recipe::RecipeRegistry::display_names`]'s twin. Empty
+    /// today, and correctly so: every shipped raw title-cases properly.
+    pub fn display_names(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.entries.iter().filter_map(|entry| {
+            entry
+                .display_name
+                .as_deref()
+                .map(|name| (entry.id.as_str(), name))
+        })
     }
 
     /// Priced ids, sorted — a stable order for error messages and tests.
@@ -506,6 +548,45 @@ mod tests {
                 supported: 1
             }
         ));
+    }
+
+    /// A raw may name itself exactly as a recipe may
+    /// ([`super::recipe::Recipe::display_name`]) — nothing shipped needs
+    /// it, so this proves the field works rather than reading the file
+    /// back.
+    #[test]
+    fn an_entry_may_carry_its_own_name_and_a_blank_one_is_refused() {
+        let text = EXAMPLE.replacen(
+            r#"id: "sugar", price: 3"#,
+            r#"id: "sugar", display_name: Some("Caster Sugar"), price: 3"#,
+            1,
+        );
+        let catalog = IngredientCatalog::from_ron_str(&text).unwrap();
+        assert_eq!(
+            catalog.display_names().collect::<Vec<_>>(),
+            vec![("sugar", "Caster Sugar")],
+            "only the entry that named itself is in the map; the rest title-case"
+        );
+
+        let blank = EXAMPLE.replacen(
+            r#"id: "sugar", price: 3"#,
+            r#"id: "sugar", display_name: Some(""), price: 3"#,
+            1,
+        );
+        assert!(matches!(
+            IngredientCatalog::from_ron_str(&blank).unwrap_err(),
+            IngredientLoadError::BlankDisplayName { .. }
+        ));
+    }
+
+    /// No shipped raw needs a name of its own — every id here title-cases
+    /// correctly. If one ever does, this is the test to change.
+    #[test]
+    fn nothing_in_the_shipped_market_needs_a_name_of_its_own() {
+        let catalog =
+            IngredientCatalog::from_ron_str(include_str!("../../../data/ingredients.ron"))
+                .expect("bundled data/ingredients.ron must parse");
+        assert_eq!(catalog.display_names().count(), 0);
     }
 
     #[test]
