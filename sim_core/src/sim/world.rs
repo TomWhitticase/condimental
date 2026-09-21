@@ -3494,13 +3494,12 @@ impl World {
         // exit and so its consumption of the finished product.
         let events = self.economy.tick(self.tick_count);
         for event in &events {
-            if let ContractEvent::Paid { id } = event {
-                if let Some(contract) = self.economy.board().get(id) {
+            if let ContractEvent::Paid { id } = event
+                && let Some(contract) = self.economy.board().get(id) {
                     for (item, qty) in &contract.mix {
                         self.production.record_consumed(item, StatKind::Item, *qty);
                     }
                 }
-            }
         }
         self.production.tick();
 

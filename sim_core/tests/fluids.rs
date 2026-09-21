@@ -196,12 +196,12 @@ fn run_chain_watching_fluid(
     // belt is the hopper's own job over the following ticks, gated by belt
     // spacing exactly as the old per-tick spawn attempts were.
     let loaded = {
-        let before = the_hopper(&world).quantity;
+        let before = the_hopper(world).quantity;
         world.issue_command(PlayerCommand::FillHopper {
             amount: tomatoes,
             tile: None,
         });
-        the_hopper(&world).quantity - before
+        the_hopper(world).quantity - before
     };
     assert_eq!(
         loaded, tomatoes,
@@ -213,14 +213,13 @@ fn run_chain_watching_fluid(
     for tick_i in 0..ticks {
         world.tick();
         seen = seen.max(count_item_anywhere(world, item));
-        if tick_i >= SETTLE_TICKS {
-            if let Some(fluid) = the_network(&world) {
+        if tick_i >= SETTLE_TICKS
+            && let Some(fluid) = the_network(world) {
                 min_volume = Some(match min_volume {
                     Some(v) => v.min(fluid.total_volume),
                     None => fluid.total_volume,
                 });
             }
-        }
     }
     (seen, min_volume)
 }

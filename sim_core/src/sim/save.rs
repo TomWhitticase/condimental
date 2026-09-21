@@ -840,14 +840,13 @@ impl SaveData {
         // A version mismatch is far more likely than a corrupt file, and its
         // message is far more useful, so it is checked against a shape that
         // only has the one field in it.
-        if let Ok(header) = ron::from_str::<Header>(text) {
-            if header.schema_version != SAVE_SCHEMA_VERSION {
+        if let Ok(header) = ron::from_str::<Header>(text)
+            && header.schema_version != SAVE_SCHEMA_VERSION {
                 return Err(SaveError::UnsupportedSchemaVersion {
                     found: header.schema_version,
                     supported: SAVE_SCHEMA_VERSION,
                 });
             }
-        }
         let data: SaveData = ron::from_str(text).map_err(SaveError::Parse)?;
         if data.schema_version != SAVE_SCHEMA_VERSION {
             return Err(SaveError::UnsupportedSchemaVersion {
@@ -1166,7 +1165,7 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
                 }
             }
             SavedBody::Hopper(hopper) => {
-                if !world.raw_items().iter().any(|raw| *raw == hopper.item) {
+                if !world.raw_items().contains(&hopper.item) {
                     return Err(SaveError::UnknownHopperItem {
                         item: hopper.item.clone(),
                         tile: placement.tile,
@@ -1253,13 +1252,11 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
         }
     }
     for placement in &data.placements {
-        if let SavedBody::Machine(machine) = &placement.body {
-            if let Some(id) = &machine.refused_by {
-                if staff_catalog.get(id).is_none() {
+        if let SavedBody::Machine(machine) = &placement.body
+            && let Some(id) = &machine.refused_by
+                && staff_catalog.get(id).is_none() {
                     return Err(SaveError::UnknownStaffCategory { id: id.clone() });
                 }
-            }
-        }
     }
     Ok(())
 }
@@ -2022,7 +2019,7 @@ mod tests {
         let world = load(data).expect("an empty active list is a legal state");
         assert!(world.economy().contracts.is_empty());
         assert!(
-            world.economy().board().len() > 0,
+            !world.economy().board().is_empty(),
             "the board is content and is still there to sign from"
         );
     }

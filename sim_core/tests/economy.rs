@@ -114,7 +114,7 @@ fn stocked(mut world: World) -> World {
 /// consumables; the dock does the rest by itself, every tick.
 fn run_until_shipped(world: &mut World, target: u32) -> u32 {
     for _ in 0..500_000u32 {
-        if the_dock(&world).shipped_total < target {
+        if the_dock(world).shipped_total < target {
             // Keep the line supplied — see `common`'s module doc for why
             // sugar is metered rather than dumped onto a shared belt.
             common::supply(world);
@@ -122,11 +122,11 @@ fn run_until_shipped(world: &mut World, target: u32) -> u32 {
 
         world.tick();
 
-        if the_dock(&world).shipped_total >= target {
+        if the_dock(world).shipped_total >= target {
             break;
         }
     }
-    the_dock(&world).shipped_total
+    the_dock(world).shipped_total
 }
 
 #[test]

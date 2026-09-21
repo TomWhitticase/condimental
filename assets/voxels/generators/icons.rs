@@ -69,11 +69,10 @@ fn voxels_root() -> PathBuf {
 /// this binary) and the same fallback install path both work whether this
 /// binary is run standalone or from that script.
 fn find_thumbnailer() -> Option<PathBuf> {
-    if let Ok(p) = env::var("VENGI_THUMBNAILER") {
-        if !p.is_empty() {
+    if let Ok(p) = env::var("VENGI_THUMBNAILER")
+        && !p.is_empty() {
             return Some(PathBuf::from(p));
         }
-    }
     if let Some(p) = which_on_path("vengi-thumbnailer") {
         return Some(p);
     }

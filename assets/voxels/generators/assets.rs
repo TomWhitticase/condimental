@@ -5381,7 +5381,7 @@ mod tests {
                 [TILE_VOXELS, TILE_VOXELS, FLOOR_VOXELS],
                 "{name}: a floor tile is one tile square and FLOOR_VOXELS deep"
             );
-            for (&(x, y, z), _) in &m.voxels {
+            for &(x, y, z) in m.voxels.keys() {
                 assert!(
                     z <= FLOOR_TOP as u32,
                     "{name}: voxel at ({x}, {y}, {z}) stands above the slab's top surface"

@@ -112,9 +112,8 @@ fn set_tank_auto_fill(world: &mut World, tile: (i32, i32), enabled: bool) {
 #[test]
 fn a_new_hopper_is_manual_and_the_toggle_turns_it_on_and_off() {
     let mut world = world();
-    assert_eq!(
-        hopper_at(&world, TOMATO_HOPPER).1,
-        false,
+    assert!(
+        !hopper_at(&world, TOMATO_HOPPER).1,
         "a freshly placed hopper is loaded by hand until the player says otherwise"
     );
 
@@ -271,7 +270,7 @@ fn a_draining_hopper_is_kept_full_every_tick_while_stock_lasts() {
 #[test]
 fn a_new_tank_is_manual_and_the_toggle_turns_it_on_and_off() {
     let mut world = world();
-    assert_eq!(tank_at(&world, TANK).1, false);
+    assert!(!tank_at(&world, TANK).1);
 
     set_tank_auto_fill(&mut world, TANK, true);
     assert!(tank_at(&world, TANK).1);
