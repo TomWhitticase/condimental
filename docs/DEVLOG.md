@@ -59,8 +59,11 @@ below is history and should only ever be appended to.)*
   (W3):** six shelves, a pallet per bound bay from the bottom level up, goods
   scaled to the bay's fill and tinted per raw, hover off either tile of the
   1×2, and W1's removal refusal said in words before the click.
-  `scripts/screenshot-scene.sh --warehouse` photographs it. See the log
-  entries below.
+  `scripts/screenshot-scene.sh --warehouse` photographs it. **The market
+  reads the ceiling (W4):** a crate prints `owned / capacity`, buys only what
+  fits, says `AT CAPACITY` when nothing does, and a header meters the racks'
+  shared bays; the STOCK plate marks a full row `FULL` and says how many rows
+  it is hiding when the column cuts its list. See the log entries below.
 - **The lighting post-passes mean something now (2026-09-20).** Glow is
   `1.0 / 0.0 / 1.2 / SCREEN` and SSAO is `0.45 / 16.0 / 1.6`
   (`factory_environment.gd`). Both sets of old numbers were chosen where they
@@ -201,6 +204,59 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-21 — The market says what will fit, and the plate stops hiding rows (W4)
+
+The last of the warehouse tickets, and the half the player reads. W1 put a
+ceiling on raw stock and W3 drew the racks; the shop was still offering
+crates of ten into a larder with room for four, and refusing them in silence.
+
+**The crate carries the ceiling, because the crate is where it stops
+something.** Each market slot now prints `In stock 180 / 320`, buys the number
+it prints (`min(crate, capacity − owned)`), and when there is no room at all
+says `AT CAPACITY ✗` in amber rather than wearing the unaffordable price's
+`✗` — the two refusals have different cures, earn money or build a rack, and
+one word for both sends the player to the wrong one. Shift-buy is clamped by
+the same room, a click with nowhere to put anything issues no command at all
+(it cues the shared refusal instead), and every figure is the wire's:
+`IngredientSnapshot::capacity`, never a Godot-side `base + stack × bays`,
+which is exactly the arithmetic only the simulation can do honestly while the
+bays are a shared pool.
+
+**A header for the pool itself**: `Warehouse: 1 rack · bays 2 / 6 · 4 free`
+under the balance, with a meter beside it. That meter is the first bar the
+warehouse has earned under §5e — bays used of bays built is a fixed fraction
+the simulation defines — and it is the only one: a per-ingredient bar would
+slide whenever a *different* ingredient took a bay, so the STOCK plate keeps
+figures plus a `FULL` chip on any row at its ceiling. A purchase dirties no
+tile, so `_buy_ingredient_slot` re-reads the warehouse itself rather than
+waiting a frame; the pallets on the racks fill as the crates are clicked.
+
+**The plate defect the W1 and W3 screenshots showed.** Both PRs photographed a
+STOCK plate listing one of three ingredients behind a scroll thumb drawn over
+the count. The cause was not the plate: the CREW plate made this column three
+tenants deep, and at 1600x900 they wanted 796px of a 741px column, with
+`_stock_ceiling_y` inviting the clipboard to grow until the plate was down to
+its one-row floor. Two rank-4 faults were in play, so the tiebreak came from
+the rank above — **reachability**. A docket stack is a scrollbar the player
+can drag and C shows every contract in full; the STOCK plate is
+`MOUSE_FILTER_IGNORE` from the panel down, so a row cut off it cannot be
+reached at all. The shares are now 0.55 stock / 0.32 crew (CREW spends its
+assignment line, which the H panel still shows), and the clipboard is capped
+at the line where the whole list fits (`_stock_list_ceiling_y`) but never
+below its own one-line floor. 1600x900 shows three rows and no scrollbar.
+
+720p genuinely cannot seat three whole plates, so there the cut is
+*announced*: the heading reads `+2 more · M: market` and the list reserves a
+gutter so the thumb is never drawn on a count. A scrollbar on an IGNORE plate
+is a mark, not a control.
+
+`test_warehouse_rack.gd` proves the crate's pair of numbers against the wire's
+own cap, the clamped quantity (four units of room buys four and charges for
+four), the AT CAPACITY word and glyph, the dead click, and the header's
+figures and meter. `test_hud_plates.gd` proves the FULL chip, the whole list
+at 1600x900, and that a cut list says how many rows it is hiding. UI_UX.md
+§5e/§5f carry the reasoning.
 
 ### 2026-09-21 — The rack shows what it is holding, bay by bay (W3)
 

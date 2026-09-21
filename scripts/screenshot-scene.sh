@@ -307,6 +307,14 @@
 # and shows about four at a time, so a tier appended to the end of the file
 # is below the fold until something scrolls there.
 #
+# Pass --at-capacity to fill every unlocked raw ingredient to the ceiling the
+# warehouse gives it (W1's cap, W4's words). With --market that is the frame
+# where a crate reads AT CAPACITY, the header's bays meter is at its warning
+# red with 0 free, and the STOCK plate marks each row FULL; the balance is
+# left deliberately fat, because the point of the state is a purchase money
+# cannot fix. Without the flag every fixture has room to spare and the crates
+# read exactly as they did before the warehouse existed.
+#
 # Pass --unlocked to put the world past every progression gate in
 # data/unlocks.ron (the shipped one opens after ten deliveries), so --market,
 # --board and the larder photograph with the BBQ tier released — the "after"
@@ -353,7 +361,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -767,9 +767,8 @@ glance.
 **A bar is drawn only where the simulation defines the ceiling.** Hopper and
 tank level, a machine's cycle, a pipe's pressure, a contract's countdown
 against its own cadence, a price against the money in the player's pocket:
-those are real fractions. Stock on hand (the §5f plate) and the balance
-itself are not — nothing in the game says how many tomatoes is "full" — so
-they stay figures.
+those are real fractions. The balance itself is not — nothing says how much
+money is "full" — so it stays a figure.
 A gauge whose full mark is invented teaches a scale that does not exist.
 
 All of them go through one pair of helpers in `main.gd` (`_build_meter` /
@@ -792,6 +791,19 @@ Two consequences worth keeping:
   bar appeared because the ceiling did, and with no `delivery_capacity` on
   the wire the line falls back to the bare figure rather than inventing a
   full mark.
+- **The warehouse's ceiling is drawn where it is spent, and that is not the
+  STOCK plate** (2026-09-21). Racks cap raw stock (GAMEPLAY.md), so "how many
+  tomatoes is full" finally has an answer and the §5f plate could have had a
+  bar under this rule. It does not, for the thing the rule is really about: a
+  cap is `base + stack × free bays` and the bays are a pool every ingredient
+  draws on, so the tomato row's full mark moves when the player buys sugar. A
+  bar that slides while the player never touched the thing it measures
+  teaches a scale as badly as an invented one does. So the ceiling is split
+  three ways, each to the place that can hold it honestly: the plate says
+  `FULL` in a word on the row that has reached it (§7), the market crate
+  prints `owned / capacity` because the crate is where the ceiling actually
+  stops something, and the bar goes on the one genuinely fixed fraction in
+  the system — **bays used of bays built**, in the market's warehouse header.
 - **A docket's bar stays paper and ink.** §5 gives a contract card two
   colours; the countdown is drawn in ink on the checkbox's paper tone, and
   the card's single warning red is spent only on the last stretch of a
@@ -823,10 +835,13 @@ right-hand plate, a sibling of the clipboard, with **one row per raw
 ingredient the simulation prices** — voxel icon, display name, amount
 right-aligned so the numbers form a column a glance can run down. **One
 readout, one fact, one place:** nothing on the hotbar shows stock any more.
-Per §5e there is no bar (nothing says how many tomatoes is "full"), so zero
-is carried by the word `none` on a dimmed row rather than by a colour (§7),
-and the heading keeps the `M: market` hint so the plate says where the
-numbers come from.
+Per §5e there is still no bar, though since the warehouse (2026-09-21) the
+reason has changed: stock now has a ceiling, but it is drawn from a shared
+bay pool, so a row's own full mark would move when a different ingredient was
+bought. Zero is carried by the word `none` on a dimmed row rather than by a
+colour (§7); the ceiling by a `FULL` chip on the row that has reached it; and
+the pair of numbers by the market crate that spends it. The heading keeps the
+`M: market` hint so the plate says where the numbers come from.
 
 **The right-hand column arbitrates in both directions, and only one half of
 that is obvious.** The clipboard's scroll cap subtracts the plate's reserved
@@ -857,8 +872,33 @@ countdown that fits (`_line_boundary_height`). The ordering above is
 unchanged — the clamp still wins, and the cut still goes down, never up.
 It is the third rank that got sharper: "a list showing less than it could"
 now means a docket showing fewer of its own lines, not a docket sliced
-through one. The shipped 1600x900 window shows whole dockets and the whole
-plate.
+through one.
+
+**Three tenants in one column, and the tie goes to what cannot be reached**
+(2026-09-21, the warehouse work). The CREW plate made this column three
+plates deep and the arithmetic stopped closing: at 1600x900 the column is
+741px and the clipboard, STOCK and CREW wanted 796px between them. What gave
+way was the stock list — down to ONE of three ingredients, behind a scroll
+thumb drawn over the count — so the plate whose whole job is "what do I have"
+was showing a third of it. Both candidates are rank-4 faults (a docket
+showing fewer lines; a list showing fewer rows), so the tiebreak had to come
+from the rank above: **reachability**. The docket stack is a scrollbar the
+player can drag, and C shows every contract in full; the STOCK plate is
+`MOUSE_FILTER_IGNORE` from the panel down, so a row cut off it cannot be
+reached at all. The column pays the plate first now —
+`STOCK_PANEL_HEIGHT_SHARE` 0.42 → 0.55, `CREW_PANEL_HEIGHT_SHARE` 0.43 → 0.32
+(CREW spends its assignment line, which the H panel still carries in full),
+and the clipboard is capped at the line where the whole list fits
+(`_stock_list_ceiling_y`) but never below its own one-line floor. The shipped
+1600x900 window shows whole dockets and the whole plate again.
+
+**At 1280x720 the column still cannot seat all three whole, so the cut is
+announced.** A plate silently showing one of three ingredients reads as a
+factory that holds one ingredient, which is a worse lie than a short list.
+The heading's hint becomes `+2 more · M: market`, and the row list reserves a
+gutter so the scrollbar is never drawn over the count it is hiding. On an
+IGNORE plate a scrollbar is a mark rather than a control — it can say "there
+is more" and cannot be used to see it — so the words have to carry it.
 
 **The case that would not snap is bought with the hint's line** (2026-09-20,
 closing issue #17). At 1280x720 with every offer signed the column left the
