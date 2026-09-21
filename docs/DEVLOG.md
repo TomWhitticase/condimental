@@ -22,17 +22,19 @@ below is history and should only ever be appended to.)*
   finished but unmerged — contract board, payout juice + audio, machine
   animations, floor redesign, vinegar assets, belt-arrow removal — were
   consolidated onto one integration branch and fast-forwarded into `main`.
-  The union passes `scripts/verify-core-loop.sh` (19 Rust suites, 30 headless
-  Godot proofs, no failures) and has been rendered and played. A fresh
+  The union passed `scripts/verify-core-loop.sh` (19 Rust suites, 30 headless
+  Godot proofs, no failures) and has been rendered and played; the same script
+  is **26 Rust suites and 38 Godot proofs as of 2026-09-21**. A fresh
   worktree still needs `cargo xtask` and **two** `godot --import` passes
   before the world is visible. See the log entry below.
-- **CI runs the tests now (2026-09-16).** Seven workflows under
+- **CI runs the tests now (2026-09-16).** Nine workflows under
   `.github/workflows/`: `rust.yml` (sim_core + voxgen tests, `cargo xtask`,
   a fmt/clippy ratchet, and a check that `assets/voxels/models` still matches
   its generators), `invariants.yml` (the CLAUDE.md rules that can be grepped
   for, `shellcheck`, `actionlint`), the two older lint/screenshot backstops,
   `verify.yml` (the full Godot gate — nightly, on demand, or on a PR labelled
-  `full-verify`), `audit.yml`, and `claude.yml`/`claude-review.yml` (dormant
+  `full-verify`), `audit.yml`, `labeler.yml`, and
+  `claude.yml`/`claude-review.yml` (dormant
   until an `ANTHROPIC_API_KEY` secret exists). `docs/WORKFLOW.md`,
   "What CI runs", is the table. See the log entry below.
 - **There are two sauces (2026-09-18).** `data/recipes.ron` forks: ketchup
@@ -41,8 +43,10 @@ below is history and should only ever be appended to.)*
   machine kind — a BBQ line is a *branch* tapped off the pipe leaving the
   ketchup vat, so the two sauces compete for one vat's output, and the 600-tick
   BBQ cook against the vat's 240 splits it 3 ketchup to 2 BBQ. Two of the four
-  new contracts name both sauces. BBQ is ungated so far; the unlock ladder is
-  the next ticket. See the log entry below.
+  new contracts name both sauces. **BBQ is gated now (2026-09-19):**
+  `data/unlocks.ron` holds its three ingredients and four contracts back until
+  the tenth lifetime delivery, so a new game's market and board show only what
+  a one-sauce factory can use. See the log entries below.
 - **The lighting post-passes mean something now (2026-09-20).** Glow is
   `1.0 / 0.0 / 1.2 / SCREEN` and SSAO is `0.45 / 16.0 / 1.6`
   (`factory_environment.gd`). Both sets of old numbers were chosen where they
@@ -184,6 +188,27 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — The README catches up with the second sauce, and every frame in it is fresh
+
+The README had not moved since 2026-09-16 and was describing a one-sauce
+game: it said in as many words that only one sauce existed, counted the
+verify script at 19 Rust suites and 30 Godot proofs, and its gallery
+pre-dated the glow/SSAO retune, the HUD refit, the hopper tints and the
+config panel's corner. Every claim in it has now been re-derived from
+`data/` and `sim_core/` rather than edited in place — the shipped line's
+cost is 959, not "a little over 1,000"; the board holds 13 contracts of
+which 9 are ungated; the market sells 6 ingredients of which 3 wait for the
+tenth delivery. The chain section is two tables now, because BBQ is a
+branch off the ketchup line and not a second line, and a table that pretends
+otherwise is the wrong shape regardless of the words in it.
+
+All fourteen gallery images were re-rendered rather than kept: a screenshot
+of a build from five days ago is a screenshot of a different game's
+lighting. Three are new — the two-sauce factory that is now the hero shot,
+a mothballed building standing its crew down, and a close-up of the BBQ
+branch taking finished ketchup in as a fluid. The captions say which world
+state each frame shows, since "nine offers" and "three ingredients" are
+true of a new game and misleading of an unlocked one.
 ### 2026-09-21 — A jammed belt's rubber stands still with the items on it (issue #79)
 
 UI_UX.md §6a's rule — a continuous effect is driven by the thing's own work
