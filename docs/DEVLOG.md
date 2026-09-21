@@ -787,6 +787,145 @@ passed on the command line — headless Chrome captures on a load heuristic
 that lands before a model has been fetched, so the page hands back its own
 canvas instead of being photographed.
 
+### 2026-09-20 — Tooling: the build signs itself, the hook can read a path, the cursor belongs to the run
+
+Three tooling defects off the deferred queue (#77, #53, #4). None of them is
+in the game; all three are in the machinery the game is verified with, and
+each one had already cost somebody a round of investigation.
+
+**`cargo xtask` re-signs the library it stages (issue #77).** The sighting
+behind the issue is a headless run dying with **exit 137, no stderr, no
+marker**, while `godot --version` still exited 0 and `codesign --verify`
+called the library valid — it read as a broken engine, and re-signing by hand
+cured it. xtask is what replaces the file, so xtask now runs
+`codesign -s - --force` on it and prints that it did, before the two
+`--import` passes that are themselves the first thing to load it.
+
+**Said plainly, because review asked the right question of it: that kill was
+not reproduced to order.** Comment the call out, force a relink, run headless
+Godot — and it passes, because the Rust linker already emits
+`flags=0x20002(adhoc,linker-signed)`, so the staged copy is normally valid
+before xtask touches it. Neither a `com.apple.quarantine` xattr nor a byte
+flipped in a signed library brought the kill back either. What IS reproducible
+is the shape of the failure when the signature really is gone:
+`codesign --remove-signature` on the staged copy gives
+`dlopen(...): Trying to load an unsigned library`, no GDExtension, a
+`SimBridge` parse error out of `main.gd` — and **exit 0**. So the status code
+is useless in both directions (137 with no output, or 0 with no marker), which
+is the argument for keeping a call this cheap rather than for claiming it is
+proven load-bearing.
+Two calls settled in the issue: a signing failure **warns and leaves the
+library staged** rather than failing the build (a machine with no Xcode
+command line tools must still be able to build; CI's `cargo test` never loads
+the dylib), and it applies **only to the loaded dylib, not the staged `.vox`
+output** — the kill is about code the dynamic linker maps in, and signing
+thousands of data files would cost seconds a build to change nothing.
+
+**The PR-screenshot hook can open the body file it is given (issue #53).**
+`.claude/hooks/require-pr-screenshot.sh` `open()`s any `--body-file` path in
+the command, but it is not a shell: `--body-file $SCRATCH/body.md` was opened
+as the literal characters `$SCRATCH`, failed, and counted as "no image" —
+refusing a body whose first line was the screenshot. It now expands `$VARS`
+over the environment the hook was actually given, plus `~`, and nothing else;
+no subshell, so `--body "$(cat body.md)"` is still refused. Both halves are
+tested: `$SCRATCH/body.md` and `~/body.md` pass, while a missing file, an
+undefined variable, a command substitution and an expanded file with no image
+in it are all still blocked (25 cases in
+`.claude/hooks/test_require_pr_screenshot.py`).
+
+**The `--hover` cursor drift, diagnosed (issue #4).** The cause was not the
+tile→screen mapping, which is exact: it is that `Input.warp_mouse` moves the
+machine's ONE pointer, which outlives the process and is shared with every
+other window on the desktop. That leaks two ways, both reproduced. A run
+asking for no hover inherited the tile the last run parked on — `--fixture
+bottleneck --payout` came back wearing the previous `--hover-dock` run's
+tooltip, over a frozen scene that had stopped refreshing the numbers in it,
+which is the sighting in the issue's comment. And two `screenshot-scene.sh`
+runs at once (a wave of parallel worktrees makes this ordinary) fight over
+that pointer: run A aimed at the dock, run B warped to a hopper, and A's frame
+would have carried the hopper's tooltip while claiming to be the dock shot.
+So the script owns the cursor for the whole run now: every run **parks** it on
+empty ground first (asking the scene's own `_hover_text_at_tile` where is
+quiet), a `--hover*` flag then aims it, it is **re-asserted** three frames
+before the shutter (which is also what makes `--closeup` safe, since that
+re-aims the camera after the parking), and the frame is only written if the
+cursor really is over what it was aimed at. A mismatch is `SCREENSHOT_FAIL`
+and no PNG, the same refusal #70 gave a wrong fixture: a tooltip belonging to
+the wrong thing is precisely the frame this script exists not to hand back.
+Every run now prints `SCREENSHOT_CURSOR:` beside `SCREENSHOT_FIXTURE`.
+
+The sweep that came with it found one more of the same kind, and it is fixed
+too: a hover target the camera is **not showing** — `--fixture chain
+--closeup 26,0,8 --hover-hopper` — could not be reached, because the window
+server clamps a warp to the window, so the run failed at the shutter blaming
+a hand on the mouse for a tile that was nine thousand pixels off the left
+edge. The aim now checks the projection against the viewport first and says
+exactly that. What the sweep did NOT find was a spurious refusal: 48
+combinations — 41 that must render, 7 that must refuse — and every one did
+what it should, before the merge with main and again after it. Across two sweeps one run each
+refused at the shutter naming a tile nobody asked for — a different case
+each time, both while sibling worktrees were running Godot, and both passing
+six times in a row afterwards — which is the parallel-pointer case the
+message already lists, measured rather than assumed, and now recorded in
+`screenshot-scene.sh`'s own header.
+
+Two corrections from review, both about a guard being confidently wrong —
+which is the thing this ticket is against, so they are the ticket, not a
+footnote. **A guard must check what is actually in the frame.** In first
+person `main.gd` reads the tooltip from the SCREEN CENTRE, not the pointer,
+so asserting on the pointer there failed `--first-person --hover-dock` at the
+shutter and blamed a parallel worktree for a pointer nothing had touched. The
+harness now asks the same question the frame does (`_hover_query_pos`), and a
+`--hover*` flag in first person **turns the camera** instead of warping the
+pointer — `--first-person --hover-dock` is "stand in the hall and look at the
+dock", which is a review shot worth having. **And a guard must not invent a
+cause.** The "nowhere on screen is empty ground" fallback printed a NOTE
+explaining the tooltip and then refused anyway, with a message about a
+pointer that had been moved when nothing had moved it; the explained frame is
+now written, as its own docstring always promised, and every refusal lists
+its candidate causes as candidates.
+
+A third correction, from the re-review, and the largest of the three: **a
+flag that cannot do what it was asked must refuse, not shrug.** Every one of
+the seven `--hover*` helpers was guarded by `if tile != HOVER_NONE`, so a
+flag whose target was not in the fixture aimed at nothing at all and the run
+went on to photograph the parked cursor and report success. `--fixture
+full_dock --hover-splitter` — that line has no splitter — handed back a clean
+frame of the dock with `SCREENSHOT_OK` on it and exit 0, and plain `--hover`
+did the same against the empty world, which is the shortest command the
+script takes. Nothing in the output said the flag had been dropped. That is
+issue #70's failure wearing another hat: a plausible frame of the wrong thing
+at a zero exit status, handed to a reviewer as evidence.
+
+Fixed for the SET rather than for the seven, because a hole this shape is
+worth closing once. The flags are one table in `godot_project/hover_targets.gd`
+— flag, what it looks for in words, and a finder over `world_layout_json` —
+`test_screenshot.gd` has a single loop over it and no other way to aim a
+hover flag, and a finder that comes back empty REFUSES with the flag, the
+target and the world it looked in (with "you built no world at all" for the
+empty case, rather than a confusing complaint about a missing dock). Three
+things keep the next one honest: `test_hover_targets.gd` drives every row
+against every fixture **headlessly**, which is new — the screenshot harness
+needs a window, so until now nothing in CI knew the hover flags existed;
+`scripts/check-invariants.sh` fails if `test_screenshot.gd` names a `--hover*`
+flag the table does not have; and `--ghost-blocked` and `--remove-mode`, the
+only other flags that aim at something the world may not contain, refuse on
+the same grounds (an empty world made `--ghost-blocked` photograph the VALID
+state).
+
+The sweep that came with it found one more of the same kind, and it is fixed
+too: a hover target the camera is **not showing** — `--fixture chain
+--closeup 26,0,8 --hover-hopper` — could not be reached, because the window
+server clamps a warp to the window, so the run failed at the shutter blaming
+a hand on the mouse for a tile that was nine thousand pixels off the left
+edge. The aim now checks the projection against the viewport first and says
+exactly that. What the sweep did NOT find was a spurious refusal: 43
+combinations, every one that should render did. One run refused at the
+shutter naming a tile nobody asked for, while four sibling worktrees were
+running Godot, and passed six times in a row afterwards — which is the
+parallel-pointer case the message already lists, measured rather than
+assumed, and now recorded in `screenshot-scene.sh`'s own header.
+
 ### 2026-09-20 — Mothballing, and naming the machine that is going without
 
 The two halves of one complaint about the staff pools: there was no way out
