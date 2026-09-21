@@ -788,10 +788,8 @@ mod tests {
             r#"staff: [], display_name: "The Crusher"),"#,
             1,
         );
-        let registry = MachineRegistry::from_ron_str(&format!(
-            "#![enable(implicit_some)]\n{text}"
-        ))
-        .unwrap();
+        let registry =
+            MachineRegistry::from_ron_str(&format!("#![enable(implicit_some)]\n{text}")).unwrap();
         assert_eq!(registry.display_names(), vec![("crusher", "The Crusher")]);
 
         let bundled = MachineRegistry::bundled();
@@ -807,8 +805,8 @@ mod tests {
     #[test]
     fn a_blank_display_name_is_rejected_rather_than_drawn_as_an_empty_label() {
         let text = EXAMPLE.replacen(r#"staff: []),"#, r#"staff: [], display_name: "  "),"#, 1);
-        let err =
-            MachineRegistry::from_ron_str(&format!("#![enable(implicit_some)]\n{text}")).unwrap_err();
+        let err = MachineRegistry::from_ron_str(&format!("#![enable(implicit_some)]\n{text}"))
+            .unwrap_err();
         match err {
             MachineLoadError::BlankDisplayName { ref id } => assert_eq!(id, "crusher"),
             other => panic!("expected BlankDisplayName, got {other:?}"),

@@ -95,7 +95,14 @@ fn a_machine_kind_may_be_called_something_other_than_its_id() {
         names.get("warehouse_rack").map(String::as_str),
         Some("Stock Shelving")
     );
-    for id in ["crusher", "mixer", "cooking_vat", "bottler", "packer", "dock"] {
+    for id in [
+        "crusher",
+        "mixer",
+        "cooking_vat",
+        "bottler",
+        "packer",
+        "dock",
+    ] {
         assert!(
             !names.contains_key(id),
             "'{id}' title-cases to what the game calls it, so it stays out of the map"
