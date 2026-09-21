@@ -31,7 +31,9 @@
 #   * declaring a tank's fluid from that picker (issue #43) reaches the
 #     simulation, marks the slot, retitles the panel and stops the tank
 #     reading as unconnected, and the note beneath it names how much fluid
-#     switching would destroy — the tank's AND the run's — before the click,
+#     the click would destroy — the tank's AND the run's — before the
+#     click, on an undeclared tank as well as a declared one, while agreeing
+#     with the fluid the run already carries destroys nothing (issue #121),
 #   * a MACHINE opens the same panel (issue #19), with the hopper/tank rows
 #     hidden, and its mothball switch issues `set_mothballed`, reads its
 #     state back off the simulation, and puts "switched off" and the unlit
@@ -623,7 +625,6 @@ func _run_checks() -> void:
 	if fluid_slot < 0:
 		_fail("the tank picker does not offer '%s', which is what its run carries" % fluid)
 		return
-	main._on_config_picker_pressed(fluid_slot)
 	Layouts.stock(main.sim, fluid, 256)
 	# FILL buys one crate at a time and the mixer drinks what reaches it, so
 	# fill to the brim and let only a few ticks pass: the point is a tank AND
@@ -640,13 +641,51 @@ func _run_checks() -> void:
 	if in_tank <= 0.0 or in_run <= 0.0:
 		_fail("tank holds %.1f and its run %.1f — the warning proves nothing" % [in_tank, in_run])
 		return
+	# The tank is still UNDECLARED here — the state every tank ships in and
+	# the state the shipped chain is played in — and that branch used to
+	# read "pick one to say for certain" with no mention that picking
+	# destroys anything (issue #121). It warns now, and it names the other
+	# click as the destructive one, because the fluid the run already
+	# carries is a no-op in the sim.
+	# `declared` is null on the wire for an undeclared tank, and the key is
+	# there — `main`'s own reader is what turns that into "".
+	if main._declared_fluid_of(topped_up) != "":
+		_fail("the fixture's tank is already declared — 10c proves nothing about a first click")
+		return
 	# Spelled out from the wire, not from `_tank_doomed_volume`: a warning
 	# that counted only the tank would match itself and pass while lying.
+	var undeclared_warning := "another fluid destroys %.1f units — this tank and the run it feeds" % (
+		in_tank + in_run
+	)
+	if main._config_picker_note.text != undeclared_warning:
+		_fail("a filled UNDECLARED tank's note reads '%s', expected '%s'" % [
+			main._config_picker_note.text, undeclared_warning
+		])
+		return
+	# And the click the note calls harmless has to be harmless: declaring
+	# the fluid the run already carries settles the question without
+	# emptying the tank or purging the run (`World::try_set_tank_fluid`).
+	# Proved in Rust too (`sim_core/tests/tank_fluid.rs`); asserted here
+	# because it is the panel's own button that sends the command.
+	main._on_config_picker_pressed(fluid_slot)
+	main._apply_dirty_chunks()
+	_repoll()
+	var settled := _tank_snapshot(TANK)
+	if main._declared_fluid_of(settled) != fluid:
+		_fail("pressing the run's own fluid did not declare it (wire says %s)" % str(settled.get("declared")))
+		return
+	if float(settled.get("quantity", 0.0)) != in_tank or _run_volume_fed_by(settled) != in_run:
+		_fail("agreeing with the run destroyed fluid: tank %.1f -> %.1f, run %.1f -> %.1f" % [
+			in_tank, float(settled.get("quantity", 0.0)), in_run, _run_volume_fed_by(settled)
+		])
+		return
+	# Declared now, holding the same fluid — and from here a switch really
+	# would take both, so the note says so with the same number.
 	var warning := "switching destroys %.1f units — this tank and the run it feeds" % (
 		in_tank + in_run
 	)
 	if main._config_picker_note.text != warning:
-		_fail("a filled tank's note reads '%s', expected '%s'" % [
+		_fail("a filled declared tank's note reads '%s', expected '%s'" % [
 			main._config_picker_note.text, warning
 		])
 		return
@@ -807,5 +846,5 @@ func _run_checks() -> void:
 		_fail("a belt asks for no crew and holds nothing, so it has no panel")
 		return
 
-	print("CONFIG_PANEL_OK: click opens/toggles/retargets/closes, FILL per building with reasons, AUTO-FILL round-trips and keeps a %d-unit hopper and a %.0f-unit tank full, picker retargets a placed hopper and declares a tank's fluid after warning what switching destroys, ESC/menus/modes/removal close it, unplumbed tank refused, the mothball switch round-trips through the sim on a machine AND on the dock and reads back in words, a belt gets no panel at all, SPACE/V/Q inert" % [capacity, tank_capacity])
+	print("CONFIG_PANEL_OK: click opens/toggles/retargets/closes, FILL per building with reasons, AUTO-FILL round-trips and keeps a %d-unit hopper and a %.0f-unit tank full, picker retargets a placed hopper and declares a tank's fluid after warning what the click destroys (declared or not), while agreeing with the run destroys nothing, ESC/menus/modes/removal close it, unplumbed tank refused, the mothball switch round-trips through the sim on a machine AND on the dock and reads back in words, a belt gets no panel at all, SPACE/V/Q inert" % [capacity, tank_capacity])
 	quit(0)

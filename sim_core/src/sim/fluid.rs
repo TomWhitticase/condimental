@@ -293,12 +293,44 @@ impl FluidTank {
     /// would relabel it rather than move it. Re-declaring what is already
     /// declared changes nothing and costs nothing, so a UI may send it
     /// freely.
+    ///
+    /// **A change of *declaration* is not always a change of *fluid*.** A
+    /// tank ships undeclared and takes its name from its run, so `None ->
+    /// Some(x)` is a real change to this struct while the tank goes on
+    /// holding exactly what it held. Emptying it there would destroy fluid
+    /// to prevent a relabelling that is not happening — issue #121. That
+    /// case goes through [`Self::settle`] instead, because only `world.rs`
+    /// can see the run and decide which of the two this is.
     pub(crate) fn declare(&mut self, fluid: FluidId) -> bool {
         if self.fluid.as_deref() == Some(fluid.as_str()) {
             return false;
         }
         self.fluid = Some(fluid);
         self.volume = Fx::ZERO;
+        true
+    }
+
+    /// Writes down a declaration that changes no fluid, **keeping the
+    /// volume** — [`Self::declare`] for the case its emptying would be
+    /// destruction for nothing (issue #121).
+    ///
+    /// The tank becomes genuinely declared: the player has settled a
+    /// question the graph was answering for them, which is what seeds
+    /// `resolve_network_fluids` and what a save round-trips. What does not
+    /// happen is the emptying, because the id in `fluid` after this call
+    /// names the same substance the volume already was.
+    ///
+    /// **Only `World::try_set_tank_fluid` may call this**, and only after
+    /// it has proved the no-op — the tank's own contents are `fluid` or
+    /// nothing *and* every run it discharges into already resolves to
+    /// `Carries(fluid)`. This type cannot see a run, so it cannot check
+    /// the second half itself; handing it the decision is why the two
+    /// methods are separate rather than one with a flag.
+    pub(crate) fn settle(&mut self, fluid: FluidId) -> bool {
+        if self.fluid.as_deref() == Some(fluid.as_str()) {
+            return false;
+        }
+        self.fluid = Some(fluid);
         true
     }
 
