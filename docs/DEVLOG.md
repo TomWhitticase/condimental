@@ -184,6 +184,33 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — Liquid smoke is lifted out of BBQ mix's shadow, and every hopper heap is now measured against every other (issues #113, #115)
+
+`liquid_smoke` and `bbq_mix` stand next to each other in the BBQ branch — the
+tank's run and the mixer's run feed the same vat — and until now they were
+9.3/255 apart in the rendered frame, against 10.7–11.8/255 of ordinary
+same-fluid shading noise. Two fluids a metre apart were, measurably, the same
+colour. The fix is a **lift, not a darkening** (issue #100's rule: raise the
+value, do not deepen the hue): `smoke_slate` goes #4D4521 → #706430 in
+`palette.ron`, with `main.gd`'s `FLUID_TINTS` entry moved to match, and the
+pair now renders **20.4/255 apart** — comfortably outside the noise.
+
+It does not reach the 26/255 the ticket asked for, deliberately. Getting
+there needs a luma of about 0.419 (#796C33), which lands liquid smoke
+**9.1/255 from vinegar** — the gap is closed at one end by opening it at the
+other. The six fluids are crowded on the value axis and no single tint can
+fix that; issue #131 carries the real problem.
+
+Alongside it, the hopper heaps get the guard the fluids already had.
+`test_fluid_gallery.gd` has checked every fluid pair against a floor for a
+while; `test_ingredient_models.gd` only ever checked that a raw solid *had* a
+tint, so two indistinguishable heaps were legal. It now runs the same
+pairwise `sum |dRGB| + 2·|dLuma|` metric over `HOPPER_FILL_TINTS` with a
+floor of 0.31, calibrated ~10% under the worst shipped pair, and reports the
+worst pair it found in its success line so the margin is visible without
+failing. The fluid floor moves 0.24 → 0.26 for the same reason — the lift
+made the old floor slack.
+
 ### 2026-09-21 — Seams that tell the truth: five stale claims and three flags that lied
 
 A docs-and-guards pass over five issues that shared one shape: something in
