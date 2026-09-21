@@ -23,7 +23,7 @@ See [WORKFLOW.md](WORKFLOW.md).
   worth putting in a report, it is worth an issue" worked exactly as written
   and produced a backlog of small, true, unprioritised findings a human has
   to rank and nobody picks up — its longest-lived entries were comments
-  citing thirty Godot scripts against 38 and 60 Hz against a 30 Hz tick, both
+  citing thirty Godot scripts against 37 and 60 Hz against a 30 Hz tick, both
   cheaper to fix than to file. **An issue nobody will ever choose to work on
   costs more than it records.** Three gates now, in order: could you just fix
   it (a line or two in a file the branch already touches, or a small safe fix

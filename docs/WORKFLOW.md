@@ -269,7 +269,8 @@ fixing it right now":
   a misleading log line. Make it in the branch at hand and mention it in the
   PR body. Two of the longest-lived issues in this repo were "a comment says
   thirty scripts, there are 38" and "a comment says 60 Hz, the tick is 30 Hz";
-  both were cheaper to fix than to file.
+  both were cheaper to fix than to file — and the first was itself wrong, the
+  true count being 37, which is why the script now prints what it ran.
 - **A small, safe fix in the area you are already working in is a fix too**,
   even if it was not in the brief, as long as it does not enlarge the PR's
   story past what its title claims.

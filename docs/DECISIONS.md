@@ -37,7 +37,7 @@ matches what code comments and data files cite.
   thorough reports. The rule therefore converted every observation into a
   backlog entry, and the backlog became a queue of findings that are small,
   true, and unprioritised. Its longest-lived entries were `verify-core-loop.sh`'s
-  header claiming thirty Godot scripts where it runs 38, and a `recipes.ron`
+  header claiming thirty Godot scripts where it runs 37, and a `recipes.ron`
   comment citing 60 ticks/sec against a 30 Hz tick — each a one-line edit
   that cost more to file, read and rank than to make.
 

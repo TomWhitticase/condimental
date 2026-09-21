@@ -24,7 +24,8 @@ below is history and should only ever be appended to.)*
   consolidated onto one integration branch and fast-forwarded into `main`.
   The union passed `scripts/verify-core-loop.sh` (19 Rust suites, 30 headless
   Godot proofs, no failures) and has been rendered and played; the same script
-  is **26 Rust suites and 38 Godot proofs as of 2026-09-21**. A fresh
+  is **26 Rust suites and 37 Godot proofs as of 2026-09-21** — a number the
+  run now prints for itself. A fresh
   worktree still needs `cargo xtask` and **two** `godot --import` passes
   before the world is visible. See the log entry below.
 - **CI runs the tests now (2026-09-16).** Nine workflows under
@@ -193,7 +194,7 @@ below is history and should only ever be appended to.)*
 The 2026-09-16 workflow rule said that if a finding was worth putting in a
 report it was worth an issue. It worked as written, and the result was a
 backlog of small, true, unprioritised findings — its longest-lived entries
-were a script header claiming thirty Godot scripts where it runs 38, and a
+were a script header claiming thirty Godot scripts where it runs 37, and a
 `recipes.ron` comment citing 60 ticks/sec against a 30 Hz tick. Both were
 one-line edits, and both cost more to file, read and rank than to fix.
 
@@ -213,7 +214,10 @@ Dogfooded on the two issues the new rule cites as examples of what should
 never have been filed: `data/recipes.ron`'s cook-time comment now says 30
 ticks/sec (issue #137 — 80 ticks is under three seconds, not "a little over a
 second"), and `scripts/verify-core-loop.sh` no longer claims a script count in
-its header. It **counts and prints** the scripts it ran instead (issue #138),
+its header. It **counts and prints** the scripts it ran instead (issue #138,
+whose own count of 38 was one too many — `grep -c '^run_godot_script'` matches
+the function definition as well as its 37 calls, which is the argument for
+printing the number rather than writing it down),
 and the five live copies of "30 headless Godot scripts" that had drifted with
 it — the `verify` and `open-pr` skills, WORKFLOW.md's command table, the PR
 template's checklist and `verify.yml`'s header — now name the property rather
