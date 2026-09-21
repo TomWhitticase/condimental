@@ -167,6 +167,14 @@ h1 {
 .group button:hover { color: var(--ink); background: var(--panel-2); }
 .group button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
 
+/* "facing" reads as a caption on its four letters, not as a fifth button. */
+.group .label {
+  padding: 5px 8px;
+  background: var(--panel);
+  color: var(--ink-dim);
+  font-size: 11px;
+}
+
 #variations {
   position: absolute;
   left: 0;

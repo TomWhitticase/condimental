@@ -587,6 +587,121 @@ Also filed along the way: a screenshot fixture is never asserted to be
 actually running before the shutter (#94), and the clipboard shows one docket
 at 1600x900 with three contracts signed (#95).
 
+### 2026-09-20 — The asset browser spins a model, and its shadows are measured
+
+Two asset-browser issues, and the second turned into a measurement.
+
+**A facing control (issue #36).** The browser drew every model once, in the
+facing it was authored in, so the two things UI_UX.md §2b asserts about
+rotation could be read in the doc and not seen: a carved doorway does not
+survive a 180° spin (point 18), and an overlay that lines up on its host does
+so in one facing out of four (point 29). There are **E S W N** buttons and an
+`f` key now, in the sim's own clockwise order, and they spin the model the
+way a placement does — a yaw about the **footprint origin**, which is what
+the `.vox` origin already is (the footprint's centre at ground level), not
+about the mesh's centre. The details panel's footprint line swaps its extents
+with it, as `_rotated_footprint` does. The dock is the asset that makes the
+point: at east and south you are looking into its loading bays, at west they
+are a blank blue wall.
+
+**Ambient occlusion, at the game's own strength (issue #49).** Baked per
+voxel rather than screen-space: the occupancy grid the mesh is built from is
+box-blurred to a near-Gaussian at Godot's own radius, sampled along each
+face's normal, and the flat-half-space baseline is subtracted so an open
+flank keeps the colour it had. It dims indirect diffuse only, as Godot's SSAO
+does with `ssao_light_affect` at 0. The three.js `SSAOPass` was not the route
+— it does not define `PERSPECTIVE_CAMERA=0`, this viewer's camera is
+orthographic, and `web/vendor/` is fetched rather than vendored, so patching
+it means vendoring a copy; and the voxel grid the occlusion is *about* is
+already in hand at mesh-build time, which is cheaper and more exact than
+inferring that grid back out of a depth buffer.
+
+The first cut of it shipped a bug that review caught and the change is worth
+recording for the shape of it. The sample was counted off the face's corner
+index — which is the first EMPTY cell on a positive normal but the last SOLID
+one on a negative normal, so the three negative normals sampled a voxel
+nearer the surface than the baseline was derived at, the subtraction
+under-cancelled, and half of every model's flat faces came back 2.9% dark
+with nothing whatever in front of them. On the vat that was 48.8% of the
+painted deck darkened where the game darkens 0.2% of it. The fix is to count
+from the first empty cell on both signs; the lesson is that the bake is
+arithmetic, so `tools/asset-browser/test-ao.mjs` now runs the viewer's own
+module under node and asserts a solid cube reads fully open on all six face
+normals, that each axis reads its two faces alike, and that an inner corner
+is still occluded. It fails six assertions on the code that shipped.
+
+Nor did the calibration catch it, and that is the more interesting half. The
+strength is derived by measurement rather than chosen, but the first metric
+was the deep end of the pixels each renderer darkened *at all* — which is
+area-normalised, so "how much of the model got shaded" divides straight out
+of it. A browser darkening 11x more of the machine than the game therefore
+derived a constant that reproduced to three decimal places. `calibrate-ao.py`
+now measures per MACHINE pixel — mean shading, the fraction of the machine
+darkened past 1% and 3%, and the 99th percentile over the machine rather than
+over the touched set — and **fails loudly** when the browser's coverage
+diverges from the game's, because no strength can fix a coverage gap: it
+scales every darkened pixel alike. The machine's pixels are found rather than
+guessed, by rendering the same camera over the empty world (the world starts
+empty, so that is just another `screenshot-scene.sh` run) and taking what
+differs. Run against the frames that shipped, the new metric calls it at
+49.7x coverage.
+
+Two more of the same class turned up while re-deriving. The port had taken
+`ssao_radius` and `ssao_intensity` out of `factory_environment.gd` and left
+`ssao_power` behind, and power is a **gamma on the occlusion term**: it is the
+difference between a crease finder and a wash, and no strength can stand in
+for it, because a strength scales every darkened pixel alike. Porting it cut
+the browser's coverage from 24.8% of the machine to 9.1% on its own. And
+`test-ao.mjs` had assumed `AO_RADIUS` was a whole number, so a fractional
+radius indexed the field at fractional coordinates and three assertions read
+`undefined` rather than failing on the geometry. Two of three settings ported,
+and a test that passed by rounding — the next person porting a render setting
+will do the same unless it is written down.
+
+Which pose to calibrate against turned out to be the real question. The bake
+is object-space, so it is a property of the model, and the model is what the
+browser exists to show; but the game's play camera is isometric, and a 0.45 m
+world radius is a few pixels wide there. The same vat at the same settings has
+67.8% of its pixels darkened by more than 1% when you stand beside it and
+0.3% at the play camera. Matching the play camera would therefore have matched
+the *camera*, not the model, and shipped a pass under one 8-bit level — issue
+#49 closed on paper with nothing visible. The constant is derived beside the
+line instead, and the gap is published rather than hidden: the browser removes
+**3.49% of the machine's light against the game's 4.36%**, over 0.75x its
+coverage and 1.26x its depth, at `AO_STRENGTH` **5.067** against PR #104's
+`ssao_radius 0.45 / ssao_intensity 16.0 / ssao_power 1.6` — which is why #104
+merges first. The rule it is held to is now stated precisely: never darker
+than the game's own strongest *honest* presentation of the same geometry.
+
+The frames themselves needed a gate too. `screenshot-scene.sh` occasionally
+returns a frame captured before the fixture is built or before the pose is
+applied — a plausible PNG of an empty hall at the default framing, which once
+got as far as writing a constant. The calibration now refuses a before/after
+unless the machine covers a sane share of the frame, the pass-on frame keeps
+95% of the pass-off frame's machine pixels, and the pass only removes light;
+it re-shoots three times and then fails. It caught two bad frames on the run
+that produced the number above, one of them a "pass on" frame that came back
+*brighter*, 112.1 to 155.2 mean luma.
+
+A claim this work made along the way was wrong, and the correction belongs
+here because it fed issue #103. Calibrating against the game needs a frame
+the game's SSAO visibly changes, and the first-person pose looked like it was
+not one: switching SSAO off moved 1.3% of that frame. But
+`test_screenshot.gd`'s first-person camera stands 4 m above the focus and
+pitches *up*, so whatever fixture is built it is aimed across an empty hall —
+a frame with no near geometry is supposed to be unmoved by an occlusion pass.
+Re-measured from a pose standing beside the line instead, the shipped
+0.9/2.4 settings darken **9.80% of the frame by more than 1%, 2.84% by more
+than 3%, p99 6.29%, darkest pixel 33.1%** (a re-render of the control differs
+by 0.000%, so that is signal, not noise). The pass was never inert; the
+camera was pointed at nothing.
+
+Two seams came with it, both narrow. The viewer takes its switches from the
+query string as well as its buttons (`?view=game&facing=2&ao=0&bare=1`), and
+`serve.py` grows a `POST /api/shot` that exists **only** when `--shot-dir` is
+passed on the command line — headless Chrome captures on a load heuristic
+that lands before a model has been fetched, so the page hands back its own
+canvas instead of being photographed.
 
 ### 2026-09-20 — Three issues off the board: names, fluid colour, honest frames
 
