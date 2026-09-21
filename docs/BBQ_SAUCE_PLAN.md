@@ -1,5 +1,30 @@
 # BBQ Sauce — the second sauce
 
+> **SUPERSEDED — BBQ shipped between 2026-09-18 and 2026-09-19, and this file
+> is now history.** Every ticket landed: T1 the sim capability (PR #45), T2 the
+> content (#56), T3 the unlock gate (#66), T4 the assets (#39), and this doc's
+> own ticket T5 (the docs, late — 2026-09-21). Read the authoritative docs, not
+> the plan below, for what the game does now:
+>
+> | What the plan called | Where it lives now |
+> |---|---|
+> | §2 the chain, §2.1 the ratio | `data/recipes.ron`, and GAMEPLAY.md §3's derived-sauces section |
+> | §3 the three sim changes | `docs/DECISIONS.md` 2026-09-21, two records (several recipes per kind; several fluid inputs). `validate_chain` has since been refined again — issue #42's record, not §3.3 |
+> | §3.1 the save consequence | `SavedMachine::recipe`. Note the additive-field window it used has **closed**: the save schema is 2 since 2026-09-20 and a shape change is a bump now |
+> | §4 the contracts | `data/contracts.ron` |
+> | §5 the unlock | `data/unlocks.ron` and its comment, GAMEPLAY.md §9, `docs/DECISIONS.md` 2026-09-21 |
+> | the balance of the gate | `docs/DECISIONS.md` 2026-09-20, "The bank at the moment of building…" — issue #55 is closed `NOT_PLANNED` and its successors are open as #92 and #93 |
+>
+> Two rulings made while the epic ran are **not** in the text below, and both
+> are pinned by tests on `main`: per-box payout monotonicity is **per sauce**
+> (BBQ pays more per box at every size because it costs more to make; mixed
+> orders are excluded from the ladder outright), and "one line's throughput"
+> means **one ketchup line**, from `reference::linear_prefix`, not the maximum
+> over every recipe.
+>
+> The brief is kept verbatim for the record. Where it and a doc above
+> disagree, the doc above is right.
+
 The plan for the game's second sauce, agreed with the project owner on
 2026-09-16. This doc is the **shared spec for the workers building it**:
 they work in separate worktrees whose sessions share no memory, so every

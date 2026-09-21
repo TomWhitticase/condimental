@@ -18,6 +18,56 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-21 **A machine kind may name several recipes, and a placed machine
+  runs whichever one its inputs satisfy — there is never a picker.**
+  `recipes.ron` stopped being one line per kind in the BBQ epic;
+  `RecipeRegistry::for_machine` hands a kind's recipes back in file order and
+  `Machine::choose` starts the **first fully-satisfied** one, so file order is
+  the deterministic tiebreak and that is the only role it plays in selection.
+  When none is satisfied the machine *holds* the closest one (most
+  requirements met, earliest wins a tie) — nothing in the tick turns on that,
+  but the stall readout is taken from `Machine::recipe` and "waiting for
+  molasses" must be a true sentence about a BBQ mixer. **No player-facing
+  recipe picker, and no save field for a player's choice**: the plumbing
+  already decides, and a machine-selection screen is a different game's
+  affordance. The in-flight recipe *is* persisted (`SavedMachine::recipe`),
+  because a craft half-finished has already eaten the inputs it would be
+  re-derived from. Landed 2026-09-18 (PR #45); recorded here as T5 of the
+  epic. Full record in `docs/DECISIONS.md`.
+- 2026-09-21 **A recipe may draw several fluid networks, matched by fluid id;
+  it still deposits into exactly one.** `validate_fluid_scope` no longer caps
+  `fluid_inputs` at one. What it enforces now: a recipe may not name the same
+  fluid twice (one fluid is one input with the units added up, because each
+  input is matched to a *different* network), and `fluid_outputs` is still at
+  most one, off the outlet face — that half of the rule is unchanged and is
+  not up for discussion. Each fluid input is matched **by id** against the
+  networks touching the footprint, greedy in recipe order, each network
+  supplying at most one input; `world.rs` now hands `Machine::tick` N disjoint
+  draw borrows plus one deposit and still asserts they do not alias rather
+  than assuming it. Bent because BBQ's cook needs `bbq_mix` and `liquid_smoke`
+  together and no layout dodges it, and every later sauce wants it (mayo is
+  oil plus acid, hot sauce vinegar plus mash). The knock-on: a run's fluid can
+  no longer be read off "the one recipe its machine names", so
+  `resolve_network_fluids` narrows the whole graph at once instead. Landed
+  2026-09-18 (PR #45). Full record in `docs/DECISIONS.md`.
+- 2026-09-21 **A progression gate is a filter on two lists, keyed to lifetime
+  deliveries, and it announces itself.** `data/unlocks.ron` (schema 1) is the
+  first gate in the game: an `Unlock` names a threshold and exactly two lists,
+  `ingredients` held back from the market and `contracts` held back from the
+  board. **There is no way to lock a recipe and no field to add one with** —
+  BBQ's recipes sit in `recipes.ron` from a new game, unbuildable because
+  their raws cannot be bought and unsellable because nobody is asking, which
+  keeps the whole mechanism off the tick path. Both lists are enforced in the
+  simulation, not the panel: `BuyIngredient` is refused (`world.rs`) and
+  `SignContract` returns `SignRefusal::Locked` whether or not a row was ever
+  drawn. The trigger is lifetime **successful** deliveries
+  (`Economy::lifetime_deliveries`, satisfied windows only, never decreasing);
+  the **counter** is saved and every gate's state is derived from it against
+  the file, so a balance pass re-reads correctly for every existing save. The
+  group is named because the toast needs a subject — a gate that opens
+  silently is one the player never experiences. Partly answers GAMEPLAY §11's
+  contract-gating question: a delivery count, no reputation meter. Landed
+  2026-09-19 (PR #66). Full record in `docs/DECISIONS.md`.
 - 2026-09-21 **A belt's rubber runs on that tile's own work clock, and the
   simulation is what counts it.** §6a's machine rule applies to belts:
   `BeltSegment::moved_ticks` counts the ticks a tile actually advanced

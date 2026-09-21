@@ -188,6 +188,74 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — The BBQ epic gets the docs it shipped without (T5)
+
+The second sauce has been playable since 2026-09-18 and gated since
+2026-09-19, but the epic's last ticket — fold it into the authoritative docs —
+was never done, and three days of sessions have been reading docs that
+described a game with one sauce in it.
+
+**Two invariants were bent and neither was written down.** `DECISIONS.md` now
+carries a full record for each. *A machine kind may name several recipes, and
+a placed machine runs whichever one its inputs satisfy* — first
+fully-satisfied wins, `recipes.ron` file order is the tiebreak, an unsatisfied
+machine holds the closest recipe so the stall readout can name a raw it is
+really waiting for, and **there is no player-facing picker**, because the
+plumbing already decides. *A recipe may draw several fluid networks, matched
+by fluid id, and still deposits into exactly one* — the output half of the
+2026-09-08 rule is untouched, which is what keeps a both-ways-plumbed machine
+readable from the layout alone. Both were previously stated as deliberate
+invariants, in a panic message and in a comment, so without a record the next
+session finds a rule, a reason, and no note that it was overturned.
+
+**The knock-on is recorded with them, because it is the real price.** Once a
+kind runs several recipes, a mixer's outlet run is `ketchup_mix` or `bbq_mix`
+depending on what is plumbed *into* the mixer — the thing being derived. That
+is why `resolve_network_fluids` narrows the whole graph at once instead of
+asking each machine in turn, and it is the root of issues #43 and #53.
+
+**The gate got a record too.** `data/unlocks.ron` is the first progression
+gate in the game: a threshold of lifetime successful deliveries releasing two
+named lists, enforced in the simulation rather than hidden by a panel, with no
+way to lock a recipe and no field to add one with — so progression costs the
+tick nothing. The counter is saved and the gate derived from it, which is what
+lets a balance pass on the file re-read correctly for every existing save.
+
+**GAMEPLAY.md was wrong in two tables, not merely incomplete.** §2 and §4 both
+said BBQ is gated behind "a smoker or low-and-slow reduction unit" — a machine
+that was deliberately never built, because the 600-tick cook buys the same
+identity with a number. Both rows now say what shipped, §4's "equipment
+purchases *are* the tech tree" claim is qualified by the sauce that is not
+bought, and §2 gains the third kind of gate the table did not have a slot for:
+a tier that costs no capital still needs a reason not to arrive in the first
+minute. §3 records BBQ as the game's first shipped *derived* sauce and why the
+3:2 ratio is load-bearing; §9 gains the recipe-selection and progression-gate
+bullets; §11's contract-gating question is now half-struck — a delivery count,
+no reputation meter, and what remains open said plainly.
+
+`docs/BBQ_SAUCE_PLAN.md` is marked superseded with a table pointing at where
+each of its sections now lives, the way `QUALITY_PASS_PLAN.md` was before it,
+and `sim_core/CLAUDE.md` gains the two invariants plus the `unlocks` module it
+had never listed.
+
+**Rendering the frame for this entry found the harness broken.**
+`test_screenshot.gd`'s forward run still called `main.gd::_update_belt_frame`,
+deleted by issue #79 the day before, so every frame of every forward run died
+on a nonexistent method — and since a GDScript runtime error unwinds only the
+call, it took the machine mechanisms, the dirty chunks, the buffers and the
+fluid refresh with it. The harness wrote a PNG and exited 0 regardless: an
+idle-looking factory photographed in the middle of a run, which is precisely
+the lie those lines were added to prevent. Fixed here. A second finding from
+the same render is filed rather than fixed — `--unlock-toast` photographs the
+`SIGNED` notice instead of the unlock announcement it exists for, because the
+toast is queued behind a showing notice on a wall-clock dwell the shutter
+beats (issue #141).
+
+One thing this pass deliberately did not do: close the gap the epic left in
+the *game*. Building the BBQ branch still stops boxed-ketchup output for
+~8 500 ticks and can cost a contract, with no warning at placement — issue #55
+is closed `NOT_PLANNED` and its successors #92 and #93 are open and unstarted.
+
 ### 2026-09-21 — The README catches up with the second sauce, and every frame in it is fresh
 
 The README had not moved since 2026-09-16 and was describing a one-sauce

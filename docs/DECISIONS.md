@@ -25,6 +25,186 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-21: **A machine kind may name several recipes, and a placed machine
+  runs whichever one its inputs satisfy — there is never a picker.** (The BBQ
+  epic, T1/PR #45, landed 2026-09-18; recorded here as T5, late.)
+
+  **The invariant this replaced was deliberate.** `world.rs`'s
+  `recipe_for_kind` panicked on a second recipe naming a kind, and said why:
+  there was no recipe-selection mechanic, so a second recipe would have been
+  content the simulation could not act on. `save.rs` leaned on the same fact
+  — a machine's recipe was *not* saved, because "a placed machine runs the one
+  recipe its kind names, so saving it would be saving content". Both were
+  correct while the chain made one sauce. BBQ is a second recipe on the mixer,
+  the cooking vat, the bottler and the packer — four kinds at once — so the
+  rule had to go, and the question was only what replaces it.
+
+  **Three ways to choose a recipe, and why inputs won.** (A) **A player-facing
+  picker** on the configuration panel: explicit, and the shape most games use.
+  Rejected on the owner's constraint and on `docs/BBQ_SAUCE_PLAN.md` §7 — a
+  machine-selection screen is a different game's affordance, and this game's
+  verb is plumbing. (B) **A recipe chosen at build time** and stored on the
+  placement: no UI at run time, but it is still a player choice, still needs a
+  screen to make it on, and now also needs one to *change* it. (C) **The
+  inputs decide**, which is what shipped: the plumbing already distinguishes
+  the cases with no ambiguity to resolve. A mixer standing on a vinegar pipe
+  beside a sugar hopper blends ketchup mix; a mixer on a ketchup pipe beside
+  spice and molasses hoppers blends BBQ mix. The two never both match, so the
+  player's layout *is* the answer, and the game gains a second sauce without
+  gaining a single new verb.
+
+  **What `Machine::choose` does, exactly.** `RecipeRegistry::for_machine`
+  returns a kind's recipes in `data/recipes.ron` file order. The **first
+  fully-satisfied** one is started, so file order is the deterministic
+  tiebreak when two match (ARCHITECTURE §3.9 requires one; it is the same
+  tiebreak `contracts.ron` already uses) — and that is the only role file
+  order plays in selection. When *none* is satisfied, the machine holds the
+  **closest** one: most requirements met, earliest winning a tie. Nothing in
+  the tick turns on that branch — an unsatisfied machine does not move — but
+  the snapshot and the stall readout are read off `Machine::recipe`, and
+  "waiting for molasses" has to be a true sentence about a BBQ mixer where
+  "waiting for vinegar" is not.
+
+  **The save-format consequence, which is why this PR was not self-merged.**
+  Once a kind runs several recipes, a machine halfway through a BBQ cook can
+  no longer re-derive its recipe on load: the inputs it would be derived from
+  have already been consumed by the craft in flight. So `SavedMachine::recipe`
+  is persisted. It went in as a `#[serde(default)]` addition with no
+  `SAVE_SCHEMA_VERSION` bump, inside the window `save.rs` had explicitly
+  reserved for exactly that — **that window has since closed**, and the first
+  real bump (schema 2, `SavedTank::fluid`, 2026-09-20) is recorded below. A
+  save written before the field loads with no in-flight recipe, which is what
+  a machine with no craft in flight reads as anyway; a save naming a recipe
+  its kind can no longer run is refused with its own error rather than
+  silently re-picked.
+
+  **The knock-on nobody costed in advance: naming a pipe run got hard.** A
+  network's fluid id used to be one line — the first machine to reach an
+  unclaimed run named it from its kind's only recipe, and producer and
+  consumer agreed by naming the same id in `recipes.ron`. With a kind running
+  several recipes, a mixer's outlet run is `ketchup_mix` or `bbq_mix`
+  depending on what is plumbed *into* the mixer, which is the very thing being
+  derived; asking each machine in turn would make the answer depend on which
+  machine the walk reached first, and this simulation does not get to have
+  answers like that. `resolve_network_fluids` therefore derives the whole
+  graph at once by narrowing — each run starts with every id it could hold and
+  is narrowed to a fixpoint. That pass, and the ambiguity it can legitimately
+  end on, is the root of issues #43 and #53 and of the tank-declaration record
+  below. It is the real price of this decision, and it was paid once.
+
+  **`validate_chain` came with it.** `recipes.ron` no longer describes one
+  production line, so "recipe i+1 consumes something recipe i produces" was
+  the wrong invariant and was relaxed to a graph check. It has since been
+  refined again (issue #42: per connected component, each needing a recipe
+  that can actually be *started*) — see that record; the rule to obey is the
+  later one.
+
+- 2026-09-21: **A recipe may draw several fluid networks, matched by fluid id;
+  it still deposits into exactly one.** (The BBQ epic, T1/PR #45, landed
+  2026-09-18; recorded here as T5, late.)
+
+  **What was true before.** The 2026-09-08 chain rework (below) settled how a
+  machine plumbed on both sides stays unambiguous without the player labelling
+  a run: **a fluid output leaves by the face the machine points at, exactly as
+  a solid one does; a fluid input may come from any other pipe touching the
+  footprint.** `validate_fluid_scope` then asserted `fluid_inputs.len() <= 1`,
+  and `two_networks_mut` handed out exactly one draw plus one deposit and
+  asserted they differ.
+
+  **What changed, and what deliberately did not.** The input cap is gone. The
+  **output** cap is not, and is not up for discussion: a machine still
+  deposits into exactly one network, off its outlet face, which is the whole
+  mechanism that keeps a both-ways-plumbed machine readable from the layout
+  alone. `validate_fluid_scope` now enforces a different pair of rules: at
+  most one fluid *output*, and **no recipe may name the same fluid twice** —
+  each input is matched to a *different* network, so one fluid means one input
+  with the units added up. Each fluid input is matched **by id** against the
+  networks touching the footprint, greedily in recipe order, each network
+  supplying at most one input. `world.rs` hands `Machine::tick` N disjoint
+  draw borrows plus one deposit, and still *asserts* disjointness rather than
+  assuming it — the assertion is the only thing making the aliasing sound, so
+  it was kept when the arity changed.
+
+  **Why it was bent, and why now rather than later.** The owner's two choices
+  for BBQ — the mixer outputs a liquid, and liquid smoke goes in at the cook —
+  make the cook a two-network recipe (`bbq_mix` plus `liquid_smoke`), and
+  there is no layout that dodges it. Neither choice is arbitrary flavour: they
+  are what make BBQ a *branch* tapped off the ketchup pipe rather than a
+  second line standing beside it. And every sauce after it wants the same
+  capability — mayo is oil plus acid, hot sauce is vinegar plus mash
+  (GAMEPLAY §2, tiers 4 and 5) — so it is better bent once, now, with a real
+  two-fluid recipe in the shipped content to test it against, than bent later
+  against a fixture.
+
+- 2026-09-21: **A progression gate is a filter on two lists, keyed to lifetime
+  deliveries, and it announces itself.** (The BBQ epic, T3/PR #66, landed
+  2026-09-19; recorded here as T5, late.)
+
+  **The game gated nothing before this.** Every ingredient in
+  `ingredients.ron` and every contract in `contracts.ron` was available in a
+  new game, so the only thing that grew as you played was the balance. That
+  was right while the chain made one sauce — there was nothing to hold back.
+  The second sauce changes it: handing a player the whole two-sauce board in
+  their first minute makes the ketchup line read as a chore standing between
+  them and the interesting one.
+
+  **A gate names two lists, and there is deliberately no third.**
+  `data/unlocks.ron` (schema 1, loader `sim::unlocks::UnlockRegistry`): an
+  `Unlock` has an id, a player-facing `name`, an `after_deliveries` threshold,
+  `ingredients` held back from the market and `contracts` held back from the
+  board. **There is no way to lock a recipe and no field to add one with.**
+  The BBQ recipes sit in `recipes.ron` from a new game and are simply
+  unbuildable — their raws cannot be bought — and unsellable, because nobody
+  is asking. That is not a simplification: a locked recipe would be a state
+  every placed machine consults on every tick, the hottest path in the
+  simulation, to answer a question whose answer changes a handful of times in
+  a session. Two filtered lists cost the tick nothing at all — `machine.rs`,
+  `belt.rs` and `fluid.rs` do not read this module.
+
+  **A gate is a rule, not a decoration on a panel.** Both lists are enforced
+  in the simulation: `BuyIngredient` is refused for a locked id (`world.rs`),
+  and `SignContract` returns `SignRefusal::Locked` whether or not a row was
+  ever drawn for it. Godot hiding the row is then presentation, and a bug in
+  the panel cannot sell the player a gate that is shut.
+
+  **Why lifetime deliveries, and not money, ticks or machines placed.** Money
+  can be sat on, ticks pass while the player reads the keybinds, and a placed
+  machine need never run — but a delivery is proof that a whole line ran end
+  to end and something was shipped. It counts satisfied delivery windows only
+  (`Economy::tick`'s `Paid` event); a missed window counts for nothing, a lost
+  contract does not take its past deliveries back, and the count never
+  decreases, so a gate once open stays open. The threshold is **ten**, which
+  is ninety seconds to three minutes of a working line; the measured sweep
+  behind that number, and the reason it was *not* raised to paper over issue
+  #55, is the 2026-09-20 record "The bank at the moment of building decides
+  whether the BBQ branch costs you the board" and the protocol in
+  `unlocks.ron`'s own comment.
+
+  **The counter is saved; the gate's state is derived.** `SaveData` stores
+  `lifetime_deliveries` and nothing else about progression. Saving "bbq_sauce
+  is unlocked" would freeze a save against the numbers in the file on the day
+  it was written; deriving it means a balance pass on `unlocks.ron` re-reads
+  correctly for every existing save.
+
+  **Why the group is named rather than each entry carrying `unlock_after`.**
+  The obvious alternative spreads one decision across seven entries in two
+  files and leaves nothing to announce — and **the announcement is the point
+  of a gate**: one that opens silently is one the player never experiences.
+  A toast needs a subject, so the group has a `name`, and that name is
+  player-facing prose rather than an id: "★ BBQ Sauce unlocked — new
+  ingredients in the shop, new orders on the board". The sim decides which
+  gates are open and publishes them in its snapshot; `main.gd`'s
+  `_announce_unlocks` diffs that list against what it has already seen, and
+  primes itself on the first snapshot so a loaded save does not re-announce a
+  tier the player earned sessions ago.
+
+  **What this gate deliberately does not do.** It does not amend live
+  contracts on opening — losing a contract you were serving fine because the
+  game changed its terms reads as a bug, not as difficulty. It does not
+  tier-lock the rest of the board: nothing else on it is gated at all. And it
+  is not a reputation meter — see GAMEPLAY §11, where this settles the
+  gating half of that question and leaves reputation itself open.
+
 - 2026-09-21: **A belt's rubber runs on that tile's own work clock, and the
   simulation is what counts it.** (Issue #79.)
 

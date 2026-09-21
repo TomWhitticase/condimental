@@ -49,6 +49,19 @@ the plan is `docs/ARCHITECTURE.md` §3/§4/§6/§10.
 - **`machines.rs` owns the footprint origin convention** — min-X/min-Y corner,
   occupying `[x, x+width) × [y, y+height)`, and the tile a belt feeds into.
   Read its module doc before touching rotation.
+- **A kind may name several recipes; the machine's *inputs* pick one.**
+  `Machine::choose` starts the first fully-satisfied recipe
+  `RecipeRegistry::for_machine` offers, so `recipes.ron` file order is the
+  tiebreak; with none satisfied it holds the closest, which is what makes the
+  stall readout name a raw the machine is really waiting for. **There is no
+  player-facing picker and no command that sets a recipe** — do not add one.
+  The in-flight recipe *is* saved (`SavedMachine::recipe`): a craft under way
+  has already eaten the inputs it would be re-derived from.
+- **A recipe may draw N fluid networks, matched by fluid id; it deposits into
+  exactly one.** `validate_fluid_scope` refuses a recipe that names one fluid
+  twice (that is one input with the units added up) and still caps
+  `fluid_outputs` at one, off the outlet face. The N draw borrows plus the
+  deposit are asserted disjoint in `world.rs`, not assumed.
 - `validate_chain` panics at construction on a part of `recipes.ron` nothing
   can start — a component with no buyable machine or no obtainable input
   (solid or fluid): content errors fail at load, not silently at runtime.
@@ -110,6 +123,7 @@ the plan is `docs/ARCHITECTURE.md` §3/§4/§6/§10.
 - `shop` — `ShopCatalog` + `OwnedEquipment` (money is not here)
 - `ingredients` — prices, owned stock, the definition of "raw"
 - `staff` — `StaffCatalog` + `StaffPools`: crew claims, payday, hire/fire
+- `unlocks` — `UnlockRegistry` from `unlocks.ron`: progression gates, off the tick path
 - `stats` — `ProductionLedger`: made/used over rolling windows (the P screen)
 - `save` — RON snapshot save/load
 - `reference` — `reference_chain`: the shipped layout as a test fixture
