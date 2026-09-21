@@ -970,6 +970,29 @@ new, and both came out of the render rather than the plan (§2b point 12):
   air, because a headless test can prove a fleck was thrown and cannot say
   whether the throw reads as crushing.
 
+The work-clock rule is not only about machines. A belt's rubber is a
+continuous effect too, and it used to run off the *global* simulation tick,
+so a line backed up solid against a full vat drew its surface racing under
+items that had not moved in minutes — the decoration running because the
+belt existed, which is exactly what the rule above forbids (issue #79). The
+fix gives every belt tile its own work clock: `BeltSegment::moved_ticks`
+counts the ticks that tile actually advanced product on, `BeltSnapshot` and
+`SplitterSnapshot` carry it, and the frame is
+`floor(moved_ticks * BELT_FRAMES / BELT_TICKS_PER_TILE) mod BELT_FRAMES`.
+Three consequences worth knowing before changing it:
+
+- **The count belongs to the simulation, not to Godot.** A belt that stops
+  moving stops dirtying its chunk, so the presentation layer is never told
+  "this tile stood still" — it cannot derive the clock, only be handed it.
+- **It is a counter, not a "moving" flag.** A flag would leave the pattern
+  to a global phase, and the rubber would jump a fraction of a tile at the
+  moment a jam cleared. A counter resumes on the phase it stopped on, and
+  the pattern crosses a tile in exactly the ticks an item does.
+- **An empty belt therefore shows no motion at all**, the same way an idle
+  crusher throws no pulp. That is the rule, not an omission: running rubber
+  is the statement "product is moving here", and on an empty belt it is a
+  lie about a belt that could be carrying and is not.
+
 ## 7. Color & readability
 
 - **Base palette is neutral/industrial**: steel greys, concrete, safety

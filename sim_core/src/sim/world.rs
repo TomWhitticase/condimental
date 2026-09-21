@@ -785,7 +785,7 @@ pub struct ChunkSnapshot {
 ///
 /// ```json
 /// { "tile": [3, 0], "direction": "east",
-///   "items": [["tomato", 0.62]] }
+///   "items": [["tomato", 0.62]], "moved_ticks": 418 }
 /// ```
 ///
 /// **This shape is a breaking change from the pre-placement one**, which was
@@ -806,6 +806,14 @@ pub struct BeltSnapshot {
     pub tile: TileCoord,
     pub direction: Direction,
     pub items: Vec<(ItemId, f64)>,
+    /// How many ticks this tile has actually advanced product on
+    /// (`BeltSegment::moved_ticks`) — the clock the renderer runs the
+    /// belt's surface pattern from, so a jammed tile's rubber stops with
+    /// the items on it (issue #79). It is a COUNTER and not a flag because
+    /// a delta only carries the belts that moved: a tile missing from a
+    /// delta is a tile that stood still, and the last count it sent is
+    /// still exactly where its pattern should be.
+    pub moved_ticks: u64,
 }
 
 /// One conveyor splitter (Epic B), for rendering.
@@ -815,7 +823,7 @@ pub struct BeltSnapshot {
 /// ```json
 /// { "tile": [6, 0], "kind": "splitter", "direction": "east",
 ///   "footprint": { "width_tiles": 1, "height_tiles": 1 },
-///   "items": [["tomato", 0.44]],
+///   "items": [["tomato", 0.44]], "moved_ticks": 418,
 ///   "outputs": [[7, 0], [6, -1]],
 ///   "next_output": "straight" }
 /// ```
@@ -844,6 +852,11 @@ pub struct SplitterSnapshot {
     pub direction: Direction,
     pub footprint: Footprint,
     pub items: Vec<(ItemId, f64)>,
+    /// Exactly [`BeltSnapshot::moved_ticks`]: a splitter carries its items
+    /// in an ordinary one-tile belt segment and is drawn as one frame, but
+    /// it still reports its own clock so the two kinds' wire shapes stay
+    /// interchangeable.
+    pub moved_ticks: u64,
     pub outputs: [Option<TileCoord>; 2],
     pub next_output: Side,
 }
@@ -4599,6 +4612,7 @@ impl World {
                 .into_iter()
                 .map(|(item, pos)| (item, pos.to_num::<f64>()))
                 .collect(),
+            moved_ticks: segment.moved_ticks(),
         }
     }
 
@@ -4615,6 +4629,7 @@ impl World {
                 .into_iter()
                 .map(|(item, pos)| (item, pos.to_num::<f64>()))
                 .collect(),
+            moved_ticks: segment.moved_ticks(),
             outputs: self.splitter_output_tiles(splitter),
             next_output: self
                 .ecs

@@ -381,6 +381,16 @@ impl SavedBody {
 pub struct SavedBelt {
     pub items: Vec<(ItemId, FxBits)>,
     pub frontier: u32,
+    /// The tile's surface clock (`BeltSegment::moved_ticks`) — how many
+    /// ticks this belt has actually advanced product on. Presentation
+    /// state, saved so a loaded factory's rubber stands where the saved
+    /// one's did rather than snapping to a fresh phase under the same
+    /// items. `#[serde(default)]` and added to `schema_version` 2 rather
+    /// than bumping it, like `SavedHopper::auto_fill` and
+    /// `SavedMachine::load`: a save without it loads at phase 0, which is
+    /// where a freshly placed belt starts.
+    #[serde(default)]
+    pub moved_ticks: u64,
 }
 
 /// A splitter carries a belt tile's worth of product plus the one thing a
@@ -1023,6 +1033,7 @@ fn saved_belt(world: &World, entity: hecs::Entity) -> SavedBelt {
             .map(|(item, position)| (item, FxBits::of(position)))
             .collect(),
         frontier: belt.frontier() as u32,
+        moved_ticks: belt.moved_ticks(),
     }
 }
 
@@ -1545,7 +1556,13 @@ fn restore_belt(world: &mut World, entity: hecs::Entity, saved: &SavedBelt) {
         .ecs_mut()
         .insert_one(
             entity,
-            BeltSegment::restore(length, min_spacing, &positions, saved.frontier as usize),
+            BeltSegment::restore(
+                length,
+                min_spacing,
+                &positions,
+                saved.frontier as usize,
+                saved.moved_ticks,
+            ),
         )
         .expect("the entity was just placed");
 }
@@ -1893,6 +1910,7 @@ mod tests {
             body: SavedBody::Belt(SavedBelt {
                 items: Vec::new(),
                 frontier: 0,
+                moved_ticks: 0,
             }),
         });
         let message = refusal(data);
@@ -1911,6 +1929,7 @@ mod tests {
         belt.body = SavedBody::Belt(SavedBelt {
             items: vec![("brine".to_string(), FxBits::of(Fx::from_num(0.5)))],
             frontier: 0,
+            moved_ticks: 0,
         });
         let message = refusal(data);
         assert!(message.contains("'brine'"), "{message}");

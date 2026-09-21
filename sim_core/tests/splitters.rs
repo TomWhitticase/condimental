@@ -545,6 +545,7 @@ fn the_splitter_wire_form_has_the_documented_shape() {
             "footprint",
             "items",
             "kind",
+            "moved_ticks",
             "next_output",
             "outputs",
             "tile",

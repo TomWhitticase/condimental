@@ -76,6 +76,24 @@ pub struct BeltSegment {
     /// `0..=frontier+1` instead of the whole belt — the actual FFF #176
     /// payoff, not just the storage shape.
     frontier: usize,
+    /// How many ticks this tile has actually advanced product on, since it
+    /// was placed — the tile's own clock, incremented by `tick_toward`
+    /// exactly when it reports movement.
+    ///
+    /// This is the one piece of belt state that exists for the RENDERER
+    /// (`BeltSnapshot::moved_ticks`), and it is here rather than in Godot
+    /// because Godot cannot compute it: a belt that stops moving stops
+    /// dirtying its chunk, so the presentation layer is never told "this
+    /// tile stood still". Drive the surface pattern from the global tick
+    /// instead and a completely jammed belt runs its rubber forever while
+    /// the items on it sit still — which is a decoration contradicting the
+    /// simulation, exactly what UI_UX.md §6a forbids (issue #79).
+    ///
+    /// A counter rather than a flag, because the rubber must not JUMP when
+    /// a line unjams: the frame is `floor(moved_ticks * FRAMES /
+    /// TICKS_PER_TILE) mod FRAMES`, so the pattern crosses a tile in
+    /// exactly the ticks an item does and simply pauses in between.
+    moved_ticks: u64,
 }
 
 impl BeltSegment {
@@ -85,6 +103,7 @@ impl BeltSegment {
             min_spacing,
             items: VecDeque::new(),
             frontier: 0,
+            moved_ticks: 0,
         }
     }
 
@@ -153,6 +172,13 @@ impl BeltSegment {
             }
         }
         self.frontier = last_moved;
+        if moved {
+            // The tile's own surface clock (see `moved_ticks`). Saturating
+            // rather than wrapping: at 30 Hz a `u64` outlives the universe,
+            // and a wrap would make the rubber jump once in the one run
+            // long enough to see it.
+            self.moved_ticks = self.moved_ticks.saturating_add(1);
+        }
         moved
     }
 
@@ -240,6 +266,13 @@ impl BeltSegment {
         self.frontier
     }
 
+    /// The tile's own surface clock — see the `moved_ticks` field. Read by
+    /// the belt and splitter snapshots, and saved so a loaded factory's
+    /// rubber stands exactly where the saved one's did.
+    pub(crate) fn moved_ticks(&self) -> u64 {
+        self.moved_ticks
+    }
+
     /// Rebuilds a belt from what [`Self::snapshot_positions`] reported, for
     /// the save/load module and nothing else (`sim::save`).
     ///
@@ -263,6 +296,7 @@ impl BeltSegment {
         min_spacing: Fx,
         positions: &[(ItemId, Fx)],
         frontier: usize,
+        moved_ticks: u64,
     ) -> Self {
         let mut items: VecDeque<BeltItem> = VecDeque::with_capacity(positions.len());
         for (index, (item, position)) in positions.iter().enumerate() {
@@ -285,6 +319,7 @@ impl BeltSegment {
             min_spacing,
             items,
             frontier,
+            moved_ticks,
         }
     }
 
@@ -384,10 +419,16 @@ mod tests {
 
         let positions = belt.snapshot_positions();
         assert_eq!(positions.len(), 3);
-        let restored =
-            BeltSegment::restore(belt.length, belt.min_spacing, &positions, belt.frontier());
+        let restored = BeltSegment::restore(
+            belt.length,
+            belt.min_spacing,
+            &positions,
+            belt.frontier(),
+            belt.moved_ticks(),
+        );
         assert_eq!(restored.snapshot_positions(), positions);
         assert_eq!(restored.frontier(), belt.frontier());
+        assert_eq!(restored.moved_ticks(), belt.moved_ticks());
 
         // ...and it must keep behaving identically, not just read the same.
         let mut original = belt;
@@ -401,7 +442,7 @@ mod tests {
     /// An empty belt round-trips too — the case a freshly placed tile is in.
     #[test]
     fn restoring_an_empty_belt_yields_an_empty_belt() {
-        let belt = BeltSegment::restore(fx(1.0), fx(SPACING), &[], 0);
+        let belt = BeltSegment::restore(fx(1.0), fx(SPACING), &[], 0, 0);
         assert!(belt.is_empty());
         assert_eq!(belt.snapshot_positions(), Vec::new());
     }
