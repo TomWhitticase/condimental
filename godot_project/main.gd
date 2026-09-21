@@ -70,11 +70,13 @@ extends Node3D
 ## one mesh per material class, so steel can be shinier than concrete and
 ## status lamps can actually emit — UI_UX.md §4's explicit metal exception.
 ##
-## Two view modes, toggled with TAB: ISOMETRIC (this doc's §1 fixed
+## Two view modes, toggled with TAB: ISOMETRIC (UI_UX.md §1's fixed
 ## orthographic camera, pan/zoom only) and FIRST_PERSON (a free-look
-## perspective "walk" camera, not part of UI_UX.md — this project has no
-## player entity or collision geometry, so it's a fly-cam: no gravity, no
-## walls stop you). Both modes reuse the same single `Camera3D` node,
+## perspective "walk" camera — this project has no player entity or collision
+## geometry, so it's a fly-cam: no gravity, no walls stop you). **A session
+## OPENS in first person** (`DEFAULT_VIEW_MODE`, 2026-09-21); the isometric
+## view is a TAB away and stays the view the game is laid out and art-
+## directed from. Both modes reuse the same single `Camera3D` node,
 ## switching its projection/position/orientation rather than swapping nodes,
 ## so "exactly one Camera3D" stays true regardless of mode.
 ##
@@ -1879,6 +1881,17 @@ const HOVER_METER_WIDTH := 170.0 * UI_SCALE
 var _crosshair: Control # visible only in FIRST_PERSON — see _set_view_mode
 
 enum ViewMode { ISOMETRIC, FIRST_PERSON }
+## The view a session OPENS in — first person, since 2026-09-21. The factory
+## is voxel art at a human scale and the hall is a real place to stand in; the
+## isometric view is where you lay a line out, which is the second thing a
+## player does, not the first. TAB still swaps the two either way, and
+## nothing else in the scene branches on which one came first.
+##
+## `_ready` applies this by calling `_set_view_mode` once the HUD exists, and
+## that call is a deliberate no-op when this IS `ISOMETRIC` — `_build_camera`
+## has already configured the camera that way, which is why `_view_mode`
+## below starts as the isometric view rather than as this constant.
+const DEFAULT_VIEW_MODE := ViewMode.FIRST_PERSON
 var _view_mode: int = ViewMode.ISOMETRIC
 ## The hall's environment, kept because the two view modes want different
 ## BACKDROPS out of it — see `_apply_backdrop_mode`.
@@ -1939,6 +1952,18 @@ func _ready() -> void:
 		music.start()
 	_build_ui()
 	_build_ghost_layer()
+	# The view the game OPENS in (see DEFAULT_VIEW_MODE). After `_build_ui`
+	# because `_set_view_mode` shows the crosshair and rewrites the help
+	# legend, and neither exists before the HUD is built.
+	#
+	# The mode is restated first because `_build_camera` above has just left
+	# the camera isometric, and `_set_view_mode` early-returns on a mode it
+	# believes it is already in. Several headless tests call `_ready()` a
+	# second time on the same node; without this the second call would skip
+	# over the crosshair and legend `_build_ui` had just rebuilt, leaving the
+	# new HUD dressed for the view the scene is not in.
+	_view_mode = ViewMode.ISOMETRIC
+	_set_view_mode(DEFAULT_VIEW_MODE)
 	_refresh_owned_counts()
 	_update_contract_panel() # fill in real text/sizing before the first frame draws
 	_update_fluid_network() # show tick 0's fluid levels, not an empty pipe run

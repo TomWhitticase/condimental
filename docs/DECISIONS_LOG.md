@@ -18,6 +18,16 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-21 **A session opens in FIRST PERSON; isometric is a TAB away.**
+  `main.gd`'s `DEFAULT_VIEW_MODE` is the one place that says so, applied by
+  `_ready` through `_set_view_mode` *after* `_build_ui` (the crosshair and
+  the legend must exist first). The isometric camera is unchanged and still
+  fixed — UI_UX.md §1 governs the angle, not which view the game opens in —
+  and nothing else in the scene branches on which mode came first.
+  `test_screenshot.gd` deliberately does NOT follow this: a review shot is
+  isometric unless `--first-person`, because `--closeup`, `--zoom`, `--pan`
+  and every `--hover*` are isometric ideas and would otherwise be aimed at a
+  camera they cannot steer. Full record in `docs/DECISIONS.md`.
 - 2026-09-21 **The one wall-clock assertion in the gate is scaled by how
   loaded the machine is, measured in the same process.** (Issue #146.)
   `test_perf.gd` is the only test that asserts a time rather than an outcome,

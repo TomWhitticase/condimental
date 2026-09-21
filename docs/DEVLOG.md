@@ -197,6 +197,21 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — The game opens in first person
+
+The view a session starts in is first person now, not isometric: you arrive
+standing in the hall the sky shader draws, among machines built at a human
+scale, and TAB takes you up to the isometric view to lay a line out. One
+constant says so (`main.gd`'s `DEFAULT_VIEW_MODE`), applied by `_ready` after
+the HUD exists — the crosshair, the legend and the mouse capture all come
+with the mode. Neither camera changed, and the isometric one is still the
+fixed angle UI_UX.md §1 specifies.
+
+`scripts/screenshot-scene.sh` deliberately does not follow the new default:
+its framing flags (`--closeup`, `--zoom`, `--pan`, every `--hover*`) all
+steer the isometric camera, so a review shot stays isometric unless
+`--first-person` asks otherwise. Reasoning in `docs/DECISIONS.md`.
+
 ### 2026-09-21 — The perf gate stops failing on the neighbours (issue #146)
 
 `test_perf.gd` is the only test in the suite that asserts a wall clock, and

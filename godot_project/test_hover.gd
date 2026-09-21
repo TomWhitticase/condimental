@@ -115,6 +115,10 @@ func _run_checks() -> void:
 	if camera == null:
 		_fail("main._camera was not set by _build_camera()")
 		return
+	# The scene opens in first person (`DEFAULT_VIEW_MODE`), and the isometric
+	# cursor is what the first half of this test is about — so TAB to it. The
+	# FIRST_PERSON half below switches back and aims the camera itself.
+	main._set_view_mode(main.ViewMode.ISOMETRIC)
 	if main._placements.is_empty():
 		_fail("the demo line produced no placements — nothing to hover")
 		return
