@@ -25,6 +25,107 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-21: **Settings are presentation; a cheat that moves money is a
+  real simulation command; F3 is ungated in pre-alpha.** (Owner asked for a
+  settings menu and a development cheat panel; the four shape questions —
+  which extra knobs, which hosts, how the tool is gated, which cheats — were
+  put to them and answered.)
+
+  **What the settings are, and where they live.** Eight knobs: music on/off
+  and level, sound effects on/off and level, movement speed, look
+  sensitivity, field of view, hall size. They live in a `Settings` autoload
+  and in `user://settings.cfg`, written with `ConfigFile`. They are **not**
+  in `sim_core` and **not** in the save format. The reason is the save
+  format's own rule: a save is a full RON state snapshot with a
+  `schema_version` that is *rejected, never migrated*. Putting a volume
+  slider in it would mean a preference change could invalidate a save, and a
+  save carried to another machine would bring that machine's field of view
+  with it. A preference is about the person at the keyboard, not about the
+  factory.
+
+  This is also what lets the two audio autoloads stay the only things that
+  know about sound: the panel writes `Music.volume` and `FactoryAudio.volume`
+  and nothing else in the HUD learns a second way to be quiet. It settles the
+  note `main.gd`'s `_toggle_sound` had carried since the pause menu grew
+  SOUND and MUSIC buttons — *"a persisted audio setting belongs with the rest
+  of a settings screen this project does not have yet, not smuggled into the
+  save format"*. Those two buttons are gone from the pause menu now; they are
+  rows of this screen, and the tests press the rows.
+
+  **One panel, two hosts.** `settings_panel.gd` builds the rows and both
+  `main.gd` and `menu.gd` host them, each swapping them in place of its own
+  button column — the shape the menu's Load Game view and the pause menu's
+  quit confirmation already have. A second plate over the first would be two
+  things to dismiss, and two copies of the rows would be a knob that exists
+  in one place and not the other. The panel takes `ui_scale` and `font_base`
+  as **arguments** rather than preloading `main.gd` for them: `main.gd`
+  preloads the panel, and a preload cycle does not load. For the same reason
+  it restates `_button`'s styling and the whole-row snapping instead of
+  sharing them.
+
+  **The knobs are steppers, not sliders.** A drag cannot be asserted in a
+  headless test, the repo contains no slider to match, and each of these is a
+  short list of sensible values. Every value is formatted rather than shown
+  bare (`100%`, `×1.25`, `75°`), and the fill bar under a stepper is
+  deliberately **not** `_build_meter`'s language: that bar means "the sim
+  defines this ceiling", and no part of the simulation has an opinion about
+  the field of view.
+
+  **A headless run must not read or write the developer's file.** Every
+  existing headless test instantiates `main.tscn`, so a developer who had set
+  movement speed to ×3 would have failed `test_camera_nav.gd` on their
+  machine alone. `Settings.persist_enabled` is false under
+  `DisplayServer.get_name() == "headless"`, decided in the **member
+  initializer** and not in `_ready`: an autoload's `_ready` has not run when
+  a `--script` test's `_initialize()` does, so a flag set there reads as its
+  declared value at exactly the moment the test needs it. `test_settings.gd`
+  is the one place that turns persistence back on, around a backup of the
+  real file that every exit path restores. `test_screenshot.gd` forces the
+  defaults for the same reason from the other side — it is the one check in
+  the project with a real display, and a review frame rendered at whatever
+  FOV happens to be in one developer's config is not evidence. `--set
+  key=value` is how a frame of what a knob *does* gets taken.
+
+  **Granting money is not presentation.** Money is simulation state: spent
+  through `try_spend`, written by `save.rs`, read by every panel off one
+  counter. A grant Godot kept to itself would mean a balance the sim
+  disagrees with and a save that forgets the money. So it is
+  `PlayerCommand::DebugGrantMoney { amount: Money }` over the real JSON wire,
+  with an `i64` DTO (no `f64` anywhere near it), refused at `amount <= 0`
+  leaving the world byte-identical, dirtying no chunk because money is not a
+  tile. Named `Debug…` so the enum says which of its arms is a cheat. There
+  is no negative grant: taking money away would need a rule about what
+  happens below zero that `Economy` deliberately does not have.
+
+  **Time speed is presentation.** Nothing in `sim_core` knows what a second
+  is — the tick is the only clock — so the speed lives in
+  `_advance_simulation`, which scales the tick interval *and* raises the
+  `MAX_TICKS_PER_FRAME` catch-up budget in proportion, so the clamp keeps
+  meaning "one slow frame must not fast-forward the factory" instead of
+  silently capping ×10 at whatever the frame rate allows. FROZEN is **not
+  PAUSED**: no ticks, but the panels, the camera and the animations keep
+  running, which is what makes it useful for looking at something. STEP
+  spends exactly one tick, on the next frame. The panel states that in-game
+  clocks still read in the simulation's seconds, because at ×10 a "40s" load
+  window really is four seconds of sitting there.
+
+  **F3 is ungated.** Not behind `OS.is_debug_build()`: this is pre-alpha,
+  the owner is the only player, and a review screenshot should show what an
+  export does. It is **not a modal** — not one of the five E/M/C/H/P panels,
+  so ESC does not take it, it closes nothing and pauses nothing, and the
+  factory keeps running behind it, which is the entire point of watching a
+  cheat land. It does join `_fp_mouse_free()`, because it is covered in
+  buttons and a captured mouse cannot press one.
+
+  **Hall size is three shader uniforms, not five.** `hall_half_width`,
+  `roof_height` and `bay_pitch` scale together so the room keeps its
+  proportions; `floor_drop` stays put (the slab is one eye-height under the
+  camera whatever the room does) and `haze_density` stays put (a bigger room
+  already reads hazier because there is more of it to cross). The stepped
+  knob is also why this is affordable: each press is one radiance re-bake,
+  and a dragged slider would have been one per frame. The title screen takes
+  the same scale, so the row changes the room behind the menu as it is
+  pressed.
 - 2026-09-21: **A review verdict is a COMMENT whose first line is exactly
   `VERDICT: APPROVED` or `VERDICT: CHANGES REQUESTED`.** (Issue #124.)
 

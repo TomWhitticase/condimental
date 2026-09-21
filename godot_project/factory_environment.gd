@@ -37,6 +37,27 @@ const HAZE_DENSITY := 0.0052
 ## of them look like it is standing somewhere specific.
 const TITLE_HAZE_DENSITY := 0.0
 
+## How big the hall is, at HALL SIZE x1.00 — the shader's own defaults, moved
+## up here because the settings screen can now scale them.
+##
+## They were literals inside `factory_interior_sky.gdshader` and `build_into`
+## never set them, which was fine while nothing could change them and is not
+## fine now: a uniform's default and a scale applied on top of it are two
+## sources for one number, and the first time somebody tuned the shader the
+## slider would have been multiplying something else. `build_into` states all
+## three explicitly, so GDScript owns them and the shader's defaults are only
+## what the editor's material preview shows.
+##
+## **Three, not five.** `floor_drop` stays put — the slab is about one
+## eye-height under the camera and that is a relationship to the PLAYER, not
+## to the room, so a bigger hall must not drop the floor away. `haze_density`
+## stays put too: haze is measured per unit of distance, so a hall twice as
+## deep already reads hazier at the far wall without touching it, which is
+## exactly how air works.
+const HALL_HALF_WIDTH := 132.0 # wall distance: ~41 tiles each way
+const HALL_ROOF_HEIGHT := 26.0 # underside of the roof deck
+const HALL_BAY_PITCH := 26.0   # structural bay: one truss, one column
+
 
 ## UI_UX.md §4: real-time dynamic lighting with soft shadows, light ambient
 ## occlusion in voxel crevices, and mild bloom on emissives — the
@@ -60,7 +81,9 @@ const TITLE_HAZE_DENSITY := 0.0
 ##
 ## Colours below are palette.ron's, by name, so the backdrop is made of the
 ## same industrial greys as the voxel models standing in front of it.
-static func build_into(parent: Node, haze_density: float = HAZE_DENSITY) -> WorldEnvironment:
+static func build_into(
+	parent: Node, haze_density: float = HAZE_DENSITY, hall_scale: float = 1.0
+) -> WorldEnvironment:
 	var sky_material := ShaderMaterial.new()
 	sky_material.shader = preload("res://factory_interior_sky.gdshader")
 	sky_material.set_shader_parameter("deck_color", Color("#3A3C40"))      # painted deck, below steel_dark
@@ -77,6 +100,7 @@ static func build_into(parent: Node, haze_density: float = HAZE_DENSITY) -> Worl
 	# haze tints the ambient, and the concrete floor then photographs beige.
 	sky_material.set_shader_parameter("haze_color", HAZE_COLOR)
 	sky_material.set_shader_parameter("haze_density", haze_density)
+	_write_hall_scale(sky_material, hall_scale)
 
 	var sky := Sky.new()
 	sky.sky_material = sky_material
@@ -299,3 +323,31 @@ static func set_backdrop_for(env: Environment, first_person: bool) -> void:
 	else:
 		env.background_mode = Environment.BG_COLOR
 		env.background_color = HAZE_COLOR
+
+
+## Re-sizes the hall on a live environment — the HALL SIZE row of the
+## settings screen, applied without rebuilding anything. `set_backdrop_for`'s
+## twin: the one place that decides, called by everyone who needs it.
+##
+## The sky is a shader, so a bigger hall costs nothing to draw; what it does
+## cost is one radiance re-bake, because `build_into` asks for
+## `PROCESS_MODE_QUALITY` (nothing in the shader animates, so a full bake once
+## beats an incremental one dripping in over the first frames of a screenshot
+## run). That is why this is a *stepped* setting and not a dragged slider:
+## eight presses of `+` are eight bakes, a drag would be one per frame.
+static func set_hall_scale(env: Environment, hall_scale: float) -> void:
+	if env == null or env.sky == null:
+		return
+	var material := env.sky.sky_material
+	if material is ShaderMaterial:
+		_write_hall_scale(material as ShaderMaterial, hall_scale)
+
+
+## The three uniforms, scaled together so the hall keeps its proportions —
+## a room twice as wide with the same roof on it is a corridor, not a bigger
+## factory. See the `HALL_*` consts for which two are deliberately left out.
+static func _write_hall_scale(material: ShaderMaterial, hall_scale: float) -> void:
+	var scale: float = maxf(0.05, hall_scale)
+	material.set_shader_parameter("hall_half_width", HALL_HALF_WIDTH * scale)
+	material.set_shader_parameter("roof_height", HALL_ROOF_HEIGHT * scale)
+	material.set_shader_parameter("bay_pitch", HALL_BAY_PITCH * scale)

@@ -113,6 +113,7 @@ const BACKGROUND_PLANT := [
 
 var _assets := VoxelAssets.new()
 var _camera: Camera3D
+var _world_env: WorldEnvironment
 ## Seconds since the screen came up, which is all the camera's drift is a
 ## function of. Wall time, not a tick count: there is no simulation on this
 ## screen to borrow a clock from, and nothing here is reproduced from a save.
@@ -131,7 +132,15 @@ func _ready() -> void:
 	_assets.load_materials()
 	# Clear air, unlike the game: see `TITLE_HAZE_DENSITY`. A poster wants the
 	# hall's roof and far wall crisp behind the chain, not washed grey.
-	FactoryEnvironment.build_into(self, FactoryEnvironment.TITLE_HAZE_DENSITY)
+	# HALL SIZE applies here too, so a player dragging that row on the menu
+	# watches the room behind the menu change rather than having to start a
+	# game to find out what they just set.
+	_world_env = FactoryEnvironment.build_into(
+		self, FactoryEnvironment.TITLE_HAZE_DENSITY, _hall_scale()
+	)
+	var settings := _settings_node()
+	if settings != null and not settings.changed.is_connected(_apply_hall_scale):
+		settings.changed.connect(_apply_hall_scale)
 	_build_floor()
 	_build_models()
 	_build_camera()
@@ -272,3 +281,30 @@ func _placed(asset: String, tx: int, tz: int, quarter_turns: int, height: float)
 
 func _tile_centre(tx: int, tz: int, height: float) -> Vector3:
 	return Vector3(float(tx) * TILE, height, float(tz) * TILE)
+
+
+## The hall size the menu's backdrop is drawn at. Falls back to x1.00 with no
+## `Settings` autoload — the poster is art, and art with no settings file
+## behind it is still a poster.
+func _hall_scale() -> float:
+	var settings := _settings_node()
+	return 1.0 if settings == null else float(settings.hall_scale)
+
+
+## Re-sizes the room behind the menu when the HALL SIZE row moves. One
+## argument-free listener because `Settings.changed` carries no key: every
+## listener re-reads what it cares about (see `settings.gd`).
+func _apply_hall_scale() -> void:
+	if _world_env == null:
+		return
+	FactoryEnvironment.set_hall_scale(_world_env.environment, _hall_scale())
+
+
+## The `Settings` autoload, or null. Looked up off the tree root for the
+## reason `settings.gd::music_node` documents.
+func _settings_node() -> Node:
+	var loop := Engine.get_main_loop()
+	if not (loop is SceneTree):
+		return null
+	var tree_root: Node = (loop as SceneTree).root
+	return tree_root.get_node_or_null("Settings") if tree_root != null else null

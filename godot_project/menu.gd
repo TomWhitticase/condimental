@@ -25,6 +25,9 @@ extends Control
 
 const GameSaves = preload("res://game_session.gd")
 const TitleScene = preload("res://title_scene.gd")
+## The settings rows, shared with the pause menu's copy of this screen so the
+## two cannot drift a row apart — see `settings_panel.gd`.
+const SettingsPanelScript = preload("res://settings_panel.gd")
 
 # --- Plate palette, shared with main.gd's HUD ------------------------------
 ## Deliberately the same three colours `main.gd` builds every panel from, so
@@ -167,14 +170,19 @@ var _save_rows_box: VBoxContainer
 var _save_rows: Array = [] # Array[Dictionary]: the rows `list_saves` returned
 var _empty_label: Label
 var _error_label: Label
+var _settings_box: VBoxContainer
+var _settings_panel: RefCounted
 var _new_game_button: Button
 var _load_button: Button
+var _settings_button: Button
 var _quit_button: Button
 var _back_button: Button
 ## Which half of the menu is showing. The load list replaces the three
 ## buttons rather than opening beside them: this is one panel, and a modal
 ## list over a modal menu is two things to close.
 var _load_open := false
+## The settings screen, which replaces the buttons for the same reason.
+var _settings_open := false
 
 
 func _ready() -> void:
@@ -286,11 +294,16 @@ func _build_panel() -> void:
 	_load_button.pressed.connect(_on_load_pressed)
 	_button_box.add_child(_load_button)
 
+	_settings_button = _menu_button("SettingsButton", "SETTINGS")
+	_settings_button.pressed.connect(_on_settings_pressed)
+	_button_box.add_child(_settings_button)
+
 	_quit_button = _menu_button("QuitButton", "QUIT")
 	_quit_button.pressed.connect(_on_quit_pressed)
 	_button_box.add_child(_quit_button)
 
 	_build_load_view()
+	_build_settings_view()
 
 	# The error line lives OUTSIDE the load view, at the bottom of the panel,
 	# because it has to survive the view it was produced in: a refused load
@@ -433,6 +446,41 @@ func _build_load_view() -> void:
 	_load_box.add_child(_back_button)
 
 
+## The settings screen, built by the same script the pause menu uses. Built
+## once, at panel time, rather than on the first press: the rows read their
+## values from the `Settings` autoload every time they are shown
+## (`refresh()`), so there is nothing stale to rebuild, and a menu that pauses
+## for a moment the first time a button is pressed is a menu that feels
+## broken.
+func _build_settings_view() -> void:
+	_settings_panel = SettingsPanelScript.new()
+	_settings_box = _settings_panel.build(
+		_settings_node(), UI_SCALE, BASE_FONT_SIZE, _settings_rows_budget(), _on_back_pressed
+	)
+	_settings_box.visible = false
+	_root_box.add_child(_settings_box)
+
+
+## What is left for the settings rows once the wordmark, the plate's own
+## padding and the screen margins have had theirs — `settings_panel.gd`'s
+## `fit()` argument, and its fallback for a menu that is not in a tree.
+##
+## NOT `_list_height_budget`, which takes off the LOAD view's chrome and a
+## save list that is not zeroed while this is being asked: sharing it showed
+## one row of eight under a plate with room for four.
+func _settings_rows_budget() -> float:
+	if not is_inside_tree():
+		return SAVE_LIST_MAX_HEIGHT
+	# The rest of the settings column — heading, note, two rules and the
+	# RESET/BACK footer — comes off the budget too. The panel measures its
+	# own; the flat fallback is for the moment before it has been built, when
+	# nothing is on screen for the number to be wrong about yet.
+	var chrome := _px(150.0)
+	if _settings_panel != null and _settings_panel.root != null:
+		chrome = _settings_panel.chrome_height()
+	return maxf(SAVE_LIST_MIN_HEIGHT, _panel_height_budget() - chrome)
+
+
 # --------------------------------------------------------------------------
 # Widgets
 # --------------------------------------------------------------------------
@@ -537,6 +585,20 @@ func _apply_list_height() -> void:
 ## BACK clean off the bottom edge — a frame nobody had rendered since the
 ## column was rearranged (UI_UX.md §2b point 12).
 func _list_height_budget() -> float:
+	var budget := _panel_height_budget()
+	if _load_box != null:
+		# The heading, the rule and BACK — the list itself is zeroed by the
+		# caller before this is read.
+		budget -= _load_box.get_combined_minimum_size().y
+	return budget
+
+
+## What the plate itself may take: the window, less the screen margins, the
+## plate's own padding and everything standing above it. Both scrolling views
+## start here and then take off whatever chrome of their own they carry — the
+## save list its heading and BACK (`_list_height_budget`), the settings rows
+## theirs (`_settings_rows_budget`).
+func _panel_height_budget() -> float:
 	if not is_inside_tree():
 		# No window to measure against (the headless tests build the menu
 		# outside a tree); the flat cap is the honest answer.
@@ -550,10 +612,6 @@ func _list_height_budget() -> float:
 			# Everything standing above the plate: the wordmark and its strap.
 			if child is Control and child.name != "MenuPanel":
 				used += (child as Control).get_combined_minimum_size().y + separation
-	if _load_box != null:
-		# The heading, the rule and BACK — the list itself is zeroed by the
-		# caller before this is read.
-		used += _load_box.get_combined_minimum_size().y
 	return float(get_viewport_rect().size.y) - used
 
 
@@ -594,6 +652,18 @@ func _session() -> Node:
 	return tree_root.get_node_or_null("GameSession") if tree_root != null else null
 
 
+## The `Settings` autoload, or null — reached through the root for
+## `_session()`'s reason. The settings view tolerates a null (it simply has
+## nothing to show), which is what a headless test that never registered the
+## autoloads gets.
+func _settings_node() -> Node:
+	var loop := Engine.get_main_loop()
+	if not (loop is SceneTree):
+		return null
+	var tree_root: Node = (loop as SceneTree).root
+	return tree_root.get_node_or_null("Settings") if tree_root != null else null
+
+
 func _show_error(text: String) -> void:
 	if _error_label == null:
 		return
@@ -614,21 +684,50 @@ func _on_load_pressed() -> void:
 	_set_load_open(true)
 
 
+func _on_settings_pressed() -> void:
+	_show_error("")
+	_set_settings_open(true)
+
+
+## BACK, from either view. One button's worth of behaviour for both, because
+## there is only ever one view over the buttons and "back" means the same
+## thing in each: the three buttons again.
 func _on_back_pressed() -> void:
 	_show_error("")
 	_set_load_open(false)
+	_set_settings_open(false)
 
 
 func _set_load_open(open: bool) -> void:
 	_load_open = open
+	if open:
+		_set_settings_open(false)
 	if _button_box != null:
-		_button_box.visible = not open
+		_button_box.visible = not open and not _settings_open
 	if _load_box != null:
 		_load_box.visible = open
 	# After the swap, not before: `_refresh_saves` sizes the list against the
 	# space the visible load view leaves.
 	if open:
 		_refresh_saves()
+
+
+func _set_settings_open(open: bool) -> void:
+	_settings_open = open
+	if open:
+		_set_load_open(false)
+	if _button_box != null:
+		_button_box.visible = not open and not _load_open
+	if _settings_box != null:
+		_settings_box.visible = open
+	# The rows read the autoload, and the pause menu's copy of this screen
+	# writes the same autoload — so what is shown is re-read on the way in
+	# rather than trusted from the last time this menu was built.
+	if open and _settings_panel != null:
+		_settings_panel.refresh()
+		# And re-measured: `build()` sized the scroll before these rows were in
+		# a tree, and the window may have been resized since.
+		_settings_panel.fit(_settings_rows_budget())
 
 
 func _on_quit_pressed() -> void:

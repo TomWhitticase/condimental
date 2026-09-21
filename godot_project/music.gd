@@ -41,6 +41,14 @@ var ducked := false:
 		ducked = value
 		_apply()
 
+## The player's own level, 0..1, from the settings screen. Rides on top of
+## `VOLUME_DB` and composes with `DUCK_DB` in `_apply` — `audio.gd`'s `volume`
+## and for its reason: the constants are the mix, this is the listener.
+var volume := 1.0:
+	set(value):
+		volume = clampf(value, 0.0, 1.0)
+		_apply()
+
 ## How many times `start()` has been asked for — the headless seam.
 var starts := 0
 
@@ -131,7 +139,13 @@ func _can_play() -> bool:
 func _apply() -> void:
 	if _player == null:
 		return
-	_player.volume_db = VOLUME_DB + (DUCK_DB if ducked else 0.0)
+	# `linear_to_db(0.0)` is `-INF` and must not be added to anything — see
+	# `FactoryAudio.SILENCE_DB`, whose floor this shares so the two channels
+	# agree on what "off" sounds like.
+	if volume <= 0.0:
+		_player.volume_db = FactoryAudio.SILENCE_DB
+	else:
+		_player.volume_db = VOLUME_DB + linear_to_db(volume) + (DUCK_DB if ducked else 0.0)
 	if not enabled and _player.playing:
 		_player.stop()
 	elif enabled and not _player.playing and _stream != null and _can_play():

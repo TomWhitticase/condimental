@@ -90,10 +90,25 @@ const VOLUME_DB := -7.0
 ## rather than as a second event.
 const VOICES := 6
 
-## Whether anything is actually audible. Toggled from the pause menu; the
+## Below this, a level is silence rather than a number. `linear_to_db(0.0)`
+## is `-INF`, and `-INF` arriving at `volume_db` (or being added to
+## `VOLUME_DB`) is not a value the mixer can be trusted with, so the floor is
+## a real decibel figure well under audibility instead.
+const SILENCE_DB := -60.0
+
+## Whether anything is actually audible. Set from the settings screen; the
 ## cues are still generated and `play()` still bookkeeps, so muting can never
 ## change timing or state — only whether a stream is started.
 var enabled := true
+
+## The player's own level, 0..1, riding ON TOP of `VOLUME_DB` rather than
+## replacing it: that constant is the mix decision (effects sit under music),
+## and this is the listener's. At 1.0 the game sounds exactly as it did before
+## there was a slider.
+var volume := 1.0:
+	set(value):
+		volume = clampf(value, 0.0, 1.0)
+		_apply_volume()
 
 var _players: Array[AudioStreamPlayer] = []
 var _next_voice := 0
@@ -124,9 +139,19 @@ func setup(parent: Node) -> void:
 	for i in range(VOICES):
 		var player := AudioStreamPlayer.new()
 		player.name = "sfx_%d" % i
-		player.volume_db = VOLUME_DB
 		parent.add_child(player)
 		_players.append(player)
+	# After the voices exist, so a level set before `setup` (the settings file
+	# is read before the scene builds its audio) is not lost.
+	_apply_volume()
+
+
+## The level every voice runs at. Separate from `play()` so a slider dragged
+## mid-cue moves the sound already playing, rather than only the next one.
+func _apply_volume() -> void:
+	var level: float = SILENCE_DB if volume <= 0.0 else VOLUME_DB + linear_to_db(volume)
+	for player in _players:
+		player.volume_db = level
 
 
 ## Fires one cue. Round-robins the voices so a second payout in the same

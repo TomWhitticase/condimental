@@ -387,19 +387,21 @@ func _initialize() -> void:
 		_fail("the delivery knock is not quieter than the payout chime")
 		return
 
-	# The mute switch says which way it is set, in words (UI_UX.md §7).
-	if main._pause_sound_button == null:
-		_fail("the pause menu has no SOUND switch")
+	# The mute switch says which way it is set, in words (UI_UX.md §7). It is
+	# the SOUND row of the settings screen now, reached from the pause menu.
+	var sound_switch: Button = main._pause_settings_panel.value_controls.get("sfx_enabled")
+	if sound_switch == null:
+		_fail("the settings screen has no SOUND switch")
 		return
-	if main._pause_sound_button.text != "SOUND: ON":
-		_fail("the sound switch starts reading '%s'" % main._pause_sound_button.text)
+	if sound_switch.text != "SOUND: ON":
+		_fail("the sound switch starts reading '%s'" % sound_switch.text)
 		return
-	main._on_pause_sound_pressed()
+	sound_switch.pressed.emit()
 	if main._audio.enabled:
 		_fail("pressing the sound switch did not mute")
 		return
-	if main._pause_sound_button.text != "SOUND: OFF":
-		_fail("a muted game's switch reads '%s'" % main._pause_sound_button.text)
+	if sound_switch.text != "SOUND: OFF":
+		_fail("a muted game's switch reads '%s'" % sound_switch.text)
 		return
 	# Muting must not change bookkeeping, only whether a stream starts.
 	main._audio.plays.clear()
@@ -407,8 +409,8 @@ func _initialize() -> void:
 	if int(main._audio.plays.get(main._audio.PAYOUT, 0)) != 1:
 		_fail("muting stopped play() bookkeeping, so mute can change timing or state")
 		return
-	main._on_pause_sound_pressed()
-	if not main._audio.enabled or main._pause_sound_button.text != "SOUND: ON":
+	sound_switch.pressed.emit()
+	if not main._audio.enabled or sound_switch.text != "SOUND: ON":
 		_fail("the sound switch does not toggle back on")
 		return
 

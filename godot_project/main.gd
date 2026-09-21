@@ -95,6 +95,11 @@ const GameSaves = preload("res://game_session.gd")
 const VoxelAssets = preload("res://voxel_assets.gd")
 ## The hall's light and backdrop, shared with the title screen.
 const FactoryEnvironment = preload("res://factory_environment.gd")
+## The settings rows, shared with the main menu's copy of the same screen
+## (`menu.gd`) so the two cannot drift. It takes `UI_SCALE`/`UI_FONT_BASE` as
+## arguments rather than reading them back out of this file, which is what
+## lets this preload exist at all — see `settings_panel.gd`'s `build`.
+const SettingsPanelScript = preload("res://settings_panel.gd")
 
 # --- Scale ---------------------------------------------------------------
 # UI_UX.md §2 fixes one world tile at 32x32x32 voxels. The .vox importer's
@@ -2033,6 +2038,13 @@ var _pause_slot_field: LineEdit
 var _pause_status: Label
 var _pause_confirm_box: VBoxContainer
 var _pause_buttons_box: VBoxContainer
+## The settings screen, in place of the buttons — `_pause_confirm_box`'s
+## arrangement and for its reason. The pause menu is where the SOUND and MUSIC
+## switches used to live; they are two rows of this now, beside the six other
+## things a player can turn (`settings_panel.gd`).
+var _pause_settings_box: VBoxContainer
+var _pause_settings_panel: RefCounted
+var _pause_settings_open := false
 ## Set while "Quit to Menu" is waiting for its confirm click. Quitting to the
 ## menu throws away everything since the last save, and that is the one thing
 ## in this panel with no undo — so it asks, where Save & Quit (which cannot
@@ -2152,6 +2164,15 @@ func _ready() -> void:
 	# blobs — see that file's header for why.
 	_audio = FactoryAudio.new()
 	_audio.setup(self)
+	# Every preference the player has set, applied to what was just built — and
+	# connected so that a row pressed later lands without anything having to
+	# poll it. Connected once: several headless tests call `_ready()` a second
+	# time on the same node, and a second connection would apply everything
+	# twice per press.
+	var settings := _settings_node()
+	if settings != null and not settings.changed.is_connected(_apply_settings):
+		settings.changed.connect(_apply_settings)
+	_apply_settings()
 	# The score (music.gd). Idempotent: the menu already started it, and a
 	# game entered from the menu must not restart the loop at the cut.
 	var music := _music()
@@ -2261,6 +2282,27 @@ func _music() -> Node:
 		return null
 	var tree_root: Node = (loop as SceneTree).root
 	return tree_root.get_node_or_null("Music") if tree_root != null else null
+
+
+## The `Settings` autoload, or null — found the same way again. Everything
+## that reads a preference goes through here, so the whole scene tolerates its
+## absence by falling back to the shipped defaults rather than crashing.
+func _settings_node() -> Node:
+	var loop := Engine.get_main_loop()
+	if not (loop is SceneTree):
+		return null
+	var tree_root: Node = (loop as SceneTree).root
+	return tree_root.get_node_or_null("Settings") if tree_root != null else null
+
+
+## One preference, or the default the code used before there was a settings
+## screen. `key` is one of `settings.gd`'s `KNOBS`.
+func _setting(key: String, fallback):
+	var settings := _settings_node()
+	if settings == null:
+		return fallback
+	var value = settings.get_value(key)
+	return fallback if value == null else value
 
 
 ## One cue, through `audio.gd`. Null-safe because `_audio` is built in
@@ -4762,7 +4804,11 @@ func _apply_pan(direction: Vector3, delta: float) -> void:
 	# covers the same fraction of the visible view per second whether zoomed
 	# in or out — a flat speed would feel sluggish when zoomed out and
 	# twitchy when zoomed in.
-	_camera_focus += direction.normalized() * PAN_SPEED * _camera_size * delta
+	# The constant is the x1.0 baseline; the player's MOVEMENT SPEED multiplies
+	# it here rather than being folded into it, so the number above stays the
+	# one this camera was tuned at (`settings.gd`).
+	var speed: float = PAN_SPEED * float(_setting("move_speed", 1.0))
+	_camera_focus += direction.normalized() * speed * _camera_size * delta
 	_update_camera_transform()
 
 
@@ -4828,8 +4874,9 @@ func _update_fp_camera_transform() -> void:
 ## Mouse-look, deliberately Input-free (see _apply_pan's equivalent note) so
 ## test_camera_nav.gd can call it directly with a synthetic delta.
 func _apply_look(relative: Vector2) -> void:
-	_fp_yaw -= relative.x * FP_MOUSE_SENSITIVITY
-	_fp_pitch = clampf(_fp_pitch - relative.y * FP_MOUSE_SENSITIVITY, -FP_PITCH_LIMIT, FP_PITCH_LIMIT)
+	var sensitivity: float = FP_MOUSE_SENSITIVITY * float(_setting("look_sensitivity", 1.0))
+	_fp_yaw -= relative.x * sensitivity
+	_fp_pitch = clampf(_fp_pitch - relative.y * sensitivity, -FP_PITCH_LIMIT, FP_PITCH_LIMIT)
 	_update_fp_camera_transform()
 
 
@@ -4861,7 +4908,11 @@ func _fp_input_direction() -> Vector3:
 func _apply_fp_move(direction: Vector3, delta: float) -> void:
 	if direction == Vector3.ZERO:
 		return
-	_fp_position += direction.normalized() * FP_MOVE_SPEED * delta
+	# MOVEMENT SPEED again, the same multiplier the isometric pan takes: one
+	# row on the settings screen moves the player at whichever camera they are
+	# behind.
+	var speed: float = FP_MOVE_SPEED * float(_setting("move_speed", 1.0))
+	_fp_position += direction.normalized() * speed * delta
 	_update_fp_camera_transform()
 
 
@@ -4899,7 +4950,10 @@ func _set_view_mode(mode: int) -> void:
 		_fp_yaw = atan2(-_pan_forward.x, -_pan_forward.z)
 		_fp_pitch = deg_to_rad(-15.0)
 		_camera.projection = Camera3D.PROJECTION_PERSPECTIVE
-		_camera.fov = FP_FOV
+		# The constant is the default the FIELD OF VIEW row starts at; what the
+		# player set is what the camera gets (`_apply_settings` re-applies it
+		# while already in this mode).
+		_camera.fov = float(_setting("field_of_view", FP_FOV))
 		_camera.near = FP_NEAR
 		_camera.keep_aspect = Camera3D.KEEP_HEIGHT
 		# ...unless a panel is up and needs the cursor. This used to check
@@ -4971,7 +5025,12 @@ func _framing_size(basis: Basis) -> float:
 ## the same hall, and a menu lit differently from the game would be the one
 ## screen that does not look like the game.
 func _build_environment() -> void:
-	_world_environment = FactoryEnvironment.build_into(self)
+	# The hall's size is the player's (`settings.gd`'s `hall_scale`), passed in
+	# at build time so the very first frame is already the room they chose
+	# rather than the default one resized a frame later.
+	_world_environment = FactoryEnvironment.build_into(
+		self, FactoryEnvironment.HAZE_DENSITY, float(_setting("hall_scale", 1.0))
+	)
 	_apply_backdrop_mode()
 
 
@@ -5280,12 +5339,15 @@ func _build_ui() -> void:
 	# The way out (the save/main-menu epic's ticket 2). Last, so it draws over
 	# every other panel — it is the one modal that means the game has stopped.
 	_build_pause_menu(hud, settings)
+	# The development tool (F3), after the pause menu so it draws over it: it
+	# is the one panel that is allowed to be up while anything else is, and a
+	# cheat you cannot reach while the game is stopped is half a cheat.
+	_build_debug_menu(hud, settings)
 	# The payout celebration (the "make earning money feel like something"
 	# ticket). Last of all, and its "+N" is the last child of the HUD, so the
 	# one thing that only appears for a second draws over every panel that is
 	# permanently there.
 	_build_payout_feedback(hud)
-	_update_sound_button()
 
 
 ## Folds the keybind legend away, or brings it back. Reached two ways, on
@@ -6792,7 +6854,10 @@ func _set_shop_menu_open(open: bool) -> void:
 ## scene is being torn down for the main menu. The one answer the
 ## first-person mouse capture and the crosshair both read.
 func _fp_mouse_free() -> bool:
-	return _leaving_to_menu or _modal_open() or _config_open or _pause_open
+	# `_debug_open` is here and NOT in `_modal_open`: the debug panel is covered
+	# in buttons, so it needs a cursor, but it is not one of the five panels and
+	# must not inherit their ESC-closes-it or pause-the-world behaviour.
+	return _leaving_to_menu or _modal_open() or _config_open or _pause_open or _debug_open
 
 
 ## Any of the five modal panels (E, M, C, H, P) is up. Build mode is not a
@@ -13752,21 +13817,16 @@ func _build_pause_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	resume.pressed.connect(_on_pause_resume_pressed)
 	_pause_buttons_box.add_child(resume)
 
-	# The game's first sound arrived with the payout celebration, so the first
-	# way to switch it off arrives with it too — on the one screen a player
-	# already opens to change how the session behaves, rather than as a
-	# keybind nobody would find. Its caption says ON or OFF in words rather
-	# than looking pressed, per UI_UX.md §7.
-	_pause_sound_button = _pause_button("SoundButton", "SOUND: ON")
-	_pause_sound_button.pressed.connect(_on_pause_sound_pressed)
-	_pause_buttons_box.add_child(_pause_sound_button)
-
-	# The score's own switch, beside the effects': a player who wants the
-	# clunks and chimes but not the track (or the reverse) can have that.
-	_pause_music_button = _pause_button("MusicButton", "MUSIC: ON")
-	_pause_music_button.pressed.connect(_on_pause_music_pressed)
-	_pause_buttons_box.add_child(_pause_music_button)
-	_update_music_button()
+	# Where the SOUND and MUSIC switches went. Both were buttons on this list
+	# — the game's first sound arrived with the payout celebration and the
+	# first way to switch it off arrived beside it — and both are rows of the
+	# settings screen now, with their volumes, the camera and the hall. This
+	# is the one screen a player already opens to change how the session
+	# behaves, so it is where the door belongs rather than a keybind nobody
+	# would find.
+	var settings_button := _pause_button("SettingsButton", "SETTINGS")
+	settings_button.pressed.connect(_on_pause_settings_pressed)
+	_pause_buttons_box.add_child(settings_button)
 
 	var save_row := HBoxContainer.new()
 	save_row.add_theme_constant_override("separation", _ui_i(8))
@@ -13823,6 +13883,20 @@ func _build_pause_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	cancel.pressed.connect(_on_pause_cancel_quit_pressed)
 	_pause_confirm_box.add_child(cancel)
 
+	# The settings screen, in place of the buttons for the confirm step's
+	# reason. Built here rather than on first press so the rows exist for a
+	# test to reach them — before anything is clicked.
+	_pause_settings_panel = SettingsPanelScript.new()
+	_pause_settings_box = _pause_settings_panel.build(
+		_settings_node(),
+		UI_SCALE,
+		UI_FONT_BASE,
+		_pause_settings_rows_budget(),
+		_on_pause_settings_back_pressed
+	)
+	_pause_settings_box.visible = false
+	body.add_child(_pause_settings_box)
+
 	# What the last action did — a save's file name, or why one was refused.
 	# Its own line inside this panel rather than the hotbar flyout, because
 	# the flyout sits at the bottom of the screen behind this plate.
@@ -13859,6 +13933,429 @@ func _position_pause_menu() -> void:
 	_pause_menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
 
 
+## How much of the window the settings rows may take before they scroll —
+## everything but this plate's own chrome (its title, its note, its margins,
+## and the settings column's heading, rules and footer). Eight rows at 1.5x do
+## not fit a 720-tall window, and a plate taller than the screen puts its BACK
+## button where nobody can click it (UI_UX.md §5c).
+##
+## A flat subtraction rather than a measurement of the nodes: the nodes it
+## would measure are the ones being built when this is first called, and the
+## menu's equivalent (`menu.gd`'s `_settings_rows_budget`) has real children
+## above the plate to measure where this has none.
+func _pause_settings_rows_budget() -> float:
+	var vp := get_viewport() if is_inside_tree() else null
+	if vp == null:
+		# No window to measure (the headless tests build the scene outside a
+		# tree) — no cap, so a test sees every row at its full height.
+		return 0.0
+	return maxf(_ui_px(150.0), vp.get_visible_rect().size.y - _ui_px(280.0))
+
+
+func _on_pause_settings_pressed() -> void:
+	_set_pause_settings(true)
+
+
+func _on_pause_settings_back_pressed() -> void:
+	_set_pause_settings(false)
+
+
+# --------------------------------------------------------------------------
+# The debug menu (F3)
+# --------------------------------------------------------------------------
+# A development tool, not a feature: a way to reach a state worth looking at
+# without playing fifteen minutes to it, and a live readout of what the sim is
+# actually doing while something is being changed.
+#
+# **Not gated on `OS.is_debug_build()`, deliberately** (the owner's call). This
+# is pre-alpha, every screenshot in a PR is rendered from an export-shaped run,
+# and a panel that exists in review and not in the build is a panel nobody
+# checks. It says what it is on its own heading instead.
+#
+# Money is a REAL COMMAND on the real wire (`debug_grant_money`), because money
+# is simulation state and the alternative — a number Godot adds to what it
+# draws — is a balance the sim disagrees with and a save that forgets it. Time
+# speed is the opposite: nothing in `sim_core` knows what a second is (the tick
+# is its only clock), so the speed is entirely this file's business and lives
+# in `_advance_simulation`.
+
+## What the three money buttons grant, in whole currency units.
+const DEBUG_MONEY_GRANTS := [1000, 10000, 100000]
+## The speeds, in order, and the captions for them. 0 is FROZEN — a factory
+## that does not advance while everything else (camera, panels, this readout)
+## keeps running, which is not the same thing as PAUSED.
+const DEBUG_TIME_SCALES := [0.0, 1.0, 2.0, 5.0, 10.0]
+const DEBUG_TIME_LABELS := ["FROZEN", "x1", "x2", "x5", "x10"]
+const DEBUG_PANEL_MIN_WIDTH := 300.0 * UI_SCALE
+const DEBUG_BUTTON_MIN_SIZE := Vector2(88.0, 30.0) * UI_SCALE
+
+var _debug_menu: PanelContainer
+var _debug_open := false
+var _debug_readout: Label
+## One button per entry of `DEBUG_TIME_SCALES`, so the selected speed can be
+## shown as a caption rather than only as a colour (UI_UX.md §7).
+var _debug_speed_buttons: Array = []
+## The factory's clock, as a multiple of `TICK_HZ`. 0 is frozen; 1.0 is the
+## speed every other part of this project assumes and the only one a player
+## who never presses F3 will ever see.
+var _debug_time_scale := 1.0
+## Ticks the STEP button has asked for and `_advance_simulation` has not yet
+## taken. A counter rather than a flag so a fast set of clicks is not lost.
+var _debug_step_pending := 0
+
+
+func _build_debug_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.05, 0.05, 0.08, 0.95)
+	# Not the hazard yellow every in-game plate is edged with: this panel is not
+	# part of the game, and the one thing it must never be mistaken for is a
+	# panel that is.
+	style.border_color = Color(0.38, 0.62, 0.86, 0.95)
+	style.set_border_width_all(_ui_i(2))
+	style.set_content_margin_all(_ui_px(12.0))
+
+	_debug_menu = PanelContainer.new()
+	_debug_menu.name = "DebugMenu"
+	_debug_menu.add_theme_stylebox_override("panel", style)
+	_debug_menu.custom_minimum_size = Vector2(DEBUG_PANEL_MIN_WIDTH, 0.0)
+	_debug_menu.visible = false
+	hud.add_child(_debug_menu)
+
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", _ui_i(8))
+	_debug_menu.add_child(body)
+
+	var heading_settings := LabelSettings.new()
+	heading_settings.font_size = _ui_font(2)
+	heading_settings.font_color = Color(0.62, 0.80, 0.98)
+	heading_settings.outline_size = base_settings.outline_size
+	heading_settings.outline_color = base_settings.outline_color
+
+	var heading := Label.new()
+	heading.name = "DebugHeading"
+	heading.label_settings = heading_settings
+	heading.text = "DEBUG MENU — F3"
+	body.add_child(heading)
+
+	var note_settings := LabelSettings.new()
+	note_settings.font_size = _ui_font(-3)
+	note_settings.font_color = Color(0.66, 0.68, 0.70)
+	note_settings.outline_size = base_settings.outline_size
+	note_settings.outline_color = base_settings.outline_color
+
+	var note := Label.new()
+	note.name = "DebugNote"
+	note.label_settings = note_settings
+	note.text = "a development tool, not part of the game"
+	body.add_child(note)
+
+	body.add_child(_debug_rule())
+
+	# Each section's name sits ON its row rather than over it. This panel has
+	# to fit between the legend and the hotbar — the two fixed plates down its
+	# side of the screen — and a heading of its own per section is three lines
+	# of height spent saying what four words say in the margin.
+	var money_row := HBoxContainer.new()
+	money_row.name = "DebugMoneyRow"
+	money_row.add_theme_constant_override("separation", _ui_i(6))
+	body.add_child(money_row)
+	money_row.add_child(_debug_section_label("GIVE MONEY", base_settings))
+
+	for amount in DEBUG_MONEY_GRANTS:
+		var grant := _debug_button("DebugGrant_%d" % amount, "+%s" % _debug_money_caption(int(amount)))
+		grant.pressed.connect(_on_debug_grant_pressed.bind(int(amount)))
+		money_row.add_child(grant)
+
+	body.add_child(_debug_rule())
+
+	var time_row := HBoxContainer.new()
+	time_row.name = "DebugTimeRow"
+	time_row.add_theme_constant_override("separation", _ui_i(6))
+	body.add_child(time_row)
+	time_row.add_child(_debug_section_label("TIME SPEED", base_settings))
+
+	_debug_speed_buttons = []
+	for index in range(DEBUG_TIME_SCALES.size()):
+		var speed := _debug_button(
+			"DebugSpeed_%d" % index, String(DEBUG_TIME_LABELS[index])
+		)
+		speed.custom_minimum_size = Vector2(_ui_px(56.0), DEBUG_BUTTON_MIN_SIZE.y)
+		speed.pressed.connect(_on_debug_speed_pressed.bind(index))
+		time_row.add_child(speed)
+		_debug_speed_buttons.append(speed)
+
+	var step_row := HBoxContainer.new()
+	step_row.name = "DebugStepRow"
+	step_row.add_theme_constant_override("separation", _ui_i(8))
+	body.add_child(step_row)
+
+	var step := _debug_button("DebugStepButton", "STEP 1 TICK")
+	step.custom_minimum_size = Vector2(DEBUG_PANEL_MIN_WIDTH * 0.4, DEBUG_BUTTON_MIN_SIZE.y)
+	step.pressed.connect(_on_debug_step_pressed)
+	step_row.add_child(step)
+
+	# The clocks elsewhere in this game are in SECONDS (UI_UX.md §7), and they
+	# are the simulation's seconds — ticks over `TICK_HZ`. At x10 a "40s" load
+	# window really is four seconds of sitting there, and this is the line that
+	# says so rather than leaving a player of the next build to wonder why the
+	# numbers lie. Beside STEP because that is the button it is really about.
+	var clock_note := Label.new()
+	clock_note.name = "DebugClockNote"
+	clock_note.label_settings = note_settings
+	clock_note.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	clock_note.text = "in-game clocks still count sim seconds, not real ones"
+	step_row.add_child(clock_note)
+
+	body.add_child(_debug_rule())
+
+	# The live readout. Monospace so a number changing every frame does not make
+	# the whole column jitter sideways as its digits change width.
+	var readout_settings := LabelSettings.new()
+	readout_settings.font_size = _ui_font(-1)
+	readout_settings.font_color = Color(0.92, 0.93, 0.94)
+	readout_settings.outline_size = base_settings.outline_size
+	readout_settings.outline_color = base_settings.outline_color
+
+	_debug_readout = Label.new()
+	_debug_readout.name = "DebugReadout"
+	_debug_readout.label_settings = readout_settings
+	_debug_readout.custom_minimum_size = Vector2(DEBUG_PANEL_MIN_WIDTH, 0.0)
+	_debug_readout.text = ""
+	body.add_child(_debug_readout)
+
+	_update_debug_speed_buttons()
+	_position_debug_menu()
+
+
+## A section's name, in the row it names. Pinned to one width so GIVE MONEY
+## and TIME SPEED start their buttons at the same x — a ragged left edge on
+## two rows of buttons reads as a mistake (UI_UX.md §5).
+func _debug_section_label(text: String, base_settings: LabelSettings) -> Label:
+	var label := Label.new()
+	label.label_settings = base_settings
+	label.text = text
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.custom_minimum_size = Vector2(_ui_px(112.0), 0.0)
+	return label
+
+
+func _debug_rule() -> Panel:
+	var rule := Panel.new()
+	rule.custom_minimum_size = Vector2(0.0, _ui_px(2.0))
+	rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.38, 0.62, 0.86, 0.45)
+	rule.add_theme_stylebox_override("panel", style)
+	return rule
+
+
+func _debug_button(node_name: String, text: String) -> Button:
+	var button := Button.new()
+	button.name = node_name
+	button.text = text
+	button.focus_mode = Control.FOCUS_NONE
+	button.custom_minimum_size = DEBUG_BUTTON_MIN_SIZE
+	button.add_theme_font_size_override("font_size", _ui_font(-1))
+	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+		button.add_theme_stylebox_override(state, _shop_slot_style(state))
+	return button
+
+
+## Bottom-left, where nothing else lives: the legend is top-left, the
+## clipboard top-right and the hotbar bottom-centre — and ABOVE the hotbar
+## strip, which reaches across the bottom of the screen even where its slots
+## do not (`_hotbar_reserved_height`, the number every other panel down there
+## asks for).
+##
+## Placed by hand rather than by `PRESET_BOTTOM_LEFT`: an anchored preset
+## fixes the offsets against the bottom edge ONCE, and this panel's readout
+## grows the first time it is filled in, which pushed the last two lines off
+## the screen. The height is `maxf(minimum, size)` for the reason the whole
+## HUD uses that pair — a minimum measured headless underreports what is
+## really drawn — and the top is clamped to the margin, so a window too short
+## for the whole panel loses the readout at the bottom rather than the title
+## and the buttons at the top.
+func _position_debug_menu() -> void:
+	if _debug_menu == null:
+		return
+	var vp := get_viewport() if is_inside_tree() else null
+	if vp == null:
+		_debug_menu.set_anchors_and_offsets_preset(
+			Control.PRESET_BOTTOM_LEFT, Control.PRESET_MODE_MINSIZE, _ui_i(16)
+		)
+		return
+	_debug_menu.set_anchors_and_offsets_preset(
+		Control.PRESET_TOP_LEFT, Control.PRESET_MODE_MINSIZE, _ui_i(16)
+	)
+	var margin := _ui_px(16.0)
+	var height: float = maxf(_debug_menu.get_combined_minimum_size().y, _debug_menu.size.y)
+	# The hotbar PLATE's top edge where there is one, `_hotbar_reserved_height()`
+	# only as the fallback a headless run never leaves — the reserved strip also
+	# holds the item-name flyout, which is centred over the hotbar and cannot
+	# reach this corner. `_position_stock_panel` makes the same distinction for
+	# the same reason; here the difference is the whole readout.
+	var floor_y: float = vp.get_visible_rect().size.y - _hotbar_reserved_height()
+	if _hotbar_panel != null and _hotbar_panel.size.y > 0.0:
+		floor_y = _hotbar_panel.get_global_rect().position.y - margin
+	var top: float = maxf(margin, floor_y - height)
+	# Clear of the legend if it fits under it, which at 1600x900 it does. When
+	# it does not, the tool takes the corner and the legend shows through the
+	# top of it — F1 collapses the legend, and a development panel losing an
+	# argument with a controls reminder would be the wrong way round.
+	if _legend_panel != null and _legend_panel.visible and _legend_panel.size.y > 0.0:
+		var under_legend: float = _legend_panel.get_global_rect().end.y + margin
+		if under_legend + height <= floor_y:
+			top = maxf(top, under_legend)
+	_debug_menu.position = Vector2(margin, top)
+
+
+## F3. **Not a modal**: it does not pause, it is not closed by ESC, it closes
+## nothing that is open and `_modal_open` does not count it — the factory
+## keeps running behind it, which is the entire point of watching a cheat
+## land. It DOES join `_fp_mouse_free`, because it is covered in buttons and a
+## captured mouse cannot press one.
+func _set_debug_open(open: bool) -> void:
+	if _debug_menu == null or open == _debug_open:
+		return
+	_debug_open = open
+	_debug_menu.visible = open
+	if open:
+		# Filled in first, then placed: the readout is what makes this panel
+		# its full height, and placing it around an empty one put the last
+		# lines off the bottom of the screen.
+		_update_debug_readout()
+		_position_debug_menu()
+	_apply_fp_mouse_mode()
+	_update_crosshair_visibility()
+
+
+func _on_debug_grant_pressed(amount: int) -> void:
+	sim.issue_command_json(JSON.stringify({"type": "debug_grant_money", "amount": amount}))
+	# The clipboard reads money off the wire on the next `_wire_changed` frame,
+	# which a command always makes true — so nothing else has to be poked. The
+	# readout is refreshed here anyway so the panel answers on the same frame
+	# the button was pressed, even at FROZEN.
+	_update_debug_readout()
+
+
+func _on_debug_speed_pressed(index: int) -> void:
+	if index < 0 or index >= DEBUG_TIME_SCALES.size():
+		return
+	_debug_time_scale = float(DEBUG_TIME_SCALES[index])
+	# Whatever fraction of a tick had accumulated was measured against the old
+	# interval; carrying it into a ten-times-shorter one would spend it as ten.
+	_tick_accum = 0.0
+	_update_debug_speed_buttons()
+	_update_debug_readout()
+
+
+func _on_debug_step_pressed() -> void:
+	_debug_step_pending += 1
+
+
+## The selected speed, said in words as well as shown by the plate: the button
+## that is on reads `[x2]`, the rest read `x2` (UI_UX.md §7 — never colour
+## alone, and a pressed-looking button is not a word).
+func _update_debug_speed_buttons() -> void:
+	for index in range(_debug_speed_buttons.size()):
+		var button: Button = _debug_speed_buttons[index]
+		if button == null:
+			continue
+		var caption := String(DEBUG_TIME_LABELS[index])
+		var selected: bool = is_equal_approx(
+			_debug_time_scale, float(DEBUG_TIME_SCALES[index])
+		)
+		button.text = "[%s]" % caption if selected else caption
+
+
+## What the simulation is actually doing, re-read every frame the panel is up
+## — outside `_wire_changed`'s gate, like the wall-clock fades, because FPS
+## and a frozen tick count are exactly the things that do not move the
+## revision.
+func _update_debug_readout() -> void:
+	if _debug_readout == null:
+		return
+	var econ := _read_economy()
+	var money: float = float(econ.get("money", 0.0))
+	var lines := [
+		"tick %d   ·   revision %d   ·   speed %s   ·   %d fps" % [
+			int(sim.current_tick()),
+			int(sim.revision()),
+			_debug_speed_caption(),
+			int(round(Engine.get_frames_per_second())),
+		],
+		# The same "%.0f" shape every other plate in this HUD shows money in.
+		"money %.0f" % money,
+		# One directory rather than two absolute paths: `saves/` and
+		# `settings.cfg` are both `user://`, and the two full paths side by
+		# side made this panel wider than the factory behind it.
+		"user://   %s" % _debug_user_dir(),
+		"          holds saves/ and settings.cfg",
+	]
+	_debug_readout.text = "\n".join(lines)
+
+
+## "1k", "10k", "100k" — short enough that three of them fit one row, and
+## unambiguous because the label beside them says GIVE MONEY.
+func _debug_money_caption(amount: int) -> String:
+	if amount >= 1000 and amount % 1000 == 0:
+		return "%dk" % (amount / 1000)
+	return "%d" % amount
+
+
+## The directory `user://` resolves to on this machine, with the home
+## directory written as `~` — the shape a developer can paste into a terminal,
+## and forty characters shorter than the one Godot hands back.
+##
+## Taken from the settings file rather than from `GameSaves`, because
+## `resolved_saves_dir()` is one level down (`…/saves`) and this line is about
+## the directory that holds both.
+func _debug_user_dir() -> String:
+	var folder := _settings_file_path().get_base_dir()
+	var home := OS.get_environment("HOME")
+	if home != "" and folder.begins_with(home):
+		return "~" + folder.substr(home.length())
+	return folder
+
+
+## Where `user://settings.cfg` really is, for the developer looking for it.
+## Through the autoload rather than a preload of its script, so this file does
+## not carry a second reference to something it already reaches by name.
+func _settings_file_path() -> String:
+	var settings := _settings_node()
+	return String(settings.resolved_path()) if settings != null else "(no Settings autoload)"
+
+
+func _debug_speed_caption() -> String:
+	for index in range(DEBUG_TIME_SCALES.size()):
+		if is_equal_approx(_debug_time_scale, float(DEBUG_TIME_SCALES[index])):
+			return String(DEBUG_TIME_LABELS[index])
+	return "x%.2f" % _debug_time_scale
+
+
+## Swaps the pause menu's buttons for the settings rows, and back. The confirm
+## step's shape (`_set_pause_confirm`), and the two are mutually exclusive by
+## construction: each hides the other on the way in.
+func _set_pause_settings(open: bool) -> void:
+	_pause_settings_open = open
+	if open:
+		_set_pause_confirm(false)
+	if _pause_buttons_box != null:
+		_pause_buttons_box.visible = not open and not _pause_confirm_quit
+	if _pause_settings_box != null:
+		_pause_settings_box.visible = open
+	if open and _pause_settings_panel != null:
+		# Re-read on the way in: the main menu hosts the same rows against the
+		# same autoload, and a player who changed the volume there and then
+		# loaded this save must not find the old number here.
+		_pause_settings_panel.refresh()
+		# And re-measure: `build()` sized the scroll before these rows were in
+		# a tree, and the window may have been resized since.
+		_pause_settings_panel.fit(_pause_settings_rows_budget())
+	# The plate just changed size by most of its height.
+	_position_pause_menu()
+
+
 ## Opens or closes the pause menu, and with it the simulation's pause.
 ##
 ## Handing the mouse back in first-person is the same thing the build menu
@@ -13877,6 +14374,10 @@ func _set_pause_open(open: bool) -> void:
 		music.ducked = open
 	if open:
 		_pause_confirm_quit = false
+		# Always on the buttons, whichever page was showing when it last
+		# closed: ESC is how this panel is reached, and it should reach the
+		# same thing every time.
+		_set_pause_settings(false)
 		_set_pause_confirm(false)
 		_pause_status.text = ""
 		_pause_slot_field.text = _save_slot
@@ -13896,8 +14397,10 @@ func _set_pause_open(open: bool) -> void:
 
 func _set_pause_confirm(confirming: bool) -> void:
 	_pause_confirm_quit = confirming
+	if confirming:
+		_set_pause_settings(false)
 	if _pause_buttons_box != null:
-		_pause_buttons_box.visible = not confirming
+		_pause_buttons_box.visible = not confirming and not _pause_settings_open
 	if _pause_confirm_box != null:
 		_pause_confirm_box.visible = confirming
 	_position_pause_menu()
@@ -14064,6 +14567,11 @@ func _process(delta: float) -> void:
 	else:
 		_update_money_flyout()
 		_update_hotbar_flyout()
+	if _debug_open:
+		# Every frame, in neither branch: FPS and a frozen tick count are exactly
+		# the facts that do not move the revision, so a gated readout would sit
+		# still while the thing it is reporting on did not.
+		_update_debug_readout()
 	_update_machine_gauges()
 	_update_contract_notice()
 	# The ghost cannot be up while paused at all — build mode counts as
@@ -14098,10 +14606,27 @@ func _advance_simulation(delta: float) -> void:
 	if _pause_open:
 		_tick_accum = 0.0
 		return
+	# The debug menu's STEP button, which is the only way a FROZEN factory
+	# moves: exactly one tick, taken before the clock is consulted, so it costs
+	# nothing and happens whatever the speed is.
+	if _debug_step_pending > 0:
+		_debug_step_pending -= 1
+		sim.tick()
+		_apply_dirty_chunks()
+	if _debug_time_scale <= 0.0:
+		# FROZEN. Not the same thing as PAUSED: the panels, the camera and the
+		# animations all keep running, the factory simply stops advancing.
+		_tick_accum = 0.0
+		return
 	_tick_accum += delta
 	_advance_autosave(delta)
-	var tick_interval := 1.0 / TICK_HZ
-	var budget := MAX_TICKS_PER_FRAME
+	# The debug menu's time speed, and the only two lines it takes: a faster
+	# clock is a shorter interval, and the catch-up budget rises with it in
+	# proportion so the clamp keeps meaning "one slow frame must not
+	# fast-forward the factory" rather than silently capping x10 at whatever
+	# the frame rate allows.
+	var tick_interval := 1.0 / (TICK_HZ * _debug_time_scale)
+	var budget := int(ceil(float(MAX_TICKS_PER_FRAME) * _debug_time_scale))
 	while _tick_accum >= tick_interval and budget > 0:
 		_tick_accum -= tick_interval
 		budget -= 1
@@ -14225,6 +14750,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	# F1 is what a player reaches for when they want to know the controls.
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F1:
 		_toggle_legend()
+		return
+
+	# F3 is the debug menu (see `_build_debug_menu`) — F1's rules exactly: not a
+	# modal, not closed by ESC, closes nothing that is open, and the factory
+	# keeps running behind it, which is the point of watching a cheat land.
+	# F3 IS FREE for the same enumeration F1's note makes: no function key but
+	# F1 is bound anywhere in this handler.
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F3:
+		_set_debug_open(not _debug_open)
 		return
 
 	if event is InputEventMouseButton:
@@ -16514,9 +17048,6 @@ var _crush_anchors: Dictionary = {}
 ## crushers actually start a batch.
 var _crush_beats: Dictionary = {}
 
-## The pause menu's sound switch (built in `_build_pause_menu`).
-var _pause_sound_button: Button
-var _pause_music_button: Button
 
 
 ## Test seams. A dummy audio driver makes "was a sound heard" unanswerable
@@ -16954,46 +17485,35 @@ func _update_dock_pop(current_tick: int) -> void:
 		_dock_pop_slot = -1
 
 
-## Whether anything is audible, and the pause-menu caption that says so.
-## Session-scoped on purpose: this is the game's FIRST sound, and a persisted
-## audio setting belongs with the rest of a settings screen this project does
-## not have yet, not smuggled into the save format.
-func _toggle_sound() -> void:
-	if _audio == null:
+## Everything the player can turn, applied to the scene that owns it. Called
+## once from `_ready` and again on every `Settings.changed` — so a row pressed
+## on the pause menu and the same row pressed on the main menu (the panel is
+## the same script, against the same autoload) land identically here.
+##
+## The score is NOT applied here: `Settings` pushes that to the `Music`
+## autoload itself, because the main menu has no scene of its own to do it and
+## a track nobody could turn down until a factory had loaded would be a
+## strange screen. Everything below belongs to this scene, which is why it is
+## this scene that writes it.
+func _apply_settings() -> void:
+	if _audio != null:
+		_audio.enabled = bool(_setting("sfx_enabled", true))
+		_audio.volume = float(_setting("sfx_volume", 1.0))
+	if _camera != null and _view_mode == ViewMode.FIRST_PERSON:
+		# Only in first person: the isometric camera is orthographic and has no
+		# field of view at all. `_set_view_mode` applies it on the way in.
+		_camera.fov = float(_setting("field_of_view", FP_FOV))
+	_apply_hall_scale()
+	if _pause_settings_panel != null:
+		_pause_settings_panel.refresh()
+
+
+## The hall the first-person camera stands in, resized (`factory_environment.
+## gd`). Costs one radiance re-bake per call, which is why the setting is
+## stepped rather than dragged.
+func _apply_hall_scale() -> void:
+	if _world_environment == null:
 		return
-	_audio.enabled = not _audio.enabled
-	_update_sound_button()
-
-
-## The switch says ON or OFF in words, not by looking pressed (UI_UX.md §7).
-func _update_sound_button() -> void:
-	if _pause_sound_button == null:
-		return
-	var on: bool = _audio != null and _audio.enabled
-	_pause_sound_button.text = "SOUND: ON" if on else "SOUND: OFF"
-
-
-func _on_pause_sound_pressed() -> void:
-	_toggle_sound()
-
-
-## The score's switch lives on the `Music` autoload, so it survives a trip
-## back to the menu and into another save within one session.
-func _toggle_music() -> void:
-	var music := _music()
-	if music == null:
-		return
-	music.enabled = not music.enabled
-	_update_music_button()
-
-
-func _update_music_button() -> void:
-	if _pause_music_button == null:
-		return
-	var music := _music()
-	var on: bool = music != null and bool(music.enabled)
-	_pause_music_button.text = "MUSIC: ON" if on else "MUSIC: OFF"
-
-
-func _on_pause_music_pressed() -> void:
-	_toggle_music()
+	FactoryEnvironment.set_hall_scale(
+		_world_environment.environment, float(_setting("hall_scale", 1.0))
+	)

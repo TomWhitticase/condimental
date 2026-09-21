@@ -757,6 +757,42 @@ with the line *"the factory is stopped while this is open"* (§7: never encode
 state invisibly). **Quit to Menu asks first; Save & Quit does not.** The save
 field is a **name**, prefilled with what this session loaded from.
 
+**Settings** is one screen hosted twice — `settings_panel.gd`, built by the
+main menu and by the pause menu alike, so a knob cannot exist in one and not
+the other. In both it **replaces the button column in the plate it is in**
+rather than opening a second plate over the first: that is what Load Game
+already does on the menu and what the quit confirmation does on the pause
+menu, and a modal over a modal is two things to dismiss. The heading says
+*"kept on this computer, not in your save"*, because these are preferences
+and not progress: they live in `user://settings.cfg` and a save carried to
+another machine does not bring them (`docs/DECISIONS.md`).
+
+Two row shapes, both built from §5's plates rather than from stock engine
+controls:
+
+- a **toggle**, one button captioned in words — `MUSIC: ON` / `MUSIC: OFF`,
+  never a coloured light (§7);
+- a **stepper**, `[ − ] LABEL   value [ + ]` over a thin fill bar. Steppers
+  and not a slider because a drag cannot be asserted headlessly and because
+  every one of these knobs is a short list of sensible values; the bar is
+  **not** the §5e meter language — the sim defines no ceiling here, so it
+  gets its own colours and its own `SettingRange_*` name.
+
+The value is always **formatted, never bare**: `100%`, `×1.25`, `75°`. The
+column **scrolls on a row boundary** (§5c's snap rule) — half a card of a
+contract is half a decision, and half a settings row is a `+` button drawn
+where it cannot be clicked.
+
+**The development menu (F3)** is not part of the game and says so on itself:
+a blue-edged plate, never the hazard yellow every in-game plate is bordered
+with. It is **not a modal** — ESC leaves it alone, it closes nothing, and the
+factory keeps running behind it, which is the entire point of watching a
+cheat land. It sits bottom-left, under the legend and above the hotbar, the
+one corner no plate owns. Money grants go over the real command wire (a cheat
+that Godot kept to itself would mean a balance the sim disagrees with);
+**time speed is presentation-side** and the panel says so — the clocks in the
+game still count the simulation's seconds, not the wall's.
+
 ### 5e. Numbers into bars: the one meter language
 
 A figure tells the player what a thing *is*; a bar tells them where it
