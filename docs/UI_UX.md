@@ -533,9 +533,29 @@ crate has two as well — **left-click buys one crate, SHIFT+left-click buys
 every unit the balance covers** — and each slot prints what the shift
 gesture would fetch *right now* (`shift: buy 123`) under the crate's price,
 dimmed to `shift: buy 0` when nothing is affordable, because a modifier
-nobody can see is a modifier nobody uses. A hopper's
-contents are chosen on the ghost (**Q** cycles raw items; the prompt names
-it; the ghost shows a tinted fill).
+nobody can see is a modifier nobody uses.
+
+**What a hopper or a tank will hold is not chosen on the ghost.** The ghost
+carries the *first* raw the simulation offers — `hopper_items[0]`, i.e.
+`World::raw_items` in wire order — drawn as a tinted fill and named in the
+prompt, so the click is still specific about what it is about to place. It
+is changed afterwards, by **clicking the placed building** and using the
+picker in its own configuration panel; the prompt says so on the
+ghost, `click it once placed to change contents`, and says it only when
+there is more than one raw to choose between, because a hint about a choice
+that does not exist is noise. The fluid tank works the same way and through the
+same picker (issue #43, 2026-09-20), so there is one gesture for "what does
+this vessel hold" rather than one per vessel.
+
+This replaced a **Q** key that cycled the ghost's contents before the click
+(along with global **SPACE** and **V** for filling, and the sim's
+`CycleHopperItem` command, all deleted). The reason is worth keeping: a
+keybind on the ghost can only configure a thing that has not been built yet,
+so the answer to "I placed the wrong one" was to remove it and place it
+again. Configuring the *placed* building makes the bin retargetable in place
+and puts every vessel-feeding verb — level, FILL, AUTO-FILL, contents — on
+one panel reached one way. `test_config_panel.gd` pins it and
+`scripts/screenshot-scene.sh --config TX,TY` photographs it.
 
 **SHIFT buys back what the click places** (2026-09-16). Laying a run of belt
 otherwise costs two trips to the build menu per handful — buy ten, place
@@ -620,13 +640,25 @@ this order:
    are **the most** a grid ever takes, not the number it always takes.
 3. **The list scrolls**, as above.
 
-**`autowrap_mode` is not used anywhere in this layout.** A wrapping Label
-reports a 1px minimum width and a height shaped at whatever width it was last
-*drawn* at — so under `--headless` it measures 1x1609 and every panel sized
-around it is nonsense. This layout is measurement-driven end to end and its
-regression proof is a headless test. A sentence that must get narrower is
-**broken at a join it already has** (the board's offer is a mix label and a
-terms label) — a break at a fixed point, not a reflow.
+**`autowrap_mode` is never put on a Label whose width a fit pass measures.**
+A wrapping Label reports a 1px minimum width and a height shaped at whatever
+width it was last *drawn* at — so under `--headless` it measures 1x1609 and
+every panel sized around it is nonsense. This layout is measurement-driven end
+to end and its regression proof is a headless test. A sentence that must get
+narrower is therefore **broken at a join it already has** (the board's offer
+is a mix label and a terms label) — a break at a fixed point, not a reflow,
+and `_fit_contract_board_split` measures before it breaks so a window with the
+room keeps the sentence whole.
+
+It *is* used — 14 times in `main.gd` — wherever the width is **pinned** before
+anything measures it, so the 1px minimum is never what a fit pass reads: inside
+a fixed-size ancestor (`SHOP_SLOT_SIZE`, `MARKET_SLOT_SIZE`,
+`CONFIG_PICKER_SLOT_SIZE`), or on a Label that sets its own
+`custom_minimum_size.x` (`CONFIG_PANEL_WIDTH` for the configuration notes,
+`CREW_TEXT_WIDTH` for the crew affordance line, `PAUSE_BUTTON_MIN_SIZE.x` for
+the pause menu). The configuration panel *is* measured by a fit pass
+(`_position_config_panel`), so escaping measurement is not the exemption — the
+pin is. Pin the width or do not wrap.
 
 **A panel that dodges the right-hand column consults one list, after its own
 clamp** (2026-09-20, issue #88). The clipboard, STOCK and CREW plates are

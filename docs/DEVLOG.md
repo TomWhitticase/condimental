@@ -184,6 +184,158 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-20 — The width pass, measured: a fit that was not conditional cost the board an offer
+
+PR #102 taught every modal to yield width at 1280x720 and landed on main as
+`c62aae9`. An adversarial review of it finished after the merge and its
+verdict never reached anyone, so its three blocking findings and one request
+have been live defects in shipped code since. This is that review, worked
+through. Nothing here is new behaviour; all four are regressions or
+false statements introduced by that PR.
+
+**The contracts board lost a whole offer at 1600x900 — by five pixels.**
+`_build_contract_board_row` put the offer's terms on a second line
+*unconditionally*. That split is load-bearing at 1280x720, where the unsplit
+grid wants 1324px against 1264px available. At 1600x900 it is not: unsplit,
+the panel is 1380px in a 1600px window with 220px to spare. What the split
+costs there is vertical — a card goes 120px to 157px, so three of them need
+489px against a 484px cap and `snap_rows` cuts the list to TWO. Before the
+width pass the board showed three offers at that size; after it, two. The
+fix is the doctrine the PR's own decision record states and then did not
+apply to itself: `_fit_contract_board_split` measures the panel unsplit
+against `_modal_available_width()` and reparents the terms label into the mix
+row when it fits, into the text column when it does not. At 1600x900 the
+board is back to three whole offers with the sentence on one line; at
+1280x720 the rendered frame is byte-identical to before.
+
+**`snap_rows` is a cost, so it now needs a reason.** Moving the cut down to
+the last whole row buys a tidy edge and pays height. The build menu was
+already exempt on the grounds that the half-row past the cap is what says
+"scroll". The production panel asked for it and paid 161px at 1600x900 —
+four rows where main had shown four plus a readable fifth. The rule the two
+share, and the one recorded: **`snap_rows` is for a stack whose rows are
+DECISIONS the player signs** — an offer, a hire — where half a card is half a
+choice. A production row is a readout; nothing is signed and nothing is lost
+by cutting one, so the production panel drops it and the half-row does its
+job (367px to 434px at 1600x900, 179px to 254px at 1280x720).
+
+**"`autowrap_mode` is banned and unused" was false the day it was written.**
+`docs/UI_UX.md`, `godot_project/CLAUDE.md` and `docs/DECISIONS.md` all stated
+it as an absolute while 14 live assignments sat in `main.gd`. All four
+statements are rescoped to what the code does, against every site checked
+rather than assumed: seven shop and market labels sit in a button pinned by
+`SHOP_SLOT_SIZE` (`main.gd:5719`) or `MARKET_SLOT_SIZE` (6312), the
+contents-picker label under `CONFIG_PICKER_SLOT_SIZE` (10177), and six set
+their own `custom_minimum_size.x` — `CONFIG_PANEL_WIDTH`, `CREW_TEXT_WIDTH`,
+`PAUSE_BUTTON_MIN_SIZE.x`. The first draft of this correction said the
+configuration panel escapes the rule by not being sized by a fit pass; it
+does not — `_position_config_panel` reads `get_combined_minimum_size()` and
+places the panel against the right-hand plates from it. The pin is the
+exemption, not the absence of measurement, and the true rule is **pin the
+width or do not wrap**. It matters out of proportion to its size because
+`godot_project/CLAUDE.md` loads into every session in that directory: an
+absolute stated there costs the next agent either working code or a session
+spent proving the file wrong.
+
+**Issue #88 was closed behind a test that could not catch it.** #88 is a
+FLUID TANK's configuration panel drawn over STOCK and CREW at 1600x900;
+`test_hud_plates.gd` opened a HOPPER. Reverting `_position_config_panel` to
+its pre-#102 body failed only the 1280x720 case — the size the issue is
+about passed with the fix removed, while a real render of the issue's own
+repro (`--fixture fluids --stock --config=4,2`) put the tank's panel squarely
+on both plates. The test now runs six cases: hopper and tank, 1600x900 and
+1280x720, and the tank again low in the frame where #88 photographed it,
+framed through the real drag-pan rather than a teleport. It was proved by
+reverting: `the fluid tank's configuration panel at (1600, 900), standing 52%
+across and 58% down the frame covers the STOCK plate by 168x100px`. The cause
+is worth recording too, because the first guess was wrong: both the old and
+new bodies measure `get_combined_minimum_size()`. The difference is ORDER —
+the new one clamps `pos.y` *before* consulting the plates, the old one tested
+them against the pre-clamp `y`, found no overlap for a panel opening low, and
+then the final clamp lifted it into them. A bound has to be judged against
+where the panel will be DRAWN, which is the rule `_panel_position_near`
+learned the same way (UI_UX §2b point 33).
+
+**And the branch per plate the same commit forbade.** `_panel_position_near`
+avoided the legend, the contract panel and `_stock_rect` — but not
+`_crew_rect`, in the very commit that created `_crew_rect` and wrote into
+`godot_project/CLAUDE.md` that the right-hand column is ONE list and never a
+branch per plate. A tooltip near the cursor landed on the wage bill. The
+entry is added and the test now loops the column instead of naming one plate,
+so the next tenant of that edge is caught by a test that already exists; it
+was proved by reverting the three lines.
+
+Not fixed here and still open: issue #106 (a mid-word break in the contents
+picker) and issue #99 (the legend), neither of which is this review's
+subject.
+### 2026-09-20 — Two hopper tints, a guard that refuses, and a distance metric that can see value
+
+Three issues sharing one shape: a lookup table keyed by content id whose
+fallback makes a missing entry invisible. The same class as #67's market
+icons and #68's fluid colours.
+
+**Two raws were drawn the same colour (#80).** `HOPPER_FILL_TINTS` had
+`tomato` and `sugar` and nothing else, so `spice_mix` and `molasses` both
+came out of `HOPPER_FILL_TINT_FALLBACK` — measured on the `--bbq` fixture
+their fill tops were 213.2 and 214.4 luma, 1.2/255 apart, which is the same
+object to a player. They now carry their own palette colours verbatim
+rather than lifted: unlike a fluid sitting in a shadowed steel bore there is
+nothing to lift a hopper's upward-facing heap against, and `tomato` and
+`sugar` were already their palette colours unaltered.
+
+`molasses` ships nearly black on purpose, after looking at it in a frame
+rather than reasoning about it. #100 is the precedent for a dark tint
+reading as an empty vessel, but an empty hopper is a **pale** bin with its
+ridged floor in plain view, so the failure mode is the opposite of a pipe's:
+full it measures 57.4 luma against the empty bin's 106.1, and at 22% fill
+— deepest in the bin, worst-lit by SSAO — 57.3 against 111.1. Lifting it
+would have moved it *toward* the empty bin.
+
+**The guard is the point, not the two colours.** Adding entries to a table
+that silently tolerates missing ones fixes today and not tomorrow.
+`test_ingredient_models.gd` now refuses a raw solid with no tint, and
+enumerates the raws from the simulation's own `hopper_items`
+(`World::raw_items`, deliberately unfiltered by the unlock gates) rather
+than from a second hand-written list.
+
+**The fluid gallery was policing a list, not the table (#108).** Its
+saturation and distance checks walked `FLUID_GALLERY_FLUIDS`, a hand-written
+six, so a seventh entry in `FLUID_TINTS` would ship unphotographed and
+unmeasured with `FLUID_GALLERY_OK` and exit 0. Proved by adding a near-grey
+`worcester`: green before the change, red after. The reverse loop closes it.
+
+**The distance floor could not see the axis the renderer uses.**
+`FLUID_TINT_MIN_DISTANCE` was 0.08 on summed `|dRGB|`, calibrated against
+nothing, and summed `|dRGB|` cannot tell a brightness difference from a hue
+difference of the same size — only the first is what this camera reads by.
+Raising it would only have moved where it was blind, so the metric gained a
+luma term (`sum|dRGB| + 2*|dLuma|`) and the floor is now 0.24, a stated 10%
+margin below the measured worst shipped pair.
+
+That pair is reported rather than excused. `bbq_mix` and `liquid_smoke`
+render 9.3/255 of luma apart while one fluid photographed on two tiles of
+its own run spreads 10.7 and 11.8 — the difference between the liquids is
+smaller than the noise of measuring one of them twice, so they separate by
+hue alone. Filed as #113 with the windows. Incidentally #108's own figure
+did not reproduce: it named `bbq` <-> `liquid_smoke` at "dLuma 0.6", which
+measures 19.8-27/255 depending on zoom, and 0.6 looks like a same-fluid
+control.
+
+**And the doc still described a deleted keybind (#89).** UI_UX §5a said a
+hopper's contents are chosen on the ghost with **Q**. That key, the global
+SPACE/V fill keys and the sim's `CycleHopperItem` command all went when the
+configuration panel landed; the ghost now carries `hopper_items[0]` and
+contents are retargeted by clicking the placed building, the fluid tank
+included since #43. §5a has no numbered points and every `§N point M`
+citation in the tree refers to §2a/§2b, so nothing was renumbered.
+
+Deferred out of this pass: #113 (the value collision above), #114 (the
+screenshot harness silently ignores `--closeup=X,Y,S` and renders a
+whole-factory frame with exit 0), #115 (`HOPPER_FILL_TINTS` has no pairwise
+distance guard at all; `tomato` <-> `spice_mix` is 12.7/255), #116 (UI_UX
+has no section for the configuration panel, so #89's replacement text is
+lodged in §5a).
+
 ### 2026-09-20 — The hall's two post-passes, judged against frames for the first time
 
 Issues #32 and #2 closed; #3 measured and left open. All three were the same

@@ -25,6 +25,49 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-20: **A width fix must be MEASURED at every window size, and
+  `snap_rows` is for rows the player signs.** (Follow-up to the entry below,
+  from the review of PR #102.)
+
+  **The fault.** The entry below states the doctrine plainly — measure against
+  `_modal_available_width()`, do not assume — and then two of its own fixes
+  were applied unconditionally, which is the same mistake in the other
+  direction. `_build_contract_board_row` put the offer's terms on their own
+  line always. That is load-bearing at 1280x720: unsplit, the board's grid
+  wants 1324px against 1264px available. At 1600x900 it is not: the unsplit
+  panel is 1380px in a 1600px window, 220px to spare. The cost of splitting
+  there is vertical — a card goes 120px to 157px, so three need 489px against
+  a 484px cap, and `snap_rows` drops the board to TWO whole offers. The board
+  showed one fewer offer than it did before the width pass, missing by five
+  pixels, and the prose the split was protecting was never in danger at that
+  size.
+
+  **The fix.** `_fit_contract_board_split` measures the panel unsplit against
+  `_modal_available_width()` and reparents the terms label into the mix row
+  when it fits, into the text column when it does not — measured, per window,
+  like everything else in this layout. At 1600x900 the board is back to three
+  whole offers with the sentence on one line; at 1280x720 the rendered frame
+  is byte-identical to before.
+
+  **`snap_rows` is a cost, so it needs a reason.** Moving the cut down to the
+  last whole row buys a tidy edge and pays height for it. The build menu was
+  already exempted on the grounds that the half-row it shows past the cap is
+  what says "scroll". The production panel asked for it and paid 161px at
+  1600x900 — four rows where main had shown four plus a readable fifth. The
+  general rule the two cases share: **`snap_rows` is for a stack whose rows
+  are DECISIONS the player signs** — an offer on the board, a hire on the
+  staff panel — where half a card is half a choice and the player might sign
+  the half they can see. A production row is a readout. Nothing is signed, so
+  nothing is lost by cutting one in half, and the half says "scroll" for free.
+  The production panel drops it.
+
+  **And one more per-plate branch.** `_panel_position_near` avoided the
+  legend, the contract panel and `_stock_rect` but not `_crew_rect` — in the
+  same commit that created `_crew_rect` and wrote into `godot_project/CLAUDE.md`
+  that the right-hand column is ONE list and never a branch per plate. A
+  tooltip near the cursor landed on the wage bill. The entry is added, and
+  `test_hud_plates.gd` now loops the column rather than naming one plate, so
+  the next tenant of that edge is caught by a test that already exists.
 - 2026-09-20: **Never out-darken the game's own strongest honest presentation
   of the same geometry.** This restates a rule given earlier in the same
   review — "never out-darken the game" — because the naive form of it turned
@@ -438,19 +481,39 @@ matches what code comments and data files cite.
      it always takes.
   3. *The list scrolls.* Already true.
 
-  **What is never done: `autowrap_mode`.** The obvious fix for a 1030px
-  sentence is to let it wrap. It cannot be used here. A wrapping Label reports
-  a minimum width of one pixel and a minimum height shaped at whatever width
-  it last had — and a Label is only reshaped when it is DRAWN. Under
-  `--headless`, where nothing draws, a wrapped sentence measures 1x1609 and
-  every panel sized around it is nonsense. This layout is measurement-driven
-  end to end (`_fit_grid_scroll`, `_whole_rows_height`, `_fit_grid_columns`)
-  and its regression proof is a headless test, so a control whose size cannot
-  be measured without drawing it cannot be part of it. Where a sentence must
-  get narrower it is **broken at a join it already has**: the board's offer is
-  now two labels, the mix and the terms, so the column is as wide as its
-  longer half rather than as wide as both. A break at a fixed point, not a
-  reflow.
+  **What is never done: `autowrap_mode` on a Label a fit pass MEASURES.** The
+  obvious fix for a 1030px sentence is to let it wrap. It cannot be used
+  there. A wrapping Label reports a minimum width of one pixel and a minimum
+  height shaped at whatever width it last had — and a Label is only reshaped
+  when it is DRAWN. Under `--headless`, where nothing draws, a wrapped
+  sentence measures 1x1609 and every panel sized around it is nonsense. This
+  layout is measurement-driven end to end (`_fit_grid_scroll`,
+  `_whole_rows_height`, `_fit_grid_columns`) and its regression proof is a
+  headless test, so a control whose size cannot be measured without drawing it
+  cannot be part of what is measured. Where such a sentence must get narrower
+  it is **broken at a join it already has**: the board's offer is a mix label
+  and a terms label, so the column is as wide as its longer half rather than
+  as wide as both. A break at a fixed point, not a reflow.
+
+  The rule is about the MEASUREMENT, not the property, and the absolute
+  version of it was false the day it was written: 14 `autowrap_mode`
+  assignments were already live in `main.gd` and are still there — the shop
+  and market slots, the crew affordance line, the configuration panel and the
+  pause menu. They are safe for a reason worth stating, because it is the
+  reason: every one of them has its width PINNED before anything measures it,
+  so the 1px minimum is never what a fit pass reads. Seven sit inside a
+  fixed-size ancestor — `SHOP_SLOT_SIZE` (`main.gd:5719`) and
+  `MARKET_SLOT_SIZE` (6312) — and the contents-picker label under
+  `CONFIG_PICKER_SLOT_SIZE` (10177); the other six set their own
+  `custom_minimum_size.x`: the three configuration-panel notes take
+  `CONFIG_PANEL_WIDTH`, the crew affordance line `CREW_TEXT_WIDTH`, the two
+  pause-menu labels `PAUSE_BUTTON_MIN_SIZE.x`. Note that the configuration
+  panel IS measured by a fit pass — `_position_config_panel` reads
+  `get_combined_minimum_size()` and positions against the right-hand plates
+  from it — so "not sized by a fit pass" is not the exemption; the pin is.
+  Stated as an absolute, the rule sends the next
+  reader to delete working code or to spend a session proving the document
+  wrong (raised in the review of PR #102, corrected 2026-09-20).
 
   **The measurement trap, twice.** The same "shaping happens on draw" rule bit
   in two more places, and both are worth knowing before trusting a number.

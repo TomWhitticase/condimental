@@ -110,6 +110,38 @@ const MODAL_CASES := [
 ## clear the right-hand column like any other (issue #88).
 const CONFIG_TILE := Vector2i(-6, 0)
 
+## And a FLUID TANK, placed for the configuration sweep alone. Issue #88 is a
+## tank at 1600x900, not a hopper, and the two panels are not the same panel:
+## the tank's carries a fluid meter and a contents picker of fluids. A sweep
+## of the hopper alone is a sweep that PASSES with `_position_config_panel`
+## reverted to the version that shipped the bug, at the very size the issue
+## was filed about.
+const CONFIG_TANK_TILE := Vector2i(-3, 0)
+
+## WHERE IN THE FRAME the building stands when its panel opens, as a
+## fraction of the window. The panel is anchored to the BUILDING, so this is
+## not decoration — it is the input the positioning is a function of, and a
+## sweep that only ever frames the building in the middle only ever tests the
+## middle.
+##
+## `CONFIG_LOW` is where issue #88 photographed its tank, and it is the half
+## of the issue a centred sweep cannot see: a panel opening BELOW the
+## right-hand plates is clamped back up above the hotbar, and the clamp can
+## lift it into plates that were nowhere near it when the flip was decided.
+const CONFIG_CENTRED := Vector2(0.5, 0.5)
+const CONFIG_LOW := Vector2(0.52, 0.58)
+
+## Every configuration case: which building, on which tile, at which window
+## size, standing where in the frame.
+const CONFIG_CASES := [
+	["the hopper", CONFIG_TILE, BIG, CONFIG_CENTRED],
+	["the hopper", CONFIG_TILE, SMALL, CONFIG_CENTRED],
+	["the fluid tank", CONFIG_TANK_TILE, BIG, CONFIG_CENTRED],
+	["the fluid tank", CONFIG_TANK_TILE, SMALL, CONFIG_CENTRED],
+	["the fluid tank", CONFIG_TANK_TILE, BIG, CONFIG_LOW],
+	["the fluid tank", CONFIG_TANK_TILE, SMALL, CONFIG_LOW],
+]
+
 ## Frames a case is given before it is read — one to apply it, the rest for
 ## Godot's deferred minimum-size invalidation (`_sweep_step`). It has always
 ## settled by the second; the third is slack.
@@ -127,7 +159,7 @@ var _frame := 0
 ## the docket sweep before it has been put away (`_finish_sweep`).
 var _modal := 0
 var _swept := false
-## The configuration sweep's cursor, one case per window size.
+## The configuration sweep's cursor, an index into `CONFIG_CASES`.
 var _cfg := 0
 
 
@@ -327,7 +359,9 @@ func _run_checks() -> void:
 		return
 
 	# Spending it moves the number back down in the same refresh.
-	Layouts.place(main.sim, "hopper", Vector2i(-6, 0), "east", bought)
+	Layouts.place(main.sim, "hopper", CONFIG_TILE, "east", bought)
+	# The configuration sweep's second building — issue #88's own kind.
+	Layouts.place(main.sim, "fluid_tank", CONFIG_TANK_TILE, "east")
 	main._issue_world_command({"type": "fill_hopper", "tile": [-6, 0]})
 	main._refresh_owned_counts()
 	main._update_larder()
@@ -604,15 +638,25 @@ func _run_checks() -> void:
 		])
 		return
 
-	# And the new plate joins the list: a cursor over the stock column pushes
-	# the panel off it, not onto it.
-	var stock_rect: Rect2 = main._stock_rect()
-	var stock_pos: Vector2 = main._panel_position_near(probe, stock_rect.position + stock_rect.size * 0.5)
-	if Rect2(stock_pos, probe_size).intersects(stock_rect):
-		_fail("a panel near the cursor lands on the stock plate (%s over %s)" % [
-			str(Rect2(stock_pos, probe_size)), str(stock_rect)
-		])
-		return
+	# And the new plates join the list: a cursor over the right-hand column
+	# pushes the panel off it, not onto it. The column is ONE list
+	# (godot_project/CLAUDE.md), so every tenant of it is checked the same
+	# way — CREW was added to the column and left out of `_panel_position_near`,
+	# and a machine hovered beside it covered the whole plate.
+	for plate in [
+		["the stock plate", main._stock_rect()],
+		["the CREW plate", main._crew_rect()],
+	]:
+		var plate_rect: Rect2 = plate[1]
+		if plate_rect.size.y <= 0.0:
+			_fail("%s has no rect to avoid — the fixture is wrong" % plate[0])
+			return
+		var pos: Vector2 = main._panel_position_near(probe, plate_rect.position + plate_rect.size * 0.5)
+		if Rect2(pos, probe_size).intersects(plate_rect):
+			_fail("a panel near the cursor lands on %s (%s over %s)" % [
+				plate[0], str(Rect2(pos, probe_size)), str(plate_rect)
+			])
+			return
 	probe.queue_free()
 
 	# --- The clipboard's docket stack is cut BETWEEN dockets (issue #8) ----
@@ -870,25 +914,28 @@ func _modal_step() -> bool:
 ## reference the player can fold beats covering a live readout — the same
 ## ranking `_position_config_panel`'s own comment makes.
 func _config_step() -> bool:
-	if _cfg >= 2:
-		_close_config()
+	if _cfg >= CONFIG_CASES.size():
 		_open_only("")
 		_resize(BIG)
-		print("HUD_PLATES_OK: %s; every modal (%s) fits inside the window with every button reachable, at 1600x900 and at 1280x720; and a building's configuration panel keeps clear of all three right-hand plates at both sizes" % [
+		print("HUD_PLATES_OK: %s; every modal (%s) fits inside the window with every button reachable, at 1600x900 and at 1280x720; and a hopper's and a FLUID TANK's configuration panel keeps clear of all three right-hand plates at both sizes, with the building centred and standing low in the frame where issue #88 photographed it" % [
 			_summary, ", ".join(_modal_keys())
 		])
 		quit(0)
 		return true
-	var window: Vector2i = BIG if _cfg == 0 else SMALL
+	var what: String = CONFIG_CASES[_cfg][0]
+	var tile: Vector2i = CONFIG_CASES[_cfg][1]
+	var window: Vector2i = CONFIG_CASES[_cfg][2]
+	var across: Vector2 = CONFIG_CASES[_cfg][3]
 	_open_only("")
 	_resize(window)
-	_open_config()
+	_open_config(tile, window, across)
 	main._position_config_panel()
 	_frame += 1
 	if _frame < SETTLE_FRAMES:
 		return false
-	if not _check_config_case(window):
+	if not _check_config_case(window, tile, what, across):
 		return true
+	_close_config(tile)
 	_cfg += 1
 	_frame = 0
 	return false
@@ -900,23 +947,46 @@ func _config_step() -> bool:
 ## the frame puts the panel on the left edge and proves nothing — centred, the
 ## panel opens over the right-hand column and has to flip to clear it, which is
 ## the case issue #88 was about.
-func _open_config() -> void:
-	main._camera_focus = main._tile_origin(CONFIG_TILE.x, CONFIG_TILE.y, 0.0)
+func _open_config(tile: Vector2i, window: Vector2i, across: Vector2) -> void:
+	var world: Vector3 = main._tile_origin(tile.x, tile.y, 0.0)
+	main._camera_focus = world
 	main._update_camera_transform()
+	# Then pan until the building is drawn where this case wants it, through
+	# the real drag-pan the player uses. Screen pixels to world is linear, so
+	# the correction converges immediately; it is ASSERTED afterwards rather
+	# than trusted (`_check_config_case`), because a case that quietly framed
+	# the building somewhere else would quietly prove something else.
+	var want := Vector2(float(window.x), float(window.y)) * across
+	for _i in range(32):
+		var delta: Vector2 = want - main._camera.unproject_position(world)
+		if delta.length() <= 0.25:
+			break
+		main._apply_drag_pan(delta)
 	if not main._config_open:
-		main._config_click_at_tile(CONFIG_TILE)
+		main._config_click_at_tile(tile)
 
 
-func _close_config() -> void:
+func _close_config(tile: Vector2i) -> void:
 	if main._config_open:
-		main._config_click_at_tile(CONFIG_TILE)
+		main._config_click_at_tile(tile)
 
 
 ## False when the case failed (`_fail` has already asked to quit).
-func _check_config_case(window: Vector2i) -> bool:
-	var where := "the configuration panel at %s" % str(window)
+func _check_config_case(window: Vector2i, tile: Vector2i, what: String, across: Vector2) -> bool:
+	var where := "%s's configuration panel at %s, standing %d%% across and %d%% down the frame" % [
+		what, str(window), int(round(across.x * 100.0)), int(round(across.y * 100.0))
+	]
 	if not main._config_open or main._config_panel == null or not main._config_panel.visible:
-		_fail("%s never opened on the hopper at %s" % [where, str(CONFIG_TILE)])
+		_fail("%s never opened at %s" % [where, str(tile)])
+		return false
+	# The framing this case asked for is the case: assert it rather than
+	# assume the pan landed (see `_open_config`).
+	var drawn: Vector2 = main._camera.unproject_position(main._tile_origin(tile.x, tile.y, 0.0))
+	var wanted := Vector2(float(window.x), float(window.y)) * across
+	if drawn.distance_to(wanted) > 1.0:
+		_fail("%s: the building is drawn at %s, not the %s this case asked for" % [
+			where, str(drawn), str(wanted)
+		])
 		return false
 	var rect: Rect2 = main._config_panel.get_global_rect()
 	if rect.position.x < -0.5 or rect.end.x > float(window.x) + 0.5:

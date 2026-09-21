@@ -26,7 +26,15 @@
 #   * `test_layouts.gd`'s hand-copied `FLUID_MIN_VISIBLE_PRESSURE` still
 #     equals `main.gd`'s, the number it was copied from,
 #   * every one of the six has a `FLUID_TINTS` entry, no two alike, and none
-#     of them near-grey (issue #100 — see `FLUID_TINT_MIN_SATURATION`).
+#     of them near-grey (issue #100 — see `FLUID_TINT_MIN_SATURATION`),
+#   * and, the other way round, every key in `FLUID_TINTS` is IN
+#     `FLUID_GALLERY_FLUIDS` (issue #108). Without that the three checks
+#     above police a hand-written list of six rather than the table they are
+#     about, so a seventh fluid ships an unphotographed, unmeasured tint with
+#     `FLUID_GALLERY_OK` and exit 0 — proved on `559641b` by adding one. A
+#     guard that has merely been given more entries, rather than made to
+#     refuse, has not been fixed; that ruling came out of PR #84's review and
+#     is what `test_ingredient_models.gd` already does for the model tables.
 extends SceneTree
 
 const Layouts = preload("res://test_layouts.gd")
@@ -43,11 +51,49 @@ const Layouts = preload("res://test_layouts.gd")
 ## see.
 const FLUID_TINT_MIN_SATURATION := 0.35
 
-## How far apart two tints have to be, summed over RGB, to count as
-## different liquids. The same number and the same reason as
-## `test_bbq_branch.gd`'s check of the runs its own fixture names; this one
-## covers all six at once, which is what the gallery is for.
-const FLUID_TINT_MIN_DISTANCE := 0.08
+## How much a luma difference counts for, against the same magnitude of
+## difference spread over R, G and B. It is >1 because this camera reads by
+## VALUE contrast rather than by colour (`assets/voxels/CLAUDE.md`, UI_UX §7),
+## so a pair that moves in brightness is further apart to a player than a
+## pair that merely moves round the hue wheel by the same amount. Two is the
+## weight at which the measured worst pair below stops being the one summed
+## |dRGB| alone names, which is the whole reason the term is here.
+const FLUID_TINT_LUMA_WEIGHT := 2.0
+
+## How far apart two tints have to be to count as different liquids, on
+## `sum |dRGB| + FLUID_TINT_LUMA_WEIGHT * |dLuma|`.
+##
+## **It used to be 0.08 on summed |dRGB| alone, and that number was
+## calibrated against nothing** (issue #108). The shipped six's worst pair on
+## that metric is 0.148, so the floor passed a pair at half the worst case
+## the art had ever been reviewed at, and — the real defect — summed |dRGB|
+## cannot tell "these two differ in brightness" from "these two differ in hue
+## at the same brightness". Only the first of those is the axis the renderer
+## reads by, so the metric was blind on the axis that matters and raising it
+## would only have moved where it was blind.
+##
+## Measured on the shipped six with the luma term in (see the PR for the
+## table): the worst pair is `bbq_mix` <-> `liquid_smoke` at **0.269**, then
+## `bbq` <-> `liquid_smoke` at 0.283 and `ketchup_mix` <-> `bbq_mix` at
+## 0.291; everything else is 0.45 and up. **0.24 is a 10% margin below that
+## worst pair** — deliberately tight, where the old number's was 46%, because
+## a seventh fluid landing between 0.24 and 0.27 is one a human should look
+## at rather than one a constant should wave through.
+##
+## **The floor is set below a pair this ticket reports as too close, and
+## that is not an endorsement of it.** Rendered in the gallery at 1600x900,
+## `bbq_mix` and `liquid_smoke` sit 9.3/255 of luma apart while the SAME
+## fluid photographed on two tiles of its own run spreads 10.7 and 11.8 —
+## the pair is a genuine value collision separated by hue alone, and fixing
+## it is an art change, filed rather than smuggled in here. `bbq` <->
+## `liquid_smoke`, the pair issue #108 named, measures 19.8-27/255 apart and
+## is above that noise; #108's 0.6 figure for it did not reproduce.
+##
+## `test_bbq_branch.gd` keeps its own, looser 0.08 on plain summed |dRGB|,
+## and the two are deliberately NOT the same number any more: that one is
+## documented as a copied-entry catcher over the four runs its fixture
+## names, this one is a calibrated judgement over every tint the game has.
+const FLUID_TINT_MIN_DISTANCE := 0.24
 
 var main
 var _ran := false
@@ -56,6 +102,13 @@ var _ran := false
 func _fail(msg: String) -> void:
 	printerr("FLUID_GALLERY_FAIL: %s" % msg)
 	quit(1)
+
+
+## Rec. 709 relative luminance, the same weights the legibility measurements
+## in `docs/DECISIONS.md` are taken with, so the number in a failure message
+## and the number in a rendered-frame review mean the same thing.
+func _luma(c: Color) -> float:
+	return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
 
 
 func _initialize() -> void:
@@ -133,7 +186,21 @@ func _run_checks() -> void:
 		)
 		return
 
-	# --- 5. six tints, all different, none of them grey -------------------
+	# --- 5. the gallery's hand-list covers the whole table ----------------
+	# Everything from here down walks `FLUID_GALLERY_FLUIDS`, so on its own it
+	# is a check on a list rather than on `FLUID_TINTS`. This loop is what
+	# ties the two together: a fluid cannot get a tint without also being
+	# stood in the frame that proves the tint reads (issue #108).
+	for fluid in main.FLUID_TINTS:
+		if not Layouts.FLUID_GALLERY_FLUIDS.has(fluid):
+			_fail(
+				"'%s' has a FLUID_TINTS entry but the gallery never stands it in a frame, " % fluid
+				+ "so nothing below can see it: add it to test_layouts.gd's "
+				+ "FLUID_GALLERY_FLUIDS and give it a run in build_fluid_gallery()"
+			)
+			return
+
+	# --- 6. six tints, all different, none of them grey -------------------
 	var seen := {}
 	for fluid in Layouts.FLUID_GALLERY_FLUIDS:
 		if not main.FLUID_TINTS.has(fluid):
@@ -153,14 +220,21 @@ func _run_checks() -> void:
 			return
 		for other_id in seen:
 			var other: Color = seen[other_id]
-			var distance: float = (
+			var chroma: float = (
 				absf(tint.r - other.r) + absf(tint.g - other.g) + absf(tint.b - other.b)
 			)
+			var value: float = absf(_luma(tint) - _luma(other))
+			var distance: float = chroma + FLUID_TINT_LUMA_WEIGHT * value
 			if distance < FLUID_TINT_MIN_DISTANCE:
 				_fail(
-					"'%s' and '%s' are tinted the same liquid (distance %.3f) — the gallery "
+					"'%s' and '%s' are tinted the same liquid (distance %.3f, of which "
 					% [fluid, other_id, distance]
-					+ "stands them in one frame, so two of its six would be one colour"
+					+ "%.3f is summed |dRGB| and %.3f is |dLuma| x %s) — the gallery stands "
+					% [chroma, value, FLUID_TINT_LUMA_WEIGHT * value, FLUID_TINT_LUMA_WEIGHT]
+					+ "them in one frame, so two of its runs would be one liquid. Move them "
+					+ "apart in BRIGHTNESS by preference: this camera reads by value, and a "
+					+ "pair separated by hue alone clears the floor while still reading as "
+					+ "one colour at play zoom (issue #108)."
 				)
 				return
 		seen[fluid] = tint
