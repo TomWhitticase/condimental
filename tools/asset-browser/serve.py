@@ -15,13 +15,14 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import re
 import sys
 import threading
 import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -107,6 +108,16 @@ def ensure_vendor() -> None:
         print(f"  {rel}  {len(data) // 1024} KiB")
 
 
+# Where `POST /api/shot` is allowed to write, set by --shot-dir and otherwise
+# nothing at all: a dev server that takes files from a page by default is not
+# a dev server anybody should be running. `calibrate-ao.py` passes it because
+# it is the only way to get the viewer's own pixels out of a headless Chrome
+# — that Chrome's `--screenshot` fires on a load heuristic, long before an
+# asset has been fetched and drawn.
+SHOT_DIR: Path | None = None
+SHOT_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "sauce-asset-browser"
 
@@ -165,14 +176,44 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # surface tool bugs in the browser, not silence
             self._json({"error": repr(exc)}, 500)
 
+    def do_POST(self) -> None:  # noqa: N802 (http.server's API)
+        route = unquote(urlparse(self.path).path)
+        if route != "/api/shot" or SHOT_DIR is None:
+            self._json({"error": "forbidden"}, 403)
+            return
+        name = parse_qs(urlparse(self.path).query).get("name", [""])[0]
+        if not SHOT_NAME.match(name):
+            self._json({"error": f"bad shot name: {name!r}"}, 400)
+            return
+        length = int(self.headers.get("Content-Length", 0))
+        if length <= 0 or length > 64 * 1024 * 1024:
+            self._json({"error": "bad shot length"}, 400)
+            return
+        body = self.rfile.read(length)
+        if not body.startswith(b"\x89PNG"):
+            self._json({"error": "not a png"}, 400)
+            return
+        (SHOT_DIR / f"{name}.png").write_bytes(body)
+        self._json({"wrote": f"{name}.png"})
+
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--no-browser", action="store_true")
+    ap.add_argument(
+        "--shot-dir",
+        help="let the page POST its canvas to /api/shot and write the PNGs here "
+             "(calibrate-ao.py's route out of a headless browser)",
+    )
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
+
+    if args.shot_dir:
+        global SHOT_DIR
+        SHOT_DIR = Path(args.shot_dir).resolve()
+        SHOT_DIR.mkdir(parents=True, exist_ok=True)
 
     ensure_vendor()
     cat = catalog()

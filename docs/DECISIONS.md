@@ -68,6 +68,74 @@ matches what code comments and data files cite.
   tooltip near the cursor landed on the wage bill. The entry is added, and
   `test_hud_plates.gd` now loops the column rather than naming one plate, so
   the next tenant of that edge is caught by a test that already exists.
+- 2026-09-20: **Never out-darken the game's own strongest honest presentation
+  of the same geometry.** This restates a rule given earlier in the same
+  review — "never out-darken the game" — because the naive form of it turned
+  out to have an accident in it, and the accident produced a pass nobody could
+  see.
+
+  **What the rule protects.** The asset browser is where a model is approved.
+  If it shades a form harder than the game can, an artist signs off on a
+  silhouette that only reads under browser-only occlusion, and the machine
+  ships flat. So the browser's baked AO is calibrated *down* to the game
+  rather than tuned by eye, and `AO_STRENGTH` is a measured quotient:
+  `calibrate-ao.py` renders the game's own vat fixture with SSAO on and off,
+  renders the browser on the same model with AO on and off, and divides the
+  shading per machine pixel. Nobody chooses the number; the two renderers do.
+
+  **Where the naive form broke.** Godot's `ssao_radius` is in WORLD units, so
+  the retuned 0.45 m radius is 4.5 voxels of a model — but the play camera is
+  isometric and sees a whole factory, so those 4.5 voxels are a couple of
+  pixels on screen. Measured on the same vat at the same settings: standing
+  beside it, 67.8% of the machine's pixels darken by more than 1% and 4.36% of
+  its light is removed; at the isometric play camera, 0.3% and 0.01%. A
+  strength calibrated against 0.01% is about 0.05 — a darkening of under one
+  8-bit level on the greys these models are painted in, which is not a match
+  but a rounding error. "Never darker than the game" read literally therefore
+  demanded a feature that is switched on and invisible, which is exactly the
+  outcome issue #49 exists to prevent.
+
+  **What was decided, and why this pose.** Calibrate against the game standing
+  beside the line, at eye height, facing the machine. The deciding argument is
+  that the bake is **object-space**: it is a property of the model, and the
+  model is the thing the browser exists to show. The play camera does not fail
+  to show the occlusion because the occlusion is not there — it fails because
+  its pixel scale cannot resolve it. Deriving where the effect cannot resolve
+  bakes a camera's limitation into an artist's inspection tool.
+
+  **The conditions attached, all of them binding.** (1) Publish the gap: the
+  isometric numbers stay in the table, and the README and the PR state which
+  pose the constant came from, at what settings, and that a play-camera
+  screenshot is flatter on purpose — an artist must find the explanation
+  before filing it as a bug, not after. (2) State the settings beside the
+  constant: `ssao_radius 0.45 / ssao_intensity 16.0 / ssao_power 1.6`, PR
+  #104's retune, which merges first. (3) The refusals stay: the coverage gate,
+  the staleness check against `factory_environment.gd`, `test-ao.mjs`, and the
+  requirement that the strength settle. (4) #49 is closed by a pass a person
+  can see, shown as a before/after at the browser's own default view.
+
+  **Two findings from the same class, recorded because the next port will
+  repeat them.** `ssao_power` had not been ported at all. It is a gamma on the
+  occlusion term, which is the difference between a crease finder and a wash,
+  and porting it alone cut the browser's coverage from 24.8% of the machine to
+  9.1%. No strength could have corrected it: a strength scales every darkened
+  pixel alike, so a shape mismatch survives any amount of scaling. Port every
+  setting of a pass or none. Second, `test-ao.mjs` had assumed `AO_RADIUS` was
+  a whole number; at 4.5 it indexed the occlusion field at fractional
+  coordinates, and three assertions compared `undefined` instead of failing.
+  A test that passes by rounding is not a test.
+
+  **And the frames are not trusted either.** `screenshot-scene.sh`
+  occasionally returns a frame captured before the fixture is built or before
+  the pose is applied — an empty hall at the default framing, which looks like
+  a perfectly good PNG and once got as far as writing a constant to
+  `web/ao.mjs`. A believable before/after has the machine covering a sane
+  share of the frame, has the pass-on frame keeping 95% of the pass-off
+  frame's machine pixels (SSAO moves no geometry), and has the pass only
+  removing light. Anything else is re-shot three times and then fails the run.
+
+  Option "ship it switched off" was considered and rejected: it would close
+  #49 on paper while leaving the browser exactly as it was.
 
 - 2026-09-20: **Glow means "this is emitting", not "this is bright" — and
   SSAO means "this is a crease".** Issue

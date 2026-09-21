@@ -32,6 +32,31 @@ See [WORKFLOW.md](WORKFLOW.md).
   card is half a choice. A production row is a readout; the production panel
   drops it (it was 161px short of its column at 1600x900) and joins the build
   menu in letting the half-row past the cut say "scroll".
+- 2026-09-20 **The asset browser may never look darker than the game's own
+  strongest honest presentation of the same geometry.** The browser's baked
+  AO exists so a form cannot be approved on shading the game will not give it,
+  so `AO_STRENGTH` in `tools/asset-browser/web/ao.mjs` is *measured*, never
+  chosen: `tools/asset-browser/calibrate-ao.py --write` renders the game's vat
+  fixture with `factory_environment.gd`'s SSAO on and off and the browser on
+  the same model with AO on and off, and divides one renderer's shading per
+  machine pixel by the other's. **"The game" means the game at the pose where
+  it presents that geometry most strongly — standing beside the line in first
+  person — not at the isometric play camera**, because the bake is
+  object-space and a 0.45 m world `ssao_radius` is a few pixels wide at the
+  play camera: the same vat shades 67.8% of its pixels past 1% beside the line
+  and 0.3% there. Calibrating at the play camera matches the *camera* and
+  ships a pass under one 8-bit level. The gap is **published, not hidden** —
+  `tools/asset-browser/README.md` and the PR say which pose the constant came
+  from, at which settings, and that a play-camera screenshot looks flatter on
+  purpose. Every render setting is ported, not a subset: `ssao_radius`,
+  `ssao_intensity` **and `ssao_power`** (a gamma on the occlusion term — a
+  missing one is a shape mismatch no strength can fix). The calibration
+  **fails** rather than producing a number when the browser's coverage
+  diverges from the game's, when the constants are stale against
+  `factory_environment.gd`, when the strength will not settle, or when the
+  screenshot harness hands back a frame captured before the fixture or the
+  pose was applied. Full record in `docs/DECISIONS.md`.
+
 - 2026-09-20 **Glow means "this is emitting", not "this is bright" — and
   SSAO means "this is a crease".** The
   hall's post-pass is `glow_intensity 1.0`, **`glow_bloom 0.0`**,
