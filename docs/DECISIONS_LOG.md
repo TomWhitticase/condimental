@@ -18,6 +18,19 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-21 **A review verdict is a COMMENT whose first line is exactly
+  `VERDICT: APPROVED` or `VERDICT: CHANGES REQUESTED`.** GitHub refuses
+  `--approve` and `--request-changes` on a pull request owned by the same
+  account, and every PR in this repo is authored as `TomWhitticase`: the API
+  answers `Review Can not approve your own pull request`, and
+  `gh pr view N --json reviewDecision` stays `""` however thorough the review
+  was. So a reviewer posts `gh pr review N --comment` and the merge gates on
+  that first line, not on GitHub's own state. The review standard behind it is
+  the `review` skill — own worktree, rebuild, re-run the issue's own
+  reproduction, revert each fix to prove its test fails without it, count the
+  `_OK` markers by hand, read the PNG; a re-review re-runs the first review's
+  "what I verified" rather than diffing the rework. Full record in
+  `docs/DECISIONS.md`.
 - 2026-09-21 **A content id is a KEY; what a player reads is a `display_name`
   in the same file.** Renaming a thing in front of the player never renames
   its id. A machine kind id is written into every save file and looked up by

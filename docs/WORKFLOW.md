@@ -42,7 +42,7 @@ milestone-level visual checks. Both Godot scripts honour `GODOT_BIN`.
 
 | Command | What it proves | Cost |
 |---|---|---|
-| `cargo test -p sim_core` | Sim invariants: conservation, determinism, economy, save/load. 19 integration test files under `sim_core/tests/`, plus unit tests. | fast |
+| `cargo test -p sim_core` | Sim invariants: conservation, determinism, economy, save/load. 27 integration test files under `sim_core/tests/`, plus unit tests. | fast |
 | `cargo test -p voxgen` | Voxel-level asset properties — that a machine's inlet/outlet is a genuinely empty opening, which no mesh or screenshot can tell from a painted rectangle. | fast |
 | `scripts/verify-core-loop.sh` | Everything: `cargo test -p sim_core`, `cargo test -p voxgen`, `cargo xtask`, two `--import` passes, an import sanity check, then **every headless Godot script** through the real `gdext` JSON boundary, and prints how many it ran. | slow |
 | `scripts/verify-scaffold.sh` | The milestone-1 Rust ↔ Godot round trip alone (`cargo xtask`, prime the cache, `test_round_trip.gd`). Re-run this on a quiet machine before treating a `gdext` load failure as a regression. | medium |
@@ -66,6 +66,7 @@ floor. The script's header explains every flag; grouped, they are:
   stress|pipes|gallery|demo>` (an explicit one WINS over the flags below,
   which each imply a fixture; an unknown name is refused, and every run
   prints the `SCREENSHOT_FIXTURE` it built), `--stress`, `--pipe-gallery`, `--belt-gallery`,
+  `--fluid-gallery`, `--item-gallery`, `--warehouse`,
   `--bottleneck`, `--understaffed`, `--staff-shortfall`, `--contracts`,
   `--payout`; `--populate` runs one forward; also `--stock`, `--hotbar N`
 - **Screens:** `--menu`, `--pause`, `--shop`, `--market`, `--board`,
@@ -249,6 +250,16 @@ checks are red or still running.** Say it is ready and stop. Merging your own
 work unreviewed is fine for routine changes the owner has not asked to see;
 it is not fine for anything the design docs call a deviation, a `gdext` bump,
 a save-format change, or anything the owner flagged.
+
+**A PR that is reviewed is reviewed adversarially**, by someone who did not
+write it: they build the branch in their own worktree, re-run the reproduction
+of every issue it claims to close, and revert each fix in turn to prove the new
+test actually fails without it. GitHub refuses `--approve` and
+`--request-changes` on a PR owned by the same account — which is every PR here
+— so the verdict is posted with `gh pr review N --comment`, opening with a line
+that is exactly `VERDICT: APPROVED` or `VERDICT: CHANGES REQUESTED`, and the
+merge gates on that line (`reviewDecision` stays empty). The `review` skill is
+the full procedure, for the first review and for a re-review.
 
 ### Fix it, or file it — and prefer fixing it
 

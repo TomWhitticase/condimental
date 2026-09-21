@@ -205,6 +205,39 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — The adversarial review standard is a skill, not prompt text
+
+The review bar this repo actually holds work to lived nowhere in the repo: it
+was prompt text one coordinator session held during the 2026-09-20 sweep, so
+every later session either reinvented it or reviewed to a weaker bar without
+noticing the bar had moved (issue #124). It is now `.claude/skills/review/`,
+beside `verify`, `screenshot-review` and `open-pr`, listed in `CLAUDE.md` and
+pointed at from `docs/WORKFLOW.md` where merging is described.
+
+What it says: review in your own worktree off your own `cargo xtask` build;
+re-run the *issue's* reproduction rather than the author's test; reproduce the
+failure on the pre-fix commit and show it gone on the tip, naming both; and —
+the load-bearing step — **revert each fix in turn and confirm the new test
+fails**, because a test that passes without its fix keeps passing through the
+regression. Count the `_OK` markers by hand and read the PNG yourself, since
+Godot exits 0 on a parse error and `assert()` does not stop the run. A
+re-review is not a diff of the rework: the first review's "what I verified"
+is stale the moment the tip moves, so it is re-run.
+
+Every claim in it was re-measured before it was written down, which is the
+rule the skill itself argues for. `gh pr review --approve` on a PR of this
+account answers `Review Can not approve your own pull request`, and
+`--request-changes` the equivalent, so the verdict convention — a `--comment`
+review whose first line is exactly `VERDICT: APPROVED` or
+`VERDICT: CHANGES REQUESTED` — is recorded as a decision in
+`docs/DECISIONS_LOG.md` and `docs/DECISIONS.md`. The `assert()` claim was
+re-probed on Godot 4.6.3: it prints `SCRIPT ERROR: Assertion failed`, abandons
+the rest of *that function*, and the caller runs on to exit 0. One stale
+number fixed in passing — `docs/WORKFLOW.md` said 19 integration test files
+under `sim_core/tests/`, there are 27 — and one that looked stale and was not:
+the status section's 38 Godot proofs is right, because
+`grep -c '^run_godot_script'` answers 39 by matching the function definition
+too, the same off-by-one issue #138 recorded.
 ### 2026-09-21 — The warehouse rack loses its red, and the game calls it Stock Shelving
 
 Two owner asks on one kind. **The red first.** The rack's load beams were

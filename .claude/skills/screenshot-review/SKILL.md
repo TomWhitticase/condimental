@@ -44,7 +44,9 @@ a pipe run south — three facings in one frame; the same as `--fixture demo`)
 | stress | pipes | gallery | demo` · `--stress` (1500-tile serpentine, implies `--populate`, prints a
 `SCREENSHOT_RENDER` line with object/primitive/draw-call counts) ·
 `--pipe-gallery` · `--belt-gallery` (every belt shape and junction at every
-facing) · `--bottleneck` (whole line backed up behind the vat; implies
+facing) · `--fluid-gallery` (all six fluids in six named runs in one frame —
+the frame issue #108's tint guard was not policing) · `--item-gallery` ·
+`--warehouse` · `--bottleneck` (whole line backed up behind the vat; implies
 `--populate`) · `--understaffed` · `--staff-shortfall` (line funded below its
 next bill) · `--contracts` (signs every offer, runs to a mixed board) ·
 `--payout` (holds the frame mid-celebration; implies `--fixture chain`) ·
