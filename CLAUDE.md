@@ -78,7 +78,7 @@ change something that seems to conflict with it.
 | Status and dated history | [docs/DEVLOG.md](docs/DEVLOG.md) |
 
 Skills cover the repeatable procedures: `voxel-asset`, `verify`,
-`screenshot-review`, `record-decision`, `open-pr`, `file-issue`.
+`screenshot-review`, `record-decision`, `open-pr`, `review`, `file-issue`.
 
 ## Not yet built, deliberately
 

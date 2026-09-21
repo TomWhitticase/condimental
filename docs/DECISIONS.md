@@ -25,6 +25,56 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-21: **A review verdict is a COMMENT whose first line is exactly
+  `VERDICT: APPROVED` or `VERDICT: CHANGES REQUESTED`.** (Issue #124.)
+
+  **The constraint.** Every pull request in this repository is authored by the
+  same GitHub account, and GitHub will not let an account review its own work.
+  Measured rather than assumed, against a real PR of this account:
+
+  ```
+  $ gh pr review 157 --approve --body "…"
+  failed to create review: GraphQL: Review Can not approve your own pull request (addPullRequestReview)
+  $ gh pr review 157 --request-changes --body "…"
+  failed to create review: GraphQL: Review Can not request changes on your own pull request (addPullRequestReview)
+  ```
+
+  `--comment` is accepted, but it produces a review in state `COMMENTED`, so
+  `gh pr view N --json reviewDecision` answers `""` — empty on #91 and #98,
+  both of which carry full, blocking adversarial reviews. There is no field
+  for an automated merge step, or the next session, to read.
+
+  **The rule.** The verdict is therefore carried by the body's own first line,
+  exactly `VERDICT: APPROVED` or `VERDICT: CHANGES REQUESTED`, and whoever
+  merges gates on that line. It is a convention rather than a mechanism, which
+  is the cost: nothing enforces it, so a review that buries its verdict in
+  prose is unreadable to the merge step. Making it the *first* line is what
+  keeps it greppable and keeps a skim from inverting it.
+
+  **Why the standard behind it is written down at all.** The procedure existed
+  only as prompt text held by one coordinator session, so each new session
+  either reinvented it or reviewed to a weaker bar without noticing the bar had
+  moved. It is now the `review` skill. Across the 2026-09-20 sweep it caught,
+  among others: a guard that had merely been given more entries rather than
+  made to refuse (#108); an `assert()` that prints and does not abort, so a
+  broken fixture still reported `SCREENSHOT_OK` and exit 0 (#110);
+  measurements in a `DECISIONS.md` record that did not reproduce (#111); a
+  `--closeup=X,Y,S` flag the harness accepted and ignored, rendering the wrong
+  frame silently (#114); and a destructive action with no warning that broke a
+  `docs/UI_UX.md` rule the same PR had just written (#121).
+
+  The load-bearing half of the procedure is **reverting each fix in turn**: a
+  test that still passes with its fix removed proves nothing and is worse than
+  no test, because it keeps passing through the regression. The second half is
+  that a re-review is not a diff of the rework — the first review's "what I
+  verified and it held" is stale the moment the tip moves, so it is re-run.
+
+  **The standing rule the whole thing rests on:** a false absolute in
+  `docs/DECISIONS.md` or a `CLAUDE.md` is worse than a bug, because it is what
+  the next person reasons *from* instead of measuring, and it is not found by
+  the next test run. Hence: re-derive a PR's documented numbers from your own
+  run rather than re-running the author's script, and when a claim is
+  withdrawn, grep for it in every place it was written.
 - 2026-09-21: **A content id is a KEY; what a player reads is a
   `display_name` in the same file.** (Owner's call, asked for directly: "can
   you rename warehouse rack to stock shelving".)
