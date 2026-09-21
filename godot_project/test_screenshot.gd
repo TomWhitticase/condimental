@@ -355,6 +355,11 @@ var _unlocked := false
 ## before the shutter, so the announcement line is up in the frame. The
 ## notice is the only part of this feature that cannot be photographed from
 ## a settled state — it exists for one moment and then fades.
+##
+## The notice slot holds one line at a time and queues the rest, so this flag
+## needs the slot EMPTY at the crossing — `_clear_build_notices` sees to that
+## — and it REFUSES rather than writing a PNG of whatever else is in it
+## (`_check_unlock_toast`, issue #141).
 var _unlock_toast := false
 var _contracts := false
 ## `--board` opens the contracts board menu (the contract-board epic).
@@ -761,6 +766,69 @@ func _cross_gates(offset: int) -> void:
 	_main._refresh_owned_counts()
 
 
+## The glyph `main.gd::_announce_unlocks` opens its announcement with. The
+## other two notices are `✔ SIGNED:` and `✗ CONTRACT LOST:`, so the first
+## character is enough to tell them apart without pinning the wording.
+const UNLOCK_NOTICE_GLYPH := "★"
+
+
+## Drops the "what just changed" banner the fixture's own construction raised,
+## and the queue behind it.
+##
+## A fixture buys, places, hires, signs and runs tens of thousands of ticks
+## inside frame 1, so main.gd's contract notices fire for things that — in the
+## world this shot claims to photograph — happened long before the shutter.
+## `--bbq` signs two orders as it builds, and its frames came back with
+## `✔ SIGNED: smokehouse_trial` hanging over a factory that had been running
+## for 27,000 ticks.
+##
+## It costs more than a wart. A notice holds for `CONTRACT_NOTICE_HOLD_MSEC`
+## of WALL CLOCK and everything raised while it is up queues behind it, so the
+## stale banner swallowed the one thing `--unlock-toast` exists to photograph
+## (issue #141). Clearing it is not the harness overruling that queue — the
+## queueing rule is right, an unlock really does land on a delivery, and
+## `test_unlocks.gd` still proves the announcement fires. It is the harness
+## declining to photograph its own setup.
+func _clear_build_notices() -> void:
+	if _main == null or _main._contract_notice == null:
+		return
+	_main._contract_notice_queue.clear()
+	_main._contract_notice_until_msec = 0
+	_main._contract_notice.text = ""
+	_main._contract_notice.modulate = Color(1, 1, 1, 0)
+
+
+## Proves the announcement is the notice in frame, rather than trusting it.
+##
+## `--unlock-toast` wrote a perfectly good-looking PNG of the wrong banner for
+## a day and still printed `SCREENSHOT_OK:` (issue #141); nothing but a
+## reviewer's eye caught it. A shot of the wrong thing is worse than no shot,
+## because a PR body presents it as evidence — so refuse, like the fluid
+## gallery does when its runs have merged.
+func _check_unlock_toast() -> bool:
+	var notice: Label = _main._contract_notice
+	if notice == null:
+		printerr("SCREENSHOT_FAIL: --unlock-toast, but the HUD has no notice line")
+		return false
+	if not notice.text.begins_with(UNLOCK_NOTICE_GLYPH):
+		var wrong := (
+			"SCREENSHOT_FAIL: --unlock-toast crossed the gate, but the notice "
+			+ "in frame reads \"%s\" — the announcement is queued behind that, "
+			+ "not photographed"
+		)
+		printerr(wrong % notice.text)
+		return false
+	if notice.modulate.a < 0.99:
+		var faded := (
+			"SCREENSHOT_FAIL: --unlock-toast raised the announcement, but it "
+			+ "had faded to %.2f alpha by the shutter — the run took longer "
+			+ "than the notice holds"
+		)
+		printerr(faded % notice.modulate.a)
+		return false
+	return true
+
+
 ## Builds whatever the flags asked for, through the same purchase/place
 ## commands a player uses (test_layouts.gd). The camera is re-framed
 ## afterwards, because it frames the placed world and there was nothing to
@@ -999,7 +1067,19 @@ func _enter_closeup() -> void:
 	_main._update_camera_transform()
 
 
-func _enter_first_person() -> void:
+## The view this run photographs, which is NOT `main.gd`'s
+## `DEFAULT_VIEW_MODE` — a review shot is isometric unless `--first-person`
+## asked otherwise. Every other framing flag this tool has (`--closeup`,
+## `--zoom`, `--pan`, and every `--hover*`, which warps the OS cursor to
+## where a tile projects) is an isometric idea, so following the game's
+## opening view would have silently re-aimed every command line in
+## `docs/`, `scripts/` and CI at a first-person camera those flags cannot
+## steer. The game's default is exercised by `test_camera_nav.gd` instead,
+## and photographed by passing `--first-person` here.
+func _enter_view_mode() -> void:
+	if not _first_person:
+		_main._set_view_mode(_main.ViewMode.ISOMETRIC)
+		return
 	_main._set_view_mode(_main.ViewMode.FIRST_PERSON)
 	# Higher up and looking a bit further up than the default entry pose, so
 	# the sky/horizon/ground extent — the thing being reviewed — is actually
@@ -1853,13 +1933,19 @@ func _process(_delta: float) -> bool:
 	# has to be settled before they are drawn.
 	if _frames == 1 and (_unlocked or _unlock_toast):
 		_cross_gates(-1 if _unlock_toast else 0)
-	if _frames == 1 and _first_person:
-		_enter_first_person()
+	if _frames == 1:
+		_enter_view_mode()
 	# Before main.gd has drawn a single tooltip, and before any --hover* flag
 	# on frame 2 aims it somewhere on purpose: the pointer this run starts
 	# with is the one the run before it left behind (issue #4).
 	if _frames == 1:
 		_park_cursor()
+	# Before any flag below acts, and in particular before --unlock-toast
+	# crosses the gate: frame 1 built the fixture, and every banner main.gd
+	# raised while it did is about the build, not about the world in frame
+	# (issue #141).
+	if _frames == 2 and _fixture != "":
+		_clear_build_notices()
 	if _frames == 2 and _populate:
 		_run_chain_forward()
 	# The closeup is applied BEFORE any hover flag: a hover warps the OS cursor
@@ -1897,6 +1983,11 @@ func _process(_delta: float) -> bool:
 		_cross_gates(0)
 		_main._update_contract_panel()
 		_main._update_larder()
+		# Checked at the moment it is raised, not only at the shutter, so a
+		# run that lost it says which banner took the slot instead.
+		if not _check_unlock_toast():
+			_refuse()
+			return true
 	if _frames == 2 and _market:
 		_main._set_market_open(true)
 	if _frames == 2 and _board:
@@ -1953,6 +2044,12 @@ func _process(_delta: float) -> bool:
 	if _frames < WARMUP_FRAMES:
 		return false
 	if not _check_cursor():
+		_refuse()
+		return true
+	# Again here: the notice's dwell is wall clock (issue #82), so a slow
+	# machine could fade the announcement out between frame 2 and the shutter
+	# and leave the PNG showing an empty strip.
+	if _unlock_toast and not _check_unlock_toast():
 		_refuse()
 		return true
 	return _write_frame()

@@ -242,10 +242,46 @@ emissive voxel because a building that neither works nor stalls has nothing to
 light. How many of its six shelves carry a pallet **is** the readout.
 
 New screenshot fixture `--warehouse` (`Layouts.build_warehouse_row`): three
-racks at three depths — one with every bay bound, one holding two ingredients
-with a part-full bay on the end, one empty — refused rather than photographed
-if the order was clamped. It is the one fixture exempt from the harness's
-blanket `stock_larder`, because its subject is the larder.
+racks holding three raws — two with every bay bound, one with two of six, a
+part-full load on the last bay of each ingredient, and four bare shelves to
+compare the bound ones against; refused rather than photographed if the order
+was clamped. Fourteen of its eighteen bays are in use, so `--warehouse
+--remove-mode` photographs the refusal too. It is the one fixture exempt from
+the harness's blanket `stock_larder`, because its subject is the larder.
+
+### 2026-09-21 — The game opens in first person
+
+The view a session starts in is first person now, not isometric: you arrive
+standing in the hall the sky shader draws, among machines built at a human
+scale, and TAB takes you up to the isometric view to lay a line out. One
+constant says so (`main.gd`'s `DEFAULT_VIEW_MODE`), applied by `_ready` after
+the HUD exists — the crosshair, the legend and the mouse capture all come
+with the mode. Neither camera changed, and the isometric one is still the
+fixed angle UI_UX.md §1 specifies.
+
+`scripts/screenshot-scene.sh` deliberately does not follow the new default:
+its framing flags (`--closeup`, `--zoom`, `--pan`, every `--hover*`) all
+steer the isometric camera, so a review shot stays isometric unless
+`--first-person` asks otherwise. Reasoning in `docs/DECISIONS.md`.
+
+### 2026-09-21 — The perf gate stops failing on the neighbours (issue #146)
+
+`test_perf.gd` is the only test in the suite that asserts a wall clock, and
+this machine runs up to six worktrees' headless Godot at once. The same 120
+frames measured 350.7 ms alone and 3733.1 ms beside a neighbour's verify,
+against a 3000 ms ceiling — a red gate on a branch that had touched only
+panel placement, reading exactly like a regression.
+
+Both ceilings are now multiplied by a load factor the test measures itself:
+a fixed 400k-iteration script loop, timed once before the measurements and
+once after, worse of the two, `measured / 12 ms`, clamped to [1.0, 6.0]. A
+quiet box therefore gets exactly the old constants (measured after the
+change: 1.04x, ceilings 1567/3135 ms, frames 275.1 ms). The median of nine
+samples, not the minimum — under sixteen spinning processes the fastest
+sample was 11.9 ms, indistinguishable from idle, while the median was
+38.3 ms. Raw milliseconds are still printed unscaled, because the ticket-4
+before/after numbers quoted elsewhere in this log come off those lines.
+Reasoning in [DECISIONS.md](DECISIONS.md) under today's date.
 
 ### 2026-09-21 — Raw stock has a ceiling, and a rack is what raises it (W1)
 

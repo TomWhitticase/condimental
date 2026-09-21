@@ -186,7 +186,7 @@ run_godot_script test_splitters.gd SPLITTERS_OK "splitter model, next-output arr
 run_godot_script test_save_load.gd SAVE_LOAD_OK "save_ron/load_ron/new_game across the real boundary — save/load ticket 1"
 run_godot_script test_main_menu.gd MAIN_MENU_OK "menu.tscn, the save list, the GameSession handoff — save/load ticket 2"
 run_godot_script test_pause_menu.gd PAUSE_MENU_OK "ESC pause menu, save slots, autosave, quit to menu — save/load ticket 2"
-run_godot_script test_perf.gd PERF_OK "instanced belts/pipes/items on the 1500-tile stress line, rebuild + 120 frames timed — pipes & conveyors ticket 4"
+run_godot_script test_perf.gd PERF_OK "instanced belts/pipes/items on the 1500-tile stress line, rebuild + 120 frames timed against ceilings scaled by measured machine load — pipes & conveyors ticket 4"
 run_godot_script test_pipe_shapes.gd PIPE_SHAPES_OK "pipe shape, turn, fittings and fluid body from links; pipe hover — pipes & conveyors ticket 6"
 run_godot_script test_belt_shapes.gd BELT_SHAPES_OK "belt shape from links at every facing, frame from tick, corner item arcs, belt hover — pipes & conveyors ticket 5"
 run_godot_script test_payout_feedback.gd PAYOUT_FEEDBACK_OK "the payout celebration: coins, the money punch, the PAID stamp and the sound — payout juice"
