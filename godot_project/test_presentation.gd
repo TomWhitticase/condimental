@@ -313,6 +313,50 @@ func _initialize() -> void:
 		_fail("a full dock's lamp should blink whatever the deck is showing")
 		return
 
+	# --- and only the dock that is actually jammed pulses ------------------
+	# "Full" is per dock (`DockSnapshot::full` — THIS dock refused a box off
+	# its belt this tick), not per pool. It read the pool's shared
+	# `delivery_full` until 2026-09-21, which is an `.any()` over the
+	# products: one capped sauce cried jam on every dock in the world,
+	# including one shipping a different sauce with room to spare. The sim
+	# side is covered by `bbq_branch.rs`; this is the half that decides which
+	# lamp on screen the flag reaches.
+	var saved_dock_states: Dictionary = main._dock_states.duplicate()
+	main._dock_states = {
+		"1,1": {"tile": [1, 1], "full": false},
+		"2,2": {"tile": [2, 2], "full": true},
+	}
+	var blocked: Dictionary = main._blocked_dock_keys()
+	if blocked.size() != 1 or not blocked.has("2,2"):
+		_fail("only the dock reporting full should be blocked, got %s" % str(blocked.keys()))
+		return
+	main._dock_states = saved_dock_states
+
+	# And the set actually steers the lamp: the same dock, the same stock,
+	# the same ticks — blocked or not is the only thing that changes.
+	# The demo line ends at a crusher and owns no dock, so buy one through
+	# the ordinary command path and rebuild the scene around it.
+	Layouts.place(main.sim, "dock", Vector2i(8, 0), "east")
+	main._rebuild_world()
+	if main._dock_nodes.is_empty():
+		_fail("placing a dock built no lamp nodes to drive")
+		return
+	var dock_key: String = main._dock_nodes.keys()[0]
+	var stock := [["boxed_ketchup", 1]]
+	var steady_states := {}
+	var blinked_states := {}
+	for tick in range(main.DOCK_FULL_PULSE_TICKS * 2):
+		main._update_dock_stock(stock, {}, tick)
+		steady_states[bool(main._dock_nodes[dock_key]["stocked"])] = true
+		main._update_dock_stock(stock, {dock_key: true}, tick)
+		blinked_states[bool(main._dock_nodes[dock_key]["stocked"])] = true
+	if steady_states.size() != 1 or not steady_states.has(true):
+		_fail("a dock that is NOT backing up should hold its lamp lit, not blink")
+		return
+	if blinked_states.size() != 2:
+		_fail("the dock named in blocked_keys should blink, it held at %s" % str(blinked_states.keys()))
+		return
+
 	# --- and the two halves of that blink have to LOOK different ----------
 	# They did not. `lamp_idle` was `lamp_running`'s emission at a quarter
 	# energy until 2026-09-16, and the two rendered at most 2/255 apart: the

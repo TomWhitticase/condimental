@@ -343,9 +343,12 @@ pub struct EconomySnapshot {
     /// the level as a bar without knowing the constant, and so a change to
     /// it never needs a matching edit in GDScript.
     pub delivery_capacity: u32,
-    /// Whether any item has reached that ceiling, i.e. whether the dock is
-    /// refusing boxes and the line behind it is backing up
-    /// ([`Economy::delivery_pool_full`]).
+    /// Whether any item has reached that ceiling
+    /// ([`Economy::delivery_pool_full`]) — a summary of the pool, read with
+    /// `delivery_stock` beside it to see which product is capped.
+    ///
+    /// NOT "a dock is backing up": that is per-dock, and `DockSnapshot::full`
+    /// carries it.
     pub delivery_full: bool,
     /// Every **active** contract, in priority order.
     pub contracts: Vec<ContractSnapshot>,
@@ -539,10 +542,16 @@ impl Economy {
         self.delivery_buffer.has_room_for(item, qty)
     }
 
-    /// Whether any item in the pool has reached the ceiling — "the dock is
-    /// full", as the dock's lamp and the clipboard say it. Deliberately
-    /// *any* rather than *all*: one item at the ceiling is already enough to
-    /// stop that product's line dead, which is the fact worth showing.
+    /// Whether any item in the pool has reached the ceiling, as the
+    /// clipboard says it. Deliberately *any* rather than *all*: one item at
+    /// the ceiling is already enough to stop that product's line dead,
+    /// which is the fact worth showing.
+    ///
+    /// A summary of the POOL, and only safe as one because the clipboard
+    /// draws it beside `delivery_stock`'s per-item levels, which say WHICH
+    /// product is capped. On its own it cannot answer "is this dock
+    /// jammed" — that is per-dock and per-item, and lives on
+    /// [`super::dock::Dock::blocked`], which the lamp reads instead.
     pub fn delivery_pool_full(&self) -> bool {
         self.delivery_buffer
             .iter()

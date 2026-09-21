@@ -646,6 +646,12 @@ See [WORKFLOW.md](WORKFLOW.md).
   deck lamps (`DOCK_FULL_PULSE_TICKS`, off `sim.current_tick()`), because
   emission MULTIPLIES vertex colour (§2b point 8) so a red lamp is
   impossible here — **a world-space warning is a rhythm, not a colour.**
+  **Amended 2026-09-21:** that pulse is per **dock**, off
+  `DockSnapshot::full` (`Dock::blocked` — this dock refused a box this
+  tick), **not** per pool: `Economy::delivery_pool_full` is an `.any()`
+  over the item ceilings, so one capped sauce pulsed every dock in the
+  world, including ones shipping another sauce into room. The `.any()`
+  stays for the clipboard, which shows the per-item levels beside it.
   **The crusher throws pulp, and a BEAT is a third size of feedback**
   beside §6a's two: five `crush_bit` flecks every `CRUSH_BEAT_TICKS` of
   the machine's own WORK ticks, so a starved or blocked crusher throws

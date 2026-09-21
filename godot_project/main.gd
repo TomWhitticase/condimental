@@ -1086,7 +1086,7 @@ var _dock_states: Dictionary = {} # origin key -> dock snapshot
 var _dock_nodes: Dictionary = {} # origin key -> {"slots": Array[Node3D], "lamp": MeshInstance3D, "stocked": bool}
 var _last_dock_stock: Array = [] # economy_snapshot_json's delivery_stock, shared by every dock
 var _delivery_capacity := 0 # how many of ONE item the pool holds, 0 until first polled
-var _delivery_full := false # is any item at that ceiling — the dock reads FULL
+var _delivery_full := false # is any item at that ceiling — the clipboard reads FULL
 
 # --- The warehouse: racks, and the one storage picture they share ----------
 # A rack is the fourth buffer kind (W3 of the warehouse sprint) and is keyed
@@ -3863,11 +3863,12 @@ func _refresh_buffers(econ: Dictionary = {}) -> void:
 	_last_dock_stock = econ.get("delivery_stock", [])
 	# The pool's ceiling and whether it is at it (the dock-capacity change).
 	# Both are facts about the ONE shared pool, so they are read here, once,
-	# rather than off each dock's own snapshot — which carries `full` too, for
-	# a chunk-driven reader with no economy in hand.
+	# and they feed the CLIPBOARD. The lamp does not use them: whether a
+	# given dock is backing up is per-dock and per-item, and comes off that
+	# dock's own snapshot via `_blocked_dock_keys`.
 	_delivery_capacity = int(econ.get("delivery_capacity", 0))
 	_delivery_full = bool(econ.get("delivery_full", false))
-	_update_dock_stock(_last_dock_stock, _delivery_full, sim.current_tick())
+	_update_dock_stock(_last_dock_stock, _blocked_dock_keys(), sim.current_tick())
 
 
 ## Re-reads the warehouse and reloads every rack's shelves from it.
@@ -3997,6 +3998,20 @@ func _set_lamp_stocked(nodes: Dictionary, stocked: bool) -> void:
 		lamp.set_surface_override_material(0, _lamp_running if stocked else _lamp_idle)
 
 
+## The tile key of every dock the sim reports as backing up right now, as a
+## set (`{key: true}`) for the lamp to test membership against.
+##
+## Read off `_dock_states`, which the same poll has just refilled from
+## `dock_snapshots_json`, so the lamp and hover can never disagree about
+## which dock is jammed.
+func _blocked_dock_keys() -> Dictionary:
+	var blocked := {}
+	for key in _dock_states.keys():
+		if bool(_dock_states[key].get("full", false)):
+			blocked[key] = true
+	return blocked
+
+
 ## Stands one case per unit of stock waiting to be sold on EVERY dock's deck,
 ## up to DOCK_STOCK_SLOTS each, drawn with that item's own model.
 ##
@@ -4006,16 +4021,19 @@ func _set_lamp_stocked(nodes: Dictionary, stocked: bool) -> void:
 ## ledger), and the dock's own `contents` empties every tick, so a per-dock
 ## figure would be zero forever — see DOCK_ASSET's doc.
 ##
-## `full` says the pool has hit `DELIVERY_STOCK_CAPACITY` for something and
-## the docks are refusing the belt (the dock-capacity change, 2026-09-16).
+## The LAMP, by contrast, is per dock: `blocked_keys` holds the tile key of
+## each dock the sim says is refusing its belt right now
+## (`DockSnapshot::full`), and only those pulse. It used to take one shared
+## flag off the economy, which lit every dock the moment any single product
+## capped — so a BBQ dock running clean cried jam because ketchup was full.
 ## A full deck already looks like a full deck — the cases cap out at
 ## DOCK_STOCK_SLOTS long before the pool does — so the state gets the one
 ## channel a stack of crates does not have: the lamp PULSES instead of
 ## holding, off `current_tick`.
 ##
-## Pure given `stock`, `full`, `current_tick` and the built nodes, so a test
-## can drive it directly.
-func _update_dock_stock(stock: Array, full := false, current_tick := 0) -> void:
+## Pure given `stock`, `blocked_keys`, `current_tick` and the built nodes,
+## so a test can drive it directly.
+func _update_dock_stock(stock: Array, blocked_keys := {}, current_tick := 0) -> void:
 	# Flatten the pool's (item, quantity) pairs into one case per unit, in
 	# snapshot order, so a multi-item pool shows a mixed stack rather than
 	# only its first product.
@@ -4048,7 +4066,10 @@ func _update_dock_stock(stock: Array, full := false, current_tick := 0) -> void:
 				node.set_meta("asset", asset)
 				slot.add_child(node)
 			slot.visible = true
-		_set_lamp_stocked(nodes, _dock_lamp_lit(not waiting.is_empty(), full, current_tick))
+		_set_lamp_stocked(
+			nodes,
+			_dock_lamp_lit(not waiting.is_empty(), blocked_keys.has(key), current_tick)
+		)
 
 
 ## Whether a dock's lamp is lit this tick: steady while it merely holds

@@ -171,6 +171,20 @@ pub struct Dock {
     /// that cannot make payroll can get its wage bill all the way to zero
     /// — the dock is the last thing on the line still asking for a crew.
     mothballed: bool,
+    /// Whether this dock refused a box off its belt this tick because
+    /// nothing had room for it — THIS dock's jam, not the pool's state.
+    ///
+    /// Derived, not persisted: [`World::tick`] clears it on every dock
+    /// before step 4 and [`Self::try_absorb`] raises it again, so it means
+    /// "is backing up right now" rather than "once did". A world restored
+    /// from a save reports `false` until its first tick, which is the same
+    /// one-tick catch-up the pass-through `buffer` already has.
+    ///
+    /// On the wire as `DockSnapshot::full`, where it drives the lamp. It is
+    /// deliberately NOT `Economy::delivery_pool_full`: the pool's ceiling is
+    /// per ITEM, so a pool capped on ketchup says nothing about the dock
+    /// next door taking BBQ off its belt perfectly happily.
+    blocked: bool,
 }
 
 impl Dock {
@@ -180,6 +194,7 @@ impl Dock {
             shipped_total: 0,
             understaffed: false,
             mothballed: false,
+            blocked: false,
         }
     }
 
@@ -202,7 +217,32 @@ impl Dock {
             shipped_total,
             understaffed,
             mothballed,
+            // Derived per tick, so a load starts it clear rather than
+            // saving a verdict that the next tick recomputes anyway.
+            blocked: false,
         }
+    }
+
+    /// Whether this dock is refusing boxes off its belt right now, so the
+    /// line behind it is backing up — what the lamp pulses on.
+    ///
+    /// False for a MOTHBALLED dock, which also takes nothing off the belt:
+    /// that is a switch the player threw, reported by [`Self::mothballed`],
+    /// and conflating the two would light a jam lamp on a dock that is
+    /// simply off.
+    pub fn blocked(&self) -> bool {
+        self.blocked
+    }
+
+    /// Clears the jam verdict so [`Self::try_absorb`] can raise it again —
+    /// called on every dock once per tick, before the pass that pulls off
+    /// belts, in the `claim`/`reset` shape the staff pools already use.
+    ///
+    /// Separate from `try_absorb` because a dock may be fed by SEVERAL
+    /// belts: resetting here and only ever setting there makes `blocked`
+    /// "any inbound belt was refused", which is what backing up means.
+    pub(crate) fn clear_blocked(&mut self) {
+        self.blocked = false;
     }
 
     /// Whether the player has switched this dock off (issue #19).
@@ -286,6 +326,11 @@ impl Dock {
         // `ship_into` drop the overflow is what keeps the refusal on the
         // belt, where it backs the line up instead of destroying a box.
         if !self.buffer.has_room_for(&item, 1) || !economy.has_delivery_room(&item, 1) {
+            // The jam is a fact about THIS dock and THIS item: recorded
+            // here, where both the refusal and the item are in hand, rather
+            // than re-derived by a snapshot that would have to guess which
+            // product the belt was carrying.
+            self.blocked = true;
             return false;
         }
         let Some(taken) = belt.take_front_if_at_end() else {
@@ -592,6 +637,73 @@ mod tests {
         econ.delivery_buffer.remove("boxed_ketchup", 1);
         assert_eq!(d.ship_into(&mut econ), 1);
         assert!(d.is_empty());
+    }
+
+    /// `blocked` is raised by the refusal itself and says nothing until one
+    /// happens — a dock with an empty belt is not backing anything up, even
+    /// while the pool sits at its ceiling.
+    #[test]
+    fn blocked_tracks_the_refusal_not_the_pool() {
+        let mut d = dock();
+        let mut econ = economy();
+        let mut b = belt();
+
+        econ.deposit("boxed_ketchup", DELIVERY_STOCK_CAPACITY);
+        assert!(econ.delivery_pool_full());
+        assert!(
+            !d.blocked(),
+            "a full pool alone is not this dock backing up — nothing has been refused"
+        );
+
+        assert!(b.try_spawn("boxed_ketchup".to_string()));
+        run_to_end(&mut b);
+        assert!(!d.try_absorb(&mut b, &econ));
+        assert!(
+            d.blocked(),
+            "the box was refused, so the line is backing up"
+        );
+
+        // Room appears, and the same dock takes the box it was refusing.
+        econ.delivery_buffer.remove("boxed_ketchup", 1);
+        d.clear_blocked();
+        assert!(d.try_absorb(&mut b, &econ));
+        assert!(!d.blocked());
+    }
+
+    /// The whole point of making this per dock: the pool's ceiling is per
+    /// ITEM, so a pool capped on ketchup must leave a dock taking BBQ
+    /// reporting itself perfectly clear. This is the assertion that fails
+    /// against `Economy::delivery_pool_full`, which was true for both.
+    #[test]
+    fn a_dock_on_another_product_is_not_blocked_by_a_capped_one() {
+        let mut ketchup_dock = dock();
+        let mut bbq_dock = dock();
+        let mut econ = economy();
+
+        econ.deposit("boxed_ketchup", DELIVERY_STOCK_CAPACITY);
+        assert!(
+            econ.delivery_pool_full(),
+            "the pool summary is true — one item is at the ceiling"
+        );
+
+        let mut ketchup_belt = belt();
+        assert!(ketchup_belt.try_spawn("boxed_ketchup".to_string()));
+        run_to_end(&mut ketchup_belt);
+        assert!(!ketchup_dock.try_absorb(&mut ketchup_belt, &econ));
+
+        let mut bbq_belt = belt();
+        assert!(bbq_belt.try_spawn("boxed_bbq".to_string()));
+        run_to_end(&mut bbq_belt);
+        assert!(
+            bbq_dock.try_absorb(&mut bbq_belt, &econ),
+            "the BBQ pool has room, so this dock takes its box"
+        );
+
+        assert!(ketchup_dock.blocked(), "this one really is backing up");
+        assert!(
+            !bbq_dock.blocked(),
+            "and this one is not — the lamp must be able to tell them apart"
+        );
     }
 
     /// A partial ship: the pool has room for some of what the dock holds,

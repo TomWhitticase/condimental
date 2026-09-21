@@ -1253,18 +1253,20 @@ pub struct DockSnapshot {
     /// nothing, takes nothing off the belt. Distinct from `understaffed`,
     /// which is the crew being refused rather than never asked for.
     pub mothballed: bool,
-    /// Whether the shared delivery pool has reached its per-item ceiling
-    /// (`Economy::delivery_pool_full`), i.e. whether this dock is currently
-    /// refusing boxes off its belt and the line behind it is backing up (the
-    /// dock-capacity change, 2026-09-16).
+    /// Whether THIS dock is currently refusing a box off its belt, so the
+    /// line behind it is backing up ([`super::dock::Dock::blocked`]) — the
+    /// dock-capacity change, 2026-09-16, made per-dock by the second sauce.
     ///
-    /// A property of the POOL, not of this building, so every dock reports
-    /// it identically — the same rule the pallet stack drawn on the deck
-    /// already follows (point 1 above). It rides the dock's own snapshot
-    /// anyway because it is a fact about this tile that hover has to state
-    /// ("full — the belt is backing up") and because a chunk-driven renderer
-    /// re-reads a dock when it ships; presentation with the economy snapshot
-    /// already in hand may equally read `delivery_full` there.
+    /// It used to be `Economy::delivery_pool_full` verbatim, a property of
+    /// the POOL that every dock reported identically. That read true while
+    /// one sauce shipped, because the only capped item was the only item.
+    /// The pool's ceiling is per ITEM, though, so once BBQ arrived beside
+    /// ketchup the two facts came apart: a pool capped on ketchup left a
+    /// BBQ dock taking boxes perfectly happily while its lamp cried jam.
+    ///
+    /// So this is the building's own state now, and the pool's summary
+    /// stays where it belongs — `EconomySnapshot::delivery_full`, read by
+    /// the clipboard beside the per-item levels that explain it.
     pub full: bool,
 }
 
@@ -3688,6 +3690,21 @@ impl World {
         self.topology.machine_output_taps = output_taps;
 
         // 4. Consumers pull off a belt's end.
+        //
+        // Every dock's jam verdict is cleared first so the pass below can
+        // only ever raise it: a dock fed by two belts is backing up if
+        // EITHER was refused, and last-write-wins would report whichever
+        // link the topology happened to visit last.
+        // Taken and put back rather than cloned, as the two passes below do:
+        // this runs every tick, and a fresh Vec per tick to read a list the
+        // loop does not modify is an allocation for nothing.
+        let docks = std::mem::take(&mut self.topology.docks);
+        for &dock in &docks {
+            if let Ok(mut body) = self.ecs.get::<&mut Dock>(dock) {
+                body.clear_blocked();
+            }
+        }
+        self.topology.docks = docks;
         let belt_to_sink = std::mem::take(&mut self.topology.belt_to_sink);
         for &(belt, sink) in &belt_to_sink {
             let moved = match self.body_kind(sink) {
@@ -5198,7 +5215,7 @@ impl World {
         // The body's fields are lifted out before `is_crewed`, which walks
         // every placement and would otherwise be called while this dock's
         // component is still borrowed.
-        let (contents, capacity_per_item, shipped_total, understaffed, mothballed) = {
+        let (contents, capacity_per_item, shipped_total, understaffed, mothballed, blocked) = {
             let body = self.ecs.get::<&Dock>(dock).unwrap();
             (
                 body.contents().cloned().collect(),
@@ -5206,6 +5223,7 @@ impl World {
                 body.shipped_total(),
                 body.understaffed(),
                 body.mothballed(),
+                body.blocked(),
             )
         };
         DockSnapshot {
@@ -5220,7 +5238,7 @@ impl World {
             understaffed,
             crewed: self.is_crewed(dock),
             mothballed,
-            full: self.economy.delivery_pool_full(),
+            full: blocked,
         }
     }
 

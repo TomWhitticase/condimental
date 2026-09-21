@@ -858,6 +858,55 @@ static func build_bbq_running_line(sim) -> void:
 		sim.tick()
 
 
+## THE SPLIT DOCK LAMPS — `scripts/screenshot-scene.sh --split-docks`: the
+## BBQ branch run on until ONE of its two docks is backing up and the other
+## is not, which is the whole subject of the per-dock lamp change.
+##
+## Built on `build_bbq_running_line` because it is the only fixture with two
+## docks shipping two products into the one shared pool. BBQ is the sauce
+## that caps: the branch out-produces the orders on the board while the
+## shipped line is throttled to its share of the vat (the same asymmetry
+## `tests/bbq_branch.rs` relies on).
+##
+## The wait is long, and has to be: the board keeps BUYING. Ketchup sits
+## around 2 in the pool for the whole run because its contracts settle as
+## fast as the line ships, and BBQ climbs only ~3 per 4 000 ticks against
+## what the two BBQ orders take — so the ceiling arrives somewhere past tick
+## 70 000. That gap is the point of the shot rather than an inconvenience:
+## one product outruns its demand, the other does not, and only one dock
+## should say so.
+##
+## Returns with the docks disagreeing, or having run out of patience — the
+## caller checks `split_dock_lamps_found` rather than trusting the frame.
+const SPLIT_DOCK_MAX_TICKS := 140000
+
+
+static func build_split_dock_line(sim) -> void:
+	build_bbq_running_line(sim)
+	if fixture_failure() != "":
+		return
+	for i in range(SPLIT_DOCK_MAX_TICKS):
+		if i % RESTOCK_EVERY == 0:
+			restock(sim)
+		sim.tick()
+		if split_dock_lamps_found(sim):
+			return
+
+
+## Whether the docks currently DISAGREE about backing up — one jammed, one
+## clear. The sim's own per-dock verdict (`DockSnapshot::full`), never a
+## pool level compared here, for `delivery_full`'s reason above.
+static func split_dock_lamps_found(sim) -> bool:
+	var docks = JSON.parse_string(sim.dock_snapshots_json())
+	if not (docks is Array) or docks.size() < 2:
+		return false
+	var jammed := 0
+	for dock in docks:
+		if dock is Dictionary and bool(dock.get("full", false)):
+			jammed += 1
+	return jammed > 0 and jammed < docks.size()
+
+
 ## THE STALLED RUN (issue #54) — the fixture `test_pipe_fault.gd` asserts
 ## and `scripts/screenshot-scene.sh --stalled-run` photographs: the BBQ
 ## branch exactly as it ships, with ONE mistake made in it.

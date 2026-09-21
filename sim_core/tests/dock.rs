@@ -524,12 +524,11 @@ fn a_full_pool_backs_the_line_up_instead_of_losing_product() {
         filled,
         "an undemanded line must reach the pool's ceiling — it never did, so either the          line stopped producing or the ceiling is not being applied"
     );
-    let dock = the_dock(&world);
-    assert!(
-        dock.full,
-        "a pool at its ceiling is what the dock's `full` flag reports: {dock:?}"
-    );
-
+    // NOT `dock.full` yet, deliberately. The flag reports this dock refusing
+    // a box, and the pool only reached its ceiling in step 6 of this very
+    // tick — after step 4 had already taken a box off the belt into room
+    // that still existed. The refusal, and the flag, come one tick later.
+    //
     // Keep running with nowhere to put product: the belt fills instead.
     let mut backed_up = 0;
     for _ in 0..2_000u32 {
@@ -549,5 +548,28 @@ fn a_full_pool_backs_the_line_up_instead_of_losing_product() {
     assert!(
         backed_up > 0,
         "with the pool full the dock's belt must hold the boxes it cannot hand over"
+    );
+    // And once a backed-up box actually reaches the belt's END, the dock
+    // refuses it and says so. Hunted rather than asserted outright: the box
+    // above has only just been spawned onto the belt and still has the run
+    // to travel, and `try_absorb` raises nothing until there is something
+    // at the end to say no to.
+    let mut reported = false;
+    for _ in 0..2_000u32 {
+        common::supply(&mut world);
+        world.tick();
+        if the_dock(&world).full {
+            reported = true;
+            break;
+        }
+    }
+    let dock = the_dock(&world);
+    assert!(
+        reported,
+        "and THAT is what `full` reports — this dock refusing its belt, not the pool's         level: {dock:?}"
+    );
+    assert!(
+        dock.contents.is_empty(),
+        "a dock that is backing up is still a pass-through, holding nothing itself"
     );
 }
