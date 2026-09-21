@@ -189,6 +189,40 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — The spice mix is a sack, and a machine shows the sauce it is really making
+
+Two asks in one branch. The first is art: `item_spice_mix` was a tin, which
+at icon size read as a drum next to the molasses jar, so it is now a sack cut
+from `item_sugar`'s pattern — smaller in every dimension (a voxgen test pins
+that, and that neither sack ever borrows the other's cloth), in a new
+`sack_spice` brown, with its blend showing at the mouth above both the cloth
+and the label.
+
+The second is the real fix. The bottler and the packer drew their sauce in
+`sauce_red` no matter what they were running, so a BBQ line bottled ketchup
+on screen; with more sauces coming, one model per sauce is not a shape worth
+starting. Instead **a machine's `liquid` material class now means "this is
+the product"**: `machine_product` paints it in a neutral `fluid_pale`,
+`voxel_assets.gd` already names each class's mesh, and `main.gd` tints that
+one mesh from `PRODUCT_TINTS[recipe_id]` whenever the machine's live recipe
+changes. A new sauce is a row in that table, not a new asset. The tint is
+keyed by *recipe* rather than by output buffer because mid-craft the buffer
+is empty; an unregistered sauce falls back to untinted pale, so it reads as
+unfinished rather than as the wrong sauce. The cooking vat's sight glass had
+the same bug one stage upstream and is fixed by the same mechanism, which
+leaves `sauce_red` with no consumer — it stays in `palette.ron` with a note,
+because indices are file order and removing one renumbers everything below.
+
+Rendering it found the rest of the defect was in the sim, not the renderer.
+`Machine::choose` breaks a tie on `recipes.ron` file order, so a BBQ bottler
+that ran dry silently adopted `bottled_ketchup` — visible as a red machine,
+and as a stall readout that named a raw it was not waiting for. A tie now
+goes to the recipe the machine is already holding
+(`a_bbq_machine_that_runs_dry_keeps_its_own_recipe`). `test_bbq_branch.gd`
+samples each machine's live recipe *during* the run and asserts the two lines
+draw different colours, which is what catches a regression here at all — the
+end-of-run state had already fallen back.
+
 ### 2026-09-21 — The warehouse rack has its art (W2)
 
 First ticket of the warehouse stock racks feature, and assets only — nothing

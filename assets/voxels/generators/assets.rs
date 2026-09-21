@@ -1662,7 +1662,7 @@ pub fn item_vinegar(p: &Palette) -> VoxModel {
     m
 }
 
-/// The BBQ branch's three raw ingredients — a **spice tin**, a **molasses
+/// The BBQ branch's three raw ingredients — a **spice bag**, a **molasses
 /// jar** and a **liquid-smoke drum** (issue #67).
 ///
 /// All three went on sale the moment the BBQ gate opened and none of them
@@ -1676,12 +1676,14 @@ pub fn item_vinegar(p: &Palette) -> VoxModel {
 /// **They are designed as a ROW, not as three objects**, because the frame
 /// that has to work is the market, where all six raws stand side by side:
 /// a red sphere (tomato), a kraft sack (sugar), an amber jug (vinegar), and
-/// then these three. So each takes a silhouette none of the others has —
-/// a low heaped tin, a squat capped jar, a straight-sided ribbed drum —
-/// and a value none of the others has, rather than three variations on
+/// then these three. So each takes a silhouette none of the others has — a
+/// tied paper bag, a squat capped jar, a straight-sided ribbed drum — and a
+/// value none of the others has, rather than three variations on
 /// "container". At icon scale it is the proportion of the parts that
 /// identifies a thing (§2b point 31), and the part doing the work here is
-/// respectively the heap, the cap and the hoops.
+/// respectively the tie, the cap and the hoops. The bag is the newest of
+/// the three and the one that has to work hardest, because the row already
+/// holds a bag: see `item_spice_mix` for what keeps it from being sugar's.
 ///
 /// **Which camera each is authored for differs, and it follows what
 /// carries it.** `spice_mix` and `molasses` are solids: a hopper unloads
@@ -1695,45 +1697,59 @@ pub fn item_vinegar(p: &Palette) -> VoxModel {
 /// icon pass, and it is authored for `vengi`'s corner alone, exactly as
 /// `item_vinegar` is and for the same reason.
 ///
-/// One open tin of ground spice: a low steel can with the blend heaped
-/// above its rim.
+/// One bag of ground spice: a small spice-dyed paper sack, tied at the
+/// neck, with a spill of the blend at its mouth.
 ///
-/// **Open and heaped rather than a sealed tin**, which is the whole design:
-/// a closed tin is a cylinder, and this factory already has pails, bottles
-/// and a jug that are cylinders. The heap gives it a domed top nothing else
-/// on a belt has, and it puts the one thing that says *spice* — a coarse,
-/// dark orange-red powder, flecked rather than flat — on the surface both
-/// cameras look down at. The tin is deliberately the widest and shortest of
-/// the six raws for the same reason: at market-crate size a silhouette is
-/// read before a colour is.
+/// **A SACK, and deliberately `item_sugar`'s sack one size down** — the
+/// project owner's call, 2026-09-21. This was an open steel tin with the
+/// blend heaped above its rim, drawn wide and low so that no two of the six
+/// raws in the market row shared an outline; the row argument above is
+/// still the one that matters, which is why the SIZE is as load-bearing
+/// here as the colour. Two bags of bulk dry goods are told apart the way
+/// two real ones are — by how big they are and what is printed on them — so
+/// this one is narrower, shallower AND shorter than the sugar sack in every
+/// dimension (a test pins all three), and its paper is `sack_spice` where
+/// sugar's is undyed `sack_kraft`, 123/255 of luma apart.
+///
+/// What the heap used to do, the spill now does: it puts the substance's
+/// own colour on the surface BOTH cameras look down at (§2b point 11 for
+/// the game's, point 35 for the market's), and it is the one bright thing
+/// on the bag for the reason `item_sugar`'s crystal is — a sack alone is a
+/// sack, and it is the pairing of the sack with what is coming out of it
+/// that names the ingredient.
 pub fn item_spice_mix(p: &Palette) -> VoxModel {
     let mut m = item_volume();
-    let steel = p.idx("steel");
-    // The can: wide, short, and genuinely hollow, so the heap sits IN it
-    // rather than on it. Carved rather than drawn as a ring for the reason
-    // `pail` records — a filled bore still meshes as a solid plug.
-    m.cylinder_z((8, 8), 5.6, (0, 6), steel);
-    m.carve_cylinder_z((8, 8), 4.6, (1, 6));
-    // The rolled rim, a ring and not a disc, in the brightest metal on the
-    // item: it is the top edge of the silhouette and the one place the
-    // "metal keeps the brightest pixel" rule (UI_UX.md §4) can land without
-    // competing with the spice.
-    m.cylinder_z((8, 8), 6.0, (6, 6), p.idx("steel_light"));
-    m.carve_cylinder_z((8, 8), 4.8, (6, 6));
-    // The blend itself, filling the can and mounded above it. Its radius
-    // stays inside the rim's bore at every height it reaches (§2b point
-    // 19), so the powder never z-fights the wall it sits in.
+    let sack = p.idx("sack_spice");
+    // Slumped body over a tucked flat base, widest at the base and
+    // narrowing toward the neck, so it reads as full and soft rather than
+    // as a box — `item_sugar`'s own note records what the stepped-cuboid
+    // version of this looked like, and it is not worth rediscovering.
+    m.ellipsoid((8, 8, 4), (4.6, 3.8, 4.2), sack);
+    m.cuboid((5, 10), (6, 9), (0, 1), sack);
+    // The gathered neck, pinched to a ridge along X.
+    m.cuboid((6, 9), (7, 8), (8, 9), sack);
+    // A twine tie standing one voxel PROUD of that neck, where the sugar
+    // sack's fold is a flat dark band flush with it. That overhang is the
+    // one silhouette difference between the two bags, and it is what keeps
+    // them apart in the market row at a size where a colour can be lost to
+    // a shadow; `label_kraft` rather than a dark cord because against
+    // `sack_spice` a dark band is 14/255 and this is 114/255.
+    m.cuboid((5, 10), (7, 8), (10, 10), p.idx("label_kraft"));
+    // The blend itself, spilling from the mouth and dusted on the floor
+    // beside the bag. `spice_paprika` is the substance's own colour
+    // wherever it appears (the palette's one-colour-per-substance rule), so
+    // the bag on the belt and the crate in the market are the same stuff.
     let paprika = p.idx("spice_paprika");
-    m.cylinder_z((8, 8), 4.6, (1, 5), paprika);
-    m.ellipsoid((8, 8, 5), (4.6, 4.6, 4.0), paprika);
-    // Flecks of whole spice through the grind — `bbq_brown` rather than a
-    // black, which on a face this camera lights would read as a hole in the
-    // heap (§2b point 21). Fixed positions, never random: a review
+    m.cuboid((6, 9), (7, 8), (11, 11), paprika);
+    // Whole spice through the grind, and a scatter of the ground blend on
+    // the ground. `bbq_brown` rather than a black for the fleck, exactly as
+    // the tin used: on a face this camera lights, a black reads as a hole
+    // in the spill (§2b point 21). Fixed positions, never random — a review
     // screenshot has to be repeatable.
-    for (x, y) in [(6, 7), (9, 6), (8, 10), (10, 9), (7, 8)] {
-        m.set(x, y, 8, p.idx("bbq_brown"));
+    m.set(7, 7, 11, p.idx("bbq_brown"));
+    for (x, y) in [(3, 7), (12, 9), (8, 4)] {
+        m.set(x, y, 0, paprika);
     }
-    m.set(8, 8, 9, p.idx("bbq_brown"));
     m
 }
 
@@ -3442,6 +3458,36 @@ fn machine_fluid_port(m: &mut VoxModel, p: &Palette, lane_y: i32, face: Face, la
     );
 }
 
+/// The colour every machine paints the product it is visibly working on:
+/// the sauce standing in `machine_bottler`'s bottles, the bottle in
+/// `machine_packer`'s open case, and the level behind
+/// `machine_cooking_vat`'s sight glass.
+///
+/// **This is a mechanism, not a colour choice** (2026-09-21). It is
+/// `fluid_pale` — the same near-white the pipe run and the fluid tank are
+/// drawn in — and `fluid_pale` is the `liquid` class, which no other voxel
+/// of any of those three machines uses. So `voxgen` splits exactly the
+/// product into a mesh of its own (`machine_bottler.liquid.vox`, §2b point
+/// 2) and `main.gd` multiplies the sauce's own colour over that one mesh,
+/// from the machine's LIVE recipe (its `PRODUCT_TINTS`). A bottler drawing
+/// BBQ shows BBQ; the same bottler switched back to ketchup shows ketchup,
+/// with no second model and no per-kind code.
+///
+/// The three models keep their painted sauce in the COMBINED `name.vox`
+/// the icon pass renders, because the tint only exists in the running
+/// game: a build-menu icon therefore shows a bottler holding near-white
+/// bottles, which is the honest picture of a machine that is not making
+/// anything yet — the same reading `fluid_tank`'s empty pale column and
+/// `hopper`'s empty bin already ship.
+///
+/// **Keeping `liquid` to the product alone is what holds this up**, so a
+/// test asserts it for all three: paint anything else on one of these
+/// machines with a `liquid` colour and it would be tinted as if it were
+/// sauce.
+fn machine_product(p: &Palette) -> u8 {
+    p.idx("fluid_pale")
+}
+
 /// GAMEPLAY.md §2 tier 1's raw-ingredient prep, `data/machines.ron`'s 1x1
 /// `crusher`: tomatoes are tipped into the open feed pocket in the top of
 /// the frame, two counter-rotating rolls crush them in the nip, and paste
@@ -3809,10 +3855,19 @@ pub fn machine_cooking_vat(p: &Palette) -> VoxModel {
     m.cylinder_z((49, 18), 4.0, (46, 46), p.idx("steel_light"));
 
     // Sight glass on the camera-facing side: the sauce level inside, framed
-    // in stainless. Matte `sauce_red` on purpose — it is product, not a
-    // polished surface.
+    // in stainless.
+    //
+    // The sauce behind it is the product mesh (`machine_product`), so the
+    // vat shows what it is actually cooking. It was flat `sauce_red`, under
+    // a note here saying matte was deliberate — "it is product, not a
+    // polished surface" — and it is that reading, not the rule, that was
+    // wrong: this vat cooks BBQ as well as ketchup (`data/recipes.ron`), so
+    // a fixed red was never product, it was one product. What stands behind
+    // a sight glass is liquid in a vessel, exactly as `fluid_tank_fill` is,
+    // and the gloss the class brings is the one every other visible liquid
+    // in this factory already carries.
     m.cuboid((29, 36), (5, 8), (16, 34), p.idx("steel_light"));
-    m.cuboid((31, 34), (4, 6), (17, 29), p.idx("sauce_red"));
+    m.cuboid((31, 34), (4, 6), (17, 29), machine_product(p));
 
     // Access platform, handrail and ladder — the industrial language
     // UI_UX.md §3 asks for, and what actually sells the vat's size.
@@ -3889,9 +3944,17 @@ pub fn machine_bottler(p: &Palette) -> VoxModel {
 
     // Three bottles in the lane, mid-fill — the same silhouette
     // `item_bottle` uses, so what leaves this machine is recognizably what
-    // is standing in it.
+    // is standing in it. Their CONTENTS are the product mesh
+    // (`machine_product`), which is what keeps that true of a second sauce:
+    // a bottler drawing BBQ off its pipe filled three ketchup-red bottles
+    // until 2026-09-21.
+    //
+    // The label band at z 14..15 replaces the sauce outright over those two
+    // layers rather than ringing it, because r 2.6 and r 2.8 round to the
+    // same cells here — a one-voxel ring would be empty, and the two solids
+    // would share every cell they cover (§2b point 24).
     for x in [8, 16, 24] {
-        m.cylinder_z((x, 16), 2.6, (12, 17), p.idx("ketchup_red"));
+        m.cylinder_z((x, 16), 2.6, (12, 17), machine_product(p));
         m.cylinder_z((x, 16), 2.8, (14, 15), p.idx("label_cream"));
         m.cylinder_z((x, 16), 1.2, (18, 19), p.idx("glass_pale"));
     }
@@ -3971,7 +4034,11 @@ pub fn machine_packer(p: &Palette) -> VoxModel {
     m.carve_cuboid((19, 26), (11, 20), (14, 21));
     m.cuboid((17, 28), (6, 8), (20, 20), p.idx("cardboard_dark"));
     m.cuboid((17, 28), (23, 25), (20, 20), p.idx("cardboard_dark"));
-    m.cylinder_z((22, 15), 2.2, (14, 19), p.idx("ketchup_red"));
+    // The bottle in it is the one thing on this machine that says WHICH
+    // sauce is being packed, so it is the product mesh (see
+    // `machine_product`) and not a painted red: a packer boxing BBQ used
+    // to stand a ketchup bottle in its case.
+    m.cylinder_z((22, 15), 2.2, (14, 19), machine_product(p));
     m.cylinder_z((22, 15), 1.2, (20, 21), p.idx("glass_pale"));
 
     // Taping head on a stand over the case: an arm carrying a brass tape
@@ -7268,29 +7335,35 @@ mod tests {
     /// part by colour** (issue #67). They are bought from one plate that
     /// shows all six ingredients at 64px side by side, where a thing is
     /// identified by the proportion of its parts (UI_UX §2b point 31) — so
-    /// the tin is wide and low, the jar narrow and tall, and the drum
-    /// between them. This is the claim two rework passes were spent on, and
-    /// the one a later edit is most likely to undo by widening the jar or
-    /// raising the tin a couple of voxels "to balance the row".
+    /// the bag is the shortest of the three, the jar is narrow and tall,
+    /// and the drum is the widest. This is the claim two rework passes were
+    /// spent on, and the one a later edit is most likely to undo by
+    /// widening the jar or raising the bag a couple of voxels "to balance
+    /// the row".
+    ///
+    /// The bag replaced a wide, low spice TIN on 2026-09-21 and the
+    /// assertions moved with it, which is the honest way round: the claim
+    /// is that the three outlines stay distinct, not that any one of them
+    /// keeps a particular shape for ever.
     #[test]
     fn the_new_raw_ingredients_do_not_share_a_silhouette() {
         let p = palette();
-        let (tin_w, _, tin_h) = extent(&item_spice_mix(&p));
+        let (bag_w, _, bag_h) = extent(&item_spice_mix(&p));
         let (jar_w, _, jar_h) = extent(&item_molasses(&p));
         let (drum_w, _, drum_h) = extent(&item_liquid_smoke(&p));
         assert!(
-            tin_w > tin_h,
-            "the spice tin is wider than it is tall ({tin_w} x {tin_h})"
+            bag_h < jar_h && bag_h < drum_h,
+            "the spice bag is the shortest of the three (bag {bag_h}, jar {jar_h}, drum {drum_h})"
         );
         assert!(
             jar_h > jar_w,
             "the molasses jar is taller than it is wide ({jar_w} x {jar_h})"
         );
         assert!(
-            jar_w < drum_w && drum_w < tin_w,
-            "the three widths stay ordered jar {jar_w} < drum {drum_w} < tin {tin_w}"
+            jar_w < bag_w && bag_w < drum_w,
+            "the three widths stay ordered jar {jar_w} < bag {bag_w} < drum {drum_w}"
         );
-        let outlines = [(tin_w, tin_h), (jar_w, jar_h), (drum_w, drum_h)];
+        let outlines = [(bag_w, bag_h), (jar_w, jar_h), (drum_w, drum_h)];
         for (i, a) in outlines.iter().enumerate() {
             for b in &outlines[i + 1..] {
                 assert_ne!(a, b, "no two of the three have the same outline");
@@ -7298,20 +7371,48 @@ mod tests {
         }
     }
 
-    /// **A tin of spice has to show the spice** — its contents stand proud
-    /// of the rim, or the model is a tin and the market offers two steel
-    /// cylinders (the drum is the other). Asserted as "paprika above the
-    /// highest steel" rather than by a voxel count, because the failure
-    /// worth catching is a future edit deepening the tin until the heap
-    /// sinks into it.
+    /// **The spice bag is the sugar sack ONE SIZE DOWN, and that is the
+    /// whole of what keeps them apart on a belt** (the project owner's
+    /// 2026-09-21 call to make spice a bag). The two now share a shape, so
+    /// the row argument the test above makes cannot be what separates
+    /// them: size and paper are, and both are asserted here because a
+    /// later edit "rounding out" the spice bag would silently ship two
+    /// identical sacks of different things.
     #[test]
-    fn the_spice_tin_heaps_its_contents_above_the_rim() {
+    fn the_spice_bag_is_smaller_than_the_sugar_sack_in_every_dimension() {
         let p = palette();
-        let tin = item_spice_mix(&p);
+        let (sw, sd, sh) = extent(&item_sugar(&p));
+        let (bw, bd, bh) = extent(&item_spice_mix(&p));
+        assert!(
+            bw < sw && bd < sd && bh < sh,
+            "the spice bag {bw}x{bd}x{bh} is smaller than the sugar sack {sw}x{sd}x{sh} \
+             in all three"
+        );
+        let spice = item_spice_mix(&p);
+        let sugar = item_sugar(&p);
+        assert!(
+            !spice.voxels.values().any(|&c| c == p.idx("sack_kraft")),
+            "the spice bag's paper is `sack_spice`, never sugar's undyed kraft"
+        );
+        assert!(
+            !sugar.voxels.values().any(|&c| c == p.idx("sack_spice")),
+            "and the sugar sack's is never the spice paper"
+        );
+    }
+
+    /// **A bag of spice has to show the spice** — the blend spills from its
+    /// mouth and is the topmost thing on the model, or what ships is a
+    /// small brown bag and the market offers two sacks. Asserted as
+    /// "paprika above the highest paper" rather than by a voxel count,
+    /// because the failure worth catching is a future edit tying the neck
+    /// shut over the spill.
+    #[test]
+    fn the_spice_bag_shows_its_blend_at_the_mouth() {
+        let p = palette();
+        let bag = item_spice_mix(&p);
         let paprika = p.idx("spice_paprika");
-        let rim = p.idx("steel_light");
         let top_of = |colour: u8| {
-            tin.voxels
+            bag.voxels
                 .iter()
                 .filter(|&(_, &c)| c == colour)
                 .map(|(at, _)| at.2)
@@ -7319,15 +7420,57 @@ mod tests {
                 .unwrap_or(0)
         };
         assert!(
-            tin.voxels.values().any(|&c| c == paprika),
-            "the tin is painted from the palette's own `spice_paprika`"
+            bag.voxels.values().any(|&c| c == paprika),
+            "the bag is filled from the palette's own `spice_paprika`"
         );
         assert!(
-            top_of(paprika) > top_of(rim),
-            "the heap ({}) stands above the rim ({})",
+            top_of(paprika) > top_of(p.idx("sack_spice")),
+            "the spill ({}) stands above the paper ({})",
             top_of(paprika),
-            top_of(rim)
+            top_of(p.idx("sack_spice"))
         );
+        assert!(
+            top_of(paprika) > top_of(p.idx("label_kraft")),
+            "and above the tie ({})",
+            top_of(p.idx("label_kraft"))
+        );
+    }
+
+    /// **`liquid` means "this is the product" on a machine, and nothing
+    /// else may use it** (2026-09-21). `main.gd` tints one mesh per machine
+    /// with the sauce its live recipe is making, and the mesh it reaches
+    /// for is the `liquid` one — so a second `liquid` colour anywhere on
+    /// one of these bodies would be repainted as sauce every time the
+    /// recipe changed. `machine_product` is the only way in, and this is
+    /// the assertion that keeps it the only way in.
+    #[test]
+    fn a_machine_spends_its_liquid_class_on_the_product_alone() {
+        let p = palette();
+        let product = machine_product(&p);
+        assert_eq!(
+            p.class_of(product),
+            MaterialClass::Liquid,
+            "the product colour has to BE the liquid class or nothing is split out"
+        );
+        for (name, model) in [
+            ("machine_bottler", machine_bottler(&p)),
+            ("machine_packer", machine_packer(&p)),
+            ("machine_cooking_vat", machine_cooking_vat(&p)),
+        ] {
+            let mut liquid = model
+                .voxels
+                .values()
+                .copied()
+                .filter(|&c| p.class_of(c) == MaterialClass::Liquid);
+            assert!(
+                liquid.clone().next().is_some(),
+                "{name} has a product mesh at all"
+            );
+            assert!(
+                liquid.all(|c| c == product),
+                "{name} spends `liquid` on nothing but `machine_product`"
+            );
+        }
     }
 
     /// **The jar keeps a band of empty glass above its fill line.** Its own

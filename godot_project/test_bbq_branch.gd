@@ -31,6 +31,11 @@
 #     `FLUID_TINTS` entry of its own and no two of the six are the same
 #     colour (issue #68 — three of them fell through to the neutral fallback,
 #     so the whole BBQ half of the factory ran pale blue water),
+#   * AND THE SAUCE A MACHINE SHOWS IS THAT RECIPE'S: the two bottlers and
+#     the two packers are one model each, whose product mesh is tinted from
+#     the live recipe (`PRODUCT_TINTS`), so the BBQ pair and the ketchup
+#     pair come out different colours — they were both ketchup until
+#     2026-09-21, the sauce having been painted into the voxels,
 #   * A MACHINE PICKS ITS RECIPE FROM ITS PLUMBING: the two mixers are the
 #     same kind on the same board and one makes `ketchup_mix` while the other
 #     makes `bbq_mix`, with no picker anywhere in the UI,
@@ -89,8 +94,26 @@ const BBQ_RUN := Vector2i(19, -3)
 ## is how the pale-blue BBQ runs were found in the first place.
 const FLUID_TINT_MIN_DISTANCE := 0.08
 
+## The machines that SHOW their product, paired ketchup-against-BBQ: one pair
+## per kind, each entry a tile and the recipe that tile must be seen running.
+## Two of a kind is the whole point — a table of tints cannot be wrong for a
+## factory that only makes one sauce.
+const PRODUCT_MACHINE_PAIRS := [
+	[[Vector2i(12, 0), "ketchup"], [BBQ_VAT, "bbq"]],
+	[[Vector2i(16, 0), "bottled_ketchup"], [BBQ_BOTTLER, "bottled_bbq"]],
+	[[Vector2i(21, 0), "boxed_ketchup"], [BBQ_PACKER, "boxed_bbq"]],
+]
+## How often to ask those six what they are making. Every 50 ticks is a
+## little under two seconds of play and a few hundred reads across the run —
+## cheap beside the ticks themselves, and dense enough that a stage which
+## only runs in bursts is still caught in one.
+const PRODUCT_SAMPLE_TICKS := 50
+
+
 var main: Node
 var _ran := false
+## origin key -> the set of recipe ids that machine was seen running.
+var _product_recipes: Dictionary = {}
 
 
 func _fail(msg: String) -> void:
@@ -126,6 +149,23 @@ func _fluid_on(tile: Vector2i) -> String:
 			if int(segment["tile"][0]) == tile.x and int(segment["tile"][1]) == tile.y:
 				return String(network.get("fluid", ""))
 	return ""
+
+
+## Records what each product-showing machine is making right now — see
+## PRODUCT_MACHINE_PAIRS. Read straight off `query_tile_json` rather than
+## through a world rebuild: this runs inside the tick loop, and a rebuild
+## there would cost more than the ticks it samples.
+func _sample_product_recipes() -> void:
+	for pair in PRODUCT_MACHINE_PAIRS:
+		for entry in pair:
+			var tile: Vector2i = entry[0]
+			var parsed = JSON.parse_string(main.sim.query_tile_json(tile.x, tile.y))
+			if parsed == null or parsed.get("recipe") == null:
+				continue
+			var key: String = main._tile_key(tile)
+			if not _product_recipes.has(key):
+				_product_recipes[key] = {}
+			_product_recipes[key][String(parsed["recipe"])] = true
 
 
 func _made(item_id: String) -> int:
@@ -262,6 +302,8 @@ floor have to be tellable apart"
 		main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper", "amount": 64}))
 		main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank", "amount": 100}))
 		main.sim.tick()
+		if _i % PRODUCT_SAMPLE_TICKS == 0:
+			_sample_product_recipes()
 	main._rebuild_world()
 
 	for stage in ["bbq_mix", "bbq", "bottled_bbq", "boxed_bbq"]:
@@ -314,11 +356,81 @@ have needed naming in data"
 		_fail("the BBQ mixer must run bbq_mix, not '%s'" % _placement_recipe(BBQ_MIXER))
 		return
 
+	# AND THE PICKER IS WHAT PAINTS THE SAUCE. Six machines of three kinds
+	# on this floor show sauce, and until 2026-09-21 all six showed ketchup:
+	# the sauce was painted into their voxels, so a bottler filling BBQ
+	# stood a row of red bottles and the packer beside it boxed them. The
+	# product is the `liquid` mesh now, tinted from the live recipe
+	# (main.gd's PRODUCT_TINTS), and this asserts that join end to end.
+	#
+	# **Against what each machine was SEEN making, not what it is making
+	# now.** A machine holds a recipe only while its inputs point at one; a
+	# line that has run its stock down holds its kind's first recipe again,
+	# which is `bottled_ketchup` for both bottlers — so checking at the end
+	# of the run would assert the file order back, exactly as the mixers'
+	# note above says. `_sampled_recipes` watches all six while the factory
+	# is working instead.
+	for pair in PRODUCT_MACHINE_PAIRS:
+		var tints := {}
+		for entry in pair:
+			var tile: Vector2i = entry[0]
+			var want := String(entry[1])
+			var ran: Dictionary = _product_recipes.get(main._tile_key(tile), {})
+			if not ran.has(want):
+				_fail(
+					"the machine at %s never ran '%s' in %d ticks — it was seen making %s, so the sauce it DRAWS cannot be checked"
+					% [tile, want, RUN_TICKS, ", ".join(PackedStringArray(ran.keys()))]
+				)
+				return
+			for recipe in ran:
+				if not main.PRODUCT_TINTS.has(recipe):
+					_fail(
+						"the machine at %s ran '%s', which has no PRODUCT_TINTS entry in main.gd — its product draws in the untinted fallback, so a finished sauce reads as pale and unmade. Every recipe a product-showing machine can run needs a row there; that is the one thing a new sauce has to add to this file."
+						% [tile, recipe]
+					)
+					return
+			tints[want] = main.PRODUCT_TINTS[want]
+		var colours: Array = tints.values()
+		if colours[0] == colours[1]:
+			_fail(
+				"%s and %s are of one kind making different sauces and drawing the same colour (%s) — this is the defect the product mesh exists to fix"
+				% [pair[0][1], pair[1][1], colours[0]]
+			)
+			return
+	# The two rows a VAT uses are the fluid tints its own outlet run carries
+	# a tile later: the same cook seen through glass and then through steel,
+	# so they are equal by intent rather than by coincidence, and a lift like
+	# issue #113's has to move both.
+	for fluid_id in ["ketchup", "bbq"]:
+		if main.PRODUCT_TINTS[fluid_id] != main.FLUID_TINTS[fluid_id]:
+			_fail(
+				"the vat draws '%s' as %s while the pipe it fills draws it as %s — one cook, one colour"
+				% [fluid_id, main.PRODUCT_TINTS[fluid_id], main.FLUID_TINTS[fluid_id]]
+			)
+			return
+	# And the scene actually put those colours on a mesh. A machine with no
+	# `liquid` child is one whose product was never split out — the models
+	# are stale, or a generator stopped using `machine_product`.
+	for pair in PRODUCT_MACHINE_PAIRS:
+		for entry in pair:
+			var key: String = main._tile_key(entry[0])
+			if main._machine_products.get(key, null) == null:
+				_fail(
+					"the machine at %s has no `liquid` mesh to paint its product on — run `cargo xtask`, and check `machine_product` still colours it in assets/voxels/generators/assets.rs"
+					% entry[0]
+				)
+				return
+			if String(main._machine_product_recipes.get(key, "")) == "":
+				_fail("the machine at %s never had its product tinted at all" % entry[0])
+				return
+
+
 	print(
 		"BBQ_BRANCH_OK: %d placements built from a new game's balance with the shipped line \
 unmoved, six pipe runs all named (the single tap at (14, -1) reading ketchup, the BBQ mixer's \
 outlet reading bbq_mix), %d mixed order(s) on the board, two mixers of one kind running \
-different recipes chosen by their plumbing alone, every BBQ label spelled 'BBQ' rather than \
+different recipes chosen by their plumbing alone and drawing \
+different sauces from it, every BBQ label spelled 'BBQ' rather than \
 title-cased to 'Bbq', and %d boxes of BBQ made and %d delivered in %d ticks"
 		% [layout.size(), mixed, _made("boxed_bbq"), _delivered("boxed_bbq"), RUN_TICKS]
 	)

@@ -279,3 +279,64 @@ fn the_branch_leaves_the_shipped_line_exactly_where_it_was() {
         "the branch must add to the shipped line, not replace it"
     );
 }
+
+/// The recipe the machine on `tile` is holding.
+fn recipe_at(world: &World, tile: (i32, i32)) -> String {
+    world
+        .world_layout()
+        .into_iter()
+        .find(|placement| placement.tile == tile.into())
+        .and_then(|placement| placement.recipe)
+        .unwrap_or_else(|| panic!("no machine at {tile:?}"))
+}
+
+/// **A BBQ machine that runs dry stays a BBQ machine.**
+///
+/// `Machine::choose` re-picks an idle machine's recipe every tick from what
+/// its buffers and taps hold, and when nothing is satisfied it holds the
+/// closest. A bottler that has drained its tap and emptied its buffer
+/// satisfies *nothing*, so every candidate ties at zero — and the tie used
+/// to go to whichever came first in `data/recipes.ron`, which is
+/// `bottled_ketchup`. The BBQ bottler therefore reported ketchup the moment
+/// it caught up with its supply, which is a lie in two visible places: the
+/// stall readout said it was waiting for ketchup it has never touched, and
+/// the machine drew a row of ketchup bottles (`PRODUCT_TINTS` in
+/// `godot_project/main.gd`, 2026-09-21).
+///
+/// Asserted on a bottler AND a packer because they starve differently — one
+/// is fed by a pipe and one by a belt — and against a run long enough for
+/// the branch to be genuinely idle rather than momentarily between crafts.
+#[test]
+fn a_bbq_machine_that_runs_dry_keeps_its_own_recipe() {
+    let mut world = branch();
+    for _ in 0..20_000u64 {
+        supply(&mut world);
+        world.tick();
+    }
+    assert!(
+        made(&world, "boxed_bbq") > 0,
+        "the branch has to have RUN before it can be asked what it runs"
+    );
+    assert_eq!(recipe_at(&world, (21, -3)), "bottled_bbq");
+    assert_eq!(recipe_at(&world, (26, -3)), "boxed_bbq");
+
+    // Now starve it: no more raws, and long enough for every pipe, buffer
+    // and belt in the branch to empty out.
+    for _ in 0..20_000u64 {
+        world.tick();
+    }
+    assert_eq!(
+        recipe_at(&world, (21, -3)),
+        "bottled_bbq",
+        "an empty BBQ bottler must not report itself as a ketchup bottler"
+    );
+    assert_eq!(
+        recipe_at(&world, (26, -3)),
+        "boxed_bbq",
+        "nor an empty BBQ packer"
+    );
+    // The ketchup line is the control: it holds its own recipes throughout,
+    // which is what says the rule is "keep what you hold" and not "keep BBQ".
+    assert_eq!(recipe_at(&world, (16, 0)), "bottled_ketchup");
+    assert_eq!(recipe_at(&world, (21, 0)), "boxed_ketchup");
+}
