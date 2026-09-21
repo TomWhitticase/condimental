@@ -25,6 +25,59 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-21: **A voxel asset is judged against the factory floor, and the
+  fixed camera is paid with spacing, not with deletion.** (Warehouse stock
+  racks, W2. Issues #144 and #147.)
+
+  **The bike rack.** The first design was one row of four bays: five ∩
+  frames standing on a deck, with no longitudinal load beam. The beam was
+  dropped on purpose — this camera sees a tile's +X and −Y faces, a sight
+  line travels `(+x, −y, +z)`, and a front beam therefore hides whatever sits
+  about twelve voxels below and behind it. Deleting it kept every load
+  visible and destroyed the silhouette: the owner's verdict was "more like a
+  bike rack than a warehouse rack". The occlusion was real and the remedy was
+  wrong. The shipped rack runs solid `paint_red` beams the full 64 voxels at
+  both post planes and buys the loads their visibility with **clearance**
+  instead — a fifteen-voxel level pitch, the load's top standing well under
+  the beam above it. Rule: when this camera eats a feature, move the feature
+  or move what it hides; removing the structural member removes the reading.
+
+  **"footprint × 32" governs the footprint plane only.** Stated here because
+  it was got wrong in the session that wrote this: the rule that a kind's
+  model is its `data/machines.ron` footprint × 32 constrains X and Y. Height
+  is free — `fluid_tank` is 1×1 and 40 tall, `machine_cooking_vat` is 2×2 and
+  48. The only ceiling on a tall asset is a design one, that the vat stays
+  the biggest object on the line, and a voxgen test pins the rack against the
+  vat's *actual* model height rather than a magic number.
+
+  **Black is not the background.** `vengi-thumbnailer` has no alpha cvar, so
+  every preview stands on an opaque black pad, and every open volume inside
+  an asset is measured against black. The game's backdrop is the factory
+  floor, `#9C9C90`, luma **155.1**. The two give opposite answers. Against
+  black the rack's bay tints all read "too dark to see"; against floor the
+  saturated ones read dark-on-light and are perfectly legible, and what
+  actually vanishes is a **mid** tint sitting at the floor's own value. So:
+  repaint the pure-black pixels with the floor colour before taking any mean,
+  and state the verdict as a dead **band** rather than a threshold.
+
+  For this rack the band is **100..175 luma**, recorded as
+  `RACK_TINT_DEAD_BAND` with its method and its results table in the doc
+  comment. Measuring it found a genuine defect. The bottom bay stood on the
+  `concrete_dark` plinth while the two levels above are backed by floor, so
+  the same tint separated by 86/255 up top and 17/255 down there — decking
+  the bottom bay in the same `steel_dark` as the others narrowed the band
+  from 55..175 to 100..175 and made all six slots behave alike. Four of the
+  six existing hopper tints clear the band; `vinegar` and `liquid_smoke` do
+  not and get their own darker rack values. `HOPPER_FILL_TINTS` is left
+  alone: those were measured against a hopper's dark throat (issues #80,
+  #131), which is a different problem with a different answer.
+
+  **The generator is the wire to W3.** The bay geometry and the dead band are
+  `const`s in `assets/voxels/generators/assets.rs`, several of them unused by
+  the generator itself and `#[allow(dead_code)]` rather than deleted.
+  Deleting them moves the numbers into GDScript, which is the thing
+  `DOCK_DECK_Z`'s comment exists to prevent. W3 reads them; it does not
+  re-derive them.
 - 2026-09-21: **A panel that points at the world is FOLLOWED in isometric and
   PARKED in first person.** (Issue #105.)
 

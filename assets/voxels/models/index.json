@@ -299,5 +299,16 @@
   ],
   "staff_packaging": [
     "matte"
+  ],
+  "warehouse_pallet": [
+    "matte",
+    "metal"
+  ],
+  "warehouse_pallet_load": [
+    "matte"
+  ],
+  "warehouse_rack": [
+    "matte",
+    "metal"
   ]
 }
