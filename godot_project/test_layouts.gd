@@ -231,6 +231,111 @@ static func storage_bays(sim) -> int:
 	return int(snapshot.get("total_bays", 0))
 
 
+## THE WAREHOUSE ROW — what `scripts/screenshot-scene.sh --warehouse`
+## photographs, and the only fixture whose subject is the STOCK rather than
+## the line that eats it.
+##
+## Three racks side by side holding three raws, and every readout W3 draws in
+## one frame: two racks with all six bays bound, a third with two, a part-full
+## load on the last bay of each ingredient, and four bare shelves to compare
+## the bound ones against. Two of the racks hold two ingredients each — the
+## tints are what tell those apart, and a rack that is not "the tomato rack"
+## is the visible consequence of bays being a shared pool rather than a
+## per-item shelf.
+##
+## IT IS ALSO SIZED TO REFUSE ITS OWN REMOVAL. Fourteen of the eighteen bays
+## are in use, so picking any rack up would leave twelve for stock that needs
+## fourteen, and `--warehouse --remove-mode` photographs W1's refusal being
+## said out loud rather than a rack quietly failing to come up. Stocking this
+## row less deeply would silently cost that second shot.
+##
+## THE AMOUNTS ARE CHOSEN AGAINST `data/storage.ron`, not against appetite:
+## each is `base_cap` (free, and binds no bay at all) plus a number of whole
+## `slot_stack`s plus a remainder, so that the last bay of each ingredient is
+## visibly PART full. They are read back off the wire below rather than
+## assumed — a price rise or a `base_cap` edit that puts the order over the
+## ceiling would otherwise be photographed as a rack that is simply emptier
+## than the reviewer was told, which is the failure `build_fluid_gallery`
+## refuses for the same reason.
+##
+## ONLY THE UNGATED RAWS STAND HERE. `data/unlocks.ron` holds the three BBQ
+## ingredients back until ten deliveries are made, so a fresh world cannot
+## buy spice mix, molasses or liquid smoke at any price and this row shows
+## the three a new game has (see `build_bbq_running_line`, which pays 40 000
+## ticks for the other three). That every raw the game prices — gated ones
+## included — has a rack tint of its own, distinct from the floor, is proved
+## headlessly by `test_warehouse_rack.gd` instead: it is a claim about a
+## table, and it does not need a camera.
+const WAREHOUSE_ROW_RACKS := [Vector2i(0, 0), Vector2i(2, 0), Vector2i(4, 0)]
+
+## The holding each raw is bought to, written as `[item, whole bays,
+## remainder]` and turned into units below so that the intent survives an edit
+## to either knob: six bays of tomato, four of sugar and four of vinegar, and
+## a part-full bay on the end of each — 0.6, 0.9 and 0.3 of a bay, three
+## visibly different heights.
+const WAREHOUSE_ROW_STOCK := [
+	["tomato", 5, 30],
+	["sugar", 3, 45],
+	["vinegar", 3, 15],
+]
+
+
+## Builds the row above. Returns "" or a complaint naming what is missing —
+## the fixture is its contents, so a rack row that came up short is refused
+## rather than photographed.
+static func build_warehouse_row(sim) -> String:
+	for tile in WAREHOUSE_ROW_RACKS:
+		sim.issue_command_json(JSON.stringify({
+			"type": "purchase", "kind": WAREHOUSE_KIND,
+		}))
+		sim.issue_command_json(JSON.stringify({
+			"type": "place", "kind": WAREHOUSE_KIND,
+			"tile": [tile.x, tile.y], "direction": "east",
+		}))
+	if line_placements(sim) != 0 or placement_count(sim) != WAREHOUSE_ROW_RACKS.size():
+		return "the warehouse row placed %d of %d racks (and %d other things)" % [
+			placement_count(sim), WAREHOUSE_ROW_RACKS.size(), line_placements(sim),
+		]
+	var storage = JSON.parse_string(sim.storage_snapshot_json())
+	if not (storage is Dictionary):
+		return "storage_snapshot_json returned no object"
+	var base_cap := int(storage.get("base_cap", 0))
+	var slot_stack := int(storage.get("slot_stack", 0))
+	for entry in WAREHOUSE_ROW_STOCK:
+		var item := String(entry[0])
+		var units: int = base_cap + int(entry[1]) * slot_stack + int(entry[2])
+		sim.issue_command_json(JSON.stringify({
+			"type": "buy_ingredient", "item": item, "quantity": units,
+		}))
+		var held := stock_held(sim, item)
+		if held != units:
+			return (
+				"the warehouse row holds %d of %s, not the %d it was built for — "
+				% [held, item, units]
+				+ "the order was clamped, so the shot would show a rack emptier "
+				+ "than its caption claims"
+			)
+	return ""
+
+
+## How many units of one raw the factory is holding, off the ingredient
+## snapshot — the same figure the market plate shows.
+static func stock_held(sim, item: String) -> int:
+	var snapshot = JSON.parse_string(sim.ingredients_snapshot_json())
+	if not (snapshot is Dictionary):
+		return 0
+	for entry in snapshot.get("entries", []):
+		if String(entry.get("id", "")) == item:
+			return int(entry.get("owned", 0))
+	return 0
+
+
+## Every placement in the world, warehouse included — [method line_placements]
+## counts the other half.
+static func placement_count(sim) -> int:
+	return JSON.parse_string(sim.world_layout_json()).size()
+
+
 ## THE DEMO LINE — the fixture most tests build, and the one
 ## `scripts/screenshot-scene.sh --build` photographs.
 ##
