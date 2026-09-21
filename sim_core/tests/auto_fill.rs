@@ -63,20 +63,12 @@ fn world() -> World {
     reference_chain_with_budget(recipes(), BUDGET)
 }
 
-/// Buys `quantity` of `item`, asserting it was affordable — an unaffordable
-/// buy is a silent no-op, which would otherwise surface later as an
-/// unexplained empty bin.
+/// Buys `quantity` of `item`, building the warehouse room for it first and
+/// asserting the purchase landed — an unaffordable or unhousable buy is a
+/// silent no-op, which would otherwise surface much later as an unexplained
+/// empty bin. `common::buy` is the one implementation of that.
 fn buy(world: &mut World, item: &str, quantity: u32) {
-    let before = world.owned_ingredient(item);
-    world.issue_command(PlayerCommand::BuyIngredient {
-        item: item.to_string(),
-        quantity,
-    });
-    assert_eq!(
-        world.owned_ingredient(item),
-        before + quantity,
-        "the fixture must be able to afford {quantity} x {item}"
-    );
+    common::buy(world, item, quantity);
 }
 
 fn hopper_at(world: &World, tile: (i32, i32)) -> (u32, bool) {

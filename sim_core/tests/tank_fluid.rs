@@ -41,6 +41,8 @@
 //! branch's real second fluids sit behind a delivery gate a headless test
 //! cannot open.
 
+mod common;
+
 use sim_core::sim::fluid::PipeNaming;
 use sim_core::sim::machines::MachineRegistry;
 use sim_core::sim::save::SaveData;
@@ -161,10 +163,10 @@ fn place(world: &mut World, kind: &str, tile: (i32, i32), direction: Direction) 
 fn ambiguous_line() -> World {
     let mut world = funded(brine());
     for item in ["vinegar", "sugar"] {
-        world.issue_command(PlayerCommand::BuyIngredient {
-            item: item.to_string(),
-            quantity: 500,
-        });
+        // Racks first: `data/storage.ron` caps a holding at `base_cap` plus
+        // the bays that exist, so `common::buy` builds the room before it
+        // orders — an order with nowhere to go is silently clamped.
+        common::buy(&mut world, item, 500);
     }
     for &(kind, tile, direction) in LAYOUT {
         place(&mut world, kind, tile, direction);
@@ -194,10 +196,7 @@ fn shipped_single_tank_line() -> World {
     let recipes = RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
         .expect("data/recipes.ron must parse");
     let mut world = funded(recipes);
-    world.issue_command(PlayerCommand::BuyIngredient {
-        item: "vinegar".to_string(),
-        quantity: 500,
-    });
+    common::buy(&mut world, "vinegar", 500);
     for &(kind, tile, direction) in LAYOUT {
         if tile == NORTH_RUN || tile == NORTH_TANK {
             continue;

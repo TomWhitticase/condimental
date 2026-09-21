@@ -178,5 +178,27 @@
             id: "dock",
             price: 70,
         ),
+
+        // --- Storage, which is not on the line at all ---
+        // A warehouse stock rack (the warehouse-rack sprint). Last because
+        // it stands nowhere in particular: it is the first buildable kind
+        // that is not part of a production line, and nothing is delivered
+        // to it or taken off it. What it buys is HEADROOM — six bays of
+        // fifty units each on top of every ingredient's free allowance,
+        // per `data/storage.ron`.
+        //
+        // Priced level with the crusher, which is a deliberate statement
+        // about when it is worth buying: a first rack costs a machine, so
+        // early on the answer is to build the line and top the bins up by
+        // hand, and it only becomes obvious once the line runs fast enough
+        // that topping up by hand is the thing interrupting the player.
+        // The sprint plan priced it at 50 against four bays; six bays (the
+        // owner's call, issue #147, and what the model actually has) is
+        // half as much room again, so the price moved with it rather than
+        // leaving a rack the cheapest way to buy anything in the game.
+        ShopEntry(
+            id: "warehouse_rack",
+            price: 75,
+        ),
     ],
 )

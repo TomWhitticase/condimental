@@ -456,10 +456,10 @@ func _run_checks() -> void:
 	Layouts.stock_larder(line.sim)
 	line._rebuild_world()
 
-	var layout: Array = JSON.parse_string(line.sim.world_layout_json())
-	if layout.size() != Layouts.REFERENCE_LINE_PLACEMENTS:
+	var placed := Layouts.line_placements(line.sim)
+	if placed != Layouts.REFERENCE_LINE_PLACEMENTS:
 		_fail("the reference line placed %d of %d pieces — something was refused" % [
-			layout.size(), Layouts.REFERENCE_LINE_PLACEMENTS
+			placed, Layouts.REFERENCE_LINE_PLACEMENTS
 		])
 		return
 

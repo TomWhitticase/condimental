@@ -70,6 +70,72 @@ matches what code comments and data files cite.
   projection, the crosshair and the legend straight out of `_ready` before
   TABbing back to isometric for the navigation tests it already had.
 
+- 2026-09-21: **Stock has a ceiling, a rack is pure storage, and its bays are
+  derived from the ledger rather than stored.** (Warehouse stock racks, W1.)
+
+  **Why a ceiling at all.** Until `data/storage.ron` existed, `BuyIngredient`
+  credited `OwnedIngredients` with no limit but money — and money is the thing
+  a running factory produces. A player one contract in could buy four thousand
+  tomatoes and never think about supply again, which collapses GAMEPLAY.md
+  §5's "ingredients — recurring, scales directly with production volume" cost
+  axis into a single early purchase. The cap is what makes stock something you
+  build room for. `base_cap` (20) is free and unconditional, so a new game
+  works with no warehouse and no ingredient can ever be crowded out of
+  existence by another; above it, stock occupies **bays**, and bays are what a
+  rack supplies.
+
+  **R6 wins: a rack does not touch belts or pipes.** The sprint plan
+  contradicted itself — its R6 said racks have no interaction with the
+  logistics network, its W1 scope asked for "the rack's one-unit-per-tick belt
+  push in tick step 5", and its W3 asked to "wire the config panel's item
+  picker to the rack's output item". Those are three different buildings. A
+  rack is **pure storage**: no output item, no picker, no facing-dependent
+  discharge, no topology links, no step-5 arm. The hopper stays the only thing
+  that meters raw onto a belt, which keeps one answer to "how does raw enter
+  the line" instead of two that a player would have to learn to tell apart.
+  `BodyKind::WarehouseRack` appears in `body_kind` and nowhere in tick step 4
+  or 5, and `a_rack_beside_a_running_belt_never_touches_it` pins that absence.
+
+  **Six bays at a 50 stack, priced 75.** Six is the model's own geometry, not
+  a free parameter: W2's voxel asset is two bays wide by three levels tall
+  (issue #147), and W3 draws one pallet per bay, so a rack that claimed a
+  different number would be a building lying about what it holds. Six slots
+  instead of the plan's four makes a rack +300 per ingredient rather than
+  +200, so the plan's ~50 becomes **75** to hold the capacity-per-money it
+  intended — level with the crusher, above the fluid tank's 60.
+
+  **Bays are derived, not assigned.** The plan bound each bay to an item id
+  and persisted it. Deriving instead —
+  `bays_for(count) = ceil(max(0, count − base_cap) / slot_stack)`, summed over
+  the ledger — means there is no allocation state to drift out of step with
+  the ledger, nothing to migrate in a save (`SavedBody::WarehouseRack` carries
+  no fields and `schema_version` stays 2), and a bay frees itself the moment
+  the stock in it is consumed rather than staying reserved for an ingredient
+  the player owns one unit of. The consequence to know is that free bays are a
+  **shared pool**: filling every bay with tomato does stop the player buying
+  sugar above `base_cap` until some tomato is used. That is the intended
+  pressure — a warehouse is a finite room — and `base_cap` is the guarantee
+  that it can never become a deadlock.
+
+  **No new refusal channel.** There is no generic "why was that refused" wire,
+  and this did not add one. The established pattern (#143) is that the
+  simulation declines silently and presentation derives the reason from a
+  snapshot field, so `IngredientSnapshot` gained `capacity` and the market
+  panel will say "at capacity" itself. A clamped buy is **charged for what was
+  credited, never for what was asked** — the same rule `OwnedIngredients::take`
+  already states for the hopper path.
+
+  **What the cap cost the fixtures, and the shape of the fix.** Every fixture
+  that ran a line for long enough to matter bought a deep larder up front;
+  with a ceiling, none of them could. Both test layers now build the warehouse
+  they need through the real commands (`common::make_room` in Rust,
+  `Layouts.make_room` in GDScript) by adding one rack and re-asking, so the
+  bay arithmetic stays in `sim_core` and neither fixture restates it. The long
+  runs top up instead of stocking deep (`restock`): 3 000 of one ingredient is
+  sixty bays, and `--full-dock` would have photographed a wall of racks
+  instead of a dock. `*_PLACEMENTS` counts exclude the warehouse
+  (`Layouts.line_placements`) — the layout under test is the line.
+
 - 2026-09-21: **A voxel asset is judged against the factory floor, and the
   fixed camera is paid with spacing, not with deletion.** (Warehouse stock
   racks, W2. Issues #144 and #147.)

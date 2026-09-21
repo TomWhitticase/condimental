@@ -28,6 +28,20 @@ See [WORKFLOW.md](WORKFLOW.md).
   isometric unless `--first-person`, because `--closeup`, `--zoom`, `--pan`
   and every `--hover*` are isometric ideas and would otherwise be aimed at a
   camera they cannot steer. Full record in `docs/DECISIONS.md`.
+- 2026-09-21 **Raw stock has a ceiling, a rack is pure storage, and its bays
+  are derived.** (W1.) `data/storage.ron` caps a holding at `base_cap` (20,
+  free and unconditional, so a new game works and nothing can be crowded out)
+  plus `slot_stack` (50) per **bay**; a `warehouse_rack` supplies six, the
+  model's own geometry, and costs 75. **R6 wins:** a rack has no output item,
+  no picker, no topology links and no tick-step-5 arm — the hopper stays the
+  only thing that meters raw onto a belt. Bays are computed from the ledger
+  (`ceil(max(0, count − base_cap) / slot_stack)`), never stored: no allocation
+  state to persist or drift, and a bay frees itself when its stock is used.
+  Free bays are therefore a **shared pool**. `BuyIngredient` clamps silently
+  and charges only for what it credited; the reason is derived by presentation
+  from `IngredientSnapshot::capacity`, as in #143. Fixtures build the
+  warehouse they need through real commands and top it up mid-run rather than
+  stocking deep, and `*_PLACEMENTS` counts exclude it.
 - 2026-09-21 **A voxel asset is judged against the factory floor, not
   against vengi's black.** The two backdrops give opposite verdicts, and the
   floor is the one the player has. Repaint the pure-black pad with

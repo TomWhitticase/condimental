@@ -169,6 +169,7 @@ use super::recipe::RecipeRegistry;
 use super::splitter::{SPLITTER_KIND, Side, Splitter};
 use super::staff::{StaffPools, StaffRestore, StaffRestoreError};
 use super::stats::{ItemStats, ProductionLedger, STAT_BUCKETS, STAT_WINDOW_COUNT, StatKind};
+use super::storage::WAREHOUSE_RACK_KIND;
 use super::types::{Direction, Fx, ItemId, Money, RecipeId, TileCoord};
 use super::world::{BELT_KIND, PIPE_KIND, PlayerCommand, World};
 
@@ -355,6 +356,20 @@ pub enum SavedBody {
     Hopper(SavedHopper),
     FluidTank(SavedTank),
     Dock(SavedDock),
+    /// A warehouse stock rack — **no payload, deliberately**.
+    ///
+    /// A rack holds nothing of its own: the bays it supplies are a property
+    /// of its kind in `data/storage.ron`, and the stock standing in them is
+    /// rows of `owned_ingredients`, which this file already saves. Which
+    /// bay draws which ingredient is derived on read (see
+    /// [`super::storage`]), so there is nothing here to persist and nothing
+    /// that could load back inconsistent with the ledger.
+    ///
+    /// Added without moving [`SAVE_SCHEMA_VERSION`], the same additive rule
+    /// [`SavedHopper::auto_fill`] followed: no save written before racks
+    /// existed can contain one, and every field of every other variant is
+    /// untouched.
+    WarehouseRack,
 }
 
 impl SavedBody {
@@ -369,6 +384,7 @@ impl SavedBody {
             SavedBody::Hopper(_) => "hopper",
             SavedBody::FluidTank(_) => "fluid_tank",
             SavedBody::Dock(_) => "dock",
+            SavedBody::WarehouseRack => "warehouse_rack",
         }
     }
 }
@@ -648,6 +664,20 @@ pub enum SaveError {
     UnknownIngredient {
         id: String,
     },
+    /// The owned-stock ledger holds more than the saved racks have room
+    /// for. The cross-file invariant between `owned_ingredients` and the
+    /// `warehouse_rack` placements, and the one thing about storage a save
+    /// *can* get wrong — `data/storage.ron` changing under a save, or a
+    /// hand-edited ledger.
+    ///
+    /// Reported rather than clamped, for this module's standing reason: a
+    /// loader that quietly drops stock the player paid for is worse than
+    /// one that says the save and the content files no longer agree.
+    StockOverCapacity {
+        id: String,
+        held: u32,
+        bays: u32,
+    },
     /// An active contract id this build's `data/contracts.ron` does not
     /// offer. Only this direction is an error: since the contract-board
     /// epic the active list is a subset of the board, so a board offer the
@@ -776,6 +806,12 @@ impl std::fmt::Display for SaveError {
                 f,
                 "the save says the player owns '{id}', which data/ingredients.ron does not \
                  price"
+            ),
+            SaveError::StockOverCapacity { id, held, bays } => write!(
+                f,
+                "the save holds {held} of '{id}', which will not fit the {bays} storage \
+                 bay(s) its warehouse racks supply — data/storage.ron changed under this \
+                 save, or the ledger was edited by hand"
             ),
             SaveError::UnknownContract { id } => write!(
                 f,
@@ -931,6 +967,7 @@ impl World {
                         mothballed: dock.mothballed(),
                     })
                 }
+                WAREHOUSE_RACK_KIND => SavedBody::WarehouseRack,
                 _ => {
                     let machine = self
                         .ecs()
@@ -1202,7 +1239,7 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
                     });
                 }
             }
-            SavedBody::Pipe(_) => {}
+            SavedBody::Pipe(_) | SavedBody::WarehouseRack => {}
         }
     }
 
@@ -1214,6 +1251,31 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
     for (id, _) in &data.owned_ingredients {
         if world.ingredients().catalog.get(id).is_none() {
             return Err(SaveError::UnknownIngredient { id: id.clone() });
+        }
+    }
+    // The saved stock has to fit the saved racks. `rebuild_structure`
+    // replays real `Place` commands but `restore_ledgers` writes the ledger
+    // straight in — it has to, since replaying `BuyIngredient` would charge
+    // for stock the save already paid for — so this is the only place the
+    // storage invariant gets checked on the load path. Counted off
+    // `data.placements` rather than the half-built world because validation
+    // runs before anything is placed.
+    let bays = data
+        .placements
+        .iter()
+        .map(|placement| world.storage().bays_of_kind(&placement.kind))
+        .fold(0u32, u32::saturating_add);
+    let mut owned = super::ingredients::OwnedIngredients::new();
+    for (id, count) in &data.owned_ingredients {
+        owned.add(id, *count);
+    }
+    for (id, count) in &data.owned_ingredients {
+        if *count > world.storage().cap_for(id, &owned, bays) {
+            return Err(SaveError::StockOverCapacity {
+                id: id.clone(),
+                held: *count,
+                bays,
+            });
         }
     }
     for (item, held) in &data.delivery_stock {
@@ -1335,6 +1397,7 @@ fn expected_body(kind: &str) -> &'static str {
         HOPPER_KIND => "hopper",
         FLUID_TANK_KIND => "fluid_tank",
         DOCK_KIND => "dock",
+        WAREHOUSE_RACK_KIND => "warehouse_rack",
         _ => "machine",
     }
 }
@@ -1534,6 +1597,11 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                     )
                     .expect("the entity was just placed");
             }
+            // Nothing to write back: a rack's body is a marker component
+            // `rebuild_structure`'s `Place` already spawned, and its
+            // contents are `owned_ingredients`, restored by
+            // `restore_ledgers` further down.
+            SavedBody::WarehouseRack => {}
         }
     }
     Ok(())
