@@ -1342,15 +1342,23 @@ func _run_chain_forward() -> void:
 			# as empty while the simulation held eight tomatoes on it, which
 			# is exactly the kind of lie this whole script exists to catch.
 			_main._apply_dirty_chunks()
-			# The two animations the tick drives. `main.gd` advances both at
-			# the end of `_advance_simulation`, which this loop deliberately
-			# does not go through (it wants ticks without a frame's worth of
-			# input, camera and UI work), so without these two lines every
-			# screenshot ever taken shows belt frame 0 and every machine's
-			# mechanism at rest — an idle-looking factory photographed in the
-			# middle of a run, which is the same lie the comment above is
-			# about. Both read the tick, so the shot stays reproducible.
-			_main._update_belt_frame()
+			# The machine mechanisms. `main.gd` advances them at the end of
+			# `_advance_simulation`, which this loop deliberately does not go
+			# through (it wants ticks without a frame's worth of input, camera
+			# and UI work), so without this line every screenshot ever taken
+			# shows every machine's mechanism at rest — an idle-looking factory
+			# photographed in the middle of a run, which is the same lie the
+			# comment above is about. It reads the tick, so the shot stays
+			# reproducible.
+			#
+			# The belt surface needs no line here, and calling one is an ERROR:
+			# `main.gd::_update_belt_frame` was deleted by issue #79, which put
+			# each tile's rubber on its own clock off the wire, inside the
+			# `_apply_dirty_chunks()` above. This loop kept calling it until
+			# 2026-09-21 and every frame of a forward run died on the
+			# nonexistent method — silently, because Godot's runtime error only
+			# unwinds the call — taking `_update_machine_motion`,
+			# `_refresh_buffers` and `_update_fluid_network` with it.
 			_main._update_machine_motion()
 	_main._apply_dirty_chunks()
 	_main._refresh_buffers()
