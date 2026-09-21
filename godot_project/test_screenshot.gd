@@ -229,7 +229,7 @@ const FIXTURE_NAMES: PackedStringArray = [
 	"demo", "machines", "fluids", "vat", "splitter", "chain", "stress",
 	"pipes", "gallery", "items", "fluid_gallery", "bottleneck", "bbq",
 	"stalled_run", "understaffed", "shortfall", "full_dock",
-	"unclerked_dock", "warehouse",
+	"unclerked_dock", "warehouse", "split_docks",
 ]
 
 ## The fixtures whose whole claim is a factory that is WORKING, and which are
@@ -462,6 +462,7 @@ const CRUSHING_REVIEW_HOLD_TICKS := 6
 ## picks the half deliberately instead, and two runs a `--dock-lamp` apart
 ## are how a reviewer sees the blink itself.
 var _full_dock := false
+var _split_docks := false
 ## `--dock-lamp dark` for the other half of the pulse; lit by default, since
 ## a lit lamp over a full pool is the state worth reviewing and a dark one is
 ## indistinguishable from an empty dock's.
@@ -645,6 +646,9 @@ func _initialize() -> void:
 	if args.has("--bbq"):
 		_pick_fixture("bbq", "--bbq")
 		_populate = true
+	_split_docks = args.has("--split-docks")
+	if _split_docks:
+		_pick_fixture("split_docks", "--split-docks")
 	_stalled_run = args.has("--stalled-run")
 	if _stalled_run:
 		# NOT --populate: the shot compares a DEAD run with a merely EMPTY
@@ -890,6 +894,13 @@ func _build_fixture() -> void:
 			Layouts.build_underfunded_line(_main.sim)
 		"full_dock":
 			Layouts.build_full_dock_line(_main.sim)
+		"split_docks":
+			# Like `unclerked_dock`, this one can be built and still not BE
+			# itself: the subject is two docks DISAGREEING, and a frame where
+			# both agree shows nothing. Refuse rather than photograph it.
+			Layouts.build_split_dock_line(_main.sim)
+			if not Layouts.split_dock_lamps_found(_main.sim):
+				printerr("SCREENSHOT_NOTE: --split-docks never found a tick with one dock backing up and one clear — nothing to photograph")
 		"unclerked_dock":
 			# Like the fluid gallery, this one can be built and still not BE
 			# itself: the whole subject is the window where `crewed` is
@@ -1743,7 +1754,10 @@ func _run_to_crushing() -> void:
 	for i in range(CRUSHING_REVIEW_TICK_LIMIT):
 		_main.sim.tick()
 		_main._apply_dirty_chunks()
-		_main._update_belt_frame()
+		# No belt-surface call here: `main.gd::_update_belt_frame` was deleted
+		# by issue #79 and `_apply_dirty_chunks` above drives the rubber now.
+		# Calling it raised a runtime error that silently unwound the REST of
+		# this loop body — see `_run_chain_forward`, fixed 2026-09-21.
 		_main._update_machine_motion()
 		_main._update_payout_feedback()
 		if _main._active_crush_count() > 0:
@@ -1755,7 +1769,7 @@ func _run_to_crushing() -> void:
 	for i in range(CRUSHING_REVIEW_HOLD_TICKS):
 		_main.sim.tick()
 		_main._apply_dirty_chunks()
-		_main._update_belt_frame()
+		# No `_update_belt_frame` — deleted by issue #79; see `_run_chain_forward`.
 		_main._update_machine_motion()
 		_main._update_payout_feedback()
 	_main._refresh_buffers()
@@ -1776,15 +1790,15 @@ func _run_to_crushing() -> void:
 func _run_to_full_dock() -> void:
 	var held := false
 	for i in range(FULL_DOCK_HOLD_TICK_LIMIT):
-		if Layouts.delivery_full(_main.sim) and _dock_lamp_on_wanted_half():
+		if _a_dock_reports_full() and _dock_lamp_on_wanted_half():
 			held = true
 			break
 		_main.sim.tick()
 		_main._apply_dirty_chunks()
-		_main._update_belt_frame()
+		# No `_update_belt_frame` — deleted by issue #79; see `_run_chain_forward`.
 		_main._update_machine_motion()
 	if not held:
-		printerr("SCREENSHOT_NOTE: --full-dock never found a %s tick with the pool full — the shot is of whatever the line reached"
+		printerr("SCREENSHOT_NOTE: --full-dock never found a %s tick with a dock backing up — the shot is of whatever the line reached"
 			% ("dark" if _dock_lamp_dark else "lit"))
 	_main._refresh_buffers()
 	_main._update_fluid_network()
@@ -1794,6 +1808,54 @@ func _run_to_full_dock() -> void:
 	# would hand back a coin-flip on which half of the pulse is in frame —
 	# the exact thing this flag exists to make deterministic.
 	_main.set_process(false)
+
+
+## Lands the shot on a tick where the two docks still disagree AND the pulse
+## is on the half `--dock-lamp` asked for.
+##
+## That second condition is the whole shot. A dock merely HOLDING stock is
+## lit steady, and a dock backing up PULSES, so on the lit half of the pulse
+## both lamps are lit and the frame shows nothing: it is the DARK half that
+## separates them, with the jammed dock's lamp out and the clear dock's
+## still burning. `--dock-lamp dark` is therefore the interesting frame here,
+## which is the opposite way round from `--full-dock`.
+func _run_to_split_docks() -> void:
+	var held := false
+	for i in range(FULL_DOCK_HOLD_TICK_LIMIT):
+		if Layouts.split_dock_lamps_found(_main.sim) and _dock_lamp_on_wanted_half():
+			held = true
+			break
+		_main.sim.tick()
+		_main._apply_dirty_chunks()
+		# No `_update_belt_frame` — deleted by issue #79; see `_run_chain_forward`.
+		_main._update_machine_motion()
+	if not held:
+		printerr("SCREENSHOT_NOTE: --split-docks never found a %s tick with the docks disagreeing — the shot is of whatever the lines reached"
+			% ("dark" if _dock_lamp_dark else "lit"))
+	_main._refresh_buffers()
+	_main._update_fluid_network()
+	_main._update_contract_panel()
+	# Frozen for `_run_to_full_dock`'s reason: the lamps read
+	# `sim.current_tick()`, so letting the scene run on would hand back a
+	# coin-flip on which half of the pulse is in frame.
+	_main.set_process(false)
+
+
+## Whether any dock says IT is backing up this tick.
+##
+## Read off `dock_snapshots_json` rather than `Layouts.delivery_full`: since
+## the lamp went per-dock, a full POOL no longer implies a jammed DOCK (the
+## ceiling is per item), and it is the dock's own verdict this shot is of.
+## Read from the sim directly because the hunting loop below does not call
+## `_refresh_buffers`, so `_main._dock_states` is a frame behind here.
+func _a_dock_reports_full() -> bool:
+	var docks = JSON.parse_string(_main.sim.dock_snapshots_json())
+	if not (docks is Array):
+		return false
+	for dock in docks:
+		if dock is Dictionary and bool(dock.get("full", false)):
+			return true
+	return false
 
 
 ## Whether the dock's lamps are lit or dark this tick, matched against what
@@ -2036,6 +2098,8 @@ func _process(_delta: float) -> bool:
 		_run_to_crushing()
 	if _frames == 2 and _full_dock:
 		_run_to_full_dock()
+	if _frames == 2 and _split_docks:
+		_run_to_split_docks()
 	if _frames == 2 and _stock:
 		_stock_the_hotbar()
 	# Through the real setter, not by hiding the label: the point of the shot

@@ -208,6 +208,17 @@
 # window or all time, biggest first, with per-minute rates and bars (the
 # production-stats epic — Factorio's P screen). It implies --populate.
 #
+# Pass --split-docks to build the SPLIT-DOCK LINE (test_layouts.gd's
+# `build_split_dock_line`): the BBQ branch, with its two docks, run on until
+# ONE of them is backing up and the other is not. That is the state the
+# per-dock lamp change is about — the pool's ceiling is per ITEM, so a pool
+# capped on BBQ leaves the ketchup dock taking boxes perfectly happily, and
+# only the jammed dock's lamp pulses. Before the change both pulsed, because
+# the lamp read the pool's `.any()` summary rather than the dock. The
+# clipboard still reads ⚠ FULL, correctly: the POOL has a capped item.
+# Honours --dock-lamp dark for the other half of the pulse, as --full-dock
+# does, and refuses to claim the fixture if the docks never disagreed.
+#
 # Pass --full-dock to build the FULL-DOCK LINE (test_layouts.gd's
 # `build_full_dock_line`): the shipped line on auto-fill, run until it has
 # made boxes faster than its contracts ask for them and the shared delivery
@@ -361,7 +372,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--split-docks [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

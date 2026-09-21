@@ -341,3 +341,69 @@ fn a_bbq_machine_that_runs_dry_keeps_its_own_recipe() {
     assert_eq!(recipe_at(&world, (16, 0)), "bottled_ketchup");
     assert_eq!(recipe_at(&world, (21, 0)), "boxed_ketchup");
 }
+
+/// The regression the per-dock lamp exists for: with two docks shipping two
+/// products into one pool, a pool capped on ONE of them must leave the other
+/// dock reporting itself clear.
+///
+/// `DockSnapshot::full` used to be `Economy::delivery_pool_full` verbatim,
+/// which is `.any()` over the pool — so the moment either product capped,
+/// BOTH docks said "full" and both lamps pulsed, including one taking boxes
+/// off its belt perfectly happily. The two facts only ever agreed while
+/// there was one sauce to cap.
+///
+/// BBQ is the one that caps here, not ketchup, and that is the fixture
+/// rather than a choice: the branch out-produces the Smokehouse Trial's
+/// appetite, while the shipped line is throttled to two fifths of the shared
+/// vat and runs its larder down long before its own ceiling.
+///
+/// Note what is asserted in the middle: `delivery_full` is still true. The
+/// pool summary was never wrong; reading it as a per-building fact was.
+#[test]
+fn a_pool_capped_on_one_sauce_leaves_the_other_dock_reporting_clear() {
+    const KETCHUP_DOCK: (i32, i32) = (26, 0);
+    const BBQ_DOCK: (i32, i32) = (31, -3);
+
+    let mut world = branch();
+    let dock_at = |world: &World, tile: (i32, i32)| -> sim_core::sim::world::DockSnapshot {
+        world
+            .dock_snapshots()
+            .into_iter()
+            .find(|dock| dock.tile == tile)
+            .unwrap_or_else(|| panic!("the branch fixture has a dock at {tile:?}"))
+    };
+
+    // Run the branch until the ketchup dock is backing up. Both lines feed
+    // the same pool, but only ketchup out-runs what the board asks for.
+    // Run the branch until its dock is backing up. ~33k ticks on this
+    // fixture; the budget is loose because the number is a consequence of
+    // every rate in `data/`, not something this test is pinning.
+    let mut jammed = false;
+    for _ in 0..60_000u32 {
+        supply(&mut world);
+        world.tick();
+        if dock_at(&world, BBQ_DOCK).full {
+            jammed = true;
+            break;
+        }
+    }
+    assert!(
+        jammed,
+        "an under-demanded BBQ line must eventually back its dock up — it never did, so \
+         either the line stopped or `full` is not being raised"
+    );
+
+    let economy = world.economy_snapshot();
+    assert!(
+        economy.delivery_full,
+        "the POOL summary is true here, and stays true — it is the per-dock reading of it \
+         that was wrong: {:?}",
+        economy.delivery_stock
+    );
+    let ketchup = dock_at(&world, KETCHUP_DOCK);
+    assert!(
+        !ketchup.full,
+        "the ketchup dock is not the one backing up: {ketchup:?} against a pool of {:?}",
+        economy.delivery_stock
+    );
+}

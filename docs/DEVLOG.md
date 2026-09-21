@@ -205,6 +205,30 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — A dock's lamp is about that dock
+
+The "backing up" pulse on a dock's deck lamps was read off the shared
+delivery pool, which caps **per item id**. `Economy::delivery_pool_full()`
+is an `.any()` over those ceilings, so the moment one sauce filled its 48
+units every dock in the world started pulsing — including a dock shipping
+the other sauce into 38 units of room. That was invisible while the game
+shipped one product, and the BBQ branch made it a real misread: the lamp
+sent the player to inspect the line that was working.
+
+Docks do share the pool, and that part is deliberate (a second dock is
+another door out of the factory, not a second ledger). What is not shared
+is *jamming*: `Dock` now records `blocked` at the moment `try_absorb`
+refuses a box, `World::tick` clears it for every dock at the top of the
+consumer pass, and `DockSnapshot::full` carries it to the lamp. It is
+derived, not saved, so the save format is untouched. The clipboard's
+`⚠ FULL` line still reads the pool, on purpose — it shows the per-item
+levels next to it, so there it names something.
+
+Covered by two sim tests plus a world-level one on the BBQ fixture, a
+presentation test that only the named dock blinks, and
+`screenshot-scene.sh --split-docks`, which runs the BBQ branch on until
+its two docks disagree — a fixture the old code could not have built.
+
 ### 2026-09-21 — The adversarial review standard is a skill, not prompt text
 
 The review bar this repo actually holds work to lived nowhere in the repo: it

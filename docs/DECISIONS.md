@@ -2306,6 +2306,39 @@ matches what code comments and data files cite.
      pure so `test_presentation.gd` can assert the blink without pumping
      frames.
 
+     **Amended 2026-09-21 — the lamp is per DOCK, the clipboard is per
+     pool.** `_update_dock_stock` lit every dock off
+     `Economy::delivery_pool_full()`, which is an `.any()` over the
+     per-item ceilings above. That was indistinguishable from correct
+     while one sauce shipped — the only capped item was the only item —
+     and the BBQ branch (PR #142) made it wrong: a dock backing up on
+     `boxed_bbq` pulsed the ketchup dock across the floor, which was
+     still taking boxes with 38 units of room. A pulsing lamp on a
+     working dock is worse than no lamp, because it sends the player to
+     inspect the one machine that is fine.
+
+     `Dock` now carries a `blocked` flag, raised at the refusal site in
+     `try_absorb` — the one place that has both the refusal and the item
+     in hand — and cleared for every dock at the top of `World::tick`'s
+     consumer pass. Cleared per tick rather than assigned, because a dock
+     may be fed by several belts and the pass visits it once per belt:
+     any one of them jamming is the jam, the same `claim`/`reset` shape
+     the staff pools use. It is derived, never persisted — `SavedDock` is
+     unchanged, so no `schema_version` bump, and a load starts it clear.
+     `DockSnapshot::full` carries it; `_blocked_dock_keys()` turns the
+     snapshot poll into the set of tiles the lamp tests against.
+
+     `EconomySnapshot::delivery_full` keeps the `.any()` and keeps the
+     clipboard's `⚠ FULL` line. The two readings are different questions:
+     the clipboard shows the per-item levels right beside it, so "some
+     product is capped" is a complete sentence there, where on the
+     factory floor it is a lamp pointing at the wrong building.
+     `tests/bbq_branch.rs` pins it at world level (one dock full, the
+     other clear, with the pool reporting full), and
+     `screenshot-scene.sh --split-docks` runs the BBQ fixture on until
+     the two docks disagree — a fixture that, under the old code, cannot
+     build itself.
+
   2. **The crusher throws pulp — a BEAT, which is a third size of
      feedback.** §6a settled two sizes for two frequencies (a payout's
      celebration, a dock arrival's small cue). Crushing is neither: it is
