@@ -271,6 +271,23 @@ pub const ASSETS: &[Asset] = &[
         name: "fluid_tank_fill",
         build: fluid_tank_fill,
     },
+    // The warehouse rack and the two models that show what is on it (the
+    // warehouse-racks sprint, ticket W2). Grouped with the hopper and the
+    // tank because all three are storage the player places and the sim
+    // fills; see the "Warehouse rack" section for why this one is an open
+    // frame rather than a housing with carved openings.
+    Asset {
+        name: "warehouse_rack",
+        build: warehouse_rack,
+    },
+    Asset {
+        name: "warehouse_pallet",
+        build: warehouse_pallet,
+    },
+    Asset {
+        name: "warehouse_pallet_load",
+        build: warehouse_pallet_load,
+    },
     // The pipe family ("Pipes & Conveyors Overhaul" ticket 3): shapes, the
     // fittings Godot overlays on any open leg, and one fluid body per shape.
     // See the pipe section's header for the face convention.
@@ -4699,6 +4716,450 @@ pub fn hopper_fill(p: &Palette) -> VoxModel {
 }
 
 // ---------------------------------------------------------------------------
+// Warehouse rack (the warehouse-racks sprint, ticket W2)
+// ---------------------------------------------------------------------------
+//
+// The building that decides how much raw stock the player may own. Three
+// models, and the split between them is the one `hopper`/`hopper_fill`
+// already uses, for the same reason: the vessel is fixed geometry, what is
+// *in* it is live simulation state that Godot scales and tints.
+//
+//   * `warehouse_rack`        — the racking itself, four empty bays.
+//   * `warehouse_pallet`      — the pallet standing in a bay that is BOUND
+//                               to an ingredient. Its presence alone is
+//                               "this bay is in use".
+//   * `warehouse_pallet_load` — one voxel of near-white goods on that
+//                               pallet, scaled to the bay's fill fraction
+//                               and tinted per ingredient, exactly the way
+//                               `hopper_fill` works.
+//
+// **Why an open frame rather than a cabinet with four doorways.** Every
+// other placed kind in this game is a closed housing, so the carved-opening
+// rule (UI_UX.md §2b point 11) applies to it: cut the doorway through +X,
+// because that is one of the only two faces this camera ever sees. A rack
+// cannot take that deal. Point 18 is the reason — a rotated placement
+// reuses the same mesh spun about its footprint origin, so a doorway carved
+// through +X points *away* from the viewer at 180°, and the one kind whose
+// entire job is to be read from the outside would go blank at half its
+// facings.
+//
+// Real selective pallet racking is already the answer: two-post frames tied
+// across the depth, rails spanning between them, and NO back, no sides and
+// no doors at all. The bays are then empty from every direction, which
+// satisfies point 11's "an opening must be empty, not dark" trivially and
+// survives all four facings without a single overlay. It is also the one
+// silhouette on this floor that is not a solid box — a see-through frame
+// among a dozen closed housings — so a rack is tellable from a machine at
+// play zoom by its shape before any of its colour is resolved.
+//
+// **Why the goods sit on a pallet rather than in a tote.** The first cut
+// put an open-topped stacking crate in each bay and filled it like a
+// hopper, and the render killed it: a tote wide enough to be worth drawing
+// is nearly as wide as its bay, so its own walls stand between this camera
+// and the one thing in the bay that carries meaning. The rack came back as
+// a grey box with slots in it — every advantage the open frame had just
+// bought, spent on four containers. Palletised goods are what is actually
+// in a rack, and they put the product where the sight line already is:
+// **the tinted load IS the readout**, and the pallet under it is a dark
+// two-voxel plinth that says the bay is bound even when it is nearly empty.
+//
+// **Why two bays of three levels.** A rack is six slots, and there are two
+// ways to spend them. The first cut spent four of them in ONE ROW, because
+// this camera punishes anything standing above a bay: a sight line leaves
+// every voxel along `(+x, -y, +z)`, so a beam at the front of an upper
+// level hides a band of whatever is twelve voxels below and behind it. That
+// version measured well and **looked like a bike rack** — five evenly
+// spaced hoops with nothing spanning them, which is what racking is not.
+// The horizontal load beams running the full length of the run are the one
+// feature that says "warehouse" before anything else is resolved, and a row
+// of unconnected frames has none.
+//
+// So the beams are back and the levels with them, and the camera is paid
+// off with spacing rather than by deletion:
+//
+//   * every pair in [`RACK_BEAM_Z`] clears the load below it by three
+//     voxels, which is what puts the whole of that load's FRONT face — the
+//     face this camera reads a fill level from — below the beam that would
+//     otherwise cross it.
+//   * [`RACK_BRACE_Z`] sits above each level's goods for the same reason,
+//     not across them.
+//   * The upper deck stops at [`RACK_BAY_X`]`.1`, short of the front beam,
+//     so it never overhangs the goods below. It eats the back of the lower
+//     load's top face and none of its front.
+//   * Nothing at all stands above the top level. Its beams are the ones it
+//     sits on, which is how real selective racking is built anyway.
+//
+// **Height is not capped by the footprint** — see [`RACK_HEIGHT`]. The first
+// two-level cut assumed `footprint x 32` bounded z as well and squeezed both
+// levels into 30 voxels, which left a rack with the proportions of a coffee
+// table. The rule only ever governed the footprint plane.
+//
+// The earlier one-row version is in the history of this file if the two
+// levels ever stop reading; what is NOT worth retrying is a rack with no
+// longitudinal beams at all.
+//
+// **Material** (§2b point 8, structure is painted, food contact is
+// stainless): a rack touches nothing, so it is almost all paint. The
+// uprights are `paint_blue`, the same as the machine skirts, because a rack
+// is factory equipment and not a second visual family; the load beams are
+// `paint_red` against them, which is the two-tone every real racking system
+// is sold in and the cheapest way to make the beams read as beams rather
+// than as more frame. Decking is steel because that is what a deck is. The
+// column guards are hazard striped — a real rack in a plant where powered
+// pallet trucks drive has exactly those.
+//
+// **Colour is still spent on the stock.** `paint_red` #82372F is a dark
+// brick, four stops below `tomato_red`, so the beams sit under the goods in
+// value and the four tinted loads stay the only saturated thing a rack
+// shows (UI_UX.md §7).
+
+/// The rack's upright frames: THREE of them along the model's long (Y)
+/// axis, each a pair of posts spanning the depth, with a bay in each of the
+/// two gaps between them.
+///
+/// The end frames sit flush with the footprint edge (y = 0 and y = 63) for
+/// `machine_footing`'s reason — a structure inset from its own tile leaves a
+/// hairline of bare floor where the neighbouring tile butts up. Three frames
+/// of four and two bays of twenty-six is 64 exactly, which is what makes the
+/// bays **identical** so that one pallet model serves all of them.
+const RACK_FRAME_Y: [(i32, i32); 3] = [(0, 3), (30, 33), (60, 63)];
+const RACK_POST_X: [(i32, i32); 2] = [(2, 5), (26, 29)];
+
+/// The two bays' Y spans, i.e. the gaps between consecutive frames, and the
+/// X span every bay shares (between the posts). Pinned as constants rather
+/// than recomputed because [`warehouse_pallet`] is sized and centred from
+/// them, and because the tests assert the bays are empty against them.
+// The four constants below are the WIRE BETWEEN W2 AND W3 and have no
+// consumer inside this generator: `main.gd` positions a bay's pallet and
+// scales its load against them, and this file's tests assert the geometry
+// holds them true. `dead_code` therefore fires on the binary build and is
+// silenced here rather than by deleting the numbers, which would move them
+// into GDScript — the thing `DOCK_DECK_Z`'s comment exists to prevent.
+#[allow(dead_code)]
+const RACK_BAY_Y: [(i32, i32); 2] = [(4, 29), (34, 59)];
+#[allow(dead_code)]
+const RACK_BAY_X: (i32, i32) = (6, 25);
+
+/// The z a pallet's base stands on, per LEVEL — the plinth for the bottom
+/// level, a deck laid over each beam pair for the two above it. Two bays
+/// times three levels is six slots per rack.
+///
+/// **The pitch is fifteen and every level gets the same three voxels of
+/// clearance**, which is the geometry the first two-level rack measured
+/// best on (issue #144: the level with three voxels over it read 27-38/255,
+/// the one with a brace across its goods read 16). Three levels at the
+/// roomier nineteen would stand 58 voxels tall and out-top the cooking vat;
+/// see [`RACK_HEIGHT`].
+///
+/// **`main.gd` places pallets against these numbers**, together with
+/// [`RACK_BAY_Y`] above: a bound slot's pallet is drawn at the rack origin,
+/// offset by its bay's centre in X/Y, lifted to its level, with the load
+/// scaled on top of it. They are the wire between W2 and W3 — change one,
+/// change both.
+#[allow(dead_code)]
+const RACK_LEVEL_Z: [i32; 3] = [2, 17, 32];
+
+/// The longitudinal load beams, one pair per level ABOVE the bottom one,
+/// and the deck slice laid across each pair.
+///
+/// **The three voxels between the load below and `.0` are the whole
+/// design.** A front beam hides what is twelve voxels below and behind it,
+/// so a beam any lower would lay a band across the front face of that
+/// level's goods — which is the face a fill level is read from, and the
+/// defect that killed the first two-level cut.
+const RACK_BEAM_Z: [(i32, i32); 2] = [(14, 16), (29, 31)];
+
+/// The depth braces that make a pair of posts an upright FRAME. Horizontal,
+/// never diagonal — §2b point 23: a thin diagonal does not survive this
+/// camera, and racking's real lattice bracing is exactly the thing that
+/// would vanish into noise here. Two heights, one per level, so an empty
+/// rack still reads as braced rather than as bare poles.
+///
+/// **Each brace sits in the clear air ABOVE its level's goods**, not across
+/// them. They used to sit mid-bay, where the front frame's brace laid a
+/// diagonal band over the stock behind it — measurably so: the level whose
+/// goods the old brace crossed read 16/255 against the clear level's 27
+/// (issue #144). Up here they cost the readout nothing.
+///
+/// The first two are at their beam pair's own height, so the brace between a
+/// frame's posts and the beams outside them make ONE continuous line across
+/// the rack's full width at every level. The third is the top tie, above the
+/// goods on the top level, which has no beams over it.
+const RACK_BRACE_Z: [(i32, i32); 3] = [(14, 15), (29, 30), (42, 43)];
+
+/// The posts' top voxel, the cap plate above them, and the model's own
+/// height.
+///
+/// **A model is only bound to `footprint x 32` in the footprint PLANE** —
+/// height is free, and the line already spends it: `fluid_tank` is 1x1 and
+/// 40 tall, `machine_cooking_vat` 2x2 and 48. Racking that stops at one tile
+/// reads as shelving, so this stands at 45 occupied, three levels of it.
+///
+/// **48 is the ceiling, and it is the cooking vat's.** The vat is the thing
+/// meant to be the biggest object on the line (see [`machine_cooking_vat`])
+/// and a store room should not out-tower the process — a test pins the rack
+/// under the vat's real model height rather than a literal. That ceiling is
+/// what fixes the level pitch at fifteen: three levels at the two-level
+/// rack's roomier nineteen came to 58.
+const RACK_POST_TOP_Z: i32 = 44;
+const RACK_CAP_Z: i32 = 45;
+const RACK_HEIGHT: u32 = 46;
+
+/// A pallet's footprint and height, and how tall a full load stands on it.
+///
+/// The footprint is inset from [`RACK_BAY_X`]/[`RACK_BAY_Y`] at every edge
+/// so a pallet never touches the posts it stands between.
+/// [`RACK_LOAD_MAX_H`] is what `main.gd` scales a full slot to, and it is
+/// capped to clear the beams above it under the sight-line rule — the
+/// test pins that rather than the comment.
+const RACK_PALLET_SIZE: [u32; 3] = [18, 22, 2];
+#[allow(dead_code)]
+const RACK_LOAD_MAX_H: i32 = 8;
+
+/// **The luma a bay's tint may NOT have** — the answer to issue #144, and
+/// the last piece of the W2/W3 wire. `main.gd` tints the near-white
+/// [`warehouse_pallet_load`] slab per item the way it tints a hopper's fill;
+/// a tint inside this band renders the goods at the value of the thing
+/// behind them and a full bay becomes indistinguishable from an empty one.
+///
+/// **Measured, not judged.** At 82 px (a 1x2 at default zoom), against the
+/// factory floor's own #9C9C90 rather than vengi's black, with one
+/// difference mask per slot and the anchor at 26/255. The floor is the
+/// point: an empty bay in game shows FLOOR, so a saturated tint is not too
+/// dark to see — it reads dark-on-light, which is perfectly legible — and
+/// what actually disappears is a tint that lands ON the floor's own 155.
+///
+/// The band was 55..175 until the bottom bay got its own deck (see
+/// [`warehouse_rack`]); the plinth under it was the only backdrop on the
+/// rack that was not floor-coloured. Worst-slot separation of the six
+/// shipped hopper tints against the decked rack:
+///
+/// | item | tint | luma | worst |
+/// |---|---|---|---|
+/// | molasses | `#2A160E` | 25.7 | 84.3 |
+/// | liquid_smoke | `#706430` | 98.8 | **23.1** |
+/// | tomato | `#C22B21` | 74.4 | 44.1 |
+/// | spice_mix | `#A8481C` | 89.2 | 31.5 |
+/// | vinegar | `#AD6B23` | 115.8 | **9.1** |
+/// | sugar | `#F2F0E6` | 239.7 | 70.0 |
+///
+/// So **four of the six may be reused verbatim and two may not**. W3's rack
+/// table should darken those two rather than invent new hues — `vinegar`
+/// `Color(0.461, 0.286, 0.093)` (luma 79, worst 39.8) and `liquid_smoke`
+/// `Color(0.325, 0.290, 0.139)` (luma 73, worst 44.6), which is each one's
+/// own colour at 0.68/0.74 value and still reads as amber and as smoke.
+/// Do NOT edit `HOPPER_FILL_TINTS` to match: a hopper's fill is seen against
+/// the hopper's own dark throat, not against the floor, and those two were
+/// measured there (issues #80, #131).
+///
+/// **Identity is not this band's job.** The tints that clear it cluster
+/// between 73 and 89 luma, so a player tells 40 units from 10 by the tint
+/// and tells molasses from smoke by the bay's ICON. Spending the band on
+/// mutual discriminability as well would leave nothing for fill level,
+/// which is the readout the rack exists for (plan requirement R3).
+#[allow(dead_code)]
+const RACK_TINT_DEAD_BAND: (u8, u8) = (100, 175);
+
+/// `data/machines.ron`'s **1x2** `warehouse_rack` — placed storage, and the
+/// only kind in the game that neither processes nor moves anything.
+///
+/// See this section's header for why it is an open frame rather than a
+/// housing with carved openings, why it is two bays of three levels, and for
+/// the material split. The geometry below is three upright frames
+/// ([`RACK_FRAME_Y`]) braced across the depth, two pairs of load beams
+/// running the rack's whole length at [`RACK_BEAM_Z`], and a deck over each
+/// bay at each pair — which leaves the six volumes in [`RACK_BAY_X`] x
+/// [`RACK_BAY_Y`] above each of [`RACK_LEVEL_Z`] genuinely empty, as this
+/// file's tests check voxel by voxel rather than by eye.
+pub fn warehouse_rack(p: &Palette) -> VoxModel {
+    let tile = TILE_VOXELS as i32;
+    let last_x = tile - 1;
+    let last_y = tile * 2 - 1;
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS * 2, RACK_HEIGHT]);
+
+    // Plinth and hazard skirt, flush with the footprint, so a rack sits in
+    // the same family as every machine (see `machine_footing_rect`) — but
+    // WITHOUT that helper's painted base block, which would fill the
+    // footprint solid and take the bays away.
+    m.cuboid((0, last_x), (0, last_y), (0, 1), p.idx("concrete_dark"));
+    for (y0, y1) in [(0, 0), (last_y, last_y)] {
+        m.hazard_stripe_x(
+            (0, last_x),
+            (y0, y1),
+            (2, 2),
+            3,
+            p.idx("hazard_yellow"),
+            p.idx("hazard_black"),
+        );
+    }
+    for y in 0..=last_y {
+        let a = if (y + 2).rem_euclid(6) < 3 {
+            p.idx("hazard_yellow")
+        } else {
+            p.idx("hazard_black")
+        };
+        m.set(0, y, 2, a);
+        m.set(last_x, y, 2, a);
+    }
+
+    // The load beams: one pair running the rack's whole length, in the two
+    // post planes, which is what turns three frames into a RUN of racking
+    // rather than three things standing near each other.
+    for &(x0, x1) in &RACK_POST_X {
+        for &span in &RACK_BEAM_Z {
+            // Solid `paint_red` all the way through, INCLUDING the top face.
+            // The first cut capped each beam with a bright `steel_light` slice
+            // to carry the line down the rack, and that slice is square to the
+            // light: it rendered as two white bars running the full 64 and
+            // became the loudest thing in the frame, with the beams reading as
+            // steel and the red invisible beneath them. The beam's own lit top
+            // face is already the line; it does not need help.
+            m.cuboid((x0, x1), (0, last_y), span, p.idx("paint_red"));
+        }
+    }
+
+    // The upper level's decking, per bay, laid across the beams and
+    // stopping SHORT of the front beam (`RACK_BAY_X.1` = 25, the beam
+    // starts at 26). A deck that overhung its beam would put its own edge
+    // across the goods below — the whole reason the first two-level rack
+    // failed.
+    for &(y0, y1) in &RACK_BAY_Y {
+        for &span in &RACK_BEAM_Z {
+            m.cuboid(RACK_BAY_X, (y0, y1), (span.1, span.1), p.idx("steel_dark"));
+        }
+        // And one over the plinth, under the BOTTOM level. Measured, not
+        // decorative: with the bottom bay floored in `concrete_dark` the
+        // goods on it had a dark backdrop where the levels above have the
+        // factory floor, so a dark tint separated by 86/255 up top and 17
+        // down here — the bottom level alone widened the unusable tint band
+        // to 55..175 luma (issue #144). Decking it in the same steel as the
+        // other levels makes all six slots behave alike.
+        m.cuboid(RACK_BAY_X, (y0, y1), (1, 1), p.idx("steel_dark"));
+    }
+
+    // The three upright frames.
+    for &(y0, y1) in &RACK_FRAME_Y {
+        for &(x0, x1) in &RACK_POST_X {
+            m.cuboid(
+                (x0, x1),
+                (y0, y1),
+                (2, RACK_POST_TOP_Z),
+                p.idx("paint_blue"),
+            );
+            // Column guard: the striped foot every upright in a plant with
+            // powered pallet trucks in it carries.
+            m.hazard_stripe_x(
+                (x0, x1),
+                (y0, y1),
+                (3, 7),
+                3,
+                p.idx("hazard_yellow"),
+                p.idx("hazard_black"),
+            );
+            // Post cap — a post has to END in something, or it reads as
+            // sawn off. Its own footprint only: an earlier cut ran one
+            // bright plate right across each frame and those bars became
+            // the loudest thing in the render, a rack wearing a hat.
+            m.cuboid(
+                (x0, x1),
+                (y0, y1),
+                (RACK_CAP_Z, RACK_CAP_Z),
+                p.idx("steel_dark"),
+            );
+        }
+        // The depth braces between a frame's two posts.
+        for &z in &RACK_BRACE_Z {
+            m.cuboid(RACK_BAY_X, (y0, y1), z, p.idx("paint_blue"));
+        }
+    }
+
+    // A bay-identification header across the top of the -Y end frame, which
+    // is the face this camera sees and where a real rack carries its
+    // location signage. A rack has no controls to put there, and an end
+    // frame with nothing on it at all reads as scaffolding rather than as a
+    // piece of the factory. Above the top level's goods, so it costs the
+    // readout nothing.
+    // Small and dark-bodied on purpose: at bay width in `steel_light` it
+    // was a white plate the size of a pallet, and the rack grew a second
+    // subject. A `paint_blue` board with one bright line of `steel_light`
+    // across it reads as signage at any zoom that can resolve it and as
+    // part of the frame at any zoom that cannot.
+    let sign = (RACK_BAY_X.0 + 4, RACK_BAY_X.1 - 4);
+    m.cuboid(
+        sign,
+        (0, 0),
+        (RACK_POST_TOP_Z - 3, RACK_POST_TOP_Z),
+        p.idx("paint_blue"),
+    );
+    m.cuboid(
+        (sign.0 + 1, sign.1 - 1),
+        (0, 0),
+        (RACK_POST_TOP_Z - 1, RACK_POST_TOP_Z - 1),
+        p.idx("steel_light"),
+    );
+
+    m
+}
+
+/// The pallet standing in a **bound** slot — the half of the rack's readout
+/// that says "this slot is in use at all", where [`warehouse_pallet_load`]
+/// says how full it is.
+///
+/// Its own volume, not the rack's, so `main.gd` instantiates one per bound
+/// slot and positions it from [`RACK_BAY_Y`] and [`RACK_LEVEL_Z`]; the .vox
+/// origin convention puts this model's pivot at its footprint centre at
+/// ground level, so a slot's transform is the bay centre offset with no
+/// further arithmetic.
+///
+/// Two voxels tall and deliberately dark. It is the one part of a bound
+/// slot that does not change with the stock level, so it has to be legible
+/// enough to say "bound" on its own and quiet enough that the tinted goods
+/// standing on it are what the eye lands on. `tote_grey` feet under a
+/// `steel_dark` deck: a plastic hygienic pallet, which is what a food plant
+/// actually stores raw ingredients on, and not the timber one — UI_UX.md
+/// §2b point 14 records what a second warm brown object costs on a floor
+/// that already has `cardboard` cases on it.
+pub fn warehouse_pallet(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new(RACK_PALLET_SIZE);
+    let last_x = RACK_PALLET_SIZE[0] as i32 - 1;
+    let last_y = RACK_PALLET_SIZE[1] as i32 - 1;
+    m.cuboid((0, last_x), (0, last_y), (1, 1), p.idx("steel_dark"));
+    // Three runner feet under the deck, along the rack's length, which is
+    // the one detail at this size that says "pallet" and not "board".
+    for &(y0, y1) in &[
+        (0, 2),
+        (last_y / 2 - 1, last_y / 2 + 1),
+        (last_y - 2, last_y),
+    ] {
+        m.cuboid((0, last_x), (y0, y1), (0, 0), p.idx("tote_grey"));
+    }
+    m
+}
+
+/// The goods standing on a pallet: ONE voxel of near-white bulk that
+/// `main.gd` scales vertically to the slot's fill fraction and multiplies a
+/// per-item tint over, exactly as `hopper_fill` is used.
+///
+/// `bulk_pale` rather than a colour, because *which* ingredient a slot holds
+/// is simulation state and a tint multiplies cleanly over near-white without
+/// reading as a painted block. Inset a voxel from the pallet's own deck at
+/// every edge, which is §2b point 19 — a body flush with what it stands on
+/// z-fights, and it is the defect you only ever see once there is product
+/// in the thing.
+pub fn warehouse_pallet_load(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([RACK_PALLET_SIZE[0], RACK_PALLET_SIZE[1], 1]);
+    let last_x = RACK_PALLET_SIZE[0] as i32 - 1;
+    let last_y = RACK_PALLET_SIZE[1] as i32 - 1;
+    m.cuboid((1, last_x - 1), (1, last_y - 1), (0, 0), p.idx("bulk_pale"));
+    for x in [1, last_x - 1] {
+        for y in [1, last_y - 1] {
+            m.erase(x, y, 0);
+        }
+    }
+    m
+}
+
+// ---------------------------------------------------------------------------
 // Delivery dock (the delivery-dock ticket, GAMEPLAY.md §6/§9)
 // ---------------------------------------------------------------------------
 
@@ -6925,6 +7386,153 @@ mod tests {
         assert!(
             drum.voxels.values().any(|&c| c == p.idx("smoke_slate")),
             "the drum's body is the palette's `smoke_slate`, the number FLUID_TINTS mirrors"
+        );
+    }
+
+    /// **The four slots are genuinely empty openings**, not dark ones
+    /// (DECISIONS.md Part B). The rack's whole readout is that a player can
+    /// see the stock standing in it, so a single stray voxel left across a
+    /// slot by a future edit — a brace dropped a level, a deck that
+    /// overhangs, a back panel — is the one defect that costs the asset its
+    /// reason to exist, and it is invisible in a preview of the *empty*
+    /// rack.
+    #[test]
+    fn the_racks_slots_are_empty_volumes() {
+        let rack = warehouse_rack(&palette());
+        let load_h = RACK_PALLET_SIZE[2] as i32 + RACK_LOAD_MAX_H;
+        for (bay, &(y0, y1)) in RACK_BAY_Y.iter().enumerate() {
+            for (level, &base) in RACK_LEVEL_Z.iter().enumerate() {
+                for x in RACK_BAY_X.0..=RACK_BAY_X.1 {
+                    for y in y0..=y1 {
+                        for z in base..base + load_h {
+                            assert!(
+                                !rack.filled(x, y, z),
+                                "bay {bay} level {level} is obstructed at ({x}, {y}, {z})"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A full load still stands clear of what is above it.
+    ///
+    /// The camera makes this concrete: a sight line leaves every voxel along
+    /// `(+x, -y, +z)`, so the lower level's goods start disappearing behind
+    /// the front load beam once their top reaches it. [`RACK_LOAD_MAX_H`] is
+    /// what `main.gd` scales a full slot to, so the two numbers are wired
+    /// together whether or not anyone remembers it — hence the assert rather
+    /// than the comment.
+    #[test]
+    fn a_full_slot_stands_clear_of_the_frame() {
+        let load_top = |base: i32| base + RACK_PALLET_SIZE[2] as i32 + RACK_LOAD_MAX_H - 1;
+        // Every level but the top one is roofed by the beam pair above it;
+        // the top one by the posts' own ceiling.
+        for (level, &base) in RACK_LEVEL_Z.iter().enumerate() {
+            let ceiling = RACK_BEAM_Z
+                .get(level)
+                .map(|span| span.0)
+                .unwrap_or(RACK_POST_TOP_Z);
+            assert!(
+                load_top(base) < ceiling,
+                "a full load on level {level} tops out at z = {}, at or above the {ceiling} over it",
+                load_top(base)
+            );
+        }
+        // Each level above the bottom one stands on a deck over a beam pair,
+        // not above thin air.
+        for (level, &span) in RACK_BEAM_Z.iter().enumerate() {
+            assert_eq!(
+                RACK_LEVEL_Z[level + 1],
+                span.1 + 1,
+                "level {} does not sit on the deck laid over its beams",
+                level + 1
+            );
+        }
+        assert_eq!(
+            RACK_LEVEL_Z.len(),
+            RACK_BEAM_Z.len() + 1,
+            "every level but the bottom one needs a beam pair to stand on"
+        );
+        // And a pallet never touches the posts it stands between, or a slot
+        // reads as filled even when its stock is nearly gone.
+        let bay_w = RACK_BAY_X.1 - RACK_BAY_X.0 + 1;
+        let bay_d = RACK_BAY_Y[0].1 - RACK_BAY_Y[0].0 + 1;
+        assert!(
+            (RACK_PALLET_SIZE[0] as i32) < bay_w && (RACK_PALLET_SIZE[1] as i32) < bay_d,
+            "the pallet ({} x {}) is inset from its bay ({bay_w} x {bay_d})",
+            RACK_PALLET_SIZE[0],
+            RACK_PALLET_SIZE[1]
+        );
+    }
+
+    /// **The beams run the rack's whole length.** They are the feature that
+    /// makes the thing read as racking rather than as a row of hoops — the
+    /// defect the one-row version shipped with — and deleting them is a
+    /// one-line edit that no other check here would notice.
+    #[test]
+    fn the_load_beams_span_the_whole_run() {
+        let rack = warehouse_rack(&palette());
+        let last_y = TILE_VOXELS as i32 * 2 - 1;
+        for &(x0, x1) in &RACK_POST_X {
+            for &span in &RACK_BEAM_Z {
+                for y in 0..=last_y {
+                    assert!(
+                        rack.filled(x0, y, span.0),
+                        "the z {} beam in the x {x0}..{x1} plane is broken at y = {y}",
+                        span.0
+                    );
+                }
+            }
+        }
+    }
+
+    /// The rack fills its `data/machines.ron` **1x2** footprint and nothing
+    /// more, and it stays short of the cooking vat: a storage building as
+    /// tall as the chain's centrepiece would stand over the line it sits
+    /// beside and hide it (UI_UX.md's rule that height is spent on what
+    /// matters). The footprint half of this is the hard one — the height is
+    /// free, but the plan the rack has to fit is 1x2.
+    #[test]
+    fn the_rack_keeps_to_its_footprint_and_its_height() {
+        let rack = warehouse_rack(&palette());
+        assert_eq!(
+            rack.size,
+            [TILE_VOXELS, TILE_VOXELS * 2, RACK_HEIGHT],
+            "the rack is the 1x2 footprint x RACK_HEIGHT"
+        );
+        let vat = machine_cooking_vat(&palette());
+        assert!(
+            rack.size[2] < vat.size[2],
+            "the rack ({}) has grown to the cooking vat's {}",
+            rack.size[2],
+            vat.size[2]
+        );
+        let tallest = rack.voxels.keys().map(|at| at.2).max().unwrap();
+        assert_eq!(
+            tallest as i32, RACK_CAP_Z,
+            "the post caps are the highest thing on the rack"
+        );
+    }
+
+    /// The bays are **identical**, which is what lets one pallet model and
+    /// one placement rule serve all four slots in `main.gd`.
+    #[test]
+    fn every_bay_is_the_same_size() {
+        let spans: Vec<i32> = RACK_BAY_Y.iter().map(|&(a, b)| b - a).collect();
+        assert!(
+            spans.iter().all(|s| *s == spans[0]),
+            "the bays differ in depth: {spans:?}"
+        );
+        for (frame, bay) in RACK_FRAME_Y.iter().zip(RACK_BAY_Y.iter()) {
+            assert_eq!(frame.1 + 1, bay.0, "a bay starts where its frame ends");
+        }
+        let last = RACK_BAY_Y[RACK_BAY_Y.len() - 1].1;
+        assert_eq!(
+            last + 1,
+            RACK_FRAME_Y[RACK_FRAME_Y.len() - 1].0,
+            "the last bay ends where the end frame begins"
         );
     }
 }

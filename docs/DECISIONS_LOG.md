@@ -18,6 +18,17 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-21 **A voxel asset is judged against the factory floor, not
+  against vengi's black.** The two backdrops give opposite verdicts, and the
+  floor is the one the player has. Repaint the pure-black pad with
+  `#9C9C90` (luma 155.1) before taking any mean. What actually disappears on
+  this floor is a MID tint at the floor's own value, so a legibility verdict
+  is a dead BAND, not a threshold — the warehouse rack's is 100..175 luma,
+  recorded as `RACK_TINT_DEAD_BAND` in the generator for W3 to read rather
+  than re-derive. Also: **pay the fixed camera with spacing, not with
+  deletion.** The rack's first design dropped its longitudinal load beam
+  because the beam hid the load behind it; the result read as a bike rack.
+  The beam stays and the levels are spaced so the sight line clears it.
 - 2026-09-21 **A panel that points at the world is FOLLOWED in isometric and
   PARKED in first person.** (Issue #105.) In first person there is no cursor:
   the query point is the crosshair at the centre of the screen and the subject

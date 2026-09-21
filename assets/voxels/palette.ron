@@ -311,5 +311,22 @@
         // the same number was standing in a pipe, and the drum and the
         // fluid move together by the rule above.
         (name: "smoke_slate",     rgb: "#706430", class: "matte"),
+
+        // --- the warehouse rack's returnable tote (the warehouse-racks
+        // sprint, ticket W2) ---
+        // The body of a stacking crate standing in a rack bay. Its own
+        // entry rather than the ketchup pail's `pail_grey` #989EA2 because
+        // the two greys have opposite jobs: a pail is an object on a belt
+        // and wants to be seen, a tote is a FRAME around the one thing in
+        // a rack bay that carries meaning — the tinted product inside it
+        // (UI_UX.md §7, saturated colour reserved for meaning). At
+        // `pail_grey` the lit walls render brighter than a heap of sugar
+        // and the bay reads as an empty white box with a smudge in it;
+        // taken down to this value the walls fall away and the fill is the
+        // brightest thing in the opening, which is the whole readout.
+        // `pail_grey` itself stays on this model as the moulded rim and
+        // corner ribs, so the tote is still recognisably the same plastic
+        // family as the pail two stages downstream.
+        (name: "tote_grey",       rgb: "#707780", class: "matte"),
     ],
 )

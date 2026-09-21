@@ -189,6 +189,29 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — The warehouse rack has its art (W2)
+
+First ticket of the warehouse stock racks feature, and assets only — nothing
+is placeable yet. Three generators in `assets/voxels/generators/assets.rs`:
+`warehouse_rack` (32×64×46, a 1×2 footprint, **two bays × three levels = six
+slots**), `warehouse_pallet` (18×22×2) and `warehouse_pallet_load`, a
+one-voxel `bulk_pale` slab for `main.gd` to scale and tint per item the way
+`hopper_fill` already works. One palette colour appended, `tote_grey`. Five
+new voxgen tests assert the bays are genuinely empty volumes, that a full
+slot stands clear of the frame at every level, that the load beams span the
+whole run, that the rack keeps to its footprint and stays under the cooking
+vat's height, and that every bay is the same size.
+
+Two design rulings came out of it and are in
+[DECISIONS.md](DECISIONS.md) under today's date: **pay the fixed camera with
+spacing, not with deletion** (the first design dropped its longitudinal load
+beam to stop it hiding the loads, and read as a bike rack), and **judge a
+voxel asset against the factory floor rather than vengi's black pad** (the
+two backdrops give opposite verdicts; the rack's unusable tint band is
+100..175 luma, in `RACK_TINT_DEAD_BAND` for W3 to read). Measuring the second
+one found a real defect: the bottom bay was backed by the dark plinth instead
+of by floor, and decking it in `steel_dark` like the other two narrowed the
+band from 55..175. Issues #144 and #147 both closed by doing the work.
 ### 2026-09-21 — In first person the hover panel is parked, not followed (issue #105)
 
 A panel that follows the cursor is the right idea right up until there is no
