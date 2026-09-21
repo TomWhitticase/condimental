@@ -178,6 +178,18 @@
 # now doing to the payroll. It implies --populate, so the rest of the line
 # is running around the one machine that is not.
 #
+# Pass --unclerked-dock to build the reference line with its ONE logistics
+# head FIRED, ticked only far enough to settle the scene. That is the window
+# issue #87 was about: `understaffed` only moves on a tick the dock actually
+# held something and was refused, so until a box reaches the dock — hundreds
+# of ticks on a cold line, never on one starved upstream — the tooltip said
+# nothing while the establishment could not crew the building. Pair it with
+# --hover-dock; the subject of the frame is the "short of logistics staff"
+# line now drawn from the STANDING `crewed` fact. The fixture refuses to
+# build if that window has closed, so a sim change cannot hand back an
+# ordinary-looking dock under this flag. --full-dock photographs the other,
+# latched case.
+#
 # Pass --production to build the bottleneck line and open the PRODUCTION
 # panel (P) over it: what the factory made and used per item over a
 # window or all time, biggest first, with per-minute rates and bars (the
@@ -324,7 +336,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--mothballed] [--full-dock [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

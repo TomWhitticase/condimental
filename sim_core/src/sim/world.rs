@@ -1218,7 +1218,23 @@ pub struct DockSnapshot {
     /// Refused its logistics crew on the last tick it had something to
     /// ship (the staff pools MVP epic; `Dock::understaffed`). While true
     /// the buffer is held and, at capacity, the belt behind it backs up.
+    ///
+    /// This is a PER-TICK fact and only moves on a tick the dock actually
+    /// had something to ship, so on a line that ebbs it is false on most
+    /// ticks of a dock that is permanently short — read `crewed` for the
+    /// standing answer and this one for the live refusal (issue #87).
     pub understaffed: bool,
+    /// Whether the establishment could crew this dock if everything it owns
+    /// ran at once ([`World::uncrewed_placements`]) — the same stable,
+    /// per-placement fact a machine's polled load entry carries (issue #20).
+    ///
+    /// It rides THIS snapshot, and not only `TileSnapshot::Dock`, because
+    /// `dock_snapshots` is polled every frame while the tile snapshot is
+    /// read per rebuild: hiring and firing deliberately dirty no chunk
+    /// (`sim_core/CLAUDE.md`), so a `crewed` taken off the rebuild channel
+    /// would go stale the moment the player fired the clerk. Polled is the
+    /// only channel on which a staffing fact stays true.
+    pub crewed: bool,
     /// Switched off by the player (issue #19): claims no clerk, ships
     /// nothing, takes nothing off the belt. Distinct from `understaffed`,
     /// which is the crew being refused rather than never asked for.
@@ -4831,18 +4847,31 @@ impl World {
 
     fn dock_snapshot(&self, dock: Entity) -> DockSnapshot {
         let placement = self.placement_of(dock);
-        let body = self.ecs.get::<&Dock>(dock).unwrap();
+        // The body's fields are lifted out before `is_crewed`, which walks
+        // every placement and would otherwise be called while this dock's
+        // component is still borrowed.
+        let (contents, capacity_per_item, shipped_total, understaffed, mothballed) = {
+            let body = self.ecs.get::<&Dock>(dock).unwrap();
+            (
+                body.contents().cloned().collect(),
+                body.capacity_per_item(),
+                body.shipped_total(),
+                body.understaffed(),
+                body.mothballed(),
+            )
+        };
         DockSnapshot {
             tile: self.position_of(dock),
             kind: placement.kind,
             direction: placement.direction,
             footprint: placement.footprint,
             belt_tile: self.inbound_belt_tile(dock),
-            contents: body.contents().cloned().collect(),
-            capacity_per_item: body.capacity_per_item(),
-            shipped_total: body.shipped_total(),
-            understaffed: body.understaffed(),
-            mothballed: body.mothballed(),
+            contents,
+            capacity_per_item,
+            shipped_total,
+            understaffed,
+            crewed: self.is_crewed(dock),
+            mothballed,
             full: self.economy.delivery_pool_full(),
         }
     }

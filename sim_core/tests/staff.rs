@@ -1207,6 +1207,51 @@ fn crew_rides_query_tile_and_the_shop_snapshot_and_the_stall_kind_spells_staff()
     assert_eq!(serde_json::to_value(StallKind::Staff).unwrap(), "staff");
 }
 
+/// Issue #87: the dock's POLLED snapshot carries the standing `crewed`
+/// fact, not only the per-tick `understaffed` one — and it follows hiring
+/// and firing, which deliberately dirty no chunk.
+///
+/// This is the whole reason the field rides `dock_snapshots` as well as
+/// `query_tile`: the presentation reads the former every frame and the
+/// latter only when the scene is rebuilt, so a `crewed` available only on
+/// the rebuild channel would go stale the moment a clerk was let go.
+#[test]
+fn the_docks_polled_snapshot_carries_crewed_and_it_follows_hiring() {
+    let mut world = reference_chain_with_budget(recipes(), 1_000);
+    world.tick();
+    assert!(
+        world.dock_snapshots()[0].crewed,
+        "the reference chain hires the clerk its dock asks for"
+    );
+
+    let dirty_before = world.dirty_chunks().to_vec();
+    fire(&mut world, "logistics");
+    assert_eq!(headcount(&world, "logistics"), 0);
+    assert_eq!(
+        world.dirty_chunks(),
+        dirty_before.as_slice(),
+        "firing still dirties no chunk — the polled snapshot is how this reaches the HUD"
+    );
+    assert!(
+        !world.dock_snapshots()[0].crewed,
+        "a dock whose only clerk was fired is not crewed"
+    );
+
+    hire(&mut world, "logistics");
+    assert!(
+        world.dock_snapshots()[0].crewed,
+        "hiring the clerk back crews the dock again"
+    );
+    // And the two flags are independent: the standing answer says nothing
+    // about whether this particular tick refused a shipment.
+    assert!(!world.dock_snapshots()[0].understaffed);
+    assert_eq!(
+        serde_json::to_value(&world.dock_snapshots()[0]).unwrap()["crewed"],
+        true,
+        "and it is on the wire under that name"
+    );
+}
+
 /// A `staff` stall is reported only when nothing older applies: an idle
 /// machine with no input reads `input`, never `staff`, even with nobody
 /// hired.

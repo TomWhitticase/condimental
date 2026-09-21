@@ -184,6 +184,35 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — The dock says it is short of a clerk before anything is refused (issue #87)
+
+The dock's hover drew its staffing line from `DockSnapshot::understaffed`,
+which is a **per-tick** fact: it only moves on a tick the dock actually held
+something and was refused it. Between firing the clerk and the first box
+arriving — hundreds of ticks on a cold line, and never at all on one that is
+also starved upstream — the tooltip said nothing was wrong while the
+establishment plainly could not crew the building. This is the dock's half
+of issue #20, which the machines got in the same pass and the dock did not.
+
+The fix is a channel choice, which is why it was deferred rather than
+one-lined. `crewed` — the establishment's standing answer, already computed
+by `World::uncrewed_placements` — existed on `TileSnapshot::Dock`, but Godot
+reads that only when the scene is *rebuilt*, and hiring and firing
+deliberately dirty no chunk. A `crewed` taken off the rebuild channel would
+have gone stale the moment a clerk was let go, which is worse than the blink
+it replaced. So it rides `DockSnapshot` instead, on the POLLED
+`dock_snapshots_json` the hover already reads every frame.
+
+The tooltip now prefers the live refusal where there is one, because "held"
+says the stronger thing, and falls back to the standing shortage in the
+**same words** the machine hover uses, through the one helper both share
+(`_uncrewed_reason_text`) — so the two readings cannot drift apart.
+
+The silent window is now photographable: `scripts/screenshot-scene.sh
+--unclerked-dock --hover-dock` builds the reference line with its one
+logistics head fired and refuses to render at all if the window has closed,
+so a sim change cannot hand back an ordinary-looking dock under that flag.
+
 ### 2026-09-21 — The configuration panel gets a corner, a section, and a name that is not cut in half (issues #106, #107, #116)
 
 Three tickets about the one panel in the HUD that *commands* rather than

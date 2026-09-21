@@ -263,6 +263,42 @@ func _run_checks() -> void:
 		return
 	dock_state["full"] = false
 
+	# --- the standing shortage is said on every tick, not just the refused
+	# one (issue #87) ------------------------------------------------------
+	# `understaffed` only moves on a tick the dock actually had something to
+	# ship, so on a line that ebbs it is false on most ticks of a dock that
+	# is permanently short — and the hover used to fall silent on those. The
+	# stable `crewed` now answers instead, in the SAME WORDS, so the two
+	# readings can never contradict each other. Both flags come off the wire
+	# (`cargo test -p sim_core`); what is checked here is which one the
+	# tooltip reaches for.
+	if not bool(dock_state.get("crewed", false)):
+		_fail("a funded dock should read as crewed before this case starts")
+		return
+	var crewed_hover: String = main._dock_hover_text("5,0", "east")
+	if crewed_hover.contains("short of"):
+		_fail("a crewed dock claimed a staff shortage: '%s'" % crewed_hover)
+		return
+	dock_state["crewed"] = false
+	var uncrewed_hover: String = main._dock_hover_text("5,0", "east")
+	if not uncrewed_hover.contains("short of logistics staff"):
+		_fail("an uncrewed dock stayed silent between refusals: '%s'" % uncrewed_hover)
+		return
+	if uncrewed_hover.contains("held"):
+		_fail("a dock that was not refused this tick said it was holding: '%s'" % uncrewed_hover)
+		return
+	# And a live refusal still wins, because it says the stronger thing.
+	dock_state["understaffed"] = true
+	var held_hover: String = main._dock_hover_text("5,0", "east")
+	if not held_hover.contains("held"):
+		_fail("a dock refused its crew this tick must say it is holding: '%s'" % held_hover)
+		return
+	if held_hover.count("short of logistics staff") != 1:
+		_fail("the shortage was reported twice at once: '%s'" % held_hover)
+		return
+	dock_state["understaffed"] = false
+	dock_state["crewed"] = true
+
 	# --- hover answers for every placed kind through one mechanism --------
 	for kind in placed.keys():
 		var tile: Vector2i = placed[kind][0]

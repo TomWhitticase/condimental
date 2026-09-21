@@ -750,6 +750,57 @@ static func understaffed_stall(sim, tile: Vector2i) -> String:
 	return ""
 
 
+## THE UNCLERKED DOCK (issue #87) — the reference line with its ONE
+## logistics head fired, photographed in the window where the dock has not
+## yet been asked for a clerk. `scripts/screenshot-scene.sh
+## --unclerked-dock --hover-dock` is the repro frame.
+##
+## `Dock::understaffed` only moves on a tick the dock actually held
+## something and was refused, so between firing the clerk and the first box
+## arriving — which on a cold line is hundreds of ticks, and on a line that
+## is also starved upstream is forever — the dock reported nothing wrong at
+## all while the establishment could not crew it. That silent window is the
+## subject: the hover has to say "short of logistics staff" from the
+## STANDING `crewed` fact, not wait for a refusal.
+##
+## Built deliberately short: the line is placed, the head is fired, and the
+## sim is ticked only far enough to settle the scene. Running it on would
+## eventually latch `understaffed` and photograph the other case, which
+## `--full-dock` already covers.
+const UNCLERKED_CATEGORY := "logistics"
+const UNCLERKED_SETTLE_TICKS := 20
+
+static func build_unclerked_dock(sim) -> void:
+	build_reference_line(sim)
+	fund(sim, 8000)
+	sim.issue_command_json(JSON.stringify({
+		"type": "fire", "category": UNCLERKED_CATEGORY,
+	}))
+	for i in range(UNCLERKED_SETTLE_TICKS):
+		sim.tick()
+
+
+## Whether EVERY placed dock is in the silent window this fixture exists
+## for: the establishment cannot crew it (`crewed` false) and yet it was
+## not refused on the last tick it mattered (`understaffed` false), so
+## before issue #87 the hover said nothing at all. Read off the POLLED dock
+## snapshot, which is the channel the fix put `crewed` on.
+##
+## Asked of every dock rather than of a named tile on purpose: the caller
+## hovers whichever dock the scene found first, and a hardcoded coordinate
+## here would go quietly wrong the day the reference line moves.
+static func unclerked_dock_is_silent(sim) -> bool:
+	var parsed = JSON.parse_string(sim.dock_snapshots_json())
+	if not (parsed is Array) or parsed.is_empty():
+		return false
+	for entry in parsed:
+		if not (entry is Dictionary):
+			return false
+		if bool(entry.get("crewed", true)) or bool(entry.get("understaffed", false)):
+			return false
+	return true
+
+
 ## THE UNDERFUNDED LINE (the quality pass, ticket 4) — the fixture that
 ## CANNOT pay its next bill, for `test_staff_panel.gd`'s BEFORE-payday
 ## warning and `screenshot-scene.sh --staff-shortfall`. The shipped line's
