@@ -25,6 +25,110 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-21: **A content id is a KEY; what a player reads is a
+  `display_name` in the same file.** (Owner's call, asked for directly: "can
+  you rename warehouse rack to stock shelving".)
+
+  **What was asked, and the two ways to do it.** The kind the player buys to
+  store raw ingredients was called "Warehouse Rack" in the build menu, the
+  hotbar tooltip and its hover panel — none of which is a written label.
+  `main.gd`'s `_kind_display_name` title-cases the kind id, so all three
+  said "Warehouse Rack" because the id is `warehouse_rack`. The obvious
+  reading of "rename it" is therefore to rename the id, and the obvious
+  reading is the expensive one.
+
+  **What renaming the id would have cost.** A kind id is not a label with a
+  lookup behind it; it is a key, and four separate things key off it. It is
+  written into every save file twice (the tile's `kind` and the body tag
+  `SavedBody::WarehouseRack`), so a rename means a `SAVE_SCHEMA_VERSION`
+  bump — and this format **rejects rather than migrates** (see `sim::save`'s
+  module doc), so every save anyone holds is refused. `data/shop.ron` and
+  `data/storage.ron` both name it. `main.gd`'s `MACHINE_MODELS` maps it to a
+  voxel asset, and the asset, its generator function and its `.vox` files
+  carry the name too. Beyond that it is the subject of roughly 440 lines of
+  design prose across `assets.rs`, `world.rs`, `storage.rs`, `main.gd` and
+  two dated records in this file — prose that is measured, cited by point
+  number, and worth more than the consistency a blanket rewrite would buy.
+  None of that is visible to a player, and all of it would have moved to
+  change one string in three panels.
+
+  **What was done instead.** `MachineKind` gained an optional
+  `display_name`, the field `Recipe` and `IngredientKind` have carried since
+  issue #60, and `World::display_names` gathers all three files into the one
+  map the wire already exposes as `display_names_json`. `data/machines.ron`
+  says `display_name: "Stock Shelving"` on the `warehouse_rack` entry and
+  every panel follows, because each of them already asked that map before
+  title-casing. The id stayed. That is the rule this record exists for, and
+  it is not a rule about this kind: **a rename in front of the player is a
+  content change, and content changes are data.** If a rename ever does need
+  the key to move — a save-format break for another reason, say — the label
+  is already in the right place to survive it.
+
+  The two hand-written strings that named the kind rather than asking for it
+  moved by hand: the market's warehouse line reads "Warehouse: 3 shelving
+  unit(s)" and "build shelving for more". "Unit" rather than the kind's own
+  name, because "3 Stock Shelvings" is not English — the label names the
+  thing, the sentence counts it.
+
+  **What is deliberately still called a rack.** Every identifier
+  (`warehouse_rack`, `WAREHOUSE_RACK_KIND`, `RACK_BAY_X`, `_rack_nodes`) and
+  every line of design prose. The model draws selective pallet racking and
+  that is what the generator should call it; the *kind* is called Stock
+  Shelving, and `data/machines.ron` is where the two are tied together. A
+  reader who greps either word finds the same object.
+
+- 2026-09-21: **Nothing on a storage model is painted the colour of a
+  thing the game stores, and its structure wears one paint.** (The owner's
+  call, asked directly: remove any red from the warehouse rack model; then,
+  after a green cut was rendered, make the beams the same blue as the rest
+  of it.)
+
+  **What was wrong with the red.** The rack's load beams were `paint_red`
+  #82372F against `paint_blue` uprights — the two-tone real racking is sold
+  in, chosen in the W2 record below for exactly that reason. What that
+  record did not weigh is that this kind's whole job is to show **tinted
+  stock**: `main.gd` tints each bay's goods per ingredient, and the
+  ingredient a player holds most of is tomatoes, `#C22B21`. So the one model
+  whose readout is colour had its structure painted in the same family as
+  the most common thing it reads out. In the `--warehouse` render the beams
+  and the top-level tomato loads are the same warm red at a glance.
+
+  **Why the answer is the uprights' own blue and not another hue.** A
+  second structural colour was worth having when the beams were the only
+  thing distinguishing a run of racking from three frames standing near each
+  other. It is not worth having against the tinted goods: every painted hue
+  on the frame is one more thing competing with the only colour on this kind
+  that carries information. `paint_blue` #2E5772 spends none — the frame is
+  one paint, the goods are the only saturated thing a rack shows (UI_UX §7),
+  and the blue is already the machine-skirt colour, so a rack stays factory
+  equipment rather than a second visual family.
+
+  **What replaces the hue: the light.** A beam still reads as a beam
+  because its lit top face and the upright's vertical faces are different
+  planes under the fixed isometric key. Measured over the beam pixels of the
+  `--warehouse` render, the beams' top faces come back at 134.7 where the
+  unchanged blue structure beside them sits at 55.7 — a separation of about
+  79 luma, which is why the beams do not dissolve into the frame. This is
+  the thing to re-render before anyone "restores" a contrasting beam colour:
+  the separation is real, it is just made of shading rather than paint.
+
+  **The swap is value-neutral, deliberately.** Over that same mask the blue
+  beams measure mean 76.4 where the red ones measured 74.7 (flat colour
+  luma 77.8 against 76.5). Every relationship the rack was tuned by is a
+  relationship in value — the goods above the beams, `RACK_TINT_DEAD_BAND`
+  and the six shipped tints measured against it — so a swap that moves hue
+  and not value costs no re-measuring. The green cut this passed through,
+  #3A6B33, measured **+11.6 luma** over the same mask and was rejected on
+  that number rather than by eye; #32602F was the value-matched green that
+  replaced it, and the owner's second call retired both.
+
+  **The rule, past this asset:** on anything that displays stock, structure
+  is painted in a hue no product uses — and preferably in a hue the model
+  already wears, since structure can separate from structure by value alone.
+  When an existing colour is replaced on an asset whose readings were
+  measured, match its luma and move only hue, or the measurements have to be
+  redone.
+
 - 2026-09-21: **A session opens in FIRST PERSON; isometric is a TAB away.**
   (Owner's call, asked for directly.)
 
@@ -204,7 +308,7 @@ matches what code comments and data files cite.
   about twelve voxels below and behind it. Deleting it kept every load
   visible and destroyed the silhouette: the owner's verdict was "more like a
   bike rack than a warehouse rack". The occlusion was real and the remedy was
-  wrong. The shipped rack runs solid `paint_red` beams the full 64 voxels at
+  wrong. The shipped rack runs solid painted beams the full 64 voxels at
   both post planes and buys the loads their visibility with **clearance**
   instead — a fifteen-voxel level pitch, the load's top standing well under
   the beam above it. Rule: when this camera eats a feature, move the feature

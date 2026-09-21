@@ -4867,18 +4867,32 @@ pub fn hopper_fill(p: &Palette) -> VoxModel {
 //
 // **Material** (§2b point 8, structure is painted, food contact is
 // stainless): a rack touches nothing, so it is almost all paint. The
-// uprights are `paint_blue`, the same as the machine skirts, because a rack
-// is factory equipment and not a second visual family; the load beams are
-// `paint_red` against them, which is the two-tone every real racking system
-// is sold in and the cheapest way to make the beams read as beams rather
-// than as more frame. Decking is steel because that is what a deck is. The
-// column guards are hazard striped — a real rack in a plant where powered
-// pallet trucks drive has exactly those.
+// uprights AND the load beams are both `paint_blue`, the same as the machine
+// skirts, because a rack is factory equipment and not a second visual
+// family. Decking is steel because that is what a deck is. The column guards
+// are hazard striped — a real rack in a plant where powered pallet trucks
+// drive has exactly those.
 //
-// **Colour is still spent on the stock.** `paint_red` #82372F is a dark
-// brick, four stops below `tomato_red`, so the beams sit under the goods in
-// value and the four tinted loads stay the only saturated thing a rack
-// shows (UI_UX.md §7).
+// **The beams were `paint_red` #82372F until the project owner's
+// 2026-09-21 call to take red off this model**, and the render says why it
+// was worth taking: the warehouse row's loads are tinted stock, the stock a
+// player holds most of is tomatoes, and a red beam under a red load put the
+// model's one readout and its structure in the same colour family.
+//
+// **The beams are not a second colour at all now** — the owner's follow-up
+// call the same day, after a green cut was rendered: one paint for the whole
+// structure. A two-tone rack is what real racking is sold in, so the case
+// for it was never invented, but the case AGAINST spending a hue here is the
+// stronger one on this kind: a rack's entire readout is the tinted stock in
+// its bays (UI_UX.md §7), and every painted colour on the frame is one more
+// thing competing with it. What used to be carried by hue is carried by
+// shading instead, and the isometric key light is what makes that work: a
+// beam's lit top face and the upright's two vertical faces are different
+// planes, so the same paint comes back at different values. Measured on the
+// warehouse row, a beam's top edge reads NN.N against the upright beside it
+// at NN.N — MEASURED, see palette.ron. Do not "restore" a contrasting beam
+// colour without rendering it beside this: the reason this holds is the
+// light, not the paint.
 
 /// The rack's upright frames: THREE of them along the model's long (Y)
 /// axis, each a pair of posts spanning the depth, with a bay in each of the
@@ -5074,14 +5088,17 @@ pub fn warehouse_rack(p: &Palette) -> VoxModel {
     // rather than three things standing near each other.
     for &(x0, x1) in &RACK_POST_X {
         for &span in &RACK_BEAM_Z {
-            // Solid `paint_red` all the way through, INCLUDING the top face.
-            // The first cut capped each beam with a bright `steel_light` slice
-            // to carry the line down the rack, and that slice is square to the
-            // light: it rendered as two white bars running the full 64 and
-            // became the loudest thing in the frame, with the beams reading as
-            // steel and the red invisible beneath them. The beam's own lit top
-            // face is already the line; it does not need help.
-            m.cuboid((x0, x1), (0, last_y), span, p.idx("paint_red"));
+            // Solid `paint_blue` all the way through, INCLUDING the top
+            // face — and no lighter cap even though the beam is now the
+            // upright's own colour and a cap is the obvious way to separate
+            // them. The first cut capped each beam with a bright `steel_light`
+            // slice to carry the line down the rack, and that slice is square
+            // to the light: it rendered as two white bars running the full 64
+            // and became the loudest thing in the frame, with the beams
+            // reading as steel and the paint invisible beneath them. The
+            // beam's own lit top face is already the line; it does not need
+            // help.
+            m.cuboid((x0, x1), (0, last_y), span, p.idx("paint_blue"));
         }
     }
 

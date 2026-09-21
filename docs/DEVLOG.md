@@ -205,6 +205,41 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — The warehouse rack loses its red, and the game calls it Stock Shelving
+
+Two owner asks on one kind. **The red first.** The rack's load beams were
+`paint_red`, picked in the W2 pass because blue-and-red is what real racking
+is sold in. What that choice missed is that this kind's entire readout is
+colour: its bays hold stock tinted per ingredient, and the stock a factory
+holds most of is tomatoes — so the structure was painted the same family as
+the thing it was framing. The beams went green first — a value-matched
+#32602F, since every reading the rack was tuned by (the goods against their
+backdrop, the tint dead band) is a reading in value, and a brighter #3A6B33
+cut measured +11.6 luma and was rejected for it. Then, on the owner's second
+call, they went `paint_blue`: the uprights' own colour, so the frame is one
+paint and no hue at all is spent on structure, leaving the tinted goods as
+the only saturated thing the kind shows. The beams still read as beams —
+under the fixed isometric key their lit top faces render at 134.7 against the
+upright faces beside them at 55.7, shading doing what the second paint did.
+Value held across both swaps: the beam pixels measure 76.4 where the red ones
+measured 74.7. `assets/voxels/icons/warehouse_rack.png`
+was re-rendered with it: that icon is committed art the build menu and hotbar
+load at runtime, so a model recolour that skips `voxgen --bin voxicons` leaves
+the old colour sitting in the UI.
+
+**Then the name.** "Warehouse Rack" was never written down anywhere: the
+build menu, the hotbar and the hover panel all title-case the kind id, and
+the id is `warehouse_rack`. Renaming the id would have meant a save-format
+break (ids are save keys and this format rejects rather than migrates) plus
+`shop.ron`, `storage.ron`, the voxel asset and some 440 lines of measured
+design prose, to change one string in three panels. So `MachineKind` gained
+the optional `display_name` that `Recipe` and `IngredientKind` have carried
+since issue #60, `World::display_names` now gathers all three files, and
+`data/machines.ron` says `display_name: "Stock Shelving"`. The id stayed put.
+The rule that came out of it is in DECISIONS_LOG: **an id is a key, a label
+is content** — and it is now the documented way to rename anything the player
+reads.
+
 ### 2026-09-21 — The spice mix is a sack, and a machine shows the sauce it is really making
 
 Two asks in one branch. The first is art: `item_spice_mix` was a tin, which

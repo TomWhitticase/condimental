@@ -8,10 +8,17 @@
 //! optional `display_name` on a recipe or an ingredient entry, gathered by
 //! [`World::display_names`] into the one map the wire carries.
 //!
-//! What is under test here is the *map*, not either loader — the loaders
-//! have their own unit tests. This is the join: both files feed one id
-//! space, the map is what Godot reads, and an id that is absent from it is
-//! the signal to title-case rather than a hole.
+//! What is under test here is the *map*, not any loader — the loaders have
+//! their own unit tests. This is the join: three files feed it, the map is
+//! what Godot reads, and an id that is absent from it is the signal to
+//! title-case rather than a hole.
+//!
+//! **`data/machines.ron` is the third file**, added by the project owner's
+//! 2026-09-21 call to call `warehouse_rack` "Stock Shelving". That is the
+//! other reason a name lives in content: not an acronym the formatter
+//! cannot spell, but a kind whose id is a key — written into every save,
+//! and looked up by `shop.ron`, `storage.ron` and the voxel asset table —
+//! and therefore not something to rename because a label changed.
 
 use std::collections::BTreeMap;
 
@@ -71,9 +78,36 @@ fn an_id_that_title_cases_correctly_is_absent_rather_than_repeated() {
     }
     assert_eq!(
         names.len(),
-        4,
-        "only the four BBQ ids need naming today: {names:?}"
+        5,
+        "only the four BBQ ids and the one renamed machine kind need naming today: {names:?}"
     );
+}
+
+/// The machine half of the map, and the case it was added for: the kind id
+/// stays `warehouse_rack` because it is a key, and every label a player
+/// reads comes from here instead. `main.gd`'s `_kind_display_name` asks
+/// this map before it title-cases, so the build menu, the hotbar tooltip
+/// and the hover panel all say "Stock Shelving" from this one entry.
+#[test]
+fn a_machine_kind_may_be_called_something_other_than_its_id() {
+    let names = names();
+    assert_eq!(
+        names.get("warehouse_rack").map(String::as_str),
+        Some("Stock Shelving")
+    );
+    for id in [
+        "crusher",
+        "mixer",
+        "cooking_vat",
+        "bottler",
+        "packer",
+        "dock",
+    ] {
+        assert!(
+            !names.contains_key(id),
+            "'{id}' title-cases to what the game calls it, so it stays out of the map"
+        );
+    }
 }
 
 /// Both halves of the id space are in one map. No shipped raw names itself,

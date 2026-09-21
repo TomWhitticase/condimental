@@ -1090,6 +1090,23 @@ Three consequences worth knowing before changing it:
   highlights, selection.
 - **Never encode critical state in colour alone**: pair every status colour
   with a glyph, word, shape or position.
+- **A model that displays stock is never painted the colour of stock** (the
+  stock shelving, 2026-09-21). Its bays are tinted per ingredient, so the
+  structure around them has to stay out of that colour space: the load beams
+  were `paint_red` #82372F, the family the commonest stock — tomatoes — is
+  already in. They are `paint_blue` now, the one paint the rest of that
+  structure already wears, which spends no hue on the frame at all and
+  leaves the tinted goods as the only saturated thing the kind shows.
+  **Structure may separate from structure by value alone**: the beams and
+  the uprights are one colour, and a beam still reads as a beam because its
+  lit top face renders at 134.7 where the upright's vertical faces beside it
+  are 55.7 — the isometric key light does the work a second paint was doing.
+  **And when a colour on a measured asset is replaced, keep its luma and
+  move only hue**: everything such an asset was tuned by (goods against
+  backdrop, `RACK_TINT_DEAD_BAND`) is a relationship in value, so a
+  value-neutral swap costs no re-measuring. The shipped beams measure 76.4
+  where the red ones measured 74.7. A brighter green cut (#3A6B33, +11.6)
+  was rejected on exactly that.
 - **A world-space warning is a rhythm, not a lamp** (the dock-capacity
   change, 2026-09-16). A full delivery dock has to say so on the floor, not
   only on the clipboard, and it cannot say it by turning red: machine

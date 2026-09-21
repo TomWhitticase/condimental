@@ -18,6 +18,35 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-21 **A content id is a KEY; what a player reads is a `display_name`
+  in the same file.** Renaming a thing in front of the player never renames
+  its id. A machine kind id is written into every save file and looked up by
+  `data/shop.ron`, `data/storage.ron`, `main.gd`'s asset tables and the voxel
+  generator, so moving it costs a `SAVE_SCHEMA_VERSION` bump — every existing
+  save rejected, `sim::save`'s version rule being reject-never-migrate — to
+  change a string no player can see the inside of. `MachineKind` therefore
+  carries an optional `display_name`, exactly as `Recipe` and
+  `IngredientKind` already did, and `World::display_names` gathers all three
+  into the one map `_kind_display_name` asks before it title-cases an id. The
+  shipped case: `warehouse_rack` is called **"Stock Shelving"**. Absence from
+  that map stays the normal case and means "the title-case fallback is
+  right". Full record in `docs/DECISIONS.md`.
+- 2026-09-21 **Nothing on a storage model is painted the colour of a thing
+  the game stores, and its structure wears ONE paint.** The stock shelving's
+  load beams were `paint_red` #82372F, the two-tone real racking is sold in,
+  and its bays hold tinted stock the player is meant to read at a glance —
+  most often tomatoes. A structure sharing a colour family with the goods it
+  frames fights the one readout the model exists for. The beams are
+  `paint_blue` #2E5772 now — the uprights' own colour, so the whole frame is
+  one paint and no hue at all is spent on structure. **A beam still reads as
+  a beam by value, not by colour**: its lit top face renders at 134.7 where
+  the upright's vertical faces beside it are 55.7, which is the isometric key
+  light doing what a second paint used to. The swap is also **value-neutral**
+  — the beam pixels measure 76.4 in the rendered warehouse row where the red
+  ones measured 74.7 — because every relationship the rack was tuned by
+  (goods against backdrop, `RACK_TINT_DEAD_BAND`) is a relationship in value.
+  A green cut (#3A6B33) measured eleven luma up and was rejected for that
+  alone. Full record in `docs/DECISIONS.md`.
 - 2026-09-21 **A session opens in FIRST PERSON; isometric is a TAB away.**
   `main.gd`'s `DEFAULT_VIEW_MODE` is the one place that says so, applied by
   `_ready` through `_set_view_mode` *after* `_build_ui` (the crosshair and

@@ -7359,9 +7359,9 @@ func _update_ingredient_market() -> void:
 ## arithmetic the wire exists to carry (CLAUDE.md: never recompute a number
 ## the wire already carries).
 ##
-## A factory with no rack still gets the line: "no racks" is the answer to
-## "why will this crate not buy", and a panel that only mentions the warehouse
-## once one exists cannot teach that racks are the cure.
+## A factory with no shelving still gets the line: "no shelving" is the answer
+## to "why will this crate not buy", and a panel that only mentions the
+## warehouse once one exists cannot teach that shelving is the cure.
 func _update_market_storage() -> void:
 	if _market_storage_label == null or _market_bays_meter == null:
 		return
@@ -7382,12 +7382,16 @@ func _update_market_storage() -> void:
 	var racks: int = (_storage_state.get("racks", []) as Array).size()
 	if total <= 0:
 		_market_storage_label.text = (
-			"Warehouse: no racks  ·  %d of each ingredient  ·  build a rack for more" % base_cap
+			"Warehouse: no shelving  ·  %d of each ingredient  ·  build shelving for more"
+			% base_cap
 		)
 		_market_bays_meter.visible = false
 		return
 	_market_bays_meter.visible = true
-	_market_storage_label.text = "Warehouse: %d rack%s  ·  bays %d / %d  ·  %d free" % [
+	# "shelving unit", not the kind's own display name: the line already says
+	# Warehouse, and "3 Stock Shelvings" is not English. What the player
+	# counts is units of shelving; the bays beside it are what each supplies.
+	_market_storage_label.text = "Warehouse: %d shelving unit%s  ·  bays %d / %d  ·  %d free" % [
 		racks, "" if racks == 1 else "s", used, total, maxi(0, total - used)
 	]
 	_set_meter(
