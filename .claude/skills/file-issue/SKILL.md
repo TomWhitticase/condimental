@@ -1,21 +1,51 @@
 ---
 name: file-issue
-description: File a GitHub issue for something noticed but deliberately not fixed, using gh. Use when you spot a bug, a contradiction between code and a design doc, a stale number, a missing test or a performance problem, and decide it is out of scope for the work in hand — the deferral is not finished until the issue exists.
+description: Decide whether a finding you are not fixing deserves a GitHub issue, and file it with gh if it does. Use when you have spotted a real defect — a bug, a contradiction with a design doc, a performance problem — that the branch in hand genuinely cannot fix, because it needs an owner's call, breaks the save format, or is too large. Most findings should be fixed in place instead; this skill's first section is the gate that decides which.
 ---
 
 # Filing an issue for what you are not fixing
 
-**Deciding something is out of scope is only half the decision; the other half
-is filing it.** A finding that lives only in a session's closing message is
-lost — no other agent shares this session's memory, and the next one to touch
-that file starts cold. The bar is low on purpose: **if it was worth putting in
-a report, it is worth an issue.**
+A finding that lives only in a session's closing message is lost — no other
+agent shares this session's memory, and the next one to touch that file starts
+cold. That is what issues are for. But the backlog is a queue a human has to
+read and rank, and **an issue nobody will ever choose to work on costs more
+than it records**. The bar is not low.
 
-This is not a substitute for the decision record. An issue is *work not yet
-done*; a rule that is now true goes through the `record-decision` skill, and a
-milestone goes in `docs/DEVLOG.md`.
+## First: should this be an issue at all?
 
-## First: is it already filed?
+Three gates, in order. Any "no" and you do not file.
+
+**1. Can you just fix it?** If the fix is a line or two in a file this branch
+already touches — a stale comment, a wrong constant, a typo, a misleading log
+line — fix it and mention it in the PR body. Same for a small, safe fix in the
+area you are already working in, as long as the PR's title still describes the
+PR. Filing is for what you *cannot* do now: it needs a call only the owner can
+make, it breaks the save format, it contradicts a design doc, it is real work,
+or it is in a part of the tree this branch has no business touching.
+
+**2. Would anyone pick it off the board ahead of the next feature?** Be
+honest. These fail the test and do not get filed:
+
+- polish with no defect behind it ("it could look nicer at 4K"),
+- speculative hardening — "add a test for X" where X has never broken,
+- systems CLAUDE.md lists as deliberately not built yet; their absence is a
+  plan, not a bug,
+- a limit a design doc already records,
+- anything you cannot state as something concrete going wrong for a player or
+  an agent.
+
+**3. Is it already filed?** A second sighting is a comment on the open issue,
+never a new one.
+
+**Budget: about one issue per pull request.** Wanting to file five means
+either one underlying problem worth a single issue, or nits. File the one that
+matters; the rest go in the PR body, where review can promote them.
+
+This is also not the decision record. An issue is *work not yet done*; a rule
+that is now true goes through the `record-decision` skill, and a milestone
+goes in `docs/DEVLOG.md`.
+
+## Check the backlog first
 
 ```
 gh issue list --state open --search "<a distinctive word from the finding>"

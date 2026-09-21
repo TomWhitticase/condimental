@@ -81,9 +81,11 @@ under `## Screenshots`, the DEVLOG/decision calls, and `Closes #N` for every
 issue it settles. The image does not replace the words: what the screenshot
 showed still goes in "How it was verified".
 
-**File issues for anything you noticed and are not fixing** (the `file-issue`
-skill) and list them in the PR body, so the deferral is reviewable rather than
-buried in a session transcript.
+**Say in the PR body what you noticed and did not fix**, so the deferral is
+reviewable rather than buried in a session transcript. A note in the body is
+usually the right home for it; the `file-issue` skill decides the few that
+also earn a backlog entry, and it starts by asking whether you should have
+just fixed it instead.
 
 ## 5. Watch it land
 

@@ -37,9 +37,13 @@ empty, and the player buys and places every tile.
   `scripts/pr-screenshot.sh`, paste its markdown. A hook and CI both refuse a
   PR without an image; a change with no visual surface shows the state it
   affects.
-- **Anything you notice and decide not to fix becomes a GitHub issue**
-  (`gh issue create --label deferred`). A finding reported only in a final
-  message is lost — the next session starts cold.
+- **Fix what you notice; file an issue only for what you genuinely cannot
+  fix now.** A stale comment, a wrong number, a typo in a file you already
+  have open is a fix in the branch at hand, not a backlog entry. An issue is
+  for a real defect that needs a design call, a save-format break, or work too
+  large for the branch — roughly one per PR. The backlog is a queue a human
+  has to prioritise, so an issue nobody would ever pick costs more than it
+  records; see WORKFLOW.md for the test to apply.
 
 ## Layout
 

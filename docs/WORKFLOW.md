@@ -153,12 +153,14 @@ not re-litigate a logged decision without a good reason.
 ## GitHub: branches, pull requests and issues
 
 **The repository on GitHub is the record of the work, not just a backup of
-it.** Every change arrives on `main` through a pull request, and everything
-noticed and not fixed becomes an issue. Both rules exist for the same reason:
-this project is built mostly by agents in separate worktrees over sessions
-that do not share memory, so a finding that lives only in a session's final
-message is lost, and a change that lands by a local merge has no reviewable
-artifact and no CI run behind it.
+it.** Every change arrives on `main` through a pull request, and a finding
+worth someone's time that this branch will not fix becomes an issue. Both
+rules exist for the same reason: this project is built mostly by agents in
+separate worktrees over sessions that do not share memory, so a finding that
+lives only in a session's final message is lost, and a change that lands by a
+local merge has no reviewable artifact and no CI run behind it. The issue
+half of that has a cost the PR half does not — see *Fix it, or file it*
+below, and prefer the fix.
 
 `gh` is the interface — it is authenticated in this environment and needs no
 token handling. If `gh auth status` fails, stop and say so rather than falling
@@ -248,15 +250,50 @@ work unreviewed is fine for routine changes the owner has not asked to see;
 it is not fine for anything the design docs call a deviation, a `gdext` bump,
 a save-format change, or anything the owner flagged.
 
-### File an issue for anything you are not fixing
+### Fix it, or file it — and prefer fixing it
 
-**If you notice something wrong and decide it is out of scope, that decision
-is only complete when the issue exists.** The bar is low and deliberately so:
-if it was worth mentioning in a report, it is worth an issue. A finding
-reported only in a final message dies with the session — the `resolve_sink`
-inlet-rule contradiction (`docs/DEVLOG.md`, the pipes & conveyors close-out)
-sat in a DEVLOG paragraph for a week precisely because there was nowhere else
-to put it.
+**Filing is the fallback, not the reflex.** A finding that only ever lived in
+a session's final message dies with the session, which is why the
+`resolve_sink` inlet-rule contradiction (`docs/DEVLOG.md`, the pipes &
+conveyors close-out) sat in a DEVLOG paragraph for a week. But the opposite
+failure is the one this project actually has: a backlog of small, true,
+unprioritised findings that a human has to read and rank, and that nobody ever
+picks up. **An issue nobody will ever choose to work on costs more than it
+records.**
+
+So the first question is not "is this worth an issue" but "why am I not
+fixing it right now":
+
+- **A one-line correction in a file you already have open is a fix**, not a
+  backlog entry — a stale comment, a wrong constant in a doc header, a typo,
+  a misleading log line. Make it in the branch at hand and mention it in the
+  PR body. Two of the longest-lived issues in this repo were "a comment says
+  thirty scripts, there are 38" and "a comment says 60 Hz, the tick is 30 Hz";
+  both were cheaper to fix than to file.
+- **A small, safe fix in the area you are already working in is a fix too**,
+  even if it was not in the brief, as long as it does not enlarge the PR's
+  story past what its title claims.
+- **File it when fixing it now would be wrong**: it needs a call only the
+  owner can make, it breaks the save format, it contradicts a design doc, it
+  is genuinely more work than the branch at hand, or it is in a part of the
+  codebase this branch has no business touching.
+
+Then apply the test: **would a reasonable person pick this off the board
+ahead of the next feature?** If the honest answer is no, it is not an issue.
+Things that fail the test and should not be filed:
+
+- polish ideas with no defect behind them ("it could look nicer at 4K"),
+- speculative hardening — "add a test for X" where X has never broken,
+- observations about systems deliberately not built yet (CLAUDE.md lists
+  them; their absence is a plan, not a bug),
+- restatements of a limit a design doc already records,
+- anything you cannot say concretely goes wrong for a player or an agent.
+
+**Budget: roughly one issue per pull request.** That is a smell test, not a
+quota — a session that wants to file five has usually either found one
+underlying problem worth a single issue, or is filing nits. If several real
+deferrals genuinely come out of one branch, file the one that matters and put
+the rest in the PR body, where review can promote them.
 
 ```
 gh issue create --title "<imperative summary>" \
@@ -267,12 +304,13 @@ EOF
 ```
 
 `.github/ISSUE_TEMPLATE/deferred-finding.md` is the body's shape, and the
-`file-issue` skill is the full procedure. What makes an issue useful here is
+`file-issue` skill is the full procedure. Search first (`gh issue list
+--search`) — a second sighting belongs as a comment on the open issue, not as
+a second issue. What makes an issue useful here is
 that the next agent starts cold: name the **file and function**, say how it
 was **found** (which test, which screenshot flag, which run), say what the
-**fix probably is** if you know, and say **why it was deferred** — out of
-scope, or a call the owner has to make. Search first (`gh issue list --search`)
-so the same finding is not filed twice.
+**fix probably is** if you know, and say **why it was deferred** — which of
+the reasons above applies, in a sentence that survives being read cold.
 
 Labels, kept deliberately few:
 
