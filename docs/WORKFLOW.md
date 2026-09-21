@@ -346,6 +346,27 @@ tracker. A decision still goes in the three places under *Recording a decision*
 above, a milestone still goes in `docs/DEVLOG.md`, and a design plan is still a doc in `docs/`. An
 issue is the right home only for work that is not being done yet.
 
+### Closing out a session
+
+A session ends when its worktree could be deleted without losing anything —
+not when the last edit is made. Every branch has reached `main` through a
+merged pull request, nothing is uncommitted, unpushed or left in the shared
+stash, and no pull request this session opened is still open.
+
+The `wrap-it-up` skill is the procedure, including the sweep that proves it
+and the banner that reports it. Two rules it exists to enforce:
+
+- **Being near the end of a session is not a reason to file an issue.** The
+  gate above is unchanged at the close: finish it, drop it deliberately, or —
+  rarely — file it because finishing it now would be wrong.
+- **A branch left behind in a worktree about to be removed is deleted work.**
+  If it genuinely cannot land, say so plainly and leave the worktree in place;
+  do not report a clean close over the top of it.
+- **A PR of your own waiting on its review verdict is the one legitimate way
+  to end with a PR open.** You cannot review what you wrote, so pushing it and
+  naming what it waits on is finishing your half; merging it to tidy up is
+  not.
+
 ## Orchestration (Orca)
 
 Use Orca's orchestration layer (`orca orchestration …`) for milestone-sized

@@ -221,6 +221,27 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-25 — A session now has a defined ending
+
+`wrap-it-up` joins the skills. Sessions were ending on "that looks
+done", which is not the same question as "can this worktree be deleted
+without losing anything" — the one that actually matters, since an Orca
+worktree is removed as a matter of course and takes any un-landed branch
+with it. The skill is the sweep that answers it: take stock out loud,
+finish or deliberately drop each item, land every branch through a
+merged PR, prove `git status`, unpushed commits, the shared stash and
+open PRs are all empty, and then report with an all-caps green banner —
+or a red one naming exactly what is unfinished and where it lives.
+`docs/WORKFLOW.md` gains a "Closing out a session" section stating the
+two rules the skill enforces: the end of a session is not a reason to
+file an issue, and a branch left in a worktree about to be removed is
+deleted work. It defers to the `review` skill that landed on the 21st:
+since nobody can review what they wrote, a session's own PR waiting on
+its verdict is the one legitimate way to end with a PR still open —
+which is also why the skill separates "is the work finished" from "would
+deleting the tree lose anything". They are different questions and a
+wrap-up answers both.
+
 ### 2026-09-25 — A machine hover gives up lines before it covers the HUD (issue #99)
 
 At 1280x720 with the controls legend open, a machine hover always sat on
