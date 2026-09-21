@@ -71,8 +71,15 @@ Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
   (hotbar reserved height, legend, clipboard), not just viewport edges, and
   every candidate is judged *after* the clamp (`_panel_position_near`,
   `_pushed_clear_of` — UI_UX §2b point 33). The right-hand column is **one
-  list** — `_contract_panel_rect`, `_stock_rect`, `_crew_rect` — never a
+  list** — `_hud_avoid_rects`, one list for both placement rules — never a
   branch per plate, and a panel flipped aside lands its edge *on* the bound.
+- **A panel pointing at the world is followed in isometric and PARKED in
+  first person** (`_world_panel_position`, the one door the hover tooltip and
+  the placement prompt both use). First person has no cursor: the query point
+  is the crosshair and the subject is behind it, so following the anchor puts
+  the panel on the thing it describes. `_first_person_panel_position` takes
+  the lower-left corner instead and refuses any position containing the
+  crosshair, however little HUD it covers (UI_UX §2b point 33, issue #105).
 - **No modal is ever wider than the window, and no control is drawn where
   it cannot be clicked** (UI_UX §5c). Width yields in this order: prose to
   the row's hover (`_fit_staff_width`), then fewer grid columns

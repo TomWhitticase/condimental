@@ -18,6 +18,21 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-21 **A panel that points at the world is FOLLOWED in isometric and
+  PARKED in first person.** (Issue #105.) In first person there is no cursor:
+  the query point is the crosshair at the centre of the screen and the subject
+  is the thing behind it, so `_panel_position_near`'s flip stands the panel on
+  what it describes — at 1280x720 all four quadrants fail, the clamp comes back
+  through the middle, and the dock the player walked up to is entirely behind
+  its own tooltip. The first-person rule is the lower-left corner, above the
+  hotbar: the one region no fixed plate claims, the one the crosshair never
+  enters, and fixed rather than followed so the panel also stops sliding about
+  on every mouse-look. A position standing on the crosshair is refused however
+  little HUD it covers — covering a keybind reference the player can fold with
+  F1 beats covering the machine they walked over to look at. Both panels with a
+  world anchor (the hover tooltip, the build placement prompt) go through one
+  door, `_world_panel_position`, so neither can be fixed and the other left.
+
 - 2026-09-21 **A gated ingredient is padlocked in the contents picker, not
   hidden from it — and pointing a vessel at one is REFUSED.** The market
   omits a locked row; the picker keeps it, dimmed, with a 🔒 and a line

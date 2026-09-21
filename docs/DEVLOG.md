@@ -189,6 +189,36 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — In first person the hover panel is parked, not followed (issue #105)
+
+A panel that follows the cursor is the right idea right up until there is no
+cursor. In first person the mouse is captured, the query point is the
+crosshair at the centre of the screen, and the thing being described is
+directly behind it — so `_panel_position_near`'s flip, which exists to keep a
+panel off the tile it names, had nothing to flip away from. At 1600x900 it
+found room to the right and looked fine. At 1280x720 the legend and the
+right-hand column leave no quadrant that fits, the fallback clamps the panel
+back on screen, and it lands on the crosshair: PR #78's own published evidence
+frame shows a dock, the belt feeding it and the crosshair all behind the panel
+describing them, and nobody read the frame that way at the time.
+
+The fix is a different rule rather than a tuned one. First person parks the
+panel in the lower-left corner, above the hotbar — the one region no fixed
+plate claims and the crosshair never enters — and steps it clear of whatever
+plate that corner still touches by the scoring the cursor rule already falls
+back to. A candidate that contains the crosshair is dropped before it is
+scored: covering the legend, which F1 folds away, beats covering the machine
+the player walked over to look at. Being parked rather than followed also
+stops the panel sliding about the frame on every mouse-look, which is the
+other half of why following was wrong here.
+
+The placement prompt anchors on the crosshair in first person as well and had
+the same fault with nobody reporting it, so both panels now go through one
+door (`_world_panel_position`) and the plates they dodge are one list
+(`_hud_avoid_rects`). `test_hud_plates.gd` drives the rule with sizes of its
+own — a headless font metric cannot prove a width, so what the test pins is
+the rule given a size, and the 1280x720 render is the acceptance.
+
 ### 2026-09-21 — A locked ingredient is padlocked in the picker, and refused (issue #90)
 
 `data/unlocks.ron` holds the three BBQ raws back until ten deliveries, and

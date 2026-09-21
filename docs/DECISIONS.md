@@ -25,6 +25,55 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-21: **A panel that points at the world is FOLLOWED in isometric and
+  PARKED in first person.** (Issue #105.)
+
+  **The fault.** `_update_hover_tooltip` asks about a screen point — the live
+  cursor in isometric, the crosshair at the centre of the screen in first
+  person, where the mouse is captured and has no meaningful position — and
+  handed that point to `_panel_position_near` in both. That function's job is
+  to keep a panel off the tile it describes by flipping it into whichever
+  quadrant around the *cursor* has room, which is exactly right when the
+  subject is under the pointer. In first person the subject is behind the
+  crosshair and the crosshair is the middle of the frame. At 1600x900 the flip
+  happened to find room to the right and the fault never showed; at 1280x720
+  the legend and the right-hand column take enough of the frame that all four
+  quadrants fail, the fallback clamps the panel back on screen, and it lands
+  squarely on the crosshair. PR #78 published the frame as its own evidence
+  without anyone reading it that way: the dock, the belt feeding it and the
+  crosshair are all behind the panel describing them.
+
+  **Why not offset the query point.** Moving the anchor off the subject and
+  clamping is the obvious repair and it does not work: the clamp is the thing
+  that puts the panel back over the middle, and an anchor moved off the
+  crosshair describes a tile the player is not looking at. Nor is "below the
+  crosshair" available — at 1280x720 the strip between the crosshair and the
+  hotbar's reserved height is about 230px and a machine hover is 283 tall.
+
+  **The rule.** First person parks the panel in the lower-left corner rather
+  than following anything. That corner is the one region of the frame no fixed
+  plate claims (the legend is top-left, the clipboard/STOCK/CREW are the
+  right-hand column, the hotbar has its own strip) and the one the crosshair
+  never enters at any resolution a panel narrower than half the frame is drawn
+  at. Being fixed is a second gain: a followed panel slides across the screen
+  on every mouse-look, which a parked one does not.
+
+  **The crosshair is a veto, not a score.** The corner is then stepped clear
+  of whatever plate it still touches — at 1280x720 the legend reaches far
+  enough down to clip a tall tooltip's top — by the same least-HUD-covered
+  scoring `_panel_position_near` falls back to, ties keeping the corner. But a
+  candidate containing the crosshair is dropped before it is scored at all.
+  Covering the legend, which the player can fold away with F1, is always
+  better than covering the machine they walked across the hall to look at, and
+  a preference that strong is stated rather than left to an area sum.
+
+  **One door for both panels.** The placement prompt anchors on the crosshair
+  in first person too and had the same fault, unreported. Both now go through
+  `_world_panel_position`, which picks the rule from the view mode, so the two
+  cannot be fixed one at a time. The plates they avoid are one list too
+  (`_hud_avoid_rects`), for the reason issue #88 already wrote down: a branch
+  per plate is how CREW came to be missing from one of them for four days.
+
 - 2026-09-21: **A gated ingredient is padlocked in the contents picker, not
   hidden from it — and pointing a vessel at one is REFUSED.** (Issue #90.)
 
