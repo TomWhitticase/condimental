@@ -577,6 +577,27 @@ func _initialize() -> void:
 	_no_hud = args.has("--no-hud")
 	_contents = int(_string_arg(args, "--contents")) if _string_arg(args, "--contents") != "" else -1
 	_contents_refill = args.has("--contents-refill")
+	# A flag the harness accepts but cannot honour must stop the run, not
+	# decorate the log (issue #123, same class as #110 and #114). --contents
+	# needs a panel to press the slot in, and --contents-refill needs a slot
+	# to have been pressed; without those the flag is silently dropped and
+	# the run still reports SCREENSHOT_OK on a frame nobody asked for.
+	if _contents >= 0 and not _config:
+		printerr(
+			"SCREENSHOT_FAIL: --contents %d needs --config TX,TY — there is no "
+			% _contents
+			+ "configuration panel open for it to press a picker slot in."
+		)
+		_refuse()
+		return
+	if _contents_refill and _contents < 0:
+		printerr(
+			"SCREENSHOT_FAIL: --contents-refill needs --config TX,TY and "
+			+ "--contents N — it refills the fluid a picker slot just declared, "
+			+ "so with no slot pressed there is nothing for it to refill."
+		)
+		_refuse()
+		return
 	_contracts = args.has("--contracts")
 	if _contracts:
 		_pick_fixture("chain", "--contracts")
@@ -1395,7 +1416,15 @@ func _open_shop_menu() -> void:
 func _open_config_at(tile: Vector2i) -> void:
 	_main._config_click_at_tile(tile)
 	if not _main._config_open:
-		printerr("SCREENSHOT: no hopper or tank at %s to configure" % str(tile))
+		# Same rule as the --contents guards above (issue #123): --config
+		# aimed at a tile with nothing configurable on it used to print this
+		# and still ship a SCREENSHOT_OK frame with no panel in it.
+		printerr(
+			"SCREENSHOT_FAIL: --config %s has no hopper or tank on it to "
+			% str(tile)
+			+ "configure, so no panel opened."
+		)
+		_refuse()
 		return
 	if _contents >= 0:
 		_main._on_config_picker_pressed(_contents)
@@ -1410,7 +1439,13 @@ func _open_config_at(tile: Vector2i) -> void:
 func _refill_declared_tank() -> void:
 	var fluid: String = String(_main._tank_fluids[_contents]) if _contents < _main._tank_fluids.size() else ""
 	if fluid == "":
-		printerr("SCREENSHOT: --contents-refill: no fluid in picker slot %d" % _contents)
+		printerr(
+			"SCREENSHOT_FAIL: --contents-refill: picker slot %d names no fluid "
+			% _contents
+			+ "(the panel has %d slot(s)) — nothing to buy or pump back."
+			% _main._tank_fluids.size()
+		)
+		_refuse()
 		return
 	Layouts.fund(_main.sim, 5000)
 	Layouts.stock(_main.sim, fluid, 256)

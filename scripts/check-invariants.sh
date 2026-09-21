@@ -88,11 +88,13 @@ done < <(grep -rhoE '"res://[^"%]+\.(tscn|tres|gd|png|svg|ogg|wav|gdextension|im
 # boolean beside the rest — would be invisible to `test_hover_targets.gd`,
 # which only knows what is in the table.
 echo "==> every --hover* flag test_screenshot.gd knows about is in the table"
+# Either quote: GDScript takes both, so a flag written args.has('--hover-belt')
+# must not slip past a pattern that only knows about double quotes.
 while read -r flag; do
-  grep -qF "\"$flag\"" godot_project/hover_targets.gd \
+  grep -qE "[\"']${flag}[\"']" godot_project/hover_targets.gd \
     || fail "test_screenshot.gd names $flag, which hover_targets.gd's table does not — add a row there instead, so the flag inherits the refusal (see that file's header)"
-done < <(grep -ohE '"--hover[a-z-]*"' godot_project/test_screenshot.gd \
-         | tr -d '"' | sort -u)
+done < <(grep -ohE "[\"']--hover[a-z-]*[\"']" godot_project/test_screenshot.gd \
+         | tr -d "\"'" | sort -u)
 
 # ----------------------------------------------------------- 5. doc links
 # The docs are the project's memory and CLAUDE.md is a map of them

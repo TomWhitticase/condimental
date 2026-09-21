@@ -4109,9 +4109,13 @@ impl World {
     ///
     /// Walks `tank_discharges` rather than the tank's neighbours because
     /// that list is already the answer to "which network, which segment",
-    /// computed by the topology pass — and a tank facing a junction may
-    /// legitimately have more than one entry. See
-    /// [`Self::try_set_tank_fluid`] for why this exists at all.
+    /// computed by the topology pass. It does *not* walk it because a tank
+    /// can have several entries: `fluid_tank` is `Footprint(1, 1)` in
+    /// `data/machines.ron` and discharges through the one face it points at,
+    /// so the topology pass cannot currently produce more than one. The
+    /// `BTreeSet` below is defensive against a multi-outlet tank, not a
+    /// shape that occurs today. See [`Self::try_set_tank_fluid`] for why
+    /// this exists at all.
     fn purge_runs_fed_by(&mut self, tank: Entity) {
         let networks: BTreeSet<usize> = self
             .topology
