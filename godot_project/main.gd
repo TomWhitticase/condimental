@@ -332,6 +332,51 @@ const FLUID_TINTS := {
 }
 const FLUID_TINT_FALLBACK := Color(0.60, 0.79, 0.86)
 
+## Presentation-only tint per RECIPE id — the answer to "which sauce is this
+## machine handling?", and the reason a bottler filling BBQ no longer draws
+## a row of ketchup bottles (2026-09-21).
+##
+## **The mechanism, because it is what makes the third sauce free.** A
+## machine that shows its product paints that product — and nothing else —
+## in the palette's `liquid` class (`machine_product` in
+## `assets/voxels/generators/assets.rs`, pinned there by a test). `voxgen`
+## writes one mesh per material class, so a machine's product arrives in
+## Godot as a child node named `liquid` that can be tinted on its own, and
+## the tint comes from the recipe the simulation says the machine is
+## RUNNING (`MachineSnapshot.recipe` — `Machine::choose`'s live answer,
+## which follows the inputs). One voxel model therefore serves every sauce:
+## a new sauce needs a row in this table and nothing else — no new asset, no
+## machine kind, no generator change, no branch anywhere in this file.
+##
+## Keyed by recipe and not by the output item because the recipe is what the
+## wire carries while the machine is WORKING: the output buffer is empty for
+## most of a craft, which is exactly when the sauce is on show in the vat's
+## sight glass.
+##
+## The numbers are the palette's own, and deliberately come from a different
+## entry per machine. The vat holds fluid, so its two recipes take the tint
+## of the pipe run they feed — the same liquid a few tiles on, and the same
+## values as `FLUID_TINTS` above (`test_bbq_branch.gd` pins them equal). The
+## bottler and packer hold sauce behind glass and printed on cases, so they
+## take `ketchup_red` #BE160E and `bbq_brown` #4E2419: the colours the
+## bottles and boxes on the belt beside them are already painted, which is
+## what makes a full crate and the machine that filled it read as one thing.
+const PRODUCT_TINTS := {
+	"ketchup": Color(0.77, 0.10, 0.05),
+	"bbq": Color(0.33, 0.17, 0.11),
+	"bottled_ketchup": Color(0.745, 0.086, 0.055),
+	"boxed_ketchup": Color(0.745, 0.086, 0.055),
+	"bottled_bbq": Color(0.306, 0.141, 0.098),
+	"boxed_bbq": Color(0.306, 0.141, 0.098),
+}
+## What a recipe with no entry draws as: the voxel's own `fluid_pale`
+## #E8F1EC, left untinted. A sauce nobody has added a row for reads as a
+## pale, unfinished product rather than as the WRONG sauce — which is the
+## failure worth preferring, and the one thing the hardcoded ketchup this
+## replaced could not do (UI_UX.md §2b point 12: every content-id lookup
+## gets a documented fallback).
+const PRODUCT_TINT_FALLBACK := Color(1, 1, 1)
+
 ## --- The belt family (the pipes & conveyors overhaul, ticket 5) -----------
 ##
 ## A belt tile's SHAPE is derived from the `links` the simulation puts on
@@ -976,6 +1021,8 @@ var _kind_footprints: Dictionary = {}
 var _machine_states: Dictionary = {} # origin key -> last machine snapshot dict
 var _machine_lamps: Dictionary = {} # origin key -> MeshInstance3D (emissive mesh)
 var _machine_gauges: Dictionary = {} # origin key -> Node3D, the live progress bar (see MACHINE_PROGRESS_GAUGES)
+var _machine_products: Dictionary = {} # origin key -> MeshInstance3D, the `liquid` mesh (see PRODUCT_TINTS)
+var _machine_product_recipes: Dictionary = {} # origin key -> the recipe id that mesh is tinted for
 var _machine_running: Dictionary = {} # origin key -> bool, to avoid redundant swaps
 var _machine_motion: Dictionary = {} # origin key -> {"frames": Array[Node3D], "frame": int, "family": String}, see MACHINE_MOTION_MODELS
 ## The machine-load epic (ticket 3). Keyed on origin tile like the rest; see
@@ -2954,6 +3001,8 @@ func _rebuild_world() -> void:
 		existing.free()
 	_machine_lamps.clear()
 	_machine_gauges.clear()
+	_machine_products.clear()
+	_machine_product_recipes.clear()
 	_machine_running.clear()
 	_machine_motion.clear()
 	_crush_anchors.clear()
@@ -3142,6 +3191,15 @@ func _build_placement(placement: Dictionary) -> void:
 			# A machine: a recipe-running kind. Its status lamp and (for the
 			# kinds that declare one) its progress gauge.
 			_machine_lamps[key] = lamp
+			# Its product mesh, and the sauce that mesh is currently holding:
+			# `voxgen` splits the body by material class, so the machine's
+			# `liquid` class — which is the product and nothing else, see
+			# `machine_product` in assets/voxels/generators/assets.rs — is a
+			# child node of its own to tint (PRODUCT_TINTS). Read off the
+			# layout rather than waiting for a snapshot so a machine is the
+			# right colour the frame it is placed.
+			_machine_products[key] = body.get_node_or_null("liquid")
+			_set_machine_product(key, placement.get("recipe"))
 			_machine_running[key] = true
 			_set_machine_running(key, false)
 			if MACHINE_PROGRESS_GAUGES.has(kind):
@@ -3285,6 +3343,10 @@ func _seed_machine_states() -> void:
 			"input": [],
 			"output": [],
 		}
+		# Tinted from the same read: a machine that has not moved anything
+		# yet is still making something, and a freshly loaded save must not
+		# wait for a craft to finish before it shows which sauce.
+		_set_machine_product(_tile_key(origin), parsed["recipe"])
 
 
 ## Fills `_splitter_states` (and points every arrow) for every placed
@@ -4018,6 +4080,41 @@ func _fluid_material_for(fluid_id: String) -> StandardMaterial3D:
 	var base: StandardMaterial3D = _class_materials.get("liquid", null)
 	var mat: StandardMaterial3D = base.duplicate() if base != null else _make_material(0.0, 0.14)
 	mat.albedo_color = FLUID_TINTS.get(fluid_id, FLUID_TINT_FALLBACK)
+	return mat
+
+
+
+## Tints one machine's product mesh to the sauce it is currently making —
+## the whole of what makes a bottler full of BBQ look like one (PRODUCT_TINTS).
+##
+## Cheap enough to call from the per-chunk snapshot path: the recipe behind
+## the current tint is recorded per machine and a repeat is dropped, so this
+## builds a material only on the tick a machine changes what it makes.
+##
+## A machine with no `liquid` mesh (every kind that shows no product) and a
+## null recipe are both no-ops rather than warnings — they are the ordinary
+## cases, not mistakes.
+func _set_machine_product(key: String, recipe) -> void:
+	if recipe == null:
+		return
+	var recipe_id := String(recipe)
+	if String(_machine_product_recipes.get(key, "")) == recipe_id:
+		return
+	var mesh: MeshInstance3D = _machine_products.get(key, null)
+	if mesh == null:
+		return
+	_machine_product_recipes[key] = recipe_id
+	mesh.set_surface_override_material(0, _product_material_for(recipe_id))
+
+
+## A machine's product material: the same `liquid` class numbers the fluid in
+## a pipe uses — it is the same substance, seen through glass instead of
+## steel — tinted per recipe rather than per fluid. Built fresh per call like
+## `_fluid_material_for` above, and called about as often.
+func _product_material_for(recipe_id: String) -> StandardMaterial3D:
+	var base: StandardMaterial3D = _class_materials.get("liquid", null)
+	var mat: StandardMaterial3D = base.duplicate() if base != null else _make_material(0.0, 0.14)
+	mat.albedo_color = PRODUCT_TINTS.get(recipe_id, PRODUCT_TINT_FALLBACK)
 	return mat
 
 
@@ -14394,6 +14491,10 @@ func _render_snapshot(snapshot: Dictionary) -> void:
 		# collapse them into one that flickered between them.
 		var key := _tile_key(_pair_to_tile(machine.get("tile")))
 		_machine_states[key] = machine
+		# And what sauce it is making: `recipe` is the live choice, so a
+		# machine re-plumbed onto the other sauce repaints its product the
+		# same frame its stall readout changes (PRODUCT_TINTS).
+		_set_machine_product(key, machine.get("recipe"))
 		_set_machine_running(key, machine.get("process") != null)
 
 

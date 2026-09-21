@@ -119,8 +119,7 @@
     "liquid"
   ],
   "item_spice_mix": [
-    "matte",
-    "metal"
+    "matte"
   ],
   "item_sugar": [
     "matte"
@@ -141,7 +140,8 @@
   "machine_bottler": [
     "matte",
     "metal",
-    "emissive"
+    "emissive",
+    "liquid"
   ],
   "machine_bottler_motion_f0": [
     "metal"
@@ -158,7 +158,8 @@
   "machine_cooking_vat": [
     "matte",
     "metal",
-    "emissive"
+    "emissive",
+    "liquid"
   ],
   "machine_cooking_vat_motion_f0": [
     "metal"
@@ -226,7 +227,8 @@
   "machine_packer": [
     "matte",
     "metal",
-    "emissive"
+    "emissive",
+    "liquid"
   ],
   "machine_packer_motion_f0": [
     "metal"

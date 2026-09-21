@@ -104,6 +104,15 @@
         (name: "tomato_red",     rgb: "#C22C21", class: "matte"),
         (name: "tomato_shadow",  rgb: "#8B1E17", class: "matte"),
         (name: "tomato_leaf",    rgb: "#3E8C39", class: "matte"),
+        // NOTHING PAINTS THIS ANY MORE, and it stays where it is. It was
+        // the cooking vat's sight glass; since 2026-09-21 the vat shows the
+        // sauce it is actually cooking (`machine_product`, tinted per
+        // recipe), so a fixed red would have been one sauce of several.
+        // Indices here are the file's own order, so a removal renumbers
+        // every colour below it and silently repaints half the factory —
+        // this list is appended to, never edited in the middle. It is also
+        // still the anchor two later entries were picked against
+        // (`bbq_brown`'s note below measures itself off it).
         (name: "sauce_red",      rgb: "#9E2117", class: "matte"),
         (name: "ketchup_red",    rgb: "#BE160E", class: "matte"),
         (name: "pail_grey",      rgb: "#989EA2", class: "matte"),
@@ -328,5 +337,20 @@
         // corner ribs, so the tote is still recognisably the same plastic
         // family as the pail two stages downstream.
         (name: "tote_grey",       rgb: "#707780", class: "matte"),
+        // --- the spice bag's paper (the project owner's 2026-09-21 call to
+        // make `item_spice_mix` a sack) ---
+        // A spice-dyed paper sack, where sugar's is undyed kraft. Its own
+        // entry rather than a reuse of `sack_kraft` #C9B48E for the reason
+        // the two bags exist to be told apart: they now share a shape, so
+        // the paper is the difference, and at 123/255 of luma between them
+        // that difference survives any size the market row renders at.
+        // It is also a good deal DARKER than `spice_paprika` #A8481C, the
+        // blend spilling from its mouth (30.8/255 between them, past the
+        // ~26 anchor for "reads reliably"), because both cameras look down
+        // on that spill and a dark mark on a face this camera lights reads
+        // as a hole (UI_UX.md §2b point 21) — the sack is the dark thing
+        // and the powder the bright one, the same way round as sugar's
+        // white crystal on pale kraft.
+        (name: "sack_spice",      rgb: "#6E2F13", class: "matte"),
     ],
 )

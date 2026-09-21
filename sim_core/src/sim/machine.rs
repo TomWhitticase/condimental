@@ -584,11 +584,21 @@ impl Machine {
     ///    pipe beside spice and molasses hoppers blends BBQ mix: the two
     ///    never both match.
     /// 2. When none is satisfied, **the one closest to being satisfied**,
-    ///    counting requirements met, earliest again winning a tie. Nothing
-    ///    in the simulation turns on this — an unsatisfied machine does not
-    ///    move — but the snapshot and the stall readout are read off
-    ///    [`Machine::recipe`], and "waiting for molasses" is a true sentence
-    ///    about a BBQ mixer where "waiting for vinegar" is not.
+    ///    counting requirements met. Nothing in the simulation turns on
+    ///    this — an unsatisfied machine does not move — but the snapshot and
+    ///    the stall readout are read off [`Machine::recipe`], and "waiting
+    ///    for molasses" is a true sentence about a BBQ mixer where "waiting
+    ///    for vinegar" is not.
+    /// 3. **A tie goes to the recipe the machine is already holding**, and
+    ///    only then to the earliest in the file. This is rule 2's own
+    ///    argument applied to the case rule 2 got wrong: a bottler that has
+    ///    just filled twenty bottles of BBQ and drained its tap ties every
+    ///    candidate at zero, and taking the earliest handed it
+    ///    `bottled_ketchup` — so it reported waiting for ketchup it had
+    ///    never touched, and (since 2026-09-21, when a machine started
+    ///    drawing the sauce its recipe names) stood a row of red bottles in
+    ///    a BBQ line. A machine that has never run holds its kind's first
+    ///    recipe and keeps on holding it, so a fresh factory is unchanged.
     ///
     /// `None` only for a kind no recipe names, which `World` refuses to
     /// place.
@@ -604,7 +614,12 @@ impl Machine {
             if met == wanted {
                 return Some((candidate, true));
             }
-            if closest.is_none_or(|(best, _)| met > best) {
+            // Rule 3's tie-break: `met > best` alone leaves the earliest
+            // candidate holding a tie, so the held recipe has to be able to
+            // take it back off one that got there first.
+            if closest
+                .is_none_or(|(best, _)| met > best || (met == best && candidate.id == self.recipe))
+            {
                 closest = Some((met, candidate));
             }
         }

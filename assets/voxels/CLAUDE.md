@@ -20,6 +20,12 @@ Reasoning lives in `docs/UI_UX.md` §2a/§2b and `docs/DECISIONS.md` Part B —
   `name.vox` (combined, for review) plus `name.<class>.vox` per class used;
   Godot rebuilds one `StandardMaterial3D` per class from `materials.json`,
   classes listed in `index.json`. Classes: matte, metal, emissive, liquid.
+- **On a machine, `liquid` means "this is the product" — nothing else may
+  use it.** A machine that shows sauce paints it with `machine_product`, and
+  `main.gd` tints that one mesh from the recipe the machine is actually
+  running (`PRODUCT_TINTS`), so one model serves every sauce. A second
+  `liquid` colour on such a body would be repainted as sauce along with it;
+  a voxgen test pins that none exists.
 - **The `.vox` encoder is hand-written** (`generators/vox.rs`, §2b point 1) —
   no Rust crate emits the `nTRN`/`nGRP`/`nSHP` scene graph the pinned Godot
   importer needs. Origin is the **footprint centre at ground level**.
