@@ -176,6 +176,16 @@ Items, recipes and machines are added by editing data files, never
 simulation code. `data/recipes.ron` also carries `fluid_inputs` and
 `fluid_outputs`. If a new item needs a Rust change, a data field is missing.
 
+**An id is a key; what a player reads is a `display_name` beside it.** Ids
+are written into save files and looked up across `data/*.ron`, so renaming
+one is a save-format break (§4); the label is content and moves freely. A
+`Recipe`, an `IngredientKind` and a `MachineKind` may each carry an optional
+`display_name`, `World::display_names` gathers them into the one map
+`display_names_json` carries, and the presentation layer asks that map before
+it title-cases an id. Absence is the normal case and means the fallback is
+right. The shipped example is the kind id `warehouse_rack`, which the game
+calls "Stock Shelving" — see DECISIONS.md, 2026-09-21.
+
 ### 3.7 Update scheduling (tiered) — future, milestone 8
 
 - **Active:** belts/machines processing — every tick.

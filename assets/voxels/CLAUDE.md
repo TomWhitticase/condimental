@@ -96,6 +96,11 @@ cargo test -p voxgen                 # voxel asserts: openings empty, frames
 cargo xtask                          # stage into godot_project/voxels/
 ```
 
+- **`voxgen` does not touch `icons/`.** A recolour or reshape that stops at
+  `--bin voxgen` leaves the old look in the build menu, the hotbar and every
+  hover panel, which read the committed PNGs — run `--bin voxicons` (or
+  `scripts/build-voxels.sh`) too, then `cargo xtask`. The render is
+  deterministic: only the model you changed comes back modified.
 - `scripts/asset-browser.sh` opens every asset at once in a browser you can
   turn — variations, palette, footprint and the generator's own doc comment
   side by side. It is a reading of the `.vox` files lit the way the game

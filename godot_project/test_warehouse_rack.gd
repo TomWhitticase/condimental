@@ -362,7 +362,15 @@ func _run_checks() -> void:
 		return
 
 	# --- hover, from BOTH tiles of the 1x2 footprint -----------------------
+	# The name itself comes from content (`display_name` in data/machines.ron,
+	# through `display_names_json`), not from title-casing the id: the kind id
+	# is a save key and stayed `warehouse_rack` when the project owner renamed
+	# what the player reads. This asserts the join, so a dropped data field
+	# shows up here rather than as "Warehouse Rack" in a shipped frame.
 	var rack_name: String = main._kind_display_name(main.WAREHOUSE_RACK_KIND)
+	if rack_name != "Stock Shelving":
+		_fail("the kind reads '%s' — data/machines.ron's display_name is not reaching _kind_display_name, so the hotbar, the build menu and this tooltip are all calling it by its id" % rack_name)
+		return
 	var hovers: Array = []
 	for hover_tile in [tile, tile + Vector2i(0, 1)]:
 		var text: String = main._hover_text_at_tile(hover_tile)
@@ -440,7 +448,7 @@ func _run_checks() -> void:
 	if not main._market_storage_label.visible:
 		_fail("the market says nothing about the warehouse, with a rack standing")
 		return
-	for phrase in ["1 rack", "bays %d / %d" % [used_bays, total_bays], "%d free" % (total_bays - used_bays)]:
+	for phrase in ["1 shelving unit", "bays %d / %d" % [used_bays, total_bays], "%d free" % (total_bays - used_bays)]:
 		if not main._market_storage_label.text.contains(phrase):
 			_fail("the market's warehouse line does not say '%s':\n%s" % [phrase, main._market_storage_label.text])
 			return

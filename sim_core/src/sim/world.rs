@@ -2372,11 +2372,20 @@ impl World {
     /// Recipes and ingredients share one id space (a recipe's id is its
     /// product's), so one map serves both. A recipe wins a collision,
     /// which cannot happen today: no shipped raw declares a name.
+    ///
+    /// **Machine kinds are in here too**, from `data/machines.ron`, and
+    /// they are the other half of the reason this map exists: a kind whose
+    /// id is a key rather than a label (`warehouse_rack`, which the game
+    /// calls "Stock Shelving") names itself in content exactly the way a
+    /// sauce does. Kind ids and item ids are separate spaces that have
+    /// never collided; if one ever does, the machine's name wins, since a
+    /// kind label is only ever asked for by `_kind_display_name`.
     pub fn display_names(&self) -> BTreeMap<String, String> {
         self.ingredients
             .catalog
             .display_names()
             .chain(self.recipes.display_names())
+            .chain(self.machines.display_names())
             .map(|(id, name)| (id.to_string(), name.to_string()))
             .collect()
     }

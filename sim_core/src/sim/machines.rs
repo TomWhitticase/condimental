@@ -251,6 +251,27 @@ pub struct MachineKind {
     /// order is the order a refusal is reported in. Checked against the
     /// catalog by `StaffCatalog::validate_machines`, a test.
     pub staff: Vec<(String, u32)>,
+    /// What to call this kind in front of a player, when title-casing the
+    /// id gets it wrong — the machine twin of [`super::recipe::Recipe::
+    /// display_name`], and everything that doc says applies here.
+    ///
+    /// **Optional, and usually absent**: the build menu, the hotbar and
+    /// every hover tooltip title themselves from the id (`cooking_vat` →
+    /// "Cooking Vat"), which is what keeps a new `data/shop.ron` entry from
+    /// needing a matching edit in GDScript.
+    ///
+    /// Where the recipe field exists for initialisms the formatter cannot
+    /// spell, this one exists for the other case: **a kind whose id is not
+    /// what the game calls it.** `warehouse_rack` is the shipped example —
+    /// the project owner's 2026-09-21 call renamed it to "Stock Shelving"
+    /// in front of the player, and the id stayed where it was because a
+    /// kind id is a key (it is written into every save file and looked up
+    /// by `data/storage.ron`, `data/shop.ron` and the voxel asset table),
+    /// while a name is content. Renaming the key to follow the label would
+    /// have cost a `SAVE_SCHEMA_VERSION` bump — every existing save
+    /// rejected — for a change no player can see the inside of.
+    #[serde(default)]
+    pub display_name: Option<String>,
 }
 
 /// The file's shape once its version has been checked (see
@@ -277,6 +298,14 @@ pub enum MachineLoadError {
     DegenerateFootprint {
         id: String,
         footprint: Footprint,
+    },
+    /// A `display_name` that is present but empty or whitespace — the same
+    /// refusal [`super::recipe::RecipeLoadError::BlankDisplayName`] makes,
+    /// for the same reason: absent means "title-case the id", which is a
+    /// real answer, and blank means a build-menu card captioned with
+    /// nothing, which would show up only as a gap in a rendered frame.
+    BlankDisplayName {
+        id: String,
     },
     /// A recipe names a machine kind that `machines.ron` doesn't define.
     /// Reported as an error rather than a silent default, so a typo'd kind
@@ -309,6 +338,11 @@ impl std::fmt::Display for MachineLoadError {
                  ({}x{}) — both width_tiles and height_tiles must be at least 1, since a \
                  machine occupies the tile its belt feeds into",
                 footprint.width_tiles, footprint.height_tiles
+            ),
+            MachineLoadError::BlankDisplayName { id } => write!(
+                f,
+                "machines.ron machine kind '{id}' has a blank display_name — omit the \
+                 field to title-case the id instead"
             ),
             MachineLoadError::UnknownKindInRecipe {
                 recipe,
@@ -383,6 +417,13 @@ impl MachineRegistry {
             if by_id.contains_key(&kind.id) {
                 return Err(MachineLoadError::DuplicateKind { id: kind.id });
             }
+            if kind
+                .display_name
+                .as_deref()
+                .is_some_and(|name| name.trim().is_empty())
+            {
+                return Err(MachineLoadError::BlankDisplayName { id: kind.id });
+            }
             by_id.insert(kind.id.clone(), kind);
         }
         Ok(Self { by_id })
@@ -406,6 +447,25 @@ impl MachineRegistry {
     /// somewhere downstream.
     pub fn footprint_of(&self, id: &str) -> Option<Footprint> {
         self.by_id.get(id).map(|k| k.footprint)
+    }
+
+    /// Every kind that carries a name of its own, as `(id, display name)`
+    /// pairs — see [`MachineKind::display_name`]. Kinds that leave the field
+    /// out are absent, which is the presentation layer's cue to title-case
+    /// the id. Sorted, because the backing map is a `HashMap` and this feeds
+    /// a snapshot the GDScript side may compare against.
+    pub fn display_names(&self) -> Vec<(&str, &str)> {
+        let mut names: Vec<(&str, &str)> = self
+            .by_id
+            .values()
+            .filter_map(|kind| {
+                kind.display_name
+                    .as_deref()
+                    .map(|name| (kind.id.as_str(), name))
+            })
+            .collect();
+        names.sort_unstable();
+        names
     }
 
     /// Known kind ids, sorted — a stable order for error messages and tests
@@ -714,6 +774,46 @@ mod tests {
         let text = EXAMPLE.replacen("height_tiles: 3", "height_tiles: -2", 1);
         let err = MachineRegistry::from_ron_str(&text).unwrap_err();
         assert!(matches!(err, MachineLoadError::DegenerateFootprint { .. }));
+    }
+
+    /// The field that lets a kind be called something other than its id, and
+    /// the shipped reason it exists: `warehouse_rack` is the key every save
+    /// and every content file uses, and "Stock Shelving" is what the player
+    /// reads. A kind that leaves it out is absent from this map, which is
+    /// the presentation layer's cue to title-case the id itself.
+    #[test]
+    fn a_kind_may_name_itself_and_most_do_not() {
+        let text = EXAMPLE.replacen(
+            r#"staff: []),"#,
+            r#"staff: [], display_name: "The Crusher"),"#,
+            1,
+        );
+        let registry = MachineRegistry::from_ron_str(&format!(
+            "#![enable(implicit_some)]\n{text}"
+        ))
+        .unwrap();
+        assert_eq!(registry.display_names(), vec![("crusher", "The Crusher")]);
+
+        let bundled = MachineRegistry::bundled();
+        assert_eq!(
+            bundled.display_names(),
+            vec![("warehouse_rack", "Stock Shelving")],
+            "the shipped content names exactly one kind; the rest title-case correctly"
+        );
+    }
+
+    /// Blank is not "no name" — it is a build-menu card captioned with
+    /// nothing, and it would only show up in a rendered frame.
+    #[test]
+    fn a_blank_display_name_is_rejected_rather_than_drawn_as_an_empty_label() {
+        let text = EXAMPLE.replacen(r#"staff: []),"#, r#"staff: [], display_name: "  "),"#, 1);
+        let err =
+            MachineRegistry::from_ron_str(&format!("#![enable(implicit_some)]\n{text}")).unwrap_err();
+        match err {
+            MachineLoadError::BlankDisplayName { ref id } => assert_eq!(id, "crusher"),
+            other => panic!("expected BlankDisplayName, got {other:?}"),
+        }
+        assert!(err.to_string().contains("blank display_name"));
     }
 
     #[test]

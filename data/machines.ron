@@ -110,6 +110,12 @@
 // (the test fixture that rebuilds the old shipped layout out of purchase and
 // placement commands) lays out, and what the raw-ingredient rule reads — but
 // `World` no longer builds anything from it.
+//
+// The RON extension below lets an optional field be written as its value
+// (`display_name: "Stock Shelving"`) instead of `Some("Stock Shelving")`,
+// exactly as `data/recipes.ron` does and for the same reason: it keeps a
+// content file reading like content.
+#![enable(implicit_some)]
 (
     schema_version: 2,
     machines: [
@@ -312,7 +318,7 @@
 
         ),
         // --- The warehouse, which is not on the line at all ---
-        // A stock rack (the warehouse-rack sprint, ticket W1). The fourth
+        // Stock shelving (the warehouse-rack sprint, ticket W1). The fourth
         // kind here with no recipe behind it, and the first with no place
         // in a production line: nothing is delivered to it and nothing
         // leaves it on a belt. What it does is raise the ceiling on how
@@ -330,11 +336,22 @@
         // shelf costs money in the only way this game models cost — it was
         // bought — and a standing wage for a building that never runs would
         // read as a penalty for having bought storage at all.
+        //
+        // **The id is not what the game calls it.** The project owner's
+        // 2026-09-21 call renamed this kind to "Stock Shelving" in front of
+        // the player; `display_name` is how that is said, because the
+        // formatter in `main.gd` would otherwise title-case the id to
+        // "Warehouse Rack". The id itself is a KEY — it is written into
+        // every save file, and `data/shop.ron`, `data/storage.ron` and the
+        // voxel asset table all look this kind up by it — so renaming it
+        // would reject every existing save (`sim::save`'s version rule) to
+        // change a string no player can see. This field exists precisely so
+        // a label can move without the key moving.
         MachineKind(
             id: "warehouse_rack",
             footprint: Footprint(width_tiles: 1, height_tiles: 2),
             staff: [],
-
+            display_name: "Stock Shelving",
         ),
     ],
 )
