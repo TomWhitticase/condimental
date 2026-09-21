@@ -33,7 +33,7 @@ git branch -f main origin/main         # only if local main is otherwise unpushe
 
 Per `docs/WORKFLOW.md`: `cargo test -p sim_core` and `cargo test -p voxgen`
 always, `scripts/verify-core-loop.sh` for anything structural (it must print
-its 30 headless markers and `PASS`), and `scripts/screenshot-scene.sh` **with
+every headless marker, the script count it prints, and `PASS`), and `scripts/screenshot-scene.sh` **with
 the PNG actually read** for anything presentational. A sim-core change needs a
 headless test covering it before it merges (ARCHITECTURE §10).
 

@@ -188,6 +188,39 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — The bar for filing an issue is no longer low
+
+The 2026-09-16 workflow rule said that if a finding was worth putting in a
+report it was worth an issue. It worked as written, and the result was a
+backlog of small, true, unprioritised findings — its longest-lived entries
+were a script header claiming thirty Godot scripts where it runs 38, and a
+`recipes.ron` comment citing 60 ticks/sec against a 30 Hz tick. Both were
+one-line edits, and both cost more to file, read and rank than to fix.
+
+The rule is now a gate rather than a reflex, in `docs/WORKFLOW.md` ("Fix it,
+or file it — and prefer fixing it") and in the `file-issue` skill's first
+section: fix it in the branch at hand when it is a line or two or a small safe
+fix in the area you are already in; file only when fixing now would be wrong
+(an owner's call, the save format, a design-doc contradiction, real work, or a
+part of the tree this branch has no business touching) *and* someone would
+pick it off the board ahead of the next feature. Roughly one issue per PR, as
+a smell test; further deferrals go in the PR body, where review can promote
+them. Nothing changes for a finding that passes the gate — same cold-reader
+body, same labels. Recorded in `docs/DECISIONS_LOG.md` and `docs/DECISIONS.md`
+Part A, which also annotate the 2026-09-16 entry this amends.
+
+Dogfooded on the two issues the new rule cites as examples of what should
+never have been filed: `data/recipes.ron`'s cook-time comment now says 30
+ticks/sec (issue #137 — 80 ticks is under three seconds, not "a little over a
+second"), and `scripts/verify-core-loop.sh` no longer claims a script count in
+its header. It **counts and prints** the scripts it ran instead (issue #138),
+and the five live copies of "30 headless Godot scripts" that had drifted with
+it — the `verify` and `open-pr` skills, WORKFLOW.md's command table, the PR
+template's checklist and `verify.yml`'s header — now name the property rather
+than the number. Dated entries elsewhere in this log keep their numbers: they
+describe a moment, not the present. The other 15 open issues were left alone;
+pruning them is the owner's call.
+
 ### 2026-09-21 — The README catches up with the second sauce, and every frame in it is fresh
 
 The README had not moved since 2026-09-16 and was describing a one-sauce

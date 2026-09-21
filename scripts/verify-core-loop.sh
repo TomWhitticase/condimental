@@ -12,7 +12,9 @@
 #      conservation across every stage, not just one. No Godot involved.
 #   2. `cargo xtask` builds the extension and copies it into
 #      godot_project/bin/.
-#   3. Thirty headless Godot scripts exercise the parts cargo test can't: the
+#   3. Every headless Godot script under godot_project/ exercises the parts
+#      cargo test can't (the count is printed at the end of the run, so this
+#      header has no number to drift): the
 #      real `gdext` boundary (JSON command/snapshot/layout wire format going
 #      through Godot's own Variant/String/JSON machinery, driven through the
 #      whole chain end to end), the interactive scene's keyboard input
@@ -140,10 +142,13 @@ echo
 # with a type-inference error never loaded, and this script happily printed
 # PASS. Every script below therefore also has to print its own success
 # marker, and its absence is a failure.
+godot_scripts_run=0
+
 run_godot_script() {
   script="$1"
   marker="$2"
   label="$3"
+  godot_scripts_run=$((godot_scripts_run + 1))
   echo "==> godot --headless --script $script ($label)"
   out=$("$godot_bin" --headless --path godot_project --script "$script" 2>&1)
   status=$?
@@ -198,6 +203,7 @@ run_godot_script test_ingredient_models.gd INGREDIENT_MODELS_OK "every id in dat
 run_godot_script test_fluid_gallery.gd FLUID_GALLERY_OK "the fluid gallery stands all six fluids at once: every placement accepted, every run named by topology alone and above main.gd's visible-pressure floor, every tint present, distinct and not near-grey — issues #72 and #100"
 
 echo
+echo "$godot_scripts_run headless Godot scripts run."
 echo "PASS: real placement + milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"
 echo "      + icons + hover + milestone 6 fluid presentation + machine footprints/hopper"
 echo "      + belt/pipe junctions + the build menu + the inventory hotbar + the chain rework's"

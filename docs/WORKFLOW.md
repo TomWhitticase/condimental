@@ -44,7 +44,7 @@ milestone-level visual checks. Both Godot scripts honour `GODOT_BIN`.
 |---|---|---|
 | `cargo test -p sim_core` | Sim invariants: conservation, determinism, economy, save/load. 19 integration test files under `sim_core/tests/`, plus unit tests. | fast |
 | `cargo test -p voxgen` | Voxel-level asset properties — that a machine's inlet/outlet is a genuinely empty opening, which no mesh or screenshot can tell from a painted rectangle. | fast |
-| `scripts/verify-core-loop.sh` | Everything: `cargo test -p sim_core`, `cargo test -p voxgen`, `cargo xtask`, two `--import` passes, an import sanity check, then **30 headless Godot scripts** through the real `gdext` JSON boundary. | slow |
+| `scripts/verify-core-loop.sh` | Everything: `cargo test -p sim_core`, `cargo test -p voxgen`, `cargo xtask`, two `--import` passes, an import sanity check, then **every headless Godot script** through the real `gdext` JSON boundary, and prints how many it ran. | slow |
 | `scripts/verify-scaffold.sh` | The milestone-1 Rust ↔ Godot round trip alone (`cargo xtask`, prime the cache, `test_round_trip.gd`). Re-run this on a quiet machine before treating a `gdext` load failure as a regression. | medium |
 | `scripts/screenshot-scene.sh` | The one NON-headless check (below). | slow |
 
