@@ -137,6 +137,14 @@ func _press_key(keycode: Key) -> void:
 
 ## The panel is repolled by `_process` in the live scene; a test has no
 ## frames, so it polls the same way by hand after anything it changes.
+## The picker note's FIRST line — the sentence about this building's own
+## state. Since issue #90 a second line can follow it, naming the gate over
+## any padlocked slot, and that half has its own check (`_gate_note_line`)
+## rather than being spliced into every expected string here.
+func _note_head() -> String:
+	return String(main._config_picker_note.text.split("\n")[0])
+
+
 func _repoll() -> void:
 	main._refresh_buffers()
 	# `_process` re-reads the fluid networks every frame too, and since
@@ -488,8 +496,8 @@ func _run_checks() -> void:
 		if slot["mark"].visible:
 			_fail("an undeclared tank marks '%s' as chosen — nobody chose it" % slot["item"])
 			return
-	if main._config_picker_note.text != "read from the pipe run — pick one to say for certain":
-		_fail("an undeclared but named tank's note reads '%s'" % main._config_picker_note.text)
+	if _note_head() != "read from the pipe run — pick one to say for certain":
+		_fail("an undeclared but named tank's note reads '%s'" % _note_head())
 		return
 	var tank := _tank_snapshot(TANK)
 	if tank.is_empty():
@@ -581,8 +589,8 @@ func _run_checks() -> void:
 	if not main._config_fill_button.disabled or main._config_fill_reason.text != "Not connected to a pipe run":
 		_fail("an unplumbed tank's FILL is not blocked with 'Not connected to a pipe run' (got '%s')" % main._config_fill_reason.text)
 		return
-	if main._config_picker_note.text != "nothing can name this run — pick what this tank holds":
-		_fail("an unnamed tank's picker note reads '%s'" % main._config_picker_note.text)
+	if _note_head() != "nothing can name this run — pick what this tank holds":
+		_fail("an unnamed tank's picker note reads '%s'" % _note_head())
 		return
 
 	# --- 10b. Declaring a tank's fluid (issue #43) ---------------------------
@@ -610,8 +618,8 @@ func _run_checks() -> void:
 		return
 	# The note names what switching would destroy, before the click. This
 	# tank is empty and feeds no run, so there is nothing to warn about yet.
-	if main._config_picker_note.text != "switching empties this tank and the run it feeds":
-		_fail("a declared empty tank's picker note reads '%s'" % main._config_picker_note.text)
+	if _note_head() != "switching empties this tank and the run it feeds":
+		_fail("a declared empty tank's picker note reads '%s'" % _note_head())
 		return
 	# --- 10c. The warning counts the run, not just the tank -----------------
 	# Switching a declaration purges the pipe run as well as the tank (the
@@ -657,9 +665,9 @@ func _run_checks() -> void:
 	var undeclared_warning := "another fluid destroys %.1f units — this tank and the run it feeds" % (
 		in_tank + in_run
 	)
-	if main._config_picker_note.text != undeclared_warning:
+	if _note_head() != undeclared_warning:
 		_fail("a filled UNDECLARED tank's note reads '%s', expected '%s'" % [
-			main._config_picker_note.text, undeclared_warning
+			_note_head(), undeclared_warning
 		])
 		return
 	# And the click the note calls harmless has to be harmless: declaring
@@ -684,9 +692,9 @@ func _run_checks() -> void:
 	var warning := "switching destroys %.1f units — this tank and the run it feeds" % (
 		in_tank + in_run
 	)
-	if main._config_picker_note.text != warning:
+	if _note_head() != warning:
 		_fail("a filled declared tank's note reads '%s', expected '%s'" % [
-			main._config_picker_note.text, warning
+			_note_head(), warning
 		])
 		return
 
@@ -846,5 +854,96 @@ func _run_checks() -> void:
 		_fail("a belt asks for no crew and holds nothing, so it has no panel")
 		return
 
-	print("CONFIG_PANEL_OK: click opens/toggles/retargets/closes, FILL per building with reasons, AUTO-FILL round-trips and keeps a %d-unit hopper and a %.0f-unit tank full, picker retargets a placed hopper and declares a tank's fluid after warning what the click destroys (declared or not), while agreeing with the run destroys nothing, ESC/menus/modes/removal close it, unplumbed tank refused, the mothball switch round-trips through the sim on a machine AND on the dock and reads back in words, a belt gets no panel at all, SPACE/V/Q inert" % [capacity, tank_capacity])
+	# --- The padlocked contents choice (issue #90) --------------------------
+	# `data/unlocks.ron` holds ingredients back until a tier opens, and the
+	# market hides them; the contents picker did not, so a click on a gated
+	# ingredient was a click that did nothing a player could read. Ids come
+	# from the wire's own `locked` flag, never from a list repeated here, so
+	# a balance pass that moves an id between tiers leaves this passing.
+	var locked_solids: Array = []
+	for item in main._hopper_items:
+		if main._choice_locked(item):
+			locked_solids.append(String(item))
+	if locked_solids.is_empty():
+		_fail("no raw solid is gated in a new game — data/unlocks.ron ships one, so the wire lost it")
+		return
+	# A hopper out of the world as it stands NOW: the mothball section
+	# rebuilt it around the shipped chain, so the fixture's own two hoppers
+	# are long gone by here.
+	var gate_hopper := Vector2i(0, 0)
+	var found_hopper := false
+	for placement in main._placements:
+		if String(placement.get("kind", "")) == main.HOPPER_KIND:
+			gate_hopper = main._placement_origin(placement)
+			found_hopper = true
+			break
+	if not found_hopper:
+		_fail("the shipped chain has no hopper to open a picker on")
+		return
+	main._config_click_at_tile(gate_hopper)
+	if not main._config_open or main._config_kind != "hopper":
+		_fail("the hopper panel did not reopen for the gate checks")
+		return
+	var locked_slot := -1
+	for index in range(main._config_picker_slots.size()):
+		if locked_solids.has(String(main._config_picker_slots[index]["item"])):
+			locked_slot = index
+			break
+	if locked_slot < 0:
+		_fail("the picker dropped the locked choices %s instead of padlocking them" % str(locked_solids))
+		return
+	var slot: Dictionary = main._config_picker_slots[locked_slot]
+	if not slot["lock"].visible:
+		_fail("the locked slot '%s' wears no padlock" % slot["item"])
+		return
+	if slot["mark"].visible:
+		_fail("the locked slot '%s' is marked as the hopper's contents" % slot["item"])
+		return
+	if slot["column"].modulate.a >= 1.0:
+		_fail("the locked slot '%s' is drawn at full strength" % slot["item"])
+		return
+	# And the words beside the glyph: which gate, and how far off it is.
+	var gate_line := ""
+	for line in main._config_picker_note.text.split("\n"):
+		if String(line).begins_with("🔒"):
+			gate_line = String(line)
+	if not gate_line.contains(main._item_display_name(String(slot["item"]))) \
+			or not gate_line.contains("0 of "):
+		_fail("the picker note does not say what is locked or how far off: '%s'" % gate_line)
+		return
+	# Pressing it is refused by the SIMULATION — the hopper holds what it held.
+	var held_before := String(_hopper_snapshot(gate_hopper).get("item", ""))
+	main._on_config_picker_pressed(locked_slot)
+	_repoll()
+	if String(_hopper_snapshot(gate_hopper).get("item", "")) != held_before:
+		_fail("a locked choice retargeted the hopper to '%s'" % slot["item"])
+		return
+	# An unlocked slot in the same picker still works, so the refusal is the
+	# gate's rather than the picker having gone inert.
+	var open_slot := -1
+	for index in range(main._config_picker_slots.size()):
+		var id := String(main._config_picker_slots[index]["item"])
+		if not main._choice_locked(id) and id != held_before:
+			open_slot = index
+			break
+	if open_slot < 0:
+		_fail("the fixture needs a second unlocked raw solid to press")
+		return
+	main._on_config_picker_pressed(open_slot)
+	_repoll()
+	var wanted := String(main._config_picker_slots[open_slot]["item"])
+	if String(_hopper_snapshot(gate_hopper).get("item", "")) != wanted:
+		_fail("an unlocked choice '%s' was refused too" % wanted)
+		return
+	# The ghost never offers a locked default either — the sim refuses a
+	# Place that carries one.
+	main._build_kind = main.HOPPER_KIND
+	var ghost_item: String = main._selected_hopper_item()
+	main._build_kind = ""
+	if ghost_item == "" or main._choice_locked(ghost_item):
+		_fail("a hopper would be placed holding the locked '%s'" % ghost_item)
+		return
+	main._close_config_panel()
+
+	print("CONFIG_PANEL_OK: click opens/toggles/retargets/closes, FILL per building with reasons, AUTO-FILL round-trips and keeps a %d-unit hopper and a %.0f-unit tank full, picker retargets a placed hopper and declares a tank's fluid after warning what the click destroys (declared or not), while agreeing with the run destroys nothing, ESC/menus/modes/removal close it, unplumbed tank refused, the mothball switch round-trips through the sim on a machine AND on the dock and reads back in words, a belt gets no panel at all, a gated ingredient is padlocked, named in words and refused, SPACE/V/Q inert" % [capacity, tank_capacity])
 	quit(0)

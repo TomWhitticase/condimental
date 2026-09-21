@@ -189,6 +189,43 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — A locked ingredient is padlocked in the picker, and refused (issue #90)
+
+`data/unlocks.ron` holds the three BBQ raws back until ten deliveries, and
+until now it held them back from the market and from nowhere else. The
+configuration panel's CONTENTS picker listed every raw the content files
+define, the simulation accepted a click on any of them, and the hopper then
+sat empty with no explanation beyond "in stock: 0" — the player had aimed a
+bin at something they could not buy and nothing in the game said so.
+
+The gate is now a rule on that click too: `try_set_hopper_item` and
+`try_set_tank_fluid` refuse a locked id, the tank's refusal landing *before*
+the purge so a refused declaration does not cost the player the vinegar
+standing in the drum. The wire carries the verdict rather than the scene
+re-deriving it — `IngredientsSnapshot`'s two lists became `ContentsChoice`
+records (`id`, `locked`, `unlock_name`, `after_deliveries`) beside the
+lifetime delivery count, and the market's `entries` still omits the locked
+rows.
+
+The picker keeps them. A locked slot is dimmed, wears a 🔒 in the corner the
+✔ would have taken, is never marked as chosen, and the line under the row
+names its gate and the distance to it — "🔒 Liquid Smoke — BBQ Sauce, 0 of 10
+deliveries". The button is not disabled: pressing it issues the command,
+the simulation refuses it, and the cue is read back off what the building
+holds afterwards, so a refusal sounds refused. The build ghost's default
+skips locked ids for the same reason.
+
+Where the rule deliberately stops is `Place`'s `item`. That field is how the
+ghost and the layout fixtures *seed* a bin, not a choice made against a
+gate; refusing it would close nothing a player can reach and would cost
+every BBQ fixture ten deliveries of real play before it could place a
+hopper, which `test_layouts.gd` has no honest way to pay. The gate still
+bites the bin — the raw cannot be bought, so it can never hold a unit — and
+`unlocks.rs` pins exactly that. Twelve cases there in all, plus a new
+section of `test_config_panel.gd` and `reference::open_every_gate`, which
+lets a fixture state the premise that its factory belongs to a player who
+earned it.
+
 ### 2026-09-21 — The bar for filing an issue is no longer low
 
 The 2026-09-16 workflow rule said that if a finding was worth putting in a

@@ -2106,15 +2106,24 @@ impl World {
     /// money, in one object — see [`IngredientsSnapshot`].
     ///
     /// **An ingredient behind a progression gate that has not opened is
-    /// absent from `entries`** (`data/unlocks.ron`, [`super::unlocks`]).
-    /// `hopper_items` is not filtered, deliberately — see
-    /// [`IngredientsSnapshot`]'s field doc.
+    /// absent from `entries`** (`data/unlocks.ron`, [`super::unlocks`]) but
+    /// **present and flagged in `hopper_items`/`tank_fluids`** — see
+    /// [`super::ingredients::ContentsChoice`] for why the market hides what
+    /// the contents picker shows.
     pub fn ingredients_snapshot(&self) -> IngredientsSnapshot {
+        let deliveries = self.economy.lifetime_deliveries;
         self.ingredients.snapshot(
             self.economy.money,
             &self.raw_items,
             self.raw_fluids.iter().cloned().collect(),
-            |id| self.economy.ingredient_unlocked(id),
+            deliveries,
+            |id| {
+                self.economy
+                    .unlocks()
+                    .gate_for_ingredient(id)
+                    .filter(|gate| !gate.is_open(deliveries))
+                    .map(|gate| (gate.name.clone(), gate.after_deliveries))
+            },
         )
     }
 
@@ -2245,7 +2254,21 @@ impl World {
     ///   meant and picking the first would silently choose for them.
     fn hopper_item_for(&self, requested: Option<&str>) -> Option<ItemId> {
         match requested {
+            // Raw, and DELIBERATELY not gated (issue #90). `SetHopperItem`
+            // on a placed hopper is refused for a locked ingredient, because
+            // that command is the picker the player clicks; the `item` a
+            // Place carries is not a choice made against a gate at all — the
+            // ghost seeds it (`_selected_hopper_item` skips locked ids), and
+            // a layout fixture names it to build a factory to photograph.
+            // Refusing it would buy nothing a player can reach and cost
+            // every BBQ layout fixture ten deliveries of real play before it
+            // could place a bin, which `test_layouts.gd` has no honest way
+            // to pay. The gate still bites the bin it seeds: the raw behind
+            // it cannot be bought, so neither a manual fill nor auto-fill
+            // can put a single unit in it.
             Some(item) => self.raw_items.iter().find(|raw| *raw == item).cloned(),
+            // An omitted item is unchanged: it falls back only where there
+            // is exactly ONE raw item in the world at all.
             None => match self.raw_items.as_slice() {
                 [only] => Some(only.clone()),
                 _ => None,
@@ -3958,6 +3981,15 @@ impl World {
         if !self.raw_items.iter().any(|raw| raw == item) {
             return false;
         }
+        // And a progression gate that has not opened refuses it too
+        // (issue #90). `data/unlocks.ron` states the rule for
+        // `BuyIngredient` and `SignContract` — a gate is a rule, not a
+        // decoration on a panel — and these two commands had escaped it:
+        // a hopper could be pointed at an ingredient nobody could buy and
+        // then sit empty forever, saying only "in stock: 0".
+        if !self.ingredient_unlocked(item) {
+            return false;
+        }
         let Some(&entity) = self.topology.grid.get(&tile) else {
             return false;
         };
@@ -4059,6 +4091,13 @@ impl World {
     /// through [`FluidTank::settle`] and nothing is purged.
     fn try_set_tank_fluid(&mut self, tile: TileCoord, fluid: &str) -> bool {
         if !self.raw_fluids.iter().any(|raw| raw == fluid) {
+            return false;
+        }
+        // Locked is refused, exactly as for a hopper — see
+        // `try_set_hopper_item`. The two pickers are built from one piece of
+        // Godot code and must not behave differently (issue #90, which is
+        // issue #43's own note that whatever was decided applied to both).
+        if !self.ingredient_unlocked(fluid) {
             return false;
         }
         let Some(&entity) = self.topology.grid.get(&tile) else {

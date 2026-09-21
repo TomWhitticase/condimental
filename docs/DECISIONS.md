@@ -25,6 +25,72 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-21: **A gated ingredient is padlocked in the contents picker, not
+  hidden from it — and pointing a vessel at one is REFUSED.** (Issue #90.)
+
+  **The fault.** `data/unlocks.ron` states its own doctrine plainly: a gate
+  holds back ingredient and contract ids, and both `BuyIngredient` and
+  `SignContract` are refused for a locked id "not merely hidden from a
+  panel — so a gate is a rule rather than a decoration on the UI". The
+  configuration panel's CONTENTS picker was the decoration. It listed every
+  raw the content files define, the simulation accepted a click on any of
+  them, and the player's hopper then sat empty behind an "in stock: 0" that
+  described the symptom and not the cause. Pre-existing for hoppers; issue
+  #43 mirrored it onto tanks on purpose, because two pickers built from one
+  piece of code behaving differently would have been worse than one
+  consistent gap.
+
+  **Kept and padlocked, rather than hidden.** The market omits a locked row
+  and the picker keeps it. That asymmetry is the decision, and it is about
+  what each panel is for. The market answers "what may I buy now", where an
+  unbuyable entry is noise. The picker is the full set of things this vessel
+  will ever hold — the place a player learns the game has a liquid smoke in
+  it at all. A gate the player can see coming is something to aim at;
+  GAMEPLAY §2's progression only pulls if the next tier is visible from the
+  current one. So the slot stays, dimmed, with a 🔒 in the corner the ✔ would
+  have taken (never colour alone, UI_UX §7) and a line under the row naming
+  the unlock and the distance to it: "🔒 Liquid Smoke — BBQ Sauce, 0 of 10
+  deliveries". The glyph says shut; only the words say when it opens, and
+  the number is the part the player can act on.
+
+  **The button stays live.** The obvious alternative is `disabled = true`,
+  which swallows the click and says nothing. A live button issues the
+  command, the simulation refuses it, and the cue is read back off what the
+  building holds afterwards — so the press sounds REFUSED, exactly as the
+  audio rule requires (a cue is fired by the handler that knows the real
+  outcome, never by the input). Pressing the slot the vessel already holds
+  is let through silently, because that press asked for nothing.
+
+  **The wire carries the verdict.** `IngredientsSnapshot`'s `hopper_items`
+  and `tank_fluids` became `ContentsChoice` records — `id`, `locked`,
+  `unlock_name`, `after_deliveries` — beside the lifetime delivery count,
+  and `World::ingredients_snapshot` passes the gate in as a closure. Godot
+  does not re-derive a gate from `unlocks.ron`; it reads a decision the
+  simulation already made, which is the same division `next_bill` and
+  `shortfall` are on.
+
+  **Where the rule stops, and why that is not a hole.** `Place`'s `item` is
+  NOT gated. It is how the build ghost seeds a newly placed bin and how a
+  layout fixture stands a factory up for a screenshot — not a choice made
+  against a gate. The ghost's default now skips locked ids, so no player
+  path produces such a Place. Refusing it as well would close nothing a
+  player can reach, and would cost every BBQ fixture ten deliveries of real
+  play before it could place a hopper: `sim::reference` can state that
+  premise cheaply (`open_every_gate`), but `godot_project/test_layouts.gd`
+  builds only through the public command API and has no honest way to pay
+  it, so the price would have been a test-only back door on the bridge —
+  worse than the hole it closed. The gate still bites the bin it seeds: the
+  raw cannot be bought, so neither a manual fill nor auto-fill can put a
+  unit in it, and `unlocks.rs` pins exactly that.
+
+  **The refusal lands before the purge.** Declaring a *different* fluid
+  empties the tank and the run it feeds. A refused declaration must
+  therefore refuse first and destroy nothing, or a click the game was never
+  going to honour would still cost the player the vinegar standing in the
+  drum. `try_set_tank_fluid` checks the gate immediately after the raw
+  check, above `purge_runs_fed_by`, and the test asserts the volume as well
+  as the name.
+
 - 2026-09-21: **An issue is for what you cannot fix now, and the bar is no
   longer low.** (Amends the 2026-09-16 GitHub entry below.)
 

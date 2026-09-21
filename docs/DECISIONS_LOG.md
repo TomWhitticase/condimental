@@ -18,6 +18,22 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-21 **A gated ingredient is padlocked in the contents picker, not
+  hidden from it — and pointing a vessel at one is REFUSED.** The market
+  omits a locked row; the picker keeps it, dimmed, with a 🔒 and a line
+  naming the unlock and the deliveries still to go. Different questions: the
+  market lists what you may buy now, the picker is everything this vessel
+  will ever hold, and a gate nobody sees coming is one nobody plans for. The
+  refusal is the simulation's (`try_set_hopper_item`, `try_set_tank_fluid`,
+  the tank's landing *before* the purge), the wire carries `locked`/
+  `unlock_name`/`after_deliveries` per choice, and the button stays live so
+  the refusal is heard rather than swallowed by a dead control. The rule
+  stops at `Place`'s `item`: that seeds a bin (the ghost, the fixtures)
+  rather than choosing against a gate, the ghost never offers a locked id,
+  and a bin seeded with one can hold nothing anyway. Fixtures state their
+  premise with `reference::open_every_gate` instead of the sim growing a
+  back door.
+
 - 2026-09-21 **An issue is for what you cannot fix now, and the bar is no
   longer low.** Amends the 2026-09-16 GitHub rule below, whose "if it was
   worth putting in a report, it is worth an issue" worked exactly as written

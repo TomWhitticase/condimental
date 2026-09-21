@@ -144,6 +144,20 @@ This is the central economic mechanic and the main departure from a plain Factor
 
 **Progression coupling:** early contracts should only demand tier-1/2 sauces (accessible from the start), and higher-value contracts should demand mixes that reach into tiers the player hasn't unlocked yet — creating the pull to invest contract earnings into the next equipment tier specifically to become eligible for the next tier of contract, rather than equipment unlocks being disconnected from what the contract board is asking for.
 
+**A gate is a rule, and it is also a promise.** `data/unlocks.ron` names the
+ids a tier holds back, and the simulation REFUSES every command that would
+reach one: `BuyIngredient`, `SignContract`, and — since 2026-09-21, issue
+#90 — pointing a placed hopper or fluid tank at a locked ingredient. The
+market omits a locked row; the configuration panel's CONTENTS picker keeps
+it and padlocks it, naming the unlock and the deliveries still to go. That
+asymmetry is deliberate and is the promise half: a gate the player can see
+coming is a thing to aim at, while one that materialises unannounced is a
+surprise they could not have planned for. The one place the rule stops is
+`Place`'s `item` field, which is how the build ghost and the test fixtures
+seed a bin rather than a choice made against a gate — the ghost never offers
+a locked id, and a bin seeded with one can hold nothing anyway, because the
+raw cannot be bought.
+
 **Expansion is a cost the contract board charges, and nobody warns you**
 (measured 2026-09-20, re-measured after review, issue #55). Building the BBQ
 branch off a running ketchup line stops boxed-ketchup output for about

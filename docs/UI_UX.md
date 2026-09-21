@@ -901,6 +901,21 @@ crop, never a spill. The measurement is taken from the **font** at build
 time rather than from the Label: a wrapping Label reports a 1px minimum
 width and will agree that anything fits.
 
+**A choice the player has not unlocked stays in the picker, padlocked.**
+`data/unlocks.ron` holds ingredients back until a tier opens, and the market
+simply omits a locked row — but the CONTENTS picker keeps it, dimmed, with a
+🔒 where the selected slot's ✔ would be and a line under the row naming the
+gate and the distance to it ("🔒 Liquid Smoke — BBQ Sauce, 4 of 10
+deliveries"). The two panels differ because they answer different questions.
+The market is a list of what you may buy **now**, and an entry you cannot buy
+is noise in it. The picker is the full set of things this vessel will ever
+hold, and a player who never sees liquid smoke until the day it appears has
+no way to anticipate it — a gate nobody can see coming is a gate nobody plans
+for (GAMEPLAY §2). Pressing a padlocked slot is refused by the simulation and
+sounds refused; the panel does not grey the button out and swallow the click,
+because the glyph, the dimming and the cue together say more than a dead
+control does (2026-09-21, issue #90).
+
 **And the panel is never wider than the constant that names its width.** The
 positioning arithmetic above is written against `CONFIG_PANEL_WIDTH`; a
 single unpinned footer Label made the real panel 99px wider than that, which

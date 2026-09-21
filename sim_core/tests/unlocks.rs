@@ -25,7 +25,7 @@ mod common;
 
 use sim_core::sim::types::Money;
 use sim_core::sim::{
-    ContractRegistry, PlayerCommand, RecipeRegistry, UnlockRegistry, World,
+    ContractRegistry, FLUID_TANK_CAPACITY, PlayerCommand, RecipeRegistry, UnlockRegistry, World,
     reference_chain_with_budget,
 };
 
@@ -326,5 +326,307 @@ fn a_save_written_before_the_gate_existed_loads_at_zero_deliveries() {
         loaded.money(),
         Money::from_num(1_000),
         "and nothing else about the save changed"
+    );
+}
+
+// =====================================================================
+// The contents picker (issue #90)
+// =====================================================================
+//
+// A gate holds back an ingredient, and until this the two commands that
+// point a BUILDING at one — `SetHopperItem` and `SetTankFluid` — accepted it
+// anyway. The player could aim a hopper at an ingredient nobody could buy,
+// and the hopper then sat empty forever saying only "in stock: 0". The
+// market's rule ("refused, not merely hidden") now covers them, and the
+// picker's wire carries what the panel needs to say so.
+
+/// The reference chain's first hopper, and its tank — the two buildings the
+/// configuration panel's CONTENTS picker is drawn for.
+const FIRST_HOPPER: (i32, i32) = (-1, 0);
+
+fn hopper_item(world: &World, tile: (i32, i32)) -> String {
+    match world.query_tile(tile) {
+        Some(sim_core::sim::TileSnapshot::Hopper { item, .. }) => item,
+        other => panic!("expected a hopper at {tile:?}, found {other:?}"),
+    }
+}
+
+/// Pointing a placed hopper at a locked ingredient is refused, and refused
+/// *totally*: the bin keeps the item it had, so a misdirected click cannot
+/// even empty it.
+#[test]
+fn a_hopper_cannot_be_pointed_at_a_locked_ingredient() {
+    let (ingredients, _) = gated();
+    let mut world = reference_chain_with_budget(recipes(), 10_000);
+    let before = hopper_item(&world, FIRST_HOPPER);
+    assert!(
+        !ingredients.contains(&before),
+        "the fixture's hopper must start on an UNLOCKED item for this to mean anything"
+    );
+
+    for id in &ingredients {
+        world.issue_command(PlayerCommand::SetHopperItem {
+            tile: FIRST_HOPPER,
+            item: id.clone(),
+        });
+        assert_eq!(
+            hopper_item(&world, FIRST_HOPPER),
+            before,
+            "'{id}' is behind a closed gate, so the hopper must keep holding '{before}' — \
+             a dimmed slot the simulation still honours is a decoration, not a gate"
+        );
+    }
+}
+
+/// And the same click, once the gate has opened, is accepted — so the
+/// refusal above is the gate and not some other rule quietly declining.
+#[test]
+fn the_same_hopper_click_lands_once_the_gate_opens() {
+    let (ingredients, _) = gated();
+    let mut world = reference_chain_with_budget(recipes(), 10_000);
+    sim_core::sim::reference::open_every_gate(&mut world);
+    let wanted = ingredients
+        .iter()
+        .find(|id| world.raw_items().iter().any(|raw| raw == *id))
+        .expect("the gate must hold back at least one RAW solid for this test");
+
+    world.issue_command(PlayerCommand::SetHopperItem {
+        tile: FIRST_HOPPER,
+        item: wanted.clone(),
+    });
+    assert_eq!(
+        &hopper_item(&world, FIRST_HOPPER),
+        wanted,
+        "with the gate open this is an ordinary retarget"
+    );
+}
+
+/// Where the rule deliberately STOPS: a hopper may be placed holding a
+/// locked ingredient, and is then a bin that can never be filled.
+///
+/// `Place`'s `item` is not a choice made against a gate. The build ghost
+/// seeds it — and skips locked ids when it does (`_selected_hopper_item`) —
+/// while a layout fixture names it to stand a factory up for a screenshot.
+/// Refusing it would close nothing a player can reach and would cost every
+/// BBQ fixture ten deliveries of real play before it could place a bin,
+/// which `godot_project/test_layouts.gd` has no honest way to pay.
+///
+/// What makes that safe is the half asserted below: the gate still bites the
+/// bin. `BuyIngredient` is refused for the locked raw, so the larder never
+/// holds a unit of it, so neither a manual fill nor auto-fill can put
+/// anything in the hopper. The player cannot reach a state the picker would
+/// not have let them reach; they just get an empty bin instead of a refusal.
+#[test]
+fn a_hopper_placed_holding_a_locked_ingredient_can_never_be_filled() {
+    let (ingredients, _) = gated();
+    let mut world = reference_chain_with_budget(recipes(), 10_000);
+    let locked = ingredients
+        .iter()
+        .find(|id| world.raw_items().iter().any(|raw| raw == *id))
+        .expect("the gate must hold back at least one RAW solid for this test")
+        .clone();
+    let free = (40, 40);
+
+    world.issue_command(PlayerCommand::Purchase {
+        kind: "hopper".to_string(),
+        quantity: 1,
+    });
+    world.issue_command(PlayerCommand::Place {
+        kind: "hopper".to_string(),
+        tile: free,
+        direction: sim_core::sim::Direction::East,
+        item: Some(locked.clone()),
+    });
+    assert_eq!(
+        hopper_item(&world, free),
+        locked,
+        "a Place naming a locked raw stands the bin up — the gate is not on this command"
+    );
+
+    // And now the half that matters. Buy all you like: the gate refuses.
+    world.issue_command(PlayerCommand::BuyIngredient {
+        item: locked.clone(),
+        quantity: 50,
+    });
+    world.issue_command(PlayerCommand::SetHopperAutoFill {
+        tile: free,
+        enabled: true,
+    });
+    for _ in 0..50 {
+        world.tick();
+    }
+    let held = world
+        .hopper_snapshots()
+        .into_iter()
+        .find(|hopper| hopper.tile == free)
+        .expect("the hopper this test placed");
+    assert_eq!(
+        held.quantity, 0,
+        "'{locked}' cannot be bought, so an auto-filling hopper of it stays empty forever"
+    );
+
+    // Once the gate opens the same bin fills from the same commands.
+    sim_core::sim::reference::open_every_gate(&mut world);
+    world.issue_command(PlayerCommand::BuyIngredient {
+        item: locked.clone(),
+        quantity: 50,
+    });
+    world.tick();
+    let filled = world
+        .hopper_snapshots()
+        .into_iter()
+        .find(|hopper| hopper.tile == free)
+        .expect("the hopper this test placed");
+    assert!(
+        filled.quantity > 0,
+        "with the gate open the same bin fills — the emptiness was the gate's, not the hopper's"
+    );
+}
+
+/// The wire the CONTENTS picker is drawn from. A locked id is KEPT here and
+/// flagged, where the market listing omits it: the picker is the full set of
+/// things this building will ever hold, and a gate nobody can see coming is
+/// one nobody anticipates (GAMEPLAY.md §2).
+#[test]
+fn the_picker_wire_keeps_a_locked_choice_and_names_its_gate() {
+    let (ingredients, _) = gated();
+    let world = reference_chain_with_budget(recipes(), 10_000);
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&world.ingredients_snapshot()).unwrap())
+            .unwrap();
+
+    let threshold = UnlockRegistry::bundled()
+        .get("bbq_sauce")
+        .expect("data/unlocks.ron must ship the bbq_sauce gate")
+        .after_deliveries;
+    let name = UnlockRegistry::bundled()
+        .get("bbq_sauce")
+        .unwrap()
+        .name
+        .clone();
+
+    let mut seen_locked = 0;
+    for list in ["hopper_items", "tank_fluids"] {
+        let choices = snapshot[list].as_array().expect("a list of choices");
+        assert!(!choices.is_empty(), "{list} must not be empty");
+        for choice in choices {
+            let id = choice["id"].as_str().unwrap().to_string();
+            let locked = choice["locked"].as_bool().unwrap();
+            assert_eq!(
+                locked,
+                ingredients.contains(&id),
+                "'{id}' in {list} reports locked={locked}, which disagrees with the gate"
+            );
+            if locked {
+                seen_locked += 1;
+                assert_eq!(choice["unlock_name"].as_str().unwrap(), name);
+                assert_eq!(
+                    choice["after_deliveries"].as_u64().unwrap() as u32,
+                    threshold
+                );
+            } else {
+                assert_eq!(choice["unlock_name"].as_str().unwrap(), "");
+                assert_eq!(choice["after_deliveries"].as_u64().unwrap(), 0);
+            }
+            assert!(
+                locked
+                    || snapshot["entries"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|entry| entry["id"] == id.as_str()),
+                "an unlocked choice is on the market too"
+            );
+        }
+    }
+    assert!(
+        seen_locked > 0,
+        "the shipped gate must hold back at least one raw, or this test proves nothing"
+    );
+    assert_eq!(
+        snapshot["deliveries"].as_u64().unwrap(),
+        0,
+        "and the count to read those thresholds against rides along"
+    );
+    for id in &ingredients {
+        assert!(
+            !snapshot["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["id"] == id.as_str()),
+            "'{id}' is still absent from the MARKET listing — the picker shows what \
+             the market hides, not the other way round"
+        );
+    }
+}
+
+/// Every choice unlocks together with the gate, and nothing then claims a
+/// gate to describe.
+#[test]
+fn the_picker_wire_goes_quiet_once_the_gate_opens() {
+    let mut world = reference_chain_with_budget(recipes(), 10_000);
+    sim_core::sim::reference::open_every_gate(&mut world);
+    let snapshot = world.ingredients_snapshot();
+    assert!(
+        snapshot
+            .hopper_items
+            .iter()
+            .chain(snapshot.tank_fluids.iter())
+            .all(|choice| !choice.locked
+                && choice.unlock_name.is_empty()
+                && choice.after_deliveries == 0),
+        "with every gate open no choice is locked, and an unlocked one carries no gate"
+    );
+}
+
+/// The tank half of the same rule. Issue #43 built both pickers out of one
+/// piece of Godot code and #90 notes that two pickers behaving differently
+/// would be worse than one consistent gap, so the fluid command declines a
+/// locked fluid exactly as the solid one declines a locked ingredient — and
+/// declines it BEFORE the purge, so a refused declaration does not cost the
+/// player the vinegar already in the drum.
+#[test]
+fn a_tank_cannot_be_declared_to_a_locked_fluid() {
+    /// The reference chain's fluid tank (`tests/auto_fill.rs` pins the same tile).
+    const TANK: (i32, i32) = (5, 2);
+    let (ingredients, _) = gated();
+    let mut world = reference_chain_with_budget(recipes(), 10_000);
+    common::stock_up(&mut world);
+    world.issue_command(PlayerCommand::FillFluidTank {
+        amount: FLUID_TANK_CAPACITY,
+        tile: Some(TANK),
+    });
+    let held = world
+        .fluid_tank_snapshots()
+        .into_iter()
+        .find(|tank| tank.tile == TANK)
+        .expect("the reference chain ships a fluid tank");
+    assert!(
+        held.quantity > 0.0,
+        "the fixture wants fluid standing in the drum, so a wrongly-allowed purge would show"
+    );
+
+    let locked = ingredients
+        .iter()
+        .find(|id| world.raw_fluids().contains(*id))
+        .expect("the gate must hold back at least one RAW fluid for this test")
+        .clone();
+    world.issue_command(PlayerCommand::SetTankFluid {
+        tile: TANK,
+        fluid: locked.clone(),
+    });
+    let after = world
+        .fluid_tank_snapshots()
+        .into_iter()
+        .find(|tank| tank.tile == TANK)
+        .unwrap();
+    assert_eq!(
+        after.fluid, held.fluid,
+        "'{locked}' is behind a closed gate, so the drum still holds what it held"
+    );
+    assert_eq!(
+        after.quantity, held.quantity,
+        "and a refused declaration purges nothing — the refusal comes first"
     );
 }
