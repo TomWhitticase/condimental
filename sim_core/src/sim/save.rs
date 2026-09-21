@@ -115,9 +115,15 @@
 //! reserved it said what ends it: "after this batch ships, a field addition
 //! is a version bump like any other shape change".
 //!
-//! **`schema_version` is therefore 2**, and [`SavedTank::fluid`] is the
-//! field that moved it (issue #43: a tank declares what it holds). A v1
-//! file is **rejected**, not migrated — the rule ARCHITECTURE.md §4 sets
+//! **`schema_version` is therefore 2**, and version 2 is this sweep's
+//! batch: [`SavedTank::fluid`] is the field that moved it (issue #43: a
+//! tank declares what it holds), and [`SavedMachine::mothballed`] and
+//! [`SavedDock::mothballed`] (issue #19: a crewed building can be switched
+//! off) joined the same number rather than each claiming one of their own.
+//! Three shape changes reviewed and merged in the same sweep are one shape
+//! change as far as a file is concerned — no build ever wrote a save with
+//! one of them and not the others — so a third and a fourth version would
+//! name states that never existed. A v1 file is **rejected**, not migrated — the rule ARCHITECTURE.md §4 sets
 //! for this format and every other loader in this crate follows — and the
 //! cost of that is bounded by the same fact the window rested on: no
 //! release has ever written a save file, so the only v1 files in existence
@@ -436,6 +442,23 @@ pub struct SavedMachine {
     /// player never started.
     #[serde(default)]
     pub recipe: Option<RecipeId>,
+    /// Whether the player had switched this machine OFF
+    /// (`sim::machine::Machine::mothballed`, issue #19's escape hatch from
+    /// the unpaid spiral). A mothballed machine is out of the establishment,
+    /// so this is a payroll fact as much as a machine one: a factory
+    /// reopened from a save must still be off where the player switched it
+    /// off, or the load hands them back a wage bill they had deliberately
+    /// cut.
+    ///
+    /// `#[serde(default)]`, but **not** under the closed field-addition
+    /// window: it is part of what makes the format version 2, alongside
+    /// `SavedTank::fluid` (see the module doc). The default still earns its
+    /// keep between two version-2 builds in this sweep — a file written
+    /// before this field existed loads with every machine in service, which
+    /// is what it was written with — and a v1 file never reaches it, having
+    /// already been refused.
+    #[serde(default)]
+    pub mothballed: bool,
 }
 
 /// A [`LoadWindow`](super::machine::LoadWindow)'s ring, verbatim: one
@@ -503,6 +526,10 @@ pub struct SavedDock {
     /// `refused_by`. `#[serde(default)]`.
     #[serde(default)]
     pub understaffed: bool,
+    /// `Dock::mothballed` — the player's switch, same shape and same
+    /// `#[serde(default)]` reason as `SavedMachine::mothballed`.
+    #[serde(default)]
+    pub mothballed: bool,
 }
 
 /// One contract's live state, matched to content by `id` on load.
@@ -891,6 +918,7 @@ impl World {
                         contents: dock.slots().to_vec(),
                         shipped_total: dock.shipped_total(),
                         understaffed: dock.understaffed(),
+                        mothballed: dock.mothballed(),
                     })
                 }
                 _ => {
@@ -913,6 +941,7 @@ impl World {
                         },
                         refused_by: machine.refused_by.clone(),
                         recipe: Some(machine.recipe.clone()),
+                        mothballed: machine.mothballed,
                     })
                 }
             };
@@ -1424,6 +1453,10 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                     });
                 machine.load = load;
                 machine.refused_by = saved.refused_by.clone();
+                // The establishment is recomputed once after every body is
+                // restored (see `load`), so setting this here is enough to
+                // put a mothballed machine's crew back out of the payroll.
+                machine.mothballed = saved.mothballed;
                 // `validate` already checked this names one of the kind's
                 // recipes; a save without the field keeps the recipe the
                 // `Place` above started the machine on.
@@ -1486,6 +1519,7 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                             saved.contents.clone(),
                             saved.shipped_total,
                             saved.understaffed,
+                            saved.mothballed,
                         ),
                     )
                     .expect("the entity was just placed");
@@ -1899,6 +1933,7 @@ mod tests {
             load: SavedLoad::default(),
             refused_by: None,
             recipe: None,
+            mothballed: false,
         });
         let message = refusal(data);
         assert!(message.contains("9999"), "{message}");

@@ -1102,6 +1102,7 @@ fn staff_snapshot_json_has_the_documented_shape_in_staff_ron_order() {
     assert_eq!(
         keys,
         vec![
+            "bill_per_period",
             "categories",
             "last_bill",
             "money",
@@ -1117,6 +1118,7 @@ fn staff_snapshot_json_has_the_documented_shape_in_staff_ron_order() {
     assert_eq!(json["next_payday_tick"], 2000);
     assert_eq!(json["last_bill"], 14);
     assert_eq!(json["next_bill"], 14);
+    assert_eq!(json["bill_per_period"], 14, "nothing is stood down");
     assert_eq!(json["shortfall"], 0);
     assert_eq!(json["unpaid_last_payday"], 0);
     assert_eq!(json["walked_out_last_payday"], 0);
@@ -1141,9 +1143,12 @@ fn staff_snapshot_json_has_the_documented_shape_in_staff_ron_order() {
                 "id",
                 "left_last_payday",
                 "name",
+                "on_payroll",
                 "owed",
                 "required",
                 "short",
+                "sources",
+                "stood_down",
                 "unpaid",
                 "wage"
             ]
@@ -1454,13 +1459,16 @@ fn arrears_survive_a_save_and_an_impossible_state_is_refused() {
         .unwrap()
         .owed
         .insert("manufacturing".to_string(), 0);
-    let message = World::from_save_ron(&save.to_ron(), recipes())
-        .err()
-        .expect("fewer owed than hired is a corrupt save")
-        .to_string();
-    assert!(
-        message.contains("manufacturing") && message.contains("owed"),
-        "{message}"
+    // Fewer OWED than hired is not corrupt — since standing down (issue
+    // #19) it is what a save taken during a shutdown looks like — so it
+    // loads, and the establishment rebuilt from the replayed placements
+    // decides how much of it stands. Nothing is mothballed in this world,
+    // so every head goes straight back on the payroll.
+    let loaded = World::from_save_ron(&save.to_ron(), recipes())
+        .expect("fewer owed than hired is a shutdown, not a corrupt save");
+    assert_eq!(
+        loaded.staff().pool("manufacturing").unwrap().owed,
+        loaded.staff().headcount("manufacturing"),
     );
 }
 

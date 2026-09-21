@@ -235,6 +235,64 @@ See [WORKFLOW.md](WORKFLOW.md).
   and that ratio are **withdrawn**. The same-kind control is one single case
   on the shared belt across 14 renders, which spreads 5.0/255. Full record in
   `docs/DECISIONS.md`.
+- 2026-09-20 **Mothballing is the way out of arrears, and it STANDS CREW
+  DOWN rather than only shrinking the establishment.** A placement can be
+  switched off (`PlayerCommand::SetMothballed`, wire `set_mothballed`). It
+  drops out of the ESTABLISHMENT, produces nothing, and HOLDS the batch it
+  was part-way through rather than losing it (`Machine::tick` advances
+  `start_tick` in step with the clock). **Crucially it also moves money**:
+  `StaffPools` computes `stood_down = min(headcount - required, the
+  mothballed requirement)` and `on_payroll() = headcount - stood_down`, and
+  `bill_per_period` sums the heads ON THE PAYROLL, so the bill falls the
+  tick the switch is thrown without firing anybody. `next_bill` follows
+  `owed`, which `sync_payroll` only ever RAISES — a head already owed for
+  this period stays owed, so mothballing on payday eve buys notice pay, not
+  free labour — and only payday lowers it. **A stood-down head never walks
+  out**: `left` is capped by `on_payroll()`. That is the whole reason to
+  prefer mothballing to firing, which loses a trained crew the factory then
+  has to re-hire.
+- 2026-09-20 **A placement may be mothballed iff its kind asks for a crew.**
+  The test is a non-empty `staff` list in `data/machines.ron`, not a Rust
+  type check — content decides, as content decides everything else about a
+  kind. This **reverses** the first round's "only a `Machine` can be
+  mothballed": the DOCK asks for a logistics clerk, so it is switchable, and
+  it has to be, because while it is on, `required("logistics")` never
+  reaches 0 and a factory with no income can never get its bill to zero. A
+  hopper, a tank, a belt, a pipe and a splitter ask for nobody and are
+  refused byte-exactly. The same rule drives Godot: `_config_can_mothball`
+  asks whether the polled crew list is non-empty rather than matching a
+  hardcoded kind list. Mothballing is not a fourth `WorkState` — the window
+  it did no work in is honestly a starved window, and `StallKind::Mothballed`
+  carries the why. It persists as `SavedMachine::mothballed` and
+  `SavedDock::mothballed`, both `#[serde(default)]`, **joining
+  `schema_version` 2** with issue #43's `SavedTank::fluid` rather than
+  claiming a version of their own. No new `data/*.ron` number: the figures
+  that govern it (`wage`, `pay_period_ticks`) are already data. The surface
+  is the click-to-configure panel; **not** a keybind — Q, SPACE and V were
+  retired for acting on a building the player could not see. What
+  mothballing does NOT do is conjure income: a standing order lost to three
+  missed windows during a shutdown still costs money to re-sign, which is
+  issue #85 and stays open.
+  > Full record in `docs/DECISIONS.md`.
+
+- 2026-09-20 **`crewed` on a placement is the ESTABLISHMENT's answer, not a
+  replay of the last tick.** `PlacementSnapshot.crewed` and
+  `MachineLoadEntry.crewed` come from `World::uncrewed_placements`, which
+  hands each pool's `headcount` out in the order the tick claims in
+  (`topology.machines`, then `topology.docks`, whole crew or nothing) and
+  names whoever goes without. It deliberately does **not** read what the
+  last tick did: the tick only claims for a machine that would otherwise
+  have worked, so a per-tick reading flickers as the line ebbs — which is
+  the exact flapping the 2026-09-16 establishment change existed to end.
+  It is derived, so no save-schema change; `crewed` sits BEFORE `links` in
+  `PlacementSnapshot`, because `links` stays last and `tests/links.rs` pins
+  that shape byte for byte. Godot shows it in the hover's load line, in the
+  same words a `staff` stall gives (`_uncrewed_reason_text` and
+  `_stall_reason_text` share `_crew_categories_text`), and by outlining the
+  load bar amber — the track's BORDER, not its fill, because an uncrewed
+  machine does no work and has no fill left to colour. **No in-world pole**;
+  the hover panel is still the one place status lives.
+  > Full record in `docs/DECISIONS.md`.
 
 - 2026-09-16 **The game is called CONDIMENTAL, and so is the repo.** All-caps
   wherever it is the title: the menu's `title.text`, `config/name`, the
