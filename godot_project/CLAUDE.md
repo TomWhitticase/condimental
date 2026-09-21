@@ -136,6 +136,15 @@ builds factories through real purchase/place commands.
 
 - `scripts/verify-core-loop.sh` — cargo tests, `cargo xtask`, the imports,
   then every headless `test_*.gd`.
+- **`test_perf.gd` is the only test that asserts a wall clock**, and its two
+  ceilings are SCALED by a load factor it measures in its own process (a
+  fixed script loop, before and after, worse of the two, clamped to
+  [1.0, 6.0] — issue #146). Six worktrees share this CPU, and the same 120
+  frames have measured 350.7 ms alone and 3733.1 ms beside a neighbour's
+  verify. A `PERF_FAIL` that survives the scaling is worth believing; re-run
+  the one script by itself before touching anything either way. Nothing else
+  in the suite gets a wall-clock assertion — assert the outcome, print the
+  time.
 - One test: `godot --headless --path godot_project --script test_x.gd`.
   **Every test must print its own success marker** (`FOO_OK`) — Godot exits 0
   even on a script parse failure, so exit status proves nothing.
