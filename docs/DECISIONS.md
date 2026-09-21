@@ -25,6 +25,63 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-21: **The one wall-clock assertion in the gate is scaled by how
+  loaded the machine is, measured in the same process.** (Issue #146.)
+
+  **The fault.** `godot_project/test_perf.gd` asserts that 120 hand-driven
+  `_process` frames on the 1500-tile stress line finish inside
+  `FRAMES_CEILING_MSEC := 3000`, and that a warm `_rebuild_world` finishes
+  inside 1500 ms. Every other test in the suite asserts an outcome — a count,
+  a refusal, a rectangle — and is reproducible. These two assert a duration,
+  and this repo is worked in six worktrees on one machine, each of which runs
+  `godot --headless --script test_*.gd` whenever it likes. On 2026-09-21 a
+  full verify on a branch that touched nothing but panel placement reported
+  `PERF_FAIL: 120 frames took 3733.1 ms`; re-running the same script alone,
+  same build, no edit between the two, gave 350.7 ms. Ten times, from
+  neighbours.
+
+  **Why that is worth fixing rather than tolerating.** The failure does not
+  read as noise. It reads as a performance regression, in the one test whose
+  whole job is to catch performance regressions, and it arrives at the end of
+  a long verify when the session is trying to open a PR. The cost is a
+  session-hour spent hunting a regression in a diff that has none — and the
+  cheaper the disproof looks, the more likely the next agent is to skip it
+  and "fix" a phantom.
+
+  **Why not just raise the ceiling.** The ceilings are already about 8x the
+  measured solo cost, and the test's own header says why: they are generous
+  on purpose so that this catches an order-of-magnitude regression — a
+  Node3D per tile coming back — and not a ten-percent one. A ceiling loose
+  enough to survive four concurrent Godot runs is loose enough to let the
+  regression it exists for pass.
+
+  **The rule.** The test times a fixed amount of pure-script arithmetic
+  (400k iterations, about 12 ms unloaded) in its own process, once before the
+  measurements and once after them, takes the worse of the two, and
+  multiplies both ceilings by `measured / reference`. Contention that arrives
+  halfway through a run is as real as contention that was there at the start,
+  which is why it is bracketed rather than sampled once. The factor is
+  clamped to 1.0 below, so a quiet box gets exactly the constants and nothing
+  is loosened, and to 6.0 above, because past that the machine is too busy
+  for any of it to mean much and a ceiling that rises without limit is not a
+  test. The raw milliseconds are still printed first and unscaled: the
+  ticket-4 before/after numbers in DEVLOG quote those lines, and a number
+  that moves with the weather is no good to compare against.
+
+  **The median, never the minimum.** A process fighting for the CPU still
+  gets a full slice now and then, so its fastest sample is indistinguishable
+  from an idle machine's — measured under sixteen spinning processes, the
+  fastest of nine samples was 11.9 ms against an idle 12.2 ms, while the
+  median was 38.3 ms and the slowest 113.5 ms. The mean is no better: one
+  descheduled sample drags it around on its own. The median is what a long
+  stretch of work, which is what the frame loop is, actually runs at.
+
+  **What this does not license.** Scaling is for a contended clock, not for a
+  slow implementation. Nothing else in the suite may grow a wall-clock
+  assertion on the strength of this; an outcome to assert is almost always
+  available, and where it is not, the number is printed and reviewed rather
+  than gated.
+
 - 2026-09-21: **Stock has a ceiling, a rack is pure storage, and its bays are
   derived from the ledger rather than stored.** (Warehouse stock racks, W1.)
 
