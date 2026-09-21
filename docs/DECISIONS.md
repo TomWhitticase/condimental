@@ -25,7 +25,6 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
-<<<<<<< HEAD
 - 2026-09-20: **A width fix must be MEASURED at every window size, and
   `snap_rows` is for rows the player signs.** (Follow-up to the entry below,
   from the review of PR #102.)
@@ -70,7 +69,6 @@ matches what code comments and data files cite.
   `test_hud_plates.gd` now loops the column rather than naming one plate, so
   the next tenant of that edge is caught by a test that already exists.
 
-=======
 - 2026-09-20: **Glow means "this is emitting", not "this is bright" — and
   SSAO means "this is a crease".** Issue
   #32. The hall's glow settings — `glow_intensity 0.7`, `glow_bloom 0.15`,
@@ -225,7 +223,6 @@ matches what code comments and data files cite.
   correctly, not evidence that it is inert. The eye-level numbers above come
   from a pose standing beside the line, not from the default first-person
   pose `test_screenshot.gd` reaches.
->>>>>>> origin/main
 - 2026-09-20: **A tank declares what it holds; the save format's
   field-addition window is closed.** Two issues, one mechanism, and one
   question that had to go back to the owner.

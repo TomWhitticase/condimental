@@ -184,7 +184,6 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
-<<<<<<< HEAD
 ### 2026-09-20 — The width pass, measured: a fit that was not conditional cost the board an offer
 
 PR #102 taught every modal to yield width at 1280x720 and landed on main as
@@ -270,7 +269,6 @@ Not fixed here and still open: issue #106 (a mid-word break in the contents
 picker) and issue #99 (the legend), neither of which is this review's
 subject.
 
-=======
 ### 2026-09-20 — The hall's two post-passes, judged against frames for the first time
 
 Issues #32 and #2 closed; #3 measured and left open. All three were the same
@@ -326,7 +324,6 @@ frames before it saves. That defeated the first glow sweep entirely (two
 renders of the same settings differed more than two different settings did),
 and both post-pass retunes above were measured through a tick-pinned harness
 instead.
->>>>>>> origin/main
 ### 2026-09-20 — A tank says what it holds, and a recipe file may fork
 
 Two fluid-identity issues off the board, both latent: neither bites the

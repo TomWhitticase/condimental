@@ -18,7 +18,6 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
-<<<<<<< HEAD
 - 2026-09-20 **A width fix must be MEASURED at every window size, and
   `snap_rows` is for rows the player signs.** Two regressions from the width
   pass above, both from a fit applied unconditionally. `_build_contract_board_row`
@@ -33,7 +32,6 @@ See [WORKFLOW.md](WORKFLOW.md).
   card is half a choice. A production row is a readout; the production panel
   drops it (it was 161px short of its column at 1600x900) and joins the build
   menu in letting the half-row past the cut say "scroll".
-=======
 - 2026-09-20 **Glow means "this is emitting", not "this is bright" — and
   SSAO means "this is a crease".** The
   hall's post-pass is `glow_intensity 1.0`, **`glow_bloom 0.0`**,
@@ -70,7 +68,6 @@ See [WORKFLOW.md](WORKFLOW.md).
   first. A first-person shot aimed across the empty hall shows no SSAO at any
   setting and proves nothing — there is no geometry near the camera.
   Full record in `docs/DECISIONS.md`.
->>>>>>> origin/main
 - 2026-09-20 **A tank declares what it holds, and the save format's
   field-addition window is closed.** `FluidTank` carries an optional declared
   fluid, set by `PlayerCommand::SetTankFluid` and **seeded into**
