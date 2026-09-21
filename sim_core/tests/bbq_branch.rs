@@ -286,7 +286,7 @@ fn recipe_at(world: &World, tile: (i32, i32)) -> String {
     world
         .world_layout()
         .into_iter()
-        .find(|placement| placement.tile == tile.into())
+        .find(|placement| placement.tile == tile)
         .and_then(|placement| placement.recipe)
         .unwrap_or_else(|| panic!("no machine at {tile:?}"))
 }
