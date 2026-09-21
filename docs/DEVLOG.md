@@ -184,6 +184,46 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — Confirming what a tank already holds stopped costing a tankful (issue #121)
+
+Declaring a fluid tank's fluid empties the tank and purges every pipe run it
+feeds. That rule is right and stays: carrying volumes across a recompute
+would relabel fluid the player bought as something else, so a declaration
+that renames a run has to destroy what the old name was attached to. What was
+wrong is that the rule fired on declarations that renamed nothing. A tank
+ships **undeclared** — it has no fluid id of its own and reads its name off
+the run it discharges into — so the single most ordinary click in the panel,
+ticking the vinegar the panel is already showing you, was billed at the full
+price of a fluid swap. On the shipped chain that is 22 units in the tank and
+40 in the run, gone, for pressing "yes" to the status quo.
+
+`World::try_set_tank_fluid` now asks one question before the declaration
+lands: does this only write down what is already resolved? Two halves, both
+required. The tank's own contents must be that fluid or there must be none —
+a tank is allowed to be empty, since there is nothing there to destroy. And
+every run it discharges into must resolve to `PipeNaming::Carries(x)` for the
+same x. A tank that discharges into no run at all is *not* settled, and
+neither is one whose run is `Ambiguous` (two tanks disagreeing) or
+`Unnameable` (no machine on it can say). Those keep the old destructive path
+exactly. The settled case takes a new `FluidTank::settle`, which records the
+declaration and skips `purge_runs_fed_by` — a sibling of `declare` rather
+than a flag on it, because the two mean different things and only `World`
+can tell them apart: the tank type cannot see a run.
+
+The panel half was the same bug wearing the other hat. The picker's note
+quantified what a click would destroy only on a tank that was **already**
+declared, which is the one state the shipped chain is never in. Both
+undeclared branches warn now: "another fluid destroys 62.0 units" on a run
+something can name, where the carried fluid itself has just become free, and
+"declaring destroys 62.0 units" where nothing can name the run and every pick
+purges. That is UI_UX.md point 38 applied to the state the game actually
+boots in, which the pull request that wrote the point had skipped.
+
+Four new tests, three in `tests/tank_fluid.rs` around a new
+shipped-single-tank fixture and one in `test_config_panel.gd`. The sim ones
+were checked for vacuity by disabling the guard and watching the settled case
+fail. `scripts/verify-core-loop.sh` is green.
+
 ### 2026-09-20 — The width pass, measured: a fit that was not conditional cost the board an offer
 
 PR #102 taught every modal to yield width at 1280x720 and landed on main as

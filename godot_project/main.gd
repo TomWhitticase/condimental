@@ -10640,21 +10640,34 @@ func _declared_fluid_of(snapshot: Dictionary) -> String:
 ## overrule it — and has to overrule it if they want a second raw fluid on a
 ## second run (issue #43).
 ##
-## The declared case names **what switching will destroy, before the click**,
-## because switching destroys more than this panel is showing. It empties the
-## tank, which is the rule a hopper's retarget already has, and it also purges
-## the pipe run the tank feeds (`World::try_set_tank_fluid`) — that fluid was
+## Each case names **what the click will destroy, before the click**, because
+## declaring destroys more than this panel is showing. It empties the tank,
+## which is the rule a hopper's retarget already has, and it also purges the
+## pipe run the tank feeds (`World::try_set_tank_fluid`) — that fluid was
 ## bought and it is gone. Found in review of the pull request that added
 ## declaring: the sim was silently relabelling the run instead, and the fix
 ## makes a destructive act destructive, so the player has to be told first
 ## rather than left to discover it from a number that dropped.
+##
+## **The undeclared cases warn too** (issue #121). They did not, and an
+## undeclared tank is how every tank ships, so the one state the shipped
+## chain is actually played in was the one state that invited the click
+## without saying what it costs — against UI_UX.md point 38, which the same
+## pull request wrote. What differs is only which click is the destructive
+## one: on a named run the fluid it already carries is now a free no-op in
+## the sim, so the warning is about picking *another*; on a run nothing can
+## name, every pick purges.
 func _tank_picker_note(declared: String, carried: String, doomed: float) -> String:
 	if declared != "":
 		if doomed > 0.0:
 			return "switching destroys %.1f units — this tank and the run it feeds" % doomed
 		return "switching empties this tank and the run it feeds"
 	if carried != "":
+		if doomed > 0.0:
+			return "another fluid destroys %.1f units — this tank and the run it feeds" % doomed
 		return "read from the pipe run — pick one to say for certain"
+	if doomed > 0.0:
+		return "declaring destroys %.1f units — this tank and the run it feeds" % doomed
 	return "nothing can name this run — pick what this tank holds"
 
 

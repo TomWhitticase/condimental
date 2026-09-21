@@ -4012,6 +4012,17 @@ impl World {
     /// was the alternative, and it is the worse game — it leaves a player
     /// who mis-declared a tank with no way to drain the run they no longer
     /// want.
+    ///
+    /// **And a declaration that changes no fluid destroys nothing** (issue
+    /// #121). Everything above is about a *switch*; a tank ships
+    /// undeclared, so the commonest use of this command is not a switch at
+    /// all but the player agreeing with the name the graph already derived,
+    /// and that used to empty the tank and purge the run exactly as a
+    /// switch does — 120 units of vinegar destroyed to replace vinegar with
+    /// vinegar, on a panel whose note invited the click. See
+    /// [`Self::declaration_settles_what_is_there`] for what "changes no
+    /// fluid" means precisely; when it holds, the declaration is recorded
+    /// through [`FluidTank::settle`] and nothing is purged.
     fn try_set_tank_fluid(&mut self, tile: TileCoord, fluid: &str) -> bool {
         if !self.raw_fluids.iter().any(|raw| raw == fluid) {
             return false;
@@ -4019,17 +4030,78 @@ impl World {
         let Some(&entity) = self.topology.grid.get(&tile) else {
             return false;
         };
-        let Ok(mut tank) = self.ecs.get::<&mut FluidTank>(entity) else {
-            return false;
-        };
-        if !tank.declare(fluid.to_string()) {
+        if self.ecs.get::<&FluidTank>(entity).is_err() {
             return false;
         }
+        // Asked before the declaration lands, because both halves of it
+        // read state the declaration is about to change.
+        let settles = self.declaration_settles_what_is_there(entity, fluid);
+        let mut tank = self
+            .ecs
+            .get::<&mut FluidTank>(entity)
+            .expect("the tile was a tank one statement ago");
+        let changed = if settles {
+            tank.settle(fluid.to_string())
+        } else {
+            tank.declare(fluid.to_string())
+        };
         drop(tank);
-        self.purge_runs_fed_by(entity);
+        if !changed {
+            return false;
+        }
+        if !settles {
+            self.purge_runs_fed_by(entity);
+        }
         self.mark_placement_dirty(entity);
         self.recompute_topology();
         true
+    }
+
+    /// Whether declaring `fluid` on `tank` would only write down what that
+    /// tank and its run are already resolved to hold — the case
+    /// [`Self::try_set_tank_fluid`] must not destroy anything for.
+    ///
+    /// Both halves are needed, and neither is "the run also carries
+    /// `fluid`" on its own:
+    ///
+    /// * **the tank's own contents are `fluid`, or there are none.** A tank
+    ///   holds no id of its own, so its contents are whatever
+    ///   [`Self::tank_fluid`] resolves — the declaration if it has one, the
+    ///   run's name otherwise. A tank declared vinegar and still holding
+    ///   some of it is switching, however its run reads.
+    /// * **every run it discharges into already resolves to
+    ///   `Carries(fluid)`.** A run that reads `Ambiguous` or `Unnameable`
+    ///   becomes something else the moment this declaration seeds it, and
+    ///   whatever is standing in it was never `fluid` by any answer the
+    ///   simulation had — so that declaration *is* a change and the purge
+    ///   is right. A tank facing a junction may discharge into more than
+    ///   one run; one of them changing is enough to make this a change.
+    ///
+    /// A tank discharging into no run at all is not settled either. It has
+    /// no downstream to lose, so the distinction costs nothing there: the
+    /// purge finds nothing and the tank it empties can only be empty, since
+    /// [`Self::fill_tank_entity`] refuses a tank with no run to name what
+    /// it is pouring.
+    fn declaration_settles_what_is_there(&self, tank: Entity, fluid: &str) -> bool {
+        let Ok(body) = self.ecs.get::<&FluidTank>(tank) else {
+            return false;
+        };
+        let holds_only_this = body.is_empty();
+        drop(body);
+        if !holds_only_this && self.tank_fluid(tank).as_deref() != Some(fluid) {
+            return false;
+        }
+        let mut runs = self
+            .topology
+            .tank_discharges
+            .iter()
+            .filter(|&&(entity, _, _)| entity == tank)
+            .map(|&(_, network, _)| &self.topology.networks[network])
+            .peekable();
+        runs.peek().is_some()
+            && runs.all(|run| {
+                run.naming() == PipeNaming::Carries && run.fluid.as_deref() == Some(fluid)
+            })
     }
 
     /// Destroys what every run `tank` discharges into is holding, and marks

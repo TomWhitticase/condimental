@@ -175,6 +175,32 @@ fn declared_line() -> World {
     world
 }
 
+/// The same layout with the north run and its tank left out, on **shipped**
+/// recipes: one mixer, one tank, one feed run the graph can name by itself
+/// because a mixer draws exactly one raw fluid. Stocked with vinegar, so
+/// `run_for` can put fluid in both the tank and the run.
+///
+/// This is the shape every tank in the shipped chain is in — undeclared,
+/// named by the factory around it — which is why the two cases about what
+/// a *first* declaration may destroy are proved here rather than on the
+/// two-fluid fixture, where an undeclared tank cannot be filled at all.
+fn shipped_single_tank_line() -> World {
+    let recipes = RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
+        .expect("data/recipes.ron must parse");
+    let mut world = funded(recipes);
+    world.issue_command(PlayerCommand::BuyIngredient {
+        item: "vinegar".to_string(),
+        quantity: 500,
+    });
+    for &(kind, tile, direction) in LAYOUT {
+        if tile == NORTH_RUN || tile == NORTH_TANK {
+            continue;
+        }
+        place(&mut world, kind, tile, direction);
+    }
+    world
+}
+
 fn declare(world: &mut World, tile: (i32, i32), fluid: &str) {
     world.issue_command(PlayerCommand::SetTankFluid {
         tile,
@@ -555,15 +581,7 @@ fn the_set_tank_fluid_command_parses_from_json() {
 /// mixer that cannot.
 #[test]
 fn a_declaration_no_machine_on_the_run_can_use_is_unnameable() {
-    let recipes = RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
-        .expect("data/recipes.ron must parse");
-    let mut world = funded(recipes);
-    for &(kind, tile, direction) in LAYOUT {
-        if tile == NORTH_RUN || tile == NORTH_TANK {
-            continue;
-        }
-        place(&mut world, kind, tile, direction);
-    }
+    let mut world = shipped_single_tank_line();
 
     // Undeclared, the graph names it: vinegar is the one raw fluid a mixer
     // draws, so the run a tank feeds it through can hold nothing else.
@@ -596,6 +614,146 @@ fn a_declaration_no_machine_on_the_run_can_use_is_unnameable() {
     // Putting it back is the fix, and it takes effect immediately.
     declare(&mut world, SOUTH_TANK, "vinegar");
     assert_eq!(naming_at(&world, SOUTH_RUN).1, PipeNaming::Carries);
+}
+
+// =====================================================================
+// 3b. A declaration that changes nothing destroys nothing (issue #121)
+// =====================================================================
+
+/// **Agreeing with the factory is not a switch.**
+///
+/// Every tank ships undeclared and takes its name from the run it feeds,
+/// so the commonest thing a player can do on this panel is press the slot
+/// the panel is already showing them — settling a question rather than
+/// changing an answer. That went through the same purge a switch does:
+/// `FluidTank::declare` counts `None -> Some(x)` as a change, and
+/// `try_set_tank_fluid` purged on any change, so 120 units of vinegar were
+/// destroyed to replace vinegar with vinegar. Issue #121, found in
+/// adversarial review of the pull request that made the purge reach the
+/// run, and reproduced there through the shipped picker.
+///
+/// The declaration still lands — the tank is genuinely declared afterwards,
+/// which is what seeds the resolver and what a save carries — it simply
+/// costs nothing.
+#[test]
+fn declaring_the_fluid_the_run_already_carries_destroys_nothing() {
+    let mut world = shipped_single_tank_line();
+    run_for(&mut world, 200);
+
+    let tank_before = tank_at(&world, SOUTH_TANK).quantity;
+    let run_before = volume_at(&world, SOUTH_RUN);
+    assert!(
+        tank_before > 0.0 && run_before > 0.0,
+        "the tank ({tank_before}) and its run ({run_before}) must both be holding \
+         vinegar, or this proves nothing"
+    );
+    let tank = tank_at(&world, SOUTH_TANK);
+    assert_eq!(tank.declared, None, "and the tank must still be undeclared");
+    assert_eq!(
+        tank.fluid.as_deref(),
+        Some("vinegar"),
+        "with the graph naming it — this is the state the panel offers the click in"
+    );
+
+    declare(&mut world, SOUTH_TANK, "vinegar");
+
+    assert_eq!(
+        tank_at(&world, SOUTH_TANK).quantity,
+        tank_before,
+        "declaring what the tank already holds must not empty it"
+    );
+    assert_eq!(
+        volume_at(&world, SOUTH_RUN),
+        run_before,
+        "nor purge the run it feeds — nothing was relabelled, so nothing was at risk"
+    );
+    assert_eq!(
+        tank_at(&world, SOUTH_TANK).declared.as_deref(),
+        Some("vinegar"),
+        "the declaration still lands: the player settled it, and a save must carry that"
+    );
+    assert_eq!(naming_at(&world, SOUTH_RUN).0.as_deref(), Some("vinegar"));
+    assert_eq!(naming_at(&world, SOUTH_RUN).1, PipeNaming::Carries);
+
+    // And it is idempotent from there, as re-declaring always was.
+    declare(&mut world, SOUTH_TANK, "vinegar");
+    assert_eq!(tank_at(&world, SOUTH_TANK).quantity, tank_before);
+    assert_eq!(volume_at(&world, SOUTH_RUN), run_before);
+}
+
+/// The other side of the same guard: a **first** declaration that really
+/// does change the fluid still empties the tank and purges the run.
+///
+/// `liquid_smoke` is raw, so the picker offers it on every tank, and no
+/// mixer recipe drinks it — the run stops being nameable the moment the
+/// declaration seeds it. Whatever is standing in the pipes was vinegar by
+/// the only answer the simulation ever had, so carrying it across would
+/// relabel it, which is what the purge exists to prevent. The tank being
+/// undeclared beforehand changes nothing about that.
+#[test]
+fn a_first_declaration_that_does_change_the_fluid_still_purges() {
+    let mut world = shipped_single_tank_line();
+    run_for(&mut world, 200);
+
+    let elsewhere_before = fluid_elsewhere(&world, SOUTH_RUN, SOUTH_TANK);
+    assert!(tank_at(&world, SOUTH_TANK).quantity > 0.0);
+    assert!(volume_at(&world, SOUTH_RUN) > 0.0);
+    assert_eq!(tank_at(&world, SOUTH_TANK).declared, None);
+
+    declare(&mut world, SOUTH_TANK, "liquid_smoke");
+
+    assert_eq!(
+        tank_at(&world, SOUTH_TANK).quantity,
+        0.0,
+        "the vinegar in the tank does not become liquid smoke"
+    );
+    assert_eq!(
+        volume_at(&world, SOUTH_RUN),
+        0.0,
+        "nor does the vinegar in the run it fed"
+    );
+    assert_eq!(
+        naming_at(&world, SOUTH_RUN).1,
+        PipeNaming::Unnameable,
+        "a run the declaration contradicts is not a run that already carried it"
+    );
+    assert_eq!(
+        fluid_elsewhere(&world, SOUTH_RUN, SOUTH_TANK),
+        elsewhere_before,
+        "destroyed, not moved"
+    );
+}
+
+/// The guard reads the *tank* as well as the run. A tank that is holding
+/// one fluid while its run resolves to another is switching, and the purge
+/// is right — "the run carries `x`" on its own is not the no-op case.
+///
+/// Reached the way a player reaches it: declare the tank, fill it, then
+/// re-plumb the run out from under the declaration. The second tank
+/// declaring `vinegar` makes the run ambiguous between the two, and
+/// pressing `sugar` on the first tank is then a genuine change of what it
+/// holds.
+#[test]
+fn a_declaration_that_only_matches_the_run_is_not_a_no_op() {
+    let mut world = ambiguous_line();
+    declare(&mut world, SOUTH_TANK, "sugar");
+    run_for(&mut world, 200);
+    let held = tank_at(&world, SOUTH_TANK).quantity;
+    assert!(held > 0.0, "the south tank must be holding sugar");
+
+    // A second tank on the same run, declaring the other fluid: the run
+    // stops resolving to `sugar` without the south tank's own contents
+    // changing at all.
+    place(&mut world, "fluid_tank", (2, -1), Direction::East);
+    declare(&mut world, (2, -1), "vinegar");
+    assert_eq!(naming_at(&world, SOUTH_RUN).1, PipeNaming::Ambiguous);
+
+    declare(&mut world, SOUTH_TANK, "vinegar");
+    assert_eq!(
+        tank_at(&world, SOUTH_TANK).quantity,
+        0.0,
+        "the sugar in the tank is not vinegar, whatever the run says"
+    );
 }
 
 // =====================================================================
