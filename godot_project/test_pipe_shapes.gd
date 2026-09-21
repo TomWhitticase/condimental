@@ -145,9 +145,13 @@ func _run_checks() -> void:
 	main._update_fluid_network()
 
 	var layout: Array = JSON.parse_string(main.sim.world_layout_json())
-	if layout.size() != Layouts.PIPE_GALLERY_PLACEMENTS:
+	# `line_placements`, not the layout's size: stocking a larder now builds
+	# warehouse racks, and they are the fixture's storage rather than part of
+	# the gallery being counted.
+	var placed := Layouts.line_placements(main.sim)
+	if placed != Layouts.PIPE_GALLERY_PLACEMENTS:
 		_fail("the gallery placed %d things, expected %d — a refused placement" % [
-			layout.size(), Layouts.PIPE_GALLERY_PLACEMENTS
+			placed, Layouts.PIPE_GALLERY_PLACEMENTS
 		])
 		return
 

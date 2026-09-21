@@ -398,10 +398,10 @@ fn unplaced_inventory_and_bought_stock_survive() {
         kind: "crusher".into(),
         quantity: 2,
     });
-    world.issue_command(PlayerCommand::BuyIngredient {
-        item: "tomato".into(),
-        quantity: 30,
-    });
+    // 30 tomato is over `data/storage.ron`'s `base_cap`, so `common::buy`
+    // puts a warehouse rack down to hold it — which is why the placement
+    // count below is two and not one.
+    common::buy(&mut world, "tomato", 30);
     // Place one of the seven, so owned and placed are genuinely different
     // numbers rather than accidentally equal.
     world.issue_command(PlayerCommand::Place {
@@ -416,7 +416,11 @@ fn unplaced_inventory_and_bought_stock_survive() {
     assert_eq!(loaded.owned_count("belt"), 6);
     assert_eq!(loaded.owned_count("crusher"), 2);
     assert_eq!(loaded.owned_ingredient("tomato"), 30);
-    assert_eq!(loaded.placement_count(), 1);
+    assert_eq!(
+        loaded.placement_count(),
+        2,
+        "the belt and the rack holding the tomatoes"
+    );
     assert_eq!(
         loaded.money(),
         money,
