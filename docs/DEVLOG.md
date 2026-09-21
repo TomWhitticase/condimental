@@ -787,6 +787,68 @@ passed on the command line — headless Chrome captures on a load heuristic
 that lands before a model has been fetched, so the page hands back its own
 canvas instead of being photographed.
 
+### 2026-09-20 — Mothballing, and naming the machine that is going without
+
+The two halves of one complaint about the staff pools: there was no way out
+of the unpaid spiral (#19), and no way to tell which machine was the one
+short of crew (#20).
+
+**The spiral had no exit.** Unpaid heads idle the machines they crew, which
+cuts the income that would have paid them, so a factory that missed one
+payday missed the next one harder. The only lever was `Remove`, which
+refunds the machine to the shed — a fine answer for a machine you regret
+buying, a terrible one for a line you want back next period.
+
+**Mothballing.** `set_mothballed` switches a building off: it drops out of
+the establishment, produces nothing, and HOLDS the batch it was part-way
+through rather than losing it or finishing it, so switching it back on
+resumes. The switch lives on the click-to-configure panel, which grew a
+third shape — not a keybind, for the same reason Q, SPACE and V were
+retired. It persists across a save, joining `schema_version` 2 alongside a
+tank's declared fluid rather than claiming a version of its own.
+
+**Standing crew down is what makes it worth anything.** Review caught the
+first attempt doing nothing: it shrank `required` but never touched
+`bill_per_period` or `next_bill`, so an A/B over four paydays came back
+bit-identical. It now stands crew down — a mothballed building's heads come
+off the payroll, the bill falls on the tick the switch is thrown, nobody is
+fired and nobody walks out. Mothballing on payday eve buys notice pay, not
+free labour. The four-payday A/B that used to tie now ends 44 against 86.
+
+**Anything that asks for a crew can be switched off**, decided by the
+kind's `staff` list in `data/machines.ron` rather than by a Rust type — so
+the **dock** can be, and has to be able to be: while it is on,
+`required("logistics")` never reaches zero and a factory with no income
+cannot get its bill down to nothing. A hopper, a tank, a belt, a pipe and a
+splitter ask for nobody and are refused. The same rule now drives the
+panel, which asks the content instead of consulting a kind list kept in
+GDScript.
+
+What mothballing does not do is conjure income: a standing order lost to
+three missed windows while the factory was dark costs money to re-sign.
+The acceptance test says so out loud rather than claiming a recovery it did
+not see. That is issue #85, still open.
+
+**Naming the machine.** Every placement now reports `crewed` — the
+establishment's stable answer to *if everything placed wanted to run at
+once, who goes without?* Deliberately not a replay of the last tick, which
+flickers as the line ebbs; that flapping is what the establishment model
+existed to end. The hover says it in the same words a `staff` stall gives,
+through the one helper both go through so they cannot drift.
+
+The load bar needed one new idea. An uncrewed machine does no work, so its
+window decays to 0% and there is no fill left to turn amber at exactly the
+moment the player needs telling. So the track's **border** carries the
+colour instead: the fill is the quantity, the border is the state, and the
+words above it still say which state it is. A mothballed machine beats both
+and reads `○ switched off` on an unlit grey bar — the player chose it, and
+nothing about it is a fault. No in-world pole; the hover panel is still the
+one place status lives.
+
+The dock's own held line still flickers the old way, for a channel reason —
+issue #87.
+
+
 ### 2026-09-20 — Three issues off the board: names, fluid colour, honest frames
 
 A no-new-features pass over the deferred queue. Nothing here changes what

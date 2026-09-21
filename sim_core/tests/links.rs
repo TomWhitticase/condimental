@@ -894,17 +894,17 @@ fn world_layout_json_matches_the_documented_shape_byte_for_byte() {
     let json = serde_json::to_string(&world.world_layout()).unwrap();
     let expected = concat!(
         "[",
-        r#"{"kind":"hopper","tile":[-1,0],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[-1,0]],"recipe":null}"#,
+        r#"{"kind":"hopper","tile":[-1,0],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[-1,0]],"recipe":null,"crewed":true}"#,
         ",",
-        r#"{"kind":"belt","tile":[0,0],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[0,0]],"recipe":null,"links":{"inputs":[{"from":"west","kind":"hopper"}],"output":{"to":"east","kind":"machine"}}}"#,
+        r#"{"kind":"belt","tile":[0,0],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[0,0]],"recipe":null,"crewed":true,"links":{"inputs":[{"from":"west","kind":"hopper"}],"output":{"to":"east","kind":"machine"}}}"#,
         ",",
-        r#"{"kind":"crusher","tile":[1,0],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[1,0]],"recipe":"tomato_paste"}"#,
+        r#"{"kind":"crusher","tile":[1,0],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[1,0]],"recipe":"tomato_paste","crewed":true}"#,
         ",",
-        r#"{"kind":"fluid_tank","tile":[0,1],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[0,1]],"recipe":null}"#,
+        r#"{"kind":"fluid_tank","tile":[0,1],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[0,1]],"recipe":null,"crewed":true}"#,
         ",",
-        r#"{"kind":"pipe","tile":[1,1],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[1,1]],"recipe":null,"links":{"connections":[{"to":"east","kind":"pipe"},{"to":"west","kind":"tank"}]}}"#,
+        r#"{"kind":"pipe","tile":[1,1],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[1,1]],"recipe":null,"crewed":true,"links":{"connections":[{"to":"east","kind":"pipe"},{"to":"west","kind":"tank"}]}}"#,
         ",",
-        r#"{"kind":"pipe","tile":[2,1],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[2,1]],"recipe":null,"links":{"connections":[{"to":"west","kind":"pipe"}]}}"#,
+        r#"{"kind":"pipe","tile":[2,1],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[2,1]],"recipe":null,"crewed":true,"links":{"connections":[{"to":"west","kind":"pipe"}]}}"#,
         "]",
     );
     assert_eq!(json, expected);

@@ -239,6 +239,13 @@ var _shop := false
 ## of the two to look at.
 var _config := false
 var _config_tile := Vector2i.ZERO
+## `--mothballed` builds the UNDERSTAFFED LINE, throws the mothball switch
+## on the cooking vat and opens that vat's own configuration panel — issue
+## #19's escape hatch in the state a player reaches it in. The frame shows
+## the switch reading MOTHBALLED: OFF, the batch held where the switch
+## caught it, and the machine's hover words; it implies `--populate`, so the
+## rest of the line is running around the one machine that is not.
+var _mothballed := false
 ## `--market` opens the ingredient market, and `--contents N` presses the
 ## open configuration panel's picker slot N (with `--config`), so a placed
 ## hopper is photographed after being retargeted to another ingredient.
@@ -485,6 +492,10 @@ func _initialize() -> void:
 	_short_staffed = args.has("--short-staffed")
 	if _short_staffed:
 		_pick_fixture("understaffed", "--short-staffed")
+		_populate = true
+	_mothballed = args.has("--mothballed")
+	if _mothballed:
+		_pick_fixture("understaffed", "--mothballed")
 		_populate = true
 	_first_person = args.has("--first-person")
 	_hover = args.has("--hover")
@@ -1053,6 +1064,34 @@ func _refill_declared_tank() -> void:
 	_main._update_fluid_network()
 
 
+## `--mothballed`: switches the understaffed line's cooking vat off through
+## the real command, then opens its panel through the real click — so the
+## frame is of the state a player reaches by clicking the machine that is
+## going without its crew and throwing the one switch that is there, not of
+## a widget this script posed.
+##
+## **The level bar in this frame is empty, and that is correct.** Review
+## asked for a HELD batch here; this fixture cannot produce one, because the
+## vat is precisely the machine the understaffed line denies a crew, so it
+## has never started a craft to hold. Delaying this call by any number of
+## frames does not change that — nothing about the vat advances while it is
+## uncrewed. What the frame is evidence for is the other half: `required`
+## falls from 4 to 2 and the CREW plate follows it, naming `crusher, mixer`
+## and no vat. The held-batch promise is pinned headlessly instead, by
+## `sim_core/tests/mothball.rs`, which asserts `elapsed` stands still across
+## a mothballing and the same batch finishes on the other side.
+func _mothball_the_vat() -> void:
+	var tile: Vector2i = Layouts.UNDERSTAFFED_VAT
+	_main._config_click_at_tile(tile)
+	if not _main._config_open:
+		printerr("SCREENSHOT: no machine at %s to mothball" % str(tile))
+		return
+	_main._on_config_mothball_pressed()
+	_main._refresh_buffers()
+	_main._poll_machine_load()
+	_main._update_config_panel()
+
+
 ## Drives the real chain across several contract cadence boundaries, feeding
 ## it exactly the way a player does. What puts product in the shared delivery
 ## pool the contracts draw from is the delivery dock at the end of the line,
@@ -1423,6 +1462,8 @@ func _process(_delta: float) -> bool:
 	# empty one photographs it blocked with its reason.
 	if _frames == 2 and _config:
 		_open_config_at(_config_tile)
+	if _frames == 2 and _mothballed:
+		_mothball_the_vat()
 	# Last, so it draws over whatever else the flags set up — which is
 	# exactly what a review of it wants to see.
 	if _frames == 3 and _pause:

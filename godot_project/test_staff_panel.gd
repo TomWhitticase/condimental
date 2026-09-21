@@ -241,23 +241,20 @@ func _run_checks() -> void:
 	var vats: Array = [{"kind": "cooking_vat", "count": 2}]
 	if main._staff_demand_text(vats) != "asked for by: cooking vat ×2":
 		_fail("a multi-word kind id reads as lowercase words, not the wire's underscore id, got '%s'" % main._staff_demand_text(vats))
-	var demand_placements := [
-		{"kind": "crusher", "tile": [4, 0]},
-		{"kind": "crusher", "tile": [4, 5]},
-		{"kind": "mixer", "tile": [9, 0]},
-	]
-	var demand_crews := {
-		"4,0": [{"category": "manufacturing", "count": 1}],
-		"4,5": [{"category": "manufacturing", "count": 1}],
-		"9,0": [{"category": "manufacturing", "count": 1}],
+	# The sources are the SIM's, read straight off the category row rather
+	# than re-totalled here (issue #19 broke the Godot-side sum: it went on
+	# counting a machine the player had switched off). Section 7b runs the
+	# real wire; this pins that nothing is derived on the way through.
+	var wire_row := {
+		"id": "manufacturing",
+		"sources": [{"kind": "crusher", "count": 2}, {"kind": "mixer", "count": 1}],
 	}
-	var sources: Array = main._staff_demand_sources_for("manufacturing", demand_placements, demand_crews)
-	if sources.size() != 2 or int(sources[0]["count"]) != 2 or String(sources[0]["kind"]) != "crusher":
-		_fail("a second crusher doubles the crusher's own ×N rather than adding a line, got %s" % str(sources))
-	if int(sources[1]["count"]) != 1 or String(sources[1]["kind"]) != "mixer":
-		_fail("the mixer gets its own line at ×1, got %s" % str(sources))
-	if main._staff_demand_sources_for("logistics", demand_placements, demand_crews) != []:
-		_fail("a category nothing asks for returns no sources")
+	if main._staff_demand_sources(wire_row) != wire_row["sources"]:
+		_fail("the WHY line must hand the wire's own sources through untouched")
+	if main._staff_demand_sources({"id": "logistics"}) != []:
+		_fail("a category the wire lists no sources for asks for nobody")
+	if main._staff_demand_sources(null) != []:
+		_fail("a missing row is no sources, not a crash")
 
 	# --- 1d. what each category does, one sentence per id (ticket 4) --------
 	for id in ["manufacturing", "maintenance", "packaging", "logistics"]:
@@ -1031,6 +1028,49 @@ func _run_checks() -> void:
 			ranked["short_label"].text, ranked["working_label"].text,
 		])
 	main._set_staff_open(false)
+
+	# --- 12. the switch moves BOTH numbers, not just the sim's (issue #19) ---
+	#
+	# The blocker this section exists for: mothballing dropped the sim's
+	# `required` from 4 to 2 while the CREW caption and the H panel's WHY
+	# line went on saying 4, because Godot re-totalled the crews of every
+	# PLACED machine instead of reading the establishment the sim had just
+	# recomputed. One number, one source. Cut `sources` out of
+	# `staff_snapshot_json` or put the GDScript walk back and this fails.
+	main.sim.new_game()
+	Layouts.build_reference_line(main.sim)
+	main._rebuild_world()
+	main._update_staff_panel()
+	var plate_before: Dictionary = main._crew_plate_state(main._staff_snapshot, main.sim.current_tick())
+	var manufacturing_before := {}
+	for row in plate_before["rows"]:
+		if String(row["id"]) == "manufacturing":
+			manufacturing_before = row
+	if manufacturing_before.is_empty() or String(manufacturing_before["count_text"]).find("/ 4") < 0:
+		_fail("the shipped line asks for 4 manufacturing, the caption says '%s'" % str(manufacturing_before.get("count_text", "")))
+	if String(manufacturing_before["assigned_text"]).find("cooking vat") < 0:
+		_fail("the vat is one of the things asking, got '%s'" % String(manufacturing_before["assigned_text"]))
+
+	var vat_tile: Vector2i = Layouts.UNDERSTAFFED_VAT
+	main.sim.issue_command_json(JSON.stringify({
+		"type": "set_mothballed", "tile": [vat_tile.x, vat_tile.y], "enabled": true,
+	}))
+	main._rebuild_world()
+	main._update_staff_panel()
+	var plate_after: Dictionary = main._crew_plate_state(main._staff_snapshot, main.sim.current_tick())
+	var manufacturing_after := {}
+	for row in plate_after["rows"]:
+		if String(row["id"]) == "manufacturing":
+			manufacturing_after = row
+	if String(manufacturing_after.get("count_text", "")).find("/ 2") < 0:
+		_fail("a switched-off vat takes its 2 cooks off the CREW caption, got '%s'" % str(manufacturing_after.get("count_text", "")))
+	if String(manufacturing_after.get("assigned_text", "")).find("cooking vat") >= 0:
+		_fail("a switched-off vat is not one of the things asking, got '%s'" % String(manufacturing_after.get("assigned_text", "")))
+	var why: String = main._staff_demand_text(main._staff_demand_sources(_category("manufacturing")))
+	if why.find("cooking vat") >= 0:
+		_fail("the H panel's WHY line still names the switched-off vat: '%s'" % why)
+	if why.find("crusher") < 0:
+		_fail("but it still names what IS switched on: '%s'" % why)
 
 	if _failed:
 		quit(1)

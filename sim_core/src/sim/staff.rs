@@ -50,6 +50,53 @@
 //! GAMEPLAY.md §1's one non-negative counter does not allow; softer than
 //! a cliff. A zero-wage head is never unpaid and never leaves.
 //!
+//! **The way out of arrears is MOTHBALLING** (issue #19). Unpaid heads idle
+//! the machines they crew, which cuts the income that would have paid them,
+//! so before mothballing existed a factory that missed one payday could
+//! only watch the next one miss harder, and the only lever it had was
+//! FIRING — which takes the trained crew away as the price of keeping the
+//! factory, and leaves a broke factory unable to hire them back
+//! ([`can_hire`](StaffPools::can_hire) refuses while the balance cannot
+//! cover the next bill). Mothballing is the lever that costs nothing
+//! permanent.
+//!
+//! A mothballed machine (`PlayerCommand::SetMothballed`) asks for no crew,
+//! so it drops out of the ESTABLISHMENT ([`StaffPools::set_required`]) —
+//! and the heads it was holding are **STOOD DOWN**
+//! ([`CategoryPool::stood_down`]): still hired, still there, but OFF THE
+//! PAYROLL. That is the whole mechanism, and it is the only thing in the
+//! game that lowers a wage bill without losing a head.
+//!
+//! Standing down bills exactly like firing, minus the loss:
+//!
+//! * [`bill_per_period`](StaffPools::bill_per_period) — the run rate —
+//!   falls the instant the switch is thrown, so the plate shows the player
+//!   the relief they just bought.
+//! * [`next_bill`](StaffPools::next_bill) does NOT, because `owed` does not
+//!   fall mid-period. A head stood down halfway through a period still
+//!   worked half of it. This is the same notice-pay rule a fired head gets,
+//!   and it is what stops mothballing-on-payday-eve being a free period of
+//!   labour, exactly as `owed` stops fire-then-rehire being one.
+//! * From the NEXT payday on, the stood-down heads are not billed at all,
+//!   and a head that is not billed cannot go unpaid — so a factory that
+//!   stands its whole crew down settles at a bill of zero, clears its
+//!   arrears, keeps every head, and switches back on. It pays for that
+//!   with the periods of production it did not have.
+//! * **A stood-down head never walks out.** Without that the two-strike
+//!   rule would take the whole crew at the payday BEFORE the relief
+//!   lands, since the period the switch was thrown in is still billed —
+//!   the escape would close on the player's fingers. A head whose line has
+//!   been switched off is not being asked to turn up.
+//!
+//! Switching the machine back on puts its crew straight back on the payroll
+//! (`owed` rises again at once — no re-hiring, no [`can_hire`](StaffPools::can_hire) gate, no
+//! lost training) and resumes the batch it was mid-way through.
+//!
+//! Only the crew of MOTHBALLED machinery is stood down, never a merely
+//! surplus head: [`CategoryPool::stood_down`] is capped both by the heads
+//! the mothballed machinery would need and by the heads left over once the
+//! running machinery is crewed, so over-hiring costs what it always cost.
+//!
 //! Integers throughout except the money itself, which is the economy's
 //! `Money` (ARCHITECTURE.md §3.9). Pools are a `Vec` in file order — the panel
 //! order and the payday order — never a hash map.
@@ -306,6 +353,42 @@ pub fn crew_entries(staff: &[(String, u32)]) -> Vec<CrewEntry> {
         .collect()
 }
 
+/// WHO ASKS for a category: one placed kind and how many heads of that
+/// category every placement of it needs, totalled — a second crusher
+/// doubles the crusher's own count rather than adding a second line. The
+/// wire form of the establishment's sources
+/// ([`StaffCategorySnapshot::sources`]), so the HUD can name the machines
+/// a hiring figure comes from without re-deriving it from the placements:
+///
+/// ```json
+/// {"kind": "cooking_vat", "count": 2}
+/// ```
+///
+/// MOTHBALLED machinery is not in here, for the same reason it is not in
+/// `required` — it is not asking for anybody.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CrewSource {
+    pub kind: String,
+    pub count: u32,
+}
+
+/// One category's whole establishment line, as
+/// `World::recompute_establishment` hands it to
+/// [`StaffPools::set_required`]: how many heads the running machinery
+/// needs, how many more the mothballed machinery would need, and which
+/// kinds the first figure comes from.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EstablishmentEntry {
+    pub category: String,
+    /// Heads the machinery that is switched ON needs.
+    pub required: u32,
+    /// Heads the MOTHBALLED machinery would need if every switch went back
+    /// on — the ceiling on how many heads may be stood down.
+    pub mothballed: u32,
+    /// The kinds behind `required`, in the world's own tile order.
+    pub sources: Vec<CrewSource>,
+}
+
 /// One category's live numbers. `headcount`, `unpaid`, `owed` and
 /// `left_last_payday` persist (and ride the save); `available`, `demand`
 /// and `assigned` are this tick's tally, reset at the top of every tick;
@@ -332,13 +415,36 @@ pub struct CategoryPool {
     pub demand: u32,
     /// Heads actually handed to a machine or dock this tick.
     pub assigned: u32,
-    /// The ESTABLISHMENT: every head the PLACED machinery needs to be fully
-    /// crewed, whether or not any of it is running this tick. Summed from
-    /// the placements by `World::recompute_topology`, so it moves only when
-    /// a machine is placed, removed or rotated — never with production
-    /// flow. This is the number "do I need to hire?" is answered from;
-    /// `demand` remains the honest per-tick activity figure beside it.
+    /// The ESTABLISHMENT: every head the placed machinery that is SWITCHED
+    /// ON needs to be fully crewed, whether or not any of it is running
+    /// this tick. Summed from the placements by
+    /// `World::recompute_establishment`, so it moves only when a machine is
+    /// placed, removed, rotated or mothballed — never with production flow.
+    /// This is the number "do I need to hire?" is answered from; `demand`
+    /// remains the honest per-tick activity figure beside it.
     pub required: u32,
+    /// The establishment the MOTHBALLED machinery would add back if every
+    /// switch went on again. Summed the same way, from the same walk, and
+    /// the ceiling on [`stood_down`](Self::stood_down).
+    pub mothballed_required: u32,
+    /// Heads STOOD DOWN: on the books, not on the payroll, because the
+    /// machinery they crew is mothballed (issue #19; see this module's
+    /// doc). Derived, never commanded —
+    /// `min(headcount - required, mothballed_required)` — so it is bounded
+    /// twice over: it can never stand down a head the running machinery
+    /// still needs, and it can never stand down more heads than the
+    /// mothballed machinery was holding, which is what keeps a merely
+    /// surplus head costing full wage.
+    pub stood_down: u32,
+}
+
+impl CategoryPool {
+    /// Heads ON THE PAYROLL: hired, minus the ones stood down with the
+    /// machinery they crew. The run-rate figure
+    /// ([`StaffPools::bill_per_period`]) counts these and nothing else.
+    pub fn on_payroll(&self) -> u32 {
+        self.headcount.saturating_sub(self.stood_down)
+    }
 }
 
 /// What a machine or dock hands `Machine::tick` / `World::tick` to ask for
@@ -393,6 +499,10 @@ pub struct StaffRestore<'a> {
 pub struct StaffPools {
     catalog: StaffCatalog,
     pools: Vec<CategoryPool>,
+    /// Parallel to `pools`: who asks for that category, from the same walk
+    /// that set `required`. Kept beside the pools rather than on
+    /// [`CategoryPool`] so that stays a `Copy` bag of counters.
+    sources: Vec<Vec<CrewSource>>,
     next_payday_tick: u64,
     last_bill: u32,
     /// Heads the last payday's money did not reach (sum of that payday's
@@ -419,12 +529,16 @@ impl StaffPools {
                 demand: 0,
                 assigned: 0,
                 required: 0,
+                mothballed_required: 0,
+                stood_down: 0,
             })
             .collect();
+        let sources = catalog.categories.iter().map(|_| Vec::new()).collect();
         let next_payday_tick = catalog.pay_period_ticks;
         Self {
             catalog,
             pools,
+            sources,
             next_payday_tick,
             last_bill: 0,
             unpaid_last_payday: 0,
@@ -481,20 +595,29 @@ impl StaffPools {
             .fold(0u32, u32::saturating_add)
     }
 
-    /// The run rate: what one payday costs at the current headcounts,
-    /// `sum(headcount * wage)`. What the NEXT payday will actually charge
-    /// is [`next_bill`](Self::next_bill), which also counts notice pay.
+    /// The run rate: what a payday costs at the current headcounts once
+    /// the line is settled, `sum((headcount - stood_down) * wage)`.
+    ///
+    /// **This is the figure mothballing moves at once** (issue #19): a head
+    /// whose machine has been switched off is off the payroll from that
+    /// tick, so throwing the switch shows the player the relief they just
+    /// bought, in the same breath as the machine going quiet. What the NEXT
+    /// payday will actually charge is [`next_bill`](Self::next_bill), which
+    /// still counts the period already half-worked — see this module's doc.
     pub fn bill_per_period(&self) -> u32 {
         self.catalog
             .categories
             .iter()
             .zip(&self.pools)
-            .map(|(c, p)| c.wage.saturating_mul(p.headcount))
+            .map(|(c, p)| c.wage.saturating_mul(p.on_payroll()))
             .fold(0u32, u32::saturating_add)
     }
 
     /// What the next payday will charge: `sum(owed * wage)` — every head
-    /// employed for any part of this period, fired or not.
+    /// employed for any part of this period, fired or not, stood down or
+    /// not. `owed` is the memory that makes both notice pay and
+    /// mothballing cost the period they happened in
+    /// ([`Self::sync_payroll`]).
     pub fn next_bill(&self) -> u32 {
         self.catalog
             .categories
@@ -528,10 +651,11 @@ impl StaffPools {
     }
 
     /// Sets the ESTABLISHMENT — how many heads of each category the placed
-    /// machinery needs to be fully crewed — from a per-category total.
+    /// machinery needs to be fully crewed — from one line per category.
     ///
-    /// Called from `World::recompute_topology`, which is reached only by
-    /// `Place`, `Remove` and `Rotate`, so this figure is **stable during
+    /// Called from `World::recompute_establishment`, which is reached by
+    /// `Place`, `Remove`, `Rotate` and `SetMothballed` — all four of them
+    /// deliberate player actions — so this figure is **stable during
     /// play**: it cannot move because a belt ran dry or a vat finished a
     /// batch. That stability is the whole point. `demand` (what was asked
     /// for this tick) breathes with production flow, which made
@@ -539,20 +663,69 @@ impl StaffPools {
     /// prompted a hire had already gone by the time the player acted
     /// (docs/DECISIONS.md, the 2026-09-16 establishment record).
     ///
-    /// Categories the caller does not mention are set to zero, so a factory
-    /// whose last crusher was removed stops asking for cooks. An unknown
-    /// category id is ignored rather than rejected: the catalog is the
-    /// authority on what exists, and `validate_machines` has already proved
-    /// every machine's crew names a real category.
-    pub fn set_required(&mut self, totals: &[(String, u32)]) {
+    /// Each entry carries three things the HUD must not re-derive: the
+    /// heads the RUNNING machinery needs, the heads the MOTHBALLED
+    /// machinery would need (the stand-down ceiling), and which kinds the
+    /// first figure comes from. Categories the caller does not mention are
+    /// zeroed on all three, so a factory whose last crusher was removed —
+    /// or MOTHBALLED, which is the same thing to the payroll (issue #19) —
+    /// stops asking for cooks. An unknown category id is ignored rather
+    /// than rejected: the catalog is the authority on what exists, and
+    /// `validate_machines` has already proved every machine's crew names a
+    /// real category.
+    ///
+    /// Ends in [`sync_payroll`](Self::sync_payroll), so the wage bill moves
+    /// in the same call the establishment does and the two can never be
+    /// read out of step.
+    pub fn set_required(&mut self, establishment: &[EstablishmentEntry]) {
         for pool in &mut self.pools {
             pool.required = 0;
+            pool.mothballed_required = 0;
         }
-        for (category, count) in totals {
-            if let Some(i) = self.catalog.index_of(category) {
-                self.pools[i].required = self.pools[i].required.saturating_add(*count);
+        for sources in &mut self.sources {
+            sources.clear();
+        }
+        for entry in establishment {
+            if let Some(i) = self.catalog.index_of(&entry.category) {
+                self.pools[i].required = self.pools[i].required.saturating_add(entry.required);
+                self.pools[i].mothballed_required = self.pools[i]
+                    .mothballed_required
+                    .saturating_add(entry.mothballed);
+                self.sources[i].extend(entry.sources.iter().cloned());
             }
         }
+        self.sync_payroll();
+    }
+
+    /// Recomputes who is STOOD DOWN and what that does to the payroll, from
+    /// the establishment and the headcounts. Called from every path that
+    /// can move either — [`set_required`](Self::set_required),
+    /// [`hire`](Self::hire), [`fire`](Self::fire) and payday itself — so
+    /// `stood_down` is never a cached number that can go stale.
+    ///
+    /// `stood_down` is the surplus the mothballed machinery accounts for
+    /// and no more (see [`CategoryPool::stood_down`]). `owed` then rises to
+    /// cover everyone back on the payroll but **never falls here**: that is
+    /// the notice-pay rule, and it is why standing a crew down costs you
+    /// the period you did it in and spares you the ones after. Only payday
+    /// lets `owed` fall, in [`tick`](Self::tick).
+    fn sync_payroll(&mut self) {
+        for pool in &mut self.pools {
+            pool.stood_down = pool
+                .headcount
+                .saturating_sub(pool.required)
+                .min(pool.mothballed_required);
+            pool.owed = pool.owed.max(pool.on_payroll());
+        }
+    }
+
+    /// Who asks for a category, by kind, in the world's own tile order —
+    /// the establishment's own sources, as `set_required` was given them.
+    /// Empty for an unknown category and for one nothing placed asks for.
+    pub fn sources(&self, category: &str) -> &[CrewSource] {
+        self.catalog
+            .index_of(category)
+            .map_or(&[], |i| self.sources[i].as_slice())
     }
 
     /// The establishment for one category — what the placed machinery needs.
@@ -641,6 +814,7 @@ impl StaffPools {
             .expect("can_hire is false for an unknown category");
         self.pools[i].headcount = self.pools[i].headcount.saturating_add(1);
         self.pools[i].owed = self.pools[i].owed.saturating_add(1);
+        self.sync_payroll();
         true
     }
 
@@ -659,6 +833,9 @@ impl StaffPools {
                 if pool.unpaid > 0 {
                     pool.unpaid -= 1;
                 }
+                // A head fired out of a stood-down surplus is one fewer
+                // head to stand down, not a second saving.
+                self.sync_payroll();
                 true
             }
             _ => false,
@@ -666,7 +843,10 @@ impl StaffPools {
     }
 
     /// Payday, run after the economy's own tick. When `current_tick` has
-    /// reached `next_payday_tick`, pays every OWED head one at a time in
+    /// reached `next_payday_tick`, pays every OWED head — which is every
+    /// head that was on the payroll for any part of the period, and so
+    /// excludes the ones stood down for the whole of it (issue #19) — one
+    /// at a time in
     /// catalog order through [`Economy::try_spend`] — within a category the
     /// heads that have already left (notice pay) first, then the heads in
     /// arrears, then the rest. The first refusal leaves that head and every
@@ -692,7 +872,7 @@ impl StaffPools {
             if category.wage == 0 {
                 // A volunteer is never unpaid, so never leaves.
                 pool.unpaid = 0;
-                pool.owed = pool.headcount;
+                pool.owed = pool.on_payroll();
                 continue;
             }
             let wage = Money::from_num(category.wage);
@@ -706,22 +886,49 @@ impl StaffPools {
                 }
             }
             // Notice pay went out first; what reached the heads still on
-            // the books is the rest.
+            // the books is the rest. `owed` can sit BELOW the headcount
+            // when heads are stood down (issue #19), so the heads this
+            // payday actually billed is the smaller of the two — a head
+            // nobody billed cannot go unpaid, which is exactly how a
+            // shutdown clears arrears instead of deepening them.
             let departed = pool.owed.saturating_sub(pool.headcount);
+            let billed = pool.owed.min(pool.headcount);
             let current_paid = paid_heads.saturating_sub(departed);
-            let unpaid_now = pool.headcount.saturating_sub(current_paid);
+            let unpaid_now = billed.saturating_sub(current_paid);
             // Back pay first: the money that reached the current heads went
             // to the ones in arrears before anyone else, so an arrears head
             // it did NOT reach was unpaid twice and leaves; a clear head it
             // did not reach is in arrears for the first time and stays.
-            let left = pool.unpaid.saturating_sub(current_paid);
+            //
+            // **A STOOD-DOWN HEAD NEVER WALKS OUT** (issue #19), which is
+            // what makes mothballing an escape and not a slower death. The
+            // period a stand-down is thrown in is still billed in full
+            // (`owed`, notice pay), so a factory that mothballs the day
+            // after it missed payroll misses the next one too — and
+            // without this clause the two-strike rule would take its whole
+            // crew at exactly the payday the relief was about to arrive.
+            // A head whose line the player has switched off is not being
+            // asked to work; they are owed their notice pay, and then they
+            // wait. Only the heads the factory is still asking to turn up
+            // — `on_payroll` — can walk.
+            let left = pool
+                .unpaid
+                .saturating_sub(current_paid)
+                .min(unpaid_now)
+                .min(pool.on_payroll());
             pool.headcount -= left;
-            pool.unpaid = unpaid_now - left;
+            pool.unpaid = unpaid_now.saturating_sub(left);
             pool.left_last_payday = left;
-            pool.owed = pool.headcount;
+            // The new period starts everyone who is ON THE PAYROLL owed;
+            // the stood-down are not billed until they are back on it.
+            pool.owed = pool.on_payroll();
             unpaid_total = unpaid_total.saturating_add(unpaid_now);
             left_total = left_total.saturating_add(left);
         }
+        // Walkouts moved headcounts, so the stand-down is re-derived from
+        // what is left; `owed` was just set per category above and
+        // `sync_payroll` only ever raises it, never lowers it.
+        self.sync_payroll();
         self.last_bill = paid;
         self.unpaid_last_payday = unpaid_total;
         self.walked_out_last_payday = left_total;
@@ -739,6 +946,7 @@ impl StaffPools {
             pay_period_ticks: self.catalog.pay_period_ticks,
             next_payday_tick: self.next_payday_tick,
             next_bill: self.next_bill(),
+            bill_per_period: self.bill_per_period(),
             shortfall: self.shortfall(money),
             last_bill: self.last_bill,
             unpaid_last_payday: self.unpaid_last_payday,
@@ -762,6 +970,9 @@ impl StaffPools {
                     assigned: p.assigned,
                     required: p.required,
                     short: p.required.saturating_sub(p.headcount),
+                    stood_down: p.stood_down,
+                    on_payroll: p.on_payroll(),
+                    sources: self.sources(&c.id).to_vec(),
                 })
                 .collect(),
         }
@@ -772,10 +983,15 @@ impl StaffPools {
     /// [`StaffRestore`]), so a category added to `staff.ron` after a save
     /// was written starts as a new game would, and a save from before the
     /// quality pass — no arrears, no `owed` — loads with nobody in arrears
-    /// and every head owed. An id the catalog does not know, arrears above
-    /// the headcount, or `owed` below it (states the tick path cannot
-    /// produce) are refused. The per-tick tallies are not restored: the
-    /// first tick after a load recomputes them, like the topology.
+    /// and every head owed. An id the catalog does not know, or arrears
+    /// above the headcount (a state the tick path cannot produce), is
+    /// refused. `owed` BELOW the headcount is not: since standing down
+    /// (issue #19) that is what a save taken during a shutdown looks like,
+    /// and the establishment that justifies it is rebuilt a moment later by
+    /// `World::recompute_establishment`, which repairs any `owed` the
+    /// stand-down does not account for. The per-tick tallies are not
+    /// restored: the first tick after a load recomputes them, like the
+    /// topology.
     pub(crate) fn restore(
         catalog: StaffCatalog,
         saved: StaffRestore<'_>,
@@ -811,16 +1027,16 @@ impl StaffPools {
                     reason: format!("{} unpaid of {} hired", p.unpaid, p.headcount),
                 });
             }
-            if p.owed < p.headcount {
-                return Err(StaffRestoreError::Inconsistent {
-                    category: c.id.clone(),
-                    reason: format!("{} owed, fewer than the {} hired", p.owed, p.headcount),
-                });
-            }
         }
         for p in &mut pools.pools {
             p.available = p.headcount.saturating_sub(p.unpaid);
         }
+        // The establishment is deliberately NOT synced here. It is not in
+        // the save: `World::recompute_establishment` re-sums it from the
+        // replayed placements a moment later and calls `sync_payroll` with
+        // it. Doing it here, with nothing yet known to be mothballed,
+        // would raise a shutdown's `owed` back to the full headcount and
+        // bill a factory for the period it had stood its crew down in.
         pools.next_payday_tick = saved.next_payday_tick;
         pools.last_bill = saved.last_bill;
         pools.unpaid_last_payday = saved.unpaid_last_payday;
@@ -863,14 +1079,15 @@ impl StaffPools {
 ///
 /// ```json
 /// {"pay_period_ticks": 1000, "next_payday_tick": 3000,
-///  "next_bill": 14, "shortfall": 0,
+///  "next_bill": 14, "bill_per_period": 14, "shortfall": 0,
 ///  "last_bill": 14, "unpaid_last_payday": 0, "walked_out_last_payday": 0,
 ///  "money": 2986.0,
 ///  "categories": [
 ///    {"id": "manufacturing", "name": "Manufacturing", "headcount": 4,
 ///     "wage": 2, "owed": 4, "unpaid": 0, "left_last_payday": 0,
 ///     "can_hire": true, "required": 4, "demand": 4, "assigned": 4,
-///      "short": 0}, ...]}
+///      "short": 0, "stood_down": 0, "on_payroll": 4,
+///      "sources": [{"kind": "crusher", "count": 1}]}, ...]}
 /// ```
 ///
 /// `demand` and `assigned` describe the LAST completed tick — what was
@@ -900,6 +1117,13 @@ pub struct StaffSnapshot {
     pub pay_period_ticks: u64,
     pub next_payday_tick: u64,
     pub next_bill: u32,
+    /// The RUN RATE: what a payday costs once the current stand-down has
+    /// been in place for a whole period
+    /// ([`StaffPools::bill_per_period`]). Equal to `next_bill` on a
+    /// factory with nothing mothballed; below it the moment a switch is
+    /// thrown, which is how the HUD shows the relief before the payday
+    /// that delivers it.
+    pub bill_per_period: u32,
     pub shortfall: u32,
     pub last_bill: u32,
     pub unpaid_last_payday: u32,
@@ -922,6 +1146,18 @@ pub struct StaffCategorySnapshot {
     pub assigned: u32,
     pub required: u32,
     pub short: u32,
+    /// Heads stood down with mothballed machinery — off the payroll,
+    /// still on the books (issue #19).
+    pub stood_down: u32,
+    /// `headcount - stood_down`: what the run rate is charged for.
+    pub on_payroll: u32,
+    /// Which placed kinds `required` comes from, in the world's tile
+    /// order — the HUD's `asked for by:` line and the CREW plate's
+    /// caption, so neither re-derives a number the wire already carries
+    /// (`godot_project/CLAUDE.md`). Mothballed machinery is not in here,
+    /// which is what keeps the caption from naming a machine that has
+    /// left the establishment.
+    pub sources: Vec<CrewSource>,
 }
 
 #[cfg(test)]
@@ -944,6 +1180,39 @@ mod tests {
 
     fn crew(lines: &[(&str, u32)]) -> Vec<(String, u32)> {
         lines.iter().map(|(c, n)| (c.to_string(), *n)).collect()
+    }
+
+    /// An establishment line with nothing mothballed — what
+    /// `recompute_establishment` hands over for a factory with every
+    /// switch on.
+    fn running(category: &str, required: u32) -> EstablishmentEntry {
+        EstablishmentEntry {
+            category: category.to_string(),
+            required,
+            mothballed: 0,
+            sources: vec![CrewSource {
+                kind: "crusher".to_string(),
+                count: required,
+            }],
+        }
+    }
+
+    /// An establishment line for machinery that is placed and SWITCHED
+    /// OFF: it needs nobody, and `mothballed` heads may be stood down.
+    fn switched_off(category: &str, required: u32, mothballed: u32) -> EstablishmentEntry {
+        EstablishmentEntry {
+            category: category.to_string(),
+            required,
+            mothballed,
+            sources: if required == 0 {
+                Vec::new()
+            } else {
+                vec![CrewSource {
+                    kind: "crusher".to_string(),
+                    count: required,
+                }]
+            },
+        }
     }
 
     fn economy_with(money: u32) -> Economy {
@@ -1365,7 +1634,7 @@ mod tests {
         // need — and `short` becomes the hiring advice: three cooks' worth
         // of machines standing, two cooks hired, so hire one. It does not
         // matter what this or any other tick asked for.
-        pools.set_required(&[("cooks".to_string(), 3)]);
+        pools.set_required(&[running("cooks", 3)]);
         let staffed = pools.snapshot(Money::from_num(42));
         assert_eq!(
             (staffed.categories[0].required, staffed.categories[0].short),
@@ -1467,10 +1736,29 @@ mod tests {
             StaffPools::restore(catalog(), saved(&cooks3, &unpaid4, &[])),
             Err(StaffRestoreError::Inconsistent { ref category, .. }) if category == "cooks"
         ));
+        // `owed` BELOW the headcount is NOT impossible since standing
+        // down (issue #19) — it is what a save taken during a shutdown
+        // looks like — so it loads, and the establishment that lands a
+        // moment later decides how much of it survives. With nothing
+        // mothballed, `sync_payroll` puts every head back on the payroll.
         let owed2 = [("cooks".to_string(), 2)];
-        assert!(matches!(
-            StaffPools::restore(catalog(), saved(&cooks3, &[], &owed2)),
-            Err(StaffRestoreError::Inconsistent { ref category, .. }) if category == "cooks"
-        ));
+        let shutdown = StaffPools::restore(catalog(), saved(&cooks3, &[], &owed2)).unwrap();
+        assert_eq!(shutdown.pool("cooks").unwrap().owed, 2);
+        let mut shutdown = shutdown;
+        shutdown.set_required(&[switched_off("cooks", 0, 3)]);
+        let cooks = shutdown.pool("cooks").unwrap();
+        assert_eq!(
+            (cooks.stood_down, cooks.on_payroll(), cooks.owed),
+            (3, 0, 2),
+            "three cooks stood down with the machinery they crew are off the payroll,              and the shutdown the save was taken in is not billed over again"
+        );
+        let mut running_again =
+            StaffPools::restore(catalog(), saved(&cooks3, &[], &owed2)).unwrap();
+        running_again.set_required(&[running("cooks", 3)]);
+        assert_eq!(
+            running_again.pool("cooks").unwrap().owed,
+            3,
+            "nothing is mothballed, so a saved `owed` below the headcount is repaired"
+        );
     }
 }
