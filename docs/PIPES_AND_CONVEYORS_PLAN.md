@@ -108,6 +108,16 @@ instancing (ticket 4) a frame change swaps which of the four per-frame
 `MultiMeshInstance3D`s is visible, so animating a thousand belts costs four
 visibility flips.
 
+**Superseded on 2026-09-21 (issue #79), in both halves.** The clock is each
+tile's own `BeltSegment::moved_ticks` — ticks that tile actually advanced
+product on, carried by `BeltSnapshot` — not `current_tick`, because off the
+global tick a jammed line's rubber races under items that are not moving
+(UI_UX.md §6a). Pause still freezes it, for the same reason: no tick, no
+count. And since tiles of one frame set are now on different frames, the
+swap is per tile rather than per set: a tile not standing on a frame stays
+in that frame's `MultiMesh` with a zero-scale basis at its own position, so
+a frame change costs two transform writes for the tile that changed.
+
 ## Corner conventions (decided here so tickets 2, 3, 5, 6 agree)
 
 - A belt corner model is authored for a tile whose OUTPUT is +X (east) and

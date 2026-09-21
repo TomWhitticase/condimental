@@ -184,6 +184,47 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — A jammed belt's rubber stands still with the items on it (issue #79)
+
+UI_UX.md §6a's rule — a continuous effect is driven by the thing's own work
+clock — predates the belt animation and the belt animation broke it. The
+frame index was `floor(tick * BELT_FRAMES / BELT_TICKS_PER_TILE) mod
+BELT_FRAMES` off the global simulation tick, one number for every belt in
+the world, so a line backed up solid behind the 240-tick cooking vat drew
+its surface racing under items that had not moved in minutes.
+
+Every belt tile now has its own work clock. `BeltSegment::moved_ticks`
+counts the ticks that tile actually advanced product on — incremented by
+`tick_toward` exactly when it reports movement — and `BeltSnapshot` and
+`SplitterSnapshot` carry it to Godot, which takes the frame from it instead
+of from the tick. `SavedBelt::moved_ticks` is `#[serde(default)]` at the
+current `schema_version`, like `SavedHopper::auto_fill` before it, so a
+reload stands where the save did and an older save loads at phase 0.
+
+Two things about the shape of it, both written up in DECISIONS.md. It is in
+Rust because Godot cannot work it out: a belt that stops moving stops
+dirtying its chunk, so the presentation layer is never told a tile stood
+still — and that same fact makes the fix free, since a jammed tile is simply
+absent from the delta and Godot keeps the count it already has. And it is a
+counter rather than a "moving" flag, because a flag would rejoin a global
+phase and make the rubber jump the moment a jam cleared.
+
+On the Godot side the frame is now per tile rather than per scene, which
+`MultiMesh` has no per-instance visibility for; a tile not standing on a
+frame is kept in that frame's group with a zero-scale basis **at its own
+position**, so the group's AABB is unchanged and a frame change costs two
+transform writes for the tile that changed and nothing for the rest.
+
+The empty belt shows no motion at all now, deliberately — the idle crusher
+throws no pulp for the same reason. New `sim_core/tests/belt_surface.rs`
+(five cases, read through `chunk_snapshot`) and a rewritten section 3 of
+`test_belt_shapes.gd`. What the headless test cannot reach is the transform
+write itself: the dummy RenderingServer reads every `MultiMesh` instance
+transform back as the identity. `scripts/screenshot-scene.sh --bottleneck
+--closeup 1.5,0,20` is that half, and it is visible — four consecutive tiles
+of one four-frame set stand on four different phases, where before the whole
+world stood on one.
+
 ### 2026-09-21 — Clippy's backlog is gone and the baseline is zero (issue #29)
 
 The lint ratchet has held `CLIPPY_BASELINE=28` since it was introduced; it

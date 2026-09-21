@@ -25,6 +25,70 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-21: **A belt's rubber runs on that tile's own work clock, and the
+  simulation is what counts it.** (Issue #79.)
+
+  **The fault.** UI_UX.md §6a already says a continuous effect is driven by
+  the machine's own work clock — a starved crusher throws no pulp. The belt
+  animation predated that rule and broke it: the frame index was
+  `floor(tick * BELT_FRAMES / BELT_TICKS_PER_TILE) mod BELT_FRAMES` off the
+  *global* simulation tick, one number for every belt in the world. Back a
+  line up behind the 240-tick cooking vat and the items stand still while
+  the rubber under them races — a decoration running because the belt
+  exists, which is the exact thing the rule forbids, and a loud lie at that:
+  running rubber is the strongest signal on the floor that product is
+  moving.
+
+  **Why the count is in Rust and not in Godot.** This looks like pure
+  presentation, and the reflex is to keep it in GDScript. Godot cannot
+  compute it. Delta granularity is per chunk, and a belt that stops moving
+  stops dirtying its chunk, so the presentation layer is never told "this
+  tile stood still" — absence from a delta is all it gets, and absence is
+  indistinguishable from "this chunk had nothing to say". The simulation is
+  the only party that knows a tile advanced product this tick. So
+  `BeltSegment::tick_toward` increments `moved_ticks` exactly when it
+  reports movement, and `BeltSnapshot`/`SplitterSnapshot` carry it.
+
+  This also makes the dirty-chunk machinery do the work for free: a moving
+  belt dirties its chunk and re-sends its count, a jammed one is absent and
+  Godot keeps the last count it was given, which is already where the
+  pattern belongs. Cost lands exactly where the movement is.
+
+  **A counter, not a flag.** The cheaper wire field is a boolean "this tile
+  moved", with Godot still stepping a global phase while it is true. That
+  is wrong at the moment a jam clears: the tile rejoins whatever phase the
+  global clock has drifted to, and the rubber jumps a fraction of a tile
+  under items that started moving smoothly. A counter resumes on the phase
+  it stopped on, and the pattern crosses a tile in exactly the ticks an item
+  does — the property the original formula had and the reason it was chosen.
+  `tests/belt_surface.rs` pins both halves: frozen while jammed, and
+  resumed-not-caught-up when the jam clears.
+
+  **Saved, at the current `schema_version`.** `SavedBelt::moved_ticks` is
+  `#[serde(default)]`, like `SavedHopper::auto_fill` and `SavedMachine::load`
+  before it — an additive field is not a shape change, and a save written
+  without it loads at phase 0, which is where a freshly placed belt starts
+  anyway. A reloaded factory's rubber therefore stands where the saved one's
+  did rather than snapping under unmoved items.
+
+  **The consequence accepted on purpose: an empty belt shows no motion.**
+  Real conveyors run empty, and the first instinct is to keep the rubber
+  going and stop it only when blocked. That is a third clock — "powered" —
+  and the game has no such concept; more to the point it would make running
+  rubber mean nothing, since it would be true of every belt ever placed.
+  Under the §6a reading the motion is a *statement* that product is moving
+  here, and on an empty belt that statement is false. The idle crusher is
+  the precedent and the answer is the same one.
+
+  **What proves it.** `tests/belt_surface.rs` (five cases, through
+  `chunk_snapshot`, i.e. the wire Godot reads) and
+  `test_belt_shapes.gd` section 3, which steps the scene's own loop and
+  asserts each tile draws its own clock's frame. Not provable headless: the
+  `MultiMesh` transform writes underneath, because the dummy
+  RenderingServer reads every instance transform back as the identity. That
+  half is `scripts/screenshot-scene.sh --bottleneck --closeup`, where four
+  consecutive tiles of one four-frame set now stand on four different
+  phases and the cleats along a backed-up line no longer march.
 - 2026-09-20: **A width fix must be MEASURED at every window size, and
   `snap_rows` is for rows the player signs.** (Follow-up to the entry below,
   from the review of PR #102.)

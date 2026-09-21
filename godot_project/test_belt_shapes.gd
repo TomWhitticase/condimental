@@ -1,8 +1,8 @@
 # Headless proof of the belt presentation from the pipes and conveyors
 # overhaul's ticket 5 (docs/PIPES_AND_CONVEYORS_PLAN.md): a belt tile's
 # shape comes from the `links` the simulation reports, its animation frame
-# from the tick, its items' path from its shape, and its tooltip says all of
-# it in words. Built against test_layouts.gd's `build_belt_gallery` through
+# from its own surface clock, its items' path from its shape, and its tooltip
+# says all of it in words. Built against test_layouts.gd's `build_belt_gallery` through
 # real purchase/place commands, so every assertion is about a tile the sim
 # actually linked.
 #
@@ -17,9 +17,10 @@
 #   * the gallery's eight corner tiles are drawn with the corner families at
 #     the yaw of their own facing (no yaw of their own), and its merge, start
 #     and end tiles with the straight family — four frames each,
-#   * the frame index follows `floor(tick * 4 / 50) mod 4`, the scene shows
-#     exactly that frame's nodes after a simulation step, and with the pause
-#     menu up neither the tick nor the frame moves,
+#   * a tile's frame index follows `floor(its own moved_ticks * 4 / 50) mod 4`
+#     and the scene draws it there — so two tiles of one frame set sit on
+#     different frames, a jammed tile's rubber stands still with the items on
+#     it (issue #79), and with the pause menu up nothing moves at all,
 #   * an item on a straight runs from the input face's midpoint to the
 #     output face's; on a corner it follows the quarter-circle arc between
 #     them (0, 0.5 and 1 checked), and the arc's end meets the next tile's
@@ -146,37 +147,101 @@ func _run_checks() -> void:
 			_fail("%s should be a %s, the scene recorded '%s'" % [str(tile), straights[tile], str(main._belt_shapes.get(main._tile_key(tile), ""))])
 			return
 
-	# --- 3. the frame follows the tick, and freezes with the pause menu ----
+	# --- 3. the frame follows the TILE'S OWN clock (issue #79) ------------
+	# The formula is unchanged; the clock it reads is not. `moved_ticks` is
+	# how many ticks the SIMULATION advanced product on that tile, so a
+	# jammed tile stops counting and its rubber stops with the items on it.
 	var frame_cases := {0: 0, 12: 0, 13: 1, 25: 2, 37: 2, 38: 3, 49: 3, 50: 0, 63: 1, 100: 0}
-	for tick in frame_cases.keys():
-		if main._belt_frame_for_tick(tick) != frame_cases[tick]:
-			_fail("tick %d should show frame %d, got %d" % [tick, frame_cases[tick], main._belt_frame_for_tick(tick)])
+	for clock in frame_cases.keys():
+		if main._belt_frame_for_moved_ticks(clock) != frame_cases[clock]:
+			_fail("a clock of %d should show frame %d, got %d" % [clock, frame_cases[clock], main._belt_frame_for_moved_ticks(clock)])
 			return
-	# Drive the scene's own step: one real frame's worth of time at a time,
-	# through `_advance_simulation`, until the tick lands on a frame change.
+	# Run the gallery for real: stock its larder, fill its hoppers, and step
+	# the scene's own loop a frame at a time. The twelve-tile clockwise ring
+	# takes tomatoes until it is packed solid against itself and then never
+	# moves again, which is exactly the state this ticket is about.
+	Layouts.stock_larder(main.sim)
+	main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper", "amount": 64}))
 	var tick_interval: float = 1.0 / main.TICK_HZ
-	while main.sim.current_tick() < 13:
+	for _i in range(3000):
 		main._advance_simulation(tick_interval)
-	if main._tile_frame != main._belt_frame_for_tick(main.sim.current_tick()):
-		_fail("after stepping to tick %d the scene shows frame %d, expected %d" % [main.sim.current_tick(), main._tile_frame, main._belt_frame_for_tick(main.sim.current_tick())])
+	# (1, 0) is on the ring, fed by the hopper from its flank and by the
+	# tile behind it; (8, 6) is the lone start nothing feeds. Both draw the
+	# straight family, so they are instances of the SAME four-frame set.
+	var ring := Vector2i(1, 0)
+	var lone := Vector2i(8, 6)
+	var ring_key: String = main._tile_key(ring)
+	var lone_key: String = main._tile_key(lone)
+	var ring_clock: int = int(main._belt_surface_ticks.get(ring_key, 0))
+	if ring_clock <= 0:
+		_fail("the ring tile at %s should have carried tomatoes by now, its clock reads %d" % [str(ring), ring_clock])
 		return
-	var shown: int = main._tile_frame
-	if shown != 1:
-		_fail("tick %d should be on frame 1, the scene is on %d" % [main.sim.current_tick(), shown])
+	if int(main._belt_surface_ticks.get(lone_key, -1)) != 0:
+		_fail("nothing feeds the lone belt at %s, so its clock must read 0, got %s" % [str(lone), str(main._belt_surface_ticks.get(lone_key, -1))])
 		return
-	var set: Dictionary = main._tile_sets[main._tile_set_key(straight)]
-	for f in range(set["nodes"].size()):
-		for mmi in set["nodes"][f].values():
-			if mmi.visible != (f == shown):
-				_fail("straight frame %d nodes visible=%s while frame %d is showing" % [f, str(mmi.visible), shown])
-				return
+	# Both are straight tiles in the SAME four-frame set, and they are on
+	# different frames — which is the whole change: before this, one scene
+	# counter put every belt in the world on one frame.
+	var ring_frame: int = main._tile_instances[ring_key]["frame"]
+	var lone_frame: int = main._tile_instances[lone_key]["frame"]
+	if main._tile_instances[ring_key]["set"] != main._tile_instances[lone_key]["set"]:
+		_fail("the fixture wants two tiles in one frame set to compare; %s and %s are in different sets" % [str(ring), str(lone)])
+		return
+	if ring_frame != main._belt_frame_for_moved_ticks(ring_clock) or lone_frame != 0:
+		_fail("tile frames should follow their own clocks: %s reads clock %d on frame %d, %s on frame %d" % [str(ring), ring_clock, ring_frame, str(lone), lone_frame])
+		return
+	if ring_frame == lone_frame:
+		_fail("a carrying tile and a tile that has never carried anything are both on frame %d — the rubber is still running off one scene clock" % ring_frame)
+		return
+	# Every belt in the world, not just these two: each tile's drawn frame
+	# is its own clock's frame.
+	#
+	# What this CANNOT assert is the transform write underneath, and that is
+	# the headless renderer rather than a gap in the check: `MultiMesh`
+	# instance buffers live in the RenderingServer, and the dummy backend
+	# reads every one of them back as the identity — `get_instance_transform`
+	# on a tile this scene positioned at (3.2, 0.3, 0.0) answers the origin.
+	# So the record below is the honest seam, and
+	# `scripts/screenshot-scene.sh --belt-gallery --closeup` is where the
+	# rubber itself is checked (UI_UX.md §2b point 12).
+	for key in main._belt_surface_ticks.keys():
+		var record: Dictionary = main._tile_instances.get(key, {})
+		if record.is_empty() or record["frames"].size() <= 1:
+			continue
+		var want: int = main._belt_frame_for_moved_ticks(int(main._belt_surface_ticks[key]))
+		if int(record["frame"]) != want:
+			_fail("the tile %s reads clock %s, which is frame %d, but it draws frame %d" % [key, str(main._belt_surface_ticks[key]), want, int(record["frame"])])
+			return
+	# THE REGRESSION. The ring is jammed: sixty more ticks pass — long
+	# enough for the old scene-wide counter to have stepped four frames —
+	# and no tile on it moves a frame, because no tile on it moved an item.
+	var jammed := {}
+	for key in main._belt_surface_ticks.keys():
+		jammed[key] = main._belt_surface_ticks[key]
 	var tick_before: int = main.sim.current_tick()
+	for _i in range(60):
+		main._advance_simulation(tick_interval)
+	if main.sim.current_tick() != tick_before + 60:
+		_fail("the fixture should have stepped 60 ticks, went %d -> %d" % [tick_before, main.sim.current_tick()])
+		return
+	if int(main._belt_surface_ticks.get(ring_key, -1)) != ring_clock:
+		_fail("the ring is packed solid, so its clock must stand still; %d -> %s over 60 ticks" % [ring_clock, str(main._belt_surface_ticks.get(ring_key, -1))])
+		return
+	if main._tile_instances[ring_key]["frame"] != ring_frame:
+		_fail("a jammed belt moved from frame %d to %d — its rubber is running under items that are not" % [ring_frame, main._tile_instances[ring_key]["frame"]])
+		return
+	# --- and the pause menu freezes what is still moving ------------------
+	tick_before = main.sim.current_tick()
 	main._set_pause_open(true)
 	for _i in range(60):
 		main._advance_simulation(tick_interval)
-	if main.sim.current_tick() != tick_before or main._tile_frame != shown:
-		_fail("with the pause menu up the tick moved %d -> %d and the frame %d -> %d" % [tick_before, main.sim.current_tick(), shown, main._tile_frame])
+	if main.sim.current_tick() != tick_before:
+		_fail("with the pause menu up the tick moved %d -> %d" % [tick_before, main.sim.current_tick()])
 		return
+	for key in jammed.keys():
+		if int(main._belt_surface_ticks.get(key, -1)) != int(jammed[key]):
+			_fail("with the pause menu up the tile %s moved its clock %s -> %s" % [key, str(jammed[key]), str(main._belt_surface_ticks.get(key, -1))])
+			return
 	main._set_pause_open(false)
 
 	# --- 4. items: straight runs face to face, corners follow the arc -----
@@ -242,5 +307,5 @@ func _run_checks() -> void:
 				_fail("hover over %s should contain '%s', got: %s" % [str(tile), phrase, text.replace("\n", " / ")])
 				return
 
-	print("BELT_SHAPES_OK: shape rule pure at every facing, gallery corners drawn with the corner families at their facing's yaw, merges/starts/ends straight, frame = floor(tick*%d/%d) mod %d and frozen while paused, items run face to face and arc through corners continuously, hover names feeds and hand-offs" % [main.BELT_FRAMES, main.BELT_TICKS_PER_TILE, main.BELT_FRAMES])
+	print("BELT_SHAPES_OK: shape rule pure at every facing, gallery corners drawn with the corner families at their facing's yaw, merges/starts/ends straight, each tile's frame = floor(its own moved_ticks*%d/%d) mod %d, frozen while jammed and while paused, items run face to face and arc through corners continuously, hover names feeds and hand-offs" % [main.BELT_FRAMES, main.BELT_TICKS_PER_TILE, main.BELT_FRAMES])
 	quit(0)

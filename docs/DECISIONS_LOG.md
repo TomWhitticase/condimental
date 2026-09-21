@@ -18,6 +18,16 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-21 **A belt's rubber runs on that tile's own work clock, and the
+  simulation is what counts it.** §6a's machine rule applies to belts:
+  `BeltSegment::moved_ticks` counts the ticks a tile actually advanced
+  product on, rides `BeltSnapshot`/`SplitterSnapshot`, and is what the frame
+  index is taken from — so a jammed line's surface stops with the items on
+  it. It lives in Rust because a stopped belt stops dirtying its chunk, so
+  Godot is never told a tile stood still. A **counter**, not a "moving"
+  flag: a flag re-joins a global phase and makes the rubber jump when a jam
+  clears. Saved (`#[serde(default)]`, no schema bump) so a load stands where
+  the save did. An empty belt shows no motion at all, deliberately.
 - 2026-09-20 **A width fix must be MEASURED at every window size, and
   `snap_rows` is for rows the player signs.** Two regressions from the width
   pass above, both from a fit applied unconditionally. `_build_contract_board_row`
