@@ -294,7 +294,21 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   and fittings read noticeably shinier, so machinery pops.
 - **Lighting**: real-time dynamic lighting, soft shadows, mild bloom on
   emissives, light SSAO. Reference: a modded-Minecraft shader pack, not
-  photorealism.
+  photorealism. **"On emissives" is the whole of it**: the glow post-pass
+  must mean *this is emitting*, never *this pixel is bright*. That is
+  `glow_bloom = 0.0` (Godot's `glow_bloom` blooms everything *below* the
+  threshold — frame-wide haze by definition), a threshold above the
+  brightest lit white surface in the game, and **SCREEN**, never SOFTLIGHT,
+  whose effect scales with the pixel beneath it and so cannot brighten a
+  lens that is already bright (DECISIONS.md, 2026-09-20).
+  **"Light SSAO" is a crease, not a shadow**: `ssao_radius` is in world
+  units, so it must be set at the scale of *a fitting against a body*
+  (0.45 units = 4.5 voxels), not of a machine against the floor. A wider
+  radius reads as grime at eye level long before it reads as contact
+  shading in isometric. Because the radius is world-space, the two cameras
+  disagree about how strong the pass is — judge a change to it in
+  isometric closeup, play zoom **and** first person standing beside the
+  line (DECISIONS.md, 2026-09-20).
 - **The light is indoor light**: a lamp-white key from above for the roof's
   high-bay fittings, a daylight-cool fill for the glazing, and ambient taken
   from the interior sky itself. Warming the key beiges every grey asset in

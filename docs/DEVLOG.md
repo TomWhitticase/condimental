@@ -43,6 +43,15 @@ below is history and should only ever be appended to.)*
   BBQ cook against the vat's 240 splits it 3 ketchup to 2 BBQ. Two of the four
   new contracts name both sauces. BBQ is ungated so far; the unlock ladder is
   the next ticket. See the log entry below.
+- **The lighting post-passes mean something now (2026-09-20).** Glow is
+  `1.0 / 0.0 / 1.2 / SCREEN` and SSAO is `0.45 / 16.0 / 1.6`
+  (`factory_environment.gd`). Both sets of old numbers were chosen where they
+  could not be seen — the glow while issue #25 meant nothing emitted, the
+  SSAO at a radius sized for a machine against the floor rather than a
+  fitting against a body. Retune either only against rendered frames, and the
+  SSAO in three framings: its radius is in world units, so the isometric and
+  first-person cameras disagree about how strong it is. See the log entry
+  below and `docs/DECISIONS.md`.
 - **Agent context restructured (2026-09-16).** `CLAUDE.md` is 72 lines and
   `@`-includes nothing; it maps a task to the doc that covers it. The
   condensed decisions log lives in `docs/DECISIONS_LOG.md`, workflow in
@@ -175,6 +184,7 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+<<<<<<< HEAD
 ### 2026-09-20 — The width pass, measured: a fit that was not conditional cost the board an offer
 
 PR #102 taught every modal to yield width at 1280x720 and landed on main as
@@ -260,6 +270,63 @@ Not fixed here and still open: issue #106 (a mid-word break in the contents
 picker) and issue #99 (the legend), neither of which is this review's
 subject.
 
+=======
+### 2026-09-20 — The hall's two post-passes, judged against frames for the first time
+
+Issues #32 and #2 closed; #3 measured and left open. All three were the same
+kind of problem: a number nobody had ever checked against a rendered frame.
+
+**Glow (issue #32).** `glow_intensity 0.7 / glow_bloom 0.15 /
+glow_hdr_threshold 0.85 / SOFTLIGHT` was chosen for UI_UX §4's "mild bloom on
+emissives" while, because of issue #25, **nothing in the game emitted at
+all** — it was tuned against an input that did not exist. Retuned to
+`1.0 / 0.0 / 1.2 / SCREEN` by scoring *selectivity*: what the pass adds around
+a lit status lens against what it adds to the rest of the frame. 2.7x -> 69x.
+The status lamp goes from a cream cube with a visible edge to an amber lamp
+with a halo; in first person the roof fittings stop being white rectangles
+indistinguishable from the skylight panels. Exposure is unmoved and
+`SCREENSHOT_RENDER` is identical — a full-screen post-pass costs the same
+whatever it is tuned to.
+
+**SSAO (issue #32, extra scope).** The asset browser's work on issue #49
+measured the game's SSAO while calibrating a baked AO pass against it and
+found it near-inert; confirmed here — at `ssao_radius 0.9 /
+ssao_intensity 2.4` the deepest crease in an isometric closeup lost 1.7
+levels out of 133, which is nothing. **Raising the intensity is not the fix.**
+`ssao_radius` is in world units, so an eye-level camera finds far more
+occlusion per pixel than the orthographic one looking down from across the
+hall: `0.9 / 16` reads well in isometric and, in first person, swallows the
+belt's legs in a smear. Halving the radius reconciles them — `0.45 / 16.0`,
+where 0.45 units is 4.5 voxels, *a fitting against a body* rather than a
+machine against the floor. Judged in three framings, not two.
+
+**The belt animation (issue #2).** Nobody had watched it run. `BELT_FRAMES = 4`
+is confirmed correct, from a frame sequence rather than an opinion: on a
+*running* belt at the repo's own closeup, a cleat-advance tick changes the
+frame 3.81-3.88 against 3.33-3.56 for an ordinary tick — only +12%, because
+the quarter-tile cleat step is buried in the continuous glide of the goods. A
+live wall-clock run showed the phase sequence 1->2->3->0 advancing every 12-13
+ticks with nothing skipped or repeated. A separate defect fell out of it and
+is filed, not fixed: a **backed-up** belt keeps running its rubber (issue #79),
+which both strobes and states the opposite of the truth.
+
+**`_read_world_layout` (issue #3), measured and left open.** The issue quotes
+40-80 ms per rebuild, off a **debug** `sim_core` — and `cargo xtask` builds
+debug unless passed `--release`. On release it is **14.8-15.5 ms, 24-28% of a
+55.4-61.6 ms warm rebuild** at 1539 placements; even debug is only 30.6 ms
+(38%). Since it is a quarter of the rebuild, fixing it alone cannot remove the
+hitch, and place/remove/rotate all bump `sim.revision()` so there is no cheap
+cache. Numbers posted on #3; it stays open for milestone 8's tiered scheduler
+rather than being improvised now. `test_perf.gd` reports the figure every run
+so it cannot drift back into folklore.
+
+Also filed: issue #82 — `scripts/screenshot-scene.sh` renders are not
+reproducible run to run, because the scene ticks on the wall clock for 45
+frames before it saves. That defeated the first glow sweep entirely (two
+renders of the same settings differed more than two different settings did),
+and both post-pass retunes above were measured through a tick-pinned harness
+instead.
+>>>>>>> origin/main
 ### 2026-09-20 — A tank says what it holds, and a recipe file may fork
 
 Two fluid-identity issues off the board, both latent: neither bites the

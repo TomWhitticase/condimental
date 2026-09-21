@@ -25,6 +25,7 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+<<<<<<< HEAD
 - 2026-09-20: **A width fix must be MEASURED at every window size, and
   `snap_rows` is for rows the player signs.** (Follow-up to the entry below,
   from the review of PR #102.)
@@ -69,6 +70,162 @@ matches what code comments and data files cite.
   `test_hud_plates.gd` now loops the column rather than naming one plate, so
   the next tenant of that edge is caught by a test that already exists.
 
+=======
+- 2026-09-20: **Glow means "this is emitting", not "this is bright" — and
+  SSAO means "this is a crease".** Issue
+  #32. The hall's glow settings — `glow_intensity 0.7`, `glow_bloom 0.15`,
+  `glow_hdr_threshold 0.85`, SOFTLIGHT — were chosen for UI_UX §4's "mild
+  bloom on EMISSIVES" at a time when **nothing in the game emitted**: issue
+  #25 meant `StandardMaterial3D` multiplied its emission by an absent texture,
+  so every status lamp was ordinary painted amber at any energy. The pass was
+  tuned against an input that did not exist, and #25's fix (the
+  `voxel_emissive` shader) changed what it is fed without anyone re-reading
+  the frame.
+
+  **How it was measured, and two traps in measuring it.** Glow has no numeric
+  read-out, so each setting was scored by differencing two rendered PNGs and
+  taking mean channel deltas inside a box around one lit status lens against
+  the whole rest of the frame — *selectivity*, the ratio of the two.
+
+  The first trap is the baseline. Baselining against `glow_enabled = false`
+  gives nonsense (the lens appearing to gain *less* than the floor), because
+  enabling the pass at all shifts the image by about +4.5 mean luma
+  independently of whether anything crosses the threshold. The fix is to
+  baseline against a render with glow **enabled and contributing nothing** —
+  but a high threshold is not enough on its own: `glow_bloom` blooms
+  everything *below* the threshold, so a baseline that keeps `glow_bloom` also
+  keeps the haze and every reading taken against it is wrong. **The null
+  baseline is `glow_bloom = 0.0` with `glow_hdr_threshold = 3.0`.**
+
+  The second trap is the renderer. `scripts/screenshot-scene.sh` lets the
+  scene's own `_process` run for 45 frames before it saves, and
+  `_advance_simulation` ticks on the WALL CLOCK, so how many simulation ticks
+  pass between building the fixture and taking the shot depends on machine
+  load. Two renders of *identical* settings differ in where the items on the
+  belts are, and that difference swamps any glow delta — six of eight
+  variants in one sweep failed to reproduce between two passes. This sweep was
+  therefore rendered by a throwaway harness that disables the scene's process
+  mode and counts the ticks by hand; every render is then byte-identical run
+  to run. Filed separately as its own issue.
+
+  **The sweep** (bottleneck line, crusher closeup at tile 4,0 size 10,
+  1200x800, tick 10060; deltas in 0-255 levels against the null baseline):
+
+  | intensity / bloom / threshold / blend | lens box | max | rest of frame | selectivity |
+  |---|---|---|---|---|
+  | 0.7 / 0.15 / 0.85 / SOFTLIGHT *(shipped)* | +3.22 | +29 | +1.21 | 2.7x |
+  | 0.7 / 0.0 / 0.85 / SOFTLIGHT | +2.12 | +28 | +0.15 | 14.6x |
+  | 0.7 / 0.0 / 1.2 / SOFTLIGHT | +1.32 | +25 | +0.04 | 34.9x |
+  | 1.0 / 0.0 / 1.2 / SOFTLIGHT | +1.99 | +30 | +0.04 | 48.2x |
+  | 1.0 / 0.0 / 0.85 / SCREEN | +21.58 | +218 | +0.79 | 27.3x |
+  | 1.0 / 0.0 / 1.0 / SCREEN | +19.23 | +217 | +0.52 | 37.2x |
+  | 0.7 / 0.0 / 1.2 / SCREEN | +12.29 | +199 | +0.17 | 71.8x |
+  | **1.0 / 0.0 / 1.2 / SCREEN** *(new)* | **+16.12** | **+213** | **+0.23** | **69.1x** |
+  | 1.0 / 0.0 / 1.4 / SCREEN | +13.14 | +208 | +0.07 | 179.5x |
+  | 1.0 / 0.0 / 1.2 / ADDITIVE | +16.52 | +213 | +0.25 | 66.4x |
+
+  **What the sweep says.** `glow_bloom` is the whole of the frame-wide haze
+  (rows 1-2: zeroing it alone takes contamination from +1.21 to +0.15), which
+  is why the old settings fired on the crusher's white lid, the jars' froth
+  and the dock's box labels and softened all three — a legibility cost (§2b)
+  paid for an effect meant to be about lamps. The blend mode then decides
+  everything: **SOFTLIGHT's brightest single pixel is +25..30 at any
+  intensity and any threshold**, because its effect scales with the pixel
+  beneath it and a lit lens is already bright, so it cannot make a halo at all
+  — the lens stays a flat cream cube however it is tuned. SCREEN takes the
+  same lens to +213. Threshold 1.2 is the knee rather than a guess: 1.0-1.2 is
+  where the brightest *lit white* surface in the game sits, below it
+  contamination climbs fast (+0.79 at 0.85) and above it the lamp is what
+  pays — 1.4 buys +0.07 instead of +0.23, a difference already under one luma
+  level, for 19% of the halo. Intensity went 0.7 -> 1.0 last, worth
+  +16.12/+213 against +12.29/+199 for +0.06 of contamination. ADDITIVE was
+  measured and is within noise of SCREEN; SCREEN is kept because it retains
+  marginally more hue in the lens (saturation 0.36 against 0.34) and is
+  bounded by construction, so a brighter emissive added later cannot push a
+  lens past white. (The earlier claim that ADDITIVE clips and spills is not
+  supported by the measurement: clipped pixels in the lens box are 3.0%
+  against 3.1%.)
+
+  **Result:** 1.0 / 0.0 / 1.2 / SCREEN. The halo around a lit lens goes from
+  1480 px at rgb(6,2,1) to 7136 px at rgb(18,9,2) — five times the reach,
+  three times the strength, amber either way (saturation 0.87), which is §4's
+  "a lit voxel glows in its OWN colour". Overall exposure is unmoved (mean
+  luma 135.1 -> 134.4 on the closeup, 153.8 -> 155.0 in first person), and
+  `SCREENSHOT_RENDER` is identical (objects 1189, primitives 4538006, draw
+  calls 233 on the stress line): a full-screen post-pass costs the same
+  whatever it is tuned to. Read across a bright frame and a dark one: in
+  first person the old settings lifted the roof lamps' own *faces* (+2.43)
+  and barely their surroundings (+1.67), which is why they read as flat white
+  rectangles indistinguishable from the skylight panels; the new ones leave
+  the faces alone (+1.91) and light the dark roof around them (+7.26), which
+  is what a lamp does.
+
+  **The SSAO in the same block had the same defect**, and was retuned with it
+  after the asset browser's worker (issue #49) measured the game's pass while
+  calibrating a baked per-voxel AO pass against it and found it near-inert: on
+  a vat fixture, toggling `ssao_enabled` moved the isometric closeup by at
+  most 5/255 and darkened 0.01% of pixels by more than 3%. That is the same
+  failure as the glow — `ssao_radius 0.9 / ssao_intensity 2.4 / ssao_power
+  1.6` was a number chosen where it could not be seen and never checked
+  against a frame.
+
+  Reproduced on the bottleneck line at a pinned tick (the same deterministic
+  harness the glow used, for the same reason), differencing rendered PNGs
+  against `ssao_enabled = false`. At the shipped settings the deepest of three
+  hand-picked crease boxes — a pot shoulder, a gantry arm against a pot, a
+  crusher leg — lost **1.7 levels out of 133** (x0.987), mean over the three
+  1.2 levels, with 0.22% of the frame darkened by more than 3%. On a flat
+  voxel face, 1% is not a shading cue; it is nothing.
+
+  **The finding that changed the answer: the pass is not uniformly weak.**
+  `ssao_radius` is in world units, so how much occlusion it finds per pixel
+  depends on how near the geometry is to the camera — and this game has two
+  cameras that differ enormously in that. The same setting that is invisible
+  under the orthographic camera looking down from across the hall is already
+  doing real work at eye level. At the shipped 0.9 / 2.4, first person
+  standing beside the line already darkens 7.8% of the frame by more than 3%,
+  against isometric's 0.22%. So "raise the intensity until isometric reads"
+  produces a first-person view that is filthy.
+
+  Measured, 1200x800. *iso crease* is the mean loss over the three boxes;
+  *smear* is the share of the frame darkened by more than 3%, which is where
+  overshoot shows up before the eye catches it; *crease:flat* is mean
+  darkening within 3 px of a luma edge over mean darkening elsewhere.
+
+  | radius / intensity | iso crease | iso smear | eye smear | crease:flat |
+  |---|---|---|---|---|
+  | 0.9 / 2.4 *(shipped)* | -1.2 lv | 0.22% | 7.8% | 2.0x |
+  | 0.9 / 8 | -4.5 lv | 1.40% | 15.3% | 1.9x |
+  | 0.9 / 16 | -7.8 lv | 2.83% | 18.7% | 1.8x |
+  | 0.45 / 8 | -2.1 lv | 0.41% | 10.2% | 2.3x |
+  | **0.45 / 16** *(new)* | **-3.7 lv** | **0.87%** | **12.9%** | **2.2x** |
+  | 0.45 / 24 | -4.8 lv | 1.16% | 14.0% | 2.1x |
+  | 0.3 / 16 | -2.1 lv | 0.50% | 9.4% | 2.3x |
+
+  `ssao_light_affect` was tried at 0.3, 0.6 and 1.0 and changed the rendered
+  frame by **nothing at all** — byte-identical measurements — so it is not
+  the lever it looks like and is not set.
+
+  **Result: 0.45 / 16.0 / 1.6.** Halving the radius is what reconciles the two
+  cameras: it costs isometric bite but takes much more off the first-person
+  smear, because that smear is the far end of a radius that was never
+  crease-sized to begin with. 0.45 world units is 4.5 voxels — *a fitting
+  against a body*, not a machine against the floor — and the crease:flat ratio
+  confirms it, rising from 2.0x to 2.2x in isometric and 2.5x to 2.6x at eye
+  level while the bite triples. Read at three framings, not two: isometric
+  closeup, play zoom (where the tomatoes gain a tight dark seat on the belt
+  rubber instead of floating), and first person standing beside the line. The
+  rejected 0.9 / 16 is the instructive frame — in first person it swallows the
+  belt's legs into a single dark smear and hangs a halo off the belt's lower
+  edge, which is exactly the "dirty-looking model" this is supposed to avoid.
+
+  **A trap for whoever measures this next**: a first-person shot aimed across
+  the empty hall shows no SSAO change at *any* intensity, because there is no
+  geometry near the camera to occlude anything. That is the pass behaving
+  correctly, not evidence that it is inert. The eye-level numbers above come
+  from a pose standing beside the line, not from the default first-person
+  pose `test_screenshot.gd` reaches.
+>>>>>>> origin/main
 - 2026-09-20: **A tank declares what it holds; the save format's
   field-addition window is closed.** Two issues, one mechanism, and one
   question that had to go back to the owner.
@@ -488,13 +645,26 @@ matches what code comments and data files cite.
   branch's packer output onto the ketchup exit belt, cases alternating, whole
   factory framing, case ≈ 20×21 px — a `boxed_ketchup` and a `boxed_bbq` on
   the **same belt in the same frame** read **156.7** and **117.2**: a
-  **39.5/255** gap. Review reproduced it independently at 152.87 vs 110.35,
-  **42.5**. The windows are 26×26 at (964,561) and (1023,538) of
-  `bbq_mixed.png`, aligned by silhouette overlap; the mask is 260 px and was
-  verified to contain all 45 of the window's near-neutral `label_cream`
-  pixels. The dock's contract-clipboard icons separate by 28.5 luma, 11.6
+  **39.5/255** gap. The windows are 26×26 at (964,561) and (1023,538) of
+  `bbq_mixed.png`, aligned by silhouette overlap. The frame is
+  `TomWhitticase-iss-balance/20260920-152320-bbq_mixed.png` on the `pr-media`
+  branch, which is the only copy — per #82 the screenshot harness is not
+  reproducible run to run, so it cannot be re-rendered.
+
+  **The gap is implementation-sensitive; read it as a range, not a figure.**
+  Three independent implementations of the method as written above give
+  **30.4, 39.5 and 42.5** — a spread of 12 luma, larger than the 5.02
+  same-kind floor quoted below, because the written recipe does not pin the
+  mask down to the pixel (the same three give masks of 233 and 260 px). The
+  earlier claim here that the 260 px mask "contains all 45 of the window's
+  near-neutral `label_cream` pixels" did not reproduce — a re-implementation
+  got 23 of 45 — and is withdrawn (#111). What survives is what the ruling
+  needs: **every implementation clears the ~26/255 "reads reliably" anchor**,
+  the lowest of them by about 15%. The dock's contract-clipboard icons separate by 28.5 luma, 11.6
   dE76. The method's anchors are 1.2/255 = invisible and ~26/255 = reads
-  reliably, so a 39.5 gap clears the reading threshold by half again.
+  reliably, so the gap clears the reading threshold on every implementation of
+  the method tried — by half again on the most generous, by about 15% on the
+  least.
 
   **A control must be the same subject kind as the subject — and every window
   must be logged** (corrected the same day, review of PR #98). The first
