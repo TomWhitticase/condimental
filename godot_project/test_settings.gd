@@ -387,9 +387,23 @@ func _initialize() -> void:
 	if not menu._settings_open or menu._load_open:
 		_fail("SETTINGS on the main menu must open the settings page and nothing else")
 		return
+	# The wordmark stands down while the rows are up and comes back with the
+	# buttons — at 1280x720 that height is the difference between one row of
+	# eight and four. A headless run cannot prove how many rows are on screen,
+	# but it can prove the height is actually handed over and handed back.
+	var title: Control = menu.find_child("Title", true, false)
+	if title == null:
+		_fail("the main menu has no Title in its column")
+		return
+	if title.visible:
+		_fail("the wordmark must stand down while the settings rows are up")
+		return
 	menu._settings_panel.back_button.pressed.emit()
 	if menu._settings_open:
 		_fail("BACK on the main menu must close the settings page")
+		return
+	if not title.visible:
+		_fail("BACK must bring the wordmark back with the buttons")
 		return
 
 	_restore()

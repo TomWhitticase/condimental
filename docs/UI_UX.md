@@ -783,6 +783,15 @@ column **scrolls on a row boundary** (§5c's snap rule) — half a card of a
 contract is half a decision, and half a settings row is a `+` button drawn
 where it cannot be clicked.
 
+On the main menu the **wordmark stands down while these rows are up** and
+comes back with the buttons. It is the title, the tagline and the splash —
+about 230px of the column at any window size — and at 1280x720 that height is
+the difference between one row of eight and four. §5c already ranks a control
+the player has to reach above everything else on the screen, and what is above
+this plate is decoration; the player is one BACK press from all of it, and the
+factory poster behind it never moves. Load Game keeps the wordmark: its list
+is short and its rows are tall, so it has nothing to spend the height on.
+
 **The development menu (F3)** is not part of the game and says so on itself:
 a blue-edged plate, never the hazard yellow every in-game plate is bordered
 with. It is **not a modal** — ESC leaves it alone, it closes nothing, and the

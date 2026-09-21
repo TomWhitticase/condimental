@@ -610,7 +610,11 @@ func _panel_height_budget() -> float:
 		var separation := float(column.get_theme_constant("separation"))
 		for child in column.get_children():
 			# Everything standing above the plate: the wordmark and its strap.
-			if child is Control and child.name != "MenuPanel":
+			# VISIBLE ones only — the settings view stands them down
+			# (`_set_wordmark_visible`), and a hidden child takes none of a
+			# `VBoxContainer`'s space, so counting one here would hold back
+			# room nothing is using.
+			if child is Control and child.name != "MenuPanel" and child.visible:
 				used += (child as Control).get_combined_minimum_size().y + separation
 	return float(get_viewport_rect().size.y) - used
 
@@ -720,6 +724,15 @@ func _set_settings_open(open: bool) -> void:
 		_button_box.visible = not open and not _load_open
 	if _settings_box != null:
 		_settings_box.visible = open
+	# The wordmark stands down while these rows are up, and comes back with the
+	# buttons. It is ~230px of the column at any window size, and at 1280x720 —
+	# the smallest size this HUD is held to — that is the difference between
+	# one row of eight and four. UI_UX.md §5c already ranks a control the
+	# player has to reach above everything else on the screen, and what is
+	# above the plate here is the title, a tagline and a splash line: the
+	# decoration the rule is written to outrank. The player is one BACK press
+	# from all three, and the factory poster behind them never went anywhere.
+	_set_wordmark_visible(not open)
 	# The rows read the autoload, and the pause menu's copy of this screen
 	# writes the same autoload — so what is shown is re-read on the way in
 	# rather than trusted from the last time this menu was built.
@@ -728,6 +741,20 @@ func _set_settings_open(open: bool) -> void:
 		# And re-measured: `build()` sized the scroll before these rows were in
 		# a tree, and the window may have been resized since.
 		_settings_panel.fit(_settings_rows_budget())
+
+
+## Everything in the column ABOVE the plate — the title, the tagline and the
+## splash. A hidden child of a `VBoxContainer` takes none of its space, which
+## is the whole point: `_panel_height_budget` counts the visible ones only, so
+## the plate is measured against the room this leaves and not against the room
+## it would leave if it were still there.
+func _set_wordmark_visible(shown: bool) -> void:
+	var column := get_node_or_null("MenuMargins/MenuColumn")
+	if column == null:
+		return
+	for child in column.get_children():
+		if child is Control and child.name != "MenuPanel":
+			(child as Control).visible = shown
 
 
 func _on_quit_pressed() -> void:
