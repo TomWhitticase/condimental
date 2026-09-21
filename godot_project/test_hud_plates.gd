@@ -909,15 +909,20 @@ func _modal_step() -> bool:
 ## after the flip was written and was never added to it, so a panel that
 ## cleared the clipboard and STOCK was drawn straight over the wage bill.
 ##
-## The legend is deliberately NOT checked here: at 1280x720 there is no
-## position that clears both it and the column, and covering a static keybind
-## reference the player can fold beats covering a live readout — the same
-## ranking `_position_config_panel`'s own comment makes.
+## The legend is checked too, but as "never covered while drawn" rather than
+## "never overlapped" (issue #107). At neither shipped size does a position
+## exist that clears both the legend and the right-hand column — the panel is
+## 571px tall in a 698px band at 1600x900, and 426px wide where the gap
+## between the legend and the clipboard is smaller than that — so a plain
+## "must not overlap" would be a rule nothing can satisfy. The panel takes
+## the corner when it must and the legend steps aside for as long as it does
+## (`_set_legend_yielded`), which is the ranking `_position_config_panel` has
+## always stated, now carried out rather than merely written down.
 func _config_step() -> bool:
 	if _cfg >= CONFIG_CASES.size():
 		_open_only("")
 		_resize(BIG)
-		print("HUD_PLATES_OK: %s; every modal (%s) fits inside the window with every button reachable, at 1600x900 and at 1280x720; and a hopper's and a FLUID TANK's configuration panel keeps clear of all three right-hand plates at both sizes, with the building centred and standing low in the frame where issue #88 photographed it" % [
+		print("HUD_PLATES_OK: %s; every modal (%s) fits inside the window with every button reachable, at 1600x900 and at 1280x720; and a hopper's and a FLUID TANK's configuration panel keeps clear of all three right-hand plates at both sizes — and never drawn on top of the CONTROLS legend, which steps aside at a size where nothing can clear both (issue #107) — with the building centred and standing low in the frame where issue #88 photographed it" % [
 			_summary, ", ".join(_modal_keys())
 		])
 		quit(0)
@@ -992,11 +997,19 @@ func _check_config_case(window: Vector2i, tile: Vector2i, what: String, across: 
 	if rect.position.x < -0.5 or rect.end.x > float(window.x) + 0.5:
 		_fail("%s is off the side of the window (%s)" % [where, str(rect)])
 		return false
-	for named in [
+	var plates := [
 		["the contracts clipboard", main._contract_panel_rect()],
 		["the STOCK plate", main._stock_rect()],
 		["the CREW plate", main._crew_rect()],
-	]:
+	]
+	# The legend joins the list only while it is DRAWN. The panel is allowed
+	# to take its corner when no position clears both it and the column —
+	# what it is not allowed to do is take the corner and leave the legend
+	# underneath (issue #107). `_legend_rect()` still reports a rect while
+	# the plate has yielded, so this has to ask the plate and not the rect.
+	if main._legend_panel != null and main._legend_panel.visible:
+		plates.append(["the CONTROLS legend", main._legend_rect()])
+	for named in plates:
 		var plate: Rect2 = named[1]
 		if plate.size.x <= 0.0 or plate.size.y <= 0.0:
 			continue

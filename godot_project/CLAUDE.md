@@ -82,16 +82,24 @@ Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
   and a height shaped at whatever width it was last *drawn* at, which is
   meaningless under `--headless`, so a panel measured around one is measured
   around nothing. Break such a sentence at a join it already has. It is used
-  legitimately 14 times, every one of them with the width pinned first — by a
-  fixed-size ancestor (`SHOP_SLOT_SIZE`, `MARKET_SLOT_SIZE`,
-  `CONFIG_PICKER_SLOT_SIZE`) or by the Label's own `custom_minimum_size.x`
-  (`CONFIG_PANEL_WIDTH`, `CREW_TEXT_WIDTH`, `PAUSE_BUTTON_MIN_SIZE.x`) — so the
-  pin dominates the 1px and the measurement stays honest. Pin the width or do
-  not wrap.
+  legitimately 17 times in `main.gd` and twice in `menu.gd`, every one of them
+  with the width pinned first — by a fixed-size ancestor (`SHOP_SLOT_SIZE`,
+  `MARKET_SLOT_SIZE`, `CONFIG_PICKER_SLOT_SIZE`) or by the Label's own
+  `custom_minimum_size.x` (`CONFIG_PANEL_WIDTH`, `CREW_TEXT_WIDTH`,
+  `PAUSE_BUTTON_MIN_SIZE.x`) — so the pin dominates the 1px and the
+  measurement stays honest. **An unpinned one is the bug, not the exception**:
+  the configuration panel's footer was the only Label on that panel with
+  neither a pin nor a wrap, and at 489px it made the whole panel 99px wider
+  than `CONFIG_PANEL_WIDTH` says it is — which is what put it on the legend
+  it could not then get off (issue #107). Pin the width or do not wrap.
 - **A headless test cannot prove a width.** Headless font metrics are
   narrower than a real window's, and `get_combined_minimum_size()` can
   underreport what is on screen — take `maxf(minimum, size)` when
-  positioning. `scripts/screenshot-scene.sh` at 1280x720 is the acceptance.
+  positioning. Nor can you get a width out of a wrapping Label by turning
+  wrapping off to measure it: the cached minimum is only re-shaped when the
+  TEXT changes, so a single-word label answers "1px, it fits" to every
+  question. Measure the **font** (`Font.get_string_size`) when you need a
+  number. `scripts/screenshot-scene.sh` at 1280x720 is the acceptance.
 - **Audio is synthesised into `AudioStreamWAV` at runtime**; no `.wav` in the
   repo. A cue is fired by the handler that knows the real outcome (compare
   money/owned before and after), never by the input — so a refused command

@@ -1008,6 +1008,21 @@ var _help_label: Label
 var _legend_panel: PanelContainer
 var _legend_toggle: Button
 var _legend_collapsed := false
+## True while a panel has taken the legend's corner (issue #107).
+##
+## It is NOT the player's fold. `_legend_collapsed` is theirs — UI_UX.md §5f
+## calls it "a 'not right now', not a preference" — and nothing here writes
+## it, so folding and unfolding still mean exactly what the player meant.
+## This is the plate stepping aside for the duration of one panel and coming
+## straight back.
+##
+## `_legend_rect()` keeps reporting the plate's rect while it is yielded, and
+## that is the whole reason this is a flag rather than a `visible = false`.
+## A hidden plate has no rect; a panel positioned against no rect drifts onto
+## the free corner, which frees the plate, which moves the panel back — the
+## two-state oscillation issue #87 records in a different plate. Positioning
+## is decided against where the legend WOULD be, and only the drawing yields.
+var _legend_yielded := false
 
 # --- Contract clipboard (UI_UX.md §5) --------------------------------------
 # The money/contract readout used to be one plain Label folded into the
@@ -4774,7 +4789,11 @@ func _apply_legend_collapsed() -> void:
 ## headless run never leaves — the old `size.y > 0` guard silently dropped
 ## the legend out of the avoid list entirely in exactly that case.
 func _legend_rect() -> Rect2:
-	if _legend_panel == null or not _legend_panel.visible:
+	if _legend_panel == null:
+		return Rect2()
+	# `_legend_yielded` is deliberately still a rect here: see that flag's
+	# doc comment for why a yielded plate must keep measuring.
+	if not _legend_panel.visible and not _legend_yielded:
 		return Rect2()
 	var size := _legend_panel.size
 	if size.y <= 0.0:
@@ -10143,6 +10162,12 @@ const CONFIG_LEVEL_BAR_HEIGHT := 14.0 * UI_SCALE
 ## over the note beneath it.
 const CONFIG_PICKER_SLOT_SIZE := Vector2(58.0, 78.0) * UI_SCALE
 const CONFIG_PICKER_ICON_SIZE := Vector2(30.0, 30.0) * UI_SCALE
+## How small the slot's name may be shrunk to keep a word whole (issue #106,
+## `_fit_config_picker_name`). Two steps under the name's own size: enough to
+## take "Molasses" at today's scale, and a floor rather than an open-ended
+## shrink so a future twenty-letter ingredient gets an unreadable-but-honest
+## slot rather than a one-pixel one.
+const CONFIG_PICKER_NAME_MIN_FONT_DELTA := -5
 
 
 func _build_config_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
@@ -10363,7 +10388,15 @@ func _build_config_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void
 
 	var footer := Label.new()
 	footer.label_settings = note_settings
-	footer.text = "ESC or ✕: close    ·    click the building again to close"
+	# Pinned and wrapping, like every other note on this panel. It was
+	# neither, and at 489px it was the widest thing in a panel that declares
+	# itself 426 wide — so the panel the positioning arithmetic is written
+	# against was 99px wider than the constant that names its width, which is
+	# 99px of a legend it then could not get off (issue #107). The two clauses
+	# also said the same thing twice; one of them is enough.
+	footer.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	footer.custom_minimum_size.x = CONFIG_PANEL_WIDTH
+	footer.text = "ESC, ✕, or the building again: close"
 	body.add_child(footer)
 
 
@@ -10437,6 +10470,13 @@ func _build_config_picker_slot(index: int, item_id: String) -> void:
 	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	name_label.text = _item_display_name(item_id)
 	column.add_child(name_label)
+	_fit_config_picker_name(name_label, name_settings)
+	# And the frame is the last word on where the name may be drawn. The
+	# column is anchored to the button rather than clipped by it, so before
+	# this a name the fit could not rescue drew its tail BELOW the slot, on
+	# top of the note underneath (issue #106). Clipping costs nothing when
+	# the fit succeeds and turns the failure from a spill into a crop.
+	button.clip_contents = true
 
 	# The non-colour half of the selected signal (UI_UX.md §7): the frame
 	# turns hazard-yellow exactly as the hotbar's selected socket does, AND a
@@ -10458,6 +10498,60 @@ func _build_config_picker_slot(index: int, item_id: String) -> void:
 	button.add_child(mark)
 
 	_config_picker_slots.append({"item": item_id, "button": button, "mark": mark})
+
+
+## Shrinks a picker slot's name until no WORD in it has to be broken in half
+## (issue #106).
+##
+## The slot is deliberately tall enough for two lines, which is the right
+## answer for "Spice Mix": a name with a space in it wraps at a join it
+## already has, and both halves are words. "Molasses" has no join. With no
+## legal break and no room, `AUTOWRAP_WORD_SMART` fell back to breaking
+## inside the word and drew "Molasse" / "s" — one of the few pieces of text
+## in this HUD that was not merely cramped but wrong.
+##
+## So the FONT yields before the word does. That is §5c's order applied one
+## level down: the thing that can give way without losing meaning gives way
+## first, and the name only wraps after the type has shrunk as far as
+## [`CONFIG_PICKER_NAME_MIN_FONT_DELTA`] allows.
+##
+## The measurement happens HERE, at build time in the real window, rather
+## than being pinned to a constant a test could assert: headless font metrics
+## are narrower than a live window's (`godot_project/CLAUDE.md`), so a number
+## measured headless is wrong on screen and a number measured on screen is
+## wrong headless. A fit that re-measures is right in both.
+func _fit_config_picker_name(label: Label, settings: LabelSettings) -> void:
+	# The widest single word is the only thing that can fail: anything with a
+	# space in it has somewhere legal to break.
+	var longest := ""
+	for word in label.text.split(" ", false):
+		if word.length() > longest.length():
+			longest = word
+	if longest == "":
+		return
+	# The room a line really has: the slot less the column's insets, and less
+	# the outline, which grows OUTWARD from the glyphs on both sides and is
+	# not in the string's own measured width.
+	var inner: float = CONFIG_PICKER_SLOT_SIZE.x - _ui_px(8.0) - float(settings.outline_size)
+	# Measured off the FONT, not off the Label. A Label that is wrapping
+	# reports a 1px minimum width, and turning wrapping off to measure it
+	# only re-shapes when the TEXT also changes — so every name that was
+	# already a single word, which is every name this is here for, answered
+	# "1px, it fits" and was never shrunk at all. Asking the font is the same
+	# question with none of that state in the way.
+	var font := settings.font
+	if font == null:
+		font = label.get_theme_font("font")
+	if font == null:
+		return
+	var floor_size := _ui_font(CONFIG_PICKER_NAME_MIN_FONT_DELTA)
+	while settings.font_size > floor_size:
+		if font.get_string_size(
+			longest, HORIZONTAL_ALIGNMENT_LEFT, -1, settings.font_size
+		).x <= inner:
+			return
+		settings.font_size -= 1
+
 
 
 ## Opens the panel for the building whose footprint ORIGIN is `origin`.
@@ -10503,6 +10597,11 @@ func _close_config_panel() -> void:
 	_config_kind = ""
 	if _config_panel != null:
 		_config_panel.visible = false
+	# The corner goes straight back, whether or not it was ever taken
+	# (issue #107). This is the only close path, so it is the only place that
+	# has to remember — a panel hidden by any other route would leave the
+	# legend gone for the rest of the session.
+	_set_legend_yielded(false)
 	if _view_mode == ViewMode.FIRST_PERSON and not _shop_open and not _market_open \
 			and not _board_open and not _staff_open and not _production_open:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -10987,8 +11086,98 @@ func _position_config_panel() -> void:
 	if pos.x + size.x > right_bound:
 		pos.x = minf(anchor.x - CONFIG_PANEL_OFFSET.x - size.x, right_bound - size.x)
 	pos.x = clampf(pos.x, 8.0, maxf(8.0, bounds.x - size.x - 8.0))
+	pos = _config_pos_clear_of_legend(pos, size, bounds)
 	_config_panel.position = pos
 	_config_panel.size = size
+	# Whatever position the search landed on is the one the legend is judged
+	# against — never a hypothetical one (§2b point 33 again).
+	_set_legend_yielded(Rect2(pos, size).intersects(_legend_rect()))
+
+
+## The last plate the panel has to get past: the CONTROLS legend, top left
+## (issue #107).
+##
+## Dodging the right-hand column is what PUTS it here. A panel that flips off
+## the clipboard lands on the opposite corner, and once the tank's panel grew
+## a destruction warning it was tall enough at 1600x900 to cover four of the
+## legend's six lines. The legend was left off the bound on purpose when the
+## bound was written — at 1280x720 there is genuinely no position that clears
+## both it and the column, and covering a keybind reference the player can
+## fold beats covering the live money readout. That ranking still holds. What
+## did not hold is the conclusion drawn from it: "sometimes there is nowhere
+## to go" was read as "never go anywhere", and the 1600x900 case, where there
+## is a whole empty band below the legend, was never tried.
+##
+## So: push DOWN, and only if the push lands somewhere legal. Down rather
+## than right because right is where the flip just came from — sending it
+## back would trade the legend for the clipboard, which is the worse of the
+## two by the ranking above. Where the window is too short for the band, the
+## panel stays exactly where it was and the old trade-off stands unchanged;
+## that "nowhere to stand" geometry is issue #99, and its answer is a shorter
+## panel, not a cleverer position.
+func _config_pos_clear_of_legend(pos: Vector2, size: Vector2, bounds: Vector2) -> Vector2:
+	var legend := _legend_rect()
+	if legend.size.x <= 0.0 or legend.size.y <= 0.0:
+		return pos
+	if not Rect2(pos, size).intersects(legend):
+		return pos
+	# Down first, then out to the legend's right. Down is preferred because
+	# right is the direction the flip just came from, and sending the panel
+	# back there trades the legend for the clipboard — the worse of the two
+	# by the ranking above.
+	for candidate in [
+		Vector2(pos.x, legend.end.y + _ui_px(8.0)),
+		Vector2(legend.end.x + _ui_px(8.0), pos.y),
+	]:
+		if _config_pos_is_clear(candidate, size, bounds):
+			return candidate
+	return pos
+
+
+## Whether a configuration panel drawn at `pos` would be fully inside the
+## playable band and off every fixed plate.
+##
+## The plates are re-tested at the CANDIDATE position rather than the one the
+## bound above was computed at: they are not all the same height, so a band
+## that was clear at the old `y` need not be clear at the new one. That is
+## the same "judge it where it will be DRAWN" rule the `y` clamp is written
+## for, applied to a move the clamp cannot see.
+func _config_pos_is_clear(pos: Vector2, size: Vector2, bounds: Vector2) -> bool:
+	if pos.x < 8.0 or pos.y < 8.0:
+		return false
+	if pos.x + size.x > bounds.x - 8.0:
+		return false
+	if pos.y + size.y > bounds.y - _hotbar_reserved_height():
+		return false
+	var rect := Rect2(pos, size)
+	for plate in [
+		_contract_panel_rect(), _stock_rect(), _crew_rect(), _legend_rect()
+	]:
+		if plate.size.y > 0.0 and rect.intersects(plate):
+			return false
+	return true
+
+
+## Hands the legend's corner to a panel, or hands it back.
+##
+## The legend is a keybind crib sheet — static, already known to anyone past
+## their first factory, and foldable on purpose. The configuration panel is
+## live, is the thing the player just clicked, and carries the warning that
+## switching a hopper's contents destroys what is in it. When only one of the
+## two can have the top-left corner at a given window size, the reference
+## text is the one that can wait. That is the ranking
+## `_position_config_panel` has always stated; what is new is that the loser
+## now actually steps aside instead of being drawn under the winner.
+##
+## It is not a fold and does not touch the player's (see `_legend_yielded`),
+## and it is only reached when `_config_pos_clear_of_legend` has already
+## failed to find a position where nobody has to yield at all.
+func _set_legend_yielded(yielded: bool) -> void:
+	if _legend_yielded == yielded:
+		return
+	_legend_yielded = yielded
+	if _legend_panel != null:
+		_legend_panel.visible = not yielded
 
 
 ## FILL: one deliberate load of this ONE building, which is what the two
