@@ -24,7 +24,7 @@ below is history and should only ever be appended to.)*
   consolidated onto one integration branch and fast-forwarded into `main`.
   The union passed `scripts/verify-core-loop.sh` (19 Rust suites, 30 headless
   Godot proofs, no failures) and has been rendered and played; the same script
-  is **26 Rust suites and 37 Godot proofs as of 2026-09-21** — a number the
+  is **26 Rust suites and 38 Godot proofs as of 2026-09-21** — a number the
   run now prints for itself. A fresh
   worktree still needs `cargo xtask` and **two** `godot --import` passes
   before the world is visible. See the log entry below.
@@ -55,7 +55,15 @@ below is history and should only ever be appended to.)*
   `IngredientSnapshot::capacity`. Bays are derived from the ledger, so free
   bays are a shared pool and a bay frees itself when its stock is used. A rack
   is pure storage — it never touches a belt. Any fixture that wants more than
-  20 of something has to build the room first. See the log entry below.
+  20 of something has to build the room first. **A rack draws what it holds
+  (W3):** six shelves, a pallet per bound bay from the bottom level up, goods
+  scaled to the bay's fill and tinted per raw, hover off either tile of the
+  1×2, and W1's removal refusal said in words before the click.
+  `scripts/screenshot-scene.sh --warehouse` photographs it. **The market
+  reads the ceiling (W4):** a crate prints `owned / capacity`, buys only what
+  fits, says `AT CAPACITY` when nothing does, and a header meters the racks'
+  shared bays; the STOCK plate marks a full row `FULL` and says how many rows
+  it is hiding when the column cuts its list. See the log entries below.
 - **The lighting post-passes mean something now (2026-09-20).** Glow is
   `1.0 / 0.0 / 1.2 / SCREEN` and SSAO is `0.45 / 16.0 / 1.6`
   (`factory_environment.gd`). Both sets of old numbers were chosen where they
@@ -230,6 +238,106 @@ goes to the recipe the machine is already holding
 samples each machine's live recipe *during* the run and asserts the two lines
 draw different colours, which is what catches a regression here at all — the
 end-of-run state had already fallen back.
+
+### 2026-09-21 — The market says what will fit, and the plate stops hiding rows (W4)
+
+The last of the warehouse tickets, and the half the player reads. W1 put a
+ceiling on raw stock and W3 drew the racks; the shop was still offering
+crates of ten into a larder with room for four, and refusing them in silence.
+
+**The crate carries the ceiling, because the crate is where it stops
+something.** Each market slot now prints `In stock 180 / 320`, buys the number
+it prints (`min(crate, capacity − owned)`), and when there is no room at all
+says `AT CAPACITY ✗` in amber rather than wearing the unaffordable price's
+`✗` — the two refusals have different cures, earn money or build a rack, and
+one word for both sends the player to the wrong one. Shift-buy is clamped by
+the same room, a click with nowhere to put anything issues no command at all
+(it cues the shared refusal instead), and every figure is the wire's:
+`IngredientSnapshot::capacity`, never a Godot-side `base + stack × bays`,
+which is exactly the arithmetic only the simulation can do honestly while the
+bays are a shared pool.
+
+**A header for the pool itself**: `Warehouse: 1 rack · bays 2 / 6 · 4 free`
+under the balance, with a meter beside it. That meter is the first bar the
+warehouse has earned under §5e — bays used of bays built is a fixed fraction
+the simulation defines — and it is the only one: a per-ingredient bar would
+slide whenever a *different* ingredient took a bay, so the STOCK plate keeps
+figures plus a `FULL` chip on any row at its ceiling. A purchase dirties no
+tile, so `_buy_ingredient_slot` re-reads the warehouse itself rather than
+waiting a frame; the pallets on the racks fill as the crates are clicked.
+
+**The plate defect the W1 and W3 screenshots showed.** Both PRs photographed a
+STOCK plate listing one of three ingredients behind a scroll thumb drawn over
+the count. The cause was not the plate: the CREW plate made this column three
+tenants deep, and at 1600x900 they wanted 796px of a 741px column, with
+`_stock_ceiling_y` inviting the clipboard to grow until the plate was down to
+its one-row floor. Two rank-4 faults were in play, so the tiebreak came from
+the rank above — **reachability**. A docket stack is a scrollbar the player
+can drag and C shows every contract in full; the STOCK plate is
+`MOUSE_FILTER_IGNORE` from the panel down, so a row cut off it cannot be
+reached at all. The shares are now 0.55 stock / 0.32 crew (CREW spends its
+assignment line, which the H panel still shows), and the clipboard is capped
+at the line where the whole list fits (`_stock_list_ceiling_y`) but never
+below its own one-line floor. 1600x900 shows three rows and no scrollbar.
+
+720p genuinely cannot seat three whole plates, so there the cut is
+*announced*: the heading reads `+2 more · M: market` and the list reserves a
+gutter so the thumb is never drawn on a count. A scrollbar on an IGNORE plate
+is a mark, not a control.
+
+`test_warehouse_rack.gd` proves the crate's pair of numbers against the wire's
+own cap, the clamped quantity (four units of room buys four and charges for
+four), the AT CAPACITY word and glyph, the dead click, and the header's
+figures and meter. `test_hud_plates.gd` proves the FULL chip, the whole list
+at 1600x900, and that a cut list says how many rows it is hiding. UI_UX.md
+§5e/§5f carry the reasoning.
+
+### 2026-09-21 — The rack shows what it is holding, bay by bay (W3)
+
+The presentation half of the warehouse stock racks. W1 made a rack the thing
+that raises the ceiling and W2 gave it a model; until now it rendered as a
+handsome empty frame whatever was in it. `main.gd` now builds six pallet/goods
+pairs per rack from W2's own geometry constants (`RACK_BAY_OFFSETS`,
+`RACK_LEVEL_VOXELS`, mirrored from `assets.rs` with the generator named beside
+them) and drives them off `storage_snapshot_json`, polled with the other
+buffers: a bound bay shows its pallet, the goods on it are scaled to the bay's
+fill, and the tint says which raw it is. Bays fill **bottom level first, near
+bay before far** — the sim assigns bay indices rather than storing them, so
+which shelf a bay is, is this file's choice, and it is the one that makes a
+part-used rack load from the floor up.
+
+The six tints are the ones W2 measured, not the hopper's: a hopper's heap is
+seen down its own dark throat and a rack's pallet is seen against the factory
+floor, so vinegar and liquid smoke are carried further from the floor's value
+than their hopper twins. `test_warehouse_rack.gd` holds that line — it
+enumerates the raws from the sim (`hopper_items ∪ tank_fluids`, so a gated
+ingredient still needs a tint), refuses a table entry that is not one of them,
+and fails any tint whose Rec.709 luma lands inside `assets.rs`'s measured
+`RACK_TINT_DEAD_BAND` of 100..175.
+
+**W1's refusal is spoken now.** A rack whose bays the stock cannot do without
+will not come up, and that was silent: the simulation declines, and there is
+no generic refusal channel to carry a reason (the #143 precedent). So the
+prompt derives it from the three fields the wire already carries —
+`used_bays > total_bays − this rack's bays` — and says `✗ REMOVE … its bays
+are the only room the stock has` before the click, hover says `⚠ HOLDING`, and
+`_confirm_build` measures whether the placement actually went before choosing
+between the REMOVE and REFUSED cues. Hover resolves from either tile of the
+1×2 and reads back the bays used, what is on them and the shared warehouse
+total, because a rack standing empty beside a full one is not a fault.
+
+No config panel and no status lamp: a rack has no crew and no contents to
+declare, so `_config_click_at_tile` already closes on it, and the model has no
+emissive voxel because a building that neither works nor stalls has nothing to
+light. How many of its six shelves carry a pallet **is** the readout.
+
+New screenshot fixture `--warehouse` (`Layouts.build_warehouse_row`): three
+racks holding three raws — two with every bay bound, one with two of six, a
+part-full load on the last bay of each ingredient, and four bare shelves to
+compare the bound ones against; refused rather than photographed if the order
+was clamped. Fourteen of its eighteen bays are in use, so `--warehouse
+--remove-mode` photographs the refusal too. It is the one fixture exempt from
+the harness's blanket `stock_larder`, because its subject is the larder.
 
 ### 2026-09-21 — The game opens in first person
 

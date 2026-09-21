@@ -243,9 +243,19 @@ func _run_checks() -> void:
 	if not main._stock_panel.visible:
 		_fail("the stock plate is not visible — it is a permanent readout")
 		return
-	if main._stock_hint == null or main._stock_hint.text != "M: market":
-		_fail("the plate does not keep the 'M: market' hint (got '%s')" % [
-			"<none>" if main._stock_hint == null else main._stock_hint.text
+	# The hint keeps the market's key whatever else it says, and says how many
+	# rows the column cut when it cut any (`_stock_rows_hidden`). Asserted
+	# against that count rather than against a literal, because which window
+	# this fixture is in when the checks run is not the subject here — the two
+	# windows get their own assertions below.
+	if main._stock_hint == null:
+		_fail("the plate does not keep the 'M: market' hint (got '<none>')")
+		return
+	var hidden_here: int = main._stock_rows_hidden()
+	var wanted_hint: String = "M: market" if hidden_here <= 0 else "+%d more  \u00b7  M: market" % hidden_here
+	if main._stock_hint.text != wanted_hint:
+		_fail("the plate reads '%s' with %d rows hidden — wanted '%s'" % [
+			main._stock_hint.text, hidden_here, wanted_hint
 		])
 		return
 
@@ -374,6 +384,38 @@ func _run_checks() -> void:
 		_fail("after the fill the plate reads '%s' for %d owned" % [main._larder_entries[bought].text, left])
 		return
 
+	# --- FULL, on the row that is ------------------------------------------
+	# The plate carries no bar (UI_UX.md §5e: the per-ingredient ceiling moves
+	# as the OTHER ingredients spend the shared bays, so a bar here would drift
+	# under a player who bought nothing). What it does carry is the one state
+	# worth acting on: a row at its ceiling, said in a word.
+	var full_chip: Label = main._larder_full_chips.get(bought)
+	if full_chip == null:
+		_fail("'%s' has no FULL chip on its row" % bought)
+		return
+	if full_chip.visible:
+		_fail("'%s' is below its ceiling but the row already reads FULL" % bought)
+		return
+	Layouts.fund(main.sim, 1000000)
+	main.sim.issue_command_json(JSON.stringify({
+		"type": "buy_ingredient", "item": bought,
+		"quantity": Layouts.stock_room_for(main.sim, bought),
+	}))
+	main._refresh_owned_counts()
+	main._update_larder()
+	if not full_chip.visible:
+		_fail("'%s' bought to its ceiling (%d) does not read FULL" % [
+			bought, Layouts.stock_held(main.sim, bought),
+		])
+		return
+	if full_chip.text != "FULL":
+		_fail("the chip on a full row reads '%s'" % full_chip.text)
+		return
+	var untouched_chip: Label = main._larder_full_chips.get(untouched)
+	if untouched_chip != null and untouched_chip.visible:
+		_fail("'%s', with none of it bought, reads FULL as well" % untouched)
+		return
+
 	# --- It clears the clipboard and the hotbar, at both window sizes ------
 	for window in [BIG, SMALL]:
 		_resize(window)
@@ -462,16 +504,37 @@ func _run_checks() -> void:
 			_fail("the CREW plate kept the '%s' assignment line at 1280x720" % id)
 			return
 
+	# Roomy window: every category still on the plate with the two things you
+	# act on — the count and the HIRE chip. NOT the assignment line: since the
+	# warehouse work this plate's share is 0.32, and the ~90px that buys is
+	# spent on the STOCK list above instead. The tiebreak is reachability
+	# (UI_UX.md \u00a75f) — the names dropped here are still in the H panel in
+	# full, whereas a stock row cut off a `MOUSE_FILTER_IGNORE` plate cannot be
+	# reached at all. So at 1600x900 the whole stock list is the assertion.
 	_resize(BIG)
-	var named := 0
+	var categories := 0
 	for id in main._crew_row_nodes:
 		var nodes = main._crew_row_nodes[id]
 		if not nodes["wrap"].visible:
 			continue
-		if not nodes["assigned_label"].visible:
-			_fail("the CREW plate dropped the '%s' assignment line at 1600x900" % id)
+		categories += 1
+		if not nodes["count_label"].visible or String(nodes["count_label"].text) == "":
+			_fail("the CREW plate dropped the '%s' count at 1600x900" % id)
 			return
-		if String(nodes["assigned_label"].text) != "":
+	if categories < 2:
+		_fail("the CREW plate shows %d categories at 1600x900" % categories)
+		return
+	if main._stock_rows_hidden() != 0:
+		_fail("the column hid %d stock rows at 1600x900 — the whole list fits there" % main._stock_rows_hidden())
+		return
+	if main._stock_hint.text != "M: market":
+		_fail("the stock hint announces hidden rows at 1600x900 ('%s')" % main._stock_hint.text)
+		return
+	# Every category names what it is assigned to through the pure function,
+	# whether or not the plate has the room to draw that line this frame.
+	var named := 0
+	for row in main._crew_plate_state(CREW_SNAPSHOT, 0)["rows"]:
+		if String(row["assigned_text"]) != "":
 			named += 1
 	if named == 0:
 		_fail("no CREW row names what its category is assigned to")
@@ -739,7 +802,7 @@ func _run_checks() -> void:
 	for offer in JSON.parse_string(main.sim.economy_snapshot_json()).get("board", []):
 		if not bool(offer.get("active", false)):
 			main.sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": String(offer["id"])}))
-	_summary = "%d stock rows on a right-hand plate clear of the clipboard and hotbar at 1600x900 and 1280x720, each with its own colour and a 'none' zero state; the legend folds %s -> %s from its button and from F1 in both view modes, is not a modal, and every cursor panel reads its current rect; a world panel is parked in the lower-left corner in first person rather than following the crosshair, clear of the crosshair, the hotbar's strip and the whole right-hand column at both sizes; the CREW plate holds the bottom of that column clear of all three at both sizes, prints the wire's own shortfall, hides the dead maintenance row and warns before payday" % [
+	_summary = "%d stock rows on a right-hand plate clear of the clipboard and hotbar at 1600x900 and 1280x720, each with its own colour and a 'none' zero state; the legend folds %s -> %s from its button and from F1 in both view modes, is not a modal, and every cursor panel reads its current rect; a world panel is parked in the lower-left corner in first person rather than following the crosshair, clear of the crosshair, the hotbar's strip and the whole right-hand column at both sizes; the CREW plate holds the bottom of that column clear of all three at both sizes, prints the wire's own shortfall, hides the dead maintenance row and warns before payday; a stock row at the warehouse's ceiling reads FULL, the whole list is on the plate at 1600x900, and a list the column cuts says how many rows it is hiding" % [
 		ids.size(), str(open_rect.size), str(stub_rect.size)
 	]
 

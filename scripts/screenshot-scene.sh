@@ -104,6 +104,19 @@
 # its ends, and the volumes are set directly. --closeup on any of its runs
 # reads one colour at size.
 #
+# Pass --warehouse to build the WAREHOUSE ROW (test_layouts.gd's
+# `build_warehouse_row`): three stock racks holding three raws, two of them
+# with every bay bound, the third with two of six, and a part-full load on
+# the last bay of each ingredient. It is the frame that judges W3's readout:
+# whether a bound bay is tellable from a bare shelf, whether a part load
+# reads as part, and whether two ingredients in one rack are two colours.
+# Fourteen of its eighteen bays are in use, so add --remove-mode for the
+# second frame: W1's refusal, said in the placement prompt before the click. It frames itself close (the subject is one 1x2 tile) and keeps the
+# HUD, and it does not tick — stock is bought, not made. The three BBQ raws
+# are behind data/unlocks.ron's gate and cannot be bought in a fresh world,
+# so they are not here; that every raw HAS a distinct rack tint is proved by
+# test_warehouse_rack.gd instead.
+#
 # Pass --item-gallery to build the ITEM GALLERY (test_layouts.gd's
 # `build_item_gallery`): a bare belt run with one of each FINISHED-GOODS
 # model standing on it, ketchup bottle, BBQ bottle, ketchup case, BBQ case,
@@ -294,6 +307,14 @@
 # and shows about four at a time, so a tier appended to the end of the file
 # is below the fold until something scrolls there.
 #
+# Pass --at-capacity to fill every unlocked raw ingredient to the ceiling the
+# warehouse gives it (W1's cap, W4's words). With --market that is the frame
+# where a crate reads AT CAPACITY, the header's bays meter is at its warning
+# red with 0 free, and the STOCK plate marks each row FULL; the balance is
+# left deliberately fat, because the point of the state is a purchase money
+# cannot fix. Without the flag every fixture has room to spare and the crates
+# read exactly as they did before the warehouse existed.
+#
 # Pass --unlocked to put the world past every progression gate in
 # data/unlocks.ron (the shipped one opens after ten deliveries), so --market,
 # --board and the larder photograph with the BBQ tier released — the "after"
@@ -340,7 +361,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

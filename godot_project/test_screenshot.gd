@@ -229,7 +229,7 @@ const FIXTURE_NAMES: PackedStringArray = [
 	"demo", "machines", "fluids", "vat", "splitter", "chain", "stress",
 	"pipes", "gallery", "items", "fluid_gallery", "bottleneck", "bbq",
 	"stalled_run", "understaffed", "shortfall", "full_dock",
-	"unclerked_dock",
+	"unclerked_dock", "warehouse",
 ]
 
 ## The fixtures whose whole claim is a factory that is WORKING, and which are
@@ -390,6 +390,10 @@ var _staff_shortfall := false
 var _short_staffed := false
 var _hotbar_key := ""
 var _stock := false
+## `--at-capacity` fills every raw to its warehouse ceiling, so the market's
+## crates and the STOCK plate photograph the full state rather than the
+## roomy one.
+var _at_capacity := false
 ## `--legend-collapsed` folds the keybind legend away before the shot (the
 ## HUD ticket), which is the half of that feature a headless test cannot
 ## judge: whether what is LEFT — the plate's heading and the button naming
@@ -545,6 +549,8 @@ func _initialize() -> void:
 		_pick_fixture("gallery", "--belt-gallery")
 	if args.has("--fluid-gallery"):
 		_pick_fixture("fluid_gallery", "--fluid-gallery")
+	if args.has("--warehouse"):
+		_pick_fixture("warehouse", "--warehouse")
 	_item_gallery = args.has("--item-gallery")
 	if _item_gallery:
 		_pick_fixture("items", "--item-gallery")
@@ -648,6 +654,7 @@ func _initialize() -> void:
 	_dock_lamp_dark = _string_arg(args, "--dock-lamp") == "dark"
 	_hotbar_key = _string_arg(args, "--hotbar")
 	_stock = args.has("--stock")
+	_at_capacity = args.has("--at-capacity")
 	_legend_collapsed = args.has("--legend-collapsed")
 	_ghost_kind = _string_arg(args, "--ghost")
 	if _ghost_kind == "":
@@ -662,6 +669,7 @@ func _initialize() -> void:
 		return
 	_resolve_fixture()
 	_apply_fluid_gallery_defaults(args)
+	_apply_warehouse_defaults(args)
 	# The world this frame actually came from, printed whether or not
 	# anything asked for one — a frame that cannot be traced back to its
 	# fixture is not evidence (issue #70).
@@ -858,6 +866,16 @@ func _build_fixture() -> void:
 				printerr("SCREENSHOT_FAIL: %s" % complaint)
 				_refuse()
 				return
+		"warehouse":
+			# Refused rather than photographed when it comes up short, for
+			# the same reason the fluid gallery is: a rack holding less than
+			# the caption says looks exactly like a rack holding what it
+			# says, and the shot is OF the contents.
+			var short: String = Layouts.build_warehouse_row(_main.sim)
+			if short != "":
+				printerr("SCREENSHOT_FAIL: %s" % short)
+				_refuse()
+				return
 		"items":
 			Layouts.build_item_gallery(_main.sim)
 		"bottleneck":
@@ -903,7 +921,28 @@ func _build_fixture() -> void:
 	# Every fixture is stocked, whether or not this run will tick: a
 	# screenshot of a factory with an empty larder is a screenshot of a
 	# factory that cannot start, and the larder strip would say so.
-	Layouts.stock_larder(_main.sim)
+	#
+	# Except the warehouse row, whose subject IS the larder. Stocking it
+	# again buys 64 more of every raw and — since W1 — puts up whatever racks
+	# that needs, so the three racks in frame would hold amounts the caption
+	# does not claim while more of them stood off camera. A fixture that is
+	# about the stock does its own.
+	if _fixture != "warehouse":
+		Layouts.stock_larder(_main.sim)
+	# `--at-capacity` buys every unlocked raw up to the ceiling the warehouse
+	# gives it. It is the one state the W4 words exist for and the one a
+	# fixture cannot drift into on its own: with room to spare every crate
+	# reads the same as it always did. The balance is deliberately left FAT
+	# afterwards — the whole point of the frame is a purchase money cannot fix.
+	if _at_capacity:
+		Layouts.fund(_main.sim, 32767)
+		for item in Layouts.stockable(_main.sim):
+			var room: int = Layouts.stock_room_for(_main.sim, item)
+			if room <= 0:
+				continue
+			_main.sim.issue_command_json(JSON.stringify({
+				"type": "buy_ingredient", "item": item, "quantity": room,
+			}))
 	_main._rebuild_world()
 	_main._refresh_owned_counts()
 	# A fixture that TICKS its way to a state — the bottleneck, understaffed
@@ -1009,6 +1048,29 @@ func _apply_fluid_gallery_defaults(args: Array) -> void:
 		_closeup_tile = FLUID_GALLERY_FOCUS
 		_closeup_size = FLUID_GALLERY_SIZE
 	_no_hud = true
+
+
+## Where `--warehouse` puts the camera when nothing else says: the middle of
+## `build_warehouse_row`'s three racks, close enough in that a single BAY is
+## a readable part of the frame. The racks are the smallest subject any shot
+## in this file has — six shelves inside one 1x2 tile — and the auto-framing
+## that suits a factory renders a loaded pallet about four pixels tall.
+const WAREHOUSE_FOCUS := Vector2(2.5, 0.5)
+const WAREHOUSE_SIZE := 26.0
+
+
+## `--warehouse`'s framing, on the same terms as the fluid gallery's above:
+## a default that an explicit `--closeup` overrides. The HUD STAYS — unlike
+## the gallery, this fixture's subject sits in the middle of an otherwise
+## empty floor with nothing in the corners, and the hotbar and legend are
+## worth having in frame as the scale the racks are read against.
+func _apply_warehouse_defaults(_args: Array) -> void:
+	if _fixture != "warehouse":
+		return
+	if not _closeup:
+		_closeup = true
+		_closeup_tile = WAREHOUSE_FOCUS
+		_closeup_size = WAREHOUSE_SIZE
 
 
 ## Aims the isometric camera at one tile, close in. Deliberately writes
