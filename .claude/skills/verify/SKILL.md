@@ -22,7 +22,7 @@ full one before handing work back.
 `cargo test -p sim_core`, `cargo test -p voxgen`, `cargo xtask`, two
 `godot --headless --import` passes, checks `godot_project/.godot/
 extension_list.cfg` registers `sim_core.gdextension`, checks every staged
-`.vox` produced a `.vox.import`, then runs **30 headless Godot scripts**,
+`.vox` produced a `.vox.import`, then runs **every headless Godot script** (the run prints how many),
 each grepped for its own success marker. It takes minutes; run it once at the
 end, not in a loop.
 

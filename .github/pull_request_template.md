@@ -15,7 +15,7 @@ that is a discussion, not a merge. -->
 <!-- Name the commands actually run and their result. Not "tests pass".
   - [ ] `cargo test -p sim_core`
   - [ ] `cargo test -p voxgen`
-  - [ ] `scripts/verify-core-loop.sh` (30 headless Godot markers + PASS)
+  - [ ] `scripts/verify-core-loop.sh` (every headless Godot marker + the script count + PASS)
   - [ ] `scripts/screenshot-scene.sh <flags>` — the PNG goes under
         Screenshots below, and what it showed goes in words here.
 Anything sim-core needs a headless test covering it (ARCHITECTURE §10). -->
@@ -43,5 +43,7 @@ Name the PNG after its subject: the file name becomes the caption. -->
 ## Issues
 
 <!-- `Closes #N` for each issue this settles — the merge closes them.
-And file an issue for anything noticed and deliberately NOT fixed here;
-list those too, so the deferral is visible at review time rather than lost. -->
+Then list what you noticed and did NOT fix, so the deferral is visible at
+review time rather than lost. A line here is usually enough; file an issue
+only for a finding that passes the gate in the `file-issue` skill — small
+things you spotted should have been fixed in this PR, not queued. -->
