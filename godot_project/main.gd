@@ -14165,8 +14165,21 @@ func _dock_hover_text(origin_key: String, direction: String) -> String:
 	var crew_text := _crew_text(crew)
 	if crew_text != "":
 		text += "\n%s" % crew_text
+	# ISSUE #87, the dock's half of #20. `understaffed` is a PER-TICK fact and
+	# only moves on a tick the dock actually had something to ship, so on a
+	# line that ebbs it blinks on and off while nothing about the staffing
+	# has changed. `crewed` is the establishment's standing answer, carried
+	# on this same POLLED snapshot so hiring and firing — which dirty no
+	# chunk — still reach it. The live refusal wins where there is one,
+	# because it says the stronger thing (the goods are HELD right now);
+	# otherwise the standing shortage is reported in the same words the
+	# machine hover uses, through the one helper both share.
 	if bool(snapshot.get("understaffed", false)):
 		text += "\nheld  ·  short of %s staff" % _crew_categories_text(crew)
+	elif not bool(snapshot.get("crewed", true)):
+		var uncrewed := _uncrewed_reason_text(origin_key)
+		if uncrewed != "":
+			text += "\n%s" % uncrewed
 	# `full` is the POOL's state, identical on every dock, and it is the
 	# reason a belt into this building has stopped moving — so it is said
 	# here, where the player has just pointed at the thing that stopped

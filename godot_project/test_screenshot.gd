@@ -229,6 +229,7 @@ const FIXTURE_NAMES: PackedStringArray = [
 	"demo", "machines", "fluids", "vat", "splitter", "chain", "stress",
 	"pipes", "gallery", "items", "fluid_gallery", "bottleneck", "bbq",
 	"stalled_run", "understaffed", "shortfall", "full_dock",
+	"unclerked_dock",
 ]
 
 ## The fixtures whose whole claim is a factory that is WORKING, and which are
@@ -239,8 +240,9 @@ const FIXTURE_NAMES: PackedStringArray = [
 ## exactly like a good one.
 ##
 ## Deliberately NOT every fixture. The galleries produce nothing by design,
-## `stalled_run`, `understaffed` and `shortfall` photograph the failure
-## itself, and an empty world has nothing to be healthy about — asserting on
+## `stalled_run`, `understaffed`, `shortfall` and `unclerked_dock`
+## photograph the failure itself, and an empty world has nothing to be
+## healthy about — asserting on
 ## those would be asserting the opposite of what they are for. Fixtures
 ## outside this list still get the `SCREENSHOT_HEALTH:` line; they are just
 ## not failed on it.
@@ -309,6 +311,14 @@ var _config_tile := Vector2i.ZERO
 ## caught it, and the machine's hover words; it implies `--populate`, so the
 ## rest of the line is running around the one machine that is not.
 var _mothballed := false
+## `--unclerked-dock` builds the reference line with its one logistics head
+## FIRED and ticks only far enough to settle the scene — the window where
+## the dock cannot be crewed but has not yet been refused anything, because
+## nothing has reached it (issue #87). Pair it with `--hover-dock`: the
+## point of the frame is that the tooltip says "short of logistics staff"
+## from the STANDING fact, where before it said nothing at all until a box
+## arrived. `--full-dock` photographs the other, latched case.
+var _unclerked_dock := false
 ## `--market` opens the ingredient market, and `--contents N` presses the
 ## open configuration panel's picker slot N (with `--config`), so a placed
 ## hopper is photographed after being retargeted to another ingredient.
@@ -556,6 +566,9 @@ func _initialize() -> void:
 	if _short_staffed:
 		_pick_fixture("understaffed", "--short-staffed")
 		_populate = true
+	_unclerked_dock = args.has("--unclerked-dock")
+	if _unclerked_dock:
+		_pick_fixture("unclerked_dock", "--unclerked-dock")
 	_mothballed = args.has("--mothballed")
 	if _mothballed:
 		_pick_fixture("understaffed", "--mothballed")
@@ -791,6 +804,21 @@ func _build_fixture() -> void:
 			Layouts.build_underfunded_line(_main.sim)
 		"full_dock":
 			Layouts.build_full_dock_line(_main.sim)
+		"unclerked_dock":
+			# Like the fluid gallery, this one can be built and still not BE
+			# itself: the whole subject is the window where `crewed` is
+			# false and `understaffed` is not yet true, and a sim change
+			# that closes that window would hand back a frame of a
+			# perfectly ordinary dock. Refuse instead of photographing it.
+			Layouts.build_unclerked_dock(_main.sim)
+			if not Layouts.unclerked_dock_is_silent(_main.sim):
+				printerr(
+					"SCREENSHOT_FAIL: the unclerked dock is not in the silent "
+					+ "window (issue #87) — it reads crewed, or it has already "
+					+ "latched understaffed"
+				)
+				_refuse()
+				return
 		"demo":
 			Layouts.build_demo_line(_main.sim)
 		_:

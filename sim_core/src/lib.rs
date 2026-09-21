@@ -475,6 +475,14 @@ impl SimBridge {
     /// reported is simply which belt tile currently feeds it, or `null`.
     /// `shipped_total` is that dock's own lifetime output — the number worth
     /// putting on a hover ("Loading dock — 37 shipped").
+    ///
+    /// **The two staffing flags are not interchangeable** (issue #87).
+    /// `understaffed` is per-tick and only moves on a tick the dock had
+    /// something to ship, so it blinks on a line that ebbs; `crewed` is the
+    /// establishment's standing answer and is the one to draw a lasting
+    /// "short of logistics staff" from. `crewed` rides this POLLED channel
+    /// precisely because hiring and firing dirty no chunk, so the copy on
+    /// `query_tile_json` goes stale between scene rebuilds.
     #[func]
     fn dock_snapshots_json(&self) -> GString {
         let snapshots = self.world.dock_snapshots();
@@ -715,7 +723,9 @@ impl SimBridge {
     /// rule. The commands are `{"type": "hire", "category": "manufacturing"}`
     /// and `{"type": "fire", "category": "manufacturing"}`; a machine short
     /// of its crew reads `"stall": {"kind": "staff", "item": "<category>"}`
-    /// with status `starved`, a dock reads `"understaffed": true`, and
+    /// with status `starved`, a dock reads `"understaffed": true` on the
+    /// tick it was refused and `"crewed": false` for as long as the
+    /// shortage stands (issue #87 — the per-tick flag alone blinks), and
     /// `query_tile_json`'s machine and dock variants plus every
     /// `shop_snapshot_json` entry carry `"crew": [{"category": ...,
     /// "count": ...}]`. See `docs/STAFF_POOLS_PLAN.md`, "The wire contract".
