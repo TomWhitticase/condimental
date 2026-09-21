@@ -310,6 +310,6 @@
         // until issue #100: that colour vanished into the steel bore when
         // the same number was standing in a pipe, and the drum and the
         // fluid move together by the rule above.
-        (name: "smoke_slate",     rgb: "#4D4521", class: "matte"),
+        (name: "smoke_slate",     rgb: "#706430", class: "matte"),
     ],
 )

@@ -302,8 +302,31 @@ const FLUID_TINTS := {
 	# come back.
 	"bbq_mix": Color(0.48, 0.25, 0.15),
 	"bbq": Color(0.33, 0.17, 0.11),
-	# #4D4521, and equal to `palette.ron`'s `smoke_slate` — see there.
-	"liquid_smoke": Color(0.302, 0.271, 0.129),
+	# #706430, and equal to `palette.ron`'s `smoke_slate` — see there.
+	#
+	# LIFTED from #4D4521 for issue #113. Against `bbq_mix` the old pair was
+	# a value collision: 6.2/255 apart in tint luma and 9.3/255 rendered,
+	# while the SAME fluid photographed on two tiles of its own run spreads
+	# 10.7-11.8 — the two liquids differed by less than the noise of
+	# measuring one of them twice, leaving hue as the only thing telling
+	# them apart. Re-measured on the same frame and the same windows after
+	# the lift (`--fluid-gallery --closeup 13,1,20` at 1600x900, steel-bore
+	# control 175.1 against the ticket's 176.6, so the framing is the
+	# ticket's): **20.4/255 rendered**, comfortably clear of that noise.
+	#
+	# The move is a lift and not a darkening because #100 is the precedent
+	# for a dark tint vanishing into the grey steel bore, and the hue is
+	# unchanged (saturation 0.572, the same olive-brown), so the
+	# "flavouring, not sauce" reading #100 picked this colour for is intact.
+	#
+	# **20.4 and not the ~26/255 the ticket asked for, deliberately.** This
+	# fluid sits on a crowded value axis: `bbq_mix` is at luma 0.292 below
+	# it and `vinegar` at 0.454 above. Taking the gap to `bbq_mix` past 26
+	# needs luma ~0.419 (#796C33), which lands 9.1/255 from `vinegar` — the
+	# same defect against a different neighbour. 0.387 is near the midpoint,
+	# and the pair is no longer a value collision by the measure that
+	# defined one (issue #131 carries the crowding).
+	"liquid_smoke": Color(0.439, 0.392, 0.188),
 }
 const FLUID_TINT_FALLBACK := Color(0.60, 0.79, 0.86)
 

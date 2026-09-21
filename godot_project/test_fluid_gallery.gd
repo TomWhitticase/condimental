@@ -72,28 +72,35 @@ const FLUID_TINT_LUMA_WEIGHT := 2.0
 ## reads by, so the metric was blind on the axis that matters and raising it
 ## would only have moved where it was blind.
 ##
-## Measured on the shipped six with the luma term in (see the PR for the
-## table): the worst pair is `bbq_mix` <-> `liquid_smoke` at **0.269**, then
-## `bbq` <-> `liquid_smoke` at 0.283 and `ketchup_mix` <-> `bbq_mix` at
-## 0.291; everything else is 0.45 and up. **0.24 is a 10% margin below that
-## worst pair** — deliberately tight, where the old number's was 46%, because
-## a seventh fluid landing between 0.24 and 0.27 is one a human should look
-## at rather than one a constant should wave through.
+## Measured on the shipped six with the luma term in: the worst pair is now
+## `ketchup_mix` <-> `bbq_mix` at **0.291**, then `bbq_mix` <-> `liquid_smoke`
+## at 0.412 and `vinegar` <-> `liquid_smoke` at 0.452; everything else is
+## 0.45 and up. **0.26 is a 10% margin below the worst pair** — deliberately
+## tight, where the old 0.08's was 46%, because a seventh fluid landing
+## between 0.26 and 0.29 is one a human should look at rather than one a
+## constant should wave through.
 ##
-## **The floor is set below a pair this ticket reports as too close, and
-## that is not an endorsement of it.** Rendered in the gallery at 1600x900,
-## `bbq_mix` and `liquid_smoke` sit 9.3/255 of luma apart while the SAME
-## fluid photographed on two tiles of its own run spreads 10.7 and 11.8 —
-## the pair is a genuine value collision separated by hue alone, and fixing
-## it is an art change, filed rather than smuggled in here. `bbq` <->
-## `liquid_smoke`, the pair issue #108 named, measures 19.8-27/255 apart and
-## is above that noise; #108's 0.6 figure for it did not reproduce.
+## It was 0.24 below a worst pair of 0.269, which was `bbq_mix` <->
+## `liquid_smoke` — the value collision issue #113 reported. That is fixed
+## rather than tolerated now: `smoke_slate` was lifted from #4D4521 to
+## #706430 in `palette.ron`, taking the pair from 6.2/255 of tint luma to
+## 24.4/255, so the floor could follow the art up. See `main.gd`'s
+## `FLUID_TINTS["liquid_smoke"]` for why the move is a lift and not a
+## darkening.
+##
+## **The floor sitting below a pair a ticket reports as too close is a
+## record that somebody should look, not an endorsement of it.** The pair
+## that inherits that role is `ketchup_mix` <-> `bbq_mix`: 0.291 overall but
+## only 7.7/255 of luma between them, so they are told apart by hue much as
+## the old pair was. Red against brown is a wider hue gap than terracotta
+## against olive and both are mid-chain fluids that never share a frame in
+## the shipped fixtures, which is why this is filed rather than fixed here.
 ##
 ## `test_bbq_branch.gd` keeps its own, looser 0.08 on plain summed |dRGB|,
 ## and the two are deliberately NOT the same number any more: that one is
 ## documented as a copied-entry catcher over the four runs its fixture
 ## names, this one is a calibrated judgement over every tint the game has.
-const FLUID_TINT_MIN_DISTANCE := 0.24
+const FLUID_TINT_MIN_DISTANCE := 0.26
 
 var main
 var _ran := false
