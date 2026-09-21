@@ -783,6 +783,14 @@ fn every_link_in_the_reference_chain_is_mirrored_by_its_neighbour() {
             TileSnapshot::Hopper { .. } => Hopper,
             TileSnapshot::FluidTank { .. } => Tank,
             TileSnapshot::Dock { .. } => Dock,
+            // A rack is never wired to anything (sprint requirement R6), so
+            // the reference chain has none and this arm is unreachable here.
+            // It is spelled out rather than wildcarded so that the day a
+            // rack *does* grow a link, this test stops compiling instead of
+            // quietly mis-reporting one.
+            TileSnapshot::WarehouseRack { .. } => {
+                unreachable!("the reference chain places no warehouse rack")
+            }
         })
     };
 

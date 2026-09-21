@@ -1,0 +1,81 @@
+// Storage content — how much raw stock the player may hold, and what
+// raises the ceiling (GAMEPLAY.md §5's ingredient cost axis). Data, never
+// hardcoded in sim_core, exactly like `shop.ron` and `ingredients.ron`; the
+// loader is `sim_core::sim::storage::StorageCatalog`.
+//
+// `schema_version` follows ARCHITECTURE.md §4's data-file versioning rule:
+// the loader rejects a mismatched version rather than silently misreading a
+// changed shape.
+//
+// WHAT THIS FILE IS FOR. Until it existed, `BuyIngredient` credited
+// `OwnedIngredients` with no ceiling at all, so the only limit on stock was
+// money — and money is the thing a running factory produces. A player one
+// contract into the game could buy four thousand tomatoes and never think
+// about supply again, which flattens the "ingredients — recurring, scales
+// directly with production volume" cost axis into a single early purchase.
+// The cap here is what makes stock a thing you have to build room for.
+//
+// THE RULE, IN ONE PLACE. Capacity is per ingredient id, and it has two
+// parts:
+//
+//     cap(id) = base_cap + slot_stack * (bays not needed by anything else)
+//
+// `base_cap` is free and unconditional — every raw can always be held to it
+// with no warehouse at all, so a new game works and no ingredient can ever
+// be crowded out of existence by another. Above that, stock occupies
+// **bays**, and bays are what a warehouse rack supplies.
+//
+// BAYS ARE DERIVED, NOT ASSIGNED. Nothing stores "bay 3 holds tomato". The
+// bays an ingredient occupies are computed from how much of it is held:
+//
+//     bays_for(count) = ceil(max(0, count - base_cap) / slot_stack)
+//
+// summed over every ingredient to give bays in use. A purchase is clamped
+// so the total never exceeds the bays that exist. This was chosen over
+// binding each bay to an id and persisting it: there is no allocation state
+// to drift out of step with the ledger, nothing to migrate in a save, and a
+// bay frees itself the moment the stock in it is consumed rather than
+// staying reserved for an ingredient the player has one unit of.
+//
+// The consequence to know: free bays are a SHARED pool. Filling every bay
+// with tomato does stop the player buying sugar above `base_cap` until some
+// tomato is used. That is the intended pressure — a warehouse is a finite
+// room — and `base_cap` is the guarantee that it can never become a
+// deadlock.
+//
+// NUMBERS ARE PLACEHOLDERS, like every other price in this repo
+// (GAMEPLAY.md §10 puts exact balance in a later pass). The shape they
+// encode: `base_cap` is under a hopper's 64-unit capacity, so an
+// unwarehoused player is topping bins up by hand and feels it; one rack at
+// `slot_stack` x its bays is worth several hoppers of buffer, which is what
+// justifies the 75 it costs in `shop.ron` — the same price as a crusher.
+(
+    schema_version: 1,
+
+    // Free, unconditional capacity per raw ingredient id, with no rack
+    // placed anywhere. Deliberately less than one hopper fill: the first
+    // thing a player should notice is that they cannot stockpile.
+    base_cap: 20,
+
+    // How many units of one ingredient a single bay holds. The last bay an
+    // ingredient occupies is usually part full; nothing rounds stock up to
+    // a whole bay.
+    slot_stack: 50,
+
+    // Every buildable kind that supplies bays, and how many each supplies.
+    // A list rather than a single constant so that a larger (or smaller)
+    // rack is a data edit and not a Rust one.
+    //
+    // `warehouse_rack`'s six is the model's own geometry, not a free
+    // parameter: the voxel asset is two bays wide by three levels tall
+    // (`assets/voxels/generators/assets.rs`, `RACK_POST_X` x
+    // `RACK_LEVEL_Z`), and W3 draws one pallet per bay. Changing this
+    // number without changing the model leaves the building lying about
+    // what it holds.
+    racks: [
+        RackKind(
+            id: "warehouse_rack",
+            bays: 6,
+        ),
+    ],
+)

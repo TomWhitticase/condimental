@@ -58,11 +58,18 @@ static func place(sim, kind: String, tile: Vector2i, direction: String, item := 
 	sim.issue_command_json(JSON.stringify(command))
 
 
-## Buys `quantity` units of a raw ingredient. Since the chain rework nothing
-## enters the factory that was not paid for: `fill_hopper` and
-## `fill_fluid_tank` draw from bought stock and are silent no-ops without it,
-## so any fixture that intends to actually RUN has to stock its larder first.
+## Buys `quantity` units of a raw ingredient, building the warehouse room for
+## it first. Since the chain rework nothing enters the factory that was not
+## paid for: `fill_hopper` and `fill_fluid_tank` draw from bought stock and
+## are silent no-ops without it, so any fixture that intends to actually RUN
+## has to stock its larder first. Since W1 nothing is unlimited either — a
+## holding is capped at `data/storage.ron`'s `base_cap` plus whatever bays
+## the placed warehouse racks supply, and an order over the ceiling is
+## silently CLAMPED. A fixture that skipped the racks would therefore run for
+## a few hundred ticks and then photograph an idle line, which is how the
+## fluid gallery failed when the cap landed.
 static func stock(sim, item: String, quantity := 64) -> void:
+	make_room(sim, item, quantity)
 	sim.issue_command_json(JSON.stringify({
 		"type": "buy_ingredient", "item": item, "quantity": quantity,
 	}))
@@ -71,13 +78,157 @@ static func stock(sim, item: String, quantity := 64) -> void:
 ## Buys a working amount of EVERY raw ingredient the shipped content prices,
 ## enumerated from `ingredients_snapshot_json` rather than named here — so a
 ## third ingredient stocks itself. Called by any test that intends to run a
-## line rather than only look at one.
+## line rather than only look at one. Gated ingredients are not in that list
+## until their unlock opens, so this buys — and warehouses — only what the
+## player could buy at this moment.
 static func stock_larder(sim, quantity := 64) -> void:
+	for item in stockable(sim):
+		stock(sim, item, quantity)
+
+
+## Tops every stockable raw back up to `quantity`, building nothing and
+## asserting nothing.
+##
+## This is what a long fixture run does instead of stocking once and deeply.
+## Before W1 a fixture that needed 22 000 ticks of raw simply bought 3 000 of
+## it up front; now it cannot — that is sixty bays per ingredient, a wall of
+## racks in a shot that is meant to be of a dock. So the stock arrives the way
+## a player's does: the line eats what is in the larder, room appears, and the
+## order goes in again. Call it every [constant RESTOCK_EVERY] ticks, which is
+## far more often than [constant LARDER_STOCK] can be consumed in.
+## `deeper` names the raws to hold above `quantity` — one entry per
+## ingredient a fixture eats faster than the rest, so that the shared level
+## stays one number.
+static func restock(sim, quantity := LARDER_STOCK, deeper := {}) -> void:
 	var snapshot = JSON.parse_string(sim.ingredients_snapshot_json())
 	if not (snapshot is Dictionary):
 		return
 	for entry in snapshot.get("entries", []):
-		stock(sim, String(entry.get("id", "")), quantity)
+		var item := String(entry.get("id", ""))
+		var target := int(deeper.get(item, quantity))
+		var held := int(entry.get("owned", 0))
+		if held < target:
+			sim.issue_command_json(JSON.stringify({
+				"type": "buy_ingredient", "item": item, "quantity": target - held,
+			}))
+
+
+## Every raw ingredient the player may buy right now, in the sim's own order.
+## `ingredients_snapshot_json` drops what is still behind an unlock, so this
+## is the gate's verdict rather than a list repeated here.
+static func stockable(sim) -> PackedStringArray:
+	var items := PackedStringArray()
+	var snapshot = JSON.parse_string(sim.ingredients_snapshot_json())
+	if not (snapshot is Dictionary):
+		return items
+	for entry in snapshot.get("entries", []):
+		items.append(String(entry.get("id", "")))
+	return items
+
+
+## What one fixture larder holds of each raw: `data/storage.ron`'s free
+## `base_cap` of 20 plus one whole rack's six bays of 50. Sized to a RACK
+## rather than to a run, so that a fixture's warehouse is one building per
+## ingredient and stays out of the way of the thing being photographed; the
+## length of the run is [method restock]'s job, not this number's.
+const LARDER_STOCK := 320
+
+## How often a settling fixture tops its larder back up. A tick of the
+## reference line consumes well under one unit of anything, so a hundred
+## ticks cannot empty a larder — this is frequent enough to be invisible and
+## rare enough that the JSON does not dominate a 40 000-tick loop.
+const RESTOCK_EVERY := 100
+
+## The row the fixtures' warehouse stands on, and the one north of it (a rack
+## is 1x2). Every layout in this file builds at `y >= -3` and the stress
+## fixture's southernmost tile is `y = -1`, so a rack row here cannot collide
+## with any of them however the content grows.
+const WAREHOUSE_ROW_Y := -8
+
+## How far east [method add_rack] looks for a free tile before giving up — a
+## bound on the search, not on the warehouse.
+const WAREHOUSE_ROW_TILES := 96
+
+
+## Builds however many warehouse racks it takes for `quantity` more of `item`
+## to fit, through the same purchase and placement commands a player uses.
+##
+## Racks are added ONE at a time and the room rechecked, rather than computed
+## from `base_cap` and `slot_stack`: free bays are a shared pool, so the room
+## for tomato depends on how much sugar is held, and that arithmetic lives in
+## `sim_core::sim::storage` alone. A fixture that cannot afford another rack
+## stops asking and lets the buy be clamped — the same outcome a player gets,
+## and the fixture's own assertions are what should complain about it.
+static func make_room(sim, item: String, quantity: int) -> void:
+	while stock_room_for(sim, item) < quantity:
+		if not add_rack(sim):
+			return
+
+
+## How much more of `item` the warehouse will take — the sim's own figure,
+## off the `capacity` the ingredient snapshot carries, never a cap recomputed
+## here.
+static func stock_room_for(sim, item: String) -> int:
+	var snapshot = JSON.parse_string(sim.ingredients_snapshot_json())
+	if not (snapshot is Dictionary):
+		return 0
+	for entry in snapshot.get("entries", []):
+		if String(entry.get("id", "")) == item:
+			return maxi(0, int(entry.get("capacity", 0)) - int(entry.get("owned", 0)))
+	return 0
+
+
+## One more rack, on the first free tile of the warehouse row. Returns whether
+## one went up — a purchase the fixture cannot afford and a row with no gap
+## left both come back `false`.
+##
+## The free tile is found by TRYING rather than by reading occupancy, so this
+## stays correct for a fixture that has built something of its own down there,
+## and the verdict is `total_bays` moving rather than a placement count: a
+## refused `place` is silent, like every other refused command.
+static func add_rack(sim) -> bool:
+	var before := storage_bays(sim)
+	sim.issue_command_json(JSON.stringify({
+		"type": "purchase", "kind": WAREHOUSE_KIND,
+	}))
+	for x in range(WAREHOUSE_ROW_TILES):
+		sim.issue_command_json(JSON.stringify({
+			"type": "place", "kind": WAREHOUSE_KIND,
+			"tile": [x, WAREHOUSE_ROW_Y], "direction": "east",
+		}))
+		if storage_bays(sim) > before:
+			return true
+	return false
+
+
+## The buildable kind that supplies bays. Named once here so the fixtures
+## and the `*_PLACEMENTS` counts below agree on what is warehouse and what is
+## line.
+const WAREHOUSE_KIND := "warehouse_rack"
+
+
+## How many placements a fixture's LINE has — every `*_PLACEMENTS` constant
+## in this file counts these, and none of them count the warehouse.
+##
+## Stocking a larder puts racks down (see [method make_room]), and how many
+## depends on `data/storage.ron`'s bay arithmetic and on what the unlock gate
+## has opened, so a fixture that folded them into its total would have to
+## restate that arithmetic and would break on a content edit. The layout
+## under test is the line.
+static func line_placements(sim) -> int:
+	var count := 0
+	for entry in JSON.parse_string(sim.world_layout_json()):
+		if String(entry.get("kind", "")) != WAREHOUSE_KIND:
+			count += 1
+	return count
+
+
+## How many bays the placed warehouse supplies in total.
+static func storage_bays(sim) -> int:
+	var snapshot = JSON.parse_string(sim.storage_snapshot_json())
+	if not (snapshot is Dictionary):
+		return 0
+	return int(snapshot.get("total_bays", 0))
 
 
 ## THE DEMO LINE — the fixture most tests build, and the one
@@ -347,7 +498,6 @@ const BBQ_BRANCH_PLACEMENTS := 70
 ## `data/contracts.ron`'s mixed orders are written against and there are
 ## boxes of both sauces on the floor.
 const BBQ_SETTLE_TICKS := 15000
-const BBQ_STOCK := 1200
 
 ## How long the ketchup line is allowed to run on its own before the fixture
 ## gives up waiting for `data/unlocks.ron`'s BBQ gate to open. The shipped
@@ -522,7 +672,7 @@ static func build_bbq_running_line(sim) -> void:
 	# 1. The ketchup line alone — everything a new game can reach.
 	build_reference_line(sim)
 	fund(sim, 30000)
-	stock_larder(sim, BBQ_STOCK)
+	stock_larder(sim, LARDER_STOCK)
 	for tile in [Vector2i(-1, 0), Vector2i(4, 1)]:
 		sim.issue_command_json(JSON.stringify({
 			"type": "set_hopper_auto_fill", "tile": [tile.x, tile.y], "enabled": true,
@@ -544,6 +694,10 @@ static func build_bbq_running_line(sim) -> void:
 		# shut gate on top of it (issue #110).
 		if fixture_failure() != "":
 			return
+		# A poll is longer than RESTOCK_EVERY, so this is the top-up: the
+		# ketchup line runs for up to 40 000 ticks here and a single larder
+		# is 320 of each raw.
+		restock(sim)
 		for _i in range(BBQ_GATE_POLL_TICKS):
 			sim.tick()
 		waited += BBQ_GATE_POLL_TICKS
@@ -572,7 +726,7 @@ static func build_bbq_running_line(sim) -> void:
 	fund(sim, 30000)
 	# The larder is stocked AGAIN, and this time the three BBQ raws are in
 	# the market to be bought — they were not, before the gate opened.
-	stock_larder(sim, BBQ_STOCK)
+	stock_larder(sim, LARDER_STOCK)
 	for tile in [Vector2i(9, -3), Vector2i(9, -2)]:
 		sim.issue_command_json(JSON.stringify({
 			"type": "set_hopper_auto_fill", "tile": [tile.x, tile.y], "enabled": true,
@@ -593,7 +747,9 @@ static func build_bbq_running_line(sim) -> void:
 		sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": id}))
 
 	# 4. Both lines running.
-	for _i in range(BBQ_SETTLE_TICKS):
+	for i in range(BBQ_SETTLE_TICKS):
+		if i % RESTOCK_EVERY == 0:
+			restock(sim)
 		sim.tick()
 
 
@@ -670,8 +826,10 @@ static func hire_until_staffed(sim) -> void:
 ## paste, four tomatoes a craft, so tomatoes get an extra crate on top of
 ## the shared amount.
 const BOTTLENECK_SETTLE_TICKS := 10000
-const BOTTLENECK_STOCK := 400
 const BOTTLENECK_EXTRA_TOMATOES := 300
+## What `restock` holds this line at: the shared larder, with the crusher's
+## appetite for tomato on top.
+const BOTTLENECK_LARDER := {"tomato": LARDER_STOCK + BOTTLENECK_EXTRA_TOMATOES}
 const BOTTLENECK_MACHINES := {
 	"4,0": "blocked", # crusher
 	"9,0": "blocked", # mixer
@@ -682,10 +840,10 @@ const BOTTLENECK_MACHINES := {
 
 static func build_bottleneck_line(sim) -> void:
 	build_reference_line(sim)
-	# The line's bill leaves ~1900; the stock below is ~2000 at the shipped
-	# prices (tomato 1, sugar 3, vinegar 2 per unit), so top the balance up.
+	# The line's bill leaves ~1900, and the larder plus the warehouse it now
+	# needs costs more than that, so top the balance up.
 	fund(sim, 8000)
-	stock_larder(sim, BOTTLENECK_STOCK)
+	stock_larder(sim, LARDER_STOCK)
 	stock(sim, "tomato", BOTTLENECK_EXTRA_TOMATOES)
 	for tile in [Vector2i(-1, 0), Vector2i(4, 1)]:
 		sim.issue_command_json(JSON.stringify({
@@ -695,6 +853,8 @@ static func build_bottleneck_line(sim) -> void:
 		"type": "set_tank_auto_fill", "tile": [5, 2], "enabled": true,
 	}))
 	for i in range(BOTTLENECK_SETTLE_TICKS):
+		if i % RESTOCK_EVERY == 0:
+			restock(sim, LARDER_STOCK, BOTTLENECK_LARDER)
 		sim.tick()
 
 
@@ -722,7 +882,7 @@ static func build_understaffed_line(sim) -> void:
 	# Funded and stocked like the bottleneck line, for its reason: the
 	# line's bill leaves too little for a deep larder.
 	fund(sim, 8000)
-	stock_larder(sim, BOTTLENECK_STOCK)
+	stock_larder(sim, LARDER_STOCK)
 	for tile in [Vector2i(-1, 0), Vector2i(4, 1)]:
 		sim.issue_command_json(JSON.stringify({
 			"type": "set_hopper_auto_fill", "tile": [tile.x, tile.y], "enabled": true,
@@ -733,6 +893,8 @@ static func build_understaffed_line(sim) -> void:
 	for i in range(UNDERSTAFFED_FIRED):
 		sim.issue_command_json(JSON.stringify({"type": "fire", "category": UNDERSTAFFED_CATEGORY}))
 	for i in range(UNDERSTAFFED_MAX_TICKS):
+		if i % RESTOCK_EVERY == 0:
+			restock(sim)
 		sim.tick()
 		if understaffed_stall(sim, UNDERSTAFFED_VAT) == UNDERSTAFFED_CATEGORY:
 			return
@@ -840,12 +1002,15 @@ static func build_underfunded_line(sim) -> void:
 ## `build_understaffed_line` does: a sim change that stops the pool ever
 ## filling should leave a note rather than hang the shot.
 ##
-## `FULL_DOCK_STOCK` is sized for the whole climb with room to spare, and
-## bought AFTER the balance is topped up: a larder that runs dry at tick
-## 12 000 photographs as a half-full dock, and `stock` is refused outright
-## when the money is not there — which is what the shipped line's own bill
-## leaves, since it costs ~1 100 of the 3 000 a new game starts with.
-const FULL_DOCK_STOCK := 3000
+## The larder is stocked AFTER the balance is topped up — `stock` is
+## refused outright when the money is not there, and the shipped line's own
+## bill leaves ~1 900 of the 3 000 a new game starts with — and it is topped
+## up as the run goes, rather than bought deep. One larder is 320 of each
+## raw and the whole climb eats several thousand, which before W1 was simply
+## bought up front; a holding is capped now, and 3 000 of one ingredient is
+## sixty bays, so this fixture would have photographed a wall of racks
+## instead of a dock. `restock` inside the loop is both smaller and truer to
+## how a player gets there.
 const FULL_DOCK_FUNDS := 30000
 const FULL_DOCK_MAX_TICKS := 40000
 
@@ -856,7 +1021,7 @@ static func build_full_dock_line(sim) -> void:
 	# then hand the empty line a fortune. The stocking spends ~18 000 of
 	# this at the shipped prices, and ~40 paydays cost 560 of the rest.
 	fund(sim, FULL_DOCK_FUNDS)
-	stock_larder(sim, FULL_DOCK_STOCK)
+	stock_larder(sim, LARDER_STOCK)
 	for tile in [Vector2i(-1, 0), Vector2i(4, 1)]:
 		sim.issue_command_json(JSON.stringify({
 			"type": "set_hopper_auto_fill", "tile": [tile.x, tile.y], "enabled": true,
@@ -865,6 +1030,8 @@ static func build_full_dock_line(sim) -> void:
 		"type": "set_tank_auto_fill", "tile": [5, 2], "enabled": true,
 	}))
 	for i in range(FULL_DOCK_MAX_TICKS):
+		if i % RESTOCK_EVERY == 0:
+			restock(sim)
 		sim.tick()
 		if delivery_full(sim):
 			return

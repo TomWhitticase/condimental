@@ -4,20 +4,26 @@
 //! Two things every such test now has to do, both consequences of the
 //! chain-rework epic:
 //!
-//! 1. **Buy its ingredients.** Nothing is free any more (GAMEPLAY.md §5), so
-//!    a world that is going to be run has to be built with a budget
-//!    (`reference_chain_with_budget`) and then stocked. [`STOCK_COST`] is
-//!    sized so a stocked world's balance lands on exactly **zero**, which
-//!    keeps every "money increased by exactly one payout" assertion measured
-//!    against a clean baseline.
+//! 1. **Buy its ingredients — and build somewhere to put them.** Nothing is
+//!    free any more (GAMEPLAY.md §5), and since W1 nothing is unlimited
+//!    either: stock is capped per ingredient id at `data/storage.ron`'s
+//!    `base_cap` plus whatever **bays** the placed warehouse racks supply.
+//!    A fixture that wants a long run's worth of raw therefore has to put
+//!    racks down first, exactly as a player would — [`stock_up`] does both,
+//!    and [`STOCK_COST`] is the whole bill (racks + ingredients), sized so a
+//!    stocked world's balance lands on exactly **zero**, which keeps every
+//!    "money increased by exactly one payout" assertion measured against a
+//!    clean baseline.
 //! 2. **Keep both hoppers fed, not one.** The shipped chain has two raw
 //!    solids now, each arriving on its own belt lane into its own tile of
 //!    the mixer's inlet face (`data/machines.ron`'s note on why the mixer is
 //!    1x2). [`supply`] tops up every hopper and the tank, which is all a
 //!    running line needs.
 
-use sim_core::sim::types::Money;
-use sim_core::sim::{FLUID_TANK_CAPACITY, HOPPER_CAPACITY, PlayerCommand, World};
+use sim_core::sim::types::{Direction, Money};
+use sim_core::sim::{
+    FLUID_TANK_CAPACITY, HOPPER_CAPACITY, PlayerCommand, WAREHOUSE_RACK_KIND, World,
+};
 
 /// A long run's worth of every raw ingredient the shipped chain needs.
 /// Generous rather than exact: these fixtures are about the line running for
@@ -29,16 +35,48 @@ pub const SUGAR_UNITS: u32 = 500;
 #[allow(dead_code)]
 pub const VINEGAR_UNITS: u32 = 1000;
 
-/// What [`stock_up`] spends, at `data/ingredients.ron`'s current prices.
+/// The ingredient half of [`stock_up`]'s bill, at `data/ingredients.ron`'s
+/// current prices.
 ///
 /// It is a literal, and [`stock_up`] asserts the actual spend matches it —
 /// so an ingredient price change fails loudly *here*, with a message about
 /// the fixture's bill, rather than silently leaving a test world with money
 /// in it and breaking an unrelated assertion about contract payouts
-/// somewhere else. Fixtures pass this as their `reference_chain_with_budget`
+/// somewhere else.
+#[allow(dead_code)]
+pub const INGREDIENT_COST: u32 = 5500;
+
+/// The row the fixture's warehouse stands on, and the one south of it.
+/// Everything `sim::reference_chain` lays down is at `y >= 0` (lanes run
+/// `CHAIN_ROW_Y + j`, pipe rows north of that), so a rack row well south of
+/// the line cannot collide with it however the content grows.
+const RACK_ROW_Y: i32 = -8;
+
+/// How far east [`add_rack`] will look for a free tile before giving up —
+/// a bound on the search, not on the warehouse.
+const RACK_ROW_TILES: i32 = 64;
+
+/// How many racks [`stock_up`] ends up building, from how much it means to
+/// hold.
+///
+/// `data/storage.ron` gives every id `base_cap` free and charges one bay per
+/// `slot_stack` above it, so the stock below needs
+/// `ceil(1980/50) + ceil(480/50) + ceil(980/50)` = `40 + 10 + 20` = 70 bays,
+/// and a rack supplies six. Spelled out rather than computed so that a
+/// `storage.ron` edit fails in [`stock_up`]'s own assertion instead of
+/// somewhere downstream in a test about contract payouts.
+#[allow(dead_code)]
+pub const RACK_COUNT: u32 = 12;
+
+/// `RACK_COUNT` x `data/shop.ron`'s `warehouse_rack` price.
+#[allow(dead_code)]
+pub const RACK_COST: u32 = 900;
+
+/// What [`stock_up`] spends in total: the warehouse and then the stock that
+/// goes in it. Fixtures pass this as their `reference_chain_with_budget`
 /// budget, which is what keeps a stocked world's balance at exactly zero.
 #[allow(dead_code)]
-pub const STOCK_COST: u32 = 5500;
+pub const STOCK_COST: u32 = RACK_COST + INGREDIENT_COST;
 
 /// How many pay periods of the STARTING crew's wages a long-running fixture
 /// holds in reserve (the staff pools MVP epic). A fixture that stocks up
@@ -76,11 +114,13 @@ pub fn wages_paid(world: &World) -> Money {
     Money::from_num(bill * paydays)
 }
 
-/// Buys `quantity` of `item`, asserting it was affordable — an unaffordable
-/// buy is a silent no-op, which would otherwise surface much later as an
-/// unexplained idle factory.
+/// Buys `quantity` of `item` into a warehouse big enough to take it,
+/// asserting it was affordable — an unaffordable buy is a silent no-op,
+/// which would otherwise surface much later as an unexplained idle factory,
+/// and since W1 so is an order with nowhere to go.
 #[allow(dead_code)]
 pub fn buy(world: &mut World, item: &str, quantity: u32) {
+    make_room(world, item, quantity);
     let before = world.owned_ingredient(item);
     world.issue_command(PlayerCommand::BuyIngredient {
         item: item.to_string(),
@@ -93,7 +133,15 @@ pub fn buy(world: &mut World, item: &str, quantity: u32) {
     );
 }
 
-/// Buys [`STOCK_COST`] worth of raw ingredients.
+/// Builds the fixture's warehouse and fills it: [`STOCK_COST`] of racks and
+/// raw ingredients, leaving the world with exactly what it was funded with
+/// on top of that.
+///
+/// The racks are not a separate step — [`buy`] puts down whatever the order
+/// it is about to place needs room for. What is asserted here is that the
+/// warehouse came out the size [`RACK_COUNT`] says, so that a
+/// `data/storage.ron` edit fails on this line rather than on some later
+/// test's arithmetic about money.
 #[allow(dead_code)]
 pub fn stock_up(world: &mut World) {
     let before = world.money();
@@ -103,9 +151,64 @@ pub fn stock_up(world: &mut World) {
     assert_eq!(
         before - world.money(),
         Money::from_num(STOCK_COST),
-        "STOCK_COST must match what data/ingredients.ron actually charges for \
-         {TOMATO_UNITS} tomato + {SUGAR_UNITS} sugar + {VINEGAR_UNITS} vinegar"
+        "STOCK_COST must match what data/shop.ron charges for {RACK_COUNT} racks plus what \
+         data/ingredients.ron charges for {TOMATO_UNITS} tomato + {SUGAR_UNITS} sugar + \
+         {VINEGAR_UNITS} vinegar"
     );
+    assert_eq!(
+        world.storage_bays(),
+        RACK_COUNT * world.storage().bays_of_kind(WAREHOUSE_RACK_KIND),
+        "holding {TOMATO_UNITS} tomato + {SUGAR_UNITS} sugar + {VINEGAR_UNITS} vinegar under \
+         the current data/storage.ron took a different number of racks than RACK_COUNT's \
+         {RACK_COUNT} — update RACK_COUNT and RACK_COST together"
+    );
+}
+
+/// Buys and places however many warehouse racks it takes for `quantity` of
+/// `item` to fit, through the same public commands a player uses.
+///
+/// Every fixture that holds more than `data/storage.ron`'s `base_cap` of
+/// anything needs this, because `BuyIngredient` silently clamps an order to
+/// the room that exists. Racks are added one at a time and rechecked rather
+/// than computed, so the bay arithmetic lives in `sim_core` alone and this
+/// file cannot drift from it.
+#[allow(dead_code)]
+pub fn make_room(world: &mut World, item: &str, quantity: u32) {
+    while world.stock_room_for(item) < quantity {
+        assert!(
+            add_rack(world),
+            "the fixture ran out of money or of floor before it could hold {quantity} x \
+             {item} — it has {} bays and {}",
+            world.storage_bays(),
+            world.money()
+        );
+    }
+}
+
+/// One more rack, on the first free tile of the row south of the line.
+///
+/// Racks are 1x2, so the row occupies [`RACK_ROW_Y`] and the row north of
+/// it; both are empty in every reference layout. The free tile is found by
+/// *trying* rather than by reading occupancy, which keeps this helper
+/// correct for a test that has built something of its own down there.
+fn add_rack(world: &mut World) -> bool {
+    world.issue_command(PlayerCommand::Purchase {
+        kind: WAREHOUSE_RACK_KIND.to_string(),
+        quantity: 1,
+    });
+    for x in 0..RACK_ROW_TILES {
+        let before = world.placement_count();
+        world.issue_command(PlayerCommand::Place {
+            kind: WAREHOUSE_RACK_KIND.to_string(),
+            tile: (x, RACK_ROW_Y),
+            direction: Direction::East,
+            item: None,
+        });
+        if world.placement_count() > before {
+            return true;
+        }
+    }
+    false
 }
 
 /// One tick's worth of keeping the line fed, issuing nothing but fill
@@ -128,4 +231,32 @@ pub fn supply_solids(world: &mut World) {
         amount: HOPPER_CAPACITY,
         tile: None,
     });
+}
+
+/// Tops the larder back up to [`stock_up`]'s quantities, spending whatever
+/// the world can afford and asserting nothing.
+///
+/// This is what a long run does instead of stocking twice. Before W1 a
+/// fixture that needed two larders' worth simply bought two, because a
+/// holding had no ceiling; now it cannot — a second `stock_up` would ask for
+/// 140 bays of warehouse and be clamped. So the extra stock arrives the way
+/// a player's does: as the line eats what is there, room appears and the
+/// order goes in again. Unaffordable buys are silent no-ops here on purpose,
+/// because a run that outlives its budget is exactly what the calling test
+/// is measuring.
+#[allow(dead_code)]
+pub fn restock(world: &mut World) {
+    for (item, target) in [
+        ("tomato", TOMATO_UNITS),
+        ("sugar", SUGAR_UNITS),
+        ("vinegar", VINEGAR_UNITS),
+    ] {
+        let held = world.owned_ingredient(item);
+        if held < target {
+            world.issue_command(PlayerCommand::BuyIngredient {
+                item: item.to_string(),
+                quantity: target - held,
+            });
+        }
+    }
 }

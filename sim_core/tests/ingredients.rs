@@ -374,10 +374,17 @@ fn the_ingredients_snapshot_json_has_the_documented_shape() {
             "id": "tomato",
             "price": 1.0,
             "owned": 12,
+            "capacity": 20,
             "affordable": true,
         }),
         "entries are in data/ingredients.ron's own order"
     );
+    // `capacity` is what the market panel reads to say "at capacity" instead
+    // of a price it cannot spend: 20 is `data/storage.ron`'s `base_cap`,
+    // because this world has no warehouse rack in it. It is per entry and
+    // not a single number on the snapshot precisely because it moves with
+    // what *else* is held — free bays are a shared pool.
+    assert_eq!(entries[1]["capacity"], 20);
     assert_eq!(entries[1]["id"], "sugar");
     assert_eq!(entries[1]["owned"], 0);
     assert_eq!(entries[2]["id"], "vinegar");

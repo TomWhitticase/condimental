@@ -34,6 +34,8 @@
 //! carrying different fluids and two runs carrying the same one are then
 //! both in the one layout.
 
+mod common;
+
 use sim_core::sim::machines::MachineRegistry;
 use sim_core::sim::save::{SaveData, SavedBody};
 use sim_core::sim::types::Money;
@@ -204,10 +206,10 @@ fn tangy_line() -> World {
 
 fn stock(world: &mut World) {
     for (item, quantity) in [("tomato", 500), ("vinegar", 500)] {
-        world.issue_command(PlayerCommand::BuyIngredient {
-            item: item.to_string(),
-            quantity,
-        });
+        // `common::buy` puts down the warehouse racks the order needs first:
+        // `data/storage.ron` caps a holding at `base_cap` plus the bays that
+        // exist, and an order with nowhere to go is silently clamped.
+        common::buy(world, item, quantity);
     }
 }
 
@@ -356,10 +358,7 @@ fn what_a_hopper_holds_decides_which_recipe_its_machine_runs() {
 
     let run_with = |item: &str| {
         let mut world = funded(two_crusher_recipes());
-        world.issue_command(PlayerCommand::BuyIngredient {
-            item: item.to_string(),
-            quantity: 100,
-        });
+        common::buy(&mut world, item, 100);
         world.issue_command(PlayerCommand::Purchase {
             kind: "hopper".to_string(),
             quantity: 1,
@@ -425,10 +424,7 @@ fn file_order_breaks_a_tie_between_two_satisfied_recipes() {
         let recipes =
             RecipeRegistry::from_ron_str(&text).expect("the fixture recipe text must parse");
         let mut world = funded(recipes);
-        world.issue_command(PlayerCommand::BuyIngredient {
-            item: "tomato".to_string(),
-            quantity: 100,
-        });
+        common::buy(&mut world, "tomato", 100);
         place(&mut world, "hopper", (0, 0), Direction::East);
         place(&mut world, "belt", (1, 0), Direction::East);
         place(&mut world, "crusher", (2, 0), Direction::East);

@@ -450,6 +450,7 @@ impl Ingredients {
         hopper_items: &[String],
         tank_fluids: Vec<String>,
         deliveries: u32,
+        capacity: impl Fn(&str) -> u32,
         gate: impl Fn(&str) -> Option<(String, u32)>,
     ) -> IngredientsSnapshot {
         let choice = |id: &String| match gate(id) {
@@ -476,11 +477,16 @@ impl Ingredients {
                 .entries()
                 .iter()
                 .filter(|entry| gate(&entry.id).is_none())
-                .map(|entry| IngredientSnapshot {
-                    id: entry.id.clone(),
-                    price: entry.price_money().to_num::<f64>(),
-                    owned: self.owned.count(&entry.id),
-                    affordable: money >= entry.price_money(),
+                .map(|entry| {
+                    let owned = self.owned.count(&entry.id);
+                    let capacity = capacity(&entry.id);
+                    IngredientSnapshot {
+                        id: entry.id.clone(),
+                        price: entry.price_money().to_num::<f64>(),
+                        owned,
+                        capacity,
+                        affordable: money >= entry.price_money() && owned < capacity,
+                    }
                 })
                 .collect(),
         }
@@ -579,6 +585,25 @@ pub struct IngredientSnapshot {
     pub id: String,
     pub price: f64,
     pub owned: u32,
+    /// The most of this ingredient the player may hold right now — the
+    /// ceiling `super::storage` imposes and warehouse racks raise
+    /// (`World::stock_cap_for`). Presentation draws "12 / 20" from this
+    /// pair and says "at capacity" when they meet.
+    ///
+    /// **Not constant, and not a property of the ingredient.** Free bays
+    /// are a shared pool, so buying tomato lowers sugar's ceiling; the
+    /// number has to be re-read with the rest of the snapshot rather than
+    /// cached per id.
+    pub capacity: u32,
+    /// Whether one more unit can be bought: the money is there **and**
+    /// there is room for it.
+    ///
+    /// The two reasons a buy button is dead are deliberately folded into
+    /// one flag rather than left to presentation to combine, because the
+    /// rule about which refusals `BuyIngredient` actually applies belongs
+    /// in the simulation (`sim_core/CLAUDE.md`). Which of the two to *say*
+    /// is presentation's call, and it has `owned`, `capacity` and `price`
+    /// to say it with.
     pub affordable: bool,
 }
 
@@ -820,6 +845,7 @@ mod tests {
             &hopper_items,
             vec!["vinegar".to_string()],
             0,
+            |_| u32::MAX,
             |_| None,
         );
         assert_eq!(snapshot.entries.len(), 2);
@@ -862,6 +888,7 @@ mod tests {
             &hopper_items,
             vec!["vinegar".to_string()],
             4,
+            |_| u32::MAX,
             |id| (id == "sugar").then(|| ("Sweet Tier".to_string(), 10)),
         );
         assert_eq!(
