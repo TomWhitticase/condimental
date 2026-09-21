@@ -233,6 +233,7 @@ use super::staff::{
     CrewEntry, CrewRequest, CrewSource, EstablishmentEntry, StaffPools, StaffSnapshot, crew_entries,
 };
 use super::stats::{ProductionLedger, ProductionSnapshot, StatKind};
+use super::storage::{StorageCatalog, WAREHOUSE_RACK_KIND, WarehouseRack};
 use super::types::{ChunkId, Direction, FluidId, Fx, ItemId, Money, RecipeId, TileCoord, chunk_of};
 
 /// The buildable-kind id (`data/shop.ron`) of one tile of conveyor.
@@ -1267,6 +1268,87 @@ pub struct DockSnapshot {
     pub full: bool,
 }
 
+/// One occupied bay of a warehouse rack, for presentation (the
+/// warehouse-rack sprint, ticket W3 draws a pallet per entry).
+///
+/// ```json
+/// { "bay": 0, "item": "tomato", "units": 50, "capacity": 50 }
+/// ```
+///
+/// `bay` indexes the building's own bays, `0..bays`, and is what decides
+/// which pallet in the model this stock stands on. **It is assigned, not
+/// stored**: [`World::storage_snapshot`] lays every ingredient's bays out in
+/// sorted id order across the racks in tile order, so the same ledger and
+/// the same floor plan always give the same answer, but the bay a given
+/// ingredient occupies can move when a neighbour's stock does. See
+/// [`super::storage`] for why that trade was taken.
+///
+/// `capacity` is the same `slot_stack` for every bay, carried here so a
+/// renderer can size a pallet load without a second lookup — the reason
+/// [`HopperSnapshot`] carries its capacity too.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RackBay {
+    pub bay: u32,
+    pub item: ItemId,
+    /// Units standing in **this** bay. The last bay an ingredient occupies
+    /// is usually part full; every earlier one holds exactly `capacity`.
+    pub units: u32,
+    pub capacity: u32,
+}
+
+/// One placed warehouse rack, for presentation.
+///
+/// ```json
+/// {
+///   "tile": [4, 2], "kind": "warehouse_rack", "direction": "east",
+///   "footprint": { "width_tiles": 1, "height_tiles": 2 },
+///   "bays": 6, "contents": [{ "bay": 0, "item": "tomato", "units": 50,
+///                             "capacity": 50 }]
+/// }
+/// ```
+///
+/// There is no `crew`, no `understaffed` and no `mothballed`: a rack does no
+/// work, asks for nobody and cannot be switched off, so the three fields
+/// every working placement carries would all be constants here. There is no
+/// `belt_tile` either — a rack is not wired to anything (sprint requirement
+/// R6).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RackSnapshot {
+    pub tile: TileCoord,
+    pub kind: String,
+    pub direction: Direction,
+    pub footprint: Footprint,
+    /// Bays this building supplies, from `data/storage.ron`.
+    pub bays: u32,
+    /// Only the **occupied** bays, in bay order. Shorter than `bays`
+    /// whenever the warehouse is not full, and empty for a rack in a
+    /// factory holding nothing above its free allowance.
+    pub contents: Vec<RackBay>,
+}
+
+/// The whole storage picture in one object — what a capacity readout needs
+/// without walking the racks itself (ARCHITECTURE.md §4/§5).
+///
+/// Polled, like the fluid and machine-load snapshots, and for their reason:
+/// stock moves when a *hopper* is filled, which dirties the hopper's tile
+/// and not the warehouse's, and a rack is redrawn from here rather than from
+/// a chunk delta.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StorageSnapshot {
+    /// Free capacity per ingredient with no rack placed at all.
+    pub base_cap: u32,
+    /// Units of one ingredient a single bay holds.
+    pub slot_stack: u32,
+    /// Bays every placed rack supplies between them.
+    pub total_bays: u32,
+    /// Bays the current holdings stand in — never more than `total_bays`,
+    /// which is the invariant [`super::storage::StorageCatalog::cap_for`]
+    /// documents.
+    pub used_bays: u32,
+    /// Every placed rack, in tile order.
+    pub racks: Vec<RackSnapshot>,
+}
+
 /// One machine's tap into a fluid network, for presentation. Used for both
 /// roles — see [`FluidSnapshot::taps`] (machines drawing) and
 /// [`FluidSnapshot::producers`] (machines depositing).
@@ -1499,6 +1581,22 @@ pub enum TileSnapshot {
         /// switched off.
         mothballed: bool,
     },
+    /// `{"kind": "warehouse_rack", "direction": "east", "footprint": {...},
+    ///   "origin_tile": [4, 2], "bays": 6,
+    ///   "contents": [{"bay": 0, "item": "tomato", "units": 50,
+    ///                 "capacity": 50}]}` — enough for a hover tooltip
+    /// ("Warehouse rack — 2/6 bays"). Only *occupied* bays appear in
+    /// `contents`, and the bay a given ingredient stands in is assigned by
+    /// [`World::storage_snapshot`] rather than stored (see
+    /// [`super::storage`]). There is no `fill` and no crew: a rack does no
+    /// work and asks for nobody.
+    WarehouseRack {
+        direction: Direction,
+        footprint: Footprint,
+        origin_tile: TileCoord,
+        bays: u32,
+        contents: Vec<RackBay>,
+    },
 }
 
 /// What stands on the far end of a link, for [`Links`] — the seven kinds a
@@ -1532,6 +1630,12 @@ impl From<BodyKind> for LinkKind {
             BodyKind::Hopper => LinkKind::Hopper,
             BodyKind::FluidTank => LinkKind::Tank,
             BodyKind::Dock => LinkKind::Dock,
+            // A rack is never on either end of a link, so this arm is only
+            // reachable if one day something asks a rack's tile what it is
+            // wired to. `Dock` is the nearest honest answer — a terminus —
+            // and inventing a `LinkKind::Rack` nothing produces would put a
+            // dead variant on the wire for presentation to handle.
+            BodyKind::WarehouseRack => LinkKind::Dock,
         }
     }
 }
@@ -1717,6 +1821,14 @@ enum BodyKind {
     Hopper,
     FluidTank,
     Dock,
+    /// A warehouse stock rack (see [`super::storage`]). The only body here
+    /// that the *tick* never touches: a rack supplies storage bays, and
+    /// storage is a property of the ledger rather than of a tile. It is a
+    /// `BodyKind` at all because it is placed, removed, rotated and drawn
+    /// like everything else, and because its absence from every hand-off in
+    /// `recompute_topology` is the thing that has to stay deliberate —
+    /// sprint requirement R6, "belts and pipes do not interact with racks".
+    WarehouseRack,
 }
 
 /// Everything derived from *where things stand*, rebuilt whenever that
@@ -1744,6 +1856,10 @@ struct Topology {
     hoppers: Vec<Entity>,
     tanks: Vec<Entity>,
     docks: Vec<Entity>,
+    /// Every placed warehouse rack, in tile order. Read by
+    /// [`World::storage_bays`] and by the storage snapshot, and by nothing
+    /// in `tick` at all — see [`BodyKind::WarehouseRack`].
+    racks: Vec<Entity>,
     /// A belt hands off to the belt (or splitter) it points at.
     belt_to_belt: Vec<(Entity, Entity)>,
     /// The same relation as `belt_to_belt`, indexed like `belts`: entry
@@ -1860,6 +1976,12 @@ pub struct World {
     /// it (GAMEPLAY.md §5). A plain field beside `shop` and `economy` for
     /// their reason: one per world.
     ingredients: Ingredients,
+    /// How much raw stock the player may hold and what raises the ceiling
+    /// (the warehouse-rack sprint, `storage.rs`). A plain field beside
+    /// `ingredients` because it is that ledger's rules: the numbers live in
+    /// `data/storage.ron`, the bays are counted off `topology.racks`, and
+    /// nothing about capacity is stored per entity.
+    storage: StorageCatalog,
     /// The staff pools (the staff pools MVP epic, GAMEPLAY.md §7): a plain
     /// field like `economy`, for the same reason — four aggregate counters
     /// are not a reason for ECS machinery.
@@ -2032,6 +2154,7 @@ impl World {
             economy: Economy::with_money(&contracts, money),
             shop,
             ingredients,
+            storage: StorageCatalog::bundled(),
             staff: StaffPools::bundled(),
             topology: Topology::default(),
             production: ProductionLedger::new(),
@@ -2112,11 +2235,13 @@ impl World {
     /// the contents picker shows.
     pub fn ingredients_snapshot(&self) -> IngredientsSnapshot {
         let deliveries = self.economy.lifetime_deliveries;
+        let bays = self.storage_bays();
         self.ingredients.snapshot(
             self.economy.money,
             &self.raw_items,
             self.raw_fluids.iter().cloned().collect(),
             deliveries,
+            |id| self.storage.cap_for(id, &self.ingredients.owned, bays),
             |id| {
                 self.economy
                     .unlocks()
@@ -2125,6 +2250,112 @@ impl World {
                     .map(|gate| (gate.name.clone(), gate.after_deliveries))
             },
         )
+    }
+
+    /// The stock-capacity rules this world was built with
+    /// (`data/storage.ron`). Read-only: capacity is content, and the only
+    /// thing that changes at runtime is how many racks stand on the floor.
+    pub fn storage(&self) -> &StorageCatalog {
+        &self.storage
+    }
+
+    /// How many storage bays the placed racks supply between them —
+    /// `total_bays` everywhere else in this module.
+    ///
+    /// Summed off `topology.racks` rather than kept as a counter, so it
+    /// cannot drift from the floor: `recompute_topology` runs on every
+    /// `Place`, `Remove` and `Rotate`, which is exactly when this answer can
+    /// change.
+    pub fn storage_bays(&self) -> u32 {
+        self.topology
+            .racks
+            .iter()
+            .map(|&entity| self.storage.bays_of_kind(&self.placement_of(entity).kind))
+            .fold(0, u32::saturating_add)
+    }
+
+    /// The most of `id` the player may currently hold — the number a market
+    /// panel shows beside what they own, and the number `BuyIngredient`
+    /// clamps against. See [`StorageCatalog::cap_for`] for the rule and its
+    /// invariant.
+    pub fn stock_cap_for(&self, id: &str) -> u32 {
+        self.storage
+            .cap_for(id, &self.ingredients.owned, self.storage_bays())
+    }
+
+    /// How many more units of `id` will fit right now.
+    pub fn stock_room_for(&self, id: &str) -> u32 {
+        self.storage
+            .room_for(id, &self.ingredients.owned, self.storage_bays())
+    }
+
+    /// The flat run of occupied bays, `(ingredient, units)` in bay order —
+    /// [`StorageCatalog::bay_contents`] against this world's ledger. Sliced
+    /// across the racks by [`World::storage_snapshot`].
+    fn bay_runs(&self) -> Vec<(ItemId, u32)> {
+        self.storage.bay_contents(&self.ingredients.owned)
+    }
+
+    /// One rack's snapshot, given the flat bay run [`World::bay_runs`]
+    /// built.
+    ///
+    /// The slice this rack gets is decided by **how many bays the racks
+    /// before it in tile order supply**, which is why the run is passed in
+    /// rather than recomputed: a rack cannot know its own offset.
+    fn rack_snapshot(&self, entity: Entity, runs: &[(ItemId, u32)]) -> RackSnapshot {
+        let placement = self.placement_of(entity);
+        let bays = self.storage.bays_of_kind(&placement.kind);
+        let mut offset = 0u32;
+        for &other in &self.topology.racks {
+            if other == entity {
+                break;
+            }
+            offset =
+                offset.saturating_add(self.storage.bays_of_kind(&self.placement_of(other).kind));
+        }
+        let capacity = self.storage.slot_stack();
+        let contents = (0..bays)
+            .filter_map(|bay| {
+                let (item, units) = runs.get((offset + bay) as usize)?;
+                Some(RackBay {
+                    bay,
+                    item: item.clone(),
+                    units: *units,
+                    capacity,
+                })
+            })
+            .collect();
+        RackSnapshot {
+            tile: self.position_of(entity),
+            kind: placement.kind.clone(),
+            direction: placement.direction,
+            footprint: placement.footprint,
+            bays,
+            contents,
+        }
+    }
+
+    /// Everything a capacity readout and a warehouse render need: the two
+    /// content numbers, the bay totals, and every placed rack with the stock
+    /// standing in it (ARCHITECTURE.md §4/§5).
+    ///
+    /// **Ingredients fill the racks in sorted id order, racks in tile
+    /// order** — the one place the bay assignment is decided, so it is
+    /// deterministic (§3.9) even though nothing stores it.
+    pub fn storage_snapshot(&self) -> StorageSnapshot {
+        let runs = self.bay_runs();
+        StorageSnapshot {
+            base_cap: self.storage.base_cap(),
+            slot_stack: self.storage.slot_stack(),
+            total_bays: self.storage_bays(),
+            used_bays: self.storage.bays_used(&self.ingredients.owned),
+            racks: self
+                .topology
+                .racks
+                .iter()
+                .map(|&entity| self.rack_snapshot(entity, &runs))
+                .collect(),
+        }
     }
 
     /// Every content id that names itself, as `id -> display name`.
@@ -2231,6 +2462,10 @@ impl World {
         }
         match kind {
             BELT_KIND | PIPE_KIND | SPLITTER_KIND | DOCK_KIND | FLUID_TANK_KIND => true,
+            // A rack needs nothing of the content files beyond a price
+            // and a footprint: it runs no recipe and holds no declared
+            // ingredient, so there is nothing here that could be missing.
+            WAREHOUSE_RACK_KIND => true,
             HOPPER_KIND => !self.raw_items.is_empty(),
             other => self.recipes.for_machine(other).next().is_some(),
         }
@@ -2370,6 +2605,14 @@ impl World {
                 BodyKind::Dock,
                 Dock::new(DOCK_CAPACITY),
             )),
+            // A rack's body is a marker and nothing else: the bays it
+            // supplies are a property of its kind (`data/storage.ron`) and
+            // the stock in them stays in the one ingredient ledger. See
+            // [`WarehouseRack`].
+            WAREHOUSE_RACK_KIND => {
+                self.ecs
+                    .spawn((position, placement, BodyKind::WarehouseRack, WarehouseRack))
+            }
             machine_kind => {
                 // A freshly placed machine starts on its kind's first recipe
                 // in file order; from its first idle tick onwards it re-picks
@@ -2406,6 +2649,25 @@ impl World {
             return false;
         };
         let placement = self.placement_of(entity);
+        // **The one removal in this simulation that can be refused.**
+        // Everything else picks up cleanly because its contents go with it
+        // — a hopper keeps its bin, a belt's items are destroyed with the
+        // tile. A rack's contents are not its own: they are rows in the
+        // shared ingredient ledger, and taking the rack away would leave
+        // stock standing in bays that no longer exist. Rather than delete
+        // the overflow (the player paid for it) or let the ledger sit over
+        // its own ceiling (which would make
+        // `StorageCatalog::cap_for`'s invariant a lie), the building simply
+        // will not come up until enough has been used. Presentation says so
+        // from `storage_snapshot`; there is no refusal channel and this does
+        // not add one (see `BuyIngredient`).
+        if self.storage.is_rack(&placement.kind) {
+            let bays = self.storage.bays_of_kind(&placement.kind);
+            let remaining = self.storage_bays().saturating_sub(bays);
+            if self.storage.bays_used(&self.ingredients.owned) > remaining {
+                return false;
+            }
+        }
         let origin = self.position_of(entity);
         let tiles = placement.tiles(origin);
         self.ecs
@@ -2728,6 +2990,7 @@ impl World {
                 BodyKind::Hopper => topology.hoppers.push(entity),
                 BodyKind::FluidTank => topology.tanks.push(entity),
                 BodyKind::Dock => topology.docks.push(entity),
+                BodyKind::WarehouseRack => topology.racks.push(entity),
             }
             let placement = self.placement_of(entity);
             let origin = self.position_of(entity);
@@ -2798,7 +3061,13 @@ impl World {
                         .contains(&target)
                         .then_some(occupant)
                 }
-                BodyKind::Pipe | BodyKind::Hopper | BodyKind::FluidTank => None,
+                // A rack is not a sink, deliberately (R6): an item on a
+                // belt pointed at one simply stops, the way it does
+                // against a tank.
+                BodyKind::Pipe
+                | BodyKind::Hopper
+                | BodyKind::FluidTank
+                | BodyKind::WarehouseRack => None,
             }
         };
         topology.belt_ahead = vec![None; topology.belts.len()];
@@ -3851,6 +4120,17 @@ impl World {
                 if !self.economy.ingredient_unlocked(&item) {
                     return;
                 }
+                // A second check `Purchase` has no equivalent of: stock has
+                // a CEILING, and the ceiling is a building
+                // (`storage.rs`). The request is clamped to the room that
+                // is actually there rather than refused outright, for
+                // `OwnedIngredients::take`'s reason — a quantity is not an
+                // indivisible act the way placing a building is, and a
+                // player who asks for fifty with room for ten meant "fill
+                // me up". Clamped FIRST, so the price is the price of what
+                // arrives: charging for what was asked and crediting what
+                // fits would be a silent tax.
+                let quantity = quantity.min(self.stock_room_for(&item));
                 let Some(cost) = self.ingredients.cost_of(&item, quantity) else {
                     return;
                 };
@@ -5088,6 +5368,16 @@ impl World {
                     capacity: snapshot.capacity,
                     fill: snapshot.fill,
                     auto_fill: snapshot.auto_fill,
+                }
+            }
+            BodyKind::WarehouseRack => {
+                let snapshot = self.rack_snapshot(entity, &self.bay_runs());
+                TileSnapshot::WarehouseRack {
+                    direction: snapshot.direction,
+                    footprint: snapshot.footprint,
+                    origin_tile: snapshot.tile,
+                    bays: snapshot.bays,
+                    contents: snapshot.contents,
                 }
             }
             BodyKind::Dock => {

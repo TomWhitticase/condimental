@@ -447,6 +447,14 @@ const MACHINE_MODELS := {
 	# looks it up; `_build_dock` and the build menu's `_shop_asset_for` both do,
 	# and they find it here rather than in a table of their own.
 	"dock": "machine_dock",
+	# The warehouse stock rack (W1/W2). Like the dock it is no
+	# `chain_layout_json` stage — nothing in `data/recipes.ron` names it — but
+	# it has a footprint in `data/machines.ron` and a price in
+	# `data/shop.ron`, so it is placed, hovered and previewed through the
+	# same paths as every other building and needs its model here. Its
+	# pallets and their tints are W3; this entry is the bare body, so that a
+	# rack the player buys is visible the moment it is placed.
+	"warehouse_rack": "warehouse_rack",
 }
 const MACHINE_MODEL_FALLBACK := "machine"
 

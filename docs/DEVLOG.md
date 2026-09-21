@@ -48,6 +48,14 @@ below is history and should only ever be appended to.)*
   `data/unlocks.ron` holds its three ingredients and four contracts back until
   the tenth lifetime delivery, so a new game's market and board show only what
   a one-sauce factory can use. See the log entries below.
+- **Raw stock has a ceiling (2026-09-21).** `data/storage.ron` caps every
+  ingredient at `base_cap` 20 plus 50 per **bay**, and a `warehouse_rack`
+  (1×2, six bays, 75) is the only thing that supplies bays. `BuyIngredient`
+  clamps silently and charges for what it credited; the reason is read off
+  `IngredientSnapshot::capacity`. Bays are derived from the ledger, so free
+  bays are a shared pool and a bay frees itself when its stock is used. A rack
+  is pure storage — it never touches a belt. Any fixture that wants more than
+  20 of something has to build the room first. See the log entry below.
 - **The lighting post-passes mean something now (2026-09-20).** Glow is
   `1.0 / 0.0 / 1.2 / SCREEN` and SSAO is `0.45 / 16.0 / 1.6`
   (`factory_environment.gd`). Both sets of old numbers were chosen where they
@@ -188,6 +196,47 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-21 — Raw stock has a ceiling, and a rack is what raises it (W1)
+
+The simulation half of the warehouse stock racks feature. Until now
+`BuyIngredient` credited `OwnedIngredients` with no limit but money, and money
+is the thing a running factory produces — so GAMEPLAY.md §5's recurring
+ingredient cost was one early purchase and then nothing. A holding is now
+capped at `data/storage.ron`'s `base_cap` (20, free and unconditional) plus
+`slot_stack` (50) for every **bay** the placed warehouse supplies, and
+`warehouse_rack` — W2's model, 1×2, six bays, 75 in `shop.ron` — is the thing
+that supplies them. New module `sim_core/src/sim/storage.rs` owns the
+arithmetic and the loader; `World` gained `storage_bays`, `stock_cap_for`,
+`stock_room_for` and `storage_snapshot`, `IngredientSnapshot` gained
+`capacity`, and `SavedBody::WarehouseRack` carries no fields, so
+`schema_version` stays 2. `godot_project/main.gd` registers the model and
+nothing else: pallets, tints and the guidance plate are W3, the market plate
+is W4.
+
+Three rulings are in [DECISIONS.md](DECISIONS.md) under today's date. **R6
+wins** — a rack is pure storage, with no output item, no picker, no topology
+links and no tick-step-5 arm, so the hopper stays the only thing that meters
+raw onto a belt; the sprint plan asked for all three readings of this and they
+were three different buildings. **Bays are derived from the ledger, not
+assigned and persisted** — nothing to migrate, nothing to drift, and a bay
+frees itself the instant its stock is used, at the price that free bays are a
+shared pool. **Six bays at 50, priced 75** — six is the model's own geometry,
+and the price moves with it.
+
+`sim_core/tests/storage.rs` is ten tests over the whole system, including the
+headline invariant (a holding is never over its own ceiling, however the
+warehouse changes), a removal that is refused because it would strand stock —
+the first removal in the game that can fail — a save holding more than its
+racks can, and the R6 pin. The cap's real cost was to the fixtures: every one
+that ran a line bought a deep larder up front and none of them could any more.
+Both layers now build the warehouse through the real commands, one rack at a
+time, re-asking the sim for the room rather than restating its arithmetic
+(`common::make_room`, `Layouts.make_room`), and the long runs top up mid-run
+instead of stocking deep (`restock`) — 3 000 of one ingredient is sixty bays,
+and `--full-dock` would have photographed a wall of racks instead of a dock.
+`*_PLACEMENTS` counts now exclude the warehouse (`Layouts.line_placements`):
+the layout under test is the line.
 
 ### 2026-09-21 — The warehouse rack has its art (W2)
 

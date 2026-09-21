@@ -483,11 +483,13 @@ fn the_pool_ceiling_clears_the_biggest_order_on_the_board() {
 /// so in words.
 #[test]
 fn a_full_pool_backs_the_line_up_instead_of_losing_product() {
-    // Twice `world()`'s larder: the line has to run some 25 000 ticks to
-    // out-produce the starter contract's appetite by a whole pool, and one
-    // stocking runs dry before then (a dead line proves nothing here).
+    // Twice `world()`'s larder's worth of *money*: the line has to run some
+    // 25 000 ticks to out-produce the starter contract's appetite by a whole
+    // pool, and one larder runs dry before then (a dead line proves nothing
+    // here). It cannot be bought twice over in one go — a holding is capped
+    // at what the warehouse holds since W1 — so the second larder arrives
+    // through `restock` as the first is eaten.
     let mut world = reference_chain_with_budget(recipes(), BUDGET + common::STOCK_COST);
-    common::stock_up(&mut world);
     common::stock_up(&mut world);
     let belt_start = the_dock(&world)
         .belt_tile
@@ -496,6 +498,7 @@ fn a_full_pool_backs_the_line_up_instead_of_losing_product() {
 
     let mut filled = false;
     for _ in 0..80_000u32 {
+        common::restock(&mut world);
         common::supply(&mut world);
         world.tick();
 

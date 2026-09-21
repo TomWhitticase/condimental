@@ -311,5 +311,30 @@
             staff: [("logistics", 1)],
 
         ),
+        // --- The warehouse, which is not on the line at all ---
+        // A stock rack (the warehouse-rack sprint, ticket W1). The fourth
+        // kind here with no recipe behind it, and the first with no place
+        // in a production line: nothing is delivered to it and nothing
+        // leaves it on a belt. What it does is raise the ceiling on how
+        // much raw ingredient the player may own at once — the bays it
+        // supplies are in `data/storage.ron`, and `sim_core::sim::storage`
+        // has the rule in full.
+        //
+        // 1x2 because the model is: `warehouse_rack` is 32x64 voxels, two
+        // bays deep along its length. That is also the shape a rack ought
+        // to be — a run of racking is long and narrow, and a player lining
+        // several up end to end should get an aisle rather than a block.
+        //
+        // NO CREW, deliberately. Every other kind's staff list is about
+        // work being done on a tick; a rack does none. Stock sitting on a
+        // shelf costs money in the only way this game models cost — it was
+        // bought — and a standing wage for a building that never runs would
+        // read as a penalty for having bought storage at all.
+        MachineKind(
+            id: "warehouse_rack",
+            footprint: Footprint(width_tiles: 1, height_tiles: 2),
+            staff: [],
+
+        ),
     ],
 )

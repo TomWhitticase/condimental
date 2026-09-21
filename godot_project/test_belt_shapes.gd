@@ -104,7 +104,10 @@ func _run_checks() -> void:
 
 	# --- 2. the gallery: corners at every facing, spun by their facing -----
 	Layouts.build_belt_gallery(main.sim)
-	var placed: int = JSON.parse_string(main.sim.world_layout_json()).size()
+	# `line_placements`, not the layout's size: stocking a larder now builds
+	# warehouse racks, and they are the fixture's storage rather than part of
+	# the gallery being counted.
+	var placed := Layouts.line_placements(main.sim)
 	if placed != Layouts.BELT_GALLERY_PLACEMENTS:
 		_fail("the gallery placed %d things, expected %d — a refused place means a collision in the fixture" % [placed, Layouts.BELT_GALLERY_PLACEMENTS])
 		return

@@ -71,13 +71,25 @@ func _run_checks() -> void:
 
 	var build_start := Time.get_ticks_usec()
 	Layouts.build_stress_line(main.sim)
-	Layouts.stock_larder(main.sim, 2000)
+	# One larder rather than the 2 000 of each raw this used to buy: a
+	# holding is capped now, and 2 000 is forty bays per ingredient — twenty
+	# racks, which would be twenty more buildings in a measurement about
+	# belts. The warmup loop below tops it up instead.
+	Layouts.stock_larder(main.sim, Layouts.LARDER_STOCK)
 	var build_msec := _msec(build_start)
 
 	main._read_world_layout()
-	if main._placements.size() != Layouts.STRESS_PLACEMENTS:
+	# The fixture's own warehouse is not part of the line being measured, so
+	# it is not part of the count either — `Layouts.line_placements` says why.
+	# Counted off what `_read_world_layout` parsed rather than off the sim,
+	# because what this guards is that the read crossed the wire intact.
+	var placed := 0
+	for placement in main._placements:
+		if String(placement.get("kind", "")) != Layouts.WAREHOUSE_KIND:
+			placed += 1
+	if placed != Layouts.STRESS_PLACEMENTS:
 		_fail("the stress line placed %d of %d things — a purchase or a place was refused (money? a collision?)" % [
-			main._placements.size(), Layouts.STRESS_PLACEMENTS,
+			placed, Layouts.STRESS_PLACEMENTS,
 		])
 		return
 
@@ -108,6 +120,7 @@ func _run_checks() -> void:
 	main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
 	for i in range(WARMUP_TICKS):
 		if i % 50 == 0:
+			Layouts.restock(main.sim)
 			main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
 		main.sim.tick()
 		main._apply_dirty_chunks()

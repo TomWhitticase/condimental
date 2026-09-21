@@ -25,6 +25,8 @@
 //! Everything below runs with no Godot process involved (ARCHITECTURE.md
 //! §7).
 
+mod common;
+
 use sim_core::sim::machines::MachineRegistry;
 use sim_core::sim::types::{Money, TileCoord};
 use sim_core::sim::{
@@ -142,13 +144,12 @@ impl Junction {
         let straight = build_belt_run(&mut world, (1, 0), Direction::East, straight_tiles);
         let branch = build_belt_run(&mut world, (0, -1), Direction::South, branch_tiles);
         // Ingredients cost money since the chain-rework epic (`FillHopper`
-        // now draws from bought stock rather than conjuring it) — buy
-        // comfortably more than this fixture will ever fill, so the hopper
-        // fill below is limited by `tomatoes`/hopper capacity, not by stock.
-        world.issue_command(PlayerCommand::BuyIngredient {
-            item: "tomato".to_string(),
-            quantity: tomatoes.max(HOPPER_CAPACITY),
-        });
+        // now draws from bought stock rather than conjuring it) and since W1
+        // they need somewhere to go as well — `common::buy` builds the racks
+        // the order needs and buys comfortably more than this fixture will
+        // ever fill, so the hopper fill below is limited by
+        // `tomatoes`/hopper capacity, not by stock.
+        common::buy(&mut world, "tomato", tomatoes.max(HOPPER_CAPACITY));
         world.issue_command(PlayerCommand::FillHopper {
             amount: tomatoes,
             tile: None,
