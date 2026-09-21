@@ -70,9 +70,10 @@ fn voxels_root() -> PathBuf {
 /// binary is run standalone or from that script.
 fn find_thumbnailer() -> Option<PathBuf> {
     if let Ok(p) = env::var("VENGI_THUMBNAILER")
-        && !p.is_empty() {
-            return Some(PathBuf::from(p));
-        }
+        && !p.is_empty()
+    {
+        return Some(PathBuf::from(p));
+    }
     if let Some(p) = which_on_path("vengi-thumbnailer") {
         return Some(p);
     }

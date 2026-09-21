@@ -214,12 +214,13 @@ fn run_chain_watching_fluid(
         world.tick();
         seen = seen.max(count_item_anywhere(world, item));
         if tick_i >= SETTLE_TICKS
-            && let Some(fluid) = the_network(world) {
-                min_volume = Some(match min_volume {
-                    Some(v) => v.min(fluid.total_volume),
-                    None => fluid.total_volume,
-                });
-            }
+            && let Some(fluid) = the_network(world)
+        {
+            min_volume = Some(match min_volume {
+                Some(v) => v.min(fluid.total_volume),
+                None => fluid.total_volume,
+            });
+        }
     }
     (seen, min_volume)
 }

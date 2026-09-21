@@ -841,12 +841,13 @@ impl SaveData {
         // message is far more useful, so it is checked against a shape that
         // only has the one field in it.
         if let Ok(header) = ron::from_str::<Header>(text)
-            && header.schema_version != SAVE_SCHEMA_VERSION {
-                return Err(SaveError::UnsupportedSchemaVersion {
-                    found: header.schema_version,
-                    supported: SAVE_SCHEMA_VERSION,
-                });
-            }
+            && header.schema_version != SAVE_SCHEMA_VERSION
+        {
+            return Err(SaveError::UnsupportedSchemaVersion {
+                found: header.schema_version,
+                supported: SAVE_SCHEMA_VERSION,
+            });
+        }
         let data: SaveData = ron::from_str(text).map_err(SaveError::Parse)?;
         if data.schema_version != SAVE_SCHEMA_VERSION {
             return Err(SaveError::UnsupportedSchemaVersion {
@@ -1254,9 +1255,10 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
     for placement in &data.placements {
         if let SavedBody::Machine(machine) = &placement.body
             && let Some(id) = &machine.refused_by
-                && staff_catalog.get(id).is_none() {
-                    return Err(SaveError::UnknownStaffCategory { id: id.clone() });
-                }
+            && staff_catalog.get(id).is_none()
+        {
+            return Err(SaveError::UnknownStaffCategory { id: id.clone() });
+        }
     }
     Ok(())
 }
