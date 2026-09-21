@@ -25,6 +25,63 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-21: **An issue is for what you cannot fix now, and the bar is no
+  longer low.** (Amends the 2026-09-16 GitHub entry below.)
+
+  **What went wrong with the old rule.** "Deciding something is out of scope
+  is only half the decision; filing it is the other half" was written against
+  a real failure — the `resolve_sink` contradiction that sat in a DEVLOG
+  paragraph for a week because there was nowhere else to put it — and it
+  fixed that failure. The part that did not survive contact is the bar:
+  *if it was worth putting in a report, it is worth an issue.* Agents write
+  thorough reports. The rule therefore converted every observation into a
+  backlog entry, and the backlog became a queue of findings that are small,
+  true, and unprioritised. Its longest-lived entries were `verify-core-loop.sh`'s
+  header claiming thirty Godot scripts where it runs 37, and a `recipes.ron`
+  comment citing 60 ticks/sec against a 30 Hz tick — each a one-line edit
+  that cost more to file, read and rank than to make.
+
+  **The asymmetry that the old rule missed.** A PR is read once and then it
+  is gone; an issue is read by a human on every pass over the board until
+  someone closes it. So the two halves of "fix it or file it" do not cost the
+  same, and the rule now says so: **an issue nobody will ever choose to work
+  on costs more than it records.**
+
+  **The gates.** Three, in order, in `file-issue`'s first section. *Could you
+  just fix it* — a line or two in a file the branch already touches (a stale
+  comment, a wrong constant, a typo, a misleading log line) is a fix plus a
+  line in the PR body, and so is a small safe fix in the area you are already
+  working in, provided the PR's title still describes the PR. Filing is for
+  what you cannot do now: an owner's call, a save-format break, a design-doc
+  contradiction, genuinely larger work, or a part of the tree this branch has
+  no business touching. *Would anyone pick it off the board ahead of the next
+  feature* — polish with no defect behind it, speculative hardening ("add a
+  test for X" where X has never broken), systems CLAUDE.md lists as
+  deliberately not built yet, and restatements of a limit a design doc already
+  records all fail this. *Is it already filed* — a second sighting is a
+  comment on the open issue.
+
+  **The budget is a smell test, not a quota.** Roughly one issue per pull
+  request. A session that wants to file five has usually found one underlying
+  problem worth a single issue, or is filing nits; where several real
+  deferrals do come out of one branch, the rest go in the PR body, which is
+  the right venue anyway — review can promote a line in a body into an issue,
+  and review is a human deciding, which is exactly the judgement the backlog
+  was accumulating in place of.
+
+  **What does not change.** A finding that passes the gates must still be
+  filed, with the same cold-reader body (file *and* function, how it was
+  found, why it was deferred, what the fix probably is) and the same short
+  label set. Issues are still the backlog and nothing else. The failure the
+  2026-09-16 rule was written against is still a failure; this narrows what
+  counts as a finding, not what happens to one.
+
+  **Where it is written.** `docs/WORKFLOW.md`'s "Fix it, or file it — and
+  prefer fixing it" is the rule; `file-issue`'s first section is the gate and
+  its description says so, so the skill is not reached for by reflex;
+  `open-pr` and `.github/pull_request_template.md` now ask for a line in the
+  body first and an issue only past the gate; `CLAUDE.md` carries the
+  one-sentence version.
 - 2026-09-21: **A machine kind may name several recipes, and a placed machine
   runs whichever one its inputs satisfy — there is never a picker.** (The BBQ
   epic, T1/PR #45, landed 2026-09-18; recorded here as T5, late.)
@@ -2082,9 +2139,12 @@ matches what code comments and data files cite.
   record-keeping calls were made, so the DEVLOG and decision-log questions are
   answered at review time rather than forgotten.
 
-  **The rule for deferrals.** Deciding something is out of scope is only half
-  a decision; the issue is the other half, and the bar is deliberately low —
-  if it was worth putting in a report, it is worth an issue. The body assumes
+  **The rule for deferrals.** *(Amended 2026-09-21 — the low bar produced an
+  unprioritised backlog; see the entry at the top of Part A. Everything below
+  still holds for a finding that passes the new gates.)* Deciding something is
+  out of scope is only half a decision; the issue is the other half, and the
+  bar is deliberately low — if it was worth putting in a report, it is worth
+  an issue. The body assumes
   a cold reader: **file and function** (not "somewhere in the Godot layer"),
   **how it was found** (the test name, the `screenshot-scene.sh` flags, the
   fixture — this is what turns a re-investigation into one command), **why it

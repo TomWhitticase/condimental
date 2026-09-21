@@ -1,7 +1,7 @@
 name: Headless verify (Godot)
 
 # scripts/verify-core-loop.sh in full: cargo tests, `cargo xtask`, two Godot
-# import passes and ~30 headless Godot scripts, each grepped for its own
+# import passes and every headless Godot script, each grepped for its own
 # success marker (docs/WORKFLOW.md, "Verification"). It is THE gate — and it
 # takes minutes, needs a 100MB Godot download, and has never been run on
 # Linux, only on the macOS machines this project is developed on.

@@ -101,8 +101,8 @@
 // PROCESS TIMES follow the work each machine does, so the line has a
 // visible bottleneck rather than a row of interchangeable stages. Of the
 // ketchup line's three front-end processing stages: crushing is mechanical
-// and the quickest of them (80 ticks — a little over a second at
-// ARCHITECTURE.md §3.9's 60 ticks/sec), blending is a little slower still
+// and the quickest of them (80 ticks — under three seconds at
+// ARCHITECTURE.md §3.9's 30 ticks/sec), blending is a little slower still
 // (90), and the cook-down is the longest step on THAT line (240, three
 // times the crush) — which is precisely why the cooking vat is also the
 // biggest machine on it (`data/machines.ron`).

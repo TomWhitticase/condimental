@@ -190,7 +190,7 @@ pulling a schema bump.
 scripts/verify-core-loop.sh
 ```
 
-26 Rust test suites and 38 headless Godot proofs, including the real `gdext` JSON
+26 Rust test suites and 37 headless Godot proofs, including the real `gdext` JSON
 boundary, save/load round trips, the second sauce running as a branch off the first,
 and the interactive scene's input path. For a picture instead of a pass/fail:
 

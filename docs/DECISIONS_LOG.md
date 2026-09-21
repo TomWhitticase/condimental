@@ -18,6 +18,27 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-21 **An issue is for what you cannot fix now, and the bar is no
+  longer low.** Amends the 2026-09-16 GitHub rule below, whose "if it was
+  worth putting in a report, it is worth an issue" worked exactly as written
+  and produced a backlog of small, true, unprioritised findings a human has
+  to rank and nobody picks up — its longest-lived entries were comments
+  citing thirty Godot scripts against 37 and 60 Hz against a 30 Hz tick, both
+  cheaper to fix than to file. **An issue nobody will ever choose to work on
+  costs more than it records.** Three gates now, in order: could you just fix
+  it (a line or two in a file the branch already touches, or a small safe fix
+  in the area you are in, is a fix and a line in the PR body — file only when
+  fixing now would be *wrong*: an owner's call, the save format, a design-doc
+  contradiction, real work, or a part of the tree this branch has no business
+  in); would anyone pick it ahead of the next feature (polish with no defect,
+  speculative hardening, systems CLAUDE.md lists as deliberately unbuilt, and
+  restatements of a documented limit all fail); is it already filed (a second
+  sighting is a comment). **Budget: roughly one issue per PR** — a smell
+  test, not a quota; the rest go in the PR body where review can promote
+  them. Unchanged: the cold-reader body, the label set, and that a finding
+  which *does* pass the gates must still be filed rather than left in a
+  closing message. `file-issue`'s first section is the gate; `open-pr`, the
+  PR template and `CLAUDE.md` point at it.
 - 2026-09-21 **A machine kind may name several recipes, and a placed machine
   runs whichever one its inputs satisfy — there is never a picker.**
   `recipes.ron` stopped being one line per kind in the BBQ epic;
@@ -589,7 +610,8 @@ See [WORKFLOW.md](WORKFLOW.md).
   still running, requested for review, or that deviates from a design doc,
   bumps `gdext` or changes the save format — say it is ready and stop.
   **Deciding something is out of scope is only half the decision; filing it is
-  the other half**: `gh issue create --label deferred`, with file *and*
+  the other half** *(the bar was raised on 2026-09-21 — see the entry at the
+  top of this log)*: `gh issue create --label deferred`, with file *and*
   function, how it was found, why it was deferred and what the fix probably
   is, because the next agent starts cold and a finding reported only in a
   closing message is lost. Labels are deliberately few: `deferred`,
