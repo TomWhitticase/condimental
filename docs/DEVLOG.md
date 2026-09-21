@@ -184,6 +184,74 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-20 — Two hopper tints, a guard that refuses, and a distance metric that can see value
+
+Three issues sharing one shape: a lookup table keyed by content id whose
+fallback makes a missing entry invisible. The same class as #67's market
+icons and #68's fluid colours.
+
+**Two raws were drawn the same colour (#80).** `HOPPER_FILL_TINTS` had
+`tomato` and `sugar` and nothing else, so `spice_mix` and `molasses` both
+came out of `HOPPER_FILL_TINT_FALLBACK` — measured on the `--bbq` fixture
+their fill tops were 213.2 and 214.4 luma, 1.2/255 apart, which is the same
+object to a player. They now carry their own palette colours verbatim
+rather than lifted: unlike a fluid sitting in a shadowed steel bore there is
+nothing to lift a hopper's upward-facing heap against, and `tomato` and
+`sugar` were already their palette colours unaltered.
+
+`molasses` ships nearly black on purpose, after looking at it in a frame
+rather than reasoning about it. #100 is the precedent for a dark tint
+reading as an empty vessel, but an empty hopper is a **pale** bin with its
+ridged floor in plain view, so the failure mode is the opposite of a pipe's:
+full it measures 57.4 luma against the empty bin's 106.1, and at 22% fill
+— deepest in the bin, worst-lit by SSAO — 57.3 against 111.1. Lifting it
+would have moved it *toward* the empty bin.
+
+**The guard is the point, not the two colours.** Adding entries to a table
+that silently tolerates missing ones fixes today and not tomorrow.
+`test_ingredient_models.gd` now refuses a raw solid with no tint, and
+enumerates the raws from the simulation's own `hopper_items`
+(`World::raw_items`, deliberately unfiltered by the unlock gates) rather
+than from a second hand-written list.
+
+**The fluid gallery was policing a list, not the table (#108).** Its
+saturation and distance checks walked `FLUID_GALLERY_FLUIDS`, a hand-written
+six, so a seventh entry in `FLUID_TINTS` would ship unphotographed and
+unmeasured with `FLUID_GALLERY_OK` and exit 0. Proved by adding a near-grey
+`worcester`: green before the change, red after. The reverse loop closes it.
+
+**The distance floor could not see the axis the renderer uses.**
+`FLUID_TINT_MIN_DISTANCE` was 0.08 on summed `|dRGB|`, calibrated against
+nothing, and summed `|dRGB|` cannot tell a brightness difference from a hue
+difference of the same size — only the first is what this camera reads by.
+Raising it would only have moved where it was blind, so the metric gained a
+luma term (`sum|dRGB| + 2*|dLuma|`) and the floor is now 0.24, a stated 10%
+margin below the measured worst shipped pair.
+
+That pair is reported rather than excused. `bbq_mix` and `liquid_smoke`
+render 9.3/255 of luma apart while one fluid photographed on two tiles of
+its own run spreads 10.7 and 11.8 — the difference between the liquids is
+smaller than the noise of measuring one of them twice, so they separate by
+hue alone. Filed as #113 with the windows. Incidentally #108's own figure
+did not reproduce: it named `bbq` <-> `liquid_smoke` at "dLuma 0.6", which
+measures 19.8-27/255 depending on zoom, and 0.6 looks like a same-fluid
+control.
+
+**And the doc still described a deleted keybind (#89).** UI_UX §5a said a
+hopper's contents are chosen on the ghost with **Q**. That key, the global
+SPACE/V fill keys and the sim's `CycleHopperItem` command all went when the
+configuration panel landed; the ghost now carries `hopper_items[0]` and
+contents are retargeted by clicking the placed building, the fluid tank
+included since #43. §5a has no numbered points and every `§N point M`
+citation in the tree refers to §2a/§2b, so nothing was renumbered.
+
+Deferred out of this pass: #113 (the value collision above), #114 (the
+screenshot harness silently ignores `--closeup=X,Y,S` and renders a
+whole-factory frame with exit 0), #115 (`HOPPER_FILL_TINTS` has no pairwise
+distance guard at all; `tomato` <-> `spice_mix` is 12.7/255), #116 (UI_UX
+has no section for the configuration panel, so #89's replacement text is
+lodged in §5a).
+
 ### 2026-09-20 — The hall's two post-passes, judged against frames for the first time
 
 Issues #32 and #2 closed; #3 measured and left open. All three were the same

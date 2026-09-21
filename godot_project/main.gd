@@ -643,9 +643,40 @@ const DOCK_FULL_PULSE_TICKS := 12
 ## chooses it when they place the hopper (see `_hopper_item_choices`), so a
 ## world can hold several hoppers full of different things — and the model's
 ## voxels are near-white so this multiplies over them.
+##
+## Every key here is its substance's own colour in `assets/voxels/palette.ron`,
+## verbatim and unlifted — `tomato_red` #C22C21 and `sugar_white` #F2F0E8 were
+## the first two, and the BBQ pair follows them. That is the rule
+## `vinegar_amber` states in that file ("one colour, named once, used by every
+## place the substance appears"), and unlike `FLUID_TINTS` there is nothing to
+## lift AGAINST: a fluid body stands inside a shadowed steel bore, while a
+## hopper's heap is an upward face under the key light, so what reads in the
+## market crate reads in the bin.
+##
+## `test_ingredient_models.gd` now REFUSES a raw solid with no entry here,
+## enumerated from the simulation's own `hopper_items`, so the fallback below
+## is unreachable by a shipped ingredient. It was reachable, and silently:
+## `spice_mix` and `molasses` both drew in the fallback beige, which is what
+## issue #80 was (the same class as #67's market icons and #68's fluids).
 const HOPPER_FILL_TINTS := {
 	"tomato": Color(0.76, 0.17, 0.13),
 	"sugar": Color(0.95, 0.94, 0.90),
+	# `spice_paprika` #A8481C. The orange it was already pushed toward for
+	# the market crate is what keeps the bin from reading as another tomato
+	# one: measured on the top face of a full hopper the two are (247, 97,
+	# 77) and (227, 123, 73), apart by hue and by 13.9/255 of luma.
+	"spice_mix": Color(0.659, 0.282, 0.110),
+	# `molasses_black` #2A160E, and kept NEARLY BLACK on purpose after
+	# looking at it — the check issue #80 asked for, since #100 is the
+	# precedent for a dark tint reading as an empty vessel. It does not: an
+	# empty hopper is a PALE grey bin with its ridged floor in plain view,
+	# so the failure mode here is the opposite of a pipe's. Measured on the
+	# same window of the same frame, a full molasses hopper's face is luma
+	# 57.4 against that bin's 106.1, and a nearly-drained one (22% fill,
+	# deepest in the bin and so worst-lit by SSAO) is 57.3 against 111.1 —
+	# ~50/255 either way, where ~26/255 is the anchor for "reads reliably".
+	# Lifting it would have moved it TOWARD the empty bin, not away.
+	"molasses": Color(0.165, 0.086, 0.055),
 }
 const HOPPER_FILL_TINT_FALLBACK := Color(0.72, 0.66, 0.56)
 
