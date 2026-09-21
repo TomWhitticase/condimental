@@ -79,11 +79,11 @@ fn run_until_shipped(world: &mut World, target: u32) -> u32 {
     for _ in 0..500_000u32 {
         common::supply(world);
         world.tick();
-        if the_dock(&world).shipped_total >= target {
+        if the_dock(world).shipped_total >= target {
             break;
         }
     }
-    the_dock(&world).shipped_total
+    the_dock(world).shipped_total
 }
 
 // ---------------------------------------------------------------------

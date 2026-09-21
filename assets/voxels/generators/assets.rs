@@ -886,6 +886,10 @@ pub enum BeltShape {
 /// The straight belt tile at rest — frame 0 of the straight shape. Not an
 /// `ASSETS` entry (the scene asks for `belt_f0`); kept as the reference the
 /// junction tests and the splitter's stubs are measured against.
+#[allow(
+    dead_code,
+    reason = "a reference shape for the junction tests, not an ASSETS entry"
+)]
 pub fn belt(p: &Palette) -> VoxModel {
     belt_shape(p, BeltShape::Straight, 0)
 }
@@ -2475,6 +2479,13 @@ const PIPE_LEG_WINDOW: (i32, i32) = (20, 26);
 /// out of a window rises one voxel per voxel of travel, and the wheel is
 /// too high to be in its way.
 const PIPE_FITTING_X0: i32 = 27;
+/// Kept beside `PIPE_FITTING_X0` because the pair is the measurement, and
+/// reading one without the other is how the sight line above gets
+/// mis-remembered. Nothing draws with it today.
+#[allow(
+    dead_code,
+    reason = "the other half of a measurement, kept for the doc above"
+)]
 const PIPE_FITTING_TOP_X0: i32 = 25;
 /// How much larger in radius every fitting part is than the tube or flange
 /// it may be overlaid on — see `pipe_fitting_machine`'s doc.
@@ -5381,7 +5392,7 @@ mod tests {
                 [TILE_VOXELS, TILE_VOXELS, FLOOR_VOXELS],
                 "{name}: a floor tile is one tile square and FLOOR_VOXELS deep"
             );
-            for (&(x, y, z), _) in &m.voxels {
+            for &(x, y, z) in m.voxels.keys() {
                 assert!(
                     z <= FLOOR_TOP as u32,
                     "{name}: voxel at ({x}, {y}, {z}) stands above the slab's top surface"
@@ -6469,7 +6480,11 @@ mod tests {
 
     /// The families whose mechanism turns, as opposed to travelling: every
     /// rule stated in terms of an angle applies to exactly these.
-    const TURNING_MOTION: [(&str, fn(&Palette, u32) -> VoxModel); 4] = [
+    /// One entry of [`TURNING_MOTION`]: the family's model-name stem and the
+    /// generator that draws one of its motion frames.
+    type MotionFamily = (&'static str, fn(&Palette, u32) -> VoxModel);
+
+    const TURNING_MOTION: [MotionFamily; 4] = [
         ("machine", machine_motion),
         ("machine_crusher", machine_crusher_motion),
         ("machine_mixer", machine_mixer_motion),

@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # rustfmt and clippy, as RATCHETS rather than as all-or-nothing gates.
 #
-# Why a ratchet. Clippy currently has a backlog on this repo (28 warnings,
-# none of them wrong code — issue #29 tracks burning it down). Turning it
-# into `-D warnings` today would paint CI red on every pull request until
-# someone clears it, and a red-by-default check is a check everybody learns
-# to ignore. Turning it off entirely gives agents no signal at all.
+# Why a ratchet. Both backlogs are now burned down — fmt in issue #28,
+# clippy in issue #29 (2026-09-21) — so BOTH baselines are 0 and this is an
+# ordinary all-or-nothing gate wearing a ratchet's clothes: one new warning
+# is one over the baseline, and CI goes red.
 #
-# fmt's backlog was burned down in full (issue #28) — FMT_BASELINE=0 below
-# is now an ordinary all-or-nothing gate in ratchet's clothing; it stays a
-# ratchet only so a future backlog (if one ever accrues) has somewhere to
-# register instead of failing CI outright.
+# It stays a ratchet rather than becoming a plain `-D warnings` on purpose.
+# A backlog can accrue again — a toolchain bump is the usual way, since a
+# new clippy release lints code nobody touched — and when it does, the
+# choice is between a red-by-default CI (a check everybody learns to ignore)
+# and one deliberate, reviewed line raising a baseline with a reason beside
+# it. `-D warnings` offers only the first. It also reports the count on
+# every run and tells you when it can be lowered, which a hard denial cannot
+# do. The rule is unchanged and is the whole point: LOWER freely, never
+# raise without a reason in the commit message.
 #
 # So: the counts below are a high-water mark. New code cannot push them up —
 # a newly added .rs file has to be formatted, and new code cannot introduce a
@@ -27,8 +31,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root" || exit 1
 
 # High-water marks. Lower freely, never raise. See the header.
-FMT_BASELINE=0       # unformatted files — burn-down tracked by issue #28
-CLIPPY_BASELINE=28   # clippy warnings   — burn-down tracked by issue #29
+FMT_BASELINE=0       # unformatted files — burned down in issue #28
+CLIPPY_BASELINE=0    # clippy warnings   — burned down in issue #29
 
 status=0
 

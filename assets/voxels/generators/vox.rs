@@ -467,6 +467,10 @@ impl VoxModel {
     /// this model's volume. How a composition Godot makes from two models
     /// (a pipe shape plus an overlaid fitting) can be tested as one voxel
     /// solid here.
+    #[allow(
+        dead_code,
+        reason = "a test-facing primitive, kept with rotated_cw below"
+    )]
     pub fn merge(&mut self, other: &VoxModel) -> &mut Self {
         for (&(x, y, z), &idx) in &other.voxels {
             self.set(x as i32, y as i32, z as i32, idx);
@@ -488,6 +492,10 @@ impl VoxModel {
     /// the camera-visible corner of every body at every facing, and the
     /// mixer is a body); the poles are gone, the rotation stays for any
     /// test that turns a body.
+    #[allow(
+        dead_code,
+        reason = "the poles are gone; the rotation stays for any test that turns a body"
+    )]
     pub fn rotated_cw(&self, turns: u32) -> VoxModel {
         let mut out = self.clone();
         for _ in 0..(turns % 4) {

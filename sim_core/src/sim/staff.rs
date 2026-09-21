@@ -1298,7 +1298,7 @@ mod tests {
         assert_eq!(pools.headcount("drivers"), 1);
         assert_eq!(pools.headcount("nobody"), 0);
         assert_eq!(pools.next_payday_tick(), 100);
-        assert_eq!(pools.bill_per_period(), 2 * 3 + 0 + 5);
+        assert_eq!(pools.bill_per_period(), (2 * 3) + 5);
     }
 
     #[test]

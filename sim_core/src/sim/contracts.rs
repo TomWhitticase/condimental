@@ -594,7 +594,7 @@ mod tests {
              point of a second sauce is that there is something else to specialise in"
         );
         for (item, sizes) in by_item.iter_mut() {
-            sizes.sort_by(|a, b| a.0.cmp(&b.0));
+            sizes.sort_by_key(|a| a.0);
             for pair in sizes.windows(2) {
                 assert!(
                     pair[1].1 >= pair[0].1,

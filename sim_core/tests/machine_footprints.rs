@@ -184,7 +184,20 @@ fn kinds(entries: &[(&str, i32, i32)]) -> MachineRegistry {
 /// The bottler and the cooking vat have **no belt at all**: their inputs are
 /// entirely fluid, so `belt_length_tiles` is 0 for both, which is the single
 /// clearest signature of the rework in this table.
-const EXPECTED_SHIPPED_LAYOUT: [(&str, &str, (i32, i32), i32, (i32, i32), (i32, i32)); 5] = [
+/// One row of [`EXPECTED_SHIPPED_LAYOUT`]: recipe, machine kind, origin
+/// tile, belt length in tiles, the tile that belt starts at, and the
+/// footprint as (width, height). Named so the table reads as a table
+/// rather than as a six-deep tuple.
+type ExpectedPlacement = (
+    &'static str,
+    &'static str,
+    (i32, i32),
+    i32,
+    (i32, i32),
+    (i32, i32),
+);
+
+const EXPECTED_SHIPPED_LAYOUT: [ExpectedPlacement; 5] = [
     ("tomato_paste", "crusher", (0, 0), 4, (4, 0), (1, 1)),
     ("ketchup_mix", "mixer", (5, 0), 4, (9, 0), (1, 2)),
     ("ketchup", "cooking_vat", (12, 0), 0, (12, 0), (2, 2)),

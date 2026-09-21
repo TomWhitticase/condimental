@@ -3182,10 +3182,15 @@ impl World {
     /// 2. **Belts move**, each by one tick's travel — splitters too, which
     ///    are belt tiles with a choice at the end (see
     ///    [`super::splitter`]), so product crosses one at belt speed.
-    /// 2b. **Staff pools reset** (the staff pools MVP epic): every category
-    ///    is back at its headcount less its heads in arrears (the quality
-    ///    pass: an unpaid head stays hired but does not work), with nothing
-    ///    asked for yet.
+    ///
+    ///    **2b. Staff pools reset** (the staff pools MVP epic): every
+    ///    category is back at its headcount less its heads in arrears (the
+    ///    quality pass: an unpaid head stays hired but does not work), with
+    ///    nothing asked for yet. It reads as a paragraph of step 2 rather
+    ///    than a list item of its own because `2b.` is not a list marker
+    ///    any markdown parser recognises — and renumbering is not the way
+    ///    out: `dock.rs` and the tick body itself cite these steps by
+    ///    number.
     /// 3. **Machines run** — start a craft, or deposit a finished one. In
     ///    `topology.machines` order each machine that would work this tick
     ///    first claims its kind's whole crew from the pools; a refused
@@ -3270,8 +3275,8 @@ impl World {
                 .map(|segment| segment.room_at_start())
         };
         self.room_ahead.clear();
-        for index in 0..belts.len() {
-            let room = room_at_start(self, belt_ahead[index]);
+        for &ahead in belt_ahead.iter().take(belts.len()) {
+            let room = room_at_start(self, ahead);
             self.room_ahead
                 .push(room.unwrap_or(self.item_min_spacing()));
         }
@@ -3494,11 +3499,11 @@ impl World {
         // exit and so its consumption of the finished product.
         let events = self.economy.tick(self.tick_count);
         for event in &events {
-            if let ContractEvent::Paid { id } = event {
-                if let Some(contract) = self.economy.board().get(id) {
-                    for (item, qty) in &contract.mix {
-                        self.production.record_consumed(item, StatKind::Item, *qty);
-                    }
+            if let ContractEvent::Paid { id } = event
+                && let Some(contract) = self.economy.board().get(id)
+            {
+                for (item, qty) in &contract.mix {
+                    self.production.record_consumed(item, StatKind::Item, *qty);
                 }
             }
         }

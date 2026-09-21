@@ -184,6 +184,24 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — Clippy's backlog is gone and the baseline is zero (issue #29)
+
+The lint ratchet has held `CLIPPY_BASELINE=28` since it was introduced; it
+is now 0. The remaining warnings were six sites, none of them wrong code:
+two six-deep tuple types that are now named `type`s with a doc comment
+saying what the columns are, an index loop that only indexed one slice,
+four deliberately kept-but-unused generator items that already explained
+themselves in prose and now say the same thing to the compiler, and the
+tick's step "2b" — which is not a list marker any markdown parser
+recognises, and could not simply be renumbered because `dock.rs` and the
+tick body both cite these steps by number.
+
+`scripts/check-rust-lint.sh` stays a **ratchet** rather than becoming
+`-D warnings`, now with both baselines at zero. A toolchain bump can lint
+code nobody touched, and the right answer then is one reviewed line raising
+a baseline with a reason beside it — not a red-by-default CI that everybody
+learns to ignore. The rule is unchanged: lower freely, never raise without
+saying why.
 ### 2026-09-21 — The dock says it is short of a clerk before anything is refused (issue #87)
 
 The dock's hover drew its staffing line from `DockSnapshot::understaffed`,
