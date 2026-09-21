@@ -48,6 +48,14 @@ below is history and should only ever be appended to.)*
   `data/unlocks.ron` holds its three ingredients and four contracts back until
   the tenth lifetime delivery, so a new game's market and board show only what
   a one-sauce factory can use. See the log entries below.
+- **Raw stock has a ceiling (2026-09-21).** `data/storage.ron` caps every
+  ingredient at `base_cap` 20 plus 50 per **bay**, and a `warehouse_rack`
+  (1×2, six bays, 75) is the only thing that supplies bays. `BuyIngredient`
+  clamps silently and charges for what it credited; the reason is read off
+  `IngredientSnapshot::capacity`. Bays are derived from the ledger, so free
+  bays are a shared pool and a bay frees itself when its stock is used. A rack
+  is pure storage — it never touches a belt. Any fixture that wants more than
+  20 of something has to build the room first. See the log entry below.
 - **The lighting post-passes mean something now (2026-09-20).** Glow is
   `1.0 / 0.0 / 1.2 / SCREEN` and SSAO is `0.45 / 16.0 / 1.6`
   (`factory_environment.gd`). Both sets of old numbers were chosen where they
@@ -222,6 +230,81 @@ goes to the recipe the machine is already holding
 samples each machine's live recipe *during* the run and asserts the two lines
 draw different colours, which is what catches a regression here at all — the
 end-of-run state had already fallen back.
+
+### 2026-09-21 — The game opens in first person
+
+The view a session starts in is first person now, not isometric: you arrive
+standing in the hall the sky shader draws, among machines built at a human
+scale, and TAB takes you up to the isometric view to lay a line out. One
+constant says so (`main.gd`'s `DEFAULT_VIEW_MODE`), applied by `_ready` after
+the HUD exists — the crosshair, the legend and the mouse capture all come
+with the mode. Neither camera changed, and the isometric one is still the
+fixed angle UI_UX.md §1 specifies.
+
+`scripts/screenshot-scene.sh` deliberately does not follow the new default:
+its framing flags (`--closeup`, `--zoom`, `--pan`, every `--hover*`) all
+steer the isometric camera, so a review shot stays isometric unless
+`--first-person` asks otherwise. Reasoning in `docs/DECISIONS.md`.
+
+### 2026-09-21 — The perf gate stops failing on the neighbours (issue #146)
+
+`test_perf.gd` is the only test in the suite that asserts a wall clock, and
+this machine runs up to six worktrees' headless Godot at once. The same 120
+frames measured 350.7 ms alone and 3733.1 ms beside a neighbour's verify,
+against a 3000 ms ceiling — a red gate on a branch that had touched only
+panel placement, reading exactly like a regression.
+
+Both ceilings are now multiplied by a load factor the test measures itself:
+a fixed 400k-iteration script loop, timed once before the measurements and
+once after, worse of the two, `measured / 12 ms`, clamped to [1.0, 6.0]. A
+quiet box therefore gets exactly the old constants (measured after the
+change: 1.04x, ceilings 1567/3135 ms, frames 275.1 ms). The median of nine
+samples, not the minimum — under sixteen spinning processes the fastest
+sample was 11.9 ms, indistinguishable from idle, while the median was
+38.3 ms. Raw milliseconds are still printed unscaled, because the ticket-4
+before/after numbers quoted elsewhere in this log come off those lines.
+Reasoning in [DECISIONS.md](DECISIONS.md) under today's date.
+
+### 2026-09-21 — Raw stock has a ceiling, and a rack is what raises it (W1)
+
+The simulation half of the warehouse stock racks feature. Until now
+`BuyIngredient` credited `OwnedIngredients` with no limit but money, and money
+is the thing a running factory produces — so GAMEPLAY.md §5's recurring
+ingredient cost was one early purchase and then nothing. A holding is now
+capped at `data/storage.ron`'s `base_cap` (20, free and unconditional) plus
+`slot_stack` (50) for every **bay** the placed warehouse supplies, and
+`warehouse_rack` — W2's model, 1×2, six bays, 75 in `shop.ron` — is the thing
+that supplies them. New module `sim_core/src/sim/storage.rs` owns the
+arithmetic and the loader; `World` gained `storage_bays`, `stock_cap_for`,
+`stock_room_for` and `storage_snapshot`, `IngredientSnapshot` gained
+`capacity`, and `SavedBody::WarehouseRack` carries no fields, so
+`schema_version` stays 2. `godot_project/main.gd` registers the model and
+nothing else: pallets, tints and the guidance plate are W3, the market plate
+is W4.
+
+Three rulings are in [DECISIONS.md](DECISIONS.md) under today's date. **R6
+wins** — a rack is pure storage, with no output item, no picker, no topology
+links and no tick-step-5 arm, so the hopper stays the only thing that meters
+raw onto a belt; the sprint plan asked for all three readings of this and they
+were three different buildings. **Bays are derived from the ledger, not
+assigned and persisted** — nothing to migrate, nothing to drift, and a bay
+frees itself the instant its stock is used, at the price that free bays are a
+shared pool. **Six bays at 50, priced 75** — six is the model's own geometry,
+and the price moves with it.
+
+`sim_core/tests/storage.rs` is ten tests over the whole system, including the
+headline invariant (a holding is never over its own ceiling, however the
+warehouse changes), a removal that is refused because it would strand stock —
+the first removal in the game that can fail — a save holding more than its
+racks can, and the R6 pin. The cap's real cost was to the fixtures: every one
+that ran a line bought a deep larder up front and none of them could any more.
+Both layers now build the warehouse through the real commands, one rack at a
+time, re-asking the sim for the room rather than restating its arithmetic
+(`common::make_room`, `Layouts.make_room`), and the long runs top up mid-run
+instead of stocking deep (`restock`) — 3 000 of one ingredient is sixty bays,
+and `--full-dock` would have photographed a wall of racks instead of a dock.
+`*_PLACEMENTS` counts now exclude the warehouse (`Layouts.line_placements`):
+the layout under test is the line.
 
 ### 2026-09-21 — The warehouse rack has its art (W2)
 

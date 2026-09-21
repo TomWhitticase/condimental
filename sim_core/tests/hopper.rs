@@ -74,20 +74,12 @@ fn tomato_hopper(world: &World) -> HopperSnapshot {
     hopper_for(world, "tomato")
 }
 
-/// Buys `quantity` of `item` and asserts the purchase actually landed —
-/// otherwise a silently-unaffordable buy shows up much later as an
-/// unexplained empty hopper.
+/// Buys `quantity` of `item`, building the warehouse room for it first and
+/// asserting the purchase landed — an unaffordable or unhousable buy is a
+/// silent no-op, which would otherwise surface much later as an unexplained
+/// empty bin. `common::buy` is the one implementation of that.
 fn buy(world: &mut World, item: &str, quantity: u32) {
-    let before = world.owned_ingredient(item);
-    world.issue_command(PlayerCommand::BuyIngredient {
-        item: item.to_string(),
-        quantity,
-    });
-    assert_eq!(
-        world.owned_ingredient(item),
-        before + quantity,
-        "the fixture must be able to afford {quantity} x {item}"
-    );
+    common::buy(world, item, quantity);
 }
 
 /// How many items are on every belt in the world right now. Since the "Real

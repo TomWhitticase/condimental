@@ -18,6 +18,48 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-21 **A session opens in FIRST PERSON; isometric is a TAB away.**
+  `main.gd`'s `DEFAULT_VIEW_MODE` is the one place that says so, applied by
+  `_ready` through `_set_view_mode` *after* `_build_ui` (the crosshair and
+  the legend must exist first). The isometric camera is unchanged and still
+  fixed — UI_UX.md §1 governs the angle, not which view the game opens in —
+  and nothing else in the scene branches on which mode came first.
+  `test_screenshot.gd` deliberately does NOT follow this: a review shot is
+  isometric unless `--first-person`, because `--closeup`, `--zoom`, `--pan`
+  and every `--hover*` are isometric ideas and would otherwise be aimed at a
+  camera they cannot steer. Full record in `docs/DECISIONS.md`.
+- 2026-09-21 **The one wall-clock assertion in the gate is scaled by how
+  loaded the machine is, measured in the same process.** (Issue #146.)
+  `test_perf.gd` is the only test that asserts a time rather than an outcome,
+  and several worktrees run headless Godot on this machine at once: the same
+  120 frames measured 350.7 ms alone and 3733.1 ms beside a neighbour's
+  verify, failing a 3000 ms ceiling with no code between the two. A red gate
+  that reads as a regression is worse than no gate, because the next session
+  goes looking for the regression in its own diff. Raising the ceiling is the
+  wrong fix — it is generous precisely so it catches an order-of-magnitude
+  regression, and a ceiling loose enough to survive four concurrent runs
+  would let one through. Instead the test times a fixed pure-script loop
+  before and after the measurements it brackets, takes the worse reading, and
+  multiplies both ceilings by it, clamped to 1.0 below (a quiet box gets
+  exactly the constants) and 6.0 above (past that the machine is too busy for
+  the number to mean anything). The median of the samples, never the minimum:
+  a starved process still gets a full slice now and then, so its fastest
+  sample looks idle however loaded the box is.
+
+- 2026-09-21 **Raw stock has a ceiling, a rack is pure storage, and its bays
+  are derived.** (W1.) `data/storage.ron` caps a holding at `base_cap` (20,
+  free and unconditional, so a new game works and nothing can be crowded out)
+  plus `slot_stack` (50) per **bay**; a `warehouse_rack` supplies six, the
+  model's own geometry, and costs 75. **R6 wins:** a rack has no output item,
+  no picker, no topology links and no tick-step-5 arm — the hopper stays the
+  only thing that meters raw onto a belt. Bays are computed from the ledger
+  (`ceil(max(0, count − base_cap) / slot_stack)`), never stored: no allocation
+  state to persist or drift, and a bay frees itself when its stock is used.
+  Free bays are therefore a **shared pool**. `BuyIngredient` clamps silently
+  and charges only for what it credited; the reason is derived by presentation
+  from `IngredientSnapshot::capacity`, as in #143. Fixtures build the
+  warehouse they need through real commands and top it up mid-run rather than
+  stocking deep, and `*_PLACEMENTS` counts exclude it.
 - 2026-09-21 **A voxel asset is judged against the factory floor, not
   against vengi's black.** The two backdrops give opposite verdicts, and the
   floor is the one the player has. Repaint the pure-black pad with

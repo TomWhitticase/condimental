@@ -744,9 +744,12 @@ impl SimBridge {
     /// ```json
     /// {"money": 2913.0,
     ///  "entries": [
-    ///    {"id": "tomato", "price": 1.0, "owned": 40, "affordable": true},
-    ///    {"id": "sugar", "price": 3.0, "owned": 0, "affordable": true},
-    ///    {"id": "vinegar", "price": 2.0, "owned": 12, "affordable": true}
+    ///    {"id": "tomato", "price": 1.0, "owned": 40, "capacity": 320,
+    ///     "affordable": true},
+    ///    {"id": "sugar", "price": 3.0, "owned": 0, "capacity": 20,
+    ///     "affordable": true},
+    ///    {"id": "vinegar", "price": 2.0, "owned": 12, "capacity": 20,
+    ///     "affordable": true}
     ///  ]}
     /// ```
     ///
@@ -776,6 +779,48 @@ impl SimBridge {
     fn ingredients_snapshot_json(&self) -> GString {
         let snapshot = self.world.ingredients_snapshot();
         let json = serde_json::to_string(&snapshot).expect("IngredientsSnapshot must serialize");
+        GString::from(json.as_str())
+    }
+
+    /// The warehouse: how much raw stock may be held, and what is standing
+    /// in the racks right now, as one JSON object (`sim::StorageSnapshot`).
+    ///
+    /// ```json
+    /// {"base_cap": 20, "slot_stack": 50, "total_bays": 12, "used_bays": 7,
+    ///  "racks": [
+    ///    {"tile": [0, -8], "kind": "warehouse_rack", "direction": "east",
+    ///     "footprint": {"width_tiles": 1, "height_tiles": 2}, "bays": 6,
+    ///     "contents": [{"bay": 0, "item": "tomato", "units": 50,
+    ///                   "capacity": 50},
+    ///                  {"bay": 1, "item": "tomato", "units": 30,
+    ///                   "capacity": 50}]}
+    ///  ]}
+    /// ```
+    ///
+    /// **Polled, not pushed.** Like the fluid and staff reads, a change to
+    /// what is in a bay dirties no chunk: stock moves whenever a bin is
+    /// filled or a contract is signed, and marking the warehouse's tiles
+    /// dirty for that would make every purchase a structural update. The
+    /// warehouse panel reads this while it is open, and the renderer reads
+    /// it after a `place`/`remove`.
+    ///
+    /// `contents` holds one entry per **occupied** bay, in bay order, so an
+    /// empty rack reports `[]` rather than six nulls. A bay's `units` is at
+    /// most `capacity` and the last bay an item occupies is usually part
+    /// full. Which bay holds what is **derived** from the ledger rather
+    /// than stored — ingredients fill the bays in sorted id order, racks in
+    /// tile order — so it can change under a renderer that caches it;
+    /// re-read after any buy or fill.
+    ///
+    /// `base_cap` is the free, unconditional ceiling every raw ingredient
+    /// has with no warehouse at all, and `total_bays - used_bays` is the
+    /// shared pool of room above it. Per-ingredient capacity is on
+    /// `ingredients_snapshot_json`'s entries, because it moves with what
+    /// else is held.
+    #[func]
+    fn storage_snapshot_json(&self) -> GString {
+        let snapshot = self.world.storage_snapshot();
+        let json = serde_json::to_string(&snapshot).expect("StorageSnapshot must serialize");
         GString::from(json.as_str())
     }
 

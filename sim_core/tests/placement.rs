@@ -27,6 +27,8 @@
 //! Everything below runs with no Godot process involved (ARCHITECTURE.md
 //! §7).
 
+mod common;
+
 use sim_core::sim::machines::MachineRegistry;
 use sim_core::sim::types::Money;
 use sim_core::sim::{
@@ -76,9 +78,17 @@ fn funded(recipes: RecipeRegistry) -> World {
         Money::from_num(20_000),
     );
     for item in ["tomato", "sugar", "vinegar"] {
+        // As full a larder as a world with no warehouse in it can have.
+        // Since W1 a holding is capped at `data/storage.ron`'s `base_cap`
+        // plus the bays the placed racks supply, and this fixture places
+        // nothing — the tests in this file count placements, so a rack
+        // bought behind their back would change what they measure. A test
+        // that needs a whole tank's or hopper's worth asks for the room
+        // itself, with `common::make_room`.
+        let quantity = world.stock_room_for(item);
         world.issue_command(PlayerCommand::BuyIngredient {
             item: item.to_string(),
-            quantity: 1_000,
+            quantity,
         });
     }
     world
@@ -872,6 +882,10 @@ fn two_disconnected_pipe_runs_are_two_networks() {
     // id — the other is plumbed to pipe nothing taps, so there is nothing to
     // buy for it and the fill is a silent no-op (GAMEPLAY.md §5: a fill
     // draws from bought stock, and stock is per ingredient).
+    // A whole tank's worth is over `base_cap`, so this test buys the room
+    // for it — `funded` deliberately leaves the world without a warehouse.
+    let short_by = 60 - world.owned_ingredient("vinegar");
+    common::buy(&mut world, "vinegar", short_by);
     let vinegar_before = world.owned_ingredient("vinegar");
     world.issue_command(PlayerCommand::FillFluidTank {
         amount: 60,

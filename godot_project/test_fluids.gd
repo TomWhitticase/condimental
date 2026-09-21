@@ -200,7 +200,10 @@ func _run_checks() -> void:
 	if not tap_text.contains("connects east") or not tap_text.contains("feeds Mixer"):
 		_fail("the tapped tile's tooltip should name its pipe side and the mixer, got: %s" % tap_text)
 		return
-	# ...and through the same screen-to-tile math, in the isometric view.
+	# ...and through the same screen-to-tile math, in the isometric view —
+	# which the scene has to be TABbed into, since it opens in first person
+	# (`DEFAULT_VIEW_MODE`) and this check is about the isometric cursor.
+	main._set_view_mode(main.ViewMode.ISOMETRIC)
 	var screen_pos: Vector2 = main._camera.unproject_position(
 		main._tile_origin(probe.x, probe.y, main.BELT_SURFACE_Y)
 	)

@@ -27,6 +27,8 @@
 
 use std::collections::BTreeMap;
 
+mod common;
+
 use sim_core::sim::{
     FLUID_TANK_CAPACITY, HOPPER_CAPACITY, PlayerCommand, RecipeRegistry, World, bbq_branch,
     reference_chain,
@@ -54,6 +56,12 @@ const STOCK: [(&str, u32); 6] = [
 /// down. (`tests/common/mod.rs` keeps its own for the same reason; this file
 /// buys a different basket, so it needs its own number.)
 const STOCK_COST: u32 = 12_600;
+/// What the warehouse under that basket costs: 21 racks at `data/shop.ron`'s
+/// `warehouse_rack` price. `common::buy` puts down as many as the order in
+/// front of it needs (`data/storage.ron` caps a holding at `base_cap` plus
+/// the bays that exist), and this basket comes to 124 bays. A literal for
+/// the same reason [`STOCK_COST`] is one.
+const RACK_COST: u32 = 1_575;
 /// Enough to stock up, sign every BBQ contract and pay the enlarged crew for
 /// the whole run, with room to spare. Unlike `tests/common/mod.rs` this one
 /// is deliberately *not* sized to land on zero: nothing here measures
@@ -72,20 +80,13 @@ fn branch() -> World {
 fn stock_up(world: &mut World) {
     let before = world.money();
     for (item, quantity) in STOCK {
-        world.issue_command(PlayerCommand::BuyIngredient {
-            item: item.to_string(),
-            quantity,
-        });
-        assert_eq!(
-            world.owned_ingredient(item),
-            quantity,
-            "the fixture must be able to afford {quantity} x {item}"
-        );
+        common::buy(world, item, quantity);
     }
     assert_eq!(
         before - world.money(),
-        sim_core::sim::types::Money::from_num(STOCK_COST),
-        "STOCK_COST must match what data/ingredients.ron actually charges for {STOCK:?}"
+        sim_core::sim::types::Money::from_num(STOCK_COST + RACK_COST),
+        "STOCK_COST + RACK_COST must match what data/ingredients.ron and data/shop.ron \
+         actually charge for {STOCK:?} and the warehouse to hold it"
     );
 }
 
