@@ -201,6 +201,7 @@ run_godot_script test_hover_targets.gd HOVER_TARGETS_OK "what each --hover* scre
 run_godot_script test_unlocks.gd UNLOCKS_OK "the first progression gate: a new game's market, larder and board list only what data/unlocks.ron has released, crossing the threshold grows all three in place and is announced once by name, a save already past it is not re-announced — the BBQ epic, ticket 3"
 run_godot_script test_ingredient_models.gd INGREDIENT_MODELS_OK "every id in data/ingredients.ron has a voxel model of its own: none reaches _market_asset_for's pipe fallback, fluids are registered in FLUID_MODELS and solids in ITEM_MODELS, and each named asset has a real icon rather than the placeholder — issue #67"
 run_godot_script test_fluid_gallery.gd FLUID_GALLERY_OK "the fluid gallery stands all six fluids at once: every placement accepted, every run named by topology alone and above main.gd's visible-pressure floor, every tint present, distinct and not near-grey — issues #72 and #100"
+run_godot_script test_warehouse_rack.gd WAREHOUSE_RACK_OK "the warehouse stock rack reads out its own stock: six shelves filling bottom level first inside the imported frame, pallets appearing one bay at a time in step with storage_snapshot_json and their loads scaled to the fill, a tint per raw ingredient clear of the measured dead band, hover resolving from either tile of the 1x2, and W1's removal refusal spoken before the click — the warehouse sprint, W3"
 
 echo
 echo "$godot_scripts_run headless Godot scripts run."
@@ -215,6 +216,7 @@ echo "      + pipe shapes, fittings and fluid bodies from the wire's links,"
 echo "      + belt shapes from links, animation frames, corner arcs and belt hover,"
 echo "      + the payout celebration a real contract payout fires, and its decay to nothing,"
 echo "      + the second sauce running as a branch off the first, and shipping,"
+echo "      + the warehouse stock rack drawing the raw stock it is holding, bay by bay,"
 echo "      all verified"
 echo "      headlessly (sim_core tests"
 echo "      + gdext boundary + interaction + 3D scene structure + pan/zoom + contract panel"

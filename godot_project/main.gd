@@ -451,9 +451,10 @@ const MACHINE_MODELS := {
 	# `chain_layout_json` stage — nothing in `data/recipes.ron` names it — but
 	# it has a footprint in `data/machines.ron` and a price in
 	# `data/shop.ron`, so it is placed, hovered and previewed through the
-	# same paths as every other building and needs its model here. Its
-	# pallets and their tints are W3; this entry is the bare body, so that a
-	# rack the player buys is visible the moment it is placed.
+	# same paths as every other building and needs its model here. This entry
+	# is the bare FRAME; the pallets standing on its shelves and the tints on
+	# them are separate nodes built per bay — see WAREHOUSE_RACK_ASSET's
+	# section and `_build_rack_bays`.
 	"warehouse_rack": "warehouse_rack",
 }
 const MACHINE_MODEL_FALLBACK := "machine"
@@ -586,6 +587,100 @@ const HOPPER_FILL_FLOOR_Y := FLOOR_Y + HOPPER_FILL_FLOOR_VOXELS * VOXEL_UNIT
 ## Below this fill fraction the product body is hidden outright rather than
 ## drawn as a sub-voxel sliver — the same call FLUID_MIN_VISIBLE_PRESSURE makes.
 const HOPPER_MIN_VISIBLE_FILL := 0.02
+
+## --- The warehouse stock rack (the warehouse sprint) -----------------------
+##
+## W2 cut the art, W1 made the bays real in simulation, and this is the wire
+## between them: where a bound bay's pallet stands in the rack's own model and
+## how tall a full one loads. Every number below mirrors a constant in
+## assets/voxels/generators/assets.rs — RACK_BAY_Y, RACK_BAY_X, RACK_LEVEL_Z,
+## RACK_PALLET_SIZE and RACK_LOAD_MAX_H, which carry `#[allow(dead_code)]`
+## precisely because this file is their consumer. Change one, change both.
+##
+## The rack is the fourth buffer building and is drawn the way the other three
+## are — a body plus one-voxel-tall bodies scaled to a live fraction (UI_UX.md
+## §2b point 5) — with one difference that is the whole point of the building:
+## it has SIX of them rather than one, and which of the six are drawn at all is
+## the readout. An empty bay shows bare shelf, so "how full is my warehouse" is
+## answered by counting pallets from across the floor, before any tint or any
+## number is read.
+const WAREHOUSE_RACK_ASSET := "warehouse_rack"
+const RACK_PALLET_ASSET := "warehouse_pallet"
+const RACK_LOAD_ASSET := "warehouse_pallet_load"
+
+## Where each bay's pallet stands, in the rack model's own voxel coordinates
+## (x, y) measured from its footprint's centre — the same convention (and the
+## same world mapping) DOCK_STOCK_OFFSETS uses.
+##
+## Two entries because the model has two bays across its 1x2 footprint, at the
+## centres of the generator's RACK_BAY_Y spans (4..29 and 34..59, so 17 and 47
+## against a 64-deep model's centre of 32) and on its RACK_BAY_X midline, which
+## is the model's own (6..25 against a 32-wide model's 16).
+const RACK_BAY_OFFSETS := [Vector2(0.0, -15.0), Vector2(0.0, 15.0)]
+
+## The z a pallet's base stands on, per level: the plinth, then a deck over
+## each pair of load beams. `assets.rs`'s RACK_LEVEL_Z.
+const RACK_LEVEL_VOXELS := [2, 17, 32]
+
+## How many slots the model physically has, and how a `RackBay`'s `bay` index
+## maps onto them.
+##
+## **Bottom level first, near bay before far.** The simulation assigns bay
+## indices and says nothing about where they are (`sim::world::RackBay`: "it is
+## assigned, not stored"), so the arrangement is this file's to choose and it
+## chooses the one a warehouse actually loads in — from the floor up, so a
+## part-used rack keeps its stock at the height the camera reads best and an
+## empty top level reads as headroom rather than as a gap.
+##
+## RACK_SLOTS is the MODEL's capacity, not the kind's: `data/storage.ron` says
+## how many bays a `warehouse_rack` supplies and today the two agree at six. A
+## rack kind whose data gave it more bays than the model has shelves would draw
+## the first six and drop the rest — the documented fallback, and one a test
+## pins rather than leaves to be discovered in a frame.
+const RACK_SLOTS := 6
+const RACK_PALLET_HEIGHT_VOXELS := 2
+const RACK_LOAD_HEIGHT_VOXELS := 8
+## Below this fraction of a bay the load slab is hidden rather than drawn as a
+## sub-voxel sliver — the same call HOPPER_MIN_VISIBLE_FILL makes. A bay with
+## stock in it always shows its PALLET, so a nearly-empty bay still reads as
+## "bound, and nearly empty" rather than as free shelf.
+const RACK_MIN_VISIBLE_FILL := 0.02
+
+## Presentation-only tint per raw-ingredient id for the goods on a pallet —
+## HOPPER_FILL_TINTS' twin, and deliberately not the same table.
+##
+## **A rack's goods are seen against the FLOOR; a hopper's are seen down the
+## hopper's own dark throat.** That is the whole reason there are two tables:
+## `assets.rs`'s RACK_TINT_DEAD_BAND measured all six shipped tints on the real
+## model at play zoom against the factory floor's own #9C9C90, and two of them
+## — `vinegar` at luma 115.8 and `liquid_smoke` at 98.8 — landed close enough
+## to the floor that a full bay could not be told from an empty one (9.1 and
+## 23.1 of separation at the worst slot, against an anchor of 26). Four of the
+## six may be reused verbatim and those two may not, so those two are each
+## their own colour taken down to 0.68/0.74 value: still amber, still smoke,
+## and 39.8 and 44.6 clear.
+##
+## **Do not "fix" this by editing HOPPER_FILL_TINTS to match** — those two were
+## measured in the hopper, where the backdrop is dark and lifting is what
+## works (issues #80, #131). The two tables disagree because the two backdrops
+## do.
+##
+## Identity is not this table's job either: the tints that clear the band
+## cluster between 73 and 89 luma, so a bay's fill LEVEL is what the colour
+## carries and which ingredient it is comes from the hover readout. The
+## fallback below is unreachable for a shipped raw — `test_warehouse_rack.gd`
+## enumerates the sim's own raw ids and refuses one with no entry, the rule
+## `test_ingredient_models.gd` already applies to the model tables.
+const RACK_LOAD_TINTS := {
+	"tomato": Color(0.76, 0.17, 0.13),
+	"sugar": Color(0.95, 0.94, 0.90),
+	"spice_mix": Color(0.659, 0.282, 0.110),
+	"molasses": Color(0.165, 0.086, 0.055),
+	# `vinegar_amber` and `smoke_slate` at 0.68 and 0.74 value — see above.
+	"vinegar": Color(0.461, 0.286, 0.093),
+	"liquid_smoke": Color(0.325, 0.290, 0.139),
+}
+const RACK_LOAD_TINT_FALLBACK := Color(0.72, 0.66, 0.56)
 
 ## --- The conveyor splitter (Epic B) ---------------------------------------
 ##
@@ -944,6 +1039,18 @@ var _last_dock_stock: Array = [] # economy_snapshot_json's delivery_stock, share
 var _delivery_capacity := 0 # how many of ONE item the pool holds, 0 until first polled
 var _delivery_full := false # is any item at that ceiling — the dock reads FULL
 
+# --- The warehouse: racks, and the one storage picture they share ----------
+# A rack is the fourth buffer kind (W3 of the warehouse sprint) and is keyed
+# the same way as the three above, but it carries a fifth field the others do
+# not need: `_storage_state`, the whole-warehouse half of
+# `storage_snapshot_json`. Bays are a SHARED pool — how many this rack's stock
+# stands in depends on what every other rack holds — so the questions "is the
+# warehouse full" and "would picking this one up strand stock" are answered
+# from the one object rather than from any rack's own entry.
+var _rack_states: Dictionary = {} # origin key -> rack snapshot (its own bays and contents)
+var _rack_nodes: Dictionary = {} # origin key -> {"bays": Array of {"pallet", "load", "tint"}}
+var _storage_state: Dictionary = {} # base_cap / slot_stack / total_bays / used_bays
+
 # --- Build mode: the ghost, and what the next click will do ----------------
 # `_build_kind` is "" when the player is not placing anything; `_remove_mode`
 # is the destructive twin. The two are mutually exclusive by construction
@@ -956,7 +1063,7 @@ var _ghost_root: Node3D
 var _ghost_asset := ""
 var _ghost_tile := Vector2i.ZERO
 var _ghost_valid := false
-var _ghost_reason := "" # "", "blocked", "none_owned", "nothing_here"
+var _ghost_reason := "" # "", "blocked", "none_owned", "nothing_here", "rack_needed"
 var _owned_counts: Dictionary = {} # kind -> owned count, repolled while building
 var _shop_prices: Dictionary = {} # kind -> price, from the same poll
 var _shop_affordable: Dictionary = {} # kind -> can the balance cover one, same poll
@@ -2707,6 +2814,12 @@ const PIPE_KIND := "pipe"
 const HOPPER_KIND := "hopper"
 const FLUID_TANK_KIND := "fluid_tank"
 const DOCK_KIND := "dock"
+## The fourth, and the odd one out: a buffer that holds nothing the LINE ever
+## touches. A rack is pure storage — no recipe, no crew, no belt in front of
+## it, nothing to configure (sprint requirement R6) — so it appears in
+## `_build_placement`, in hover and in the ghost's removal check, and in no
+## other dispatch in this file. Its Rust twin is `sim::WAREHOUSE_RACK_KIND`.
+const WAREHOUSE_RACK_KIND := "warehouse_rack"
 ## Epic B's splitter. A `data/machines.ron` kind like the three above, but
 ## belt-LIKE rather than a buffer: it carries product at belt speed and hands
 ## it on, so `_is_building_tile` deliberately groups it with the conveyor.
@@ -2774,6 +2887,7 @@ func _rebuild_world() -> void:
 	_hopper_nodes.clear()
 	_fluid_tank_nodes.clear()
 	_dock_nodes.clear()
+	_rack_nodes.clear()
 	_pipe_fluid_nodes.clear()
 	_pipe_fault_nodes.clear()
 	# The instanced tiles and item pools are children of "World" and went
@@ -2929,6 +3043,12 @@ func _build_placement(placement: Dictionary) -> void:
 				"lamp": lamp,
 				"stocked": true,
 			}
+		WAREHOUSE_RACK_KIND:
+			# No lamp: the rack's model has no emissive voxel at all, because a
+			# building that neither works nor stalls has no status to light
+			# (see `warehouse_rack`'s generator doc). What it has instead is six
+			# shelves, and how many of them carry a pallet IS the readout.
+			_rack_nodes[key] = {"bays": _build_rack_bays(origin, size, yaw)}
 		DOCK_KIND:
 			_dock_nodes[key] = {
 				"slots": _build_dock_slots(origin, size, yaw),
@@ -3008,6 +3128,52 @@ func _build_dock_slots(origin: Vector2i, size: Vector2i, yaw: float) -> Array:
 		_world_root.add_child(slot)
 		slots.append(slot)
 	return slots
+
+
+## The pallet and the goods slab for every shelf of one rack, created hidden —
+## `_refresh_racks` reveals the ones the simulation says are bound, and scales
+## and tints their loads.
+##
+## Built for the MODEL's shelves rather than for the snapshot's bays, and all
+## six at build time rather than on demand, for the reason `_build_dock_slots`
+## pools its cases: which bay holds which ingredient is derived and moves as
+## stock is bought and eaten (`sim::world::RackBay`), so a renderer that
+## created a node per bound bay would be rebuilding nodes on a poll that runs
+## every frame. Six node pairs standing ready cost nothing and never churn.
+##
+## The pair is a pallet plus its load, not one node, because the two do
+## different jobs: the pallet says the bay is BOUND (a shelf either has one or
+## does not — a shape difference, UI_UX.md §7) and the slab on top of it says
+## how full that bay is.
+func _build_rack_bays(origin: Vector2i, size: Vector2i, yaw: float) -> Array:
+	var bays: Array = []
+	for slot in range(RACK_SLOTS):
+		# Bottom level first, near bay before far — see RACK_SLOTS' doc.
+		var level: int = slot / RACK_BAY_OFFSETS.size()
+		var offset: Vector2 = RACK_BAY_OFFSETS[slot % RACK_BAY_OFFSETS.size()]
+		var base: float = FLOOR_Y + float(RACK_LEVEL_VOXELS[level]) * VOXEL_UNIT
+		# The vox importer maps low local Y to high world Z, so a shelf's
+		# model-space Y offset runs the other way in the world — the same
+		# mapping the dock's deck slots use, and rotated with the building so a
+		# turned rack loads its own bays rather than its neighbour's.
+		var local := Vector3(offset.x * VOXEL_UNIT, 0.0, -offset.y * VOXEL_UNIT).rotated(Vector3.UP, yaw)
+		var centre := _footprint_centre(origin, size, base)
+		var pallet := _asset_node(RACK_PALLET_ASSET)
+		pallet.name = "rack_pallet_%s_%d" % [_tile_key(origin), slot]
+		pallet.position = centre + local
+		pallet.rotation.y = yaw
+		pallet.visible = false
+		_world_root.add_child(pallet)
+		var load := _asset_node(RACK_LOAD_ASSET)
+		load.name = "rack_load_%s_%d" % [_tile_key(origin), slot]
+		load.position = _footprint_centre(
+			origin, size, base + RACK_PALLET_HEIGHT_VOXELS * VOXEL_UNIT
+		) + local
+		load.rotation.y = yaw
+		load.visible = false
+		_world_root.add_child(load)
+		bays.append({"pallet": pallet, "load": load, "tint": ""})
+	return bays
 
 
 func _pair_to_tile(pair) -> Vector2i:
@@ -3548,6 +3714,8 @@ func _refresh_buffers(econ: Dictionary = {}) -> void:
 	for snapshot in _read_snapshot_array(sim.dock_snapshots_json()):
 		_dock_states[_tile_key(_pair_to_tile(snapshot.get("tile")))] = snapshot
 
+	_refresh_racks()
+
 	# The economy is parsed by the caller when it already has it (a frame's
 	# poll reads it once for the clipboard, the deck and the board).
 	if econ.is_empty():
@@ -3560,6 +3728,78 @@ func _refresh_buffers(econ: Dictionary = {}) -> void:
 	_delivery_capacity = int(econ.get("delivery_capacity", 0))
 	_delivery_full = bool(econ.get("delivery_full", false))
 	_update_dock_stock(_last_dock_stock, _delivery_full, sim.current_tick())
+
+
+## Re-reads the warehouse and reloads every rack's shelves from it.
+##
+## Polled with the other buffers, and it has to be: stock moves when a HOPPER
+## is filled, which dirties the hopper's tile and not the warehouse's
+## (`StorageSnapshot`'s own doc says so), and it moves again on every market
+## purchase, which dirties nothing at all. A chunk-driven rack would sit full
+## of pallets that were emptied minutes ago.
+##
+## One call for the whole warehouse rather than one per rack, because bays are
+## a shared pool: `used_bays` and `total_bays` are facts about the FLOOR, and
+## which physical bay draws which ingredient is re-derived by the simulation
+## every time a holding changes (`sim::world::RackBay`). So the contents are
+## re-applied from scratch here rather than diffed — every shelf is hidden and
+## the occupied ones are put back, which is the only way a caching renderer
+## stays honest about an assignment that can shuffle under it.
+func _refresh_racks() -> void:
+	_rack_states.clear()
+	_storage_state = {}
+	var parsed = JSON.parse_string(sim.storage_snapshot_json())
+	if not (parsed is Dictionary):
+		return
+	_storage_state = parsed
+	for snapshot in parsed.get("racks", []):
+		if not (snapshot is Dictionary):
+			continue
+		var key := _tile_key(_pair_to_tile(snapshot.get("tile")))
+		_rack_states[key] = snapshot
+		var nodes: Dictionary = _rack_nodes.get(key, {})
+		if nodes.is_empty():
+			continue
+		var bays: Array = nodes.get("bays", [])
+		for bay in bays:
+			bay["pallet"].visible = false
+			bay["load"].visible = false
+		for entry in snapshot.get("contents", []):
+			if not (entry is Dictionary):
+				continue
+			var index := int(entry.get("bay", -1))
+			# The documented fallback for a bay the model has no shelf for: a
+			# rack kind with more bays in `data/storage.ron` than the model was
+			# cut with draws the shelves it has and drops the rest, rather than
+			# hanging pallets in the air above it. See RACK_SLOTS' doc.
+			if index < 0 or index >= bays.size():
+				continue
+			var bay: Dictionary = bays[index]
+			bay["pallet"].visible = true
+			var capacity := float(entry.get("capacity", 0.0))
+			var fill := 0.0
+			if capacity > 0.0:
+				fill = clampf(float(entry.get("units", 0)) / capacity, 0.0, 1.0)
+			_apply_level(bay["load"], fill, RACK_MIN_VISIBLE_FILL, RACK_LOAD_HEIGHT_VOXELS)
+			# Retinted only when this shelf's ingredient actually changes — the
+			# same economy `_refresh_buffers` makes for the hopper, and it
+			# matters more here: this runs every frame over six shelves per
+			# rack, and a warehouse is the one building a player puts down
+			# dozens of.
+			var item := String(entry.get("item", ""))
+			if String(bay.get("tint", "")) != item:
+				bay["tint"] = item
+				_tint_level_body(bay["load"], _rack_load_material(item))
+
+
+## The goods on a pallet: the near-white `warehouse_pallet_load` slab with a
+## per-item tint multiplied over it, exactly as a hopper's product body is
+## tinted — a different table, for the reason RACK_LOAD_TINTS states.
+func _rack_load_material(item_id: String) -> StandardMaterial3D:
+	var base: StandardMaterial3D = _class_materials.get("matte", null)
+	var mat: StandardMaterial3D = base.duplicate() if base != null else _make_material(0.0, 0.95)
+	mat.albedo_color = RACK_LOAD_TINTS.get(item_id, RACK_LOAD_TINT_FALLBACK)
+	return mat
 
 
 ## Parses one of the SimBridge calls that returns an ARRAY of snapshots —
@@ -12264,7 +12504,14 @@ func _confirm_build() -> void:
 		if _placement_at_tile(tile).is_empty():
 			return
 		_issue_world_command({"type": "remove", "tile": [tile.x, tile.y]})
-		_cue(FactoryAudio.REMOVE)
+		# The simulation has the final say here too, since W1: a warehouse rack
+		# whose bays the stock still needs is refused, silently like every other
+		# impossible command. What is on the tile afterwards is the answer, and
+		# the sound says it — the same before/after comparison the placement
+		# branch below makes, and the reason a refused click cannot sound like
+		# a successful one (godot_project/CLAUDE.md, "Audio").
+		var gone := _placement_at_tile(tile).is_empty()
+		_cue(FactoryAudio.REMOVE if gone else FactoryAudio.REFUSED)
 		return
 	if _build_kind == "" or not _ghost_valid:
 		return
@@ -12524,8 +12771,17 @@ func _update_ghost() -> void:
 			_ghost_valid = false
 			_ghost_reason = "nothing_here"
 		else:
-			_ghost_valid = true
-			_ghost_reason = ""
+			# A warehouse rack whose bays the stock cannot do without will be
+			# refused (W1), and it is the only placed thing in the game that
+			# can be. The ghost says so BEFORE the click, from the same three
+			# wire fields the simulation decides on — see
+			# `_rack_removal_refused`.
+			var refused := String(placement.get("kind", "")) == WAREHOUSE_RACK_KIND \
+				and _rack_removal_refused(int(
+					_rack_states.get(_tile_key(_placement_origin(placement)), {}).get("bays", 0)
+				))
+			_ghost_valid = not refused
+			_ghost_reason = "rack_needed" if refused else ""
 			var origin := _placement_origin(placement)
 			var direction := _placement_direction(placement)
 			var size := _rotated_footprint(_footprint_size(placement.get("footprint")), direction)
@@ -12646,8 +12902,16 @@ func _placement_prompt_text() -> String:
 		if _ghost_reason == "nothing_here":
 			return "✗ REMOVE\nnothing here\nX or ESC: stop removing"
 		var placement := _placement_at_tile(_ghost_tile)
+		var removing := _kind_display_name(String(placement.get("kind", "")))
+		# W1's refusal, said in words rather than left as a click that does
+		# nothing. It names the way OUT as well as the reason: the bays free
+		# themselves the moment the stock standing in them is sold or eaten, so
+		# this is a "not yet", not a "never".
+		if _ghost_reason == "rack_needed":
+			return "✗ REMOVE  %s\nits bays are the only room the stock has\nsell or use some first    X or ESC: stop removing" % \
+				removing
 		return "✔ REMOVE  %s\nclick to pick it up (what it holds is lost)\nX or ESC: stop removing" % \
-			_kind_display_name(String(placement.get("kind", "")))
+			removing
 	if _build_kind == "":
 		return ""
 	var kind_name := _kind_display_name(_build_kind)
@@ -13942,6 +14206,8 @@ func _hover_text_at_tile(tile: Vector2i) -> String:
 			return _fluid_tank_hover_text(key, direction)
 		DOCK_KIND:
 			return _dock_hover_text(key, direction)
+		WAREHOUSE_RACK_KIND:
+			return _rack_hover_text(key, direction)
 	return _machine_hover_text(key, kind, direction)
 
 
@@ -13988,6 +14254,22 @@ func _hover_panel_state(tile: Vector2i) -> Dictionary:
 			if tank_capacity > 0.0:
 				state["meter"] = {
 					"fraction": float(tank.get("quantity", 0.0)) / tank_capacity,
+					"color": METER_FILL_LEVEL,
+				}
+			return state
+		WAREHOUSE_RACK_KIND:
+			# BAYS used of bays supplied, not units of units: a bay is the
+			# thing this building sells and the thing the player runs out of,
+			# and the ceiling is its own `bays` — a genuine one, which is what
+			# the section header on `_build_meter` requires. Units would need a
+			# denominator this building does not have, since what one bay holds
+			# depends on the ingredient standing in it.
+			var rack: Dictionary = _rack_states.get(key, {})
+			var bays := float(rack.get("bays", 0.0))
+			if bays > 0.0:
+				var contents: Array = rack.get("contents", [])
+				state["meter"] = {
+					"fraction": float(contents.size()) / bays,
 					"color": METER_FILL_LEVEL,
 				}
 			return state
@@ -14466,6 +14748,78 @@ func _dock_hover_text(origin_key: String, direction: String) -> String:
 		text += "\n⚠ FULL  ·  %d of one item is all the dock holds\nthe belt backs up until a contract ships some" % \
 			_delivery_capacity
 	return text
+
+
+## What one warehouse rack's tooltip says. Both tiles of its 1x2 footprint
+## reach it — `_placement_at_tile` resolves a footprint, not an origin, which
+## is the same thing that makes hovering the far corner of the 2x2 vat work.
+##
+## Three facts, in the order a player needs them. **What is on this rack**,
+## because that is what they pointed at. **What the whole warehouse is doing**,
+## because bays are a shared pool and a rack standing empty beside a full one
+## is not a fault — the empty one's bays are holding the neighbour's overflow.
+## And, when it applies, **that this one cannot come up**, which is the single
+## state W1 introduced that a player can otherwise only discover by clicking
+## and watching nothing happen.
+func _rack_hover_text(origin_key: String, direction: String) -> String:
+	var snapshot: Dictionary = _rack_states.get(origin_key, {})
+	if snapshot.is_empty():
+		return "%s\nfacing %s" % [_kind_display_name(WAREHOUSE_RACK_KIND), direction]
+	var bays := int(snapshot.get("bays", 0))
+	var contents: Array = snapshot.get("contents", [])
+	var text := "%s  ·  facing %s\n%d of %d bays in use\n%s\nwarehouse: %d of %d bays  ·  %d free per item" % [
+		_kind_display_name(WAREHOUSE_RACK_KIND),
+		direction,
+		contents.size(),
+		bays,
+		_rack_contents_text(contents),
+		int(_storage_state.get("used_bays", 0)),
+		int(_storage_state.get("total_bays", 0)),
+		int(_storage_state.get("base_cap", 0)),
+	]
+	if _rack_removal_refused(bays):
+		text += "\n⚠ HOLDING  ·  its bays are the only room the stock has\nsell or use some before picking it up"
+	return text
+
+
+## What a rack's bound bays hold, as words — display names and units, in the
+## bay order the snapshot already sorted them into, with the several bays of
+## one ingredient added up. Six bays would otherwise print as six lines saying
+## "Tomato 50" and the one number the player wants (how much tomato is in this
+## rack) would be theirs to add up.
+func _rack_contents_text(contents: Array) -> String:
+	if contents.is_empty():
+		return "empty"
+	var order: Array[String] = []
+	var totals := {}
+	for entry in contents:
+		if not (entry is Dictionary):
+			continue
+		var item := String(entry.get("item", ""))
+		if not totals.has(item):
+			totals[item] = 0
+			order.append(item)
+		totals[item] = int(totals[item]) + int(entry.get("units", 0))
+	var parts: Array[String] = []
+	for item in order:
+		parts.append("%s %d" % [_item_display_name(item), int(totals[item])])
+	return "  ·  ".join(parts)
+
+
+## Whether picking up a rack that supplies `bays` would be refused — the one
+## removal in the game that can fail.
+##
+## **Derived here from the wire, not asked of the simulation.** There is no
+## refusal channel and this does not add one: the sim declines silently and
+## presentation works the reason out from a snapshot field, which is the rule
+## #143 set and which `World::try_remove`'s own comment points at this function
+## to carry out. The arithmetic below is that function's, field for field —
+## the stock has to fit in the bays that would be left.
+func _rack_removal_refused(bays: int) -> bool:
+	if _storage_state.is_empty():
+		return false
+	var remaining := int(_storage_state.get("total_bays", 0)) - bays
+	return int(_storage_state.get("used_bays", 0)) > remaining
 
 
 ## The thin, live-state-reading half (deliberately not unit tested, same
