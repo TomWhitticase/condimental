@@ -125,12 +125,18 @@ const LAYOUT: &[(&str, (i32, i32), Direction)] = &[
 ];
 
 fn funded(recipes: RecipeRegistry) -> World {
-    World::with_content_and_money(
+    let mut world = World::with_content_and_money(
         recipes,
         MachineRegistry::bundled(),
         ContractRegistry::bundled(),
         Money::from_num(500_000),
-    )
+    );
+    // Liquid smoke is behind `data/unlocks.ron`'s BBQ gate, and since issue
+    // #90 a gate that has not opened REFUSES a tank declared to the fluid
+    // behind it — so without this the tests below cannot reach their own
+    // subject. The fixture states its premise; see `reference::open_every_gate`.
+    sim_core::sim::reference::open_every_gate(&mut world);
+    world
 }
 
 fn place(world: &mut World, kind: &str, tile: (i32, i32), direction: Direction) {

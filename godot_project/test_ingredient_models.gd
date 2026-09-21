@@ -115,9 +115,20 @@ func _all_ingredient_ids() -> Array:
 ## `World::raw_items`, the raw SOLIDS a hopper may legally hold, so a raw
 ## ingredient absent from that list is a fluid. Asking the sim beats a
 ## hardcoded list here, which would be the same staleness one layer down.
+##
+## Read through the scene's own `_hopper_items` rather than off the JSON:
+## since issue #90 each entry on the wire is a CHOICE record carrying its
+## gate, and `_refresh_hopper_items` is the one place that unpacks it.
 func _is_fluid(id: String) -> bool:
-	var hopper_items: Array = _main._ingredients_snapshot().get("hopper_items", [])
-	return not hopper_items.has(id)
+	return not _raw_solids().has(id)
+
+
+## The raw solid ids, unpacked from the wire's contents choices. Gated ones
+## are included — a padlocked ingredient still needs a model and a tint, and
+## is in fact the one most likely to be missing them.
+func _raw_solids() -> Array:
+	_main._refresh_hopper_items()
+	return _main._hopper_items
 
 
 func _initialize() -> void:
@@ -166,11 +177,11 @@ func _initialize() -> void:
 	# above is keyed by every item a BELT can carry; this table is keyed only
 	# by what a hopper can be set to hold, which is a strictly smaller set and
 	# a different question, so it gets its own pass rather than a branch in
-	# the loop above. `hopper_items` is `World::raw_items` and is deliberately
-	# NOT filtered by the unlock gates (see its field doc), so this reads the
-	# same four ids on a fresh world as on a finished one — the gates crossed
-	# above are for the ingredient entries, not for this.
-	var hopper_items: Array = _main._ingredients_snapshot().get("hopper_items", [])
+	# the loop above. `hopper_items` is `World::raw_items` and keeps the ids a
+	# gate holds back, flagged rather than dropped (issue #90), so this reads
+	# the same four ids on a fresh world as on a finished one — the gates
+	# crossed above are for the ingredient entries, not for this.
+	var hopper_items: Array = _raw_solids()
 	if hopper_items.is_empty():
 		_fail("the simulation offers a hopper NO contents at all — this check would be vacuous")
 		return

@@ -476,10 +476,12 @@ fn plan(recipes: &RecipeRegistry, machines: &MachineRegistry) -> Vec<Order> {
 /// Nothing on the ketchup line moves. `the_bbq_branch_layout_is_pinned` in
 /// this file holds both fixtures to an exact coordinate list so that stays
 /// true.
-/// **The world it returns has every progression gate open**, and it has to:
-/// since `data/unlocks.ron`, the three BBQ raws are behind a gate and
-/// `BuyIngredient` refuses them until ten contract deliveries have been
-/// made, so a caller could build this branch and never fill a hopper. That
+/// **The world it returns has every progression gate open**, and it has to,
+/// from before the first `Place` rather than after the last: since
+/// `data/unlocks.ron`, the three BBQ raws are behind a gate, and a gate that
+/// has not opened refuses both `BuyIngredient` and a hopper pointed at one
+/// of them (issue #90) — so with the counter set afterwards this fixture
+/// would not merely fail to fill a hopper, it would fail to place one. That
 /// is not the fixture dodging a rule — it is the fixture stating its
 /// premise. A player building this branch has, by definition, run the
 /// ketchup line long enough to be offered BBQ, and the counter is the only
@@ -489,12 +491,6 @@ fn plan(recipes: &RecipeRegistry, machines: &MachineRegistry) -> Vec<Order> {
 /// written as a literal, so a balance pass on `unlocks.ron` cannot leave
 /// this fixture one delivery short.
 pub fn bbq_branch(recipes: RecipeRegistry, budget: u32) -> World {
-    let deliveries = UnlockRegistry::bundled()
-        .ordered()
-        .iter()
-        .map(|unlock| unlock.after_deliveries)
-        .max()
-        .unwrap_or(0);
     let mut world = build(
         recipes,
         MachineRegistry::bundled(),
@@ -502,8 +498,42 @@ pub fn bbq_branch(recipes: RecipeRegistry, budget: u32) -> World {
         Money::from_num(budget),
         bbq_plan,
     );
-    world.restore_lifetime_deliveries(deliveries);
+    open_every_gate(&mut world);
     world
+}
+
+/// The lifetime delivery count at which **every** gate in
+/// `data/unlocks.ron` has opened — the highest threshold the file names.
+///
+/// Read from the shipped file rather than written as a literal, so a
+/// balance pass on `unlocks.ron` cannot leave a fixture one delivery short.
+pub fn every_gate_open() -> u32 {
+    UnlockRegistry::bundled()
+        .ordered()
+        .iter()
+        .map(|unlock| unlock.after_deliveries)
+        .max()
+        .unwrap_or(0)
+}
+
+/// Opens every progression gate in `world`, the way [`bbq_branch`] opens
+/// them for the factory it builds.
+///
+/// This exists because a gate is a **rule**, not a dimmed button: since
+/// issue #90, a hopper or a tank pointed at an ingredient still behind a
+/// gate is refused, so a test about gated content — liquid smoke, say — has
+/// no way to reach its own subject in a fresh world. Setting the counter is
+/// the fixture stating its premise, exactly as `bbq_branch`'s doc describes:
+/// a factory holding liquid smoke belongs to a player who earned it, and
+/// this counter is the only thing that says so.
+///
+/// **Not a back door into `restore_lifetime_deliveries`.** That stays
+/// `pub(super)`. This is the fixture module, whose whole contract is that it
+/// can do nothing a player cannot — and a player does reach this state, by
+/// shipping. What they cannot do is reach it in one call, which is the same
+/// concession every other fixture here makes about money and stock.
+pub fn open_every_gate(world: &mut World) {
+    world.restore_lifetime_deliveries(every_gate_open());
 }
 
 /// The row the BBQ branch's machines sit on. Three north of the chain row,

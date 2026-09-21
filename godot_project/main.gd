@@ -1004,6 +1004,23 @@ var _hopper_items: Array = [] # item ids a hopper may legally hold, from the sim
 ## Content again, not a Godot table: a fourth raw fluid appears in the
 ## picker with no edit here.
 var _tank_fluids: Array = [] # fluid ids a tank may be declared to hold
+## The gates still standing over those two lists: id -> `{"name", "after"}`,
+## carrying only the LOCKED ids, from `ingredients_snapshot_json`'s per-choice
+## `locked`/`unlock_name`/`after_deliveries`.
+##
+## Issue #90. A gated ingredient is hidden from the market, and was hidden
+## from nothing else — so the contents picker still offered liquid smoke and
+## molasses, and a click on either did nothing a player could read. The
+## choice stays on the list, because a picker that grew entries as the game
+## went on would hide the fact that there is more to come; what it gains is a
+## padlock, a dimmed frame and a sentence naming the gate. The refusal itself
+## is the simulation's (`try_set_hopper_item`/`try_set_tank_fluid`), not this
+## table's: this is the label on the door, not the lock.
+var _ingredient_gates: Dictionary = {}
+## Lifetime satisfied deliveries, straight off the same snapshot — the number
+## every gate in `data/unlocks.ron` is measured against, and the "4 of 10" in
+## the picker's note. Counted by the sim; never incremented here.
+var _lifetime_deliveries: int = 0
 ## The ghost's product body — a `hopper_fill` slab tinted with the chosen
 ## item, so the ghost previews WHAT the hopper will hold as well as where it
 ## goes. Colour alone would not be enough (UI_UX.md §7); the prompt names the
@@ -6386,7 +6403,8 @@ func _owned_ingredient_counts() -> Dictionary:
 func _refresh_hopper_items() -> void:
 	var snapshot := _ingredients_snapshot()
 	var items: Array = snapshot.get("hopper_items", [])
-	_hopper_items = items.duplicate()
+	_lifetime_deliveries = int(snapshot.get("deliveries", 0))
+	_hopper_items = _record_choices(items)
 
 
 ## `_refresh_hopper_items` for tanks. Separate call rather than one that
@@ -6394,18 +6412,56 @@ func _refresh_hopper_items() -> void:
 func _refresh_tank_fluids() -> void:
 	var snapshot := _ingredients_snapshot()
 	var fluids: Array = snapshot.get("tank_fluids", [])
-	_tank_fluids = fluids.duplicate()
+	_lifetime_deliveries = int(snapshot.get("deliveries", 0))
+	_tank_fluids = _record_choices(fluids)
 
 
-## What the hopper currently being placed will hold — always the FIRST raw
-## ingredient, since the contents choice moved onto the placed building (see
-## `_hopper_items`). "" when the kind in hand is not a hopper, or when the
-## world has no raw solids at all, which is a world with no recipes and
-## cannot happen with shipped content.
+## Splits one wire list of contents choices into the id list the rest of the
+## scene has always used, and the gate table beside it.
+##
+## Both callers write the same table, which is why this merges rather than
+## replaces: solids and fluids are disjoint lists, and an id whose gate has
+## since opened has to leave the table, not linger in it. Each list therefore
+## states the truth about its own ids and says nothing about the other's.
+func _record_choices(choices: Array) -> Array:
+	var ids: Array = []
+	for choice in choices:
+		var id := String(choice.get("id", ""))
+		ids.append(id)
+		if bool(choice.get("locked", false)):
+			_ingredient_gates[id] = {
+				"name": String(choice.get("unlock_name", "")),
+				"after": int(choice.get("after_deliveries", 0)),
+			}
+		else:
+			_ingredient_gates.erase(id)
+	return ids
+
+
+## What the hopper currently being placed will hold — the first raw ingredient
+## the player may actually have, since the contents choice moved onto the
+## placed building (see `_hopper_items`). "" when the kind in hand is not a
+## hopper, or when the world has no raw solids at all, which is a world with
+## no recipes and cannot happen with shipped content.
+##
+## The "the player may actually have" half is issue #90: the sim refuses to
+## place a hopper holding a locked ingredient, so a default that picked the
+## list's first entry blind would make the hopper unplaceable the moment a
+## balance pass put a gated id at the top of `data/ingredients.ron`.
 func _selected_hopper_item() -> String:
-	if _build_kind != HOPPER_KIND or _hopper_items.is_empty():
+	if _build_kind != HOPPER_KIND:
 		return ""
-	return String(_hopper_items[0])
+	for item in _hopper_items:
+		if not _choice_locked(item):
+			return String(item)
+	return ""
+
+
+## Whether a gate in `data/unlocks.ron` is still standing over this contents
+## choice. The simulation is the one that decides — this only reads back the
+## verdict it already put on the wire.
+func _choice_locked(item) -> bool:
+	return _ingredient_gates.has(String(item))
 
 
 ## "tomato_paste" -> "Tomato Paste". Item ids are content, exactly as kind ids
@@ -10590,7 +10646,29 @@ func _build_config_picker_slot(index: int, item_id: String) -> void:
 	mark.visible = false
 	button.add_child(mark)
 
-	_config_picker_slots.append({"item": item_id, "button": button, "mark": mark})
+	# The padlock sits exactly where the tick sits, because the two can never
+	# both be true: the simulation refuses a locked choice, so a locked slot
+	# is never the one in the building. Reusing the corner keeps the slot's
+	# layout identical in both states and gives the dimmed frame the glyph it
+	# needs beside it (UI_UX.md §7 — never colour alone).
+	var lock_settings := LabelSettings.new()
+	lock_settings.font_size = _ui_font(-1)
+	lock_settings.font_color = Color(0.72, 0.74, 0.78)
+	lock_settings.outline_size = _ui_i(4)
+	lock_settings.outline_color = Color(0, 0, 0, 0.9)
+
+	var lock := Label.new()
+	lock.name = "Locked"
+	lock.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lock.label_settings = lock_settings
+	lock.text = "🔒"
+	lock.position = _ui_v(Vector2(4, 1))
+	lock.visible = false
+	button.add_child(lock)
+
+	_config_picker_slots.append({
+		"item": item_id, "button": button, "mark": mark, "lock": lock, "column": column,
+	})
 
 
 ## Shrinks a picker slot's name until no WORD in it has to be broken in half
@@ -10796,6 +10874,11 @@ func _update_config_panel() -> void:
 
 
 func _update_config_hopper(key: String) -> void:
+	# Re-read on every update, not only when the panel opens: a delivery can
+	# land while it is open, and the padlock it clears has to come off there
+	# and then (issue #90). The snapshot behind this is already parsed on
+	# this path for `in stock:`, so it costs a list of four strings.
+	_refresh_hopper_items()
 	var snapshot: Dictionary = _hopper_states.get(key, {})
 	var item := String(snapshot.get("item", ""))
 	_config_title.text = "Hopper — %s" % _item_display_name(item)
@@ -10809,11 +10892,14 @@ func _update_config_hopper(key: String) -> void:
 	_apply_config_auto_state(bool(snapshot.get("auto_fill", false)))
 	_update_config_picker(item)
 	# Shared label, two kinds — a hopper's sentence is a constant, a tank's
-	# depends on its state (see `_tank_picker_note`).
-	_config_picker_note.text = HOPPER_PICKER_NOTE
+	# depends on its state (see `_tank_picker_note`). Either way the padlocks
+	# get their own line under it when there are any.
+	_config_picker_note.text = _with_gate_note(HOPPER_PICKER_NOTE, _hopper_items)
 
 
 func _update_config_tank(key: String) -> void:
+	# The tank's half of `_update_config_hopper`'s re-read, same reason.
+	_refresh_tank_fluids()
 	var snapshot: Dictionary = _fluid_tank_states.get(key, {})
 	var fluid := _fluid_id_of(snapshot)
 	_config_title.text = "Fluid Tank — %s" % (
@@ -10838,7 +10924,9 @@ func _update_config_tank(key: String) -> void:
 	# below says which of the two the panel is showing.
 	var declared := _declared_fluid_of(snapshot)
 	_update_config_picker(declared)
-	_config_picker_note.text = _tank_picker_note(declared, fluid, _tank_doomed_volume(snapshot))
+	_config_picker_note.text = _with_gate_note(
+		_tank_picker_note(declared, fluid, _tank_doomed_volume(snapshot)), _tank_fluids
+	)
 
 
 ## A tank's declared fluid — `null` on the wire, and "" here, for every tank
@@ -10884,6 +10972,44 @@ func _tank_picker_note(declared: String, carried: String, doomed: float) -> Stri
 	if doomed > 0.0:
 		return "declaring destroys %.1f units — this tank and the run it feeds" % doomed
 	return "nothing can name this run — pick what this tank holds"
+
+
+## The picker's own sentence with the padlocks' explanation under it, or
+## unchanged when nothing on this list is locked (issue #90).
+##
+## A glyph says a slot is shut; only words say when it opens. The line names
+## the ingredients, the unlock standing over them and the distance left to
+## it — "4 of 10 deliveries" rather than a bare "locked", because the number
+## is the part the player can act on, and it is the sim's own count.
+##
+## Grouped by gate rather than one line per ingredient: `data/unlocks.ron`
+## opens a tier at a time, so the common case is two ids and one sentence.
+## Sorting and formatting only — the gate, its name and its threshold are all
+## the simulation's.
+func _with_gate_note(note: String, choices: Array) -> String:
+	var by_gate := {}
+	for item in choices:
+		var gate: Dictionary = _ingredient_gates.get(String(item), {})
+		if gate.is_empty():
+			continue
+		var key := "%d\t%s" % [int(gate["after"]), String(gate["name"])]
+		if not by_gate.has(key):
+			by_gate[key] = []
+		by_gate[key].append(_item_display_name(String(item)))
+	if by_gate.is_empty():
+		return note
+	var lines: Array = []
+	var keys: Array = by_gate.keys()
+	keys.sort()
+	for key in keys:
+		var parts: PackedStringArray = String(key).split("\t")
+		lines.append("🔒 %s — %s, %d of %d deliveries" % [
+			", ".join(PackedStringArray(by_gate[key])),
+			parts[1],
+			_lifetime_deliveries,
+			int(parts[0]),
+		])
+	return "\n".join(PackedStringArray([note] + lines))
 
 
 ## How much fluid a declaration change would destroy: what the tank holds
@@ -11098,17 +11224,26 @@ func _config_toggle_style(state: String, enabled: bool) -> StyleBoxFlat:
 	return style
 
 
+## The three states a picker slot can be in, re-read on every panel update
+## rather than baked in at build time — a gate that opens while the panel is
+## open takes its padlock off there and then, without the player having to
+## close and reopen to find out (issue #90).
 func _update_config_picker(current: String) -> void:
 	for slot in _config_picker_slots:
-		var selected: bool = String(slot["item"]) == current
+		var locked: bool = _choice_locked(slot["item"])
+		var selected: bool = not locked and String(slot["item"]) == current
 		slot["mark"].visible = selected
+		slot["lock"].visible = locked
+		# Dimmed contents as well as a dim frame: the slot reads as "not yet"
+		# at a glance, and the padlock says which kind of "not yet" it is.
+		slot["column"].modulate = Color(1, 1, 1, 0.45 if locked else 1.0)
 		var button: Button = slot["button"]
 		# Literally the hotbar's own selected/stocked socket styles, so "the
-		# thing I have chosen" looks the same wherever the game asks.
+		# thing I have chosen" looks the same wherever the game asks. A locked
+		# slot takes the empty socket's, for the same reason.
+		var state_name := "selected" if selected else ("locked" if locked else "stocked")
 		for state in ["normal", "hover", "pressed", "disabled", "focus"]:
-			button.add_theme_stylebox_override(
-				state, _hotbar_slot_style("selected" if selected else "stocked")
-			)
+			button.add_theme_stylebox_override(state, _hotbar_slot_style(state_name))
 
 
 func _set_config_level(fraction: float) -> void:
@@ -11327,6 +11462,14 @@ func _on_config_picker_pressed(index: int) -> void:
 	if index < 0 or index >= _config_picker_slots.size():
 		return
 	var chosen := String(_config_picker_slots[index]["item"])
+	# The command goes out whatever the slot looks like, and the CUE is read
+	# back off what the building holds afterwards — the rule that a refusal
+	# must sound refused, answered by the outcome rather than by the click
+	# (godot_project/CLAUDE.md). A gated choice is refused in Rust, so this
+	# needs no idea of its own about what is allowed; what it must not do is
+	# cry refusal over a press that asked for nothing, which is why the
+	# already-chosen slot is let through silently.
+	var before := _config_contents()
 	if _config_kind == FLUID_TANK_KIND:
 		# `set_tank_fluid` is the same shape of command against the fluid
 		# side: it declares what the drum holds, and the simulation seeds
@@ -11337,12 +11480,29 @@ func _on_config_picker_pressed(index: int) -> void:
 			"tile": [_config_tile.x, _config_tile.y],
 			"fluid": chosen,
 		})
-		return
-	_issue_config_command({
-		"type": "set_hopper_item",
-		"tile": [_config_tile.x, _config_tile.y],
-		"item": chosen,
-	})
+	else:
+		_issue_config_command({
+			"type": "set_hopper_item",
+			"tile": [_config_tile.x, _config_tile.y],
+			"item": chosen,
+		})
+	if before != chosen and _config_contents() != chosen:
+		_cue(FactoryAudio.REFUSED)
+
+
+## What the building the panel is open on actually holds, by the same read
+## the panel itself draws from — a hopper's item, a tank's DECLARED fluid.
+## "" for anything else, and for a tank still taking its name off the run.
+func _config_contents() -> String:
+	var placement := _placement_at_tile(_config_tile)
+	if placement.is_empty():
+		return ""
+	var key := _tile_key(_placement_origin(placement))
+	if _config_kind == HOPPER_KIND:
+		return String(_hopper_states.get(key, {}).get("item", ""))
+	if _config_kind == FLUID_TANK_KIND:
+		return _declared_fluid_of(_fluid_tank_states.get(key, {}))
+	return ""
 
 
 ## Issues one of the panel's five commands and redraws what they touch.

@@ -430,30 +430,52 @@ impl Ingredients {
     /// its own [`super::world::World::raw_items`], which is the single
     /// definition of that set.
     ///
-    /// `unlocked` is passed in for the same kind of reason — a progression
+    /// `gate` is passed in for the same kind of reason — a progression
     /// gate is keyed off the economy's lifetime delivery count
     /// ([`super::unlocks`]), which is not this module's to know — and
     /// mirrors [`super::shop::Shop::snapshot`]'s `crew_of`. An entry it
-    /// says no to is **omitted**, not flagged: the market lists what can be
-    /// bought. The refusal itself lives in `World`'s `BuyIngredient` arm,
-    /// so a hidden row is presentation agreeing with the simulation rather
-    /// than enforcing anything.
+    /// says no to is **omitted from `entries`**, not flagged: the market
+    /// lists what can be bought. The refusal itself lives in `World`'s
+    /// `BuyIngredient` arm, so a hidden row is presentation agreeing with
+    /// the simulation rather than enforcing anything.
+    ///
+    /// The two CONTENTS lists take the opposite course and keep a locked
+    /// id, flagged — see [`ContentsChoice`] for why a picker shows what the
+    /// market hides. One closure answers both questions, so "locked" means
+    /// one thing across the whole snapshot: `Some((name, after))` is a gate
+    /// that has not opened yet, `None` is available now.
     pub fn snapshot(
         &self,
         money: Money,
         hopper_items: &[String],
         tank_fluids: Vec<String>,
-        unlocked: impl Fn(&str) -> bool,
+        deliveries: u32,
+        gate: impl Fn(&str) -> Option<(String, u32)>,
     ) -> IngredientsSnapshot {
+        let choice = |id: &String| match gate(id) {
+            Some((name, after_deliveries)) => ContentsChoice {
+                id: id.clone(),
+                locked: true,
+                unlock_name: name,
+                after_deliveries,
+            },
+            None => ContentsChoice {
+                id: id.clone(),
+                locked: false,
+                unlock_name: String::new(),
+                after_deliveries: 0,
+            },
+        };
         IngredientsSnapshot {
             money: money.to_num::<f64>(),
-            hopper_items: hopper_items.to_vec(),
-            tank_fluids,
+            deliveries,
+            hopper_items: hopper_items.iter().map(&choice).collect(),
+            tank_fluids: tank_fluids.iter().map(&choice).collect(),
             entries: self
                 .catalog
                 .entries()
                 .iter()
-                .filter(|entry| unlocked(&entry.id))
+                .filter(|entry| gate(&entry.id).is_none())
                 .map(|entry| IngredientSnapshot {
                     id: entry.id.clone(),
                     price: entry.price_money().to_num::<f64>(),
@@ -472,47 +494,84 @@ impl Ingredients {
 ///
 /// ```json
 /// {"money": 2913.0,
-///  "hopper_items": ["tomato", "sugar"],
-///  "tank_fluids": ["vinegar"],
+///  "deliveries": 4,
+///  "hopper_items": [
+///    {"id": "tomato", "locked": false, "unlock_name": "", "after_deliveries": 0},
+///    {"id": "spice_mix", "locked": true, "unlock_name": "BBQ Sauce", "after_deliveries": 10}
+///  ],
+///  "tank_fluids": [
+///    {"id": "vinegar", "locked": false, "unlock_name": "", "after_deliveries": 0}
+///  ],
 ///  "entries": [
 ///    {"id": "tomato", "price": 1.0, "owned": 40, "affordable": true},
 ///    {"id": "sugar", "price": 3.0, "owned": 0, "affordable": true}
 ///  ]}
 /// ```
 ///
-/// `hopper_items` is the ids a hopper may legally be placed holding (see
-/// [`super::world::PlayerCommand::Place`]'s `item` field). It is on the
-/// wire because presentation genuinely cannot work it out — an id's price
-/// says nothing about whether it is a solid — and because the alternative
-/// is a Godot-side list of literals that a third raw ingredient would
-/// silently make wrong. Its order is `data/recipes.ron`'s own order of
-/// first appearance, so a UI cycling through it presents them in the order
-/// the production line uses them.
+/// `deliveries` is the economy's lifetime successful delivery count — the
+/// one number every progression gate is measured against
+/// ([`super::unlocks`]). It is here so a panel that draws a locked
+/// [`ContentsChoice`] can say how far off the gate is ("4 of 10") without
+/// reaching for a second snapshot, and it is carried ONCE rather than on
+/// every choice because it is a property of the economy, not of an id.
 ///
-/// **It is deliberately NOT filtered by progression gates, so it is no
-/// longer `entries` minus the fluids.** `entries` is a market listing and
-/// a gate holds things back from it; `hopper_items` is a *placement rule*
-/// — the set `World::raw_items` will actually accept — and the simulation
-/// does not refuse a hopper set to a locked ingredient. It does not need
-/// to: that hopper can never be filled, because the ingredient cannot be
-/// bought, which is exactly the "present but unbuildable" state
-/// `data/unlocks.ron` describes for the recipes themselves. Filtering here
-/// would make the wire disagree with what `Place` accepts, which is the
-/// more expensive kind of wrong.
+/// `hopper_items` is the raw solids a hopper can hold — every one of them,
+/// including the ids a gate is still holding back, each carrying that
+/// verdict (see [`ContentsChoice`]). It is on the wire because the
+/// presentation genuinely cannot work it out — an id's price says nothing
+/// about whether it is a solid — and the alternative, a pair of Godot-side
+/// list literals, is a thing a third raw ingredient would silently make
+/// wrong. Its order is `data/recipes.ron`'s own order of first appearance,
+/// so a UI presents them in the order the production line uses them.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct IngredientsSnapshot {
     pub money: f64,
-    pub hopper_items: Vec<String>,
+    pub deliveries: u32,
+    pub hopper_items: Vec<ContentsChoice>,
     /// `hopper_items`' fluid twin: the ids a tank may be **declared** to
     /// hold (`world::PlayerCommand::SetTankFluid`, issue #43), which is
     /// `World::raw_fluids` verbatim. On the wire for `hopper_items`'
-    /// reason — an id's price says nothing about whether it is a fluid —
-    /// and, like it, deliberately **not** filtered by progression gates: it
-    /// is the placement rule, not the market listing, and the simulation
-    /// does not refuse a tank declared to a locked fluid either. Sorted,
-    /// because `raw_fluids` is a `BTreeSet` (ARCHITECTURE.md §3.9).
-    pub tank_fluids: Vec<String>,
+    /// reason — an id's price says nothing about whether it is a fluid.
+    /// Sorted, because `raw_fluids` is a `BTreeSet` (ARCHITECTURE.md §3.9).
+    pub tank_fluids: Vec<ContentsChoice>,
     pub entries: Vec<IngredientSnapshot>,
+}
+
+/// One slot in the configuration panel's CONTENTS picker: a raw a hopper
+/// may hold, or a raw fluid a tank may be declared to hold, plus whether a
+/// progression gate is still holding it back.
+///
+/// **Why a locked choice is listed at all, when a locked market row is
+/// hidden.** The two lists answer different questions. `entries` is a shop:
+/// a row the player cannot buy is a row with nothing to do, so it is
+/// omitted. The picker is the full set of things this building will ever
+/// hold, and a player deciding where to put a hopper is entitled to know
+/// that a fourth bin exists and what opens it — GAMEPLAY.md §2's progression
+/// is a thing to look forward to, and a gate nobody can see coming is one
+/// nobody anticipates. So the slot stays, dimmed, naming its gate.
+///
+/// **And it is refused, not merely dimmed.** `SetHopperItem` and
+/// `SetTankFluid` — the two commands this picker issues — decline a locked
+/// id, which is the rule `data/unlocks.ron` states for `BuyIngredient` and
+/// `SignContract` finally applied to the two that had quietly escaped it
+/// (issue #90). Before this a hopper could be pointed at an ingredient
+/// nobody could buy and then sat empty forever with nothing on screen
+/// saying why. `Place`'s `item` is deliberately still accepted: it seeds a
+/// bin rather than choosing against a gate, and `World::hopper_item_for`'s
+/// comment has the reasoning.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ContentsChoice {
+    pub id: String,
+    /// Whether a gate that has not opened is holding this id back. The
+    /// simulation refuses it while this is true.
+    pub locked: bool,
+    /// The gate's player-facing name, as `data/unlocks.ron` writes it
+    /// ("BBQ Sauce") — prose for a panel to put in a sentence, never an id.
+    /// Empty when `locked` is false.
+    pub unlock_name: String,
+    /// Lifetime deliveries the gate opens at, to read against
+    /// [`IngredientsSnapshot::deliveries`]. 0 when `locked` is false.
+    pub after_deliveries: u32,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -526,6 +585,11 @@ pub struct IngredientSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The ids of a picker list, for asserting against a plain `Vec<String>`.
+    fn ids(choices: &[ContentsChoice]) -> Vec<String> {
+        choices.iter().map(|choice| choice.id.clone()).collect()
+    }
 
     const EXAMPLE: &str = r#"(
         schema_version: 1,
@@ -755,17 +819,23 @@ mod tests {
             Money::from_num(2),
             &hopper_items,
             vec!["vinegar".to_string()],
-            |_| true,
+            0,
+            |_| None,
         );
         assert_eq!(snapshot.entries.len(), 2);
         assert_eq!(
-            snapshot.hopper_items, hopper_items,
+            ids(&snapshot.hopper_items),
+            hopper_items,
             "the hopper-legal ids are reported verbatim, not re-derived from the catalog"
         );
         assert_eq!(
-            snapshot.tank_fluids,
+            ids(&snapshot.tank_fluids),
             vec!["vinegar".to_string()],
             "and so are the tank-legal ones — a price says nothing about solid or fluid"
+        );
+        assert!(
+            snapshot.hopper_items.iter().all(|choice| !choice.locked),
+            "nothing is gated in this fixture, so no choice may claim to be"
         );
         assert_eq!(snapshot.entries[0].id, "tomato");
         assert_eq!(snapshot.entries[0].owned, 12);
@@ -780,17 +850,19 @@ mod tests {
 
     /// A locked ingredient is OMITTED from the market listing rather than
     /// flagged — the market lists what can be bought (`data/unlocks.ron`).
-    /// `hopper_items` is passed through untouched, which is the whole point
-    /// of it being a separate list: it is a placement rule, not a listing.
+    /// The contents picker keeps it and FLAGS it instead, naming the gate:
+    /// the two lists answer different questions (issue #90, and see
+    /// [`ContentsChoice`]).
     #[test]
-    fn the_snapshot_omits_an_ingredient_a_gate_holds_back() {
+    fn a_gate_hides_a_market_row_and_flags_the_contents_choice() {
         let ingredients = Ingredients::new(IngredientCatalog::from_ron_str(EXAMPLE).unwrap());
         let hopper_items = ["tomato".to_string(), "sugar".to_string()];
         let snapshot = ingredients.snapshot(
             Money::from_num(50),
             &hopper_items,
             vec!["vinegar".to_string()],
-            |id| id != "sugar",
+            4,
+            |id| (id == "sugar").then(|| ("Sweet Tier".to_string(), 10)),
         );
         assert_eq!(
             snapshot
@@ -798,11 +870,29 @@ mod tests {
                 .iter()
                 .map(|e| e.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["tomato"]
+            vec!["tomato"],
+            "the market lists only what can be bought"
         );
         assert_eq!(
-            snapshot.hopper_items, hopper_items,
-            "a gate filters the market, never the set of ids a hopper may hold"
+            ids(&snapshot.hopper_items),
+            hopper_items,
+            "a gate never shortens the picker — a bin the player cannot fill yet is \
+             still a bin they should see coming"
+        );
+        let sugar = &snapshot.hopper_items[1];
+        assert!(sugar.locked);
+        assert_eq!(sugar.unlock_name, "Sweet Tier");
+        assert_eq!(sugar.after_deliveries, 10);
+        assert_eq!(
+            snapshot.deliveries, 4,
+            "and the count to read that against rides along, once"
+        );
+        let tomato = &snapshot.hopper_items[0];
+        assert!(!tomato.locked);
+        assert_eq!(
+            (tomato.unlock_name.as_str(), tomato.after_deliveries),
+            ("", 0),
+            "an ungated choice carries no gate to describe"
         );
     }
 }
