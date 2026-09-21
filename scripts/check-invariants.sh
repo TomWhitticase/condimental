@@ -78,7 +78,23 @@ done < <(grep -rhoE '"res://[^"%]+\.(tscn|tres|gd|png|svg|ogg|wav|gdextension|im
            godot_project --include='*.gd' --include='*.tscn' \
          | grep -v ci-allow-missing | tr -d '"' | sort -u)
 
-# ----------------------------------------------------------- 4. doc links
+# -------------------------------------------------------- 4. hover flags
+# The screenshot harness is the one check that needs a window, so none of it
+# runs in CI — and a `--hover*` flag that cannot find its target used to aim
+# at nothing, photograph the parked cursor and report success (PR #78's
+# re-review). The refusal now lives in ONE loop over `hover_targets.gd`'s
+# table, which only holds if nothing else in test_screenshot.gd parses a
+# hover flag of its own. An eighth one added the old way — a `_hover_x`
+# boolean beside the rest — would be invisible to `test_hover_targets.gd`,
+# which only knows what is in the table.
+echo "==> every --hover* flag test_screenshot.gd knows about is in the table"
+while read -r flag; do
+  grep -qF "\"$flag\"" godot_project/hover_targets.gd \
+    || fail "test_screenshot.gd names $flag, which hover_targets.gd's table does not — add a row there instead, so the flag inherits the refusal (see that file's header)"
+done < <(grep -ohE '"--hover[a-z-]*"' godot_project/test_screenshot.gd \
+         | tr -d '"' | sort -u)
+
+# ----------------------------------------------------------- 5. doc links
 # The docs are the project's memory and CLAUDE.md is a map of them
 # (docs/WORKFLOW.md, "Recording a decision"). A link into a renamed or moved
 # file breaks the map quietly — nothing fails, the next session just does not
@@ -97,7 +113,7 @@ done < <(
 
 echo
 if [ "$status" -eq 0 ]; then
-  echo "PASS: test scripts wired and marked, scenes text, res:// paths real, doc links resolve"
+  echo "PASS: test scripts wired and marked, scenes text, res:// paths real, hover flags tabled, doc links resolve"
 else
   echo "FAILED — see above" >&2
 fi
