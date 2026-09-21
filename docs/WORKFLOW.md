@@ -66,6 +66,7 @@ floor. The script's header explains every flag; grouped, they are:
   stress|pipes|gallery|demo>` (an explicit one WINS over the flags below,
   which each imply a fixture; an unknown name is refused, and every run
   prints the `SCREENSHOT_FIXTURE` it built), `--stress`, `--pipe-gallery`, `--belt-gallery`,
+  `--fluid-gallery`, `--item-gallery`, `--warehouse`,
   `--bottleneck`, `--understaffed`, `--staff-shortfall`, `--contracts`,
   `--payout`; `--populate` runs one forward; also `--stock`, `--hotbar N`
 - **Screens:** `--menu`, `--pause`, `--shop`, `--market`, `--board`,
