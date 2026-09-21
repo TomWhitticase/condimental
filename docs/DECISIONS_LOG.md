@@ -18,6 +18,42 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-20 **Glow means "this is emitting", not "this is bright" — and
+  SSAO means "this is a crease".** The
+  hall's post-pass is `glow_intensity 1.0`, **`glow_bloom 0.0`**,
+  `glow_hdr_threshold 1.2`, **SCREEN** (`factory_environment.gd`). Tune it
+  only against rendered frames in which something actually emits, and judge it
+  by *selectivity* — what the pass adds around a lit lens over what it adds to
+  the rest of the frame. Two rules for measuring it, both learned the hard
+  way: the null baseline is glow **enabled** with **`glow_bloom = 0.0` and a
+  threshold of 3.0** (enabling the pass at all shifts the frame ~+4.5 mean, and
+  a high threshold alone still leaves `glow_bloom`'s frame-wide haze in the
+  baseline); and it cannot be measured through `scripts/screenshot-scene.sh`,
+  whose sim state is not reproducible run to run. `glow_bloom` is frame-wide
+  haze by definition and belongs at 0 in a game whose emissives are small
+  lamps. **SOFTLIGHT can never make a halo** — its effect scales with the pixel
+  beneath it, so its brightest pixel is +25..30 levels at any intensity or
+  threshold, against SCREEN's +213. The old 0.7 / 0.15 / 0.85 / SOFTLIGHT was
+  tuned while issue #25 meant nothing in the game emitted at all, and scored
+  2.7x selectivity against the present 69x.
+
+  The **SSAO** in the same block had the same defect and was retuned with it:
+  `ssao_radius 0.45`, `ssao_intensity 16.0`, `ssao_power 1.6`, from
+  `0.9 / 2.4 / 1.6`. At the old numbers the deepest crease in an isometric
+  closeup lost 1.2 levels out of ~130 — invisible (measured by the asset
+  browser's worker on issue #49, and confirmed here against
+  `ssao_enabled = false`). **Intensity alone cannot fix it**: `ssao_radius` is
+  in WORLD units, so an eye-level camera finds far more occlusion per pixel
+  than the orthographic camera looking down from across the hall, and
+  `0.9 / 16` reads well in isometric while swallowing the belt's legs in a
+  smear in first person. Halving the radius is what reconciles the two views —
+  0.45 world units is 4.5 voxels, *a fitting against a body*, not a machine
+  against the floor. Judge a change to it in **three** framings (isometric
+  closeup, play zoom, first person standing on the line), and watch the share
+  of the frame darkened by more than 3%: that is where overshoot shows up
+  first. A first-person shot aimed across the empty hall shows no SSAO at any
+  setting and proves nothing — there is no geometry near the camera.
+  Full record in `docs/DECISIONS.md`.
 - 2026-09-20 **A tank declares what it holds, and the save format's
   field-addition window is closed.** `FluidTank` carries an optional declared
   fluid, set by `PlayerCommand::SetTankFluid` and **seeded into**

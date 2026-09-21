@@ -99,16 +99,122 @@ static func build_into(parent: Node, haze_density: float = HAZE_DENSITY) -> Worl
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.ambient_light_energy = 1.2
 
+	# UI_UX.md §4's "light SSAO" — retuned 2026-09-20 alongside the glow, and
+	# for the same reason (issue #32): the shipped numbers had never been
+	# judged against a rendered frame. The asset browser's worker measured
+	# them while calibrating a baked AO pass (issue #49) and found the pass
+	# near-inert; differencing rendered PNGs against `ssao_enabled = false`
+	# agrees. At 0.9 / 2.4 the deepest of three crease boxes in an isometric
+	# closeup lost 1.7 levels out of 133 (x0.987) and 0.22% of the frame
+	# darkened by more than 3% — under the eye's threshold on a flat voxel
+	# face, i.e. nothing.
+	#
+	# Intensity alone cannot fix it, because the pass is NOT equally weak in
+	# every view: its radius is in world units, so an eye-level camera with
+	# geometry a metre away finds far more occlusion per pixel than the
+	# orthographic camera looking down from across the hall. 0.9 / 16 reads
+	# nicely in isometric and is much too strong in first person, where it
+	# swallows the belt's legs in a smear and hangs a dark halo off the
+	# belt's lower edge. HALVING THE RADIUS is what reconciles them: it costs
+	# isometric bite but takes much more off the first-person smear, because
+	# the smear is the far end of a radius that was never crease-sized. 0.45
+	# world units is 4.5 voxels — a fitting against a body, not a machine
+	# against the floor.
+	#
+	# Measured on the bottleneck line at a pinned tick, 1200x800, against
+	# `ssao_enabled = false`. "crease" is the mean loss in three hand-picked
+	# boxes (a pot shoulder, a gantry against a pot, a crusher leg); "smear"
+	# is the share of the frame darkened by more than 3%, which is where
+	# overshoot shows up first.
+	#
+	#   radius/intensity    iso crease   iso smear   eye smear   crease:flat
+	#   0.9  / 2.4  (old)     -1.2 lv      0.22%       7.8%         2.0x
+	#   0.9  / 8              -4.5 lv      1.40%      15.3%         1.9x
+	#   0.9  / 16             -7.8 lv      2.83%      18.7%         1.8x  smears
+	#   0.45 / 8              -2.1 lv      0.41%      10.2%         2.3x
+	#   0.45 / 16   (new)     -3.7 lv      0.87%      12.9%         2.2x
+	#   0.45 / 24             -4.8 lv      1.16%      14.0%         2.1x
+	#   0.3  / 16             -2.1 lv      0.50%       9.4%         2.3x
+	#
+	# 0.45 / 16 is the one that reads in all three framings checked
+	# (isometric closeup, play zoom, first person on the floor) without any
+	# of them looking grubby. Full record in docs/DECISIONS.md.
 	env.ssao_enabled = true
-	env.ssao_radius = 0.9
-	env.ssao_intensity = 2.4
+	env.ssao_radius = 0.45
+	env.ssao_intensity = 16.0
 	env.ssao_power = 1.6
 
+	# UI_UX.md §4's "mild bloom on EMISSIVES" — retuned 2026-09-20 (issue #32).
+	#
+	# The first four numbers here (0.7 / 0.15 / 0.85 / SOFTLIGHT) were chosen
+	# while NOTHING in the game emitted: issue #25 meant every lamp was
+	# ordinary painted amber at any energy, so the pass was tuned against an
+	# input that did not exist. Retuned against the input it actually has, by
+	# differencing rendered PNGs of the bottleneck line's crusher and scoring
+	# what the pass adds inside a box around one lit status lens against what
+	# it adds to the whole rest of the frame — SELECTIVITY, on a deterministic
+	# render at a pinned tick. Every figure below is that measurement, in
+	# 0-255 levels, against a baseline with the pass ENABLED and contributing
+	# nothing (bloom 0, threshold 3.0); see DECISIONS.md for why both of those
+	# conditions matter.
+	#
+	#   intensity/bloom/threshold/blend     lens box   max   rest    ratio
+	#   0.7 / 0.15 / 0.85 / SOFTLIGHT  (old) +3.22     +29   +1.21    2.7x
+	#   0.7 / 0.0  / 0.85 / SOFTLIGHT        +2.12     +28   +0.15   14.6x
+	#   1.0 / 0.0  / 1.2  / SOFTLIGHT        +1.99     +30   +0.04   48.2x
+	#   1.0 / 0.0  / 0.85 / SCREEN          +21.58    +218   +0.79   27.3x
+	#   1.0 / 0.0  / 1.0  / SCREEN          +19.23    +217   +0.52   37.2x
+	#   0.7 / 0.0  / 1.2  / SCREEN          +12.29    +199   +0.17   71.8x
+	#   1.0 / 0.0  / 1.2  / SCREEN     (new) +16.12   +213   +0.23   69.1x
+	#   1.0 / 0.0  / 1.4  / SCREEN          +13.14    +208   +0.07  179.5x
+	#   1.0 / 0.0  / 1.2  / ADDITIVE        +16.52    +213   +0.25   66.4x
+	#
+	# What each number is, and why:
+	#
+	# * `glow_bloom = 0.0` (was 0.15). Godot's `glow_bloom` makes glow visible
+	#   in areas DARKER than the threshold — it is literally "bloom everything
+	#   a little", and it was the only thing producing any bloom at all back
+	#   when nothing emitted, which is exactly why it was turned up. It is the
+	#   whole of the frame-wide haze: zeroing it alone takes the rest-of-frame
+	#   lift from +1.21 to +0.15 (rows 1 and 2), and it is why the old settings
+	#   fired on the crusher's white lid, the froth in the tomato jars and the
+	#   box labels on the dock, softening all three.
+	# * `GLOW_BLEND_MODE_SCREEN` (was SOFTLIGHT). The one that decides whether
+	#   a lamp reads at all. SOFTLIGHT's effect scales with the pixel under it,
+	#   so it cannot brighten an already-bright lens: its brightest single
+	#   pixel is +25..30 at ANY intensity or threshold, against SCREEN's +213.
+	#   The lens stays a flat cream cube under SOFTLIGHT however it is tuned.
+	# * `glow_hdr_threshold = 1.2` (was 0.85), and it is the knee of the sweep,
+	#   not a guess. 1.0-1.2 is where the brightest LIT WHITE surface in the
+	#   game sits, which is the line between "bright" and "emitting". Below it
+	#   contamination climbs fast (+0.79 at 0.85); above it the lamp is what
+	#   pays — 1.4 buys +0.07 instead of +0.23, a difference already under one
+	#   luma level, for 19% of the halo.
+	# * `glow_intensity = 1.0` (was 0.7), to pay back the reach the other three
+	#   took away: at the same threshold, 1.0 against 0.7 is +16.12/+213
+	#   against +12.29/+199 for +0.06 of contamination.
+	# * ADDITIVE was measured too and is within noise of SCREEN here. SCREEN is
+	#   kept because it retains marginally more hue in the lens (saturation
+	#   0.36 against 0.34) and is bounded by construction, so a brighter
+	#   emissive added later cannot push a lens past white.
+	#
+	# The effect: the halo around a lit lens goes from 1480 px at rgb(6,2,1)
+	# to 7136 px at rgb(18,9,2) — five times the reach, three times the
+	# strength, and amber either way (saturation 0.87), which is §4's "a lit
+	# voxel glows in its OWN colour". Overall exposure is unmoved (mean luma
+	# 135.1 -> 134.4 on that closeup, 153.8 -> 155.0 in first person): this is
+	# a change in WHAT glows, not in how bright the game is. In first person
+	# the old settings lifted the roof lamps' own FACES (+2.43) and barely
+	# their surroundings (+1.67), which is why they read as flat white
+	# rectangles against the skylights; the new ones leave the faces alone
+	# (+1.91) and light the dark roof around them (+7.26), which is what a
+	# lamp does. `SCREENSHOT_RENDER` is identical either way — a full-screen
+	# post-pass costs the same whatever it is tuned to.
 	env.glow_enabled = true
-	env.glow_intensity = 0.7
-	env.glow_bloom = 0.15
-	env.glow_hdr_threshold = 0.85
-	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
+	env.glow_intensity = 1.0
+	env.glow_bloom = 0.0
+	env.glow_hdr_threshold = 1.2
+	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SCREEN
 
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	env.tonemap_white = 6.0

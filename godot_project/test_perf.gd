@@ -92,6 +92,17 @@ func _run_checks() -> void:
 	main._rebuild_world()
 	var rebuild_msec := _msec(warm_start)
 
+	# `_read_world_layout` ON ITS OWN, the first thing a rebuild does and the
+	# subject of issue #3: it re-parses the WHOLE `world_layout_json` (some
+	# 336 KB at this scale) on every place, remove and rotate. Reported as a
+	# share of the rebuild above, because that share is the number the issue
+	# is really about — and because the 40-80 ms it was first quoted at came
+	# off a DEBUG `sim_core`, where the wire is written by an unoptimised
+	# build. Not asserted: it is a fraction of an already-asserted total.
+	var layout_start := Time.get_ticks_usec()
+	main._read_world_layout()
+	var layout_msec := _msec(layout_start)
+
 	# Run the line so there is product to draw, then measure frames.
 	main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
 	main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank"}))
@@ -122,6 +133,9 @@ func _run_checks() -> void:
 	])
 	print("PERF: _rebuild_world cold %.1f ms, warm %.1f ms (ceiling %d ms)" % [
 		cold_msec, rebuild_msec, REBUILD_CEILING_MSEC,
+	])
+	print("PERF: _read_world_layout %.1f ms of that warm rebuild (%.0f%%), %d placements" % [
+		layout_msec, 100.0 * layout_msec / maxf(rebuild_msec, 0.001), main._placements.size(),
 	])
 	print("PERF: %d frames of _process %.1f ms total, %.2f ms/frame (ceiling %d ms) with %d items in flight%s" % [
 		FRAMES, frames_msec, frames_msec / float(FRAMES), FRAMES_CEILING_MSEC, carried,
