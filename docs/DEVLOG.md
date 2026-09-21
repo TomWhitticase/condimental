@@ -212,6 +212,25 @@ its framing flags (`--closeup`, `--zoom`, `--pan`, every `--hover*`) all
 steer the isometric camera, so a review shot stays isometric unless
 `--first-person` asks otherwise. Reasoning in `docs/DECISIONS.md`.
 
+### 2026-09-21 — The perf gate stops failing on the neighbours (issue #146)
+
+`test_perf.gd` is the only test in the suite that asserts a wall clock, and
+this machine runs up to six worktrees' headless Godot at once. The same 120
+frames measured 350.7 ms alone and 3733.1 ms beside a neighbour's verify,
+against a 3000 ms ceiling — a red gate on a branch that had touched only
+panel placement, reading exactly like a regression.
+
+Both ceilings are now multiplied by a load factor the test measures itself:
+a fixed 400k-iteration script loop, timed once before the measurements and
+once after, worse of the two, `measured / 12 ms`, clamped to [1.0, 6.0]. A
+quiet box therefore gets exactly the old constants (measured after the
+change: 1.04x, ceilings 1567/3135 ms, frames 275.1 ms). The median of nine
+samples, not the minimum — under sixteen spinning processes the fastest
+sample was 11.9 ms, indistinguishable from idle, while the median was
+38.3 ms. Raw milliseconds are still printed unscaled, because the ticket-4
+before/after numbers quoted elsewhere in this log come off those lines.
+Reasoning in [DECISIONS.md](DECISIONS.md) under today's date.
+
 ### 2026-09-21 — Raw stock has a ceiling, and a rack is what raises it (W1)
 
 The simulation half of the warehouse stock racks feature. Until now

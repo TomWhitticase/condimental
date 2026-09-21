@@ -28,6 +28,24 @@ See [WORKFLOW.md](WORKFLOW.md).
   isometric unless `--first-person`, because `--closeup`, `--zoom`, `--pan`
   and every `--hover*` are isometric ideas and would otherwise be aimed at a
   camera they cannot steer. Full record in `docs/DECISIONS.md`.
+- 2026-09-21 **The one wall-clock assertion in the gate is scaled by how
+  loaded the machine is, measured in the same process.** (Issue #146.)
+  `test_perf.gd` is the only test that asserts a time rather than an outcome,
+  and several worktrees run headless Godot on this machine at once: the same
+  120 frames measured 350.7 ms alone and 3733.1 ms beside a neighbour's
+  verify, failing a 3000 ms ceiling with no code between the two. A red gate
+  that reads as a regression is worse than no gate, because the next session
+  goes looking for the regression in its own diff. Raising the ceiling is the
+  wrong fix — it is generous precisely so it catches an order-of-magnitude
+  regression, and a ceiling loose enough to survive four concurrent runs
+  would let one through. Instead the test times a fixed pure-script loop
+  before and after the measurements it brackets, takes the worse reading, and
+  multiplies both ceilings by it, clamped to 1.0 below (a quiet box gets
+  exactly the constants) and 6.0 above (past that the machine is too busy for
+  the number to mean anything). The median of the samples, never the minimum:
+  a starved process still gets a full slice now and then, so its fastest
+  sample looks idle however loaded the box is.
+
 - 2026-09-21 **Raw stock has a ceiling, a rack is pure storage, and its bays
   are derived.** (W1.) `data/storage.ron` caps a holding at `base_cap` (20,
   free and unconditional, so a new game works and nothing can be crowded out)
