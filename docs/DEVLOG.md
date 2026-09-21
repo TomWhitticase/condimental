@@ -184,6 +184,90 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-20 — The width pass, measured: a fit that was not conditional cost the board an offer
+
+PR #102 taught every modal to yield width at 1280x720 and landed on main as
+`c62aae9`. An adversarial review of it finished after the merge and its
+verdict never reached anyone, so its three blocking findings and one request
+have been live defects in shipped code since. This is that review, worked
+through. Nothing here is new behaviour; all four are regressions or
+false statements introduced by that PR.
+
+**The contracts board lost a whole offer at 1600x900 — by five pixels.**
+`_build_contract_board_row` put the offer's terms on a second line
+*unconditionally*. That split is load-bearing at 1280x720, where the unsplit
+grid wants 1324px against 1264px available. At 1600x900 it is not: unsplit,
+the panel is 1380px in a 1600px window with 220px to spare. What the split
+costs there is vertical — a card goes 120px to 157px, so three of them need
+489px against a 484px cap and `snap_rows` cuts the list to TWO. Before the
+width pass the board showed three offers at that size; after it, two. The
+fix is the doctrine the PR's own decision record states and then did not
+apply to itself: `_fit_contract_board_split` measures the panel unsplit
+against `_modal_available_width()` and reparents the terms label into the mix
+row when it fits, into the text column when it does not. At 1600x900 the
+board is back to three whole offers with the sentence on one line; at
+1280x720 the rendered frame is byte-identical to before.
+
+**`snap_rows` is a cost, so it now needs a reason.** Moving the cut down to
+the last whole row buys a tidy edge and pays height. The build menu was
+already exempt on the grounds that the half-row past the cap is what says
+"scroll". The production panel asked for it and paid 161px at 1600x900 —
+four rows where main had shown four plus a readable fifth. The rule the two
+share, and the one recorded: **`snap_rows` is for a stack whose rows are
+DECISIONS the player signs** — an offer, a hire — where half a card is half a
+choice. A production row is a readout; nothing is signed and nothing is lost
+by cutting one, so the production panel drops it and the half-row does its
+job (367px to 434px at 1600x900, 179px to 254px at 1280x720).
+
+**"`autowrap_mode` is banned and unused" was false the day it was written.**
+`docs/UI_UX.md`, `godot_project/CLAUDE.md` and `docs/DECISIONS.md` all stated
+it as an absolute while 14 live assignments sat in `main.gd`. All four
+statements are rescoped to what the code does, against every site checked
+rather than assumed: seven shop and market labels sit in a button pinned by
+`SHOP_SLOT_SIZE` (`main.gd:5719`) or `MARKET_SLOT_SIZE` (6312), the
+contents-picker label under `CONFIG_PICKER_SLOT_SIZE` (10177), and six set
+their own `custom_minimum_size.x` — `CONFIG_PANEL_WIDTH`, `CREW_TEXT_WIDTH`,
+`PAUSE_BUTTON_MIN_SIZE.x`. The first draft of this correction said the
+configuration panel escapes the rule by not being sized by a fit pass; it
+does not — `_position_config_panel` reads `get_combined_minimum_size()` and
+places the panel against the right-hand plates from it. The pin is the
+exemption, not the absence of measurement, and the true rule is **pin the
+width or do not wrap**. It matters out of proportion to its size because
+`godot_project/CLAUDE.md` loads into every session in that directory: an
+absolute stated there costs the next agent either working code or a session
+spent proving the file wrong.
+
+**Issue #88 was closed behind a test that could not catch it.** #88 is a
+FLUID TANK's configuration panel drawn over STOCK and CREW at 1600x900;
+`test_hud_plates.gd` opened a HOPPER. Reverting `_position_config_panel` to
+its pre-#102 body failed only the 1280x720 case — the size the issue is
+about passed with the fix removed, while a real render of the issue's own
+repro (`--fixture fluids --stock --config=4,2`) put the tank's panel squarely
+on both plates. The test now runs six cases: hopper and tank, 1600x900 and
+1280x720, and the tank again low in the frame where #88 photographed it,
+framed through the real drag-pan rather than a teleport. It was proved by
+reverting: `the fluid tank's configuration panel at (1600, 900), standing 52%
+across and 58% down the frame covers the STOCK plate by 168x100px`. The cause
+is worth recording too, because the first guess was wrong: both the old and
+new bodies measure `get_combined_minimum_size()`. The difference is ORDER —
+the new one clamps `pos.y` *before* consulting the plates, the old one tested
+them against the pre-clamp `y`, found no overlap for a panel opening low, and
+then the final clamp lifted it into them. A bound has to be judged against
+where the panel will be DRAWN, which is the rule `_panel_position_near`
+learned the same way (UI_UX §2b point 33).
+
+**And the branch per plate the same commit forbade.** `_panel_position_near`
+avoided the legend, the contract panel and `_stock_rect` — but not
+`_crew_rect`, in the very commit that created `_crew_rect` and wrote into
+`godot_project/CLAUDE.md` that the right-hand column is ONE list and never a
+branch per plate. A tooltip near the cursor landed on the wage bill. The
+entry is added and the test now loops the column instead of naming one plate,
+so the next tenant of that edge is caught by a test that already exists; it
+was proved by reverting the three lines.
+
+Not fixed here and still open: issue #106 (a mid-word break in the contents
+picker) and issue #99 (the legend), neither of which is this review's
+subject.
 ### 2026-09-20 — Two hopper tints, a guard that refuses, and a distance metric that can see value
 
 Three issues sharing one shape: a lookup table keyed by content id whose

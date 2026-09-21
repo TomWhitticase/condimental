@@ -5397,14 +5397,26 @@ func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 # What never yields: the panel is never cut off at the window's edge, and
 # nothing on it is drawn where the player cannot click it.
 #
-# What is NOT used: `autowrap_mode`. A wrapping Label reports a minimum width
-# of one pixel and a minimum height shaped at whatever width it last had, and
-# it is only ever reshaped when it is drawn — so under `--headless`, where
-# nothing draws, a wrapped sentence reports 1x1609 and every panel measured
-# around it is nonsense. The layout here is measurement-driven end to end
+# What is NOT used, on a Label whose width one of these passes MEASURES:
+# `autowrap_mode`. A wrapping Label reports a minimum width of one pixel and a
+# minimum height shaped at whatever width it last had, and it is only ever
+# reshaped when it is drawn — so under `--headless`, where nothing draws, a
+# wrapped sentence reports 1x1609 and every panel measured around it is
+# nonsense. The layout here is measurement-driven end to end
 # (`_fit_grid_scroll`, `_whole_rows_height`) and its proof is a headless test,
 # so a control whose size cannot be measured without drawing it cannot be part
-# of it. Prose that does not fit moves; it does not reflow.
+# of what is measured. Prose that does not fit moves; it does not reflow.
+#
+# It IS used, 14 times, and every one of them pins the width first so that the
+# 1px minimum is never what anything reads: three shop labels and four market
+# labels sit inside a button whose `custom_minimum_size` is `SHOP_SLOT_SIZE`
+# (5719) or `MARKET_SLOT_SIZE` (6312), the contents-picker label the same under
+# `CONFIG_PICKER_SLOT_SIZE` (10177); the three config-panel notes and the crew
+# affordability line set their own `custom_minimum_size.x` (`CONFIG_PANEL_WIDTH`,
+# `CREW_TEXT_WIDTH`), as do the two pause-menu labels (`PAUSE_BUTTON_MIN_SIZE.x`).
+# The config panel IS measured by a fit pass — `_position_config_panel` reads
+# `get_combined_minimum_size()` — and it is safe because the pin dominates, not
+# because it escapes measurement. The rule is: pin the width or do not wrap.
 
 ## The gap a modal keeps from the left and right edges of the window. In
 ## WINDOW pixels rather than `_ui_px`: this is the last few pixels before a
@@ -5519,11 +5531,14 @@ func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float, 
 	# A floor, so a viewport too small for even one row leaves a scrollable
 	# stub rather than a panel with no grid in it at all.
 	var cap: float = maxf(_ui_px(110.0), available - chrome)
-	# `snap_rows` moves the cut down to the last whole row, for a stack whose
-	# rows are cards the player reads (see `_whole_rows_height`). The build
-	# menu does NOT ask for it: its grid wraps six icon slots to a line, so a
-	# "row" there is a line of cards that are all the same height anyway, and
-	# the half-row it shows past the cap is the thing that says "scroll".
+	# `snap_rows` moves the cut down to the last whole row, and it costs height
+	# to buy a tidy edge, so it is for a stack whose rows are DECISIONS the
+	# player signs — an offer on the board, a hire — where half a card is half
+	# a choice (see `_whole_rows_height`). The build menu does NOT ask for it:
+	# its grid wraps six icon slots to a line, so a "row" there is a line of
+	# cards that are all the same height anyway, and the half-row it shows past
+	# the cap is the thing that says "scroll". Neither does the production
+	# panel, for the same reason: its rows are readouts.
 	if snap_rows:
 		cap = _whole_rows_height(grid, cap)
 	# Both floors above — `_ui_px(110)` and a whole row — may exceed what the
@@ -6792,6 +6807,7 @@ func _position_contract_board() -> void:
 		return
 	var reserved := _hotbar_reserved_height()
 	var bounds := vp.get_visible_rect().size
+	_fit_contract_board_split()
 	# `snap_rows`: an offer is a card the player reads before agreeing to it,
 	# and the SIGN button is on the same line as the terms — half a card is
 	# half a decision (issue #62's rule, one down from an unreachable button).
@@ -6799,6 +6815,47 @@ func _position_contract_board() -> void:
 	var panel_size := _board_panel.get_combined_minimum_size()
 	_board_panel.position.x = maxf(0.0, (bounds.x - panel_size.x) * 0.5)
 	_board_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
+
+
+## Gives every offer its terms on the mix's own line if the board can wear
+## them there, and breaks them onto a second line if it cannot. Returns
+## whether it had to break.
+##
+## MEASURED rather than assumed, the way `_fit_staff_width` measures and for
+## the same reason: the break is what fits the board in a 1280x720 window
+## (`_build_contract_board_row`), and it is not free anywhere else. A broken
+## card is 157px tall against 120px whole, and the board asks `snap_rows` for
+## the last WHOLE card — so at 1600x900 three broken cards want 489px against
+## a 484px cap, miss by five pixels, and the player is shown two offers where
+## the window has room for three. The window that has the width should show
+## the sentence.
+func _fit_contract_board_split() -> bool:
+	if _board_panel == null or _board_rows.is_empty():
+		return false
+	var available: float = _modal_available_width()
+	_set_contract_board_split(false)
+	if _board_panel.get_combined_minimum_size().x <= available:
+		return false
+	_set_contract_board_split(true)
+	return true
+
+
+## Moves every offer's terms between the mix's line and a line of their own.
+## The two labels are always the same two labels, so nothing is re-measured
+## or re-worded by the move; only which box holds the terms changes.
+func _set_contract_board_split(split: bool) -> void:
+	for row in _board_rows:
+		var terms: Control = row["terms_label"]
+		var mix_row: Control = row["mix_label"].get_parent()
+		var text_col: Control = mix_row.get_parent()
+		var wanted: Control = text_col if split else mix_row
+		if terms.get_parent() == wanted:
+			continue
+		terms.get_parent().remove_child(terms)
+		wanted.add_child(terms)
+		if split:
+			# Directly under the mix it continues, above the status line.
+			text_col.move_child(terms, mix_row.get_index() + 1)
 
 
 ## Rebuilds the offer rows from a `board` array. The board is content and
@@ -6856,16 +6913,16 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 	# then the cadence, the payout and the strike rule — every term a player
 	# is agreeing to, on the offer, before they click.
 	#
-	# On TWO lines, because that sentence is really two: what you deliver, and
-	# on what terms. Held on one line, a two-item mix ("3 × Boxed Ketchup, 2 ×
-	# Boxed BBQ Sauce every 3000 ticks · pays +210 · lost after 2 missed in a
-	# row") made the card 1324px wide and the board 1380px — wider than a
-	# 1280x720 window, clipped on both edges, with SIGN off the right of the
-	# screen (issue #62). Broken at the join the sentence already had, the
-	# column is as wide as its LONGER half instead of as wide as both, which is
-	# what puts it back inside the window. It is a break at a fixed point, not
-	# a reflow — see `autowrap_mode` under MODAL_EDGE_MARGIN for why the
-	# difference matters here.
+	# Built on ONE line, which is how the sentence reads: what you deliver and
+	# on what terms. It does not always fit. A two-item mix ("3 × Boxed
+	# Ketchup, 2 × Boxed BBQ Sauce every 3000 ticks · pays +210 · lost after 2
+	# missed in a row") makes the card 1324px wide and the board 1380px —
+	# wider than a 1280x720 window, clipped on both edges, with SIGN off the
+	# right of the screen (issue #62). `_fit_contract_board_split` breaks it
+	# at the join the sentence already has when that happens, so the column is
+	# as wide as its LONGER half instead of as wide as both. It is a break at
+	# a fixed point, not a reflow — see `autowrap_mode` under
+	# MODAL_EDGE_MARGIN for why the difference matters here.
 	var mix_row := HBoxContainer.new()
 	mix_row.add_theme_constant_override("separation", _ui_i(6))
 	text_col.add_child(mix_row)
@@ -6892,7 +6949,7 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 		int(offer.get("payout", 0)),
 		int(offer.get("strikes", 1)),
 	]
-	text_col.add_child(terms_label)
+	mix_row.add_child(terms_label)
 
 	var status_label := Label.new()
 	status_label.name = "OfferStatus"
@@ -8448,7 +8505,13 @@ func _position_production_panel() -> void:
 		return
 	var reserved := _hotbar_reserved_height()
 	var bounds := vp.get_visible_rect().size
-	_fit_grid_scroll(_production_scroll, _production_rows_box, bounds.y - reserved - _ui_px(16.0), true)
+	# No `snap_rows`, for the build menu's reason rather than the board's
+	# (`_fit_grid_scroll`): a production row is a readout, not a decision the
+	# player signs, so half a row costs nobody half a choice — and the half
+	# row showing past the cut is the thing that says "there is more, scroll".
+	# Asking for whole rows here bought a tidier edge and paid a readable row
+	# for it: at 1600x900 the panel ended 161px short of the column it had.
+	_fit_grid_scroll(_production_scroll, _production_rows_box, bounds.y - reserved - _ui_px(16.0))
 	var panel_size := _production_panel.get_combined_minimum_size()
 	_production_panel.position.x = maxf(0.0, (bounds.x - panel_size.x) * 0.5)
 	_production_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
@@ -13694,17 +13757,21 @@ func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
 	# hotbar's top edge, same bug the config panel's own clamp
 	# (`_hotbar_reserved_height()` below) already guards against.
 	var lower_bound := bounds.y - _hotbar_reserved_height()
-	# The legend (top-left), the contracts clipboard (top-right) and the stock
-	# plate (right edge, above the hotbar) are fixed HUD plates this panel must
-	# never land on — a tile rendered under any of them (a close-zoomed camera
-	# near the world origin, or a cursor high on the screen where the flip
-	# below used to only check the right/bottom edges) put this panel right
-	# over their own text otherwise (found in rendered frames, twice — one bug
-	# each).
+	# The legend (top-left) and the right-hand column — the contracts
+	# clipboard, the stock plate and the crew plate, top to bottom — are the
+	# fixed HUD plates this panel must never land on. A tile rendered under
+	# any of them (a close-zoomed camera near the world origin, or a cursor
+	# high on the screen where the flip below used to only check the
+	# right/bottom edges) put this panel right over their own text otherwise
+	# (found in rendered frames, twice — one bug each).
+	# The right-hand column is ONE LIST here, never a branch per plate
+	# (godot_project/CLAUDE.md): CREW was added to the column and left out of
+	# this list, so a machine hovered near the right edge covered the whole
+	# plate while the middle of the screen sat empty.
 	# Each plate reports its own CURRENT rect through a helper
-	# (`_legend_rect`, `_stock_rect`) rather than being measured here, so a
-	# collapsed legend is avoided at the size it actually is — its stub — and
-	# not at the five-line size it had when the game started.
+	# (`_legend_rect`, `_stock_rect`, `_crew_rect`) rather than being measured
+	# here, so a collapsed legend is avoided at the size it actually is — its
+	# stub — and not at the five-line size it had when the game started.
 	var avoid: Array[Rect2] = []
 	var legend := _legend_rect()
 	if legend.size.y > 0.0:
@@ -13718,6 +13785,9 @@ func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
 	var stock := _stock_rect()
 	if stock.size.y > 0.0:
 		avoid.append(stock)
+	var crew := _crew_rect()
+	if crew.size.y > 0.0:
+		avoid.append(crew)
 	# Try both hands of both axes around the cursor, nearest (bottom-right,
 	# matching the un-flipped default) first, and take the first that fits
 	# on screen, above the hotbar and clear of every avoided plate.

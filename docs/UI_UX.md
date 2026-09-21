@@ -640,13 +640,25 @@ this order:
    are **the most** a grid ever takes, not the number it always takes.
 3. **The list scrolls**, as above.
 
-**`autowrap_mode` is not used anywhere in this layout.** A wrapping Label
-reports a 1px minimum width and a height shaped at whatever width it was last
-*drawn* at — so under `--headless` it measures 1x1609 and every panel sized
-around it is nonsense. This layout is measurement-driven end to end and its
-regression proof is a headless test. A sentence that must get narrower is
-**broken at a join it already has** (the board's offer is a mix label and a
-terms label) — a break at a fixed point, not a reflow.
+**`autowrap_mode` is never put on a Label whose width a fit pass measures.**
+A wrapping Label reports a 1px minimum width and a height shaped at whatever
+width it was last *drawn* at — so under `--headless` it measures 1x1609 and
+every panel sized around it is nonsense. This layout is measurement-driven end
+to end and its regression proof is a headless test. A sentence that must get
+narrower is therefore **broken at a join it already has** (the board's offer
+is a mix label and a terms label) — a break at a fixed point, not a reflow,
+and `_fit_contract_board_split` measures before it breaks so a window with the
+room keeps the sentence whole.
+
+It *is* used — 14 times in `main.gd` — wherever the width is **pinned** before
+anything measures it, so the 1px minimum is never what a fit pass reads: inside
+a fixed-size ancestor (`SHOP_SLOT_SIZE`, `MARKET_SLOT_SIZE`,
+`CONFIG_PICKER_SLOT_SIZE`), or on a Label that sets its own
+`custom_minimum_size.x` (`CONFIG_PANEL_WIDTH` for the configuration notes,
+`CREW_TEXT_WIDTH` for the crew affordance line, `PAUSE_BUTTON_MIN_SIZE.x` for
+the pause menu). The configuration panel *is* measured by a fit pass
+(`_position_config_panel`), so escaping measurement is not the exemption — the
+pin is. Pin the width or do not wrap.
 
 **A panel that dodges the right-hand column consults one list, after its own
 clamp** (2026-09-20, issue #88). The clipboard, STOCK and CREW plates are
