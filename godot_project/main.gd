@@ -1442,11 +1442,20 @@ const CONTRACT_PANEL_MARGIN := 16
 const STOCK_PANEL_MIN_WIDTH := 228.0 * UI_SCALE
 ## The share of the space between the clipboard and the hotbar the plate may
 ## take before its list scrolls. `data/ingredients.ron` ships three raw
-## ingredients and this engages at about nine, so it is the safety valve
+## ingredients and the BBQ gate opens three more, so this is the safety valve
 ## `_fit_grid_scroll` already is for the build menu and the docket stack —
 ## what it really guarantees is that the clipboard above always keeps most of
 ## the column, since the clipboard is capped against whatever this leaves.
-const STOCK_PANEL_HEIGHT_SHARE := 0.42
+##
+## RAISED FROM 0.42 WITH THE WAREHOUSE (2026-09-21, W4). At 0.42 the share
+## itself was the thing cutting the list: with the CREW plate below and one
+## docket above, 1600x900 left the plate a 132px band it was then allowed only
+## 174px of — and 69px of that is the plate's own chrome, so the shipped
+## window showed ONE of three ingredients. The share exists to stop the plate
+## eating the column, not to cut a list the column has already made room for;
+## the band (`_position_stock_panel`) is the real bound and it is measured off
+## the other plates. Six ingredients at 0.55 is still under half the column.
+const STOCK_PANEL_HEIGHT_SHARE := 0.55
 ## The plate's two text values, and how far a row with nothing in it fades.
 ## No new colour language (UI_UX.md §7): the stocked count is the dark
 ## plate's ordinary body ink, and `none` is the same grey the hint line under
@@ -1487,7 +1496,21 @@ const CREW_TEXT_WIDTH := STOCK_PANEL_MIN_WIDTH - CREW_PANEL_PADDING * 2.0
 ## dropping detail (`_crew_fit_detail`). STOCK's twin, and deliberately close
 ## to it: the column now has three tenants and the clipboard is the one that
 ## ends up with the remainder, so neither readout below it may be open-ended.
-const CREW_PANEL_HEIGHT_SHARE := 0.43
+##
+## CUT FROM 0.43 WITH THE WAREHOUSE (2026-09-21, W4). 0.43 was set when this
+## plate was the newcomer and STOCK's three rows still fitted around it; they
+## do not. The column at 1600x900 is 741px, and the three tenants want 283
+## (clipboard, one docket), 302 (this plate WITH its assignment lines) and 211
+## (three stock rows) — 796px of demand for 741px of column, so something is
+## cut whatever this number says. What 0.43 chose was to cut the stock list to
+## a single ingredient, breaking the promise UI_UX.md §5f makes for the
+## shipped window; 0.32 spends this plate's assignment line instead, which is
+## the trade its own header already ranks first (the machine names are in the
+## H panel in full, and every category and count stays on this plate either
+## way). 0.32 is not arbitrary: 212px — this plate with the detail dropped and
+## four categories' worth of headroom — is what it has to clear at 1600x900,
+## and 302px is what it has to refuse.
+const CREW_PANEL_HEIGHT_SHARE := 0.32
 const STOCK_COUNT_COLOR := Color(0.92, 0.93, 0.94)
 const STOCK_NONE_COLOR := Color(0.66, 0.68, 0.72)
 const STOCK_NONE_ROW_ALPHA := 0.62
@@ -1603,6 +1626,11 @@ var _hotbar_tooltip_index := -1
 ## for.
 var _market_panel: PanelContainer
 var _market_money_label: Label
+## The warehouse line under the heading: how many racks are standing, and how
+## many of their bays are spoken for. Hidden outright when the wire carries no
+## warehouse at all.
+var _market_storage_label: Label
+var _market_bays_meter: Panel
 ## One dictionary per ingredient, in `data/ingredients.ron` order:
 ## {id, button, icon, price_label, owned_label}.
 var _market_slots: Array = []
@@ -1834,6 +1862,12 @@ var _strike_style_struck: StyleBoxFlat
 ## printed on the slot, so the gesture means one thing.
 const MARKET_CRATE := 10
 
+## The room a slot has when the wire carries no ceiling for it — a snapshot
+## from before the warehouse existed. Every quantity in this panel is clamped
+## by `min(quantity, room)`, so "no ceiling" has to be a number rather than a
+## branch, and it is one no balance can reach a tenth of.
+const MARKET_ROOM_UNBOUNDED := 1 << 30
+
 ## The slack a market unit price is compared with when working out how many
 ## units a balance covers. Money is fixed-point on the wire (`types::Money`,
 ## sixteen fractional bits, so a granularity of about 1.5e-5) and arrives
@@ -1864,17 +1898,29 @@ const MARKET_PRICE_EPSILON := 1.0e-6
 ## strip is gone rather than kept alongside — one readout of one fact in one
 ## place, so the two can never disagree.
 ##
-## NO BAR, ON PURPOSE (UI_UX.md §5e). Nothing in the game says how many
-## tomatoes is "full", so stock stays a figure; a gauge whose full mark is
-## invented teaches a scale that does not exist. Zero is the one state with a
-## consequence, and it is carried by the WORD `none`, dimmed — not by colour
-## alone (§7).
+## STILL NO BAR, AND THE REASON CHANGED (UI_UX.md §5e). It was "nothing in
+## the game says how many tomatoes is full"; the warehouse says so now
+## (`storage.ron`'s base cap, raised a bay at a time by racks), so the ceiling
+## exists and a bar would be legal here. It is still the wrong drawing: a
+## per-ingredient cap comes out of a SHARED pool of bays, so tomato's full
+## mark moves when sugar is bought, and six meters drifting against each other
+## on an always-on plate is a worse readout than six numbers. The ceiling is
+## drawn where it is acted on instead — the market crate says `owned /
+## capacity` beside the price (`_update_ingredient_market`), and this plate
+## carries only the state that stops a purchase: the FULL chip. Zero keeps the
+## WORD `none`, dimmed; both states are a word and not a colour alone (§7).
 ##
 ## `_larder_entries` and `_update_larder()` keep their names through the
 ## move: they are the dictionary of id -> count Label and the per-frame
 ## refresh, and both are what `test_chain_rework.gd` drives.
 var _stock_panel: PanelContainer
 var _stock_scroll: ScrollContainer
+## The gutter between the rows and the scroll bar. Without it the bar's thumb
+## is drawn ON the right-aligned count — the one column of this plate the eye
+## is there to read — and only when the list is cut, so the count a player
+## most needs is the one that gets a bar through it. Widened to the bar only
+## while the list IS cut, so an uncut list keeps its full width.
+var _stock_rows_gutter: MarginContainer
 var _stock_rows: VBoxContainer
 var _stock_hint: Label
 ## The CREW plate and its per-category rows, keyed on the wire's category id
@@ -1895,6 +1941,13 @@ var _crew_hint_warn: LabelSettings
 var _crew_plate_style: StyleBoxFlat
 var _crew_afford_label: Label
 var _larder_entries: Dictionary = {} # item id -> count Label
+## The chip that says a count has stopped moving. An ingredient at its
+## warehouse ceiling refuses the next crate (`BuyIngredient` clamps), and a
+## count that simply stops going up while the money goes nowhere is the kind
+## of silence this HUD's refusal rules exist to break — so the row says the
+## word. A chip beside the count rather than text inside it, so the numbers
+## stay a column the eye can run down.
+var _larder_full_chips: Dictionary = {} # item id -> "FULL" Label
 var _stock_row_nodes: Dictionary = {} # item id -> HBoxContainer (dimmed at zero)
 ## The ids the rows were built for, and the settings they were built from,
 ## so `_rebuild_stock_rows` can build more later. The larder is the market's
@@ -6804,6 +6857,43 @@ func _build_ingredient_market(hud: CanvasLayer, base_settings: LabelSettings) ->
 	_market_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	heading.add_child(_market_money_label)
 
+	# THE WAREHOUSE, UNDER THE BALANCE, because it is the second ceiling on
+	# this panel's one verb. Money says what you can afford and this line says
+	# what you have room for, and a crate refused for the second reason with
+	# only the first on screen is the "why did nothing happen" the capacity
+	# rule would otherwise ship with. It reads as a bay count rather than a
+	# per-ingredient one: bays are a shared pool (`sim::storage`), so the
+	# per-ingredient ceiling belongs on the crate that spends it and the pool
+	# belongs here, once.
+	var storage_settings := LabelSettings.new()
+	storage_settings.font_size = _ui_font(-1)
+	storage_settings.font_color = Color(0.66, 0.68, 0.72)
+	storage_settings.outline_size = base_settings.outline_size
+	storage_settings.outline_color = base_settings.outline_color
+
+	var storage_row := HBoxContainer.new()
+	storage_row.name = "MarketStorage"
+	storage_row.add_theme_constant_override("separation", _ui_i(16))
+	body.add_child(storage_row)
+
+	_market_storage_label = Label.new()
+	_market_storage_label.name = "StorageLine"
+	_market_storage_label.label_settings = storage_settings
+	_market_storage_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_market_storage_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	storage_row.add_child(_market_storage_label)
+
+	# A bar is legal here for the first time: the warehouse is a ceiling the
+	# simulation defines (`total_bays`), which is the whole of the one-meter-
+	# language rule's test (UI_UX.md §5e). Fixed width, not EXPAND: it hangs
+	# off the end of a line whose length is the rack count, and a bar that
+	# changed size with the wording would be a different picture of the same
+	# number every time a rack was built.
+	_market_bays_meter = _build_meter(storage_row, _ui_px(140.0), METER_FILL_LEVEL,
+		METER_TRACK_COLOR, METER_BORDER_COLOR, SHOP_METER_HEIGHT)
+	_market_bays_meter.name = "BaysMeter"
+	_market_bays_meter.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+
 	# A GRID, NOT A ROW, and inside a scroll (issue #69). One HBox of
 	# fixed-size crates has no width bound at all: three ingredients measured
 	# 648px and looked like a design, and the BBQ gate's six measured 1260px
@@ -7070,6 +7160,7 @@ func _update_ingredient_market() -> void:
 	if not _market_slots_match(entries):
 		_rebuild_market_slots(entries)
 	_market_money_label.text = "Money: %.0f" % float(snapshot.get("money", 0.0))
+	_update_market_storage()
 	_position_market_panel()
 
 	for index in range(_market_slots.size()):
@@ -7078,22 +7169,47 @@ func _update_ingredient_market() -> void:
 		var slot: Dictionary = _market_slots[index]
 		var entry: Dictionary = entries[index]
 		var unit_price: float = float(entry.get("price", 0.0))
-		var crate_price := unit_price * float(MARKET_CRATE)
-		var affordable: bool = float(snapshot.get("money", 0.0)) >= crate_price
+		var owned := int(entry.get("owned", 0))
+		# THE WAREHOUSE'S CEILING FOR THIS INGREDIENT, and the room left under
+		# it. `capacity` is the wire's own figure (`IngredientSnapshot`), never
+		# re-derived here from the base cap and the bay count: bays are a
+		# shared pool and only the simulation knows how much of it the other
+		# ingredients are standing in. The documented fallback for a snapshot
+		# carrying no `capacity` is NO ceiling — an older wire then shops the
+		# way it always did rather than refusing every crate.
+		var capacity := int(entry.get("capacity", 0))
+		var room: int = MARKET_ROOM_UNBOUNDED if capacity <= 0 else maxi(0, capacity - owned)
+		# What a click would ACTUALLY fetch. The simulation clamps a purchase
+		# to what fits and charges for what it credits (`BuyIngredient`), so a
+		# crate printed as ten against four bays of room would be a promise the
+		# panel breaks on its own next line.
+		var crate_units: int = mini(MARKET_CRATE, room)
+		var crate_price := unit_price * float(crate_units)
+		var affordable: bool = crate_units > 0 and float(snapshot.get("money", 0.0)) >= crate_price
 		# The three never-colour-alone signals the build menu already uses:
 		# a "✗" on the price, a dimmed icon, and a disabled (recessed) slot.
-		slot["price_label"].text = "Buy %d  ·  %.0f" % [MARKET_CRATE, crate_price]
-		if not affordable:
-			slot["price_label"].text += "  ✗"
+		#
+		# AT CAPACITY IS ITS OWN WORD, not the price with a "✗" on it. The two
+		# refusals have different cures — earn money, or build a rack — and a
+		# shop that says "no" the same way for both sends the player to the
+		# wrong one. Amber, the colour the STOCK plate's FULL chip uses for the
+		# same fact, and never the colour alone.
+		if room <= 0:
+			slot["price_label"].text = "AT CAPACITY  ✗"
+		else:
+			slot["price_label"].text = "Buy %d  ·  %.0f" % [crate_units, crate_price]
+			if not affordable:
+				slot["price_label"].text += "  ✗"
 		slot["price_label"].label_settings.font_color = (
-			Color(0.92, 0.93, 0.94) if affordable else Color(0.55, 0.50, 0.48)
+			Color(0.98, 0.85, 0.42) if room <= 0
+			else (Color(0.92, 0.93, 0.94) if affordable else Color(0.55, 0.50, 0.48))
 		)
 		slot["icon"].modulate = Color.WHITE if affordable else Color(0.42, 0.42, 0.45, 0.75)
 		# WHAT SHIFT+CLICK WOULD FETCH RIGHT NOW, recomputed every poll from
 		# the wire's own unit price (never a Godot-side idea of one), so the
 		# second verb is a number on the card rather than a promise the
 		# player has to do arithmetic to check.
-		var units := _units_affordable(float(snapshot.get("money", 0.0)), unit_price)
+		var units: int = mini(_units_affordable(float(snapshot.get("money", 0.0)), unit_price), room)
 		slot["shift_label"].text = (
 			"shift: buy %d" % units if units > 0 else "shift: buy 0  ✗"
 		)
@@ -7127,7 +7243,76 @@ func _update_ingredient_market() -> void:
 		# is then the same on every crate whatever the numbers are, which a
 		# rendered frame showed matters — a ragged one-word overflow reads as
 		# a bug, a deliberate second line reads as a spec.
-		slot["owned_label"].text = "In stock %d\n%.0f each" % [int(entry.get("owned", 0)), unit_price]
+		# `owned / capacity` — the ceiling drawn where it is acted on. The
+		# always-on STOCK plate carries the count and a FULL chip; the pair of
+		# numbers lives here, on the panel whose one verb the ceiling stops.
+		slot["owned_label"].text = (
+			("In stock %d\n%.0f each" % [owned, unit_price]) if capacity <= 0
+			else ("In stock %d / %d\n%.0f each" % [owned, capacity, unit_price])
+		)
+
+
+## The warehouse line under the market's balance: how many racks are standing
+## and how much of their shared bay pool is spoken for.
+##
+## Every figure is `storage_snapshot_json`'s (`sim::storage`) — the rack count
+## is the snapshot's list, not a count of the models this scene happens to
+## have built, and `used_bays` is the simulation's, never a Godot-side sum of
+## `ceil(owned / stack)` over the ingredients. That sum is exactly the
+## arithmetic the wire exists to carry (CLAUDE.md: never recompute a number
+## the wire already carries).
+##
+## A factory with no rack still gets the line: "no racks" is the answer to
+## "why will this crate not buy", and a panel that only mentions the warehouse
+## once one exists cannot teach that racks are the cure.
+func _update_market_storage() -> void:
+	if _market_storage_label == null or _market_bays_meter == null:
+		return
+	if _storage_state.is_empty():
+		# The market can be opened before the first poll has read a buffer.
+		# One door to the warehouse, so it is that door being opened early.
+		_refresh_racks()
+	if _storage_state.is_empty():
+		# No warehouse on the wire at all — the documented fallback is to say
+		# nothing rather than to print zeroes that read as "you have no room".
+		_market_storage_label.visible = false
+		_market_bays_meter.visible = false
+		return
+	_market_storage_label.visible = true
+	var base_cap := int(_storage_state.get("base_cap", 0))
+	var total := int(_storage_state.get("total_bays", 0))
+	var used := int(_storage_state.get("used_bays", 0))
+	var racks: int = (_storage_state.get("racks", []) as Array).size()
+	if total <= 0:
+		_market_storage_label.text = (
+			"Warehouse: no racks  ·  %d of each ingredient  ·  build a rack for more" % base_cap
+		)
+		_market_bays_meter.visible = false
+		return
+	_market_bays_meter.visible = true
+	_market_storage_label.text = "Warehouse: %d rack%s  ·  bays %d / %d  ·  %d free" % [
+		racks, "" if racks == 1 else "s", used, total, maxi(0, total - used)
+	]
+	_set_meter(
+		_market_bays_meter, clampf(float(used) / float(total), 0.0, 1.0),
+		METER_FILL_WARN if used >= total else METER_FILL_LEVEL
+	)
+
+
+## How many more units of `item_id` the warehouse will take: the wire's
+## `capacity` for it less what is held. `MARKET_ROOM_UNBOUNDED` when the
+## snapshot carries no ceiling for it — the same fallback the crate's own
+## labels take, so the printed quantity and the bought one cannot disagree
+## about whether there is a ceiling at all.
+func _market_room(item_id: String) -> int:
+	for entry in _ingredients_snapshot().get("entries", []):
+		if String(entry.get("id", "")) != item_id:
+			continue
+		var capacity := int(entry.get("capacity", 0))
+		if capacity <= 0:
+			return MARKET_ROOM_UNBOUNDED
+		return maxi(0, capacity - int(entry.get("owned", 0)))
+	return MARKET_ROOM_UNBOUNDED
 
 
 ## Buys one crate, or `quantity` units when a caller has worked out a better
@@ -7138,12 +7323,30 @@ func _update_ingredient_market() -> void:
 func _buy_ingredient_slot(index: int, quantity: int = MARKET_CRATE) -> void:
 	if index < 0 or index >= _market_slots.size():
 		return
+	var item_id := String(_market_slots[index]["id"])
+	# CLAMPED TO THE ROOM THE WAREHOUSE HAS LEFT, the same clamp the slot
+	# printed with. The simulation clamps too, and charges only for what it
+	# credits, so an unclamped command could not overspend — it would simply
+	# buy four where the label said ten, which is the panel lying about its own
+	# verb. One place works the number out for both (`_market_room`).
+	var wanted: int = mini(quantity, _market_room(item_id))
+	if wanted <= 0:
+		# A full larder buys nothing, and is owed the same "no" every other
+		# refused command gets (UI_UX.md §8) rather than a command sent to be
+		# declined in silence.
+		_cue(FactoryAudio.REFUSED)
+		return
 	var money_before := _current_money()
 	sim.issue_command_json(JSON.stringify({
 		"type": "buy_ingredient",
-		"item": String(_market_slots[index]["id"]),
-		"quantity": quantity,
+		"item": item_id,
+		"quantity": wanted,
 	}))
+	# The stock that just arrived went into the warehouse, and a purchase
+	# dirties no tile at all (`_refresh_racks`'s own note), so the pallets on
+	# the racks and the bay count on this panel's header are re-read here
+	# rather than a frame later — the player is looking at both as they click.
+	_refresh_racks()
 	_update_ingredient_market()
 	_cue(FactoryAudio.BUY if _current_money() < money_before else FactoryAudio.REFUSED)
 
@@ -9644,6 +9847,7 @@ func _build_stock_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	# headless `--script` harness — the same guard `_build_ingredient_market`
 	# carries, and the reason this dictionary is rebuilt rather than added to.
 	_larder_entries.clear()
+	_larder_full_chips.clear()
 	_stock_row_nodes.clear()
 	_larder_ids.clear()
 
@@ -9694,12 +9898,18 @@ func _build_stock_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_stock_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	body.add_child(_stock_scroll)
 
+	_stock_rows_gutter = MarginContainer.new()
+	_stock_rows_gutter.name = "StockRowsGutter"
+	_stock_rows_gutter.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stock_rows_gutter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_stock_scroll.add_child(_stock_rows_gutter)
+
 	_stock_rows = VBoxContainer.new()
 	_stock_rows.name = "StockRows"
 	_stock_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_stock_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_stock_rows.add_theme_constant_override("separation", _ui_i(5))
-	_stock_scroll.add_child(_stock_rows)
+	_stock_rows_gutter.add_child(_stock_rows)
 
 	_stock_base_settings = base_settings
 	_rebuild_stock_rows(_ingredients_snapshot().get("entries", []))
@@ -10195,6 +10405,26 @@ func _build_stock_row(base_settings: LabelSettings, item_id: String) -> void:
 	name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(name_label)
 
+	# The warehouse ceiling, said only when it bites (`_update_larder`). It
+	# rides between the name and the count so the counts stay a column, and it
+	# is the plate's one amber word — the same hazard gold as the heading and
+	# the market's own "AT CAPACITY", so the two panels name one state once.
+	var full_settings := LabelSettings.new()
+	full_settings.font_size = _ui_font(-2)
+	full_settings.font_color = Color(0.98, 0.85, 0.42)
+	full_settings.outline_size = base_settings.outline_size
+	full_settings.outline_color = base_settings.outline_color
+
+	var full_chip := Label.new()
+	full_chip.name = "StockFull_%s" % item_id
+	full_chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	full_chip.label_settings = full_settings
+	full_chip.text = "FULL"
+	full_chip.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	full_chip.visible = false
+	row.add_child(full_chip)
+	_larder_full_chips[item_id] = full_chip
+
 	var count_settings := LabelSettings.new()
 	count_settings.font_size = _ui_font(-1)
 	count_settings.font_color = STOCK_COUNT_COLOR
@@ -10291,6 +10521,23 @@ func _position_stock_panel() -> void:
 	var chrome: float = _stock_panel.get_combined_minimum_size().y - natural
 	var cap: float = _whole_rows_height(_stock_rows, maxf(_stock_row_height(), available - chrome))
 	_stock_scroll.custom_minimum_size.y = minf(natural, cap)
+	# A cut list grows a scroll bar, and the bar is drawn INSIDE the scroll's
+	# rect — over the right-aligned count, which is the column this plate
+	# exists to be read down. Reserve the bar's width while there is a bar.
+	# Only while there is one: an uncut list would otherwise carry a gutter
+	# for a bar nobody can see, on the one plate whose width is a fixed
+	# minimum rather than its content's.
+	var gutter: float = 0.0
+	if _stock_scroll.custom_minimum_size.y < natural - 0.5:
+		gutter = _ui_px(10.0)
+		var bar := _stock_scroll.get_v_scroll_bar()
+		if bar != null:
+			gutter = maxf(gutter, bar.get_combined_minimum_size().x)
+	_stock_rows_gutter.add_theme_constant_override("margin_right", int(ceilf(gutter)))
+	# Said before the plate is measured, because saying it can widen the head
+	# row. This is the one place that knows how much of the list the column
+	# actually took.
+	_update_stock_hint()
 
 	var size := _stock_panel.get_combined_minimum_size()
 	_stock_panel.size = size
@@ -10317,6 +10564,64 @@ func _stock_row_height() -> float:
 		return STOCK_ICON_SIZE.y
 	var row := _stock_rows.get_child(0) as Control
 	return STOCK_ICON_SIZE.y if row == null else row.get_combined_minimum_size().y
+
+
+## The head row's second word, and the one place the plate admits it is not
+## showing everything.
+##
+## `M: market` alone while the whole list is on the plate; `+2 more · M:
+## market` when the column cut it. At 1280x720 the column cannot seat the
+## clipboard, this plate and CREW whole, so the cut is not an edge case — and
+## a plate that silently shows one of three ingredients reads as a factory
+## that holds one ingredient, which is a worse lie than a shorter list.
+##
+## The scrollbar does not say it by itself: the plate is
+## `MOUSE_FILTER_IGNORE` from the panel down, so the thumb is a mark the
+## player can see and cannot drag. A count rather than an ellipsis because
+## the number IS the missing information — "+2" tells you whether opening the
+## market is worth it.
+func _update_stock_hint() -> void:
+	if _stock_hint == null:
+		return
+	var hidden := _stock_rows_hidden()
+	_stock_hint.text = "M: market" if hidden <= 0 else "+%d more  ·  M: market" % hidden
+
+
+## How many rows the height cap left off the bottom of the list.
+##
+## Measured the way the cut itself was made — whole rows against
+## `_stock_scroll`'s capped height, minimum sizes not laid-out ones — so a
+## headless test gets the same answer as the window. Asking the row nodes
+## where they ended up would report nothing before the first layout pass,
+## which is the only state a `--headless` run is ever in.
+func _stock_rows_hidden() -> int:
+	if _stock_rows == null or _stock_scroll == null:
+		return 0
+	var separation := float(_stock_rows.get_theme_constant("separation"))
+	var allowed: float = _stock_scroll.custom_minimum_size.y
+	var total := 0
+	var shown := 0
+	var used := 0.0
+	# Everything below the first row that did not fit is hidden too, even if a
+	# shorter one further down would have fitted in the gap: the list does not
+	# reorder itself, it scrolls.
+	var cut := false
+	for child in _stock_rows.get_children():
+		var row := child as Control
+		if row == null or not row.visible:
+			continue
+		total += 1
+		if cut:
+			continue
+		var next: float = used + row.get_combined_minimum_size().y
+		if shown > 0:
+			next += separation
+		if next > allowed + 0.5:
+			cut = true
+			continue
+		used = next
+		shown += 1
+	return maxi(0, total - shown)
 
 
 ## How much of the right-hand column the stock plate owns, margins included —
@@ -10353,6 +10658,7 @@ func _stock_reserved_height() -> float:
 ## (`_update_contract_panel`). A plate drawn ON the clipboard is a worse
 ## fault than either of the two things the caps are there to avoid.
 ##
+##
 ## An absolute `y` rather than a height, because the two numbers a height
 ## would have to be subtracted from are both approximations of this one:
 ## `_update_contract_panel`'s column reserves the hotbar's flyout strip that
@@ -10377,6 +10683,36 @@ func _stock_ceiling_y() -> float:
 	floor_y -= _crew_reserved_height()
 	var chrome: float = _stock_panel.get_combined_minimum_size().y - _stock_scroll.custom_minimum_size.y
 	return floor_y - (chrome + _stock_row_height()) - STOCK_PANEL_MARGIN
+
+
+## Where the plate's top edge lands once it has the WHOLE list it asked for —
+## `_stock_ceiling_y`'s preferred line, the one the clipboard is asked to stop
+## at before it starts taking rows off this plate.
+##
+## The two exist because the clipboard's growth (issue #13) had only the
+## absolute line to aim at, and that line is drawn at ONE ROW: an invitation
+## to take everything down to one row, which a board with a single signed
+## contract duly did — the shipped 1600x900 window showed one ingredient of
+## three (2026-09-21, W4). Both faults are the same rank in §5f's list ("a
+## list showing less than it could"), so the tiebreak is REACHABILITY: the
+## docket stack is a scroll bar the player can drag and the C board shows
+## every contract in full besides, whereas this plate is `MOUSE_FILTER_IGNORE`
+## from the panel down — a row cut off this list is a row nothing on screen
+## can bring back. So the stack yields first, keeping a whole line of its
+## first docket as it does (`_update_contract_panel`), and the absolute line
+## still ends it: below that the plate would stand on the CREW plate, and a
+## panel drawn on a panel outranks both.
+func _stock_list_ceiling_y() -> float:
+	if _stock_panel == null or not _stock_panel.visible:
+		return INF
+	var vp := get_viewport()
+	if vp == null or vp.get_visible_rect().size.y <= 0.0:
+		return INF
+	var floor_y: float = vp.get_visible_rect().size.y - _hotbar_reserved_height() - STOCK_PANEL_MARGIN
+	if _hotbar_panel != null and _hotbar_panel.size.y > 0.0:
+		floor_y = _hotbar_panel.get_global_rect().position.y - STOCK_PANEL_MARGIN
+	floor_y -= _crew_reserved_height()
+	return floor_y - _stock_wanted_height() - STOCK_PANEL_MARGIN
 
 
 ## The plate at its full list height, capped by the share of the column it is
@@ -10444,6 +10780,7 @@ func _rebuild_stock_rows(entries: Array) -> void:
 				row.get_parent().remove_child(row)
 			row.queue_free()
 	_larder_entries.clear()
+	_larder_full_chips.clear()
 	_stock_row_nodes.clear()
 	_larder_ids.clear()
 	if _stock_rows == null or _stock_base_settings == null:
@@ -10485,6 +10822,14 @@ func _update_larder() -> void:
 		# running perfectly well would cry wolf.
 		label.text = "%d" % owned if owned > 0 else "none"
 		label.label_settings.font_color = STOCK_COUNT_COLOR if owned > 0 else STOCK_NONE_COLOR
+		# The other end of the same figure: the warehouse ceiling, shown only
+		# where it changes what a click does. `capacity` is the wire's
+		# (`IngredientSnapshot::capacity`) — Godot never works out a cap from
+		# bays and base stock, which is `sim::storage`'s arithmetic.
+		var capacity := int(entry.get("capacity", 0))
+		var chip: Label = _larder_full_chips.get(item_id)
+		if chip != null:
+			chip.visible = capacity > 0 and owned >= capacity
 		# The whole row recedes with its number, so the eye lands on what
 		# the player actually has (position and value, not colour — §7).
 		var row: Control = _stock_row_nodes.get(item_id)
@@ -15306,6 +15651,30 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 			if _contract_panel.size.y > 0.0:
 				top = _contract_panel.get_global_rect().position.y
 			hard = maxf(0.0, ceiling_y - top)
+			# Stop EARLIER than that where the column allows: at the line the
+			# plate stands on with its whole list, not the one it stands on
+			# with a single row (`_stock_list_ceiling_y`). Between the two
+			# lines the stack is taking rows off a readout nobody can scroll,
+			# to show dockets the player can scroll to and can read in full on
+			# the C board.
+			#
+			# Floored by this panel's OWN line, which the growth rule did not
+			# need while it aimed at one stock row: a clipboard cut back to its
+			# chrome shows neither a docket nor the cue that there are dockets,
+			# which §5f ranks worse than the ragged edge the growth was
+			# introduced to buy. One whole LINE of the first docket is the
+			# least that still says "there is an order here, and there is more
+			# of it under the cut".
+			var wanted_y: float = _stock_list_ceiling_y()
+			if is_finite(wanted_y):
+				var own_chrome: float = (
+					_contract_panel.get_combined_minimum_size().y
+					- _contract_cards_scroll.custom_minimum_size.y
+				)
+				hard = minf(hard, maxf(
+					maxf(0.0, wanted_y - top),
+					own_chrome + _first_line_boundary(_contract_cards_box)
+				))
 		var stack_available: float = (
 			column - _stock_reserved_height() - _crew_reserved_height()
 		)

@@ -118,6 +118,17 @@ func _raw_ingredients() -> Array:
 	return ids
 
 
+func _ingredient_entry(item_id: String) -> Dictionary:
+	for entry in JSON.parse_string(main.sim.ingredients_snapshot_json()).get("entries", []):
+		if String(entry.get("id", "")) == item_id:
+			return entry
+	return {}
+
+
+func _stock_of(item_id: String) -> int:
+	return int(_ingredient_entry(item_id).get("owned", 0))
+
+
 func _run_checks() -> void:
 	# --- the tint table, before anything is built --------------------------
 	# Checked first and against the SIMULATION's list rather than against
@@ -386,6 +397,118 @@ func _run_checks() -> void:
 		])
 		return
 
+	# --- W4: the market carries the ceiling --------------------------------
+	# The always-on STOCK plate counts what is held; the ceiling is drawn where
+	# it is ACTED on, which is the crate. Three things have to be true of it:
+	# the pair of numbers, a quantity clamped to what will fit (so the printed
+	# promise is the purchase), and a word for a refusal that money cannot
+	# cure.
+	Layouts.fund(main.sim, 1000000)
+	main._update_ingredient_market()
+	var slot_index := -1
+	for i in range(main._market_slots.size()):
+		if String(main._market_slots[i]["id"]) == item:
+			slot_index = i
+	if slot_index < 0:
+		_fail("the market has no crate for '%s'" % item)
+		return
+	var card: Dictionary = main._market_slots[slot_index]
+	var market_entry := _ingredient_entry(item)
+	var capacity := int(market_entry.get("capacity", 0))
+	var unit_price := float(market_entry.get("price", 0.0))
+	# The rack raised the ceiling, and by the whole of what it supplies: no
+	# other ingredient is above its free allowance, so every bay is this one's
+	# to use (`sim::storage::cap_for`).
+	var want_capacity: int = base_cap + slot_stack * int(rack.get("bays", 0))
+	if capacity != want_capacity:
+		_fail("with one rack placed the wire caps '%s' at %d, expected base %d + %d bays x %d = %d" % [
+			item, capacity, base_cap, int(rack.get("bays", 0)), slot_stack, want_capacity,
+		])
+		return
+	var want_stock := "In stock %d / %d\n%.0f each" % [_stock_of(item), capacity, unit_price]
+	if card["owned_label"].text != want_stock:
+		_fail("the crate reads '%s', expected '%s' — the ceiling is not on the card" % [
+			card["owned_label"].text.replace("\n", " / "), want_stock.replace("\n", " / "),
+		])
+		return
+
+	# The warehouse line under the balance: racks standing, bays spoken for,
+	# and the same figures on a bar (a ceiling the simulation defines, so a bar
+	# is legal here — UI_UX.md §5e).
+	var used_bays := int(main._storage_state.get("used_bays", 0))
+	var total_bays := int(main._storage_state.get("total_bays", 0))
+	if not main._market_storage_label.visible:
+		_fail("the market says nothing about the warehouse, with a rack standing")
+		return
+	for phrase in ["1 rack", "bays %d / %d" % [used_bays, total_bays], "%d free" % (total_bays - used_bays)]:
+		if not main._market_storage_label.text.contains(phrase):
+			_fail("the market's warehouse line does not say '%s':\n%s" % [phrase, main._market_storage_label.text])
+			return
+	var bays_fraction := float(main._market_bays_meter.get_meta("fraction", -1.0))
+	if absf(bays_fraction - float(used_bays) / float(total_bays)) > 0.001:
+		_fail("the market's bay meter reads %.3f for %d of %d bays" % [bays_fraction, used_bays, total_bays])
+		return
+
+	# A CRATE CLAMPED TO THE ROOM LEFT. Four units of room, and the crate says
+	# four and buys four — the simulation clamps and charges for what it
+	# credits either way, so the thing at risk is the panel promising ten.
+	var short_of_full := 4
+	main.sim.issue_command_json(JSON.stringify({
+		"type": "buy_ingredient", "item": item,
+		"quantity": capacity - _stock_of(item) - short_of_full,
+	}))
+	main._refresh_buffers()
+	main._update_ingredient_market()
+	if main._market_room(item) != short_of_full:
+		_fail("with %d of %d held the market offers room for %d, expected %d" % [
+			_stock_of(item), capacity, main._market_room(item), short_of_full,
+		])
+		return
+	var want_crate := "Buy %d  ·  %.0f" % [short_of_full, unit_price * float(short_of_full)]
+	if card["price_label"].text != want_crate:
+		_fail("a crate with room for %d still offers '%s', not '%s'" % [
+			short_of_full, card["price_label"].text, want_crate,
+		])
+		return
+	var money_before: float = main._current_money()
+	main._buy_ingredient_slot(slot_index)
+	if _stock_of(item) != capacity:
+		_fail("clicking the clamped crate moved stock to %d, not to the %d ceiling" % [_stock_of(item), capacity])
+		return
+	var spent: float = money_before - main._current_money()
+	if absf(spent - unit_price * float(short_of_full)) > 0.01:
+		_fail("the clamped crate charged %.2f for %d units at %.2f" % [spent, short_of_full, unit_price])
+		return
+
+	# AT CAPACITY IS ITS OWN REFUSAL. "You cannot afford it" and "there is
+	# nowhere to put it" have different cures, so the full crate says the
+	# second one in a word rather than wearing the first one's "✗" alone.
+	main._update_ingredient_market()
+	if main._market_room(item) != 0:
+		_fail("a crate bought to its ceiling still reports room for %d" % main._market_room(item))
+		return
+	if not card["price_label"].text.begins_with("AT CAPACITY"):
+		_fail("a full crate reads '%s' rather than saying it is at capacity" % card["price_label"].text)
+		return
+	if not card["price_label"].text.contains("✗"):
+		_fail("the full crate carries no ✗ — the amber alone cannot say it (UI_UX.md §7)")
+		return
+	if card["shift_label"].text != "shift: buy 0  ✗":
+		_fail("a full crate's shift line reads '%s'" % card["shift_label"].text)
+		return
+	if not card["button"].disabled:
+		_fail("a crate with nowhere to put anything stayed live")
+		return
+	# ...and the click sends nothing at all. `revision()` counts commands,
+	# refused or not, so it is the only honest proof of that.
+	var revision_before: int = main.sim.revision()
+	main._buy_ingredient_slot(slot_index)
+	if main.sim.revision() != revision_before:
+		_fail("clicking a full crate issued a command anyway (revision %d -> %d)" % [
+			revision_before, main.sim.revision(),
+		])
+		return
+
 	# --- W1's removal refusal, said in words -------------------------------
 	# The only removal in the game that can fail. With every bay this rack
 	# supplies needed by the stock standing in it, picking it up is refused —
@@ -456,7 +579,7 @@ func _run_checks() -> void:
 		_fail("an empty rack could not be picked up either — the refusal has become unconditional")
 		return
 
-	print("WAREHOUSE_RACK_OK: %d shelves on a rack, bottom level first, all inside the imported frame; an empty rack draws none of them and stock binds them one at a time, %d of %d bays loaded in step with the wire, the load scaled to the bay's fill and capped at %d voxels; all %d raw ingredients (%s) have a rack tint of their own, no key is stale and every one clears the %.0f..%.0f dead band (closest: %s, %.1f luma clear); hover resolves from both tiles of the 1x2, names the goods and the shared warehouse, and meters bays; and W1's refusal is spoken by the prompt and the tooltip before the click the simulation then refuses" % [
+	print("WAREHOUSE_RACK_OK: %d shelves on a rack, bottom level first, all inside the imported frame; an empty rack draws none of them and stock binds them one at a time, %d of %d bays loaded in step with the wire, the load scaled to the bay's fill and capped at %d voxels; all %d raw ingredients (%s) have a rack tint of their own, no key is stale and every one clears the %.0f..%.0f dead band (closest: %s, %.1f luma clear); hover resolves from both tiles of the 1x2, names the goods and the shared warehouse, and meters bays; the market crate carries `owned / capacity` (%d / %d), clamps its quantity to the room left and says AT CAPACITY when there is none, under a header reading the racks and their free bays; and W1's refusal is spoken by the prompt and the tooltip before the click the simulation then refuses" % [
 		bays.size(),
 		contents.size(),
 		int(rack.get("bays", 0)),
@@ -467,5 +590,7 @@ func _run_checks() -> void:
 		RACK_TINT_DEAD_BAND_HIGH,
 		closest_id,
 		closest_margin,
+		capacity,
+		capacity,
 	])
 	quit(0)

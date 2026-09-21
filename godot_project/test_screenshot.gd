@@ -390,6 +390,10 @@ var _staff_shortfall := false
 var _short_staffed := false
 var _hotbar_key := ""
 var _stock := false
+## `--at-capacity` fills every raw to its warehouse ceiling, so the market's
+## crates and the STOCK plate photograph the full state rather than the
+## roomy one.
+var _at_capacity := false
 ## `--legend-collapsed` folds the keybind legend away before the shot (the
 ## HUD ticket), which is the half of that feature a headless test cannot
 ## judge: whether what is LEFT — the plate's heading and the button naming
@@ -650,6 +654,7 @@ func _initialize() -> void:
 	_dock_lamp_dark = _string_arg(args, "--dock-lamp") == "dark"
 	_hotbar_key = _string_arg(args, "--hotbar")
 	_stock = args.has("--stock")
+	_at_capacity = args.has("--at-capacity")
 	_legend_collapsed = args.has("--legend-collapsed")
 	_ghost_kind = _string_arg(args, "--ghost")
 	if _ghost_kind == "":
@@ -924,6 +929,20 @@ func _build_fixture() -> void:
 	# about the stock does its own.
 	if _fixture != "warehouse":
 		Layouts.stock_larder(_main.sim)
+	# `--at-capacity` buys every unlocked raw up to the ceiling the warehouse
+	# gives it. It is the one state the W4 words exist for and the one a
+	# fixture cannot drift into on its own: with room to spare every crate
+	# reads the same as it always did. The balance is deliberately left FAT
+	# afterwards — the whole point of the frame is a purchase money cannot fix.
+	if _at_capacity:
+		Layouts.fund(_main.sim, 32767)
+		for item in Layouts.stockable(_main.sim):
+			var room: int = Layouts.stock_room_for(_main.sim, item)
+			if room <= 0:
+				continue
+			_main.sim.issue_command_json(JSON.stringify({
+				"type": "buy_ingredient", "item": item, "quantity": room,
+			}))
 	_main._rebuild_world()
 	_main._refresh_owned_counts()
 	# A fixture that TICKS its way to a state — the bottleneck, understaffed
