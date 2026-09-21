@@ -211,7 +211,11 @@
 #
 # Pass --populate to run whatever was built forward first, so the shot shows
 # product moving instead of an idle factory. Pass --first-person to review
-# that camera mode's lighting/skybox instead of the default isometric one.
+# that camera mode's lighting/skybox. A shot is ISOMETRIC without it — this
+# tool pins the view rather than inheriting main.gd's DEFAULT_VIEW_MODE (the
+# view a SESSION opens in, first person since 2026-09-21), because every
+# framing flag here steers the isometric camera and none of them can steer
+# the other one. See test_screenshot.gd's `_enter_view_mode`.
 # It combines with the --hover* flags, and there they TURN THE CAMERA rather
 # than the pointer: in first person the tooltip is whatever the CROSSHAIR is
 # over (main.gd queries the screen centre), so --first-person --hover-dock is

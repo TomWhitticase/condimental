@@ -956,7 +956,19 @@ func _enter_closeup() -> void:
 	_main._update_camera_transform()
 
 
-func _enter_first_person() -> void:
+## The view this run photographs, which is NOT `main.gd`'s
+## `DEFAULT_VIEW_MODE` — a review shot is isometric unless `--first-person`
+## asked otherwise. Every other framing flag this tool has (`--closeup`,
+## `--zoom`, `--pan`, and every `--hover*`, which warps the OS cursor to
+## where a tile projects) is an isometric idea, so following the game's
+## opening view would have silently re-aimed every command line in
+## `docs/`, `scripts/` and CI at a first-person camera those flags cannot
+## steer. The game's default is exercised by `test_camera_nav.gd` instead,
+## and photographed by passing `--first-person` here.
+func _enter_view_mode() -> void:
+	if not _first_person:
+		_main._set_view_mode(_main.ViewMode.ISOMETRIC)
+		return
 	_main._set_view_mode(_main.ViewMode.FIRST_PERSON)
 	# Higher up and looking a bit further up than the default entry pose, so
 	# the sky/horizon/ground extent — the thing being reviewed — is actually
@@ -1810,8 +1822,8 @@ func _process(_delta: float) -> bool:
 	# has to be settled before they are drawn.
 	if _frames == 1 and (_unlocked or _unlock_toast):
 		_cross_gates(-1 if _unlock_toast else 0)
-	if _frames == 1 and _first_person:
-		_enter_first_person()
+	if _frames == 1:
+		_enter_view_mode()
 	# Before main.gd has drawn a single tooltip, and before any --hover* flag
 	# on frame 2 aims it somewhere on purpose: the pointer this run starts
 	# with is the one the run before it left behind (issue #4).

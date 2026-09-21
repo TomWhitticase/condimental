@@ -49,6 +49,31 @@ func _initialize() -> void:
 		_fail("main._camera was not set by _build_camera()")
 		return
 
+	# --- The view a session OPENS in (main.gd's DEFAULT_VIEW_MODE) ----------
+	# `_ready` has to apply it through `_set_view_mode` AFTER `_build_ui`, and
+	# a camera left orthographic here would mean the default never took — the
+	# projection is checked, not just the enum, because those are exactly the
+	# two halves that came apart when entering first person left the camera at
+	# the isometric pose (2026-09-16, guarded again below).
+	if main._view_mode != main.DEFAULT_VIEW_MODE:
+		_fail(
+			"a new session must open in DEFAULT_VIEW_MODE (%d), not %d"
+			% [main.DEFAULT_VIEW_MODE, main._view_mode]
+		)
+		return
+	if camera.projection != Camera3D.PROJECTION_PERSPECTIVE:
+		_fail("the default view is first person, so the camera must open perspective")
+		return
+	if main._crosshair != null and not main._crosshair.visible:
+		_fail("the crosshair must be up in the view the game opens in")
+		return
+	if main._help_label != null and main._help_label.text != main.FP_HELP_TEXT:
+		_fail("the legend must open on FP_HELP_TEXT, the keys the opening view has")
+		return
+	# Everything below this line is the isometric view's own navigation, so it
+	# starts where it always did: TAB back.
+	main._set_view_mode(main.ViewMode.ISOMETRIC)
+
 	var initial_basis: Basis = camera.transform.basis
 	var initial_size: float = camera.size
 	var initial_focus: Vector3 = main._camera_focus
