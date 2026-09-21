@@ -12597,7 +12597,7 @@ func _update_ghost() -> void:
 				anchor = vp.get_visible_rect().size / 2.0
 			else:
 				anchor = vp.get_mouse_position()
-			_placement_prompt.position = _panel_position_near(_placement_prompt, anchor)
+			_placement_prompt.position = _world_panel_position(_placement_prompt, anchor)
 		_placement_prompt.visible = true
 
 
@@ -13857,6 +13857,10 @@ const CHUNK_TILES := 32
 ## top-left corner, so the panel doesn't sit directly under (and get
 ## re-hidden by chasing) the cursor itself.
 const HOVER_TOOLTIP_OFFSET := Vector2(18.0, 18.0) * UI_SCALE
+## Screen-space inset from the viewport's left edge and from the hotbar's top
+## edge to the FIRST_PERSON corner a world panel is parked in
+## (`_first_person_panel_position`).
+const FIRST_PERSON_PANEL_MARGIN := 18.0 * UI_SCALE
 
 
 ## Resolves a screen-space position to the world tile beneath it: casts the
@@ -14493,7 +14497,7 @@ func _update_hover_tooltip() -> void:
 		return
 	_hover_label.text = text
 	_apply_hover_panel_state(_hover_panel_state(tile))
-	_hover_tooltip.position = _panel_position_near(_hover_tooltip, query_pos)
+	_hover_tooltip.position = _world_panel_position(_hover_tooltip, query_pos)
 	_hover_tooltip.visible = true
 
 
@@ -14526,6 +14530,154 @@ func _apply_hover_panel_state(state: Dictionary) -> void:
 	_update_hover_buffers(_hover_output_row, state.get("outputs", []))
 
 
+## Where a panel that points at something in the WORLD goes — the hover
+## tooltip and the build mode placement prompt, the two panels whose anchor
+## is "the thing the player is asking about".
+##
+## In ISOMETRIC that anchor is the cursor and the panel follows it
+## (`_panel_position_near`). In FIRST_PERSON there is no cursor: the mouse is
+## captured, the query point is the crosshair at the centre of the screen,
+## and the subject is the thing BEHIND the crosshair — so a panel that
+## follows the anchor is a panel standing on what it describes. First person
+## gets a fixed rule instead (issue #105).
+func _world_panel_position(panel: Control, anchor: Vector2) -> Vector2:
+	if _view_mode == ViewMode.FIRST_PERSON:
+		return _first_person_panel_position(_panel_draw_size(panel))
+	return _panel_position_near(panel, anchor)
+
+
+## Where a world panel goes in FIRST_PERSON: parked in the lower-left corner,
+## above the hotbar, wherever the player is looking (issue #105).
+##
+## `_panel_position_near`'s quadrant search is right for a mouse — the subject
+## is under the pointer and a flip leaves it visible — and wrong for a
+## crosshair. At 1600x900 it happened to find room to the right and the fault
+## did not show; at 1280x720 the legend and the right-hand column take enough
+## of the frame that all four quadrants fail, the fallback clamps back through
+## the middle, and the panel lands squarely ON the crosshair. The dock a
+## player walked up to ends up entirely behind its own tooltip — found in a
+## rendered frame, as these always are (UI_UX §2b point 12).
+##
+## Offsetting the query point and then clamping is no answer: the clamp is
+## what puts the panel back over the centre, and moving the query point off
+## the subject would describe a tile the player is not looking at.
+##
+## So: the lower left, which is the one region of the frame no fixed plate
+## claims (the legend is top-left and ends well above it, the clipboard,
+## STOCK and CREW are the right-hand column, the hotbar has its own reserved
+## strip) and the one the crosshair never enters. It is a fixed position, not
+## a followed one, so the panel also stops jittering across the screen on
+## every mouse-look — which is the other half of why a following panel is
+## wrong here.
+##
+## The corner is then stepped clear of whatever plate it still touches — at
+## 1280x720 the legend reaches far enough down to clip the top of a tall
+## tooltip, and the strip left between it and the hotbar is a couple of pixels
+## short of a machine hover. So the corner and the four ways off each plate
+## are scored by how much HUD they cover and the smallest wins, exactly as the
+## cursor rule's last resort does; ties keep the corner, so the corner is
+## still the rule and this only ever trims an overlap it cannot avoid.
+##
+## Two things are never traded for that. A position standing on the crosshair
+## is refused outright however little HUD it covers — covering the legend, a
+## reference the player can fold away with F1, is always better than covering
+## the machine they walked over to look at. And the search never leaves the
+## left of the frame, because the right of it is the clipboard/STOCK/CREW
+## column at every resolution.
+##
+## Given the panel's drawn size, so a test can drive the rule with sizes of
+## its own rather than trusting a headless font metric.
+func _first_person_panel_position(size: Vector2) -> Vector2:
+	var vp := get_viewport()
+	var bounds := vp.get_visible_rect().size if vp != null else Vector2(1600, 900)
+	var lower_bound := bounds.y - _hotbar_reserved_height()
+	var crosshair := bounds / 2.0
+	var avoid := _hud_avoid_rects()
+	var corner := _clamped_on_screen(
+		Vector2(
+			FIRST_PERSON_PANEL_MARGIN,
+			lower_bound - FIRST_PERSON_PANEL_MARGIN - size.y,
+		),
+		size, bounds.x, lower_bound
+	)
+	var tried: Array[Rect2] = [corner]
+	for r in avoid:
+		tried.append(_clamped_on_screen(
+			Vector2(corner.position.x, r.position.y - size.y), size, bounds.x, lower_bound))
+		tried.append(_clamped_on_screen(
+			Vector2(corner.position.x, r.position.y + r.size.y), size, bounds.x, lower_bound))
+		tried.append(_clamped_on_screen(
+			Vector2(r.position.x - size.x, corner.position.y), size, bounds.x, lower_bound))
+	# INF, so the corner itself has to pass the crosshair veto like every
+	# other candidate — a panel wider than half the frame covers the centre
+	# wherever it stands on the left, and then the least-bad of the rest is
+	# still a better answer than the corner.
+	var best: Rect2 = corner
+	var best_area: float = INF
+	for option in tried:
+		if option.has_point(crosshair):
+			continue
+		var area: float = _hud_overlap_area(option, avoid)
+		if area < best_area:
+			best_area = area
+			best = option
+	return best.position
+
+
+## The size this panel will be DRAWN at, which is not always the size it
+## reports as its minimum. A Label's minimum width comes from its last
+## shaping and a Label is only reshaped when it is drawn, so a panel whose
+## text was set earlier in this same frame — which is every cursor panel
+## here — can still report the width it had before. The hover tooltip
+## reported 299x285 while being drawn 545x285, and was placed as if the
+## right-hand 246px of it did not exist: over the legend's last line. Its
+## CURRENT size is the one the layout pass actually gave it, so the larger
+## of the two is the honest estimate, and erring large only ever buys more
+## clearance.
+func _panel_draw_size(panel: Control) -> Vector2:
+	var size := panel.get_combined_minimum_size()
+	return Vector2(maxf(size.x, panel.size.x), maxf(size.y, panel.size.y))
+
+
+## The fixed HUD plates a panel pointing at the world must never land on: the
+## legend (top-left) and the right-hand column — the contracts clipboard, the
+## stock plate and the crew plate, top to bottom. A tile rendered under any of
+## them (a close-zoomed camera near the world origin, or a cursor high on the
+## screen where the flip used to only check the right/bottom edges) put a
+## panel right over their own text otherwise — found in rendered frames,
+## twice, one bug each.
+##
+## The right-hand column is ONE LIST here, never a branch per plate
+## (godot_project/CLAUDE.md): CREW was added to the column and left out of
+## this list, and a machine hovered near the right edge covered the whole
+## plate while the middle of the screen sat empty. It is also one list for
+## BOTH rules that use it — the cursor-following flip and first person's
+## fixed corner — so the two cannot come to disagree about what a plate is.
+##
+## Each plate reports its own CURRENT rect through a helper (`_legend_rect`,
+## `_stock_rect`, `_crew_rect`) rather than being measured here, so a
+## collapsed legend is avoided at the size it actually is — its stub — and not
+## at the five-line size it had when the game started.
+func _hud_avoid_rects() -> Array[Rect2]:
+	var avoid: Array[Rect2] = []
+	var legend := _legend_rect()
+	if legend.size.y > 0.0:
+		avoid.append(legend)
+	# `get_global_rect()`, not `.position`/`.size` — the clipboard sits inside
+	# its own layout container, whose local origin is not this panel's (a
+	# direct CanvasLayer child, effectively in screen space) (see the config
+	# panel's own avoidance, which makes the same call).
+	if _contract_panel != null and _contract_panel.visible and _contract_panel.size.y > 0.0:
+		avoid.append(_contract_panel.get_global_rect())
+	var stock := _stock_rect()
+	if stock.size.y > 0.0:
+		avoid.append(stock)
+	var crew := _crew_rect()
+	if crew.size.y > 0.0:
+		avoid.append(crew)
+	return avoid
+
+
 ## Where a cursor-following panel goes: offset from the cursor, then kept
 ## clear of the viewport's edges AND of every fixed HUD plate (UI_UX.md §2b
 ## point 33).
@@ -14546,18 +14698,9 @@ func _apply_hover_panel_state(state: Dictionary) -> void:
 ## clamping on screen and then PUSHING clear, judging each candidate after the
 ## clamp rather than when it is chosen.
 func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
-	# The size this panel will be DRAWN at, which is not always the size it
-	# reports as its minimum. A Label's minimum width comes from its last
-	# shaping and a Label is only reshaped when it is drawn, so a panel whose
-	# text was set earlier in this same frame — which is every cursor panel
-	# here — can still report the width it had before. The hover tooltip
-	# reported 299x285 while being drawn 545x285, and was placed as if the
-	# right-hand 246px of it did not exist: over the legend's last line. Its
-	# CURRENT size is the one the layout pass actually gave it, so the larger
-	# of the two is the honest estimate, and erring large only ever buys more
-	# clearance.
-	var size := panel.get_combined_minimum_size()
-	size = Vector2(maxf(size.x, panel.size.x), maxf(size.y, panel.size.y))
+	# The size this panel will be DRAWN at, not the one it reports as its
+	# minimum — see `_panel_draw_size`, which is why.
+	var size := _panel_draw_size(panel)
 	var vp := get_viewport()
 	var bounds := vp.get_visible_rect().size if vp != null else Vector2(1600, 900)
 	# The hotbar sits over the bottom of the viewport (§5b) but isn't part of
@@ -14566,37 +14709,7 @@ func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
 	# hotbar's top edge, same bug the config panel's own clamp
 	# (`_hotbar_reserved_height()` below) already guards against.
 	var lower_bound := bounds.y - _hotbar_reserved_height()
-	# The legend (top-left) and the right-hand column — the contracts
-	# clipboard, the stock plate and the crew plate, top to bottom — are the
-	# fixed HUD plates this panel must never land on. A tile rendered under
-	# any of them (a close-zoomed camera near the world origin, or a cursor
-	# high on the screen where the flip below used to only check the
-	# right/bottom edges) put this panel right over their own text otherwise
-	# (found in rendered frames, twice — one bug each).
-	# The right-hand column is ONE LIST here, never a branch per plate
-	# (godot_project/CLAUDE.md): CREW was added to the column and left out of
-	# this list, so a machine hovered near the right edge covered the whole
-	# plate while the middle of the screen sat empty.
-	# Each plate reports its own CURRENT rect through a helper
-	# (`_legend_rect`, `_stock_rect`, `_crew_rect`) rather than being measured
-	# here, so a collapsed legend is avoided at the size it actually is — its
-	# stub — and not at the five-line size it had when the game started.
-	var avoid: Array[Rect2] = []
-	var legend := _legend_rect()
-	if legend.size.y > 0.0:
-		avoid.append(legend)
-	# `get_global_rect()`, not `.position`/`.size` — the clipboard sits inside
-	# its own layout container, whose local origin is not this panel's (a
-	# direct CanvasLayer child, effectively in screen space) (see the config
-	# panel's own avoidance above, which makes the same call).
-	if _contract_panel != null and _contract_panel.visible and _contract_panel.size.y > 0.0:
-		avoid.append(_contract_panel.get_global_rect())
-	var stock := _stock_rect()
-	if stock.size.y > 0.0:
-		avoid.append(stock)
-	var crew := _crew_rect()
-	if crew.size.y > 0.0:
-		avoid.append(crew)
+	var avoid := _hud_avoid_rects()
 	# Try both hands of both axes around the cursor, nearest (bottom-right,
 	# matching the un-flipped default) first, and take the first that fits
 	# on screen, above the hotbar and clear of every avoided plate.

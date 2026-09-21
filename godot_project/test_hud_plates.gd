@@ -659,6 +659,73 @@ func _run_checks() -> void:
 			return
 	probe.queue_free()
 
+	# --- First person parks a world panel, it does not follow (issue #105) -
+	# In first person there is no cursor: the query point is the crosshair at
+	# the centre of the screen, and the subject is the thing BEHIND it. The
+	# flip above is right for a mouse and wrong here — at 1280x720 all four
+	# quadrants fail, the fallback clamps back through the middle, and the
+	# panel lands squarely on the crosshair with the dock the player walked
+	# over to look at entirely behind it.
+	#
+	# The sizes are the test's own, not a headless measurement: a headless
+	# font metric cannot prove a width (godot_project/CLAUDE.md), so what is
+	# pinned here is the RULE, given a size, and the render is the acceptance.
+	# 550x283 is the machine hover as it is actually drawn at 1280x720, the
+	# size the bug was found at.
+	main._set_view_mode(main.ViewMode.FIRST_PERSON)
+	if main._legend_collapsed:
+		_press_key(KEY_F1)
+	for window in [BIG, SMALL]:
+		_resize(window)
+		var crosshair := Vector2(window) * 0.5
+		var lower_bound: float = float(window.y) - main._hotbar_reserved_height()
+		for fp_size in [Vector2(550, 283), Vector2(480, 150), Vector2(300, 90)]:
+			var placed := Rect2(main._first_person_panel_position(fp_size), fp_size)
+			if placed.has_point(crosshair):
+				_fail("at %s the first-person panel stands on the crosshair (%s over %s)" % [
+					str(window), str(placed), str(crosshair)
+				])
+				return
+			if placed.position.x < 0.0 or placed.end.x > float(window.x):
+				_fail("at %s the first-person panel hangs off the side (%s)" % [str(window), str(placed)])
+				return
+			if placed.position.y < 0.0 or placed.end.y > lower_bound + 0.5:
+				_fail("at %s the first-person panel runs into the hotbar's strip (%s, bound %d)" % [
+					str(window), str(placed), int(lower_bound)
+				])
+				return
+			# The right-hand column is never the answer: it is a plate at
+			# every resolution, and the corner is on the other side.
+			for plate in [
+				["the clipboard", main._contract_panel.get_global_rect()],
+				["the stock plate", main._stock_rect()],
+				["the CREW plate", main._crew_rect()],
+			]:
+				if placed.intersects(plate[1]):
+					_fail("at %s the first-person panel lands on %s (%s over %s)" % [
+						str(window), plate[0], str(placed), str(plate[1])
+					])
+					return
+	# And the two rules are chosen by the view mode, not by the caller: one
+	# door (`_world_panel_position`) that both the hover tooltip and the
+	# placement prompt go through, so neither can be fixed and the other left.
+	var fp_probe := PanelContainer.new()
+	var fp_label := Label.new()
+	fp_label.text = "Dock  ·  facing east\nwaiting: boxed_ketchup x48"
+	fp_probe.add_child(fp_label)
+	root.add_child(fp_probe)
+	var fp_anchor := Vector2(SMALL) * 0.5
+	var fp_drawn: Vector2 = main._panel_draw_size(fp_probe)
+	if main._world_panel_position(fp_probe, fp_anchor) != main._first_person_panel_position(fp_drawn):
+		_fail("in first person a world panel is still being placed near the crosshair")
+		return
+	main._set_view_mode(main.ViewMode.ISOMETRIC)
+	if main._world_panel_position(fp_probe, fp_anchor) != main._panel_position_near(fp_probe, fp_anchor):
+		_fail("isometric lost the cursor-following rule")
+		return
+	fp_probe.queue_free()
+	_resize(BIG)
+
 	# --- The clipboard's docket stack is cut BETWEEN dockets (issue #8) ----
 	# The clipboard is the panel that yields the right-hand column (see
 	# `_position_stock_panel`), so its docket stack is the one that gets
@@ -672,7 +739,7 @@ func _run_checks() -> void:
 	for offer in JSON.parse_string(main.sim.economy_snapshot_json()).get("board", []):
 		if not bool(offer.get("active", false)):
 			main.sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": String(offer["id"])}))
-	_summary = "%d stock rows on a right-hand plate clear of the clipboard and hotbar at 1600x900 and 1280x720, each with its own colour and a 'none' zero state; the legend folds %s -> %s from its button and from F1 in both view modes, is not a modal, and every cursor panel reads its current rect; the CREW plate holds the bottom of that column clear of all three at both sizes, prints the wire's own shortfall, hides the dead maintenance row and warns before payday" % [
+	_summary = "%d stock rows on a right-hand plate clear of the clipboard and hotbar at 1600x900 and 1280x720, each with its own colour and a 'none' zero state; the legend folds %s -> %s from its button and from F1 in both view modes, is not a modal, and every cursor panel reads its current rect; a world panel is parked in the lower-left corner in first person rather than following the crosshair, clear of the crosshair, the hotbar's strip and the whole right-hand column at both sizes; the CREW plate holds the bottom of that column clear of all three at both sizes, prints the wire's own shortfall, hides the dead maintenance row and warns before payday" % [
 		ids.size(), str(open_rect.size), str(stub_rect.size)
 	]
 

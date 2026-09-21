@@ -219,6 +219,17 @@ into sequence. They sit where they were discovered.
     re-applied, or the clamp snaps the panel back onto what it was
     avoiding.
 
+    **That rule is for a cursor, and first person has none.** There the
+    query point is the crosshair at the centre of the screen and the subject
+    is the thing *behind* it, so a panel that follows the anchor stands on
+    what it describes. A parked panel — the lower-left corner, above the
+    hotbar — is the first-person rule instead: it is the one region no fixed
+    plate claims and the crosshair never enters, and being fixed it also
+    stops the panel sliding about the frame on every mouse-look. Covering
+    the legend is preferred to covering the subject, so a position that
+    stands on the crosshair is refused however little HUD it would cover
+    (issue #105).
+
 34. **A ghost previews what the game's connection rules already make
     certain, and never what the simulation still has to decide.** The two
     shapes drawn under the cursor look inconsistent and are not: a belt
@@ -672,6 +683,20 @@ panel's own clamp, per §2b point 33, and a panel flipped aside lands its edge
 deliberately not in that list: at 1280x720 nothing clears both it and the
 column, and a keybind reference the player can fold with F1 is the right thing
 to cover in preference to a live readout.
+
+**A panel that points at the world is followed in isometric and parked in
+first person** (2026-09-21, issue #105). The hover tooltip and the placement
+prompt are the two, and both go through one door (`_world_panel_position`) so
+neither can be fixed and the other left behind — the tooltip was the one
+reported and the prompt had the same fault. In first person they take the
+lower-left corner (`_first_person_panel_position`), stepped clear of whatever
+plate that corner still touches by the same scoring the cursor rule falls back
+to, with the crosshair as a veto rather than a score. At 1600x900 the old flip
+found room and the fault did not show; at 1280x720 every quadrant failed, the
+clamp came back through the middle, and the dock a player had walked up to sat
+entirely behind its own tooltip. The corner is chosen over "below the
+crosshair" because there is not room below it: at 1280x720 the strip between
+the crosshair and the hotbar is about 230px and a machine hover is 283 tall.
 
 **A headless test cannot prove a width; only the render can.** Godot's
 headless font metrics are narrower than a real window's: the staff panel
