@@ -42,3 +42,7 @@ assets/voxels/previews/
 
 # Python bytecode from the dev tools in tools/
 __pycache__/
+
+# Per-clone Claude Code permission grants. .claude/settings.json (the shared
+# one) stays tracked; this one is whatever a local session happened to approve.
+.claude/settings.local.json

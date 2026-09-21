@@ -300,11 +300,13 @@
 #
 #   scripts/screenshot-scene.sh out.png 1600x900 --build --config=-1,0 --contents 1
 #
-# --contents-refill on top of that buys the fluid the tank was just declared
-# to hold and pumps it back through the run, so the picker's note is shot
-# saying what a *second* switch would destroy ("switching destroys 89.7 units
-# — this tank and the run it feeds"). Without it the note is shot in its
-# unquantified form, because pressing the picker slot is the destructive act.
+# --contents-refill is only needed when the picker slot *changes* the declared
+# fluid, which is the destructive case: it buys the newly declared fluid and
+# pumps it back through the run, so the picker's note is shot saying what a
+# *second* switch would destroy ("switching destroys 89.7 units — this tank
+# and the run it feeds"). Re-pressing the slot a tank already carries is a
+# no-op in the sim since #128 — the tank keeps its volume — so that frame
+# already shows the quantified note without this flag.
 #
 # (the demo line's hopper stands at (-1, 0); note the `=` form, since a
 # value starting with `-` would otherwise be read as another flag. Note also

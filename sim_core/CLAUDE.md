@@ -33,10 +33,15 @@ the plan is `docs/ARCHITECTURE.md` §3/§4/§6/§10.
   tick**: a full single-threaded rebuild of occupancy, hand-off links and fluid
   networks (volumes carried across by tile). `rayon`/partitioning is milestone
   8, deliberately unbuilt.
-- **Changing a tank's declaration empties the tank *and* every run it feeds**,
+- **Declaring a *different* fluid empties the tank *and* the run it feeds**,
   before the recompute (`try_set_tank_fluid` → `purge_runs_fed_by`). Carrying
   volumes across by tile would otherwise relabel the fluid already in the
-  pipes; the purged volume is destroyed, never credited or moved.
+  pipes; the purged volume is destroyed, never credited or moved. One run,
+  not "every": the tank is 1×1 and discharges through the face it points at.
+  Declaring the fluid the tank and its run already hold settles the name and
+  destroys nothing (`declaration_settles_what_is_there`). That, not the
+  switch, is the commoner click — reading this rule as being only about
+  *changing* a declaration is what hid #121.
 - **`sim::reference_chain` is the shared test fixture**, built only through the
   public command API — it can do nothing a player cannot; all placements `East`.
 - **`Direction::East` = `+X` is the regression anchor** and `default()`;

@@ -33,9 +33,12 @@ extends RefCounted
 const NONE := Vector2i(-999999, -999999)
 
 
-## Every `--hover*` flag there is, in the order a command line applies them
-## (the last one given wins the cursor, which is the precedence this has
-## always had).
+## Every `--hover*` flag there is, in **table order** — which is also the
+## precedence, because `requested_flags()` and `rows_for()` both walk this
+## list rather than the command line. So `--hover-dock --hover` aims at
+## whichever appears first here, not at whichever was typed last. That is
+## what the seven `if _frames == 2 and _hover_x` blocks this replaced did
+## too, so the behaviour is unchanged; only this comment was ever wrong.
 ##
 ## `footprint_size` is `main.gd`'s own `_footprint_size`, passed in rather
 ## than copied: the multi-tile row needs to know how big a placement is, and

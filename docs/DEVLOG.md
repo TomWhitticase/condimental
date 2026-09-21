@@ -184,6 +184,75 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — Seams that tell the truth: five stale claims and three flags that lied
+
+A docs-and-guards pass over five issues that shared one shape: something in
+the tree *asserted* a fact that the code no longer backed, or accepted an
+instruction it could not carry out and reported success anyway.
+
+**Three flags that were accepted and dropped (#123).** The rule this
+settles, for the next flag as much as these: a flag the harness accepts but
+cannot honour must stop the run, not decorate the log. `--contents-refill`
+with no `--contents` reached `_refill_declared_tank()` only inside
+`if _contents >= 0`, so it was dropped on the floor and the run still printed
+`SCREENSHOT_OK`; `--contents` with no `--config` had nothing to press a
+picker slot in; and a picker slot naming no fluid printed a `SCREENSHOT:`
+note and carried on. All three now `_refuse()` — non-zero exit, no PNG.
+Same class as #110 (`BBQ_FIXTURE_FAIL` printed and ignored) and #114
+(`--closeup` silently ignored).
+
+**A fourth, found by looking at the frame rather than the log.** Rendering
+the PR's own screenshot with `--config 5,2` — the coordinate issue #129
+quoted — came back a perfectly ordinary factory with no panel in it and
+`SCREENSHOT_OK` beside it, because the fluid run's tank is at (4, 2) and
+`_open_config_at` printed "no hopper or tank at (5, 2) to configure" and
+returned. That is the same defect in a fifth place, and it is in this change
+because the shot was read, not because the exit code was.
+
+**The invariant only had teeth in one quote style (#127).**
+`check-invariants.sh`'s hover section greped `'"--hover[a-z-]*"'` with the
+double quotes baked in, while its own comment claimed it fails for any
+`--hover*` string outside the table. GDScript takes either quote, so
+`args.has('--hover-belt')` was invisible to it. Widened to both, then
+break-tested: injecting a single-quoted eighth flag now fails the run
+naming it, and the tree passes clean afterwards.
+
+**Two comments asserting a shape the code cannot produce (#122, #129).**
+`purge_runs_fed_by` said it walks `tank_discharges` because "a tank facing a
+junction may legitimately have more than one entry" — but `fluid_tank` is
+`Footprint(1, 1)` in `data/machines.ron` and discharges through the one face
+it points at, so the topology pass cannot produce a second entry. The
+`BTreeSet` is defensive, and now says so. `sim_core/CLAUDE.md` carried the
+same claim plus the wording that hid #121 — "*Changing* a tank's
+declaration" describes only the switch, which is why the first-declaration
+case went unexamined for so long. `screenshot-scene.sh`'s
+`--contents-refill` paragraph was left stale by #128 in the same way and is
+reworded. These matter more than their size: `sim_core/CLAUDE.md` is loaded
+into every session working in that crate, so a false sentence there is one
+the next agent reasons *from* instead of measuring.
+
+**A precedence docstring describing an order the code does not use (#127).**
+`hover_targets.gd` said its flags are listed "in the order a command line
+applies them (the last one given wins)". `requested_flags()` and `rows_for()`
+both iterate the table, so `--hover-dock --hover` aims at whichever sits
+first in the table. The seven `if _frames == 2 and _hover_x` blocks it
+replaced did the same, so only the comment was ever wrong.
+
+**`.claude/settings.local.json` is untracked again (#125).** It was
+committed by #112. It is the per-clone list of tool permissions a local
+session happened to approve, so tracking it ships one worker's approvals to
+every clone and churns on any branch where a session approves something new.
+`git rm --cached` plus a `.gitignore` line; the shared `.claude/settings.json`
+stays tracked.
+
+**And a duplicated paragraph in this file, removed.** The entry below for the
+tooling pass carried both the superseded "43 combinations" sweep and the
+corrected "48 combinations — 41 that must render, 7 that must refuse",
+inside one entry, contradicting itself. A keep-both merge resolution put it
+there: the conflicting commit was a *rewrite* of that paragraph, not a new
+one. Keep-both is right for an append-only list and wrong for a revision,
+and the difference is not visible in the conflict markers.
+
 ### 2026-09-21 — Confirming what a tank already holds stopped costing a tankful (issue #121)
 
 Declaring a fluid tank's fluid empties the tank and purges every pipe run it
@@ -952,19 +1021,6 @@ flag the table does not have; and `--ghost-blocked` and `--remove-mode`, the
 only other flags that aim at something the world may not contain, refuse on
 the same grounds (an empty world made `--ghost-blocked` photograph the VALID
 state).
-
-The sweep that came with it found one more of the same kind, and it is fixed
-too: a hover target the camera is **not showing** — `--fixture chain
---closeup 26,0,8 --hover-hopper` — could not be reached, because the window
-server clamps a warp to the window, so the run failed at the shutter blaming
-a hand on the mouse for a tile that was nine thousand pixels off the left
-edge. The aim now checks the projection against the viewport first and says
-exactly that. What the sweep did NOT find was a spurious refusal: 43
-combinations, every one that should render did. One run refused at the
-shutter naming a tile nobody asked for, while four sibling worktrees were
-running Godot, and passed six times in a row afterwards — which is the
-parallel-pointer case the message already lists, measured rather than
-assumed, and now recorded in `screenshot-scene.sh`'s own header.
 
 ### 2026-09-20 — Mothballing, and naming the machine that is going without
 
