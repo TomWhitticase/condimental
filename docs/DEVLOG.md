@@ -184,6 +184,43 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — The configuration panel gets a corner, a section, and a name that is not cut in half (issues #106, #107, #116)
+
+Three tickets about the one panel in the HUD that *commands* rather than
+reports, and they turned out to share a cause.
+
+The panel declares itself `CONFIG_PANEL_WIDTH` wide. It was not: a single
+footer Label with neither a width pin nor a wrap made it 99px wider than the
+constant every line of the positioning arithmetic is written against. That
+is what left it with nowhere to stand — at 1600x900 it is 571px tall in a
+698px band, and once it flips off the right-hand column it lands in the
+legend's corner. The footer is pinned and wrapped now, like every other
+label on the panel.
+
+That alone does not fix it, because at neither shipped window size does a
+position exist that clears both the legend and the right-hand column. So the
+panel tries to step down or out first, and where it cannot, **the legend
+steps aside for as long as the panel is open**. It is a ranking the panel's
+own comment had stated for months without acting on: the legend is static
+keybind reference the player can fold, the panel is live and carries the
+warning that switching a vessel's contents destroys what is in it. The yield
+is not a fold — the player's `_legend_collapsed` is untouched — and the
+legend keeps *measuring* while it is yielded, so the panel cannot drift off
+the free corner and hand it straight back, which is the oscillation issue
+#87 records elsewhere.
+
+Inside the panel, "Molasses" was drawn as `Molasse` / `s`, tail outside the
+slot. A name with a space wraps at a join it already has; one without had
+nowhere legal to break, so the font now shrinks a point at a time until the
+widest single word fits, and the slot clips what the floor cannot rescue.
+The measurement is taken off the **font**, not off the Label: turning
+wrapping off to measure a Label only re-shapes it when the TEXT also
+changes, so every single-word name answered "1px, it fits" and was never
+shrunk — the first cut of this fix shipped nothing at all and the rendered
+PNG is what caught it.
+
+And `docs/UI_UX.md` finally has **§5g** for the panel, which had no section
+at all despite owning every verb that feeds the factory.
 ### 2026-09-21 — Liquid smoke is lifted out of BBQ mix's shadow, and every hopper heap is now measured against every other (issues #113, #115)
 
 `liquid_smoke` and `bbq_mix` stand next to each other in the BBQ branch — the

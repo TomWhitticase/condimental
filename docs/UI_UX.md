@@ -554,8 +554,9 @@ keybind on the ghost can only configure a thing that has not been built yet,
 so the answer to "I placed the wrong one" was to remove it and place it
 again. Configuring the *placed* building makes the bin retargetable in place
 and puts every vessel-feeding verb — level, FILL, AUTO-FILL, contents — on
-one panel reached one way. `test_config_panel.gd` pins it and
-`scripts/screenshot-scene.sh --config TX,TY` photographs it.
+one panel reached one way. That panel has its own section, **§5g** —
+where it stands, what it yields and in what order. `test_config_panel.gd`
+pins it and `scripts/screenshot-scene.sh --config TX,TY` photographs it.
 
 **SHIFT buys back what the click places** (2026-09-16). Laying a run of belt
 otherwise costs two trips to the build menu per handful — buy ten, place
@@ -854,6 +855,57 @@ at a time" rule is untouched. State is session-only — a fold is a "not right
 now", not a preference. Everything that measures the legend (the fixed-plate
 avoid list of §2b point 33, the contract notice) reads its *current* rect,
 so folding really does hand the space back.
+
+### 5g. The configuration panel: the one place a building is told what to do
+
+Every other panel in §5 reports. This one **commands**, and it is the only
+one that does: click a hopper or a fluid tank and it opens beside that
+building carrying its level, a **FILL** button, an **AUTO-FILL** toggle and
+a **CONTENTS** picker of everything the simulation will let that vessel
+hold. Machines get the same panel with a different middle — a state line and
+the **MOTHBALL** toggle. It had no section here for a long time and it
+should have had the first one, because §5a's ghost paragraph was describing
+a **Q** key that had already been deleted in its favour (issue #116).
+
+**It is anchored to the building, not to the screen.** The panel's position
+comes from the footprint's own centre projected through the camera — the
+inverse of the ray/plane pick that resolved the click — so it pans and zooms
+with the thing it configures rather than sitting at a fixed corner that
+would stop being *about* anything. That makes it a cursor-following panel by
+§2b point 33, and it obeys that rule's whole discipline: it clamps to the
+window first and is judged against the fixed plates *afterwards*, at the
+position it will actually be drawn at.
+
+**The order it yields in is the order of §5c, applied to one panel.** It
+flips to the building's other side to clear the right-hand column, landing
+its edge *on* the bound rather than at a fixed offset from the anchor. Then,
+where a clear position exists, it steps down or out to clear the legend.
+Where none exists it takes the corner and the **legend steps aside for as
+long as the panel is open** (2026-09-21, issue #107). That is a ranking, not
+a preference: the legend is static reference text that the player can fold
+and mostly already knows, and the panel is live, was just asked for, and
+carries the warning that switching a vessel's contents destroys what is in
+it. The yield is not a fold — `_legend_collapsed` is the player's and
+nothing here writes it — and the legend keeps *measuring* while it is
+yielded, so the panel cannot drift off the corner, find it free and hand it
+back once a frame.
+
+**Inside the panel, the type yields before a word does.** A CONTENTS slot is
+58×78 and deliberately tall enough for two lines, which is the right answer
+for "Spice Mix": a name with a space wraps at a join it already has. A name
+with no join and no room had nowhere legal to break, and "Molasses" was
+drawn as `Molasse` / `s` with the tail outside the slot's frame (issue
+#106). The font now shrinks a point at a time until the widest single word
+fits, down to a floor, and the slot clips what a floor cannot rescue — a
+crop, never a spill. The measurement is taken from the **font** at build
+time rather than from the Label: a wrapping Label reports a 1px minimum
+width and will agree that anything fits.
+
+**And the panel is never wider than the constant that names its width.** The
+positioning arithmetic above is written against `CONFIG_PANEL_WIDTH`; a
+single unpinned footer Label made the real panel 99px wider than that, which
+is 99px of legend it could then not get off. Every label on this panel pins
+its width and wraps — §5c's rule, and the reason that rule exists.
 
 ## 6. Feedback, motion & animation
 
