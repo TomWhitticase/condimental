@@ -59,6 +59,11 @@ func _initialize() -> void:
 		_fail("expected exactly 1 Camera3D, found %d" % cameras.size())
 		return
 	var camera: Camera3D = cameras[0]
+	# A session opens in first person (`DEFAULT_VIEW_MODE`), and the two modes
+	# share this one node — so TAB to the view the assertions below are about.
+	# That there is still exactly ONE Camera3D whichever mode is current is
+	# the check above, and it is checked before the switch on purpose.
+	main._set_view_mode(main.ViewMode.ISOMETRIC)
 	if camera.projection != Camera3D.PROJECTION_ORTHOGONAL:
 		_fail("camera must be orthographic (UI_UX.md §1), projection was %d" % camera.projection)
 		return

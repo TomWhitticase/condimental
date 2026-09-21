@@ -41,6 +41,13 @@ Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
   exception is the title screen (`title_scene.gd`'s camera drift,
   `menu.gd`'s splash pulse): there is no simulation on that screen to take a
   tick from.
+- **A session opens in the view `DEFAULT_VIEW_MODE` names** — first person
+  since 2026-09-21 — and `_ready` applies it with one `_set_view_mode` call
+  *after* `_build_ui`, because that call shows the crosshair, rewrites the
+  legend and captures the mouse. Nothing else branches on which mode came
+  first. `test_screenshot.gd` is the deliberate exception: a review shot is
+  isometric unless `--first-person`, since every framing flag it has steers
+  the isometric camera.
 - **The hall is drawn in first person, never in isometric.** A sky is
   intersected against `EYEDIR`; an orthographic camera's rays are parallel,
   so it comes out as stripes fanning from the corners.

@@ -11,7 +11,7 @@ the long form of §2b, are in [DECISIONS.md](DECISIONS.md).
 
 | Aspect | Direction |
 |---|---|
-| Camera | Fixed orthographic isometric, tile-based grid |
+| Camera | Fixed orthographic isometric, tile-based grid; a first-person view on TAB, which is what a session opens in |
 | Art medium | Full 3D voxel models (not flat-textured cubes) |
 | Asset scale | Every tile = a 32×32×32 voxel volume |
 | Theme | Grounded, semi-realistic 21st-century industrial food factory |
@@ -28,6 +28,15 @@ shader pack** (voxel base + real lighting).
 - **Fixed orthographic isometric camera.** No perspective, no free orbit.
   The scene uses a true isometric `(1, 1, 1)` view direction, one constant
   in `main.gd` (`CAMERA_DIRECTION`).
+- **A first-person view on TAB, and it is the view a session opens in**
+  (`main.gd`'s `DEFAULT_VIEW_MODE`, 2026-09-21). The factory is voxel art at
+  a human scale standing in a hall the sky shader draws (§3), and the
+  opening frame should be the player inside it rather than above it; laying
+  a line out is the second thing they do, and TAB is there for it. This does
+  **not** loosen the rule above: the isometric camera is still fixed, still
+  the angle every asset is art-directed for, and the first-person camera
+  still does not orbit it — it is a separate free-look perspective camera
+  with its own position, not a rotation of the isometric one.
 - **Tile grid always legible**: the player can always tell which tile a
   thing occupies.
 - **Rotation**: 90° snap only (not yet implemented). Assets are modelled for

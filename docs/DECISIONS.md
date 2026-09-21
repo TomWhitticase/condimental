@@ -25,6 +25,51 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-21: **A session opens in FIRST PERSON; isometric is a TAB away.**
+  (Owner's call, asked for directly.)
+
+  **What changed, and what did not.** `main.gd` grew one constant,
+  `DEFAULT_VIEW_MODE`, and `_ready` applies it with a single
+  `_set_view_mode` call. Nothing about either camera changed: the isometric
+  camera is still the fixed `(1, 1, 1)` orthographic one UI_UX.md §1
+  specifies, first person is still the free-look fly-cam TAB has reached
+  since it was added, and the two still share one `Camera3D`. The opening
+  pose in first person is the same pose TAB gives — hovering `TILE * 1.5`
+  above the framed focus point, pitched 15° down — deliberately, so the view
+  the game opens in and the view TAB produces are one behaviour, not two
+  that can drift.
+
+  **Why this does not contradict §1.** §1 is about the *angle*: the assets
+  are modelled to read from fixed directions, so the isometric camera may
+  not orbit. Which view a session opens in is a separate question, and the
+  factory has had an answer to it worth changing since the interior sky
+  landed — the hall is drawn in first person (§3), the voxel art is built at
+  a human scale, and the isometric view is where a line gets laid out, which
+  is the second thing a player does. The refusal list in `CLAUDE.md` still
+  stands: no free-rotating camera, and the isometric view is unchanged.
+
+  **The call has to come after `_build_ui`.** `_set_view_mode` shows the
+  crosshair, rewrites the help legend and applies the first-person mouse
+  capture, and none of those exist before the HUD is built — placing it
+  beside `_build_camera` gets a first-person camera with an isometric
+  legend and no crosshair. `_view_mode` still *initialises* to `ISOMETRIC`
+  rather than to the constant, because `_build_camera` has already
+  configured the camera that way and `_set_view_mode` early-returns on a
+  mode it is already in: that makes flipping `DEFAULT_VIEW_MODE` back to
+  `ISOMETRIC` a correct no-op rather than a broken one.
+
+  **The screenshot tool does not follow the game.** `test_screenshot.gd`
+  pins the view itself now (`_enter_view_mode`): isometric unless
+  `--first-person`. Every other framing flag it has is an isometric idea —
+  `--closeup`/`--zoom`/`--pan` write `_camera_focus`/`_camera_size`, and
+  every `--hover*` warps the OS cursor to where a tile *projects* — so
+  inheriting the new default would have silently re-aimed every command
+  line in `docs/`, `scripts/` and CI at a camera those flags cannot steer,
+  and the PNGs would have come back wrong rather than refused. The default
+  itself is proved by `test_camera_nav.gd`, which asserts the mode, the
+  projection, the crosshair and the legend straight out of `_ready` before
+  TABbing back to isometric for the navigation tests it already had.
+
 - 2026-09-21: **A voxel asset is judged against the factory floor, and the
   fixed camera is paid with spacing, not with deletion.** (Warehouse stock
   racks, W2. Issues #144 and #147.)
