@@ -32,10 +32,18 @@
         <button data-view="side" title="+Z (3)">side</button>
         <button data-view="top" title="above (4)">top</button>
       </div>
+      <div class="group" id="facings">
+        <span class="label">facing</span>
+        <button data-facing="0" class="on" title="east — as authored, 0° (f cycles)">E</button>
+        <button data-facing="1" title="south — the same mesh spun 90° about its footprint origin (f)">S</button>
+        <button data-facing="2" title="west — 180°: a carved doorway now faces away (f)">W</button>
+        <button data-facing="3" title="north — 270° (f)">N</button>
+      </div>
       <div class="group">
         <button id="spin" title="turntable (r)">spin</button>
         <button id="play" title="cycle animation frames (space)">play</button>
         <button id="grid-toggle" class="on" title="tile grid (g)">grid</button>
+        <button id="ao-toggle" class="on" title="baked ambient occlusion, standing in for the game's SSAO (o)">ao</button>
         <button id="bg-toggle" title="the game's own haze / the hall / dark (b)">bg: haze</button>
       </div>
       <div class="group" id="classes"></div>
