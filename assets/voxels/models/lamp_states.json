@@ -1,0 +1,14 @@
+{
+  "idle": {
+    "metallic": 0.0,
+    "roughness": 0.6,
+    "emission_energy": 0.0,
+    "albedo_scale": 0.38
+  },
+  "running": {
+    "metallic": 0.0,
+    "roughness": 0.45,
+    "emission_energy": 1.2,
+    "albedo_scale": 1.0
+  }
+}

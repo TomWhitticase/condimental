@@ -18,6 +18,25 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-25 **A status lamp's two states are palette data, written as
+  MODIFIERS of the `emissive` class, and every renderer reads the resolved
+  JSON.** A lamp is lit or dark, and `main.gd` calls `_set_machine_running(key,
+  false)` the moment a body is built, so dark is the state a machine is in for
+  most of its life. `palette.ron` now carries a `lamp_states` table holding
+  `roughness`, `emission_scale` and `albedo_scale` per state; `voxgen` resolves
+  each against the `emissive` class and writes `models/lamp_states.json` beside
+  `materials.json`, which `voxel_assets.gd` and the asset browser both read.
+  The states are modifiers, not absolute numbers: `emission_scale` multiplies
+  the class's `emission_energy`, so that energy stays written down exactly once
+  and retuning the class retunes the lit lamp with it. Absolute values would
+  have been a second copy that silently stops matching. Both dimensions are
+  kept — a dead lens drops emission to zero AND darkens albedo — because
+  albedo is what makes the state readable in a frame where the glow pass is
+  doing the talking, and it is the same channel `palette.ron` reaches for in
+  its own `status_*_off` entries. Adding the table is a shape change, so
+  `palette.ron`'s `schema_version` went to 2. Full record in
+  `docs/DECISIONS.md`.
+
 - 2026-09-21 **Settings are PRESENTATION; a cheat that moves money is a real
   SIM COMMAND; F3 is ungated in pre-alpha.** Eight knobs (music/sfx on and
   level, movement speed, look sensitivity, FOV, hall size) live in a `Settings`

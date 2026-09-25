@@ -19,6 +19,11 @@ const FRAME_MS = 180;            // animation speed for frame variations
 // of what a rotated placement does to a mesh (UI_UX.md §2b point 18).
 const FACINGS = ['east', 'south', 'west', 'north'];
 
+// The two states a status lamp is drawn in, named as `palette.ron` names
+// them. `running` first because it is what the toggle starts on, and idle is
+// the deliberate step away from it.
+const LAMPS = ['running', 'idle'];
+
 const state = {
   catalog: null,
   asset: null,
@@ -32,6 +37,7 @@ const state = {
   facing: 0,                     // index into FACINGS; 0 is as authored
   grid: true,
   ao: true,
+  lamp: 'running',               // which of LAMPS the `emissive` class wears
   backdrop: 0,                   // index into BACKDROPS
   query: '',
 };
@@ -269,7 +275,11 @@ function renderHudTitle(names) {
   const facing = state.facing
     ? `   ·   facing ${FACINGS[state.facing]} (${state.facing * 90}°)`
     : '';
-  $('#hud-title').textContent = (renderHudTitle.names || []).join('  +  ') + facing;
+  // Said out loud for the same reason facing is: a frame of an idle lamp and
+  // a frame of a lit one are the same model, and a screenshot has to carry
+  // which of the two it is.
+  const lamp = state.lamp === LAMPS[0] ? '' : `   ·   lamp ${state.lamp}`;
+  $('#hud-title').textContent = (renderHudTitle.names || []).join('  +  ') + facing + lamp;
 }
 
 const gridRoot = new THREE.Group();
@@ -493,13 +503,37 @@ function buildClassMesh(voxels, palette, size, material, ao) {
   return new THREE.Mesh(geo, material);
 }
 
+/// What one material class is made of — `palette.ron`'s table, via
+/// /api/catalog. `emissive` is the exception: a status lamp has TWO
+/// presentations, not one, and `main.gd` calls `_set_machine_running(key,
+/// false)` the moment a machine body is built, so an idle machine's rim is
+/// dark for most of its life. Both states come out of `lamp_states.json`,
+/// the very file `voxel_assets.gd` builds `lamp_idle`/`lamp_running` from —
+/// so the numbers cannot drift from the game's, the way a copy here would
+/// (issue #81).
+function materialDef(cls) {
+  if (cls === 'emissive') {
+    const lamps = state.catalog.lamp_states || {};
+    return lamps[state.lamp] || lamps.running || {};
+  }
+  return (state.catalog.materials || {})[cls] || {};
+}
+
 function materialFor(cls) {
-  const def = (state.catalog.materials || {})[cls] || {};
+  const def = materialDef(cls);
   const mat = new THREE.MeshStandardMaterial({
     vertexColors: true,
     metalness: def.metallic ?? 0,
     roughness: def.roughness ?? 0.9,
   });
+  // `albedo_scale` is the ALBEDO-only channel the idle lamp darkens — the
+  // hue lives in the vertex colours, so one multiplier takes amber, green and
+  // red down together and leaves each its own lens. `voxel_emissive.gdshader`
+  // declares that uniform `source_color`, which means Godot converts it from
+  // sRGB on the way in; naming the colour space here is that same conversion,
+  // and without it an idle lamp would read markedly too bright.
+  const scale = def.albedo_scale ?? 1;
+  if (scale !== 1) mat.color.setRGB(scale, scale, scale, THREE.SRGBColorSpace);
   const energy = def.emission_energy || 0;
   if (energy > 0) {
     // voxel_emissive.gdshader: the lens is ALBEDO *and* EMISSION, so a lamp
@@ -607,6 +641,32 @@ async function renderCurrent({ refit = false, quiet = false } = {}) {
   // Playback re-renders every frame; rebuilding the details panel that
   // often would fight the reader's scroll position for no new information.
   if (!quiet) renderDetails();
+}
+
+/// Swaps the `emissive` meshes of every model already built to the current
+/// lamp state, rather than rebuilding geometry that has not changed. Same
+/// mesh, swapped material — which is exactly the move `_set_machine_running`
+/// makes in the game.
+function applyLampState() {
+  for (const group of groups.values()) {
+    group.traverse((n) => {
+      if (!n.isMesh || n.userData.cls !== 'emissive') return;
+      n.material.dispose();
+      n.material = materialFor('emissive');
+    });
+  }
+}
+
+function setLamp(name) {
+  state.lamp = LAMPS.includes(name) ? name : LAMPS[0];
+  const button = $('#lamp-toggle');
+  button.textContent = `lamp: ${state.lamp}`;
+  // Lit by default, so the light is on the button when the viewer is NOT
+  // showing the default — the same way `bg` marks a backdrop that is not haze.
+  button.classList.toggle('on', state.lamp !== LAMPS[0]);
+  applyLampState();
+  renderHudTitle();
+  if (state.asset) renderDetails();
 }
 
 function applyClassVisibility() {
@@ -767,6 +827,14 @@ function renderDetails() {
     chips.appendChild(el('span', `chip ${cls}`, n ? `${cls} · ${n}` : cls));
   }
   facts.appendChild(chips);
+  // A model with a lamp is two models to review, and this is where the
+  // numbers behind the picture belong — straight out of `lamp_states.json`,
+  // which is also where the game's own `lamp_idle`/`lamp_running` come from.
+  if (model.classes.includes('emissive')) {
+    const lamp = materialDef('emissive');
+    facts.appendChild(el('div', 'muted',
+      `lamp ${state.lamp} (l)  ·  emission ${lamp.emission_energy ?? 0}  ·  albedo ×${lamp.albedo_scale ?? 1}`));
+  }
   panel.appendChild(facts);
 
   if (asset.used_by.length) {
@@ -978,6 +1046,9 @@ function wire() {
     gridRoot.visible = state.grid;
     e.currentTarget.classList.toggle('on', state.grid);
   };
+  $('#lamp-toggle').onclick = () => {
+    setLamp(LAMPS[(LAMPS.indexOf(state.lamp) + 1) % LAMPS.length]);
+  };
   $('#bg-toggle').onclick = (e) => {
     state.backdrop = (state.backdrop + 1) % BACKDROPS.length;
     const mode = BACKDROPS[state.backdrop];
@@ -997,6 +1068,7 @@ function wire() {
     if (e.key === 'g') $('#grid-toggle').click();
     if (e.key === 'b') $('#bg-toggle').click();
     if (e.key === 'o') $('#ao-toggle').click();
+    if (e.key === 'l') $('#lamp-toggle').click();
     // One step clockwise, which is the step the game's own R makes
     // (`Direction::rotate_cw`); shift-F walks back the other way.
     if (e.key === 'f' || e.key === 'F') {
@@ -1028,11 +1100,14 @@ function wire() {
 /// the model in the frame, and a browser that can only be driven by hand
 /// cannot be measured against the game at all.
 ///
-///     ?ao=0&view=game&facing=2&bare=1#machine_cooking_vat
+///     ?ao=0&view=game&facing=2&bare=1&lamp=idle#machine_cooking_vat
 ///
-/// `ao` is the strength uniform (blank means AO_STRENGTH); `grid=0` takes the
-/// tile grid away, so what is left on the backdrop is the model and the
-/// shadow it casts and a measurement can tell which pixels are the subject;
+/// `ao` is the strength uniform (blank means AO_STRENGTH); `lamp=idle` draws
+/// the `emissive` class in the dark state the game puts an unprocessing
+/// machine in, so a screenshot can ask for the state a machine spends most of
+/// its life in; `grid=0` takes the tile grid away, so what is left on the
+/// backdrop is the model and the shadow it casts and a measurement can tell
+/// which pixels are the subject;
 /// `bare` strips the chrome down to the viewport; `shot=<name>` posts the next drawn frame to
 /// the server's `--shot-dir` and is how a headless run gets pixels back
 /// (Chrome's own `--screenshot` fires on a load heuristic, before a model has
@@ -1047,6 +1122,7 @@ function applyQuery() {
     state.ao = aoStrength.value > 0;
     $('#ao-toggle').classList.toggle('on', state.ao);
   }
+  if (q.has('lamp')) setLamp(q.get('lamp'));
   if (q.get('grid') === '0') $('#grid-toggle').click();
   if (q.get('bare') === '1') {
     for (const sel of ['#sidebar', '#details', '#toolbar', '#hud', '#variations']) {

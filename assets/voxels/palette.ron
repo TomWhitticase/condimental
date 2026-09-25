@@ -19,8 +19,12 @@
 // to `materials.json` alongside the models), and each asset is emitted as
 // one .vox per class it uses, so a machine's steel really can be shinier
 // than the concrete it stands on — UI_UX.md §4's deliberate metal exception.
+//
+// `lamp_states` is the same idea for the one class that has more than one
+// state: a status lamp is drawn lit or dark, and both presentations are
+// written here rather than in whichever renderer happens to be drawing it.
 (
-    schema_version: 1,
+    schema_version: 2,
 
     materials: {
         // Baseline: painted metal, concrete, plastic, rubber, cardboard.
@@ -59,6 +63,38 @@
         // simulation data (see main.gd's FLUID_TINTS), so the voxels are
         // near-white and Godot tints them per fluid id.
         "liquid": (metallic: 0.0, roughness: 0.14, emission_energy: 0.0),
+    },
+
+    // The two states a status LAMP is drawn in. Not a fifth material class:
+    // these are the `emissive` class above, modified, and the game swaps one
+    // for the other on a single mesh (`main.gd`'s `_set_machine_running`).
+    // A machine's lamps are lit only while it is actually processing, which
+    // is the minority of its life, so BOTH presentations have to be readable
+    // and reviewable — the asset browser drew every lamp at full emission
+    // until issue #81, and was flattering the state a machine is least often
+    // in.
+    //
+    // Written as MODIFIERS of `emissive` so `emission_energy` stays written
+    // down exactly once. `emission_scale` multiplies that 1.2, so retuning it
+    // moves the lit lamp with it and the two can never fall out of step;
+    // `metallic` is the class's.
+    //
+    // `albedo_scale` multiplies the lens's own colour in the ALBEDO channel
+    // alone, which is how the idle lamp reads as OFF while staying the same
+    // hue of lens: one number has to take amber, green and red down together
+    // and leave each recognisable. Albedo rather than emission alone because
+    // it is the channel that still renders when the glow pass is what the eye
+    // is reading (2026-09-16, issue #25). 0.38 is the judgement this palette
+    // already makes where the colour CAN be chosen outright — `status_amber`
+    // #FFB020 against `status_amber_off` #5C4212 is a little over a third,
+    // and so are red's and green's.
+    //
+    // Exported RESOLVED to `lamp_states.json` beside the models, which is the
+    // one place Godot (`voxel_assets.gd`) and the asset browser
+    // (`tools/asset-browser`) both read them from.
+    lamp_states: {
+        "idle":    (roughness: 0.6,  emission_scale: 0.0, albedo_scale: 0.38),
+        "running": (roughness: 0.45, emission_scale: 1.0, albedo_scale: 1.0),
     },
 
     colors: [

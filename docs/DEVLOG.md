@@ -24,7 +24,7 @@ below is history and should only ever be appended to.)*
   consolidated onto one integration branch and fast-forwarded into `main`.
   The union passed `scripts/verify-core-loop.sh` (19 Rust suites, 30 headless
   Godot proofs, no failures) and has been rendered and played; the same script
-  is **26 Rust suites and 38 Godot proofs as of 2026-09-21** — a number the
+  is **26 Rust suites and 40 Godot proofs as of 2026-09-25** — a number the
   run now prints for itself. A fresh
   worktree still needs `cargo xtask` and **two** `godot --import` passes
   before the world is visible. See the log entry below.
@@ -221,6 +221,31 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-25 — The asset browser learns that a lamp is usually dark
+
+The browser drew every `*.emissive.vox` mesh at full emission. The game does
+the opposite: `main.gd` dims a machine's status lamp the moment its body is
+built and lights it only while it processes, so a cooking vat's rim is a dark
+brown ring for most of its life. Reviewing a lamp in the browser therefore
+meant approving the state a machine spends least of its time in — and the
+browser's whole point is that it cannot drift from the pipeline (issue #81).
+
+The dim values had nowhere to come from: they were three numbers hardcoded in
+`voxel_assets.gd`, the one part of the voxel pipeline with no representation in
+`palette.ron`. They are palette data now. `palette.ron` carries a `lamp_states`
+table written as *modifiers* of the `emissive` class — `emission_scale`
+multiplies the class's energy rather than restating it — `voxgen` resolves them
+and writes `models/lamp_states.json` beside `materials.json`, and
+`voxel_assets.gd` and the browser both build their materials from that file.
+Adding the table is a shape change, so `palette.ron`'s `schema_version` is 2.
+
+The browser has a `running`/`idle` toggle on `l` and a `?lamp=idle` parameter
+on its automation seam, so a screenshot can ask for the dark state. Measured
+over the vat's lamp ring, divided by the vat's own stainless in the same frame:
+the browser draws an idle ring at 0.193 against the game's 0.235, where before
+it drew 1.006. Full record in `docs/DECISIONS.md`; the rule is UI_UX.md §2b
+point 39.
+
 ### 2026-09-25 — A session now has a defined ending
 
 `wrap-it-up` joins the skills. Sessions were ending on "that looks
@@ -242,6 +267,7 @@ which is also why the skill separates "is the work finished" from "would
 deleting the tree lose anything". They are different questions and a
 wrap-up answers both.
 
+
 ### 2026-09-25 — A machine hover gives up lines before it covers the HUD (issue #99)
 
 At 1280x720 with the controls legend open, a machine hover always sat on
@@ -260,6 +286,7 @@ because UI_UX §5f says the fold is theirs. The rule is written up in UI_UX
 §5c. `test_hud_plates.gd` covers the ladder in both view modes, and
 `test_staff_panel.gd` checks that the first rung removes the crew line and
 nothing else.
+
 
 ### 2026-09-21 — A settings screen, and an F3 menu for cheating during development
 

@@ -403,6 +403,11 @@ def group_models(names: list[str]) -> list[Asset]:
 def build_catalog() -> dict:
     index = json.loads((MODELS / "index.json").read_text())
     materials = json.loads((MODELS / "materials.json").read_text())
+    # The two states a status lamp is drawn in, resolved by `voxgen` out of
+    # palette.ron and read here rather than copied: the viewer's running/idle
+    # toggle has to swap the same material `main.gd`'s `_set_machine_running`
+    # does, or it is reviewing a lamp the game never shows (issue #81).
+    lamp_states = json.loads((MODELS / "lamp_states.json").read_text())
     palette = load_palette()
     generators = load_generators()
     usage = load_usage()
@@ -498,6 +503,7 @@ def build_catalog() -> dict:
         "repo": str(REPO),
         "tile_voxels": TILE_VOXELS,
         "materials": materials,
+        "lamp_states": lamp_states,
         "palette": palette,
         "categories": [c for c in CATEGORY_ORDER if any(a["category"] == c for a in assets)],
         "assets": assets,

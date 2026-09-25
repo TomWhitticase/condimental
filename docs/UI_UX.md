@@ -84,7 +84,11 @@ writing support is immature.
 4. **Escape hatch**: a one-off hand-sculpted `.vox` (in `vengi-voxedit`) may
    be committed with no generator, clearly marked as hand-authored.
 5. **One shared, checked-in colour palette** referenced by every generator.
-   This is what keeps §4's material rule and §7's palette consistent.
+   This is what keeps §4's material rule and §7's palette consistent. It
+   carries material facts as well as colour: the class table, and the
+   `lamp_states` table that says what a status lamp looks like lit and dark
+   (§2b point 39). `voxgen` resolves both and exports them beside the models,
+   so a second renderer reads them rather than restating them.
 
 Layout (built exactly this way):
 
@@ -102,7 +106,7 @@ assets/voxels/
 
 Point numbers are cited by code comments; keep them stable — a number is
 never reused and never moves. Full narrative in DECISIONS.md Part B. There is
-no point 10, and the list runs 1-28, 35-37, 29-34: the three entries the
+no point 10, and the list runs 1-28, 35-37, 29-34, 38-39: the three entries the
 factory-floor work added were written as a second 27, a third 27 and a second
 28, and were given the next free numbers on 2026-09-16 rather than renumbered
 into sequence. They sit where they were discovered.
@@ -284,6 +288,24 @@ into sequence. They sit where they were discovered.
     refusing the switch while the run is full, is worse: it strands a
     mis-declared tank with no way to drain its run. Destruction the player
     consented to is fine; destruction they discover afterwards is not.
+
+39. **A status lamp has two states, and both are palette data.** A lamp is
+    dark far more often than it is lit — `main.gd` dims one the moment a
+    machine body is built and only lights it while the machine processes — so
+    "the lamp" is two materials, not one. Both live in `palette.ron`'s
+    `lamp_states` table, written as *modifiers* of the `emissive` class:
+    `emission_scale` multiplies the class's energy rather than restating it,
+    so retuning the class moves the lit lamp with it and there is no second
+    copy to drift. `voxgen` resolves them and writes
+    `models/lamp_states.json`; `voxel_assets.gd` and the asset browser both
+    build their materials from that file. The dark state drops emission to
+    zero **and** darkens albedo, because albedo is what keeps a dead lens
+    reading as dead in a frame where the glow pass is doing the talking — the
+    same judgement `palette.ron` makes outright in its `status_*_off` hues.
+    Before this, the dim values existed only in GDScript, and the asset
+    browser — which cannot drift from the pipeline precisely because it
+    derives everything from repo files — had nothing to derive and drew every
+    lamp lit (issue #81).
 
 ## 3. Theme & setting
 

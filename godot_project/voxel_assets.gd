@@ -15,15 +15,22 @@ extends RefCounted
 
 const VOX_DIR := "res://voxels/"
 
-## What `lamp_idle` multiplies a status lamp's own colour by to read as OFF.
-## Multiplies rather than replaces because the hue lives in the mesh's vertex
-## colours, not in the material: one number has to take amber, green and red
-## down together and leave each still recognisable as its own lens.
+## Fallback only, for a project whose models have not been staged yet.
 ##
-## Set by rendering, the way `palette.ron` set its `status_*_off` trio — and
-## against that trio, which is the same judgement made where the colour could
-## be chosen outright: `status_amber` #FFB020 against `status_amber_off`
-## #5C4212 is a little over a third, and so is red's and green's.
+## The real numbers live in `palette.ron`'s `lamp_states` and arrive through
+## `voxels/lamp_states.json`, for the same reason the class table's do: a
+## lamp's idle presentation is content, and it is read by the asset browser
+## too (issue #81), so a second copy here is a second thing to drift. This
+## constant is what `read_json` falls back to when there is no staged file to
+## read — the parallel of the `defaults` table in `load_materials`.
+##
+## It multiplies rather than replaces because the hue lives in the mesh's
+## vertex colours, not in the material: one number has to take amber, green
+## and red down together and leave each still recognisable as its own lens.
+## Set by rendering, against `palette.ron`'s `status_*_off` trio, which is the
+## same judgement made where the colour could be chosen outright:
+## `status_amber` #FFB020 against `status_amber_off` #5C4212 is a little over
+## a third, and so is red's and green's.
 const LAMP_OFF_ALBEDO := 0.38
 
 ## "matte"/"metal"/"emissive"/"liquid" -> Material. `emissive` is the one
@@ -83,11 +90,39 @@ func load_materials() -> void:
 	# "dark enough that a dead lens does not compete with a live one, light
 	# enough not to vanish", and `LAMP_OFF_ALBEDO` is that idea applied to a
 	# mesh whose colour cannot be repainted per state.
+	#
+	# Both variants come out of `voxels/lamp_states.json`, which `voxgen`
+	# resolves from palette.ron's `lamp_states` against the `emissive` class
+	# above. The numbers are not written down here for exactly the reason the
+	# class table's are not — and this file is no longer the only reader: the
+	# asset browser's running/idle toggle builds its materials from the same
+	# JSON, so what a reviewer approves there is what the game will draw
+	# (issue #81).
 	var lamp_energy: float = float(table.get("emissive", defaults["emissive"]).get("emission_energy", 2.6))
-	lamp_idle = make_emissive_material(
-		0.0, 0.6, 0.0, Color(LAMP_OFF_ALBEDO, LAMP_OFF_ALBEDO, LAMP_OFF_ALBEDO)
-	)
-	lamp_running = make_emissive_material(0.0, 0.45, lamp_energy, Color(1, 1, 1))
+	var lamp_defaults := {
+		"idle": {
+			"metallic": 0.0,
+			"roughness": 0.6,
+			"emission_energy": 0.0,
+			"albedo_scale": LAMP_OFF_ALBEDO,
+		},
+		"running": {
+			"metallic": 0.0,
+			"roughness": 0.45,
+			"emission_energy": lamp_energy,
+			"albedo_scale": 1.0,
+		},
+	}
+	var lamps: Dictionary = lamp_defaults
+	var parsed_lamps = read_json(VOX_DIR + "lamp_states.json")
+	if parsed_lamps is Dictionary and parsed_lamps.has("idle") and parsed_lamps.has("running"):
+		lamps = parsed_lamps
+	else:
+		push_warning(
+			"voxels/lamp_states.json missing — falling back to built-in status-lamp values"
+		)
+	lamp_idle = make_lamp_material(lamps["idle"])
+	lamp_running = make_lamp_material(lamps["running"])
 
 	var index = read_json(VOX_DIR + "index.json")
 	if index is Dictionary:
@@ -128,6 +163,19 @@ static func make_emissive_material(
 	mat.set_shader_parameter("emission_energy", emission_energy)
 	mat.set_shader_parameter("albedo_scale", albedo_scale)
 	return mat
+
+
+## One status-lamp state, straight out of `voxels/lamp_states.json`. The
+## entries are already resolved against the `emissive` class by `voxgen`, so
+## this applies them as they stand and knows nothing about the palette.
+static func make_lamp_material(def: Dictionary) -> ShaderMaterial:
+	var scale := float(def.get("albedo_scale", 1.0))
+	return make_emissive_material(
+		float(def.get("metallic", 0.0)),
+		float(def.get("roughness", 0.55)),
+		float(def.get("emission_energy", 0.0)),
+		Color(scale, scale, scale)
+	)
 
 
 static func read_json(path: String):
