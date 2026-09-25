@@ -1047,17 +1047,6 @@ func _reframe() -> void:
 	_main._update_camera_transform()
 
 
-## `--closeup TX,TY[,SIZE]` — the argument is one comma-separated token so
-## it survives the `--` passthrough without an argument-order convention.
-## Both `--closeup 9,-2.5,14` and `--closeup=9,-2.5,14` are accepted, because
-## `_string_arg` takes the `=` form and two argument styles in one script
-## disagreeing about it is a trap (issue #114).
-##
-## **A `--closeup` this cannot read stops the run.** It used to fall through
-## and render a whole-factory frame at default zoom with `SCREENSHOT_OK:` and
-## exit 0, so the reviewer measured a picture nobody asked for — the one
-## failure a screenshot review cannot catch by looking. Returns false when it
-## refused.
 ## `--ghost-at TX,TY[,FACING]`, refused rather than half-read: a malformed
 ## value, or one with no `--ghost`/`--ghost-blocked` to aim, would otherwise
 ## photograph the default tile (or no ghost at all) and pass. The facing's
@@ -1065,14 +1054,18 @@ func _reframe() -> void:
 func _parse_ghost_at(args: Array) -> bool:
 	var value := _string_arg(args, "--ghost-at")
 	if value == "":
-		if args.has("--ghost-at"):
+		var given := false
+		for arg in args:
+			given = given or String(arg) == "--ghost-at" or String(arg).begins_with("--ghost-at=")
+		if given:
 			printerr("SCREENSHOT_FAIL: --ghost-at wants TX,TY[,FACING] as one comma-separated token")
 			_refuse()
 			return false
 		return true
 	var parts: PackedStringArray = value.split(",")
 	if parts.size() < 2 or parts.size() > 3 \
-			or not parts[0].is_valid_int() or not parts[1].is_valid_int():
+			or not parts[0].is_valid_int() or not parts[1].is_valid_int() \
+			or (parts.size() == 3 and parts[2] == ""):
 		printerr(
 			"SCREENSHOT_FAIL: --ghost-at wants TX,TY[,FACING] as one comma-separated token, got '%s'"
 			% value
@@ -1089,6 +1082,17 @@ func _parse_ghost_at(args: Array) -> bool:
 	return true
 
 
+## `--closeup TX,TY[,SIZE]` — the argument is one comma-separated token so
+## it survives the `--` passthrough without an argument-order convention.
+## Both `--closeup 9,-2.5,14` and `--closeup=9,-2.5,14` are accepted, because
+## `_string_arg` takes the `=` form and two argument styles in one script
+## disagreeing about it is a trap (issue #114).
+##
+## **A `--closeup` this cannot read stops the run.** It used to fall through
+## and render a whole-factory frame at default zoom with `SCREENSHOT_OK:` and
+## exit 0, so the reviewer measured a picture nobody asked for — the one
+## failure a screenshot review cannot catch by looking. Returns false when it
+## refused.
 func _parse_closeup(args: Array) -> bool:
 	for i in range(args.size()):
 		var arg := String(args[i])
