@@ -71,11 +71,11 @@ matches what code comments and data files cite.
   aims the camera — `--closeup`, `--first-person`, a fixture's own framing —
   and then lets the scene run 45 ordinary frames. Those frames poll the REAL
   keyboard in `_pan_camera` and see the REAL mouse in `_input`, so a key held
-  in another window on the host, a stray wheel notch, or the OS pointer
-  another process warps moved the camera between the aim and the shutter.
-  Measured here at about one run in four, drifting a tile and a half, with
-  the simulation tick identical — the failure was invisible in every number
-  the run printed, and visible only in the picture. `main.gd` now carries
+  in another window on the host, a stray wheel notch or a drag moved the
+  camera between the aim and the shutter. Measured here at about one run in
+  four, drifting a tile and a half, with the simulation tick identical — the
+  failure was invisible in every number the run printed, and visible only in
+  the picture. `main.gd` now carries
   `_camera_input_sealed`, and every way live input moves the camera returns
   early when it is set: `_apply_pan`, `_apply_drag_pan`, `_zoom_camera`,
   `_apply_look`, `_apply_fp_move`. The guard sits on the Input-FREE half of
@@ -85,12 +85,28 @@ matches what code comments and data files cite.
   The flag is false for a player, always, and nothing but the review harness
   sets it: this is a property of a photograph, not a mode of the game, and a
   seal that a player could end up inside would be a camera that stops
-  responding. `test_screenshot.gd` sets it on frame 1 BEFORE it parks the
-  cursor, because the park is itself a pointer warp and in first person a
-  pointer warp is a look. Proven by mutation: with one pan key held down, the
-  same command rendered `a8b1b9e8a63c` unsealed and the canonical
-  `52493c1c3da8` sealed, and `test_camera_seal.gd` fails on the removal of
-  any one of the five guards.
+  responding. `test_screenshot.gd` sets it on frame 1, before the view mode
+  is chosen and before any flag has aimed anything. Proven by mutation: with
+  the engine made to report a pan key as held, the same command on the same
+  tick (10622) renders `972e7d6bbea3` — 946548 primitives, 44 objects, the
+  closeup framing quietly undone — unsealed, and the canonical
+  `52493c1c3da8` (969058, 64) sealed. `test_camera_seal.gd` fails on the
+  removal of any one of the five guards.
+
+  **PR #167 landed under this branch, and the seal stays anyway.** That PR
+  moved the render's window off-screen and made it no-focus, for its own
+  reason — not interrupting the person at the laptop — and a window that
+  never holds focus is not sent the host's keystrokes. Instrumented across a
+  whole warm-up on this tip, `DisplayServer.window_is_focused()` is false on
+  all 45 frames and `Input.is_key_pressed(KEY_W)` never goes true, so the
+  default render path no longer carries live input at all. The seal is kept
+  for two reasons. `--on-screen`, the supported flag for watching a run, DOES
+  take focus — measured true from frame 20 of the same warm-up — so the
+  defect is still reachable through a documented flag. And a reproducibility
+  guarantee that rests on a macOS window flag is one that a later change to
+  the window silently repeals; sealed, "the photograph is of the camera the
+  flags aimed" is a property of the harness, held by a headless test, on
+  every platform and in every window mode.
 
   **The harness refuses an unpinned clock rather than trusting the script.**
   `test_screenshot.gd` measures its own delta against `FIXED_FPS` and prints
@@ -5664,8 +5680,9 @@ matches what code comments and data files cite.
   node had as a surface override. Lighting, shadows and SSAO are identical —
   `scripts/screenshot-scene.sh --populate` before and after differed only on
   the carried items and one clipboard digit, and the digit said why: the two
-  runs were one simulation tick apart (the screenshot ticks by wall clock;
-  two runs of the OLD renderer differ from each other the same way). With
+  runs were one simulation tick apart (the screenshot ticked by wall clock
+  then, so two runs of the OLD renderer differed from each other the same
+  way; #82 pinned that clock on 2026-09-25). With
   `--no-hud` on the splitter fixture the two PNGs were byte-identical.
 
   (2) **What stays a node is a rule, not a list: anything with live

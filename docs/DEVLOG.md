@@ -252,11 +252,17 @@ those frames poll the real keyboard in `_pan_camera` and see the real mouse in
 a half between the aim and the shutter, about one run in four here, and
 nothing said so: the tick was identical and only the picture moved.
 `main.gd` has a `_camera_input_sealed` flag now, off for every player and set
-by the harness on frame 1 before it parks the cursor, and it shuts all five
-doors live input comes through (key pan, right-drag, zoom, first-person look,
-first-person walk). Measured with one pan key held down: unsealed the same
-command rendered `a8b1b9e8a63c`, sealed it rendered the canonical
-`52493c1c3da8`.
+by the harness on frame 1, and it shuts all five doors live input comes
+through (key pan, right-drag, zoom, first-person look, first-person walk).
+Measured with the engine made to report a pan key as held: on the same tick,
+unsealed the command rendered `972e7d6bbea3` with the closeup framing undone,
+sealed it rendered the canonical `52493c1c3da8`. PR #167 landed under this
+branch while it was in flight and moved the render's window off-screen and
+no-focus, which as a side effect stops the host's keystrokes reaching the
+default path at all — instrumented, `window_is_focused()` is false on all 45
+warm-up frames. The seal stays because `--on-screen` does take focus (true
+from frame 20 of the same warm-up), and because a guarantee resting on a
+window flag is one a later change to the window repeals in silence.
 
 `test_screenshot.gd` refuses a run whose frames did not arrive at that rate
 rather than photographing a load-dependent moment, prints `SCREENSHOT_TICK`

@@ -33,7 +33,10 @@ See [WORKFLOW.md](WORKFLOW.md).
   frames, which poll the real keyboard and see the real mouse, so
   `main.gd`'s `_camera_input_sealed` (off for every player, set by the
   harness on frame 1) shuts all five doors — key pan, right-drag, zoom,
-  first-person look, first-person walk. `test_screenshot.gd` REFUSES a run
+  first-person look, first-person walk. It stays a rule of the harness rather
+  than a side effect of PR #167's off-screen, no-focus window, which a later
+  change to that window would repeal in silence, and which `--on-screen` does
+  not get. `test_screenshot.gd` REFUSES a run
   whose frames did not arrive at `FIXED_FPS` rather than quietly
   photographing a load-dependent moment, `scripts/check-invariants.sh` keeps script and
   harness in step, and every render prints `SCREENSHOT_TICK`. A baseline
