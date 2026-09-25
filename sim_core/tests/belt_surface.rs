@@ -9,11 +9,18 @@
 //!
 //! Godot cannot work that out for itself: a belt that stops moving stops
 //! dirtying its chunk, so the presentation layer is never told the tile
-//! stood still. So the simulation counts, per tile, the ticks that tile
-//! actually advanced product on, and `BeltSnapshot::moved_ticks` carries
-//! it. This file proves the three properties the renderer relies on:
+//! stood still. So the simulation counts, per tile, the ticks that tile's
+//! rubber ran for, and `BeltSnapshot::moved_ticks` carries it.
 //!
-//! 1. A tile that moves product counts every such tick, once.
+//! What stops that clock is a JAM, and only a jam (2026-09-25). It used to
+//! stop on an empty tile too, which made one line of belt roll one tile at
+//! a time as a single box walked down it, and made still rubber mean either
+//! "jammed" or "nothing here" — so the jam this counter exists to show
+//! could not be read off the floor. A conveyor with no box on it is a motor
+//! turning, not a starved machine. This file proves the three properties
+//! the renderer relies on:
+//!
+//! 1. A tile counts every tick it runs, once — carrying product or idle.
 //! 2. A jammed tile's count freezes — and stays frozen for as long as the
 //!    jam lasts, which is what makes "missing from a delta" mean "still
 //!    where you last drew it".
@@ -113,20 +120,31 @@ fn clock_at(world: &World, tile: TileCoord) -> u64 {
         .unwrap_or_else(|| panic!("no belt snapshot for {tile:?}"))
 }
 
-/// A freshly placed belt has never carried anything, so its pattern has
-/// never advanced. Phase 0 is also what a save written before this field
-/// existed loads as — see `SavedBelt::moved_ticks`.
+/// A belt with nothing on it is still running, so its rubber keeps
+/// counting — one tick per tick, the same rate a loaded tile counts at.
+/// That is what makes a long idle line move as one surface instead of
+/// lighting up a tile at a time behind a single box, and it is the rule
+/// Godot extrapolates between snapshots (`main.gd`'s `_belt_idle_phase`),
+/// so the exact rate matters and not merely that it moves.
 #[test]
-fn a_belt_that_has_never_carried_anything_stands_at_phase_zero() {
+fn an_empty_belt_keeps_its_rubber_running() {
     let (mut world, tiles) = dead_end_run(3, 0);
-    for _ in 0..200 {
+    const TICKS: u64 = 200;
+    for _ in 0..TICKS {
         world.tick();
     }
-    for tile in tiles {
+    for tile in &tiles {
+        assert!(
+            matches!(
+                world.query_tile(*tile),
+                Some(sim_core::sim::TileSnapshot::Belt { ref items_here, .. }) if items_here.is_empty()
+            ),
+            "this asserts about an EMPTY tile, and {tile:?} has something on it"
+        );
         assert_eq!(
-            clock_at(&world, tile),
-            0,
-            "an empty belt has advanced nothing, so its rubber has not moved"
+            clock_at(&world, *tile),
+            TICKS,
+            "an idle belt runs, so its rubber counts one tick per tick like any other"
         );
     }
 }

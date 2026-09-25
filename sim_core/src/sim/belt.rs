@@ -76,9 +76,10 @@ pub struct BeltSegment {
     /// `0..=frontier+1` instead of the whole belt — the actual FFF #176
     /// payoff, not just the storage shape.
     frontier: usize,
-    /// How many ticks this tile has actually advanced product on, since it
-    /// was placed — the tile's own clock, incremented by `tick_toward`
-    /// exactly when it reports movement.
+    /// How many ticks this tile's rubber has run, since it was placed — the
+    /// tile's own clock, incremented by `tick_toward` on every tick the tile
+    /// was not JAMMED. A tile carrying nothing counts; a tile holding an item
+    /// it could not advance does not.
     ///
     /// This is the one piece of belt state that exists for the RENDERER
     /// (`BeltSnapshot::moved_ticks`), and it is here rather than in Godot
@@ -89,10 +90,26 @@ pub struct BeltSegment {
     /// the items on it sit still — which is a decoration contradicting the
     /// simulation, exactly what UI_UX.md §6a forbids (issue #79).
     ///
+    /// **An IDLE belt is a running belt (2026-09-25).** This counted only
+    /// ticks that moved product until the owner played a long line and saw
+    /// one tile of rubber move at a time as a single box walked down it: a
+    /// conveyor with no box on it is not a crusher with no tomato in it, it
+    /// is a motor turning. Counting only loaded ticks also made "still
+    /// rubber" mean two different things — jammed and empty — so the jam it
+    /// was introduced to show could not be read off the floor at all. It now
+    /// means exactly one thing. §6a's rule is kept where it bites: a jam
+    /// still stops the surface, because that is the tile's own state and not
+    /// its mere existence.
+    ///
     /// A counter rather than a flag, because the rubber must not JUMP when
     /// a line unjams: the frame is `floor(moved_ticks * FRAMES /
     /// TICKS_PER_TILE) mod FRAMES`, so the pattern crosses a tile in
-    /// exactly the ticks an item does and simply pauses in between.
+    /// exactly the ticks an item does and simply pauses when it jams.
+    ///
+    /// Godot extrapolates this between snapshots — an idle tile dirties no
+    /// chunk, so it would otherwise never hear the clock move. That is exact
+    /// rather than a guess precisely because the increment is one per tick:
+    /// see `main.gd`'s `_belt_idle_phase`.
     moved_ticks: u64,
 }
 
@@ -145,6 +162,13 @@ impl BeltSegment {
     pub fn tick_toward(&mut self, speed: Fx, room_ahead: Fx) -> bool {
         if self.items.is_empty() {
             self.frontier = 0;
+            // An empty belt is a RUNNING belt, so its rubber keeps counting
+            // (see `moved_ticks`). It still reports no movement: there is no
+            // product to redraw, and dirtying a chunk for every idle tile in
+            // the world every tick is the cost this counter exists to avoid.
+            // Godot extrapolates the phase instead, exactly, off this same
+            // one-per-tick rule.
+            self.moved_ticks = self.moved_ticks.saturating_add(1);
             return false;
         }
         let reserve = (self.min_spacing - room_ahead).max(Fx::ZERO);
