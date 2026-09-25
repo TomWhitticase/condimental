@@ -37,6 +37,14 @@ shader pack** (voxel base + real lighting).
   the angle every asset is art-directed for, and the first-person camera
   still does not orbit it — it is a separate free-look perspective camera
   with its own position, not a rotation of the isometric one.
+- **A panel takes the keyboard with the cursor.** While anything is up that
+  hands the pointer back — one of the five modals, the configuration panel,
+  the pause menu — held keys stop steering the camera and mouse motion stops
+  swinging it (`main.gd`'s `_fp_mouse_free`/`_camera_keys_live`). The panels
+  bind the same keys the camera does: SHIFT+click on a market crate buys
+  every unit the balance covers, and while the camera still read held keys
+  the one press also flew the player down, since SPACE/SHIFT are first
+  person's up/down (2026-09-22).
 - **Tile grid always legible**: the player can always tell which tile a
   thing occupies.
 - **Rotation**: 90° snap only (not yet implemented). Assets are modelled for
