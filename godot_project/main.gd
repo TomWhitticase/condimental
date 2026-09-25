@@ -2166,8 +2166,8 @@ var _iso_dragging := false # true while the right mouse button is held
 ## a fixture's own framing — and then lets the scene run frames until the
 ## shutter. Those frames are ordinary `_process` frames, so `_pan_camera`
 ## polls the REAL keyboard and `_input` sees the REAL mouse: a key held in
-## another window, a stray wheel notch, or the OS pointer another process
-## warps would move the camera between the aim and the shutter, and the
+## another window, a stray wheel notch, or a drag that lands on the render's
+## window would move the camera between the aim and the shutter, and the
 ## photograph would silently be of somewhere else. That is the second half of
 ## issue #82 — the first was the clock — and it is why two runs of one
 ## command could differ by a pan of a tile and a half with the tick identical.

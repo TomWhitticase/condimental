@@ -164,6 +164,24 @@ run_godot_script() {
   echo
 }
 
+# `test_screenshot.gd` is the one script in godot_project/ that no headless
+# test loads: it is driven by scripts/screenshot-scene.sh, which needs a
+# window, so nothing below would notice it had stopped PARSING. A merge that
+# renamed a `_process` parameter under it did exactly that, and every check in
+# this repo stayed green while the review render was dead. `--check-only`
+# parses without running, and reports the failure the way Godot always does —
+# by printing it, not by exiting non-zero.
+echo "==> godot --check-only --script test_screenshot.gd (the review harness still parses)"
+parse_out=$("$godot_bin" --headless --path godot_project --check-only \
+  --script test_screenshot.gd 2>&1)
+if printf '%s\n' "$parse_out" | grep -qE "Parse Error|Failed to load script"; then
+  printf '%s\n' "$parse_out" >&2
+  echo "FAIL: test_screenshot.gd does not parse — scripts/screenshot-scene.sh cannot render" >&2
+  exit 1
+fi
+echo "test_screenshot.gd parses"
+echo
+
 run_godot_script test_core_loop.gd CORE_LOOP_OK "real gdext JSON boundary"
 run_godot_script test_interaction.gd INTERACTION_OK "keyboard input -> SimBridge"
 run_godot_script test_presentation.gd PRESENTATION_OK "UI_UX.md §1/§2/§4 scene structure"

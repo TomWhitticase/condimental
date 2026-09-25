@@ -2158,7 +2158,7 @@ func _process(delta: float) -> bool:
 	# Before the fixture, before the flags, and on EVERY frame: a run whose
 	# clock is not pinned cannot hand back the picture its arguments name,
 	# and that is worth more as a refusal than as a caveat (issue #82).
-	if not _clock_is_pinned(_delta):
+	if not _clock_is_pinned(delta):
 		_refuse()
 		return true
 	# Build first: every flag below is about looking at something, and since
@@ -2197,11 +2197,12 @@ func _process(delta: float) -> bool:
 	# has to be settled before they are drawn.
 	if _frames == 1 and (_unlocked or _unlock_toast):
 		_cross_gates(-1 if _unlock_toast else 0)
-	# Before the view mode is chosen and long before the cursor is parked: from
-	# here to the shutter the camera is only ever what this script aims it at.
-	# `_park_cursor` warps the OS pointer, which in first person is a look; a
-	# key held in another window pans; a stray wheel notch zooms. None of that
-	# is in the command, so none of it may be in the picture (issue #82).
+	# Before the view mode is chosen: from here to the shutter the camera is
+	# only ever what this script aims it at. The hover flags stopped warping
+	# the OS pointer when the window went off-screen, but the scene still
+	# polls live input — a key held in another window pans, a stray wheel
+	# notch zooms, a drag looks. None of that is in the command, so none of
+	# it may be in the picture (issue #82).
 	if _frames == 1 and _main != null:
 		_main._camera_input_sealed = true
 	if _frames == 1:
