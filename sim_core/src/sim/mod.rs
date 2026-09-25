@@ -68,9 +68,9 @@ pub use storage::{RackKind, StorageCatalog, StorageLoadError, WAREHOUSE_RACK_KIN
 pub use types::{Direction, Fx, Money, decode_chunk_id, encode_chunk_id};
 pub use unlocks::{Unlock, UnlockRegistry, UnlockSnapshot};
 pub use world::{
-    BELT_KIND, BeltSnapshot, ChunkSnapshot, ConveyorLinks, DockSnapshot, FluidSnapshot,
-    FluidTankSnapshot, FluidTapSnapshot, HopperSnapshot, LinkInput, LinkKind, LinkOutput, Links,
-    MachineLoadEntry, MachineLoadSnapshot, MachineSnapshot, PIPE_KIND, PipeConnection, PipeLinks,
-    PipeSnapshot, PlacementSnapshot, PlayerCommand, SplitterSnapshot, Stall, StallKind,
-    TileSnapshot, World, command_from_json,
+    BELT_KIND, BeltSnapshot, CROSSING_KIND, ChunkSnapshot, ConveyorLinks, CrossingLinks,
+    DockSnapshot, FluidSnapshot, FluidTankSnapshot, FluidTapSnapshot, HopperSnapshot, LinkInput,
+    LinkKind, LinkOutput, Links, MachineLoadEntry, MachineLoadSnapshot, MachineSnapshot, PIPE_KIND,
+    PipeConnection, PipeLinks, PipeSnapshot, PlacementSnapshot, PlayerCommand, SplitterSnapshot,
+    Stall, StallKind, TileSnapshot, World, command_from_json,
 };
