@@ -234,6 +234,32 @@ impl SimBridge {
         }
     }
 
+    /// Would `command_json` succeed if issued now, and what would its tile
+    /// become? Takes exactly what `issue_command_json` takes and changes
+    /// nothing — `sim::World::preview_command`, which asks the same rule
+    /// functions the command acts on, so a ghost cannot go green on a
+    /// placement the sim then refuses. JSON-serialized `sim::PreviewResult`:
+    ///
+    /// ```json
+    /// {"valid": true, "reason": "", "result_kind": "crossing"}
+    /// {"valid": false, "reason": "A pipe can only cross a belt at right angles.",
+    ///  "result_kind": ""}
+    /// ```
+    ///
+    /// `reason` is a sentence to show, empty when valid; `result_kind` is
+    /// the kind the tile would end up as, empty when nothing is placed.
+    /// `place` and `purchase` are previewed; any other command, and
+    /// malformed JSON, comes back `valid: false` with a reason saying so.
+    #[func]
+    fn preview_command_json(&self, command_json: GString) -> GString {
+        let result = match sim::command_from_json(&command_json.to_string()) {
+            Some(cmd) => self.world.preview_command(&cmd),
+            None => sim::PreviewResult::malformed(),
+        };
+        let json = serde_json::to_string(&result).expect("PreviewResult must serialize");
+        GString::from(json.as_str())
+    }
+
     /// Everything currently placed in the world, JSON-serialized as an
     /// array of `sim::PlacementSnapshot` — kind, origin tile, facing,
     /// declared footprint, the tiles it actually occupies once rotated, and

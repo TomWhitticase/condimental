@@ -255,12 +255,37 @@ impl SimBridge {
     pub fn save_ron(&self) -> GString;
     pub fn load_ron(&mut self, ron: GString) -> GString;
     pub fn new_game(&mut self);
-    // Planned, not built:
+    // Built 2026-09-25 (belt/pipe crossings, T3a); wire: preview_command_json.
     pub fn preview_command(&self, cmd: &PlayerCommand) -> PreviewResult; // validation pass, never mutate-then-rollback
+    // Planned, not built:
     pub fn undo(&mut self) -> bool;
     pub fn redo(&mut self) -> bool;
 }
 ```
+
+`preview_command` answers the build ghost's question — would this command
+succeed now, and what would its tile become — without the ghost reimplementing
+a sim rule in GDScript. On the wire it is `preview_command_json`, taking the
+same JSON `issue_command_json` takes and returning a `PreviewResult`:
+
+```json
+{"valid": true, "reason": "", "result_kind": "crossing"}
+```
+
+- `valid` — whether `issue_command` would change the world.
+- `reason` — empty exactly when `valid`; otherwise a human-readable sentence
+  for presentation to show ("A pipe can only cross a belt at right angles.").
+- `result_kind` — the placement kind the targeted tile would end up as
+  (`"pipe"`, `"crossing"`, a machine kind); empty on a refusal or for a
+  command that places nothing.
+
+It is a validation pass over `&self`, never apply-and-roll-back: it calls the
+same `plan_*` functions (`World::plan_place`, `World::plan_purchase`) the
+matching `issue_command` arms act on, so there is one implementation of each
+rule and the two cannot drift; `sim_core/tests/preview.rs` drives a grid of
+cases through both and asserts they agree. `place` and `purchase` are covered.
+**Every other command is refused with a reason saying it is not previewed** —
+never guessed valid — until it gets its own shared `plan_*` function.
 
 Also on the wire today (`economy_snapshot_json` carries the whole contract
 `board` beside the active `contracts` since the contract-board epic, and
