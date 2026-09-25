@@ -705,13 +705,6 @@ func _initialize() -> void:
 	if _ghost_kind == "":
 		_ghost_kind = _string_arg(args, "--ghost-blocked")
 		_ghost_blocked = _ghost_kind != ""
-	var ghost_at_arg := _string_arg(args, "--ghost-at")
-	if ghost_at_arg != "":
-		var parts: PackedStringArray = ghost_at_arg.split(",")
-		if parts.size() >= 2:
-			_ghost_at = Vector2i(int(parts[0]), int(parts[1]))
-		if parts.size() == 3:
-			_ghost_facing = parts[2]
 	_allow_unhealthy = args.has("--allow-unhealthy")
 	_remove_mode = args.has("--remove-mode")
 	_title = args.has("--title")
@@ -722,6 +715,8 @@ func _initialize() -> void:
 	if not _reset_settings(args):
 		return
 	if not _parse_closeup(args):
+		return
+	if not _parse_ghost_at(args):
 		return
 	_resolve_fixture()
 	_apply_fluid_gallery_defaults(args)
@@ -1063,6 +1058,37 @@ func _reframe() -> void:
 ## exit 0, so the reviewer measured a picture nobody asked for — the one
 ## failure a screenshot review cannot catch by looking. Returns false when it
 ## refused.
+## `--ghost-at TX,TY[,FACING]`, refused rather than half-read: a malformed
+## value, or one with no `--ghost`/`--ghost-blocked` to aim, would otherwise
+## photograph the default tile (or no ghost at all) and pass. The facing's
+## spelling is checked in `_enter_ghost_mode`, against main's DIRECTIONS.
+func _parse_ghost_at(args: Array) -> bool:
+	var value := _string_arg(args, "--ghost-at")
+	if value == "":
+		if args.has("--ghost-at"):
+			printerr("SCREENSHOT_FAIL: --ghost-at wants TX,TY[,FACING] as one comma-separated token")
+			_refuse()
+			return false
+		return true
+	var parts: PackedStringArray = value.split(",")
+	if parts.size() < 2 or parts.size() > 3 \
+			or not parts[0].is_valid_int() or not parts[1].is_valid_int():
+		printerr(
+			"SCREENSHOT_FAIL: --ghost-at wants TX,TY[,FACING] as one comma-separated token, got '%s'"
+			% value
+		)
+		_refuse()
+		return false
+	if _ghost_kind == "":
+		printerr("SCREENSHOT_FAIL: --ghost-at aims a ghost, but no --ghost KIND or --ghost-blocked KIND names one")
+		_refuse()
+		return false
+	_ghost_at = Vector2i(int(parts[0]), int(parts[1]))
+	if parts.size() == 3:
+		_ghost_facing = parts[2]
+	return true
+
+
 func _parse_closeup(args: Array) -> bool:
 	for i in range(args.size()):
 		var arg := String(args[i])

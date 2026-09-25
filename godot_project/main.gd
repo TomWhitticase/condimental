@@ -13423,12 +13423,16 @@ func _ghost_asset_node(asset: String) -> Node3D:
 ## The ghost that stands for a crossing — its belt's straight frame with the
 ## gantry over it, both at the BELT's yaw like the placed tile
 ## (`_crossing_shape_for`), so a remove ghost covers exactly what the click
-## would take away: both halves.
+## would take away: both halves. Under `CROSSING_GANTRY_FALLBACK` the ghost is
+## the belt alone: a stack shares one yaw and no lift, and the fallback
+## straight needs a quarter turn and `CROSSING_LIFT_Y` that the placed tile
+## gives it, so stacking it would draw a pipe lying along the belt.
 func _crossing_ghost_asset(belt_direction: String) -> String:
+	var belt_frame := String(_belt_frames_for_shape(BELT_SHAPE_STRAIGHT)[0])
 	var gantry := _crossing_shape_for(belt_direction)
-	return "%s%s%s" % [
-		_belt_frames_for_shape(BELT_SHAPE_STRAIGHT)[0], GHOST_ASSET_STACK, String(gantry["asset"])
-	]
+	if float(gantry["model_lift_y"]) > 0.0:
+		return belt_frame
+	return "%s%s%s" % [belt_frame, GHOST_ASSET_STACK, String(gantry["asset"])]
 
 
 func _clear_ghost_body() -> void:
