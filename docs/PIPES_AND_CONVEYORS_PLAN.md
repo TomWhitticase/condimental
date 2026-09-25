@@ -109,11 +109,14 @@ instancing (ticket 4) a frame change swaps which of the four per-frame
 visibility flips.
 
 **Superseded on 2026-09-21 (issue #79), in both halves.** The clock is each
-tile's own `BeltSegment::moved_ticks` — ticks that tile actually advanced
-product on, carried by `BeltSnapshot` — not `current_tick`, because off the
-global tick a jammed line's rubber races under items that are not moving
-(UI_UX.md §6a). Pause still freezes it, for the same reason: no tick, no
-count. And since tiles of one frame set are now on different frames, the
+tile's own `BeltSegment::moved_ticks`, carried by `BeltSnapshot` — not
+`current_tick`, because off the global tick a jammed line's rubber races
+under items that are not moving (UI_UX.md §6a). Pause still freezes it, for
+the same reason: no tick, no count. **Amended 2026-09-25:** the field is the
+TICK the tile last ran on, not a count of ticks it advanced product on. An
+empty tile is a running tile and keeps taking the new tick, so a line of
+belts reads as one conveyor; only a JAM stops it taking the tick, and a
+freed tile rejoins the world's one phase. And since tiles of one frame set are now on different frames, the
 swap is per tile rather than per set: a tile not standing on a frame stays
 in that frame's `MultiMesh` with a zero-scale basis at its own position, so
 a frame change costs two transform writes for the tile that changed.

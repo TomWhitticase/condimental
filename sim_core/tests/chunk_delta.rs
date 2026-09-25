@@ -54,15 +54,37 @@ fn a_delta_carries_exactly_the_belts_whose_snapshot_changed_and_no_pipes() {
         delta.belts.len(),
         after.belts.len()
     );
-    // Tile by tile: a belt is in the delta IF AND ONLY IF its snapshot
-    // differs from the previous tick's — and the entry is that snapshot.
+    // Tile by tile: a belt is in the delta IF AND ONLY IF it moved product
+    // this tick — and the entry is its whole snapshot.
+    //
+    // For a belt with something on it that is "its snapshot differs from
+    // last tick's". An EMPTY belt is the one deliberate exception: its
+    // rubber runs whether or not anything is on it (`BeltSegment::
+    // moved_ticks`, 2026-09-25), so its `moved_ticks` moves every tick,
+    // and sending a delta for it would put every idle tile in the world
+    // back on the wire thirty times a second — which is the cost this
+    // whole mechanism exists to avoid. The renderer extrapolates that
+    // clock instead, off the same one-per-tick rule (`main.gd`'s
+    // `_belt_idle_phase`), so nothing is lost by the silence.
+    let mut idle_clocks_ran = 0;
     for now in &after.belts {
         let then = before
             .belts
             .iter()
             .find(|b| b.tile == now.tile)
             .expect("no structural change");
-        let changed = serde_json::to_string(then).unwrap() != serde_json::to_string(now).unwrap();
+        let idle = then.items.is_empty() && now.items.is_empty();
+        if idle {
+            assert_eq!(
+                now.moved_ticks,
+                then.moved_ticks + 1,
+                "belt {:?} is empty, and an empty belt is a running belt",
+                now.tile
+            );
+            idle_clocks_ran += 1;
+        }
+        let changed =
+            !idle && serde_json::to_string(then).unwrap() != serde_json::to_string(now).unwrap();
         let sent = delta.belts.iter().find(|b| b.tile == now.tile);
         assert_eq!(
             sent.is_some(),
@@ -78,6 +100,10 @@ fn a_delta_carries_exactly_the_belts_whose_snapshot_changed_and_no_pipes() {
             );
         }
     }
+    assert!(
+        idle_clocks_ran > 0,
+        "the fixture must contain an idle belt for that exception to mean anything"
+    );
     assert!(
         delta.pipes.is_empty(),
         "fluid is polled, a delta never carries a pipe"

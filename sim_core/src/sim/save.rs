@@ -397,14 +397,21 @@ impl SavedBody {
 pub struct SavedBelt {
     pub items: Vec<(ItemId, FxBits)>,
     pub frontier: u32,
-    /// The tile's surface clock (`BeltSegment::moved_ticks`) — how many
-    /// ticks this belt has actually advanced product on. Presentation
-    /// state, saved so a loaded factory's rubber stands where the saved
-    /// one's did rather than snapping to a fresh phase under the same
-    /// items. `#[serde(default)]` and added to `schema_version` 2 rather
-    /// than bumping it, like `SavedHopper::auto_fill` and
-    /// `SavedMachine::load`: a save without it loads at phase 0, which is
-    /// where a freshly placed belt starts.
+    /// The tile's surface clock (`BeltSegment::moved_ticks`) — the tick this
+    /// belt last ran on, which is the current tick unless it is JAMMED
+    /// (amended 2026-09-25; it used to be a count of the ticks it advanced
+    /// product on). Presentation state, saved so a loaded factory's rubber
+    /// stands where the saved one's did rather than snapping to a fresh
+    /// phase under the same items. `#[serde(default)]` and added to
+    /// `schema_version` 2 rather than bumping it, like
+    /// `SavedHopper::auto_fill` and `SavedMachine::load`.
+    ///
+    /// **Only a belt with items on it is restored from this.** An empty one
+    /// takes the save's own `tick_count` instead, because an empty belt is a
+    /// running belt and a save written under the old rule holds the tick
+    /// each idle tile last *carried* something — stale by construction, and
+    /// never corrected afterwards, since an idle tile dirties no chunk. See
+    /// `BeltSegment::restore`.
     #[serde(default)]
     pub moved_ticks: u64,
 }
@@ -1465,9 +1472,9 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
             .entity_at(placement.tile)
             .expect("rebuild_structure placed something on every saved tile");
         match &placement.body {
-            SavedBody::Belt(belt) => restore_belt(world, entity, belt),
+            SavedBody::Belt(belt) => restore_belt(world, entity, belt, data.tick_count),
             SavedBody::Splitter(splitter) => {
-                restore_belt(world, entity, &splitter.belt);
+                restore_belt(world, entity, &splitter.belt, data.tick_count);
                 world
                     .ecs_mut()
                     .insert_one(entity, Splitter::restore(splitter.next_output))
@@ -1607,7 +1614,10 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
     Ok(())
 }
 
-fn restore_belt(world: &mut World, entity: hecs::Entity, saved: &SavedBelt) {
+/// `tick_count` is the save's own tick and not `world.current_tick()`, which
+/// is still 0 here — `restore_tick_count` runs after every body is written.
+/// An empty belt takes it as its surface clock (`BeltSegment::restore`).
+fn restore_belt(world: &mut World, entity: hecs::Entity, saved: &SavedBelt, tick_count: u64) {
     let (length, min_spacing) = {
         let belt = world
             .ecs()
@@ -1630,6 +1640,7 @@ fn restore_belt(world: &mut World, entity: hecs::Entity, saved: &SavedBelt) {
                 &positions,
                 saved.frontier as usize,
                 saved.moved_ticks,
+                tick_count,
             ),
         )
         .expect("the entity was just placed");

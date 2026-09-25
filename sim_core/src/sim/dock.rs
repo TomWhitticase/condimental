@@ -381,7 +381,7 @@ mod tests {
     const BELT_SPEED: f64 = 0.02;
 
     fn belt() -> BeltSegment {
-        BeltSegment::new(Fx::from_num(4.0), Fx::from_num(0.25))
+        BeltSegment::new(Fx::from_num(4.0), Fx::from_num(0.25), 0)
     }
 
     fn dock() -> Dock {
@@ -404,7 +404,7 @@ mod tests {
             if belt.front_ready().is_some() {
                 return;
             }
-            belt.tick(Fx::from_num(BELT_SPEED));
+            belt.tick(Fx::from_num(BELT_SPEED), 0);
         }
         panic!("the fixture belt never delivered an item to its end");
     }
@@ -428,7 +428,7 @@ mod tests {
         let econ = economy();
         for _ in 0..500 {
             assert!(!d.try_absorb(&mut b, &econ));
-            b.tick(Fx::from_num(BELT_SPEED));
+            b.tick(Fx::from_num(BELT_SPEED), 0);
         }
         assert!(d.is_empty());
         assert_eq!(d.shipped_total(), 0);
@@ -466,7 +466,7 @@ mod tests {
         assert!(b.try_spawn("boxed_ketchup".to_string()));
         // Space the second box out behind the first, then let both run down.
         for _ in 0..20 {
-            b.tick(Fx::from_num(BELT_SPEED));
+            b.tick(Fx::from_num(BELT_SPEED), 0);
         }
         assert!(b.try_spawn("boxed_ketchup".to_string()));
 
@@ -487,7 +487,7 @@ mod tests {
         let mut b = belt();
         assert!(b.try_spawn("boxed_ketchup".to_string()));
         for _ in 0..20 {
-            b.tick(Fx::from_num(BELT_SPEED));
+            b.tick(Fx::from_num(BELT_SPEED), 0);
         }
         assert!(b.try_spawn("boxed_ketchup".to_string()));
         run_to_end(&mut b);
@@ -495,7 +495,7 @@ mod tests {
         let econ = economy();
         assert!(d.try_absorb(&mut b, &econ));
         for _ in 0..500 {
-            b.tick(Fx::from_num(BELT_SPEED));
+            b.tick(Fx::from_num(BELT_SPEED), 0);
             assert!(
                 !d.try_absorb(&mut b, &econ),
                 "a full dock must not accept a second box"
@@ -574,7 +574,7 @@ mod tests {
                 !d.try_absorb(&mut b, &econ),
                 "a dock with nowhere to ship must refuse the box"
             );
-            b.tick(Fx::from_num(BELT_SPEED));
+            b.tick(Fx::from_num(BELT_SPEED), 0);
         }
         assert_eq!(b.len(), 1, "the refused box is still on the belt, not lost");
         assert!(d.is_empty());

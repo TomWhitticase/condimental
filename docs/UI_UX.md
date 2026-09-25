@@ -1162,23 +1162,46 @@ continuous effect too, and it used to run off the *global* simulation tick,
 so a line backed up solid against a full vat drew its surface racing under
 items that had not moved in minutes — the decoration running because the
 belt existed, which is exactly what the rule above forbids (issue #79). The
-fix gives every belt tile its own work clock: `BeltSegment::moved_ticks`
-counts the ticks that tile actually advanced product on, `BeltSnapshot` and
-`SplitterSnapshot` carry it, and the frame is
+fix gives every belt tile its own work clock: `BeltSegment::moved_ticks` is
+**the tick that tile last ran on** — the current tick unless it is jammed,
+and the tick it was laid on before it has ticked at all (amended
+2026-09-25; it began as a count of the ticks the tile advanced product on).
+`BeltSnapshot` and `SplitterSnapshot` carry it, and the frame is
 `floor(moved_ticks * BELT_FRAMES / BELT_TICKS_PER_TILE) mod BELT_FRAMES`.
-Three consequences worth knowing before changing it:
+Four consequences worth knowing before changing it:
 
 - **The count belongs to the simulation, not to Godot.** A belt that stops
   moving stops dirtying its chunk, so the presentation layer is never told
   "this tile stood still" — it cannot derive the clock, only be handed it.
-- **It is a counter, not a "moving" flag.** A flag would leave the pattern
-  to a global phase, and the rubber would jump a fraction of a tile at the
-  moment a jam cleared. A counter resumes on the phase it stopped on, and
-  the pattern crosses a tile in exactly the ticks an item does.
-- **An empty belt therefore shows no motion at all**, the same way an idle
-  crusher throws no pulp. That is the rule, not an omission: running rubber
-  is the statement "product is moving here", and on an empty belt it is a
-  lie about a belt that could be carrying and is not.
+- **Every running tile is on the same phase** (amended 2026-09-25).
+  `moved_ticks` is the tick the tile last ran on, so a line of belts laid
+  over several minutes moves as one conveyor; the pattern still crosses a
+  tile in exactly the ticks an item does, because the value advances once
+  per tick. It was each tile's own count of running ticks, which drifts —
+  one spell of back-pressure and two neighbours sit a fraction of a tile
+  apart for good. The accepted cost is the reverse of what the drift cost:
+  a tile that has been jammed **rejoins** the phase instead of resuming its
+  own, so its pattern jumps once, under items that are themselves just
+  starting to move.
+- **An empty belt is a RUNNING belt** (amended 2026-09-25). It counts its
+  idle ticks like any other, so a whole line's surface moves as one whether
+  or not there is a box on it. This is not a hole in the rule above: the
+  rule stops a decoration that runs because a thing *exists*, and a
+  conveyor's own state — the only one it has — is whether it is blocked. A
+  crusher with no tomato is not doing its job; a conveyor with no box is a
+  motor turning, which is what a conveyor's job looks like with nothing to
+  carry. It first counted only loaded ticks, and a long line then lit up one
+  tile at a time under a single box, with still rubber meaning "jammed" and
+  "nothing here" at once — so the jam this clock exists to show could not be
+  read at all. **The surface stops on a jam, and on nothing else.**
+- **An idle tile is drawn from an extrapolated clock, and that is exact.**
+  It dirties no chunk (a delta per empty belt per tick is the cost this
+  whole mechanism avoids), so `main.gd` records `moved_ticks - current_tick`
+  the last time it saw the tile empty and adds the tick back
+  (`_belt_idle_phase`). Because the simulation's increment is one per tick,
+  the phase drawn while a tile is idle is the number its next snapshot
+  brings — the rubber does not jump when a box lands on it — and the wire's
+  value takes over the moment anything is on the tile.
 
 ## 7. Color & readability
 

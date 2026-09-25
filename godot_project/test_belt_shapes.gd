@@ -20,7 +20,9 @@
 #   * a tile's frame index follows `floor(its own moved_ticks * 4 / 50) mod 4`
 #     and the scene draws it there — so two tiles of one frame set sit on
 #     different frames, a jammed tile's rubber stands still with the items on
-#     it (issue #79), and with the pause menu up nothing moves at all,
+#     it (issue #79) while an EMPTY tile's keeps running, the empty tile's
+#     extrapolated phase is exactly what the next snapshot brings, and with
+#     the pause menu up nothing moves at all,
 #   * an item on a straight runs from the input face's midpoint to the
 #     output face's; on a corner it follows the quarter-circle arc between
 #     them (0, 0.5 and 1 checked), and the arc's end meets the next tile's
@@ -152,8 +154,9 @@ func _run_checks() -> void:
 
 	# --- 3. the frame follows the TILE'S OWN clock (issue #79) ------------
 	# The formula is unchanged; the clock it reads is not. `moved_ticks` is
-	# how many ticks the SIMULATION advanced product on that tile, so a
-	# jammed tile stops counting and its rubber stops with the items on it.
+	# the TICK that tile's rubber last ran on, so a jammed tile stops taking
+	# the new tick and its rubber stops with the items on it — while an
+	# empty tile, which is a running tile, keeps taking it (2026-09-25).
 	var frame_cases := {0: 0, 12: 0, 13: 1, 25: 2, 37: 2, 38: 3, 49: 3, 50: 0, 63: 1, 100: 0}
 	for clock in frame_cases.keys():
 		if main._belt_frame_for_moved_ticks(clock) != frame_cases[clock]:
@@ -179,8 +182,20 @@ func _run_checks() -> void:
 	if ring_clock <= 0:
 		_fail("the ring tile at %s should have carried tomatoes by now, its clock reads %d" % [str(ring), ring_clock])
 		return
-	if int(main._belt_surface_ticks.get(lone_key, -1)) != 0:
-		_fail("nothing feeds the lone belt at %s, so its clock must read 0, got %s" % [str(lone), str(main._belt_surface_ticks.get(lone_key, -1))])
+	# Nothing feeds the lone belt, so it has never had an item on it — and
+	# it is still a running belt. Its clock is the tick, because it was
+	# placed before the first one, and the scene knows that without ever
+	# being told: an idle tile dirties no chunk, so `_belt_idle_offsets`
+	# carries it instead.
+	if not main._belt_idle_offsets.has(lone_key):
+		_fail("the empty belt at %s should be on the idle clock, and is not" % str(lone))
+		return
+	if main._belt_idle_offsets.has(ring_key):
+		_fail("the jammed belt at %s is carrying items, so it must NOT be on the idle clock" % str(ring))
+		return
+	var lone_phase: int = main._belt_idle_phase(lone_key, main.sim.current_tick())
+	if lone_phase != main.sim.current_tick():
+		_fail("an idle belt placed before the first tick should read the tick itself, %d vs %d" % [lone_phase, main.sim.current_tick()])
 		return
 	# Both are straight tiles in the SAME four-frame set, and they are on
 	# different frames — which is the whole change: before this, one scene
@@ -190,11 +205,8 @@ func _run_checks() -> void:
 	if main._tile_instances[ring_key]["set"] != main._tile_instances[lone_key]["set"]:
 		_fail("the fixture wants two tiles in one frame set to compare; %s and %s are in different sets" % [str(ring), str(lone)])
 		return
-	if ring_frame != main._belt_frame_for_moved_ticks(ring_clock) or lone_frame != 0:
-		_fail("tile frames should follow their own clocks: %s reads clock %d on frame %d, %s on frame %d" % [str(ring), ring_clock, ring_frame, str(lone), lone_frame])
-		return
-	if ring_frame == lone_frame:
-		_fail("a carrying tile and a tile that has never carried anything are both on frame %d — the rubber is still running off one scene clock" % ring_frame)
+	if ring_frame != main._belt_frame_for_moved_ticks(ring_clock) or lone_frame != main._belt_frame_for_moved_ticks(lone_phase):
+		_fail("tile frames should follow their own clocks: %s reads clock %d on frame %d, %s reads %d on frame %d" % [str(ring), ring_clock, ring_frame, str(lone), lone_phase, lone_frame])
 		return
 	# Every belt in the world, not just these two: each tile's drawn frame
 	# is its own clock's frame.
@@ -211,9 +223,9 @@ func _run_checks() -> void:
 		var record: Dictionary = main._tile_instances.get(key, {})
 		if record.is_empty() or record["frames"].size() <= 1:
 			continue
-		var want: int = main._belt_frame_for_moved_ticks(int(main._belt_surface_ticks[key]))
+		var want: int = main._belt_frame_at(key, record["frames"])
 		if int(record["frame"]) != want:
-			_fail("the tile %s reads clock %s, which is frame %d, but it draws frame %d" % [key, str(main._belt_surface_ticks[key]), want, int(record["frame"])])
+			_fail("the tile %s should draw frame %d off its own clock, and draws %d" % [key, want, int(record["frame"])])
 			return
 	# THE REGRESSION. The ring is jammed: sixty more ticks pass — long
 	# enough for the old scene-wide counter to have stepped four frames —
@@ -233,7 +245,41 @@ func _run_checks() -> void:
 	if main._tile_instances[ring_key]["frame"] != ring_frame:
 		_fail("a jammed belt moved from frame %d to %d — its rubber is running under items that are not" % [ring_frame, main._tile_instances[ring_key]["frame"]])
 		return
+	# THE OTHER HALF, and what the owner asked for: over those same 60 ticks
+	# the EMPTY belt's rubber did move, without one delta mentioning it.
+	if main._belt_idle_phase(lone_key, main.sim.current_tick()) != lone_phase + 60:
+		_fail("an idle belt's clock should follow the tick one for one, %d -> %d over 60 ticks" % [lone_phase, main._belt_idle_phase(lone_key, main.sim.current_tick())])
+		return
+	# A whole cycle of the pattern, a tick at a time: the empty tile must
+	# show every one of its frames — the surface really running, not a step
+	# that happens to land back where it started — while the jammed tile
+	# beside it, in the same frame set, shows exactly one.
+	var idle_frames := {}
+	var jammed_frames := {}
+	for _i in range(main.BELT_TICKS_PER_TILE):
+		main._advance_simulation(tick_interval)
+		idle_frames[int(main._tile_instances[lone_key]["frame"])] = true
+		jammed_frames[int(main._tile_instances[ring_key]["frame"])] = true
+	if idle_frames.size() != main.BELT_FRAMES:
+		_fail("over one full cycle an empty belt should show all %d frames, it showed %s" % [main.BELT_FRAMES, str(idle_frames.keys())])
+		return
+	if jammed_frames.size() != 1 or not jammed_frames.has(ring_frame):
+		_fail("over the same cycle the jammed belt should have stood on frame %d, it showed %s" % [ring_frame, str(jammed_frames.keys())])
+		return
+	# And the extrapolation is EXACT, which is what stops the rubber jumping
+	# when a box finally lands: a full re-read brings the simulation's own
+	# number for that tile, and it is the number the scene had already drawn.
+	var drawn_phase: int = main._belt_idle_phase(lone_key, main.sim.current_tick())
+	main._reread_every_chunk()
+	if int(main._belt_surface_ticks.get(lone_key, -1)) != drawn_phase:
+		_fail("the scene drew the idle tile at clock %d; the simulation says %s" % [drawn_phase, str(main._belt_surface_ticks.get(lone_key, -1))])
+		return
 	# --- and the pause menu freezes what is still moving ------------------
+	# Re-taken after the re-read above, which is the first thing to have
+	# brought the idle tiles' real clocks onto the scene.
+	jammed.clear()
+	for key in main._belt_surface_ticks.keys():
+		jammed[key] = main._belt_surface_ticks[key]
 	tick_before = main.sim.current_tick()
 	main._set_pause_open(true)
 	for _i in range(60):
@@ -245,7 +291,53 @@ func _run_checks() -> void:
 		if int(main._belt_surface_ticks.get(key, -1)) != int(jammed[key]):
 			_fail("with the pause menu up the tile %s moved its clock %s -> %s" % [key, str(jammed[key]), str(main._belt_surface_ticks.get(key, -1))])
 			return
+	# Including the idle ones, which run off the tick and so stop with it.
+	var paused_lone_frame: int = main._tile_instances[lone_key]["frame"]
+	for _i in range(60):
+		main._advance_simulation(tick_interval)
+	if main._tile_instances[lone_key]["frame"] != paused_lone_frame:
+		_fail("with the pause menu up an idle belt moved from frame %d to %d" % [paused_lone_frame, main._tile_instances[lone_key]["frame"]])
+		return
 	main._set_pause_open(false)
+
+	# --- 3b. a belt LAID INTO A RUNNING FLOOR joins the phase -------------
+	# The owner's own case, and the one every fixture above hides: each of
+	# those belts was placed before the first tick, so every idle offset in
+	# the scene is 0 and a scene that ignored offsets entirely would pass.
+	# This one is bought and dropped in thousands of ticks late, through the
+	# same purchase/place commands a player uses, and the scene sees it
+	# exactly once — on the rebuild the placement triggers. An idle tile
+	# dirties no chunk afterwards, so whatever phase it is drawn on here is
+	# the phase it keeps until something crosses it.
+	var late := Vector2i(20, 20)
+	var late_key: String = main._tile_key(late)
+	Layouts.place(main.sim, "belt", late, "east")
+	main._rebuild_world()
+	if not main._tile_instances.has(late_key):
+		_fail("the belt laid at %s mid-run was not drawn at all" % str(late))
+		return
+	if main._tile_instances[late_key]["set"] != main._tile_instances[lone_key]["set"]:
+		_fail("the fixture wants the late tile in the same frame set as %s; it is in '%s' against '%s'" % [str(lone), str(main._tile_instances[late_key]["set"]), str(main._tile_instances[lone_key]["set"])])
+		return
+	# The simulation lays a tile on the CURRENT tick, so the scene's offset
+	# for it is zero like every other running tile's. A non-zero one here is
+	# a tile that will draw the wrong frame forever.
+	if int(main._belt_idle_offsets.get(late_key, 999)) != 0:
+		_fail("a belt laid mid-run should sit at offset 0 like every running tile, its offset is %s" % str(main._belt_idle_offsets.get(late_key, "absent")))
+		return
+	if main._belt_idle_phase(late_key, main.sim.current_tick()) != main.sim.current_tick():
+		_fail("a belt laid mid-run should read the tick itself, reads %d against %d" % [main._belt_idle_phase(late_key, main.sim.current_tick()), main.sim.current_tick()])
+		return
+	# What the player sees: the new tile and one that has been running since
+	# tick 0 are on the same frame, and stay there.
+	if main._tile_instances[late_key]["frame"] != main._tile_instances[lone_key]["frame"]:
+		_fail("a belt laid mid-run draws frame %d beside an old one on frame %d — the floor is not one conveyor" % [main._tile_instances[late_key]["frame"], main._tile_instances[lone_key]["frame"]])
+		return
+	for _i in range(main.BELT_TICKS_PER_TILE):
+		main._advance_simulation(tick_interval)
+		if main._tile_instances[late_key]["frame"] != main._tile_instances[lone_key]["frame"]:
+			_fail("a belt laid mid-run fell out of step at tick %d: frame %d against %d" % [main.sim.current_tick(), main._tile_instances[late_key]["frame"], main._tile_instances[lone_key]["frame"]])
+			return
 
 	# --- 4. items: straight runs face to face, corners follow the arc -----
 	var T: float = main.TILE
@@ -310,5 +402,5 @@ func _run_checks() -> void:
 				_fail("hover over %s should contain '%s', got: %s" % [str(tile), phrase, text.replace("\n", " / ")])
 				return
 
-	print("BELT_SHAPES_OK: shape rule pure at every facing, gallery corners drawn with the corner families at their facing's yaw, merges/starts/ends straight, each tile's frame = floor(its own moved_ticks*%d/%d) mod %d, frozen while jammed and while paused, items run face to face and arc through corners continuously, hover names feeds and hand-offs" % [main.BELT_FRAMES, main.BELT_TICKS_PER_TILE, main.BELT_FRAMES])
+	print("BELT_SHAPES_OK: shape rule pure at every facing, gallery corners drawn with the corner families at their facing's yaw, merges/starts/ends straight, each tile's frame = floor(its own moved_ticks*%d/%d) mod %d, frozen while jammed and while paused but running while empty, a belt laid mid-run in phase with one that has run since tick 0, items run face to face and arc through corners continuously, hover names feeds and hand-offs" % [main.BELT_FRAMES, main.BELT_TICKS_PER_TILE, main.BELT_FRAMES])
 	quit(0)
