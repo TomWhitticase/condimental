@@ -1116,15 +1116,56 @@ matches what code comments and data files cite.
   here, and on an empty belt that statement is false. The idle crusher is
   the precedent and the answer is the same one.
 
+  **Amended 2026-09-25: that consequence was wrong, and an empty belt is a
+  running belt.** The paragraph above is kept as written because the
+  reasoning that produced it is exactly what the play test refuted. The
+  owner built a long line and watched one box cross it: the rubber lit up a
+  single tile at a time, walking down the run under the box like a spotlight
+  — nothing a factory has ever done. The analogy to the idle crusher is what
+  failed. A crusher with no tomato in it is *not doing its job*; a conveyor
+  with no box on it is a motor turning, which is what a conveyor's job looks
+  like when there is nothing to carry. "Powered" is not a third clock the
+  game lacks: a belt the player has paid for and placed is powered, always,
+  and the only state it has to report is whether it is BLOCKED.
+
+  And the rule as written defeated its own purpose. Still rubber meant two
+  different things — jammed, and nothing on it — and an empty belt is by far
+  the commoner of the two, so the jam signal this whole record exists to
+  build could not be read off the floor at all. Counting the idle tick makes
+  still rubber mean exactly one thing. §6a is kept where it bites: the
+  surface stops on a jam, because that is the tile's own state rather than
+  its mere existence, and a jam is the statement worth making.
+
+  **Why Godot extrapolates, and why that is not a second clock.** An idle
+  tile dirties no chunk, deliberately and unchanged: a delta for every empty
+  belt in the world thirty times a second is the cost this counter exists to
+  avoid, and the reason for it in the first place. So `main.gd` records
+  `moved_ticks - current_tick` when it last saw a tile empty
+  (`_belt_idle_phase`) and adds the tick back to get the tile's clock on any
+  later frame. That is EXACT rather than a guess, and only because the
+  simulation's increment is exactly one per tick: the number the scene draws
+  while a tile is idle is the number the tile's next snapshot brings, so the
+  rubber does not jump when a box lands on it. The moment anything is on the
+  tile the offset is dropped and the wire's value is authoritative again.
+  The sim still decides; Godot is interpolating a rule it was given, the way
+  it interpolates an item's position between ticks.
+
   **What proves it.** `tests/belt_surface.rs` (five cases, through
-  `chunk_snapshot`, i.e. the wire Godot reads) and
-  `test_belt_shapes.gd` section 3, which steps the scene's own loop and
-  asserts each tile draws its own clock's frame. Not provable headless: the
-  `MultiMesh` transform writes underneath, because the dummy
+  `chunk_snapshot`, i.e. the wire Godot reads — including
+  `an_empty_belt_keeps_its_rubber_running`, which pins the rate at one per
+  tick and not merely "it moves") and `test_belt_shapes.gd` section 3, which
+  steps the scene's own loop and asserts each tile draws its own clock's
+  frame, that over one full cycle the empty tile shows all four frames while
+  the jammed tile beside it in the same frame set shows one, and that a full
+  re-read of the chunks brings the simulation's own number for the idle tile
+  — the extrapolation, checked against the thing it extrapolates.
+  `tests/chunk_delta.rs` pins the silence: an idle belt's clock advances
+  every tick and it is still absent from the delta. Not provable headless:
+  the `MultiMesh` transform writes underneath, because the dummy
   RenderingServer reads every instance transform back as the identity. That
-  half is `scripts/screenshot-scene.sh --bottleneck --closeup`, where four
-  consecutive tiles of one four-frame set now stand on four different
-  phases and the cleats along a backed-up line no longer march.
+  half is `scripts/screenshot-scene.sh --fixture chain --populate --closeup`,
+  where the run's cleats stand one frame further on than the same world
+  renders them without this change.
 - 2026-09-20: **A width fix must be MEASURED at every window size, and
   `snap_rows` is for rows the player signs.** (Follow-up to the entry below,
   from the review of PR #102.)

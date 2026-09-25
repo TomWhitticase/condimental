@@ -73,6 +73,13 @@ the plan is `docs/ARCHITECTURE.md` §3/§4/§6/§10.
 
 - **Delta granularity is per chunk, not per entity.** `chunk_delta` narrows
   what a dirty chunk's read carries; `chunk_snapshot` stays the full read.
+- **An empty belt's `moved_ticks` advances every tick and dirties nothing.**
+  Its rubber runs (`BeltSegment::tick_toward`, 2026-09-25) but there is no
+  product on it to redraw, and a delta per idle tile per tick is what this
+  counter exists to avoid; Godot extrapolates the phase off the one-per-tick
+  rule instead (`main.gd`'s `_belt_idle_phase`). Do not "fix" the silence by
+  marking it dirty. A JAM is what stops the clock, and the only thing that
+  does.
 - **Fluid movement, tank drain, machine load, production stats and staff state
   deliberately dirty nothing** — all polled (`fluid_snapshots_json`,
   `fluid_tank_snapshots_json`, `machine_load_snapshots_json`,
