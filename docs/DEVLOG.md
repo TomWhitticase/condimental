@@ -24,7 +24,7 @@ below is history and should only ever be appended to.)*
   consolidated onto one integration branch and fast-forwarded into `main`.
   The union passed `scripts/verify-core-loop.sh` (19 Rust suites, 30 headless
   Godot proofs, no failures) and has been rendered and played; the same script
-  is **26 Rust suites and 40 Godot proofs as of 2026-09-25** — a number the
+  is **26 Rust suites and 42 Godot proofs as of 2026-09-25** — a number the
   run now prints for itself. A fresh
   worktree still needs `cargo xtask` and **two** `godot --import` passes
   before the world is visible. See the log entry below.
@@ -221,6 +221,67 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-25 — The same screenshot command twice is the same picture (issue #82)
+
+The review render was not reproducible, and this project judges its art by
+rendered frames — so every measurement taken through one was standing on
+sand. `scripts/screenshot-scene.sh` builds its fixture and then lets the
+scene's own `_process` run 45 frames before the shutter, and
+`_advance_simulation` spends **real** frame deltas against the 30 Hz tick, so
+the number of ticks between the fixture and the photograph was a function of
+how busy the machine happened to be. Two runs of one command landed on ticks
+10621 and 10622; the PNG hash and the draw-call counts tracked the tick
+exactly. Worse than the drift was its shape: on a quiet machine the same
+command can give the same hash four times running and look fixed.
+
+The fix is Godot's own `--fixed-fps 60`, passed by the script. Nothing about
+how the game ticks for a player changes — `_advance_simulation` is untouched
+— the engine simply hands every frame the same delta, so the warm-up always
+spends `floor(45 * 30 / 60)` = 22 ticks. The three HUD fades a fixed frame
+rate cannot reach (money flyout, hotbar name flyout, contract notice, which
+sit outside the tick on purpose so they keep fading with the pause menu open)
+now read `_hud_now_msec()`, a clock `main.gd` sums from the deltas it is
+actually given, instead of `Time.get_ticks_msec()`. For a player that is the
+wall clock; for a render it is the pinned delta; and a frozen scene now
+freezes its fades with it.
+
+The clock was only half of it. A render aims the camera — `--closeup`,
+`--first-person`, a fixture's framing — and then runs 45 ordinary frames, and
+those frames poll the real keyboard in `_pan_camera` and see the real mouse in
+`_input`. A key held in another window on the host panned the shot a tile and
+a half between the aim and the shutter, about one run in four here, and
+nothing said so: the tick was identical and only the picture moved.
+`main.gd` has a `_camera_input_sealed` flag now, off for every player and set
+by the harness on frame 1, and it shuts all five doors live input comes
+through (key pan, right-drag, zoom, first-person look, first-person walk).
+Measured with the engine made to report a pan key as held: on the same tick,
+unsealed the command rendered `972e7d6bbea3` with the closeup framing undone,
+sealed it rendered the canonical `52493c1c3da8`. PR #167 landed under this
+branch while it was in flight and moved the render's window off-screen and
+no-focus, which as a side effect stops the host's keystrokes reaching the
+default path at all — instrumented, `window_is_focused()` is false on all 45
+warm-up frames. The seal stays because `--on-screen` does take focus (true
+from frame 20 of the same warm-up), and because a guarantee resting on a
+window flag is one a later change to the window repeals in silence.
+
+`test_screenshot.gd` refuses a run whose frames did not arrive at that rate
+rather than photographing a load-dependent moment, prints `SCREENSHOT_TICK`
+so two frames can be told apart by reading rather than guessing, and
+`scripts/check-invariants.sh` keeps the script and the harness in step
+(neither half of a non-headless renderer can be caught by the headless
+suite). `test_camera_seal.gd` (`CAMERA_SEAL_OK`) proves each of the five
+guards, and fails if any one is deleted; `test_frame_clock.gd`
+(`FRAME_CLOCK_OK`) holds the clock rule: no frames means no HUD time, all three fades finish
+on frames alone, and the warm-up spends the same 22 ticks twice running.
+
+Measured at 1280x720 on the tip: before, `--bottleneck --closeup 4,0,10
+--no-hud` gave four different hashes in four runs; `--fixture chain
+--populate` gave one hash four times on a quiet machine and three different
+ones under a six-way CPU load. After, the closeup is one hash across six runs
+including two under an eight-way load, and the chain fixture one hash across
+eight. **Re-render any baseline taken before this** — a pinned warm-up stops
+the world on a different tick than a loaded one did, so an old frame is a
+different moment rather than a broken one.
 ### 2026-09-25 — Screenshot renders stop interrupting the person at the laptop
 
 `scripts/screenshot-scene.sh` used to open a 1600x900 window on top of
@@ -282,7 +343,6 @@ its verdict is the one legitimate way to end with a PR still open —
 which is also why the skill separates "is the work finished" from "would
 deleting the tree lose anything". They are different questions and a
 wrap-up answers both.
-
 
 ### 2026-09-25 — A machine hover gives up lines before it covers the HUD (issue #99)
 

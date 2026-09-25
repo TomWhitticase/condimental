@@ -164,6 +164,24 @@ run_godot_script() {
   echo
 }
 
+# `test_screenshot.gd` is the one script in godot_project/ that no headless
+# test loads: it is driven by scripts/screenshot-scene.sh, which needs a
+# window, so nothing below would notice it had stopped PARSING. A merge that
+# renamed a `_process` parameter under it did exactly that, and every check in
+# this repo stayed green while the review render was dead. `--check-only`
+# parses without running, and reports the failure the way Godot always does —
+# by printing it, not by exiting non-zero.
+echo "==> godot --check-only --script test_screenshot.gd (the review harness still parses)"
+parse_out=$("$godot_bin" --headless --path godot_project --check-only \
+  --script test_screenshot.gd 2>&1)
+if printf '%s\n' "$parse_out" | grep -qE "Parse Error|Failed to load script"; then
+  printf '%s\n' "$parse_out" >&2
+  echo "FAIL: test_screenshot.gd does not parse — scripts/screenshot-scene.sh cannot render" >&2
+  exit 1
+fi
+echo "test_screenshot.gd parses"
+echo
+
 run_godot_script test_core_loop.gd CORE_LOOP_OK "real gdext JSON boundary"
 run_godot_script test_interaction.gd INTERACTION_OK "keyboard input -> SimBridge"
 run_godot_script test_presentation.gd PRESENTATION_OK "UI_UX.md §1/§2/§4 scene structure"
@@ -204,6 +222,8 @@ run_godot_script test_unlocks.gd UNLOCKS_OK "the first progression gate: a new g
 run_godot_script test_ingredient_models.gd INGREDIENT_MODELS_OK "every id in data/ingredients.ron has a voxel model of its own: none reaches _market_asset_for's pipe fallback, fluids are registered in FLUID_MODELS and solids in ITEM_MODELS, and each named asset has a real icon rather than the placeholder — issue #67"
 run_godot_script test_fluid_gallery.gd FLUID_GALLERY_OK "the fluid gallery stands all six fluids at once: every placement accepted, every run named by topology alone and above main.gd's visible-pressure floor, every tint present, distinct and not near-grey — issues #72 and #100"
 run_godot_script test_warehouse_rack.gd WAREHOUSE_RACK_OK "the warehouse stock rack reads out its own stock: six shelves filling bottom level first inside the imported frame, pallets appearing one bay at a time in step with storage_snapshot_json and their loads scaled to the fill, a tint per raw ingredient clear of the measured dead band, hover resolving from either tile of the 1x2, and W1's removal refusal spoken before the click — the warehouse sprint, W3"
+run_godot_script test_frame_clock.gd FRAME_CLOCK_OK "the HUD fades and the screenshot warm-up run on FRAMES, not the wall clock: _hud_now_msec() does not move while real milliseconds pass with no frames, all three fades finish on frames alone, and WARMUP_FRAMES at the harness's pinned FIXED_FPS always spends the same ticks — issue #82"
+run_godot_script test_camera_seal.gd CAMERA_SEAL_OK "a review render's camera cannot be moved by the machine it runs on: sealed, all five ways live input moves the camera do nothing, and every one of them still moves it unsealed — the second half of issue #82"
 
 echo
 echo "$godot_scripts_run headless Godot scripts run."

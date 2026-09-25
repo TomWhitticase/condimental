@@ -86,6 +86,14 @@ Note the `=` form for a negative coordinate, or it reads as a flag:
   machine"** — use `--closeup`, and `--no-hud` if the HUD covers the joint.
 - **Budget a rework pass.** Looking changes the design (§2b point 9).
 
+**The same command twice is the same picture** (issue #82): the script pins
+the engine clock with `--fixed-fps 60` and seals the camera against the
+machine it runs on, so re-rendering an unchanged tree is byte-identical and a
+before/after pair differs only where the change does. Each run prints the
+`SCREENSHOT_TICK` it stopped on. A baseline rendered before 2026-09-25 stopped
+the sim on a different tick, so re-render it rather than diffing across that
+change.
+
 The script needs a display and a `godot` binary (`GODOT_BIN` overrides). Its
 window is real but off-screen, the `--hover*` flags do not touch the mouse,
 and it hides Godot as soon as Godot takes focus. Rendering therefore does

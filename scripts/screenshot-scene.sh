@@ -405,6 +405,21 @@ case "$out" in
 esac
 mkdir -p "$(dirname "$out")"
 
+# THE CLOCK IS PINNED, AND THAT IS WHAT MAKES THIS REPRODUCIBLE (issue #82).
+# `--fixed-fps` tells the engine to hand every frame the same delta and stop
+# synchronising to real time, so the scene's warm-up spends a fixed amount of
+# SIMULATED time before the shutter however long those frames actually took.
+# Without it the number of ticks between "fixture built" and "shutter" is
+# whatever the host's load allowed, and two runs of one command came back one
+# tick — and several moved tomatoes — apart, which is enough to swamp the
+# change a before/after pair is being read for.
+#
+# 60, matching `test_screenshot.gd`'s FIXED_FPS, which REFUSES a run whose
+# frames did not arrive at that rate: this flag is the only thing standing
+# between a review render and a lottery, so a hand-rolled `godot --script
+# test_screenshot.gd` that forgets it is told rather than quietly obeyed.
+fixed_fps=60
+
 # Godot activates itself at launch, and its no-focus window then leaves no
 # app in front at all. So whenever Godot is the front app, HIDE it (what
 # Cmd-H does). macOS then gives focus back to the app that had it, which is
@@ -427,6 +442,7 @@ hand_focus_back() {
 }
 
 "$godot_bin" --path godot_project --resolution "$resolution" \
+  --fixed-fps "$fixed_fps" \
   --script test_screenshot.gd -- "$out" "${@:3}" &
 godot_pid=$!
 # Backgrounded for the watcher, so an interrupt has to reach Godot by hand.

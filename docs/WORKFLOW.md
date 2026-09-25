@@ -42,7 +42,7 @@ milestone-level visual checks. Both Godot scripts honour `GODOT_BIN`.
 
 | Command | What it proves | Cost |
 |---|---|---|
-| `cargo test -p sim_core` | Sim invariants: conservation, determinism, economy, save/load. 27 integration test files under `sim_core/tests/`, plus unit tests. | fast |
+| `cargo test -p sim_core` | Sim invariants: conservation, determinism, economy, save/load. 28 integration test files under `sim_core/tests/`, plus unit tests. | fast |
 | `cargo test -p voxgen` | Voxel-level asset properties — that a machine's inlet/outlet is a genuinely empty opening, which no mesh or screenshot can tell from a painted rectangle. | fast |
 | `scripts/verify-core-loop.sh` | Everything: `cargo test -p sim_core`, `cargo test -p voxgen`, `cargo xtask`, two `--import` passes, an import sanity check, then **every headless Godot script** through the real `gdext` JSON boundary, and prints how many it ran. | slow |
 | `scripts/verify-scaffold.sh` | The milestone-1 Rust ↔ Godot round trip alone (`cargo xtask`, prime the cache, `test_round_trip.gd`). Re-run this on a quiet machine before treating a `gdext` load failure as a regression. | medium |
@@ -60,7 +60,16 @@ fails to *parse*. A new `test_*.gd` must print a marker and be registered.
 content-id lookups and other presentation bugs that ship silently with every
 test green (UI_UX.md §2b point 12) — **run it for any presentation change and
 read the PNG.** The world starts empty, so with no flags it photographs bare
-floor. The script's header explains every flag; grouped, they are:
+floor. **The same command twice is the same picture** (issue #82): the
+script pins the engine clock with `--fixed-fps 60`, so the warm-up before the
+shutter always spends the same simulation ticks and every fade is at the same
+point, whatever else the machine is doing — two renders of one command are
+byte-identical, and each prints the `SCREENSHOT_TICK` it stopped on. The
+camera is sealed for the run as well, so a key held in another window cannot
+pan the shot between the aim and the shutter. Invoke
+`test_screenshot.gd` through the script, not by hand; without the flag it
+refuses to render. A baseline taken before 2026-09-25 is a different moment,
+so re-render rather than diff across that change. The script's header explains every flag; grouped, they are:
 
 - **Fixtures:** `--build`, `--fixture <machines|fluids|vat|splitter|chain|
   stress|pipes|gallery|demo>` (an explicit one WINS over the flags below,

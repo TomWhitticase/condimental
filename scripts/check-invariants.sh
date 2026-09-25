@@ -96,11 +96,44 @@ while read -r flag; do
 done < <(grep -ohE "[\"']--hover[a-z-]*[\"']" godot_project/test_screenshot.gd \
          | tr -d "\"'" | sort -u)
 
-# ----------------------------------------------------------- 5. doc links
+# --------------------------------------------------- 5. the pinned clock
+# A review render is only reproducible because `screenshot-scene.sh` passes
+# `--fixed-fps` (issue #82), and `test_screenshot.gd` refuses a run whose
+# frames did not arrive at that rate. Two halves, in two languages, that
+# have to agree on one number: drop the flag and every shot silently goes
+# back to being a function of the host's load, raise it in one place only
+# and every shot refuses. Neither failure can be caught by the headless
+# suite, because nothing headless renders.
+echo "==> screenshot-scene.sh pins the frame clock test_screenshot.gd insists on"
+sh_fps="$(grep -oE '^fixed_fps=[0-9]+' scripts/screenshot-scene.sh | head -1 | cut -d= -f2)"
+gd_fps="$(grep -oE '^const FIXED_FPS := [0-9]+' godot_project/test_screenshot.gd | head -1 | grep -oE '[0-9]+')"
+if [ -z "$sh_fps" ]; then
+  fail "scripts/screenshot-scene.sh sets no fixed_fps — without --fixed-fps a render is not reproducible (issue #82)"
+elif ! grep -qE '^[[:space:]]*--fixed-fps ' scripts/screenshot-scene.sh; then
+  fail "scripts/screenshot-scene.sh sets fixed_fps=$sh_fps but does not pass --fixed-fps to godot (issue #82)"
+elif [ -z "$gd_fps" ]; then
+  fail "godot_project/test_screenshot.gd declares no FIXED_FPS to check the harness's clock against (issue #82)"
+elif [ "$sh_fps" != "$gd_fps" ]; then
+  fail "screenshot-scene.sh renders at $sh_fps fps and test_screenshot.gd insists on $gd_fps — every shot would refuse"
+fi
+
+# ----------------------------------------------------------- 6. doc links
 # The docs are the project's memory and CLAUDE.md is a map of them
 # (docs/WORKFLOW.md, "Recording a decision"). A link into a renamed or moved
 # file breaks the map quietly — nothing fails, the next session just does not
 # find the reasoning and re-litigates a settled decision.
+echo "==> the review render seals the camera against the machine it runs on"
+# The other half of issue #82: a render aims the camera and then runs frames,
+# and those frames poll the real keyboard and see the real mouse. main.gd's
+# guard is covered headlessly by test_camera_seal.gd; that the RENDER actually
+# turns it on is not, because nothing headless renders.
+if ! grep -q "_camera_input_sealed" godot_project/main.gd; then
+  fail "godot_project/main.gd has no _camera_input_sealed — live input can move a review render's camera (issue #82)"
+fi
+if ! grep -qE "_camera_input_sealed = true" godot_project/test_screenshot.gd; then
+  fail "godot_project/test_screenshot.gd never seals the camera — a held key or a stray wheel notch can move the shot between the aim and the shutter (issue #82)"
+fi
+
 echo "==> every relative link between markdown files resolves"
 while read -r src link; do
   target="$(dirname "$src")/${link}"
@@ -115,7 +148,7 @@ done < <(
 
 echo
 if [ "$status" -eq 0 ]; then
-  echo "PASS: test scripts wired and marked, scenes text, res:// paths real, hover flags tabled, doc links resolve"
+  echo "PASS: test scripts wired and marked, scenes text, res:// paths real, hover flags tabled, review clock pinned and camera sealed, doc links resolve"
 else
   echo "FAILED — see above" >&2
 fi

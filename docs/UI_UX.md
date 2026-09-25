@@ -903,7 +903,13 @@ One readout is a bar's opposite number: **the money figure flashes what just
 changed it** (`+90`, `-5`) beneath itself and fades, on the hotbar name
 flyout's timings. A payout arrives on a contract's clock while the player is
 looking at the factory, and a balance that only ever shows its current value
-hides every event that produced it.
+hides every event that produced it. That fade, the hotbar name flyout's and the
+contract notice's are the three clocks deliberately outside the simulation
+tick, so they keep running with the pause menu open — but they are timed
+against `main.gd`'s `_hud_now_msec()`, summed from the frames the scene was
+actually given, never `Time.get_ticks_msec()`. For a player that is the wall
+clock; for a review render it is what makes the fade the same in two
+photographs of one command (issue #82).
 
 ### 5f. The right-hand column: what you have, and the legend that folds
 
