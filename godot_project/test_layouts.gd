@@ -1506,15 +1506,22 @@ const CROSSING_VINEGAR := 200
 
 ## The pressure below which a run photographs grey however wet the sim says
 ## it is. `main.gd` draws pipe liquid by scaling a ONE-VOXEL body by
-## `pressure * PIPE_BORE_HEIGHT_VOXELS` (7), so under 1/7 the column is
-## sub-voxel: the node is still visible — `FLUID_MIN_VISIBLE_PRESSURE` (0.02)
-## only suppresses a z-fighting sliver — and nothing reads in the frame.
+## `pressure * PIPE_BORE_HEIGHT_VOXELS` (7) up from the bore floor at z = 12,
+## but the sight window is only cut from z = 13 (`pipe_window_x`, one above
+## `PIPE_BORE_Z0`). So at 1/7 the liquid's surface is exactly level with the
+## window's floor and none of it shows; the first whole voxel IN the window
+## is 2/7. `FLUID_MIN_VISIBLE_PRESSURE` (0.02) only suppresses a z-fighting
+## sliver and hides nothing above it.
+##
+## Measured by forcing every segment's pressure and rendering `--fixture
+## crossing` at 1600x900: 0.15 is grey, 0.2 barely there, 0.286 a thin amber
+## line in every window. The line itself settles at 1.0 in both runs.
 ##
 ## This is here because `volume > 0` was not enough. The x = 9 run sat at
-## 0.114, eight tenths of a voxel, and passed a wet-in-every-segment check
-## while photographing entirely grey. A guard that goes green on the bad
-## picture is no guard.
-const CROSSING_MIN_DRAWN_PRESSURE := 1.0 / 7.0
+## 0.114 and passed a wet-in-every-segment check while photographing entirely
+## grey. A guard that goes green on the bad picture is no guard — and a bar
+## set at 1/7 would have passed a run at 0.15 that is just as grey.
+const CROSSING_MIN_DRAWN_PRESSURE := 2.0 / 7.0
 ## An ordinary belt tile of the line with open floor either side of it along
 ## the belt — where `--fixture crossing`'s ghost frames hold a pipe, across
 ## the belt (a crossing) or along it (refused).

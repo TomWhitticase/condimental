@@ -258,9 +258,12 @@ so the colour is evidence the crossing joined the run. That is legibility,
 not fill.
 
 And "wet" turned out not to mean "visible". `main.gd` draws pipe liquid by
-scaling a one-voxel body by `pressure × PIPE_BORE_HEIGHT_VOXELS` (7), so
-below 1/7 the column is sub-voxel and the run photographs grey while every
-segment reports fluid. The x = 9 run sat at 0.114 — eight tenths of a voxel —
+scaling a one-voxel body by `pressure × PIPE_BORE_HEIGHT_VOXELS` (7) up
+from the bore floor, and the sight window is cut from one voxel above that
+floor — so below 2/7 there is no whole voxel of liquid in the window and the
+run photographs grey while every segment reports fluid (forced renders: 0.15
+grey, 0.2 barely there, 0.286 a thin amber line). A first cut of the bar at
+1/7 put the surface exactly level with the window floor. The x = 9 run sat at 0.114 — eight tenths of a voxel —
 and sailed through a `volume > 0` check and into a PR body captioned "both
 runs wet". The check now asks for `CROSSING_MIN_DRAWN_PRESSURE`, and counts
 the runs it found rather than passing vacuously over an empty list.
