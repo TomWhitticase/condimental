@@ -189,6 +189,22 @@ below is history and should only ever be appended to.)*
   are narrower than a real window's — so only a render can prove a width.
   Issue #88 (a building's configuration panel over the STOCK, CREW and
   CONTRACTS plates) was folded in, being the same fix.
+- **Settings and a development menu (DONE, 2026-09-21).** The game has a
+  settings screen, reachable from the main menu and from the pause menu — the
+  same eight rows hosted twice, replacing the button column in whichever one
+  opened it. Music and sound effects each have an on/off and a level;
+  movement speed, look sensitivity and field of view tune the camera; hall
+  size scales the room the factory stands in, live, including behind the main
+  menu. They are **presentation state**: a `Settings` autoload and
+  `user://settings.cfg`, never `sim_core` and never the save format, so a
+  save written before this branch still loads. The pause menu's old
+  SOUND/MUSIC buttons are gone — they are rows of this screen now. **F3**
+  opens a development menu over a running factory: GIVE MONEY (a real
+  `debug_grant_money` command, because money is simulation state), TIME SPEED
+  FROZEN/×1/×2/×5/×10 with a STEP button, and a live readout of tick,
+  revision, speed, FPS, money and where `user://` really is. It is ungated in
+  pre-alpha and deliberately not a modal: ESC does not take it and it pauses
+  nothing.
 - **Open threads:** each doc's own "Open questions" section (ARCHITECTURE.md §11, UI_UX.md §9, GAMEPLAY.md §11) is the real TODO list at this stage — nothing is blocked, these are just undecided-and-known-undecided.
 
 ---
@@ -205,6 +221,49 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-21 — A settings screen, and an F3 menu for cheating during development
+
+Two asks in one branch, and the line between them is the project's own rule
+about where things live.
+
+**Settings are presentation.** Eight knobs — music on/off and level, sound
+effects on/off and level, movement speed, look sensitivity, field of view,
+hall size — in a `Settings` autoload and a `user://settings.cfg`, never in
+`sim_core` and never in the save format. A save is a full state snapshot with
+a version that is rejected rather than migrated; a volume slider in it would
+mean a preference change could invalidate a save, and a save carried to
+another machine would bring that machine's field of view with it. So a save
+written before this branch still loads, which is the acceptance test for the
+whole choice. It also settles the note `_toggle_sound` had carried since the
+pause menu grew SOUND and MUSIC buttons: those two are gone, and are rows of
+this screen.
+
+One panel, hosted twice — the main menu and the pause menu build the same
+rows and each swaps them in place of its own button column, the shape the
+Load Game view and the quit confirmation already have. The rows are steppers
+rather than sliders, because a drag cannot be asserted headlessly and each of
+these is a short list of sensible values; every value is formatted (`100%`,
+`×1.25`, `75°`) and the bar under a stepper is deliberately not the sim's
+meter language. Hall size scales three shader uniforms together, so the room
+keeps its proportions, and the title screen takes the same scale — the row
+changes the room behind the menu as it is pressed.
+
+**A cheat that moves money is a real command.** `PlayerCommand::DebugGrantMoney`
+travels the same JSON wire everything else does, refused at zero or below
+leaving the world byte-identical, because money is spent, saved and read off
+one counter and a grant Godot kept to itself would be a balance the sim
+disagrees with. Time speed is the opposite case: nothing in the sim knows
+what a second is, so it scales the tick interval and the catch-up budget in
+`_advance_simulation`. **F3** opens the panel over a running factory — it is
+ungated in pre-alpha and is not a modal, so ESC does not take it and it
+pauses nothing, which is the entire point of watching a cheat land. FROZEN
+stops the ticks without pausing the panels or the camera, and STEP spends
+exactly one.
+
+`test_screenshot.gd` now forces the defaults before every render and takes
+`--set key=value` to move one knob for the frame, so a review shot is the
+same on any developer's machine and a screenshot of what a setting *does* is
+reproducible rather than a temporary source edit.
 ### 2026-09-21 — A dock's lamp is about that dock
 
 The "backing up" pulse on a dock's deck lamps was read off the shared

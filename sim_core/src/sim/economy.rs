@@ -577,6 +577,27 @@ impl Economy {
         true
     }
 
+    /// Credits `amount` out of nowhere, and reports whether it did. The
+    /// **only** caller is [`super::world::PlayerCommand::DebugGrantMoney`],
+    /// the development cheat — every honest credit in this game is a contract
+    /// payout, made by [`Self::tick`] against a delivery that really
+    /// happened.
+    ///
+    /// It lives here anyway, beside [`Self::try_spend`], rather than letting
+    /// `world.rs` reach into `money` directly: GAMEPLAY.md §1 allows one
+    /// currency and this file owns the counter, and a cheat that writes the
+    /// field from outside is how a second rule about money starts. Saturating
+    /// like the payout path, and a non-positive `amount` is refused rather
+    /// than treated as a way to take money away — see the command's doc for
+    /// why taking money away is not what this is for.
+    pub fn grant(&mut self, amount: Money) -> bool {
+        if amount <= Money::ZERO {
+            return false;
+        }
+        self.money = self.money.saturating_add(amount);
+        true
+    }
+
     /// Signs the board's offer `id` at `current_tick`: debits its price,
     /// activates it with a fresh clock (first window ends one cadence from
     /// now) and zero counters, and slots it into the active list at its

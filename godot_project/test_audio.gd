@@ -124,14 +124,26 @@ func _initialize() -> void:
 	main._ready()
 	if int(music.starts) < 1:
 		_fail("main.gd's _ready must ask the score to start (it is idempotent)")
-	if main._pause_music_button == null or main._pause_music_button.text != "MUSIC: ON":
-		_fail("the pause menu's MUSIC button must caption itself ON at start")
-	main._toggle_music()
-	if bool(music.enabled) or main._pause_music_button.text != "MUSIC: OFF":
-		_fail("toggling music must switch the autoload off and caption the button OFF")
-	main._toggle_music()
-	if not bool(music.enabled) or main._pause_music_button.text != "MUSIC: ON":
-		_fail("toggling music back must caption the button ON")
+	# MUSIC is a row of the settings screen now, not a button of its own on
+	# the pause menu; the test presses the real control the player presses.
+	var music_toggle: Button = main._pause_settings_panel.value_controls.get("music_enabled")
+	if music_toggle == null or music_toggle.text != "MUSIC: ON":
+		_fail("the settings screen's MUSIC row must caption itself ON at start")
+		quit(1)
+		return
+	music_toggle.pressed.emit()
+	if bool(music.enabled) or music_toggle.text != "MUSIC: OFF":
+		_fail("toggling music must switch the autoload off and caption the row OFF")
+	music_toggle.pressed.emit()
+	if not bool(music.enabled) or music_toggle.text != "MUSIC: ON":
+		_fail("toggling music back must caption the row ON")
+	# The volume row reaches the same autoload — off is off either way, and a
+	# level the player set must not be undone by the enabled flag.
+	var settings: Node = main._settings_node()
+	settings.set_value("music_volume", 0.5)
+	if absf(float(music.volume) - 0.5) > 0.001:
+		_fail("MUSIC VOLUME must reach the Music autoload")
+	settings.set_value("music_volume", 1.0)
 
 	# Menus, and the pause duck.
 	main._audio.plays.clear()

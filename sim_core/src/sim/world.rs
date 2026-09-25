@@ -559,6 +559,29 @@ pub enum PlayerCommand {
     /// mid-craft that loses its crew pauses on the next tick and resumes,
     /// with no progress lost, when one is free again. No chunk is dirtied.
     Fire { category: String },
+
+    /// **A cheat.** Credits `amount` to the balance out of nowhere, for
+    /// developing the game: reaching a state worth looking at otherwise means
+    /// playing to it, and a screen full of machines is fifteen minutes away
+    /// from a fresh world (the settings/debug menu branch, 2026-09-21).
+    ///
+    /// Named `Debug…` so that nothing in this enum can be mistaken for a
+    /// mechanic. Godot's F3 panel is the only thing that sends it, and it is
+    /// deliberately NOT gated on a debug build — this is pre-alpha, and a
+    /// review screenshot should show what an export does.
+    ///
+    /// It is still a real command, on the real wire, applied by the real
+    /// [`super::economy::Economy`] — because money is simulation state, and
+    /// the alternative (a number Godot adds to what it renders) would mean a
+    /// balance the sim disagrees with and a save that forgets the grant.
+    ///
+    /// Refused, leaving the world byte-identical, at `amount <= 0`: there is
+    /// no negative grant. Taking money away would need a rule about what
+    /// happens below zero — the one thing [`super::economy::Economy`] does
+    /// not currently have, since `try_spend` simply refuses — and a cheat is
+    /// the worst place to invent it. Dirties no chunk: money is not a tile,
+    /// exactly as [`Self::Purchase`] documents.
+    DebugGrantMoney { amount: Money },
 }
 
 /// JSON wire shape for [`PlayerCommand`], used only at the `gdext` boundary
@@ -677,6 +700,14 @@ enum PlayerCommandDto {
     Fire {
         category: String,
     },
+    /// `{"type": "debug_grant_money", "amount": 10000}` — **whole currency
+    /// units**, required, and an `i64` rather than a float precisely because
+    /// nothing with a fractional part should be anywhere near this wire
+    /// (ARCHITECTURE.md §3.9). A grant bigger than [`Money`] can hold
+    /// saturates rather than wrapping.
+    DebugGrantMoney {
+        amount: i64,
+    },
 }
 
 /// Turning auto-fill *on* is what the command is for; see
@@ -747,6 +778,13 @@ impl From<PlayerCommandDto> for PlayerCommand {
             }
             PlayerCommandDto::Hire { category } => PlayerCommand::Hire { category },
             PlayerCommandDto::Fire { category } => PlayerCommand::Fire { category },
+            PlayerCommandDto::DebugGrantMoney { amount } => PlayerCommand::DebugGrantMoney {
+                // Saturating, not `from_num`: `Money`'s 48 integer bits do
+                // not hold every `i64`, and a debug fat-finger of twenty
+                // digits should land on "as much as there can be" rather than
+                // panic in debug and wrap negative in release.
+                amount: Money::saturating_from_num(amount),
+            },
         }
     }
 }
@@ -4211,6 +4249,11 @@ impl World {
             }
             PlayerCommand::Fire { category } => {
                 self.staff.fire(&category);
+            }
+            // The cheat. One line, in the economy rather than on the field,
+            // and no chunk dirtied — money is not a tile.
+            PlayerCommand::DebugGrantMoney { amount } => {
+                self.economy.grant(amount);
             }
         }
     }

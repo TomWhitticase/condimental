@@ -194,6 +194,22 @@
 # it. Like `--ghost` and `--hotbar`, it is the only way to review a panel that
 # only exists in response to a keypress.
 #
+# `--settings` opens the SETTINGS page of whichever menu this run is
+# rendering: the pause menu's by itself, or the main menu's with `--menu`.
+# One screen hosted twice (`settings_panel.gd`), so it is worth both frames.
+#
+# `--debug` opens the DEBUG MENU (F3) over a running factory — the panel
+# that gives money and changes time speed. It is a development tool and it
+# says so on its own heading, which is part of what the frame is reviewing.
+#
+# **`Settings` is reset to its shipped defaults before the scene is built.**
+# Unlike every headless test, this run has a real display, so the autoload
+# has already read whoever's `user://settings.cfg` is on this box — and a
+# review frame rendered at someone's personal field of view, movement speed
+# and hall size is a frame nobody else can reproduce. Nothing is written
+# back: `persist_enabled` goes off first, so the developer's own file is
+# untouched by the reset.
+#
 # `--closeup TX,TY[,SIZE]` re-aims the ISOMETRIC camera at one simulation
 # tile and zooms it right in (SIZE is the orthographic width in world units,
 # default CLOSEUP_SIZE). The whole-factory shot is the right frame for "does
@@ -485,6 +501,11 @@ var _menu := false
 ## typography in it, and the title is the half that is a poster.
 var _title := false
 var _pause := false
+## `--settings` opens the settings page of whichever menu is being rendered;
+## `--debug` opens the F3 development panel over the game. `--set key=value`
+## moves one knob off its default for the render (`_reset_settings`).
+var _settings := false
+var _debug := false
 ## The save this run writes so `--menu`'s list is not empty, and removes
 ## again on the way out. Named so it cannot collide with a real save.
 const MENU_REVIEW_SLOT := "zz review shot"
@@ -669,6 +690,10 @@ func _initialize() -> void:
 	_title = args.has("--title")
 	_menu = args.has("--menu") or _title
 	_pause = args.has("--pause")
+	_settings = args.has("--settings")
+	_debug = args.has("--debug")
+	if not _reset_settings(args):
+		return
 	if not _parse_closeup(args):
 		return
 	_resolve_fixture()
@@ -1976,6 +2001,51 @@ func _open_pause_menu() -> void:
 	_main._set_pause_open(true)
 
 
+## Puts `Settings` back to its shipped defaults for the duration of this run,
+## then applies any `--set key=value` this run asked for, without writing
+## anything. See the header: this is the one script in the
+## suite that renders with a real display, so it is the one that would
+## otherwise photograph the developer's own preferences.
+func _reset_settings(args: Array) -> bool:
+	var loop := Engine.get_main_loop()
+	if not (loop is SceneTree):
+		return true
+	var settings: Node = (loop as SceneTree).root.get_node_or_null("Settings")
+	if settings == null:
+		return true
+	# Off FIRST. Every press on the panel this run is about to photograph
+	# persists, and a review render must not be able to change the machine
+	# it ran on.
+	settings.persist_enabled = false
+	settings.reset()
+	# `--set key=value`, after the reset, so the frame is the defaults plus
+	# exactly what was asked for. Refused rather than ignored on an unknown
+	# key, for `--fixture`'s reason: a typo that comes back as a plausible
+	# frame of the wrong thing is worse than no frame at all.
+	for i in range(args.size()):
+		var arg := String(args[i])
+		# `--set key=value` and `--set=key=value` both, like every other flag
+		# here that takes one (`_string_arg`) — repeatable, so this is a scan
+		# of the whole list rather than one lookup.
+		var assignment := ""
+		if arg == "--set" and i + 1 < args.size():
+			assignment = String(args[i + 1])
+		elif arg.begins_with("--set="):
+			assignment = arg.substr(6)
+		else:
+			continue
+		var pair := assignment.split("=", true, 1)
+		if pair.size() != 2 or settings.knob(pair[0]) == null:
+			printerr(
+				"SCREENSHOT_FAIL: --set wants key=value and a key Settings knows: '%s'"
+				% assignment
+			)
+			_refuse()
+			return false
+		settings.set_value(String(pair[0]), float(pair[1]))
+	return true
+
+
 func _process(_delta: float) -> bool:
 	if _refused:
 		return true
@@ -1984,7 +2054,9 @@ func _process(_delta: float) -> bool:
 	# the "Real Placement" epic there is nothing to look at until one of the
 	# fixtures has been placed.
 	if _menu:
-		if _frames == 1 and not _title:
+		if _frames == 1 and _settings:
+			_main._on_settings_pressed()
+		elif _frames == 1 and not _title:
 			_open_menu_load_view()
 		if _frames < WARMUP_FRAMES:
 			return false
@@ -2117,8 +2189,15 @@ func _process(_delta: float) -> bool:
 		_mothball_the_vat()
 	# Last, so it draws over whatever else the flags set up — which is
 	# exactly what a review of it wants to see.
-	if _frames == 3 and _pause:
+	if _frames == 3 and (_pause or _settings):
 		_open_pause_menu()
+		if _settings:
+			_main._on_pause_settings_pressed()
+	# After the pause menu, because it is allowed to be up beside it and the
+	# frame that proves that is the one worth having.
+	if _frames == 3 and _debug:
+		_main._set_debug_open(true)
+		_main._update_debug_readout()
 	# Late enough that everything above has settled (the closeup has re-aimed
 	# the camera, a frozen scene has stopped), early enough that main.gd's own
 	# processing gets frames to redraw with.

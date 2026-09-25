@@ -308,6 +308,23 @@
 # it, and removes that save again afterwards. Pass --pause to open the
 # in-game pause menu (ESC) over whatever else was built.
 #
+# Pass --settings to open the SETTINGS page of whichever menu is being
+# rendered — the pause menu's on its own, the main menu's with --menu. It is
+# one screen hosted twice (`settings_panel.gd`), so both frames are worth
+# taking. Pass --debug for the F3 DEBUG MENU over a running factory.
+#
+# EVERY run FORCES `Settings` BACK TO ITS DEFAULTS first, without writing
+# anything: this script is the one check in the project with a real display,
+# so it is the one that would otherwise render at whatever field of view,
+# movement speed and hall size happen to be in the developer's own
+# `user://settings.cfg` — and a review frame nobody else can reproduce is
+# not a review frame.
+#
+# Pass --set KEY=VALUE (repeatable) to put one knob somewhere else for the
+# render, which is the only way to photograph what a setting DOES:
+#   --first-person --set hall_scale=2.5
+# An unknown key is refused rather than ignored, like --fixture.
+#
 # Pass --shop to open the build menu (docs/UI_UX.md §5) before the shot, or
 # --market to open the ingredient market — the stock half of the shop, where
 # raw ingredients are bought (the chain-rework epic) — or --board to open the
@@ -372,7 +389,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--split-docks [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--split-docks [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--settings] [--debug] [--set KEY=VALUE] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

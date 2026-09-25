@@ -42,6 +42,14 @@ GameSession="*res://game_session.gd"
 ; starts on the menu and must not restart when the scene changes to the
 ; factory. See godot_project/music.gd.
 Music="*res://music.gd"
+; Every player preference, and user://settings.cfg. An autoload for the same
+; reason again — the settings screen is reachable from BOTH the menu and the
+; pause menu, and one of them must not be able to lose what the other set.
+; LAST on purpose: it applies the score's level to `Music` as soon as it has
+; read the file, and an autoload declared before that one would run its
+; `_ready` while the node it is looking for does not exist yet. See
+; godot_project/settings.gd.
+Settings="*res://settings.gd"
 
 [editor_plugins]
 

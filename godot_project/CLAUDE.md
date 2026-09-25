@@ -61,7 +61,11 @@ Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
   only where the sim defines the ceiling; three fills, one meaning each —
   `METER_FILL_LEVEL` / `_PROGRESS` / `_WARN`. `_set_meter` sizes the fill
   explicitly (never anchors) and records the fraction on the track, so a
-  headless test can assert it with no layout pass.
+  headless test can assert it with no layout pass. The settings steppers'
+  fill bar (`SettingRange_*`, `settings_panel.gd`) is deliberately **not** this
+  language and does not share its styles or its names: that bar means "the
+  sim defines this ceiling", and no part of the simulation has an opinion
+  about the field of view.
 - **Seconds, never ticks** in player-facing clocks; **display names**
   (`_kind_display_name`/`_item_display_name`), never wire ids.
 - **UI scale is two constants** — `UI_SCALE`, `UI_FONT_BASE` — threaded
@@ -136,8 +140,17 @@ backdrop, a hand-placed poster of the chain; **art, not a sim** (nothing
 ticks, nothing is placed by a command). `voxel_assets.gd` and
 `factory_environment.gd` — the `.vox`/material loading and the hall's
 sky/lights, shared by `main.gd` and the title screen so the two cannot drift;
-neither is a place for new logic. `test_layouts.gd` — shared fixture,
-builds factories through real purchase/place commands.
+neither is a place for new logic. `settings.gd` — autoload; the eight
+presentation knobs and **all the rules about `user://settings.cfg`**, which
+is the only file they are ever in (never `sim_core`, never the save format);
+it does not read or write that file under `--headless`, decided in a member
+initializer because an autoload's `_ready` has not run when a `--script`
+test's `_initialize()` does. `settings_panel.gd` — the settings rows, built
+once and hosted by both `main.gd` and `menu.gd`, each swapping them in place
+of its own button column; it takes `ui_scale`/`font_base` as arguments rather
+than preloading `main.gd`, which preloads it, and a preload cycle does not
+load. `test_layouts.gd` — shared fixture, builds factories through real
+purchase/place commands.
 
 ## Running things
 

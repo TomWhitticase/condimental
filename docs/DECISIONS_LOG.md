@@ -18,6 +18,24 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-21 **Settings are PRESENTATION; a cheat that moves money is a real
+  SIM COMMAND; F3 is ungated in pre-alpha.** Eight knobs (music/sfx on and
+  level, movement speed, look sensitivity, FOV, hall size) live in a `Settings`
+  autoload and in `user://settings.cfg` — never in `sim_core` and never in the
+  save format, so a save carries to another machine without dragging that
+  machine's preferences with it, and a schema that is rejected rather than
+  migrated never has to carry a volume slider. One panel
+  (`settings_panel.gd`) is hosted by both the main menu and the pause menu,
+  replacing each plate's button column in place. Granting money is NOT the
+  same kind of thing: money is simulation state, spent through `try_spend`
+  and written by `save.rs`, so `PlayerCommand::DebugGrantMoney` goes over the
+  real wire and refuses `amount <= 0` byte-identically like every other
+  command. Time speed IS presentation — nothing in `sim_core` knows what a
+  second is — so it scales `_advance_simulation`'s interval and its catch-up
+  budget together, and the panel says the in-game clocks still count sim
+  seconds. The F3 panel is available in every build rather than behind
+  `OS.is_debug_build()`, so a review screenshot shows what an export does;
+  it is deliberately not a modal. Full record in `docs/DECISIONS.md`.
 - 2026-09-21 **A review verdict is a COMMENT whose first line is exactly
   `VERDICT: APPROVED` or `VERDICT: CHANGES REQUESTED`.** GitHub refuses
   `--approve` and `--request-changes` on a pull request owned by the same
