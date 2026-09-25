@@ -200,7 +200,11 @@ func build(
 	var hint := Label.new()
 	hint.name = "CookbookHint"
 	hint.label_settings = _label_settings(_font(-3), INK_DIM)
-	hint.text = "everything here is read from the recipe files — it changes when they do"
+	# Short on purpose: this row is the footer, so whatever is longest in it
+	# sets the panel's width, and a Label's own minimum under-reports what it
+	# draws by about the outline (§5c, `_fit_config_picker_name`). A sentence
+	# narrower than the header paragraph never gets to decide either.
+	hint.text = "read from the recipe files — it changes when they do"
 	hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	footer.add_child(hint)
@@ -281,12 +285,22 @@ func fit(available: Vector2) -> void:
 	_scroll.custom_minimum_size = keep
 
 	var wanted := body.get_combined_minimum_size()
-	var width := wanted.x
-	if available.x > 0.0:
-		width = minf(width, maxf(_px(240.0), available.x))
 	var height := wanted.y
 	if available.y > 0.0:
 		height = minf(height, maxf(_px(160.0), available.y - chrome.y))
+
+	var width := wanted.x
+	# A vertical scrollbar is drawn INSIDE the container, and `body`'s own
+	# minimum has never heard of it: ask for the content width alone and every
+	# row loses its last column to the bar. An ingredient row ended "solid, by
+	# bel" at 1600x900 — right-aligned text, so the bar ate the one word that
+	# says whether it arrives by belt or by pipe.
+	if height < wanted.y:
+		var bar := _scroll.get_v_scroll_bar()
+		if bar != null:
+			width += bar.get_combined_minimum_size().x
+	if available.x > 0.0:
+		width = minf(width, maxf(_px(240.0), available.x))
 	_scroll.custom_minimum_size = Vector2(width, height)
 
 
@@ -585,7 +599,7 @@ func _build_sauce_page(id: String) -> void:
 	process.add_child(_process_chain(entry))
 
 	var numbers := _section("THE NUMBERS", "")
-	_line(numbers, "Cost", "%.0f of ingredients per case" % float(entry.get("cost_per_unit", 0.0)))
+	_line(numbers, "Cost", "%.0f per case, in ingredients" % float(entry.get("cost_per_unit", 0.0)))
 	_line(numbers, "Contracts pay", _pay_text(entry))
 
 	var contracts: Array = entry.get("contracts", [])
