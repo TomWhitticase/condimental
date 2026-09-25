@@ -66,6 +66,10 @@ def _sources_stamp() -> tuple:
     watched = [
         voxlib.MODELS,  # directory mtime: a model added or removed
         voxlib.MODELS / "index.json",
+        # Rewriting a file in place does not move the directory's mtime, so
+        # the generated tables are watched by name like index.json is.
+        voxlib.MODELS / "materials.json",
+        voxlib.MODELS / "lamp_states.json",
         voxlib.ICONS,
         voxlib.VOXELS / "palette.ron",
         voxlib.GENERATORS / "assets.rs",

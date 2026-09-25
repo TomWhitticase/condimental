@@ -15,12 +15,16 @@ It opens <http://127.0.0.1:8765/>. Python 3 only — no build step, no npm.
 then used offline.
 
 The query string is the automation seam, and every switch in it is one the
-buttons already throw: `?view=game&facing=2&ao=0&grid=0&bare=1#machine_cooking_vat`
+buttons already throw:
+`?view=game&facing=2&ao=0&grid=0&bare=1&lamp=idle#machine_cooking_vat`
 frames a model the way a screenshot wants it (`bare=1` strips everything but
 the viewport, `grid=0` leaves nothing on the backdrop but the model and its
-shadow, so a measurement can tell which pixels are the subject). Add
-`&shot=<name>` and the page posts that frame to the server's `--shot-dir`;
-that is how `calibrate-ao.py` measures the viewer.
+shadow, so a measurement can tell which pixels are the subject, and
+`lamp=idle` asks for the dark status lamps the game draws on a machine that
+is not processing). Add `&shot=<name>` and the page posts that frame to the
+server's `--shot-dir`; that is how `calibrate-ao.py` measures the viewer. A
+shot name is `[a-z0-9][a-z0-9-]*` — an underscore is refused with a 400 and
+no file, which looks exactly like a page that never rendered.
 
 ## What it reads
 
@@ -31,6 +35,7 @@ browser cannot drift from the pipeline:
 |---|---|
 | the model you see | `assets/voxels/models/<name>.<class>.vox`, parsed directly |
 | material of each mesh | `models/materials.json` (`metallic`, `roughness`, emission) |
+| lit and idle status lamps | `models/lamp_states.json` — the same file `voxel_assets.gd` builds the game's `lamp_running`/`lamp_idle` from |
 | which classes an asset has | `models/index.json` |
 | colour names in the palette panel | `assets/voxels/palette.ron`, in file order |
 | the prose under "generator" | the `///` doc comment on the generator fn |
@@ -67,7 +72,7 @@ asset appears on its own, with no change here, as soon as `voxgen` writes it.
 
 `/` search · `↑`/`↓` previous/next asset · `space` play the frames ·
 `1`-`4` game / front / side / top · `f`/`F` facing · `r` turntable ·
-`g` grid · `o` ambient occlusion · `b` backdrop
+`g` grid · `o` ambient occlusion · `b` backdrop · `l` lamp running/idle
 
 The grid is one game tile per amber square (32 voxels), with two tiles of
 margin, so a model's footprint is checkable by eye.
@@ -88,6 +93,18 @@ model changes, so a silhouette can be judged against each: **haze** (the
 hall's air, what the game's camera actually sees past a machine), **hall**
 (the factory-interior gradient, roof-cool over slab-warm) and **dark** (a
 near-black plate, for reading an emissive lens or a thin bright edge).
+
+`l` swaps the `emissive` class between the two states the game draws it in.
+A status lamp is lit only while its machine is **processing**: `main.gd`
+calls `_set_machine_running(key, false)` the moment a machine body is built,
+which swaps `lamp_running` for `lamp_idle` on the same mesh, so a cooking
+vat's rim is a dark brown ring for most of its life and a bright amber one
+for the minority of it. Both states are `palette.ron`'s `lamp_states`,
+exported to `models/lamp_states.json`, and this viewer builds its materials
+from that file rather than from a copy — approve a lamp here in either state
+and you have approved the state the game will actually show (issue #81). The
+title line says `lamp idle` when it is the idle one, the way it says which
+facing it is, so a screenshot carries which of the two it is.
 
 ## Files
 
@@ -117,6 +134,18 @@ near-black plate, for reading an emissive lens or a thin bright edge).
   `scripts/screenshot-scene.sh --fixture vat`, its painted blue #153d57
   against #173b58. Re-measure if `factory_environment.gd` or
   `factory_interior_sky.gdshader` is retuned; `app.js` says how.
+- **The status lamps are the game's two states, not one, and that is
+  measured too.** This used to be the gap: every `*.emissive.vox` mesh was
+  drawn at full emission while the game dims an idle machine, so the browser
+  showed a bright amber ring where `--fixture vat` showed a brown one, and
+  whoever approved that lamp had approved the state a machine spends least of
+  its life in (issue #81). Over the vat's lamp ring, against a fixed control
+  window on its stainless flank in the same frame, the ring reads **0.231**
+  of the steel's luma at `lamp=idle` here against the game's **0.251**, and
+  **1.205** at `lamp=running` — so the idle frame reads like the game's to
+  within 8%, and the lit one is nearly five times it. `lamp=running` is still
+  the default, because a lamp is drawn to be read when it is lit; `l` and
+  `?lamp=idle` are how the other state is reviewed.
 - The ambient occlusion is baked per voxel, not screen-space: the occupancy
   grid the mesh is built from is blurred and sampled along each face's normal,
   and dims *indirect diffuse only*, as Godot's SSAO does with
