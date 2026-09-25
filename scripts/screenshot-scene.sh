@@ -262,6 +262,12 @@
 # placed (the INVALID state), or --remove-mode to enter remove mode over a
 # placed building. These are the only way to review build mode without a live
 # interactive session — the same problem the hover flags solve for tooltips.
+# Add --ghost-at TX,TY[,FACING] to hold that ghost over one chosen tile at one
+# facing instead; the sim, not the flag, says whether it is valid there. The
+# crossing's two frames are a pipe across the line's belt and along it:
+#
+#   scripts/screenshot-scene.sh valid.png --fixture crossing --ghost pipe --ghost-at 6,0,north
+#   scripts/screenshot-scene.sh refused.png --fixture crossing --ghost pipe --ghost-at 6,0,east
 #
 # Pass one of --hover / --hover-pipe / --hover-vat / --hover-hopper /
 # --hover-tank / --hover-dock / --hover-splitter to aim the cursor over the
@@ -387,7 +393,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--split-docks [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--settings] [--debug] [--set KEY=VALUE] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy] [--on-screen]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--split-docks [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND [--ghost-at TX,TY[,FACING]]|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--settings] [--debug] [--set KEY=VALUE] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy] [--on-screen]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -503,6 +503,11 @@ var _dock_lamp_dark := false
 const FULL_DOCK_HOLD_TICK_LIMIT := 2000
 var _ghost_kind := ""
 var _ghost_blocked := false
+## --ghost-at TX,TY[,FACING]: the tile the ghost is held over, and the facing
+## it is held at, instead of --ghost's open ground or --ghost-blocked's first
+## machine. Whether that reads as valid is the sim's answer, not the flag's.
+var _ghost_at := HOVER_NONE
+var _ghost_facing := ""
 var _remove_mode := false
 ## `--menu` renders menu.tscn rather than main.tscn; `--pause` renders the
 ## in-game pause menu over a running factory. See the header.
@@ -700,6 +705,13 @@ func _initialize() -> void:
 	if _ghost_kind == "":
 		_ghost_kind = _string_arg(args, "--ghost-blocked")
 		_ghost_blocked = _ghost_kind != ""
+	var ghost_at_arg := _string_arg(args, "--ghost-at")
+	if ghost_at_arg != "":
+		var parts: PackedStringArray = ghost_at_arg.split(",")
+		if parts.size() >= 2:
+			_ghost_at = Vector2i(int(parts[0]), int(parts[1]))
+		if parts.size() == 3:
+			_ghost_facing = parts[2]
 	_allow_unhealthy = args.has("--allow-unhealthy")
 	_remove_mode = args.has("--remove-mode")
 	_title = args.has("--title")
@@ -1614,8 +1626,16 @@ func _enter_ghost_mode() -> void:
 		printerr("SCREENSHOT_NOTE: could not afford one '%s' after building the fixture — no ghost to show" % _ghost_kind)
 		return
 	_main._enter_build_mode(_ghost_kind)
+	if _ghost_facing != "":
+		if not _main.DIRECTIONS.has(_ghost_facing):
+			printerr("SCREENSHOT_FAIL: --ghost-at's facing '%s' is not one of %s" % [_ghost_facing, str(_main.DIRECTIONS)])
+			_refuse()
+			return
+		_main._build_direction = _ghost_facing
 	var target := _open_ground_tile()
-	if _ghost_blocked:
+	if _ghost_at != HOVER_NONE:
+		target = _ghost_at
+	elif _ghost_blocked:
 		var occupied := _first_machine_tile()
 		if occupied == HOVER_NONE:
 			occupied = _first_tile_of(func(_p): return true)
