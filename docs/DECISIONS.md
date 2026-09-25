@@ -25,6 +25,81 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-25: **The review render's clock is PINNED — `--fixed-fps` at the
+  engine, a frame-summed clock for the HUD fades — so one command gives one
+  picture.** (Issue #82.)
+
+  **The defect.** `scripts/screenshot-scene.sh` builds a fixture, then lets
+  `main.gd`'s own `_process` run `WARMUP_FRAMES` (45) frames before the
+  shutter, and `_advance_simulation` spends real frame deltas against
+  `TICK_HZ`. How many simulation ticks the warm-up spends was therefore a
+  function of how long those 45 frames took on that host at that moment. Two
+  runs of the identical command landed on tick **10621** and **10622**, and
+  the PNG hash tracked the tick exactly: items sit a step further along a
+  belt, a clipboard digit ticks over, `SCREENSHOT_RENDER`'s primitive count
+  changes (967526 vs 969058 on one pair). It is a quiet failure — a wrong
+  frame is as plausible as a right one — and it poisons every measurement
+  taken through a render, which is how this repo judges its own art.
+
+  **The fix is the engine's, not the game's.** Godot's `--fixed-fps <n>`
+  hands every frame the same delta and stops synchronising to real time.
+  `screenshot-scene.sh` passes `--fixed-fps 60`, and nothing in
+  `_advance_simulation` changes: the tick loop a player runs is untouched,
+  byte for byte, which is the constraint that ruled out the obvious
+  alternatives (ticking the sim by hand in the harness would have made the
+  review path a *different* code path from the game's, and the throwaway
+  harness the glow sweep used is exactly that mistake, kept private). A
+  pinned 60 Hz frame against a 30 Hz tick spends `floor(45 * 30 / 60)` = **22
+  ticks** in the warm-up, every time, on any machine, under any load.
+
+  **The three HUD fades needed a second half.** The money flyout, the hotbar
+  name flyout and the contract notice are deliberately outside the tick —
+  they run in the `else` branch of `_wire_changed` so they keep fading with
+  the pause menu open — and they read `Time.get_ticks_msec()`, milliseconds
+  since *process start*, which `--fixed-fps` cannot reach: the same fixture
+  photographed after a slow boot shows a different alpha. Moving them onto
+  `sim.current_tick()` would have frozen a money flyout behind the pause
+  menu, which is the property they were given wall clock for. So `main.gd`
+  keeps a clock of its own, `_hud_clock_msec`, summed from the deltas the
+  scene is actually handed and read through `_hud_now_msec()`. For a player
+  that IS the wall clock. For a review render it is the pinned delta, so the
+  fade is reproducible. And a frozen scene (`--payout` turns processing off)
+  now freezes its fades with it, which is wanted: a photograph of a
+  celebration should not age while the shutter is open.
+
+  **The harness refuses an unpinned clock rather than trusting the script.**
+  `test_screenshot.gd` measures its own delta against `FIXED_FPS` and prints
+  `SCREENSHOT_FAIL` naming the remedy, because `godot --script
+  test_screenshot.gd` run by hand would otherwise silently be back to a
+  picture that depends on machine load. The pair is kept in step by
+  `scripts/check-invariants.sh`, which greps that the script sets
+  `fixed_fps`, actually passes `--fixed-fps` to `godot`, and agrees with the
+  constant the harness checks against — the only way to catch it, since
+  neither half of a non-headless renderer can be run by the headless suite.
+  Every render also prints `SCREENSHOT_TICK`, so a disagreement between two
+  frames can be read rather than guessed at.
+
+  **Measured, on the rebased tip, cursor parked, 1280x720.** Before:
+  `--bottleneck --closeup 4,0,10 --no-hud` four times gave four different
+  pictures (`3dba3d7512bd`, `594c0244cc32`, `52493c1c3da8`, `204eff32b9bd`);
+  `--fixture chain --populate` gave one hash four times on a quiet machine
+  and three different hashes under a six-way CPU load — the exact trap the
+  issue names, a quiet window that looks like determinism. After: the
+  closeup is `52493c1c3da8` six times (four quiet, two under an eight-way
+  load), `SCREENSHOT_TICK: 10622`, 969058 primitives every time; the chain
+  fixture is `149e338eb2fc` eight times (four quiet, four loaded),
+  `SCREENSHOT_TICK: 622`. No flag is excluded as "deliberately
+  non-deterministic": `--populate` ticks a fixed 60x10 loop and was never the
+  problem, and `--payout` and `--unlock-toast` are byte-identical too.
+
+  **The consequence to know.** A pinned warm-up stops on a different tick
+  than a loaded one did, so a baseline rendered before this change is a
+  different moment, not a corrupted one — re-render it rather than diffing
+  across the fix. `godot_project/test_frame_clock.gd` (`FRAME_CLOCK_OK`)
+  holds the whole rule headlessly: `_hud_now_msec()` does not move across 250
+  real milliseconds with no frames, each of the three fades reaches alpha 0
+  on frames alone, and `WARMUP_FRAMES` at the pinned delta spends 22 ticks
+  twice running.
 - 2026-09-25: **A status lamp's two states are palette data, written as
   modifiers of the `emissive` class, and every renderer reads the resolved
   JSON.** (Issue #81: the asset browser drew every `*.emissive.vox` mesh at
@@ -1126,7 +1201,9 @@ matches what code comments and data files cite.
   variants in one sweep failed to reproduce between two passes. This sweep was
   therefore rendered by a throwaway harness that disables the scene's process
   mode and counts the ticks by hand; every render is then byte-identical run
-  to run. Filed separately as its own issue.
+  to run. Filed separately as its own issue — **fixed on 2026-09-25**: the
+  review render pins the engine clock with `--fixed-fps`, so a sweep like
+  this one no longer needs a harness of its own (see that record below).
 
   **The sweep** (bottleneck line, crusher closeup at tile 4,0 size 10,
   1200x800, tick 10060; deltas in 0-255 levels against the null baseline):
@@ -1667,8 +1744,11 @@ matches what code comments and data files cite.
   **39.5/255** gap. The windows are 26×26 at (964,561) and (1023,538) of
   `bbq_mixed.png`, aligned by silhouette overlap. The frame is
   `TomWhitticase-iss-balance/20260920-152320-bbq_mixed.png` on the `pr-media`
-  branch, which is the only copy — per #82 the screenshot harness is not
-  reproducible run to run, so it cannot be re-rendered.
+  branch, which is the only copy — per #82 the screenshot harness was not
+  reproducible run to run when this was measured, so that exact frame cannot
+  be re-rendered. (#82 is fixed as of 2026-09-25, but a pinned warm-up stops
+  the sim on a different tick than a wall-clock one did, so a re-render is a
+  new frame, not this one.)
 
   **The gap is implementation-sensitive; read it as a range, not a figure.**
   Three independent implementations of the method as written above give

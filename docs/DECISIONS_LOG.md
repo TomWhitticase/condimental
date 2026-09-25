@@ -18,6 +18,22 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-25 **The review render's clock is PINNED, so the same command twice
+  is the same picture.** `scripts/screenshot-scene.sh` passes Godot's own
+  `--fixed-fps 60`; `_advance_simulation` is untouched, so the tick loop a
+  player runs is unchanged and the 45-frame warm-up always spends
+  `floor(45 * 30 / 60)` = 22 ticks instead of however many the host's load
+  allowed (two runs used to land a tick apart — 10621 vs 10622 — and the PNG
+  hash tracked it exactly). The three HUD fades `--fixed-fps` cannot reach —
+  money flyout, hotbar name flyout, contract notice, outside the tick on
+  purpose so they keep fading under the pause menu — read `_hud_now_msec()`,
+  a clock summed from the frame deltas the scene was actually given, NEVER
+  `Time.get_ticks_msec()` directly. `test_screenshot.gd` REFUSES a run whose
+  frames did not arrive at `FIXED_FPS` rather than quietly photographing a
+  load-dependent moment, `scripts/check-invariants.sh` keeps script and
+  harness in step, and every render prints `SCREENSHOT_TICK`. A baseline
+  rendered before this is a different moment, not a corrupt one: re-render
+  it, do not diff across the fix. Full record in `docs/DECISIONS.md`.
 - 2026-09-25 **A status lamp's two states are palette data, written as
   MODIFIERS of the `emissive` class, and every renderer reads the resolved
   JSON.** A lamp is lit or dark, and `main.gd` calls `_set_machine_running(key,
@@ -36,7 +52,6 @@ See [WORKFLOW.md](WORKFLOW.md).
   its own `status_*_off` entries. Adding the table is a shape change, so
   `palette.ron`'s `schema_version` went to 2. Full record in
   `docs/DECISIONS.md`.
-
 - 2026-09-21 **Settings are PRESENTATION; a cheat that moves money is a real
   SIM COMMAND; F3 is ungated in pre-alpha.** Eight knobs (music/sfx on and
   level, movement speed, look sensitivity, FOV, hall size) live in a `Settings`
@@ -311,8 +326,10 @@ See [WORKFLOW.md](WORKFLOW.md).
   way: the null baseline is glow **enabled** with **`glow_bloom = 0.0` and a
   threshold of 3.0** (enabling the pass at all shifts the frame ~+4.5 mean, and
   a high threshold alone still leaves `glow_bloom`'s frame-wide haze in the
-  baseline); and it cannot be measured through `scripts/screenshot-scene.sh`,
-  whose sim state is not reproducible run to run. `glow_bloom` is frame-wide
+  baseline); and it could not be measured through
+  `scripts/screenshot-scene.sh` at the time, whose sim state was not then
+  reproducible run to run — since 2026-09-25 the render's clock is pinned and
+  it can be. `glow_bloom` is frame-wide
   haze by definition and belongs at 0 in a game whose emissives are small
   lamps. **SOFTLIGHT can never make a halo** — its effect scales with the pixel
   beneath it, so its brightest pixel is +25..30 levels at any intensity or
