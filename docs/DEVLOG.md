@@ -243,14 +243,27 @@ about it at all. What it has to prove instead is that it moved — an item on
 each crossing tile, fluid in every segment of every run. The list makes the
 good frame the default; the check makes the bad frame impossible.
 
-The line was also starved. Four auto-filling tanks, two per run, drank more
-vinegar than the 64 the fixture bought: the first took 50 and the
-`CROSSING_BELT_ONTO_PIPE_X` run stood dry in every frame ever shot of it.
-Feeding both ends was the wrong instinct anyway — both halves of a run colour
-whether or not the crossing joined them, which is the one fact the colour is
-there to show. One tank at the north end wets all seven segments *through*
-the crossing, measured, and leaves stock to spare. The count is now
-`CROSSING_VINEGAR`, next to the tanks it feeds.
+The line was also starved, and the first attempt at fixing that was wrong in
+a way worth writing down. The obvious reading — four auto-filling tanks
+sharing the 64 vinegar the fixture bought — is not what happened. The FIRST
+tank drinks whatever it can reach, so the count of tanks changes nothing:
+64 left the `CROSSING_BELT_ONTO_PIPE_X` run at 0.000 pressure across four
+tanks and across two alike. The amount was always the cause. Measured under
+auto-fill alone, 128 gets that run to 0.114, 160 to 0.571 and 200 to 0.999,
+so `CROSSING_VINEGAR` is 200.
+
+One tank per run stays, for a different reason than it was first given: fed
+from the north only, fluid reaches a run's south half *through* the crossing,
+so the colour is evidence the crossing joined the run. That is legibility,
+not fill.
+
+And "wet" turned out not to mean "visible". `main.gd` draws pipe liquid by
+scaling a one-voxel body by `pressure × PIPE_BORE_HEIGHT_VOXELS` (7), so
+below 1/7 the column is sub-voxel and the run photographs grey while every
+segment reports fluid. The x = 9 run sat at 0.114 — eight tenths of a voxel —
+and sailed through a `volume > 0` check and into a PR body captioned "both
+runs wet". The check now asks for `CROSSING_MIN_DRAWN_PRESSURE`, and counts
+the runs it found rather than passing vacuously over an empty list.
 
 Doc corrections alongside: `BELT_PIPE_CROSSING_PLAN.md` now names the shipped
 `pipe_crossing` rather than the spike's `pipe_gantry`, and its clearance

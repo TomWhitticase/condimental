@@ -37,8 +37,12 @@ under the name `pipe_crossing` — T2 renamed it for what it had become. The
 run lifts to exactly one tile above the floor (`GANTRY_AXIS_Z =
 TILE_VOXELS`, 32), on risers of the run's own radius flush against either
 side of the belt lane. Measured on the shipped model, its lowest voxel
-anywhere over the lane is z = 28, three clear (25..27) of
-`CROSSING_ITEM_TOP_Z` — the spike's figure of 27 was one voxel out. Its two
+*between the risers* — y 8..23, which contains `CROSSING_ITEM_Y` (10..21) —
+is z = 28, three clear (25..27) of `CROSSING_ITEM_TOP_Z` (24); the spike's
+figure of 27 was one voxel out. Not "anywhere over the lane": the risers
+stand **on** the lane's boundary rows, y 7 and y 24 (elbows at y 3 and 28,
+outer radius 4.5), and carry steel from z 13 up. Nothing travels those two
+rows, which is why the clearance that matters is the one between them. Its two
 open faces are ordinary bores on the pipe axis at `PIPE_AXIS_Z`, so a
 crossing drops into an existing north–south run with no fitting and no
 change to its neighbours.
