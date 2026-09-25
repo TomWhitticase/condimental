@@ -8,6 +8,19 @@
 # for the lighting/shadow/glow passes to settle, grabs the viewport, and
 # exits.
 #
+# **THE WINDOW IS REAL BUT OFF-SCREEN** (`_hide_window`). This runs on the
+# laptop someone is working at, so the window must never land on top of what
+# they are doing. It is made borderless and no-focus and moved far off the
+# desktop in `_initialize`. macOS clamps a titled window back on-screen, and
+# `--position` is clamped the same way, which is why this is done from here.
+# Godot skips drawing a window macOS reports as occluded, so while it is off
+# there `_process` draws each frame itself (`_keep_drawing`), and the frame
+# written is identical to an on-screen one. Godot still takes focus when it
+# starts, and nothing inside the process can stop that: `show_window`
+# activates the app unconditionally. scripts/screenshot-scene.sh hands focus
+# back to whatever was in front. `--on-screen` keeps the window where Godot
+# put it, for watching a run.
+#
 # Run via scripts/screenshot-scene.sh, or directly:
 #   godot --path godot_project --script test_screenshot.gd -- /abs/out.png [flags]
 #
@@ -110,7 +123,7 @@
 # frame) — the only way to visually review that mode's lighting/skybox
 # without a live interactive session.
 #
-# `--hover` warps the OS cursor over the first placed machine before
+# `--hover` aims the cursor over the first placed machine before
 # rendering, so the hover tooltip (docs/UI_UX.md §5) actually shows up in the
 # shot. `--hover-pipe`, `--hover-hopper`, `--hover-tank`, `--hover-dock` and
 # `--hover-vat` do the same over the first placed pipe, hopper, fluid tank,
@@ -135,35 +148,32 @@
 # other flags that aim at something the world may not contain, and they
 # refuse on the same grounds.
 #
-# THE CURSOR IS GLOBAL, AND THIS SCRIPT OWNS IT FOR THE WHOLE RUN (issue #4).
-# `Input.warp_mouse` moves the machine's ONE pointer, which outlives the
-# process and is shared with every other window on the desktop — including a
-# second `screenshot-scene.sh` running in a parallel worktree. Left alone that
-# leaks both ways: a run asking for no hover at all inherits whatever tile the
-# LAST run parked on and photographs its tooltip (`--fixture bottleneck
-# --payout` came back with a dock tooltip from the `--hover-dock` run before
-# it, reading numbers the frozen scene never refreshed, and cost a round of
-# investigation to rule out as a game bug), and a run that does ask for a
-# hover can have the pointer moved out from under it between the warp and the
-# shutter 43 frames later. So: every run PARKS the cursor on empty ground
-# first (`_park_cursor`), any --hover* flag then aims it, it is RE-ASSERTED a
-# few frames before the shutter (`_settle_cursor`), and the frame is only
-# written if the cursor really is over the tile it was aimed at
-# (`_check_cursor`) — a mismatch REFUSES, since a tooltip belonging to the
-# wrong thing is exactly the frame this script exists not to hand back.
+# THE CURSOR IS THIS RUN'S OWN, NOT THE MACHINE'S (issue #4). It is
+# `main.gd`'s `_pointer_override`, a screen point the scene reads in place of
+# the mouse. It used to be `Input.warp_mouse`, which moves the machine's ONE
+# pointer: it yanked the pointer out from under the person at the desk, and it
+# leaked between runs. A run asking for no hover at all photographed the tile
+# the LAST run had parked on (`--fixture bottleneck --payout` came back with
+# a dock tooltip from the `--hover-dock` run before it), and a parallel
+# worktree's run could move the pointer between the warp and the shutter. The
+# override cannot leak in either direction. The procedure is kept anyway,
+# because it is cheap and it also catches the scene moving under a fixed aim.
+# Every run PARKS the cursor on empty ground first (`_park_cursor`). Any
+# --hover* flag then aims it. It is RE-ASSERTED a few frames before the
+# shutter (`_settle_cursor`), and the frame is only written if the cursor
+# really is over the tile it was aimed at (`_check_cursor`). A mismatch
+# REFUSES, since a tooltip belonging to the wrong thing is exactly the frame
+# this script exists not to hand back.
 #
-# IN FIRST PERSON THE POINTER IS NOT WHAT AIMS THE TOOLTIP — THE CROSSHAIR
+# IN FIRST PERSON THE CURSOR IS NOT WHAT AIMS THE TOOLTIP — THE CROSSHAIR
 # IS. `main.gd`'s `_update_hover_tooltip` asks the SCREEN CENTRE what it is
-# over when `_view_mode` is FIRST_PERSON and the mouse position otherwise, so
+# over when `_view_mode` is FIRST_PERSON and `_pointer_pos` otherwise, so
 # every one of the three steps above asks the same question the frame does
 # (`_hover_query_pos`), and a --hover* flag TURNS THE CAMERA rather than
-# warping the pointer (`_aim_at_tile`). This is not a detail: checking the
+# moving the cursor (`_aim_at_tile`). This is not a detail: checking the
 # pointer in a view the pointer does not drive made `--first-person
 # --hover-dock` fail at the shutter and blame a parallel worktree for it,
 # which is the same class of confidently-wrong report as issues #4 and #70.
-# The good news is that the leak itself cannot happen in first person — the
-# query position is the middle of the window whatever the desktop's pointer
-# did — so there the cursor work is a check rather than a cure.
 #
 # `--shop` opens the build menu (docs/UI_UX.md §5) before rendering.
 #
@@ -265,6 +275,8 @@ const FIXTURE_NAMES: PackedStringArray = [
 const HEALTHY_FIXTURES: PackedStringArray = ["bbq", "bottleneck", "full_dock"]
 
 var _frames := 0
+var _on_screen := false
+var _frames_drawn_seen := -1
 var _out := "user://scene.png"
 var _fixture := ""
 ## The fixture a convenience flag asked for, and the flag that asked. Kept
@@ -547,6 +559,9 @@ func _initialize() -> void:
 	var args := OS.get_cmdline_user_args()
 	if args.size() > 0:
 		_out = args[0]
+	_on_screen = args.has("--on-screen")
+	if not _on_screen:
+		_hide_window()
 	_fixture = _string_arg(args, "--fixture")
 	if _fixture != "" and not FIXTURE_NAMES.has(_fixture):
 		# Refused rather than fallen back on. `_build_fixture`'s `_:` arm used
@@ -1122,10 +1137,38 @@ func _enter_closeup() -> void:
 	_main._update_camera_transform()
 
 
+## Where the window goes: far enough left of any desktop that it can never be
+## on a screen, whatever the display arrangement.
+const OFF_SCREEN_POSITION := Vector2i(-20000, 0)
+
+
+## Takes the window off the desktop before anything is drawn in it. See the
+## window note in this file's header. Borderless first, because macOS clamps a
+## window that has a title bar back onto a screen.
+func _hide_window() -> void:
+	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_NO_FOCUS, true)
+	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, true)
+	DisplayServer.window_set_position(OFF_SCREEN_POSITION)
+
+
+## Draws this frame by hand if the engine skipped the last one. Godot does
+## not draw a window macOS reports as occluded, and an off-screen window is
+## occluded, so without this the viewport would hold whatever was drawn before
+## the move. `Engine.get_frames_drawn` counts only the loop's own draws, so a
+## count that has stopped moving means the loop has stopped drawing.
+func _keep_drawing(delta: float) -> void:
+	if _on_screen:
+		return
+	var drawn := Engine.get_frames_drawn()
+	if drawn == _frames_drawn_seen:
+		RenderingServer.force_draw(true, delta)
+	_frames_drawn_seen = drawn
+
+
 ## The view this run photographs, which is NOT `main.gd`'s
 ## `DEFAULT_VIEW_MODE` — a review shot is isometric unless `--first-person`
 ## asked otherwise. Every other framing flag this tool has (`--closeup`,
-## `--zoom`, `--pan`, and every `--hover*`, which warps the OS cursor to
+## `--zoom`, `--pan`, and every `--hover*`, which aims the cursor at
 ## where a tile projects) is an isometric idea, so following the game's
 ## opening view would have silently re-aimed every command line in
 ## `docs/`, `scripts/` and CI at a first-person camera those flags cannot
@@ -1144,22 +1187,24 @@ func _enter_view_mode() -> void:
 	_main._update_fp_camera_transform()
 
 
-## Warps the real OS cursor over one world tile, using the same tile ->
+## Aims the cursor (`main.gd`'s `_pointer_override`) over one world tile,
+## using the same tile ->
 ## world -> screen math `_tile_under_screen_pos` inverts (via the camera's own
 ## `unproject_position`, which needs the camera actually inside the tree — see
 ## the `_ready()` timing note in `_initialize` above, which is exactly why
 ## this can't run any earlier than `_process`). Every --hover* flag is this
 ## one function plus a different way of picking the tile.
 ##
-## The tile is REMEMBERED (`_cursor_tile`), because a warp is a request to the
-## window server rather than a fact: `_settle_cursor` makes it again just
+## The tile is REMEMBERED (`_cursor_tile`), not the screen point, because the
+## camera can still move after the aim: `_settle_cursor` aims again just
 ## before the shutter and `_check_cursor` proves it stuck. See the cursor note
 ## in this file's header.
 ##
-## Returns false having REFUSED if the tile is not in frame. In isometric the
-## pointer cannot be put outside the window — the window server clamps the
-## warp to the edge — so the shutter check would fire a few frames later and
-## blame a hand on the mouse for a tile the camera simply is not showing
+## Returns false having REFUSED if the tile is not in frame. A tooltip for a
+## point outside the window has nowhere to be drawn, and when this aimed the
+## real pointer the window server clamped it to the edge, so the shutter check
+## fired a few frames later and blamed a hand on the mouse for a tile the
+## camera simply was not showing
 ## (`--fixture chain --closeup 26,0,8 --hover-hopper` did exactly that). A
 ## cause this run CAN see, it names.
 func _hover_over_tile(tile: Vector2i) -> bool:
@@ -1172,8 +1217,7 @@ func _hover_over_tile(tile: Vector2i) -> bool:
 		if not frame.has_point(point):
 			printerr(
 				"SCREENSHOT_FAIL: tile %s is not in frame — it projects to %s in a \
-%dx%d window, and the pointer cannot be put outside that, so the tooltip would \
-belong to whatever the edge of the frame is over. Widen the shot (a bigger \
+%dx%d window, so its tooltip could not be in the frame. Widen the shot (a bigger \
 --closeup size, or drop it), raise the resolution, or aim at something the \
 camera is showing."
 				% [str(tile), str(point.round()), int(frame.size.x), int(frame.size.y)]
@@ -1194,12 +1238,12 @@ func _aim_at_tile(tile: Vector2i) -> void:
 	if _in_first_person():
 		_aim_crosshair_at_tile(tile)
 	else:
-		_warp_to_tile(tile)
+		_point_at_tile(tile)
 
 
-func _warp_to_tile(tile: Vector2i) -> void:
+func _point_at_tile(tile: Vector2i) -> void:
 	var world_point: Vector3 = _main._tile_origin(tile.x, tile.y, _main.BELT_SURFACE_Y)
-	Input.warp_mouse(_main._camera.unproject_position(world_point))
+	_main._pointer_override = _main._camera.unproject_position(world_point)
 
 
 ## Turns the first-person camera until the tile is dead centre, which is the
@@ -1239,7 +1283,7 @@ func _aim_crosshair_at_tile(tile: Vector2i) -> void:
 func _hover_query_pos() -> Vector2:
 	if _in_first_person():
 		return root.get_visible_rect().size / 2.0
-	return root.get_mouse_position()
+	return _main._pointer_pos(root)
 
 
 func _in_first_person() -> bool:
@@ -1312,19 +1356,19 @@ const PARK_POINTS: Array[Vector2] = [
 ]
 
 ## How far around a candidate point the ground must also be empty, in pixels.
-## A warp lands on whole pixels and `unproject_position` does not, so a point
-## chosen right on a tile boundary could park a pixel over into the machine
-## next door.
+## A point chosen right on a tile boundary is one rounding error from the
+## machine next door; this was measured when the park was a warp of the real
+## pointer, which lands on whole pixels, and is kept as a margin.
 const PARK_CLEARANCE_PX := 4.0
 
 
 ## Puts the cursor somewhere that says nothing, and records where.
 ##
 ## Called on every run before anything opens (and again from
-## `_settle_cursor`), because the pointer this script inherits is the one the
-## LAST run left behind — see the cursor note in this file's header. Without
-## it, `--payout` photographs the dock tooltip of the `--hover-dock` run
-## before it.
+## `_settle_cursor`), because a scene that has drawn a tooltip before the
+## park keeps it until something asks again. When the cursor was the real
+## pointer, `--payout` photographed the dock tooltip of the `--hover-dock`
+## run before it. See the cursor note in this file's header.
 ##
 ## "Says nothing" is asked of the scene itself (`_hover_text_at_tile`, the
 ## same query the tooltip is drawn from) rather than derived here, so a kind
@@ -1361,12 +1405,12 @@ func _park_cursor() -> void:
 		var point := Vector2(fraction.x * size.x, fraction.y * size.y)
 		if not _ground_is_quiet_around(point):
 			continue
-		Input.warp_mouse(point)
+		_main._pointer_override = point
 		_cursor_tile = _main._tile_under_screen_pos(point)
 		_cursor_park_noisy = false
 		return
 	var fallback := Vector2(PARK_POINTS[0].x * size.x, PARK_POINTS[0].y * size.y)
-	Input.warp_mouse(fallback)
+	_main._pointer_override = fallback
 	_cursor_tile = _main._tile_under_screen_pos(fallback)
 	_note_park(
 		_cursor_tile,
@@ -1399,13 +1443,11 @@ func _ground_is_quiet_around(point: Vector2) -> bool:
 
 ## Makes the cursor's placement true again a few frames before the shutter.
 ##
-## The warp happens on frame 2 and the frame is written on WARMUP_FRAMES; in
-## between, anything that moves the machine's one pointer moves this shot —
-## a parallel worktree taking its own screenshot, a hand on the mouse, the
-## window server settling. Re-asserting costs a warp and removes the whole
-## class of "sometimes it points at the wrong thing".
+## The aim happens on frame 2 and the frame is written on WARMUP_FRAMES. The
+## cursor is this run's own now, so nothing outside can move it in between,
+## but the camera can, and re-asserting costs one projection.
 ##
-## Re-PARKING (rather than re-warping to the remembered tile) is what makes
+## Re-PARKING (rather than re-aiming at the remembered tile) is what makes
 ## `--closeup` safe: the closeup re-aims the camera on frame 2, after the
 ## parking on frame 1, so the tile that was empty floor in the wide shot can
 ## be a machine filling half the zoomed frame.
@@ -1430,7 +1472,7 @@ func _settle_cursor() -> void:
 ## flag claims a particular tile, so the tile the tooltip is queried from
 ## must BE that tile. A quiet park claims only that nothing is under it, so
 ## what is checked is that the scene has nothing to say there — which is also
-## immune to the pixel of rounding a warp introduces, where an exact tile
+## immune to rounding at a tile edge, where an exact tile
 ## comparison on a tile boundary would fail for no reason. A park that had to
 ## settle for a tile that talks claims nothing beyond the NOTE it already
 ## printed, and is allowed through on that tile alone.
@@ -1440,8 +1482,8 @@ func _settle_cursor() -> void:
 ## check on something that is not in the frame.
 ##
 ## When it refuses it reports WHAT it saw and stops there. The causes it used
-## to name (a parallel worktree, a hand on the mouse) are guesses this
-## process cannot distinguish, and a harness that states a guess as the cause
+## to name (a parallel worktree, a hand on the mouse) were guesses this
+## process could not distinguish, and a harness that states a guess as the cause
 ## is the defect issues #4 and #70 were both filed about; the candidates are
 ## listed as candidates.
 func _check_cursor() -> bool:
@@ -1488,9 +1530,9 @@ func _check_cursor() -> bool:
 
 ## The things that are known to move a shot's aim out from under it, offered
 ## as a list to check rather than as a finding. Which list depends on what
-## does the aiming in this view — in first person the desktop's pointer is
-## not in the picture at all, and saying it was is how this harness came to
-## blame a parallel worktree for a camera it had aimed itself.
+## does the aiming in this view: in first person it is the camera, and
+## naming anything else is how this harness came to blame a parallel
+## worktree for a camera it had aimed itself.
 func _drift_candidates() -> String:
 	if _in_first_person():
 		return (
@@ -1498,10 +1540,7 @@ func _drift_candidates() -> String:
 			+ "%d-degree clamp, " % int(round(rad_to_deg(_main.FP_PITCH_LIMIT)))
 			+ "or something moved the first-person camera after the aim"
 		)
-	return (
-		"a hand on the mouse, a second screenshot-scene.sh warping the shared pointer "
-		+ "from another worktree, or a camera move after the aim"
-	)
+	return "a camera move after the aim, or a fixture that rebuilt the world under it"
 
 
 ## Loads both consumables and ticks, so the shot shows product moving rather
@@ -2046,9 +2085,10 @@ func _reset_settings(args: Array) -> bool:
 	return true
 
 
-func _process(_delta: float) -> bool:
+func _process(delta: float) -> bool:
 	if _refused:
 		return true
+	_keep_drawing(delta)
 	_frames += 1
 	# Build first: every flag below is about looking at something, and since
 	# the "Real Placement" epic there is nothing to look at until one of the
@@ -2089,8 +2129,8 @@ func _process(_delta: float) -> bool:
 	if _frames == 1:
 		_enter_view_mode()
 	# Before main.gd has drawn a single tooltip, and before any --hover* flag
-	# on frame 2 aims it somewhere on purpose: the pointer this run starts
-	# with is the one the run before it left behind (issue #4).
+	# on frame 2 aims it somewhere on purpose, so no tooltip is drawn from
+	# wherever the real mouse happens to be (issue #4).
 	if _frames == 1:
 		_park_cursor()
 	# Before any flag below acts, and in particular before --unlock-toast
@@ -2101,8 +2141,8 @@ func _process(_delta: float) -> bool:
 		_clear_build_notices()
 	if _frames == 2 and _populate:
 		_run_chain_forward()
-	# The closeup is applied BEFORE any hover flag: a hover warps the OS cursor
-	# to where a tile currently projects on screen, so re-aiming the camera
+	# The closeup is applied BEFORE any hover flag: a hover aims the cursor
+	# at where a tile currently projects on screen, so re-aiming the camera
 	# afterwards would leave the cursor pointing at whatever moved under it.
 	if _frames == 2 and _closeup:
 		_enter_closeup()

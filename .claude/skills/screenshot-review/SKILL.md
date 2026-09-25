@@ -86,8 +86,11 @@ Note the `=` form for a negative coordinate, or it reads as a flag:
   machine"** — use `--closeup`, and `--no-hud` if the HUD covers the joint.
 - **Budget a rework pass.** Looking changes the design (§2b point 9).
 
-The script opens a real window briefly, so it needs a display and a `godot`
-binary (`GODOT_BIN` overrides). It is slow — pick the one fixture that shows
+The script needs a display and a `godot` binary (`GODOT_BIN` overrides). Its
+window is real but off-screen, the `--hover*` flags do not touch the mouse,
+and it hides Godot as soon as Godot takes focus. Rendering therefore does
+not disturb whoever is using the machine, and it does not need you to park
+the pointer first. Add `--on-screen` only to watch a run. It is slow — pick the one fixture that shows
 what you changed rather than sweeping every flag.
 
 ## Into a pull request

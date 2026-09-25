@@ -221,6 +221,22 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-25 — Screenshot renders stop interrupting the person at the laptop
+
+`scripts/screenshot-scene.sh` used to open a 1600x900 window on top of
+whatever the owner was doing, take focus, and (for any `--hover*` flag)
+move the machine's real mouse pointer. Its window is now borderless,
+no-focus and far off the desktop. Godot skips drawing a window macOS
+reports as occluded, so the harness draws each frame itself. An
+off-screen frame was compared pixel for pixel with an on-screen one and
+was identical. The hover flags set `main.gd`'s `_pointer_override`
+instead of calling `Input.warp_mouse`, which also ends issue #4's
+cross-worktree cursor leak. Godot activates itself at launch and nothing
+inside the process can stop it, so the script hides the Godot app as soon
+as it comes to the front, and macOS gives focus back to the previous app
+about half a second later. A container was considered and rejected:
+Docker on macOS has no GPU, and a software-rendered frame is not the
+game's frame. `--on-screen` restores the old window for watching a run.
 ### 2026-09-25 — The asset browser learns that a lamp is usually dark
 
 The browser drew every `*.emissive.vox` mesh at full emission. The game does
