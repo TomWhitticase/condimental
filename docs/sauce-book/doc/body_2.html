@@ -1,0 +1,171 @@
+<h2>03 · Mayonnaise <span>— NEW MACHINE + NEW AXIS</span></h2>
+
+<p>IMG:card_03_mayonnaise</p>
+
+<p><b>The point of it.</b> The cold-chain tier. Two new machines, and the first ingredient in the
+game that can <i>go off</i>. Mayonnaise is where the factory stops being a graph of throughputs and
+starts being a floor plan with a clock on it.</p>
+
+<h3>In a kitchen</h3>
+<p>Two egg yolks, 1 tsp mustard, 1 tbsp vinegar or lemon juice, a pinch of salt. Whisk, then add
+250 ml neutral oil <i>a drop at a time</i> at first, in a thin stream once it takes. Everything at
+room temperature or the emulsion splits; the finished jar goes straight to the fridge. The mustard
+is not flavouring — it is the emulsifier, which is why mustard is an input in the game recipe and
+why mustard has to exist before mayonnaise can.</p>
+
+<h3>In the game</h3>
+<pre>Recipe(id: "mayo_base", inputs: [("egg", 2)],
+       fluid_inputs: [("oil", 3), ("mustard", 1)],
+       fluid_outputs: [("mayo_base", 1)],
+       machine: "emulsifier", time_ticks: 150),
+Recipe(id: "mayonnaise", fluid_inputs: [("mayo_base", 1)],
+       fluid_outputs: [("mayonnaise", 1)],
+       machine: "chiller", time_ticks: 90),
+Recipe(id: "bottled_mayonnaise", fluid_inputs: [("mayonnaise", 1)],
+       outputs: [("bottled_mayonnaise", 1)], machine: "bottler", time_ticks: 60),
+Recipe(id: "boxed_mayonnaise", inputs: [("bottled_mayonnaise", 1)],
+       outputs: [("boxed_mayonnaise", 1)], machine: "packer", time_ticks: 40),</pre>
+
+<h3>The line</h3>
+<p>A hopper of eggs, a tank of oil and a <b>tap off the mustard run</b> all meet at the
+<b>emulsifier</b> (150t — slow, and visibly slow: the dosing arm is the animation). Pipe to the
+<b>chiller</b> (90t), pipe to the <b>bottler</b>, belt, <b>packer</b>, <b>dock</b>. Two fluid draws at one machine is a move BBQ's cook already ships — but taking them <i>alongside
+a solid</i> is not, so <code>mayo_base</code> is the first recipe in the game to do both at
+once. That is a combination of two exercised paths rather than a new capability, and it is where
+the shape gets its first test; sauces 08 and 09 inherit it. What is new for the <i>player</i> is
+that the feed belt from the egg hopper is now a <i>liability</i>.</p>
+
+<h3>Machines</h3>
+<p><b>Emulsifier</b> (new, 1×2, manufacturing 1, 180) and <b>Chiller</b> (new, 1×2,
+manufacturing 1, 150). Full specs in §3. The chiller is the only white machine on the floor, so cold
+reads at a glance across the whole factory.</p>
+
+<h3>Why it is fun</h3>
+<p>Because for the first time the thing beating you is your own floor plan. Eggs spoil: a spoil clock
+runs on every buffer that is not a chiller, and a long, pretty, sprawling feed belt now kills stock
+outright before it arrives. Compact wins; sprawl rots. It inverts the habit the first four hours
+taught — long belts are cheap, so make them long — and it does it with one number on one ingredient.
+The chiller then becomes a <i>verb</i>: players will start parking chillers as buffers, which is
+exactly the emergent use worth designing for.</p>
+
+<h3>The money</h3>
+<p>33 per box (egg 3×2, oil 3×3, plus 18 of mustard). Contracts pay 92–104 — the first real jump in
+the game, and it should feel like one. <b>Gate:</b> 45 lifetime deliveries, releasing <code>egg</code>, <code>oil</code> and the
+mayonnaise contracts. The
+emulsifier and the chiller are simply <i>on sale</i> from a new game: <code>data/unlocks.ron</code>
+has no field that holds a machine back, and §6 says what adding one would cost.</p>
+
+<h2>04 · Garlic Aioli <span>— DATA</span></h2>
+
+<p>IMG:card_04_aioli</p>
+
+<p><b>The point of it.</b> A variant, not a tier: one crusher recipe and one more emulsifier recipe
+on machines you already own. Aioli steals mayonnaise exactly the way BBQ steals ketchup — same run,
+same contention — and what it adds is a contract board that can ask for <i>both</i>.</p>
+
+<h3>In a kitchen</h3>
+<p>Four garlic cloves and half a teaspoon of coarse salt pounded to a smooth paste in a mortar — the
+salt is the abrasive, so do not skip it — then folded into 250 ml of mayonnaise with lemon to taste.
+Traditional Catalan allioli is garlic and oil alone, emulsified by hand, and is a nightmare; every
+restaurant kitchen on earth cheats with mayonnaise, so the game cheats too.</p>
+
+<h3>In the game</h3>
+<pre>Recipe(id: "garlic_paste", inputs: [("garlic", 2), ("salt", 1)],
+       outputs: [("garlic_paste", 1)], machine: "crusher", time_ticks: 80),
+Recipe(id: "aioli", inputs: [("garlic_paste", 1)],
+       fluid_inputs: [("mayonnaise", 1)], fluid_outputs: [("aioli", 1)],
+       machine: "emulsifier", time_ticks: 90),
+Recipe(id: "bottled_aioli", fluid_inputs: [("aioli", 1)],
+       outputs: [("bottled_aioli", 1)], machine: "bottler", time_ticks: 60),
+Recipe(id: "boxed_aioli", inputs: [("bottled_aioli", 1)],
+       outputs: [("boxed_aioli", 1)], machine: "packer", time_ticks: 40),</pre>
+
+<h3>The line</h3>
+<p>Hoppers of garlic and salt → <b>crusher</b> (80t) → belt → a <b>second emulsifier</b> (90t)
+tapping the mayonnaise run → <b>bottler</b> → <b>packer</b> → <b>dock</b>. Note the second
+emulsifier: the first one is saturated making mayo base at 150t, so aioli is also the moment a
+player learns to buy a duplicate of a machine rather than a new kind.</p>
+
+<h3>Machines</h3>
+<p>None new. A third crusher recipe and a second emulsifier recipe. Under §7's recommended rule
+these are unambiguous — <code>mayo_base</code> needs eggs and <code>aioli</code> needs garlic paste,
+so what the machine is plumbed to still decides what it runs.</p>
+
+<h3>Why it is fun</h3>
+<p>Because it makes the board harder without making the factory harder. "40 mayonnaise and 20 aioli"
+is a genuinely nastier order than "60 of either" off one mayo run, and the player has to decide
+whether to split the run, stagger the contracts, or buy a third emulsifier. That is a
+<i>scheduling</i> problem, and the game has not posed one yet.</p>
+
+<h3>The money</h3>
+<p>38 per box, 33 of it mayonnaise. Contracts pay 104–118. <b>Gate:</b> 60 lifetime deliveries, releasing <code>garlic</code>, <code>salt</code> and the
+aioli contracts.</p>
+
+<h2>05 · Hot Sauce <span>— NEW MACHINE + NEW AXIS</span></h2>
+
+<p>IMG:card_05_hot_sauce</p>
+
+<p><b>The point of it.</b> The acid tier. A 3 000-tick ferment and — for the first time — a factory
+that has to grow <i>sideways</i>.</p>
+<p><b>There is one hot sauce in this game and it is fermented.</b> Hot sauce is a category in the
+real world with two production routes — quick, where vinegar supplies the acid, and fermented, where
+lactic acid bacteria make it over weeks — and the game only wants one of them. The ferment is the
+route worth simulating, because a process that takes 3 000 ticks is a design problem and a process
+that takes 120 is a formality. So the sauce is called <b>Hot Sauce</b>, its fluid id is
+<code>hot_sauce</code>, and the fermenter in the middle of its line is simply how it is made. Every
+later reference — chilli mayo's second tap, house reserve's third draw — is this one fluid.</p>
+<p>A second, unfermented "quick hot sauce" is a real option and is deliberately <i>not</i> taken: a
+cheap alternative standing next to the fermenter would undercut the one thing the fermenter exists
+to be, which is slow. It belongs on the §5 list later, if ever, once players have built a fermenter
+bank and have opinions about it.</p>
+
+<h3>In a kitchen</h3>
+<p>500 g red chillies, stems off, blended coarse with 15 g salt — 3 % by weight, which is the whole
+recipe's only real number. Pack into a jar under an airlock, leave at 20 °C for one to three weeks
+until it stops bubbling and smells sour rather than sweet. Blend with 100 ml vinegar, strain, and
+pasteurise to 80 °C so it stops changing in the bottle. The ferment is what separates a hot sauce
+from hot vinegar, and it is slow: this is genuinely the longest process in this document.</p>
+
+<h3>In the game</h3>
+<pre>Recipe(id: "chilli_mash", inputs: [("chilli", 3), ("salt", 1)],
+       outputs: [("chilli_mash", 1)], machine: "crusher", time_ticks: 80),
+Recipe(id: "fermented_mash", inputs: [("chilli_mash", 1)],
+       fluid_outputs: [("fermented_mash", 1)],
+       machine: "fermenter", time_ticks: 3000),
+Recipe(id: "hot_sauce", fluid_inputs: [("fermented_mash", 1), ("vinegar", 2)],
+       fluid_outputs: [("hot_sauce", 1)],
+       machine: "cooking_vat", time_ticks: 120),
+Recipe(id: "bottled_hot_sauce", fluid_inputs: [("hot_sauce", 1)],
+       outputs: [("bottled_hot_sauce", 1)], machine: "bottler", time_ticks: 60),
+Recipe(id: "boxed_hot_sauce", inputs: [("bottled_hot_sauce", 1)],
+       outputs: [("boxed_hot_sauce", 1)], machine: "packer", time_ticks: 40),</pre>
+
+<h3>The line</h3>
+<p>Hoppers of chilli and salt → <b>crusher</b> (80t) → belt → <b>fermenter</b> (3 000t,
+2×2) → <b>lined pipe</b> → <b>cooking vat</b> (120t, pasteurise, drinking vinegar) → pipe →
+<b>bottler</b> → <b>packer</b> → <b>dock</b>. Only the first run is corrosive. The raw mash is
+the live, acid-making thing and pasteurising in the vat is exactly what stops it — so finished
+hot sauce travels in ordinary pipe, and so does every later tap off it (06, 07). That matters:
+if the finished fluid were corrosive too, chilli mayo would stop being free.</p>
+
+<h3>Machines</h3>
+<p><b>Fermenter</b> (new, 2×2, manufacturing 2, 260) and <b>lined pipe</b> (new, 1×1, no
+crew, 24 — three times plain pipe). Full specs in §3.</p>
+
+<h3>Why it is fun</h3>
+<p>One fermenter makes a unit every hundred seconds. Nothing you build downstream fixes that — a
+faster vat, a second bottler, more staff, none of it matters. The only answer is a <b>bank</b> of
+fermenters, so for the first time the factory grows sideways instead of longer, and a corner of the
+floor becomes a farm of slow identical machines quietly bubbling. That is a Factorio feeling the game
+does not have yet, and it is worth a machine kind to get.</p>
+<p>The corrosion rule is the second half: it means you cannot simply reuse the pipe you have lying
+around. A player who runs plain pipe on fermented mash will watch it fault mid-shift, and the fix is
+obvious, cheap and memorable — which is what a good punishment looks like.</p>
+
+<h3>The money</h3>
+<p>11 per box (chilli 2×3, salt 1, vinegar 2×2) — the cheapest bill in the game — and contracts pay
+66–74. It is deliberately the best margin per box and the worst margin per <i>minute</i>: you can
+only make so much of it, so you are buying patience, not profit. <b>Gate:</b> 75 lifetime
+deliveries, releasing <code>chilli</code> and the hot-sauce contracts. As with mayonnaise, the
+fermenter and the lined pipe are on sale from the start — what gates the tier is the chilli, not the
+kit.</p>

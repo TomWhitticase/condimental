@@ -1,0 +1,325 @@
+<h2>06 · Chilli Mayo <span>— DATA</span></h2>
+
+<p>IMG:card_06_chilli_mayo</p>
+
+<p><b>The point of it.</b> The cross-product. Two tiers you have already paid for, meeting at one
+mixer for the price of a data edit. Nothing is bought and nothing is built.</p>
+
+<h3>In a kitchen</h3>
+<p>Four parts mayonnaise to one part hot sauce, folded in with a spatula rather than whisked —
+whisking shears the emulsion and you get a thin pink liquid instead of a sauce. A squeeze of lime and
+a pinch of smoked paprika if you want the chipotle version.</p>
+
+<h3>In the game</h3>
+<pre>Recipe(id: "chilli_mayo", fluid_inputs: [("mayonnaise", 2), ("hot_sauce", 1)],
+       fluid_outputs: [("chilli_mayo", 1)],
+       machine: "mixer", time_ticks: 80),
+Recipe(id: "bottled_chilli_mayo", fluid_inputs: [("chilli_mayo", 1)],
+       outputs: [("bottled_chilli_mayo", 1)], machine: "bottler", time_ticks: 60),
+Recipe(id: "boxed_chilli_mayo", inputs: [("bottled_chilli_mayo", 1)],
+       outputs: [("boxed_chilli_mayo", 1)], machine: "packer", time_ticks: 40),</pre>
+
+<h3>The line</h3>
+<p>Two taps — one off the mayonnaise run, one off the hot sauce run — into a <b>mixer</b> (80t),
+then <b>bottler</b>, <b>packer</b>, <b>dock</b>. Three machines and a dock, all of kinds you own, and the two taps are the entire build.</p>
+
+<h3>Machines</h3>
+<p>None. Not one.</p>
+
+<h3>Why it is fun</h3>
+<p>Because unlocking hot sauce quietly unlocked this too, and the player finds out by reading the
+contract board. It is the whole argument for a sauce <i>tree</i> rather than a sauce <i>list</i>:
+late capital pays off across every branch at once, and the most expensive thing in the book (the
+fermenter bank) suddenly has a second customer. It also raises the stakes on the mayo run for a
+third time — mayonnaise, aioli and chilli mayo all drink from it — which is the point at which a
+player stops extending the factory and starts <i>re-planning</i> it.</p>
+
+<h3>The money</h3>
+<p>77 per box, all of it sauce you made. Contracts pay 210–235 — the biggest line in the book until tartare turns up at 08. <b>Gate:</b> 95 lifetime deliveries, which is comfortably past both
+parents; there is no gate on the recipe itself, because in practice the <i>tree</i> is the gate —
+without a mayonnaise run and a hot sauce run there is nothing to tap.</p>
+
+<h2>07 · House Reserve Steak Sauce <span>— DATA</span></h2>
+
+<p>IMG:card_07_house_reserve</p>
+
+<p><b>The point of it.</b> Tier 7, and not one new machine. It is gated by your <i>floor plan</i>:
+three pipe runs and a hopper into one 2×2 vat, without crossing.</p>
+
+<h3>In a kitchen</h3>
+<p>Equal parts tomato-based BBQ sauce and wholegrain mustard, a quarter part hot sauce,
+two tablespoons of molasses, a splash of vinegar. Reduce twenty minutes until it coats a spoon
+(<i>nappe</i> — it should hold a line drawn through it on the back of the spoon). Bottle hot and wax
+the cap. It is a steakhouse table sauce: sweet, sour, sharp and hot at once, which is exactly what
+makes it the top of the tree — it needs one sauce from every branch.</p>
+
+<h3>In the game</h3>
+<pre>Recipe(id: "house_reserve", inputs: [("molasses", 1)],
+       fluid_inputs: [("bbq", 1), ("mustard", 1), ("hot_sauce", 1)],
+       fluid_outputs: [("house_reserve", 1)],
+       machine: "cooking_vat", time_ticks: 400),
+Recipe(id: "bottled_house_reserve", fluid_inputs: [("house_reserve", 1)],
+       outputs: [("bottled_house_reserve", 1)], machine: "bottler", time_ticks: 60),
+Recipe(id: "boxed_house_reserve", inputs: [("bottled_house_reserve", 1)],
+       outputs: [("boxed_house_reserve", 1)], machine: "packer", time_ticks: 40),</pre>
+
+<h3>The line</h3>
+<p>Three taps — BBQ, mustard, hot sauce — plus a hopper of molasses, all into one <b>cooking vat</b>
+(400t). Pipe out to a <b>bottler</b> (the wax dip is cosmetic), belt, <b>packer</b>, <b>dock</b>.</p>
+<p><b>Three fluid draws at one machine has never shipped.</b> BBQ's cook draws two, and the fluid
+scope was widened to two for it; the registry holds a list and does not cap it, but the code path has
+never been exercised at three, so this needs a test before it needs anything else.</p>
+
+<h3>Machines</h3>
+<p>None new. A fifth cooking-vat recipe, a ninth bottler recipe, a ninth packer recipe.</p>
+
+<h3>Why it is fun</h3>
+<p>A 2×2 vat has eight perimeter tiles and the outlet face eats two of them. Three pipe runs and a
+hopper have to reach the remaining six without crossing each other or the three lines already
+running through that part of your factory. That is the whole puzzle, and it is a <i>spatial</i> one —
+the payoff tier of the game is a layout tier, and it costs nothing to build but a rethink. Players
+will tear down a quarter of the floor to make room for it, and that teardown is the memorable bit.</p>
+
+<h3>The money</h3>
+<p>56 per box — three sauces you chose not to ship, plus molasses. Contracts pay 190–210. Note that it pays less per box than chilli mayo while eating three finished sauces instead of
+two: the house reserve is a <i>prestige</i> sauce, and what it really
+costs you is three finished runs diverted away from orders you could have filled. <b>Gate:</b> 150 lifetime
+deliveries — past every branch it draws from. It releases no ingredient at all: the only thing this
+tier unlocks is contracts, because everything it consumes you already make.</p>
+
+<h2>P · Pickles <span>— DATA, AND NOT A SAUCE</span></h2>
+
+<p>IMG:card_08a_pickles</p>
+
+<p><b>The point of it.</b> The last two sauces in this book are both pickle sauces, so the pickle
+line is drawn once, here, and both of them tap it. It is the first thing the factory makes that
+<i>nobody buys</i>: there is no bottled pickle, no boxed pickle and no pickle contract. It exists to
+feed two mixers, and that is the entire point of it.</p>
+
+<h3>In a kitchen</h3>
+<p>Small ridged cucumbers, scrubbed, packed upright in a jar with 3&nbsp;% brine, a splash of
+vinegar and a head of dill. Left at room temperature they go cloudy in two days and sour in a week —
+that cloud is the lactic ferment, the same one the hot sauce mash runs, but a <i>quick</i> pickle is days where a chilli mash is weeks. Drain, top and tail, and dice to 3&nbsp;mm: tartare wants it fine
+enough to spread, not to crunch.</p>
+
+<h3>In the game</h3>
+<pre>Recipe(id: "pickles", inputs: [("cucumber", 3), ("salt", 1)],
+       fluid_inputs: [("vinegar", 1)],
+       outputs: [("pickle", 1)],
+       machine: "fermenter", time_ticks: 600),
+Recipe(id: "diced_pickle", inputs: [("pickle", 1)],
+       outputs: [("diced_pickle", 1)], machine: "crusher", time_ticks: 80),</pre>
+
+<h3>The line</h3>
+<p>Hoppers of cucumber and salt, and a pipe of vinegar, into a <b>fermenter</b> (600t — twenty
+seconds, a fifth of the hot sauce mash, because a quick brine pickle is not a months-long ferment and
+should not cost like one) → belt → <b>crusher</b> (80t, dicing rather than pulping) → belt. That belt
+is the output. It goes to a mixer, or to two mixers, and never to a bottler.</p>
+
+<h3>Machines</h3>
+<p>None new, and this is the nice part: the fermenter earns a <b>second</b> recipe and the crusher a
+<b>fifth</b>. If hot sauce has already been built, the bank of fermenters standing on the floor is
+suddenly dual-use, and the player's most expensive purchase in the book gets a second job without
+buying anything. Note that <code>pickles</code> and <code>fermented_mash</code> share no input id at
+all, so the fermenter needs nothing from §7 — it is disjoint under the <i>shipped</i> rule.</p>
+
+<h3>Why it is fun</h3>
+<p>A sub-assembly. Every factory game's moment of no return is the first line you build that has no
+customer outside the factory, and CONDIMENTAL does not have one yet — every belt today ends at a
+dock. The pickle line ends at a junction. It also makes a <i>ratio</i> problem out of nothing, and
+the numbers are pleasingly awkward: a fermenter yields one pickle per 600 ticks, a crusher dices one
+per 80, and a tartare mixer eats one per 100. So <b>six fermenters and one crusher feed one mixer</b>
+— the crusher has headroom to spare and the fermenter bank does not, which is the same lesson hot
+sauce teaches, arriving a second time in a form the player can now do arithmetic about.</p>
+
+<h3>The money</h3>
+<p>9 per unit of diced pickle in ingredients (cucumber 2×3, salt 1, vinegar 2×1), and one crate of
+cucumbers makes one pail. <b>No contract, ever.</b> The cost lands in the two sauces below.</p>
+
+<h2>08 · Tartare <span>— DATA</span></h2>
+
+<p>IMG:card_08_tartare</p>
+
+<p><b>The point of it.</b> Mayonnaise with things <i>in</i> it. Every sauce shipped or proposed so
+far is a flat colour; tartare is the first one with visible bits, which makes it the first bottle on
+the shelf you can identify at play zoom without reading a label.</p>
+
+<h3>In a kitchen</h3>
+<p>Two parts mayonnaise, one part finely diced gherkin, a heaped spoon of capers chopped just enough
+to bleed, a squeeze of lemon, parsley, and black pepper. Do not rinse the capers — the brine is the
+seasoning. Rest it thirty minutes: it is watery at first and thickens as the pickle gives up its
+liquid into the emulsion.</p>
+
+<h3>In the game</h3>
+<pre>Recipe(id: "tartare", inputs: [("diced_pickle", 1), ("capers", 1)],
+       fluid_inputs: [("mayonnaise", 2)],
+       fluid_outputs: [("tartare", 1)],
+       machine: "mixer", time_ticks: 100),
+Recipe(id: "bottled_tartare", fluid_inputs: [("tartare", 1)],
+       outputs: [("bottled_tartare", 1)], machine: "bottler", time_ticks: 60),
+Recipe(id: "boxed_tartare", inputs: [("bottled_tartare", 1)],
+       outputs: [("boxed_tartare", 1)], machine: "packer", time_ticks: 40),</pre>
+
+<h3>The line</h3>
+<p>A tap off the mayonnaise run, a belt of diced pickle from the crusher and a hopper of capers,
+all into a <b>mixer</b> (100t), then <b>bottler</b>, <b>packer</b>, <b>dock</b>. Mechanically
+this is <code>bbq_mix</code>'s shipped shape exactly: two solids and one fluid at a mixer. What is
+new is where a solid comes from — diced pickle arrives off a <i>line</i>, not out of a hopper the
+player tops up.</p>
+
+<h3>Machines</h3>
+<p>None new. A sixth mixer recipe, a tenth bottler recipe, a tenth packer recipe.</p>
+
+<h3>Why it is fun</h3>
+<p>It is the first sauce whose <i>art</i> is a mechanic you can see. The flecks in the bottle are the
+pickle you routed, and a player who has just spent five minutes on a sub-assembly gets a bottle that
+visibly contains it. It is also the first sauce that can starve because a line you built is too slow
+rather than because a hopper ran dry — every solid input in the game today comes from a raw you buy,
+so "my crusher cannot keep up" is a sentence CONDIMENTAL has never made a player say. Beyond that it
+puts a fourth straw in the mayonnaise run, which is the pressure the mayo tier exists to create.</p>
+
+<h3>The money</h3>
+<p>81 per box: 66 of mayonnaise, 9 of diced pickle, 6 of capers. Contracts pay 225–250. Capers at 6
+are the priciest raw in the book and they are only ever bought one at a time, which is deliberate —
+it is a small, steady drip of money leaving the factory rather than a bulk order, and it is the first
+ingredient a player will think about skipping. <b>Gate:</b> 170 lifetime deliveries, releasing
+<code>cucumber</code>, <code>capers</code> and the tartare contracts.</p>
+
+<h2>09 · Burger Sauce <span>— DATA</span></h2>
+
+<p>IMG:card_09_burger_sauce</p>
+
+<p><b>The point of it.</b> The sauce that eats the tutorial. Burger sauce is mayonnaise, ketchup and
+pickle — and ketchup is the thing the player has been making since the first minute of the game.
+This is the tier where the starter line stops being the boring one.</p>
+
+<h3>In a kitchen</h3>
+<p>Four parts mayonnaise, two parts ketchup, one part finely diced gherkin, a teaspoon of the pickle
+brine, a pinch of paprika and a pinch of onion powder. That is genuinely the whole recipe — every
+burger sauce on every menu is a variation on those three things, and the ratio is what is being
+argued about, not the ingredients.</p>
+
+<h3>In the game</h3>
+<pre>Recipe(id: "burger_sauce", inputs: [("diced_pickle", 1)],
+       fluid_inputs: [("mayonnaise", 2), ("ketchup", 1)],
+       fluid_outputs: [("burger_sauce", 1)],
+       machine: "mixer", time_ticks: 100),
+Recipe(id: "bottled_burger_sauce", fluid_inputs: [("burger_sauce", 1)],
+       outputs: [("bottled_burger_sauce", 1)], machine: "bottler", time_ticks: 60),
+Recipe(id: "boxed_burger_sauce", inputs: [("bottled_burger_sauce", 1)],
+       outputs: [("boxed_burger_sauce", 1)], machine: "packer", time_ticks: 40),</pre>
+
+<h3>The line</h3>
+<p>Two taps — mayonnaise and <b>ketchup</b> — plus a belt of diced pickle, into a <b>mixer</b>
+(100t), then <b>bottler</b>, <b>packer</b>, <b>dock</b>. Both halves of that are shipped: BBQ's cook already draws two fluids, and BBQ's mixer already
+takes a solid alongside a fluid. Two fluids <i>and</i> a solid at one machine first appears
+earlier in this book, at 03, in <code>mayo_base</code> — so by the time burger sauce lands the
+shape is exercised and, unlike house reserve's three draws (07), it needs nothing new at all.</p>
+
+<h3>Machines</h3>
+<p>None new. A seventh mixer recipe, an eleventh bottler recipe, an eleventh packer recipe.</p>
+
+<h3>Why it is fun</h3>
+<p>Because it reaches all the way back to tile one. Ketchup has been a finished product for the whole
+game; here it becomes an <i>ingredient</i>, and the player has to tap the oldest, most settled pipe
+on their floor — the one they laid before they knew what they were doing — and steal from it. Some
+players will find their original ketchup line cannot spare the throughput and will have to go back and
+widen the thing they built first. That is the best kind of late-game content: it makes you re-read
+your own early work.</p>
+<p>It is also the sauce that makes the tree <i>look</i> like a tree. Burger sauce and the house reserve are the only two nodes with three parents, and burger sauce
+is the one whose parents reach back to tile one — on the diagram the ketchup arrow runs the full
+width of the page to get to it.</p>
+
+<h3>The money</h3>
+<p>86 per box: 66 of mayonnaise, 11 of ketchup, 9 of diced pickle. Contracts pay 235–260, the best
+line in the book — and it should be, because it is the only sauce that competes with your own ketchup
+orders for supply. Every box of burger sauce is a box of ketchup you did not ship. <b>Gate:</b> 195 lifetime deliveries, releasing the burger-sauce contracts and nothing else: it
+introduces no raw of its own, and the cucumbers its pickles are made from arrived with
+tartare.</p>
+
+<h1>3 · Four things to build</h1>
+
+<p>IMG:plate_machines</p>
+
+<p>Two sauces out of nine need new equipment — and the other seven need none at all, which is the
+tree paying for itself. This is all of it — three entries in <code>data/machines.ron</code>, four in
+<code>data/shop.ron</code> (a pipe is priced there without being a machine kind, exactly as
+plain pipe is today), and four voxel generators. The
+models above are concept art in the game's palette; they are not shipped assets.</p>
+
+<h3>Emulsifier — 1×2, manufacturing 1, 180</h3>
+<p>Threads oil into yolk under a high-shear head. Sits between the mixer (100) and the cooking vat
+(200) in price, and takes the same crew as a mixer. Visually the dosing line is the tell: a brass
+line running down from a small tank into the vessel, dripping. It is the only machine in the game
+where you can <i>see</i> the slow step, which matters because 150 ticks with no visible reason feels
+broken and 150 ticks with a dripping line feels deliberate. <b>Cost to build: one data entry and one
+generator. No simulation work at all.</b></p>
+
+<h3>Chiller — 1×2, manufacturing 1, 150</h3>
+<p>Sets mayonnaise cold, and — the important part — while stock sits in a chiller's buffer, the
+spoil clock <b>stops</b>. It is the only white machine on the floor, with a frost window on the seen
+face, so "this part of my factory is cold" reads from the camera without a single UI element.
+<b>Cost to build: one data entry, one generator, and the perishable axis (§6).</b></p>
+
+<h3>Fermenter — 2×2, manufacturing 2, 260</h3>
+<p>3 000 ticks, five times the longest process currently in the game (BBQ's cook, at 600). A 2×2
+footprint and a two-person crew, so a bank of four is a real investment in floor and in payroll.
+Airlock bubbles on the lid are the motion frames — a machine that takes a hundred seconds needs to
+visibly be doing something the whole time — and a hazard band around the base says acid-rated, which
+is the visual link to lined pipe. It is the one <i>new</i> machine whose two recipes come from unrelated tiers — chilli mash for
+05, cucumbers for the pickle line — so a bank bought for hot sauce is already paid for when
+tartare arrives. <b>Cost to build: one data entry and one generator.
+No simulation work.</b></p>
+
+<h3>Lined pipe — 1×1, no crew, 24</h3>
+<p>Three times the price of plain pipe (8) and identical in every way except that a corrosive fluid
+does not eat it. Visually: the same pipe silhouette with an acid-yellow stripe, so a corrosive run
+is legible as a run rather than as a tooltip. <b>Cost to build: one data entry, one generator, and
+the corrosion axis (§6).</b></p>
+
+<h1>4 · Ten new raws</h1>
+
+<p>IMG:plate_raws</p>
+
+<p>Everything the nine sauces buy that the factory cannot make for itself. Prices sit where the
+shipped ones do (tomato 1, sugar 3, vinegar 2, liquid smoke 3, molasses 4, spice mix 5): a box of
+sauce costs about a third of what a contract pays for it.</p>
+
+<table>
+<tr><th>Id</th><th>Price</th><th>Form</th><th>Feeds</th><th>Note</th></tr>
+<tr><td>mustard_seed</td><td>2</td><td>solid, hopper</td><td>01</td><td>kraft sack, like sugar</td></tr>
+<tr><td>turmeric</td><td>4</td><td>solid, hopper</td><td>01</td><td>pressed tin — bought ground</td></tr>
+<tr><td>honey</td><td>4</td><td>fluid, tank</td><td>02</td><td>brass drum</td></tr>
+<tr><td>egg</td><td>3</td><td>solid, hopper</td><td>03</td><td><b>perishable</b> — the only one</td></tr>
+<tr><td>oil</td><td>3</td><td>fluid, tank</td><td>03</td><td>steel drum with a carry handle</td></tr>
+<tr><td>garlic</td><td>2</td><td>solid, hopper</td><td>04</td><td>whole bulb</td></tr>
+<tr><td>chilli</td><td>2</td><td>solid, hopper</td><td>05</td><td>shallow crate, like tomato</td></tr>
+<tr><td>salt</td><td>1</td><td>solid, hopper</td><td>04, 05, P</td><td>cheapest thing in the game</td></tr>
+<tr><td>cucumber</td><td>2</td><td>solid, hopper</td><td>P</td><td>shallow crate, like tomato</td></tr>
+<tr><td>capers</td><td>6</td><td>solid, hopper</td><td>08</td><td>priciest raw in the book</td></tr>
+</table>
+
+<p>Salt is the one to look at twice: it is shared between two recipes on the <i>same machine kind</i>
+(the crusher), which is precisely what §7 is about. The mixer is worse — by sauce 09 it hosts seven recipes and three of them drink mayonnaise. Eight of the ten are hopper solids, which is deliberate:
+tanks are expensive in floor space, and a tier whose new raw is a fluid should be a tier that earns
+it.</p>
+
+<h1>5 · Six more for free</h1>
+
+<p>IMG:plate_variants</p>
+
+<p>Once the tree exists, a new sellable sauce is one <i>interesting</i> recipe entry and a
+colour — plus the bottler and packer pair every sauce in this book needs, which the table does
+not count because it is never the decision. These six are not
+proposals so much as evidence — they are what the tree is <i>for</i>, and they are the pool to draw
+from when a milestone needs content and has no budget.</p>
+
+<table>
+<tr><th>Sauce</th><th>How</th><th>Costs</th></tr>
+<tr><td>Hot honey</td><td>honey mustard + a hot sauce draw</td><td>1 recipe</td></tr>
+<tr><td>Smoky BBQ</td><td>BBQ + a second liquid-smoke draw</td><td>1 recipe</td></tr>
+<tr><td>Chipotle mayo</td><td>mayonnaise + smoked chilli mash</td><td>2 recipes</td></tr>
+<tr><td>Honey BBQ</td><td>BBQ + a honey draw</td><td>1 recipe</td></tr>
+<tr><td>Sriracha</td><td>hot sauce + sugar + garlic</td><td>1 recipe</td></tr>
+<tr><td>Steakhouse</td><td>house reserve + a molasses finish</td><td>1 recipe</td></tr>
+</table>

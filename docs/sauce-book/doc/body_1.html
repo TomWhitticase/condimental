@@ -1,0 +1,147 @@
+<h1>The Sauce Book</h1>
+<p><i>Nine sauces after BBQ — cooking recipes, production lines, machines, art. CONDIMENTAL, pre-alpha, 25 September 2026.</i></p>
+
+<p>IMG:plate_cover</p>
+
+<p>BBQ proved the shape: a second sauce does not need a second factory, it needs a
+<b>tap</b> — a pipe off a fluid the factory already makes, taken before the bottler. Everything
+below is built on that move. Seven of the nine sauces here are a <b>data-file edit</b>: recipes,
+ingredients, shop prices, contracts, and one voxel generator each. Two buy a whole new axis of
+play, and those two are where the interesting design risk lives.</p>
+
+<h3>How to read this</h3>
+<ul>
+<li><b>DATA</b> — new entries in <code>data/*.ron</code> plus voxel generators. No Rust, no GDScript.</li>
+<li><b>NEW MACHINE</b> — the above, plus a machine kind and its model. Still no sim work.</li>
+<li><b>NEW AXIS</b> — the above, plus a rule the simulation does not have yet. Two sauces do this; both are called out with what exactly it costs.</li>
+</ul>
+<p>Every kitchen recipe below is a real one, scaled and simplified until it maps onto a stage of the
+line. Every game recipe is written in the shape <code>data/recipes.ron</code> already uses, so it can
+be pasted in and argued with. Prices follow the shipped rule — a box's ingredients cost about a
+third of what a contract pays for it. Machine art is <b>concept art</b>: drawn in the game's real
+palette (<code>assets/voxels/palette.ron</code>), rendered with a sketch tool, not the shipped
+vengi pipeline. Item art for shipped things is the shipped icon.</p>
+
+<h1>1 · The sauce tree</h1>
+
+<p>IMG:plate_tree</p>
+
+<p>Every arrow is a sauce used as an ingredient in another sauce. This is the argument for the whole
+document: a <b>tree</b> rather than a list means late capital pays off across every branch at once.
+Buying the emulsifier does not unlock mayonnaise, it unlocks mayonnaise <i>and</i> aioli <i>and</i> chilli mayo <i>and</i> tartare <i>and</i>
+burger sauce — five sellable sauces off one purchase. Three of the
+nine sauces below need no new machine and no new raw <i>at all</i> once their parents exist — 06, 07 and 09 are three recipe entries apiece (a blend, a bottle and a box) — and four of the remaining six need a raw and nothing more.</p>
+
+<p>Four things on the diagram have no sauce above them — ketchup, mustard, hot sauce and the
+pickle branch each start at a raw you buy. Two of those are hubs, and they are deliberately
+different. <b>Ketchup</b> is the tutorial root, and by sauce 09 it is a supplier as much as a
+product: BBQ taps it, the house reserve takes it at one remove, and burger sauce taps it again.
+<b>Mustard</b> is the new root, and it is the busy one: it feeds honey mustard, it is an
+input to mayonnaise (mustard is the emulsifier in real mayonnaise, not a flavouring), and it lands
+in the house reserve. Put mustard early and everything downstream gets cheaper to reach.</p>
+
+<p>One node on that tree is not a sauce. <b>Pickles</b> (the blue node) are <i>feedstock</i> — a thing
+the factory makes and never sells, the first of its kind in the game. Two sauces eat them and nobody
+ships them, which makes the pickle line the first bit of your factory that exists purely to serve
+another bit of your factory. That is a Factorio feeling the game does not have yet.</p>
+
+<h1>2 · The nine sauces</h1>
+
+<h2>01 · Wholegrain Mustard <span>— DATA</span></h2>
+
+<p>IMG:card_01_mustard</p>
+
+<p><b>The point of it.</b> The first sauce that is not ketchup-shaped, and the one that teaches
+fluid contention without a single new mechanic. It reuses every machine kind in the game and still
+forces a rebuild, because it drinks <b>four vinegar a batch</b> where ketchup drinks two. One tank
+cannot feed both lines. The splitter you have never needed becomes the answer.</p>
+
+<h3>In a kitchen</h3>
+<p>100 g yellow mustard seed and 40 g brown, soaked 24 hours in 150 ml cider vinegar and 50 ml water.
+Add 1 tsp ground turmeric, 1 tsp salt, 1 tbsp honey. Pulse-grind half the seed and leave the rest
+whole — that split is what makes it <i>wholegrain</i>. Warm gently to 60 °C for twenty minutes to knock
+back the raw bite, then rest two days before jarring; mustard is unpleasantly harsh on day one and
+rounds out on day three. <i>(The rest is the one thing the game will not model — see §8.)</i></p>
+
+<h3>In the game</h3>
+<pre>Recipe(id: "mustard_grits", inputs: [("mustard_seed", 3)],
+       outputs: [("mustard_grits", 1)], machine: "crusher", time_ticks: 70),
+Recipe(id: "mustard_mix", inputs: [("mustard_grits", 1), ("turmeric", 1)],
+       fluid_inputs: [("vinegar", 4)], fluid_outputs: [("mustard_mix", 1)],
+       machine: "mixer", time_ticks: 90),
+Recipe(id: "mustard", fluid_inputs: [("mustard_mix", 1)],
+       fluid_outputs: [("mustard", 1)], machine: "cooking_vat", time_ticks: 180),
+Recipe(id: "bottled_mustard", fluid_inputs: [("mustard", 1)],
+       outputs: [("bottled_mustard", 1)], machine: "bottler", time_ticks: 60),
+Recipe(id: "boxed_mustard", inputs: [("bottled_mustard", 1)],
+       outputs: [("boxed_mustard", 1)], machine: "packer", time_ticks: 40),</pre>
+
+<h3>The line</h3>
+<p>Hopper of mustard seed → <b>crusher</b> (70t, mills the seed to grits) → belt → <b>mixer</b>
+(90t, grits plus a hopper of turmeric, drinking vinegar from a tank) → pipe → <b>cooking vat</b>
+(180t, a warm steep, not a reduction — shorter than ketchup's 240) → pipe → <b>bottler</b> → belt →
+<b>packer</b> → <b>dock</b>. Structurally it is the ketchup chain with different ids, which is the
+point: a player who can build ketchup can build this on muscle memory, and then discovers the
+vinegar bill.</p>
+
+<h3>Machines</h3>
+<p>None new. A second crusher recipe, and a third on the mixer, the cooking vat, the bottler and
+the packer — every kind already on your floor.
+<b>This is where the recipe-ambiguity problem bites</b> (§7): <code>ketchup_mix</code> and
+<code>mustard_mix</code> both run on the mixer and both consume <code>vinegar</code>, which the
+shipped invariant test forbids. That decision has to be made before this sauce can ship.</p>
+
+<h3>Why it is fun</h3>
+<p>Because the trap is legible and the fix is satisfying. You build the mustard line, both lines run
+for ninety seconds, and then <i>both</i> starve — not one. The vinegar tank is the shared thing and
+nothing on screen said so. The fix is a second tank, or a splitter with a real decision about which
+side gets priority. It is the first time the factory pushes back on a <i>resource</i> rather than on
+geometry, and it costs no new code to teach.</p>
+
+<h3>The money</h3>
+<p>18 per box in ingredients (seed 2×3, turmeric 4, vinegar 2×4). Ketchup is 11, BBQ is 23.
+Contracts pay 48–56 — deliberately thin, because the sauce's job is to make you fix your plumbing,
+not to make you rich. <b>Gate:</b> 25 lifetime deliveries, releasing <code>mustard_seed</code>, <code>turmeric</code>
+and the mustard contracts.</p>
+
+<h2>02 · Honey Mustard <span>— DATA</span></h2>
+
+<p>IMG:card_02_honey_mustard</p>
+
+<p><b>The point of it.</b> Three lines in <code>recipes.ron</code> and one new raw — and the first sauce in the game that
+is <i>never cooked</i>. It taps the mustard run before the
+bottler and goes straight to a mixer and out. A derived sauce that skips the slowest machine is free
+throughput, and that is a lesson worth teaching exactly once.</p>
+
+<h3>In a kitchen</h3>
+<p>Three parts finished wholegrain mustard, two parts honey, one part cider vinegar, a pinch of salt.
+Whisk cold. Do not heat it: honey's aromatics are volatile and heat drives them off, leaving sugar —
+which is why this is a blend and not a cook, in the kitchen and in the game.</p>
+
+<h3>In the game</h3>
+<pre>Recipe(id: "honey_mustard", fluid_inputs: [("mustard", 1), ("honey", 1)],
+       fluid_outputs: [("honey_mustard", 1)], machine: "mixer", time_ticks: 110),
+Recipe(id: "bottled_honey_mustard", fluid_inputs: [("honey_mustard", 1)],
+       outputs: [("bottled_honey_mustard", 1)], machine: "bottler", time_ticks: 60),
+Recipe(id: "boxed_honey_mustard", inputs: [("bottled_honey_mustard", 1)],
+       outputs: [("boxed_honey_mustard", 1)], machine: "packer", time_ticks: 40),</pre>
+
+<h3>The line</h3>
+<p>A pipe off the mustard vat's run — the same tap BBQ takes off ketchup — into a <b>mixer</b> (110t,
+cold blend) fed by a tank of honey. Pipe to a <b>bottler</b>, belt to a <b>packer</b>, belt to the
+<b>dock</b>. Three machines and a dock. It is the shortest sellable line in the game — only chilli mayo (06)
+ever matches it — and it should stay that way.</p>
+
+<h3>Machines</h3>
+<p>None new. One more mixer recipe, one more bottler recipe, one more packer recipe.</p>
+
+<h3>Why it is fun</h3>
+<p>It is the reward beat. Mustard just cost you a rebuild; honey mustard is three machines bolted to
+the side of it that sells for more per box than mustard does. It also quietly teaches the tap as a
+<i>tactic</i> rather than a curiosity: you now have two sauces competing for one mustard run, and the
+question "do I bottle it or blend it?" has a board-driven answer that changes every few minutes.</p>
+
+<h3>The money</h3>
+<p>22 per box, of which 18 is mustard you made yourself — the first sauce whose bill is mostly your
+own labour. Contracts pay 58–64. <b>Gate:</b> 35 lifetime deliveries, releasing <code>honey</code> and the honey-mustard
+contracts.</p>

@@ -1,0 +1,176 @@
+<h1>6 · What this actually costs in code</h1>
+
+<p>Honest accounting. Seven of the nine sauces are data and art: recipes, ingredients, shop entries,
+contracts, unlocks, and one voxel generator per new thing. <b>Two rules do not exist yet</b>, and each is the price of admission for exactly one tier — and
+so for everything the tree hangs off it — which makes each a genuine go/no-go decision rather
+than a detail.</p>
+
+<h3>The perishable axis — buys mayonnaise (and everything downstream of it)</h3>
+<p><b>The rule.</b> An ingredient may carry a shelf life in ticks. A stack of it sitting in a buffer
+— a hopper, a belt, a machine's input slot — ages; when its clock runs out it is destroyed and the
+loss is announced. A chiller's buffer does not run the clock.</p>
+<p><b>What it touches.</b> One optional field in <code>data/ingredients.ron</code>
+(<code>shelf_life_ticks</code>, absent meaning imperishable, so every existing entry is unchanged).
+A per-stack age in whatever holds a stack, which is the part to be careful about: ages must be
+fixed-point or integer ticks, they must be saved, and the save format changes. An event so the HUD
+can say what rotted and where, because silent destruction is indistinguishable from a bug.</p>
+<p><b>What it is worth.</b> It is the only rule in this document that changes how the whole factory
+is <i>laid out</i> rather than what it contains. Everything else here adds nodes to a graph; this one
+adds a cost to distance. That is a big lever for one field and one clock, and it is why mayonnaise is
+the tier worth arguing about.</p>
+<p><b>The cheap version, if the answer is no.</b> Make eggs imperishable and let mayonnaise be a
+straightforward two-new-machine tier. It loses the floor-plan lesson entirely and the chiller becomes
+decorative, but the sauce, the art and the economy all still work. Do not ship the chiller without
+the clock — a machine whose only job is to stop a clock that does not exist is a lie on the floor.</p>
+
+<h3>The corrosion axis — buys hot sauce</h3>
+<p><b>The rule.</b> A fluid may be corrosive. A plain pipe carrying a corrosive fluid accumulates
+wear and eventually faults; lined pipe never does. Wear is visible on the pipe before it faults —
+this must not be a surprise.</p>
+<p><b>What it touches.</b> One optional field on a fluid, a per-pipe wear counter (saved), a fault
+state pipes do not currently have, and a tint or overlay on a worn pipe. It reuses whatever the andon
+stack-light work already gives machines for saying "something is wrong here".</p>
+<p><b>What it is worth.</b> Less than the perishable axis, honestly. Its real job is making the
+fermenter bank feel like <i>specialist</i> equipment rather than just another machine — you are
+building an acid corner of the factory, and it looks like one. That is a mood, not a mechanic.</p>
+<p><b>The cheap version, if the answer is no.</b> Drop corrosion, keep lined pipe as a pure
+<i>requirement</i>: a corrosive fluid simply cannot enter a plain pipe, refused at placement time
+the way an invalid connection already is. No wear, no clock, no save change — and it still forces
+the player to buy and route special pipe. This is the recommended fallback and it is close to free.</p>
+
+<h3>Everything else</h3>
+<table>
+<tr><th>Thing</th><th>Where it lives</th></tr>
+<tr><td>9 sauces + 1 feedstock, 35 recipes</td><td><code>data/recipes.ron</code></td></tr>
+<tr><td>10 raw ingredients</td><td><code>data/ingredients.ron</code></td></tr>
+<tr><td>3 machine kinds and 1 pipe kind, + shop prices</td><td><code>data/machines.ron</code>, <code>data/shop.ron</code></td></tr>
+<tr><td>9 unlock gates</td><td><code>data/unlocks.ron</code></td></tr>
+<tr><td>~25 contracts</td><td><code>data/contracts.ron</code></td></tr>
+<tr><td>~35 voxel models</td><td><code>assets/voxels/</code> generators</td></tr>
+<tr><td>~20 palette colours</td><td><code>assets/voxels/palette.ron</code></td></tr>
+<tr><td>3 fluid draws at one machine</td><td>no cap in the registry, but never exercised — needs a test</td></tr>
+</table>
+
+<h3>One thing the gates cannot say</h3>
+<p>Every <b>Gate</b> line in this document is written as a lifetime-delivery count, because that is
+the only trigger <code>data/unlocks.ron</code> has, and an <code>Unlock</code> names exactly two
+lists: <code>ingredients</code> and <code>contracts</code>. There is <b>no field that holds a machine
+back</b>. So the emulsifier, the chiller and the fermenter are all on sale from a new game, and what
+actually gates those tiers is that their raws cannot be bought and nobody is asking for the sauce —
+the same mechanism BBQ already ships with.</p>
+<p>That is fine, and probably correct: a machine you can buy and cannot use is a worse lesson than a
+machine that appears when there is something to do with it. But if the shop list should grow as the
+game does, that is a third list on <code>Unlock</code>, a filter in the shop, and a
+<code>Buy</code> command that refuses a locked kind — small, but sim work, and it is not costed
+anywhere above.</p>
+
+<h1>7 · Decide this first</h1>
+
+<p>There is one shipped invariant that every sauce in this document runs into, and it has to be
+settled before any of them can land. From <code>sim_core/src/sim/recipe.rs</code>:</p>
+
+<pre>Recipes sharing a machine kind must take disjoint inputs, so that
+what a machine is plumbed to *is* which recipe it runs and file
+order never decides anything.</pre>
+
+<p>It is a good rule and it is load-bearing: it is the reason a machine needs no recipe dropdown.
+The proposals above break it in four places:</p>
+<ul>
+<li><b>mixer:</b> <code>ketchup_mix</code> and <code>mustard_mix</code> both consume
+<code>vinegar</code>.</li>
+<li><b>crusher:</b> <code>garlic_paste</code> and <code>chilli_mash</code> both consume
+<code>salt</code>.</li>
+<li><b>mixer, again:</b> <code>chilli_mayo</code>, <code>tartare</code> and
+<code>burger_sauce</code> all consume <code>mayonnaise</code>, and the last two also share
+<code>diced_pickle</code>.</li> <li><b>mixer, a third time:</b> <code>bbq_mix</code> and
+<code>burger_sauce</code> both consume <code>ketchup</code> — one shipped recipe and one
+proposed one, which is the clearest evidence that this is structural and not a slip in the
+proposals.</li> </ul>
+<p>The first two are shared <i>commodities</i> — the kind of ingredient that ought to be shared. The last two are worse and more interesting: by sauce 09 the mixer hosts seven recipes drawn
+from an overlapping pool of inputs, most of them things the factory makes itself, which is what a sauce <i>tree</i>
+inevitably produces. This will happen again with
+sugar and with oil. There are three ways out.</p>
+
+<h3>A — Dodge it in data</h3>
+<p>Give each sauce its own raw: <code>cider_vinegar</code> for mustard, salt folded into the
+fermenter recipe instead of the crusher. Costs no code at all. Costs the player a second vinegar
+tank for no reason they can see, and multiplies ingredient ids forever — by sauce twelve there are
+four vinegars. <b>Not recommended</b>, but it is the escape hatch if the release is close.</p>
+
+<h3>B — Relax the invariant (recommended)</h3>
+<p>Replace "disjoint inputs" with: <i>of any two recipes on one machine kind, each must require at
+least one input id the other does not</i> — neither's input set may be a subset of the other's. A
+machine then runs the one recipe all of whose inputs it is actually plumbed to. All three violations
+above resolve cleanly: a mixer fed tomato paste, sugar and vinegar can only be making ketchup mix; a
+crusher fed garlic and salt can only be making garlic paste; a mixer fed mayonnaise, ketchup and
+diced pickle can only be making burger sauce.</p>
+<p><b>Ambiguity is not impossible under this rule, and pretending otherwise is the trap.</b> The
+subset rule stops one recipe from swallowing another, but it does nothing about a machine plumbed to
+the <i>union</i> of two — and the union satisfies both. Tartare needs mayonnaise, diced pickle and
+capers; burger sauce needs mayonnaise, ketchup and diced pickle; neither is a subset of the other,
+and a mixer reached by all four of those inputs qualifies for both. That is not a hypothetical, it is
+sauces 08 and 09 sitting next to each other.</p>
+<p>So the rule needs a stated answer for it, and "whichever is first in the file" is exactly the
+answer the shipped invariant exists to forbid. The answer should be: <b>a machine that qualifies for
+two recipes runs neither.</b> It stops, it lights its andon amber, and its panel says which two it
+is torn between and asks the player to pick — the recipe dropdown of option C, but appearing only in
+the one case where the factory genuinely has not said what it wants, and disappearing again when a
+pipe is moved. Placement stays the language; the dropdown becomes the error message.</p>
+<p>The property the original test protects — file order never decides anything — survives intact,
+which is the part that actually matters.</p>
+<p><b>What it costs:</b> rewrite the invariant test to the new rule, change recipe selection to
+"the unique fully-satisfied recipe, or none", add the ambiguous state and its andon light, and —
+this is the part not to skip — <b>have the machine panel name the recipe it has picked</b>. The moment two recipes can live on one kind, a
+player needs to be told which one this machine is running, and that is a real UI surface, not a
+label.</p>
+
+<h3>C — Let the player pick</h3>
+<p>A recipe dropdown on the machine panel. This is what every other factory game does, and it is
+what the shipped invariant exists specifically to avoid — it turns placement from a spatial puzzle
+into a configuration chore. <b>Not recommended</b>, and mentioned only so the decision is made on
+purpose rather than by default.</p>
+
+<p><b>Recommendation: B, before sauce 01.</b> It is a small change made while there are two sauces,
+or a large one made while there are eleven.</p>
+
+<h1>8 · Deliberately not proposed</h1>
+
+<ul>
+<li><b>Ageing.</b> Real mustard rests three days and real hot sauce ferments for weeks, and neither
+is in the game as a <i>resting</i> mechanic. <code>aged_ketchup</code> and the ageing rack were
+removed with the note "ageing is not a mechanic this game wants", and nothing here reopens that. The
+fermenter is not an ageing rack: it is an ordinary machine with a long <code>time_ticks</code>, it
+occupies the floor while it runs, and its output goes straight down a pipe. House reserve is a
+prestige tier gated by <i>layout</i>, not by waiting.</li>
+<li><b>A spot market.</b> Every sauce here sells through contracts. Nothing in this document needs a
+place to dump surplus, and adding one would take the teeth out of the contention that most of these
+sauces are built to create.</li>
+<li><b>Spice heat as a stat.</b> Tempting, and wrong: a Scoville number would be a second economy
+running alongside the first, and none of the fun described above depends on it.</li>
+<li><b>Quality tiers.</b> Same argument. A sauce is a sauce; the interesting variable is whether you
+can make enough of it in time.</li>
+<li><b>Per-sauce staff roles.</b> The existing <code>manufacturing</code> crew covers all three new
+machines, and lined pipe takes no crew at all. A "fermenter tech" role would be a payroll line with no decision attached to it.</li>
+</ul>
+
+<h1>9 · A suggested order</h1>
+
+<table>
+<tr><th>Step</th><th>What lands</th><th>Cost</th></tr>
+<tr><td>0</td><td>Settle §7 — relax the invariant, name the picked recipe in the machine panel</td><td>small sim + UI</td></tr>
+<tr><td>1</td><td><b>01 Wholegrain Mustard</b> — a second root, and the vinegar squeeze</td><td>data + art</td></tr>
+<tr><td>2</td><td><b>02 Honey Mustard</b> — the reward beat, three machines</td><td>data + art</td></tr>
+<tr><td>3</td><td>Decide the perishable axis</td><td>go/no-go</td></tr>
+<tr><td>4</td><td><b>03 Mayonnaise</b> + emulsifier + chiller</td><td>data + art + 1 axis</td></tr>
+<tr><td>5</td><td><b>04 Garlic Aioli</b> — scheduling pressure, no new kit</td><td>data + art</td></tr>
+<tr><td>6</td><td><b>05 Hot Sauce</b> + fermenter + lined pipe</td><td>data + art + 1 axis</td></tr>
+<tr><td>7</td><td><b>06 Chilli Mayo</b> — free, and the payoff for step 6</td><td>data + art</td></tr>
+<tr><td>8</td><td><b>07 House Reserve</b> — the layout tier, plus a three-draw test</td><td>data + art</td></tr>
+<tr><td>9</td><td><b>Pickles</b> — the first sub-assembly, on fermenters you already own</td><td>data + art</td></tr>
+<tr><td>10</td><td><b>08 Tartare</b> — two solids and a fluid at one mixer</td><td>data + art</td></tr>
+<tr><td>11</td><td><b>09 Burger Sauce</b> — ketchup becomes an ingredient</td><td>data + art</td></tr>
+<tr><td>12</td><td>Pick from §5 whenever a milestone needs content and has no budget</td><td>one recipe each</td></tr>
+</table>
+
+<p>Steps 1 and 2 together are a playable increment that needs no new rules at all, and they are worth
+shipping on their own before anything in §6 is decided.</p>
