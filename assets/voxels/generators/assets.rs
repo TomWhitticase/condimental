@@ -2960,15 +2960,26 @@ pub fn pipe_fault(p: &Palette) -> VoxModel {
 /// tall, so the tallest thing the line carries reaches z = 24 — a foot and a
 /// half INTO a tube whose bore is z 12..19. Every solid on that belt would
 /// pass through the pipe.
+///
+/// A measured fact about today's item models, not a derivation: the bottles
+/// and the molasses jar tie for tallest. The vinegar jug stands at 25, but
+/// vinegar is stock and never rides a belt. The value is enforced by
+/// `a_crossing_clears_every_item_the_line_can_carry`, so a taller item fails
+/// `cargo test` and does not quietly graze the arch.
 const CROSSING_ITEM_TOP_Z: i32 = BELT_CLEAT_Z + 14;
-/// Where the belt's traffic runs in plan: an item model is 16 voxels wide on
-/// the tile's centre, so the lane's load occupies y 10..21 at any x. With
-/// [`CROSSING_ITEM_TOP_Z`] this is the box a crossing must leave empty.
+/// Where the belt's traffic runs in plan: the widest *fill* among today's
+/// item models, stood centred on the tile. That is not the model's size: an
+/// item's box is [`ITEM_VOXELS`] = 16 wide, which centred would be y 8..23,
+/// but nothing fills it to the edge. The widest are `item_box` and
+/// `item_box_bbq`, y 2..13 of their own box, which lands on 10..21. The same
+/// test as [`CROSSING_ITEM_TOP_Z`] holds this range to the real models. With
+/// that constant, this is the box a crossing must leave empty.
 const CROSSING_ITEM_Y: (i32, i32) = (10, 21);
-/// Height of the raised run, one full tile above the floor: the lowest voxel
-/// of a tube centred here is 27, which leaves two voxels of daylight over
-/// [`CROSSING_ITEM_TOP_Z`]. Lower and the bottles graze it, which reads as
-/// the same mistake as passing through it.
+/// Height of the raised run, one full tile above the floor. Measured, the
+/// lowest voxel of [`pipe_crossing`] anywhere over the lane is z = 28, which
+/// leaves three voxels of daylight (25..27) over [`CROSSING_ITEM_TOP_Z`].
+/// Lower and the bottles graze it, which reads as the same mistake as
+/// passing through it.
 const GANTRY_AXIS_Z: i32 = TILE_VOXELS as i32;
 /// How far the crossing's run sits above an ordinary run — **mirrored by
 /// `main.gd`**, which stands every per-tile pipe overlay on a crossing this
@@ -2982,9 +2993,9 @@ const GANTRY_MODEL_Z: u32 = 38;
 /// Where the run turns up, and (mirrored about [`PIPE_C`]) back down. Fixed
 /// by the items again, this time in plan: the lane's traffic occupies
 /// [`CROSSING_ITEM_Y`], so the free bands either side are y 0..9 and y
-/// 22..31. A riser of the run's own radius centred here fills y 0..8, and the
-/// elbow casting around it y 0..9 — exactly flush with the widest thing that
-/// passes underneath.
+/// 22..31. Measured, everything the gantry has below the span (riser, elbow
+/// castings and posts) fills y 0..7 and y 24..31. The lane is open from y 8
+/// to 23, two voxels wider on each side than the widest item.
 const GANTRY_ELBOW_Y: f32 = 3.0;
 /// The elbow casting, and NOT [`PIPE_HUB_R`]. A corner tile carries one hub
 /// and can afford the swelling that says "fitting"; a gantry carries four
@@ -5824,6 +5835,67 @@ mod tests {
             bottle_top.map(|z| z + BELT_CLEAT_Z),
             Some(CROSSING_ITEM_TOP_Z),
             "the tallest item's top moved; CROSSING_ITEM_TOP_Z must follow it"
+        );
+    }
+
+    /// [`CROSSING_ITEM_Y`] and [`CROSSING_ITEM_TOP_Z`] are hand-written
+    /// numbers claiming to be facts about the item models, and the crossing's
+    /// compile-time clearance asserts rest on them. This makes the claim
+    /// true: every `item_*` model in `ASSETS`, stood the way `main.gd` stands
+    /// a carried item (centred on the tile, base on the running surface),
+    /// must fill no voxel outside that box.
+    ///
+    /// It walks `ASSETS` rather than naming the belt items, so a new item is
+    /// covered the moment it ships (the issue #108 shape was a guard holding
+    /// a list of what existed when it was written). The exemptions go the
+    /// other way: a model that never rides a belt has to be named here, with
+    /// its reason.
+    #[test]
+    fn a_crossing_clears_every_item_the_line_can_carry() {
+        // `main.gd`'s FLUID_MODELS: stock icons for the market and the larder
+        // that nothing carries on a belt. The vinegar jug stands at z = 25.
+        const NEVER_ON_A_BELT: [&str; 2] = ["item_vinegar", "item_liquid_smoke"];
+        let p = palette();
+        let inset = (TILE_VOXELS - ITEM_VOXELS) as i32 / 2;
+        let items: Vec<_> = ASSETS
+            .iter()
+            .filter(|a| a.name.starts_with("item_"))
+            .collect();
+        for name in NEVER_ON_A_BELT {
+            assert!(
+                items.iter().any(|a| a.name == name),
+                "{name} is exempted but no longer ships; drop the exemption"
+            );
+        }
+        let mut reach: Option<(i32, i32, i32)> = None;
+        for a in items.iter().filter(|a| !NEVER_ON_A_BELT.contains(&a.name)) {
+            for &(_, y, z) in (a.build)(&p).voxels.keys() {
+                let (y, z) = (y as i32 + inset, z as i32 + BELT_CLEAT_Z);
+                assert!(
+                    (CROSSING_ITEM_Y.0..=CROSSING_ITEM_Y.1).contains(&y),
+                    "{} fills y = {y} on the belt, outside CROSSING_ITEM_Y {:?} \
+                     that the crossing is built to clear",
+                    a.name,
+                    CROSSING_ITEM_Y
+                );
+                assert!(
+                    z <= CROSSING_ITEM_TOP_Z,
+                    "{} reaches z = {z} on the belt, above CROSSING_ITEM_TOP_Z = {} \
+                     that the crossing is built to clear",
+                    a.name,
+                    CROSSING_ITEM_TOP_Z
+                );
+                let (y0, y1, top) = reach.unwrap_or((y, y, z));
+                reach = Some((y0.min(y), y1.max(y), top.max(z)));
+            }
+        }
+        // And the other direction: the constants are the items' real extent,
+        // not a loose bound, so the comments that quote them stay true.
+        assert_eq!(
+            reach,
+            Some((CROSSING_ITEM_Y.0, CROSSING_ITEM_Y.1, CROSSING_ITEM_TOP_Z)),
+            "the belt items no longer reach the edges of the crossing's box; \
+             tighten CROSSING_ITEM_Y / CROSSING_ITEM_TOP_Z to match"
         );
     }
 
