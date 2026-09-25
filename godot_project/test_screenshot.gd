@@ -1074,14 +1074,18 @@ func _reframe() -> void:
 func _parse_ghost_at(args: Array) -> bool:
 	var value := _string_arg(args, "--ghost-at")
 	if value == "":
-		if args.has("--ghost-at"):
+		var given := false
+		for arg in args:
+			given = given or String(arg) == "--ghost-at" or String(arg).begins_with("--ghost-at=")
+		if given:
 			printerr("SCREENSHOT_FAIL: --ghost-at wants TX,TY[,FACING] as one comma-separated token")
 			_refuse()
 			return false
 		return true
 	var parts: PackedStringArray = value.split(",")
 	if parts.size() < 2 or parts.size() > 3 \
-			or not parts[0].is_valid_int() or not parts[1].is_valid_int():
+			or not parts[0].is_valid_int() or not parts[1].is_valid_int() \
+			or (parts.size() == 3 and parts[2] == ""):
 		printerr(
 			"SCREENSHOT_FAIL: --ghost-at wants TX,TY[,FACING] as one comma-separated token, got '%s'"
 			% value

@@ -13430,7 +13430,7 @@ func _ghost_asset_node(asset: String) -> Node3D:
 func _crossing_ghost_asset(belt_direction: String) -> String:
 	var belt_frame := String(_belt_frames_for_shape(BELT_SHAPE_STRAIGHT)[0])
 	var gantry := _crossing_shape_for(belt_direction)
-	if float(gantry["model_lift_y"]) > 0.0:
+	if String(gantry["asset"]) == CROSSING_GANTRY_FALLBACK:
 		return belt_frame
 	return "%s%s%s" % [belt_frame, GHOST_ASSET_STACK, String(gantry["asset"])]
 
