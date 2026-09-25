@@ -1171,10 +1171,16 @@ Four consequences worth knowing before changing it:
 - **The count belongs to the simulation, not to Godot.** A belt that stops
   moving stops dirtying its chunk, so the presentation layer is never told
   "this tile stood still" — it cannot derive the clock, only be handed it.
-- **It is a counter, not a "moving" flag.** A flag would leave the pattern
-  to a global phase, and the rubber would jump a fraction of a tile at the
-  moment a jam cleared. A counter resumes on the phase it stopped on, and
-  the pattern crosses a tile in exactly the ticks an item does.
+- **Every running tile is on the same phase** (amended 2026-09-25).
+  `moved_ticks` is the tick the tile last ran on, so a line of belts laid
+  over several minutes moves as one conveyor; the pattern still crosses a
+  tile in exactly the ticks an item does, because the value advances once
+  per tick. It was each tile's own count of running ticks, which drifts —
+  one spell of back-pressure and two neighbours sit a fraction of a tile
+  apart for good. The accepted cost is the reverse of what the drift cost:
+  a tile that has been jammed **rejoins** the phase instead of resuming its
+  own, so its pattern jumps once, under items that are themselves just
+  starting to move.
 - **An empty belt is a RUNNING belt** (amended 2026-09-25). It counts its
   idle ticks like any other, so a whole line's surface moves as one whether
   or not there is a box on it. This is not a hole in the rule above: the

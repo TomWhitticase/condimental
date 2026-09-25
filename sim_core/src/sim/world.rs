@@ -3653,7 +3653,7 @@ impl World {
                     .ecs
                     .get::<&mut BeltSegment>(carrier)
                     .expect("a belt or splitter placement carries a BeltSegment");
-                segment.tick_toward(self.belt_speed, self.room_ahead[index])
+                segment.tick_toward(self.belt_speed, self.room_ahead[index], self.tick_count)
             };
             if moved {
                 let tile = self.position_of(carrier);

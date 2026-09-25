@@ -243,6 +243,16 @@ and the rubber does not jump when a box lands on it. UI_UX §6a's rule is
 kept where it bites, and the 2026-09-21 decision record is amended in place
 with what the play test refuted.
 
+Playing that build turned up the other half: "the belts need to all be
+synced up, they are a bit out of sync". A per-tile count of running ticks
+drifts — belts are laid minutes apart, and one spell of back-pressure
+leaves a tile a fraction of a tile behind for good — so a run read as a row
+of separate machines. `moved_ticks` is now the TICK the tile last ran on
+rather than a count of its own, which is the same formula at the same rate
+and puts every running belt on one phase. A jam still freezes it; the
+accepted cost is that a freed tile rejoins the phase instead of resuming its
+own, jumping once under items that are just starting to move.
+
 ### 2026-09-25 — A hover sheds a line only when that helps (PR #163 review)
 
 PR #163 merged unreviewed, and its review after the fact found that the

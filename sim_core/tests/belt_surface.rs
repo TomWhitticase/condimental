@@ -20,10 +20,12 @@
 //! turning, not a starved machine. This file proves the three properties
 //! the renderer relies on:
 //!
-//! 1. A tile counts every tick it runs, once — carrying product or idle.
+//! 1. A tile advances once per tick while it runs — carrying product or
+//!    idle — and every running tile in the world is on the same phase, so a
+//!    line of belts reads as one conveyor rather than a row of machines.
 //! 2. A jammed tile's count freezes — and stays frozen for as long as the
 //!    jam lasts, which is what makes "missing from a delta" mean "still
-//!    where you last drew it".
+//!    where you last drew it". It rejoins the phase when it moves again.
 //! 3. It survives a save/load, so a loaded factory's rubber stands where
 //!    the saved one's did.
 
@@ -211,35 +213,69 @@ fn a_jammed_belt_freezes_its_surface_clock() {
     }
 }
 
-/// A jam that clears resumes counting from where it stopped rather than
-/// re-joining a global clock — the reason this is a counter and not a
-/// boolean. The rubber must not jump a fraction of a tile at the moment
-/// the line starts again.
+/// A jam that clears REJOINS the phase every other running belt is on,
+/// rather than resuming its own (amended 2026-09-25 — the owner played a
+/// floor of belts laid at different times and asked for them in sync). The
+/// jump that costs is one repeating pattern shifting under items at the
+/// instant they start moving again; the drift it replaces was on every
+/// tile, permanently.
 #[test]
-fn a_cleared_jam_resumes_the_clock_it_stopped_on() {
+fn a_cleared_jam_rejoins_the_phase_the_running_belts_are_on() {
     let (mut world, tiles) = dead_end_run(3, HOPPER_CAPACITY);
     for _ in 0..3000 {
         world.tick();
     }
     let frozen = clock_at(&world, tiles[0]);
+    assert!(
+        frozen < world.current_tick(),
+        "the jam must have left this tile behind the tick for the rejoin to mean anything"
+    );
     // Open the dead end: a belt on the far side takes the front item and
     // the run starts moving again, freed space rippling back one item a
     // tick until it reaches the tile this asserts about.
     build(&mut world, "belt", (3, 0), Direction::East);
-    const RESUMED_TICKS: u64 = 30;
-    for _ in 0..RESUMED_TICKS {
+    for _ in 0..30 {
         world.tick();
     }
-    let running = clock_at(&world, tiles[0]);
+    // Not exactly the tick: a line that has just been freed moves in
+    // stop-and-go waves, and a tile that did not move on the very last tick
+    // is legitimately a tick or two behind. The point is that it is level
+    // with the running floor again rather than hundreds of ticks adrift.
+    let rejoined = clock_at(&world, tiles[0]);
+    let behind = world.current_tick() - rejoined;
     assert!(
-        running > frozen,
-        "the line is moving again, so its rubber must be too; stuck at {frozen}"
+        behind <= 5,
+        "the line is moving again, so this tile's rubber stands with every other \
+         running tile's; it reads {rejoined} against tick {}, and it froze at {frozen}",
+        world.current_tick()
     );
-    assert!(
-        running <= frozen + RESUMED_TICKS,
-        "the clock resumes from the {frozen} it stopped on — it cannot catch up with a \
-         global clock, or the rubber would jump the moment the line cleared; got {running}"
-    );
+}
+
+/// The property the whole floor is judged on: every belt that is running
+/// shows the same phase, whenever it was placed and whatever it has been
+/// through. A tile laid 500 ticks after its neighbour is in step with it,
+/// and so is one that spent a spell jammed.
+#[test]
+fn every_running_belt_stands_at_the_same_phase() {
+    let (mut world, _) = dead_end_run(3, 0);
+    for _ in 0..500 {
+        world.tick();
+    }
+    // A tile laid late, and one that has been jammed and freed, both join
+    // the same surface as the tiles that have run all along.
+    build(&mut world, "belt", (3, 0), Direction::East);
+    for _ in 0..40 {
+        world.tick();
+    }
+    let clocks = surface_clocks(&world);
+    assert_eq!(clocks.len(), 4, "the fixture should have four belt tiles");
+    for (tile, clock) in &clocks {
+        assert_eq!(
+            *clock,
+            world.current_tick(),
+            "every running belt is in phase, and {tile:?} is not"
+        );
+    }
 }
 
 /// Save/load carries it, so a reloaded factory's rubber stands exactly

@@ -1100,6 +1100,32 @@ matches what code comments and data files cite.
   `tests/belt_surface.rs` pins both halves: frozen while jammed, and
   resumed-not-caught-up when the jam clears.
 
+  **Amended 2026-09-25 (second amendment): the field is the TICK the tile
+  last ran on, and every running belt is in phase.** The paragraph above
+  weighed a one-off jump against nothing, because at the time every tile's
+  count started at zero on the same tick and the drift was invisible. In a
+  played factory it is not: belts are laid minutes apart, and any tile that
+  has ever been held up is permanently a fraction of a tile behind its
+  neighbours. The owner's words, after the first amendment shipped, were
+  that the belts "need to all be synced up, they are a bit out of sync".
+  A run of conveyor that is out of step reads as a row of separate machines
+  bolted together, which is exactly the thing the surface is there to deny.
+
+  So `tick_toward` assigns `current_tick` instead of incrementing. Nothing
+  about the frame formula or the rate changes — the value still advances
+  once per tick, so the pattern still crosses a tile in exactly the ticks an
+  item does — and the jam still freezes it, since a jammed tile is simply
+  not assigned. What changes is the recovery: a freed tile REJOINS the
+  phase, and its pattern jumps up to three frames once. That is the trade
+  made knowingly, and the two sides are not equal. The jump is one
+  repeating pattern shifting on one tile, at the instant its items start
+  moving and the eye is on them; the drift it replaces was on every tile,
+  all the time, and never resolved. `every_running_belt_stands_at_the_same_phase`
+  and `a_cleared_jam_rejoins_the_phase_the_running_belts_are_on` pin the new
+  halves; the latter allows a few ticks of slack, because a line that has
+  just been freed moves in stop-and-go waves and a tile that did not move on
+  the last tick is honestly a tick behind.
+
   **Saved, at the current `schema_version`.** `SavedBelt::moved_ticks` is
   `#[serde(default)]`, like `SavedHopper::auto_fill` and `SavedMachine::load`
   before it — an additive field is not a shape change, and a save written

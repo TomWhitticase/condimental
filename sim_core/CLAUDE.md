@@ -79,7 +79,8 @@ the plan is `docs/ARCHITECTURE.md` §3/§4/§6/§10.
   counter exists to avoid; Godot extrapolates the phase off the one-per-tick
   rule instead (`main.gd`'s `_belt_idle_phase`). Do not "fix" the silence by
   marking it dirty. A JAM is what stops the clock, and the only thing that
-  does.
+  does — the field is the TICK the tile last ran on, so every running belt
+  in the world is in phase and a freed one rejoins it.
 - **Fluid movement, tank drain, machine load, production stats and staff state
   deliberately dirty nothing** — all polled (`fluid_snapshots_json`,
   `fluid_tank_snapshots_json`, `machine_load_snapshots_json`,

@@ -462,10 +462,19 @@ const BELT_TICKS_PER_TILE := 50
 ##
 ## Godot cannot derive this: a belt that stops moving stops dirtying its
 ## chunk, so nothing on the wire would ever say "this tile stood still".
-## The sim counts, the renderer draws — and the count is a COUNTER rather
-## than a running/stopped flag so a line that clears resumes the phase it
-## stopped on instead of snapping back to a world clock that kept running
-## without it.
+## The sim counts and the renderer draws.
+##
+## **And every running tile is on the SAME phase** (2026-09-25, second
+## amendment — the owner played a floor of them and asked for the line to
+## move as one). `moved_ticks` is the tick a tile last ran on, so tiles laid
+## at different times are in step, and only a jam takes a tile out of step.
+## It used to be a count of each tile's own running ticks, which drifts: one
+## spell of back-pressure, or a neighbour laid a minute later, left two
+## tiles a fraction of a tile apart for good, and a run then read as a row
+## of separate machines. The cost, taken deliberately, is that a tile which
+## HAS been jammed rejoins the phase rather than resuming its own, so its
+## pattern jumps once as the line frees — under items that are themselves
+## just starting to move, at the busiest moment that tile has.
 ##
 ## The cost lands where the movement is. A loaded tile's frame is re-read
 ## exactly when its snapshot arrives (`_render_snapshot`), so a jammed line
@@ -2845,10 +2854,9 @@ func _belt_frames_for_shape(shape: String) -> Array:
 ## that and not `sim.current_tick()`): the plan's
 ## `floor(clock * BELT_FRAMES / BELT_TICKS_PER_TILE) mod BELT_FRAMES`.
 ##
-## The pattern therefore crosses a tile in exactly the ticks an item does,
-## it stands still whenever the tile does — a jam, or the pause menu, or a
-## headless test that never ticks — and it resumes from where it stopped
-## rather than jumping, because the clock is a count and not a flag.
+## The pattern therefore crosses a tile in exactly the ticks an item does
+## (the clock advances once per tick), and it stands still whenever the tile
+## does — a jam, or the pause menu, or a headless test that never ticks.
 func _belt_frame_for_moved_ticks(moved_ticks: int) -> int:
 	return posmod((moved_ticks * BELT_FRAMES) / BELT_TICKS_PER_TILE, BELT_FRAMES)
 
