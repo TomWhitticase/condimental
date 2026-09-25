@@ -255,10 +255,7 @@ const FIXTURE_NAMES: PackedStringArray = [
 	"demo", "machines", "fluids", "vat", "splitter", "chain", "stress",
 	"pipes", "gallery", "items", "fluid_gallery", "bottleneck", "bbq",
 	"stalled_run", "understaffed", "shortfall", "full_dock",
-	"unclerked_dock", "warehouse", "split_docks",
-	# THROWAWAY — the belt/pipe crossing spike of 2026-09-25, see
-	# `_stand_crossing_spike`. Delete with it.
-	"crossing",
+	"unclerked_dock", "warehouse", "split_docks", "crossing",
 ]
 
 ## The fixtures whose whole claim is a factory that is WORKING, and which are
@@ -506,6 +503,11 @@ var _dock_lamp_dark := false
 const FULL_DOCK_HOLD_TICK_LIMIT := 2000
 var _ghost_kind := ""
 var _ghost_blocked := false
+## --ghost-at TX,TY[,FACING]: the tile the ghost is held over, and the facing
+## it is held at, instead of --ghost's open ground or --ghost-blocked's first
+## machine. Whether that reads as valid is the sim's answer, not the flag's.
+var _ghost_at := HOVER_NONE
+var _ghost_facing := ""
 var _remove_mode := false
 ## `--menu` renders menu.tscn rather than main.tscn; `--pause` renders the
 ## in-game pause menu over a running factory. See the header.
@@ -713,6 +715,8 @@ func _initialize() -> void:
 	if not _reset_settings(args):
 		return
 	if not _parse_closeup(args):
+		return
+	if not _parse_ghost_at(args):
 		return
 	_resolve_fixture()
 	_apply_fluid_gallery_defaults(args)
@@ -960,7 +964,16 @@ func _build_fixture() -> void:
 				_refuse()
 				return
 		"crossing":
-			Layouts.build_crossing_spike(_main.sim)
+			# Like `split_docks`, this one can be built and not BE itself: a
+			# Place the simulation refuses is silent, and a frame of a belt
+			# running past two gaps in two pipe runs looks like a render
+			# problem rather than a rule change. Refuse instead.
+			Layouts.build_crossing_line(_main.sim)
+			var crossing_failure := Layouts.crossing_line_failure(_main.sim)
+			if crossing_failure != "":
+				printerr("SCREENSHOT_FAIL: --fixture crossing built no crossing — %s" % crossing_failure)
+				_refuse()
+				return
 		"demo":
 			Layouts.build_demo_line(_main.sim)
 		_:
@@ -1045,6 +1058,37 @@ func _reframe() -> void:
 ## exit 0, so the reviewer measured a picture nobody asked for — the one
 ## failure a screenshot review cannot catch by looking. Returns false when it
 ## refused.
+## `--ghost-at TX,TY[,FACING]`, refused rather than half-read: a malformed
+## value, or one with no `--ghost`/`--ghost-blocked` to aim, would otherwise
+## photograph the default tile (or no ghost at all) and pass. The facing's
+## spelling is checked in `_enter_ghost_mode`, against main's DIRECTIONS.
+func _parse_ghost_at(args: Array) -> bool:
+	var value := _string_arg(args, "--ghost-at")
+	if value == "":
+		if args.has("--ghost-at"):
+			printerr("SCREENSHOT_FAIL: --ghost-at wants TX,TY[,FACING] as one comma-separated token")
+			_refuse()
+			return false
+		return true
+	var parts: PackedStringArray = value.split(",")
+	if parts.size() < 2 or parts.size() > 3 \
+			or not parts[0].is_valid_int() or not parts[1].is_valid_int():
+		printerr(
+			"SCREENSHOT_FAIL: --ghost-at wants TX,TY[,FACING] as one comma-separated token, got '%s'"
+			% value
+		)
+		_refuse()
+		return false
+	if _ghost_kind == "":
+		printerr("SCREENSHOT_FAIL: --ghost-at aims a ghost, but no --ghost KIND or --ghost-blocked KIND names one")
+		_refuse()
+		return false
+	_ghost_at = Vector2i(int(parts[0]), int(parts[1]))
+	if parts.size() == 3:
+		_ghost_facing = parts[2]
+	return true
+
+
 func _parse_closeup(args: Array) -> bool:
 	for i in range(args.size()):
 		var arg := String(args[i])
@@ -1608,8 +1652,16 @@ func _enter_ghost_mode() -> void:
 		printerr("SCREENSHOT_NOTE: could not afford one '%s' after building the fixture — no ghost to show" % _ghost_kind)
 		return
 	_main._enter_build_mode(_ghost_kind)
+	if _ghost_facing != "":
+		if not _main.DIRECTIONS.has(_ghost_facing):
+			printerr("SCREENSHOT_FAIL: --ghost-at's facing '%s' is not one of %s" % [_ghost_facing, str(_main.DIRECTIONS)])
+			_refuse()
+			return
+		_main._build_direction = _ghost_facing
 	var target := _open_ground_tile()
-	if _ghost_blocked:
+	if _ghost_at != HOVER_NONE:
+		target = _ghost_at
+	elif _ghost_blocked:
 		var occupied := _first_machine_tile()
 		if occupied == HOVER_NONE:
 			occupied = _first_tile_of(func(_p): return true)
@@ -2040,56 +2092,24 @@ func _stand_item_gallery() -> void:
 		)
 
 
-## The crossing spike's overlay — **THROWAWAY** (2026-09-25).
-##
-## `build_crossing_spike` leaves one tile of each pipe run bare, because the
-## simulation has no tile that is both a belt and a pipe. This stands the two
-## candidate models in those holes as plain scene nodes: the flat bridge the
-## design doc described at x = 3, the raised gantry at x = 9. They are art in
-## the scene and nothing else — no placement, no snapshot, no save — which is
-## the entire point, since the question being asked is whether the shape
-## reads at all before anything is built to carry it.
-##
-## Items are stood on the belt through `main.gd`'s own `_show_carried_item`,
-## exactly as `_stand_item_gallery` does, and deliberately UNDER each
-## crossing: what the flat bridge does to a bottle is the finding.
-const CROSSING_SPIKE_MODELS := {
-	3: "pipe_bridge_flat",
-	9: "pipe_gantry",
-}
-const CROSSING_SPIKE_ITEMS := ["item_bottle", "item_box", "item_tomato"]
-
-
-func _stand_crossing_spike() -> void:
-	var slot := 0
-	for x in CROSSING_SPIKE_MODELS:
-		var node: Node3D = _main._assets.asset_node(String(CROSSING_SPIKE_MODELS[x]))
-		node.position = _main._tile_origin(int(x), 0, _main.FLOOR_Y)
-		_main._world_root.add_child(node)
-		# One item dead under the crossing and one either side, so the frame
-		# shows both the clearance and the line it is crossing.
-		for offset in [-1, 0, 1]:
-			_main._show_carried_item(
-				"crossing_spike_%d" % slot,
-				String(CROSSING_SPIKE_ITEMS[slot % CROSSING_SPIKE_ITEMS.size()]),
-				_main._carried_item_transform(Vector2i(int(x) + offset, 0), "east", 0.5)
-			)
-			slot += 1
-	# First person has nowhere to stand by default — `--first-person` drops the
-	# camera over the world's origin, which in this fixture is nine tiles short
-	# of the gantry. Put the player on the floor beside the raised crossing,
-	# looking up the belt at it: eye level is where the question "is this a
-	# thing a person walks under" actually gets answered.
-	if _in_first_person():
-		_main._fp_position = Vector3(
-			7.0 * _main.TILE, _main.TILE * 1.5, -2.2 * _main.TILE
-		)
-		_main._fp_yaw = atan2(
-			-(float(Layouts.CROSSING_GANTRY_X) * _main.TILE - _main._fp_position.x),
-			-(0.0 - _main._fp_position.z)
-		)
-		_main._fp_pitch = 0.0
-		_main._update_fp_camera_transform()
+## `--fixture crossing --first-person`: puts the player on the floor beside
+## the crossing whose belt was laid across a pipe, looking up the belt at it.
+## First person otherwise drops the camera over the world's origin, nine
+## tiles short of it — and eye level is where "is this a thing a person
+## walks under" actually gets answered. Isometric needs nothing: the fixture
+## frames itself like every other.
+func _frame_crossing_first_person() -> void:
+	if not _in_first_person():
+		return
+	_main._fp_position = Vector3(
+		7.0 * _main.TILE, _main.TILE * 1.5, -2.2 * _main.TILE
+	)
+	_main._fp_yaw = atan2(
+		-(float(Layouts.CROSSING_BELT_ONTO_PIPE_X) * _main.TILE - _main._fp_position.x),
+		-(0.0 - _main._fp_position.z)
+	)
+	_main._fp_pitch = 0.0
+	_main._update_fp_camera_transform()
 
 
 ## `--pause`: the in-game menu, over a factory that has been running.
@@ -2206,7 +2226,7 @@ func _process(delta: float) -> bool:
 	if _frames == 2 and _item_gallery:
 		_stand_item_gallery()
 	if _frames == 2 and _fixture == "crossing":
-		_stand_crossing_spike()
+		_frame_crossing_first_person()
 	if _frames == 2 and not _hover_flags.is_empty():
 		_apply_hover_flags()
 		# Straight out, rather than letting the rest of this frame set up a

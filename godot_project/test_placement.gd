@@ -11,8 +11,10 @@
 #   * choosing an owned kind from the build menu enters placement mode, and
 #     the ghost is a real, non-empty voxel model that follows the tile under
 #     the cursor's ray (the same `_tile_under_screen_pos` hover uses),
-#   * validity is a pure Godot-side check: free ground is valid, an occupied
-#     tile is blocked, a kind with none owned is refused — and each state is
+#   * validity is the SIMULATION's answer (`preview_command`, via
+#     `_preview_place`), never a Godot-side rule: free ground is valid, an
+#     occupied tile is blocked with the sim's own sentence, a kind with none
+#     owned is refused — and each state is
 #     signalled by MORE than colour (UI_UX.md §7): the prompt's own glyph and
 #     wording differ, and the tint differs too,
 #   * a real left-click through `_unhandled_input` places over the real
@@ -158,9 +160,12 @@ func _run_checks() -> void:
 			_fail("the ghost has an empty mesh '%s'" % mi.name)
 			return
 
-	# --- 3. Validity is a pure, footprint-aware, Godot-side check ----------
-	if not main._ghost_blocked_tiles("belt", Vector2i(7, 7), "east").is_empty():
-		_fail("open ground should not be blocked")
+	# --- 3. Validity is the sim's footprint-aware verdict -------------------
+	# Asked through `_preview_place`, the same door the ghost uses, so this is
+	# the ghost's own question and not a second copy of the rule.
+	var open_ground: Dictionary = main._preview_place("belt", Vector2i(7, 7), "east")
+	if not bool(open_ground.get("valid", false)) or String(open_ground.get("result_kind", "")) != "belt":
+		_fail("open ground should preview as a valid belt, got %s" % str(open_ground))
 		return
 	# `item` is required now that the chain has two raw solids — a hopper
 	# placed without one is a silent refusal, and this fixture would then be
@@ -169,13 +174,22 @@ func _run_checks() -> void:
 		"type": "place", "kind": "hopper", "tile": [7, 7], "direction": "east", "item": "tomato",
 	}))
 	main._rebuild_world()
-	if main._ghost_blocked_tiles("belt", Vector2i(7, 7), "east").size() != 1:
-		_fail("a tile with a hopper on it must read blocked")
+	var on_hopper: Dictionary = main._preview_place("belt", Vector2i(7, 7), "east")
+	if bool(on_hopper.get("valid", true)) or String(on_hopper.get("reason", "")) == "":
+		_fail("a tile with a hopper on it must preview as refused, with a reason: %s" % str(on_hopper))
 		return
 	# Footprint-aware: the 2x2 cooking vat placed at (6, 6) would reach (7, 7).
-	if main._ghost_blocked_tiles("cooking_vat", Vector2i(6, 6), "east").size() != 1:
-		_fail("the ghost's collision check must cover the whole footprint, not just its origin tile")
+	var vat_over: Dictionary = main._preview_place("cooking_vat", Vector2i(6, 6), "east")
+	if bool(vat_over.get("valid", true)) or String(vat_over.get("reason", "")) != String(on_hopper["reason"]):
+		_fail("the vat's footprint reaching the hopper must be refused for the same reason: %s" % str(vat_over))
 		return
+	# The prompt carries the sim's sentence verbatim, not a paraphrase of it.
+	main._ghost_reason = "blocked"
+	main._ghost_refusal = String(on_hopper["reason"])
+	if not main._placement_prompt_text().contains(main._ghost_refusal):
+		_fail("the blocked prompt should say the sim's reason '%s': %s" % [main._ghost_refusal, main._placement_prompt_text()])
+		return
+	main._ghost_refusal = ""
 	# ...and it knows a vat is 2x2 without one ever having been placed.
 	if main._kind_footprint("cooking_vat") != Vector2i(2, 2):
 		_fail("_kind_footprint should derive the vat's 2x2 footprint, got %s" % str(main._kind_footprint("cooking_vat")))

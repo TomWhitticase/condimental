@@ -183,6 +183,7 @@ run_godot_script test_chain_rework.gd CHAIN_REWORK_OK "1x2 mixer, piped middle, 
 run_godot_script test_config_panel.gd CONFIG_PANEL_OK "click a hopper or tank to configure it, UI_UX.md §5"
 run_godot_script test_placement.gd PLACEMENT_OK "empty world, ghost, rotation, place/remove — Real Placement ticket 2"
 run_godot_script test_splitters.gd SPLITTERS_OK "splitter model, next-output arrow, items crossing, hover — Epic B ticket 2"
+run_godot_script test_crossings.gd CROSSINGS_OK "belt/pipe crossing: gantry over the belt, items under it, lifted fluid, hover — crossing ticket 3"
 run_godot_script test_save_load.gd SAVE_LOAD_OK "save_ron/load_ron/new_game across the real boundary — save/load ticket 1"
 run_godot_script test_main_menu.gd MAIN_MENU_OK "menu.tscn, the save list, the GameSession handoff — save/load ticket 2"
 run_godot_script test_pause_menu.gd PAUSE_MENU_OK "ESC pause menu, save slots, autosave, quit to menu — save/load ticket 2"
