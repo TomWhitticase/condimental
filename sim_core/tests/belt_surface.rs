@@ -9,15 +9,15 @@
 //!
 //! Godot cannot work that out for itself: a belt that stops moving stops
 //! dirtying its chunk, so the presentation layer is never told the tile
-//! stood still. So the simulation counts, per tile, the ticks that tile's
-//! rubber ran for, and `BeltSnapshot::moved_ticks` carries it.
+//! stood still. So the simulation records, per tile, the TICK that tile's
+//! rubber last ran on, and `BeltSnapshot::moved_ticks` carries it.
 //!
 //! What stops that clock is a JAM, and only a jam (2026-09-25). It used to
 //! stop on an empty tile too, which made one line of belt roll one tile at
 //! a time as a single box walked down it, and made still rubber mean either
 //! "jammed" or "nothing here" — so the jam this counter exists to show
 //! could not be read off the floor. A conveyor with no box on it is a motor
-//! turning, not a starved machine. This file proves the three properties
+//! turning, not a starved machine. This file proves the four properties
 //! the renderer relies on:
 //!
 //! 1. A tile advances once per tick while it runs — carrying product or
@@ -28,6 +28,10 @@
 //!    where you last drew it". It rejoins the phase when it moves again.
 //! 3. It survives a save/load, so a loaded factory's rubber stands where
 //!    the saved one's did.
+//! 4. A tile is laid on a tick, not on zero — and an empty belt restored
+//!    from an older save takes the save's tick. The scene reads a placed
+//!    tile once and an idle tile dirties nothing afterwards, so a clock
+//!    that starts out of phase is drawn out of phase for good.
 
 use sim_core::sim::machines::MachineRegistry;
 use sim_core::sim::types::{Money, TileCoord};
@@ -327,7 +331,9 @@ fn an_empty_belt_in_an_old_save_loads_in_phase() {
         "the fixture must really have rewritten the saved clocks"
     );
     let loaded = World::from_save_ron(&stale, one_stage()).expect("the save must load");
-    for (tile, clock) in surface_clocks(&loaded) {
+    let clocks = surface_clocks(&loaded);
+    assert_eq!(clocks.len(), 3, "the save's three belts must all come back");
+    for (tile, clock) in clocks {
         assert_eq!(
             clock,
             loaded.current_tick(),

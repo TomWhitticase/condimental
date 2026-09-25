@@ -154,9 +154,9 @@ func _run_checks() -> void:
 
 	# --- 3. the frame follows the TILE'S OWN clock (issue #79) ------------
 	# The formula is unchanged; the clock it reads is not. `moved_ticks` is
-	# how many ticks that tile's rubber has RUN for, so a jammed tile stops
-	# counting and its rubber stops with the items on it — while an empty
-	# tile, which is a running tile, keeps going (2026-09-25).
+	# the TICK that tile's rubber last ran on, so a jammed tile stops taking
+	# the new tick and its rubber stops with the items on it — while an
+	# empty tile, which is a running tile, keeps taking it (2026-09-25).
 	var frame_cases := {0: 0, 12: 0, 13: 1, 25: 2, 37: 2, 38: 3, 49: 3, 50: 0, 63: 1, 100: 0}
 	for clock in frame_cases.keys():
 		if main._belt_frame_for_moved_ticks(clock) != frame_cases[clock]:
