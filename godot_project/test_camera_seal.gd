@@ -7,19 +7,26 @@
 # WHY THIS EXISTS. `scripts/screenshot-scene.sh` aims the camera itself
 # (`--closeup`, `--first-person`, a fixture's framing) and then lets the
 # scene run 45 ordinary frames before the shutter. Those frames poll the
-# REAL keyboard in `_pan_camera` and see the REAL mouse in `_input`, so a
-# key held in another window, a stray wheel notch, or the OS pointer another
-# process warps moved the camera between the aim and the shutter. It was
-# measured: with one pan key held, `--bottleneck --closeup 4,0,10 --no-hud`
-# rendered a8b1b9e8a63c instead of 52493c1c3da8 on the same simulation tick,
-# the camera having drifted about a tile and a half in 43 frames. The
-# picture was of somewhere the command never asked for, and nothing said so.
+# REAL keyboard in `_pan_camera` and see the REAL mouse in `_input`, so a key
+# held in another window, a stray wheel notch or a drag moved the camera
+# between the aim and the shutter. It was measured: with the engine made to
+# report a pan key as held, `--bottleneck --closeup 4,0,10 --no-hud` rendered
+# 972e7d6bbea3 instead of 52493c1c3da8 on the same simulation tick (10622),
+# the camera having drifted far enough to undo the closeup — 946548
+# primitives against 969058. The picture was of somewhere the command never
+# asked for, and nothing printed said so.
+#
+# PR #167 later moved the render's window off-screen and no-focus, which
+# stops the host's keystrokes reaching the default path at all. This test
+# stays because `--on-screen` still takes focus, and because a guarantee that
+# rests on a window flag is one a later change to the window repeals in
+# silence.
 #
 # `main.gd`'s `_camera_input_sealed` shuts every door live input comes
-# through, and `test_screenshot.gd` sets it on frame 1 before it parks the
-# cursor. This proves each door: sealed, the five entry points do nothing;
-# unsealed, every one of them still moves the camera, which is what stops
-# this being a test that would pass with the whole feature deleted.
+# through, and `test_screenshot.gd` sets it on frame 1. This proves each
+# door: sealed, the five entry points do nothing; unsealed, every one of them
+# still moves the camera, which is what stops this being a test that would
+# pass with the whole feature deleted.
 #
 # The flag is never set for a player — it is a property of a photograph, not
 # a mode of the game — so `_camera_input_sealed` starting false is checked
