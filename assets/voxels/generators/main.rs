@@ -16,9 +16,11 @@
 //! One mesh per class, each with its own `StandardMaterial3D`, is what makes
 //! that true; `main.gd` reassembles them into one node per asset.
 //!
-//! `models/materials.json` and `models/index.json` are written alongside so
-//! Godot can rebuild those materials, and discover which classes each asset
-//! has, without either fact being duplicated in GDScript.
+//! `models/materials.json`, `models/lamp_states.json` and `models/index.json`
+//! are written alongside so Godot can rebuild those materials, learn what a
+//! lit and an idle status lamp look like, and discover which classes each
+//! asset has, without any of those facts being duplicated in GDScript — or in
+//! the asset browser, which reads the same three files (issue #81).
 
 mod assets;
 mod palette;
@@ -80,6 +82,11 @@ fn main() {
 
     std::fs::write(out.join("materials.json"), palette.materials_json())
         .expect("failed to write materials.json");
+    // The two states a status lamp is drawn in, resolved against the
+    // `emissive` class — read by Godot and by the asset browser alike, so
+    // neither has to keep its own copy of what "idle" looks like (issue #81).
+    std::fs::write(out.join("lamp_states.json"), palette.lamp_states_json())
+        .expect("failed to write lamp_states.json");
     std::fs::write(
         out.join("index.json"),
         serde_json::to_string_pretty(&index).expect("index must serialize"),
@@ -87,7 +94,7 @@ fn main() {
     .expect("failed to write index.json");
 
     println!(
-        "voxgen: wrote {written} .vox files + materials.json + index.json to {}",
+        "voxgen: wrote {written} .vox files + materials.json + lamp_states.json + index.json to {}",
         out.display()
     );
 }

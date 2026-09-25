@@ -58,6 +58,37 @@ pub struct MaterialDef {
     pub emission_energy: f32,
 }
 
+/// One state a status lamp is drawn in, exactly as palette.ron writes it: a
+/// MODIFIER of the `emissive` class, never a second copy of it. That is what
+/// keeps `emission_energy` written down once — retuning the class moves the
+/// lit lamp with it, and no renderer can be left holding a stale number.
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct LampStateDef {
+    pub roughness: f32,
+    /// Multiplied into the `emissive` class's `emission_energy`. Zero on the
+    /// idle state: an unlit lens that still emitted would be a lamp half on.
+    pub emission_scale: f32,
+    /// Multiplied into the lens's own colour in the ALBEDO channel alone.
+    pub albedo_scale: f32,
+}
+
+/// A lamp state RESOLVED against the `emissive` class — absolute numbers a
+/// renderer can hand straight to a material with no palette knowledge at all.
+/// This is what `lamp_states.json` carries, and it is the only thing
+/// `voxel_assets.gd` and `tools/asset-browser` read.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+pub struct LampMaterialDef {
+    pub metallic: f32,
+    pub roughness: f32,
+    pub emission_energy: f32,
+    pub albedo_scale: f32,
+}
+
+/// The states every palette must define. Not an open set: `main.gd` swaps
+/// between exactly these two, so a palette missing one is a build error
+/// rather than a lamp that silently never changes.
+pub const LAMP_STATES: [&str; 2] = ["idle", "running"];
+
 #[derive(Debug, Deserialize)]
 struct ColorRow {
     name: String,
@@ -69,6 +100,7 @@ struct ColorRow {
 struct PaletteFile {
     schema_version: u32,
     materials: BTreeMap<String, MaterialDef>,
+    lamp_states: BTreeMap<String, LampStateDef>,
     colors: Vec<ColorRow>,
 }
 
@@ -88,11 +120,14 @@ pub struct Palette {
     entries: Vec<PaletteEntry>,
     by_name: BTreeMap<String, u8>,
     materials: BTreeMap<MaterialClass, MaterialDef>,
+    /// Resolved at load, so nothing downstream has to know that palette.ron
+    /// wrote these as modifiers.
+    lamp_states: BTreeMap<String, LampMaterialDef>,
 }
 
 /// Only schema version this loader understands (ARCHITECTURE.md §4: reject a
 /// mismatch rather than silently misreading a changed shape).
-const SUPPORTED_SCHEMA_VERSION: u32 = 1;
+const SUPPORTED_SCHEMA_VERSION: u32 = 2;
 
 fn parse_hex(s: &str) -> [u8; 3] {
     let s = s.trim_start_matches('#');
@@ -124,6 +159,24 @@ impl Palette {
             materials.insert(class, *def);
         }
 
+        let emissive = materials[&MaterialClass::Emissive];
+        let mut lamp_states = BTreeMap::new();
+        for state in LAMP_STATES {
+            let def = file
+                .lamp_states
+                .get(state)
+                .unwrap_or_else(|| panic!("palette.ron is missing lamp state '{state}'"));
+            lamp_states.insert(
+                state.to_string(),
+                LampMaterialDef {
+                    metallic: emissive.metallic,
+                    roughness: def.roughness,
+                    emission_energy: emissive.emission_energy * def.emission_scale,
+                    albedo_scale: def.albedo_scale,
+                },
+            );
+        }
+
         let mut entries = Vec::new();
         let mut by_name = BTreeMap::new();
         for (i, row) in file.colors.iter().enumerate() {
@@ -150,6 +203,7 @@ impl Palette {
             entries,
             by_name,
             materials,
+            lamp_states,
         }
     }
 
@@ -194,5 +248,64 @@ impl Palette {
             .map(|c| (c.name(), self.materials[&c]))
             .collect();
         serde_json::to_string_pretty(&map).expect("material table must serialize")
+    }
+
+    /// The same, for the two states a status lamp is drawn in (issue #81).
+    /// Resolved against the `emissive` class, so a consumer applies these
+    /// numbers as they stand and two renderers cannot disagree about what an
+    /// idle lamp looks like: `godot_project/voxel_assets.gd` builds
+    /// `lamp_idle`/`lamp_running` from this file, and the asset browser's
+    /// running/idle toggle reads the very same one.
+    pub fn lamp_states_json(&self) -> String {
+        serde_json::to_string_pretty(&self.lamp_states).expect("lamp states must serialize")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The status-lamp states are the `emissive` class MODIFIED, and the
+    /// exported table has to prove it rather than carry its own numbers: a
+    /// lit lamp emits exactly the energy the class asks for (so retuning the
+    /// class retunes the lamp), an idle one emits nothing at all, and the
+    /// idle lens is visibly darker in ALBEDO — the channel that still renders
+    /// when the glow pass is what the eye is reading. `voxel_assets.gd` and
+    /// `tools/asset-browser` both build their materials straight from this.
+    #[test]
+    fn lamp_states_resolve_against_the_emissive_class() {
+        let palette = Palette::load();
+        let emissive = palette.material(MaterialClass::Emissive);
+        let json: serde_json::Value =
+            serde_json::from_str(&palette.lamp_states_json()).expect("lamp states must be JSON");
+
+        for state in LAMP_STATES {
+            assert!(
+                json.get(state).is_some(),
+                "lamp_states.json must carry '{state}'"
+            );
+        }
+        let field = |state: &str, key: &str| json[state][key].as_f64().expect("number") as f32;
+
+        assert_eq!(
+            field("running", "emission_energy"),
+            emissive.emission_energy,
+            "a lit lamp emits the `emissive` class's own energy, never a second copy of it"
+        );
+        assert_eq!(
+            field("idle", "emission_energy"),
+            0.0,
+            "an unlit lens that still emitted would be a lamp half on"
+        );
+        assert!(
+            field("idle", "albedo_scale") < field("running", "albedo_scale") * 0.6,
+            "an idle lens must be visibly darker in ALBEDO, not merely dimmer in a channel \
+             a glow-lit frame does not show"
+        );
+        assert_eq!(
+            field("idle", "metallic"),
+            emissive.metallic,
+            "a lamp state modifies the `emissive` class, so metallic is the class's"
+        );
     }
 }
