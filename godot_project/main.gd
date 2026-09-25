@@ -16005,10 +16005,13 @@ func _update_hover_tooltip() -> void:
 	# (issue #99). Measured every frame from the full panel, so a folded
 	# legend or a bigger window gives the lines straight back.
 	var full := _panel_draw_size(_hover_tooltip)
-	var sheds := _hover_yield_sheds(text != _hover_text_at_tile(tile, HOVER_YIELD_CREW), state)
+	# Every rung past the first drops the same text line, so one crewless
+	# build serves them all.
+	var crewless := _hover_text_at_tile(tile, HOVER_YIELD_CREW)
+	var sheds := _hover_yield_sheds(text != crewless, state)
 	var yielded := _hover_yield_rungs(full, query_pos, sheds)
 	if yielded > 0:
-		_hover_label.text = _hover_text_at_tile(tile, yielded)
+		_hover_label.text = crewless
 		_apply_hover_panel_state(state, yielded)
 		# A free-standing Control only ever grows to its minimum, never
 		# shrinks back to it, so the shorter size is set outright. Width is
@@ -16056,9 +16059,12 @@ func _hover_yield_sheds(has_crew_line: bool, state: Dictionary) -> Array[float]:
 ## The fewest rungs of the ladder a panel of `size` has to shed before it can
 ## stand somewhere clear of every HUD plate. 0 means it fits as it is — the
 ## case at 1600x900, and at 1280x720 once the player folds the legend, since
-## `_hud_avoid_rects` reports the legend's stub then. If even the last rung
-## does not clear, the panel sheds everything: it is then the least-bad
-## search's job (`_position_near_for_size`), and a shorter panel covers less.
+## `_hud_avoid_rects` reports the legend's stub then. If no rung clears, a
+## line is shed only for a rung that covers strictly LESS than the full panel
+## does, the least-covering rung winning: the placement search is not
+## exhaustive, so a shorter panel is not always a better-placed one, and at
+## 1600x900 a cursor between the legend and the clipboard shed both lines
+## for the same 72px² the full panel covered (the PR #163 review).
 ##
 ## Driven by the same placement rule that will then place the panel, so the
 ## ladder cannot disagree with it about where "clear" is. Given sizes rather
@@ -16066,13 +16072,19 @@ func _hover_yield_sheds(has_crew_line: bool, state: Dictionary) -> Array[float]:
 func _hover_yield_rungs(size: Vector2, anchor: Vector2, sheds: Array[float]) -> int:
 	var avoid := _hud_avoid_rects()
 	var trial := size
+	var best_rung := 0
+	var best_area := INF
 	for rung in range(sheds.size() + 1):
 		if rung > 0:
 			trial.y -= sheds[rung - 1]
 		var pos := _world_position_for_size(trial, anchor)
-		if _hud_overlap_area(Rect2(pos, trial), avoid) <= 0.0:
+		var area := _hud_overlap_area(Rect2(pos, trial), avoid)
+		if area <= 0.0:
 			return rung
-	return sheds.size()
+		if area < best_area:
+			best_rung = rung
+			best_area = area
+	return best_rung
 
 
 ## Shows or hides the tooltip's bar and buffer rows for whatever

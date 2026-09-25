@@ -733,8 +733,9 @@ func _run_checks() -> void:
 	# The sizes are the test's own, not a headless measurement: a headless
 	# font metric cannot prove a width (godot_project/CLAUDE.md), so what is
 	# pinned here is the RULE, given a size, and the render is the acceptance.
-	# 550x283 is the machine hover as it is actually drawn at 1280x720, the
-	# size the bug was found at.
+	# 550x283 is the machine hover as it was drawn at 1280x720 when the bug
+	# was found (it is 456x283 now, issue #99); the larger size is kept as
+	# the harder case.
 	main._set_view_mode(main.ViewMode.FIRST_PERSON)
 	if main._legend_collapsed:
 		_press_key(KEY_F1)
@@ -836,6 +837,26 @@ func _run_checks() -> void:
 	if main._hover_yield_rungs(Vector2(456, 283), Vector2(BIG) * 0.5, two_rungs) != 0:
 		_fail("at 1600x900 a full machine hover sheds lines it has room for")
 		return
+	# And nowhere on that screen does a line go for nothing. The placement
+	# search is not exhaustive, so a cursor between the legend and the
+	# clipboard found the full panel and the shed one covering the same
+	# 72px², and the ladder used to shed both anyway (PR #163's review).
+	var avoid: Array = main._hud_avoid_rects()
+	var full_hover := Vector2(456, 283)
+	for gx in range(8, BIG.x, 32):
+		for gy in range(8, BIG.y, 32):
+			var at := Vector2(gx, gy)
+			var sweep_rungs: int = main._hover_yield_rungs(full_hover, at, two_rungs)
+			if sweep_rungs == 0:
+				continue
+			var shed_size := full_hover
+			for i in range(sweep_rungs):
+				shed_size.y -= two_rungs[i]
+			var full_area: float = main._hud_overlap_area(Rect2(main._world_position_for_size(full_hover, at), full_hover), avoid)
+			var shed_area: float = main._hud_overlap_area(Rect2(main._world_position_for_size(shed_size, at), shed_size), avoid)
+			if shed_area >= full_area:
+				_fail("at 1600x900 the hover at %s shed %d rungs to cover %.0fpx², no less than the full panel's %.0fpx²" % [str(at), sweep_rungs, shed_area, full_area])
+				return
 
 	# --- The clipboard's docket stack is cut BETWEEN dockets (issue #8) ----
 	# The clipboard is the panel that yields the right-hand column (see
