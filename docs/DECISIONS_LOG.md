@@ -28,9 +28,14 @@ See [WORKFLOW.md](WORKFLOW.md).
   money flyout, hotbar name flyout, contract notice, outside the tick on
   purpose so they keep fading under the pause menu — read `_hud_now_msec()`,
   a clock summed from the frame deltas the scene was actually given, NEVER
-  `Time.get_ticks_msec()` directly. `test_screenshot.gd` REFUSES a run whose
-  frames did not arrive at `FIXED_FPS` rather than quietly photographing a
-  load-dependent moment, `scripts/check-invariants.sh` keeps script and
+  `Time.get_ticks_msec()` directly. **The camera is sealed for the same reason the
+  clock is pinned:** a render aims the camera and then runs 45 ordinary
+  frames, which poll the real keyboard and see the real mouse, so
+  `main.gd`'s `_camera_input_sealed` (off for every player, set by the
+  harness on frame 1) shuts all five doors — key pan, right-drag, zoom,
+  first-person look, first-person walk. `test_screenshot.gd` REFUSES a run
+  whose frames did not arrive at `FIXED_FPS` rather than quietly
+  photographing a load-dependent moment, `scripts/check-invariants.sh` keeps script and
   harness in step, and every render prints `SCREENSHOT_TICK`. A baseline
   rendered before this is a different moment, not a corrupt one: re-render
   it, do not diff across the fix. Full record in `docs/DECISIONS.md`.

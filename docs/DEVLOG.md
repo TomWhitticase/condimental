@@ -24,7 +24,7 @@ below is history and should only ever be appended to.)*
   consolidated onto one integration branch and fast-forwarded into `main`.
   The union passed `scripts/verify-core-loop.sh` (19 Rust suites, 30 headless
   Godot proofs, no failures) and has been rendered and played; the same script
-  is **26 Rust suites and 41 Godot proofs as of 2026-09-25** — a number the
+  is **26 Rust suites and 42 Godot proofs as of 2026-09-25** — a number the
   run now prints for itself. A fresh
   worktree still needs `cargo xtask` and **two** `godot --import` passes
   before the world is visible. See the log entry below.
@@ -245,13 +245,27 @@ actually given, instead of `Time.get_ticks_msec()`. For a player that is the
 wall clock; for a render it is the pinned delta; and a frozen scene now
 freezes its fades with it.
 
+The clock was only half of it. A render aims the camera — `--closeup`,
+`--first-person`, a fixture's framing — and then runs 45 ordinary frames, and
+those frames poll the real keyboard in `_pan_camera` and see the real mouse in
+`_input`. A key held in another window on the host panned the shot a tile and
+a half between the aim and the shutter, about one run in four here, and
+nothing said so: the tick was identical and only the picture moved.
+`main.gd` has a `_camera_input_sealed` flag now, off for every player and set
+by the harness on frame 1 before it parks the cursor, and it shuts all five
+doors live input comes through (key pan, right-drag, zoom, first-person look,
+first-person walk). Measured with one pan key held down: unsealed the same
+command rendered `a8b1b9e8a63c`, sealed it rendered the canonical
+`52493c1c3da8`.
+
 `test_screenshot.gd` refuses a run whose frames did not arrive at that rate
 rather than photographing a load-dependent moment, prints `SCREENSHOT_TICK`
 so two frames can be told apart by reading rather than guessing, and
 `scripts/check-invariants.sh` keeps the script and the harness in step
 (neither half of a non-headless renderer can be caught by the headless
-suite). `test_frame_clock.gd` (`FRAME_CLOCK_OK`, the suite's 41st Godot
-script) holds the rule: no frames means no HUD time, all three fades finish
+suite). `test_camera_seal.gd` (`CAMERA_SEAL_OK`) proves each of the five
+guards, and fails if any one is deleted; `test_frame_clock.gd`
+(`FRAME_CLOCK_OK`) holds the clock rule: no frames means no HUD time, all three fades finish
 on frames alone, and the warm-up spends the same 22 ticks twice running.
 
 Measured at 1280x720 on the tip: before, `--bottleneck --closeup 4,0,10

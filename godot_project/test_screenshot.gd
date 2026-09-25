@@ -2197,6 +2197,13 @@ func _process(delta: float) -> bool:
 	# has to be settled before they are drawn.
 	if _frames == 1 and (_unlocked or _unlock_toast):
 		_cross_gates(-1 if _unlock_toast else 0)
+	# Before the view mode is chosen and long before the cursor is parked: from
+	# here to the shutter the camera is only ever what this script aims it at.
+	# `_park_cursor` warps the OS pointer, which in first person is a look; a
+	# key held in another window pans; a stray wheel notch zooms. None of that
+	# is in the command, so none of it may be in the picture (issue #82).
+	if _frames == 1 and _main != null:
+		_main._camera_input_sealed = true
 	if _frames == 1:
 		_enter_view_mode()
 	# Before main.gd has drawn a single tooltip, and before any --hover* flag

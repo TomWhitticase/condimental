@@ -64,7 +64,9 @@ floor. **The same command twice is the same picture** (issue #82): the
 script pins the engine clock with `--fixed-fps 60`, so the warm-up before the
 shutter always spends the same simulation ticks and every fade is at the same
 point, whatever else the machine is doing — two renders of one command are
-byte-identical, and each prints the `SCREENSHOT_TICK` it stopped on. Invoke
+byte-identical, and each prints the `SCREENSHOT_TICK` it stopped on. The
+camera is sealed for the run as well, so a key held in another window cannot
+pan the shot between the aim and the shutter. Invoke
 `test_screenshot.gd` through the script, not by hand; without the flag it
 refuses to render. A baseline taken before 2026-09-25 is a different moment,
 so re-render rather than diff across that change. The script's header explains every flag; grouped, they are:

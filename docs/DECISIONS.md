@@ -67,6 +67,31 @@ matches what code comments and data files cite.
   now freezes its fades with it, which is wanted: a photograph of a
   celebration should not age while the shutter is open.
 
+  **The clock was half of it: the camera had to be sealed too.** A render
+  aims the camera — `--closeup`, `--first-person`, a fixture's own framing —
+  and then lets the scene run 45 ordinary frames. Those frames poll the REAL
+  keyboard in `_pan_camera` and see the REAL mouse in `_input`, so a key held
+  in another window on the host, a stray wheel notch, or the OS pointer
+  another process warps moved the camera between the aim and the shutter.
+  Measured here at about one run in four, drifting a tile and a half, with
+  the simulation tick identical — the failure was invisible in every number
+  the run printed, and visible only in the picture. `main.gd` now carries
+  `_camera_input_sealed`, and every way live input moves the camera returns
+  early when it is set: `_apply_pan`, `_apply_drag_pan`, `_zoom_camera`,
+  `_apply_look`, `_apply_fp_move`. The guard sits on the Input-FREE half of
+  each pair (`_apply_pan`, not `_pan_camera`) for the reason that half exists
+  at all — it is the half a headless test can drive.
+
+  The flag is false for a player, always, and nothing but the review harness
+  sets it: this is a property of a photograph, not a mode of the game, and a
+  seal that a player could end up inside would be a camera that stops
+  responding. `test_screenshot.gd` sets it on frame 1 BEFORE it parks the
+  cursor, because the park is itself a pointer warp and in first person a
+  pointer warp is a look. Proven by mutation: with one pan key held down, the
+  same command rendered `a8b1b9e8a63c` unsealed and the canonical
+  `52493c1c3da8` sealed, and `test_camera_seal.gd` fails on the removal of
+  any one of the five guards.
+
   **The harness refuses an unpinned clock rather than trusting the script.**
   `test_screenshot.gd` measures its own delta against `FIXED_FPS` and prints
   `SCREENSHOT_FAIL` naming the remedy, because `godot --script
@@ -95,8 +120,9 @@ matches what code comments and data files cite.
   **The consequence to know.** A pinned warm-up stops on a different tick
   than a loaded one did, so a baseline rendered before this change is a
   different moment, not a corrupted one — re-render it rather than diffing
-  across the fix. `godot_project/test_frame_clock.gd` (`FRAME_CLOCK_OK`)
-  holds the whole rule headlessly: `_hud_now_msec()` does not move across 250
+  across the fix. `godot_project/test_camera_seal.gd`
+  (`CAMERA_SEAL_OK`) holds the seal, and `godot_project/test_frame_clock.gd`
+  (`FRAME_CLOCK_OK`) holds the clock headlessly: `_hud_now_msec()` does not move across 250
   real milliseconds with no frames, each of the three fades reaches alpha 0
   on frames alone, and `WARMUP_FRAMES` at the pinned delta spends 22 ticks
   twice running.

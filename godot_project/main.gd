@@ -2160,6 +2160,25 @@ var _pan_right := Vector3.RIGHT # ground-plane "screen right", derived from the 
 var _pan_forward := Vector3.FORWARD # ground-plane "screen up" (into the view), same derivation
 var _iso_dragging := false # true while the right mouse button is held
 
+## True only while a review render is taking its photograph.
+##
+## A screenshot run aims the camera itself — `--closeup`, `--first-person`,
+## a fixture's own framing — and then lets the scene run frames until the
+## shutter. Those frames are ordinary `_process` frames, so `_pan_camera`
+## polls the REAL keyboard and `_input` sees the REAL mouse: a key held in
+## another window, a stray wheel notch, or the OS pointer another process
+## warps would move the camera between the aim and the shutter, and the
+## photograph would silently be of somewhere else. That is the second half of
+## issue #82 — the first was the clock — and it is why two runs of one
+## command could differ by a pan of a tile and a half with the tick identical.
+##
+## Sealed, every way live input moves the camera returns without doing
+## anything; nothing a flag sets is affected, because the flags write
+## `_camera_focus`, `_camera_size`, `_fp_yaw` and `_fp_pitch` directly. It is
+## false for a player, always: this is a property of a render, not a mode of
+## the game.
+var _camera_input_sealed := false
+
 # --- First-person mode state ---
 var _fp_position := Vector3.ZERO
 var _fp_yaw := 0.0 # radians; see _fp_heading_basis()
@@ -4798,6 +4817,9 @@ func _update_camera_transform() -> void:
 
 
 func _zoom_camera(factor: float) -> void:
+	# A photograph is of the camera the flags aimed (`_camera_input_sealed`).
+	if _camera_input_sealed:
+		return
 	var min_size := _camera_base_size * ZOOM_MIN_FACTOR
 	var max_size := _camera_base_size * ZOOM_MAX_FACTOR
 	_camera_size = clampf(_camera_size * factor, min_size, max_size)
@@ -4826,6 +4848,9 @@ func _pan_input_direction() -> Vector3:
 ## The actual movement, deliberately Input-free so it's directly testable
 ## (test_camera_nav.gd calls this with an explicit direction).
 func _apply_pan(direction: Vector3, delta: float) -> void:
+	# A photograph is of the camera the flags aimed (`_camera_input_sealed`).
+	if _camera_input_sealed:
+		return
 	if direction == Vector3.ZERO:
 		return
 	# Scaled by current `_camera_size`, not a flat world-unit speed, so pan
@@ -4865,6 +4890,9 @@ func _iso_drag_sensitivity() -> float:
 ## click-to-build/select interaction on the left button has nothing to fight
 ## with.
 func _apply_drag_pan(relative: Vector2) -> void:
+	# A photograph is of the camera the flags aimed (`_camera_input_sealed`).
+	if _camera_input_sealed:
+		return
 	var sensitivity := _iso_drag_sensitivity()
 	if sensitivity <= 0.0:
 		return
@@ -4902,6 +4930,9 @@ func _update_fp_camera_transform() -> void:
 ## Mouse-look, deliberately Input-free (see _apply_pan's equivalent note) so
 ## test_camera_nav.gd can call it directly with a synthetic delta.
 func _apply_look(relative: Vector2) -> void:
+	# A photograph is of the camera the flags aimed (`_camera_input_sealed`).
+	if _camera_input_sealed:
+		return
 	var sensitivity: float = FP_MOUSE_SENSITIVITY * float(_setting("look_sensitivity", 1.0))
 	_fp_yaw -= relative.x * sensitivity
 	_fp_pitch = clampf(_fp_pitch - relative.y * sensitivity, -FP_PITCH_LIMIT, FP_PITCH_LIMIT)
@@ -4934,6 +4965,9 @@ func _fp_input_direction() -> Vector3:
 
 ## The actual movement, Input-free and directly testable — mirrors _apply_pan.
 func _apply_fp_move(direction: Vector3, delta: float) -> void:
+	# A photograph is of the camera the flags aimed (`_camera_input_sealed`).
+	if _camera_input_sealed:
+		return
 	if direction == Vector3.ZERO:
 		return
 	# MOVEMENT SPEED again, the same multiplier the isometric pan takes: one

@@ -122,6 +122,18 @@ fi
 # (docs/WORKFLOW.md, "Recording a decision"). A link into a renamed or moved
 # file breaks the map quietly — nothing fails, the next session just does not
 # find the reasoning and re-litigates a settled decision.
+echo "==> the review render seals the camera against the machine it runs on"
+# The other half of issue #82: a render aims the camera and then runs frames,
+# and those frames poll the real keyboard and see the real mouse. main.gd's
+# guard is covered headlessly by test_camera_seal.gd; that the RENDER actually
+# turns it on is not, because nothing headless renders.
+if ! grep -q "_camera_input_sealed" godot_project/main.gd; then
+  fail "godot_project/main.gd has no _camera_input_sealed — live input can move a review render's camera (issue #82)"
+fi
+if ! grep -qE "_camera_input_sealed = true" godot_project/test_screenshot.gd; then
+  fail "godot_project/test_screenshot.gd never seals the camera — a held key or a stray wheel notch can move the shot between the aim and the shutter (issue #82)"
+fi
+
 echo "==> every relative link between markdown files resolves"
 while read -r src link; do
   target="$(dirname "$src")/${link}"
@@ -136,7 +148,7 @@ done < <(
 
 echo
 if [ "$status" -eq 0 ]; then
-  echo "PASS: test scripts wired and marked, scenes text, res:// paths real, hover flags tabled, review clock pinned, doc links resolve"
+  echo "PASS: test scripts wired and marked, scenes text, res:// paths real, hover flags tabled, review clock pinned and camera sealed, doc links resolve"
 else
   echo "FAILED — see above" >&2
 fi
