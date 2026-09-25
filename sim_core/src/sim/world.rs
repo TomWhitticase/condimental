@@ -249,6 +249,16 @@ pub const BELT_KIND: &str = "belt";
 /// and not a machine either.
 pub const PIPE_KIND: &str = "pipe";
 
+/// The kind id of a belt and a pipe crossing on one tile
+/// (`docs/BELT_PIPE_CROSSING_PLAN.md`). **Never bought and never placed by
+/// this name**: it is not in the shop, so `Place { kind: "crossing" }` is
+/// refused like any unowned kind. A crossing is *assembled* — a pipe placed
+/// onto a belt, or a belt onto a pipe, at right angles — and `Remove` hands
+/// back the belt and the pipe it was built from. It is still a kind on the
+/// wire (`world_layout`'s `kind`, a save's placement), because that is what
+/// presentation draws and what a load rebuilds.
+pub const CROSSING_KIND: &str = "crossing";
+
 /// Where an entity sits in the tile grid (ARCHITECTURE.md §3.1/§3.2). Always
 /// the placement's **origin**: its minimum-X/minimum-Y corner, whatever it
 /// is facing (see [`super::machines`]'s module doc).
@@ -1561,6 +1571,30 @@ pub enum TileSnapshot {
         is_inlet: bool,
         links: PipeLinks,
     },
+    /// `{"kind": "crossing", "direction": "east", "pipe_direction": "south",
+    ///   "items_here": ["tomato"], "fluid": "vinegar", "naming": "carries",
+    ///   "candidates": ["vinegar"], "volume": 7.5, "capacity": 10.0,
+    ///   "pressure": 0.75, "is_source": false, "is_inlet": false,
+    ///   "links": {"inputs": [...], "output": {...}, "connections": [...]}}`
+    /// — a [`TileSnapshot::Belt`] and a [`TileSnapshot::Pipe`] on one tile,
+    /// every field meaning what it means there. `direction` is the belt's
+    /// (the placement's own); `pipe_direction` is the pipe's, always a
+    /// quarter turn clockwise from it, so the pipe's axis is
+    /// `pipe_direction` and its opposite. `links` is [`CrossingLinks`].
+    Crossing {
+        direction: Direction,
+        pipe_direction: Direction,
+        items_here: Vec<ItemId>,
+        fluid: Option<FluidId>,
+        naming: PipeNaming,
+        candidates: Vec<FluidId>,
+        volume: f64,
+        capacity: f64,
+        pressure: f64,
+        is_source: bool,
+        is_inlet: bool,
+        links: CrossingLinks,
+    },
     /// `{"kind": "hopper", "direction": "east",
     ///   "footprint": {...}, "origin_tile": [-1, 0], "item": "tomato",
     ///   "quantity": 12, "capacity": 64, "fill": 0.1875,
@@ -1670,6 +1704,11 @@ impl From<BodyKind> for LinkKind {
             BodyKind::Hopper => LinkKind::Hopper,
             BodyKind::FluidTank => LinkKind::Tank,
             BodyKind::Dock => LinkKind::Dock,
+            // Only ever asked in a conveyor relation (a belt's output, a
+            // source's input), where a crossing *is* a belt tile. Its pipe
+            // side is reported as `Pipe` by the fluid pass directly, so no
+            // new wire variant exists for presentation to handle.
+            BodyKind::Crossing => LinkKind::Belt,
             // A rack is never on either end of a link, so this arm is only
             // reachable if one day something asks a rack's tile what it is
             // wired to. `Dock` is the nearest honest answer — a terminus —
@@ -1759,17 +1798,41 @@ pub struct PipeLinks {
     pub connections: Vec<PipeConnection>,
 }
 
+/// A crossing's links: its belt's and its pipe's, side by side in one
+/// object, because the one tile is both.
+///
+/// ```json
+/// { "inputs": [ {"from": "west", "kind": "belt"} ],
+///   "output": {"to": "east", "kind": "belt"},
+///   "connections": [ {"to": "north", "kind": "pipe"},
+///                    {"to": "south", "kind": "pipe"} ] }
+/// ```
+///
+/// `inputs`/`output` mean exactly what they do in [`ConveyorLinks`], and
+/// `connections` what it does in [`PipeLinks`] — except that a crossing's
+/// `connections` can only ever name the two sides along its pipe axis
+/// (the open-sides mask, [`pipe_open_toward`]).
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize)]
+pub struct CrossingLinks {
+    #[serde(flatten)]
+    pub conveyor: ConveyorLinks,
+    #[serde(flatten)]
+    pub pipe: PipeLinks,
+}
+
 /// The `links` object on a [`PlacementSnapshot`]: a belt or splitter
-/// carries [`ConveyorLinks`], a pipe carries [`PipeLinks`], and every
-/// other kind carries nothing (the field is omitted, so those placements
-/// serialize byte-for-byte as they did before the field existed).
-/// Serialized untagged — the two shapes share no field name, and a
-/// consumer already knows which it is reading from the placement's `kind`.
+/// carries [`ConveyorLinks`], a pipe carries [`PipeLinks`], a crossing
+/// carries both at once ([`CrossingLinks`]), and every other kind carries
+/// nothing (the field is omitted, so those placements serialize
+/// byte-for-byte as they did before the field existed). Serialized
+/// untagged — a consumer already knows which it is reading from the
+/// placement's `kind`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(untagged)]
 pub enum Links {
     Conveyor(ConveyorLinks),
     Pipe(PipeLinks),
+    Crossing(CrossingLinks),
 }
 
 /// One placed thing, statically described — the unit
@@ -1869,6 +1932,16 @@ enum BodyKind {
     /// `recompute_topology` is the thing that has to stay deliberate —
     /// sprint requirement R6, "belts and pipes do not interact with racks".
     WarehouseRack,
+    /// A belt and a pipe crossing on one tile ([`CROSSING_KIND`]): one
+    /// entity carrying **both** a [`BeltSegment`] and a [`PipeTile`], so the
+    /// grid stays one occupant per tile and no tile-addressed command ever
+    /// has to ask "which layer?". Belt-like in [`Splitter`]'s sense — every
+    /// solid transfer works on it verbatim — and a pipe tile in every fluid
+    /// sense but one: its pipe joins only along its own axis
+    /// ([`pipe_open_toward`]). The placement's `direction` is the belt's;
+    /// the pipe axis is derived from it ([`crossing_pipe_direction`]), so a
+    /// `Rotate` turns the whole assembly.
+    Crossing,
 }
 
 /// Everything derived from *where things stand*, rebuilt whenever that
@@ -2496,7 +2569,7 @@ impl World {
     /// `None` for a kind that is neither, which is what makes an unknown
     /// kind an unplaceable one.
     fn footprint_for(&self, kind: &str) -> Option<Footprint> {
-        if kind == BELT_KIND || kind == PIPE_KIND {
+        if kind == BELT_KIND || kind == PIPE_KIND || kind == CROSSING_KIND {
             return Some(Footprint::ONE_BY_ONE);
         }
         self.machines.footprint_of(kind)
@@ -2588,6 +2661,14 @@ impl World {
             .footprint_for(kind)
             .expect("can_construct checked the footprint exists");
         let tiles = footprint.tiles_facing(tile, direction);
+        if let Some(occupant) = self.crossing_partner(kind, tile, direction) {
+            self.assemble_crossing(occupant, kind, direction);
+            let taken = self.shop.owned.take_one(kind);
+            debug_assert!(taken, "owned count was checked above");
+            self.recompute_topology();
+            self.mark_tiles_dirty(&tiles);
+            return true;
+        }
         if tiles.iter().any(|t| self.topology.grid.contains_key(t)) {
             return false;
         }
@@ -2691,8 +2772,87 @@ impl World {
         true
     }
 
+    /// The belt or pipe standing on `tile` that placing `kind` there facing
+    /// `direction` would assemble into a crossing, if any — the one case
+    /// where `Place` onto an occupied tile is not a refusal
+    /// (`docs/BELT_PIPE_CROSSING_PLAN.md`). Only a pipe onto a plain belt or
+    /// a belt onto a plain pipe, and only **perpendicular**: a parallel
+    /// attempt is neither drawable nor meaningful, and the placed piece
+    /// already carries the direction the player chose, so it is refused
+    /// rather than guessed at. A splitter is not a belt here — its two
+    /// outputs leave no side for a pipe to pass through.
+    fn crossing_partner(
+        &self,
+        kind: &str,
+        tile: TileCoord,
+        direction: Direction,
+    ) -> Option<Entity> {
+        let wanted = match kind {
+            PIPE_KIND => BodyKind::Belt,
+            BELT_KIND => BodyKind::Pipe,
+            _ => return None,
+        };
+        let &occupant = self.topology.grid.get(&tile)?;
+        if self.body_kind(occupant) != Some(wanted) {
+            return None;
+        }
+        let standing = self.placement_of(occupant).direction;
+        let perpendicular = direction != standing && direction != standing.opposite();
+        perpendicular.then_some(occupant)
+    }
+
+    /// Turns the belt or pipe `occupant` into a crossing by adding the
+    /// `placed` half to the entity already standing there.
+    ///
+    /// In place rather than despawn-and-respawn, because that is what "the
+    /// existing `BeltSegment` moves across verbatim" comes to: a belt keeps
+    /// the very component holding its items, so upgrading a live line
+    /// destroys nothing on the tile. A pipe's volume lives in its network
+    /// rather than on the entity, and the recompute that follows carries it
+    /// across by tile as it does for any topology change. The placement
+    /// takes the **belt's** direction either way — it is the crossing's one
+    /// `Direction` ([`crossing_pipe_direction`]).
+    fn assemble_crossing(&mut self, occupant: Entity, placed: &str, direction: Direction) {
+        if placed == BELT_KIND {
+            self.ecs
+                .insert_one(
+                    occupant,
+                    BeltSegment::new(
+                        Fx::from_num(BELT_TILE_LENGTH),
+                        Fx::from_num(ITEM_MIN_SPACING_TILES),
+                    ),
+                )
+                .expect("the grid only ever names live entities");
+        } else {
+            self.ecs
+                .insert_one(
+                    occupant,
+                    PipeTile {
+                        capacity: Fx::from_num(PIPE_SEGMENT_CAPACITY),
+                    },
+                )
+                .expect("the grid only ever names live entities");
+        }
+        let mut placement = self
+            .ecs
+            .get::<&mut Placement>(occupant)
+            .expect("a placed entity always has a Placement");
+        placement.kind = CROSSING_KIND.to_string();
+        if placed == BELT_KIND {
+            placement.direction = direction;
+        }
+        drop(placement);
+        *self
+            .ecs
+            .get::<&mut BodyKind>(occupant)
+            .expect("every placement carries a BodyKind") = BodyKind::Crossing;
+    }
+
     /// Removes whatever occupies `tile`, crediting one back to the owned
-    /// count of its kind. See [`PlayerCommand::Remove`].
+    /// count of its kind — or, for a crossing, one belt **and** one pipe,
+    /// the two things it was assembled from (there is no "remove just the
+    /// pipe": that would be the layer question coming back at removal
+    /// time). See [`PlayerCommand::Remove`].
     fn try_remove(&mut self, tile: TileCoord) -> bool {
         let Some(&entity) = self.topology.grid.get(&tile) else {
             return false;
@@ -2722,7 +2882,12 @@ impl World {
         self.ecs
             .despawn(entity)
             .expect("the grid only ever names live entities");
-        self.shop.owned.add(&placement.kind, 1);
+        if placement.kind == CROSSING_KIND {
+            self.shop.owned.add(BELT_KIND, 1);
+            self.shop.owned.add(PIPE_KIND, 1);
+        } else {
+            self.shop.owned.add(&placement.kind, 1);
+        }
         self.recompute_topology();
         self.mark_tiles_dirty(&tiles);
         true
@@ -3040,6 +3205,12 @@ impl World {
                 BodyKind::FluidTank => topology.tanks.push(entity),
                 BodyKind::Dock => topology.docks.push(entity),
                 BodyKind::WarehouseRack => topology.racks.push(entity),
+                // Both at once: its belt moves and hands off with the belts,
+                // its pipe joins a run with the pipes.
+                BodyKind::Crossing => {
+                    topology.belts.push(entity);
+                    topology.pipes.push(entity);
+                }
             }
             let placement = self.placement_of(entity);
             let origin = self.position_of(entity);
@@ -3063,13 +3234,21 @@ impl World {
         // seeded empty here and filled in below at the exact point each
         // relation is resolved, so a lonely belt still reports
         // `{"inputs": [], "output": null}` and a lonely pipe
-        // `{"connections": []}`. Sorted by side at the end of the pass.
+        // `{"connections": []}`. A crossing is in both lists and gets the
+        // one object carrying both halves. Sorted by side at the end of the
+        // pass.
         let mut links: BTreeMap<Entity, Links> = BTreeMap::new();
         for &entity in topology.belts.iter().chain(topology.splitters.iter()) {
-            links.insert(entity, Links::Conveyor(ConveyorLinks::default()));
+            let seed = match body_of(entity) {
+                BodyKind::Crossing => Links::Crossing(CrossingLinks::default()),
+                _ => Links::Conveyor(ConveyorLinks::default()),
+            };
+            links.insert(entity, seed);
         }
         for &entity in &topology.pipes {
-            links.insert(entity, Links::Pipe(PipeLinks::default()));
+            links
+                .entry(entity)
+                .or_insert_with(|| Links::Pipe(PipeLinks::default()));
         }
         fn conveyor_links(
             links: &mut BTreeMap<Entity, Links>,
@@ -3077,12 +3256,14 @@ impl World {
         ) -> &mut ConveyorLinks {
             match links.get_mut(&entity) {
                 Some(Links::Conveyor(conveyor)) => conveyor,
+                Some(Links::Crossing(crossing)) => &mut crossing.conveyor,
                 _ => unreachable!("every belt-like entity was seeded with ConveyorLinks"),
             }
         }
         fn pipe_links(links: &mut BTreeMap<Entity, Links>, entity: Entity) -> &mut PipeLinks {
             match links.get_mut(&entity) {
                 Some(Links::Pipe(pipe)) => pipe,
+                Some(Links::Crossing(crossing)) => &mut crossing.pipe,
                 _ => unreachable!("every pipe entity was seeded with PipeLinks"),
             }
         }
@@ -3099,8 +3280,8 @@ impl World {
             let &occupant = grid.get(&target)?;
             match body_of(occupant) {
                 // Belt-like: takes anything, whatever it is facing, exactly
-                // as a belt tile always has.
-                BodyKind::Belt | BodyKind::Splitter => Some(occupant),
+                // as a belt tile always has — a crossing's belt included.
+                BodyKind::Belt | BodyKind::Splitter | BodyKind::Crossing => Some(occupant),
                 // A machine or a dock only accepts on its inlet face.
                 BodyKind::Machine | BodyKind::Dock => {
                     let sink = self.placement_of(occupant);
@@ -3197,23 +3378,42 @@ impl World {
         }
 
         // --- fluid networks: one per connected component of pipe tiles,
-        // adjacency undirected (see `fluid.rs`'s module doc).
-        let pipe_tiles: BTreeMap<TileCoord, (Entity, Fx, Direction)> = topology
+        // adjacency undirected (see `fluid.rs`'s module doc) — and agreed
+        // only where BOTH tiles are open toward each other (the open-sides
+        // mask, [`pipe_open_toward`]), which keeps the relation symmetric
+        // and so the components well defined. The fourth field is the body,
+        // which is what the mask is read off.
+        let pipe_tiles: BTreeMap<TileCoord, (Entity, Fx, Direction, BodyKind)> = topology
             .pipes
             .iter()
             .map(|&entity| {
                 let placement = self.placement_of(entity);
+                let body = body_of(entity);
                 let capacity = self
                     .ecs
                     .get::<&PipeTile>(entity)
                     .expect("a pipe placement carries a PipeTile")
                     .capacity;
+                let direction = match body {
+                    BodyKind::Crossing => crossing_pipe_direction(placement.direction),
+                    _ => placement.direction,
+                };
                 (
                     self.position_of(entity),
-                    (entity, capacity, placement.direction),
+                    (entity, capacity, direction, body),
                 )
             })
             .collect();
+        // Whether the pipe on `tile` is open on `side`; `false` for a tile
+        // with no pipe on it at all.
+        let opens = |tile: TileCoord, side: Direction| {
+            pipe_tiles
+                .get(&tile)
+                .is_some_and(|&(_, _, direction, body)| pipe_open_toward(body, direction, side))
+        };
+        let joined = |tile: TileCoord, side: Direction| {
+            opens(tile, side) && opens(side.step(tile), side.opposite())
+        };
         let mut unvisited: Vec<TileCoord> = pipe_tiles.keys().copied().collect();
         unvisited.reverse(); // pop() then yields ascending tile order
         let mut seen: BTreeMap<TileCoord, ()> = BTreeMap::new();
@@ -3231,7 +3431,7 @@ impl World {
                 component.push(tile);
                 for dir in Direction::ALL {
                     let next = dir.step(tile);
-                    if pipe_tiles.contains_key(&next) && seen.insert(next, ()).is_none() {
+                    if joined(tile, dir) && seen.insert(next, ()).is_none() {
                         frontier.push(next);
                     }
                 }
@@ -3246,7 +3446,7 @@ impl World {
             let segments: Vec<PipeSegment> = component
                 .iter()
                 .map(|&tile| {
-                    let (_, capacity, direction) = pipe_tiles[&tile];
+                    let (_, capacity, direction, _) = pipe_tiles[&tile];
                     let mut segment = PipeSegment::new(tile, direction, capacity);
                     segment.volume = carried_volumes.get(&tile).copied().unwrap_or(Fx::ZERO);
                     segment
@@ -3258,12 +3458,14 @@ impl World {
             for (i, &tile) in component.iter().enumerate() {
                 for dir in [Direction::East, Direction::North] {
                     let neighbour = dir.step(tile);
-                    if let Some(&j) = index_of.get(&neighbour) {
+                    if let Some(&j) = index_of.get(&neighbour)
+                        && joined(tile, dir)
+                    {
                         segment_links.push((i, j));
                         // The same adjacency, once from each end, for the
                         // wire.
-                        let (this, _, _) = pipe_tiles[&tile];
-                        let (that, _, _) = pipe_tiles[&neighbour];
+                        let (this, _, _, _) = pipe_tiles[&tile];
+                        let (that, _, _, _) = pipe_tiles[&neighbour];
                         pipe_links(&mut links, this)
                             .connections
                             .push(PipeConnection {
@@ -3325,19 +3527,21 @@ impl World {
 
             let mut output_network: Option<usize> = None;
             if deposits {
+                // The pipe stands off the outlet face, so from the pipe the
+                // machine is back the way the machine points — the side the
+                // pipe has to be open on.
                 let tap = placement
                     .footprint
                     .outlet_neighbours(origin, placement.direction)
                     .into_iter()
+                    .filter(|&tile| opens(tile, placement.direction.opposite()))
                     .find_map(|tile| topology.pipe_index.get(&tile).map(|&index| (tile, index)));
                 if let Some((tile, (network, segment))) = tap {
                     output_network = Some(network);
                     topology
                         .machine_output_taps
                         .push((machine, network, segment));
-                    // The pipe stands off the outlet face, so from the pipe
-                    // the machine is back the way the machine points.
-                    let (pipe, _, _) = pipe_tiles[&tile];
+                    let (pipe, _, _, _) = pipe_tiles[&tile];
                     pipe_links(&mut links, pipe)
                         .connections
                         .push(PipeConnection {
@@ -3358,6 +3562,9 @@ impl World {
                     .tiles(origin)
                     .into_iter()
                     .flat_map(|tile| Direction::ALL.map(|dir| (dir, dir.step(tile))))
+                    // A crossing's pipe is closed across the belt, so a
+                    // machine beside it on that side is not plumbed into it.
+                    .filter(|&(dir, neighbour)| opens(neighbour, dir.opposite()))
                     .filter_map(|(dir, neighbour)| {
                         topology
                             .pipe_index
@@ -3375,7 +3582,7 @@ impl World {
                     topology.machine_taps.push((machine, network, segment));
                     // `dir` stepped from the footprint to the pipe; the
                     // wire names the side from the pipe's point of view.
-                    let (pipe, _, _) = pipe_tiles[&tile];
+                    let (pipe, _, _, _) = pipe_tiles[&tile];
                     pipe_links(&mut links, pipe)
                         .connections
                         .push(PipeConnection {
@@ -3398,11 +3605,12 @@ impl World {
                 .footprint
                 .outlet_neighbours(origin, placement.direction)
                 .into_iter()
+                .filter(|&tile| opens(tile, placement.direction.opposite()))
                 .find_map(|tile| topology.pipe_index.get(&tile).map(|&index| (tile, index)));
             if let Some((tile, (network, segment))) = discharge {
                 topology.networks[network].mark_source(segment);
                 topology.tank_discharges.push((tank, network, segment));
-                let (pipe, _, _) = pipe_tiles[&tile];
+                let (pipe, _, _, _) = pipe_tiles[&tile];
                 pipe_links(&mut links, pipe)
                     .connections
                     .push(PipeConnection {
@@ -3443,6 +3651,13 @@ impl World {
             match entry {
                 Links::Conveyor(conveyor) => conveyor.inputs.sort_by_key(|input| input.from),
                 Links::Pipe(pipe) => pipe.connections.sort_by_key(|connection| connection.to),
+                Links::Crossing(crossing) => {
+                    crossing.conveyor.inputs.sort_by_key(|input| input.from);
+                    crossing
+                        .pipe
+                        .connections
+                        .sort_by_key(|connection| connection.to);
+                }
             }
         }
         topology.links = links;
@@ -3945,6 +4160,7 @@ impl World {
     fn conveyor_links_of(&self, entity: Entity) -> ConveyorLinks {
         match self.topology.links.get(&entity) {
             Some(Links::Conveyor(conveyor)) => conveyor.clone(),
+            Some(Links::Crossing(crossing)) => crossing.conveyor.clone(),
             _ => unreachable!("every belt-like entity has ConveyorLinks in the topology"),
         }
     }
@@ -4088,7 +4304,7 @@ impl World {
     /// particular, was checked there); this only picks the transfer.
     fn try_handoff_from_belt_like(&mut self, from: Entity, target: Entity) -> bool {
         match self.body_kind(target) {
-            Some(BodyKind::Belt) | Some(BodyKind::Splitter) => {
+            Some(BodyKind::Belt) | Some(BodyKind::Splitter) | Some(BodyKind::Crossing) => {
                 self.try_transfer_belt_to_belt(from, target)
             }
             Some(BodyKind::Machine) => self.try_transfer_belt_to_machine(from, target),
@@ -4697,7 +4913,11 @@ impl World {
                 continue;
             };
             match self.body_kind(entity) {
-                Some(BodyKind::Belt) => snapshot.belts.push(self.belt_snapshot(entity)),
+                // A crossing's moving half is its belt; its pipe is polled
+                // like every other pipe tile's.
+                Some(BodyKind::Belt) | Some(BodyKind::Crossing) => {
+                    snapshot.belts.push(self.belt_snapshot(entity))
+                }
                 Some(BodyKind::Splitter) => snapshot.splitters.push(self.splitter_snapshot(entity)),
                 _ => {}
             }
@@ -5414,6 +5634,40 @@ impl World {
                     },
                 }
             }
+            BodyKind::Crossing => {
+                let &(network_index, segment_index) = self.topology.pipe_index.get(&pos)?;
+                let network = &self.topology.networks[network_index];
+                let segment = &network.segments()[segment_index];
+                let items_here = self
+                    .ecs
+                    .get::<&BeltSegment>(entity)
+                    .expect("a crossing carries a BeltSegment")
+                    .snapshot_positions()
+                    .into_iter()
+                    .map(|(item, _)| item)
+                    .collect();
+                TileSnapshot::Crossing {
+                    direction: placement.direction,
+                    pipe_direction: segment.direction,
+                    items_here,
+                    fluid: network.fluid.clone(),
+                    naming: network.naming(),
+                    candidates: network.candidates().to_vec(),
+                    volume: segment.volume.to_num::<f64>(),
+                    capacity: segment.capacity.to_num::<f64>(),
+                    pressure: segment.pressure().to_num::<f64>(),
+                    is_source: segment.is_source,
+                    is_inlet: self
+                        .topology
+                        .machine_taps
+                        .iter()
+                        .any(|&(_, net, seg)| net == network_index && seg == segment_index),
+                    links: match self.topology.links.get(&entity) {
+                        Some(Links::Crossing(crossing)) => crossing.clone(),
+                        _ => unreachable!("every crossing has CrossingLinks in the topology"),
+                    },
+                }
+            }
             BodyKind::Hopper => {
                 let snapshot = self.hopper_snapshot(entity);
                 TileSnapshot::Hopper {
@@ -5492,6 +5746,11 @@ impl World {
             .iter()
             .map(|&entity| (self.position_of(entity), self.placement_of(entity), entity))
             .collect()
+    }
+
+    /// The kind id `entity` was placed as — `crossing` for an assembled one.
+    pub(super) fn kind_of(&self, entity: Entity) -> String {
+        self.placement_of(entity).kind
     }
 
     /// Whatever claims `tile`, if anything — any tile of a footprint, like
@@ -6169,7 +6428,36 @@ fn footprint_chunks(origin: TileCoord, footprint: Footprint) -> Vec<ChunkId> {
 /// way a belt can", so belt linking, machine/hopper discharge and a
 /// splitter's own outputs cannot disagree about it.
 fn is_belt_like(body: BodyKind) -> bool {
-    matches!(body, BodyKind::Belt | BodyKind::Splitter)
+    matches!(
+        body,
+        BodyKind::Belt | BodyKind::Splitter | BodyKind::Crossing
+    )
+}
+
+/// The direction of a crossing's pipe, given its belt's — always a quarter
+/// turn clockwise, so the belt's direction is the crossing's one
+/// `Direction` and `rotate_cw` stays the only rotation: turning the belt
+/// turns the pipe axis with it.
+pub(super) fn crossing_pipe_direction(belt: Direction) -> Direction {
+    belt.rotate_cw()
+}
+
+/// **The open-sides mask** (`docs/BELT_PIPE_CROSSING_PLAN.md`): whether a
+/// pipe tile of `body`, running along `direction`, joins on `side`.
+///
+/// An ordinary pipe is open on all four sides whatever its direction, as it
+/// always was. A crossing's pipe is open only along its own axis — the two
+/// sides the belt does not use — because it physically spans the tile on
+/// that axis alone: joining on all four would weld any pipe beside the belt
+/// into a run it visibly does not touch, and two perpendicular runs meeting
+/// at a crossing would silently become one. Every relation the fluid pass
+/// resolves (pipe to pipe, tap, discharge) asks this, and pipe-to-pipe asks
+/// it from **both** ends, which keeps adjacency symmetric.
+fn pipe_open_toward(body: BodyKind, direction: Direction, side: Direction) -> bool {
+    match body {
+        BodyKind::Crossing => side == direction || side == direction.opposite(),
+        _ => true,
+    }
 }
 
 fn pipe_snapshot(network: &FluidNetwork, segment: &PipeSegment) -> PipeSnapshot {
