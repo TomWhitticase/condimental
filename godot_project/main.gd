@@ -1141,6 +1141,17 @@ var _ghost_asset := ""
 var _ghost_tile := Vector2i.ZERO
 var _ghost_valid := false
 var _ghost_reason := "" # "", "blocked", "none_owned", "nothing_here", "rack_needed"
+## The simulation's own sentence for a refused placement (`preview_command`'s
+## `reason`), shown verbatim under "✗ BLOCKED". Empty unless the ghost is blocked.
+var _ghost_refusal := ""
+## What the simulation says the ghost's tile would END UP as
+## (`preview_command`'s `result_kind`) — the ghost's kind, or `crossing` for a
+## pipe across a belt or a belt across a pipe. Empty unless valid.
+var _ghost_result_kind := ""
+## The last `preview_command_json` answer, keyed on the command and the sim's
+## revision, so a ghost held still asks once per change rather than per frame.
+var _ghost_preview_key := ""
+var _ghost_preview: Dictionary = {}
 var _owned_counts: Dictionary = {} # kind -> owned count, repolled while building
 var _shop_prices: Dictionary = {} # kind -> price, from the same poll
 var _shop_affordable: Dictionary = {} # kind -> can the balance cover one, same poll
@@ -13202,25 +13213,7 @@ func _confirm_build() -> void:
 		return
 	if _build_kind == "" or not _ghost_valid:
 		return
-	var command := {
-		"type": "place",
-		"kind": _build_kind,
-		"tile": [tile.x, tile.y],
-		"direction": _build_direction,
-	}
-	# **A hopper says what it will hold.** `PlayerCommand::Place`'s `item` is
-	# optional only while the world has exactly one raw solid to infer from,
-	# and the shipped chain has had two since the chain rework — so omitting
-	# it (which this function did until then) is a silent refusal, and
-	# placing a hopper did nothing at all. Sent for the hopper and no other
-	# kind, because the field is ignored elsewhere and a command carrying a
-	# field that means nothing invites the next reader to think it does.
-	if _build_kind == HOPPER_KIND:
-		var item := _selected_hopper_item()
-		if item == "":
-			return
-		command["item"] = item
-	_issue_world_command(command)
+	_issue_world_command(_place_command_at(_build_kind, tile, _build_direction))
 	# The ghost said the click would work; the simulation has the final say.
 	# What is on the tile afterwards is the answer, and the sound says it.
 	var placed := not _placement_at_tile(tile).is_empty()
@@ -13340,18 +13333,38 @@ func _ghost_target_tile() -> Vector2i:
 	return _tile_under_screen_pos(query_pos)
 
 
-## Whether the rotated footprint of `kind` at `tile` would overlap anything
-## already placed. A pure Godot-side check against `_occupancy` — the same map
-## hover resolves through, which came from `world_layout_json`'s own
-## `occupies` lists — so aiming the ghost costs no simulation round trip at
-## all. The simulation still has the final say (`Place` refuses a collision
-## silently); this is what stops the player finding that out by clicking.
-func _ghost_blocked_tiles(kind: String, tile: Vector2i, direction: String) -> Array:
-	var blocked: Array = []
-	for covered in _placement_tiles(tile, _kind_footprint(kind), direction):
-		if _occupancy.has(_tile_key(covered)):
-			blocked.append(covered)
-	return blocked
+## The `Place` command a click on `tile` would send — ONE builder, used by
+## the click and by the ghost's preview alike, so what the ghost asks the
+## simulation about is exactly what the click will do.
+##
+## **A hopper says what it will hold.** `PlayerCommand::Place`'s `item` is
+## optional only while the world has exactly one raw solid to infer from, and
+## the shipped chain has had two since the chain rework — so omitting it is a
+## refusal, and the preview says which. Sent for the hopper and no other kind,
+## because the field is ignored elsewhere and a command carrying a field that
+## means nothing invites the next reader to think it does.
+func _place_command_at(kind: String, tile: Vector2i, direction: String) -> Dictionary:
+	var command := {"type": "place", "kind": kind, "tile": [tile.x, tile.y], "direction": direction}
+	if kind == HOPPER_KIND and _selected_hopper_item() != "":
+		command["item"] = _selected_hopper_item()
+	return command
+
+
+## The simulation's verdict on placing `kind` at `tile` facing `direction`:
+## `{valid, reason, result_kind}` from `preview_command_json` (ARCHITECTURE.md
+## §4) — the same validation pass the real command runs, so the ghost cannot
+## disagree with the click. Which tiles collide, and whether a pipe meets a
+## belt at right angles, are the SIM's rules, and nothing here re-derives
+## either. Cached on the command and `sim.revision()`: every placement,
+## purchase and tick moves the revision, and nothing else changes the answer.
+func _preview_place(kind: String, tile: Vector2i, direction: String) -> Dictionary:
+	var command_json := JSON.stringify(_place_command_at(kind, tile, direction))
+	var key := "%s@%d" % [command_json, sim.revision()]
+	if key != _ghost_preview_key:
+		var parsed = JSON.parse_string(sim.preview_command_json(command_json))
+		_ghost_preview = parsed if parsed is Dictionary else {}
+		_ghost_preview_key = key
+	return _ghost_preview
 
 
 ## Rebuilds the ghost's own body — one translucent copy of the kind's real
@@ -13516,16 +13529,22 @@ func _update_ghost() -> void:
 			_tint_ghost(GHOST_TINT_REMOVE)
 			showing = true
 	elif tile != HOVER_NO_TILE:
-		var blocked := _ghost_blocked_tiles(_build_kind, tile, _build_direction)
+		var preview := _preview_place(_build_kind, tile, _build_direction)
+		_ghost_refusal = ""
+		_ghost_result_kind = ""
 		if _owned_of(_build_kind) <= 0:
+			# Ahead of the sim's own verdict, deliberately: whatever else is
+			# wrong, the way forward is the build menu, and this prompt says so.
 			_ghost_valid = false
 			_ghost_reason = "none_owned"
-		elif not blocked.is_empty():
+		elif not bool(preview.get("valid", false)):
 			_ghost_valid = false
 			_ghost_reason = "blocked"
+			_ghost_refusal = String(preview.get("reason", ""))
 		else:
 			_ghost_valid = true
 			_ghost_reason = ""
+			_ghost_result_kind = String(preview.get("result_kind", ""))
 		# **A ghost previews what the game's connection rules already make
 		# certain, and never what the simulation still has to decide.** That
 		# one rule is why the belt ghost and the pipe ghost look like they
@@ -13552,14 +13571,27 @@ func _update_ghost() -> void:
 		# fitting, because which tile of a run a machine taps IS the sim's
 		# choice — the same line, drawn in the same place.
 		#
-		# Where a would-be link is genuinely uncertain the answer is
-		# ARCHITECTURE.md §4's planned `preview_command`, a validation pass
-		# the sim itself answers; until it lands the belt ghost's job is the
-		# tile, the facing (named in the prompt's `facing east`) and whether
-		# the click will succeed.
+		# Whether the click will succeed at all is `preview_command`'s answer
+		# (ARCHITECTURE.md §4, `_preview_place`), a validation pass the sim
+		# itself runs; it does not preview links, so the belt ghost's job stays
+		# the tile, the facing (named in the prompt's `facing east`) and that
+		# verdict.
 		var ghost_asset := _shop_asset_for(_build_kind)
 		var ghost_yaw := _direction_yaw(_build_direction)
-		if _build_kind == PIPE_KIND:
+		#
+		# **A crossing is the sim's answer, not the ghost's guess.** When the
+		# preview says the tile would end up a `crossing`, the ghost is the
+		# whole stack — belt under gantry, at the BELT's yaw like the placed
+		# tile — so a pipe held across a belt shows the bridge it will build
+		# and one held along it stays the refused red pipe. Which facing is
+		# "across" is never worked out here.
+		if _ghost_result_kind == CROSSING_KIND:
+			var belt_direction := _build_direction
+			if _build_kind != BELT_KIND:
+				belt_direction = _placement_direction(_placement_at_tile(tile))
+			ghost_asset = _crossing_ghost_asset(belt_direction)
+			ghost_yaw = _direction_yaw(belt_direction)
+		elif _build_kind == PIPE_KIND:
 			var ghost_shape := _pipe_ghost_shape(tile, _build_direction)
 			ghost_asset = String(ghost_shape["asset"])
 			ghost_yaw = float(ghost_shape["yaw"])
@@ -13657,9 +13689,19 @@ func _placement_prompt_text() -> String:
 		"none_owned":
 			return "✗ NONE OWNED  %s\nbuy one in the build menu (E)\nESC: cancel" % kind_name
 		"blocked":
-			return "✗ BLOCKED  %s  ·  facing %s\nsomething is already there\nR: rotate    ESC: cancel%s" % [
-				kind_name, _build_direction, contents_hint
+			# The simulation's own sentence, verbatim — it is the one that knows
+			# whether the tile is taken or the pipe merely runs the wrong way.
+			var refusal := _ghost_refusal if _ghost_refusal != "" else "something is already there"
+			return "✗ BLOCKED  %s  ·  facing %s\n%s\nR: rotate    ESC: cancel%s" % [
+				kind_name, _build_direction, refusal, contents_hint
 			]
+	# A placement that assembles a crossing names both halves, the way the
+	# placed tile's hover will: the pipe goes OVER, the belt UNDER.
+	if _ghost_result_kind == CROSSING_KIND:
+		var other := BELT_KIND if _build_kind == PIPE_KIND else PIPE_KIND
+		kind_name = "%s %s %s" % [
+			kind_name, "over" if _build_kind == PIPE_KIND else "under", _kind_display_name(other)
+		]
 	return "✔ PLACE  %s  ·  facing %s\nclick to build    %d left to place\n%s\nR: rotate    ESC: cancel%s" % [
 		kind_name, _build_direction, owned, _auto_buy_hint_text(), contents_hint
 	]

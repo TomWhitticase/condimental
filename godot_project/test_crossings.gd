@@ -21,7 +21,18 @@
 #   * hovering a crossing names both halves, in display names, and gives it
 #     the pipe's level meter,
 #   * the remove ghost is the whole stack, belt and gantry,
-#   * removing a crossing takes both instances away.
+#   * the BUILD ghost teaches the rule with the sim's answer, both ways
+#     round: a pipe held across a belt (or a belt across a pipe) is a valid
+#     ghost drawn as the crossing it will build, named "Pipe over Belt" /
+#     "Belt under Pipe"; held along it, the same tile is refused with the
+#     sim's own sentence — and nothing here or in main.gd says which facing
+#     is "across",
+#   * removing a crossing takes both instances away,
+#   * `CROSSING_LIFT_VOXELS` is what the staged models say it is: the floor of
+#     the gantry's bore stands exactly that far above an ordinary pipe's, read
+#     from the `.vox` files `cargo xtask` staged. main.gd mirrors assets.rs's
+#     `CROSSING_LIFT` by hand, and this is what turns a moved `GANTRY_AXIS_Z`
+#     red instead of drawing the liquid in the gantry's wall.
 #
 # The one-frame-before-checking dance and the "never hold your own camera
 # reference" rule are inherited from test_hover.gd — see that file's header.
@@ -80,7 +91,95 @@ func _fluid_node_at(tile: Vector2i) -> Node3D:
 	return null
 
 
+## The voxels of a staged model as a set of `Vector3i`, read straight out of
+## the MagicaVoxel file — every material class `voxgen` split it into, since
+## a matte voxel and a metal one are both the model. Only SIZE/XYZI are read;
+## every other chunk is skipped by its own length.
+func _vox_voxels(asset: String) -> Dictionary:
+	var voxels: Dictionary = {}
+	for path in [main.VOX_DIR + asset + ".vox", main.VOX_DIR + asset + ".metal.vox"]:
+		var file := FileAccess.open(path, FileAccess.READ)
+		if file == null:
+			continue
+		file.seek(8) # "VOX " + version
+		while file.get_position() < file.get_length():
+			var id := file.get_buffer(4).get_string_from_ascii()
+			var content := file.get_32()
+			var children := file.get_32()
+			if id == "MAIN":
+				continue
+			var next := file.get_position() + content + children
+			if id == "XYZI":
+				for _i in range(file.get_32()):
+					var bytes := file.get_buffer(4)
+					voxels[Vector3i(bytes[0], bytes[1], bytes[2])] = true
+			file.seek(next)
+	return voxels
+
+
+## The floor of the bore at the model's centre column: one above the highest
+## solid voxel there, since a pipe's bore is carved open to the sky. The same
+## height `PIPE_BORE_FLOOR_VOXELS` names for an ordinary run.
+func _bore_floor(voxels: Dictionary) -> int:
+	var centre: int = int(main.VOXELS_PER_TILE) / 2 - 1
+	var top := -1
+	for voxel in voxels.keys():
+		if voxel.x == centre and voxel.y == centre:
+			top = maxi(top, voxel.z)
+	return top + 1
+
+
+## Holds `kind` over `tile` at `facing` and reads back what the ghost became.
+## "" when it is what the case expects. The expected half is only ever the
+## outcome — valid or not, and the words — never which facings are legal.
+func _ghost_case(kind: String, tile: Vector2i, facing: String, valid: bool, name: String) -> String:
+	main._enter_build_mode(kind)
+	main._build_direction = facing
+	main._pointer_override = main._camera.unproject_position(
+		main._tile_origin(tile.x, tile.y, main.BELT_SURFACE_Y)
+	)
+	main._update_ghost()
+	if main._ghost_tile != tile:
+		return "the ghost landed on %s — the aim missed" % str(main._ghost_tile)
+	var prompt: String = main._placement_prompt_text()
+	var preview: Dictionary = main._preview_place(kind, tile, facing)
+	if main._ghost_valid != valid or bool(preview.get("valid", not valid)) != valid:
+		return "the ghost reads %s and the sim says %s, expected %s" % [
+			"valid" if main._ghost_valid else "refused", str(preview), "valid" if valid else "refused"
+		]
+	if valid:
+		var belt_facing: String = facing if kind == "belt" else "east"
+		if main._ghost_asset != main._crossing_ghost_asset(belt_facing):
+			return "the valid ghost is '%s', not the crossing stack" % main._ghost_asset
+		if not is_equal_approx(main._ghost_root.rotation.y, main._direction_yaw(belt_facing)):
+			return "the crossing ghost is not at the belt's yaw"
+		if not prompt.begins_with("✔") or not prompt.contains(name):
+			return "the prompt does not say '%s': %s" % [name, prompt.replace("\n", " / ")]
+	else:
+		var reason := String(preview.get("reason", ""))
+		if reason == "" or not prompt.begins_with("✗") or not prompt.contains(reason):
+			return "the refused prompt does not carry the sim's reason '%s': %s" % [
+				reason, prompt.replace("\n", " / ")
+			]
+		if main._ghost_asset.contains(main.GHOST_ASSET_STACK):
+			return "a refused ghost is drawn as a crossing"
+	return ""
+
+
 func _run_checks() -> void:
+	# --- the lift main.gd mirrors is the lift the models have ---------------
+	var plain_floor := _bore_floor(_vox_voxels(main.PIPE_ASSET))
+	var raised_floor := _bore_floor(_vox_voxels(main.CROSSING_GANTRY_ASSET))
+	if plain_floor <= 0 or raised_floor <= 0:
+		_fail("could not read the bore of '%s' / '%s' from the staged .vox files — run cargo xtask"
+			% [main.PIPE_ASSET, main.CROSSING_GANTRY_ASSET])
+		return
+	if raised_floor - plain_floor != main.CROSSING_LIFT_VOXELS:
+		_fail("the gantry's bore floor is %d voxels above a pipe's (%d vs %d) but CROSSING_LIFT_VOXELS is %d — \
+assets.rs's CROSSING_LIFT moved and main.gd's mirror did not"
+			% [raised_floor - plain_floor, raised_floor, plain_floor, main.CROSSING_LIFT_VOXELS])
+		return
+
 	Layouts.build_crossing_line(main.sim)
 	main._rebuild_world()
 
@@ -136,8 +235,10 @@ func _run_checks() -> void:
 		return
 	var raised := _fluid_node_at(under)
 	var plain := _fluid_node_at(ordinary)
-	if not String(raised.name).begins_with(String(main.PIPE_FLUID_ASSETS[main.CROSSING_GANTRY_ASSET])):
-		_fail("the crossing's liquid body is '%s', not the gantry's own fluid model" % raised.name)
+	var gantry_fluid := String(main.PIPE_FLUID_ASSETS.get(main.CROSSING_GANTRY_ASSET, ""))
+	if gantry_fluid == "" or not String(raised.name).begins_with(gantry_fluid):
+		_fail("the crossing's liquid body is '%s', not the gantry's own fluid model ('%s' in PIPE_FLUID_ASSETS)"
+			% [raised.name, gantry_fluid])
 		return
 	var lift: float = raised.position.y - plain.position.y
 	if not is_equal_approx(lift, main.CROSSING_LIFT_Y):
@@ -195,6 +296,25 @@ func _run_checks() -> void:
 		_fail("the crossing's ghost holds %d meshes, expected the belt's %d plus the gantry's %d"
 			% [stacked, belt_only, gantry_only])
 		return
+
+	# --- the build ghost, valid across and refused along --------------------
+	main._set_view_mode(main.ViewMode.ISOMETRIC)
+	for kind in ["pipe", "belt"]:
+		main.sim.issue_command_json(JSON.stringify({"type": "purchase", "kind": kind}))
+	main._refresh_owned_counts()
+	var run_tile := Vector2i(Layouts.CROSSING_PIPE_ONTO_BELT_X, 2)
+	for case in [
+		# held kind, tile, facing, valid, the name the prompt gives it
+		["pipe", Layouts.CROSSING_GHOST_TILE, "north", true, "Pipe over Belt"],
+		["pipe", Layouts.CROSSING_GHOST_TILE, "east", false, ""],
+		["belt", run_tile, "east", true, "Belt under Pipe"],
+		["belt", run_tile, "north", false, ""],
+	]:
+		var failure := _ghost_case(case[0], case[1], case[2], case[3], case[4])
+		if failure != "":
+			_fail("%s held over %s facing %s: %s" % [case[0], str(case[1]), case[2], failure])
+			return
+	main._exit_build_mode()
 
 	# --- Rotate turns the whole assembly, gantry with it --------------------
 	main._issue_world_command({"type": "rotate", "tile": [under.x, under.y]})
