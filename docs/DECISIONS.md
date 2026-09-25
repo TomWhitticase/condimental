@@ -25,6 +25,68 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-25: **A status lamp's two states are palette data, written as
+  modifiers of the `emissive` class, and every renderer reads the resolved
+  JSON.** (Issue #81: the asset browser drew every `*.emissive.vox` mesh at
+  full emission, so a cooking vat's rim read bright amber there and dark brown
+  in the game.)
+
+  **What the problem actually was.** A status lamp has two presentations, not
+  one. `main.gd` calls `_set_machine_running(key, false)` the moment a machine
+  body is built and only lights it while the machine is processing, so the dark
+  state is the one a machine is in for most of its life. That dark state was
+  three numbers hardcoded in `voxel_assets.gd` — a roughness, a zero emission
+  and `LAMP_OFF_ALBEDO`. That made it the one thing in the voxel pipeline with
+  no representation in `palette.ron`, and therefore the one thing a second
+  renderer could not read. The asset browser derives everything else it draws
+  live from repo files, which is the whole reason it cannot drift from the
+  pipeline; on lamps it had nothing to derive from, so it drew them all lit and
+  a reviewer approving a lamp there was approving a state the game rarely
+  shows.
+
+  **Why palette.ron, and why modifiers.** `palette.ron` is already the single
+  source of truth for colour and material (UI_UX.md §2a), and `voxgen` already
+  exports the class table to `models/materials.json` for exactly this reason.
+  A lamp state is a material fact, so it belongs there. It is written as a
+  *modifier* of the `emissive` class rather than as absolute numbers:
+  `emission_scale` multiplies the class's `emission_energy` instead of
+  restating it. The alternative — a literal `emission_energy: 1.2` in the lamp
+  table — would be a second copy of a number that already exists six lines
+  above, and retuning the class would leave the lit lamp behind at the old
+  value with nothing to catch it. With a scale there is no second copy to
+  drift: a lit lamp is *by construction* the emissive class at full strength.
+
+  **Why a separate file rather than a bigger materials.json.** `materials.json`
+  is a flat class → material map that both `voxel_assets.gd` and the browser's
+  `voxlib.py` iterate. Nesting a per-state table inside it would have forced a
+  shape migration on both readers to express something that is not a material
+  class. `lamp_states.json` is written beside it by the same pass, so it is
+  still generator output, still staged by `cargo xtask`, and still covered by
+  `rust.yml`'s regenerate-and-diff of `assets/voxels/models`.
+
+  **Why both emission and albedo.** A dead lens drops emission to zero *and*
+  darkens albedo to 0.38. The second is not redundant. It is what made the
+  dock's full-pool blink visible back when emission contributed nothing (the
+  two variants once rendered at most 2/255 apart with only energy between
+  them), and it is what keeps a dead lens reading as dead in a frame where the
+  glow pass is doing the talking. It is also the channel `palette.ron` itself
+  reaches for: the `status_*_off` entries are the same hues taken down to a
+  dark matte, which is a little over a third of the lit colour — the same
+  judgement, made where the colour could be chosen outright. 0.38 is that idea
+  applied to a mesh whose colour cannot be repainted per state, because voxel
+  colour is per-vertex.
+
+  **The schema bump.** Adding the table changes the shape of `palette.ron`, and
+  a loader that rejects rather than migrates has to be told. `schema_version`
+  went 1 → 2 and `SUPPORTED_SCHEMA_VERSION` with it. A content change — a
+  different hex, a different roughness — still would not bump it.
+
+  **What it is worth.** Measured over the cooking vat's lamp ring and divided
+  by the vat's own bright stainless in the same frame, the browser now draws an
+  idle ring at 0.193 against the game's 0.235, where before it drew 1.006. The
+  gap that remains is the browser's simpler light rig putting slightly less
+  ambient on a dead lens; the gap that closed was a factor of five.
+
 - 2026-09-21: **Settings are presentation; a cheat that moves money is a
   real simulation command; F3 is ungated in pre-alpha.** (Owner asked for a
   settings menu and a development cheat panel; the four shape questions —

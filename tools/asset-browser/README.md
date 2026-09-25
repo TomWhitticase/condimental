@@ -139,13 +139,18 @@ facing it is, so a screenshot carries which of the two it is.
   drawn at full emission while the game dims an idle machine, so the browser
   showed a bright amber ring where `--fixture vat` showed a brown one, and
   whoever approved that lamp had approved the state a machine spends least of
-  its life in (issue #81). Over the vat's lamp ring, against a fixed control
-  window on its stainless flank in the same frame, the ring reads **0.231**
-  of the steel's luma at `lamp=idle` here against the game's **0.251**, and
-  **1.205** at `lamp=running` — so the idle frame reads like the game's to
-  within 8%, and the lit one is nearly five times it. `lamp=running` is still
-  the default, because a lamp is drawn to be read when it is lit; `l` and
-  `?lamp=idle` are how the other state is reviewed.
+  its life in (issue #81). Measured over the vat's lamp ring and divided by
+  the vat's own bright stainless in the same frame — the surface both
+  renderers light to within 3% of each other, which is what makes the two
+  comparable at all — the ring reads **0.193** at `lamp=idle` here against
+  **0.235** in `scripts/screenshot-scene.sh --fixture vat`, and **1.006** at
+  `lamp=running`, which is what this page drew for an idle vat before. So the
+  error this closes was a factor of five, and what is left is the browser's
+  simpler rig putting slightly less ambient on a dead lens. A fixed off-lamp
+  control box on the flank reads the same to 0.1/255 across the pair, so the
+  framing did not move between them. `lamp=running` is still the default,
+  because a lamp is drawn to be read when it is lit; `l` and `?lamp=idle` are
+  how the other state is reviewed.
 - The ambient occlusion is baked per voxel, not screen-space: the occupancy
   grid the mesh is built from is blurred and sampled along each face's normal,
   and dims *indirect diffuse only*, as Godot's SSAO does with
