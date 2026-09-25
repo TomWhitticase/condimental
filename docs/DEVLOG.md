@@ -221,6 +221,49 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-25 — The crossing fixture is made to prove it is running
+
+`--fixture crossing` shipped in PR #172 building its line and never ticking
+it, so every frame shot of it was a bare belt under two grey pipe runs — and
+every one of those frames printed `SCREENSHOT_OK`. A dead fixture does not
+look like a harness nobody ran; it looks like art that has not landed, which
+is exactly the judgement a PR screenshot is there to support. Its own doc
+comment described items backing up under the arch, which was true of the
+sim and false of every picture.
+
+Two things now stand between that frame and a PR body. `test_screenshot.gd`
+gained `SETTLED_FIXTURES`, applied after `_resolve_fixture` so it catches a
+fixture named with `--fixture` and not only one a convenience flag picked —
+the gap `crossing` fell through, having no flag of its own to set `_populate`
+beside. And because a list is the thing that gets forgotten, the fixture also
+carries `Layouts.crossing_line_idle`, asked in `_frame_health` ahead of the
+`HEALTHY_FIXTURES` gate: the line makes nothing and ships nothing, so
+`produced == 0` is its healthy state and the production check says nothing
+about it at all. What it has to prove instead is that it moved — an item on
+each crossing tile, fluid in every segment of every run. The list makes the
+good frame the default; the check makes the bad frame impossible.
+
+The line was also starved. Four auto-filling tanks, two per run, drank more
+vinegar than the 64 the fixture bought: the first took 50 and the
+`CROSSING_BELT_ONTO_PIPE_X` run stood dry in every frame ever shot of it.
+Feeding both ends was the wrong instinct anyway — both halves of a run colour
+whether or not the crossing joined them, which is the one fact the colour is
+there to show. One tank at the north end wets all seven segments *through*
+the crossing, measured, and leaves stock to spare. The count is now
+`CROSSING_VINEGAR`, next to the tanks it feeds.
+
+Doc corrections alongside: `BELT_PIPE_CROSSING_PLAN.md` now names the shipped
+`pipe_crossing` rather than the spike's `pipe_gantry`, and its clearance
+figure is re-measured on the shipped model — the gantry's lowest voxel over
+the lane is z = 28, three clear of `CROSSING_ITEM_TOP_Z`, where the spike
+said 27. **`preview_command` is no longer "planned":** it landed in PR #171
+and the ghost has asked it since #172, so the two `DECISIONS.md` passages
+that called it future work, and the one claiming ghost validity is a pure
+Godot-side footprint check, say what is true now. The 2026-09-08 belt-shapes
+entry below still calls it planned; that entry is history and was accurate
+when written, and this paragraph is the correction the log's append-only
+rule asks for.
+
 ### 2026-09-25 — Screenshot renders stop interrupting the person at the laptop
 
 `scripts/screenshot-scene.sh` used to open a 1600x900 window on top of

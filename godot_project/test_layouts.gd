@@ -1445,13 +1445,25 @@ static func item_gallery_tile(slot: int) -> Vector2i:
 ##     row across it, so the tile is a belt laid across a pipe.
 ##
 ## The belt is fed tomatoes by an auto-filling hopper and runs into nothing,
-## so it backs up and every tile — the two under the pipes included — holds
-## items to be seen passing under the arch. Each run is fed vinegar by a tank
-## at both ends, because the crossing makes
-## its two halves one network and a run half in colour would say it had not.
+## so once it has been RUN it backs up and every tile — the two under the
+## pipes included — holds items to be seen passing under the arch. It has to
+## be run for that: the fixture only builds, so `--fixture crossing` settles
+## it through `_run_chain_forward` (`test_screenshot.gd`) and the tests tick
+## it themselves. Built and not ticked, this line is a bare belt and two grey
+## pipe runs.
+##
+## **Each run is fed by ONE tank, at its north end only.** Feeding both ends
+## was the obvious thing and it is the wrong thing twice over. It proves
+## nothing — both halves of a run colour whether or not the crossing joined
+## them, which is the one fact the colour is here to show — and four
+## auto-filling tanks drink more vinegar than [constant CROSSING_VINEGAR]
+## buys, so the first tank took 50 of 64 and the x =
+## CROSSING_BELT_ONTO_PIPE_X run stood dry in every frame ever shot of it.
+## One tank per run wets all seven segments THROUGH the crossing, which is
+## the proof, and leaves stock to spare.
 ## About 900 of a 3,000 starting balance.
 static func build_crossing_line(sim) -> void:
-	stock(sim, "vinegar", 64)
+	stock(sim, "vinegar", CROSSING_VINEGAR)
 	stock(sim, "tomato", 64)
 	for y in CROSSING_RUN_YS:
 		place(sim, "pipe", Vector2i(CROSSING_BELT_ONTO_PIPE_X, y), "north")
@@ -1464,14 +1476,14 @@ static func build_crossing_line(sim) -> void:
 	for y in CROSSING_RUN_YS:
 		place(sim, "pipe", Vector2i(CROSSING_PIPE_ONTO_BELT_X, y), "north")
 	for x in [CROSSING_PIPE_ONTO_BELT_X, CROSSING_BELT_ONTO_PIPE_X]:
-		for tank in [Vector2i(x, CROSSING_RUN_YS[0] - 1), Vector2i(x, CROSSING_RUN_YS[-1] + 1)]:
-			place(sim, "fluid_tank", tank, "north" if tank.y < 0 else "south")
-			sim.issue_command_json(JSON.stringify({
-				"type": "set_tank_fluid", "tile": [tank.x, tank.y], "fluid": "vinegar",
-			}))
-			sim.issue_command_json(JSON.stringify({
-				"type": "set_tank_auto_fill", "tile": [tank.x, tank.y], "enabled": true,
-			}))
+		var tank := Vector2i(x, CROSSING_RUN_YS[0] - 1)
+		place(sim, "fluid_tank", tank, "north")
+		sim.issue_command_json(JSON.stringify({
+			"type": "set_tank_fluid", "tile": [tank.x, tank.y], "fluid": "vinegar",
+		}))
+		sim.issue_command_json(JSON.stringify({
+			"type": "set_tank_auto_fill", "tile": [tank.x, tank.y], "enabled": true,
+		}))
 
 
 ## The two crossing columns, shared with `test_screenshot.gd` and the tests
@@ -1480,6 +1492,11 @@ const CROSSING_PIPE_ONTO_BELT_X := 3
 const CROSSING_BELT_ONTO_PIPE_X := 9
 const CROSSING_BELT_TILES := 13
 const CROSSING_RUN_YS := [-3, -2, -1, 0, 1, 2, 3]
+## Vinegar bought for the line's two tanks. One tank fills to 50, so 64 fed
+## one run and starved the other while the line carried four of them; it is
+## stated here rather than inline because the tank count and this number are
+## one decision, and `crossing_line_failure` checks the result.
+const CROSSING_VINEGAR := 64
 ## An ordinary belt tile of the line with open floor either side of it along
 ## the belt — where `--fixture crossing`'s ghost frames hold a pipe, across
 ## the belt (a crossing) or along it (refused).
@@ -1497,6 +1514,39 @@ static func crossing_line_failure(sim) -> String:
 		var kind := String(parsed.get("kind", "")) if parsed is Dictionary else ""
 		if kind != "crossing":
 			return "(%d, 0) is '%s', not a crossing" % [x, kind]
+	return ""
+
+
+## Why the crossing line is not SHOWING what it was built to show, or "" if
+## it is — asked after the settle, not after the build, and separate from
+## [method crossing_line_failure] because they fail for opposite reasons: that
+## one says the sim refused to assemble a crossing, this one says the line
+## assembled and then stood there dead.
+##
+## Both are needed because both have happened. The line shipped for a day
+## with nothing ticking it and with one of its two runs starved of vinegar,
+## and every frame shot of it passed: a bare belt and a grey pipe run look
+## like art that has not landed, not like a fixture that was never run. A
+## frame is evidence in a PR body, so the harness fails rather than hand one
+## over.
+static func crossing_line_idle(sim) -> String:
+	for x in [CROSSING_PIPE_ONTO_BELT_X, CROSSING_BELT_ONTO_PIPE_X]:
+		var parsed = JSON.parse_string(sim.query_tile_json(x, 0))
+		var tile: Dictionary = parsed if parsed is Dictionary else {}
+		if Array(tile.get("items_here", [])).is_empty():
+			return "no item is on the crossing at (%d, 0) — the belt was never run" % x
+	for snapshot in JSON.parse_string(sim.fluid_snapshots_json()):
+		var segments: Array = snapshot.get("segments", [])
+		if segments.is_empty():
+			continue
+		var wet := 0
+		for segment in segments:
+			if float(segment.get("volume", 0.0)) > 0.0:
+				wet += 1
+		if wet < segments.size():
+			return "the pipe run at x = %d carries fluid in only %d of its %d segments" % [
+				int(segments[0]["tile"][0]), wet, segments.size(),
+			]
 	return ""
 
 
