@@ -92,14 +92,17 @@ just fixed it instead.
 **Every PR is reviewed before it merges** (the owner's rule, 2026-09-25).
 Green CI is not a review, and a review after the merge does not count. The
 verdict comes from a session that did not write the branch (the `review`
-skill), as a comment whose first line is `VERDICT: APPROVED`. Being told to
+skill), posted as a comment review (`gh pr review <N> --comment`) whose first
+line is `VERDICT: APPROVED`. `gh` returns that under `reviews`, not
+`comments`, so check both, and read the **latest** verdict: an approval
+followed by a later `CHANGES REQUESTED` is not an approval. Being told to
 "make a PR and merge it" does not change this. If no reviewer's verdict is
 there yet, give the URL, say the PR is waiting on review, and stop.
 
 ```
-gh pr checks --watch
-gh pr view --json comments --jq '.comments[].body' | grep -m1 '^VERDICT: APPROVED'
-gh pr merge --squash --delete-branch    # only once the line above prints
+gh pr checks <N> --watch
+gh pr view <N> --json reviews,comments --jq '[(.reviews[]|{t:.submittedAt,b:.body}),(.comments[]|{t:.createdAt,b:.body})]|sort_by(.t)|map(.b|split("\n")[0]|select(startswith("VERDICT:")))|last // "NO VERDICT"'
+gh pr merge <N> --squash --delete-branch    # only if that printed exactly VERDICT: APPROVED
 ```
 
 **Squash by default** — intermediate commits are noise in a history that feeds

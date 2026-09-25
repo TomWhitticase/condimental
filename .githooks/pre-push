@@ -27,10 +27,11 @@ refusing to push directly to main.
     git push -u origin HEAD
     gh pr create --fill
     gh pr checks --watch
+    # wait for a VERDICT: APPROVED review from a session that did not write it
     gh pr merge --squash --delete-branch
 
-  See docs/WORKFLOW.md. If you genuinely need to bypass this (a hotfix with
-  nobody to review it), `git push --no-verify` — and say that you did.
+  Every PR is reviewed before it merges, hotfixes included; see
+  docs/WORKFLOW.md and the open-pr skill. There is no bypass to reach for.
 MSG
   exit 1
 done

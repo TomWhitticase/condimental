@@ -240,12 +240,19 @@ has no image — which is why `--fill` alone no longer opens a PR here — and t
 image, one with a `raw.githubusercontent.com` link, or one linking a file that
 does not exist.
 
-Then **watch it land** — an open PR is unfinished work, not a handoff:
+Then **get it reviewed, and land it** — an open PR is unfinished work until it
+merges, and the one legitimate reason to leave it open is that it is waiting
+on a reviewer's verdict (below):
 
 ```
-gh pr checks --watch          # commitlint must pass; a red PR is not done
-gh pr merge --squash --delete-branch
+gh pr checks <N> --watch      # commitlint must pass; a red PR is not done
+gh pr view <N> --json reviews,comments --jq '[(.reviews[]|{t:.submittedAt,b:.body}),(.comments[]|{t:.createdAt,b:.body})]|sort_by(.t)|map(.b|split("\n")[0]|select(startswith("VERDICT:")))|last // "NO VERDICT"'
+gh pr merge <N> --squash --delete-branch   # only on exactly VERDICT: APPROVED
 ```
+
+The verdict is posted with `gh pr review <N> --comment`, which `gh` returns
+under `reviews` rather than `comments` — hence the query reads both and takes
+the latest `VERDICT:` line.
 
 **Squash by default.** A branch's intermediate commits ("fix the test",
 "wording") are noise in a history that feeds the changelog (CONTRIBUTING.md);

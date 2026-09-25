@@ -25,7 +25,8 @@ See [WORKFLOW.md](WORKFLOW.md).
   instruction to "make a PR and merge it" means merge after that verdict. With
   no verdict, the author stops with the PR open and says it is waiting on
   review. This replaces the old WORKFLOW.md wording that let authors merge
-  their own routine work unreviewed. Binds `docs/WORKFLOW.md` and the
+  their own routine work unreviewed. Binds `CLAUDE.md`, `docs/WORKFLOW.md`,
+  `.githooks/pre-push` and the
   `open-pr` and `wrap-it-up` skills. Full record in `docs/DECISIONS.md`.
 - 2026-09-25 **The review render's clock is PINNED, so the same command twice
   is the same picture.** `scripts/screenshot-scene.sh` passes Godot's own
@@ -804,7 +805,8 @@ See [WORKFLOW.md](WORKFLOW.md).
 - 2026-09-16 **GitHub is the workflow: every change lands by pull request,
   every deferral becomes an issue.** Nothing is committed or pushed to `main`
   directly — work goes on a `<type>/<description>` branch, `gh pr create`
-  opens the PR, `gh pr checks` must be green, and `gh pr merge --squash
+  opens the PR, `gh pr checks` must be green (and, since 2026-09-25, a
+  `VERDICT: APPROVED` review must be posted — see that entry above), and `gh pr merge --squash
   --delete-branch` lands it (squash by default, so the squashed subject is the
   one Conventional Commit and is linted like any other; a real merge commit
   only where each commit is a reviewed unit). `.githooks/pre-push` **blocks** a

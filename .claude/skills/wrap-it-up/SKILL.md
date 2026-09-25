@@ -77,10 +77,13 @@ it. The wrap-up-specific parts:
   ```
   gh pr view <N> --json mergeable,mergeStateStatus
   gh pr checks <N> --watch --interval 20
-  gh pr merge <N> --squash --delete-branch
+  # the latest VERDICT: line across reviews and comments (open-pr step 5)
+  gh pr view <N> --json reviews,comments --jq '[(.reviews[]|{t:.submittedAt,b:.body}),(.comments[]|{t:.createdAt,b:.body})]|sort_by(.t)|map(.b|split("\n")[0]|select(startswith("VERDICT:")))|last // "NO VERDICT"'
+  gh pr merge <N> --squash --delete-branch   # only on exactly VERDICT: APPROVED
   ```
 
-- **Do not merge** a PR whose checks are red or still running, one the owner
+- **Do not merge** a PR with no `VERDICT: APPROVED`, one whose checks are red
+  or still running, one the owner
   asked to review, or one that deviates from a design doc, bumps `gdext` or
   changes the save format. That is a NOT-SAFE ending (step 7), not a
   judgement call to make on the way out.
