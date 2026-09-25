@@ -26,8 +26,7 @@ See [WORKFLOW.md](WORKFLOW.md).
   no verdict, the author stops with the PR open and says it is waiting on
   review. This replaces the old WORKFLOW.md wording that let authors merge
   their own routine work unreviewed. Binds `CLAUDE.md`, `docs/WORKFLOW.md`,
-  `.githooks/pre-push` and the
-  `open-pr` and `wrap-it-up` skills. Full record in `docs/DECISIONS.md`.
+  `.githooks/pre-push` and the `open-pr` and `wrap-it-up` skills. Full record in `docs/DECISIONS.md`.
 - 2026-09-25 **The review render's clock is PINNED, so the same command twice
   is the same picture.** `scripts/screenshot-scene.sh` passes Godot's own
   `--fixed-fps 60`; `_advance_simulation` is untouched, so the tick loop a

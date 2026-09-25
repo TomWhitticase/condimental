@@ -227,7 +227,9 @@ PR #163 merged on green CI with no review. The docs allowed that at the
 time ("merging your own work unreviewed is fine for routine changes"). The
 owner has ruled it out: every PR now needs a `VERDICT: APPROVED` comment
 from a session that did not write it before it merges, and a review after
-the merge does not count. WORKFLOW.md and the `open-pr` skill now say this.
+the merge does not count. CLAUDE.md, WORKFLOW.md, the `open-pr` and
+`wrap-it-up` skills and the `pre-push` hook now say this, and the merge
+step reads the latest `VERDICT:` line across a PR's reviews and comments.
 The decision is recorded in DECISIONS_LOG.md and DECISIONS.md.
 
 ### 2026-09-25 — The same screenshot command twice is the same picture (issue #82)

@@ -25,7 +25,7 @@ refusing to push directly to main.
 
     git switch -c <type>/<short-description>   # if you are not on a branch
     git push -u origin HEAD
-    gh pr create --fill
+    gh pr create --title "..." --body-file <body.md>   # the body embeds a screenshot
     gh pr checks --watch
     # wait for a VERDICT: APPROVED review from a session that did not write it
     gh pr merge --squash --delete-branch
