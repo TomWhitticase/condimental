@@ -1460,8 +1460,9 @@ static func item_gallery_tile(slot: int) -> Vector2i:
 ##
 ## That is a legibility choice and not a fill fix — how much each run gets is
 ## [constant CROSSING_VINEGAR]'s business, and the two were confused once
-## already. The line costs 1,335 of a 3,000 starting balance (read off the
-## HUD: 1,665 left after the build).
+## already. The line costs 876 of a 3,000 starting balance; the screenshot
+## harness also stocks `stock_larder` for every fixture, which takes its
+## frame's HUD to 1,665 (1,335 spent).
 static func build_crossing_line(sim) -> void:
 	stock(sim, "vinegar", CROSSING_VINEGAR)
 	stock(sim, "tomato", 64)
@@ -1495,7 +1496,7 @@ const CROSSING_RUN_YS := [-3, -2, -1, 0, 1, 2, 3]
 ## Vinegar bought for the line's two tanks. Measured with the tanks' own
 ## auto-fill as the only source, 200 ticks, reading `fluid_snapshots_json`:
 ##
-##   64 -> x = 3 full, x = 9 pressure 0.000   (what shipped)
+##   64 -> x = 3 0.914, x = 9 pressure 0.000   (what shipped)
 ##   128 -> x = 9 0.114    160 -> x = 9 0.571    200 -> x = 9 0.999
 ##
 ## The FIRST tank drinks whatever it can reach, so a small number leaves the
@@ -1823,7 +1824,9 @@ const FLUID_GALLERY_FLUIDS: PackedStringArray = [
 
 ## Asks the simulation whether the gallery is actually a gallery: all six
 ## fluids present, each on a run the sim can NAME (`carries`, not `ambiguous`
-## or `unnameable`), each above the pressure `main.gd` will draw a body at.
+## or `unnameable`), each at a pressure whose colour actually shows —
+## [constant CROSSING_MIN_DRAWN_PRESSURE], not the far lower floor at which
+## `main.gd` merely creates the body.
 ## Returns "" when it is, or what is wrong with it.
 ##
 ## This exists because every way this fixture can fail is a quiet one. Move
@@ -1843,9 +1846,9 @@ static func check_fluid_gallery(sim) -> String:
 		var naming := String(run.get("naming", ""))
 		if naming != "carries":
 			return "a run is '%s' rather than carrying one fluid — the layout has merged or confused two networks" % naming
-		if float(run.get("pressure", 0.0)) <= FLUID_MIN_VISIBLE_PRESSURE:
-			return "the %s run is at pressure %s, at or below the %s main.gd needs to draw a body" % [
-				fluid, run.get("pressure", 0.0), FLUID_MIN_VISIBLE_PRESSURE,
+		if float(run.get("pressure", 0.0)) < CROSSING_MIN_DRAWN_PRESSURE:
+			return "the %s run is at pressure %s, under the %s at which its colour shows in a sight window" % [
+				fluid, run.get("pressure", 0.0), CROSSING_MIN_DRAWN_PRESSURE,
 			]
 		seen[fluid] = true
 	var missing := []
@@ -1878,8 +1881,9 @@ const FLUID_MIN_VISIBLE_PRESSURE := 0.02
 ## result against each buffer's real capacity — so this fills to
 ## `PIPE_SEGMENT_CAPACITY`, the smaller of the two, and a tank simply comes
 ## back a twelfth full rather than refused. Full, not a trickle, because
-## `main.gd` scales a fluid body's height by pressure: at the 0.02 floor of
-## FLUID_MIN_VISIBLE_PRESSURE there is one voxel of colour to judge.
+## `main.gd` scales a fluid body's height by pressure, and below
+## [constant CROSSING_MIN_DRAWN_PRESSURE] there is no colour in the window to
+## judge at all.
 static func fill_fluid_runs(sim, units := 10) -> void:
 	var text: String = sim.save_ron()
 	var regex := RegEx.new()

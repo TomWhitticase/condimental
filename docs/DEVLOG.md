@@ -224,7 +224,8 @@ below is history and should only ever be appended to.)*
 ### 2026-09-25 — The crossing fixture is made to prove it is running
 
 `--fixture crossing` shipped in PR #172 building its line and never ticking
-it, so every frame shot of it was a bare belt under two grey pipe runs — and
+it, so every frame shot of it was a bare belt under one grey pipe run and
+one barely tinted — and
 every one of those frames printed `SCREENSHOT_OK`. A dead fixture does not
 look like a harness nobody ran; it looks like art that has not landed, which
 is exactly the judgement a PR screenshot is there to support. Its own doc
@@ -263,15 +264,15 @@ from the bore floor, and the sight window is cut from one voxel above that
 floor — so below 2/7 there is no whole voxel of liquid in the window and the
 run photographs grey while every segment reports fluid (forced renders: 0.15
 grey, 0.2 barely there, 0.286 a thin amber line). A first cut of the bar at
-1/7 put the surface exactly level with the window floor. The x = 9 run sat at 0.114 — eight tenths of a voxel —
-and sailed through a `volume > 0` check and into a PR body captioned "both
+1/7 put the surface exactly level with the window floor. The x = 9 run sat
+at 0.114 — eight tenths of a voxel — and sailed through a `volume > 0` check and into a PR body captioned "both
 runs wet". The check now asks for `CROSSING_MIN_DRAWN_PRESSURE`, and counts
 the runs it found rather than passing vacuously over an empty list.
 
 Doc corrections alongside: `BELT_PIPE_CROSSING_PLAN.md` now names the shipped
 `pipe_crossing` rather than the spike's `pipe_gantry`, and its clearance
-figure is re-measured on the shipped model — the gantry's lowest voxel over
-the lane is z = 28, three clear of `CROSSING_ITEM_TOP_Z`, where the spike
+figure is re-measured on the shipped model — the gantry's lowest voxel
+between the risers (y 8..23) is z = 28, three clear of `CROSSING_ITEM_TOP_Z`, where the spike
 said 27. **`preview_command` is no longer "planned":** it landed in PR #171
 and the ghost has asked it since #172, so the two `DECISIONS.md` passages
 that called it future work, and the one claiming ghost validity is a pure

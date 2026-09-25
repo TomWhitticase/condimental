@@ -21,7 +21,7 @@
 #   * every placement the gallery asks for is accepted (a refused purchase
 #     would drop a run and nothing else would say so),
 #   * `check_fluid_gallery` passes on the shipped layout: six runs, each
-#     `carries` with one fluid named, each above the pressure main.gd needs,
+#     `carries` with one fluid named, each above the pressure whose colour shows in a sight window,
 #   * the six named fluids are exactly `FLUID_GALLERY_FLUIDS`,
 #   * `test_layouts.gd`'s hand-copied `FLUID_MIN_VISIBLE_PRESSURE` still
 #     equals `main.gd`'s, the number it was copied from,
@@ -253,8 +253,8 @@ func _run_checks() -> void:
 	print(
 		"FLUID_GALLERY_OK: %d placements stand %d runs, each named by topology alone, each above "
 		% [placed, snapshots.size()]
-		+ "main.gd's %s visible-pressure floor, each with a tint of its own (%s) — and the check "
-		% [main.FLUID_MIN_VISIBLE_PRESSURE, ", ".join(Layouts.FLUID_GALLERY_FLUIDS)]
+		+ "the %s pressure at which a sight window shows colour, each with a tint of its own (%s) — and the check "
+		% [Layouts.CROSSING_MIN_DRAWN_PRESSURE, ", ".join(Layouts.FLUID_GALLERY_FLUIDS)]
 		+ "refuses an empty world, so that is a pass and not a default"
 	)
 	quit(0)

@@ -156,7 +156,7 @@ its real 64px on the real plate.
 **What shipped** (PR #169): `pipe_gantry` became `pipe_crossing`, with
 `pipe_fluid_crossing` as its raised liquid body and a separate icon-only
 `crossing` model with a frozen belt and bottle baked in. `pipe_bridge_flat`
-was **deleted**; `only_the_gantry_clears_what_the_belt_is_carrying` keeps its
+was **deleted**; `a_crossing_clears_what_the_belt_is_carrying` keeps its
 counter-example by turning an ordinary straight across the lane instead, so
 the guard survived without a rejected model living in `ASSETS` forever.
 Neither name below outlives this note — grep for `pipe_crossing`.
