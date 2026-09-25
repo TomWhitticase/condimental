@@ -1428,35 +1428,43 @@ static func item_gallery_tile(slot: int) -> Vector2i:
 	return Vector2i(slot * 2, 0)
 
 
-## THE CROSSING SPIKE (2026-09-25) — **THROWAWAY**, and the only fixture here
-## that photographs something the simulation cannot actually build.
+## THE CROSSING LINE (the belt/pipe crossing epic, ticket T3) — a live belt
+## with two live pipe runs crossing it, every tile of it bought and placed
+## through the real commands, so the two crossings in it are ones the
+## SIMULATION assembled (`docs/BELT_PIPE_CROSSING_PLAN.md`). It replaced the
+## spike's hand-stood models, which photographed art the sim could not build.
 ##
-## The belt/pipe crossing design (the Drive doc of 2026-09-25) proposes one
-## tile carrying both a belt and a pipe. Nothing in `sim_core` allows that
-## yet, so this lays the two runs down with a HOLE in the pipe where they
-## would meet and `test_screenshot.gd` stands the candidate gantry model in
-## the hole — presentation only, no sim, no save. It exists so the shape can
-## be judged before any of it is built, and it should be deleted with the
-## generators it photographs.
+## One belt east along y = 0, fed by a tomato hopper and ending in nothing,
+## so product runs under both crossings and then backs up beneath them — a
+## crossing is judged with things passing under it. Two north-south pipe runs
+## cross it, one assembled each way the game allows:
 ##
-## One belt run east along y = 0, and two north-south pipe runs crossing it:
-## x = 3 for the FLAT bridge (the design doc's option B as written) and
-## x = 9 for the raised GANTRY. Each pipe run is fed from both ends, because
-## a real crossing would make its two halves one network and half a run in
-## colour would flatter the mock.
-static func build_crossing_spike(sim) -> void:
+##   * x = CROSSING_PIPE_ONTO_BELT_X — the belt row is laid first, then the
+##     pipe run, so the tile is a pipe laid ACROSS a belt;
+##   * x = CROSSING_BELT_ONTO_PIPE_X — the pipe run is laid first and the belt
+##     row across it, so the tile is a belt laid across a pipe.
+##
+## The belt is fed tomatoes by an auto-filling hopper and runs into nothing,
+## so it backs up and every tile — the two under the pipes included — holds
+## items to be seen passing under the arch. Each run is fed vinegar by a tank
+## at both ends, because the crossing makes
+## its two halves one network and a run half in colour would say it had not.
+## About 900 of a 3,000 starting balance.
+static func build_crossing_line(sim) -> void:
 	stock(sim, "vinegar", 64)
-	for x in range(13):
+	stock(sim, "tomato", 64)
+	for y in CROSSING_RUN_YS:
+		place(sim, "pipe", Vector2i(CROSSING_BELT_ONTO_PIPE_X, y), "north")
+	place(sim, "hopper", Vector2i(-1, 0), "east", "tomato")
+	for x in range(CROSSING_BELT_TILES):
 		place(sim, "belt", Vector2i(x, 0), "east")
-	for x in [CROSSING_FLAT_X, CROSSING_GANTRY_X]:
-		for y in [-3, -2, -1]:
-			place(sim, "pipe", Vector2i(x, y), "north")
-		for y in [1, 2, 3]:
-			place(sim, "pipe", Vector2i(x, y), "north")
-		# Only (x, 0) stays bare — the belt row itself, and the one tile the
-		# overlay stands in, so the gap in the render is exactly the tile a
-		# crossing would occupy.
-		for tank in [Vector2i(x, -4), Vector2i(x, 4)]:
+	sim.issue_command_json(JSON.stringify({
+		"type": "set_hopper_auto_fill", "tile": [-1, 0], "enabled": true,
+	}))
+	for y in CROSSING_RUN_YS:
+		place(sim, "pipe", Vector2i(CROSSING_PIPE_ONTO_BELT_X, y), "north")
+	for x in [CROSSING_PIPE_ONTO_BELT_X, CROSSING_BELT_ONTO_PIPE_X]:
+		for tank in [Vector2i(x, CROSSING_RUN_YS[0] - 1), Vector2i(x, CROSSING_RUN_YS[-1] + 1)]:
 			place(sim, "fluid_tank", tank, "north" if tank.y < 0 else "south")
 			sim.issue_command_json(JSON.stringify({
 				"type": "set_tank_fluid", "tile": [tank.x, tank.y], "fluid": "vinegar",
@@ -1466,10 +1474,30 @@ static func build_crossing_spike(sim) -> void:
 			}))
 
 
-## Which column each candidate crossing stands in, shared with
-## `test_screenshot.gd` so the overlay and the gap cannot drift apart.
-const CROSSING_FLAT_X := 3
-const CROSSING_GANTRY_X := 9
+## The two crossing columns, shared with `test_screenshot.gd` and the tests
+## so the fixture and what checks it cannot drift apart.
+const CROSSING_PIPE_ONTO_BELT_X := 3
+const CROSSING_BELT_ONTO_PIPE_X := 9
+const CROSSING_BELT_TILES := 13
+const CROSSING_RUN_YS := [-3, -2, -1, 0, 1, 2, 3]
+## An ordinary belt tile of the line with open floor either side of it along
+## the belt — where `--fixture crossing`'s ghost frames hold a pipe, across
+## the belt (a crossing) or along it (refused).
+const CROSSING_GHOST_TILE := Vector2i(6, 0)
+
+
+## Why the crossing line did not come out as two crossings, or "" if it did —
+## read back from the simulation's own `query_tile_json`, never from what
+## this file meant to build. A Place the sim refused is silent, so a rule
+## change that stopped either assembly would otherwise hand back a frame of a
+## belt running past two gaps.
+static func crossing_line_failure(sim) -> String:
+	for x in [CROSSING_PIPE_ONTO_BELT_X, CROSSING_BELT_ONTO_PIPE_X]:
+		var parsed = JSON.parse_string(sim.query_tile_json(x, 0))
+		var kind := String(parsed.get("kind", "")) if parsed is Dictionary else ""
+		if kind != "crossing":
+			return "(%d, 0) is '%s', not a crossing" % [x, kind]
+	return ""
 
 
 ## THE BELT GALLERY (the pipes & conveyors overhaul, ticket 5) — every belt
