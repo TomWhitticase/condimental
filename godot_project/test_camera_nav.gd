@@ -18,11 +18,15 @@
 #   * TAB toggles between ISOMETRIC (orthographic) and FIRST_PERSON
 #     (perspective) on the one shared Camera3D node,
 #   * in first-person mode, mouse-look rotates the camera and clamps pitch,
-#     while WASD movement stays purely horizontal regardless of pitch (E/Q
-#     are the only things that change height) — the Minecraft-flight rule,
+#     while WASD movement stays purely horizontal regardless of pitch
+#     (SPACE/SHIFT are the only things that change height) — the
+#     Minecraft-flight rule,
 #   * click-and-drag panning (isometric) moves `_camera_focus` opposite the
 #     drag direction along the screen-relative axes, only while the right
-#     mouse button is actually held.
+#     mouse button is actually held,
+#   * an open panel (or the pause menu) takes the movement keys with the
+#     cursor, so a market crate's SHIFT+click buys without also flying the
+#     first-person camera down.
 #
 # `_pan_camera` itself reads the `Input` singleton to decide direction
 # (held WASD/arrows) — that part is a thin, deliberately untested read per
@@ -239,10 +243,25 @@ func _initialize() -> void:
 	if main._crosshair != null and main._crosshair.visible:
 		_fail("the crosshair must not show while the market holds the cursor")
 		return
+	# A panel holding the cursor holds the keys too. SHIFT+click on a crate
+	# buys every unit the balance covers; while `_process` read held keys
+	# through the panel, that one press ALSO flew the camera down, because
+	# SHIFT is first person's "descend" (2026-09-22).
+	if main._camera_keys_live():
+		_fail("with the market open, held keys must not steer the camera")
+		return
 	main._set_market_open(false)
 	if main._fp_mouse_free():
 		_fail("with every panel closed the first-person mouse should be captured")
 		return
+	if not main._camera_keys_live():
+		_fail("with every panel closed the camera must answer held keys again")
+		return
+	main._set_pause_open(true)
+	if main._camera_keys_live():
+		_fail("the pause menu must stop the camera reading held keys")
+		return
+	main._set_pause_open(false)
 	main._unhandled_input(tab_key) # back to isometric for the checks below
 	if main._view_mode != main.ViewMode.ISOMETRIC:
 		_fail("TAB again should return to ISOMETRIC")
@@ -279,6 +298,25 @@ func _initialize() -> void:
 		_fail("_apply_look with a nonzero X delta should change _fp_yaw")
 		return
 
+	# A panel that holds the cursor holds mouse-look too. The check used to
+	# name the five modals itself, so the configuration panel and the pause
+	# menu — which hand the pointer back just the same — still swung the
+	# camera under the player's clicks; `_fp_mouse_free` is now the one rule
+	# for the pointer and `_camera_keys_live` its half for held keys.
+	var look_motion := InputEventMouseMotion.new()
+	look_motion.relative = Vector2(100.0, 0.0)
+	main._set_pause_open(true)
+	var yaw_under_pause: float = main._fp_yaw
+	main._unhandled_input(look_motion)
+	if not is_equal_approx(main._fp_yaw, yaw_under_pause):
+		_fail("mouse motion under the pause menu must not swing the first-person camera")
+		return
+	main._set_pause_open(false)
+	main._unhandled_input(look_motion)
+	if is_equal_approx(main._fp_yaw, yaw_under_pause):
+		_fail("with nothing open, mouse motion should swing the first-person camera")
+		return
+
 	main._fp_pitch = 0.0
 	for _i in range(2000): # far more than enough to hit the clamp
 		main._apply_look(Vector2(0.0, -1000.0)) # looking up, repeatedly
@@ -300,7 +338,7 @@ func _initialize() -> void:
 		_fail("_apply_fp_move with a nonzero direction should move _fp_position")
 		return
 
-	# E/Q (up/down) are the only things that change height in first-person.
+	# SPACE/SHIFT (up/down) are the only things that change height here.
 	var fp_pos_before_up: Vector3 = main._fp_position
 	main._apply_fp_move(Vector3.UP, 1.0)
 	if main._fp_position.y <= fp_pos_before_up.y:
@@ -316,5 +354,5 @@ func _initialize() -> void:
 		_fail("switching back to isometric must restore the orthographic camera, projection was %d" % camera.projection)
 		return
 
-	print("CAMERA_NAV_OK: zoom clamps at both ends, pan moves along screen axes, trackpad gesture and +/- keys both zoom, drag-pan (and a release the GUI or the pause menu swallowed still ends it) and TAB view-mode switching (never capturing the mouse under a panel) and first-person look/move all work, orientation never changes in isometric mode")
+	print("CAMERA_NAV_OK: zoom clamps at both ends, pan moves along screen axes, trackpad gesture and +/- keys both zoom, drag-pan (and a release the GUI or the pause menu swallowed still ends it) and TAB view-mode switching (never capturing the mouse or the movement keys under a panel) and first-person look/move all work, orientation never changes in isometric mode")
 	quit(0)

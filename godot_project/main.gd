@@ -6860,6 +6860,18 @@ func _fp_mouse_free() -> bool:
 	return _leaving_to_menu or _modal_open() or _config_open or _pause_open or _debug_open
 
 
+## Whether held movement keys belong to the world. Exactly the states that
+## hand the cursor back (`_fp_mouse_free`), because a panel that took the
+## pointer took the keyboard with it: SHIFT+click on a market crate is that
+## slot's "buy every unit you can afford" verb, and while the camera read
+## held keys through an open panel the same press also flew the player down
+## (SPACE/SHIFT are up/down in first person) — one gesture, two unrelated
+## things happening. The pause menu and the configuration panel are in the
+## same boat; only `_process` asks.
+func _camera_keys_live() -> bool:
+	return not _fp_mouse_free()
+
+
 ## Any of the five modal panels (E, M, C, H, P) is up. Build mode is not a
 ## modal — see `_anything_open` for the version that counts it.
 func _modal_open() -> bool:
@@ -14587,10 +14599,14 @@ func _process(delta: float) -> void:
 	if not _pause_open:
 		_update_ghost()
 	_update_hover_tooltip()
-	if _view_mode == ViewMode.ISOMETRIC:
-		_pan_camera(delta)
-	else:
-		_fp_camera_move(delta)
+	# Held keys steer the camera only while the world has the keyboard
+	# (`_camera_keys_live`) — with a panel up SHIFT belongs to the crate the
+	# player is buying from, not to flying down.
+	if _camera_keys_live():
+		if _view_mode == ViewMode.ISOMETRIC:
+			_pan_camera(delta)
+		else:
+			_fp_camera_move(delta)
 
 
 ## One frame's worth of simulation, and the autosave clock that runs beside
@@ -14807,11 +14823,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		if _view_mode == ViewMode.ISOMETRIC:
 			if _iso_dragging:
 				_apply_drag_pan(event.relative)
-		elif not _shop_open and not _market_open and not _board_open and not _staff_open \
-				and not _production_open:
-			# With either shop panel up in first-person the mouse is visible
-			# and is being used to click slots — swinging the camera with it
-			# too would make the panel unusable.
+		elif not _fp_mouse_free():
+			# Only while the world actually holds the pointer. With a panel up
+			# in first person the mouse is visible and is being used to click
+			# slots — swinging the camera with it too would make the panel
+			# unusable. This used to list the five modals itself and so missed
+			# the configuration panel and the pause menu, which hand the cursor
+			# back just the same; `_fp_mouse_free` is the one rule, and
+			# `_camera_keys_live` is its half for held keys.
 			_apply_look(event.relative)
 		return
 
