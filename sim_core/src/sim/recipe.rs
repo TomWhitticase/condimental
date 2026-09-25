@@ -123,6 +123,60 @@ pub struct Recipe {
     /// for the presentation layer ([`super::world::World::display_names`]).
     #[serde(default)]
     pub display_name: Option<String>,
+
+    /// One line saying what this product *is*, for the Cookbook's page
+    /// heading — "The cold-chain tier. Two new machines, and the first
+    /// ingredient in the game that can go off."
+    ///
+    /// **Optional, like every field below.** The Cookbook is built entirely
+    /// out of this file and its siblings, so a sauce added to `recipes.ron`
+    /// gets a page with no Rust and no GDScript edit (ARCHITECTURE.md
+    /// §3.6/§10). What it cannot do is *invent prose*: a page with no
+    /// tagline simply omits the line rather than title-casing something to
+    /// fill it, exactly as a missing `display_name` falls back rather than
+    /// failing.
+    ///
+    /// Intermediate steps usually leave this out. A tagline belongs to the
+    /// thing a player thinks of as a product — "BBQ", not "BBQ Mix" — and
+    /// the page for a step in the middle of a chain is read as part of its
+    /// sauce's page, not on its own.
+    #[serde(default)]
+    pub tagline: Option<String>,
+
+    /// The paragraph on this product's Cookbook page: what is interesting
+    /// about making it, what it introduces, what it costs you to run.
+    ///
+    /// Prose, deliberately, and deliberately **here rather than in
+    /// GDScript**. `main.gd`'s `STAFF_CATEGORY_BLURBS` is the same idea
+    /// written in the presentation layer, and it is the thing this field
+    /// exists not to become: a table keyed by content id, living in a file
+    /// that has no way to know when the content changed under it. A blurb
+    /// three lines from the recipe it describes cannot go stale unnoticed.
+    ///
+    /// Newlines are honoured. The panel wraps at a pinned width
+    /// (`godot_project/CLAUDE.md`'s rule about `autowrap_mode`), so this
+    /// does not need hand-wrapping.
+    #[serde(default)]
+    pub blurb: Option<String>,
+
+    /// Which voxel asset's icon stands for this product, when the asset is
+    /// not simply named after the id.
+    ///
+    /// The presentation layer has carried this mapping since the shop epic,
+    /// as `main.gd`'s `ITEM_MODELS` — a hand-written table from content id
+    /// to asset name, in a file that ships green when it goes stale and is
+    /// caught only by a rendered frame (`godot_project/CLAUDE.md`, UI_UX.md
+    /// §2b point 12). That is the wrong place for it: renaming an asset or
+    /// adding a sauce is a content change, and a content change must never
+    /// need a code change.
+    ///
+    /// So content names its own asset here, `world.rs` gathers these into
+    /// one map beside the display names, and `_icon_for` asks the wire
+    /// before it asks its table. The table stays as the documented fallback
+    /// rather than being deleted — it still answers for every id shipped
+    /// before this field existed — but nothing new needs to be added to it.
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -145,6 +199,16 @@ pub enum RecipeLoadError {
     BlankDisplayName {
         id: String,
     },
+    /// A `tagline`, `blurb` or `icon` that is present but empty or
+    /// whitespace — the same defect as [`Self::BlankDisplayName`] and
+    /// caught for the same reason. Absent means "this product has no
+    /// tagline", which the Cookbook renders by leaving the line out;
+    /// blank means a line of nothing, or an icon lookup for the empty
+    /// asset name, neither of which shows up until someone reads a frame.
+    BlankText {
+        id: String,
+        field: &'static str,
+    },
 }
 
 impl std::fmt::Display for RecipeLoadError {
@@ -160,6 +224,11 @@ impl std::fmt::Display for RecipeLoadError {
                 f,
                 "recipe '{id}' has a blank display_name — omit the field to title-case \
                  the id instead"
+            ),
+            RecipeLoadError::BlankText { id, field } => write!(
+                f,
+                "recipe '{id}' has a blank {field} — omit the field entirely rather than \
+                 giving it an empty value"
             ),
         }
     }
@@ -211,6 +280,18 @@ impl RecipeRegistry {
                 return Err(RecipeLoadError::BlankDisplayName {
                     id: recipe.id.clone(),
                 });
+            }
+            for (field, value) in [
+                ("tagline", &recipe.tagline),
+                ("blurb", &recipe.blurb),
+                ("icon", &recipe.icon),
+            ] {
+                if value.as_ref().is_some_and(|text| text.trim().is_empty()) {
+                    return Err(RecipeLoadError::BlankText {
+                        id: recipe.id.clone(),
+                        field,
+                    });
+                }
             }
         }
         let by_id = file
@@ -272,6 +353,18 @@ impl RecipeRegistry {
                 .display_name
                 .as_deref()
                 .map(|name| (recipe.id.as_str(), name))
+        })
+    }
+
+    /// Every id in this file that names its own voxel asset, as
+    /// `(id, asset)` pairs in file order — see [`Recipe::icon`]. Absent
+    /// ids are the presentation layer's cue to fall back to its own table.
+    pub fn icons(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.recipes.iter().filter_map(|recipe| {
+            recipe
+                .icon
+                .as_deref()
+                .map(|asset| (recipe.id.as_str(), asset))
         })
     }
 }
@@ -500,6 +593,52 @@ mod tests {
         assert!(
             matches!(err, RecipeLoadError::BlankDisplayName { ref id } if id == "tomato_sauce"),
             "a blank name would ship as an item with no label at all, got {err:?}"
+        );
+    }
+
+    /// The Cookbook's three prose fields get the same refusal for the same
+    /// reason: absent is a real answer the page renders by leaving the line
+    /// out, and blank is a line of nothing that only shows up in a frame.
+    #[test]
+    fn a_blank_cookbook_field_is_rejected_the_way_a_blank_name_is() {
+        for field in ["tagline", "blurb", "icon"] {
+            let text = EXAMPLE.replacen(
+                "id: \"tomato_sauce\",",
+                &format!("id: \"tomato_sauce\", {field}: Some(\"  \"),"),
+                1,
+            );
+            let err = RecipeRegistry::from_ron_str(&text).unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    RecipeLoadError::BlankText { ref id, field: got }
+                        if id == "tomato_sauce" && got == field
+                ),
+                "a blank {field} should be refused by name, got {err:?}"
+            );
+            assert!(err.to_string().contains(field));
+        }
+    }
+
+    /// The shipped file is the content this feature exists to render, so
+    /// what it says is worth pinning here as well as in
+    /// `tests/cookbook.rs`: every sauce a player can sell has prose, and
+    /// the middle of a chain is allowed not to.
+    #[test]
+    fn the_shipped_recipes_carry_the_prose_the_cookbook_prints() {
+        let registry = shipped();
+        for id in ["boxed_ketchup", "boxed_bbq"] {
+            let recipe = registry.get(id).expect("shipped");
+            assert!(recipe.blurb.is_some(), "{id} has no blurb");
+            assert!(recipe.icon.is_some(), "{id} has no icon");
+        }
+        assert!(
+            registry
+                .get("tomato_paste")
+                .expect("shipped")
+                .tagline
+                .is_none(),
+            "a stage in the middle of a chain does not need a tagline"
         );
     }
 }

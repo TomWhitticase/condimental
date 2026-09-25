@@ -129,7 +129,8 @@
             id: "hopper",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
             staff: [],
-
+            blurb: "Holds one raw solid and feeds it onto the belt off the face it points at. What is generous about a hopper is its buffer, not its floor space — and it holds one ingredient, so a mixer wanting two solids wants two hoppers.",
+            icon: "hopper",
         ),
         // The pipe run's supply (the "Visual overhaul round 2" epic's
         // ticket 1) — the fluid twin of the hopper above, and another
@@ -148,7 +149,8 @@
             id: "fluid_tank",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
             staff: [],
-
+            blurb: "The hopper's fluid twin: you fill it, and it discharges into the pipe run off the face it points at. Nothing refills it but you.",
+            icon: "fluid_tank",
         ),
         // A conveyor splitter (Epic B) — one belt in, two belts out, and
         // the FOURTH kind in this file with no recipe behind it. Like the
@@ -171,7 +173,8 @@
             id: "splitter",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
             staff: [],
-
+            blurb: "One belt in, two belts out. It stands in place of an ordinary belt tile and does not change what it carries — the straight-through output is the way it faces, and the second is a quarter turn clockwise from it.",
+            icon: "machine_splitter",
         ),
         // GAMEPLAY.md §2 tier 1's raw-ingredient prep: crushes whole
         // tomatoes into paste. 1x1 — a crusher is a hopper and a screw, the
@@ -181,7 +184,8 @@
             id: "crusher",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
             staff: [("manufacturing", 1)],
-
+            blurb: "Crushes whole raw solids into paste. The only machine on the line that takes an ingredient straight off a hopper with nothing upstream of it.",
+            icon: "machine_crusher",
         ),
         // Blends tomato paste and sugar with vinegar into an uncooked
         // ketchup mix, and discharges that mix as a **liquid** into a second
@@ -203,7 +207,8 @@
             id: "mixer",
             footprint: Footprint(width_tiles: 1, height_tiles: 2),
             staff: [("manufacturing", 1)],
-
+            blurb: "Blends what arrives on its inlet tiles with whatever the pipe run touching it carries, and discharges the blend as a liquid. Two tiles deep because two solid ingredients need two chutes: one belt carrying both deadlocks as soon as either outruns the other.",
+            icon: "machine_mixer",
         ),
         // GAMEPLAY.md §2 tier 1/2's cooker/kettle, grown up: a batch vat
         // that cooks the mix down into finished ketchup. **This is the
@@ -229,7 +234,8 @@
             id: "cooking_vat",
             footprint: Footprint(width_tiles: 2, height_tiles: 2),
             staff: [("manufacturing", 2)],
-
+            blurb: "The batch cooker, and the largest thing on the line. Liquid in, liquid out — no belt touches it at all — and whatever it is making, the cook is the slowest step of that sauce and therefore the line's bottleneck.",
+            icon: "machine_cooking_vat",
         ),
         // Tier 2's bottling & sealing line — and, since the chain rework,
         // the stage where the product stops being a fluid: it draws liquid
@@ -239,7 +245,8 @@
             id: "bottler",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
             staff: [("packaging", 1)],
-
+            blurb: "Where the product stops being a fluid. It draws sauce out of a pipe run touching its footprint and puts bottles onto the belt off its outlet face.",
+            icon: "machine_bottler",
         ),
         // Packing finished bottles into boxes — the stage milestone 4 added
         // as its proof that extending the chain is a data-file-only edit.
@@ -247,7 +254,8 @@
             id: "packer",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
             staff: [("packaging", 1)],
-
+            blurb: "Bottles in, cases out. The last machine in any chain — past the packer there is only belt and the dock.",
+            icon: "machine_packer",
         ),
         // The chain's finished-product exit (the delivery-dock ticket) — the
         // third kind here with no recipe behind it, and the exact mirror of
@@ -315,7 +323,8 @@
             id: "dock",
             footprint: Footprint(width_tiles: 2, height_tiles: 2),
             staff: [("logistics", 1)],
-
+            blurb: "The chain's exit. Anything that arrives on the belt is shipped the moment it gets here, with no command from you; what it was worth is the contract board's business.",
+            icon: "machine_dock",
         ),
         // --- The warehouse, which is not on the line at all ---
         // Stock shelving (the warehouse-rack sprint, ticket W1). The fourth
@@ -352,6 +361,8 @@
             footprint: Footprint(width_tiles: 1, height_tiles: 2),
             staff: [],
             display_name: "Stock Shelving",
+            blurb: "Shelving, and the one building that is not on a line: nothing is delivered to it and nothing leaves it on a belt. What it does is raise the ceiling on how much raw ingredient you may own at once.",
+            icon: "warehouse_rack",
         ),
     ],
 )

@@ -89,6 +89,15 @@ pub struct IngredientEntry {
     /// edit rather than a GDScript one.
     #[serde(default)]
     pub display_name: Option<String>,
+    /// One sentence about what this raw *is*, for its Cookbook page —
+    /// [`super::recipe::Recipe::blurb`]'s twin, and its doc explains why
+    /// prose belongs in the data file rather than in a GDScript table.
+    #[serde(default)]
+    pub blurb: Option<String>,
+    /// Which voxel asset's icon stands for this raw, when it is not simply
+    /// named after the id — [`super::recipe::Recipe::icon`]'s twin.
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 impl IngredientEntry {
@@ -128,6 +137,13 @@ pub enum IngredientLoadError {
     BlankDisplayName {
         id: String,
     },
+    /// A `blurb` or `icon` that is present but blank —
+    /// [`super::recipe::RecipeLoadError::BlankText`]'s twin, for its
+    /// reason.
+    BlankText {
+        id: String,
+        field: &'static str,
+    },
     /// `data/recipes.ron` needs an ingredient nothing here prices. See
     /// [`IngredientCatalog::validate_covers`] — reported, never a
     /// `World`-construction panic.
@@ -161,6 +177,11 @@ impl std::fmt::Display for IngredientLoadError {
                 f,
                 "ingredients.ron gives '{id}' a blank display_name — omit the field to \
                  title-case the id instead"
+            ),
+            IngredientLoadError::BlankText { id, field } => write!(
+                f,
+                "ingredients.ron gives '{id}' a blank {field} — omit the field entirely \
+                 rather than giving it an empty value"
             ),
             IngredientLoadError::UnpricedIngredient { ingredient, priced } => write!(
                 f,
@@ -219,6 +240,14 @@ impl IngredientCatalog {
                     id: entry.id.clone(),
                 });
             }
+            for (field, value) in [("blurb", &entry.blurb), ("icon", &entry.icon)] {
+                if value.as_ref().is_some_and(|text| text.trim().is_empty()) {
+                    return Err(IngredientLoadError::BlankText {
+                        id: entry.id.clone(),
+                        field,
+                    });
+                }
+            }
         }
         Ok(Self {
             entries: file.entries,
@@ -253,6 +282,18 @@ impl IngredientCatalog {
                 .display_name
                 .as_deref()
                 .map(|name| (entry.id.as_str(), name))
+        })
+    }
+
+    /// Every id in this file that names its own voxel asset, as
+    /// `(id, asset)` pairs in file order —
+    /// [`super::recipe::RecipeRegistry::icons`]'s twin.
+    pub fn icons(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.entries.iter().filter_map(|entry| {
+            entry
+                .icon
+                .as_deref()
+                .map(|asset| (entry.id.as_str(), asset))
         })
     }
 
@@ -678,6 +719,42 @@ mod tests {
             IngredientCatalog::from_ron_str(&blank).unwrap_err(),
             IngredientLoadError::BlankDisplayName { .. }
         ));
+    }
+
+    /// The Cookbook's two prose fields, refused the same way and for the
+    /// same reason — see [`IngredientEntry::blurb`].
+    #[test]
+    fn a_blank_cookbook_field_is_rejected_the_way_a_blank_name_is() {
+        for field in ["blurb", "icon"] {
+            let text = EXAMPLE.replacen(
+                r#"id: "sugar", price: 3"#,
+                &format!(r#"id: "sugar", {field}: Some("  "), price: 3"#),
+                1,
+            );
+            let err = IngredientCatalog::from_ron_str(&text).unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    IngredientLoadError::BlankText { ref id, field: got }
+                        if id == "sugar" && got == field
+                ),
+                "a blank {field} should be refused by name, got {err:?}"
+            );
+        }
+    }
+
+    /// Every bought raw gets a Cookbook page, so every entry needs the
+    /// prose and the picture that page prints. Unlike `display_name`,
+    /// which is correctly empty against the shipped content, these are the
+    /// fields the book actually renders.
+    #[test]
+    fn every_shipped_entry_carries_the_prose_the_cookbook_prints() {
+        let catalog = IngredientCatalog::bundled();
+        for entry in catalog.entries() {
+            assert!(entry.blurb.is_some(), "{} has no blurb", entry.id);
+            assert!(entry.icon.is_some(), "{} has no icon", entry.id);
+        }
+        assert_eq!(catalog.icons().count(), catalog.entries().len());
     }
 
     /// No shipped raw needs a name of its own — every id here title-cases

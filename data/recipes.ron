@@ -132,6 +132,37 @@
 // this game wants, so the stage is gone — deleted rather than disabled.
 // `TimedProcess` itself is untouched and still runs every craft cycle here.
 //
+// WHAT THE COOKBOOK READS. `tagline`, `blurb` and `icon` are all optional,
+// and they exist so that THE COOKBOOK — the in-game encyclopedia on B — is
+// written here rather than in GDScript. A sauce added to this file gets a
+// page with no Rust edit and no Godot edit: the tree, the ingredient list,
+// the machine process, the timings and the cost per box are all derived
+// from the fields above it, and these three are the only parts a machine
+// cannot work out for itself.
+//
+// Two rules about them, both learned the hard way elsewhere in this repo.
+//
+// (1) A BLURB NEVER QUOTES A NUMBER THIS FILE ALREADY OWNS. Writing "four
+// tomatoes" or "eight seconds" into prose makes a second copy of `inputs`
+// and `time_ticks` that no test compares, so the next balance pass leaves
+// the page lying. The page prints the real numbers beside the prose; the
+// prose says what they mean.
+//
+// (2) `icon` NAMES A VOXEL ASSET, and it is how `main.gd`'s `ITEM_MODELS`
+// table stops having to grow. That table is a hand-written map from content
+// id to asset name in a file that ships green when it goes stale — the
+// failure UI_UX.md §2b point 12 records. The wire is consulted first now,
+// so content names its own picture and the table is only the fallback for
+// ids written before this field existed.
+//
+// `bbq_mix` and `bbq` deliberately name NO icon. There is no open pail of
+// BBQ anywhere in the asset set, and `assets/voxels/palette.ron` records
+// why that is on purpose: nothing carries BBQ in an open container, so the
+// only voxels painted `bbq_brown` are a bottle's contents and a case's
+// print. Both ids are fluids in pipes, the Cookbook draws a stage's
+// MACHINE rather than its intermediate, and an icon here would be a
+// picture that exists nowhere in the game.
+//
 // The RON extension below lets an optional field be written as its value
 // (`display_name: "BBQ"`) instead of `Some("BBQ")`. It changes nothing about
 // what this file means; it keeps a content file reading like content.
@@ -144,6 +175,8 @@
         // (`data/ingredients.ron`) and loaded into a hopper.
         Recipe(
             id: "tomato_paste",
+            blurb: "Whole tomatoes in, paste out. The crusher is the only machine that eats a raw solid straight off a hopper with nothing upstream of it, and it takes several tomatoes to the pail — which is why a ketchup line burns more tomato than anything else on the shelf.",
+            icon: "item_paste_pail",
             inputs: [("tomato", 4)],
             outputs: [("tomato_paste", 1)],
             machine: "crusher",
@@ -165,6 +198,8 @@
         // face.
         Recipe(
             id: "ketchup_mix",
+            blurb: "Paste and sugar arrive on two belt lanes, vinegar arrives down a pipe, and what leaves is a liquid. This is where the chain stops being a conveyor: the mixer's outlet face wants a pipe run, not a belt.",
+            icon: "item_mix_pail",
             inputs: [("tomato_paste", 1), ("sugar", 1)],
             fluid_inputs: [("vinegar", 2)],
             outputs: [],
@@ -180,6 +215,9 @@
         // machine.
         Recipe(
             id: "ketchup",
+            tagline: "The first sauce. Everything else in the book is built on it.",
+            blurb: "The long cook, and the slowest step in a ketchup line — which makes the vat the bottleneck the whole line is shaped around. Liquid in, liquid out: no belt touches this machine at all, which is the clearest proof in the game that what connects a stage is content rather than geometry.",
+            icon: "item_ketchup_pail",
             inputs: [],
             fluid_inputs: [("ketchup_mix", 1)],
             outputs: [],
@@ -194,6 +232,8 @@
         // rejoins the conveyor.
         Recipe(
             id: "bottled_ketchup",
+            blurb: "Where the product stops being a fluid. Ketchup is drawn out of the pipe run and leaves as a bottle on a belt — the one step in the game with a liquid input and a solid output, and where the piped middle of the chain rejoins the conveyor.",
+            icon: "item_bottle",
             inputs: [],
             fluid_inputs: [("ketchup", 1)],
             outputs: [("bottled_ketchup", 1)],
@@ -208,6 +248,9 @@
         // then or now.
         Recipe(
             id: "boxed_ketchup",
+            tagline: "What the dock ships, and what the contracts pay for.",
+            blurb: "The packer is the end of the line; past it there is only belt and the dock. Nothing downstream cares which sauce is in the case — only the contract board does.",
+            icon: "item_box",
             inputs: [("bottled_ketchup", 1)],
             outputs: [("boxed_ketchup", 1)],
             machine: "packer",
@@ -250,6 +293,7 @@
         Recipe(
             id: "bbq_mix",
             display_name: "BBQ Mix",
+            blurb: "Finished ketchup, thickened with molasses and spice. Two belt lanes and a pipe run feed one mixer here, which is the first time the factory has to get a fluid and two solids into the same machine at once.",
             inputs: [("spice_mix", 1), ("molasses", 1)],
             fluid_inputs: [("ketchup", 1)],
             outputs: [],
@@ -282,6 +326,8 @@
         Recipe(
             id: "bbq",
             display_name: "BBQ",
+            tagline: "The second sauce, and the first thing you make out of something you already make.",
+            blurb: "The longest process in the game, and deliberately so. A BBQ vat draws its ketchup from the same run that feeds the ketchup bottler, so every case of BBQ is a case of ketchup not shipped. A factory feeding both settles at about three ketchup to two BBQ — which is the shape of every mixed order on the contract board.",
             inputs: [],
             fluid_inputs: [("bbq_mix", 1), ("liquid_smoke", 1)],
             outputs: [],
@@ -294,6 +340,8 @@
         Recipe(
             id: "bottled_bbq",
             display_name: "Bottled BBQ",
+            blurb: "The mirror of the ketchup bottler on a second machine: same work, darker glass. A belt carrying BBQ has to be tellable from a belt carrying ketchup at a glance, so the bottle is its own model rather than a tinted one.",
+            icon: "item_bottle_bbq",
             inputs: [],
             fluid_inputs: [("bbq", 1)],
             outputs: [("bottled_bbq", 1)],
@@ -307,6 +355,8 @@
         Recipe(
             id: "boxed_bbq",
             display_name: "Boxed BBQ",
+            blurb: "The second thing this factory can sell. Both branches' cases ride ordinary belt into the same dock — the delivery pool does not care which sauce a case holds, only the contract board does.",
+            icon: "item_box_bbq",
             inputs: [("bottled_bbq", 1)],
             outputs: [("boxed_bbq", 1)],
             machine: "packer",
