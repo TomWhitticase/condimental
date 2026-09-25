@@ -51,6 +51,10 @@
     "metal",
     "emissive"
   ],
+  "crossing": [
+    "matte",
+    "metal"
+  ],
   "crush_bit": [
     "matte"
   ],
@@ -250,13 +254,13 @@
   "pipe": [
     "metal"
   ],
-  "pipe_bridge_flat": [
-    "metal"
-  ],
   "pipe_corner": [
     "metal"
   ],
   "pipe_cross": [
+    "metal"
+  ],
+  "pipe_crossing": [
     "metal"
   ],
   "pipe_end": [
@@ -280,17 +284,14 @@
   "pipe_fluid_cross": [
     "liquid"
   ],
-  "pipe_fluid_end": [
+  "pipe_fluid_crossing": [
     "liquid"
   ],
-  "pipe_fluid_gantry": [
+  "pipe_fluid_end": [
     "liquid"
   ],
   "pipe_fluid_tee": [
     "liquid"
-  ],
-  "pipe_gantry": [
-    "metal"
   ],
   "pipe_tee": [
     "metal"
