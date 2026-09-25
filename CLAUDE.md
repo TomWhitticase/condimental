@@ -32,6 +32,10 @@ empty, and the player buys and places every tile.
   `git config core.hooksPath .githooks`.
 - **Never commit or push to `main`.** Work on a branch and merge it through a
   pull request (`gh pr create`); a `pre-push` hook refuses the alternative.
+- **No PR merges before it is reviewed.** It needs green checks AND a
+  `VERDICT: APPROVED` from a session that did not write it (the `review`
+  skill). "Make a PR and merge it" means merge after that verdict; with none,
+  leave the PR open and say it is waiting on review.
 - **Every PR body shows the change in a screenshot** — render with
   `scripts/screenshot-scene.sh`, read it, publish with
   `scripts/pr-screenshot.sh`, paste its markdown. A hook and CI both refuse a

@@ -1,6 +1,6 @@
 ---
 name: open-pr
-description: Ship finished work through GitHub — branch, push, screenshot the change, open a pull request with gh, watch its checks and merge it. Use when a change is complete and needs to reach main, or when you are about to commit and find yourself on main, or when you catch yourself about to merge or push main locally.
+description: Ship finished work through GitHub — branch, push, screenshot the change, open a pull request with gh, watch its checks, and merge it once another session has posted VERDICT: APPROVED. Use when a change is complete and needs to reach main, or when you are about to commit and find yourself on main, or when you catch yourself about to merge or push main locally.
 ---
 
 # Getting work onto `main`
@@ -87,13 +87,22 @@ usually the right home for it; the `file-issue` skill decides the few that
 also earn a backlog entry, and it starts by asking whether you should have
 just fixed it instead.
 
-## 5. Watch it land
+## 5. Get it reviewed, then land it
 
-An open PR is unfinished work.
+**Every PR is reviewed before it merges** (the owner's rule, 2026-09-25).
+Green CI is not a review, and a review after the merge does not count. The
+verdict comes from a session that did not write the branch (the `review`
+skill), posted as a comment review (`gh pr review <N> --comment`) whose first
+line is `VERDICT: APPROVED`. `gh` returns that under `reviews`, not
+`comments`, so check both, and read the **latest** verdict: an approval
+followed by a later `CHANGES REQUESTED` is not an approval. Being told to
+"make a PR and merge it" does not change this. If no reviewer's verdict is
+there yet, give the URL, say the PR is waiting on review, and stop.
 
 ```
-gh pr checks --watch
-gh pr merge --squash --delete-branch
+gh pr checks <N> --watch
+gh pr view <N> --json reviews,comments --jq '[(.reviews[]|{t:.submittedAt,b:.body}),(.comments[]|{t:.createdAt,b:.body})]|sort_by(.t)|map(.b|split("\n")[0]|select(startswith("VERDICT:")))|last // "NO VERDICT"'
+gh pr merge <N> --squash --delete-branch    # only if that printed exactly VERDICT: APPROVED
 ```
 
 **Squash by default** — intermediate commits are noise in a history that feeds
@@ -102,7 +111,8 @@ the change, so it must pass the same lint (`scripts/lint-commit-msg.sh`). Keep
 a real merge commit only when each commit is a reviewed unit in its own right,
 as in a ticketed epic.
 
-**Do not merge** a PR whose checks are red or still running, one the owner
+**Do not merge** a PR with no `VERDICT: APPROVED`, one whose checks are red
+or still running, one the owner
 asked to review, or one that deviates from a design doc, bumps `gdext`, or
 changes the save format. Say it is ready, give the URL, and stop.
 
