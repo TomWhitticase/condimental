@@ -1428,6 +1428,50 @@ static func item_gallery_tile(slot: int) -> Vector2i:
 	return Vector2i(slot * 2, 0)
 
 
+## THE CROSSING SPIKE (2026-09-25) — **THROWAWAY**, and the only fixture here
+## that photographs something the simulation cannot actually build.
+##
+## The belt/pipe crossing design (the Drive doc of 2026-09-25) proposes one
+## tile carrying both a belt and a pipe. Nothing in `sim_core` allows that
+## yet, so this lays the two runs down with a HOLE in the pipe where they
+## would meet and `test_screenshot.gd` stands the candidate gantry model in
+## the hole — presentation only, no sim, no save. It exists so the shape can
+## be judged before any of it is built, and it should be deleted with the
+## generators it photographs.
+##
+## One belt run east along y = 0, and two north-south pipe runs crossing it:
+## x = 3 for the FLAT bridge (the design doc's option B as written) and
+## x = 9 for the raised GANTRY. Each pipe run is fed from both ends, because
+## a real crossing would make its two halves one network and half a run in
+## colour would flatter the mock.
+static func build_crossing_spike(sim) -> void:
+	stock(sim, "vinegar", 64)
+	for x in range(13):
+		place(sim, "belt", Vector2i(x, 0), "east")
+	for x in [CROSSING_FLAT_X, CROSSING_GANTRY_X]:
+		for y in [-3, -2, -1]:
+			place(sim, "pipe", Vector2i(x, y), "north")
+		for y in [1, 2, 3]:
+			place(sim, "pipe", Vector2i(x, y), "north")
+		# Only (x, 0) stays bare — the belt row itself, and the one tile the
+		# overlay stands in, so the gap in the render is exactly the tile a
+		# crossing would occupy.
+		for tank in [Vector2i(x, -4), Vector2i(x, 4)]:
+			place(sim, "fluid_tank", tank, "north" if tank.y < 0 else "south")
+			sim.issue_command_json(JSON.stringify({
+				"type": "set_tank_fluid", "tile": [tank.x, tank.y], "fluid": "vinegar",
+			}))
+			sim.issue_command_json(JSON.stringify({
+				"type": "set_tank_auto_fill", "tile": [tank.x, tank.y], "enabled": true,
+			}))
+
+
+## Which column each candidate crossing stands in, shared with
+## `test_screenshot.gd` so the overlay and the gap cannot drift apart.
+const CROSSING_FLAT_X := 3
+const CROSSING_GANTRY_X := 9
+
+
 ## THE BELT GALLERY (the pipes & conveyors overhaul, ticket 5) — every belt
 ## shape at every facing, and a belt meeting a machine, a hopper and a dock
 ## at every facing, in one world. `test_belt_shapes.gd` asserts against it

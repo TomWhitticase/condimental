@@ -344,6 +344,21 @@ pub const ASSETS: &[Asset] = &[
         name: "pipe_fluid_end",
         build: pipe_fluid_end,
     },
+    // The belt/pipe crossing spike of 2026-09-25 — THROWAWAY, see the
+    // "Crossings" section below. Registered so the review render can show
+    // both candidates; nothing places either.
+    Asset {
+        name: "pipe_bridge_flat",
+        build: pipe_bridge_flat,
+    },
+    Asset {
+        name: "pipe_gantry",
+        build: pipe_gantry,
+    },
+    Asset {
+        name: "pipe_fluid_gantry",
+        build: pipe_fluid_gantry,
+    },
     Asset {
         name: "item_tomato",
         build: item_tomato,
@@ -2914,6 +2929,146 @@ pub fn pipe_fault(p: &Palette) -> VoxModel {
     // the clamp from the bright `steel_light` tube by VALUE as well as by
     // shape (§2b point 11).
     m.cuboid(span, span, (z.1 - 1, z.1), black);
+    m
+}
+
+// --- Crossings: a visual spike, 2026-09-25 ---------------------------------
+//
+// THROWAWAY. Nothing in the simulation or the scene places either of these;
+// they exist so the belt/pipe crossing design (the Drive doc of 2026-09-25)
+// can be LOOKED at before it is built, which is the one thing reading a
+// generator can never do for you (UI_UX.md §2b point 9). Delete them, or
+// promote them, once that call is made.
+//
+// Both are authored with the BELT running +X — the crossing tile's own
+// `Direction` — and the PIPE running along Y, so one yaw turns the pair
+// exactly as it turns every other tile. Neither draws the belt: the scene
+// stacks one of these over an ordinary `belt_f*` instance, so a crossing
+// keeps the belt's four animation frames for nothing.
+
+/// What a crossing actually has to clear, and it is NOT the belt.
+///
+/// The design doc's arithmetic stopped at the conveyor: the cleat tops out at
+/// [`BELT_CLEAT_Z`] = 10 and the run's tube starts at 11, so a pipe left at
+/// [`PIPE_AXIS_Z`] misses it by a voxel. But the belt is a floor for things
+/// standing on it. An item is placed with its base on the running surface at
+/// `BELT_SURFACE_VOXELS` = [`BELT_CLEAT_Z`] and `item_bottle` is 15 voxels
+/// tall, so the tallest thing the line carries reaches z = 24 — a foot and a
+/// half INTO a tube whose bore is z 12..19. Every solid on that belt would
+/// pass through the pipe.
+const CROSSING_ITEM_TOP_Z: i32 = BELT_CLEAT_Z + 14;
+/// Height of the raised run, one full tile above the floor: the lowest voxel
+/// of a tube centred here is 27, which leaves two voxels of daylight over
+/// [`CROSSING_ITEM_TOP_Z`]. Lower and the bottles graze it, which reads as
+/// the same mistake as passing through it.
+const GANTRY_AXIS_Z: i32 = TILE_VOXELS as i32;
+/// Tall enough for the raised tube's crown at z = 36 plus the window carve.
+const GANTRY_MODEL_Z: u32 = 38;
+/// Where the run turns up, and (mirrored about [`PIPE_C`]) back down. Fixed
+/// by the items again, this time in plan: an item model is 16 voxels wide on
+/// the tile's centre, so the lane's traffic occupies y 10..21 and the free
+/// bands either side are y 0..9 and y 22..31. A riser of the run's own radius
+/// centred here fills y 0..8, and the hub casting around it y 0..9 — exactly
+/// flush with the widest thing that passes underneath.
+const GANTRY_ELBOW_Y: f32 = 3.0;
+/// The elbow casting, and NOT [`PIPE_HUB_R`]. A corner tile carries one hub
+/// and can afford the swelling that says "fitting"; a gantry carries four
+/// within a third of a tile, and at the run's own hub radius the first render
+/// came back with a lumpy pale column at each end of the arch instead of two
+/// elbows. Half a voxel of swell is enough to break the line and little
+/// enough to keep the silhouette a pipe's.
+const GANTRY_HUB_R: f32 = PIPE_OUTER_R + 0.5;
+
+/// The two posts a crossing stands on, replacing [`pipe_stand`]'s single
+/// central one — which cannot stay, because it stands in the belt's lane.
+/// Both sit clear of the conveyor's side frames (y 4..6 and 25..27) and of
+/// its legs, so the two models never share a voxel.
+fn crossing_posts(m: &mut VoxModel, p: &Palette, axis_z: i32) {
+    let steel = p.idx("steel");
+    for (y0, y1) in [(1, 3), (28, 30)] {
+        m.cuboid((13, 18), (y0, y1), (0, 0), steel);
+        m.cuboid((14, 17), (y0, y1), (1, axis_z - 7), steel);
+        m.cuboid((13, 18), (y0 - 1, y1 + 1), (axis_z - 6, axis_z - 5), steel);
+    }
+}
+
+/// [`pipe_window_x`] turned along Y and given an explicit axis, so the raised
+/// run gets its sight glass at its own height instead of at the run's.
+fn crossing_window_y(m: &mut VoxModel, y: (i32, i32), axis_z: i32) {
+    let top = (axis_z + 5).min(m.size[2] as i32 - 1);
+    m.carve_cuboid(PIPE_BORE_Y, y, (axis_z - 2, top));
+}
+
+/// **The flat bridge — drawn to be rejected.** The design doc's option B as
+/// written: today's straight pipe, its central stand swapped for two posts
+/// outside the lane, left at the run's own [`PIPE_AXIS_Z`].
+///
+/// It clears the conveyor and nothing else. See [`CROSSING_ITEM_TOP_Z`]: this
+/// shape is kept only so the render can show what that costs side by side
+/// with [`pipe_gantry`], and it should not outlive that comparison.
+pub fn pipe_bridge_flat(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 24]);
+    let last = TILE_VOXELS as i32 - 1;
+    crossing_posts(&mut m, p, PIPE_AXIS_Z);
+    pipe_leg_y(&mut m, p, (0, last));
+    pipe_bore_y(&mut m, (0, last));
+    crossing_window_y(&mut m, (12, 19), PIPE_AXIS_Z);
+    m
+}
+
+/// **The gantry.** The run arrives at [`PIPE_AXIS_Z`] on the tile's edge,
+/// elbows up at [`GANTRY_ELBOW_Y`], crosses the lane at [`GANTRY_AXIS_Z`] —
+/// clear over the tallest bottle — and comes back down to meet its neighbour
+/// at the far face. Both open faces are a plain bore on the run's own axis,
+/// so a crossing drops into an existing north–south run with no fitting and
+/// no change to the tiles either side of it.
+///
+/// Drawn solid and hollowed afterwards, the rule every junction shape here
+/// follows: legs and hub castings then open into one another instead of
+/// meeting as two separately-bored tubes.
+pub fn pipe_gantry(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, GANTRY_MODEL_Z]);
+    let last = TILE_VOXELS as i32 - 1;
+    let low = PIPE_AXIS_Z as f32;
+    let high = GANTRY_AXIS_Z as f32;
+    let near = GANTRY_ELBOW_Y;
+    let far = PIPE_C * 2.0 - GANTRY_ELBOW_Y;
+    let steel = p.idx("steel_light");
+
+    crossing_posts(&mut m, p, PIPE_AXIS_Z);
+
+    pipe_leg_y(&mut m, p, (0, near as i32));
+    pipe_leg_y(&mut m, p, (far as i32, last));
+    for y in [near, far] {
+        m.cylinder_z_f((PIPE_C, y), PIPE_OUTER_R, (PIPE_AXIS_Z, GANTRY_AXIS_Z), steel);
+        m.sphere_f((PIPE_C, y, low), GANTRY_HUB_R, steel);
+        m.sphere_f((PIPE_C, y, high), GANTRY_HUB_R, steel);
+    }
+    m.cylinder_y_f(
+        (PIPE_C, high),
+        PIPE_OUTER_R,
+        (near as i32, far as i32),
+        steel,
+    );
+
+    m.carve_cylinder_y_f((PIPE_C, low), PIPE_BORE_R, (0, near as i32));
+    m.carve_cylinder_y_f((PIPE_C, low), PIPE_BORE_R, (far as i32, last));
+    for y in [near, far] {
+        m.carve_cylinder_z_f((PIPE_C, y), PIPE_BORE_R, (PIPE_AXIS_Z, GANTRY_AXIS_Z));
+        m.carve_sphere_f((PIPE_C, y, low), PIPE_BORE_R);
+        m.carve_sphere_f((PIPE_C, y, high), PIPE_BORE_R);
+    }
+    m.carve_cylinder_y_f((PIPE_C, high), PIPE_BORE_R, (near as i32, far as i32));
+    crossing_window_y(&mut m, (12, 19), GANTRY_AXIS_Z);
+    m
+}
+
+/// The liquid in a [`pipe_gantry`]'s raised run — the flat slab every other
+/// fluid body is, on the crossing's own axis rather than the run's, so the
+/// sight window over the belt shows the same colour as the tiles either side.
+pub fn pipe_fluid_gantry(p: &Palette) -> VoxModel {
+    let mut m = pipe_fluid_slab();
+    pipe_fluid_y(&mut m, p, (GANTRY_ELBOW_Y as i32, (PIPE_C * 2.0 - GANTRY_ELBOW_Y) as i32));
     m
 }
 
@@ -5572,6 +5727,37 @@ mod tests {
 
     fn palette() -> Palette {
         Palette::load()
+    }
+
+    /// The crossing spike's whole finding, as an assertion (2026-09-25) —
+    /// **THROWAWAY**, delete it with the two shapes it measures.
+    ///
+    /// An item rides the belt with its base on the running surface and its
+    /// model centred on the tile, so a solid on a crossing tile fills
+    /// y 10..21 up to [`CROSSING_ITEM_TOP_Z`]. That box is what a crossing
+    /// has to leave empty, and it is NOT the same box as the belt's own.
+    /// `pipe_bridge_flat` — the design doc's option B as written — fills it;
+    /// `pipe_gantry` clears it. Both halves are asserted, because a spike
+    /// that only proved the good case would not have found the bug.
+    #[test]
+    fn only_the_gantry_clears_what_the_belt_is_carrying() {
+        let p = palette();
+        let item_box = |m: &VoxModel| {
+            (10..=21).any(|y| {
+                (0..TILE_VOXELS as i32).any(|x| {
+                    (0..=CROSSING_ITEM_TOP_Z).any(|z| m.filled(x, y, z))
+                })
+            })
+        };
+        assert!(
+            item_box(&pipe_bridge_flat(&p)),
+            "the flat bridge is supposed to foul the item box — if it no longer \
+             does, the belt or the items changed and the gantry may be unneeded"
+        );
+        assert!(
+            !item_box(&pipe_gantry(&p)),
+            "the gantry stands in the space an item on the belt occupies"
+        );
     }
 
     /// Every kind's junction geometry, so a new machine kind added to

@@ -256,6 +256,9 @@ const FIXTURE_NAMES: PackedStringArray = [
 	"pipes", "gallery", "items", "fluid_gallery", "bottleneck", "bbq",
 	"stalled_run", "understaffed", "shortfall", "full_dock",
 	"unclerked_dock", "warehouse", "split_docks",
+	# THROWAWAY — the belt/pipe crossing spike of 2026-09-25, see
+	# `_stand_crossing_spike`. Delete with it.
+	"crossing",
 ]
 
 ## The fixtures whose whole claim is a factory that is WORKING, and which are
@@ -956,6 +959,8 @@ func _build_fixture() -> void:
 				)
 				_refuse()
 				return
+		"crossing":
+			Layouts.build_crossing_spike(_main.sim)
 		"demo":
 			Layouts.build_demo_line(_main.sim)
 		_:
@@ -2035,6 +2040,58 @@ func _stand_item_gallery() -> void:
 		)
 
 
+## The crossing spike's overlay — **THROWAWAY** (2026-09-25).
+##
+## `build_crossing_spike` leaves one tile of each pipe run bare, because the
+## simulation has no tile that is both a belt and a pipe. This stands the two
+## candidate models in those holes as plain scene nodes: the flat bridge the
+## design doc described at x = 3, the raised gantry at x = 9. They are art in
+## the scene and nothing else — no placement, no snapshot, no save — which is
+## the entire point, since the question being asked is whether the shape
+## reads at all before anything is built to carry it.
+##
+## Items are stood on the belt through `main.gd`'s own `_show_carried_item`,
+## exactly as `_stand_item_gallery` does, and deliberately UNDER each
+## crossing: what the flat bridge does to a bottle is the finding.
+const CROSSING_SPIKE_MODELS := {
+	3: "pipe_bridge_flat",
+	9: "pipe_gantry",
+}
+const CROSSING_SPIKE_ITEMS := ["item_bottle", "item_box", "item_tomato"]
+
+
+func _stand_crossing_spike() -> void:
+	var slot := 0
+	for x in CROSSING_SPIKE_MODELS:
+		var node: Node3D = _main._assets.asset_node(String(CROSSING_SPIKE_MODELS[x]))
+		node.position = _main._tile_origin(int(x), 0, _main.FLOOR_Y)
+		_main._world_root.add_child(node)
+		# One item dead under the crossing and one either side, so the frame
+		# shows both the clearance and the line it is crossing.
+		for offset in [-1, 0, 1]:
+			_main._show_carried_item(
+				"crossing_spike_%d" % slot,
+				String(CROSSING_SPIKE_ITEMS[slot % CROSSING_SPIKE_ITEMS.size()]),
+				_main._carried_item_transform(Vector2i(int(x) + offset, 0), "east", 0.5)
+			)
+			slot += 1
+	# First person has nowhere to stand by default — `--first-person` drops the
+	# camera over the world's origin, which in this fixture is nine tiles short
+	# of the gantry. Put the player on the floor beside the raised crossing,
+	# looking up the belt at it: eye level is where the question "is this a
+	# thing a person walks under" actually gets answered.
+	if _in_first_person():
+		_main._fp_position = Vector3(
+			7.0 * _main.TILE, _main.TILE * 1.5, -2.2 * _main.TILE
+		)
+		_main._fp_yaw = atan2(
+			-(float(Layouts.CROSSING_GANTRY_X) * _main.TILE - _main._fp_position.x),
+			-(0.0 - _main._fp_position.z)
+		)
+		_main._fp_pitch = 0.0
+		_main._update_fp_camera_transform()
+
+
 ## `--pause`: the in-game menu, over a factory that has been running.
 func _open_pause_menu() -> void:
 	_main._set_pause_open(true)
@@ -2148,6 +2205,8 @@ func _process(delta: float) -> bool:
 		_enter_closeup()
 	if _frames == 2 and _item_gallery:
 		_stand_item_gallery()
+	if _frames == 2 and _fixture == "crossing":
+		_stand_crossing_spike()
 	if _frames == 2 and not _hover_flags.is_empty():
 		_apply_hover_flags()
 		# Straight out, rather than letting the rest of this frame set up a

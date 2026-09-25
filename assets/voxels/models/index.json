@@ -250,6 +250,9 @@
   "pipe": [
     "metal"
   ],
+  "pipe_bridge_flat": [
+    "metal"
+  ],
   "pipe_corner": [
     "metal"
   ],
@@ -280,8 +283,14 @@
   "pipe_fluid_end": [
     "liquid"
   ],
+  "pipe_fluid_gantry": [
+    "liquid"
+  ],
   "pipe_fluid_tee": [
     "liquid"
+  ],
+  "pipe_gantry": [
+    "metal"
   ],
   "pipe_tee": [
     "metal"
