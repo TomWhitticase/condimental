@@ -742,6 +742,31 @@ fn default_buy_quantity() -> u32 {
     DEFAULT_BUY_QUANTITY
 }
 
+impl PlayerCommand {
+    /// The command's wire `type` (`PlayerCommandDto`'s tag), for a sentence
+    /// that has to name it.
+    fn type_name(&self) -> &'static str {
+        match self {
+            Self::FillHopper { .. } => "fill_hopper",
+            Self::FillFluidTank { .. } => "fill_fluid_tank",
+            Self::BuyIngredient { .. } => "buy_ingredient",
+            Self::Purchase { .. } => "purchase",
+            Self::Place { .. } => "place",
+            Self::Remove { .. } => "remove",
+            Self::Rotate { .. } => "rotate",
+            Self::SetHopperItem { .. } => "set_hopper_item",
+            Self::SignContract { .. } => "sign_contract",
+            Self::SetHopperAutoFill { .. } => "set_hopper_auto_fill",
+            Self::SetTankAutoFill { .. } => "set_tank_auto_fill",
+            Self::SetTankFluid { .. } => "set_tank_fluid",
+            Self::SetMothballed { .. } => "set_mothballed",
+            Self::Hire { .. } => "hire",
+            Self::Fire { .. } => "fire",
+            Self::DebugGrantMoney { .. } => "debug_grant_money",
+        }
+    }
+}
+
 impl From<PlayerCommandDto> for PlayerCommand {
     fn from(dto: PlayerCommandDto) -> Self {
         match dto {
@@ -807,6 +832,99 @@ pub fn command_from_json(json: &str) -> Option<PlayerCommand> {
     serde_json::from_str::<PlayerCommandDto>(json)
         .ok()
         .map(PlayerCommand::from)
+}
+
+/// What [`World::preview_command`] answers: would this command succeed if
+/// issued now, and what would the tile it names become (ARCHITECTURE.md §4).
+/// Serialized by `SimBridge::preview_command_json`:
+///
+/// ```json
+/// {"valid": true, "reason": "", "result_kind": "crossing"}
+/// {"valid": false, "reason": "A pipe can only cross a belt at right angles.",
+///  "result_kind": ""}
+/// ```
+///
+/// `reason` is empty exactly when `valid` is true, and otherwise a sentence
+/// for presentation to show as it stands. `result_kind` is the placement
+/// kind the targeted tile would end up as (`"pipe"`, `"crossing"`, a machine
+/// kind), and empty for a refusal or for a command that places nothing.
+///
+/// **A command preview does not cover is refused, not waved through**: its
+/// `reason` says the preview cannot vouch for it. A ghost that goes green on
+/// a guess is the failure this type exists to prevent.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct PreviewResult {
+    pub valid: bool,
+    pub reason: String,
+    pub result_kind: String,
+}
+
+impl PreviewResult {
+    fn accepted(result_kind: &str) -> Self {
+        Self {
+            valid: true,
+            reason: String::new(),
+            result_kind: result_kind.to_string(),
+        }
+    }
+
+    /// The answer for a command the wire could not parse — which
+    /// `issue_command_json` drops as a no-op, so it is not valid.
+    pub fn malformed() -> Self {
+        Self::refused("That command could not be read.".to_string())
+    }
+
+    fn refused(reason: String) -> Self {
+        Self {
+            valid: false,
+            reason,
+            result_kind: String::new(),
+        }
+    }
+}
+
+/// What a `Place` that [`World::plan_place`] accepted will do.
+enum PlacePlan {
+    /// Assemble the belt or pipe already standing there into a crossing.
+    Crossing {
+        occupant: Entity,
+        tiles: Vec<TileCoord>,
+    },
+    /// Spawn a new placement on free ground.
+    Fresh {
+        footprint: Footprint,
+        tiles: Vec<TileCoord>,
+        hopper_item: Option<ItemId>,
+    },
+}
+
+/// Why [`World::plan_place`] refused a `Place`. `issue_command` drops it (a
+/// refusal there is a silent no-op); [`World::preview_command`] words it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlaceRefusal {
+    /// Not a buildable kind, or a machine kind no recipe runs on.
+    NotBuildable,
+    /// A hopper with no item named where one is needed, or a non-raw one.
+    HopperItem,
+    /// A belt and a pipe that would cross, but run the same way.
+    Parallel,
+    /// The footprint overlaps something already placed.
+    Occupied,
+    /// The player owns none of the kind.
+    NoneOwned,
+}
+
+/// Why [`World::plan_purchase`] refused a `Purchase`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PurchaseRefusal {
+    /// Not in the shop catalog.
+    NotForSale,
+    /// A quantity of zero.
+    NothingAsked,
+    /// A total [`Money`] cannot represent.
+    TooLarge,
+    /// A total the balance does not cover.
+    Unaffordable,
 }
 
 /// A snapshot of one chunk's contents, built fresh on request from live
@@ -2633,18 +2751,32 @@ impl World {
         }
     }
 
-    /// Places one owned unit of `kind`, returning whether it happened. See
-    /// [`PlayerCommand::Place`] for the refusal rules — every one of them
-    /// leaves the world byte-identical.
-    fn try_place(
-        &mut self,
+    /// **The one placement rule in this file.** Decides whether placing one
+    /// owned `kind` at `tile` facing `direction` would succeed, and what it
+    /// would do, without changing anything.
+    ///
+    /// `issue_command` hands the plan it returns to [`Self::apply_place`],
+    /// which cannot refuse, and [`Self::preview_command`] reports it: there
+    /// is no second copy of the ownership, footprint, hopper-item, overlap
+    /// or crossing rule for the build ghost and the placement to disagree
+    /// about. A refusal added anywhere but here — a guard in the `Place` arm
+    /// of `issue_command` — would still compile and would drift;
+    /// `tests/preview.rs` checks agreement over a grid of cases, not every
+    /// input.
+    ///
+    /// The refusals are checked in the order a player wants to hear them —
+    /// "you cannot build that here" before "you own none" — which changes
+    /// only which reason a doubly-refused placement reports, never whether
+    /// it is refused.
+    fn plan_place(
+        &self,
         kind: &str,
         tile: TileCoord,
         direction: Direction,
         item: Option<&str>,
-    ) -> bool {
-        if self.shop.owned.count(kind) == 0 || !self.can_construct(kind) {
-            return false;
+    ) -> Result<PlacePlan, PlaceRefusal> {
+        if !self.can_construct(kind) {
+            return Err(PlaceRefusal::NotBuildable);
         }
         // Resolved before anything is spawned, so an ambiguous or bogus
         // hopper item is a refusal that changes nothing rather than a
@@ -2652,7 +2784,7 @@ impl World {
         let hopper_item = if kind == HOPPER_KIND {
             match self.hopper_item_for(item) {
                 Some(resolved) => Some(resolved),
-                None => return false,
+                None => return Err(PlaceRefusal::HopperItem),
             }
         } else {
             None
@@ -2661,17 +2793,52 @@ impl World {
             .footprint_for(kind)
             .expect("can_construct checked the footprint exists");
         let tiles = footprint.tiles_facing(tile, direction);
-        if let Some(occupant) = self.crossing_partner(kind, tile, direction) {
-            self.assemble_crossing(occupant, kind, direction);
-            let taken = self.shop.owned.take_one(kind);
-            debug_assert!(taken, "owned count was checked above");
-            self.recompute_topology();
-            self.mark_tiles_dirty(&tiles);
-            return true;
+        let plan = match self.crossing_partner(kind, tile, direction)? {
+            Some(occupant) => PlacePlan::Crossing { occupant, tiles },
+            None if tiles.iter().any(|t| self.topology.grid.contains_key(t)) => {
+                return Err(PlaceRefusal::Occupied);
+            }
+            None => PlacePlan::Fresh {
+                footprint,
+                tiles,
+                hopper_item,
+            },
+        };
+        if self.shop.owned.count(kind) == 0 {
+            return Err(PlaceRefusal::NoneOwned);
         }
-        if tiles.iter().any(|t| self.topology.grid.contains_key(t)) {
-            return false;
-        }
+        Ok(plan)
+    }
+
+    /// Carries out a placement [`Self::plan_place`] accepted, returning the
+    /// entity now standing on `tile`. It has **no refusal path**: it takes
+    /// the plan, not the request, and must hand back an entity, so a bare
+    /// `return` does not compile — a new refusal belongs in `plan_place`,
+    /// where [`Self::preview_command`] reads it too. See
+    /// [`PlayerCommand::Place`] for the refusal rules; every one leaves the
+    /// world byte-identical because it is decided before this runs.
+    fn apply_place(
+        &mut self,
+        kind: &str,
+        tile: TileCoord,
+        direction: Direction,
+        plan: PlacePlan,
+    ) -> Entity {
+        let (footprint, tiles, hopper_item) = match plan {
+            PlacePlan::Crossing { occupant, tiles } => {
+                self.assemble_crossing(occupant, kind, direction);
+                let taken = self.shop.owned.take_one(kind);
+                debug_assert!(taken, "plan_place checked the owned count");
+                self.recompute_topology();
+                self.mark_tiles_dirty(&tiles);
+                return occupant;
+            }
+            PlacePlan::Fresh {
+                footprint,
+                tiles,
+                hopper_item,
+            } => (footprint, tiles, hopper_item),
+        };
 
         let placement = Placement {
             kind: kind.to_string(),
@@ -2766,10 +2933,10 @@ impl World {
         debug_assert!(self.ecs.contains(entity));
 
         let taken = self.shop.owned.take_one(kind);
-        debug_assert!(taken, "owned count was checked above");
+        debug_assert!(taken, "plan_place checked the owned count");
         self.recompute_topology();
         self.mark_tiles_dirty(&tiles);
-        true
+        entity
     }
 
     /// The belt or pipe standing on `tile` that placing `kind` there facing
@@ -2779,26 +2946,32 @@ impl World {
     /// a belt onto a plain pipe, and only **perpendicular**: a parallel
     /// attempt is neither drawable nor meaningful, and the placed piece
     /// already carries the direction the player chose, so it is refused
-    /// rather than guessed at. A splitter is not a belt here — its two
-    /// outputs leave no side for a pipe to pass through.
+    /// ([`PlaceRefusal::Parallel`]) rather than guessed at. A splitter is not
+    /// a belt here — its two outputs leave no side for a pipe to pass
+    /// through. `Ok(None)` means "not a crossing"; the ordinary overlap rule
+    /// then decides.
     fn crossing_partner(
         &self,
         kind: &str,
         tile: TileCoord,
         direction: Direction,
-    ) -> Option<Entity> {
+    ) -> Result<Option<Entity>, PlaceRefusal> {
         let wanted = match kind {
             PIPE_KIND => BodyKind::Belt,
             BELT_KIND => BodyKind::Pipe,
-            _ => return None,
+            _ => return Ok(None),
         };
-        let &occupant = self.topology.grid.get(&tile)?;
+        let Some(&occupant) = self.topology.grid.get(&tile) else {
+            return Ok(None);
+        };
         if self.body_kind(occupant) != Some(wanted) {
-            return None;
+            return Ok(None);
         }
         let standing = self.placement_of(occupant).direction;
-        let perpendicular = direction != standing && direction != standing.opposite();
-        perpendicular.then_some(occupant)
+        if direction == standing || direction == standing.opposite() {
+            return Err(PlaceRefusal::Parallel);
+        }
+        Ok(Some(occupant))
     }
 
     /// Turns the belt or pipe `occupant` into a crossing by adding the
@@ -4377,12 +4550,11 @@ impl World {
                 // No chunk is marked dirty: a purchase changes money and an
                 // owned count, neither of which is a tile. *Placing* what was
                 // bought is what dirties a chunk.
-                let Some(cost) = self.shop.cost_of(&kind, quantity) else {
+                let Ok(cost) = self.plan_purchase(&kind, quantity) else {
                     return;
                 };
-                if !self.economy.try_spend(cost) {
-                    return;
-                }
+                let spent = self.economy.try_spend(cost);
+                debug_assert!(spent, "plan_purchase checked the balance");
                 self.shop.owned.add(&kind, quantity);
             }
             PlayerCommand::BuyIngredient { item, quantity } => {
@@ -4425,7 +4597,12 @@ impl World {
                 direction,
                 item,
             } => {
-                self.try_place(&kind, tile, direction, item.as_deref());
+                // Planned here, applied there: `apply_place` cannot refuse,
+                // so every refusal `Place` has is one `plan_place` makes —
+                // the same call `preview_command` makes.
+                if let Ok(plan) = self.plan_place(&kind, tile, direction, item.as_deref()) {
+                    self.apply_place(&kind, tile, direction, plan);
+                }
             }
             PlayerCommand::Remove { tile } => {
                 self.try_remove(tile);
@@ -4472,6 +4649,120 @@ impl World {
                 self.economy.grant(amount);
             }
         }
+    }
+
+    /// **The one purchase rule in this file**: what buying `quantity` of
+    /// `kind` would cost, or why it cannot happen. The `Purchase` arm of
+    /// [`Self::issue_command`] spends what this prices and
+    /// [`Self::preview_command`] reports it, so there is no second copy of
+    /// the rule for the two to disagree about.
+    fn plan_purchase(&self, kind: &str, quantity: u32) -> Result<Money, PurchaseRefusal> {
+        if self.shop.catalog.get(kind).is_none() {
+            return Err(PurchaseRefusal::NotForSale);
+        }
+        if quantity == 0 {
+            return Err(PurchaseRefusal::NothingAsked);
+        }
+        let Some(cost) = self.shop.cost_of(kind, quantity) else {
+            return Err(PurchaseRefusal::TooLarge);
+        };
+        if !self.economy.can_spend(cost) {
+            return Err(PurchaseRefusal::Unaffordable);
+        }
+        Ok(cost)
+    }
+
+    /// Whether `cmd` would succeed if issued now, and what the tile it
+    /// names would become — a **validation pass**, never an apply-and-roll-
+    /// back: it takes `&self`, so neither the world nor its
+    /// [`Self::revision`] can move (ARCHITECTURE.md §4).
+    ///
+    /// It asks the very functions [`Self::issue_command`] acts on
+    /// ([`Self::plan_place`], [`Self::plan_purchase`]), which is the whole
+    /// guarantee: a preview that merely agrees with the command today would
+    /// be free to disagree tomorrow. It holds for as long as every refusal
+    /// lives in a `plan_*` function rather than in an `issue_command` arm;
+    /// `tests/preview.rs` pins the agreement over a grid of cases, not over
+    /// every input.
+    ///
+    /// `Place` and `Purchase` are covered — the build ghost and the buy
+    /// button. Every other command is **refused with a reason saying it is
+    /// not previewed**, never guessed valid; give one its own `plan_*`
+    /// function, shared with its `issue_command` arm, before covering it.
+    pub fn preview_command(&self, cmd: &PlayerCommand) -> PreviewResult {
+        match cmd {
+            PlayerCommand::Place {
+                kind,
+                tile,
+                direction,
+                item,
+            } => match self.plan_place(kind, *tile, *direction, item.as_deref()) {
+                Ok(PlacePlan::Crossing { .. }) => PreviewResult::accepted(CROSSING_KIND),
+                Ok(PlacePlan::Fresh { .. }) => PreviewResult::accepted(kind),
+                Err(refusal) => PreviewResult::refused(self.place_refusal_reason(
+                    refusal,
+                    kind,
+                    item.as_deref(),
+                )),
+            },
+            PlayerCommand::Purchase { kind, quantity } => {
+                match self.plan_purchase(kind, *quantity) {
+                    Ok(_) => PreviewResult::accepted(""),
+                    Err(refusal) => {
+                        PreviewResult::refused(self.purchase_refusal_reason(refusal, kind))
+                    }
+                }
+            }
+            other => PreviewResult::refused(format!(
+                "Preview does not check {} commands yet.",
+                other.type_name()
+            )),
+        }
+    }
+
+    /// The sentence [`Self::preview_command`] gives for a refused `Place`.
+    fn place_refusal_reason(
+        &self,
+        refusal: PlaceRefusal,
+        kind: &str,
+        item: Option<&str>,
+    ) -> String {
+        let name = self.label_of(kind);
+        match refusal {
+            PlaceRefusal::NotBuildable => format!("{name} is not something that can be built."),
+            PlaceRefusal::HopperItem => match item {
+                Some(item) => format!(
+                    "A hopper cannot hold {}: it only takes raw ingredients.",
+                    self.label_of(item)
+                ),
+                None => "Choose which ingredient this hopper will hold.".to_string(),
+            },
+            PlaceRefusal::Parallel if kind == PIPE_KIND => {
+                "A pipe can only cross a belt at right angles.".to_string()
+            }
+            PlaceRefusal::Parallel => "A belt can only cross a pipe at right angles.".to_string(),
+            PlaceRefusal::Occupied => "That space is already taken.".to_string(),
+            PlaceRefusal::NoneOwned => format!("You own no {name} to place."),
+        }
+    }
+
+    /// The sentence [`Self::preview_command`] gives for a refused `Purchase`.
+    fn purchase_refusal_reason(&self, refusal: PurchaseRefusal, kind: &str) -> String {
+        let name = self.label_of(kind);
+        match refusal {
+            PurchaseRefusal::NotForSale => format!("{name} is not for sale."),
+            PurchaseRefusal::NothingAsked => "Choose how many to buy.".to_string(),
+            PurchaseRefusal::TooLarge => "That order is too large.".to_string(),
+            PurchaseRefusal::Unaffordable => format!("Not enough money to buy {name}."),
+        }
+    }
+
+    /// `id`'s display name where the content files give one, else the id
+    /// itself (a belt and a pipe are priced, not defined, so have none).
+    fn label_of(&self, id: &str) -> String {
+        self.display_names()
+            .remove(id)
+            .unwrap_or_else(|| id.to_string())
     }
 
     /// **The one hopper fill rule in this file.** Adds up to `amount` units
@@ -5849,7 +6140,7 @@ impl World {
     }
 
     /// The footprint `kind` is placed with, or `None` for a kind this world
-    /// cannot construct at all — `try_place`'s own first question, asked by
+    /// cannot construct at all — `plan_place`'s own first question, asked by
     /// [`super::save`] before it places anything so a save naming a kind
     /// this build no longer has fails with a message about *that* rather
     /// than as a generic refusal.
