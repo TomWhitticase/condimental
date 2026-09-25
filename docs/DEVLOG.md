@@ -253,6 +253,14 @@ and puts every running belt on one phase. A jam still freezes it; the
 accepted cost is that a freed tile rejoins the phase instead of resuming its
 own, jumping once under items that are just starting to move.
 
+The review of that branch found the half neither test covered: a belt is laid
+on a tick now as well. A freshly placed segment started its clock at 0, and
+since the scene reads a placed tile exactly once — on the rebuild the
+placement triggers — and an idle tile dirties no chunk afterwards, the one
+tile the player had just bought was the one tile permanently out of step. The
+same hole closed at load, where an empty belt now takes the save's own tick
+rather than whatever a pre-rule save recorded.
+
 ### 2026-09-25 — A hover sheds a line only when that helps (PR #163 review)
 
 PR #163 merged unreviewed, and its review after the fact found that the

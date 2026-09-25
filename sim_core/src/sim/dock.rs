@@ -381,7 +381,7 @@ mod tests {
     const BELT_SPEED: f64 = 0.02;
 
     fn belt() -> BeltSegment {
-        BeltSegment::new(Fx::from_num(4.0), Fx::from_num(0.25))
+        BeltSegment::new(Fx::from_num(4.0), Fx::from_num(0.25), 0)
     }
 
     fn dock() -> Dock {

@@ -278,6 +278,64 @@ fn every_running_belt_stands_at_the_same_phase() {
     }
 }
 
+/// The case the owner reported, and the one a tick of slack hides: a belt
+/// bought and dropped into a floor that has been running for an hour is in
+/// phase **in the frame it is first drawn in**, before it has ticked once.
+///
+/// Reading it after a tick or two proves nothing, because the tile's first
+/// tick would fix a clock that started at zero. Godot never gets that
+/// second look: it reads a placed tile once, on the rebuild the placement
+/// triggers, and an idle tile dirties no chunk afterwards — so a tile that
+/// is out of phase at that instant stays out of phase until something
+/// crosses it.
+#[test]
+fn a_belt_laid_into_a_running_floor_is_in_phase_before_it_ticks() {
+    let (mut world, tiles) = dead_end_run(3, 0);
+    for _ in 0..777 {
+        world.tick();
+    }
+    build(&mut world, "belt", (3, 0), Direction::East);
+    // No tick here, deliberately.
+    let clocks = surface_clocks(&world);
+    for tile in tiles.iter().chain(std::iter::once(&(3, 0))) {
+        assert_eq!(
+            clocks.get(tile).copied(),
+            Some(world.current_tick()),
+            "{tile:?} is drawn out of phase in the very frame it is placed in"
+        );
+    }
+}
+
+/// A save written before the surface clock was a tick — so every idle
+/// tile's number is the tick it last *carried* something, which is stale —
+/// loads with its empty belts on the loaded world's phase, not on that
+/// stale one. Nothing would ever correct it: an idle tile dirties no chunk,
+/// so the scene draws the number it was handed at load forever.
+#[test]
+fn an_empty_belt_in_an_old_save_loads_in_phase() {
+    let (mut world, _) = dead_end_run(3, 0);
+    for _ in 0..900 {
+        world.tick();
+    }
+    // What a pre-2026-09-25 save of this world holds: belts that have never
+    // carried anything, and so never advanced a counter.
+    let stale = world
+        .to_save_ron()
+        .replace("moved_ticks: 900", "moved_ticks: 0");
+    assert!(
+        stale.contains("moved_ticks: 0"),
+        "the fixture must really have rewritten the saved clocks"
+    );
+    let loaded = World::from_save_ron(&stale, one_stage()).expect("the save must load");
+    for (tile, clock) in surface_clocks(&loaded) {
+        assert_eq!(
+            clock,
+            loaded.current_tick(),
+            "{tile:?} loaded on a stale phase and nothing will ever correct it"
+        );
+    }
+}
+
 /// Save/load carries it, so a reloaded factory's rubber stands exactly
 /// where the saved one's did under the same items.
 #[test]

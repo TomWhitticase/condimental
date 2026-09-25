@@ -303,7 +303,10 @@ See [WORKFLOW.md](WORKFLOW.md).
   **Amended again 2026-09-25: it IS the tick, so every running belt is in
   phase.** `tick_toward` assigns `current_tick` rather than incrementing, so
   tiles laid minutes apart move as one conveyor and only a jam takes a tile
-  out of step. Same formula, same one-per-tick rate; the accepted cost is
+  out of step. A tile is **laid on a tick**, not on zero
+  (`BeltSegment::new`'s `laid_on_tick`, and the save's `tick_count` for an
+  empty belt at load): the scene reads a placed tile once and an idle tile
+  dirties nothing after that, so a clock that starts wrong stays wrong. Same formula, same one-per-tick rate; the accepted cost is
   that a freed tile rejoins the phase instead of resuming its own, jumping
   once, which is cheaper than a drift that never resolves. Full record in
   `docs/DECISIONS.md`.

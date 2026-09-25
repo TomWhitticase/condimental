@@ -300,6 +300,45 @@ func _run_checks() -> void:
 		return
 	main._set_pause_open(false)
 
+	# --- 3b. a belt LAID INTO A RUNNING FLOOR joins the phase -------------
+	# The owner's own case, and the one every fixture above hides: each of
+	# those belts was placed before the first tick, so every idle offset in
+	# the scene is 0 and a scene that ignored offsets entirely would pass.
+	# This one is bought and dropped in thousands of ticks late, through the
+	# same purchase/place commands a player uses, and the scene sees it
+	# exactly once — on the rebuild the placement triggers. An idle tile
+	# dirties no chunk afterwards, so whatever phase it is drawn on here is
+	# the phase it keeps until something crosses it.
+	var late := Vector2i(20, 20)
+	var late_key: String = main._tile_key(late)
+	Layouts.place(main.sim, "belt", late, "east")
+	main._rebuild_world()
+	if not main._tile_instances.has(late_key):
+		_fail("the belt laid at %s mid-run was not drawn at all" % str(late))
+		return
+	if main._tile_instances[late_key]["set"] != main._tile_instances[lone_key]["set"]:
+		_fail("the fixture wants the late tile in the same frame set as %s; it is in '%s' against '%s'" % [str(lone), str(main._tile_instances[late_key]["set"]), str(main._tile_instances[lone_key]["set"])])
+		return
+	# The simulation lays a tile on the CURRENT tick, so the scene's offset
+	# for it is zero like every other running tile's. A non-zero one here is
+	# a tile that will draw the wrong frame forever.
+	if int(main._belt_idle_offsets.get(late_key, 999)) != 0:
+		_fail("a belt laid mid-run should sit at offset 0 like every running tile, its offset is %s" % str(main._belt_idle_offsets.get(late_key, "absent")))
+		return
+	if main._belt_idle_phase(late_key, main.sim.current_tick()) != main.sim.current_tick():
+		_fail("a belt laid mid-run should read the tick itself, reads %d against %d" % [main._belt_idle_phase(late_key, main.sim.current_tick()), main.sim.current_tick()])
+		return
+	# What the player sees: the new tile and one that has been running since
+	# tick 0 are on the same frame, and stay there.
+	if main._tile_instances[late_key]["frame"] != main._tile_instances[lone_key]["frame"]:
+		_fail("a belt laid mid-run draws frame %d beside an old one on frame %d — the floor is not one conveyor" % [main._tile_instances[late_key]["frame"], main._tile_instances[lone_key]["frame"]])
+		return
+	for _i in range(main.BELT_TICKS_PER_TILE):
+		main._advance_simulation(tick_interval)
+		if main._tile_instances[late_key]["frame"] != main._tile_instances[lone_key]["frame"]:
+			_fail("a belt laid mid-run fell out of step at tick %d: frame %d against %d" % [main.sim.current_tick(), main._tile_instances[late_key]["frame"], main._tile_instances[lone_key]["frame"]])
+			return
+
 	# --- 4. items: straight runs face to face, corners follow the arc -----
 	var T: float = main.TILE
 	var Y: float = main.BELT_SURFACE_Y
@@ -363,5 +402,5 @@ func _run_checks() -> void:
 				_fail("hover over %s should contain '%s', got: %s" % [str(tile), phrase, text.replace("\n", " / ")])
 				return
 
-	print("BELT_SHAPES_OK: shape rule pure at every facing, gallery corners drawn with the corner families at their facing's yaw, merges/starts/ends straight, each tile's frame = floor(its own moved_ticks*%d/%d) mod %d, frozen while jammed and while paused but running while empty, items run face to face and arc through corners continuously, hover names feeds and hand-offs" % [main.BELT_FRAMES, main.BELT_TICKS_PER_TILE, main.BELT_FRAMES])
+	print("BELT_SHAPES_OK: shape rule pure at every facing, gallery corners drawn with the corner families at their facing's yaw, merges/starts/ends straight, each tile's frame = floor(its own moved_ticks*%d/%d) mod %d, frozen while jammed and while paused but running while empty, a belt laid mid-run in phase with one that has run since tick 0, items run face to face and arc through corners continuously, hover names feeds and hand-offs" % [main.BELT_FRAMES, main.BELT_TICKS_PER_TILE, main.BELT_FRAMES])
 	quit(0)

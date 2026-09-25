@@ -440,10 +440,12 @@ const BELT_TICKS_PER_TILE := 50
 ## --- The surface clock: whose tick the rubber runs on (issue #79) --------
 ##
 ## **A belt tile's frame follows THAT TILE'S OWN clock, not the world's.**
-## `BeltSnapshot.moved_ticks` is how many ticks the simulation has actually
-## advanced product on that tile, and `_belt_frame_for_moved_ticks` is the
-## same `floor(clock * BELT_FRAMES / BELT_TICKS_PER_TILE) mod BELT_FRAMES`
-## it always was — only the clock changed.
+## `BeltSnapshot.moved_ticks` is the tick that tile last RAN on — the current
+## tick unless it is jammed (amended twice below; it began as a count of the
+## ticks the simulation advanced product on it) — and
+## `_belt_frame_for_moved_ticks` is the same
+## `floor(clock * BELT_FRAMES / BELT_TICKS_PER_TILE) mod BELT_FRAMES` it
+## always was. Only the clock changed.
 ##
 ## It used to be the global `sim.current_tick()`, which meant every belt in
 ## the world ran its rubber forever, a jammed one included: the tomatoes on
@@ -2874,6 +2876,18 @@ func _belt_frame_for_moved_ticks(moved_ticks: int) -> int:
 ##
 ## Off `sim.current_tick()` like every other clock in the scene, so pause
 ## freezes an idle belt too and a screenshot run repeats.
+##
+## **The scene reads a placed tile once** — on the rebuild the placement
+## triggers — and an idle tile dirties nothing afterwards, so there is no
+## second look to correct a bad offset with. That is why a belt is laid on
+## the current tick in the simulation (`BeltSegment::new`'s `laid_on_tick`)
+## and an empty one takes the world's tick at load: a tile whose clock
+## started at 0 would be drawn on the wrong frame for as long as it stayed
+## empty, which is a belt bought mid-game — the commonest belt there is.
+## Every running tile's offset is therefore 0, and
+## `test_belt_shapes.gd` section 3b is what keeps it that way, because every
+## belt in every other fixture is placed before the first tick and so cannot
+## tell a working offset from an ignored one.
 func _belt_idle_phase(key: String, current_tick: int) -> int:
 	return current_tick + int(_belt_idle_offsets.get(key, 0))
 

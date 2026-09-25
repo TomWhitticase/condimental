@@ -1176,15 +1176,35 @@ matches what code comments and data files cite.
   The sim still decides; Godot is interpolating a rule it was given, the way
   it interpolates an item's position between ticks.
 
-  **What proves it.** `tests/belt_surface.rs` (five cases, through
+  **Exact only if the clock was right the one time Godot read it** (review of
+  PR #177, 2026-09-25). The scene reads a placed tile ONCE — on the rebuild
+  the placement triggers — and an idle tile dirties nothing afterwards, so
+  there is no second look to correct anything with. A belt whose clock
+  started at 0 was therefore drawn on the wrong frame for as long as it
+  stayed empty, however right the simulation's own number became on the next
+  tick. That is not a flaw in extrapolating; it is the reason a tile is now
+  LAID ON A TICK (`BeltSegment::new`'s `laid_on_tick`, seeded from
+  `World::tick_count` at the `Place`, and the save's own `tick_count` for an
+  empty belt at load). The renderer's assumption is a contract the simulation
+  has to honour at every entry point, not only in `tick_toward`.
+
+  **What proves it.** `tests/belt_surface.rs` (eight cases, through
   `chunk_snapshot`, i.e. the wire Godot reads — including
   `an_empty_belt_keeps_its_rubber_running`, which pins the rate at one per
-  tick and not merely "it moves") and `test_belt_shapes.gd` section 3, which
-  steps the scene's own loop and asserts each tile draws its own clock's
-  frame, that over one full cycle the empty tile shows all four frames while
-  the jammed tile beside it in the same frame set shows one, and that a full
-  re-read of the chunks brings the simulation's own number for the idle tile
-  — the extrapolation, checked against the thing it extrapolates.
+  tick and not merely "it moves", and
+  `a_belt_laid_into_a_running_floor_is_in_phase_before_it_ticks`, which reads
+  the clock with no tick between the placement and the read, because a tick
+  of slack is exactly what hid the placement bug) and `test_belt_shapes.gd`
+  sections 3 and 3b, which step the scene's own loop and assert each tile
+  draws its own clock's frame, that over one full cycle the empty tile shows
+  all four frames while the jammed tile beside it in the same frame set shows
+  one, that a full re-read of the chunks brings the simulation's own number
+  for the idle tile — the extrapolation, checked against the thing it
+  extrapolates — and that a belt bought and dropped in 3 000 ticks late draws
+  the same frame as one that has run since tick 0, for a whole cycle
+  afterwards. Section 3b exists because every other belt in every fixture is
+  placed before the first tick, so every idle offset in them is 0 and a scene
+  that ignored offsets altogether passed the lot.
   `tests/chunk_delta.rs` pins the silence: an idle belt's clock advances
   every tick and it is still absent from the delta. Not provable headless:
   the `MultiMesh` transform writes underneath, because the dummy

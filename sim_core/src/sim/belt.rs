@@ -120,6 +120,14 @@ pub struct BeltSegment {
     /// moving, at the busiest instant on that tile; the permanent
     /// misalignment it replaces was visible on every tile, all the time.
     ///
+    /// A tile is therefore LAID on a tick, not on zero (`new`'s
+    /// `laid_on_tick`). A belt bought and dropped into a floor that has been
+    /// running for an hour would otherwise start at 0 and stay there until
+    /// something moved on it — and since an idle tile dirties no chunk, the
+    /// scene would never hear the correction, so the one tile the player
+    /// just placed is the one tile out of step. That is the whole complaint
+    /// this rule answers, arriving by the other door.
+    ///
     /// Godot extrapolates this between snapshots — an idle tile dirties no
     /// chunk, so it would otherwise never hear the clock move. That is exact
     /// rather than a guess precisely because the value is the tick itself:
@@ -128,13 +136,16 @@ pub struct BeltSegment {
 }
 
 impl BeltSegment {
-    pub fn new(length: Fx, min_spacing: Fx) -> Self {
+    /// `laid_on_tick` is the world's current tick, and it is the tile's
+    /// first surface phase — see `moved_ticks`. Tests that are about item
+    /// positions rather than the surface pass 0.
+    pub fn new(length: Fx, min_spacing: Fx, laid_on_tick: u64) -> Self {
         Self {
             length,
             min_spacing,
             items: VecDeque::new(),
             frontier: 0,
-            moved_ticks: 0,
+            moved_ticks: laid_on_tick,
         }
     }
 
@@ -329,12 +340,21 @@ impl BeltSegment {
     /// frontier would let a compressed run advance further in its first tick
     /// than the belt it was saved from. It is clamped on the way in, so a
     /// hand-edited save cannot push it out of range.
+    ///
+    /// `current_tick` is the loaded world's tick, and an EMPTY belt takes it
+    /// instead of whatever the save holds: an empty belt is a running belt,
+    /// so its clock is now (see `moved_ticks`). A save written before that
+    /// rule stores the tick each idle tile last carried something, which is
+    /// stale by construction, and since an idle tile dirties no chunk the
+    /// scene would never be told otherwise. A belt with items on it keeps
+    /// its saved clock, which is what a jam being frozen means.
     pub(crate) fn restore(
         length: Fx,
         min_spacing: Fx,
         positions: &[(ItemId, Fx)],
         frontier: usize,
         moved_ticks: u64,
+        current_tick: u64,
     ) -> Self {
         let mut items: VecDeque<BeltItem> = VecDeque::with_capacity(positions.len());
         for (index, (item, position)) in positions.iter().enumerate() {
@@ -352,6 +372,11 @@ impl BeltSegment {
             });
         }
         let frontier = frontier.min(items.len().saturating_sub(1));
+        let moved_ticks = if items.is_empty() {
+            current_tick
+        } else {
+            moved_ticks
+        };
         Self {
             length,
             min_spacing,
@@ -388,7 +413,7 @@ mod tests {
 
     #[test]
     fn single_item_advances_by_speed_each_tick() {
-        let mut belt = BeltSegment::new(fx(4.0), fx(SPACING));
+        let mut belt = BeltSegment::new(fx(4.0), fx(SPACING), 0);
         belt.try_spawn("tomato".into());
         let moved = belt.tick(fx(0.1), 0);
         assert!(moved);
@@ -399,7 +424,7 @@ mod tests {
 
     #[test]
     fn item_stops_exactly_at_belt_end_and_does_not_overshoot() {
-        let mut belt = BeltSegment::new(fx(0.3), fx(SPACING));
+        let mut belt = BeltSegment::new(fx(0.3), fx(SPACING), 0);
         belt.try_spawn("tomato".into());
         for _ in 0..10 {
             belt.tick(fx(0.1), 0);
@@ -412,7 +437,7 @@ mod tests {
 
     #[test]
     fn following_item_compresses_against_a_jammed_leader_without_overlap() {
-        let mut belt = BeltSegment::new(fx(10.0), fx(SPACING));
+        let mut belt = BeltSegment::new(fx(10.0), fx(SPACING), 0);
         belt.try_spawn("a".into());
         // Advance the leader most of the way, then leave it there forever
         // (nobody calls take_front_if_at_end) to simulate a full
@@ -439,7 +464,7 @@ mod tests {
     /// to come back running-state-identical (`sim::save`).
     #[test]
     fn restoring_from_snapshot_positions_is_exact() {
-        let mut belt = BeltSegment::new(fx(4.0), fx(SPACING));
+        let mut belt = BeltSegment::new(fx(4.0), fx(SPACING), 0);
         // An item has to have travelled `min_spacing` from the start before
         // the next one fits behind it, which at this speed is 13 ticks.
         assert!(belt.try_spawn("a".into()));
@@ -463,6 +488,7 @@ mod tests {
             &positions,
             belt.frontier(),
             belt.moved_ticks(),
+            belt.moved_ticks(),
         );
         assert_eq!(restored.snapshot_positions(), positions);
         assert_eq!(restored.frontier(), belt.frontier());
@@ -480,21 +506,21 @@ mod tests {
     /// An empty belt round-trips too — the case a freshly placed tile is in.
     #[test]
     fn restoring_an_empty_belt_yields_an_empty_belt() {
-        let belt = BeltSegment::restore(fx(1.0), fx(SPACING), &[], 0, 0);
+        let belt = BeltSegment::restore(fx(1.0), fx(SPACING), &[], 0, 0, 0);
         assert!(belt.is_empty());
         assert_eq!(belt.snapshot_positions(), Vec::new());
     }
 
     #[test]
     fn cannot_spawn_on_top_of_an_unmoved_item() {
-        let mut belt = BeltSegment::new(fx(4.0), fx(SPACING));
+        let mut belt = BeltSegment::new(fx(4.0), fx(SPACING), 0);
         assert!(belt.try_spawn("a".into()));
         assert!(!belt.try_spawn("b".into()));
     }
 
     #[test]
     fn exiting_the_front_folds_min_spacing_back_into_the_new_front() {
-        let mut belt = BeltSegment::new(fx(1.0), fx(SPACING));
+        let mut belt = BeltSegment::new(fx(1.0), fx(SPACING), 0);
         belt.try_spawn("a".into());
         // Run the leader all the way to the end (but don't remove it yet),
         // then queue a follower right behind it.
@@ -522,7 +548,7 @@ mod tests {
 
     #[test]
     fn room_at_start_is_the_whole_belt_when_empty_and_the_back_items_distance_otherwise() {
-        let mut belt = BeltSegment::new(fx(1.0), fx(SPACING));
+        let mut belt = BeltSegment::new(fx(1.0), fx(SPACING), 0);
         assert_eq!(belt.room_at_start(), fx(1.0));
         belt.try_spawn("a".into());
         assert_eq!(belt.room_at_start(), fx(0.0));
@@ -541,7 +567,7 @@ mod tests {
     /// must keep clear of, exactly as it would of an item on its own tile.
     #[test]
     fn the_front_item_stops_min_spacing_short_of_an_item_at_the_next_belts_start() {
-        let mut belt = BeltSegment::new(fx(1.0), fx(SPACING));
+        let mut belt = BeltSegment::new(fx(1.0), fx(SPACING), 0);
         belt.try_spawn("a".into());
         // The tile ahead has no room at all at its start.
         for _ in 0..40 {
@@ -574,7 +600,7 @@ mod tests {
     /// still close up against it as far as their own footprint allows.
     #[test]
     fn the_reserve_holds_only_the_front_item_and_the_rest_close_up_behind_it() {
-        let mut belt = BeltSegment::new(fx(1.0), fx(SPACING));
+        let mut belt = BeltSegment::new(fx(1.0), fx(SPACING), 0);
         belt.try_spawn("a".into());
         for _ in 0..3 {
             belt.tick_toward(fx(0.1), fx(0.0), 0);
@@ -593,8 +619,8 @@ mod tests {
     /// from one into a belt with room.
     #[test]
     fn tick_is_tick_toward_with_a_whole_footprint_of_room() {
-        let mut plain = BeltSegment::new(fx(2.0), fx(SPACING));
-        let mut toward = BeltSegment::new(fx(2.0), fx(SPACING));
+        let mut plain = BeltSegment::new(fx(2.0), fx(SPACING), 0);
+        let mut toward = BeltSegment::new(fx(2.0), fx(SPACING), 0);
         for belt in [&mut plain, &mut toward] {
             belt.try_spawn("a".into());
             belt.tick(fx(0.1), 0);

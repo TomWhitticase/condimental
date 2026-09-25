@@ -1162,9 +1162,11 @@ continuous effect too, and it used to run off the *global* simulation tick,
 so a line backed up solid against a full vat drew its surface racing under
 items that had not moved in minutes — the decoration running because the
 belt existed, which is exactly what the rule above forbids (issue #79). The
-fix gives every belt tile its own work clock: `BeltSegment::moved_ticks`
-counts the ticks that tile actually advanced product on, `BeltSnapshot` and
-`SplitterSnapshot` carry it, and the frame is
+fix gives every belt tile its own work clock: `BeltSegment::moved_ticks` is
+**the tick that tile last ran on** — the current tick unless it is jammed,
+and the tick it was laid on before it has ticked at all (amended
+2026-09-25; it began as a count of the ticks the tile advanced product on).
+`BeltSnapshot` and `SplitterSnapshot` carry it, and the frame is
 `floor(moved_ticks * BELT_FRAMES / BELT_TICKS_PER_TILE) mod BELT_FRAMES`.
 Four consequences worth knowing before changing it:
 
