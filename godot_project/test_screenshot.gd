@@ -22,7 +22,21 @@
 # put it, for watching a run.
 #
 # Run via scripts/screenshot-scene.sh, or directly:
-#   godot --path godot_project --script test_screenshot.gd -- /abs/out.png [flags]
+#   godot --path godot_project --fixed-fps 60 --script test_screenshot.gd -- /abs/out.png [flags]
+#
+# THE SAME COMMAND TWICE IS THE SAME PICTURE, AND `--fixed-fps` IS WHY
+# (issue #82). The fixtures below are deterministic — each ticks a fixed
+# number of times — but the warm-up that follows them is counted in FRAMES,
+# and main.gd advances the simulation on each frame's DELTA. On a free
+# clock that delta is real elapsed time, so the ticks between "fixture
+# built" and "shutter" are a property of the machine's load: two renders of
+# `--bottleneck --closeup 4,0,10 --no-hud` came back one tick and several
+# moved tomatoes apart, and six of eight glow variants failed to reproduce
+# in the sweep that found it. `--fixed-fps` hands every frame the same
+# delta instead, so the shot is a function of its arguments; this script
+# REFUSES a run that arrives without it (`_clock_is_pinned`), and prints
+# the tick it fired on (`SCREENSHOT_TICK`) so a pair that ever does drift
+# says so in its own output.
 #
 # **THE WORLD STARTS EMPTY.** Since the "Real Placement" epic a new game
 # contains nothing at all, so most flags below begin by BUILDING something.
@@ -235,6 +249,25 @@ const HoverTargets = preload("res://hover_targets.gd")
 ## Enough frames for shadow atlases, SSAO and glow to be resolved — a
 ## screenshot on frame 1 shows an unlit, shadowless scene and is misleading.
 const WARMUP_FRAMES := 45
+
+## The frame rate this harness insists on being run at, matching the
+## `--fixed-fps` in `scripts/screenshot-scene.sh` (issue #82; the two are
+## checked against each other by `scripts/check-invariants.sh`).
+##
+## WHY A SHOT NEEDS A PINNED CLOCK. The warm-up above is counted in FRAMES,
+## and `main.gd` advances the simulation on the frame's DELTA — so with a
+## free-running clock the number of ticks between "fixture built" and
+## "shutter" is however much wall time those 45 frames happened to take,
+## which is a property of the host's load and not of the command. Two runs
+## of `--bottleneck --closeup 4,0,10 --no-hud` landed one tick apart and
+## produced different pictures; nothing in the output said so.
+const FIXED_FPS := 60.0
+
+## How far a frame's delta may sit from `1.0 / FIXED_FPS` and still count as
+## pinned. The engine hands back exactly that quotient under `--fixed-fps`,
+## so this is a float-comparison tolerance rather than a real allowance — a
+## free-running frame misses by tens of milliseconds, not by a microsecond.
+const FIXED_DELTA_EPSILON := 1e-6
 
 ## The frame `_settle_cursor` re-asserts the cursor on — three before the
 ## shutter, so main.gd has frames left to lay the tooltip out with it.
@@ -741,6 +774,38 @@ func _initialize() -> void:
 func _refuse() -> void:
 	_refused = true
 	quit(1)
+
+
+## Whether this frame arrived on the fixed clock the shot is a function of,
+## and a refusal naming the missing flag if it did not.
+##
+## Checked on every frame rather than once, because "pinned" is a claim about
+## all of them: `--fixed-fps` is what stops the engine synchronising to real
+## time, and a single frame that drifts is a tick this run may or may not
+## have spent. There is nothing to measure against but the delta itself —
+## the engine does not report the flag back — and that is the quantity that
+## matters anyway.
+##
+## It REFUSES rather than warning. A frame taken on a free clock is exactly
+## as plausible as a good one and is the thing issue #82 was filed about: a
+## whole glow sweep was judged against two renders of one baseline that
+## disagreed with each other, at 98x and 8x selectivity, with nothing in
+## either output saying which was which.
+func _clock_is_pinned(delta: float) -> bool:
+	var wanted := 1.0 / FIXED_FPS
+	if absf(delta - wanted) <= FIXED_DELTA_EPSILON:
+		return true
+	printerr(
+		"SCREENSHOT_FAIL: frame %d arrived %.1f ms after the last one, not the "
+		% [_frames, delta * 1000.0]
+		+ "%.1f ms this harness is pinned to. " % (wanted * 1000.0)
+		+ "The engine is synchronising to real time, so how far the simulation "
+		+ "runs before the shutter depends on what else this machine is doing "
+		+ "and two runs of this command would photograph two different "
+		+ "factories (issue #82). Run it through scripts/screenshot-scene.sh, "
+		+ "or pass --fixed-fps %d to godot yourself." % int(FIXED_FPS)
+	)
+	return false
 
 
 ## Records the fixture a convenience flag implies. The LAST caller wins,
@@ -2090,6 +2155,12 @@ func _process(delta: float) -> bool:
 		return true
 	_keep_drawing(delta)
 	_frames += 1
+	# Before the fixture, before the flags, and on EVERY frame: a run whose
+	# clock is not pinned cannot hand back the picture its arguments name,
+	# and that is worth more as a refusal than as a caveat (issue #82).
+	if not _clock_is_pinned(_delta):
+		_refuse()
+		return true
 	# Build first: every flag below is about looking at something, and since
 	# the "Real Placement" epic there is nothing to look at until one of the
 	# fixtures has been placed.
@@ -2340,6 +2411,14 @@ func _write_frame() -> bool:
 	if err != OK:
 		printerr("SCREENSHOT_FAIL: could not write %s (error %d)" % [_out, err])
 		return true
+
+	# WHEN, in the only clock the picture is made of. Two runs of one command
+	# print the same number here, and a pair that ever stops printing it is a
+	# pair whose difference is the harness rather than the change under
+	# review — which is the whole of issue #82, and was invisible in this
+	# output while it was true. The menu scene has no simulation to ask.
+	if not _menu and _main != null and _main.sim != null:
+		print("SCREENSHOT_TICK: %d" % _main.sim.current_tick())
 
 	# What the frame cost the renderer, in the renderer's own terms. Objects
 	# is what instancing collapses (one MultiMesh is one object however many

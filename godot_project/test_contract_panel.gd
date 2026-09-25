@@ -87,7 +87,7 @@ func _initialize() -> void:
 	# The signatures just spent money, which the money flyout announces; let
 	# that flash expire so the flyout assertions further down start from
 	# nothing showing, as they were written to.
-	main._contract_money_change_until_msec = Time.get_ticks_msec() - main.MONEY_FLYOUT_HOLD_MSEC - main.MONEY_FLYOUT_FADE_MSEC - 1
+	main._contract_money_change_until_msec = main._hud_now_msec() - main.MONEY_FLYOUT_HOLD_MSEC - main.MONEY_FLYOUT_FADE_MSEC - 1
 	main._update_contract_panel()
 	var econ: Dictionary = JSON.parse_string(main.sim.economy_snapshot_json())
 	var contracts: Array = econ.get("contracts", [])

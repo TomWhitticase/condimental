@@ -991,6 +991,29 @@ var sim: SimBridge
 
 var _tick_accum := 0.0
 
+## The HUD's own clock, in milliseconds, summed from the frame deltas this
+## scene has actually been given — read through `_hud_now_msec()` and never
+## from `Time.get_ticks_msec()` directly.
+##
+## Everything the simulation animates is anchored to `sim.current_tick()`
+## (see `_update_payout_feedback`'s header). The three things that are NOT
+## are the HUD's fades — the money flyout, the hotbar's name flyout and the
+## contract notice — which are deliberately outside the tick so they keep
+## fading under the pause menu, where there are no ticks at all
+## (`godot_project/CLAUDE.md`, "Wire and rebuild invariants").
+##
+## Outside the tick did not have to mean outside the clock this project can
+## reproduce. For a player this is the wall clock: the frame deltas ARE
+## elapsed time, so a six-second notice still shows for six seconds. For a
+## review render it is the difference between a picture and a lottery —
+## `scripts/screenshot-scene.sh` pins the frame delta (`--fixed-fps`), which
+## pins this too, so the shutter always catches a fade at the same point of
+## it (issue #82). It also stops on a frozen scene, with everything else:
+## `--payout` sets `set_process(false)` to hold a celebration still, and a
+## flyout that went on fading over a stopped factory was the one piece of
+## that frame the freeze did not reach.
+var _hud_clock_msec := 0.0
+
 # --- Everything the player has placed (the "Real Placement" epic, ticket 2)-
 # This scene used to learn its shape ONCE, from `chain_layout_json`, because
 # `World::new` built a fixed multi-stage chain at construction and nothing
@@ -1262,11 +1285,13 @@ var _contract_money_label: Label
 ## faded, in the manner of the hotbar's name flyout. See
 ## `_flash_money_change`.
 var _contract_money_change: Label
-## The deadline the flyout is held to. It starts one whole fade in the PAST,
-## not at zero: `Time.get_ticks_msec()` is milliseconds since the engine
-## started, so a deadline of zero is still inside the fade window for the
-## first fraction of a second of the process and would show the player a
-## ghost of a change that never happened.
+## The deadline the flyout is held to, against `_hud_now_msec()`. It starts
+## one whole fade in the PAST, not at zero: that clock starts AT zero, so a
+## deadline of zero is still inside the fade window for the scene's first
+## frames and would show the player a ghost of a change that never happened.
+## (It was already true of the engine clock this used to read, which starts
+## at zero too, just at process launch rather than at the scene's first
+## frame — the scene builds in between.)
 var _contract_money_change_until_msec := -MONEY_FLYOUT_FADE_MSEC
 ## The balance the last poll saw. `INF` is the "no poll yet" sentinel — the
 ## first frame must not report the whole starting balance as a payout.
@@ -9954,7 +9979,7 @@ func _announce_unlocks(unlocks: Array) -> void:
 			# Queued behind whatever is showing rather than over it: an
 			# unlock lands on a delivery, and a delivery is exactly when a
 			# contract notice is most likely to be mid-fade.
-			if Time.get_ticks_msec() < _contract_notice_until_msec:
+			if _hud_now_msec() < _contract_notice_until_msec:
 				_contract_notice_queue.append(text)
 			else:
 				_show_contract_notice(text)
@@ -9976,7 +10001,7 @@ func _show_contract_notice(text: String) -> void:
 	if _contract_notice == null:
 		return
 	_contract_notice.text = text
-	_contract_notice_until_msec = Time.get_ticks_msec() + CONTRACT_NOTICE_HOLD_MSEC
+	_contract_notice_until_msec = _hud_now_msec() + CONTRACT_NOTICE_HOLD_MSEC
 	_contract_notice.modulate = Color(1, 1, 1, 1)
 	_position_contract_notice()
 
@@ -10008,7 +10033,7 @@ func _position_contract_notice() -> void:
 func _update_contract_notice() -> void:
 	if _contract_notice == null:
 		return
-	var now := Time.get_ticks_msec()
+	var now := _hud_now_msec()
 	var remaining := _contract_notice_until_msec - now
 	# Fully faded and something is waiting: start it, rather than the next
 	# `_show_contract_notice` call overwriting a label nobody finished
@@ -12713,7 +12738,7 @@ func _apply_hotbar_slot_state(slot: Dictionary, state: String, selected: bool) -
 
 
 ## The name flyout — shown for HOTBAR_FLYOUT_HOLD_MSEC then faded out over
-## HOTBAR_FLYOUT_FADE_MSEC. Hand-timed off `Time.get_ticks_msec` rather than
+## HOTBAR_FLYOUT_FADE_MSEC. Hand-timed off `_hud_now_msec()` rather than
 ## tweened, because a tween would have to be cancelled and rebuilt on every
 ## rapid slot switch, and because this way the fade is a pure function of the
 ## clock — which is also what makes it checkable headlessly.
@@ -12721,14 +12746,14 @@ func _show_hotbar_flyout(text: String) -> void:
 	if _hotbar_flyout == null:
 		return
 	_hotbar_flyout.text = text
-	_hotbar_flyout_until_msec = Time.get_ticks_msec() + HOTBAR_FLYOUT_HOLD_MSEC
+	_hotbar_flyout_until_msec = _hud_now_msec() + HOTBAR_FLYOUT_HOLD_MSEC
 	_hotbar_flyout.modulate = Color(1, 1, 1, 1)
 
 
 func _update_hotbar_flyout() -> void:
 	if _hotbar_flyout == null:
 		return
-	var remaining := _hotbar_flyout_until_msec - Time.get_ticks_msec()
+	var remaining := _hotbar_flyout_until_msec - _hud_now_msec()
 	if remaining >= 0:
 		_hotbar_flyout.modulate = Color(1, 1, 1, 1)
 	elif remaining > -HOTBAR_FLYOUT_FADE_MSEC:
@@ -14565,6 +14590,9 @@ func _notification(what: int) -> void:
 # --------------------------------------------------------------------------
 
 func _process(delta: float) -> void:
+	# Before anything reads it: every fade below is measured against this
+	# frame, not against the operating system's idea of now (`_hud_clock_msec`).
+	_hud_clock_msec += delta * 1000.0
 	_advance_simulation(delta)
 
 	# The snapshot readers run only when something they read could have
@@ -14623,6 +14651,14 @@ func _process(delta: float) -> void:
 			_pan_camera(delta)
 		else:
 			_fp_camera_move(delta)
+
+
+## Now, as the frames have measured it — the clock every HUD fade is timed
+## against (`_hud_clock_msec` says why it is not `Time.get_ticks_msec()`).
+## Milliseconds, like the deadlines it is compared with, and monotonic: it
+## only ever moves forward, one frame's delta at a time.
+func _hud_now_msec() -> int:
+	return int(_hud_clock_msec)
 
 
 ## One frame's worth of simulation, and the autosave clock that runs beside
@@ -16552,7 +16588,7 @@ func _flash_money_change(money: float) -> void:
 	_contract_money_change.text = "+%d" % whole if whole > 0 else "%d" % whole
 	_contract_money_change.label_settings = \
 		_contract_gain_settings if whole > 0 else _contract_spend_settings
-	_contract_money_change_until_msec = Time.get_ticks_msec() + MONEY_FLYOUT_HOLD_MSEC
+	_contract_money_change_until_msec = _hud_now_msec() + MONEY_FLYOUT_HOLD_MSEC
 
 
 ## Holds the money flyout at full ink, then fades it, and keeps it sitting
@@ -16569,7 +16605,7 @@ func _update_money_flyout() -> void:
 		return
 	_contract_money_change.position = Vector2(0.0, _contract_money_label.size.y)
 	_contract_money_change.size.x = _contract_money_label.size.x
-	var remaining := _contract_money_change_until_msec - Time.get_ticks_msec()
+	var remaining := _contract_money_change_until_msec - _hud_now_msec()
 	if remaining >= 0:
 		_contract_money_change.modulate = Color(1, 1, 1, 1)
 	elif remaining > -MONEY_FLYOUT_FADE_MSEC:
@@ -16940,11 +16976,15 @@ func _format_counts(pairs: Array) -> String:
 ## 1. **It pauses with the game.** UI_UX.md §5d's pause menu says "the
 ##    factory is stopped while this is open"; a coin still arcing over a
 ##    stopped factory would contradict the sentence.
-## 2. **A screenshot is reproducible.** `MAX_TICKS_PER_FRAME` already clamps
-##    catch-up so two `scripts/screenshot-scene.sh` runs are byte-identical
-##    (the visual-overhaul-r2 decision); anchoring to the tick puts this
-##    effect inside that guarantee instead of outside it, so `--payout` can
-##    photograph the same frame of the same burst twice.
+## 2. **A screenshot is reproducible.** A review render is pinned to a fixed
+##    frame clock (`scripts/screenshot-scene.sh` passes `--fixed-fps`), so
+##    the tick the shutter opens on is a function of the flags alone;
+##    anchoring this effect to the tick puts it inside that guarantee instead
+##    of outside it, so `--payout` photographs the same frame of the same
+##    burst twice. This used to credit `MAX_TICKS_PER_FRAME`, which clamps a
+##    frame's catch-up but does NOT pin how many frames' worth of wall clock
+##    the warm-up spends — the two renders that disagreed in issue #82 were
+##    one simulation tick apart.
 ## 3. **A headless test can assert it.** The whole effect is a pure function
 ##    of `current_tick - start_tick`, so a test drives it by ticking rather
 ##    than by sleeping.

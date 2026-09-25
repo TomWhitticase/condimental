@@ -204,6 +204,7 @@ run_godot_script test_unlocks.gd UNLOCKS_OK "the first progression gate: a new g
 run_godot_script test_ingredient_models.gd INGREDIENT_MODELS_OK "every id in data/ingredients.ron has a voxel model of its own: none reaches _market_asset_for's pipe fallback, fluids are registered in FLUID_MODELS and solids in ITEM_MODELS, and each named asset has a real icon rather than the placeholder — issue #67"
 run_godot_script test_fluid_gallery.gd FLUID_GALLERY_OK "the fluid gallery stands all six fluids at once: every placement accepted, every run named by topology alone and above main.gd's visible-pressure floor, every tint present, distinct and not near-grey — issues #72 and #100"
 run_godot_script test_warehouse_rack.gd WAREHOUSE_RACK_OK "the warehouse stock rack reads out its own stock: six shelves filling bottom level first inside the imported frame, pallets appearing one bay at a time in step with storage_snapshot_json and their loads scaled to the fill, a tint per raw ingredient clear of the measured dead band, hover resolving from either tile of the 1x2, and W1's removal refusal spoken before the click — the warehouse sprint, W3"
+run_godot_script test_frame_clock.gd FRAME_CLOCK_OK "the HUD fades and the screenshot warm-up run on FRAMES, not the wall clock: _hud_now_msec() does not move while real milliseconds pass with no frames, all three fades finish on frames alone, and WARMUP_FRAMES at the harness's pinned FIXED_FPS always spends the same ticks — issue #82"
 
 echo
 echo "$godot_scripts_run headless Godot scripts run."
