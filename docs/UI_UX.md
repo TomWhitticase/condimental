@@ -1094,6 +1094,70 @@ single unpinned footer Label made the real panel 99px wider than that, which
 is 99px of legend it could then not get off. Every label on this panel pins
 its width and wraps — §5c's rule, and the reason that rule exists.
 
+### 5h. THE COOKBOOK: the game explaining itself (built 2026-09-25)
+
+Everything else in §5 tells the player what the factory is doing right now.
+This one tells them what the game *is*: **B** opens a screen whose first view
+is a **sauce tree**, one node per sauce family in a column that says how far
+from raw it is, joined by an arrow wherever one sauce is an ingredient in
+another. Clicking a node opens its page — the ingredients per case, the
+machine process left to right with every stage's duration in seconds, the
+cost of a case in ingredients, what the contracts pay for one, who buys it,
+and the paragraph from the data file. A stage opens its machine's page, an
+ingredient row opens the ingredient's, a breadcrumb walks back.
+
+**It is the content files rendered, and nothing else.** Not one sauce name,
+machine name, ingredient, tier, price or arrow is written in
+`cookbook_panel.gd`; the derivation — tiers, families, edges, cost per case,
+the pay range and the gates — is `sim_core/src/sim/cookbook.rs`'s, off the
+registries, and the panel draws `cookbook_json()`. That is not a style
+preference: adding a sauce, rebalancing a recipe, renaming an item or
+swapping an asset has to change this screen with no code edit, or the screen
+goes stale and starts lying. `test_cookbook.gd` asserts it as a *test* —
+every id, display name and contract name in the book is checked against the
+panel's own string literals — because a rule nothing enforces is a rule that
+lasts one content change. The consequence is that there is **no fallback
+prose**: a sauce with no `blurb` gets no blurb paragraph, not a sentence
+GDScript made up.
+
+**A locked family is a silhouette, not a hole.** It keeps its place in the
+tree, dimmed and unnamed, showing the padlock, the word LOCKED and its own
+gate (`0 of 10 shipped`) — §5g's rule about never using colour alone, and
+§7's. Its page is the gate and only the gate: no ingredients, no stages.
+Showing the shape of a chain the player has not earned would make the
+silhouette decorative, and hiding the node entirely would hide that there is
+anything to earn.
+
+**It shows, it does not select.** There is no "make this" button and there
+never will be: GAMEPLAY §9 is explicit that the layout is the choice and a
+recipe picker is a different game's affordance.
+
+**It does not pause, and it is also on the pause menu.** As a modal it
+behaves exactly like E/M/C/H/P — one at a time, ESC closes it, the factory
+keeps running. That is wrong for a long read, so the same panel is hosted a
+second time as a pause-menu page, where the factory is stopped. Two hosts,
+one `RefCounted` builder returning a column, the way `settings_panel.gd` is
+shared between `main.gd` and `menu.gd`.
+
+**The tree is the project's first `_draw()`, and the layout is data.** Nodes
+and edges are computed into a plain dictionary, put on the canvas with
+`set_meta("layout", ...)`, and `_draw()` renders only from that. A headless
+run never lays a Control out, so a layout that lived in laid-out rectangles
+would be invisible to every test; the meta is what `test_cookbook.gd`
+asserts against and the pixels are downstream of it. The nodes themselves
+are real Buttons at explicit positions, so a click is a `pressed` signal
+rather than a hit test against a rectangle nobody measured.
+
+**B and the six-line legend.** B was the build menu's key until E took it
+over, and was left dead rather than aliased; "B for book" claims it the way
+C claimed contracts. That made a sixth panel key, and the legend — which had
+already been widened once for the fifth — was split across two lines instead
+(`E: build menu  M: market  C: contracts` / `H: staff  P: production  B:
+cookbook`). It grows downward into empty screen rather than sideways into
+the clipboard, and every key stays printed, which `E/M/C/H/P: panels` would
+not have done. `DECISIONS.md` called this shot: "the next panel that earns a
+key will overrun it again".
+
 ## 6. Feedback, motion & animation
 
 - **Chunky, snappy animation** on voxel assets; no smooth organic motion.

@@ -66,6 +66,14 @@ Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
   language and does not share its styles or its names: that bar means "the
   sim defines this ceiling", and no part of the simulation has an opinion
   about the field of view.
+- **A `_draw()` renders only from a dictionary on the canvas's meta**
+  (`cookbook_panel.gd`'s sauce tree, the project's only custom drawing).
+  Compute the nodes and edges into a plain Dictionary, `set_meta("layout",
+  …)` it, and draw from that — the same discipline as `_set_meter` recording
+  its fraction on the track, and for the same reason: a `--headless` run
+  never lays a Control out, so a layout that exists only inside `_draw()`
+  exists nowhere a test can see. Anything clickable is a real Button at an
+  explicit position, not a hit-test against the drawing.
 - **Seconds, never ticks** in player-facing clocks; **display names**
   (`_kind_display_name`/`_item_display_name`), never wire ids.
 - **UI scale is two constants** — `UI_SCALE`, `UI_FONT_BASE` — threaded
@@ -129,7 +137,7 @@ Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
 
 ## Orientation
 
-`main.gd` (~11.9k lines) — the 3D scene, HUD, build mode, every panel, the
+`main.gd` (~18k lines) — the 3D scene, HUD, build mode, every panel, the
 tick loop. `game_session.gd` — autoload; the New Game/Load handoff **and all
 save-file rules** (dir, listing, slot sanitizer, reserved `autosave` slot);
 `sim_core` does no file I/O. `music.gd` — autoload; the one looping track,
@@ -149,7 +157,11 @@ test's `_initialize()` does. `settings_panel.gd` — the settings rows, built
 once and hosted by both `main.gd` and `menu.gd`, each swapping them in place
 of its own button column; it takes `ui_scale`/`font_base` as arguments rather
 than preloading `main.gd`, which preloads it, and a preload cycle does not
-load. `test_layouts.gd` — shared fixture, builds factories through real
+load. `cookbook_panel.gd` — THE COOKBOOK's whole screen, hosted the same
+way by the B modal and by a pause-menu page; it names no sauce, machine,
+price or contract, because every word of its content comes from
+`cookbook_json` (`test_cookbook.gd` fails if a literal in it ever matches
+one). `test_layouts.gd` — shared fixture, builds factories through real
 purchase/place commands.
 
 ## Running things

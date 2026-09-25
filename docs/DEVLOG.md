@@ -48,6 +48,16 @@ below is history and should only ever be appended to.)*
   `data/unlocks.ron` holds its three ingredients and four contracts back until
   the tenth lifetime delivery, so a new game's market and board show only what
   a one-sauce factory can use. See the log entries below.
+- **The game explains itself (2026-09-25).** **B** opens THE COOKBOOK: a
+  sauce tree with a node per family in a column that says how far from raw it
+  is, an arrow wherever one sauce is an ingredient in another, and a page
+  behind each node with the ingredients per case, the machine process in
+  seconds, the cost, what the contracts pay and who buys it. All of it is
+  `sim_core/src/sim/cookbook.rs` derived from `data/*.ron` — nothing in
+  `godot_project/cookbook_panel.gd` names a sauce, a machine or a price, and
+  `test_cookbook.gd` fails if anything ever does. A locked family is an
+  unnamed silhouette carrying its gate. The same panel is a page on the pause
+  menu, for reading with the factory stopped. See the log entry below.
 - **Raw stock has a ceiling (2026-09-21).** `data/storage.ron` caps every
   ingredient at `base_cap` 20 plus 50 per **bay**, and a `warehouse_rack`
   (1×2, six bays, 75) is the only thing that supplies bays. `BuyIngredient`
@@ -220,6 +230,72 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-25 — THE COOKBOOK: the game explains itself, out of the data files
+
+CONDIMENTAL had never explained itself. A player who bought a mixer had no
+way to learn what it makes, what feeds it, or what the thing it makes is
+worth — and every one of those facts already existed in `data/*.ron`, where
+only the loader had ever read them. The owner, reading a design doc whose
+sauce tree and recipe cards were generated from those files, asked for them
+in game and set the binding requirement: dynamic, never hardcoded, and as
+maintainable as possible, because sauces, recipes, balance, assets and names
+are all going to keep changing.
+
+So the feature is not really a screen; it is the property that the screen
+tracks the content files, and the screen is what that property looks like.
+
+**The sim decides.** New pure module `sim_core/src/sim/cookbook.rs` builds
+the whole book from the registries with no `World`: the obtainability
+fixpoint lifted out of `validate_chain` gives each recipe its tier (its depth
+from raw, which is the tree's column), families root at each item a contract
+demands and walk back through producing recipes, an edge is one family's
+product being an input to another's, cost per case recurses the graph from
+raw ingredient prices, the pay range is min/max of `payout / boxes` across
+every contract naming the terminal item, and lockedness is derived — a family
+is locked while any raw in its transitive inputs is still gated. One new
+bridge call, `cookbook_json()`, read on open and on the `LOAD_POLL_TICKS`
+cadence while open, because the lock half moves with lifetime deliveries.
+
+**Godot renders.** `godot_project/cookbook_panel.gd` is a `RefCounted`
+returning a column, hosted twice: as the B modal and as a pause-menu page,
+because a modal that does not pause is wrong for a long read. The sauce tree
+is the project's first `_draw()`, and it follows `_set_meter`'s discipline —
+the layout is computed into a dictionary, put on the canvas with
+`set_meta("layout", ...)`, and `_draw()` renders only from that, so a
+headless test can read a layout no headless run ever lays out. The nodes are
+real Buttons at explicit positions, so a click is a `pressed` signal.
+
+**The property is a test, not a comment.** `test_cookbook.gd` pulls every id,
+display name and contract name out of `cookbook_json` and fails if any of
+them appears in a string literal in `cookbook_panel.gd`. It also checks the
+drawn tree against the wire node for node and edge for edge, that a locked
+family is a silhouette whose page is the gate and nothing else, that every
+duration is seconds and the word `tick` appears nowhere, that the pages link
+and the breadcrumb walks back, that B closes the other five and each of them
+closes B, and that the book is polled on the tick only while open.
+
+**What the data files gained.** Optional `tagline`/`blurb`/`icon` on
+`Recipe`, `MachineKind` and `IngredientEntry`, blank rejected at load as
+`BlankDisplayName` already was, plus a sibling `icon_names_json()` that
+`_icon_for` now consults ahead of `ITEM_MODELS` — which is what makes
+swapping an asset a data edit. The rule going forward: a Cookbook that needs
+a fact the data files cannot state is a missing data field, not a Rust
+change.
+
+**Three consequences that look like omissions and are not.** No fallback
+prose — a sauce with no `blurb` gets no blurb paragraph rather than a
+sentence GDScript made up. No number computed in Godot except seconds, and
+only because `TICK_HZ` is GDScript's. And no machine named even in prose: an
+ingredient row says "solid, by belt", not "hopper, then belt", because a
+machine name in a sentence is still content authored in GDScript.
+
+B was free — it was the build menu's key until E took it over and was left
+dead rather than aliased — so the legend grew a sixth panel key and was split
+across two lines rather than widened a third time, which `DECISIONS.md` had
+already called ("the next panel that earns a key will overrun it again").
+Decision record: `docs/DECISIONS.md`, 2026-09-25; the screen is
+`docs/UI_UX.md` §5h.
 
 ### 2026-09-25 — A hover sheds a line only when that helps (PR #163 review)
 

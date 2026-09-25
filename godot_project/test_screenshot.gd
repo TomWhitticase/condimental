@@ -111,6 +111,13 @@
 # (P) over it — the production-stats epic's screen, reviewed on a line
 # with every stage counted and a contract paid. Implies `--populate`.
 #
+# `--cookbook` opens THE COOKBOOK (B) on its sauce tree over the reference
+# line, and `--cookbook-page` opens the page behind the FIRST UNLOCKED node
+# the tree draws. Which sauce that is is deliberately not named here: the
+# whole feature is that the screen comes off `cookbook_json`, and a flag
+# that named a sauce would be one more place to edit when content changes.
+# Both imply `--populate`, so the factory behind the plate is running.
+#
 # `--full-dock` builds the FULL-DOCK LINE (test_layouts.gd's
 # `build_full_dock_line`: the reference line on auto-fill, run until the
 # shared delivery pool is at its 48-per-item ceiling) and freezes the frame
@@ -436,6 +443,12 @@ var _staff := false
 ## line — the fixture with every stage counted and a contract paid, so the
 ## rows, rates, bars and the all-time exit show something.
 var _production := false
+## `--cookbook` opens THE COOKBOOK (B) on its sauce tree; `--cookbook-page`
+## opens the page of the first unlocked sauce the tree drew. The panel is the
+## same in any world — it is the content files rendered — so the fixture is
+## chosen for what is BEHIND it, which is the line the game ships.
+var _cookbook := false
+var _cookbook_page := false
 var _understaffed := false
 ## `--staff-shortfall` opens the staff panel over a line funded to less than
 ## its next payday's bill (the quality pass, ticket 4's BEFORE warning) —
@@ -634,6 +647,11 @@ func _initialize() -> void:
 	_production = args.has("--production")
 	if _production:
 		_pick_fixture("bottleneck", "--production")
+		_populate = true
+	_cookbook_page = args.has("--cookbook-page")
+	_cookbook = _cookbook_page or args.has("--cookbook")
+	if _cookbook:
+		_pick_fixture("chain", "--cookbook-page" if _cookbook_page else "--cookbook")
 		_populate = true
 	_understaffed = args.has("--understaffed")
 	if _understaffed:
@@ -1272,6 +1290,32 @@ func _enter_view_mode() -> void:
 ## camera simply was not showing
 ## (`--fixture chain --closeup 26,0,8 --hover-hopper` did exactly that). A
 ## cause this run CAN see, it names.
+## `--cookbook-page`: the page behind the first node the TREE draws that is
+## not a silhouette. Read off `cookbook_json` rather than written down, for
+## the reason the whole feature exists — a flag naming a sauce would be a
+## place to edit every time the content files change. It refuses in words if
+## every family is still locked, rather than photographing the tree twice.
+func _open_first_unlocked_sauce() -> bool:
+	var book = JSON.parse_string(_main.sim.cookbook_json())
+	if not (book is Dictionary):
+		printerr("SCREENSHOT_FAIL: --cookbook-page could not read cookbook_json")
+		_refuse()
+		return false
+	for entry in (book as Dictionary).get("sauces", []):
+		if bool(entry.get("locked", false)):
+			continue
+		_main._cookbook.open("sauce", String(entry.get("id", "")))
+		_main._position_cookbook_panel()
+		return true
+	printerr(
+		"SCREENSHOT_FAIL: --cookbook-page found no unlocked sauce in this world, so \
+there is no page to open. Every family is still behind its gate — ship enough to \
+release one, or use --cookbook for the tree."
+	)
+	_refuse()
+	return false
+
+
 func _hover_over_tile(tile: Vector2i) -> bool:
 	if not _in_first_person():
 		var world_point: Vector3 = _main._tile_origin(
@@ -2273,6 +2317,10 @@ func _process(delta: float) -> bool:
 		_main._set_staff_open(true)
 	if _frames == 2 and _production:
 		_main._set_production_open(true)
+	if _frames == 2 and _cookbook:
+		_main._set_cookbook_open(true)
+		if _cookbook_page and not _open_first_unlocked_sauce():
+			return true
 	if _frames == 2 and _understaffed:
 		if not _hover_over_tile(Layouts.UNDERSTAFFED_VAT):
 			return true

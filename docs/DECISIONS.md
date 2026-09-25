@@ -25,6 +25,93 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-25: **THE COOKBOOK is derived from the content files, and nothing
+  in it may be written in GDScript.** (Owner's request, after the Sauce Book
+  Google Doc.)
+
+  **What happened.** The owner read a design doc whose sauce tree and recipe
+  cards were generated from `data/*.ron`, said that is exactly what the game
+  should show, and asked for it in game: "it should be interactive and most
+  importantly DYNAMIC, it shouldnt be hardcoded ... I want this to be as
+  maintainable as possible because in future we will add new sauces, adjust
+  recipes, balance things, change assets and names etc."
+
+  **The options.** (1) Build the screen in GDScript against the wire it
+  already has — `shop_snapshot_json`, `production_snapshot_json`, the display
+  names — filling the gaps with tables in `main.gd`. Cheapest, and every
+  content change after it silently rots the screen, because nothing fails when
+  a table falls out of step with `recipes.ron`. (2) Compute the whole book in
+  Rust as one snapshot, and let Godot lay out rectangles. More Rust up front —
+  a tier fixpoint, family rooting, a cost recursion — and then a sauce added to
+  `recipes.ron` appears in the tree with no code touched at all.
+
+  **What decided it.** The thing the owner asked for is not a screen, it is
+  the *property* that the screen tracks the content files. A property nothing
+  enforces lasts exactly one content change, and the first CLAUDE.md rule
+  already says gameplay logic lives in Rust and content is data, never code.
+  So the derivation went into `sim_core/src/sim/cookbook.rs`, pure and
+  `World`-free (`tests/display_names.rs`'s precedent: "an empty world is
+  enough: the map is content read back, not state"), and the property was
+  written down as a test rather than a comment: `test_cookbook.gd` takes every
+  id, display name and contract name out of `cookbook_json` and fails if any
+  of them appears in a string literal in `cookbook_panel.gd`. That test is the
+  decision; the panel is an implementation of it.
+
+  **What it cost.** Three consequences that all look like omissions and are
+  not. There is **no fallback prose**: a sauce with no `blurb` gets no blurb
+  paragraph, because a sentence written in GDScript would be both the
+  hardcoding the feature exists to avoid and a second place to fix later.
+  **No number is computed in Godot** — cost per case, the pay range and the
+  delivery counts arrive finished; seconds are the single exception, and only
+  because `TICK_HZ` is GDScript's constant, so the wire carries ticks and the
+  host hands the divisor over. And the panel **names no machine even in
+  prose**: an ingredient row says "solid, by belt", not "hopper, then belt",
+  because a machine name in a sentence is still content authored in GDScript
+  and the test cannot tell the difference.
+
+  **Where the words come from.** A tagline, a blurb and an icon are facts
+  about content that no registry could derive, so they became optional
+  `#[serde(default)]` fields on `Recipe`, `MachineKind` and `IngredientEntry`,
+  blank rejected at load exactly as `BlankDisplayName` already is. The rule
+  stands: if the Cookbook needs a fact the data files cannot state, that is a
+  missing data field, not a Rust change. `icon` also gave `_icon_for` a wire
+  source ahead of `ITEM_MODELS`, which is what makes swapping an asset a data
+  edit — the owner named that case explicitly.
+
+  **Locked content is a silhouette, not a hole.** (Owner's choice, asked
+  before planning.) A gated family keeps its place in the tree, dimmed and
+  unnamed, showing the padlock, the word LOCKED and its own gate (`0 of 10
+  shipped`), and its page is the gate and only the gate. Hiding the node would
+  hide that there is anything to earn; drawing its ingredients and its process
+  under a padlock would make the silhouette decorative. Lockedness is
+  *derived*, never authored: `unlocks.ron` gates ingredients and contracts, so
+  a family is locked while any raw in its transitive inputs is.
+
+  **It shows, it does not select.** No "make this" button, now or later:
+  GAMEPLAY §9 is explicit that the layout is the choice and a recipe picker is
+  a different game's affordance.
+
+  **Two hosts, one panel.** As a modal on B it behaves like E/M/C/H/P — one at
+  a time, ESC closes it, the factory keeps running — which is wrong for a long
+  read, so the same `RefCounted` builder is hosted a second time as a
+  pause-menu page, where the factory is stopped. `settings_panel.gd`'s shape,
+  for `settings_panel.gd`'s reason.
+
+  **The tree is the project's first `_draw()`.** The discipline is
+  `_set_meter`'s: the layout is computed into a plain dictionary, put on the
+  canvas with `set_meta("layout", ...)`, and `_draw()` renders only from that.
+  A headless run never lays a Control out, so a layout living in laid-out
+  rectangles would be invisible to every test. The nodes are real Buttons at
+  explicit positions rather than hit tests, so a click is a `pressed` signal.
+
+  **The legend.** B was the build menu's key until E took it over and was left
+  dead rather than aliased, so "B for book" claims it the way C claimed
+  contracts. That made a sixth panel key, and rather than widen the legend a
+  third time the panel keys were split across two lines — `DECISIONS.md` had
+  already predicted this ("the next panel that earns a key will overrun it
+  again"). It grows downward into empty screen instead of sideways into the
+  clipboard, and every key stays printed, which `E/M/C/H/P: panels` would not.
+
 - 2026-09-25: **Every PR is reviewed before it merges, with no exceptions.**
   (Owner's rule, stated after PR #163.)
 

@@ -251,6 +251,19 @@ func _initialize() -> void:
 		_fail("with the market open, held keys must not steer the camera")
 		return
 	main._set_market_open(false)
+
+	# And the same for the sixth panel. Every modal added since has had to be
+	# threaded through `_fp_mouse_free` by hand, so each one is asserted here
+	# rather than trusted to the one that came before it.
+	main._set_cookbook_open(true)
+	if not main._fp_mouse_free():
+		_fail("with the cookbook open the first-person mouse must stay free (visible), not captured")
+		return
+	if main._camera_keys_live():
+		_fail("with the cookbook open, held keys must not steer the camera")
+		return
+	main._set_cookbook_open(false)
+
 	if main._fp_mouse_free():
 		_fail("with every panel closed the first-person mouse should be captured")
 		return

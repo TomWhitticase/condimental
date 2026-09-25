@@ -171,7 +171,8 @@ func _initialize() -> void:
 	# --- E OPENS THE MENU, ESC CLOSES EVERYTHING (the E/ESC-controls ticket)
 	# The build menu moved off B onto Factorio's own inventory key, and B was
 	# removed rather than kept as an alias — so both halves get asserted, the
-	# same way C's removal above is.
+	# same way C's removal above is. B is THE COOKBOOK's key since 2026-09-25;
+	# what matters here is still that it is not the build menu's.
 	_press(main, KEY_E)
 	if not main._shop_open:
 		_fail("E should open the build menu")
@@ -184,6 +185,14 @@ func _initialize() -> void:
 	if main._shop_open:
 		_fail("B is no longer the build-menu key and must not open it")
 		return
+	if not main._cookbook_open:
+		_fail("B should open the cookbook")
+		return
+	_press(main, KEY_X)
+	if main._cookbook_open or not main._remove_mode:
+		_fail("X under the cookbook should close it and enter remove mode (cookbook %s, remove %s)" % [main._cookbook_open, main._remove_mode])
+		return
+	_press(main, KEY_ESCAPE)
 
 	# ESC used to leave build/remove mode ONLY: with the menu up it did
 	# nothing at all, so the one key a player reaches for to dismiss things
