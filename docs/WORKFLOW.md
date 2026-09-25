@@ -254,13 +254,19 @@ change, so it must pass the same lint. Use a real merge commit only when the
 individual commits are genuinely worth keeping — a ticketed epic where each
 commit is a reviewed unit.
 
-**Do not merge a PR the owner asked to review, and do not merge one whose
-checks are red or still running.** Say it is ready and stop. Merging your own
-work unreviewed is fine for routine changes the owner has not asked to see;
-it is not fine for anything the design docs call a deviation, a `gdext` bump,
-a save-format change, or anything the owner flagged.
+**Every PR is reviewed before it merges. No exceptions for routine changes,
+and no reviewing after the merge** (the owner's rule, 2026-09-25). A PR
+merges only once it has a `VERDICT: APPROVED` comment from a session that did
+not write it, and its checks are green. Otherwise say it is ready for review
+and stop. An instruction to "open a PR and merge it" means that, after
+review. PR #163 is why this is spelled out. It merged on green CI under the
+old wording ("merging your own work unreviewed is fine for routine
+changes"), and its review could only happen afterwards, with the code
+already on `main`. A deviation from the design docs, a `gdext` bump, a
+save-format change, or anything the owner flagged also waits for the owner,
+on top of the review.
 
-**A PR that is reviewed is reviewed adversarially**, by someone who did not
+**A PR is reviewed adversarially**, by someone who did not
 write it: they build the branch in their own worktree, re-run the reproduction
 of every issue it claims to close, and revert each fix in turn to prove the new
 test actually fails without it. GitHub refuses `--approve` and

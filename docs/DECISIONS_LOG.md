@@ -18,6 +18,15 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-25 **Every PR is reviewed BEFORE it merges, with no exceptions.**
+  A PR merges only when its checks are green AND it has a `VERDICT: APPROVED`
+  comment from a session that did not write it (the `review` skill). Routine
+  changes get no exemption, and a review after the merge does not count. An
+  instruction to "make a PR and merge it" means merge after that verdict. With
+  no verdict, the author stops with the PR open and says it is waiting on
+  review. This replaces the old WORKFLOW.md wording that let authors merge
+  their own routine work unreviewed. Binds `docs/WORKFLOW.md` and the
+  `open-pr` and `wrap-it-up` skills. Full record in `docs/DECISIONS.md`.
 - 2026-09-25 **The review render's clock is PINNED, so the same command twice
   is the same picture.** `scripts/screenshot-scene.sh` passes Godot's own
   `--fixed-fps 60`; `_advance_simulation` is untouched, so the tick loop a

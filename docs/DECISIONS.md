@@ -25,6 +25,35 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-25: **Every PR is reviewed before it merges, with no exceptions.**
+  (Owner's rule, stated after PR #163.)
+
+  **What happened.** A session was told to "pick an issue, fix it, make a PR
+  and merge it". It fixed #99, opened PR #163 and merged it on green CI. That
+  was allowed at the time: WORKFLOW.md said "merging your own work
+  unreviewed is fine for routine changes the owner has not asked to see",
+  and the `open-pr` skill went straight from `gh pr checks --watch` to
+  `gh pr merge`. The `wrap-it-up` skill (#162), which landed minutes later,
+  already assumed PRs merge on a review verdict, so the session reported the
+  missing review as "owed post-merge". The owner rejected that: *"we
+  shouldn't have post merge reviews, we should always have review before
+  merging, that's important"*.
+
+  **The rule.** Green CI plus a `VERDICT: APPROVED` comment from a session
+  that did not write the branch. Both are required before `gh pr merge`, for
+  every PR. A post-merge review is not a substitute, because by then the
+  unreviewed code is already on `main` and every other worktree branches
+  from it. An instruction to merge is read as "merge once reviewed". If no
+  reviewer is available, the author stops with the PR open. `wrap-it-up`
+  already treats that as the one legitimate way to end a session with a PR
+  still open.
+
+  **What was rejected.** Keeping the routine-change exemption was rejected.
+  Whether a change counts as "routine" is judged by its author, which is
+  exactly the judgement a review exists to check. #163 was a
+  presentation-only HUD fix, the most routine kind of change, and it still
+  shipped with nobody but its author having read it.
+
 - 2026-09-25: **The review render's clock is PINNED — `--fixed-fps` at the
   engine, a frame-summed clock for the HUD fades — so one command gives one
   picture.** (Issue #82.)

@@ -221,6 +221,15 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-25 — No PR merges before it is reviewed
+
+PR #163 merged on green CI with no review. The docs allowed that at the
+time ("merging your own work unreviewed is fine for routine changes"). The
+owner has ruled it out: every PR now needs a `VERDICT: APPROVED` comment
+from a session that did not write it before it merges, and a review after
+the merge does not count. WORKFLOW.md and the `open-pr` skill now say this.
+The decision is recorded in DECISIONS_LOG.md and DECISIONS.md.
+
 ### 2026-09-25 — The same screenshot command twice is the same picture (issue #82)
 
 The review render was not reproducible, and this project judges its art by
@@ -282,6 +291,7 @@ including two under an eight-way load, and the chain fixture one hash across
 eight. **Re-render any baseline taken before this** — a pinned warm-up stops
 the world on a different tick than a loaded one did, so an old frame is a
 different moment rather than a broken one.
+
 ### 2026-09-25 — Screenshot renders stop interrupting the person at the laptop
 
 `scripts/screenshot-scene.sh` used to open a 1600x900 window on top of
