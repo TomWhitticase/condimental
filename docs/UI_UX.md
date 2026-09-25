@@ -701,7 +701,12 @@ fold is the player's", so the hover sheds instead, fewest rungs first
 same frame already names, then **the load bar**, whose `% busy` figure stays
 in the text above it. The ladder is judged by the same placement rule that
 then places the panel, from the full panel every frame. That means a bigger
-window or a folded legend brings the lines back on its own.
+window or a folded legend brings the lines back on its own. **A line goes
+only if going helps:** when no rung clears, a rung is taken only if it
+covers strictly less than the full panel, since the placement search is not
+exhaustive and a shorter panel is not always better placed (at 1600x900 a
+cursor between the legend and the clipboard shed both lines for no gain,
+PR #163's review).
 
 **`autowrap_mode` is never put on a Label whose width a fit pass measures.**
 A wrapping Label reports a 1px minimum width and a height shaped at whatever

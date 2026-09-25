@@ -221,6 +221,21 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-25 — A hover sheds a line only when that helps (PR #163 review)
+
+PR #163 merged unreviewed, and its review after the fact found that the
+yield ladder shed both lines whenever no rung cleared the HUD. It assumed a
+shorter panel always covers less. It does not, because the placement search
+is not exhaustive. At 1600x900, 147 of 720 cursor positions between the
+legend and the clipboard dropped the crew line and the load bar and still
+covered exactly as much as the full panel did. A rung is now taken only if
+it clears, or if it covers strictly less than the full panel. Otherwise the
+panel keeps its lines. `test_hud_plates.gd` sweeps a 32px grid of cursor
+positions at 1600x900 and fails on the old ladder at (968, 72). The review's
+stale figures are also fixed: the DEVLOG overlap (about 15,500 px², not
+20,000) and the old "550x283, one pixel short" notes in DECISIONS.md and
+the test.
+
 ### 2026-09-25 — No PR merges before it is reviewed
 
 PR #163 merged on green CI with no review. The docs allowed that at the
@@ -360,7 +375,7 @@ wrap-up answers both.
 
 At 1280x720 with the controls legend open, a machine hover always sat on
 top of the legend. The best position the placement search could find still
-covered about 20,000 px² of it. The issue said the panel was one pixel too
+covered about 15,500 px² of it. The issue said the panel was one pixel too
 tall. Measuring showed it was 48px too tall: the panel is 456x283, and the
 band between the legend and the hotbar is 235px.
 

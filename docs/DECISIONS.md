@@ -1635,7 +1635,9 @@ matches what code comments and data files cite.
   **When nothing fits.** At 1280x720 with the legend open there is genuinely
   nowhere for a machine hover to stand: 550x283 of tooltip, a 757x259 legend
   starting 24px in, 499px to its right, 24px above and — after the hotbar
-  takes its strip — 282px below, one pixel short. Pushing off one plate at a
+  takes its strip — 282px below, one pixel short. (Figures as recorded then.
+  Measured again for issue #99, the tooltip is 456x283 and the band 235px:
+  48px short, not one.) Pushing off one plate at a
   time is no answer: each push clears the plate it is given and can land on
   the next, and one pass across three plates put the tooltip over two at once.
   So when every position is a fault, `_panel_position_near` scores every
@@ -1645,6 +1647,8 @@ matches what code comments and data files cite.
   ordering still decides whenever the overlap is equal. The remaining overlap
   at that one window size is filed rather than fudged: the real answer is a
   legend that folds itself or a shorter tooltip, which is a content decision.
+  (Taken 2026-09-25, issue #99: the tooltip sheds its `crew:` line and then
+  its load bar — see UI_UX.md §5c.)
 
   **The same lesson, a third time: the configuration panel** (issue #88, folded
   in because it turned out to be this fix and not a separate one). The panel a
