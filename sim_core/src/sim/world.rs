@@ -2755,11 +2755,14 @@ impl World {
     /// owned `kind` at `tile` facing `direction` would succeed, and what it
     /// would do, without changing anything.
     ///
-    /// [`Self::try_place`] acts on the plan it returns and
-    /// [`Self::preview_command`] reports it, so the build ghost and the
-    /// placement itself cannot drift: there is no second copy of the
-    /// ownership, footprint, hopper-item, overlap or crossing rule for the
-    /// two to disagree about (`tests/preview.rs` drives both over a grid).
+    /// `issue_command` hands the plan it returns to [`Self::apply_place`],
+    /// which cannot refuse, and [`Self::preview_command`] reports it: there
+    /// is no second copy of the ownership, footprint, hopper-item, overlap
+    /// or crossing rule for the build ghost and the placement to disagree
+    /// about. A refusal added anywhere but here — a guard in the `Place` arm
+    /// of `issue_command` — would still compile and would drift;
+    /// `tests/preview.rs` checks agreement over a grid of cases, not every
+    /// input.
     ///
     /// The refusals are checked in the order a player wants to hear them —
     /// "you cannot build that here" before "you own none" — which changes
@@ -2807,32 +2810,34 @@ impl World {
         Ok(plan)
     }
 
-    /// Places one owned unit of `kind`, returning whether it happened. See
-    /// [`PlayerCommand::Place`] for the refusal rules — every one of them
-    /// leaves the world byte-identical, because every one of them is decided
-    /// by [`Self::plan_place`] before anything moves.
-    fn try_place(
+    /// Carries out a placement [`Self::plan_place`] accepted, returning the
+    /// entity now standing on `tile`. It has **no refusal path**: it takes
+    /// the plan, not the request, and must hand back an entity, so a bare
+    /// `return` does not compile — a new refusal belongs in `plan_place`,
+    /// where [`Self::preview_command`] reads it too. See
+    /// [`PlayerCommand::Place`] for the refusal rules; every one leaves the
+    /// world byte-identical because it is decided before this runs.
+    fn apply_place(
         &mut self,
         kind: &str,
         tile: TileCoord,
         direction: Direction,
-        item: Option<&str>,
-    ) -> bool {
-        let (footprint, tiles, hopper_item) = match self.plan_place(kind, tile, direction, item) {
-            Err(_) => return false,
-            Ok(PlacePlan::Crossing { occupant, tiles }) => {
+        plan: PlacePlan,
+    ) -> Entity {
+        let (footprint, tiles, hopper_item) = match plan {
+            PlacePlan::Crossing { occupant, tiles } => {
                 self.assemble_crossing(occupant, kind, direction);
                 let taken = self.shop.owned.take_one(kind);
                 debug_assert!(taken, "plan_place checked the owned count");
                 self.recompute_topology();
                 self.mark_tiles_dirty(&tiles);
-                return true;
+                return occupant;
             }
-            Ok(PlacePlan::Fresh {
+            PlacePlan::Fresh {
                 footprint,
                 tiles,
                 hopper_item,
-            }) => (footprint, tiles, hopper_item),
+            } => (footprint, tiles, hopper_item),
         };
 
         let placement = Placement {
@@ -2931,7 +2936,7 @@ impl World {
         debug_assert!(taken, "plan_place checked the owned count");
         self.recompute_topology();
         self.mark_tiles_dirty(&tiles);
-        true
+        entity
     }
 
     /// The belt or pipe standing on `tile` that placing `kind` there facing
@@ -4592,7 +4597,12 @@ impl World {
                 direction,
                 item,
             } => {
-                self.try_place(&kind, tile, direction, item.as_deref());
+                // Planned here, applied there: `apply_place` cannot refuse,
+                // so every refusal `Place` has is one `plan_place` makes —
+                // the same call `preview_command` makes.
+                if let Ok(plan) = self.plan_place(&kind, tile, direction, item.as_deref()) {
+                    self.apply_place(&kind, tile, direction, plan);
+                }
             }
             PlayerCommand::Remove { tile } => {
                 self.try_remove(tile);
@@ -4644,7 +4654,8 @@ impl World {
     /// **The one purchase rule in this file**: what buying `quantity` of
     /// `kind` would cost, or why it cannot happen. The `Purchase` arm of
     /// [`Self::issue_command`] spends what this prices and
-    /// [`Self::preview_command`] reports it, so the two cannot disagree.
+    /// [`Self::preview_command`] reports it, so there is no second copy of
+    /// the rule for the two to disagree about.
     fn plan_purchase(&self, kind: &str, quantity: u32) -> Result<Money, PurchaseRefusal> {
         if self.shop.catalog.get(kind).is_none() {
             return Err(PurchaseRefusal::NotForSale);
@@ -4669,7 +4680,10 @@ impl World {
     /// It asks the very functions [`Self::issue_command`] acts on
     /// ([`Self::plan_place`], [`Self::plan_purchase`]), which is the whole
     /// guarantee: a preview that merely agrees with the command today would
-    /// be free to disagree tomorrow. `tests/preview.rs` pins the agreement.
+    /// be free to disagree tomorrow. It holds for as long as every refusal
+    /// lives in a `plan_*` function rather than in an `issue_command` arm;
+    /// `tests/preview.rs` pins the agreement over a grid of cases, not over
+    /// every input.
     ///
     /// `Place` and `Purchase` are covered — the build ghost and the buy
     /// button. Every other command is **refused with a reason saying it is
@@ -6126,7 +6140,7 @@ impl World {
     }
 
     /// The footprint `kind` is placed with, or `None` for a kind this world
-    /// cannot construct at all — `try_place`'s own first question, asked by
+    /// cannot construct at all — `plan_place`'s own first question, asked by
     /// [`super::save`] before it places anything so a save naming a kind
     /// this build no longer has fails with a message about *that* rather
     /// than as a generic refusal.

@@ -559,7 +559,7 @@ impl Economy {
     }
 
     /// Whether [`Self::try_spend`] would take `amount` — its one rule, asked
-    /// without spending, so a preview and the spend cannot disagree.
+    /// without spending, so a preview and the spend check the same thing.
     pub fn can_spend(&self, amount: Money) -> bool {
         amount > Money::ZERO && self.money >= amount
     }

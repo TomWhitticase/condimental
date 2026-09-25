@@ -282,8 +282,14 @@ same JSON `issue_command_json` takes and returning a `PreviewResult`:
 It is a validation pass over `&self`, never apply-and-roll-back: it calls the
 same `plan_*` functions (`World::plan_place`, `World::plan_purchase`) the
 matching `issue_command` arms act on, so there is one implementation of each
-rule and the two cannot drift; `sim_core/tests/preview.rs` drives a grid of
-cases through both and asserts they agree. `place` and `purchase` are covered.
+rule — no second copy for the two to disagree about. The guarantee is
+structural, not total: `World::apply_place` takes the plan rather than the
+request and must return the placed entity, so it has no way to refuse, but a
+guard written in an `issue_command` arm before the plan is applied would
+still compile and would drift. Put a new refusal in the `plan_*` function.
+`sim_core/tests/preview.rs` drives a grid of cases through both and asserts
+they agree — agreement is pinned over that grid, not over every input.
+`place` and `purchase` are covered.
 **Every other command is refused with a reason saying it is not previewed** —
 never guessed valid — until it gets its own shared `plan_*` function.
 

@@ -348,7 +348,7 @@ pub struct SavedPlacement {
 }
 
 /// The live contents of one placement, one variant per body a `Place` can
-/// construct (`world.rs`'s `try_place`).
+/// construct (`world.rs`'s `apply_place`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SavedBody {
     Belt(SavedBelt),
@@ -1418,7 +1418,7 @@ fn restore_staff(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
     Ok(())
 }
 
-/// Which body a kind is built with (`world.rs`'s `try_place`) — the one
+/// Which body a kind is built with (`world.rs`'s `apply_place`) — the one
 /// place this module restates that mapping, so a mismatch is an error rather
 /// than a silently wrong body.
 fn expected_body(kind: &str) -> &'static str {
