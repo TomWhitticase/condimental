@@ -221,6 +221,25 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-25 — A machine hover gives up lines before it covers the HUD (issue #99)
+
+At 1280x720 with the controls legend open, a machine hover always sat on
+top of the legend. The best position the placement search could find still
+covered about 20,000 px² of it. The issue said the panel was one pixel too
+tall. Measuring showed it was 48px too tall: the panel is 456x283, and the
+band between the legend and the hotbar is 235px.
+
+The hover now drops lines until it fits (`_hover_yield_rungs`). It drops
+the `crew:` line first, then the load bar, and never more than it needs.
+Both are already shown elsewhere on the same frame: the CREW plate lists
+every crew category, and the `% busy` figure stays in the text. The panel
+is measured at full size every frame, so at 1600x900 or with the legend
+folded (F1) nothing is dropped. We never fold the legend for the player,
+because UI_UX §5f says the fold is theirs. The rule is written up in UI_UX
+§5c. `test_hud_plates.gd` covers the ladder in both view modes, and
+`test_staff_panel.gd` checks that the first rung removes the crew line and
+nothing else.
+
 ### 2026-09-21 — A settings screen, and an F3 menu for cheating during development
 
 Two asks in one branch, and the line between them is the project's own rule
@@ -264,6 +283,7 @@ exactly one.
 `--set key=value` to move one knob for the frame, so a review shot is the
 same on any developer's machine and a screenshot of what a setting *does* is
 reproducible rather than a temporary source edit.
+
 ### 2026-09-21 — A dock's lamp is about that dock
 
 The "backing up" pulse on a dock's deck lamps was read off the shared

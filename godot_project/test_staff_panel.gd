@@ -760,6 +760,11 @@ func _run_checks() -> void:
 			_fail("hover on the understaffed vat must say '%s', got:\n%s" % [needle, hover])
 	if main._hover_text_at_tile(vat + Vector2i(1, 1)).find("short of manufacturing staff") < 0:
 		_fail("any tile of the vat says it")
+	# The hover's first yield rung (issue #99) drops the crew line and ONLY
+	# it: the shortage it explains is still said, just not the headcount.
+	var yielded_hover: String = main._hover_text_at_tile(vat, main.HOVER_YIELD_CREW)
+	if yielded_hover != hover.replace("\ncrew: 2 manufacturing", ""):
+		_fail("a hover yielding its crew line should lose that line and nothing else, got:\n%s" % yielded_hover)
 	var state: Dictionary = main._hover_panel_state(vat)
 	var load_meter: Dictionary = state.get("load_meter", {})
 	if load_meter.is_empty() or load_meter["color"] != main.METER_FILL_PROGRESS:

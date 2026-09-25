@@ -787,7 +787,55 @@ func _run_checks() -> void:
 		_fail("isometric lost the cursor-following rule")
 		return
 	fp_probe.queue_free()
+
+	# --- A hover with nowhere to stand sheds lines (issue #99) --------------
+	# At 1280x720 with the legend open, the band between the legend and the
+	# hotbar's strip is shorter than a full machine hover, and no gap beside
+	# the legend is wide enough, so every position covered some HUD. The
+	# hover now sheds its crew line, then its load bar, until one clears.
+	# Sized off the band this run actually has rather than off the 235px a
+	# real window measured: what is pinned is the RULE — shed the fewest
+	# rungs that clear, and none at all when the legend is folded or the
+	# window is big.
+	_resize(SMALL)
+	if main._legend_collapsed:
+		_press_key(KEY_F1)
+	var band: float = float(SMALL.y) - main._hotbar_reserved_height() - main._legend_rect().end.y
+	var hover_anchor := Vector2(SMALL) * 0.5
+	var one_rung: Array[float] = [40.0, 0.0]
+	var two_rungs: Array[float] = [20.0, 30.0]
+	for mode in [main.ViewMode.ISOMETRIC, main.ViewMode.FIRST_PERSON]:
+		main._set_view_mode(mode)
+		if main._legend_collapsed:
+			_press_key(KEY_F1)
+		var tall := Vector2(456, band + 24.0)
+		var rungs: int = main._hover_yield_rungs(tall, hover_anchor, one_rung)
+		if rungs != 1:
+			_fail("a hover 24px too tall for the %dpx band shed %d rungs, not the one that clears it (mode %d)" % [int(band), rungs, mode])
+			return
+		var shed := Vector2(tall.x, tall.y - one_rung[0])
+		var placed := Rect2(main._world_position_for_size(shed, hover_anchor), shed)
+		if main._hud_overlap_area(placed, main._hud_avoid_rects()) > 0.0:
+			_fail("the hover shed its crew line and still stands on a plate (%s, mode %d)" % [str(placed), mode])
+			return
+		# Needs both rungs: the first alone leaves it 4px over.
+		rungs = main._hover_yield_rungs(tall, hover_anchor, two_rungs)
+		if rungs != 2:
+			_fail("a hover that needs both rungs shed %d (mode %d)" % [rungs, mode])
+			return
+		# Folded, the legend is a stub and the same panel fits whole: the
+		# player's fold buys the lines back without the game folding anything.
+		_press_key(KEY_F1)
+		rungs = main._hover_yield_rungs(tall, hover_anchor, two_rungs)
+		if rungs != 0:
+			_fail("with the legend folded the hover still shed %d rungs (mode %d)" % [rungs, mode])
+			return
+		_press_key(KEY_F1)
+	main._set_view_mode(main.ViewMode.ISOMETRIC)
 	_resize(BIG)
+	if main._hover_yield_rungs(Vector2(456, 283), Vector2(BIG) * 0.5, two_rungs) != 0:
+		_fail("at 1600x900 a full machine hover sheds lines it has room for")
+		return
 
 	# --- The clipboard's docket stack is cut BETWEEN dockets (issue #8) ----
 	# The clipboard is the panel that yields the right-hand column (see

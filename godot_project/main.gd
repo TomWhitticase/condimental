@@ -15216,7 +15216,12 @@ func _tile_under_screen_pos(screen_pos: Vector2) -> Vector2i:
 ## uses, and disambiguating two hoppers falls straight out of it.
 ##
 ## Pure given the polled snapshots, so a test can drive it with a tile.
-func _hover_text_at_tile(tile: Vector2i) -> String:
+##
+## `yielded` is how far down the hover's yield ladder the panel has gone
+## (`_hover_yield_rungs`, issue #99): from `HOVER_YIELD_CREW` on, the `crew:`
+## line is left out.
+func _hover_text_at_tile(tile: Vector2i, yielded := 0) -> String:
+	var with_crew := yielded < HOVER_YIELD_CREW
 	var placement := _placement_at_tile(tile)
 	if placement.is_empty():
 		return ""
@@ -15235,10 +15240,10 @@ func _hover_text_at_tile(tile: Vector2i) -> String:
 		FLUID_TANK_KIND:
 			return _fluid_tank_hover_text(key, direction)
 		DOCK_KIND:
-			return _dock_hover_text(key, direction)
+			return _dock_hover_text(key, direction, with_crew)
 		WAREHOUSE_RACK_KIND:
 			return _rack_hover_text(key, direction)
-	return _machine_hover_text(key, kind, direction)
+	return _machine_hover_text(key, kind, direction, with_crew)
 
 
 ## The WIDGET half of the tooltip: what bar (if any) `tile` should show, and
@@ -15496,7 +15501,7 @@ func _splitter_output_text(outputs: Array, side: int) -> String:
 ## and which side gives it back — the one fact about a machine that used to be
 ## the same for every machine in the world and now is not.
 ## Pure given `_machine_states`/`sim.current_tick()` — no Input reads.
-func _machine_hover_text(origin_key: String, kind: String, direction: String) -> String:
+func _machine_hover_text(origin_key: String, kind: String, direction: String, with_crew := true) -> String:
 	if not _machine_states.has(origin_key):
 		return "%s\nfacing %s" % [_kind_display_name(kind), direction]
 	var machine: Dictionary = _machine_states[origin_key]
@@ -15544,8 +15549,9 @@ func _machine_hover_text(origin_key: String, kind: String, direction: String) ->
 	# The crew this kind needs while running (the staff pools MVP): read
 	# with the machine's other facts at rebuild, so the line under "short of
 	# manufacturing staff" says how many manufacturing staff that is.
+	# The first line the hover sheds when it has nowhere to stand (issue #99).
 	var crew_text := _crew_text(_crews.get(origin_key, []))
-	if crew_text != "":
+	if crew_text != "" and with_crew:
 		text += "\n%s" % crew_text
 	return text
 
@@ -15737,7 +15743,7 @@ func _fluid_tank_hover_text(origin_key: String, direction: String) -> String:
 ## what is standing on the shared pool waiting for a contract to claim it —
 ## the same figure the clipboard prints as ON THE DOCK, deliberately, rather
 ## than a second number the player would have to reconcile with it.
-func _dock_hover_text(origin_key: String, direction: String) -> String:
+func _dock_hover_text(origin_key: String, direction: String, with_crew := true) -> String:
 	var snapshot: Dictionary = _dock_states.get(origin_key, {})
 	if snapshot.is_empty():
 		return "%s\nfacing %s" % [_kind_display_name(DOCK_KIND), direction]
@@ -15753,7 +15759,7 @@ func _dock_hover_text(origin_key: String, direction: String) -> String:
 	# crew the wire says this dock needs, never guessed from the pools.
 	var crew: Array = _crews.get(origin_key, [])
 	var crew_text := _crew_text(crew)
-	if crew_text != "":
+	if crew_text != "" and with_crew:
 		text += "\n%s" % crew_text
 	# ISSUE #87, the dock's half of #20. `understaffed` is a PER-TICK fact and
 	# only moves on a tick the dock actually had something to ship, so on a
@@ -15888,16 +15894,88 @@ func _update_hover_tooltip() -> void:
 		_hover_tooltip.visible = false
 		return
 	_hover_label.text = text
-	_apply_hover_panel_state(_hover_panel_state(tile))
+	var state := _hover_panel_state(tile)
+	_apply_hover_panel_state(state)
+	# Too tall to stand anywhere clear of the HUD? Shed lines until it is
+	# (issue #99). Measured every frame from the full panel, so a folded
+	# legend or a bigger window gives the lines straight back.
+	var full := _panel_draw_size(_hover_tooltip)
+	var sheds := _hover_yield_sheds(text != _hover_text_at_tile(tile, HOVER_YIELD_CREW), state)
+	var yielded := _hover_yield_rungs(full, query_pos, sheds)
+	if yielded > 0:
+		_hover_label.text = _hover_text_at_tile(tile, yielded)
+		_apply_hover_panel_state(state, yielded)
+		# A free-standing Control only ever grows to its minimum, never
+		# shrinks back to it, so the shorter size is set outright. Width is
+		# kept: the lines shed are never the widest, and the full width is
+		# the one `_panel_draw_size` already trusts.
+		var shed_height := 0.0
+		for i in range(yielded):
+			shed_height += sheds[i]
+		_hover_tooltip.size = Vector2(full.x, full.y - shed_height)
 	_hover_tooltip.position = _world_panel_position(_hover_tooltip, query_pos)
 	_hover_tooltip.visible = true
+
+
+## The hover's yield ladder (issue #99), in the order its rungs are shed:
+## first the `crew:` line — the CREW plate on screen already names every
+## category — then the load bar, whose `% busy` figure is still printed in
+## the text two lines above it. Neither loses a fact the player cannot see
+## elsewhere on the same frame, which is why these two go and nothing else.
+const HOVER_YIELD_CREW := 1
+const HOVER_YIELD_LOAD := 2
+
+
+## How many pixels each rung of the ladder gives back for the tile being
+## hovered, rung 1 first. A rung this tile does not have (a belt has no crew
+## line, a dock no load bar) gives back nothing, and costs nothing to climb.
+## Measured off the live nodes rather than typed, so a UI scale change moves
+## them with it.
+func _hover_yield_sheds(has_crew_line: bool, state: Dictionary) -> Array[float]:
+	var crew_line := 0.0
+	if has_crew_line and _hover_label != null:
+		crew_line = float(_hover_label.get_line_height())
+		if _hover_label.label_settings != null:
+			crew_line += _hover_label.label_settings.line_spacing
+	var load_row := 0.0
+	var load_meter: Dictionary = state.get("load_meter", {})
+	if not load_meter.is_empty() and _hover_load_meter != null:
+		load_row = _hover_load_meter.get_combined_minimum_size().y
+		var column := _hover_load_meter.get_parent() as Container
+		if column != null:
+			load_row += column.get_theme_constant("separation")
+	var sheds: Array[float] = [crew_line, load_row]
+	return sheds
+
+
+## The fewest rungs of the ladder a panel of `size` has to shed before it can
+## stand somewhere clear of every HUD plate. 0 means it fits as it is — the
+## case at 1600x900, and at 1280x720 once the player folds the legend, since
+## `_hud_avoid_rects` reports the legend's stub then. If even the last rung
+## does not clear, the panel sheds everything: it is then the least-bad
+## search's job (`_position_near_for_size`), and a shorter panel covers less.
+##
+## Driven by the same placement rule that will then place the panel, so the
+## ladder cannot disagree with it about where "clear" is. Given sizes rather
+## than a node, so a test can drive it without trusting a headless font.
+func _hover_yield_rungs(size: Vector2, anchor: Vector2, sheds: Array[float]) -> int:
+	var avoid := _hud_avoid_rects()
+	var trial := size
+	for rung in range(sheds.size() + 1):
+		if rung > 0:
+			trial.y -= sheds[rung - 1]
+		var pos := _world_position_for_size(trial, anchor)
+		if _hud_overlap_area(Rect2(pos, trial), avoid) <= 0.0:
+			return rung
+	return sheds.size()
 
 
 ## Shows or hides the tooltip's bar and buffer rows for whatever
 ## `_hover_panel_state` reported. Split from the query above for the same
 ## reason every other pair in this file is: the deciding half is pure and
-## testable, this half only touches nodes.
-func _apply_hover_panel_state(state: Dictionary) -> void:
+## testable, this half only touches nodes. `yielded` is how far down the
+## hover's yield ladder this frame went (`_hover_yield_rungs`).
+func _apply_hover_panel_state(state: Dictionary, yielded := 0) -> void:
 	var meter: Dictionary = state.get("meter", {})
 	if _hover_meter != null:
 		_hover_meter.visible = not meter.is_empty()
@@ -15905,7 +15983,7 @@ func _apply_hover_panel_state(state: Dictionary) -> void:
 			_set_meter(_hover_meter, float(meter.get("fraction", 0.0)), meter.get("color", METER_FILL_PROGRESS))
 	var load_meter: Dictionary = state.get("load_meter", {})
 	if _hover_load_meter != null:
-		_hover_load_meter.visible = not load_meter.is_empty()
+		_hover_load_meter.visible = not load_meter.is_empty() and yielded < HOVER_YIELD_LOAD
 		if not load_meter.is_empty():
 			_set_meter(_hover_load_meter, float(load_meter.get("fraction", 0.0)), load_meter.get("color", METER_FILL_LEVEL))
 			_set_meter_outline(_hover_load_meter, load_meter.get("outline", METER_BORDER_COLOR))
@@ -15933,9 +16011,15 @@ func _apply_hover_panel_state(state: Dictionary) -> void:
 ## follows the anchor is a panel standing on what it describes. First person
 ## gets a fixed rule instead (issue #105).
 func _world_panel_position(panel: Control, anchor: Vector2) -> Vector2:
+	return _world_position_for_size(_panel_draw_size(panel), anchor)
+
+
+## `_world_panel_position` for a panel of `size` — the same one door, asked
+## about a size rather than a node.
+func _world_position_for_size(size: Vector2, anchor: Vector2) -> Vector2:
 	if _view_mode == ViewMode.FIRST_PERSON:
-		return _first_person_panel_position(_panel_draw_size(panel))
-	return _panel_position_near(panel, anchor)
+		return _first_person_panel_position(size)
+	return _position_near_for_size(size, anchor)
 
 
 ## Where a world panel goes in FIRST_PERSON: parked in the lower-left corner,
@@ -15964,8 +16048,9 @@ func _world_panel_position(panel: Control, anchor: Vector2) -> Vector2:
 ##
 ## The corner is then stepped clear of whatever plate it still touches — at
 ## 1280x720 the legend reaches far enough down to clip the top of a tall
-## tooltip, and the strip left between it and the hotbar is a couple of pixels
-## short of a machine hover. So the corner and the four ways off each plate
+## tooltip, and the strip left between it and the hotbar is 48px short of a
+## full machine hover (the hover sheds lines to fit it first — issue #99). So
+## the corner and the four ways off each plate
 ## are scored by how much HUD they cover and the smallest wins, exactly as the
 ## cursor rule's last resort does; ties keep the corner, so the corner is
 ## still the rule and this only ever trims an overlap it cannot avoid.
@@ -16092,7 +16177,13 @@ func _hud_avoid_rects() -> Array[Rect2]:
 func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
 	# The size this panel will be DRAWN at, not the one it reports as its
 	# minimum — see `_panel_draw_size`, which is why.
-	var size := _panel_draw_size(panel)
+	return _position_near_for_size(_panel_draw_size(panel), anchor)
+
+
+## `_panel_position_near`'s rule for a panel of `size`, split out so the
+## hover's yield ladder (`_hover_yield_rungs`) can ask where a SHORTER panel
+## would stand before it sheds anything to make it shorter.
+func _position_near_for_size(size: Vector2, anchor: Vector2) -> Vector2:
 	var vp := get_viewport()
 	var bounds := vp.get_visible_rect().size if vp != null else Vector2(1600, 900)
 	# The hotbar sits over the bottom of the viewport (§5b) but isn't part of
@@ -16147,11 +16238,13 @@ func _panel_position_near(panel: Control, anchor: Vector2) -> Vector2:
 	if _hud_overlap_area(rect, avoid) <= 0.0:
 		return rect.position
 
-	# Nothing clears every plate. At 1280x720 with the legend open there is
-	# genuinely nowhere to stand: a machine hover is 550x283, the legend is
-	# 757x259 and starts 24px in, which leaves 499px to its right, 24px above
-	# it and — once the hotbar has taken its strip — 282px below it, one
-	# pixel short. Pushing per plate in turn is no answer either: each push
+	# Nothing clears every plate. At 1280x720 with the legend open a full
+	# machine hover (456x283) has genuinely nowhere to stand: the band between
+	# the legend's bottom and the hotbar's strip is 235px, and no gap beside
+	# the legend is wide enough. The hover sheds lines before it gets here
+	# (`_hover_yield_rungs`, issue #99), so this is now the last resort for a
+	# panel that is still too tall once it has yielded everything it can.
+	# Pushing per plate in turn is no answer either: each push
 	# clears the plate it is given and can land on the next, and one pass
 	# across three plates put the tooltip over two of them at once.
 	#
