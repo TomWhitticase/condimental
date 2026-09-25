@@ -4,8 +4,18 @@
 # This is the one verification step in the project that is NOT headless, and
 # deliberately so: everything else about this codebase is checked without a
 # framebuffer (ARCHITECTURE.md §7), but "does the factory look like UI_UX.md
-# describes" cannot be. It opens a real window briefly, waits for lighting to
-# settle, writes the frame, and exits.
+# describes" cannot be. It opens a real window (off-screen), waits for
+# lighting to settle, writes the frame, and exits.
+#
+# **THE WINDOW IS OFF-SCREEN, AND FOCUS IS HANDED BACK.** These renders run on
+# a laptop someone is using, so nothing here may land on top of their work or
+# take their keystrokes. test_screenshot.gd moves its window off the desktop
+# before drawing anything; its header says how. Godot still activates itself
+# at launch, which nothing inside the process can prevent, so while it runs
+# this script hides Godot the moment it is in front, and macOS gives focus
+# back to whatever app had it (`hand_focus_back`). The cursor is not touched either: the --hover* flags aim
+# a point inside the scene, not the machine's pointer. Pass --on-screen to
+# watch a run in a normal window; that also leaves focus alone.
 #
 # **THE WORLD NOW STARTS EMPTY** (the "Real Placement" epic). With no flags
 # at all this photographs exactly that — bare floor, a build menu key and
@@ -254,7 +264,7 @@
 # interactive session — the same problem the hover flags solve for tooltips.
 #
 # Pass one of --hover / --hover-pipe / --hover-vat / --hover-hopper /
-# --hover-tank / --hover-dock / --hover-splitter to park the cursor over the
+# --hover-tank / --hover-dock / --hover-splitter to aim the cursor over the
 # first placed machine, pipe, multi-tile machine's FAR CORNER, hopper, fluid
 # tank, dock or conveyor splitter,
 # so that tooltip is in the shot. (--hover-vat deliberately picks a
@@ -273,30 +283,18 @@
 # and --remove-mode refuse on an empty world for the same reason: neither has
 # anything to stand on, and --ghost-blocked's frame would be the VALID state.
 #
-# **THE CURSOR IS THE MACHINE'S, NOT THIS RUN'S** (issue #4). These flags warp
-# the one real pointer, which outlives the process, so every run now says
+# **THE CURSOR IS THIS RUN'S, NOT THE MACHINE'S** (issue #4). These flags
+# used to warp the one real pointer, which outlived the process and leaked
+# between runs. They now aim a point only the scene can see. Every run says
 # where the cursor ended up beside SCREENSHOT_FIXTURE: `SCREENSHOT_CURSOR:
 # hovering tile (26, 0)` for a hover flag, `parked on empty ground ...` for a
-# run that asked for none — a run with no --hover* parks the cursor clear of
-# everything rather than inheriting the tile the last run left it on, which
-# is how a `--payout` frame came back wearing the previous `--hover-dock`
-# run's tooltip. If the pointer is somewhere else by the time the shutter
-# opens, the run is REFUSED with SCREENSHOT_FAIL and writes no PNG, because
-# the tooltip in that frame belongs to the wrong thing; the message lists the
-# usual candidates rather than picking one, since this process cannot see
-# which of them happened.
+# run that asked for none. If the cursor is not over the tile it was aimed at
+# when the shutter opens (the camera moved after the aim), the run is REFUSED
+# with SCREENSHOT_FAIL and writes no PNG, because the tooltip in that frame
+# belongs to the wrong thing.
 #
-# Parallel runs are USUALLY fine, and both halves of that were measured
-# rather than assumed. In favour: three concurrent pairs of renders in two
-# worktrees all passed and reported their own correct tile, and 138
-# `CGWarpMouseCursorPosition` warps fired at the desktop DURING a
-# --hover-dock run left it pixel-identical — an unfocused Godot window does
-# not pick up another process's warp. Against: two 48-run sweeps taken while
-# sibling worktrees were running Godot each refused ONCE, at the shutter,
-# naming a tile nobody had asked for — a different case each time, and each
-# one then passed six times in a row on its own. So the failure mode is
-# real, rare, and exactly what the refusal describes. Re-run it before you read anything into it, and
-# serialise only if it keeps happening; do not serialise on principle.
+# Parallel runs in several worktrees are fine. Each has its own window and
+# its own cursor, and neither is on the desktop.
 #
 # Pass --title to photograph the TITLE SCREEN — the menu as the player first
 # sees it: the wordmark, the splash line and the three buttons over the 3D
@@ -389,7 +387,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--split-docks [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--settings] [--debug] [--set KEY=VALUE] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--split-docks [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--settings] [--debug] [--set KEY=VALUE] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy] [--on-screen]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -407,9 +405,40 @@ case "$out" in
 esac
 mkdir -p "$(dirname "$out")"
 
+# Godot activates itself at launch, and its no-focus window then leaves no
+# app in front at all. So whenever Godot is the front app, HIDE it (what
+# Cmd-H does). macOS then gives focus back to the app that had it, which is
+# the one thing a script cannot reliably name. Handing focus to a named app
+# instead was tried: Godot took it back each time. Polled, because the
+# activation lands a moment after launch, at a time this script cannot see.
+# Nothing here needs the window to be visible; test_screenshot.gd draws it by
+# hand.
+hand_focus_back() {
+  local godot_pid=$1 front
+  while kill -0 "$godot_pid" 2>/dev/null; do
+    front=$(lsappinfo info -only pid "$(lsappinfo front)" 2>/dev/null \
+      | sed -n 's/.*"pid"=\([0-9]*\).*/\1/p')
+    if [ "$front" = "$godot_pid" ]; then
+      osascript -e "tell application \"System Events\" to set visible of \
+        (first process whose unix id is $godot_pid) to false" >/dev/null 2>&1
+    fi
+    sleep 0.05
+  done
+}
+
 "$godot_bin" --path godot_project --resolution "$resolution" \
-  --script test_screenshot.gd -- "$out" "${@:3}"
+  --script test_screenshot.gd -- "$out" "${@:3}" &
+godot_pid=$!
+# Backgrounded for the watcher, so an interrupt has to reach Godot by hand.
+trap 'kill "$godot_pid" 2>/dev/null' INT TERM
+watcher_pid=""
+if command -v lsappinfo >/dev/null && [[ " ${*:3} " != *" --on-screen "* ]]; then
+  hand_focus_back "$godot_pid" &
+  watcher_pid=$!
+fi
+wait "$godot_pid"
 status=$?
+[ -n "$watcher_pid" ] && wait "$watcher_pid" 2>/dev/null
 if [ ! -f "$out" ]; then
   echo "error: no screenshot written to $out (godot exited $status)" >&2
   exit 1

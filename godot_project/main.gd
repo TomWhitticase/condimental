@@ -2112,6 +2112,9 @@ enum ViewMode { ISOMETRIC, FIRST_PERSON }
 ## below starts as the isometric view rather than as this constant.
 const DEFAULT_VIEW_MODE := ViewMode.FIRST_PERSON
 var _view_mode: int = ViewMode.ISOMETRIC
+## A screen point standing in for the mouse, or null for the real one. Only
+## test_screenshot.gd sets it; `_pointer_pos` explains why.
+var _pointer_override: Variant = null
 ## The hall's environment, kept because the two view modes want different
 ## BACKDROPS out of it — see `_apply_backdrop_mode`.
 var _world_environment: WorldEnvironment
@@ -11606,6 +11609,19 @@ func _config_query_pos() -> Vector2:
 		return Vector2.ZERO
 	if _view_mode == ViewMode.FIRST_PERSON and not _config_open:
 		return vp.get_visible_rect().size / 2.0
+	return _pointer_pos(vp)
+
+
+## Where the isometric cursor is, for every question the scene asks of it:
+## the hover tooltip, the ghost, the placement prompt and a configuration
+## click. That is the viewport's own mouse position, unless
+## test_screenshot.gd has set `_pointer_override`. The harness sets it
+## rather than calling `Input.warp_mouse`, which moves the machine's ONE
+## pointer, the one the person at the desk is using. Its window is off-screen
+## besides, where no real pointer could reach it anyway.
+func _pointer_pos(vp: Viewport) -> Vector2:
+	if _pointer_override != null:
+		return _pointer_override
 	return vp.get_mouse_position()
 
 
@@ -13218,7 +13234,7 @@ func _ghost_target_tile() -> Vector2i:
 	if _view_mode == ViewMode.FIRST_PERSON:
 		query_pos = vp.get_visible_rect().size / 2.0
 	else:
-		query_pos = vp.get_mouse_position()
+		query_pos = _pointer_pos(vp)
 	return _tile_under_screen_pos(query_pos)
 
 
@@ -13429,7 +13445,7 @@ func _update_ghost() -> void:
 			if _view_mode == ViewMode.FIRST_PERSON:
 				anchor = vp.get_visible_rect().size / 2.0
 			else:
-				anchor = vp.get_mouse_position()
+				anchor = _pointer_pos(vp)
 			_placement_prompt.position = _world_panel_position(_placement_prompt, anchor)
 		_placement_prompt.visible = true
 
@@ -15906,7 +15922,7 @@ func _update_hover_tooltip() -> void:
 	if _view_mode == ViewMode.FIRST_PERSON:
 		query_pos = vp.get_visible_rect().size / 2.0
 	else:
-		query_pos = vp.get_mouse_position()
+		query_pos = _pointer_pos(vp)
 	var tile := _tile_under_screen_pos(query_pos)
 	var text := _hover_text_at_tile(tile)
 	if text == "":

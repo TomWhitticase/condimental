@@ -379,7 +379,7 @@ matches what code comments and data files cite.
   pins the view itself now (`_enter_view_mode`): isometric unless
   `--first-person`. Every other framing flag it has is an isometric idea —
   `--closeup`/`--zoom`/`--pan` write `_camera_focus`/`_camera_size`, and
-  every `--hover*` warps the OS cursor to where a tile *projects* — so
+  every `--hover*` aims the cursor at where a tile *projects* — so
   inheriting the new default would have silently re-aimed every command
   line in `docs/`, `scripts/` and CI at a camera those flags cannot steer,
   and the PNGs would have come back wrong rather than refused. The default
