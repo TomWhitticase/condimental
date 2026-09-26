@@ -231,6 +231,46 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-26 — Mustard, the third sauce, and the fluid it could not drink
+
+Mustard ships as content: two raws (`mustard_seed`, `turmeric`), five stages,
+four contracts and a 25-delivery gate, all in `data/*.ron`, with no simulation
+change behind it. The interesting part is the one shape that had to change,
+and why.
+
+The obvious recipe drank `vinegar` at the mixer, beside turmeric, the way
+`ketchup_mix` does — which is the whole point of the tier, since vinegar is
+the first raw two sauces compete for out of one budget. It also broke the
+ketchup line in a brand-new game, long before a player could unlock mustard.
+`World::resolve_network_fluids` works out what a pipe run carries by narrowing
+candidates seeded from *every* recipe of *every* kind that touches the run,
+and `RecipeRegistry::for_machine` knows nothing about unlock gates. Two mixer
+recipes drinking one raw leaves nothing to narrow with: the vinegar tank's run
+goes ambiguous, every machine on it stalls with `AmbiguousPipe`, and because
+`World::tank_fluid` returns `None` on an ambiguous run the tank cannot even be
+filled. Content that is still locked can stall a line that already ships.
+
+So mustard's vinegar moved a stage upstream, to the crusher, which drank
+nothing: `mustard_mash` is 4 mustard seed milled wet with 2 vinegar, and the
+mustard mixer takes the derived mash down a pipe the way the BBQ mixer takes
+derived ketchup. The bill per box is unchanged at 17 — only the machine that
+drinks moved — and it restored full per-kind input disjointness, so the older
+and stronger `recipes_on_a_kind_take_disjoint_inputs` rule survives untouched.
+
+The rule that came out of it is recorded (2026-09-26, `docs/DECISIONS_LOG.md`)
+and fenced two ways: `at_most_one_raw_fluid_enters_any_machine_kind` reads the
+data file and fails on the shape, and `sim_core/tests/mustard_line.rs` builds
+both lines out of real commands and proves every run resolves and a box of
+mustard reaches the dock. Two more cases pin the near misses the crusher's new
+fluid recipe creates — a dry crusher whose outlet touches a `ketchup_mix` run
+does not poison it, and one vinegar run may feed a crusher and a mixer at
+once. The principled fix, a resolver that reads the solid side of a recipe
+too, is issue #184 rather than something improvised here.
+
+Mustard's voxels are ticket M2 (PR #179); registering them in `main.gd`'s
+model and tint tables is M3, so `test_ingredient_models.gd` and
+`test_warehouse_rack.gd` fail on the content branch alone by design.
+
 ### 2026-09-25 — THE COOKBOOK: the game explains itself, out of the data files
 
 CONDIMENTAL had never explained itself. A player who bought a mixer had no
