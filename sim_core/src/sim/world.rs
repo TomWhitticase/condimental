@@ -220,6 +220,7 @@ use super::fluid::{
     FLUID_TANK_CAPACITY, FLUID_TANK_FILL_AMOUNT, FLUID_TANK_KIND, FluidNetwork, FluidTank,
     FluidTap, PipeNaming, PipeSegment,
 };
+use super::guide::GuideRegistry;
 use super::hopper::{HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, HOPPER_KIND, Hopper};
 use super::ingredients::{
     DEFAULT_BUY_QUANTITY, IngredientCatalog, Ingredients, IngredientsSnapshot, raw_ingredient_ids,
@@ -2101,6 +2102,13 @@ pub struct World {
     /// field like `economy`, for the same reason — four aggregate counters
     /// are not a reason for ECS machinery.
     staff: StaffPools,
+    /// THE COOKBOOK's prose pages (`data/guide.ron`). Held like `storage`
+    /// rather than loaded per read: [`World::cookbook`] is polled while the
+    /// book is open, and re-parsing a content file on a poll is a parse per
+    /// poll for a file that cannot change while the game runs. No world
+    /// state touches it — it is content, and it is here because this is
+    /// where the registries live.
+    guide: GuideRegistry,
     topology: Topology,
     /// What the factory made and used, per item, over several rolling
     /// windows and for all time (the production-stats epic, `stats.rs`).
@@ -2271,6 +2279,7 @@ impl World {
             ingredients,
             storage: StorageCatalog::bundled(),
             staff: StaffPools::bundled(),
+            guide: GuideRegistry::bundled(),
             topology: Topology::default(),
             production: ProductionLedger::new(),
         }
@@ -2522,6 +2531,7 @@ impl World {
             shop: &self.shop.catalog,
             staff: self.staff.catalog(),
             unlocks: self.economy.unlocks(),
+            guide: &self.guide,
             deliveries: self.economy.lifetime_deliveries,
         })
     }

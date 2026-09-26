@@ -227,10 +227,13 @@
 # production-stats epic — Factorio's P screen). It implies --populate.
 #
 # Pass --cookbook to open THE COOKBOOK (B) on its sauce tree over the
-# reference line, or --cookbook-page for the page behind the first unlocked
+# reference line, --cookbook-page for the page behind the first unlocked
 # node the tree draws — the ingredients, the machine process in seconds, the
-# cost and what the contracts pay. Both imply --populate. Neither names a
-# sauce: the screen is data/*.ron rendered, and so is the flag.
+# cost and what the contracts pay — or --cookbook-basics for the first of
+# the book's prose pages, where the sentences come out of data/guide.ron and
+# every number in them out of the sim. All three imply --populate. None of
+# them names a sauce or a topic: the screen is data/*.ron rendered, and so
+# is the flag.
 #
 # Pass --split-docks to build the SPLIT-DOCK LINE (test_layouts.gd's
 # `build_split_dock_line`): the BBQ branch, with its two docks, run on until
@@ -401,7 +404,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--payday-warning] [--production] [--cookbook|--cookbook-page] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--split-docks [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--settings] [--debug] [--set KEY=VALUE] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy] [--on-screen]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--payday-warning] [--production] [--cookbook|--cookbook-page|--cookbook-basics] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--split-docks [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--settings] [--debug] [--set KEY=VALUE] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy] [--on-screen]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
