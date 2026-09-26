@@ -324,6 +324,12 @@ pub const ASSETS: &[Asset] = &[
         name: "pipe_fault",
         build: pipe_fault,
     },
+    // The floating "!" over a placement that needs the player (a dock with
+    // every place taken, first; racks and machines can raise it too).
+    Asset {
+        name: "warning_marker",
+        build: warning_marker,
+    },
     Asset {
         name: "pipe_fluid",
         build: pipe_fluid,
@@ -3161,6 +3167,32 @@ pub fn pipe_fault(p: &Palette) -> VoxModel {
     // the clamp from the bright `steel_light` tube by VALUE as well as by
     // shape (§2b point 11).
     m.cuboid(span, span, (z.1 - 1, z.1), black);
+    m
+}
+
+/// The floating "!" Godot hangs over a placement that needs the player —
+/// first a dock with every place taken (2026-09-26), and by design anything
+/// else that has to say "look here" (a rack out of bays, a stuck machine).
+/// It marks WHERE; the hover says what, as the pipe clamp above does.
+///
+/// **A solid bang, not a plate.** A flat sign would read on one axis of this
+/// camera and edge-on in first person; a square-section bar and dot read as
+/// "!" from every horizontal direction, so the marker needs no billboard and
+/// no yaw. Square about voxel 15.5 on both axes (§2b point 20), pinned by
+/// `a_warning_marker_is_unchanged_by_a_quarter_turn`.
+///
+/// **It glows.** `status_amber`, the andon's own warning hue, in the
+/// `emissive` class, so it carries over a busy floor under the glow pass.
+/// It floats clear of whatever it marks, so the floor behind it is the
+/// darker grey the amber is read against. One uniform width throughout: a
+/// first render with a dark collar and a wider head read as a pedestal
+/// holding a block, not as a "!".
+pub fn warning_marker(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::tile();
+    let amber = p.idx("status_amber");
+    // The dot, a gap as tall as half the dot, then the bar to the top.
+    m.cuboid((12, 19), (12, 19), (0, 6), amber);
+    m.cuboid((12, 19), (12, 19), (11, 31), amber);
     m
 }
 
@@ -6999,6 +7031,29 @@ mod tests {
     /// a quarter turn — otherwise the striping would run one way on an
     /// east/west run and the other on a north/south one, which is §2b point
     /// 29's defect with the check skipped rather than passed.
+    #[test]
+    fn a_warning_marker_is_unchanged_by_a_quarter_turn() {
+        let bang = warning_marker(&palette());
+        assert_eq!(
+            bang.voxels,
+            bang.rotated_cw(1).voxels,
+            "the warning marker must read the same from every side"
+        );
+    }
+
+    /// A "!" is a bar over a dot with daylight between them, and the lit part
+    /// is the emissive warning hue — the shape and the glow are the marker.
+    #[test]
+    fn a_warning_marker_is_a_lit_bar_over_a_dot() {
+        let p = palette();
+        let bang = warning_marker(&p);
+        let amber = p.idx("status_amber");
+        let lit_at = |z: u32| bang.voxels.iter().any(|(&(_, _, vz), &c)| c == amber && vz == z);
+        assert!(lit_at(0), "the dot must stand at the foot");
+        assert!(!(7..=10).any(lit_at), "the dot and the bar must have a gap between them");
+        assert!(lit_at(31), "the bar must reach the head");
+    }
+
     #[test]
     fn a_pipe_fault_clamp_is_unchanged_by_a_quarter_turn() {
         let clamp = pipe_fault(&palette());

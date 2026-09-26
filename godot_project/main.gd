@@ -3206,6 +3206,7 @@ func _rebuild_world() -> void:
 	_rack_nodes.clear()
 	_pipe_fluid_nodes.clear()
 	_pipe_fault_nodes.clear()
+	_world_warnings.clear()
 	# The instanced tiles and item pools are children of "World" and went
 	# with it; their bookkeeping goes too, so a stale slot index can never
 	# point into a MultiMesh that no longer exists.
@@ -4232,6 +4233,12 @@ func _update_dock_stock(dock_states: Dictionary, current_tick := 0) -> void:
 			nodes,
 			_dock_lamp_lit(not waiting.is_empty(), bool(snapshot.get("full", false)), current_tick)
 		)
+		# Every place taken: the "!" over the dock. `at_capacity`, not `full`
+		# — a dock whose places are all taken needs a contract or a removal
+		# whether or not a box happened to arrive this tick to be refused.
+		_set_world_warning(
+			"dock:" + key, nodes.get("anchor", Vector3.ZERO), bool(snapshot.get("at_capacity", false))
+		)
 
 
 ## A dock's (item, quantity) pairs flattened into one case per unit, in
@@ -4397,6 +4404,72 @@ func _update_pipe_fault_markers() -> void:
 		# being turned to its host's facing.
 		_world_root.add_child(node)
 		_pipe_fault_nodes[key] = node
+
+
+# --- The floating "!" ----------------------------------------------------
+## A glowing "!" hung over a placement that needs the player
+## (`warning_marker`, `assets/voxels/generators/assets.rs`). A dock with every
+## place taken raises one first (the owner's 2026-09-26 ask). The marker is
+## built to be reused, so a rack out of bays or a stuck machine can raise the
+## same one through `_set_world_warning` with a key of its own. It marks
+## WHERE to look and the hover says what is wrong, the split the pipe clamp
+## already makes. It is never the only signal (UI_UX §7): the dock's lamp
+## still pulses and its hover still says FULL.
+const WARNING_MARKER_ASSET := "warning_marker"
+## How far above its anchor the marker floats, and at what size. Measured in
+## TILE (§6a), clear of the dock's roof.
+const WARNING_MARKER_LIFT := 1.35 * TILE
+const WARNING_MARKER_SCALE := 0.75
+## A slow bob, clocked off the simulation tick like every other animation
+## here (§6a), so a pause freezes it and a screenshot repeats. It only moves
+## the marker up and down, never turns it: the "!" reads the same from every
+## side (`a_warning_marker_is_unchanged_by_a_quarter_turn`).
+const WARNING_MARKER_BOB_TICKS := 48
+const WARNING_MARKER_BOB := 0.08 * TILE
+var _world_warnings: Dictionary = {} # caller's key -> Node3D, one "!" each
+
+
+## Raises (`on`) or clears the floating "!" for `key`, standing over
+## `anchor`. Idempotent both ways, so a caller can hand it its state every
+## frame. The key is the caller's, namespaced by what raised it
+## (`"dock:5,0"`), so two kinds on one tile never share a marker.
+func _set_world_warning(key: String, anchor: Vector3, on: bool) -> void:
+	if not on:
+		if _world_warnings.has(key):
+			var stale: Node3D = _world_warnings[key]
+			_world_warnings.erase(key)
+			if stale != null and is_instance_valid(stale):
+				stale.get_parent().remove_child(stale)
+				_release_render_resources(stale)
+				stale.free()
+		return
+	var node: Node3D = _world_warnings.get(key)
+	if node == null or not is_instance_valid(node):
+		if _world_root == null:
+			return
+		node = _asset_node(WARNING_MARKER_ASSET)
+		node.name = "%s_%s" % [WARNING_MARKER_ASSET, key.replace(":", "_").replace(",", "_")]
+		node.scale = Vector3.ONE * WARNING_MARKER_SCALE
+		_world_root.add_child(node)
+		_world_warnings[key] = node
+	node.set_meta("anchor", anchor)
+	node.position = _world_warning_position(anchor, sim.current_tick() if sim != null else 0)
+
+
+## Where a marker over `anchor` stands on `tick`: lifted clear, plus the bob.
+func _world_warning_position(anchor: Vector3, tick: int) -> Vector3:
+	var phase := float(posmod(tick, WARNING_MARKER_BOB_TICKS)) / WARNING_MARKER_BOB_TICKS
+	return anchor + Vector3(0.0, WARNING_MARKER_LIFT + sin(phase * TAU) * WARNING_MARKER_BOB, 0.0)
+
+
+## Moves every raised marker to this tick's point in its bob.
+func _update_world_warnings(current_tick: int) -> void:
+	for key in _world_warnings.keys():
+		var node: Node3D = _world_warnings[key]
+		if node == null or not is_instance_valid(node):
+			_world_warnings.erase(key)
+			continue
+		node.position = _world_warning_position(node.get_meta("anchor", Vector3.ZERO), current_tick)
 
 
 ## The liquid body sitting in one pipe segment's bore, created on first
@@ -17913,6 +17986,7 @@ func _update_payout_feedback() -> void:
 	_update_payout_flyout(current_tick)
 	_update_payout_stamps(current_tick)
 	_update_dock_pop(current_tick)
+	_update_world_warnings(current_tick)
 
 
 func _update_coins(current_tick: int) -> void:
