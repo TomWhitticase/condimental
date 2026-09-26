@@ -1915,6 +1915,13 @@ var _market_open := false
 # the clipboard is what is RUNNING and this is what is FOR SALE; putting a
 # SIGN button on the board of running orders would make every docket look
 # like a thing to click.
+#
+# Since 2026-09-26 the board is two columns: what is FOR SALE on the right,
+# and on the LEFT what is running — the clipboard's own dockets, built by
+# `_build_contract_card` and driven by `_update_contract_card`, just wider,
+# so the choice of what to sign next is made looking at what is already
+# signed. Still no SIGN button on a running docket: the left column is a
+# readout, the right column is the menu.
 var _board_panel: PanelContainer
 var _board_money_label: Label
 var _board_scroll: ScrollContainer
@@ -1922,6 +1929,27 @@ var _board_box: VBoxContainer
 var _board_rows: Array = [] # Array[Dictionary], see _build_contract_board_row
 var _board_row_ids: Array = []
 var _board_open := false
+## The left column: the active contracts' dockets, one per entry of
+## `economy_snapshot_json`'s `contracts`, in the same order the clipboard
+## shows them. Records are `_build_contract_card`'s.
+var _board_active_scroll: ScrollContainer
+var _board_active_box: VBoxContainer
+var _board_active_cards: Array = []
+var _board_active_ids: Array = []
+## The left column's paper card when nothing is running — a new game can
+## start with no contract at all, so this is the column's first face.
+var _board_active_empty: PanelContainer
+## The two column headings; the left one is held to the right one's height
+## (which carries the balance's larger type) so the first dockets line up.
+var _board_active_heading: Label
+var _board_offer_heading: HBoxContainer
+## How wide the left column's dockets are: the "larger version" of the
+## clipboard's docket, whose countdown bar and status line get the room the
+## corner plate cannot give them.
+const BOARD_ACTIVE_COLUMN_WIDTH := 300.0 * UI_SCALE
+## Where an offer's terms break when the board is at its narrowest: the
+## strike rule goes onto its own line (`_fit_contract_board_split`).
+const BOARD_TERMS_JOIN := "  ·  "
 
 # --- The staff panel (the staff pools MVP, ticket 3, 2026-09-12) -----------
 # `data/staff.ron`'s four categories, read off `staff_snapshot_json`: how
@@ -6234,7 +6262,7 @@ func _rebuild_contract_cards(contracts: Array) -> void:
 	_contract_cards.clear()
 	_contract_card_ids.clear()
 	for contract in contracts:
-		_contract_cards.append(_build_contract_card(contract))
+		_contract_cards.append(_build_contract_card(contract, _contract_cards_box))
 		_contract_card_ids.append(String(contract.get("id", "")))
 
 
@@ -6243,15 +6271,20 @@ func _rebuild_contract_cards(contracts: Array) -> void:
 ## clocks independently in sim_core, so this countdown is per docket and is
 ## never shared the way money is.
 ##
+## Built into `box`: the clipboard's stack, or the C board's left column
+## (`_rebuild_board_active_cards`), which shows the same dockets larger and
+## drives them through the same `_update_contract_card` — one docket, two
+## places it hangs.
+##
 ## Returns the record `_update_contract_panel` drives it through:
 ##   {"id", "panel", "name_label", "payout_label", "meta_label",
 ##    "countdown_meter", "countdown_label", "done_label", "missed_label",
 ##    "rows": {item id -> {"icon", "label", "boxes"}}}
-func _build_contract_card(contract: Dictionary) -> Dictionary:
+func _build_contract_card(contract: Dictionary, box: VBoxContainer, status_width := 0.0) -> Dictionary:
 	var panel := PanelContainer.new()
 	panel.name = "ContractCard_%s" % String(contract.get("id", "?"))
 	panel.add_theme_stylebox_override("panel", _contract_card_style)
-	_contract_cards_box.add_child(panel)
+	box.add_child(panel)
 
 	var card_body := VBoxContainer.new()
 	card_body.add_theme_constant_override("separation", _ui_i(4))
@@ -6292,6 +6325,13 @@ func _build_contract_card(contract: Dictionary) -> Dictionary:
 	var status_label := Label.new()
 	status_label.name = "Status"
 	status_label.label_settings = _contract_ink_settings
+	# The board's column is a fixed width and the clipboard's is not: there the
+	# status line wraps inside that PINNED width (the `autowrap_mode` rule
+	# under MODAL_EDGE_MARGIN), because "⚠ LAST CHANCE — … it is LOST" on one
+	# line is wider than the board can give a running docket beside its offers.
+	if status_width > 0.0:
+		status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		status_label.custom_minimum_size.x = status_width
 	card_body.add_child(status_label)
 
 	# Strikes: one pip per miss the contract forgives, filled as misses run,
@@ -8168,6 +8208,8 @@ func _build_contract_board(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	# harness (see `_build_ingredient_market`).
 	_board_rows.clear()
 	_board_row_ids.clear()
+	_board_active_cards.clear()
+	_board_active_ids.clear()
 
 	_board_panel = PanelContainer.new()
 	_board_panel.name = "ContractBoard"
@@ -8187,11 +8229,12 @@ func _build_contract_board(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 
 	var heading := HBoxContainer.new()
 	heading.add_theme_constant_override("separation", _ui_i(16))
-	body.add_child(heading)
+	# Hung on the right-hand column below: the balance belongs over the
+	# offers it pays for, and the running dockets get a heading of their own.
 
 	var title := Label.new()
 	title.label_settings = title_settings
-	title.text = "CONTRACTS BOARD"
+	title.text = "FOR SALE"
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading.add_child(title)
 
@@ -8209,11 +8252,74 @@ func _build_contract_board(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_board_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	heading.add_child(_board_money_label)
 
+	# Two columns: running on the left, for sale on the right, each under a
+	# heading of its own. The headings stand where the board's title used to,
+	# so the split costs no height — at 1280x720 a row of height is an offer.
+	var columns := HBoxContainer.new()
+	columns.name = "BoardColumns"
+	columns.add_theme_constant_override("separation", _ui_i(18))
+	body.add_child(columns)
+
+	var active_col := VBoxContainer.new()
+	active_col.name = "ActiveColumn"
+	active_col.add_theme_constant_override("separation", _ui_i(6))
+	active_col.custom_minimum_size.x = BOARD_ACTIVE_COLUMN_WIDTH
+	columns.add_child(active_col)
+	_board_active_heading = Label.new()
+	_board_active_heading.name = "ActiveHeading"
+	_board_active_heading.label_settings = title_settings
+	_board_active_heading.text = "YOUR CONTRACTS"
+	_board_active_heading.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	active_col.add_child(_board_active_heading)
+
+	_board_active_empty = PanelContainer.new()
+	_board_active_empty.name = "NoActiveContracts"
+	_board_active_empty.add_theme_stylebox_override("panel", _contract_card_style)
+	active_col.add_child(_board_active_empty)
+	var empty_body := VBoxContainer.new()
+	empty_body.add_theme_constant_override("separation", _ui_i(4))
+	_board_active_empty.add_child(empty_body)
+	var empty_title := Label.new()
+	empty_title.label_settings = _contract_name_settings
+	empty_title.text = "No contracts running"
+	empty_body.add_child(empty_title)
+	var empty_text := Label.new()
+	empty_text.label_settings = _contract_ink_settings
+	empty_text.text = "nothing ships for money until you sign an order — pick one under FOR SALE and SIGN it →"
+	# Wrapped inside the column's PINNED width, as a running docket's status
+	# line is (the `autowrap_mode` rule under MODAL_EDGE_MARGIN). On one line,
+	# or broken once, this sentence widened the column ~90px past the pin, and
+	# every pixel of that came off the offers — in the state a new game opens
+	# the board to.
+	empty_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	empty_text.custom_minimum_size.x = BOARD_ACTIVE_COLUMN_WIDTH - _ui_px(12.0) - _ui_px(14.0)
+	empty_body.add_child(empty_text)
+
+	_board_active_scroll = ScrollContainer.new()
+	_board_active_scroll.name = "ActiveScroll"
+	_board_active_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_board_active_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	active_col.add_child(_board_active_scroll)
+
+	_board_active_box = VBoxContainer.new()
+	_board_active_box.name = "ActiveCards"
+	_board_active_box.add_theme_constant_override("separation", _ui_i(6))
+	_board_active_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_board_active_scroll.add_child(_board_active_box)
+
+	var offer_col := VBoxContainer.new()
+	offer_col.name = "OfferColumn"
+	offer_col.add_theme_constant_override("separation", _ui_i(6))
+	offer_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	columns.add_child(offer_col)
+	offer_col.add_child(heading)
+	_board_offer_heading = heading
+
 	_board_scroll = ScrollContainer.new()
 	_board_scroll.name = "BoardScroll"
 	_board_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_board_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	body.add_child(_board_scroll)
+	offer_col.add_child(_board_scroll)
 
 	_board_box = VBoxContainer.new()
 	_board_box.name = "BoardRows"
@@ -8223,10 +8329,13 @@ func _build_contract_board(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 
 	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
 	_rebuild_board_rows(econ.get("board", []))
+	_rebuild_board_active_cards(econ.get("contracts", []))
 
 	var footer := Label.new()
 	footer.label_settings = base_settings
-	footer.text = "click SIGN to take an order — one of each, never two\nmiss its strikes in a row and it is lost: it comes back here to be signed again    C/ESC: close"
+	# One line, not two: beside the running dockets a line of height is what
+	# decides whether a 720-high window shows one offer or two.
+	footer.text = "SIGN takes an order — one of each, never two  ·  miss its strikes in a row and it comes back here    C/ESC: close"
 	body.add_child(footer)
 
 	_position_contract_board()
@@ -8247,41 +8356,65 @@ func _position_contract_board() -> void:
 	# `snap_rows`: an offer is a card the player reads before agreeing to it,
 	# and the SIGN button is on the same line as the terms — half a card is
 	# half a decision (issue #62's rule, one down from an unreachable button).
-	_fit_grid_scroll(_board_scroll, _board_box, bounds.y - reserved - _ui_px(16.0), true)
+	# A running docket is read the same way, so its column snaps too.
+	#
+	# One column at a time, with the other collapsed while it is measured:
+	# `_fit_grid_scroll` reads its chrome off the whole panel's height, and
+	# side by side that height is the TALLER column's — measuring the short
+	# one against it would hand it the tall one's list as "chrome".
+	_board_active_heading.custom_minimum_size.y = _board_offer_heading.get_combined_minimum_size().y
+	var available := bounds.y - reserved - _ui_px(16.0)
+	_board_active_scroll.custom_minimum_size.y = 0.0
+	var offers_height := _fit_grid_scroll(_board_scroll, _board_box, available, true)
+	_board_scroll.custom_minimum_size.y = 0.0
+	_fit_grid_scroll(_board_active_scroll, _board_active_box, available, true)
+	_board_scroll.custom_minimum_size.y = offers_height
 	var panel_size := _board_panel.get_combined_minimum_size()
 	_board_panel.position.x = maxf(0.0, (bounds.x - panel_size.x) * 0.5)
 	_board_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
 
 
 ## Gives every offer its terms on the mix's own line if the board can wear
-## them there, and breaks them onto a second line if it cannot. Returns
-## whether it had to break.
+## them there, and breaks them onto a second line if it cannot — and, since
+## the board has shared the window with the running dockets (2026-09-26),
+## breaks the strike rule off the terms onto a third line if even that is
+## too wide, at the " · " join the sentence already has, and last of all
+## puts each item of a many-item mix on a line of its own, at its ", ".
+## Returns whether it had to break at all.
 ##
 ## MEASURED rather than assumed, the way `_fit_staff_width` measures and for
 ## the same reason: the break is what fits the board in a 1280x720 window
-## (`_build_contract_board_row`), and it is not free anywhere else. A broken
-## card is 157px tall against 120px whole, and the board asks `snap_rows` for
-## the last WHOLE card — so at 1600x900 three broken cards want 489px against
-## a 484px cap, miss by five pixels, and the player is shown two offers where
-## the window has room for three. The window that has the width should show
-## the sentence.
+## (`_build_contract_board_row`), and it is not free anywhere else. Every
+## break is a line of height on every card, and the board asks `snap_rows`
+## for the last WHOLE card — so one line too many cost 1600x900 its third
+## offer once, and 1280x720 its second (PR #195's review; the status line
+## moved under the SIGN button and the strike rule shortened to "N strikes"
+## to win it back). The window that has the width should show the sentence.
 func _fit_contract_board_split() -> bool:
 	if _board_panel == null or _board_rows.is_empty():
 		return false
 	var available: float = _modal_available_width()
-	_set_contract_board_split(false)
-	if _board_panel.get_combined_minimum_size().x <= available:
-		return false
-	_set_contract_board_split(true)
+	for level in range(4):
+		_set_contract_board_split(level)
+		if _board_panel.get_combined_minimum_size().x <= available:
+			return level > 0
 	return true
 
 
-## Moves every offer's terms between the mix's line and a line of their own.
-## The two labels are always the same two labels, so nothing is re-measured
-## or re-worded by the move; only which box holds the terms changes.
-func _set_contract_board_split(split: bool) -> void:
+## Breaks every offer to `level`: 0 is one line; 1 moves the terms onto a
+## line of their own; 2 also breaks the strike rule off the terms; 3 also
+## puts each item of the mix on its own line. The labels are always the same
+## labels, so nothing is re-measured by the move; only which box holds the
+## terms, and where the texts carry a line break, changes.
+func _set_contract_board_split(level: int) -> void:
+	var split := level > 0
 	for row in _board_rows:
-		var terms: Control = row["terms_label"]
+		var terms: Label = row["terms_label"]
+		var halves: PackedStringArray = terms.get_meta("halves")
+		terms.text = ("\n" if level > 1 else BOARD_TERMS_JOIN).join(halves)
+		var mix: Label = row["mix_label"]
+		var parts: PackedStringArray = mix.get_meta("parts")
+		mix.text = (",\n" if level > 2 else ", ").join(parts)
 		var mix_row: Control = row["mix_label"].get_parent()
 		var text_col: Control = mix_row.get_parent()
 		var wanted: Control = text_col if split else mix_row
@@ -8309,6 +8442,34 @@ func _rebuild_board_rows(board: Array) -> void:
 	for index in range(board.size()):
 		_board_rows.append(_build_contract_board_row(board[index], index))
 		_board_row_ids.append(String(board[index].get("id", "")))
+
+
+## Rebuilds the left column's dockets from a `contracts` array, through the
+## clipboard's own builder and the clipboard's own guard
+## (`_board_active_matches`, `_contract_cards_match`'s twin).
+func _rebuild_board_active_cards(contracts: Array) -> void:
+	for card in _board_active_cards:
+		var panel: Node = card["panel"]
+		if is_instance_valid(panel):
+			if panel.get_parent() != null:
+				panel.get_parent().remove_child(panel)
+			panel.queue_free()
+	_board_active_cards.clear()
+	_board_active_ids.clear()
+	for contract in contracts:
+		_board_active_cards.append(_build_contract_card(
+			contract, _board_active_box, BOARD_ACTIVE_COLUMN_WIDTH - _ui_px(12.0) - _ui_px(14.0)
+		))
+		_board_active_ids.append(String(contract.get("id", "")))
+
+
+func _board_active_matches(contracts: Array) -> bool:
+	if contracts.size() != _board_active_ids.size():
+		return false
+	for i in range(contracts.size()):
+		if String(contracts[i].get("id", "")) != String(_board_active_ids[i]):
+			return false
+	return true
 
 
 func _board_rows_match(board: Array) -> bool:
@@ -8376,32 +8537,55 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 	mix_label.name = "OfferMix"
 	mix_label.label_settings = _contract_ink_settings
 	mix_label.text = ", ".join(PackedStringArray(parts))
+	# Kept for `_set_contract_board_split`, which may break the mix at ", ".
+	mix_label.set_meta("parts", PackedStringArray(parts))
 	mix_row.add_child(mix_label)
 	var terms_label := Label.new()
 	terms_label.name = "OfferTerms"
 	terms_label.label_settings = _contract_ink_settings
-	terms_label.text = "every %d ticks  ·  pays +%d  ·  lost after %d missed in a row" % [
-		int(offer.get("cadence_ticks", 0)),
-		int(offer.get("payout", 0)),
-		int(offer.get("strikes", 1)),
-	]
+	# The two halves kept apart, so `_set_contract_board_split` can break at
+	# the join and put it back.
+	#
+	# The strike rule is "3 strikes", not "lost after 3 missed in a row": the
+	# long form is what broke the terms onto a second line beside the running
+	# dockets, and a fifth line on every card is what left a 1280x720 window
+	# one offer. The footer says what a strike is, and a signed docket spells
+	# the rule out in full beside its pips.
+	var strikes := int(offer.get("strikes", 1))
+	var halves := PackedStringArray([
+		"every %d ticks%spays +%d" % [
+			int(offer.get("cadence_ticks", 0)), BOARD_TERMS_JOIN, int(offer.get("payout", 0))],
+		"%d strike%s" % [strikes, "" if strikes == 1 else "s"],
+	])
+	terms_label.set_meta("halves", halves)
+	terms_label.text = BOARD_TERMS_JOIN.join(halves)
 	mix_row.add_child(terms_label)
 
-	var status_label := Label.new()
-	status_label.name = "OfferStatus"
-	status_label.label_settings = _contract_meta_settings
-	text_col.add_child(status_label)
+	# The button and the word on where this offer stands share a column, the
+	# status UNDER the button: it is the button's own reason, and the space
+	# below a 44px button was dead anyway, while a line under the terms was a
+	# line of height on every card.
+	var sign_col := VBoxContainer.new()
+	sign_col.name = "SignColumn"
+	sign_col.add_theme_constant_override("separation", _ui_i(3))
+	sign_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(sign_col)
 
 	var sign_button := Button.new()
 	sign_button.name = "Sign_%s" % String(offer.get("id", "?"))
 	sign_button.focus_mode = Control.FOCUS_NONE
 	sign_button.custom_minimum_size = _ui_v(Vector2(128, 44))
-	sign_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	sign_button.add_theme_font_size_override("font_size", _ui_font(1))
 	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
 		sign_button.add_theme_stylebox_override(state, _shop_slot_style(state))
 	sign_button.pressed.connect(_sign_contract_offer.bind(index))
-	row.add_child(sign_button)
+	sign_col.add_child(sign_button)
+
+	var status_label := Label.new()
+	status_label.name = "OfferStatus"
+	status_label.label_settings = _contract_meta_settings
+	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sign_col.add_child(status_label)
 
 	return {
 		"id": String(offer.get("id", "")),
@@ -8428,6 +8612,16 @@ func _update_contract_board(econ: Dictionary = {}) -> void:
 		_rebuild_board_rows(board)
 	_board_money_label.text = "Money: %.0f" % float(econ.get("money", 0.0))
 
+	# The left column: what is running, the clipboard's dockets at board size.
+	var contracts: Array = econ.get("contracts", [])
+	if not _board_active_matches(contracts):
+		_rebuild_board_active_cards(contracts)
+	_board_active_empty.visible = contracts.is_empty()
+	_board_active_scroll.visible = not contracts.is_empty()
+	var current_tick: int = sim.current_tick()
+	for i in range(min(contracts.size(), _board_active_cards.size())):
+		_update_contract_card(_board_active_cards[i], contracts[i], current_tick)
+
 	for i in range(min(board.size(), _board_rows.size())):
 		var offer: Dictionary = board[i]
 		var row: Dictionary = _board_rows[i]
@@ -8437,27 +8631,30 @@ func _update_contract_board(econ: Dictionary = {}) -> void:
 		var lost: int = int(offer.get("times_lost", 0))
 		var button: Button = row["sign_button"]
 		var status: Label = row["status_label"]
+		# Short, and on lines of their own: they sit under the SIGN button, so
+		# the button column is as wide as their widest line — and the button
+		# already carries the price.
 		var lost_note := ""
 		if lost > 0:
-			lost_note = "  ·  lost %d time%s before" % [lost, "" if lost == 1 else "s"]
+			lost_note = "\nlost %d time%s before" % [lost, "" if lost == 1 else "s"]
 		if active:
 			button.text = "SIGNED"
 			button.disabled = true
-			status.text = "✔ signed and running — it is on your clipboard" + lost_note
+			status.text = "✔ running, on the left" + lost_note
 			row["panel"].add_theme_stylebox_override("panel", _contract_card_style_ready)
 		elif not affordable:
 			button.text = "✗ SIGN · %d" % price
 			button.disabled = true
-			status.text = "✗ can't afford — the signature costs %d" % price + lost_note
+			status.text = "✗ can't afford it" + lost_note
 			row["panel"].add_theme_stylebox_override("panel", _contract_card_style)
 		else:
 			button.text = "SIGN · %d" % price
 			button.disabled = false
 			if lost > 0:
-				status.text = "✗ LOST — sign it again for %d" % price + lost_note
+				status.text = "✗ LOST — sign again" + lost_note
 				row["panel"].add_theme_stylebox_override("panel", _contract_card_style_last_chance)
 			else:
-				status.text = "available — %d to sign" % price
+				status.text = "available"
 				row["panel"].add_theme_stylebox_override("panel", _contract_card_style)
 	_position_contract_board()
 
