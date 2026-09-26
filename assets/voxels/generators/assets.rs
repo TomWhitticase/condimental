@@ -3854,10 +3854,11 @@ pub fn machine_crusher(p: &Palette) -> VoxModel {
     );
 
     // The two crushing rolls, drawn AFTER the pocket is carved so they
-    // stand in it. Bright steel against brass so the pair reads as two
-    // counter-rotating rolls rather than as one drum — dark steel was the
-    // first choice and, in the rendered scene, sank into the frame's own
-    // shadow so only one roll was legible.
+    // stand in it. Both bright steel: dark steel was the first choice and,
+    // in the rendered scene, sank into the frame's own shadow so only one
+    // roll was legible. The second roll was brass for a while, to split the
+    // pair by colour; the owner asked for both grey (2026-09-26), and the
+    // teeth in `machine_crusher_motion` still part them at the nip.
     //
     // Only the smooth CORE is drawn here: the teeth that make a roll read as
     // turning belong to `machine_crusher_motion`, in the annulus this core
@@ -3873,7 +3874,7 @@ pub fn machine_crusher(p: &Palette) -> VoxModel {
         (20, 16),
         CRUSHER_ROLL_CORE_R,
         CRUSHER_ROLL_Y,
-        p.idx("brass"),
+        p.idx("steel_light"),
     );
 
     // The identity of the machine: two big driven flywheels standing proud
@@ -4582,7 +4583,7 @@ pub fn machine_motion(p: &Palette, phase: u32) -> VoxModel {
 /// two features on one shaft rather than two shafts.
 pub fn machine_crusher_motion(p: &Palette, phase: u32) -> VoxModel {
     let mut m = VoxModel::tile();
-    for (x, sense, tooth) in [(12i32, 1.0f32, "steel_light"), (20, -1.0, "brass")] {
+    for (x, sense) in [(12i32, 1.0f32), (20, -1.0)] {
         let angle = sense * spin(phase, 4);
         for (u, v) in arm_cells((x, 16), (CRUSHER_HUB_R, CRUSHER_SPOKE_R), 4, 1.7, angle) {
             m.cuboid((u, u), (1, 2), (v, v), p.idx("steel_dark"));
@@ -4597,7 +4598,7 @@ pub fn machine_crusher_motion(p: &Palette, phase: u32) -> VoxModel {
             if v < CRUSHER_POCKET_FLOOR_Z {
                 continue;
             }
-            m.cuboid((u, u), CRUSHER_ROLL_Y, (v, v), p.idx(tooth));
+            m.cuboid((u, u), CRUSHER_ROLL_Y, (v, v), p.idx("steel_light"));
         }
     }
     m
@@ -7499,6 +7500,38 @@ mod tests {
                     "crusher tooth at ({x}, {y}, {z}) on frame {k} is outside the carved pocket"
                 );
             }
+        }
+    }
+
+    /// Both crushing rolls are the same grey, core and teeth, on the body
+    /// and on every motion frame — the owner's 2026-09-26 call, replacing a
+    /// brass second roll. Only the part standing in the feed pocket is
+    /// checked; below its floor the rolls are inside the frame.
+    #[test]
+    fn the_crushers_two_rolls_are_both_grey() {
+        let p = palette();
+        let grey = p.idx("steel_light");
+        let mut models = vec![machine_crusher(&p)];
+        models.extend((0..MACHINE_FRAMES).map(|k| machine_crusher_motion(&p, k)));
+        for roll_x in [12i32, 20] {
+            let mut seen = 0;
+            for m in &models {
+                for (&(x, y, z), &c) in &m.voxels {
+                    let (x, y, z) = (x as i32, y as i32, z as i32);
+                    let (dx, dz) = ((x - roll_x) as f32, (z - 16) as f32);
+                    let on_roll = (dx * dx + dz * dz).sqrt() <= CRUSHER_ROLL_R
+                        && (CRUSHER_ROLL_Y.0..=CRUSHER_ROLL_Y.1).contains(&y)
+                        && z >= CRUSHER_POCKET_FLOOR_Z;
+                    if on_roll {
+                        seen += 1;
+                        assert_eq!(
+                            c, grey,
+                            "roll x={roll_x} voxel ({x}, {y}, {z}) is not steel_light"
+                        );
+                    }
+                }
+            }
+            assert!(seen > 0, "roll x={roll_x} has no voxels in the pocket");
         }
     }
 
