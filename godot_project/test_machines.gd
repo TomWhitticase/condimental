@@ -313,6 +313,15 @@ func _run_checks() -> void:
 	if spots.size() != places:
 		_fail("two of the grid's sockets were drawn on the same spot")
 		return
+	# The grid redraws only on a change, and a change of WHAT stands on the
+	# dock is one even when the number of places is not: a box shipped and
+	# another arrived must not leave the old icons drawn.
+	dock_state["contents"] = [["boxed_ketchup", 2], ["boxed_bbq", 3]]
+	main._apply_hover_panel_state(main._hover_panel_state(Vector2i(5, 0)))
+	var redrawn: Array = grid_node.get_meta("cells", [])
+	if redrawn != ["boxed_ketchup", "boxed_ketchup", "boxed_bbq", "boxed_bbq", "boxed_bbq"]:
+		_fail("the grid kept its old cells after the dock's contents changed: %s" % [redrawn])
+		return
 	# The size is the snapshot's, not a constant: half the places, half the rows.
 	dock_state["places"] = main.HOVER_PLACES_COLUMNS * 2
 	main._apply_hover_panel_state(main._hover_panel_state(Vector2i(5, 0)))
