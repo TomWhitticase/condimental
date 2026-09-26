@@ -292,6 +292,15 @@ does not poison it, and one vinegar run may feed a crusher and a mixer at
 once. The principled fix, a resolver that reads the solid side of a recipe
 too, is issue #184 rather than something improvised here.
 
+Review caught the gate's own tests asserting a list against itself: they looped
+over `data/unlocks.ron`'s `mustard_sauce` entry, so deleting an id from it made
+the loop vacuous and the suite stayed green with an unfulfillable mustard order
+on a new game's board. What a tier must hold back is now derived from the
+content — every contract whose mix names `boxed_mustard`, every raw the recipe
+graph feeds to mustard alone — and compared with the gate in both directions.
+The general lesson for the next sauce: a gate list is only guarded by something
+that does not read the gate.
+
 Mustard's voxels are ticket M2 (PR #179); registering them in `main.gd`'s
 model and tint tables is M3, so `test_ingredient_models.gd` and
 `test_warehouse_rack.gd` fail on the content branch alone by design.
