@@ -494,22 +494,20 @@ impl SimBridge {
     /// ```json
     /// [{"tile": [35, 0], "kind": "dock", "direction": "east",
     ///   "footprint": {"width_tiles": 1, "height_tiles": 1},
-    ///   "belt_tile": [34, 0], "contents": [], "capacity_per_item": 32,
-    ///   "shipped_total": 37}]
+    ///   "belt_tile": [34, 0], "contents": [["boxed_ketchup", 3]],
+    ///   "places": 32, "used": 3, "at_capacity": false,
+    ///   "shipped_total": 37, "last_paid_tick": 1200, ...}]
     /// ```
     ///
     /// The exit-end counterpart of `hopper_snapshots_json`, and an array for
-    /// the same reason: a dock is an ordinary placed building now, so a
-    /// world may have none or several — and several docks all ship into the
-    /// one shared delivery pool, so "what is waiting to be sold" is still
-    /// exactly one number. Two shape notes that have not changed:
-    ///
-    /// 1. **No `fill` field.** A dock ships everything it receives into the
-    ///    shared pool in the same tick, so its own level is always zero
-    ///    between ticks and `contents` is normally `[]`. **Draw a pallet
-    ///    stack from `economy_snapshot_json`'s `delivery_stock` instead.**
-    /// 2. **`contents` is a list**, not one item plus a count: a dock
-    ///    accepts whatever the line delivers.
+    /// the same reason: a dock is an ordinary placed building, so a world
+    /// may have none or several. **`contents` is what stands on THAT dock**
+    /// (2026-09-26): draw its deck, its hover grid (`places`, `used`) and
+    /// its "full" marker (`at_capacity`) from it. `economy_snapshot_json`'s
+    /// `delivery_stock` is the sum a contract settles against, not any one
+    /// dock. A dock is polled, not dirty-tracked, so `shipped_total` rising
+    /// is how to tell a box just arrived HERE, and `last_paid_tick` equal to
+    /// the tick a payout landed is how to tell this dock paid it.
     ///
     /// **`belt_tile` replaces `belt_start_tile`/`belt_length_tiles`**: a dock
     /// no longer owns a belt (it used to be built with one), so what is
@@ -531,8 +529,8 @@ impl SimBridge {
         GString::from(json.as_str())
     }
 
-    /// A JSON-serialized `sim::EconomySnapshot` — money, the shared delivery
-    /// pool, and an ARRAY of every active contract (GAMEPLAY.md §6/§9).
+    /// A JSON-serialized `sim::EconomySnapshot` — money, the stock every
+    /// contract can draw on (summed over the docks), and an ARRAY of every active contract (GAMEPLAY.md §6/§9).
     /// Unlike the chunk snapshots above there's no dirty-tracking to check
     /// first: there's exactly one economy per world, so Godot can just call
     /// this every frame it wants to redraw the HUD.
@@ -573,7 +571,7 @@ impl SimBridge {
     /// equivalents live inside each `contracts` entry (`contract_mix` ->
     /// `mix`, `contract_progress` -> `progress`). `money` is unchanged and
     /// is still a single value. `progress` is clamped to the mix's required
-    /// quantity — a checklist reads "2/2", never "7/2"; the unclamped pool
+    /// quantity — a checklist reads "2/2", never "7/2"; the unclamped sum
     /// is `delivery_stock`. `contracts` is in `contracts.ron` file order,
     /// which is also the priority order when two contracts fall due
     /// together and stock covers only one (see `sim::economy`'s module doc

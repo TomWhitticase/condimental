@@ -5,7 +5,7 @@
 //!
 //! **What counts, in one rule.** *Produced* is what a recipe deposits at
 //! craft completion; *consumed* is what a recipe takes at craft start plus
-//! what a contract takes from the delivery pool when it pays — the
+//! what a contract takes off the docks when it pays — the
 //! factory's exit, the way a rocket launch is consumption in Factorio.
 //! Buying stock, filling a hopper or tank, and a hopper metering a unit
 //! onto its belt are deliberately **not** counted: the market is not the

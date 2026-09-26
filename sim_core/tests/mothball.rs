@@ -90,9 +90,21 @@ fn uncrewed(world: &World) -> Vec<(i32, i32)> {
         .collect()
 }
 
-/// What the docks have shipped in their lifetimes — the factory's whole
-/// income, and so the whole of what an idle line costs it.
+/// What contracts have collected off the docks in their lifetimes — the
+/// factory's whole income, and so the whole of what an idle line costs it.
+/// Everything a dock ever took off its belt, less what still stands on it:
+/// a dock short of its clerk keeps taking boxes, but none of them is sold.
 fn shipped(world: &World) -> u32 {
+    world
+        .dock_snapshots()
+        .iter()
+        .map(|d| d.shipped_total - d.used)
+        .sum()
+}
+
+/// What the lines have carried to their docks in their lifetimes, sold or
+/// not — whether the factory is making anything at all.
+fn delivered(world: &World) -> u32 {
     world.dock_snapshots().iter().map(|d| d.shipped_total).sum()
 }
 
@@ -551,7 +563,7 @@ fn mothballing_is_what_takes_a_broke_factory_out_of_arrears_and_a_control_proves
     // And the decisive difference, in the one currency that is not money:
     // the factory that threw the switch MAKES THINGS AGAIN, and the one
     // that played on cannot, because it has nobody left to make them with.
-    let (was_world, was_control) = (shipped(&world), shipped(&control));
+    let (was_world, was_control) = (delivered(&world), delivered(&control));
     while control.current_tick() < world.current_tick() {
         common::supply(&mut control);
         control.tick();
@@ -561,12 +573,12 @@ fn mothballing_is_what_takes_a_broke_factory_out_of_arrears_and_a_control_proves
         to_next_payday(&mut control);
     }
     assert!(
-        shipped(&world) > was_world,
+        delivered(&world) > was_world,
         "the reopened line ships again: {was_world} -> {}",
-        shipped(&world)
+        delivered(&world)
     );
     assert_eq!(
-        shipped(&control),
+        delivered(&control),
         was_control,
         "an empty factory ships nothing, ever"
     );

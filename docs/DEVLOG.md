@@ -285,6 +285,27 @@ GAMEPLAY §7/§11, UI_UX §2b point 40 and §5, and ARCHITECTURE §4 are amended
 `docs/DECISIONS.md` carries the full record, including the four scope calls
 the owner made and the two I argued against.
 
+### 2026-09-26 — Each dock holds its own stock
+
+The owner saw the docks behave as if they were wired together. A payout threw
+coins over every dock, and one dock taking a case made every dock pop one.
+The design was working as written: since 2026-09-08 a dock had been a
+pass-through into one shared delivery pool, so the only fact in the world was
+"what is on the docks". There was nothing per-dock for the presentation to
+draw.
+
+Each dock now keeps what it takes off its belt, in 32 places. Contracts draw
+on the docks that can ship this tick, summed, taking from each dock in
+topology order. Every dock a payout drew on records it. The coins now rise
+over only those docks, and a case pops only on the dock that took it. The
+dock hover names what stands on that dock and counts its places.
+
+This supersedes the pool and its 48-per-item cap (DECISIONS_LOG
+2026-09-26). The save schema is now 3, and older saves are refused rather
+than migrated. This is the first of three PRs for the owner's report. The
+hover's places grid and a reusable floating "!" over a full dock follow on
+this model.
+
 ### 2026-09-26 — THE COOKBOOK gets a BASICS section, and the prose states no numbers
 
 The Cookbook's tree answers "what can this factory make". It cannot answer

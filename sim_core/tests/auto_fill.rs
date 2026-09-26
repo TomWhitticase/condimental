@@ -763,10 +763,9 @@ fn accounted(world: &World, raw: &str, recipes: &RecipeRegistry, final_item: &st
                 }
             }
         }
+        // `shipped_total` counts every box that reached the dock, standing
+        // on it or since collected, so `contents` is already inside it.
         for dock in &snapshot.docks {
-            for (item, qty) in &dock.contents {
-                total += value(item) * Fx::from_num(*qty);
-            }
             total += value(final_item) * Fx::from_num(dock.shipped_total);
         }
     }

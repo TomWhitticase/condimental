@@ -469,8 +469,8 @@ fn plan(recipes: &RecipeRegistry, machines: &MachineRegistry) -> Vec<Order> {
 ///    smoke into the ketchup network. Belts on that row are harmless — only
 ///    pipes join pipes — which is why the run happily crosses over the
 ///    ketchup line's exit belts.
-/// 3. **The branch gets its own dock.** Every dock deposits into the same
-///    shared delivery pool (`economy.rs`), so a second one is bookkeeping-free
+/// 3. **The branch gets its own dock.** Contracts draw from every shipping
+///    dock's stock summed (`economy.rs`), so a second one is bookkeeping-free
 ///    and far clearer than merging two product streams onto one belt.
 ///
 /// Nothing on the ketchup line moves. `the_bbq_branch_layout_is_pinned` in

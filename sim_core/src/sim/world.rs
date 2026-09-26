@@ -61,9 +61,9 @@
 //! restriction: nothing in the simulation ever assumed exactly one, so
 //! forbidding a second would have been new code enforcing a rule no design
 //! document states (CLAUDE.md: don't design for hypothetical requirements).
-//! A second dock is simply a second place boxes leave the factory; both
-//! ship into [`Economy`]'s one shared pool, which is where "how much is on
-//! the dock" has always been one number.
+//! A second dock is simply a second place boxes leave the factory; each
+//! holds what arrived at it, and contracts draw on all of them at once
+//! (`super::dock`'s module doc).
 //!
 //! # The conventions this module depends on
 //!
@@ -215,7 +215,7 @@ use hecs::Entity;
 use super::belt::BeltSegment;
 use super::contracts::ContractRegistry;
 use super::dock::{DOCK_CAPACITY, DOCK_KIND, Dock};
-use super::economy::{ContractEvent, Economy, EconomySnapshot, STARTING_MONEY};
+use super::economy::{ContractEvent, DeliveryStock, Economy, EconomySnapshot, STARTING_MONEY};
 use super::fluid::{
     FLUID_TANK_CAPACITY, FLUID_TANK_FILL_AMOUNT, FLUID_TANK_KIND, FluidNetwork, FluidTank,
     FluidTap, PipeNaming, PipeSegment,
@@ -225,6 +225,7 @@ use super::hopper::{HOPPER_CAPACITY, HOPPER_FILL_AMOUNT, HOPPER_KIND, Hopper};
 use super::ingredients::{
     DEFAULT_BUY_QUANTITY, IngredientCatalog, Ingredients, IngredientsSnapshot, raw_ingredient_ids,
 };
+use super::inventory::Inventory;
 use super::machine::{LOAD_WINDOW_TICKS, LoadWindow, Machine, WorkState};
 use super::machines::{Footprint, MachineRegistry};
 use super::recipe::{Recipe, RecipeRegistry};
@@ -1246,23 +1247,24 @@ pub struct FluidTankSnapshot {
 /// {
 ///   "tile": [35, 0], "kind": "dock", "direction": "east",
 ///   "footprint": { "width_tiles": 1, "height_tiles": 1 },
-///   "belt_tile": [34, 0], "contents": [], "capacity_per_item": 32,
-///   "shipped_total": 37
+///   "belt_tile": [34, 0], "contents": [["boxed_ketchup", 3]],
+///   "places": 32, "used": 3, "at_capacity": false,
+///   "shipped_total": 37, "last_paid_tick": 1200, ...
 /// }
 /// ```
 ///
-/// Two things about it are unchanged by placement and worth re-reading:
+/// **`contents` is what stands on THIS dock** (2026-09-26, `super::dock`'s
+/// module doc): the number to draw this dock's deck, hover and "full"
+/// marker from. Until then a dock was a pass-through into one shared pool
+/// and its own contents were always empty between ticks, which is why every
+/// dock used to draw the same stack. It is a list, not one item and a
+/// count: a dock accepts whatever the line delivers to it.
 ///
-/// 1. **There is no `fill` field.** The dock is a pass-through: it ships
-///    everything it receives into the economy's shared delivery pool in the
-///    same tick, so its own level is always zero between ticks. **The number
-///    to draw a pallet stack from is `EconomySnapshot::delivery_stock`** —
-///    the one shared "what's on the dock" figure every contract settles
-///    against, and still one number however many docks the player builds.
-/// 2. **`contents` is a list**, not one item and a count: a dock accepts
-///    whatever the line delivers to it.
+/// The two counters are how presentation, which only polls, tells which
+/// dock something happened at: `shipped_total` rises on the dock a box
+/// arrived at, and `last_paid_tick` becomes the current tick on every dock a
+/// contract payment took from, and on no other.
 ///
-/// `shipped_total` is this dock's own cumulative output since it was placed.
 /// **`belt_tile` replaces the old `belt_start_tile`/`belt_length_tiles`
 /// pair**: a dock no longer owns a belt (it used to be built with one), so
 /// what is reported is simply which belt tile currently feeds it, if any.
@@ -1275,11 +1277,24 @@ pub struct DockSnapshot {
     /// The belt tile that currently hands product to this dock, if any.
     pub belt_tile: Option<TileCoord>,
     pub contents: Vec<(ItemId, u32)>,
-    pub capacity_per_item: u32,
+    /// How many places the dock has ([`super::dock::DOCK_CAPACITY`]) — the
+    /// size of the grid a hover draws, carried so GDScript never knows it.
+    pub places: u32,
+    /// How many of those places hold a case: the sum of `contents`.
+    pub used: u32,
+    /// Every place is taken ([`super::dock::Dock::at_capacity`]) — the
+    /// dock can take nothing more until a contract collects. Not the same
+    /// as `full`, which is a box actually being refused.
+    pub at_capacity: bool,
+    /// Every unit this dock has ever taken off its belt.
     pub shipped_total: u32,
+    /// The last tick a contract payment took stock from this dock, `null`
+    /// if none has since the world was built or loaded.
+    pub last_paid_tick: Option<u64>,
     /// Refused its logistics crew on the last tick it had something to
     /// ship (the staff pools MVP epic; `Dock::understaffed`). While true
-    /// the buffer is held and, at capacity, the belt behind it backs up.
+    /// no contract draws on its stock; it keeps taking boxes until every
+    /// place is taken, and then the belt behind it backs up.
     ///
     /// This is a PER-TICK fact and only moves on a tick the dock actually
     /// had something to ship, so on a line that ebbs it is false on most
@@ -1305,16 +1320,12 @@ pub struct DockSnapshot {
     /// line behind it is backing up ([`super::dock::Dock::blocked`]) — the
     /// dock-capacity change, 2026-09-16, made per-dock by the second sauce.
     ///
-    /// It used to be `Economy::delivery_pool_full` verbatim, a property of
-    /// the POOL that every dock reported identically. That read true while
-    /// one sauce shipped, because the only capped item was the only item.
-    /// The pool's ceiling is per ITEM, though, so once BBQ arrived beside
-    /// ketchup the two facts came apart: a pool capped on ketchup left a
-    /// BBQ dock taking boxes perfectly happily while its lamp cried jam.
-    ///
-    /// So this is the building's own state now, and the pool's summary
-    /// stays where it belongs — `EconomySnapshot::delivery_full`, read by
-    /// the clipboard beside the per-item levels that explain it.
+    /// It used to be a property of the one shared delivery pool that every
+    /// dock reported identically, which cried jam on a BBQ dock taking
+    /// boxes perfectly happily beside a pool capped on ketchup. It is the
+    /// building's own state now, and the board's summary stays where it
+    /// belongs — `EconomySnapshot::delivery_full`, "some dock is at
+    /// capacity", read by the clipboard.
     pub full: bool,
 }
 
@@ -1603,17 +1614,21 @@ pub enum TileSnapshot {
         auto_fill: bool,
     },
     /// `{"kind": "dock", "direction": "east", "footprint": {...},
-    ///   "origin_tile": [35, 0], "contents": [], "capacity_per_item": 32,
-    ///   "shipped_total": 37}` — enough for a hover tooltip ("Loading dock —
-    /// 37 shipped"). There is deliberately no `fill` here and `contents` is
-    /// normally empty; see [`DockSnapshot`].
+    ///   "origin_tile": [35, 0], "contents": [["boxed_ketchup", 3]],
+    ///   "places": 32, "used": 3, "at_capacity": false,
+    ///   "shipped_total": 37, "last_paid_tick": null, ...}` — what stands on
+    /// this dock and how many of its places that fills; the same fields
+    /// [`DockSnapshot`] carries, and documented there.
     Dock {
         direction: Direction,
         footprint: Footprint,
         origin_tile: TileCoord,
         contents: Vec<(ItemId, u32)>,
-        capacity_per_item: u32,
+        places: u32,
+        used: u32,
+        at_capacity: bool,
         shipped_total: u32,
+        last_paid_tick: Option<u64>,
         /// The kind's `staff` requirement and whether the dock was refused
         /// it on the last tick it held something (the staff pools MVP
         /// epic) — hover's "crew: 1 logistics" and "held · short of
@@ -2295,7 +2310,7 @@ impl World {
         self.economy.money
     }
 
-    /// The live economy — money, the shared delivery pool, and every active
+    /// The live economy — money and every active
     /// contract's own cadence state. Read-only; contracts advance through
     /// [`World::tick`], never by a caller poking at them.
     pub fn economy(&self) -> &Economy {
@@ -2305,8 +2320,26 @@ impl World {
     /// Presentation-facing money + contract-status snapshot (ARCHITECTURE.md
     /// §4/§5) — always current, unlike `chunk_snapshot` there's no
     /// dirty-tracking to consult first.
+    /// Settles nothing: `progress` and `satisfied` are read against the
+    /// stock [`World::tick`]'s step 7 would lend the economy if a window
+    /// ended now, so the clipboard and the payout can never disagree.
     pub fn economy_snapshot(&self) -> EconomySnapshot {
-        self.economy.snapshot()
+        let mut stock = DeliveryStock::default();
+        for &dock in &self.topology.docks {
+            let body = self
+                .ecs
+                .get::<&Dock>(dock)
+                .expect("a dock placement carries a Dock");
+            stock.count_places(body.places(), body.at_capacity());
+            if !body.mothballed() && !body.understaffed() {
+                let mut held = Inventory::new(body.places());
+                for (item, qty) in body.contents() {
+                    held.add(item, *qty);
+                }
+                stock.push(held);
+            }
+        }
+        self.economy.snapshot(&stock)
     }
 
     /// The production ledger — what the factory has made and used, per
@@ -3685,17 +3718,23 @@ impl World {
     ///    already moved this tick, so nothing crosses two tiles in one tick
     ///    — a splitter included, since an item handed *onto* it this tick
     ///    lands at the start of its segment and is not at the end yet.
-    /// 6. **Docks ship** whatever they took in step 4 into [`Economy`]'s
-    ///    shared delivery pool — in the same tick it arrived, because a dock
-    ///    is a pass-through (see [`super::dock`]) and the pool is what
-    ///    contracts settle against below. A dock holding something first
-    ///    claims its crew like a machine; refused, it holds (at capacity the
-    ///    belt backs up; nothing is lost) and reads `understaffed`.
-    /// 7. **Contracts settle**, one cadence check per active contract. A
-    ///    contract that pays records its mix in the production ledger as
-    ///    consumed — the factory's exit — and the ledger's clock advances
-    ///    after it, so everything this tick recorded sits in the bucket that
-    ///    was current while it happened.
+    /// 6. **Docks crew up.** A dock holding something an active contract
+    ///    orders ([`Economy::wanted`]) claims its crew like a machine;
+    ///    refused, it reads `understaffed` and cannot ship this tick (it
+    ///    keeps taking boxes until its places are full, then the belt backs
+    ///    up; nothing is lost). A dock holding only goods nobody has ordered
+    ///    asks for nobody and is not `understaffed` — it has no work — so a
+    ///    clog of an unordered product never holds a head another dock's
+    ///    orders need. A mothballed dock claims nobody.
+    /// 7. **Contracts settle**, one cadence check per active contract,
+    ///    against what stands on every dock that can ship this tick — not
+    ///    mothballed, not refused its crew in step 6 — lent to the economy
+    ///    in `topology.docks` order (see [`super::dock`] and
+    ///    [`super::economy::DeliveryStock`]). Every dock a payment took from
+    ///    records the tick. A contract that pays records its mix in the
+    ///    production ledger as consumed — the factory's exit — and the
+    ///    ledger's clock advances after it, so everything this tick recorded
+    ///    sits in the bucket that was current while it happened.
     /// 8. **Payday** (`StaffPools::tick`): on the tick the clock reaches
     ///    `next_payday_tick`, every head owed for the period — fired ones
     ///    included, notice pay first — is paid one at a time out of the one
@@ -3925,60 +3964,48 @@ impl World {
         }
         self.topology.splitter_outputs = splitter_outputs;
 
-        // 6. Docks ship.
+        // 6. Docks crew up.
         let docks = std::mem::take(&mut self.topology.docks);
+        let wanted = self.economy.wanted();
         for &dock in &docks {
             let kind = self.placement_of(dock).kind;
-            let (shipped, flag_flipped) = {
+            let flag_flipped = {
                 let mut body = self
                     .ecs
                     .get::<&mut Dock>(dock)
                     .expect("a dock placement carries a Dock");
+                let was = body.understaffed();
                 if body.mothballed() {
                     // Switched off: it claims no clerk and ships nothing,
                     // and it is not "understaffed" either — nobody was
                     // asked for, so there is no shortage to report. The
                     // held goods stay held; `try_absorb_belt_into_dock`
                     // refuses, so the belt behind it backs up.
-                    let was = body.understaffed();
                     body.set_understaffed(false);
-                    (0, was)
-                } else if body.is_empty() {
-                    // Nothing to ship, nobody asked for; the verdict of the
-                    // last loaded tick stands.
-                    (0, false)
-                } else {
+                } else if body.contents().any(|(item, _)| wanted.contains(item)) {
+                    // Crew is claimed every tick the dock holds something a
+                    // contract orders: that stock is the crew's work.
+                    // Claiming for ANY stock let a dock clogged with a
+                    // product nobody orders hold the only head forever and
+                    // starve the dock whose stock was ordered (PR #182
+                    // review).
                     let crew: &[(String, u32)] =
                         self.machines.get(&kind).map_or(&[], |k| k.staff.as_slice());
-                    let was = body.understaffed();
-                    match self.staff.claim(crew) {
-                        Ok(()) => {
-                            body.set_understaffed(false);
-                            (body.ship_into(&mut self.economy), was)
-                        }
-                        Err(_) => {
-                            // Held, not lost: the buffer keeps it, and at
-                            // capacity `try_absorb` refuses and the belt
-                            // backs up.
-                            body.set_understaffed(true);
-                            (0, !was)
-                        }
-                    }
+                    body.set_understaffed(self.staff.claim(crew).is_err());
+                } else if !body.is_empty() {
+                    // Holding only what nobody ordered: no work, nobody
+                    // asked for, no shortage to report — as for a mothball.
+                    body.set_understaffed(false);
                 }
+                // An empty dock asks for nobody either, and the verdict of
+                // the last tick it held work stands.
+                body.understaffed() != was
             };
             if flag_flipped {
                 // `understaffed` rides the dock's chunk snapshot.
                 self.mark_placement_dirty(dock);
             }
-            if shipped > 0 {
-                // The dock's own snapshot changed (`shipped_total` at
-                // least), so a chunk-driven renderer has to re-read it. At
-                // most once per box, not once per tick, so it does not
-                // defeat dirty tracking the way fluid movement would.
-                self.mark_placement_dirty(dock);
-            }
         }
-        self.topology.docks = docks;
         self.topology.belts = belts;
         self.topology.machines = machines;
 
@@ -3988,19 +4015,50 @@ impl World {
         // used up) simply stops appearing in that snapshot's `contracts` and
         // reads `active: false` on its `board`; the events are not kept —
         // the snapshot is the wire, and a UI diffs it. What IS kept from the
-        // events is the one thing no snapshot can reconstruct afterwards:
-        // a payout took its mix out of the pool, which is the factory's
-        // exit and so its consumption of the finished product.
-        let events = self.economy.tick(self.tick_count);
+        // events is what no snapshot can reconstruct afterwards: which docks
+        // a payout took its mix from, and that it took it — the factory's
+        // exit, and so its consumption of the finished product.
+        //
+        // The shipping docks' stock is lent out and handed back, so a dock
+        // lent here is the dock at the same position in `lent`.
+        let mut stock = DeliveryStock::default();
+        let mut lent = Vec::new();
+        for &dock in &docks {
+            let mut body = self
+                .ecs
+                .get::<&mut Dock>(dock)
+                .expect("a dock placement carries a Dock");
+            if body.mothballed() || body.understaffed() {
+                continue;
+            }
+            stock.push(body.take_stock());
+            lent.push(dock);
+        }
+        let events = self.economy.tick(self.tick_count, &mut stock);
+        let mut paid = vec![false; lent.len()];
         for event in &events {
-            if let ContractEvent::Paid { id } = event
-                && let Some(contract) = self.economy.board().get(id)
-            {
-                for (item, qty) in &contract.mix {
-                    self.production.record_consumed(item, StatKind::Item, *qty);
+            if let ContractEvent::Paid { id, from } = event {
+                for &at in from {
+                    paid[at] = true;
+                }
+                if let Some(contract) = self.economy.board().get(id) {
+                    for (item, qty) in &contract.mix {
+                        self.production.record_consumed(item, StatKind::Item, *qty);
+                    }
                 }
             }
         }
+        for ((dock, held), paid) in lent.into_iter().zip(stock.into_docks()).zip(paid) {
+            self.ecs
+                .get::<&mut Dock>(dock)
+                .expect("a dock placement carries a Dock")
+                .return_stock(held, paid.then_some(self.tick_count));
+            if paid {
+                // Its contents and `last_paid_tick` ride its chunk snapshot.
+                self.mark_placement_dirty(dock);
+            }
+        }
+        self.topology.docks = docks;
         self.production.tick();
 
         // 8. Payday. Not tied to any tile either; Godot polls
@@ -4237,10 +4295,7 @@ impl World {
             return false;
         }
         let mut segment = self.ecs.get::<&mut BeltSegment>(belt).unwrap();
-        // The economy comes in read-only, as the pool's room check (the
-        // dock-capacity change): a full pool leaves the box standing on the
-        // belt rather than on a dock that cannot ship it.
-        body.try_absorb(&mut segment, &self.economy)
+        body.try_absorb(&mut segment)
     }
 
     /// What a command would do to the **next payday**, before it is issued
@@ -5506,16 +5561,20 @@ impl World {
         // The body's fields are lifted out before `is_crewed`, which walks
         // every placement and would otherwise be called while this dock's
         // component is still borrowed.
-        let (contents, capacity_per_item, shipped_total, understaffed, mothballed, blocked) = {
+        let (contents, places, used, at_capacity, shipped_total, last_paid_tick) = {
             let body = self.ecs.get::<&Dock>(dock).unwrap();
             (
                 body.contents().cloned().collect(),
-                body.capacity_per_item(),
+                body.places(),
+                body.used(),
+                body.at_capacity(),
                 body.shipped_total(),
-                body.understaffed(),
-                body.mothballed(),
-                body.blocked(),
+                body.last_paid_tick(),
             )
+        };
+        let (understaffed, mothballed, blocked) = {
+            let body = self.ecs.get::<&Dock>(dock).unwrap();
+            (body.understaffed(), body.mothballed(), body.blocked())
         };
         DockSnapshot {
             tile: self.position_of(dock),
@@ -5524,8 +5583,11 @@ impl World {
             footprint: placement.footprint,
             belt_tile: self.inbound_belt_tile(dock),
             contents,
-            capacity_per_item,
+            places,
+            used,
+            at_capacity,
             shipped_total,
+            last_paid_tick,
             understaffed,
             crewed: self.is_crewed(dock),
             mothballed,
@@ -5705,8 +5767,11 @@ impl World {
                     footprint: snapshot.footprint,
                     origin_tile: snapshot.tile,
                     contents: snapshot.contents,
-                    capacity_per_item: snapshot.capacity_per_item,
+                    places: snapshot.places,
+                    used: snapshot.used,
+                    at_capacity: snapshot.at_capacity,
                     shipped_total: snapshot.shipped_total,
+                    last_paid_tick: snapshot.last_paid_tick,
                     crew: crew_entries(self.crew_of_kind(&placement.kind)),
                     crewed: self.is_crewed(entity),
                     understaffed: snapshot.understaffed,

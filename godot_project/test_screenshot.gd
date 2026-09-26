@@ -122,8 +122,8 @@
 #
 # `--full-dock` builds the FULL-DOCK LINE (test_layouts.gd's
 # `build_full_dock_line`: the reference line on auto-fill, run until the
-# shared delivery pool is at its 48-per-item ceiling) and freezes the frame
-# on a lit half of the dock lamps' pulse, so the clipboard's `48/48` /
+# dock has every one of its 32 places taken) and freezes the frame
+# on a lit half of the dock lamps' pulse, so the clipboard's `32/32` /
 # `⚠ FULL` line, the belt standing still behind the dock and the pulsing
 # deck lamps are all in one shot. `--dock-lamp dark` takes the other half of
 # the pulse; two runs a `--dock-lamp` apart are the blink itself. Pair it
@@ -493,10 +493,10 @@ var _legend_collapsed := false
 ## back to photographing three identical checklists. What it waits for is at
 ## least one unit standing on the dock plus at least one delivery AND one miss
 ## on the board — which against the shipped contracts (asks of 2, 3 and 1 out
-## of one shared pool) reads as one docket satisfied and the rest part-filled:
-## the checkbox mechanic and the shared-pool competition in a single frame.
+## of the one dock's stock) reads as one docket satisfied and the rest part-
+## filled: the checkbox mechanic and the competition for stock in one frame.
 ## A MINIMUM dock count rather than an exact one, because the contracts check
-## every 1000/1500/2500 ticks and drain the pool about as fast as the line can
+## every 1000/1500/2500 ticks and drain the dock about as fast as the line can
 ## fill it.
 const CONTRACTS_REVIEW_DOCK_UNITS := 1
 const CONTRACTS_REVIEW_TICK_LIMIT := 20000
@@ -535,12 +535,12 @@ const CRUSHING_REVIEW_TICK_LIMIT := 2000
 ## second beat to leave the mouth, so the shot shows a spray rather than one
 ## bit, and short of CRUSH_FLIGHT_TICKS so the first beat is still up.
 const CRUSHING_REVIEW_HOLD_TICKS := 6
-## `--full-dock` photographs a delivery pool at its ceiling: the clipboard's
-## ON THE DOCK line reading `48/48` in warning red under `⚠ FULL — belt
+## `--full-dock` photographs a dock with every place taken: the clipboard's
+## ON THE DOCK line reading `32/32` in warning red under `⚠ FULL — belt
 ## backing up`, the boxes standing still on the belt the dock has stopped
 ## taking from, and the dock's deck lamps PULSING rather than steady. Both
 ## states arrived with the dock-capacity change and neither could be
-## photographed on demand: `--bottleneck` leaves the pool around 20 of 48.
+## photographed on demand: `--bottleneck` leaves the dock part-filled.
 ##
 ## `Layouts.build_full_dock_line` does the waiting (some 25 000 ticks against
 ## the starter contract's appetite); what is left here is the same freeze
@@ -552,12 +552,12 @@ const CRUSHING_REVIEW_HOLD_TICKS := 6
 var _full_dock := false
 var _split_docks := false
 ## `--dock-lamp dark` for the other half of the pulse; lit by default, since
-## a lit lamp over a full pool is the state worth reviewing and a dark one is
+## a lit lamp over a full dock is the state worth reviewing and a dark one is
 ## indistinguishable from an empty dock's.
 var _dock_lamp_dark := false
 ## How long to hunt for a tick that is both full AND on the wanted half of
 ## the blink. A whole pulse is DOCK_FULL_PULSE_TICKS (12), so this is only
-## generous because a contract may ship mid-hunt and drop the pool off its
+## generous because a contract may ship mid-hunt and take the dock off its
 ## ceiling for a cadence — in which case the line refills and the next
 ## crossing is taken.
 const FULL_DOCK_HOLD_TICK_LIMIT := 2000
@@ -747,7 +747,7 @@ func _initialize() -> void:
 	if _full_dock:
 		# NOT --populate: the fixture runs itself to the state it is named
 		# for, and `_run_chain_forward`'s own spawns on top of that would
-		# only be more ticks against an already-full pool.
+		# only be more ticks against an already-full dock.
 		_pick_fixture("full_dock", "--full-dock")
 	# Last of the fixture flags on purpose: --contracts, --payout and
 	# --crushing each force the plain shipped line, and --bbq is meant to be
@@ -1923,9 +1923,9 @@ func _mothball_the_vat() -> void:
 
 
 ## Drives the real chain across several contract cadence boundaries, feeding
-## it exactly the way a player does. What puts product in the shared delivery
-## pool the contracts draw from is the delivery dock at the end of the line,
-## not a command issued from here.
+## it exactly the way a player does. What puts product on the dock the
+## contracts draw from is the belt at the end of the line, not a command
+## issued from here.
 func _run_contract_cycles() -> void:
 	# A new game runs the starter only (the contract-board epic); the review
 	# frame wants the whole board competing, so sign every offer first — the
@@ -2027,13 +2027,13 @@ func _run_to_crushing() -> void:
 	_main.set_process(false)
 
 
-## Stops the clock on a tick where the delivery pool is at its ceiling AND
+## Stops the clock on a tick where a dock is at its ceiling AND
 ## the dock's lamps are on the wanted half of their pulse, then freezes.
 ##
 ## `Layouts.build_full_dock_line` has already run the line to full by the
 ## time this is called; the loop here is the alignment, and it re-checks
 ## fullness on every step rather than assuming it, because a contract that
-## ships mid-hunt takes the pool off its ceiling for a cadence and would
+## ships mid-hunt takes the dock off its ceiling for a cadence and would
 ## otherwise be photographed as a dock that merely holds some stock.
 func _run_to_full_dock() -> void:
 	var held := false
@@ -2091,9 +2091,9 @@ func _run_to_split_docks() -> void:
 
 ## Whether any dock says IT is backing up this tick.
 ##
-## Read off `dock_snapshots_json` rather than `Layouts.delivery_full`: since
-## the lamp went per-dock, a full POOL no longer implies a jammed DOCK (the
-## ceiling is per item), and it is the dock's own verdict this shot is of.
+## Read off `dock_snapshots_json` rather than `Layouts.delivery_full`: that
+## is a summary over every dock, and it is one dock's own verdict this shot
+## is of.
 ## Read from the sim directly because the hunting loop below does not call
 ## `_refresh_buffers`, so `_main._dock_states` is a frame behind here.
 func _a_dock_reports_full() -> bool:

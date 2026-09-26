@@ -18,8 +18,8 @@
 #     footprint the simulation reports,
 #   * the hopper's product body rescales when its fill level changes — the
 #     same live-data-drives-a-scaled-body contract the pipe run's liquid has,
-#   * the goods standing on a dock's deck follow the economy's SHARED pool,
-#     not the dock's own (always empty) buffer,
+#   * the goods standing on a dock's deck follow THAT dock's own stock,
+#     never another dock's,
 #   * the 2x2 cooking vat genuinely spans more than one tile, sits at its
 #     footprint's centre rather than on its origin tile, and resolves for
 #     hover from a NON-ORIGIN tile of its footprint.
@@ -203,7 +203,7 @@ func _run_checks() -> void:
 		_fail("a full hopper's level (%f) rose past its box section" % fill_node.scale.y)
 		return
 
-	# --- the dock's deck follows the SHARED pool, not its own buffer -------
+	# --- each dock's deck follows its OWN stock ---------------------------
 	var dock_nodes: Dictionary = main._dock_nodes.get("5,0", {})
 	if dock_nodes.is_empty():
 		_fail("the placed dock built no deck slots")
@@ -212,28 +212,35 @@ func _run_checks() -> void:
 	if slots.size() != main.DOCK_STOCK_SLOTS:
 		_fail("expected %d dock stock slots, got %d" % [main.DOCK_STOCK_SLOTS, slots.size()])
 		return
-	main._update_dock_stock([])
+	main._update_dock_stock({"5,0": {"contents": []}})
 	for slot in slots:
 		if slot.visible:
-			_fail("a case is standing on the dock with nothing in the delivery pool")
+			_fail("a case is standing on the dock with nothing on it")
 			return
-	main._update_dock_stock([["boxed_ketchup", 1]])
+	main._update_dock_stock({"5,0": {"contents": [["boxed_ketchup", 1]]}})
 	if not slots[0].visible:
-		_fail("one unit in the delivery pool put no case on the dock")
+		_fail("one unit on the dock put no case on its deck")
 		return
 	if slots[main.DOCK_STOCK_SLOTS - 1].visible:
-		_fail("one unit in the delivery pool filled more than one slot")
+		_fail("one unit on the dock filled more than one slot")
 		return
 	if _meshes(slots[0], []).is_empty():
 		_fail("the case standing on the dock rendered no mesh")
 		return
-	main._update_dock_stock([["boxed_ketchup", 99]])
+	# Another dock's stock is never drawn here — the owner's "linked docks"
+	# report of 2026-09-26.
+	main._update_dock_stock({"5,0": {"contents": []}, "9,0": {"contents": [["boxed_ketchup", 4]]}})
+	for slot in slots:
+		if slot.visible:
+			_fail("another dock's stock was drawn on this dock's deck")
+			return
+	main._update_dock_stock({"5,0": {"contents": [["boxed_ketchup", 32]]}})
 	for slot in slots:
 		if not slot.visible:
-			_fail("a full delivery pool left a dock slot empty")
+			_fail("a full dock left a deck slot empty")
 			return
 
-	# --- a full pool says so on the dock it stopped ------------------------
+	# --- a full dock says so, and says what it holds ----------------------
 	# The `full` flag and the capacity both come off the wire (asserted in
 	# `cargo test -p sim_core`); what is checked here is that the hover says
 	# the two things a player standing at a stopped belt needs — that this is
@@ -243,19 +250,32 @@ func _run_checks() -> void:
 		_fail("the placed dock has no polled state to hover")
 		return
 	if bool(dock_state.get("full", false)):
-		_fail("an idle dock's pool should not read as full")
+		_fail("an idle dock should not read as full")
 		return
 	var calm_hover: String = main._dock_hover_text("5,0", "east")
 	if calm_hover.contains("FULL"):
 		_fail("a dock with room said it was full: '%s'" % calm_hover)
 		return
+	var places := int(dock_state.get("places", 0))
+	if places <= 0 or not calm_hover.contains("0 / %d places" % places):
+		_fail("the hover must count this dock's places off its own snapshot, got: '%s'" % calm_hover)
+		return
+	var saved_contents = dock_state.get("contents", [])
+	var saved_used = dock_state.get("used", 0)
+	dock_state["contents"] = [["boxed_ketchup", 3]]
+	dock_state["used"] = 3
+	var stocked_hover: String = main._dock_hover_text("5,0", "east")
+	if not stocked_hover.contains("3 / %d places" % places) or not stocked_hover.contains("Boxed Ketchup"):
+		_fail("the hover must say what stands on THIS dock, got: '%s'" % stocked_hover)
+		return
+	dock_state["contents"] = saved_contents
+	dock_state["used"] = saved_used
 	dock_state["full"] = true
-	main._delivery_capacity = 48
 	var full_hover: String = main._dock_hover_text("5,0", "east")
 	if not full_hover.contains("⚠ FULL"):
 		_fail("a full dock's hover must say so, got: '%s'" % full_hover)
 		return
-	if not full_hover.contains("48"):
+	if not full_hover.contains("%d places" % places):
 		_fail("the full-dock hover should name the ceiling it hit, got: '%s'" % full_hover)
 		return
 	if not full_hover.contains("backs up"):
@@ -333,5 +353,5 @@ func _run_checks() -> void:
 		_fail("the tile just past the vat's footprint still resolved to it")
 		return
 
-	print("MACHINES_OK: all %d priced kinds resolve to distinct bespoke models, a hopper/machine/dock render at the sim's own tiles with a live product level and a deck following the shared pool, and the 2x2 vat spans its whole footprint and answers hover from a non-origin tile" % kinds)
+	print("MACHINES_OK: all %d priced kinds resolve to distinct bespoke models, a hopper/machine/dock render at the sim's own tiles with a live product level and a deck following its own dock's stock, and the 2x2 vat spans its whole footprint and answers hover from a non-origin tile" % kinds)
 	quit(0)

@@ -237,22 +237,21 @@
 #
 # Pass --split-docks to build the SPLIT-DOCK LINE (test_layouts.gd's
 # `build_split_dock_line`): the BBQ branch, with its two docks, run on until
-# ONE of them is backing up and the other is not. That is the state the
-# per-dock lamp change is about — the pool's ceiling is per ITEM, so a pool
-# capped on BBQ leaves the ketchup dock taking boxes perfectly happily, and
-# only the jammed dock's lamp pulses. Before the change both pulsed, because
-# the lamp read the pool's `.any()` summary rather than the dock. The
-# clipboard still reads ⚠ FULL, correctly: the POOL has a capped item.
+# ONE of them is backing up and the other is not. The fixture's mixed exit
+# feeds BBQ onto the ketchup dock too, and that dock fills with the BBQ the
+# orders cannot absorb, while the branch's own dock keeps taking boxes. Each
+# dock holds its own stock, so only the jammed dock's lamp pulses. The
+# clipboard still reads ⚠ FULL, correctly: a dock in the world is full.
 # Honours --dock-lamp dark for the other half of the pulse, as --full-dock
 # does, and refuses to claim the fixture if the docks never disagreed.
 #
 # Pass --full-dock to build the FULL-DOCK LINE (test_layouts.gd's
 # `build_full_dock_line`): the shipped line on auto-fill, run until it has
-# made boxes faster than its contracts ask for them and the shared delivery
-# pool sits at its 48-per-item ceiling. That is the one state the
+# made boxes faster than its contracts ask for them and its dock has all 32
+# places taken. That is the one state the
 # dock-capacity change added and nothing else can reach on demand
-# (--bottleneck leaves the pool around 20 of 48): the clipboard's ON THE DOCK
-# line reads 48/48 in warning red under `⚠ FULL — belt backing up`, the boxes
+# (--bottleneck leaves the dock part-filled): the clipboard's ON THE DOCK
+# line reads 32/32 in warning red under `⚠ FULL — belt backing up`, the boxes
 # stand still on the belt the dock has stopped taking from, and the dock's
 # deck lamps PULSE instead of holding steady. The shot is FROZEN on a lit
 # half of that pulse, since a pulse is a rhythm rather than a state and a

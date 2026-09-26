@@ -142,8 +142,8 @@ the plan is `docs/ARCHITECTURE.md` §3/§4/§6/§10.
 - `belt` — `BeltSegment`, gap-based item storage; `splitter` — round-robin diverter
 - `fluid` — `FluidNetwork`, `FluidTank`, pressure equalization
 - `hopper` — raw-solid feeder + auto-fill; `inventory` — slot-based storage
-- `dock` — pass-through into `Economy` every tick
-- `economy` — money, contract board, active contracts, shared delivery pool
+- `dock` — a dock's own stock in `DOCK_CAPACITY` places; contracts draw from it
+- `economy` — money, contract board, active contracts, `DeliveryStock` (the docks summed)
 - `contracts` — `ContractRegistry` from `contracts.ron`
 - `shop` — `ShopCatalog` + `OwnedEquipment` (money is not here)
 - `ingredients` — prices, owned stock, the definition of "raw"
