@@ -33,12 +33,16 @@
 #     MOTHBALLED machine reads "switched off" with a fourth glyph and an
 #     unlit bar rather than as a fault, and both really arrive over the
 #     wire for every machine on the line,
-#   * a machine the sim refused its crew floats the red understaffed
-#     person over its roof, and no other machine does — not a staffed one,
-#     not one waiting on input, not one switched off.
+#   * a machine the sim reports `understaffed` floats the red person over
+#     its roof, and no other machine does — not a staffed one, not one
+#     waiting on input, not one switched off — and it holds, poll after
+#     poll, while the vat's per-tick `staff` stall blinks under it.
 extends SceneTree
 
 const Layouts = preload("res://test_layouts.gd")
+## How long the understaffed fixture is run on to prove its marker holds:
+## the review's probe length, some 200 load polls.
+const STEADY_TICKS := 6000
 
 var main
 var _ran := false
@@ -434,10 +438,46 @@ func _run_checks() -> void:
 		var roof: float = main.FLOOR_Y + main._mesh_for("machine_cooking_vat").get_aabb().end.y
 		if person.position.y <= roof:
 			_fail("the vat's marker stands at %.2f, inside a roof at %.2f" % [person.position.y, roof])
-	for stall in [null, {"kind": "input", "item": "tomato"}, {"kind": "output", "item": "ketchup"},
-			{"kind": "mothballed", "item": ""}]:
-		if main._stall_is_staff(stall):
-			_fail("a %s stall is not a crew refusal" % str(stall))
+
+	# ...and it HOLDS. The vat is handed its crew on any tick the crusher or
+	# the mixer claims nothing, so its `staff` stall blinks off about a
+	# quarter of the time while it stays short; a marker read off that
+	# stall toggled 43 times in 201 polls here (the PR #192 review). Run
+	# the fixture on through the real tick path, which polls on its own
+	# cadence, and fail on any poll the person is missing while the sim
+	# still says the vat is short.
+	var person_node = main._world_warnings.get("machine:" + vat_key)
+	var marker_polled_at: int = main._load_polled_tick
+	var polls := 0
+	var stall_flips := 0
+	var last_staff := Layouts.understaffed_stall(main.sim, Layouts.UNDERSTAFFED_VAT) != ""
+	for i in range(STEADY_TICKS):
+		if i % Layouts.RESTOCK_EVERY == 0:
+			Layouts.restock(main.sim)
+		main._advance_simulation(1.0 / main.TICK_HZ)
+		var staff := Layouts.understaffed_stall(main.sim, Layouts.UNDERSTAFFED_VAT) != ""
+		if staff != last_staff:
+			stall_flips += 1
+		last_staff = staff
+		if main._load_polled_tick == marker_polled_at:
+			continue
+		marker_polled_at = main._load_polled_tick
+		polls += 1
+		if bool(main._machine_load[vat_key].get("crewed", true)):
+			_fail("the vat was crewed by tick %d; the steady-marker check proves nothing" % marker_polled_at)
+			break
+		if _machine_markers() != ["machine:" + vat_key]:
+			_fail("poll at tick %d: the vat is still short but the markers are %s"
+				% [marker_polled_at, str(_machine_markers())])
+			break
+		if main._world_warnings["machine:" + vat_key] != person_node:
+			_fail("poll at tick %d: the vat's person was freed and re-made" % marker_polled_at)
+			break
+	if polls < STEADY_TICKS / main.LOAD_POLL_TICKS / 2:
+		_fail("only %d polls in %d ticks: the tick path did not poll" % [polls, STEADY_TICKS])
+	# The reason the check exists: the stall under it really did blink.
+	if stall_flips < 10:
+		_fail("the vat's staff stall flipped only %d times; the fixture no longer blinks" % stall_flips)
 
 	# And the same for the switch, thrown by a real command rather than
 	# written into a dictionary here.

@@ -1091,7 +1091,7 @@ pub enum StallKind {
 ///
 /// ```json
 /// {"tile": [4, 0], "load": {...}, "stall": {"kind": "input", "item": "tomato"},
-///  "crewed": true, "mothballed": false}
+///  "crewed": true, "mothballed": false, "understaffed": false}
 /// ```
 ///
 /// `crewed` and `mothballed` ride the POLLED entry rather than only the
@@ -1110,6 +1110,21 @@ pub struct MachineLoadEntry {
     pub crewed: bool,
     /// Whether the player has switched this machine off — issue #19.
     pub mothballed: bool,
+    /// Whether the machine is standing idle **for want of a crew** — the
+    /// one question the red person over it answers (UI_UX §7). It is short
+    /// on the establishment (`!crewed`, so never a mothballed machine) AND
+    /// nothing on its own supply side is holding it up: it has a batch's
+    /// worth of input, or one under way, and room for what it makes. So an
+    /// unfed or backed-up machine is idle for that reason, not this one.
+    ///
+    /// Deliberately NOT `stall.kind == "staff"`. The pools reset every tick,
+    /// and on a tick an upstream machine happens to claim nothing the short
+    /// one is handed its crew after all, so the per-tick stall blinks
+    /// between `staff` and none (43 toggles in 201 polls on the
+    /// `understaffed` fixture). Both halves here move only with the
+    /// establishment or the machine's own buffers, so it holds while the
+    /// machine stays short (`an_understaffed_machine_stays_understaffed`).
+    pub understaffed: bool,
 }
 
 /// One pipe tile, for rendering (milestone 6 — ARCHITECTURE.md §3.4).
@@ -5167,13 +5182,16 @@ impl World {
                 let body = self.ecs.get::<&Machine>(machine).unwrap();
                 let load = MachineLoadSnapshot::of(&body.load);
                 let mothballed = body.mothballed;
+                let supplied = self.machine_supply_stall(machine, &body).is_none();
                 drop(body);
+                let crewed = !uncrewed.contains(&machine);
                 MachineLoadEntry {
                     tile: self.position_of(machine),
                     load,
                     stall: self.machine_stall(machine),
-                    crewed: !uncrewed.contains(&machine),
+                    crewed,
                     mothballed,
+                    understaffed: !crewed && supplied,
                 }
             })
             .collect()

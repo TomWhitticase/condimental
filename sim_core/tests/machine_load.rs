@@ -240,16 +240,27 @@ fn the_wire_shape_is_the_one_the_plan_promises() {
     let entries = json.as_array().expect("an array");
     for entry in entries {
         // `serde_json::Value` sorts object keys; the wire's own order is
-        // the struct's (`tile`, `load`, `stall`, then the two staffing
-        // facts the andon needs beside the load bar — `crewed` and
-        // `mothballed`, issues #19 and #20), and Godot reads by key.
+        // the struct's (`tile`, `load`, `stall`, then the staffing facts
+        // the andon needs beside the load bar — `crewed` and `mothballed`,
+        // issues #19 and #20, and `understaffed`, which the red person over
+        // a machine reads, PR #192), and Godot reads by key.
         let keys: Vec<&str> = entry
             .as_object()
             .unwrap()
             .keys()
             .map(String::as_str)
             .collect();
-        assert_eq!(keys, ["crewed", "load", "mothballed", "stall", "tile"]);
+        assert_eq!(
+            keys,
+            [
+                "crewed",
+                "load",
+                "mothballed",
+                "stall",
+                "tile",
+                "understaffed"
+            ]
+        );
         let load = entry["load"].as_object().unwrap();
         let mut load_keys: Vec<&str> = load.keys().map(String::as_str).collect();
         load_keys.sort_unstable();

@@ -4609,7 +4609,7 @@ const WARNING_MARKER_BOB_TICKS := 48
 const WARNING_MARKER_BOB := 0.08 * TILE
 var _world_warnings: Dictionary = {} # caller's key -> Node3D, one marker each
 ## The same door's second asset: a red person over a machine standing idle
-## because it was refused its crew (the sim's `staff` stall), raised from
+## for want of its crew (the sim's `understaffed`), raised from
 ## `_poll_machine_load` under `"machine:x,y"`. Red, not amber, because the
 ## machine has STOPPED; a person, not a "!", because the fix is a hire. Its
 ## hover says "short of <category> staff" in words (UI_UX §7).
@@ -4906,22 +4906,19 @@ func _poll_machine_load() -> void:
 		record["crewed"] = bool(entry.get("crewed", true))
 		record["mothballed"] = bool(entry.get("mothballed", false))
 		_machine_load[key] = record
-		# The red person over a machine refused its crew. THIS poll's stall,
-		# not the remembered reason: the sim reports `staff` only on a tick
-		# the machine would otherwise have worked (`World::machine_stall`),
-		# so an unfed, backed-up or switched-off machine never raises it,
-		# and a refused one is refused on every tick it stays refused.
+		record["understaffed"] = bool(entry.get("understaffed", false))
+		_machine_load[key] = record
+		# The red person over a machine idle for want of a crew: the sim's
+		# `understaffed`, never this poll's `staff` stall. The pools reset
+		# every tick, so a short machine is handed its crew on any tick an
+		# upstream one claims nothing, and the stall blinks while the
+		# machine stays short; `understaffed` holds (short on the
+		# establishment, and nothing on its own supply side holding it up).
 		if _machine_marker_anchors.has(key):
 			_set_world_warning(
 				"machine:" + key, _machine_marker_anchors[key],
-				_stall_is_staff(stall), UNDERSTAFFED_MARKER_ASSET
+				record["understaffed"], UNDERSTAFFED_MARKER_ASSET
 			)
-
-
-## Whether a polled stall is the sim's "refused its crew" — the one reason
-## the understaffed marker stands for.
-func _stall_is_staff(stall) -> bool:
-	return stall is Dictionary and String(stall.get("kind", "")) == "staff"
 
 
 ## The stall reason in words. Item ids go through `_item_display_name` like
@@ -9803,6 +9800,10 @@ func _staff_move_head(index: int, verb: String) -> void:
 		"category": id,
 	}))
 	_poll_staff()
+	# A hire or a fire moves `understaffed` with no tick: re-read now, so
+	# the red person over a machine goes (or comes) with the click, not up
+	# to LOAD_POLL_TICKS later.
+	_poll_machine_load()
 	_update_staff_panel()
 	var after := _headcount_of(id)
 	if after == before:
@@ -13024,6 +13025,9 @@ func _issue_config_command(command: Dictionary) -> void:
 	sim.issue_command_json(JSON.stringify(command))
 	_apply_dirty_chunks()
 	_refresh_buffers()
+	# The mothball switch clears (or restores) a red person over the
+	# machine; read it now rather than at the next load poll.
+	_poll_machine_load()
 	_update_config_panel()
 
 

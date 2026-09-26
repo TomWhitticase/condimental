@@ -331,7 +331,7 @@ pub const ASSETS: &[Asset] = &[
         build: warning_marker,
     },
     // Its red sibling: a person over a machine that would be working but
-    // was refused its crew (`stall.kind == "staff"`).
+    // is short of its crew (`MachineLoadEntry::understaffed`).
     Asset {
         name: "understaffed_marker",
         build: understaffed_marker,

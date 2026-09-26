@@ -1443,8 +1443,23 @@ Four consequences worth knowing before changing it:
   `at_capacity`. The marker says WHERE to look. The hover says what is wrong
   (`⚠ FULL`, the places grid), and the lamp still pulses, so it is never the
   only signal. It is built to be reused: `_set_world_warning(key, anchor,
-  on)` in `main.gd` takes any placement, so a rack out of bays or a stuck
-  machine raises the same marker under a key of its own.
+  on, asset)` in `main.gd` takes any placement and any marker asset (the
+  "!" by default), under a key of its own per kind (`"dock:5,0"`), so a
+  rack out of bays can raise the "!" through the same door.
+- **A red person marks a machine idle for want of a crew** (2026-09-26,
+  PR #192). The same door's second asset (`understaffed_marker`): a lit
+  head over shoulders, the user pictogram, in `status_red`. Red, not
+  amber, because the machine has STOPPED; a person, not a "!", because the
+  fix is a hire. It stands `MACHINE_MARKER_CLEARANCE` above the tallest
+  voxel the kind draws, read off its meshes, under `"machine:x,y"`. It
+  reads the sim's `understaffed` off the polled machine-load entry — short
+  on the establishment AND nothing on its own supply side holding it up —
+  never the per-tick `staff` stall, which blinks whenever an upstream
+  machine claims nothing that tick and the short one gets its crew. So an
+  unfed, backed-up or switched-off machine never shows it, and a short one
+  shows it steadily until a hire or the mothball switch clears it (both
+  re-poll at once). The hover still says "short of <category> staff" in
+  words, so the colour is never the only signal.
 
 ## 8. What this doc does not cover
 
