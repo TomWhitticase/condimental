@@ -104,26 +104,37 @@ A fork inherits your context, so it would be the author marking their own
 work. A fresh agent starts cold, and that is the point. Its prompt should:
 
 - tell it to follow `.claude/skills/review/SKILL.md` in its own worktree;
-- give the PR number, and the `cargo` PATH line and the never-`pkill godot`
-  rule from the `verify` skill;
+- give the PR number, the `export PATH=…rustup…` line from the `review`
+  skill's §0, and the rule never to `pkill godot` by name (other worktrees
+  run headless Godot);
 - say it must post the verdict itself with `gh pr review <N> --comment`,
   and must not edit, push to or merge the branch.
 
 Say what the PR claims, but not why you think it is right. The reviewer is
 there to check the claims, not to be talked into them. Keep working while it
-runs. Then read the verdict with the query below:
+runs. **Do not end the session until it returns.** The subagent belongs to
+your session: end it early, and either the review dies with it or its
+verdict arrives with nobody left to act on it. Then read the verdict with the
+query below:
 
-- **`APPROVED`**: merge, unless a rule below holds it.
+- **`APPROVED`**: merge, unless a rule below holds the merge.
 - **`CHANGES REQUESTED`**: fix the findings on the branch, push, and launch a
   *fresh* subagent to re-review. A re-review by the agent that asked for the
-  changes is not independent of them either.
+  changes is not independent of them either. The new reviewer re-reviews the
+  rework (the `review` skill's "Re-reviewing a rework"). It is not a second
+  opinion on the old code: relaunching reviewers until one approves is
+  shopping for a verdict, not a review.
 
-Leave the PR open and stop, giving the URL and what it is waiting on, only
-when:
+**The review always runs; some cases hold only the merge.** Launch the
+reviewer even when:
 
-- no subagent can be launched;
 - the task told you not to merge (an Orca worker's coordinator merges); or
-- a rule below says the owner decides.
+- a rule below says the owner decides too.
+
+In those cases, get the verdict, then leave the PR open with the URL, the
+verdict, and what the merge is still waiting on. The one case with no review
+at all is that no subagent can be launched. Then say so, give the URL, and
+stop.
 
 ```
 gh pr checks <N> --watch
@@ -140,7 +151,8 @@ as in a ticketed epic.
 **Do not merge** a PR with no `VERDICT: APPROVED`, one whose checks are red
 or still running, one the owner
 asked to review, or one that deviates from a design doc, bumps `gdext`, or
-changes the save format. Say it is ready, give the URL, and stop.
+changes the save format. Leave it open with the URL and say what it waits on.
+With no verdict at all, the step above is not done yet: launch the reviewer.
 
 ## Afterwards
 

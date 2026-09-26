@@ -241,8 +241,8 @@ image, one with a `raw.githubusercontent.com` link, or one linking a file that
 does not exist.
 
 Then **get it reviewed, and land it** — an open PR is unfinished work until it
-merges, and the one legitimate reason to leave it open is that it is waiting
-on a reviewer's verdict (below):
+merges. The one legitimate reason to leave it open is that its merge is held
+after the review: by the task, or by the owner (below):
 
 ```
 gh pr checks <N> --watch      # commitlint must pass; a red PR is not done
@@ -265,13 +265,18 @@ commit is a reviewed unit.
 and no reviewing after the merge** (the owner's rule, 2026-09-25). A PR
 merges only once it has a `VERDICT: APPROVED` comment from a session that did
 not write it, and its checks are green. An instruction to "open a PR and
-merge it" means that, after review. **Without a verdict, the author does not
-stop to wait for one; they commission it.** They launch a fresh subagent
-(`general-purpose`, never a `fork` of their own context) to run the `review`
-skill and post the verdict, and act on what it says (`open-pr` step 5). A
-subagent is a session that did not write the branch. That is the whole
-requirement, and it is why no PR should sit open for want of a reviewer. PR
-#193 sat open this way until the owner said so (2026-09-26). PR #163 is why this is spelled out. It merged on green CI under the
+merge it" means that, after review.
+
+**Without a verdict, the author does not stop to wait for one; they
+commission it.** They launch a fresh `general-purpose` subagent to run the
+`review` skill and post the verdict. They wait for it and act on what it
+says (`open-pr` step 5). A fresh subagent starts cold in its own worktree,
+so it is a session that did not write the branch. A `fork` is not: it
+inherits the author's whole context. The review runs even when the task or
+the owner holds the merge; only the merge waits. So no PR sits open for want
+of a reviewer, as #193 did until the owner said so (2026-09-26).
+
+PR #163 is why this is spelled out. It merged on green CI under the
 old wording ("merging your own work unreviewed is fine for routine
 changes"), and its review could only happen afterwards, with the code
 already on `main`. A deviation from the design docs, a `gdext` bump, a
@@ -390,9 +395,11 @@ and the banner that reports it. Two rules it exists to enforce:
   If it genuinely cannot land, say so plainly and leave the worktree in place;
   do not report a clean close over the top of it.
 - **A PR of your own waiting on its review verdict is the one legitimate way
-  to end with a PR open.** You cannot review what you wrote, but you can
-  commission the review: launch the reviewer subagent before you close. Then
-  name what the PR waits on. Merging it to tidy up is never finishing it.
+  to end with a PR open, once it has one.** You cannot review what you wrote,
+  but you can commission the review: launch the reviewer subagent and wait
+  for its verdict before you close. The subagent does not outlive the
+  session. Then name what the merge waits on. Merging it to tidy up is never
+  finishing it.
 
 ## Orchestration (Orca)
 

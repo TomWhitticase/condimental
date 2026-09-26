@@ -69,11 +69,12 @@ it. The wrap-up-specific parts:
   and the `review` skill), the verdict posted as a comment whose first line is
   `VERDICT: APPROVED`. A session that wrote the branch cannot supply that,
   however carefully it re-runs its own tests — so **a PR of yours awaiting
-  review is the one legitimate way to end with a PR still open**, and only
-  once a reviewer is actually on it. With no verdict, launch the review
-  yourself as a fresh subagent (`open-pr` step 5: `general-purpose`, never
-  `fork`) rather than ending on "waiting for someone". Then say what the PR
-  is waiting on, and do not merge it to tidy the session up.
+  its merge is the one legitimate way to end with a PR still open**. With no
+  verdict, launch the review yourself as a fresh subagent (`open-pr` step 5:
+  `general-purpose`, never `fork`) rather than ending on "waiting for
+  someone", and **wait for its verdict before you close**. The subagent dies
+  with the session. An approved PR still open is one whose merge the task
+  or the owner holds; say which. Do not merge it to tidy the session up.
 - **Check mergeability before waiting on checks.** A PR with conflicts gets no
   CI run at all, so `--watch` waits forever on nothing:
 
@@ -181,7 +182,8 @@ numbers filed and why they were not fixed, and the exact worktree-removal
 command. Under the red one, add what is unfinished, where it is (branch,
 file, PR), the next concrete step, and — separately and in as many words —
 **whether the tree can still be deleted safely**. "PR #162 is pushed and
-waiting on review; the worktree can go, the work cannot be lost" is a red
+approved, its merge held for the owner; the worktree can go, the work cannot
+be lost" is a red
 banner with a clean tree, and saying only one half of that misleads.
 
 **Never print the green banner with work outstanding.** The banner is a

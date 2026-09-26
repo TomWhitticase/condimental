@@ -48,14 +48,26 @@ matches what code comments and data files cite.
   After `CHANGES REQUESTED`, the re-review goes to another fresh subagent,
   not the one that asked for the changes.
 
-  **What still stops.** Three cases still end with the PR open:
-  - no subagent can be launched;
+  **What still stops.** Only the *merge*, and only in two cases:
   - the task forbids merging (an Orca worker's coordinator merges);
   - the change also needs the owner, on top of the review: a design-doc
     deviation, a `gdext` bump, or a save-format change.
 
-  #193 itself is the second and third case. It bumps the save schema, so
-  even with its verdict it waits for the owner.
+  The review still runs in both, so the PR stays open *with* its verdict.
+  #193 is both cases: an Orca ticket, and a save-schema bump. It got its
+  subagent review all the same, and only its merge waits. The one case with
+  no review is that no subagent can be launched at all. The author also
+  waits for the verdict before ending the session: the subagent is part of
+  that session and does not outlive it.
+
+  **What was rejected.** The first draft of this rule (#198's first review):
+  - It listed the owner and no-merge cases as reasons to stop, which would
+    have left #193 exactly where it was.
+  - It let the author close once the reviewer was launched, when the
+    subagent dies with the session.
+  - It did not forbid relaunching fresh reviewers until one approves. A
+    fresh re-review is of the *rework*, never a second opinion on the same
+    code.
 
 - 2026-09-26: **CONDIMENTAL is GPL-3.0-only; the name and brand are
   reserved.** (Owner's call, from a release-readiness audit.)
@@ -483,11 +495,11 @@ matches what code comments and data files cite.
   every PR. A post-merge review is not a substitute, because by then the
   unreviewed code is already on `main` and every other worktree branches
   from it. An instruction to merge is read as "merge once reviewed". If no
-  reviewer is available, the author stops with the PR open. (Amended
-  2026-09-26, entry above: the author launches a subagent as the reviewer
-  rather than stopping.) `wrap-it-up`
-  already treats that as the one legitimate way to end a session with a PR
-  still open.
+  reviewer is available, the author stops with the PR open, and
+  `wrap-it-up` treated that as the one legitimate way to end a session with
+  a PR still open. **Amended 2026-09-26** (entry above): the author now
+  launches a subagent as the reviewer rather than stopping, and a PR stays
+  open only once its merge is held after the review.
 
   **What was rejected.** Keeping the routine-change exemption was rejected.
   Whether a change counts as "routine" is judged by its author, which is

@@ -37,8 +37,11 @@ empty, and the player buys and places every tile.
   skill). "Make a PR and merge it" means merge after that verdict. **With
   no verdict yet, do not stop and wait: launch a fresh subagent** (the Agent
   tool, `general-purpose`, never a `fork`) to review it with the `review`
-  skill, then act on its verdict. Leave the PR open only if the review
-  cannot be run, or the change also waits on the owner.
+  skill, wait for its verdict, and act on it (`open-pr` step 5). The review
+  always runs. Only the *merge* is held when the task forbids merging (an
+  Orca worker's coordinator merges) or the owner must also sign off (a
+  design-doc deviation, a `gdext` bump, a save-format change). Only if no
+  subagent can be launched does the PR sit open with no review.
 - **Every PR body shows the change in a screenshot** — render with
   `scripts/screenshot-scene.sh`, read it, publish with
   `scripts/pr-screenshot.sh`, paste its markdown. A hook and CI both refuse a
