@@ -1992,16 +1992,21 @@ pub fn item_mustard_seed(p: &Palette) -> VoxModel {
 /// reason: an identifying mark on a side face this camera shades is a mark
 /// the player never gets.
 ///
-/// **Small and bright beats large and bright here**, which is why the root
+/// **A small organic shape beats a flat panel here**, which is why the root
 /// is not simply painted yellow. `turmeric_orange` cannot clear the
 /// reads-reliably threshold from `hazard_yellow` in luma — the gap between
 /// `vinegar_amber` and `hazard_yellow` is only 48.1/255 wide, so nothing
 /// inside it clears 26 from both ends, and `palette.ron`'s entry works the
 /// arithmetic through. It separates by HUE (17.5 degrees, dE76 22.6 from
-/// hazard yellow) and by AREA instead: a small saturated cut face on a dark
-/// body is not signage, whatever its hue, because signage in this game is a
-/// large flat panel. The dark skin also buys the cut face 42.6/255 of local
-/// contrast, which is more than any yellow-on-yellow arrangement could.
+/// hazard yellow) and by SHAPE instead: a cut face on a knobbly root 18px
+/// across is not signage whatever its hue, because signage in this game is a
+/// large flat straight-edged panel on a machine. **Not by area** — the cut is
+/// a seventh of the root by volume, but the repaint below puts it on exactly
+/// the faces this camera sees, so in a play-zoom frame it is over HALF the
+/// root's visible pixels (100 of 186); the argument has to survive that, and
+/// it does. The
+/// dark skin also buys the cut face 42.6/255 of local contrast, which is more
+/// than any yellow-on-yellow arrangement could.
 ///
 /// Ellipsoids and short cylinders rather than one straight shape, because
 /// straightness is what identifies `item_liquid_smoke`'s drum in the same
@@ -2207,10 +2212,17 @@ pub fn item_bottle_bbq(p: &Palette) -> VoxModel {
 /// **Its cap and label band are dark, and that is not a livery choice.** A
 /// bright body under `cap_white` loses the top of its silhouette:
 /// `mustard_gold` is 5.0/255 from `glass_pale`, the neck every bottle
-/// shares, so body, neck and cap would be one pale column. `label_mustard`
-/// does both jobs instead — see [`bottle`], which grew the `cap` parameter
-/// for this, and `palette.ron`, which records why one dark colour serves as
-/// band and cap where the other two bottles use two.
+/// shares, so body and neck are already one mass, and a white cap on top of
+/// them leaves the bottle's whole top — the three-voxel neck and the
+/// two-voxel cap, one five-pixel mark at item size — at 213.9 against a
+/// 192.7 body. That is 21.2 apart, under the 26 that reads, and the pale
+/// column runs from the label band to the crown. (Cap-against-neck 26.6 and
+/// cap-against-body 31.6 each clear the anchor on their own; it is the top
+/// taken together that fails, which is the figure
+/// `a_bottle_s_cap_contrasts_with_the_neck_and_the_body` asserts.)
+/// `label_mustard` does both jobs instead — see [`bottle`], which grew the
+/// `cap` parameter for this, and `palette.ron`, which records why one dark
+/// colour serves as band and cap where the other two bottles use two.
 pub fn item_bottle_mustard(p: &Palette) -> VoxModel {
     bottle(p, "mustard_gold", "label_mustard", "label_mustard")
 }
@@ -2228,10 +2240,16 @@ pub fn item_bottle_mustard(p: &Palette) -> VoxModel {
 /// sake. Both earlier bottles are a dark body under a bright `cap_white`, so
 /// the cap tops the silhouette by contrast; `mustard_gold` is the brightest
 /// body in the game and sits 5.0/255 of luma from `glass_pale`, the neck
-/// every bottle shares, so on a mustard bottle a white cap would merge body,
-/// neck and cap into one pale column and the bottle would lose its top. A
-/// dark cap restores the same contrast the other way up — which is
-/// `box_of_sauce`'s reversed print direction applied to a bottle.
+/// every bottle shares, so on a mustard bottle the neck and a white cap
+/// together come to 213.9 against a 192.7 body — 21.2 apart, under the 26
+/// that reads — and body, neck and cap are one pale column. (Neither pair on
+/// its own says so: the white cap is 26.6 from the neck and 31.6 from the
+/// body. At the ~16px an item draws on a belt the neck is three voxels and
+/// the cap two, so the top is one mark and its combined value is what the
+/// eye gets.) A dark cap restores the same contrast the other way up — which
+/// is `box_of_sauce`'s reversed print direction applied to a bottle, and
+/// `a_bottle_s_cap_contrasts_with_the_neck_and_the_body` asserts it that
+/// way.
 fn bottle(p: &Palette, contents: &str, label: &str, cap: &str) -> VoxModel {
     let mut m = item_volume();
     m.cylinder_z((8, 8), 4.0, (0, 7), p.idx(contents));
@@ -7626,6 +7644,30 @@ mod tests {
         (span(|at| at.0), span(|at| at.1), span(|at| at.2))
     }
 
+    /// [`extent`] with the floor course left out — the vessel, not what
+    /// spilled off it.
+    ///
+    /// Several raws are drawn with a few grains on the ground beside them,
+    /// and `item_mustard_seed`'s go at the DIAGONAL corners of the volume
+    /// (its note says why), so they reach x 0 and x 15: a plain [`extent`] of
+    /// the seed tote is the whole 16-voxel volume, and "the widest thing in
+    /// the row" measured that way is measuring where the spill was placed
+    /// rather than how wide the tote is. Narrowing the whole tote — walls,
+    /// rim and fill — by four voxels left the first cut of the test below
+    /// green, because the spill still spanned x 0..15; measured above the
+    /// floor it goes red. (The review of PR #179 found this by narrowing the
+    /// walls alone, which leaves a 12-wide rim overhanging them, so the
+    /// outline really is still the widest in the row.)
+    fn body_extent(m: &VoxModel) -> (u32, u32, u32) {
+        let span = |f: fn(&(u32, u32, u32)) -> u32| {
+            let above = || m.voxels.keys().filter(|at| at.2 > 0);
+            let lo = above().map(f).min().expect("a body above the floor");
+            let hi = above().map(f).max().unwrap();
+            hi - lo + 1
+        };
+        (span(|at| at.0), span(|at| at.1), span(|at| at.2))
+    }
+
     /// **The mustard branch adds two outlines the row did not have.** Eight
     /// raws now stand on the market plate at 64px, where a thing is
     /// identified by the proportion of its parts (§2b point 31), and the two
@@ -7641,48 +7683,25 @@ mod tests {
     #[test]
     fn the_mustard_raws_add_two_outlines_the_row_did_not_have() {
         let p = palette();
+        // Every measurement here is of the vessel above the floor course,
+        // never of the grains spilled beside it — see [`body_extent`].
         let row = [
+            ("tomato", item_tomato(&p)),
+            ("sugar", item_sugar(&p)),
+            ("vinegar", item_vinegar(&p)),
+            ("spice", item_spice_mix(&p)),
+            ("molasses", item_molasses(&p)),
+            ("smoke", item_liquid_smoke(&p)),
+            ("seed", item_mustard_seed(&p)),
+            ("turmeric", item_turmeric(&p)),
+        ]
+        .map(|(name, m)| {
             (
-                "tomato",
-                extent(&item_tomato(&p)),
-                item_tomato(&p).voxels.len(),
-            ),
-            (
-                "sugar",
-                extent(&item_sugar(&p)),
-                item_sugar(&p).voxels.len(),
-            ),
-            (
-                "vinegar",
-                extent(&item_vinegar(&p)),
-                item_vinegar(&p).voxels.len(),
-            ),
-            (
-                "spice",
-                extent(&item_spice_mix(&p)),
-                item_spice_mix(&p).voxels.len(),
-            ),
-            (
-                "molasses",
-                extent(&item_molasses(&p)),
-                item_molasses(&p).voxels.len(),
-            ),
-            (
-                "smoke",
-                extent(&item_liquid_smoke(&p)),
-                item_liquid_smoke(&p).voxels.len(),
-            ),
-            (
-                "seed",
-                extent(&item_mustard_seed(&p)),
-                item_mustard_seed(&p).voxels.len(),
-            ),
-            (
-                "turmeric",
-                extent(&item_turmeric(&p)),
-                item_turmeric(&p).voxels.len(),
-            ),
-        ];
+                name,
+                body_extent(&m),
+                m.voxels.keys().filter(|at| at.2 > 0).count(),
+            )
+        });
         for (i, a) in row.iter().enumerate() {
             for b in &row[i + 1..] {
                 assert_ne!(
@@ -7696,23 +7715,34 @@ mod tests {
                 );
             }
         }
-        let widest = row.iter().max_by_key(|r| r.1.0).unwrap();
-        assert_eq!(
-            widest.0, "seed",
-            "the open seed tote is the widest thing in the row, not {} ({:?})",
-            widest.0, widest.1
+        // Strict orderings, not `max_by_key`/`min_by_key`: those return the
+        // LAST of a tie, so a raw that merely equalled the record would pass
+        // as holding it.
+        let one = |name: &str| *row.iter().find(|r| r.0 == name).expect("in the row");
+        let rest = |name: &'static str| row.iter().filter(move |r| r.0 != name);
+        let (_, seed, seed_n) = one("seed");
+        assert!(
+            rest("seed").all(|r| r.1.0 < seed.0),
+            "the open seed tote is strictly the widest in the row ({seed:?}), and these are \
+             not narrower: {:?}",
+            rest("seed").filter(|r| r.1.0 >= seed.0).collect::<Vec<_>>()
         );
-        let shortest = row.iter().min_by_key(|r| r.1.2).unwrap();
-        assert_eq!(
-            shortest.0, "turmeric",
-            "the turmeric hand lies lowest in the row, not {} ({:?})",
-            shortest.0, shortest.1
+        let (_, turmeric, turmeric_n) = one("turmeric");
+        assert!(
+            rest("turmeric").all(|r| r.1.2 > turmeric.2),
+            "the turmeric hand lies strictly lowest in the row ({turmeric:?}), and these are \
+             not taller: {:?}",
+            rest("turmeric")
+                .filter(|r| r.1.2 <= turmeric.2)
+                .collect::<Vec<_>>()
         );
-        let sparsest = row.iter().min_by_key(|r| r.2).unwrap();
-        assert_eq!(
-            sparsest.0, "turmeric",
-            "and it is the least of the eight by volume, not {} ({} voxels)",
-            sparsest.0, sparsest.2
+        assert!(
+            rest("turmeric").all(|r| r.2 > turmeric_n),
+            "and it is strictly the least of the eight by volume ({turmeric_n} voxels against \
+             the tote's {seed_n}), unlike {:?}",
+            rest("turmeric")
+                .filter(|r| r.2 <= turmeric_n)
+                .collect::<Vec<_>>()
         );
         // The two new ones are the row's only two broader than they are
         // tall — an open tote and a root lying down, against six standing
@@ -7753,10 +7783,35 @@ mod tests {
             top_of(seed),
             top_of(rim)
         );
+        // The rim is a RING: its top course of `steel_light` is exactly the
+        // one-voxel perimeter of its own mouth. This is the leg that proves
+        // the tote is open — sampling the tote's axis cannot, because the
+        // heap ellipsoid is drawn after the rim and repaints that voxel
+        // whether the mouth was carved or not (the review of PR #179 lidded
+        // the tote with the axis assertion still green).
+        let rim_top = top_of(rim);
+        let course: Vec<_> = tote
+            .voxels
+            .iter()
+            .filter(|e| e.0.2 == rim_top && *e.1 == rim)
+            .collect();
+        let side = |f: fn(&(u32, u32, u32)) -> u32| {
+            let hi = course.iter().map(|e| f(e.0)).max().expect("a rim course");
+            let lo = course.iter().map(|e| f(e.0)).min().unwrap();
+            hi - lo + 1
+        };
+        let (w, d) = (side(|at| at.0), side(|at| at.1));
         assert_eq!(
-            tote.voxels.get(&(8, 8, top_of(rim))),
+            course.len(),
+            (2 * (w + d) - 4) as usize,
+            "the rim is a one-voxel RING round a {w}x{d} mouth, not a lid ({} voxels of \
+             rim metal at z {rim_top})",
+            course.len()
+        );
+        assert_eq!(
+            tote.voxels.get(&(8, 8, rim_top)),
             Some(&seed),
-            "the rim is a RING with the heap coming through it, not a lid"
+            "and the heap comes up through that mouth on the tote's own axis"
         );
         // And the vessel's brightest pixel is its outline (UI_UX.md §4), not
         // the substance in it.
@@ -7771,13 +7826,26 @@ mod tests {
     }
 
     /// **Turmeric is dark with a bright CUT, and the cut has to reach both
-    /// cameras.** Its colour is the reason it is in the recipe, but a root
-    /// painted mostly that colour reads as a hazard marking, so the bright
-    /// flesh is a small accent — placed on the topmost face (both cameras
-    /// look down, §2b points 11 and 35) and on the +X end the game's fixed
-    /// isometric sees (point 11). Asserted as placement and proportion
-    /// rather than voxel counts: those are the two properties
-    /// `palette.ron`'s `turmeric_orange` entry spends its argument on.
+    /// cameras.** Its colour is the reason it is in the recipe, but the skin
+    /// of a root is dull brown, so the flesh goes only where the root is
+    /// broken: the topmost face (both cameras look down, §2b points 11 and
+    /// 35) and the +X end the game's fixed isometric sees (point 11).
+    ///
+    /// **The +X leg is measured as the FACE it is, not as "some flesh out at
+    /// the far end"** — the first cut of this test asked only whether any
+    /// voxel at the model's maximum x was flesh, and the review of PR #179
+    /// deleted the entire +X repaint with the test still green, because the
+    /// dusting of ground root on the FLOOR reaches x 13 as well and a single
+    /// speck at (13, 3, 0) satisfied it. So the floor is excluded and the
+    /// whole +X-facing surface of the root's far end has to be flesh.
+    ///
+    /// The third leg is a VOLUME ratio and says so. It is not the frame's
+    /// area fraction: the repaint puts the cut on exactly the faces this
+    /// camera sees, so in a play-zoom frame the cut is 100 of the root's 186
+    /// visible pixels — over half of it. What keeps that off the
+    /// hazard-marking reading is the root's small organic shape, not its
+    /// share of the picture — `palette.ron`'s `turmeric_orange` entry
+    /// carries that argument.
     #[test]
     fn the_turmeric_root_shows_its_cut_faces_to_both_cameras() {
         let p = palette();
@@ -7785,23 +7853,42 @@ mod tests {
         let flesh = p.idx("turmeric_orange");
         let skin = p.idx("cardboard_dark");
         let top = root.voxels.keys().map(|at| at.2).max().unwrap();
-        let far = root.voxels.keys().map(|at| at.0).max().unwrap();
+        let top_face: Vec<_> = root.voxels.iter().filter(|e| e.0.2 == top).collect();
         assert!(
-            root.voxels
-                .iter()
-                .filter(|e| e.0.2 == top)
-                .all(|e| *e.1 == flesh),
+            top_face.iter().all(|e| *e.1 == flesh),
             "the highest face of the root is all cut flesh"
         );
+        // The +X cut: every voxel of the root's +X-facing surface from the
+        // repaint's own x 11 outward, with the floor left out so the ground
+        // dusting cannot stand in for it.
+        let facing: Vec<_> = root
+            .voxels
+            .iter()
+            .filter(|e| {
+                e.0.2 > 0
+                    && e.0.0 >= 11
+                    && !root.filled(e.0.0 as i32 + 1, e.0.1 as i32, e.0.2 as i32)
+            })
+            .collect();
         assert!(
-            root.voxels.iter().any(|e| e.0.0 == far && *e.1 == flesh),
-            "and a second cut faces +X, where the game camera is"
+            facing.len() >= top_face.len(),
+            "the +X cut ({} voxels) is no smaller than the top cut ({}) — the game's camera \
+             is the one a player watches an item on a belt with",
+            facing.len(),
+            top_face.len()
+        );
+        assert!(
+            facing.iter().all(|e| *e.1 == flesh),
+            "and all of it is cut flesh rather than skin (only {} of {} are)",
+            facing.iter().filter(|e| *e.1 == flesh).count(),
+            facing.len()
         );
         let cut = root.voxels.values().filter(|&&c| c == flesh).count();
         let body = root.voxels.values().filter(|&&c| c == skin).count();
         assert!(
             cut * 4 < body,
-            "the cut stays an accent on a dark root ({cut} flesh against {body} skin)"
+            "and by VOLUME the cut stays a fraction of a dark root ({cut} flesh against \
+             {body} skin) — see this test's doc for what the frame shows"
         );
     }
 
@@ -7875,16 +7962,26 @@ mod tests {
         }
     }
 
-    /// **A bottle's cap has to contrast with the neck it stands on**, and
-    /// which direction that contrast runs depends on the sauce. Every bottle
-    /// shares a `glass_pale` neck, so `cap_white` tops a dark ketchup or BBQ
-    /// bottle and would vanish into a `mustard_gold` one — 5.0/255 of luma
-    /// from the neck — which is why [`bottle`] takes a `cap` at all.
+    /// **A bottle's TOP has to contrast with its body**, and which direction
+    /// that contrast runs depends on the sauce. Every bottle shares a
+    /// `glass_pale` neck, so `cap_white` tops a dark ketchup or BBQ bottle
+    /// and loses a `mustard_gold` one, which is why [`bottle`] takes a `cap`
+    /// at all.
     ///
-    /// Asserted as the PROPERTY rather than as the colours: a cap that is
-    /// 26/255 from both the neck and the body tops the silhouette whatever
-    /// paint a fourth sauce picks, and a fourth sauce copying `cap_white`
-    /// onto a pale body fails here instead of in a screenshot.
+    /// **The pairwise legs are not what catches that**, and the first cut of
+    /// this test claimed they were (the review of PR #179 falsified it in
+    /// thirty seconds): `cap_white` on a mustard body is 26.6 from the neck
+    /// and 31.6 from the body, so both clear the 26/255 anchor and the bottle
+    /// still loses its top. What fails is the top taken TOGETHER. At the
+    /// ~16px an item draws on a belt the three-voxel neck and the two-voxel
+    /// cap are one mark of about five pixels, and their area-weighted value
+    /// is what the eye compares with the body: 213.9 against a 192.7 body,
+    /// 21.2 apart. `label_mustard` puts that mark at 111.1 — 81.6 from the
+    /// body — and the silhouette keeps its top.
+    ///
+    /// So all three legs are asserted as properties rather than as colours,
+    /// and the combined one is the one that bites: a fourth sauce copying
+    /// `cap_white` onto a pale body fails here instead of in a screenshot.
     #[test]
     fn a_bottle_s_cap_contrasts_with_the_neck_and_the_body() {
         let p = palette();
@@ -7913,6 +8010,30 @@ mod tests {
                 (luma(cap) - luma(body)).abs() >= 26.0,
                 "{name}'s cap is {:.1} from its body",
                 (luma(cap) - luma(body)).abs()
+            );
+            // The leg that bites: neck and cap as the one mark they are at
+            // item size, area-weighted over the voxels each contributes,
+            // against the body colour that fills the rest of the silhouette.
+            let neck_z = model
+                .voxels
+                .iter()
+                .filter(|e| *e.1 == neck)
+                .map(|e| e.0.2)
+                .min()
+                .expect("the glass neck starts somewhere");
+            let above: Vec<f64> = model
+                .voxels
+                .iter()
+                .filter(|e| e.0.2 >= neck_z)
+                .map(|e| luma(*e.1))
+                .collect();
+            let mark = above.iter().sum::<f64>() / above.len() as f64;
+            assert!(
+                (mark - luma(body)).abs() >= 26.0,
+                "{name}'s neck and cap together read as {mark:.1} against a body at {:.1} \
+                 ({:.1} apart), and at ~16px that pair is one mark of five pixels",
+                luma(body),
+                (mark - luma(body)).abs()
             );
         }
     }
