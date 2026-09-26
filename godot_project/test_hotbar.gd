@@ -299,6 +299,41 @@ func _initialize() -> void:
 		return
 	main._exit_build_mode()
 
+	# --- The mode tab beside the strip follows every mode change -----------
+	# Driven through the real keys, and the expected mode is named here rather
+	# than read back from `_build_mode()`, so a tab that printed whatever that
+	# function said would still fail if the function stopped tracking the keys.
+	var tab: PanelContainer = main._mode_indicator
+	if tab == null or not main._hotbar_root.is_ancestor_of(tab):
+		_fail("there is no mode tab in the hotbar's column")
+		return
+	var seen := {}
+	for step in [
+		[-1, "select"],
+		[main.HOTBAR_KEYCODES[0], "place"],
+		[KEY_X, "remove"],
+		[KEY_X, "select"],
+		[main.HOTBAR_KEYCODES[0], "place"],
+		[KEY_ESCAPE, "select"],
+	]:
+		if step[0] != -1:
+			_press(main, step[0])
+		var mode: String = step[1]
+		var entry: Dictionary = main.BUILD_MODES[mode]
+		var text: String = main._mode_indicator_label.text
+		if not text.contains(entry["glyph"]) or not text.contains(entry["word"]):
+			_fail("in %s mode the tab should read '%s %s', reads '%s'" % [mode, entry["glyph"], entry["word"], text])
+			return
+		# UI_UX.md §7: the rule colour changes too, but never alone.
+		var style: StyleBoxFlat = tab.get_theme_stylebox("panel")
+		if style == null or style.border_color != entry["rule"]:
+			_fail("in %s mode the tab's rule should be that mode's colour" % mode)
+			return
+		seen[text] = true
+	if seen.size() != main.BUILD_MODES.size():
+		_fail("every mode should read differently on the tab, saw %s" % [seen.keys()])
+		return
+
 	# --- The hover tooltip carries the two verbs --------------------------
 	# This is what makes the rebinding discoverable without reading source.
 	main._on_hotbar_slot_hovered(0)
@@ -330,5 +365,5 @@ func _initialize() -> void:
 			_fail("a control legend never names the hotbar keys: '%s'" % legend)
 			return
 
-	print("HOTBAR_OK: an always-visible %d-slot strip built from the catalog, empty sockets show no count, a number key selects with no menu open and again to deselect, clicks match keys, every exit route clears the caret, and the tooltip carries both verbs" % main._hotbar_slots.size())
+	print("HOTBAR_OK: an always-visible %d-slot strip built from the catalog, empty sockets show no count, a number key selects with no menu open and again to deselect, clicks match keys, every exit route clears the caret, the mode tab follows every mode, and the tooltip carries both verbs" % main._hotbar_slots.size())
 	quit(0)

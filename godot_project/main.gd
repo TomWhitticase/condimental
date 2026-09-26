@@ -1287,6 +1287,22 @@ var _storage_state: Dictionary = {} # base_cap / slot_stack / total_bays / used_
 var _build_kind := ""
 var _build_direction := "east"
 var _remove_mode := false
+## The three answers to "what does a click do right now", and the ONE place
+## each is named. `_build_mode()` picks the key from the two variables above;
+## the mode tab beside the hotbar (`_update_mode_indicator`) prints the glyph
+## and word from here and colours its rule from here, so a new mode is one
+## entry and one branch, never a second list in the HUD to keep in step.
+## Glyph AND word AND rule colour — UI_UX.md §7, never colour alone. The rules
+## are the placement prompt's own green and red (`_placement_prompt_style`),
+## and SELECT takes the plates' hazard yellow: it is the resting state.
+const BUILD_MODES := {
+	"select": {"glyph": "○", "word": "SELECT", "rule": Color(0.85, 0.63, 0.11, 0.95)},
+	"place": {"glyph": "■", "word": "PLACE", "rule": Color(0.35, 0.85, 0.45, 0.95)},
+	"remove": {"glyph": "✕", "word": "REMOVE", "rule": Color(0.92, 0.35, 0.30, 0.95)},
+}
+var _mode_indicator: PanelContainer
+var _mode_indicator_label: Label
+var _mode_indicator_styles: Dictionary = {} # BUILD_MODES key -> StyleBoxFlat, built once
 var _ghost_root: Node3D
 var _ghost_asset := ""
 var _ghost_tile := Vector2i.ZERO
@@ -13032,7 +13048,18 @@ func _build_hotbar(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_hotbar_flyout.label_settings = flyout_settings
 	_hotbar_flyout.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_hotbar_flyout.modulate = Color(1, 1, 1, 0)
-	_hotbar_root.add_child(_hotbar_flyout)
+
+	# The flyout shares its row with the mode tab: a MarginContainer stacks
+	# its children, so the flyout stays centred over the sockets and the tab
+	# sits on the plate's left end without making the column any taller (the
+	# strip is nearly the window's width at 1280, so there is no room BESIDE
+	# it, and every panel above caps itself against this column's height).
+	var top_row := MarginContainer.new()
+	top_row.name = "HotbarTopRow"
+	top_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hotbar_root.add_child(top_row)
+	top_row.add_child(_hotbar_flyout)
+	_build_mode_indicator(top_row, base_settings)
 
 	# Nearly opaque, like the build menu's own plate rather than the help
 	# strip's lighter one: at 0.80 the floor's diamond tiling showed through
@@ -13277,6 +13304,9 @@ func _hotbar_selected_index() -> int:
 ## an eleven-entry object per frame is the same cost the contract clipboard
 ## already pays, and it is what keeps the hotbar honest with no push channel.
 func _update_hotbar() -> void:
+	# Every route into or out of a mode ends here (enter, toggle, exit), so
+	# this is the one call that keeps the tab honest.
+	_update_mode_indicator()
 	if _hotbar_slots.is_empty():
 		return
 	var snapshot = JSON.parse_string(sim.shop_snapshot_json())
@@ -13369,6 +13399,49 @@ func _position_hotbar() -> void:
 	_hotbar_root.set_anchors_and_offsets_preset(
 		Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE, HOTBAR_BOTTOM_MARGIN
 	)
+
+
+## The mode tab: a small plate on the hotbar's top-left edge saying which
+## `BUILD_MODES` entry a click is in. The placement prompt says the same thing
+## beside the cursor, but only while a ghost is on a tile — this is the one
+## readout that is there in every mode, including the resting one.
+func _build_mode_indicator(row: Control, base_settings: LabelSettings) -> void:
+	for mode in BUILD_MODES:
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color(0.06, 0.06, 0.07, 0.93)
+		style.border_color = BUILD_MODES[mode]["rule"]
+		style.border_width_top = _ui_i(3)
+		style.content_margin_left = _ui_px(8.0)
+		style.content_margin_right = _ui_px(8.0)
+		style.content_margin_top = _ui_px(3.0)
+		style.content_margin_bottom = _ui_px(2.0)
+		_mode_indicator_styles[mode] = style
+
+	_mode_indicator = PanelContainer.new()
+	_mode_indicator.name = "ModeIndicator"
+	_mode_indicator.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_mode_indicator.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_mode_indicator.size_flags_vertical = Control.SIZE_SHRINK_END
+	row.add_child(_mode_indicator)
+
+	var settings := LabelSettings.new()
+	settings.font_size = _ui_font(-1)
+	settings.font_color = Color(0.92, 0.93, 0.95)
+	settings.outline_size = base_settings.outline_size
+	settings.outline_color = base_settings.outline_color
+	_mode_indicator_label = Label.new()
+	_mode_indicator_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_mode_indicator_label.label_settings = settings
+	_mode_indicator.add_child(_mode_indicator_label)
+	_update_mode_indicator()
+
+
+func _update_mode_indicator() -> void:
+	if _mode_indicator == null:
+		return
+	var mode := _build_mode()
+	_mode_indicator_label.text = "%s %s" % [BUILD_MODES[mode]["glyph"], BUILD_MODES[mode]["word"]]
+	_mode_indicator.add_theme_stylebox_override("panel", _mode_indicator_styles[mode])
 
 
 ## Terraria's framed hover panel, in this scene's plate styling: the kind's
@@ -13663,7 +13736,17 @@ func _anything_open() -> bool:
 
 
 func _in_build_mode() -> bool:
-	return _build_kind != "" or _remove_mode
+	return _build_mode() != "select"
+
+
+## Which `BUILD_MODES` entry the player is in. Remove is checked first only
+## for safety: the two variables are exclusive by construction.
+func _build_mode() -> String:
+	if _remove_mode:
+		return "remove"
+	if _build_kind != "":
+		return "place"
+	return "select"
 
 
 ## Cycles the ghost's facing one quarter turn CLOCKWISE — the same single

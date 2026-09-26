@@ -691,6 +691,12 @@ one-line larder strip that used to sit above the sockets.
    Buying stays in the build menu (**E**) on left-click or SHIFT+number, and
    SHIFT+number works **only while the menu is open**, where price and
    balance are on screen.
+4. **A mode tab on the plate's top-left end** says what a click does right
+   now — `○ SELECT`, `■ PLACE` or `✕ REMOVE` — in every mode, the resting
+   one included (the placement prompt only speaks while a ghost is on a
+   tile). Glyph, word and rule colour (hazard yellow / the prompt's green /
+   its red) all come from `BUILD_MODES` in `main.gd`, the one table the modes
+   are named in. It shares the name flyout's row, so the column is no taller.
 
 Borrowed patterns: a selector bigger than its slot and a fading name flyout
 (Minecraft); a framed hover spec sheet with kind, count, price and both verbs
