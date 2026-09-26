@@ -592,7 +592,7 @@ impl SimBridge {
     ///   {"id": "corner_shop", "name": "Corner Shop Standing Order",
     ///    "mix": [["boxed_ketchup", 2]], "cadence_ticks": 1000,
     ///    "payout": 50.0, "price": 40.0, "strikes": 3, "starter": false,
-    ///    "active": true, "affordable": true, "times_lost": 0},
+    ///    "active": false, "affordable": true, "times_lost": 0},
     ///   ...
     /// ]
     /// ```

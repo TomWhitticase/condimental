@@ -250,10 +250,11 @@ implementation history (epics, tickets, balancing passes) behind each one.
   payout, `price` to sign and a `strikes` count. A new game runs none of
   them (since 2026-09-26; a `starter` flag would run one from tick 0, and
   the shipped board sets it on nothing) — every contract is signed from the
-  contracts board (**C**) for its price. Missing `strikes` windows in a row loses the
-  contract (losing IS the penalty, no fine on top); a paid window resets the
-  count. A signed contract takes its file-order position in the active
-  list, which is also the deterministic tiebreak for scarcity.
+  contracts board (**C**) for its price. Missing `strikes` windows in a
+  row loses the contract (losing IS the penalty, no fine on top); a paid
+  window resets the count. A signed contract takes its file-order position
+  in the active list, which is also the deterministic tiebreak for
+  scarcity.
 - **Each dock holds its own stock, and contracts draw on the docks
   together** (per dock since 2026-09-26; one shared pool before that). A
   contract is satisfied at its cadence boundary only if the docks able to

@@ -1879,8 +1879,9 @@ var _market_open := false
 
 # --- The contracts board (the contract-board epic, 2026-09-10) -------------
 # `data/contracts.ron` is a board of OFFERS since its schema 2: a new game
-# runs no contract, and every contract is SIGNED here for its price. A contract that misses its strikes in a row is LOST and comes back
-# here to be signed again, at the same price. Built from
+# runs no contract, and every contract is SIGNED here for its price. A
+# contract that misses its strikes in a row is LOST and comes back here
+# to be signed again, at the same price. Built from
 # `economy_snapshot_json`'s `board` array the way the build menu is built
 # from `shop_snapshot_json`'s entries: one row per offer, in file (=
 # priority) order, nothing hardcoded — a fifth contract in the file is a
