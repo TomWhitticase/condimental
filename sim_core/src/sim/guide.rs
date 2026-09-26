@@ -100,13 +100,25 @@ pub enum GuideFact {
     /// belts, pipes and the dock too, so prose that said machine would be
     /// wrong by four.
     BuyableCount,
-    /// How many priced raws `data/ingredients.ron` holds.
+    /// How many priced raws `data/ingredients.ron` holds, gated ones
+    /// included — the size of the file, not of the market.
     RawCount,
+    /// How many of those raws the market will actually sell at the current
+    /// delivery count. Three of the six are behind the BBQ gate today, so
+    /// prose that called `raw_count` "on the market" was wrong by three.
+    OpenRawCount,
     /// How many sauces the book has pages for.
     SauceCount,
-    /// How many orders `data/contracts.ron` holds in all.
+    /// How many orders `data/contracts.ron` holds in all, gated ones
+    /// included.
     ContractCount,
-    /// How many of those are `starter: true`.
+    /// How many of those the board is showing at the current delivery count
+    /// — the ones with no gate, or whose gate has opened.
+    OpenContractCount,
+    /// How many of those are `starter: true`: active in a new game without
+    /// being signed. Not "the ones a new player may sign", which is
+    /// [`GuideFact::OpenContractCount`] — only `corner_shop` is a starter,
+    /// while nine of the thirteen are ungated.
     StarterContracts,
     /// `economy::DELIVERY_STOCK_CAPACITY`.
     DockCapacity,
@@ -125,14 +137,16 @@ pub enum GuideFact {
 impl GuideFact {
     /// Every fact, in a stable order — the order the wire lists them in, so
     /// a diff of two snapshots reads consistently.
-    pub const ALL: [GuideFact; 14] = [
+    pub const ALL: [GuideFact; 16] = [
         GuideFact::StartingMoney,
         GuideFact::CheapestBuyable,
         GuideFact::CheapestBuyablePrice,
         GuideFact::BuyableCount,
         GuideFact::RawCount,
+        GuideFact::OpenRawCount,
         GuideFact::SauceCount,
         GuideFact::ContractCount,
+        GuideFact::OpenContractCount,
         GuideFact::StarterContracts,
         GuideFact::DockCapacity,
         GuideFact::StartingCrew,
@@ -150,8 +164,10 @@ impl GuideFact {
             GuideFact::CheapestBuyablePrice => "cheapest_buyable_price",
             GuideFact::BuyableCount => "buyable_count",
             GuideFact::RawCount => "raw_count",
+            GuideFact::OpenRawCount => "open_raw_count",
             GuideFact::SauceCount => "sauce_count",
             GuideFact::ContractCount => "contract_count",
+            GuideFact::OpenContractCount => "open_contract_count",
             GuideFact::StarterContracts => "starter_contracts",
             GuideFact::DockCapacity => "dock_capacity",
             GuideFact::StartingCrew => "starting_crew",
@@ -169,8 +185,10 @@ impl GuideFact {
             | GuideFact::StartingWageBill => GuideFactKind::Money,
             GuideFact::BuyableCount
             | GuideFact::RawCount
+            | GuideFact::OpenRawCount
             | GuideFact::SauceCount
             | GuideFact::ContractCount
+            | GuideFact::OpenContractCount
             | GuideFact::StarterContracts
             | GuideFact::DockCapacity
             | GuideFact::StartingCrew
@@ -353,9 +371,15 @@ impl GuideRegistry {
                     });
                 }
             }
-            // The tagline carries placeholders too — `money`'s does — so
-            // every piece of prose on the page is checked, not just the body.
-            for text in std::iter::once(&topic.tagline).chain(topic.body.iter()) {
+            // Every piece of prose on the page is checked, not just the
+            // body: the tagline carries placeholders (`money`'s does), and
+            // the title is prose the panel renders through the same
+            // substitution, so a typo there would put braces on screen in
+            // the largest font the book owns.
+            for text in std::iter::once(&topic.title)
+                .chain(std::iter::once(&topic.tagline))
+                .chain(topic.body.iter())
+            {
                 for name in
                     placeholders(text).map_err(|()| GuideLoadError::UnclosedPlaceholder {
                         id: topic.id.clone(),
@@ -448,7 +472,8 @@ mod tests {
             .ordered()
             .iter()
             .flat_map(|t| {
-                std::iter::once(&t.tagline)
+                std::iter::once(&t.title)
+                    .chain(std::iter::once(&t.tagline))
                     .chain(t.body.iter())
                     .flat_map(|text| placeholders(text).expect("shipped prose parses"))
             })
@@ -469,7 +494,10 @@ mod tests {
         // needed at all, so the check is simply that there are none.
         let guide = GuideRegistry::bundled();
         for topic in guide.ordered() {
-            for text in std::iter::once(&topic.tagline).chain(topic.body.iter()) {
+            for text in std::iter::once(&topic.title)
+                .chain(std::iter::once(&topic.tagline))
+                .chain(topic.body.iter())
+            {
                 // Placeholders are stripped first: `{payday_ticks}` has no
                 // digits, but a future fact name might.
                 let mut prose = text.clone();
@@ -507,6 +535,51 @@ mod tests {
             }
             other => panic!("expected an unknown-placeholder error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_typo_in_a_title_is_a_load_error_too() {
+        // The title is substituted like every other line on the page, so a
+        // placeholder nothing answers would render as braces in the biggest
+        // font the book owns. This test exists because the first version of
+        // the loader checked the tagline and the body and not the title.
+        let text = r#"(
+            schema_version: 1,
+            topics: [
+                GuideTopic(
+                    id: "money",
+                    title: "Money, and your {starting_mony}",
+                    tagline: "You open with {starting_money}.",
+                    body: ["Spend it well."],
+                ),
+            ],
+        )"#;
+        match GuideRegistry::from_ron_str(text) {
+            Err(GuideLoadError::UnknownPlaceholder { id, name, .. }) => {
+                assert_eq!(id, "money");
+                assert_eq!(name, "starting_mony");
+            }
+            other => panic!("expected an unknown-placeholder error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_unclosed_brace_in_a_title_is_a_load_error_too() {
+        let text = r#"(
+            schema_version: 1,
+            topics: [
+                GuideTopic(
+                    id: "money",
+                    title: "Money, and your {starting_money",
+                    tagline: "You open with {starting_money}.",
+                    body: ["Spend it well."],
+                ),
+            ],
+        )"#;
+        assert!(matches!(
+            GuideRegistry::from_ron_str(text),
+            Err(GuideLoadError::UnclosedPlaceholder { .. })
+        ));
     }
 
     #[test]

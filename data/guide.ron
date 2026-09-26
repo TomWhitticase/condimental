@@ -34,6 +34,11 @@
 //   tagline  one line under the heading, the plate's subtitle
 //   body     the paragraphs, in order. At least one, none of them blank.
 //
+// A `{placeholder}` works in ANY of title, tagline and body: all three are
+// checked at load and all three are substituted on screen. The title was the
+// one line the first version of the loader did not check, which let a typo
+// there reach the page as six braces in the largest font the book owns.
+//
 // WHAT DOES NOT BELONG HERE. Anything a registry already answers: a recipe's
 // steps, a machine's job, an ingredient's price. Those are the book's other
 // pages, built from the files that own them, and repeating one of them as
@@ -49,7 +54,7 @@
             tagline: "Buy raw, make sauce, ship cases, get paid. Everything else is detail.",
             body: [
                 "This whole factory is one loop. Buy a raw ingredient, run it through machines until it is a case of sauce, and get that case onto the dock before a contract's window closes. The dock pays. Nothing else does.",
-                "The world starts empty on purpose. There are {buyable_count} kinds of thing you can buy and place, {raw_count} raws on the market, and {sauce_count} sauces the machines already know how to make. Nothing is built for you, and nothing is made until you build it.",
+                "The world starts empty on purpose. There are {buyable_count} kinds of thing you can buy and place, and the market will sell you {open_raw_count} of the {raw_count} raw ingredients in this book right now — anything it is not selling yet sits behind a gate. The machines already know how to make the {sauce_count} sauces in this book. Nothing is built for you, and nothing is made until you build it.",
                 "A machine runs only when everything its recipe asks for is touching it: solids arrive on belt, fluids arrive down pipe. A machine with one input missing waits quietly and forever, which is why the first line you build should be the shortest one that can finish a case.",
             ],
         ),
@@ -68,7 +73,7 @@
             title: "Contracts",
             tagline: "An order is a promise with a clock on it.",
             body: [
-                "The board carries {contract_count} orders in all, of which {starter_contracts} are open to a brand-new factory. Each names a mix of cases, how often it wants them, what it pays, and what it costs to sign.",
+                "Of the {contract_count} orders in the file, {open_contract_count} are on the board of a brand-new factory; the rest are behind a gate. Each order names a mix of cases, how often it wants them, what it pays, and what it costs to sign. You start with {starter_contracts} of them already active, signed on your behalf.",
                 "Sign one and the clock starts. Ship the mix inside the window and it pays; miss the window and it takes a strike. Run out of strikes and the order is gone, and so is the price you paid for it. Signing more than the line can feed is the most expensive mistake available early.",
                 "The dock holds at most {dock_capacity} of any one case, so it is a loading bay and not a warehouse. Past that ceiling the packer behind it backs up.",
             ],
@@ -88,7 +93,7 @@
             title: "Building",
             tagline: "The layout is the choice. There is no recipe picker anywhere in this game.",
             body: [
-                "What a machine makes is decided by what is touching it. A crusher fed tomatoes makes paste; the same crusher fed mustard seed makes meal. Re-routing a belt is how you change the plan, and it is the only way.",
+                "What a machine makes is decided by what is touching it. One kind of machine may know several recipes, and it starts the first one whose every input has arrived — deliver something else to it and it makes something else. Re-routing a belt is how you change the plan, and it is the only way.",
                 "Solids ride belt, fluids ride pipe, and the two do not substitute for each other: a mixer outlet that wants a pipe will not accept a belt. Hoppers hold bought solids and tanks hold bought fluids, and both can be left to refill themselves from the market.",
                 "Nothing is wasted by a line that is not finished. A machine missing an input waits instead of guessing, and the production screen will tell you which machine is waiting and what it is waiting for.",
             ],

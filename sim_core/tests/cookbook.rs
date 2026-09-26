@@ -402,7 +402,8 @@ fn the_guide_ships_pages_and_every_one_of_them_asks_the_sim_for_its_numbers() {
         .guide
         .iter()
         .map(|topic| {
-            std::iter::once(&topic.tagline)
+            std::iter::once(&topic.title)
+                .chain(std::iter::once(&topic.tagline))
                 .chain(topic.body.iter())
                 .map(|text| text.matches('{').count())
                 .sum::<usize>()
@@ -442,6 +443,19 @@ fn every_fact_the_guide_can_ask_for_is_answered_from_the_content_files() {
         book.ingredients.len() as f64,
         "the raws the guide counts are the raws the book has pages for"
     );
+    // "On the market" is not "in the file". Three of the six raws sit behind
+    // the BBQ gate in a new game, so a sentence that called `raw_count` the
+    // market was wrong by three — that is what `open_raw_count` is for.
+    assert_eq!(
+        fact("open_raw_count").number,
+        book.ingredients.iter().filter(|page| !page.locked).count() as f64,
+        "the open raws are the book's own ingredient pages that are not locked"
+    );
+    assert!(
+        fact("open_raw_count").number < fact("raw_count").number,
+        "a new game with every raw already on sale has no gate left to open,          and the guide's prose about waiting behind gates would be a lie"
+    );
+
     assert_eq!(
         fact("buyable_count").number,
         sim_core::sim::ShopCatalog::bundled().entries().len() as f64
@@ -487,6 +501,24 @@ fn every_fact_the_guide_can_ask_for_is_answered_from_the_content_files() {
         f64::from(first.after_deliveries)
     );
 
+    // The orders the board is showing a brand-new factory, which is neither
+    // the file's count nor the starters: a starter is one the game signs for
+    // you, and there is one of those, while nine are simply ungated.
+    let open_now = contracts
+        .ordered()
+        .iter()
+        .filter(|c| unlocks.contract_available(&c.id, 0))
+        .count();
+    assert_eq!(fact("open_contract_count").number, open_now as f64);
+    assert!(
+        fact("open_contract_count").number > fact("starter_contracts").number,
+        "if the only orders on a new board were the ones already signed,          there would be nothing for a new player to sign"
+    );
+    assert!(
+        fact("open_contract_count").number < fact("contract_count").number,
+        "a board that shows every order at zero deliveries has no gated          orders, and the guide says it has"
+    );
+
     // The cheapest thing on the shelf goes out as an ID, titled by Godot
     // like every other id on this wire.
     let shop = sim_core::sim::ShopCatalog::bundled();
@@ -500,5 +532,58 @@ fn every_fact_the_guide_can_ask_for_is_answered_from_the_content_files() {
     assert_eq!(
         fact("cheapest_buyable_price").number,
         cheapest.price_money().to_num::<f64>()
+    );
+}
+
+/// The two counts that mean "right now" have to move with the gates, and the
+/// two that mean "in the file" have to stay put. This is the finding that
+/// sent the first version of the BASICS prose back: it said six raws were on
+/// the market when three were behind a gate, and the only reason nothing
+/// caught it is that no fact knew the difference.
+#[test]
+fn the_open_counts_follow_the_gates_and_the_file_counts_do_not() {
+    let fact = |book: &CookbookSnapshot, id: &str| {
+        book.facts
+            .iter()
+            .find(|f| f.id == id)
+            .unwrap_or_else(|| panic!("no fact answers {{{id}}}"))
+            .number
+    };
+
+    let new_game = book_after(0);
+    // Past every gate the shipped file holds, without driving a dock to get
+    // there, for `book_after`'s own reason.
+    let veteran = book_after(10_000);
+
+    assert_eq!(
+        fact(&new_game, "raw_count"),
+        fact(&veteran, "raw_count"),
+        "the file's raws do not change because somebody shipped a box"
+    );
+    assert_eq!(
+        fact(&new_game, "contract_count"),
+        fact(&veteran, "contract_count"),
+    );
+    assert_eq!(
+        fact(&new_game, "starter_contracts"),
+        fact(&veteran, "starter_contracts"),
+        "a starter is a property of the order, not of your progress"
+    );
+
+    assert!(
+        fact(&veteran, "open_raw_count") > fact(&new_game, "open_raw_count"),
+        "a gate that opens puts a raw on the market, so the guide's count of \
+         what the market sells has to rise with it"
+    );
+    assert_eq!(
+        fact(&veteran, "open_raw_count"),
+        fact(&veteran, "raw_count"),
+        "past every gate, everything in the file is for sale"
+    );
+    assert!(fact(&veteran, "open_contract_count") > fact(&new_game, "open_contract_count"));
+    assert_eq!(
+        fact(&veteran, "open_contract_count"),
+        fact(&veteran, "contract_count"),
+        "past every gate, the board shows the whole file"
     );
 }

@@ -146,7 +146,7 @@ func _finish() -> void:
 	if _failed:
 		quit(1)
 		return
-	print("COOKBOOK_OK: the tree is cookbook_json — a node per sauce in its tier column, an orthogonal labelled edge per sauce-into-sauce, all on the canvas meta _draw() renders from; a locked family is a silhouette with its gate and a gate-only page; an unlocked page is its wire entry, counts, stages in order, seconds and never ticks; stages, rows and the breadcrumb link the pages; no id, name or contract in the book is written anywhere in cookbook_panel.gd; B opens it and closes E/M/C/H/P and each of them closes it, ESC walks back then closes without the pause menu, both legends name B; polled on the tick only while open, an unchanged book redraws nothing, and the pause menu hosts the same panel; BASICS is data/guide.ron — a chip per topic, every paragraph on its page with every placeholder filled from the wire, no brace on screen, ticks read as seconds, and no sentence of the prose written in GDScript")
+	print("COOKBOOK_OK: the tree is cookbook_json — a node per sauce in its tier column, an orthogonal labelled edge per sauce-into-sauce, all on the canvas meta _draw() renders from; a locked family is a silhouette with its gate and a gate-only page; an unlocked page is its wire entry, counts, stages in order, seconds and never ticks; stages, rows and the breadcrumb link the pages; no id, name or contract in the book is written anywhere in cookbook_panel.gd; B opens it and closes E/M/C/H/P and each of them closes it, ESC walks back then closes without the pause menu, both legends name B; polled on the tick only while open, an unchanged book redraws nothing, and the pause menu hosts the same panel; BASICS is data/guide.ron — a chip per topic, every paragraph on its page with every placeholder filled from the wire, no brace on screen even when a title asks for a fact, ticks read as seconds, KEEP READING walking sideways rather than deeper, a breadcrumb capped however far the walk goes, and no sentence of the prose written in GDScript")
 	quit(0)
 
 
@@ -464,7 +464,7 @@ func _check_basics(book: Dictionary) -> void:
 		if chip == null:
 			_fail("the tree shows no BASICS chip for %s" % id)
 			continue
-		if (chip as Button).text != String(topic.get("title", "")):
+		if (chip as Button).text != _fill_expected(book, String(topic.get("title", ""))):
 			_fail("the %s chip is not titled what data/guide.ron titles it" % id)
 
 	for topic in topics:
@@ -480,7 +480,7 @@ func _check_basics(book: Dictionary) -> void:
 			continue
 
 		var screen := _screen()
-		if screen.find(String(topic.get("title", ""))) < 0:
+		if screen.find(_fill_expected(book, String(topic.get("title", "")))) < 0:
 			_fail("the %s page is not titled with the file's title" % id)
 		# A brace on screen is the one failure this whole design exists to
 		# prevent: it means prose asked for a fact nothing answered.
@@ -489,24 +489,24 @@ func _check_basics(book: Dictionary) -> void:
 		if screen.to_lower().find("tick") >= 0:
 			_fail("the %s page says tick; player-facing clocks are seconds" % id)
 
-		var prose: Array = [String(topic.get("tagline", ""))]
+		# The title is prose too, and it substitutes like the rest of them.
+		var prose: Array = [String(topic.get("title", "")), String(topic.get("tagline", ""))]
 		prose.append_array(topic.get("body", []))
 		for paragraph in prose:
 			var text := String(paragraph)
 			if text == "":
 				continue
-			# Compared in pieces around the placeholders, because the whole
-			# paragraph never appears on screen verbatim — the numbers in it
-			# are substituted by the time it is drawn.
-			for piece in _split_prose(text):
-				if piece.length() >= 8 and screen.find(piece) < 0:
-					_fail("the %s page drops \"%s\"" % [id, piece])
+			# The WHOLE line, filled: prose and numbers in one string, not the
+			# words and the values checked apart from one another. A value
+			# checked on its own is barely checked at all — `sauce_count` is
+			# "2", and a page that dropped it entirely still has a "2" in
+			# the "12" further down, so `find` could not fail.
 			for name in _placeholders(text):
-				var wanted := _fact_text(book, name)
-				if wanted == "":
+				if _fact_text(book, name) == "":
 					_fail("the %s page asks for {%s} and the wire answers nothing" % [id, name])
-				elif screen.find(wanted) < 0:
-					_fail("the %s page does not show the wire's %s (%s)" % [id, name, wanted])
+			var filled := _fill_expected(book, text)
+			if screen.find(filled) < 0:
+				_fail("the %s page does not show \"%s\"" % [id, filled])
 
 		# Every other topic is reachable without going back to the tree.
 		for other in topics:
@@ -517,24 +517,141 @@ func _check_basics(book: Dictionary) -> void:
 			_fail("a BASICS page does not walk back")
 		_panel().show_tree()
 
+	_check_keep_reading_is_sideways(topics)
+	_check_the_breadcrumb_is_capped(book)
+	_check_a_title_is_filled_like_any_other_line(book)
 	_check_prose_is_not_in_gdscript(topics)
 
 
-## The prose either side of each `{placeholder}`, which is what actually gets
-## drawn.
-func _split_prose(text: String) -> Array:
-	var out: Array = []
+## Reading one topic after another is a walk ALONG the BASICS section, not a
+## walk down into it: a KEEP READING chip replaces the page, so BACK still
+## means "back to the tree" at the end of a long read and the breadcrumb does
+## not grow a crumb per click. Counted in crumbs, never in pixels — a
+## headless run lays nothing out, so the width this protects is not something
+## this test can see (`godot_project/CLAUDE.md`).
+func _check_keep_reading_is_sideways(topics: Array) -> void:
+	if topics.size() < 2:
+		return
+	_panel().show_tree()
+	var first := String(topics[0].get("id", ""))
+	var chip := _node("Topic_%s" % first)
+	if chip == null:
+		_fail("no chip for %s to start a sideways walk from" % first)
+		return
+	(chip as Button).pressed.emit()
+	var hops := 0
+	for topic in topics:
+		var id := String(topic.get("id", ""))
+		var next := _node("Topic_%s" % id)
+		if next == null:
+			continue
+		(next as Button).pressed.emit()
+		hops += 1
+		if String(_panel().view().get("id", "")) != id:
+			_fail("KEEP READING's %s chip does not open %s" % [id, id])
+		if _crumbs() > 1:
+			_fail(
+				"%d crumbs after %d sideways hops — a sibling page is not a level deeper"
+				% [_crumbs(), hops]
+			)
+	if hops < 1:
+		_fail("no KEEP READING chip was found to walk sideways with")
+	if not _panel().back():
+		_fail("BACK does not leave a BASICS page after a sideways walk")
+	if String(_panel().view().get("kind", "")) != "tree":
+		_fail("BACK after a sideways walk lands on %s, not the tree" % _panel().view())
+
+
+## The breadcrumb never outgrows `MAX_CRUMBS`, however far the player walks.
+## Sauce pages link machines and machine pages link sauces, so the trail has
+## no natural ceiling; before the cap, twelve hops put crumbs past the right
+## edge of the modal, where nothing can be clicked.
+func _check_the_breadcrumb_is_capped(book: Dictionary) -> void:
+	var cap: int = _panel().MAX_CRUMBS
+	_panel().show_tree()
+	var sauce := _sauce_where(false)
+	var machines: Array = book.get("machines", [])
+	if sauce.is_empty() or machines.is_empty():
+		return
+	_panel().open("sauce", String(sauce.get("id", "")))
+	var walked := 1
+	for step in range(8):
+		# Machine and sauce pages link to each other, so this walk can go on
+		# as long as it likes — which is the case the cap exists for.
+		_panel().open("machine", String(machines[step % machines.size()].get("id", "")))
+		_panel().open("sauce", String(sauce.get("id", "")))
+		walked += 2
+		# `cap` trail crumbs, plus the one "…" that stands for the rest: the
+		# bound this holds the row to is buttons, because buttons are what
+		# ran off the edge of the modal.
+		if _crumbs() > cap + 1:
+			_fail(
+				"%d crumbs after %d hops; the breadcrumb shows at most %d and a \"…\""
+				% [_crumbs(), walked, cap]
+			)
+			break
+	if _node("CrumbOlder") == null:
+		_fail("%d hops and no collapsed crumb to reach the older views with" % walked)
+	else:
+		(_node("CrumbOlder") as Button).pressed.emit()
+		if String(_panel().view().get("kind", "")) != "tree":
+			_fail("the collapsed crumb does not reach the oldest view in the trail")
+	_panel().show_tree()
+
+
+## A `{placeholder}` in a topic's TITLE is filled like one anywhere else.
+##
+## Proved against a doctored book rather than the shipped one, because no
+## shipped title asks for a fact today and a check that cannot fail is not a
+## check: the panel is handed a title with a placeholder in it, and what has
+## to be on screen is the number, never the braces. `guide.rs` refuses an
+## UNKNOWN placeholder in a title; this is the other half — a known one has
+## to be substituted rather than printed.
+func _check_a_title_is_filled_like_any_other_line(book: Dictionary) -> void:
+	var topics: Array = book.get("guide", [])
+	if topics.is_empty():
+		return
+	var doctored := book.duplicate(true)
+	var id := String(doctored["guide"][0].get("id", ""))
+	doctored["guide"][0]["title"] = "Capacity {dock_capacity}"
+	_panel().set_book(doctored)
+	_panel().open("topic", id)
+	var screen := _screen()
+	var wanted := _fact_text(book, "dock_capacity")
+	if screen.find("{") >= 0 or screen.find("}") >= 0:
+		_fail("a placeholder in a topic's title prints its braces on screen")
+	if screen.find("Capacity %s" % wanted) < 0:
+		_fail("a placeholder in a topic's title is not filled from the wire")
+	_panel().set_book(book)
+	_panel().show_tree()
+
+
+## How many crumbs the breadcrumb is showing, the collapsed one included.
+func _crumbs() -> int:
+	if main._cookbook == null or main._cookbook.trail_box == null:
+		return 0
+	var count := 0
+	for child in main._cookbook.trail_box.get_children():
+		if child is Button:
+			count += 1
+	return count
+
+
+## The panel's own substitution, re-derived here from the wire so the test
+## never asks the code under test what a sentence should say.
+func _fill_expected(book: Dictionary, text: String) -> String:
+	var out := ""
 	var rest := text
 	var opened := rest.find("{")
 	while opened >= 0:
 		var closed := rest.find("}", opened)
 		if closed < 0:
 			break
-		out.append(rest.substr(0, opened).strip_edges())
+		out += rest.substr(0, opened)
+		out += _fact_text(book, rest.substr(opened + 1, closed - opened - 1))
 		rest = rest.substr(closed + 1)
 		opened = rest.find("{")
-	out.append(rest.strip_edges())
-	return out
+	return out + rest
 
 
 ## The prose half of "nothing is authored in GDScript". `_check_nothing_authored`

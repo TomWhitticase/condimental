@@ -41,6 +41,12 @@
 ## that halves a price rewrites the BASICS pages that mention it, with no
 ## edit here and none to the prose either.
 ##
+## Reading on is SIDEWAYS: a KEEP READING chip opens a sibling topic in place
+## of the current one (`open`'s `sideways`), so a player who reads all six in
+## a row still has one crumb behind them. The breadcrumb is capped on top of
+## that (`MAX_CRUMBS`), because the rest of the book is a graph and a walk
+## through it has no natural end.
+##
 ## # It is a COLUMN, not a plate
 ##
 ## `build()` returns a `VBoxContainer` the host drops into the plate it has,
@@ -111,6 +117,12 @@ const VIEW_TOPIC := "topic"
 ## layout pass gave it, and a headless run has no layout pass, so the break
 ## a test measures would not be the break a player sees.
 const BASICS_COLUMNS := 3
+
+## How many crumbs the breadcrumb shows before it collapses the older ones
+## into a single "…". Three is the deepest trail the shipped book reaches
+## without going round in a circle (tree › sauce › machine › sauce), so the
+## cap bites only on a walk that did.
+const MAX_CRUMBS := 3
 
 var root: VBoxContainer
 ## The one node everything below the breadcrumb hangs off, emptied and
@@ -261,10 +273,17 @@ func show_tree() -> void:
 
 
 ## Opens a page, remembering where it was opened from.
-func open(kind: String, id: String) -> void:
+##
+## `sideways` is for a link to a page of the SAME kind — KEEP READING's
+## siblings — and it REPLACES the page instead of stacking on it. A sibling
+## is not a level deeper, so BACK still means "back to the tree" however many
+## topics the player reads in a row; stacking them added a crumb per click
+## and ran the breadcrumb off the right edge of the modal at 1280x720.
+func open(kind: String, id: String, sideways := false) -> void:
 	if id == "":
 		return
-	_trail.append(_view)
+	if not (sideways and String(_view.get("kind", "")) == kind):
+		_trail.append(_view)
 	_view = {"kind": kind, "id": id}
 	_rebuild()
 
@@ -368,9 +387,17 @@ func _rebuild() -> void:
 	fit(Vector2.ZERO)
 
 
-## The breadcrumb: every view walked through, each one clickable, then the
-## one showing as plain text. A trail of one (the tree) draws nothing —
-## "THE COOKBOOK ›" over the tree is the heading said twice.
+## The breadcrumb: the last few views walked through, each one clickable,
+## then the one showing as plain text. A trail of one (the tree) draws
+## nothing — "THE COOKBOOK ›" over the tree is the heading said twice.
+##
+## **At most `MAX_CRUMBS` of them.** A page can be opened from a page —
+## sauce to machine to sauce — so the trail has no natural ceiling, and an
+## uncapped row of crumbs is a row that grows past the modal's right edge and
+## takes its own buttons with it, out where nothing can be clicked (UI_UX
+## §5c). What the cap hides is not lost: the leading "…" is a crumb in its
+## own right and goes to the oldest view in the trail, which is the tree in
+## every trail that starts there.
 func _rebuild_trail() -> void:
 	for child in trail_box.get_children():
 		trail_box.remove_child(child)
@@ -379,22 +406,35 @@ func _rebuild_trail() -> void:
 		trail_box.visible = false
 		return
 	trail_box.visible = true
-	for depth in range(_trail.size()):
+	var first := maxi(0, _trail.size() - MAX_CRUMBS)
+	if first > 0:
+		var older := _button("CrumbOlder", "…")
+		older.add_theme_font_size_override("font_size", _font(-3))
+		older.pressed.connect(_on_crumb_pressed.bind(0))
+		trail_box.add_child(older)
+		trail_box.add_child(_caret())
+	for depth in range(first, _trail.size()):
 		var crumb := _button("Crumb_%d" % depth, _view_title(_trail[depth]))
 		crumb.add_theme_font_size_override("font_size", _font(-3))
 		crumb.pressed.connect(_on_crumb_pressed.bind(depth))
 		trail_box.add_child(crumb)
-		var caret := Label.new()
-		caret.label_settings = _label_settings(_font(-3), INK_DIM)
-		caret.text = "›"
-		caret.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		trail_box.add_child(caret)
+		trail_box.add_child(_caret())
 	var here := Label.new()
 	here.name = "CrumbHere"
 	here.label_settings = _label_settings(_font(-3), HEADING)
 	here.text = _view_title(_view)
 	here.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	trail_box.add_child(here)
+
+
+## The "›" between two crumbs. A Label rather than part of a crumb's text so
+## the caret is never inside the clickable rectangle.
+func _caret() -> Label:
+	var caret := Label.new()
+	caret.label_settings = _label_settings(_font(-3), INK_DIM)
+	caret.text = "›"
+	caret.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	return caret
 
 
 func _on_crumb_pressed(depth: int) -> void:
@@ -420,7 +460,7 @@ func _view_title(entry: Dictionary) -> String:
 		# A BASICS page's crumb is its own title from `data/guide.ron`, not
 		# `_name(id)`: `the_loop` is not a content id and the display-name map
 		# has never heard of it, so titling it here would invent a name.
-		return String(_topic(id).get("title", id))
+		return _fill(String(_topic(id).get("title", id)))
 	return _name(id)
 
 
@@ -459,7 +499,7 @@ func _build_topic_page(id: String) -> void:
 	var title := Label.new()
 	title.name = "TopicTitle"
 	title.label_settings = _label_settings(_font(3), HEADING)
-	title.text = String(topic.get("title", ""))
+	title.text = _fill(String(topic.get("title", "")))
 	body.add_child(title)
 
 	var tagline := String(topic.get("tagline", ""))
@@ -478,12 +518,13 @@ func _build_topic_page(id: String) -> void:
 			others.append(other)
 	if not others.is_empty():
 		var more := _section("KEEP READING", "")
-		_chip_grid(more, "MoreChips", others)
+		# Sideways: these are this page's siblings, not its children.
+		_chip_grid(more, "MoreChips", others, true)
 
 
 ## A block of topic chips. Fixed columns and pinned cells so the shape a
 ## headless test measures is the shape on screen — see `BASICS_COLUMNS`.
-func _chip_grid(parent: Node, node_name: String, topics: Array) -> void:
+func _chip_grid(parent: Node, node_name: String, topics: Array, sideways := false) -> void:
 	var grid := GridContainer.new()
 	grid.name = node_name
 	grid.columns = BASICS_COLUMNS
@@ -496,7 +537,7 @@ func _chip_grid(parent: Node, node_name: String, topics: Array) -> void:
 		var topic_id := String(topic.get("id", ""))
 		if topic_id == "":
 			continue
-		var chip := _button("Topic_%s" % topic_id, String(topic.get("title", "")))
+		var chip := _button("Topic_%s" % topic_id, _fill(String(topic.get("title", ""))))
 		chip.custom_minimum_size = Vector2(
 			_px((BODY_WIDTH - 8.0 * float(BASICS_COLUMNS - 1)) / float(BASICS_COLUMNS)),
 			_px(34.0)
@@ -505,15 +546,20 @@ func _chip_grid(parent: Node, node_name: String, topics: Array) -> void:
 		# column: the grid's cells are what `fit()` measures, and one long
 		# title would otherwise set the width of the whole panel.
 		chip.clip_text = true
-		chip.pressed.connect(open.bind(VIEW_TOPIC, topic_id))
+		chip.pressed.connect(open.bind(VIEW_TOPIC, topic_id, sideways))
 		grid.add_child(chip)
 
 
-## Substitutes every `{fact}` in a guide paragraph for the number the sim
+## Substitutes every `{fact}` in a line of guide prose for the number the sim
 ## answered with.
 ##
+## **Every line of it**: the title and the chip that opens it as well as the
+## tagline and the body, because a topic may ask for a fact anywhere and the
+## loader (`guide.rs`) checks all four the same way. A title put through
+## nothing would have printed its braces in the largest font the book owns.
+##
 ## The prose in `data/guide.ron` states no quantity of its own — that is the
-## file's own rule, and `guide.rs` refuses to load a paragraph naming a
+## file's own rule, and `guide.rs` refuses to load a topic naming a
 ## placeholder the sim cannot answer — so this is where every number on a
 ## BASICS page comes from, formatted the way the rest of the panel formats
 ## that kind: ticks as seconds, a content id through the display-name map.

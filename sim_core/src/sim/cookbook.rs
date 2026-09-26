@@ -687,7 +687,8 @@ pub fn build(input: &CookbookInput<'_>) -> CookbookSnapshot {
 
     // The BASICS pages go out as authored; what the book computes for them
     // is the facts their `{placeholder}`s stand for.
-    let facts = guide_facts(input, sauces.len(), ingredients.len());
+    let open_raws = ingredients.iter().filter(|page| !page.locked).count();
+    let facts = guide_facts(input, sauces.len(), ingredients.len(), open_raws);
 
     CookbookSnapshot {
         deliveries: input.deliveries,
@@ -710,14 +711,17 @@ pub fn build(input: &CookbookInput<'_>) -> CookbookSnapshot {
 /// placeholder nothing answers, and this refuses to answer less than
 /// everything.
 ///
-/// `sauce_count` and `raw_count` come in as arguments because they are what
-/// [`build`] has just finished deciding: how many sauces the book ended up
-/// with is a fact about the book, not about a registry, and re-deriving it
-/// here would be a second definition of "a sauce".
+/// `sauce_count`, `raw_count` and `open_raw_count` come in as arguments
+/// because they are what [`build`] has just finished deciding: how many
+/// sauces the book ended up with is a fact about the book, not about a
+/// registry, and re-deriving it here would be a second definition of "a
+/// sauce" — or, for the open count, a second reading of the same gate the
+/// ingredient pages already resolved.
 fn guide_facts(
     input: &CookbookInput<'_>,
     sauce_count: usize,
     raw_count: usize,
+    open_raw_count: usize,
 ) -> Vec<GuideFactLine> {
     // The cheapest thing on the shelf, by the price the shop actually
     // charges. Ties go to the earlier entry (`data/shop.ron` order), which
@@ -738,6 +742,21 @@ fn guide_facts(
         .ordered()
         .iter()
         .min_by_key(|unlock| unlock.after_deliveries);
+
+    // Orders the board is showing right now: no gate, or a gate that has
+    // opened. This is what "open to a brand-new factory" means in the
+    // guide's prose, and it is not `starters()` — a starter is one the game
+    // signs for you, and there is exactly one of those.
+    let open_contracts = input
+        .contracts
+        .ordered()
+        .iter()
+        .filter(|contract| {
+            input
+                .unlocks
+                .contract_available(&contract.id, input.deliveries)
+        })
+        .count();
 
     let starting_crew: u32 = input
         .staff
@@ -774,8 +793,10 @@ fn guide_facts(
                 ),
                 GuideFact::BuyableCount => (input.shop.entries().len() as f64, String::new()),
                 GuideFact::RawCount => (raw_count as f64, String::new()),
+                GuideFact::OpenRawCount => (open_raw_count as f64, String::new()),
                 GuideFact::SauceCount => (sauce_count as f64, String::new()),
                 GuideFact::ContractCount => (input.contracts.len() as f64, String::new()),
+                GuideFact::OpenContractCount => (open_contracts as f64, String::new()),
                 GuideFact::StarterContracts => {
                     (input.contracts.starters().count() as f64, String::new())
                 }

@@ -1163,11 +1163,29 @@ poll, so halving a price rewrites the sentence that mentions it and nobody
 edits a word. The vocabulary is closed and enforced from both ends:
 `guide.rs` refuses to load a paragraph naming a placeholder the sim cannot
 answer, and a unit test refuses a shipped paragraph that states a bare
-number where a fact exists. The panel's `_fill()` is the only thing that
-puts the two halves together, and it formats each kind the way the rest of
-the book does — a tick fact reads as seconds, a content id goes through the
-display-name map. `test_cookbook.gd` asserts that no brace ever reaches the
-screen and that no sentence of the prose is written in GDScript.
+number where a fact exists. The check covers the **title** as well as the
+tagline and the body, and so does the substitution: the title was the one
+line the first version of the loader read past, and a typo there would have
+reached the page as braces in the largest font the book owns. The panel's
+`_fill()` is the only thing that puts the two halves together, and it formats
+each kind the way the rest of the book does — a tick fact reads as seconds, a
+content id goes through the display-name map. `test_cookbook.gd` asserts that
+no brace ever reaches the screen and that no sentence of the prose is written
+in GDScript, and it compares each **whole filled line** against what is on
+screen rather than the words and the numbers apart: a one-digit value checked
+on its own is barely checked at all, since a page that dropped "2" entirely
+still has the 2 in the "12" further down.
+
+**A count that means "right now" is its own fact.** The prose's first draft
+said "six raws on the market" by asking for `{raw_count}`, when three of the
+six were behind a gate — the file was telling a new player about content they
+could not buy. So the vocabulary distinguishes the file from the board:
+`raw_count`/`contract_count` count what the content files hold,
+`open_raw_count`/`open_contract_count` count what the current delivery count
+actually opens, and `starter_contracts` means the orders the game signs for
+you and nothing else. A sentence built out of the wrong one of those is the
+failure this whole section is designed to prevent, and it does not look like
+a bug on screen — it looks like a confident sentence.
 
 The chips sit at the **top** of the tree rather than behind a tab, because
 the player who needs them most is the one who has just opened the book for
@@ -1176,6 +1194,20 @@ the first time and does not yet know what a tier is. They are a
 break from the width the layout pass gave it, and a headless run has no
 layout pass, so the break a test measures would not be the break a player
 sees.
+
+**Reading on is sideways, and the breadcrumb has a ceiling.** Each page ends
+with KEEP READING — chips for its sibling topics — and those chips *replace*
+the page rather than stacking on it: a sibling is not a level deeper, so BACK
+still means "back to the tree" after six topics, and the breadcrumb does not
+grow a crumb per click. That alone is not enough, because the rest of the
+book is genuinely a graph — a sauce page links machines, a machine page links
+sauces — so a walk has no natural end and neither had the crumb row, which at
+1280x720 ran past the right edge of the modal and took its own buttons
+somewhere they could not be clicked (§5c). The row now shows the last three
+and collapses the rest behind a leading "…" crumb that goes to the oldest
+view in the trail. `test_cookbook.gd` counts crumbs, never pixels: a headless
+run cannot prove a width, so what it asserts is the number of buttons the
+rule allows.
 
 **B and the six-line legend.** B was the build menu's key until E took it
 over, and was left dead rather than aliased; "B for book" claims it the way
