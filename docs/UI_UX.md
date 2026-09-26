@@ -448,7 +448,15 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   terms in words and one SIGN button that names the price. A SIGN button on
   the clipboard would make every running order look like a thing to click.
   The button says what a click will do or why it will not (**SIGNED**, **✗
-  SIGN · 150**), and a lost offer says **LOST — sign it again**.
+  SIGN · 150**), and a lost offer says **LOST — sign it again**. The board
+  is two columns: **FOR SALE** on the right, and **YOUR CONTRACTS** on the
+  left — the clipboard's running dockets, built and driven by the same code,
+  wider, with no button on them — so the next order is chosen looking at the
+  ones already signed. A signature lands in the left column on the same
+  click; with nothing running it shows a paper card that says so and points
+  right. At its narrowest the board breaks an offer's strike rule onto its
+  own line (a third step of `_fit_contract_board_split`), and a running
+  docket's status line wraps inside the column's pinned width.
 - **A docket says how it is doing and whether it is in danger, four ways at
   once** (§7): a status line with a glyph and words (**✔ READY**, **⚠ AT
   RISK — 1 short, 70% of the window gone**, **⚠ LAST CHANCE — miss this
@@ -766,13 +774,14 @@ is a mix label and a terms label) — a break at a fixed point, not a reflow,
 and `_fit_contract_board_split` measures before it breaks so a window with the
 room keeps the sentence whole.
 
-It *is* used — 14 times in `main.gd` — wherever the width is **pinned** before
+It *is* used — 21 times in `main.gd` — wherever the width is **pinned** before
 anything measures it, so the 1px minimum is never what a fit pass reads: inside
 a fixed-size ancestor (`SHOP_SLOT_SIZE`, `MARKET_SLOT_SIZE`,
 `CONFIG_PICKER_SLOT_SIZE`), or on a Label that sets its own
 `custom_minimum_size.x` (`CONFIG_PANEL_WIDTH` for the configuration notes,
 `CREW_TEXT_WIDTH` for the crew affordance line, `PAUSE_BUTTON_MIN_SIZE.x` for
-the pause menu). The configuration panel *is* measured by a fit pass
+the pause menu, `BOARD_ACTIVE_COLUMN_WIDTH` for a running docket's status line
+on the contracts board). The configuration panel *is* measured by a fit pass
 (`_position_config_panel`), so escaping measurement is not the exemption — the
 pin is. Pin the width or do not wrap.
 

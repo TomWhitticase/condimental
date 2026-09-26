@@ -27,7 +27,11 @@
 #     clipboard, the announcement line says so, the board offers it again
 #     with a LOST note, and signing it again costs its price;
 #   * with every contract lost the clipboard says so in a sentence that names
-#     the key to press.
+#     the key to press;
+#   * the board is TWO columns — the running contracts' dockets on the left,
+#     the offers on the right — and a signature moves the contract into the
+#     left column on the same call, while an empty left column shows a paper
+#     card saying nothing is running.
 extends SceneTree
 
 
@@ -58,6 +62,19 @@ func _card_ids(main) -> Array:
 	var out: Array = []
 	for card in main._contract_cards:
 		out.append(String(card["id"]))
+	return out
+
+
+## The docket ids actually hanging in the board's LEFT column, read off the
+## scene tree rather than the record array, so a card built into the wrong
+## container cannot pass.
+func _left_column_ids(main) -> Array:
+	var out: Array = []
+	var column: Node = main._board_panel.find_child("ActiveColumn", true, false)
+	for card in main._board_active_cards:
+		var panel: Node = card["panel"]
+		if column != null and column.is_ancestor_of(panel):
+			out.append(String(card["id"]))
 	return out
 
 
@@ -155,6 +172,26 @@ func _initialize() -> void:
 	if main.sim.economy_snapshot_json() != econ_before:
 		_fail("opening the board changed the economy")
 		return
+	# --- Two columns: running on the left, for sale on the right ---------
+	var active_col: Node = board_panel.find_child("ActiveColumn", true, false)
+	var offer_col: Node = board_panel.find_child("OfferColumn", true, false)
+	if active_col == null or offer_col == null or active_col.get_parent() != offer_col.get_parent():
+		_fail("the board must be two side-by-side columns, 'ActiveColumn' and 'OfferColumn'")
+		return
+	if not (active_col.get_parent() is HBoxContainer) or active_col.get_index() > offer_col.get_index():
+		_fail("the running contracts must be the LEFT column, the offers the right")
+		return
+	for row in main._board_rows:
+		if not offer_col.is_ancestor_of(row["panel"]):
+			_fail("offer '%s' is not in the right-hand column" % row["id"])
+			return
+	if _left_column_ids(main) != _active_ids(main):
+		_fail("the left column should hold exactly the active contracts %s, holds %s" % [
+			str(_active_ids(main)), str(_left_column_ids(main))])
+		return
+	if main._board_active_empty.visible == not _active_ids(main).is_empty():
+		_fail("the left column's empty card should show only when nothing is running")
+		return
 	_key(main, KEY_C)
 	if main._board_open or board_panel.visible:
 		_fail("a second C should close the board")
@@ -185,7 +222,18 @@ func _initialize() -> void:
 			first_price = int(offer["price"])
 	var money_before: float = float(_econ(main)["money"])
 	var first_index: int = main._board_row_ids.find(first_offer)
+	if _left_column_ids(main).has(first_offer):
+		_fail("'%s' is in the left column before it was signed" % first_offer)
+		return
 	main._sign_contract_offer(first_index)
+	if not _left_column_ids(main).has(first_offer) or _left_column_ids(main) != _active_ids(main):
+		_fail("signing '%s' should put it in the board's left column at once; left %s, active %s" % [
+			first_offer, str(_left_column_ids(main)), str(_active_ids(main))])
+		return
+	for card in main._board_active_cards:
+		if String(card["id"]) == first_offer and String(card["status_label"].text) == "":
+			_fail("the left column's docket for '%s' was never driven" % first_offer)
+			return
 	var money_after: float = float(_econ(main)["money"])
 	if not is_equal_approx(money_before - money_after, float(first_price)):
 		_fail("signing '%s' should cost %d, money went %.0f -> %.0f" % [first_offer, first_price, money_before, money_after])
@@ -383,10 +431,17 @@ func _initialize() -> void:
 		_fail("an empty clipboard should say there is nothing running and name the key, got visible=%s '%s'" % [
 			str(main._contract_empty_label.visible), main._contract_empty_label.text])
 		return
+	main._update_contract_board()
+	if not _left_column_ids(main).is_empty() or not main._board_active_empty.visible or main._board_active_scroll.visible:
+		_fail("with nothing running the board's left column should show its empty card and no dockets")
+		return
 	main._sign_contract_offer(main._board_row_ids.find(starters[0]))
+	if main._board_active_empty.visible or _left_column_ids(main) != [String(starters[0])]:
+		_fail("signing from an empty board should replace the empty card with that docket, left %s" % str(_left_column_ids(main)))
+		return
 	if main._contract_empty_label.visible or main._contract_cards.size() != 1:
 		_fail("signing the starter again should bring one docket back and hide the empty line")
 		return
 
-	print("CONTRACT_BOARD_OK: one starter docket on a new game, %d offers on the board in file order, C/E/ESC modal rules, SIGN debits once and refuses twice, ready/ok/risk/last-chance read four ways, a lost contract leaves the clipboard, is announced, and is re-signed at its price; an empty clipboard names the key" % board.size())
+	print("CONTRACT_BOARD_OK: one starter docket on a new game, %d offers on the board in file order, C/E/ESC modal rules, SIGN debits once and refuses twice, ready/ok/risk/last-chance read four ways, a lost contract leaves the clipboard, is announced, and is re-signed at its price; an empty clipboard names the key; the board's left column holds the running dockets, gains a signature at once and has an empty card" % board.size())
 	quit(0)
