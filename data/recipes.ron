@@ -184,13 +184,13 @@
 // this game wants, so the stage is gone — deleted rather than disabled.
 // `TimedProcess` itself is untouched and still runs every craft cycle here.
 //
-// WHAT THE COOKBOOK READS. `tagline`, `blurb` and `icon` are all optional,
-// and they exist so that THE COOKBOOK — the in-game encyclopedia on B — is
-// written here rather than in GDScript. A sauce added to this file gets a
-// page with no Rust edit and no Godot edit: the tree, the ingredient list,
-// the machine process, the timings and the cost per box are all derived
-// from the fields above it, and these three are the only parts a machine
-// cannot work out for itself.
+// WHAT THE COOKBOOK READS. `tagline`, `blurb`, `icon` and `cookbook_icon`
+// are all optional, and they exist so that THE COOKBOOK — the in-game
+// encyclopedia on B — is written here rather than in GDScript. A sauce added
+// to this file gets a page with no Rust edit and no Godot edit: the tree, the
+// ingredient list, the machine process, the timings and the cost per box are
+// all derived from the fields above it, and these are the only parts a
+// machine cannot work out for itself.
 //
 // Two rules about them, both learned the hard way elsewhere in this repo.
 //
@@ -206,6 +206,12 @@
 // failure UI_UX.md §2b point 12 records. The wire is consulted first now,
 // so content names its own picture and the table is only the fallback for
 // ids written before this field existed.
+//
+// (3) `cookbook_icon` IS THE SAUCE'S FACE IN THE BOOK, and only a sauce's
+// last recipe carries one. The terminal product is a case, and a tree of
+// identical cardboard boxes does not tell ketchup from BBQ at a glance, so
+// the tree node and the page heading draw the bottle instead. `icon` stays
+// the case: it is what the belt, the dock and the contracts show.
 //
 // `bbq_mix` and `bbq` deliberately name NO icon. There is no open pail of
 // BBQ anywhere in the asset set, and `assets/voxels/palette.ron` records
@@ -303,6 +309,7 @@
             tagline: "What the dock ships, and what the contracts pay for.",
             blurb: "The packer is the end of the line; past it there is only belt and the dock. Nothing downstream cares which sauce is in the case — only the contract board does.",
             icon: "item_box",
+            cookbook_icon: "item_bottle",
             inputs: [("bottled_ketchup", 1)],
             outputs: [("boxed_ketchup", 1)],
             machine: "packer",
@@ -409,6 +416,7 @@
             display_name: "Boxed BBQ",
             blurb: "The second thing this factory can sell. A case rides ordinary belt into whichever dock that belt feeds — a dock does not care which sauce a case holds, only the contract board does.",
             icon: "item_box_bbq",
+            cookbook_icon: "item_bottle_bbq",
             inputs: [("bottled_bbq", 1)],
             outputs: [("boxed_bbq", 1)],
             machine: "packer",
@@ -548,6 +556,7 @@
             id: "boxed_mustard",
             blurb: "The third thing this factory can sell, and the first that arrives at the dock without a single tomato behind it. Three lines, one delivery pool: only the contract board knows the difference.",
             icon: "item_box_mustard",
+            cookbook_icon: "item_bottle_mustard",
             inputs: [("bottled_mustard", 1)],
             outputs: [("boxed_mustard", 1)],
             machine: "packer",

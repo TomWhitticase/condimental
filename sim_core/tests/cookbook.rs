@@ -421,7 +421,11 @@ fn a_page_carries_the_prose_its_recipe_authored_and_nothing_it_did_not() {
         Some("What the dock ships, and what the contracts pay for.")
     );
     assert!(ketchup.blurb.is_some());
-    assert_eq!(ketchup.icon.as_deref(), Some("item_box"));
+    assert_eq!(
+        ketchup.icon.as_deref(),
+        Some("item_bottle"),
+        "the book pictures a sauce by its bottle, not by the case it ships in"
+    );
     assert_eq!(
         sauce(&book, "boxed_bbq").tagline,
         None,

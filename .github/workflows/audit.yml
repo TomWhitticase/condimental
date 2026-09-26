@@ -13,12 +13,14 @@ on:
     paths:
       - '**/Cargo.toml'
       - 'Cargo.lock'
+      - 'deny.toml'
       - '.github/workflows/audit.yml'
   push:
     branches: [main]
     paths:
       - '**/Cargo.toml'
       - 'Cargo.lock'
+      - 'deny.toml'
   schedule:
     - cron: '0 4 * * 1'
   workflow_dispatch:
@@ -39,3 +41,17 @@ jobs:
         with:
           tool: cargo-audit
       - run: cargo audit --deny warnings
+
+  licenses:
+    # CONDIMENTAL is GPL-3.0-only, and every crate linked into it has to
+    # carry a licence that can be. deny.toml is the allow-list and says why
+    # widening it is a decision rather than a fix.
+    name: cargo deny (licences)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo deny check licenses
