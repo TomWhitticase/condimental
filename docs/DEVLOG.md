@@ -250,7 +250,9 @@ below is history and should only ever be appended to.)*
 A PR with green checks and no `VERDICT:` no longer ends its author's session
 with "waiting on review". The author now launches a fresh `general-purpose`
 subagent, never a `fork`. It runs the `review` skill in its own worktree and
-posts the verdict itself. PR #193 is the one that sat waiting. The rule is in
+posts the verdict itself. The author waits for that verdict before closing.
+The review runs even when the task or the owner holds the merge; only the
+merge waits. PR #193 is the one that sat waiting. The rule is in
 `CLAUDE.md`, `docs/WORKFLOW.md` and the `open-pr`, `wrap-it-up` and `review`
 skills. Decision record: 2026-09-26 in `docs/DECISIONS.md`.
 
