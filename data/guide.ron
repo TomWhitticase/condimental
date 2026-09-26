@@ -1,0 +1,122 @@
+// THE COOKBOOK's front section: the game explaining itself in prose.
+//
+// WHY THIS FILE EXISTS. THE COOKBOOK already renders every fact the content
+// files hold — what a sauce is made of, which machine does which step, what a
+// case costs and what it pays. What it could not say is the part no registry
+// holds: that the dock is the only thing that pays, that a machine waits
+// rather than guesses, that payday arrives whether the line ran or not. Those
+// are sentences, and a sentence is content, so it lives here rather than in
+// `cookbook_panel.gd` where the first draft of the book would have put it.
+//
+// THE RULE THIS FILE IS BUILT AROUND: **prose here never states a number.**
+// Every quantity is a `{placeholder}` that `sim_core` fills from the
+// registries at read time — `{starting_money}` is whatever
+// `sim::STARTING_MONEY` says today, `{first_gate_deliveries}` is whatever
+// `data/unlocks.ron`'s earliest gate says today. That is the whole point: a
+// balance pass may not silently make this file lie. Write "you open with
+// {starting_money}", never "you open with 3000".
+//
+// WHAT THE PLACEHOLDER RULE DOES NOT BUY YOU. It stops a number going
+// stale. It does nothing about a number that does not mean what the sentence
+// around it claims, and nothing about tense: `{open_contract_count}` in
+// "nine are on the board of a brand-new factory" is the right fact in a
+// clause that stops being true at the tenth delivery. Write the clause in
+// the same tense as the fact — "the board is showing {open_contract_count}
+// right now" — and prefer a phrasing that reads correctly at any value a
+// balance pass could produce, since "{starter_contracts} are active" becomes
+// "1 are". Neither the loader nor a test can see either of these.
+//
+// The vocabulary of placeholders is CLOSED and lives in
+// `sim_core/src/sim/guide.rs` (`GuideFact`). An unknown one is a load error,
+// not a literal left on screen — a typo in a placeholder would otherwise ship
+// as `{starting_mony}` in the middle of a paragraph, and the loader is the
+// only place that can catch it before a player does.
+//
+// **The sim computes each fact, Godot formats it.** A fact is typed — money,
+// a count, a span of ticks, or a name — and the presentation layer turns a
+// tick span into seconds and money into the game's money string, because
+// "seconds, never ticks" is a presentation rule and the tick rate is
+// GDScript's (`godot_project/CLAUDE.md`). Nothing here knows what a second is.
+//
+// FIELDS, per topic:
+//   id       stable content id; the panel's page order is this file's order
+//   title    the page heading, player-facing prose
+//   tagline  one line under the heading, the plate's subtitle
+//   body     the paragraphs, in order. At least one, none of them blank.
+//
+// A `{placeholder}` works in ANY of title, tagline and body: all three are
+// checked at load and all three are substituted on screen. The title was the
+// one line the first version of the loader did not check, which let a typo
+// there reach the page as six braces in the largest font the book owns.
+//
+// WHAT DOES NOT BELONG HERE. Anything a registry already answers: a recipe's
+// steps, a machine's job, an ingredient's price. Those are the book's other
+// pages, built from the files that own them, and repeating one of them as
+// prose here would be a second copy to keep in step. If a topic below needs
+// a number, it asks for a fact; if it needs a list of sauces, it does not
+// belong in this file at all.
+(
+    schema_version: 1,
+    topics: [
+        GuideTopic(
+            id: "the_loop",
+            title: "The Loop",
+            tagline: "Buy raw, make sauce, ship cases, get paid. Everything else is detail.",
+            body: [
+                "This whole factory is one loop. Buy a raw ingredient, run it through machines until it is a case of sauce, and get that case onto the dock before a contract's window closes. The dock pays. Nothing else does.",
+                "The world starts empty on purpose. There are {buyable_count} kinds of thing you can buy and place, and the market will sell you {open_raw_count} of the {raw_count} raw ingredients in this book right now — anything it is not selling yet sits behind a gate. The machines already know how to make the {sauce_count} sauces in this book. Nothing is built for you, and nothing is made until you build it.",
+                "A machine runs only when everything its recipe asks for is touching it: solids arrive on belt, fluids arrive down pipe. A machine with one input missing waits quietly and forever, which is why the first line you build should be the shortest one that can finish a case.",
+            ],
+        ),
+        GuideTopic(
+            id: "money",
+            title: "Money",
+            tagline: "You open with {starting_money}, and only the dock refills it.",
+            body: [
+                "That opening balance has to cover every machine, every belt tile and every sack of ingredients until the first delivery pays out. It is enough for a line that works and not enough for a line that is impressive.",
+                "Money leaves three ways: tiles bought from the build menu, raws bought from the market, and wages. The cheapest thing on the shelf is the {cheapest_buyable}, at {cheapest_buyable_price}.",
+                "Money comes in one way: a contract paying out because you satisfied its delivery window. There is no spot market and nothing sells itself — a case nobody ordered just sits there.",
+            ],
+        ),
+        GuideTopic(
+            id: "contracts",
+            title: "Contracts",
+            tagline: "An order is a promise with a clock on it.",
+            body: [
+                "Of the {contract_count} orders in the file, the board is showing {open_contract_count} right now — anything missing from it is behind a gate that deliveries will open. Each order names a mix of cases, how often it wants them, what it pays, and what it costs to sign. You start with {starter_contracts} of them already active, signed on your behalf.",
+                "Sign one and the clock starts. Ship the mix inside the window and it pays; miss the window and it takes a strike. Run out of strikes and the order is gone, and so is the price you paid for it. Signing more than the line can feed is the most expensive mistake available early.",
+                "The dock holds at most {dock_capacity} of any one case, so it is a loading bay and not a warehouse. Past that ceiling the packer behind it backs up.",
+            ],
+        ),
+        GuideTopic(
+            id: "crew",
+            title: "Crew",
+            tagline: "Machines need people, and payday does not wait for the line.",
+            body: [
+                "Crew are hired into pools by category, not placed next to a machine. The simulation works out which machines demand which category and assigns what you have; when a pool is short, the machines it covers slow down rather than the factory stopping dead.",
+                "You open with {starting_crew} on the payroll at {starting_wage_bill} a payday, and payday comes round every {payday_ticks}. That bill arrives whether the line ran or not.",
+                "Fail to pay it and people walk out. It is the one cost here that undoes work you already did — a machine that has lost its crew was making sauce a minute ago.",
+            ],
+        ),
+        GuideTopic(
+            id: "building",
+            title: "Building",
+            tagline: "The layout is the choice. There is no recipe picker anywhere in this game.",
+            body: [
+                "What a machine makes is decided by what is touching it. One kind of machine may know several recipes, and it starts the first one whose every input has arrived — deliver something else to it and it makes something else. Re-routing a belt is how you change the plan, and it is the only way.",
+                "Solids ride belt, fluids ride pipe, and the two do not substitute for each other: a mixer outlet that wants a pipe will not accept a belt. Hoppers hold bought solids and tanks hold bought fluids, and both can be left to refill themselves from the market.",
+                "Nothing is wasted by a line that is not finished. A machine missing an input waits instead of guessing, and the production screen will tell you which machine is waiting and what it is waiting for.",
+            ],
+        ),
+        GuideTopic(
+            id: "growing",
+            title: "Growing",
+            tagline: "New sauces arrive when the line you already have proves itself.",
+            body: [
+                "Content is gated on lifetime successful deliveries — proof that a whole line ran end to end and shipped something — never on money banked or time passed. The first gate is {first_gate_name}, at {first_gate_deliveries} deliveries.",
+                "A gate holds back raws and orders, never recipes. The machines have always known how to make everything in this book; what changes is whether you can buy the ingredients and whether anybody is asking for the result.",
+                "Once a gate is open it stays open, and it is worked out fresh from the current numbers every time you load — so a rebalance never leaves an old save stuck behind a gate it has already passed.",
+            ],
+        ),
+    ],
+)

@@ -57,7 +57,11 @@ below is history and should only ever be appended to.)*
   `godot_project/cookbook_panel.gd` names a sauce, a machine or a price, and
   `test_cookbook.gd` fails if anything ever does. A locked family is an
   unnamed silhouette carrying its gate. The same panel is a page on the pause
-  menu, for reading with the factory stopped. See the log entry below.
+  menu, for reading with the factory stopped. **It has a BASICS section now
+  (2026-09-26):** six pages of prose out of `data/guide.ron` explaining the
+  loop, money, contracts, crew, building and growing — and the prose states
+  no number of its own, every quantity in it being a `{placeholder}` the sim
+  answers from the registries. See the log entries below.
 - **Raw stock has a ceiling (2026-09-21).** `data/storage.ron` caps every
   ingredient at `base_cap` 20 plus 50 per **bay**, and a `warehouse_rack`
   (1×2, six bays, 75) is the only thing that supplies bays. `BuyIngredient`
@@ -270,6 +274,93 @@ too, is issue #184 rather than something improvised here.
 Mustard's voxels are ticket M2 (PR #179); registering them in `main.gd`'s
 model and tint tables is M3, so `test_ingredient_models.gd` and
 `test_warehouse_rack.gd` fail on the content branch alone by design.
+
+### 2026-09-26 — THE COOKBOOK gets a BASICS section, and the prose states no numbers
+
+The Cookbook's tree answers "what can this factory make". It cannot answer
+"what is the loop", "what is money for" or "what happens when a contract
+expires" — none of that is derivable from the recipe graph, because it is
+prose. The owner asked for the how-to-play half, under the same binding
+requirement as the rest of the book: dynamic, never hardcoded.
+
+Prose is content, so it went in a content file: `data/guide.ron`, six topics
+(the loop, money, contracts, crew, building, growing), each a title, a
+tagline and three or four paragraphs. The interesting part is the rule the
+file states about itself: **a paragraph never writes a number down.** Every
+quantity is a `{placeholder}` — `{starting_money}`, `{payday_ticks}`,
+`{cheapest_buyable}`, `{first_gate_deliveries}` — and the sim answers all
+sixteen of them from the registries on every poll. A price change rewrites
+the sentence that mentions it; nobody edits a word of prose.
+
+That only holds if it is enforced, so it is enforced from both ends.
+`sim_core/src/sim/guide.rs` refuses at load to accept a title, a tagline or a
+paragraph naming a placeholder the sim cannot answer, or an unclosed brace —
+a typo is a load error, never a `{` on screen. A unit test strips the placeholders out of
+every shipped paragraph and fails if an ASCII digit survives where a fact
+exists, which is what stops the next author from typing "3000" because it
+was quicker. `guide_facts` always emits the whole vocabulary, so a page can
+never find a gap. `cookbook.rs` carries the topics with their placeholders
+still in them and the answers alongside, and the panel's `_fill()` is the
+only thing that puts the two together — formatting each kind the way the
+book already formats it, so a tick fact reads as seconds and a content id
+goes through the display-name map rather than being titled in Rust.
+
+**Godot gained a view, not a vocabulary.** A row of chips at the top of the
+tree, one per topic, titled from the file; a page per topic; the other
+topics offered at the foot of each page. `test_cookbook.gd` checks the chips
+against the wire, that every paragraph reaches the screen, that the value
+shown for each placeholder is the value the wire answered with, that no
+brace survives, that a tick fact reads as seconds, and that no sentence of
+the prose appears anywhere in `cookbook_panel.gd`. Both halves were
+mutation-tested before being believed: neutering `_fill()` and dropping the
+chip row each turned the suite red in the way it should.
+
+`{machine_count}` and `{cheapest_machine}` were renamed `{buyable_count}`
+and `{cheapest_buyable}` while writing the prose — the shelf holds belts,
+pipes and the dock too, so the cheapest thing on it is a belt, and a
+placeholder called "machine" would have invited a future author to write a
+sentence that was wrong by four.
+
+New screenshot flag `--cookbook-basics`, which opens the first topic the
+guide ships without naming it, for the same reason `--cookbook-page` does
+not name a sauce. The screen is `docs/UI_UX.md` §5h.
+
+Review caught four ways the first cut was still lying, and the fixes are
+worth recording because three of them are the same mistake in different
+clothes — a sentence that is true of the *file* read as if it were true of
+the *game*. "There are {raw_count} raw ingredients you can buy" counts the
+ones behind a gate too, and so did "{contract_count} orders on the board".
+A count that means "right now" is therefore its own fact:
+`{open_raw_count}` and `{open_contract_count}` join the vocabulary, asked of
+the market and of `contract_available` at the current delivery total, and the
+two file counts keep their own sentences ("of the {contract_count} orders in
+the file"). The second review pass caught the sequel to that, which is worth
+knowing because the fix for the first mistake walks straight into it: the
+right fact in a sentence with the wrong tense. "Nine are on the board of a
+brand-new factory" is true at zero deliveries and false from the tenth on,
+because the number moves and the clause around it does not — so the prose has
+to carry the same tense as the fact it asks for, and no loader or test can
+see that half of it. A third paragraph claimed the machines could already make a sauce
+this build does not ship; it now says what is actually true and durable —
+what a machine makes is decided by what is touching it.
+
+The fourth was structural. A title was validated at load but **not**
+substituted on screen, so `{dock_capacity}` in a title would have passed the
+loader and then shown its braces to the player: the loader read only the
+tagline and the body, and the panel filled only the tagline and the body.
+Both now treat all three the same, and the Godot test doctors a title with a
+placeholder in it to prove it. `KEEP READING` also grew a trail crumb per
+topic read, so a reader who browsed ten of them had ten crumbs running off
+the modal; reading on sideways replaces the last crumb instead of stacking,
+and the breadcrumb shows at most three plus a `…` back to the tree. The test
+asserts the crumb **count**, not a width — a headless run lays nothing out.
+The screen test now also compares each whole filled line against the wire's
+own substitution rather than checking the pieces separately, which is what
+catches a value landing in the wrong sentence. Every one of these was
+mutation-tested before being believed: uncapping the trail, stacking the
+crumbs, leaving a title unfilled and blinding the loader to titles each
+turned the suite red.
+
 
 ### 2026-09-25 — THE COOKBOOK: the game explains itself, out of the data files
 
