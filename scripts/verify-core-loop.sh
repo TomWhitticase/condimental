@@ -157,6 +157,14 @@ run_godot_script() {
     echo "FAIL: $script exited $status" >&2
     exit "$status"
   fi
+  # A layout fixture that could not build what it promised (`test_layouts.gd`'s
+  # `fail_fixture`) prints `<NAME>_FIXTURE_FAIL:` and carries on, and a caller
+  # that never reads `Layouts.fixture_failure()` would still print its own
+  # success marker over a broken fixture. The marker is the failure.
+  if printf '%s\n' "$out" | grep -q "_FIXTURE_FAIL:"; then
+    echo "FAIL: $script printed a _FIXTURE_FAIL: marker — its fixture did not build" >&2
+    exit 1
+  fi
   if ! printf '%s\n' "$out" | grep -q "$marker"; then
     echo "FAIL: $script exited 0 but never printed '$marker' — it did not actually run" >&2
     exit 1
@@ -194,6 +202,7 @@ run_godot_script test_fluids.gd FLUIDS_OK "pipe rendering + fluid hover, milesto
 run_godot_script test_machines.gd MACHINES_OK "per-kind machine models, multi-tile footprints, hopper fill"
 run_godot_script test_connections.gd CONNECTIONS_OK "belt-to-building junctions at every facing, retired belt variants gone"
 run_godot_script test_shop_menu.gd SHOP_MENU_OK "build menu grid + purchases, UI_UX.md §5"
+run_godot_script test_shop_search.gd SHOP_SEARCH_OK "build menu category sections + search box"
 run_godot_script test_hotbar.gd HOTBAR_OK "always-visible hotbar, number-key selection, UI_UX.md §5"
 run_godot_script test_ui_scale.gd UI_SCALE_OK "one UI_SCALE knob, no pre-scale label, everything fits the window"
 run_godot_script test_hud_plates.gd HUD_PLATES_OK "the right-hand STOCK plate and the collapsible CONTROLS legend — one row per raw ingredient clear of the clipboard and hotbar, the legend folded by its button and by F1, and every cursor panel reading the plates' current rects — plus first person parking a world panel in the corner instead of on the crosshair"

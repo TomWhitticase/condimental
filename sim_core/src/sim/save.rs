@@ -138,6 +138,13 @@
 //! is rejected like a v1 file: its pool has no dock to stand on, and handing
 //! it to whichever dock came first would invent a fact the file never said.
 //!
+//! **`schema_version` 4 is the pay cycle** (2026-09-26, `super::stats`'s
+//! module doc): [`SavedProduction::cycles_closed`] and each
+//! [`SavedItemStats`]'s `produced_this_cycle` / `produced_last_cycle`. No
+//! ring can re-derive them — a payday falls mid-bucket — and a v3 file has
+//! no honest value for them: zero this cycle would read as a factory that
+//! made nothing since payday. Rejected like every older version.
+//!
 //! A field addition from here on is a bump, for real this time. Adding one
 //! `#[serde(default)]` and leaving the version alone would mean a v2 file
 //! written by an older build and one written by a newer one are both "v2"
@@ -183,7 +190,7 @@ use super::world::{BELT_KIND, PIPE_KIND, PlayerCommand, World};
 /// The save format's version. Bumped whenever the shape below changes;
 /// a file naming any other version is rejected, never migrated — see the
 /// module doc, and every other loader in this crate.
-pub const SAVE_SCHEMA_VERSION: u32 = 3;
+pub const SAVE_SCHEMA_VERSION: u32 = 4;
 
 /// A fixed-point value as its raw `I16F16` bits — see the module doc for why
 /// a save never stores one as decimal text.
@@ -294,6 +301,8 @@ pub struct SavedProduction {
     pub cursor: Vec<usize>,
     pub ticks_into_bucket: Vec<u32>,
     pub age: u64,
+    /// Paydays the ledger has closed (`ProductionLedger::cycles_closed`).
+    pub cycles_closed: u64,
     pub items: Vec<SavedItemStats>,
 }
 
@@ -307,6 +316,9 @@ pub struct SavedItemStats {
     pub consumed: Vec<Vec<u32>>,
     pub produced_total: u64,
     pub consumed_total: u64,
+    /// The pay cycle's two counts (`ItemStats`).
+    pub produced_this_cycle: u32,
+    pub produced_last_cycle: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1669,6 +1681,7 @@ fn saved_production(ledger: &ProductionLedger) -> SavedProduction {
         cursor: ledger.cursor().to_vec(),
         ticks_into_bucket: ledger.ticks_into_bucket().to_vec(),
         age: ledger.age(),
+        cycles_closed: ledger.cycles_closed(),
         items: ledger
             .items()
             .iter()
@@ -1679,6 +1692,8 @@ fn saved_production(ledger: &ProductionLedger) -> SavedProduction {
                 consumed: stats.consumed.iter().map(|ring| ring.to_vec()).collect(),
                 produced_total: stats.produced_total,
                 consumed_total: stats.consumed_total,
+                produced_this_cycle: stats.produced_this_cycle,
+                produced_last_cycle: stats.produced_last_cycle,
             })
             .collect(),
     }
@@ -1732,12 +1747,21 @@ fn restore_production(saved: &SavedProduction) -> Result<ProductionLedger, SaveE
             consumed: rings(&item.consumed, "consumed")?,
             produced_total: item.produced_total,
             consumed_total: item.consumed_total,
+            produced_this_cycle: item.produced_this_cycle,
+            produced_last_cycle: item.produced_last_cycle,
         };
         if items.insert(item.id.clone(), stats).is_some() {
             return Err(bad(format!("'{}' is listed twice", item.id)));
         }
     }
-    ProductionLedger::restore(items, cursor, ticks_into_bucket, saved.age).ok_or_else(|| {
+    ProductionLedger::restore(
+        items,
+        cursor,
+        ticks_into_bucket,
+        saved.age,
+        saved.cycles_closed,
+    )
+    .ok_or_else(|| {
         bad(format!(
             "cursor {:?} / clock {:?} is not a state the ledger can be in",
             saved.cursor, saved.ticks_into_bucket
@@ -1880,7 +1904,7 @@ mod tests {
     /// not on the table (ARCHITECTURE.md §4, and this module's doc).
     #[test]
     fn an_older_save_is_refused_with_both_numbers_in_the_message() {
-        for old in [1, 2] {
+        for old in [1, 2, 3] {
             let text = a_save().to_ron().replace(
                 &format!("schema_version: {SAVE_SCHEMA_VERSION}"),
                 &format!("schema_version: {old}"),
@@ -1890,14 +1914,14 @@ mod tests {
             assert!(
                 matches!(
                     error,
-                    SaveError::UnsupportedSchemaVersion { found, supported: 3 } if found == old
+                    SaveError::UnsupportedSchemaVersion { found, supported: 4 } if found == old
                 ),
-                "expected a version refusal naming {old} and 3, got {error:?}"
+                "expected a version refusal naming {old} and 4, got {error:?}"
             );
             let message = error.to_string();
             assert!(
                 message.contains(&format!("schema_version {old}"))
-                    && message.contains("supports 3"),
+                    && message.contains("supports 4"),
                 "the refusal must name both versions so it does not read as a parse failure: \
                  {message}"
             );

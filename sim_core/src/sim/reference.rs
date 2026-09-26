@@ -111,6 +111,12 @@
 //! unplaced inventory**, which is the clean baseline a test measuring
 //! earnings wants.
 //!
+//! The bill includes one contract: a new game runs none, so the fixture
+//! signs the board's first offer (`corner_shop` on the shipped board) with
+//! [`PlayerCommand::SignContract`], and a test measuring payouts has
+//! something to deliver against — unless its own board marks a `starter`,
+//! which is already running.
+//!
 //! It buys **no ingredients**, deliberately: a world built by this fixture
 //! has a factory and an empty larder, so a test that wants the line to run
 //! buys and loads exactly the tomatoes, sugar and vinegar it means to
@@ -263,8 +269,28 @@ fn build(
         });
         bill += entry.price_money() * Money::from_num(*count);
     }
+    // A new game runs no contract, so a board with no `starter` gets its
+    // first offer signed here, as a player would, and paid for in the bill.
+    // A test board that marks a starter already has one running.
+    let first_offer = contracts
+        .starters()
+        .next()
+        .is_none()
+        .then(|| contracts.ordered().first())
+        .flatten()
+        .map(|c| (c.id.clone(), c.price));
+    if let Some((_, price)) = &first_offer {
+        bill += *price;
+    }
 
     let mut world = World::with_content_and_money(recipes, machines, contracts, bill + budget);
+    if let Some((id, _)) = first_offer {
+        world.issue_command(PlayerCommand::SignContract { id: id.clone() });
+        assert!(
+            world.economy().is_active(&id),
+            "the fixture must be able to sign the board's first offer"
+        );
+    }
     for (kind, count) in wanted {
         world.issue_command(PlayerCommand::Purchase {
             kind: kind.to_string(),

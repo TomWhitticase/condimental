@@ -53,7 +53,10 @@ use super::types::Money;
 /// bundled into the binary at compile time, so there is one such file and it
 /// is updated in the same commit as this constant — a version mismatch means
 /// data and binary have drifted apart, which deserves a loud error.
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+///
+/// v2 added the build menu's categories: the file's `categories` list and
+/// every entry's required `category`.
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 /// How many of a kind a `Purchase` command buys when the JSON wire form
 /// omits `quantity` — the "player clicked the buy button once" case, the
@@ -84,6 +87,23 @@ pub struct ShopEntry {
     /// Price in whole money units, in the same money
     /// [`super::economy::Economy::money`] counts. Must be at least 1.
     pub price: i64,
+    /// Which of the file's [`ShopCategory`] ids this kind is listed under in
+    /// the build menu. Required, and must name a category the file defines
+    /// ([`ShopLoadError::UnknownCategory`]).
+    pub category: String,
+}
+
+/// One heading of the build menu — presentation grouping only, with no
+/// effect on what a kind costs or does. Content, like the entries it groups:
+/// a new section is a `data/shop.ron` edit, never a Godot one.
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct ShopCategory {
+    /// What an entry's `category` names.
+    pub id: String,
+    /// The heading the menu prints.
+    pub name: String,
+    /// A short line printed beside the heading.
+    pub note: String,
 }
 
 impl ShopEntry {
@@ -97,6 +117,7 @@ impl ShopEntry {
 #[derive(Debug, Deserialize)]
 struct ShopFile {
     schema_version: u32,
+    categories: Vec<ShopCategory>,
     entries: Vec<ShopEntry>,
 }
 
@@ -130,6 +151,26 @@ pub enum ShopLoadError {
         machine: String,
         priced: Vec<String>,
     },
+    /// An entry names a category the file's `categories` list does not
+    /// define — a kind that would fall under no heading in the build menu.
+    UnknownCategory {
+        id: String,
+        category: String,
+        known: Vec<String>,
+    },
+    /// Two categories share an id, so an entry naming it is ambiguous.
+    DuplicateCategory {
+        id: String,
+    },
+    /// An entry is listed after an entry of a LATER category. The menu shows
+    /// each category's entries under its heading, and the digit on a card is
+    /// the entry's position in the file (it is the hotbar's slot number), so
+    /// a file not grouped in category order would print the digits out of
+    /// order down the menu.
+    CategoryOutOfOrder {
+        id: String,
+        category: String,
+    },
 }
 
 impl std::fmt::Display for ShopLoadError {
@@ -158,6 +199,26 @@ impl std::fmt::Display for ShopLoadError {
                  the player can never buy it",
                 priced.join(", ")
             ),
+            ShopLoadError::UnknownCategory {
+                id,
+                category,
+                known,
+            } => write!(
+                f,
+                "shop.ron lists kind '{id}' under category '{category}', which its \
+                 `categories` does not define (known: {}) — every kind needs a heading \
+                 in the build menu",
+                known.join(", ")
+            ),
+            ShopLoadError::DuplicateCategory { id } => {
+                write!(f, "shop.ron defines category '{id}' more than once")
+            }
+            ShopLoadError::CategoryOutOfOrder { id, category } => write!(
+                f,
+                "shop.ron lists kind '{id}' (category '{category}') after a kind of a later \
+                 category — keep entries grouped in `categories` order, so the menu's slot \
+                 digits run in order down it"
+            ),
         }
     }
 }
@@ -173,6 +234,7 @@ impl std::error::Error for ShopLoadError {}
 /// to invent one.
 #[derive(Debug, Default)]
 pub struct ShopCatalog {
+    categories: Vec<ShopCategory>,
     entries: Vec<ShopEntry>,
     by_id: BTreeMap<String, usize>,
 }
@@ -193,8 +255,32 @@ impl ShopCatalog {
             });
         }
 
+        let mut category_rank = BTreeMap::new();
+        for (rank, category) in file.categories.iter().enumerate() {
+            if category_rank.insert(category.id.clone(), rank).is_some() {
+                return Err(ShopLoadError::DuplicateCategory {
+                    id: category.id.clone(),
+                });
+            }
+        }
+
         let mut by_id = BTreeMap::new();
+        let mut latest_rank = 0;
         for (index, entry) in file.entries.iter().enumerate() {
+            let Some(&rank) = category_rank.get(&entry.category) else {
+                return Err(ShopLoadError::UnknownCategory {
+                    id: entry.id.clone(),
+                    category: entry.category.clone(),
+                    known: file.categories.iter().map(|c| c.id.clone()).collect(),
+                });
+            };
+            if rank < latest_rank {
+                return Err(ShopLoadError::CategoryOutOfOrder {
+                    id: entry.id.clone(),
+                    category: entry.category.clone(),
+                });
+            }
+            latest_rank = rank;
             if entry.price < 1 {
                 return Err(ShopLoadError::DegeneratePrice {
                     id: entry.id.clone(),
@@ -208,6 +294,7 @@ impl ShopCatalog {
             }
         }
         Ok(Self {
+            categories: file.categories,
             entries: file.entries,
             by_id,
         })
@@ -226,6 +313,12 @@ impl ShopCatalog {
     /// them in.
     pub fn entries(&self) -> &[ShopEntry] {
         &self.entries
+    }
+
+    /// Every category, in the data file's order — the order the build menu
+    /// prints its headings in.
+    pub fn categories(&self) -> &[ShopCategory] {
+        &self.categories
     }
 
     pub fn get(&self, kind: &str) -> Option<&ShopEntry> {
@@ -384,12 +477,14 @@ impl Shop {
     pub fn snapshot(&self, money: Money, crew_of: impl Fn(&str) -> Vec<CrewEntry>) -> ShopSnapshot {
         ShopSnapshot {
             money: money.to_num::<f64>(),
+            categories: self.catalog.categories().to_vec(),
             entries: self
                 .catalog
                 .entries()
                 .iter()
                 .map(|entry| ShopEntrySnapshot {
                     kind: entry.id.clone(),
+                    category: entry.category.clone(),
                     price: entry.price_money().to_num::<f64>(),
                     owned: self.owned.count(&entry.id),
                     affordable: money >= entry.price_money(),
@@ -408,9 +503,12 @@ impl Shop {
 ///
 /// ```json
 /// {"money": 120.0,
+///  "categories": [{"id": "logistics", "name": "Logistics", "note": "..."}, ...],
 ///  "entries": [
-///    {"kind": "belt", "price": 5.0, "owned": 3, "affordable": true},
-///    {"kind": "cooking_vat", "price": 200.0, "owned": 0, "affordable": false}
+///    {"kind": "belt", "category": "logistics", "price": 5.0, "owned": 3,
+///     "affordable": true, "crew": []},
+///    {"kind": "cooking_vat", "category": "production", "price": 200.0,
+///     "owned": 0, "affordable": false, "crew": [...]}
 ///  ]}
 /// ```
 ///
@@ -425,6 +523,9 @@ pub struct ShopSnapshot {
     /// from fixed-point sim state into a presentation-only value that never
     /// feeds back in (ARCHITECTURE.md §3.9).
     pub money: f64,
+    /// The build menu's headings, in file order. Every entry's `category`
+    /// is one of these ids — the loader refuses a file where it is not.
+    pub categories: Vec<ShopCategory>,
     pub entries: Vec<ShopEntrySnapshot>,
 }
 
@@ -432,6 +533,8 @@ pub struct ShopSnapshot {
 pub struct ShopEntrySnapshot {
     /// The buildable kind id, e.g. "belt" or "cooking_vat".
     pub kind: String,
+    /// The id of the [`ShopCategory`] it is listed under.
+    pub category: String,
     /// Unit price. `f64` so it compares directly against `money` above
     /// without presentation having to know the data file stores an integer.
     pub price: f64,
@@ -455,10 +558,14 @@ mod tests {
     use crate::sim::machines::MachineRegistry;
 
     const EXAMPLE: &str = r#"(
-        schema_version: 1,
+        schema_version: 2,
+        categories: [
+            ShopCategory(id: "logistics", name: "Logistics", note: "moves things"),
+            ShopCategory(id: "production", name: "Production", note: "makes things"),
+        ],
         entries: [
-            ShopEntry(id: "belt", price: 5),
-            ShopEntry(id: "crusher", price: 75),
+            ShopEntry(id: "belt", price: 5, category: "logistics"),
+            ShopEntry(id: "crusher", price: 75, category: "production"),
         ],
     )"#;
 
@@ -474,13 +581,13 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_schema_version() {
-        let text = EXAMPLE.replacen("schema_version: 1", "schema_version: 99", 1);
+        let text = EXAMPLE.replacen("schema_version: 2", "schema_version: 99", 1);
         let err = ShopCatalog::from_ron_str(&text).unwrap_err();
         assert!(matches!(
             err,
             ShopLoadError::UnsupportedSchemaVersion {
                 found: 99,
-                supported: 1
+                supported: 2
             }
         ));
     }
@@ -519,6 +626,83 @@ mod tests {
         match err {
             ShopLoadError::DuplicateKind { ref id } => assert_eq!(id, "belt"),
             other => panic!("expected DuplicateKind, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_an_entry_in_an_undefined_category() {
+        let text = EXAMPLE.replacen(r#"category: "production""#, r#"category: "gadgets""#, 1);
+        let err = ShopCatalog::from_ron_str(&text).unwrap_err();
+        match err {
+            ShopLoadError::UnknownCategory {
+                ref id,
+                ref category,
+                ..
+            } => {
+                assert_eq!(id, "crusher");
+                assert_eq!(category, "gadgets");
+            }
+            other => panic!("expected UnknownCategory, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_an_entry_with_no_category_at_all() {
+        let text = EXAMPLE.replacen(r#", category: "production""#, "", 1);
+        let err = ShopCatalog::from_ron_str(&text).unwrap_err();
+        assert!(matches!(err, ShopLoadError::Parse(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn rejects_a_duplicated_category_id() {
+        let text = EXAMPLE.replacen(r#"id: "production""#, r#"id: "logistics""#, 1);
+        let err = ShopCatalog::from_ron_str(&text).unwrap_err();
+        match err {
+            ShopLoadError::DuplicateCategory { ref id } => assert_eq!(id, "logistics"),
+            other => panic!("expected DuplicateCategory, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_entries_not_grouped_in_category_order() {
+        let text = EXAMPLE
+            .replacen(r#"category: "logistics")"#, r#"category: "TMP")"#, 1)
+            .replacen(r#"category: "production")"#, r#"category: "logistics")"#, 1)
+            .replacen(r#"category: "TMP")"#, r#"category: "production")"#, 1);
+        let err = ShopCatalog::from_ron_str(&text).unwrap_err();
+        match err {
+            ShopLoadError::CategoryOutOfOrder { ref id, .. } => assert_eq!(id, "crusher"),
+            other => panic!("expected CategoryOutOfOrder, got {other:?}"),
+        }
+    }
+
+    /// The acceptance for the build menu's sections: every shipped kind is
+    /// filed under a category the shipped file defines, and every defined
+    /// category heads at least one kind (an empty heading is a stale one).
+    #[test]
+    fn every_bundled_shop_entry_has_a_known_category() {
+        let catalog = ShopCatalog::bundled();
+        let known: Vec<&str> = catalog.categories().iter().map(|c| c.id.as_str()).collect();
+        assert!(!known.is_empty(), "data/shop.ron must define categories");
+        for entry in catalog.entries() {
+            assert!(
+                known.contains(&entry.category.as_str()),
+                "kind '{}' is filed under '{}', not one of {known:?}",
+                entry.id,
+                entry.category
+            );
+        }
+        for category in catalog.categories() {
+            assert!(
+                !category.name.trim().is_empty(),
+                "category '{}' has no heading",
+                category.id
+            );
+            assert!(
+                catalog.entries().iter().any(|e| e.category == category.id),
+                "category '{}' heads no kind",
+                category.id
+            );
         }
     }
 
@@ -620,7 +804,9 @@ mod tests {
         );
         let dear = Shop::new(
             ShopCatalog::from_ron_str(
-                r#"(schema_version: 1, entries: [ShopEntry(id: "fortress", price: 40000)])"#,
+                r#"(schema_version: 2,
+                    categories: [ShopCategory(id: "keep", name: "Keep", note: "")],
+                    entries: [ShopEntry(id: "fortress", price: 40000, category: "keep")])"#,
             )
             .unwrap(),
         );
@@ -636,7 +822,11 @@ mod tests {
         assert_eq!(snapshot.money, 10.0);
         assert_eq!(snapshot.entries.len(), 2);
 
+        let headings: Vec<&str> = snapshot.categories.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(headings, vec!["logistics", "production"]);
+
         assert_eq!(snapshot.entries[0].kind, "belt");
+        assert_eq!(snapshot.entries[0].category, "logistics");
         assert_eq!(snapshot.entries[0].price, 5.0);
         assert_eq!(snapshot.entries[0].owned, 2);
         assert!(snapshot.entries[0].affordable);

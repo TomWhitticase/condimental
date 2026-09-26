@@ -117,11 +117,11 @@ Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
   and a height shaped at whatever width it was last *drawn* at, which is
   meaningless under `--headless`, so a panel measured around one is measured
   around nothing. Break such a sentence at a join it already has. It is used
-  legitimately 17 times in `main.gd` and twice in `menu.gd`, every one of them
+  legitimately 22 times in `main.gd` and twice in `menu.gd`, every one of them
   with the width pinned first — by a fixed-size ancestor (`SHOP_SLOT_SIZE`,
   `MARKET_SLOT_SIZE`, `CONFIG_PICKER_SLOT_SIZE`) or by the Label's own
   `custom_minimum_size.x` (`CONFIG_PANEL_WIDTH`, `CREW_TEXT_WIDTH`,
-  `PAUSE_BUTTON_MIN_SIZE.x`) — so the pin dominates the 1px and the
+  `PAUSE_BUTTON_MIN_SIZE.x`, `BOARD_ACTIVE_COLUMN_WIDTH`) — so the pin dominates the 1px and the
   measurement stays honest. **An unpinned one is the bug, not the exception**:
   the configuration panel's footer was the only Label on that panel with
   neither a pin nor a wrap, and at 489px it made the whole panel 99px wider

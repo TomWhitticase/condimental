@@ -244,7 +244,7 @@ func _initialize() -> void:
 	# A signature, then the same offer refused (one of each, never two).
 	main._set_contract_board_open(true)
 	main._audio.plays.clear()
-	# The first offer the economy wire says is NOT active (the starter is).
+	# The first offer the economy wire says is NOT active.
 	var offer := -1
 	var econ: Dictionary = JSON.parse_string(main.sim.economy_snapshot_json())
 	for i in range(main._board_rows.size()):

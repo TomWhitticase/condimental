@@ -448,7 +448,19 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   terms in words and one SIGN button that names the price. A SIGN button on
   the clipboard would make every running order look like a thing to click.
   The button says what a click will do or why it will not (**SIGNED**, **✗
-  SIGN · 150**), and a lost offer says **LOST — sign it again**.
+  SIGN · 150**) and, under it, a short line on where the offer stands (a
+  lost offer says **LOST — sign again**). The terms are one line — "every
+  2500 ticks · pays +90 · 2 strikes" — so that at 1280x720 two whole offers
+  can be compared side by side with the running dockets. The board
+  is two columns: **FOR SALE** on the right, and **YOUR CONTRACTS** on the
+  left — the clipboard's running dockets, built and driven by the same code,
+  wider, with no button on them — so the next order is chosen looking at the
+  ones already signed. A signature lands in the left column on the same
+  click; with nothing running it shows a paper card that says so and points
+  right, its sentence wrapped inside the column's pinned width so the empty
+  state takes nothing from the offers. At its narrowest the board breaks an offer's strike rule onto its
+  own line (a third step of `_fit_contract_board_split`), and a running
+  docket's status line wraps inside the column's pinned width.
 - **A docket says how it is doing and whether it is in danger, four ways at
   once** (§7): a status line with a glyph and words (**✔ READY**, **⚠ AT
   RISK — 1 short, 70% of the window gone**, **⚠ LAST CHANCE — miss this
@@ -474,7 +486,20 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   far)`), because the rate is over that. An empty window is a sentence,
   not an empty box. The footer says what counts: a craft starting is
   "used", a batch landing is "made", a paid order uses what it ships —
-  buying and filling are not production and never appear here.
+  buying and filling are not production and never appear here. **Over
+  the list, the pay cycle** (2026-09-26): one row per product an active
+  contract orders, REQUIRED per payday period (the contracts' mixes scaled
+  to it, a fraction to one place), THIS CYCLE and LAST CYCLE, under a
+  caption naming the cycle and its payday countdown. A finished cycle whose
+  output falls below what the contracts running NOW require (not the orders
+  live during that cycle: signing a contract can flip it once, which answers
+  "would last cycle cover what I have signed?") takes the staff panel's short
+  border and
+  prints `▲ short` in the warning colour; before the first payday last
+  cycle is `—`, and with no contract running the rows are a sentence
+  pointing at the board (C). The cycle rows and the list scroll separately
+  but share one height budget, the cycle rows first, so the panel ends
+  above the hotbar at 1280x720 however many products are ordered.
 - **The staff panel (H) is the same dark-plate menu, one row per
   category** (the staff pools MVP, ticket 3, 2026-09-12; extended by the
   quality pass's staffing-legibility ticket, 2026-09-14). Icon, name,
@@ -691,6 +716,15 @@ one-line larder strip that used to sit above the sockets.
    Buying stays in the build menu (**E**) on left-click or SHIFT+number, and
    SHIFT+number works **only while the menu is open**, where price and
    balance are on screen.
+4. **A mode tab on the plate's top-left end** says what a click does right
+   now — a ring and SELECT, a square and PLACE, or a cross and REMOVE — in
+   every mode, the resting one included (the placement prompt only speaks
+   while a ghost is on a tile). Glyph, word and rule colour (hazard yellow /
+   the prompt's green / its red) all come from `BUILD_MODES` in `main.gd`, the
+   one table the modes are named in. The glyphs are drawn, not typed: the
+   font's ○ ■ ✕ came out at three different sizes, and a drawn shape fills
+   the word's cap height in every mode. The tab stands flush on the plate's
+   top rule; it shares the name flyout's row, so the column is no taller.
 
 Borrowed patterns: a selector bigger than its slot and a fading name flyout
 (Minecraft); a framed hover spec sheet with kind, count, price and both verbs
@@ -713,9 +747,31 @@ What a scale change costs is **layout**, not type size: the build menu is six
 columns with a shorter card; panels put heading and balance on one line; the
 legend is four grouped lines; the clipboard and build grid cap themselves
 against `_hotbar_reserved_height()`; the hotbar socket takes 0.88 of the
-scale so twelve fit. `project.godot`'s window is 1600x900, where nothing
-scrolls; at 1280x720 the build grid scrolls slightly, a deliberate last
-resort over burying the footer.
+scale so twelve fit. `project.godot`'s window is 1600x900. There, nothing
+scrolls except the build menu. At 1280x720 the clipboard scrolls too, because
+a scroll is the deliberate last resort over burying the footer.
+
+**The build menu scrolls at 1600x900** (2026-09-26). The owner asked for
+categories and a search box. The categories are `data/shop.ron`'s
+`categories`, and each is a headed section in the Cookbook's caption-and-note
+style. With them, the twelve cards are three rows: Logistics 5, Production 5,
+Shipping & Storage 2. Laying the sections side by side to get back to two rows
+was tried on paper and does not fit. Two five-card sections need 2160px, and
+any two-row packing of 5/5/2 needs seven 216px cards across plus their gaps,
+which is more than the modal gets at 1600px. Shrinking the cards to make that
+fit would cramp the one screen whose job is reading them. So the sections
+scroll, and the **search box sits in the heading row, outside the scroll**.
+It filters by display name, case-insensitively, hides a section left empty,
+and is cleared when the menu closes. It is not focused when the menu opens,
+so E, ESC and the digits keep working; focused, it takes every key, and ESC
+releases it before a second ESC closes the menu (`test_shop_search.gd` pushes
+real key events to pin that). The menu's plate is **opaque** — its heading
+row sits over the contract clipboard's cream paper, and at the other modals'
+0.94 the clipboard's text read through under the balance. The scroll is cut
+on an **edge**, after a whole line of cards or a section's heading, never
+through a card, and the menu clears only the hotbar's plate rather than the
+whole strip: the strip's name flyout fires on a placement, and placing closes
+the menu. At 1600x900 that shows Logistics and Production whole.
 
 **Width yields too, and before it is clipped** (2026-09-20, issue #62).
 Height had yielded since this section was written; width had not, so at
@@ -766,13 +822,14 @@ is a mix label and a terms label) — a break at a fixed point, not a reflow,
 and `_fit_contract_board_split` measures before it breaks so a window with the
 room keeps the sentence whole.
 
-It *is* used — 14 times in `main.gd` — wherever the width is **pinned** before
+It *is* used — 22 times in `main.gd` — wherever the width is **pinned** before
 anything measures it, so the 1px minimum is never what a fit pass reads: inside
 a fixed-size ancestor (`SHOP_SLOT_SIZE`, `MARKET_SLOT_SIZE`,
 `CONFIG_PICKER_SLOT_SIZE`), or on a Label that sets its own
 `custom_minimum_size.x` (`CONFIG_PANEL_WIDTH` for the configuration notes,
 `CREW_TEXT_WIDTH` for the crew affordance line, `PAUSE_BUTTON_MIN_SIZE.x` for
-the pause menu). The configuration panel *is* measured by a fit pass
+the pause menu, `BOARD_ACTIVE_COLUMN_WIDTH` for a running docket's status line
+and the empty card on the contracts board). The configuration panel *is* measured by a fit pass
 (`_position_config_panel`), so escaping measurement is not the exemption — the
 pin is. Pin the width or do not wrap.
 

@@ -1287,6 +1287,27 @@ var _storage_state: Dictionary = {} # base_cap / slot_stack / total_bays / used_
 var _build_kind := ""
 var _build_direction := "east"
 var _remove_mode := false
+## The three answers to "what does a click do right now", and the ONE place
+## each is named. `_build_mode()` picks the key from the two variables above;
+## the mode tab beside the hotbar (`_update_mode_indicator`) draws the glyph
+## and prints the word from here and colours its rule from here, so a new mode
+## is one entry and one branch, never a second list in the HUD to keep in step.
+## Glyph AND word AND rule colour — UI_UX.md §7, never colour alone. The rules
+## are the placement prompt's own green and red (`_placement_prompt_style`),
+## and SELECT takes the plates' hazard yellow: it is the resting state.
+## The glyph is a shape `_draw_mode_glyph` draws, not a font character: the
+## font's ○ ■ ✕ rendered at three different sizes (■ was a 6px dot beside a
+## 14px ✕), and a drawn one is cap height for all three by construction.
+const BUILD_MODES := {
+	"select": {"glyph": "ring", "word": "SELECT", "rule": Color(0.85, 0.63, 0.11, 0.95)},
+	"place": {"glyph": "square", "word": "PLACE", "rule": Color(0.35, 0.85, 0.45, 0.95)},
+	"remove": {"glyph": "cross", "word": "REMOVE", "rule": Color(0.92, 0.35, 0.30, 0.95)},
+}
+var _mode_indicator: PanelContainer
+var _mode_indicator_glyph: Control
+var _mode_indicator_label: Label
+var _mode_indicator_shown := "" # the BUILD_MODES key the tab last showed
+var _mode_indicator_styles: Dictionary = {} # BUILD_MODES key -> StyleBoxFlat, built once
 var _ghost_root: Node3D
 var _ghost_asset := ""
 var _ghost_tile := Vector2i.ZERO
@@ -1565,10 +1586,19 @@ var _shop_money_label: Label
 ## `data/shop.ron`'s file order, i.e. the intended menu order):
 ## {kind, button, icon, price_label, owned_label}.
 var _shop_slots: Array = []
-## The grid and the ScrollContainer around it, kept so `_position_shop_menu`
-## can fit the one inside the other — see `_fit_grid_scroll`.
-var _shop_grid: GridContainer
+## The column of headed sections and the ScrollContainer around it, kept so
+## `_position_shop_menu` can fit the one inside the other — see
+## `_fit_grid_scroll`.
+var _shop_sections: VBoxContainer
 var _shop_grid_scroll: ScrollContainer
+## One dictionary per `categories` entry of the snapshot, in its order:
+## {id, section, grid} — the heading block and the grid its slots live in.
+var _shop_section_list: Array = []
+## The search box over the sections, and the line that stands in for them
+## when it matches nothing. Filtering is presentation: it hides slots, and
+## the sim never hears about it.
+var _shop_search: LineEdit
+var _shop_no_match: Label
 var _shop_open := false
 ## How many icon slots fit across before wrapping. **SIX**, and the number
 ## has been chased by the same constraint every time: the menu has to fit in
@@ -1879,9 +1909,9 @@ var _market_open := false
 
 # --- The contracts board (the contract-board epic, 2026-09-10) -------------
 # `data/contracts.ron` is a board of OFFERS since its schema 2: a new game
-# runs only its starter, and every other contract is SIGNED here for its
-# price. A contract that misses its strikes in a row is LOST and comes back
-# here to be signed again, at the same price. Built from
+# runs no contract, and every contract is SIGNED here for its price. A
+# contract that misses its strikes in a row is LOST and comes back here
+# to be signed again, at the same price. Built from
 # `economy_snapshot_json`'s `board` array the way the build menu is built
 # from `shop_snapshot_json`'s entries: one row per offer, in file (=
 # priority) order, nothing hardcoded — a fifth contract in the file is a
@@ -1894,6 +1924,13 @@ var _market_open := false
 # the clipboard is what is RUNNING and this is what is FOR SALE; putting a
 # SIGN button on the board of running orders would make every docket look
 # like a thing to click.
+#
+# Since 2026-09-26 the board is two columns: what is FOR SALE on the right,
+# and on the LEFT what is running — the clipboard's own dockets, built by
+# `_build_contract_card` and driven by `_update_contract_card`, just wider,
+# so the choice of what to sign next is made looking at what is already
+# signed. Still no SIGN button on a running docket: the left column is a
+# readout, the right column is the menu.
 var _board_panel: PanelContainer
 var _board_money_label: Label
 var _board_scroll: ScrollContainer
@@ -1901,6 +1938,27 @@ var _board_box: VBoxContainer
 var _board_rows: Array = [] # Array[Dictionary], see _build_contract_board_row
 var _board_row_ids: Array = []
 var _board_open := false
+## The left column: the active contracts' dockets, one per entry of
+## `economy_snapshot_json`'s `contracts`, in the same order the clipboard
+## shows them. Records are `_build_contract_card`'s.
+var _board_active_scroll: ScrollContainer
+var _board_active_box: VBoxContainer
+var _board_active_cards: Array = []
+var _board_active_ids: Array = []
+## The left column's paper card when nothing is running — a new game can
+## start with no contract at all, so this is the column's first face.
+var _board_active_empty: PanelContainer
+## The two column headings; the left one is held to the right one's height
+## (which carries the balance's larger type) so the first dockets line up.
+var _board_active_heading: Label
+var _board_offer_heading: HBoxContainer
+## How wide the left column's dockets are: the "larger version" of the
+## clipboard's docket, whose countdown bar and status line get the room the
+## corner plate cannot give them.
+const BOARD_ACTIVE_COLUMN_WIDTH := 300.0 * UI_SCALE
+## Where an offer's terms break when the board is at its narrowest: the
+## strike rule goes onto its own line (`_fit_contract_board_split`).
+const BOARD_TERMS_JOIN := "  ·  "
 
 # --- The staff panel (the staff pools MVP, ticket 3, 2026-09-12) -----------
 # `data/staff.ron`'s four categories, read off `staff_snapshot_json`: how
@@ -1984,6 +2042,16 @@ var _production_window := 1
 ## carries nothing any other readout needs), on the load's cadence.
 var _production_snapshot: Dictionary = {}
 var _production_polled_tick := -1
+## The pay-cycle block over the list (ticket 7, 2026-09-26): per product an
+## active contract orders, REQUIRED per pay cycle, MADE this cycle and last,
+## straight off the wire's `cycle`. `_production_cycle_rows` is one entry
+## per line, see `_build_production_cycle_row`.
+var _production_cycle_box: VBoxContainer
+var _production_cycle_scroll: ScrollContainer
+var _production_cycle_rows_box: VBoxContainer
+var _production_cycle_rows: Array = []
+var _production_cycle_caption: Label
+var _production_cycle_empty_label: Label
 
 # --- THE COOKBOOK (B) -----------------------------------------------------
 # The recipe book: the sauce tree, and a page per sauce, machine and raw.
@@ -2000,6 +2068,9 @@ var _cookbook_polled_tick := -1
 const PRODUCTION_ALL_TIME := -1
 const PRODUCTION_METER_WIDTH := 150.0 * UI_SCALE
 const PRODUCTION_ICON_SIZE := Vector2(36, 36) * UI_SCALE
+## The pay-cycle block's three figure columns, in the wire's terms.
+const PRODUCTION_CYCLE_COLUMNS := ["REQUIRED", "THIS CYCLE", "LAST CYCLE"]
+const PRODUCTION_CYCLE_COLUMN_WIDTH := 130.0 * UI_SCALE
 const STAFF_METER_WIDTH := 150.0 * UI_SCALE
 const STAFF_METER_HEIGHT := 20.0 * UI_SCALE
 const STAFF_ICON_SIZE := Vector2(40, 40) * UI_SCALE
@@ -6185,7 +6256,7 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_empty_label = Label.new()
 	_contract_empty_label.name = "NoContracts"
 	_contract_empty_label.label_settings = _contract_ink_settings
-	_contract_empty_label.text = "no contracts — nothing to deliver against\npress C to sign one from the board"
+	_contract_empty_label.text = "no contracts — press C to sign one"
 	_contract_empty_label.visible = false
 	body.add_child(_contract_empty_label)
 
@@ -6253,7 +6324,7 @@ func _rebuild_contract_cards(contracts: Array) -> void:
 	_contract_cards.clear()
 	_contract_card_ids.clear()
 	for contract in contracts:
-		_contract_cards.append(_build_contract_card(contract))
+		_contract_cards.append(_build_contract_card(contract, _contract_cards_box))
 		_contract_card_ids.append(String(contract.get("id", "")))
 
 
@@ -6262,15 +6333,20 @@ func _rebuild_contract_cards(contracts: Array) -> void:
 ## clocks independently in sim_core, so this countdown is per docket and is
 ## never shared the way money is.
 ##
+## Built into `box`: the clipboard's stack, or the C board's left column
+## (`_rebuild_board_active_cards`), which shows the same dockets larger and
+## drives them through the same `_update_contract_card` — one docket, two
+## places it hangs.
+##
 ## Returns the record `_update_contract_panel` drives it through:
 ##   {"id", "panel", "name_label", "payout_label", "meta_label",
 ##    "countdown_meter", "countdown_label", "done_label", "missed_label",
 ##    "rows": {item id -> {"icon", "label", "boxes"}}}
-func _build_contract_card(contract: Dictionary) -> Dictionary:
+func _build_contract_card(contract: Dictionary, box: VBoxContainer, status_width := 0.0) -> Dictionary:
 	var panel := PanelContainer.new()
 	panel.name = "ContractCard_%s" % String(contract.get("id", "?"))
 	panel.add_theme_stylebox_override("panel", _contract_card_style)
-	_contract_cards_box.add_child(panel)
+	box.add_child(panel)
 
 	var card_body := VBoxContainer.new()
 	card_body.add_theme_constant_override("separation", _ui_i(4))
@@ -6311,6 +6387,13 @@ func _build_contract_card(contract: Dictionary) -> Dictionary:
 	var status_label := Label.new()
 	status_label.name = "Status"
 	status_label.label_settings = _contract_ink_settings
+	# The board's column is a fixed width and the clipboard's is not: there the
+	# status line wraps inside that PINNED width (the `autowrap_mode` rule
+	# under MODAL_EDGE_MARGIN), because "⚠ LAST CHANCE — … it is LOST" on one
+	# line is wider than the board can give a running docket beside its offers.
+	if status_width > 0.0:
+		status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		status_label.custom_minimum_size.x = status_width
 	card_body.add_child(status_label)
 
 	# Strikes: one pip per miss the contract forgives, filled as misses run,
@@ -6478,8 +6561,11 @@ func _build_contract_checklist_row(body: VBoxContainer, item_id: String, require
 ## factory UI, and it also has to stay legible while floating over a lit 3D
 ## scene, which is exactly what that dark plate exists for.
 func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	# Opaque, unlike the other modal plates' 0.94: this panel's heading row
+	# (search box, balance) sits over the contract clipboard's cream paper, and
+	# at 0.94 the clipboard's text read through under the Money figure.
 	var panel_style := StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.06, 0.06, 0.07, 0.94)
+	panel_style.bg_color = Color(0.06, 0.06, 0.07, 1.0)
 	panel_style.border_color = Color(0.85, 0.63, 0.11, 0.95)
 	panel_style.border_width_top = _ui_i(4)
 	panel_style.border_width_left = _ui_i(2)
@@ -6533,18 +6619,42 @@ func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_shop_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	heading.add_child(_shop_money_label)
 
-	# The grid lives in a ScrollContainer whose height `_position_shop_menu`
-	# fits to whatever is left above the hotbar. **This is a last resort and
-	# is meant never to engage at a normal window size**: at 1600x900 (the
-	# resolution `scripts/screenshot-scene.sh` reviews at) the whole
-	# twelve-kind catalog fits with room to spare and the scrollbar never
-	# appears. It exists because at `project.godot`'s own 1280x720 the
-	# 2026-09-09 UI scale genuinely does not leave room for two rows of cards
-	# plus a title, a balance and a footer — and of the two ways to lose that
-	# fight, a grid that scrolls a little is much better than a menu whose
-	# footer disappears under the hotbar, which is the exact failure
-	# `_position_shop_menu` was written to prevent in the first place. The
-	# same shape (and the same reasoning) as the contract clipboard's docket
+	# The search box, in the heading row between the title and the balance so
+	# it costs the grid no height. Not focused on open, on purpose: the menu's
+	# keys (E and ESC close it, the digits select) would all type into it
+	# instead. A click puts the cursor there; ENTER or ESC hands the keys back.
+	# Its plate is opaque — the stock LineEdit is translucent, and the HUD's
+	# legend read straight through it.
+	var search_style := StyleBoxFlat.new()
+	search_style.bg_color = Color(0.13, 0.13, 0.15, 1.0)
+	search_style.border_color = Color(0.36, 0.37, 0.40)
+	search_style.set_border_width_all(_ui_i(1))
+	search_style.set_content_margin_all(_ui_px(6.0))
+	var search_focus := search_style.duplicate() as StyleBoxFlat
+	search_focus.border_color = Color(0.85, 0.63, 0.11, 0.95)
+	_shop_search = LineEdit.new()
+	_shop_search.name = "ShopSearch"
+	_shop_search.placeholder_text = "search equipment…"
+	_shop_search.clear_button_enabled = true
+	_shop_search.custom_minimum_size.x = _ui_px(260.0)
+	_shop_search.add_theme_font_size_override("font_size", _ui_font(-2))
+	_shop_search.add_theme_stylebox_override("normal", search_style)
+	_shop_search.add_theme_stylebox_override("focus", search_focus)
+	_shop_search.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_shop_search.text_changed.connect(_on_shop_search_changed)
+	_shop_search.text_submitted.connect(func(_text: String) -> void: _shop_search.release_focus())
+	_shop_search.gui_input.connect(_on_shop_search_gui_input)
+	heading.add_child(_shop_search)
+	heading.move_child(_shop_search, 1)
+
+	# The sections live in a ScrollContainer whose height `_position_shop_menu`
+	# fits to whatever is left above the hotbar, so the footer is never pushed
+	# under the hotbar. Since the catalog was split into headed categories
+	# (2026-09-26, the owner's request for categories plus a search box) it
+	# scrolls even at 1600x900: three sections are three rows of cards, and no
+	# two of them fit side by side (UI_UX.md §5c has the arithmetic). The
+	# search box above is outside the scroll on purpose — it is the way to a
+	# card below the fold. The same shape as the contract clipboard's docket
 	# stack.
 	_shop_grid_scroll = ScrollContainer.new()
 	_shop_grid_scroll.name = "ShopGridScroll"
@@ -6552,18 +6662,26 @@ func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_shop_grid_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	body.add_child(_shop_grid_scroll)
 
-	var grid := GridContainer.new()
-	grid.name = "ShopGrid"
-	grid.columns = SHOP_SLOT_COLUMNS
-	grid.add_theme_constant_override("h_separation", _ui_i(8))
-	grid.add_theme_constant_override("v_separation", _ui_i(8))
-	_shop_grid = grid
-	_shop_grid_scroll.add_child(grid)
+	_shop_sections = VBoxContainer.new()
+	_shop_sections.name = "ShopSections"
+	_shop_sections.add_theme_constant_override("separation", _ui_i(10))
+	_shop_grid_scroll.add_child(_shop_sections)
 
 	var snapshot: Dictionary = JSON.parse_string(sim.shop_snapshot_json())
+	for category in snapshot.get("categories", []):
+		_build_shop_section(String(category.get("id", "")),
+			String(category.get("name", "")), String(category.get("note", "")))
 	var entries: Array = snapshot.get("entries", [])
 	for index in range(entries.size()):
-		_build_shop_slot(grid, base_settings, index, String(entries[index]["kind"]))
+		var entry: Dictionary = entries[index]
+		_build_shop_slot(_shop_grid_for(String(entry.get("category", ""))),
+			base_settings, index, String(entry["kind"]))
+
+	_shop_no_match = Label.new()
+	_shop_no_match.name = "ShopNoMatch"
+	_shop_no_match.label_settings = base_settings
+	_shop_no_match.visible = false
+	_shop_sections.add_child(_shop_no_match)
 
 	var footer := Label.new()
 	footer.label_settings = base_settings
@@ -6574,6 +6692,111 @@ func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	body.add_child(footer)
 
 	_position_shop_menu()
+
+
+## One headed section of the build menu: a caption with its note beside it
+## over a grid of slots — THE COOKBOOK's `_section` header (the Sauce Book
+## plate language), so the two screens head a block the same way. Every word
+## comes from the snapshot's `categories`, which is `data/shop.ron`.
+func _build_shop_section(id: String, title: String, note: String) -> void:
+	var column := VBoxContainer.new()
+	column.name = "ShopSection_%s" % id
+	column.add_theme_constant_override("separation", _ui_i(5))
+	_shop_sections.add_child(column)
+
+	var header := HBoxContainer.new()
+	header.name = "Header"
+	header.add_theme_constant_override("separation", _ui_i(10))
+	column.add_child(header)
+
+	var caption_settings := LabelSettings.new()
+	caption_settings.font_size = _ui_font(-2)
+	caption_settings.font_color = Color(0.85, 0.63, 0.11, 0.95) # the panel's hazard rule
+	var caption := Label.new()
+	caption.name = "Caption"
+	caption.label_settings = caption_settings
+	caption.text = title.to_upper()
+	caption.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	header.add_child(caption)
+
+	var note_settings := LabelSettings.new()
+	note_settings.font_size = _ui_font(-4)
+	note_settings.font_color = Color(0.66, 0.68, 0.70)
+	var sub := Label.new()
+	sub.name = "Note"
+	sub.label_settings = note_settings
+	sub.text = note
+	sub.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	# No wrap and no pin: the header sits in a panel `_fit_grid_columns`
+	# measures (godot_project/CLAUDE.md: pin the width or do not wrap).
+	header.add_child(sub)
+
+	var grid := GridContainer.new()
+	grid.name = "ShopGrid_%s" % id
+	grid.columns = SHOP_SLOT_COLUMNS
+	grid.add_theme_constant_override("h_separation", _ui_i(8))
+	grid.add_theme_constant_override("v_separation", _ui_i(8))
+	column.add_child(grid)
+
+	_shop_section_list.append({"id": id, "section": column, "grid": grid})
+
+
+## The grid a category's slots go in. The fallback — the last section, or a
+## bare grid when the snapshot carried no categories at all — is for a stale
+## wire only: the loader refuses a `data/shop.ron` entry whose category the
+## file does not define, so a live snapshot never reaches it. It says so
+## loudly rather than quietly filing the kind under the wrong heading.
+func _shop_grid_for(category: String) -> GridContainer:
+	for section in _shop_section_list:
+		if section["id"] == category:
+			return section["grid"]
+	push_error("shop entry names category '%s', which the snapshot does not define — filed under the last section" % category)
+	if _shop_section_list.is_empty():
+		_build_shop_section("", "", "")
+	return _shop_section_list[-1]["grid"]
+
+
+## How many of a container's children are showing — what a filtered grid
+## balances its columns against.
+func _visible_children(node: Node) -> int:
+	var count := 0
+	for child in node.get_children():
+		if child is Control and child.visible:
+			count += 1
+	return count
+
+
+func _on_shop_search_changed(_text: String) -> void:
+	_apply_shop_search()
+	_position_shop_menu()
+
+
+## ESC in the search box gives the keys back rather than closing the menu
+## under the cursor; a second ESC closes it as it always has.
+func _on_shop_search_gui_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		_shop_search.release_focus()
+		_shop_search.accept_event()
+
+
+## Hides every slot whose display name does not contain the search text
+## (case-insensitive), then every section left with no slot showing. An empty
+## box shows everything. Only what is DRAWN changes: `_shop_slots` keeps its
+## order and its indices, which are the hotbar's slot numbers.
+func _apply_shop_search() -> void:
+	if _shop_search == null:
+		return
+	var query := _shop_search.text.strip_edges().to_lower()
+	for slot in _shop_slots:
+		slot["button"].visible = query == "" \
+			or _kind_display_name(String(slot["kind"])).to_lower().contains(query)
+	var any_shown := false
+	for section in _shop_section_list:
+		var shown := _visible_children(section["grid"]) > 0
+		section["section"].visible = shown
+		any_shown = any_shown or shown
+	_shop_no_match.visible = not any_shown
+	_shop_no_match.text = "nothing matches \"%s\"" % _shop_search.text.strip_edges()
 
 
 # --- Width: what a modal panel gives up when the window is too narrow ------
@@ -6692,14 +6915,77 @@ func _position_shop_menu() -> void:
 	var vp := get_viewport()
 	if vp == null:
 		return
-	var reserved := _hotbar_reserved_height()
+	var reserved := _shop_reserved_height()
 	var bounds := vp.get_visible_rect().size
-	_fit_grid_columns(_shop_menu, _shop_grid, _shop_slots.size(), SHOP_SLOT_COLUMNS)
-	_fit_grid_scroll(_shop_grid_scroll, _shop_grid, bounds.y - reserved - _ui_px(16.0))
+	# Each section's grid is fitted on its own, with every other grid first
+	# folded to one column: the panel is as wide as its widest grid, so a
+	# grid measured beside another still at six across would be squeezed
+	# for a width it was never taking.
+	for section in _shop_section_list:
+		section["grid"].columns = 1
+	for section in _shop_section_list:
+		var grid: GridContainer = section["grid"]
+		_fit_grid_columns(_shop_menu, grid, _visible_children(grid), SHOP_SLOT_COLUMNS)
+	var fitted := _fit_grid_scroll(_shop_grid_scroll, _shop_sections, bounds.y - reserved - _ui_px(16.0))
+	var snapped := _shop_rows_height(fitted)
+	if snapped > 0.0:
+		_shop_grid_scroll.custom_minimum_size.y = snapped
 	_shop_menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
 	var menu_size := _shop_menu.get_combined_minimum_size()
 	_shop_menu.position.x = maxf(0.0, (bounds.x - menu_size.x) * 0.5)
 	_shop_menu.position.y = max(8.0, (bounds.y - reserved - menu_size.y) * 0.5)
+
+
+## How much of the bottom of the screen the build menu must keep clear: the
+## hotbar's PLATE and the gap under it, not the whole strip. The strip's
+## column also holds the name flyout above the plate, and every other panel
+## reserves that too — but the flyout only fires on a placement, and placing
+## from the menu closes the menu (`_enter_build_mode`), so the two are never
+## up together. Reserving it cost the menu ~46px at 1600x900, which is what
+## cut the Production row through its last line. Falls back to the whole
+## strip's estimate before the plate has laid out (a headless run).
+func _shop_reserved_height() -> float:
+	var vp := get_viewport()
+	if vp == null or _hotbar_panel == null or _hotbar_panel.size.y <= 0.0:
+		return _hotbar_reserved_height()
+	var bounds := vp.get_visible_rect().size
+	return bounds.y - _hotbar_panel.get_global_rect().position.y + HOTBAR_BOTTOM_MARGIN
+
+
+## The tallest height not greater than `cap` at which the build menu's scroll
+## can end on an EDGE: after a whole line of cards, or after a section's
+## heading. A card cut through its "Owned" line reads as a rendering fault,
+## where a whole heading with nothing under it yet says "more below" — at
+## 1600x900 it is the Shipping & Storage heading, and the dock, that the cut
+## lands on. 0 when not even the first heading fits.
+func _shop_rows_height(cap: float) -> float:
+	var separation := float(_shop_sections.get_theme_constant("separation"))
+	var used := 0.0
+	var fitted := 0.0
+	var first := true
+	for section in _shop_section_list:
+		var column: Control = section["section"]
+		if not column.visible:
+			continue
+		if not first:
+			used += separation
+		first = false
+		var inner := float(column.get_theme_constant("separation"))
+		var header: Control = column.get_node("Header")
+		used += header.get_combined_minimum_size().y
+		if used > cap:
+			return fitted
+		fitted = used
+		var grid: GridContainer = section["grid"]
+		var rows_height := _whole_grid_rows_height(grid, cap - used - inner)
+		var full := grid.get_combined_minimum_size().y
+		if rows_height > cap - used - inner:
+			return fitted
+		fitted = used + inner + rows_height
+		if rows_height < full:
+			return fitted
+		used += inner + full
+	return fitted
 
 
 ## Gives `grid` as much of `available` as its panel's own chrome leaves it,
@@ -6740,11 +7026,10 @@ func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float, 
 	# `snap_rows` moves the cut down to the last whole row, and it costs height
 	# to buy a tidy edge, so it is for a stack whose rows are DECISIONS the
 	# player signs — an offer on the board, a hire — where half a card is half
-	# a choice (see `_whole_rows_height`). The build menu does NOT ask for it:
-	# its grid wraps six icon slots to a line, so a "row" there is a line of
-	# cards that are all the same height anyway, and the half-row it shows past
-	# the cap is the thing that says "scroll". Neither does the production
-	# panel, for the same reason: its rows are readouts.
+	# a choice (see `_whole_rows_height`). The build menu snaps too, but on
+	# its own edges — a line of cards OR a section's heading — which a
+	# stack of headed grids needs and this does not know (`_shop_rows_height`).
+	# The production panel does not snap: its rows are readouts.
 	if snap_rows:
 		cap = _whole_rows_height(grid, cap)
 	# Both floors above — `_ui_px(110)` and a whole row — may exceed what the
@@ -7261,6 +7546,9 @@ func _update_shop_menu() -> void:
 
 
 func _on_shop_slot_pressed(index: int) -> void:
+	# A click on a card is done typing: hand E, ESC and the digits back.
+	if _shop_search != null:
+		_shop_search.release_focus()
 	_buy_slot(index)
 
 
@@ -7333,6 +7621,13 @@ func _set_shop_menu_open(open: bool) -> void:
 	_shop_open = open
 	_shop_menu.visible = open
 	_cue(FactoryAudio.MENU_OPEN if open else FactoryAudio.MENU_CLOSE)
+	# A search does not outlive the menu: reopened, it shows everything, so
+	# no kind is ever missing from a menu that does not say it is filtered.
+	# (Setting `text` emits no `text_changed`, hence the explicit apply.)
+	if not open and _shop_search != null:
+		_shop_search.release_focus()
+		_shop_search.text = ""
+		_apply_shop_search()
 	if open:
 		_update_shop_menu()
 	# The menu is clickable in first-person too, which means handing the
@@ -8187,6 +8482,8 @@ func _build_contract_board(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	# harness (see `_build_ingredient_market`).
 	_board_rows.clear()
 	_board_row_ids.clear()
+	_board_active_cards.clear()
+	_board_active_ids.clear()
 
 	_board_panel = PanelContainer.new()
 	_board_panel.name = "ContractBoard"
@@ -8206,11 +8503,12 @@ func _build_contract_board(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 
 	var heading := HBoxContainer.new()
 	heading.add_theme_constant_override("separation", _ui_i(16))
-	body.add_child(heading)
+	# Hung on the right-hand column below: the balance belongs over the
+	# offers it pays for, and the running dockets get a heading of their own.
 
 	var title := Label.new()
 	title.label_settings = title_settings
-	title.text = "CONTRACTS BOARD"
+	title.text = "FOR SALE"
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading.add_child(title)
 
@@ -8228,11 +8526,74 @@ func _build_contract_board(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_board_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	heading.add_child(_board_money_label)
 
+	# Two columns: running on the left, for sale on the right, each under a
+	# heading of its own. The headings stand where the board's title used to,
+	# so the split costs no height — at 1280x720 a row of height is an offer.
+	var columns := HBoxContainer.new()
+	columns.name = "BoardColumns"
+	columns.add_theme_constant_override("separation", _ui_i(18))
+	body.add_child(columns)
+
+	var active_col := VBoxContainer.new()
+	active_col.name = "ActiveColumn"
+	active_col.add_theme_constant_override("separation", _ui_i(6))
+	active_col.custom_minimum_size.x = BOARD_ACTIVE_COLUMN_WIDTH
+	columns.add_child(active_col)
+	_board_active_heading = Label.new()
+	_board_active_heading.name = "ActiveHeading"
+	_board_active_heading.label_settings = title_settings
+	_board_active_heading.text = "YOUR CONTRACTS"
+	_board_active_heading.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	active_col.add_child(_board_active_heading)
+
+	_board_active_empty = PanelContainer.new()
+	_board_active_empty.name = "NoActiveContracts"
+	_board_active_empty.add_theme_stylebox_override("panel", _contract_card_style)
+	active_col.add_child(_board_active_empty)
+	var empty_body := VBoxContainer.new()
+	empty_body.add_theme_constant_override("separation", _ui_i(4))
+	_board_active_empty.add_child(empty_body)
+	var empty_title := Label.new()
+	empty_title.label_settings = _contract_name_settings
+	empty_title.text = "No contracts running"
+	empty_body.add_child(empty_title)
+	var empty_text := Label.new()
+	empty_text.label_settings = _contract_ink_settings
+	empty_text.text = "nothing ships for money until you sign an order — pick one under FOR SALE and SIGN it →"
+	# Wrapped inside the column's PINNED width, as a running docket's status
+	# line is (the `autowrap_mode` rule under MODAL_EDGE_MARGIN). On one line,
+	# or broken once, this sentence widened the column ~90px past the pin, and
+	# every pixel of that came off the offers — in the state a new game opens
+	# the board to.
+	empty_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	empty_text.custom_minimum_size.x = BOARD_ACTIVE_COLUMN_WIDTH - _ui_px(12.0) - _ui_px(14.0)
+	empty_body.add_child(empty_text)
+
+	_board_active_scroll = ScrollContainer.new()
+	_board_active_scroll.name = "ActiveScroll"
+	_board_active_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_board_active_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	active_col.add_child(_board_active_scroll)
+
+	_board_active_box = VBoxContainer.new()
+	_board_active_box.name = "ActiveCards"
+	_board_active_box.add_theme_constant_override("separation", _ui_i(6))
+	_board_active_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_board_active_scroll.add_child(_board_active_box)
+
+	var offer_col := VBoxContainer.new()
+	offer_col.name = "OfferColumn"
+	offer_col.add_theme_constant_override("separation", _ui_i(6))
+	offer_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	columns.add_child(offer_col)
+	offer_col.add_child(heading)
+	_board_offer_heading = heading
+
 	_board_scroll = ScrollContainer.new()
 	_board_scroll.name = "BoardScroll"
 	_board_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_board_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	body.add_child(_board_scroll)
+	offer_col.add_child(_board_scroll)
 
 	_board_box = VBoxContainer.new()
 	_board_box.name = "BoardRows"
@@ -8242,10 +8603,13 @@ func _build_contract_board(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 
 	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
 	_rebuild_board_rows(econ.get("board", []))
+	_rebuild_board_active_cards(econ.get("contracts", []))
 
 	var footer := Label.new()
 	footer.label_settings = base_settings
-	footer.text = "click SIGN to take an order — one of each, never two\nmiss its strikes in a row and it is lost: it comes back here to be signed again    C/ESC: close"
+	# One line, not two: beside the running dockets a line of height is what
+	# decides whether a 720-high window shows one offer or two.
+	footer.text = "SIGN takes an order — one of each, never two  ·  miss its strikes in a row and it comes back here    C/ESC: close"
 	body.add_child(footer)
 
 	_position_contract_board()
@@ -8266,41 +8630,65 @@ func _position_contract_board() -> void:
 	# `snap_rows`: an offer is a card the player reads before agreeing to it,
 	# and the SIGN button is on the same line as the terms — half a card is
 	# half a decision (issue #62's rule, one down from an unreachable button).
-	_fit_grid_scroll(_board_scroll, _board_box, bounds.y - reserved - _ui_px(16.0), true)
+	# A running docket is read the same way, so its column snaps too.
+	#
+	# One column at a time, with the other collapsed while it is measured:
+	# `_fit_grid_scroll` reads its chrome off the whole panel's height, and
+	# side by side that height is the TALLER column's — measuring the short
+	# one against it would hand it the tall one's list as "chrome".
+	_board_active_heading.custom_minimum_size.y = _board_offer_heading.get_combined_minimum_size().y
+	var available := bounds.y - reserved - _ui_px(16.0)
+	_board_active_scroll.custom_minimum_size.y = 0.0
+	var offers_height := _fit_grid_scroll(_board_scroll, _board_box, available, true)
+	_board_scroll.custom_minimum_size.y = 0.0
+	_fit_grid_scroll(_board_active_scroll, _board_active_box, available, true)
+	_board_scroll.custom_minimum_size.y = offers_height
 	var panel_size := _board_panel.get_combined_minimum_size()
 	_board_panel.position.x = maxf(0.0, (bounds.x - panel_size.x) * 0.5)
 	_board_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
 
 
 ## Gives every offer its terms on the mix's own line if the board can wear
-## them there, and breaks them onto a second line if it cannot. Returns
-## whether it had to break.
+## them there, and breaks them onto a second line if it cannot — and, since
+## the board has shared the window with the running dockets (2026-09-26),
+## breaks the strike rule off the terms onto a third line if even that is
+## too wide, at the " · " join the sentence already has, and last of all
+## puts each item of a many-item mix on a line of its own, at its ", ".
+## Returns whether it had to break at all.
 ##
 ## MEASURED rather than assumed, the way `_fit_staff_width` measures and for
 ## the same reason: the break is what fits the board in a 1280x720 window
-## (`_build_contract_board_row`), and it is not free anywhere else. A broken
-## card is 157px tall against 120px whole, and the board asks `snap_rows` for
-## the last WHOLE card — so at 1600x900 three broken cards want 489px against
-## a 484px cap, miss by five pixels, and the player is shown two offers where
-## the window has room for three. The window that has the width should show
-## the sentence.
+## (`_build_contract_board_row`), and it is not free anywhere else. Every
+## break is a line of height on every card, and the board asks `snap_rows`
+## for the last WHOLE card — so one line too many cost 1600x900 its third
+## offer once, and 1280x720 its second (PR #195's review; the status line
+## moved under the SIGN button and the strike rule shortened to "N strikes"
+## to win it back). The window that has the width should show the sentence.
 func _fit_contract_board_split() -> bool:
 	if _board_panel == null or _board_rows.is_empty():
 		return false
 	var available: float = _modal_available_width()
-	_set_contract_board_split(false)
-	if _board_panel.get_combined_minimum_size().x <= available:
-		return false
-	_set_contract_board_split(true)
+	for level in range(4):
+		_set_contract_board_split(level)
+		if _board_panel.get_combined_minimum_size().x <= available:
+			return level > 0
 	return true
 
 
-## Moves every offer's terms between the mix's line and a line of their own.
-## The two labels are always the same two labels, so nothing is re-measured
-## or re-worded by the move; only which box holds the terms changes.
-func _set_contract_board_split(split: bool) -> void:
+## Breaks every offer to `level`: 0 is one line; 1 moves the terms onto a
+## line of their own; 2 also breaks the strike rule off the terms; 3 also
+## puts each item of the mix on its own line. The labels are always the same
+## labels, so nothing is re-measured by the move; only which box holds the
+## terms, and where the texts carry a line break, changes.
+func _set_contract_board_split(level: int) -> void:
+	var split := level > 0
 	for row in _board_rows:
-		var terms: Control = row["terms_label"]
+		var terms: Label = row["terms_label"]
+		var halves: PackedStringArray = terms.get_meta("halves")
+		terms.text = ("\n" if level > 1 else BOARD_TERMS_JOIN).join(halves)
+		var mix: Label = row["mix_label"]
+		var parts: PackedStringArray = mix.get_meta("parts")
+		mix.text = (",\n" if level > 2 else ", ").join(parts)
 		var mix_row: Control = row["mix_label"].get_parent()
 		var text_col: Control = mix_row.get_parent()
 		var wanted: Control = text_col if split else mix_row
@@ -8328,6 +8716,34 @@ func _rebuild_board_rows(board: Array) -> void:
 	for index in range(board.size()):
 		_board_rows.append(_build_contract_board_row(board[index], index))
 		_board_row_ids.append(String(board[index].get("id", "")))
+
+
+## Rebuilds the left column's dockets from a `contracts` array, through the
+## clipboard's own builder and the clipboard's own guard
+## (`_board_active_matches`, `_contract_cards_match`'s twin).
+func _rebuild_board_active_cards(contracts: Array) -> void:
+	for card in _board_active_cards:
+		var panel: Node = card["panel"]
+		if is_instance_valid(panel):
+			if panel.get_parent() != null:
+				panel.get_parent().remove_child(panel)
+			panel.queue_free()
+	_board_active_cards.clear()
+	_board_active_ids.clear()
+	for contract in contracts:
+		_board_active_cards.append(_build_contract_card(
+			contract, _board_active_box, BOARD_ACTIVE_COLUMN_WIDTH - _ui_px(12.0) - _ui_px(14.0)
+		))
+		_board_active_ids.append(String(contract.get("id", "")))
+
+
+func _board_active_matches(contracts: Array) -> bool:
+	if contracts.size() != _board_active_ids.size():
+		return false
+	for i in range(contracts.size()):
+		if String(contracts[i].get("id", "")) != String(_board_active_ids[i]):
+			return false
+	return true
 
 
 func _board_rows_match(board: Array) -> bool:
@@ -8395,32 +8811,55 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 	mix_label.name = "OfferMix"
 	mix_label.label_settings = _contract_ink_settings
 	mix_label.text = ", ".join(PackedStringArray(parts))
+	# Kept for `_set_contract_board_split`, which may break the mix at ", ".
+	mix_label.set_meta("parts", PackedStringArray(parts))
 	mix_row.add_child(mix_label)
 	var terms_label := Label.new()
 	terms_label.name = "OfferTerms"
 	terms_label.label_settings = _contract_ink_settings
-	terms_label.text = "every %d ticks  ·  pays +%d  ·  lost after %d missed in a row" % [
-		int(offer.get("cadence_ticks", 0)),
-		int(offer.get("payout", 0)),
-		int(offer.get("strikes", 1)),
-	]
+	# The two halves kept apart, so `_set_contract_board_split` can break at
+	# the join and put it back.
+	#
+	# The strike rule is "3 strikes", not "lost after 3 missed in a row": the
+	# long form is what broke the terms onto a second line beside the running
+	# dockets, and a fifth line on every card is what left a 1280x720 window
+	# one offer. The footer says what a strike is, and a signed docket spells
+	# the rule out in full beside its pips.
+	var strikes := int(offer.get("strikes", 1))
+	var halves := PackedStringArray([
+		"every %d ticks%spays +%d" % [
+			int(offer.get("cadence_ticks", 0)), BOARD_TERMS_JOIN, int(offer.get("payout", 0))],
+		"%d strike%s" % [strikes, "" if strikes == 1 else "s"],
+	])
+	terms_label.set_meta("halves", halves)
+	terms_label.text = BOARD_TERMS_JOIN.join(halves)
 	mix_row.add_child(terms_label)
 
-	var status_label := Label.new()
-	status_label.name = "OfferStatus"
-	status_label.label_settings = _contract_meta_settings
-	text_col.add_child(status_label)
+	# The button and the word on where this offer stands share a column, the
+	# status UNDER the button: it is the button's own reason, and the space
+	# below a 44px button was dead anyway, while a line under the terms was a
+	# line of height on every card.
+	var sign_col := VBoxContainer.new()
+	sign_col.name = "SignColumn"
+	sign_col.add_theme_constant_override("separation", _ui_i(3))
+	sign_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(sign_col)
 
 	var sign_button := Button.new()
 	sign_button.name = "Sign_%s" % String(offer.get("id", "?"))
 	sign_button.focus_mode = Control.FOCUS_NONE
 	sign_button.custom_minimum_size = _ui_v(Vector2(128, 44))
-	sign_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	sign_button.add_theme_font_size_override("font_size", _ui_font(1))
 	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
 		sign_button.add_theme_stylebox_override(state, _shop_slot_style(state))
 	sign_button.pressed.connect(_sign_contract_offer.bind(index))
-	row.add_child(sign_button)
+	sign_col.add_child(sign_button)
+
+	var status_label := Label.new()
+	status_label.name = "OfferStatus"
+	status_label.label_settings = _contract_meta_settings
+	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sign_col.add_child(status_label)
 
 	return {
 		"id": String(offer.get("id", "")),
@@ -8447,6 +8886,16 @@ func _update_contract_board(econ: Dictionary = {}) -> void:
 		_rebuild_board_rows(board)
 	_board_money_label.text = "Money: %.0f" % float(econ.get("money", 0.0))
 
+	# The left column: what is running, the clipboard's dockets at board size.
+	var contracts: Array = econ.get("contracts", [])
+	if not _board_active_matches(contracts):
+		_rebuild_board_active_cards(contracts)
+	_board_active_empty.visible = contracts.is_empty()
+	_board_active_scroll.visible = not contracts.is_empty()
+	var current_tick: int = sim.current_tick()
+	for i in range(min(contracts.size(), _board_active_cards.size())):
+		_update_contract_card(_board_active_cards[i], contracts[i], current_tick)
+
 	for i in range(min(board.size(), _board_rows.size())):
 		var offer: Dictionary = board[i]
 		var row: Dictionary = _board_rows[i]
@@ -8456,27 +8905,30 @@ func _update_contract_board(econ: Dictionary = {}) -> void:
 		var lost: int = int(offer.get("times_lost", 0))
 		var button: Button = row["sign_button"]
 		var status: Label = row["status_label"]
+		# Short, and on lines of their own: they sit under the SIGN button, so
+		# the button column is as wide as their widest line — and the button
+		# already carries the price.
 		var lost_note := ""
 		if lost > 0:
-			lost_note = "  ·  lost %d time%s before" % [lost, "" if lost == 1 else "s"]
+			lost_note = "\nlost %d time%s before" % [lost, "" if lost == 1 else "s"]
 		if active:
 			button.text = "SIGNED"
 			button.disabled = true
-			status.text = "✔ signed and running — it is on your clipboard" + lost_note
+			status.text = "✔ running, on the left" + lost_note
 			row["panel"].add_theme_stylebox_override("panel", _contract_card_style_ready)
 		elif not affordable:
 			button.text = "✗ SIGN · %d" % price
 			button.disabled = true
-			status.text = "✗ can't afford — the signature costs %d" % price + lost_note
+			status.text = "✗ can't afford it" + lost_note
 			row["panel"].add_theme_stylebox_override("panel", _contract_card_style)
 		else:
 			button.text = "SIGN · %d" % price
 			button.disabled = false
 			if lost > 0:
-				status.text = "✗ LOST — sign it again for %d" % price + lost_note
+				status.text = "✗ LOST — sign again" + lost_note
 				row["panel"].add_theme_stylebox_override("panel", _contract_card_style_last_chance)
 			else:
-				status.text = "available — %d to sign" % price
+				status.text = "available"
 				row["panel"].add_theme_stylebox_override("panel", _contract_card_style)
 	_position_contract_board()
 
@@ -9863,6 +10315,7 @@ func _build_production_panel(hud: CanvasLayer, base_settings: LabelSettings) -> 
 	# harness (see `_build_ingredient_market`).
 	_production_rows.clear()
 	_production_window_buttons.clear()
+	_production_cycle_rows.clear()
 
 	_production_panel = PanelContainer.new()
 	_production_panel.name = "ProductionPanel"
@@ -9903,6 +10356,8 @@ func _build_production_panel(hud: CanvasLayer, base_settings: LabelSettings) -> 
 	for index in range(windows.size()):
 		_build_production_window_button(selector, base_settings, index, "last %s" % String(windows[index].get("id", "?")))
 	_build_production_window_button(selector, base_settings, PRODUCTION_ALL_TIME, "all time")
+
+	_build_production_cycle_block(body)
 
 	# The column captions, once, over the list — MADE and USED are the two
 	# halves of every row and naming them per row would be noise.
@@ -9954,6 +10409,199 @@ func _build_production_panel(hud: CanvasLayer, base_settings: LabelSettings) -> 
 	_position_production_panel()
 
 
+## The pay-cycle block: a caption naming the cycle and its countdown, the
+## three column captions, one row per demanded product, and a sentence in
+## their place when no contract is running. Above the rolling list because
+## it answers the question the orders ask — "does my factory keep up?" —
+## and the list below answers "what is it doing?".
+func _build_production_cycle_block(body: VBoxContainer) -> void:
+	_production_cycle_box = VBoxContainer.new()
+	_production_cycle_box.name = "ProductionCycle"
+	_production_cycle_box.add_theme_constant_override("separation", _ui_i(4))
+	body.add_child(_production_cycle_box)
+
+	_production_cycle_caption = Label.new()
+	_production_cycle_caption.name = "CycleCaption"
+	_production_cycle_caption.label_settings = _staff_meta_settings()
+	_production_cycle_box.add_child(_production_cycle_caption)
+
+	var captions := HBoxContainer.new()
+	captions.name = "CycleColumns"
+	captions.add_theme_constant_override("separation", _ui_i(14))
+	_production_cycle_box.add_child(captions)
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(PRODUCTION_ICON_SIZE.x + _ui_px(14.0) + _ui_px(150.0), 0.0)
+	captions.add_child(spacer)
+	for caption in PRODUCTION_CYCLE_COLUMNS:
+		var label := Label.new()
+		label.label_settings = _staff_meta_settings()
+		label.text = caption
+		label.custom_minimum_size = Vector2(PRODUCTION_CYCLE_COLUMN_WIDTH, 0.0)
+		captions.add_child(label)
+
+	# The rows scroll on their own, so a third ordered product costs the
+	# panel no height: `_fit_production_scrolls` shares one budget between
+	# this and the list below.
+	_production_cycle_scroll = ScrollContainer.new()
+	_production_cycle_scroll.name = "CycleScroll"
+	_production_cycle_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_production_cycle_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_production_cycle_box.add_child(_production_cycle_scroll)
+
+	_production_cycle_rows_box = VBoxContainer.new()
+	_production_cycle_rows_box.name = "CycleRows"
+	_production_cycle_rows_box.add_theme_constant_override("separation", _ui_i(4))
+	_production_cycle_rows_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_production_cycle_scroll.add_child(_production_cycle_rows_box)
+
+	_production_cycle_empty_label = Label.new()
+	_production_cycle_empty_label.name = "CycleEmpty"
+	_production_cycle_empty_label.label_settings = _staff_meta_settings()
+	_production_cycle_empty_label.text = "no orders running — sign one on the contracts board (C) to see what it needs per pay cycle"
+	_production_cycle_box.add_child(_production_cycle_empty_label)
+
+
+## A per-cycle requirement in words: whole when it is whole (`2`), else to
+## one place (`6.7`) — a 1 500-tick order over a 1 000-tick payday asks for
+## two-thirds of its mix, and rounding that to a whole box would lie. The
+## wire's figure is a fixed-point sum, so a whole 11 can arrive as 10.99998:
+## it is rounded to the place first and judged whole after.
+func _production_required_text(required: float) -> String:
+	var text := "%.1f" % required
+	return text.trim_suffix(".0")
+
+
+## The pay-cycle rows, FORMATTED from the snapshot's `cycle` in the wire's
+## order (contract priority) — nothing sorted, summed or judged here: the
+## sim says what is required and whether last cycle fell short. Before the
+## first payday there is no last cycle, so it prints `—`, never a zero that
+## would read as a factory that made nothing. Pure given the snapshot.
+func _production_cycle_rows_for(snapshot: Dictionary) -> Array:
+	var cycle = snapshot.get("cycle", {})
+	if not (cycle is Dictionary):
+		return []
+	var closed := int(cycle.get("cycles_closed", 0)) > 0
+	var rows: Array = []
+	for line in cycle.get("lines", []):
+		if not (line is Dictionary):
+			continue
+		var id := String(line.get("id", ""))
+		var short := bool(line.get("short", false))
+		var last := int(line.get("produced_last_cycle", 0))
+		var last_text := str(last) if closed else "—"
+		if short:
+			last_text += "  ▲ short"
+		rows.append({
+			"id": id,
+			"name": _item_display_name(id),
+			"required": _production_required_text(float(line.get("required", 0.0))),
+			"this_cycle": str(int(line.get("produced_this_cycle", 0))),
+			"last_cycle": last_text,
+			"short": short,
+		})
+	return rows
+
+
+## The caption over the block: what "cycle" means and when this one ends —
+## `ORDERS PER PAY CYCLE (34s)  ·  payday in 12s`.
+func _production_cycle_caption_text(snapshot: Dictionary) -> String:
+	var cycle = snapshot.get("cycle", {})
+	if not (cycle is Dictionary):
+		return ""
+	var text := "ORDERS PER PAY CYCLE (%s)" % _format_remaining(int(cycle.get("period_ticks", 0)))
+	var next_tick := int(cycle.get("next_tick", 0))
+	if next_tick > 0:
+		text += "    ·    payday in %s" % _format_remaining(next_tick - sim.current_tick())
+	return text
+
+
+## One demanded product: icon and name, then REQUIRED / THIS CYCLE / LAST
+## CYCLE as plain figures in fixed columns. A short row takes the staff
+## panel's short border and prints its last-cycle figure in the warning
+## colour with the words beside it (UI_UX.md §7: colour never alone).
+func _build_production_cycle_row(row_state: Dictionary) -> Dictionary:
+	var id := String(row_state.get("id", "?"))
+	var panel := PanelContainer.new()
+	panel.name = "Cycle_%s" % id
+	panel.add_theme_stylebox_override("panel", _staff_row_style(false))
+	_production_cycle_rows_box.add_child(panel)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", _ui_i(14))
+	panel.add_child(row)
+
+	var icon := TextureRect.new()
+	icon.name = "Icon"
+	icon.custom_minimum_size = PRODUCTION_ICON_SIZE
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	icon.texture = _icon_for(id)
+	row.add_child(icon)
+
+	var name_label := Label.new()
+	name_label.name = "Name"
+	name_label.label_settings = _contract_name_settings_dark()
+	name_label.text = String(row_state.get("name", id))
+	name_label.custom_minimum_size = Vector2(_ui_px(150.0), 0.0)
+	name_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(name_label)
+
+	var figures := {}
+	for key in ["required", "this_cycle", "last_cycle"]:
+		var label := Label.new()
+		label.name = key.to_pascal_case()
+		label.label_settings = _contract_name_settings_dark()
+		label.custom_minimum_size = Vector2(PRODUCTION_CYCLE_COLUMN_WIDTH, 0.0)
+		label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(label)
+		figures[key] = label
+	# The last-cycle figure's own settings, since its colour is the row's
+	# verdict (`_staff_state_settings`' reason).
+	var warn := _contract_name_settings_dark()
+	warn.font_color = METER_FILL_WARN
+	return {
+		"id": id, "panel": panel, "required": figures["required"],
+		"this_cycle": figures["this_cycle"], "last_cycle": figures["last_cycle"],
+		"plain": figures["required"].label_settings, "warn": warn, "short": false,
+	}
+
+
+func _update_production_cycle_block() -> void:
+	if _production_cycle_box == null:
+		return
+	var rows := _production_cycle_rows_for(_production_snapshot)
+	var same: bool = rows.size() == _production_cycle_rows.size()
+	if same:
+		for i in range(rows.size()):
+			same = same and String(rows[i]["id"]) == String(_production_cycle_rows[i]["id"])
+	if not same:
+		for row in _production_cycle_rows:
+			var panel: Node = row["panel"]
+			if is_instance_valid(panel):
+				if panel.get_parent() != null:
+					panel.get_parent().remove_child(panel)
+				panel.queue_free()
+		_production_cycle_rows.clear()
+		for row_state in rows:
+			_production_cycle_rows.append(_build_production_cycle_row(row_state))
+	for i in range(rows.size()):
+		var state: Dictionary = rows[i]
+		var row: Dictionary = _production_cycle_rows[i]
+		row["required"].text = String(state["required"])
+		row["this_cycle"].text = String(state["this_cycle"])
+		row["last_cycle"].text = String(state["last_cycle"])
+		var short := bool(state["short"])
+		if row["short"] != short:
+			row["short"] = short
+			row["panel"].add_theme_stylebox_override("panel", _staff_row_style(short))
+			row["last_cycle"].label_settings = row["warn"] if short else row["plain"]
+	_production_cycle_caption.text = _production_cycle_caption_text(_production_snapshot)
+	_production_cycle_empty_label.visible = rows.is_empty()
+	_production_cycle_box.get_node("CycleColumns").visible = not rows.is_empty()
+	_production_cycle_scroll.visible = not rows.is_empty()
+
+
 ## One window button. The selected one wears the hotbar's selected-socket
 ## style, the rest its stocked style — "the thing I have chosen" looks the
 ## same wherever the game asks (the configuration panel's picker made the
@@ -10001,10 +10649,39 @@ func _position_production_panel() -> void:
 	# row showing past the cut is the thing that says "there is more, scroll".
 	# Asking for whole rows here bought a tidier edge and paid a readable row
 	# for it: at 1600x900 the panel ended 161px short of the column it had.
-	_fit_grid_scroll(_production_scroll, _production_rows_box, bounds.y - reserved - _ui_px(16.0))
+	_fit_production_scrolls(bounds.y - reserved - _ui_px(16.0))
 	var panel_size := _production_panel.get_combined_minimum_size()
 	_production_panel.position.x = maxf(0.0, (bounds.x - panel_size.x) * 0.5)
 	_production_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
+
+
+## The pay-cycle rows and the rolling list share ONE height budget: what
+## `available` leaves after the panel's own chrome (measured, as
+## `_fit_grid_scroll` measures it). Each scroll alone, the cycle block grew
+## the panel by a row per ordered product past the list's floor — at
+## 1280x720 two products put it on the hotbar and three put it off the
+## screen. The cycle rows go first, since they answer the question the
+## orders ask, but never past what leaves the list `_fit_grid_scroll`'s
+## floor or half the room, whichever is more; the list takes the rest. Each
+## keeps at least one row's stub so neither vanishes, and those stubs are
+## the only thing that can overrun `available`, on a window smaller than
+## 1280x720.
+func _fit_production_scrolls(available: float) -> void:
+	if _production_cycle_scroll == null or _production_scroll == null:
+		return
+	var cycle_natural: float = _production_cycle_rows_box.get_combined_minimum_size().y if _production_cycle_scroll.visible else 0.0
+	var list_natural: float = _production_rows_box.get_combined_minimum_size().y if _production_scroll.visible else 0.0
+	_production_cycle_scroll.custom_minimum_size.y = cycle_natural
+	_production_scroll.custom_minimum_size.y = list_natural
+	var chrome: float = _production_panel.get_combined_minimum_size().y - cycle_natural - list_natural
+	var room: float = maxf(0.0, available - chrome)
+	var cycle: float = minf(cycle_natural, maxf(room * 0.5, room - _ui_px(110.0)))
+	if _production_cycle_rows_box.get_child_count() > 0:
+		var first_row: float = (_production_cycle_rows_box.get_child(0) as Control).get_combined_minimum_size().y
+		cycle = maxf(cycle, minf(cycle_natural, first_row))
+	var list: float = minf(list_natural, maxf(room - cycle, _ui_px(40.0)))
+	_production_cycle_scroll.custom_minimum_size.y = cycle
+	_production_scroll.custom_minimum_size.y = list
 
 
 func _production_poll_due() -> bool:
@@ -10214,6 +10891,7 @@ func _rebuild_production_rows(rows: Array) -> void:
 func _update_production_panel() -> void:
 	if _production_panel == null:
 		return
+	_update_production_cycle_block()
 	var rows := _production_rows_for(_production_snapshot, _production_window)
 	if not _production_rows_match(rows):
 		_rebuild_production_rows(rows)
@@ -13072,7 +13750,9 @@ func _build_hotbar(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	# behind it unbuildable. Only the slot buttons themselves take the mouse.
 	_hotbar_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hotbar_root.alignment = BoxContainer.ALIGNMENT_CENTER
-	_hotbar_root.add_theme_constant_override("separation", _ui_i(6))
+	# No gap between the rows: the mode tab stands ON the plate's top rule.
+	# The flyout keeps its old clearance as its own bottom margin below.
+	_hotbar_root.add_theme_constant_override("separation", 0)
 	hud.add_child(_hotbar_root)
 
 	# The larder strip used to sit at the TOP of this column. It is the STOCK
@@ -13092,7 +13772,25 @@ func _build_hotbar(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_hotbar_flyout.label_settings = flyout_settings
 	_hotbar_flyout.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_hotbar_flyout.modulate = Color(1, 1, 1, 0)
-	_hotbar_root.add_child(_hotbar_flyout)
+
+	# The flyout shares its row with the mode tab: a MarginContainer stacks
+	# its children, so the flyout stays centred over the sockets and the tab
+	# sits on the plate's left end without making the column any taller (the
+	# strip is nearly the window's width at 1280, so there is no room BESIDE
+	# it, and every panel above caps itself against this column's height).
+	# The flyout is bare text, so it floats the column's old 6px clear of the
+	# plate; the tab is a plate with its own rule, so it sits flush on the
+	# hotbar's (test_hud_plates pins the zero gap).
+	var top_row := MarginContainer.new()
+	top_row.name = "HotbarTopRow"
+	top_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hotbar_root.add_child(top_row)
+	var flyout_row := MarginContainer.new()
+	flyout_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	flyout_row.add_theme_constant_override("margin_bottom", _ui_i(6))
+	top_row.add_child(flyout_row)
+	flyout_row.add_child(_hotbar_flyout)
+	_build_mode_indicator(top_row, base_settings)
 
 	# Nearly opaque, like the build menu's own plate rather than the help
 	# strip's lighter one: at 0.80 the floor's diamond tiling showed through
@@ -13337,6 +14035,9 @@ func _hotbar_selected_index() -> int:
 ## an eleven-entry object per frame is the same cost the contract clipboard
 ## already pays, and it is what keeps the hotbar honest with no push channel.
 func _update_hotbar() -> void:
+	# Every route into or out of a mode ends here (enter, toggle, exit), so
+	# this is the one call that keeps the tab honest.
+	_update_mode_indicator()
 	if _hotbar_slots.is_empty():
 		return
 	var snapshot = JSON.parse_string(sim.shop_snapshot_json())
@@ -13429,6 +14130,110 @@ func _position_hotbar() -> void:
 	_hotbar_root.set_anchors_and_offsets_preset(
 		Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE, HOTBAR_BOTTOM_MARGIN
 	)
+
+
+## The mode tab: a small plate on the hotbar's top-left edge saying which
+## `BUILD_MODES` entry a click is in. The placement prompt says the same thing
+## beside the cursor, but only while a ghost is on a tile — this is the one
+## readout that is there in every mode, including the resting one.
+func _build_mode_indicator(row: Control, base_settings: LabelSettings) -> void:
+	for mode in BUILD_MODES:
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color(0.06, 0.06, 0.07, 0.93)
+		style.border_color = BUILD_MODES[mode]["rule"]
+		style.border_width_top = _ui_i(3)
+		style.content_margin_left = _ui_px(8.0)
+		style.content_margin_right = _ui_px(8.0)
+		style.content_margin_top = _ui_px(3.0)
+		style.content_margin_bottom = _ui_px(2.0)
+		_mode_indicator_styles[mode] = style
+
+	_mode_indicator = PanelContainer.new()
+	_mode_indicator.name = "ModeIndicator"
+	_mode_indicator.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_mode_indicator.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_mode_indicator.size_flags_vertical = Control.SIZE_SHRINK_END
+	row.add_child(_mode_indicator)
+
+	var settings := LabelSettings.new()
+	settings.font_size = _ui_font(-1)
+	settings.font_color = Color(0.92, 0.93, 0.95)
+	settings.outline_size = base_settings.outline_size
+	settings.outline_color = base_settings.outline_color
+
+	var line := HBoxContainer.new()
+	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	line.add_theme_constant_override("separation", _ui_i(6))
+	_mode_indicator.add_child(line)
+
+	# A cap-height square to draw in, whatever the mode: about 0.72 of the
+	# font size is a sans face's cap height.
+	var side := roundf(settings.font_size * 0.72)
+	_mode_indicator_glyph = Control.new()
+	_mode_indicator_glyph.name = "ModeGlyph"
+	_mode_indicator_glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_mode_indicator_glyph.custom_minimum_size = Vector2(side, side)
+	_mode_indicator_glyph.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_mode_indicator_glyph.draw.connect(_draw_mode_glyph.bind(_mode_indicator_glyph))
+	line.add_child(_mode_indicator_glyph)
+
+	_mode_indicator_label = Label.new()
+	_mode_indicator_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_mode_indicator_label.label_settings = settings
+	line.add_child(_mode_indicator_label)
+	_mode_indicator_shown = "" # a rebuilt tab starts blank, whatever the last one showed
+	_update_mode_indicator()
+
+
+## Called every refresh from `_update_hotbar`, so it does nothing unless the
+## mode actually changed: re-setting the stylebox override re-lays the tab out.
+func _update_mode_indicator() -> void:
+	if _mode_indicator == null:
+		return
+	var mode := _build_mode()
+	if mode == _mode_indicator_shown:
+		return
+	_mode_indicator_shown = mode
+	_mode_indicator_label.text = BUILD_MODES[mode]["word"]
+	_mode_indicator.add_theme_stylebox_override("panel", _mode_indicator_styles[mode])
+	_mode_indicator_glyph.queue_redraw()
+
+
+## The mode's glyph in its rule colour, over the label's black outline so it
+## reads on the same terms as the word beside it. Every shape fills the same
+## cap-height square with the same stroke, so no one mode reads as a dot.
+## `g` is bound at connect time, not read from `_mode_indicator_glyph`: a
+## node may only draw onto itself, and a rebuilt HUD leaves the old one live.
+func _draw_mode_glyph(g: Control) -> void:
+	if _mode_indicator_shown == "":
+		return
+	var entry: Dictionary = BUILD_MODES[_mode_indicator_shown]
+	var ink: Color = entry["rule"]
+	var halo: Color = _mode_indicator_label.label_settings.outline_color
+	var edge := maxf(1.0, _mode_indicator_label.label_settings.outline_size * 0.5)
+	var side := minf(g.size.x, g.size.y)
+	var box := Rect2((g.size - Vector2(side, side)) * 0.5, Vector2(side, side))
+	var stroke := maxf(2.0, roundf(side * 0.24))
+	match String(entry["glyph"]):
+		"ring":
+			var radius := (side - stroke) * 0.5
+			g.draw_arc(box.get_center(), radius, 0.0, TAU, 32, halo, stroke + edge * 2.0, true)
+			g.draw_arc(box.get_center(), radius, 0.0, TAU, 32, ink, stroke, true)
+		"square":
+			# Inset a stroke's width: a solid block the full cap square
+			# outweighs the ring and the cross beside it.
+			var fill := box.grow(-stroke * 0.5)
+			g.draw_rect(fill.grow(edge), halo)
+			g.draw_rect(fill, ink)
+		"cross":
+			var inset := stroke * 0.5
+			var a := box.position + Vector2(inset, inset)
+			var b := box.end - Vector2(inset, inset)
+			var c := Vector2(b.x, a.y)
+			var d := Vector2(a.x, b.y)
+			for pass_ in [[halo, stroke + edge * 2.0], [ink, stroke]]:
+				g.draw_line(a, b, pass_[0], pass_[1], true)
+				g.draw_line(c, d, pass_[0], pass_[1], true)
 
 
 ## Terraria's framed hover panel, in this scene's plate styling: the kind's
@@ -13723,7 +14528,17 @@ func _anything_open() -> bool:
 
 
 func _in_build_mode() -> bool:
-	return _build_kind != "" or _remove_mode
+	return _build_mode() != "select"
+
+
+## Which `BUILD_MODES` entry the player is in. Remove is checked first only
+## for safety: the two variables are exclusive by construction.
+func _build_mode() -> String:
+	if _remove_mode:
+		return "remove"
+	if _build_kind != "":
+		return "place"
+	return "select"
 
 
 ## Cycles the ghost's facing one quarter turn CLOCKWISE — the same single
@@ -17737,8 +18552,11 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 		# Issue #13 made the same trade against the SHORT-STAFFED strip and
 		# for the same reason: the clipboard has room for one line of advice,
 		# and a docket cut through a line outranks it.
+		# With nothing signed the empty line already names the key, and a new
+		# game opens that way: "sign MORE orders" would be wrong, and its line
+		# is what keeps the stock plate off the CREW plate at 1280x720.
 		if _contract_hint_label != null:
-			_contract_hint_label.visible = true
+			_contract_hint_label.visible = not _contract_empty_label.visible
 		var cut: float = _fit_grid_scroll(
 			_contract_cards_scroll,
 			_contract_cards_box,

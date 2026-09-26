@@ -181,7 +181,7 @@ scripts/make-demo-saves.sh
 
 Saves live in Godot's per-user data directory, not in the repo (on macOS:
 `~/Library/Application Support/Godot/app_userdata/CONDIMENTAL/saves`). The running
-game prints the resolved path once at startup. The save schema is at version 2 and an
+game prints the resolved path once at startup. The save schema is at version 4 and an
 older save is **refused by number rather than migrated**, so re-run that script after
 pulling a schema bump.
 

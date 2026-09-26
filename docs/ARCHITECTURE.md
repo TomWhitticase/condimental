@@ -376,7 +376,7 @@ autosave. A command log can still sit on top of this later.
 **Data-file schema versioning:** every `data/*.ron` carries `schema_version`;
 loaders reject a mismatch. Content changes never bump it.
 
-**Save schema version (2, since 2026-09-20).** `save.rs` once reserved a
+**Save schema version (4; first bumped 2026-09-20).** `save.rs` once reserved a
 window in which an additive `#[serde(default)]` field was not a shape
 change; it closed when that batch shipped. A tank's declared fluid
 (`SavedTank::fluid`, issue #43) is the first real bump: a v1 save is
@@ -384,7 +384,9 @@ change; it closed when that batch shipped. A tank's declared fluid
 reads as "this save predates a change" rather than as a parse failure. No
 release has ever written a save, so this is as cheap as a bump will ever
 be; the next one is not, and a migration is still not the answer — see
-`docs/DECISIONS.md`.
+`docs/DECISIONS.md`. Version 3 (2026-09-26) is per-dock stock; version 4
+(2026-09-26) is the production ledger's pay cycle — `save.rs`'s module doc
+records why each could not be a default.
 
 **Interop training-data gap:** `SimBridge` appears in no training corpus.
 Keep worked, runnable examples of every call pattern in-repo (the headless

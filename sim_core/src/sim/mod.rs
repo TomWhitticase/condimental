@@ -65,8 +65,9 @@ pub use staff::{
     StaffSnapshot, crew_entries,
 };
 pub use stats::{
-    ItemStats, ItemStatsSnapshot, ProductionLedger, ProductionSnapshot, STAT_BUCKETS,
-    STAT_WINDOW_COUNT, STAT_WINDOWS, StatKind, StatWindow, WindowSnapshot,
+    CycleLineSnapshot, CycleSnapshot, ItemStats, ItemStatsSnapshot, ProductionLedger,
+    ProductionSnapshot, STAT_BUCKETS, STAT_WINDOW_COUNT, STAT_WINDOWS, StatKind, StatWindow,
+    WindowSnapshot,
 };
 pub use storage::{RackKind, StorageCatalog, StorageLoadError, WAREHOUSE_RACK_KIND, WarehouseRack};
 pub use types::{Direction, Fx, Money, decode_chunk_id, encode_chunk_id};

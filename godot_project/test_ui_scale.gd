@@ -162,7 +162,15 @@ func _initialize() -> void:
 	main._set_market_open(true)
 	main._update_ingredient_market()
 	main._update_contract_panel()
-	main._fit_grid_scroll(main._shop_grid_scroll, main._shop_grid, available - main._ui_px(16.0))
+	var shop_scroll: float = main._fit_grid_scroll(main._shop_grid_scroll, main._shop_sections, available - main._ui_px(16.0))
+	# A `--script` run never enters the tree, and out of the tree a Control's
+	# minimum-size cache is never invalidated: the build menu keeps reporting
+	# the height it had BEFORE its scroll was capped (it has capped since its
+	# category sections made it taller than this window). So its height is
+	# measured as what the tree will make it — the chrome, which the panel and
+	# its scroll froze together, plus the height the scroll was given.
+	var shop_height: float = main._shop_menu.get_combined_minimum_size().y \
+		- main._shop_grid_scroll.get_combined_minimum_size().y + shop_scroll
 	main._fit_grid_scroll(main._contract_cards_scroll, main._contract_cards_box, available - main._ui_px(24.0))
 	for pair in [
 		["the build menu", main._shop_menu],
@@ -171,6 +179,8 @@ func _initialize() -> void:
 	]:
 		var panel: Control = pair[1]
 		var size: Vector2 = panel.get_combined_minimum_size()
+		if panel == main._shop_menu:
+			size.y = shop_height
 		if size.x > bounds.x:
 			_fail("%s is %.0fpx wide in a %.0fpx window" % [pair[0], size.x, bounds.x])
 			return

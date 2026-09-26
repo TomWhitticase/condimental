@@ -620,8 +620,16 @@ mod tests {
     fn validate_covers_refuses_a_gated_starter() {
         let text = EXAMPLE.replacen(r#""smokehouse_trial""#, r#""corner_shop""#, 1);
         let unlocks = UnlockRegistry::from_ron_str(&text).unwrap();
+        // The shipped board has no starter, so make `corner_shop` one.
+        let board =
+            ContractRegistry::from_ron_str(&include_str!("../../../data/contracts.ron").replacen(
+                r#"id: "corner_shop","#,
+                r#"id: "corner_shop", starter: true,"#,
+                1,
+            ))
+            .unwrap();
         let err = unlocks
-            .validate_covers(&IngredientCatalog::bundled(), &ContractRegistry::bundled())
+            .validate_covers(&IngredientCatalog::bundled(), &board)
             .unwrap_err();
         assert!(matches!(
             err,
