@@ -29,8 +29,8 @@
 // whole reason the game rewards a factory that can hold several different
 // lines running at once rather than one maximally-profitable one.
 //
-// FILE ORDER IS PRIORITY. Every active contract draws from ONE shared pool
-// of collected-but-undelivered stock (see `sim_core/src/sim/economy.rs`'s
+// FILE ORDER IS PRIORITY. Every active contract draws from the same stock
+// — what stands on every shipping dock, summed (see `sim_core/src/sim/economy.rs`'s
 // module doc for the full allocation rule and why it is the way it is). When
 // two contracts fall due on the same tick and there isn't enough stock for
 // both, the one listed FIRST here is filled first. That is a deterministic
@@ -278,7 +278,7 @@
         //
         // LISTED LAST, so the priority rule above is undisturbed: a player
         // who has not built a BBQ branch never sees a BBQ order skim the
-        // shared pool ahead of the ketchup orders they built for. Within the
+        // docks ahead of the ketchup orders they built for. Within the
         // tier the order again runs small to large.
         //
         // NOTE THE EXISTING CONTRACTS ARE UNTOUCHED. Amending a live order

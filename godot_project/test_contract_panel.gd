@@ -186,7 +186,7 @@ func _initialize() -> void:
 		for item_id in card["rows"]:
 			for b in card["rows"][item_id]["boxes"]:
 				if bool(b.get_meta("checked", false)):
-					_fail("with an empty delivery pool, no checkbox should read as checked yet")
+					_fail("with empty docks, no checkbox should read as checked yet")
 					return
 
 	# --- Money once, countdowns per contract ------------------------------
@@ -256,18 +256,18 @@ func _initialize() -> void:
 			_fail("docket %d's countdown did not advance with the simulation (%f -> %f)" % [i, before[i], after[i]])
 			return
 
-	# --- The shared dock pool is surfaced, and tracks real deliveries -----
+	# --- What stands on the docks is surfaced, and tracks real deliveries -
 	if main._contract_dock_row == null:
-		_fail("no shared delivery-pool readout on the clipboard")
+		_fail("no on-the-dock readout on the clipboard")
 		return
 	if not main._contract_dock_empty_label.visible:
 		_fail("with nothing delivered, the dock line should read as empty")
 		return
-	# Driven with a pool directly rather than by running a chain to fill one.
+	# Driven with a stock directly rather than by running a chain to fill one.
 	# Since the "Real Placement" epic a world starts EMPTY and a starting
 	# balance cannot buy the six machines a boxed case needs (see
 	# test_layouts.gd's header), so the honest thing to exercise here is the
-	# readout itself, which is pure given the pool — the pool's own arithmetic
+	# readout itself, which is pure given the stock — the docks' own arithmetic
 	# is asserted in `cargo test -p sim_core`.
 	var delivered_item := "boxed_ketchup"
 	main._update_contract_dock([[delivered_item, 3]], 48, false)
@@ -278,13 +278,13 @@ func _initialize() -> void:
 		_fail("delivered '%s' but the dock readout has no entry for it" % delivered_item)
 		return
 
-	# --- The pool's ceiling: a figure, a bar, and what the ceiling costs ---
-	# The dock holds a bounded amount of any one item (the dock-capacity
-	# change, 2026-09-16), so the readout says both halves of the fraction
+	# --- The docks' ceiling: a figure, a bar, and what the ceiling costs --
+	# A dock holds a bounded number of cases (the dock-capacity change,
+	# 2026-09-16; per dock since 2026-09-26), so the readout says both halves of the fraction
 	# and draws UI_UX.md §5e's bar against the sim's own full mark.
 	var dock_entry: Dictionary = main._contract_dock_entries[delivered_item]
 	if String(dock_entry["label"].text) != "3/48":
-		_fail("the dock line must stand its figure against the pool's ceiling, got: %s" % dock_entry["label"].text)
+		_fail("the dock line must stand its figure against the docks' ceiling, got: %s" % dock_entry["label"].text)
 		return
 	if not dock_entry["meter"].visible:
 		_fail("a figure with a real ceiling earns a bar (UI_UX.md 5e); the dock's is hidden")

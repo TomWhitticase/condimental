@@ -5,25 +5,45 @@
 //! This is [`super::hopper`]'s argument, run at the other end of the line.
 //! Milestones 4-7 emptied the chain with a debug affordance:
 //! `PlayerCommand::CollectOutput` reached straight into the LAST machine's
-//! own `output: Inventory`, drained it, and deposited the lot into
-//! [`super::economy::Economy`]'s shared delivery pool. Pressing **C**
-//! teleported finished boxes off the factory floor and into a customer's
-//! hands out of nothing — no tile downstream of the packer existed at all.
-//! That is fine as a "prove the economy pays out" scaffold and wrong as a
-//! game mechanic, for the same three reasons the `SpawnItem` command was
-//! wrong: nothing in the world held the product, nothing moved it, and the
-//! player's action *was* the delivery rate.
+//! own `output: Inventory`, drained it, and deposited the lot into a shared
+//! delivery pool. Pressing **C** teleported finished boxes off the factory
+//! floor and into a customer's hands out of nothing — no tile downstream of
+//! the packer existed at all. That is fine as a "prove the economy pays out"
+//! scaffold and wrong as a game mechanic, for the same three reasons the
+//! `SpawnItem` command was wrong: nothing in the world held the product,
+//! nothing moved it, and the player's action *was* the delivery rate.
 //!
 //! A loading dock is the real thing that does that job on a factory floor:
 //! the end of the line, where product arrives on a conveyor and is staged
-//! for a customer. So the last machine now feeds an ordinary belt like every
-//! other stage does, that belt runs into a dock building, and the dock
-//! deposits what it receives into the shared pool by itself, every tick,
-//! with no player action at all. GAMEPLAY.md §6/§9 and `economy.rs`'s own
-//! module doc both flagged "a real delivery-dock tile is future polish";
-//! this is that tile, and `CollectOutput` is gone rather than kept beside
-//! it — two ways to sell the same box is exactly the contradiction ticket 3
-//! removed at the hopper end.
+//! for a customer. So the last machine feeds an ordinary belt like every
+//! other stage does, that belt runs into a dock building, and contracts
+//! collect what is standing on the docks with no player action at all.
+//!
+//! # Each dock holds its own stock (2026-09-26)
+//!
+//! **What stands on a dock is that dock's**, in [`DOCK_CAPACITY`] places,
+//! one case per place. Contracts settle against the SUM over every dock
+//! that can ship this tick and take their mix from the docks in topology
+//! order (`Economy::tick`, `DeliveryStock`), and the docks a payment
+//! actually took from record it ([`Dock::last_paid_tick`]).
+//!
+//! This replaced a design where the dock was a pass-through: it shipped
+//! everything it received, the same tick, into ONE pool on the economy,
+//! and "what's on the dock" was that one number however many docks stood
+//! on the floor. That kept the figure in one place, and it made every dock
+//! a mirror of every other. A case landing on one dock popped a case on
+//! all of them, a payment threw coins off all of them, and neither the
+//! deck, the hover nor a "full" marker could say anything about the dock
+//! the player was looking at, because there was nothing per dock to say.
+//! The owner's playtest of 2026-09-26 called that out as docks being
+//! "linked", and it was the model, not the drawing, that linked them.
+//!
+//! What survived the change is the rule that mattered: **one box can be
+//! sold once.** Contracts still draw from one combined stock and still
+//! consume their whole mix on payment, so two contracts are never credited
+//! with the same box, and a second dock is still a second door out of the
+//! factory rather than a second ledger. What changed is only WHERE the
+//! boxes wait: on the dock they arrived at, until a contract takes them.
 //!
 //! # The shape this deliberately copies
 //!
@@ -36,189 +56,160 @@
 //! backs up behind it, exactly the way a machine with a full input buffer
 //! already makes one back up (`World::try_transfer_belt_to_machine`).
 //!
-//! # Why the dock drains completely, every tick
+//! # Places, not a per-item ceiling
 //!
-//! The dock's own [`Inventory`] is a **transfer buffer, not a store**:
-//! [`Dock::ship_into`] moves everything in it into the shared delivery pool
-//! in the same tick it arrived, so a snapshot taken between ticks reads
-//! empty (all but the one case [`Dock::ship_into`] names — a pool filled by
-//! another dock later in the same tick). That was a real choice, and the alternative — hold a visible
-//! stack on the dock and release it on some schedule — was rejected for two
-//! reasons.
-//!
-//! 1. **There would be two different numbers both honestly called "what's on
-//!    the dock," and the one the player could see would be the one contracts
-//!    cannot use.** `Economy`'s shared pool already *is* the staged-goods
-//!    number (`EconomySnapshot::delivery_stock`; the clipboard panel already
-//!    labels it "ON THE DOCK"), and it is what every contract settles
-//!    against. A second buffer in front of it would show boxes standing on
-//!    the dock tile that no contract can count yet — a gauge reading one
-//!    thing while the mechanism does another, which is the same failure
-//!    [`super::fluid::FluidTank`] rejected when it decided to present
-//!    constant head rather than its own fill fraction.
-//! 2. **Nothing would gate the release, so the hold would be latency with no
-//!    decision attached to it.** Contracts are already what meter the pool
-//!    out, at their own cadences (`economy.rs`'s allocation rule); a dock
-//!    that also held stock back would slow the loop down without giving the
-//!    player anything to do about it, and a buffer you cannot act on is not
-//!    a mechanic. When there *is* something to gate on — a truck that leaves
-//!    on a cadence, or GAMEPLAY.md §7's logistics staff capacity — the hold
-//!    becomes a real decision, and this is the one line that changes.
-//!
-//! So the visible "stock on the dock" stays exactly one number in exactly
-//! one place, the same shape money already has (GAMEPLAY.md §1 allows
-//! exactly one currency, and this file does not invent a second ledger of
-//! goods either). Presentation should draw a pallet stack from
-//! `EconomySnapshot::delivery_stock`, not from this buffer — see
-//! `world::DockSnapshot`, which deliberately has no `fill` field for that
-//! reason.
-//!
-//! # ...and why it can still be full (the dock-capacity change, 2026-09-16)
-//!
-//! A pass-through with an unbounded sink can never fill up, and for a year
-//! this one could not: the player could point a line at a dock nobody had
-//! ordered from and watch a number grow. The ceiling went on the pool it
-//! drains into rather than on this buffer
-//! ([`super::economy::DELIVERY_STOCK_CAPACITY`], per item id, and that
-//! constant's doc carries the argument), because that is the number the
-//! player already sees. Everything above survives it: there is still one
-//! figure called "what's on the dock", it is still the one contracts settle
-//! against, and this buffer still drains. What changed is that
-//! [`Dock::try_absorb`] now asks the economy for room before it takes a box
-//! off the belt, so a dock with nowhere to put a box refuses it and the
-//! line backs up — the same refusal a full machine buffer already makes,
-//! and the reason the "full" state is visible on the factory floor rather
-//! than only in a readout. `DockSnapshot::full` reports it.
+//! The pool this replaced was capped per ITEM (48 of each), because one
+//! total over a shared pool could deadlock the game: an overproduced
+//! product would crowd every other item out, and a mix naming a
+//! crowded-out item could never be filled again. A dock's places are one
+//! TOTAL, and that is safe here for two reasons the pool did not have.
+//! A dock is fed by the line in front of it, so one line's overproduction
+//! fills only its own dock and never another line's. And a dock can be
+//! removed, which destroys what stands on it (`PlayerCommand::Remove`'s
+//! rule for every building), so a dock clogged with a product nobody orders
+//! always has a way out. A total is also what the player can see: a grid
+//! of places with cases in some of them.
 //!
 //! # Any item, unlike the hopper's one
 //!
 //! A [`Hopper`](super::hopper::Hopper) holds a single item id fixed at
 //! construction, because a chain has exactly one raw ingredient and
 //! `recipes.ron` says which. A dock is the opposite case: it accepts
-//! whatever the line delivers to it. That costs nothing today (the shipped
-//! chain makes one sellable product) and is the honest model of the
-//! building — a dock is not commissioned for one SKU — so it holds a plain
-//! multi-item [`Inventory`] rather than one item id and a count.
+//! whatever the line delivers to it, and is not commissioned for one SKU,
+//! so it holds a plain multi-item [`Inventory`] whose slot order is the
+//! order its places fill in.
 
 use super::belt::BeltSegment;
-use super::economy::Economy;
 use super::inventory::Inventory;
 use super::types::ItemId;
 
 /// The machine kind id (`data/machines.ron`) a dock is placed as.
 ///
-/// `"dock"` rather than `"depot"`: `economy.rs`'s shared pool is already
-/// described as what is "on the dock" throughout this codebase (its
-/// `delivery_stock` field doc, and the contract clipboard's own on-screen
-/// line), so this is the word the game already uses for the place finished
-/// goods wait to be sold. Introducing a second noun for the same idea would
-/// cost terminology consistency and buy nothing.
+/// `"dock"` rather than `"depot"`: the contract clipboard's own on-screen
+/// line calls what is waiting to be sold "ON THE DOCK", so this is the word
+/// the game already uses for the place finished goods wait to be sold.
+/// Introducing a second noun for the same idea would cost terminology
+/// consistency and buy nothing.
 ///
 /// Spelled out in Rust for exactly the reason [`super::hopper::HOPPER_KIND`]
 /// and [`super::fluid::FLUID_TANK_KIND`] are: the dock is *structural* —
-/// every chain has exactly one, at its tail — so unlike a processing stage
-/// it is not derivable from `recipes.ron`'s list. Its footprint still comes
-/// from `data/machines.ron` like any other kind; only the id is written
-/// here.
+/// it is where a chain ends — so unlike a processing stage it is not
+/// derivable from `recipes.ron`'s list. Its footprint still comes from
+/// `data/machines.ron` like any other kind; only the id is written here.
 pub const DOCK_KIND: &str = "dock";
 
-/// How many units of any one item the dock can hold at once.
+/// How many places one dock has — how many cases, of any mix of items, can
+/// stand on it at once.
 ///
-/// Sized against what a delivery actually is, the way
-/// [`super::hopper::HOPPER_CAPACITY`] is sized against what a craft is: the
-/// largest single order on the shipped board asks for 3 boxes and the whole
-/// board asks for 6 across its three contracts (`data/contracts.ron`), so 32
-/// is roughly five boards' worth — the staging area is never the reason a
-/// delivery is short. It is half a hopper, which is also about right for the
-/// relative bulk of a boxed pallet against loose tomatoes.
+/// **The number is a relationship, not a literal** (the rule
+/// [`super::economy::STARTING_MONEY`] follows): a contract settles only when
+/// the docks hold its whole mix at once, so ONE dock must comfortably hold
+/// the largest single order on the board, or a factory with one dock could
+/// never fill it. `export_pallet` asks for 20 boxes in one window, and 32 is
+/// 1.6x that: the pallet order can be building up while a small order
+/// skims a few off the same dock. `tests/dock.rs` pins the relationship
+/// against `data/contracts.ron` rather than the literal, so adding a bigger
+/// order fails a test instead of quietly breaking that contract.
 ///
-/// **It is still not a constraint the shipped world can reach**, and that is
-/// stated rather than hidden: [`Dock::ship_into`] empties the buffer every
-/// tick and [`Dock::try_absorb`] fills it at most one unit per tick, so it
-/// never holds more than one. The bound exists because the absorb has to be
-/// able to say *no* — that is what makes a full dock back the belt up
-/// instead of annihilating the item, which is the property the
-/// mass-conservation test in `tests/core_loop.rs` actually checks.
-///
-/// The ceiling the player actually meets is the shared pool's
-/// ([`super::economy::DELIVERY_STOCK_CAPACITY`], added 2026-09-16): the
-/// drain IS gated now, exactly as this paragraph used to predict, and it
-/// was the one-line change it predicted — `try_absorb` asks the economy for
-/// room beside asking this buffer, and the refusal path this bound had
-/// already built and tested is what carried it.
+/// Its tightness is deliberate too. A line running against no demand fills
+/// 32 places in about 8 000 ticks (four minutes at 30 Hz), and that is when
+/// the dock says it is full (the jam lamp, and the "!" over the deck) and
+/// the belt behind it backs up. That is long enough not to nag and short
+/// enough to be a consequence of building past the board's demand.
 ///
 /// A Rust constant rather than a `data/machines.ron` field, matching
 /// `HOPPER_CAPACITY` and `FLUID_TANK_CAPACITY`: when buffer sizes become
 /// per-kind content they should all move to `machines.ron` together.
 pub const DOCK_CAPACITY: u32 = 32;
 
-/// The end of the line: a bounded buffer that takes finished product off a
-/// belt and ships it into the economy's shared delivery pool.
+/// The end of the line: the places where finished product waits on this
+/// dock until a contract collects it.
 #[derive(Debug)]
 pub struct Dock {
-    buffer: Inventory,
+    /// What is standing on the dock, in the order it arrived per item — the
+    /// order a presentation fills its grid of places in.
+    ///
+    /// Capped per item at `places` as well as in total, so the total is the
+    /// only ceiling that ever binds: [`Self::try_absorb`] checks it.
+    stock: Inventory,
+    places: u32,
+    /// Every unit this dock has ever taken off its belt. Never decreases;
+    /// saturates rather than wrapping.
+    ///
+    /// The name is the line's point of view: the line has shipped it to this
+    /// dock. Presentation diffs it to pop a case on THIS dock and no other.
     shipped_total: u32,
+    /// The last tick a paying contract took stock from this dock, or `None`
+    /// if none has since the world was built or loaded. What the coin burst
+    /// reads to throw its coins off the docks that paid, and only those.
+    ///
+    /// Persisted (`save.rs`), unlike [`Self::blocked`]: it is a fact about
+    /// the past that no tick recomputes, and a loaded world has to report
+    /// what the saved one did.
+    last_paid_tick: Option<u64>,
     /// Whether this dock was refused its crew on the last tick it held
-    /// something to ship (the staff pools MVP epic). Updated only on such
-    /// ticks — an empty dock keeps the verdict of its last loaded one — so
-    /// hover can say "held · short of logistics staff" while the belt
-    /// behind it backs up. On the wire as `DockSnapshot::understaffed`;
-    /// saved (`save.rs`).
+    /// something (the staff pools MVP epic). Updated only on such ticks —
+    /// an empty dock keeps the verdict of its last loaded one — so hover can
+    /// say "held · short of logistics staff". A contract does not draw from
+    /// a dock that was refused its crew this tick. On the wire as
+    /// `DockSnapshot::understaffed`; saved (`save.rs`).
     understaffed: bool,
     /// Whether the player has MOTHBALLED this dock (issue #19): switched
-    /// off, so it claims no clerk, ships nothing and takes nothing off the
-    /// belt behind it. Persisted (`save.rs`), and the reason a factory
-    /// that cannot make payroll can get its wage bill all the way to zero
-    /// — the dock is the last thing on the line still asking for a crew.
+    /// off, so it claims no clerk, nothing is collected from it and it takes
+    /// nothing off the belt behind it. Persisted (`save.rs`), and the reason
+    /// a factory that cannot make payroll can get its wage bill all the way
+    /// to zero — the dock is the last thing on the line still asking for a
+    /// crew.
     mothballed: bool,
-    /// Whether this dock refused a box off its belt this tick because
-    /// nothing had room for it — THIS dock's jam, not the pool's state.
+    /// Whether this dock refused a box off its belt this tick because it had
+    /// no free place — THIS dock's jam.
     ///
     /// Derived, not persisted: [`World::tick`] clears it on every dock
     /// before step 4 and [`Self::try_absorb`] raises it again, so it means
     /// "is backing up right now" rather than "once did". A world restored
-    /// from a save reports `false` until its first tick, which is the same
-    /// one-tick catch-up the pass-through `buffer` already has.
+    /// from a save reports `false` until its first tick.
     ///
-    /// On the wire as `DockSnapshot::full`, where it drives the lamp. It is
-    /// deliberately NOT `Economy::delivery_pool_full`: the pool's ceiling is
-    /// per ITEM, so a pool capped on ketchup says nothing about the dock
-    /// next door taking BBQ off its belt perfectly happily.
+    /// On the wire as `DockSnapshot::full`, where it drives the lamp.
+    /// [`Self::at_capacity`] is the related but different fact: every place
+    /// is taken, whether or not a box is waiting on the belt.
     blocked: bool,
 }
 
 impl Dock {
-    pub fn new(capacity_per_item: u32) -> Self {
+    pub fn new(places: u32) -> Self {
         Self {
-            buffer: Inventory::new(capacity_per_item),
+            stock: Inventory::new(places),
+            places,
             shipped_total: 0,
+            last_paid_tick: None,
             understaffed: false,
             mothballed: false,
             blocked: false,
         }
     }
 
-    /// Rebuilds a dock holding `contents` and having already shipped
-    /// `shipped_total` — the save/load module's seam (`sim::save`), and
-    /// `pub(crate)` for its reason: `shipped_total` is a cumulative
-    /// counter no player action can set, so only a loader may.
+    /// Rebuilds a dock holding `contents`, having already taken
+    /// `shipped_total` off its belt and last paid on `last_paid_tick` — the save/load module's seam
+    /// (`sim::save`), and `pub(crate)` for its reason: `shipped_total` is a
+    /// cumulative counter no player action can set, so only a loader may.
     ///
     /// Contents keep their slot order, empties included, for
     /// [`Inventory::restore`]'s reason.
     pub(crate) fn restore(
-        capacity_per_item: u32,
+        places: u32,
         contents: Vec<(ItemId, u32)>,
         shipped_total: u32,
+        last_paid_tick: Option<u64>,
         understaffed: bool,
         mothballed: bool,
     ) -> Self {
         Self {
-            buffer: Inventory::restore(capacity_per_item, contents),
+            stock: Inventory::restore(places, contents),
+            places,
             shipped_total,
+            last_paid_tick,
             understaffed,
             mothballed,
-            // Derived per tick, so a load starts it clear rather than
-            // saving a verdict that the next tick recomputes anyway.
             blocked: false,
         }
     }
@@ -261,9 +252,9 @@ impl Dock {
     }
 
     /// `World::tick`'s step 6 records the crew verdict here on every tick
-    /// the dock held something to ship: `true` when the claim was refused
-    /// (the buffer is held; at capacity the belt backs up, so nothing is
-    /// lost), `false` when it shipped.
+    /// the dock holds something: `true` when the claim was refused (nothing
+    /// is collected from it this tick; it keeps taking boxes until its
+    /// places are full, then the belt backs up), `false` when it was crewed.
     pub(crate) fn set_understaffed(&mut self, refused: bool) {
         self.understaffed = refused;
     }
@@ -272,110 +263,104 @@ impl Dock {
     /// [`Self::restore`], see [`Inventory::slots`] for why the empties
     /// matter.
     pub(crate) fn slots(&self) -> &[(ItemId, u32)] {
-        self.buffer.slots()
+        self.stock.slots()
     }
 
-    /// What is sitting on the dock right now, `(item id, quantity)`,
-    /// non-zero entries only. Between ticks this is always empty — see the
-    /// module doc's drain rule; it is non-empty only *inside* a tick,
-    /// between [`Self::try_absorb`] and [`Self::ship_into`].
+    /// What is standing on the dock right now, `(item id, quantity)`,
+    /// non-zero entries only, in the order the item first arrived.
     pub fn contents(&self) -> impl Iterator<Item = &(ItemId, u32)> {
-        self.buffer.iter()
+        self.stock.iter()
     }
 
-    pub fn capacity_per_item(&self) -> u32 {
-        self.buffer.capacity_per_item
+    /// How many places this dock has — [`DOCK_CAPACITY`] for every placed
+    /// dock; a parameter only so a test can build a small one.
+    pub fn places(&self) -> u32 {
+        self.places
+    }
+
+    /// How many of those places hold a case.
+    pub fn used(&self) -> u32 {
+        self.stock
+            .iter()
+            .fold(0u32, |sum, (_, qty)| sum.saturating_add(*qty))
+    }
+
+    /// Whether every place holds a case — the dock is full, whether or not
+    /// a box is waiting on the belt behind it. What the "!" over the deck
+    /// shows (`DockSnapshot::at_capacity`).
+    pub fn at_capacity(&self) -> bool {
+        self.used() >= self.places
     }
 
     pub fn is_empty(&self) -> bool {
-        self.buffer.iter().next().is_none()
+        self.stock.iter().next().is_none()
     }
 
-    /// Every unit this dock has ever shipped into the delivery pool — the
-    /// line's cumulative output, and the one number about a dock that is
-    /// worth looking at (its live level is a pass-through, see the module
-    /// doc). Never decreases; saturates rather than wrapping.
+    /// Every unit this dock has ever taken off its belt. Never decreases;
+    /// saturates rather than wrapping.
     pub fn shipped_total(&self) -> u32 {
         self.shipped_total
     }
 
+    /// The last tick a paying contract took stock from this dock (see the
+    /// field).
+    pub fn last_paid_tick(&self) -> Option<u64> {
+        self.last_paid_tick
+    }
+
+    /// Lends this dock's stock out for settlement — `World::tick`'s step 7
+    /// moves every shipping dock's stock into one `DeliveryStock`, lets the
+    /// economy settle against it, and hands each back with
+    /// [`Self::return_stock`]. A move rather than a borrow because several
+    /// docks have to be lent at once and each lives in its own ECS entity.
+    pub(crate) fn take_stock(&mut self) -> Inventory {
+        std::mem::take(&mut self.stock)
+    }
+
+    /// The other half of [`Self::take_stock`]. `paid_on` is the tick a
+    /// paying contract took something from this stock, if one did.
+    pub(crate) fn return_stock(&mut self, stock: Inventory, paid_on: Option<u64>) {
+        self.stock = stock;
+        if paid_on.is_some() {
+            self.last_paid_tick = paid_on;
+        }
+    }
+
     /// Takes **exactly one** unit off the end of `belt`, if a unit has
-    /// arrived there and this dock has room for it. Returns whether one
-    /// moved.
+    /// arrived there and this dock has a free place for it. Returns whether
+    /// one moved.
     ///
     /// The mirror image of [`super::hopper::Hopper::try_unload`], and gated
     /// the same way: `front_ready` is the availability check,
     /// `take_front_if_at_end` is the commit, and nothing is half-moved in
-    /// between. One unit per call (and `World::tick` calls it once per tick)
-    /// keeps the dock's intake rate a property of the machinery rather than
-    /// of how often anything asks.
-    pub fn try_absorb(&mut self, belt: &mut BeltSegment, economy: &Economy) -> bool {
+    /// between. One unit per call (and `World::tick` calls it once per tick
+    /// per inbound belt) keeps the dock's intake rate a property of the
+    /// machinery rather than of how often anything asks.
+    pub fn try_absorb(&mut self, belt: &mut BeltSegment) -> bool {
         let Some(item) = belt.front_ready().cloned() else {
             return false;
         };
         // Checked before the item is taken, so a full dock leaves the box
         // standing at the belt's end and the line backs up behind it —
         // exactly what a machine with a full input buffer already does.
-        //
-        // TWO ceilings, and the second is the one the player meets (the
-        // dock-capacity change, 2026-09-16). This buffer is a pass-through
-        // and empties every tick, so it is the SHARED POOL that actually
-        // fills up: `has_delivery_room` is what makes "the dock is full" a
-        // reachable state rather than the unreachable one `DOCK_CAPACITY`'s
-        // doc describes. Asking the economy here rather than letting
-        // `ship_into` drop the overflow is what keeps the refusal on the
-        // belt, where it backs the line up instead of destroying a box.
-        if !self.buffer.has_room_for(&item, 1) || !economy.has_delivery_room(&item, 1) {
-            // The jam is a fact about THIS dock and THIS item: recorded
-            // here, where both the refusal and the item are in hand, rather
-            // than re-derived by a snapshot that would have to guess which
-            // product the belt was carrying.
+        if self.at_capacity() || !self.stock.has_room_for(&item, 1) {
+            // The jam is a fact about THIS dock: recorded here, where the
+            // refusal is in hand, rather than re-derived by a snapshot.
             self.blocked = true;
             return false;
         }
         let Some(taken) = belt.take_front_if_at_end() else {
             return false;
         };
-        self.buffer.add(&taken.item, 1);
+        self.stock.add(&taken.item, 1);
+        self.shipped_total = self.shipped_total.saturating_add(1);
         true
-    }
-
-    /// Moves everything on the dock into the economy's shared delivery pool
-    /// and returns how many units went. This is the call that replaces
-    /// `PlayerCommand::CollectOutput`'s handler — the same
-    /// [`Economy::deposit`], made every tick by the building instead of on a
-    /// keypress by the player.
-    ///
-    /// Unthrottled, and complete except against a full pool: nothing is
-    /// held back on purpose (contracts already meter the pool out at their
-    /// own cadences, so a hold here would be latency with no decision
-    /// attached to it — see the module doc), but the pool has had a ceiling
-    /// since the dock-capacity change and **only what the pool accepts
-    /// leaves this buffer**. The remainder stays on the dock and is offered
-    /// again next tick, so a box is never destroyed by a full pool.
-    ///
-    /// That is the one case where a between-ticks snapshot of a dock reads
-    /// non-empty, and it is rare by construction: [`Self::try_absorb`]
-    /// refuses to take a box for a pool with no room, so the buffer only
-    /// ever holds an unshippable unit when ANOTHER dock filled the pool
-    /// later in the same tick.
-    pub fn ship_into(&mut self, economy: &mut Economy) -> u32 {
-        let held: Vec<(ItemId, u32)> = self.buffer.iter().cloned().collect();
-        let mut shipped = 0u32;
-        for (item, qty) in held {
-            let accepted = economy.deposit(&item, qty);
-            self.buffer.remove(&item, accepted);
-            shipped = shipped.saturating_add(accepted);
-        }
-        self.shipped_total = self.shipped_total.saturating_add(shipped);
-        shipped
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sim::economy::DELIVERY_STOCK_CAPACITY;
     use crate::sim::types::Fx;
 
     const BELT_SPEED: f64 = 0.02;
@@ -386,14 +371,6 @@ mod tests {
 
     fn dock() -> Dock {
         Dock::new(DOCK_CAPACITY)
-    }
-
-    /// The shipped contract board, never ticked — so nothing ever consumes
-    /// out of the shared pool and these tests observe exactly what the dock
-    /// put there. (Settling contracts is `Economy`'s own tested job; this
-    /// file is about what reaches the pool, not what leaves it.)
-    fn economy() -> Economy {
-        Economy::bundled()
     }
 
     /// Runs `belt` until its front item has reached the end, so the dock has
@@ -409,13 +386,24 @@ mod tests {
         panic!("the fixture belt never delivered an item to its end");
     }
 
+    /// Puts `item` on a fresh belt, runs it down and has `d` take it.
+    fn deliver(d: &mut Dock, item: &str) -> bool {
+        let mut b = belt();
+        assert!(b.try_spawn(item.to_string()));
+        run_to_end(&mut b);
+        d.try_absorb(&mut b)
+    }
+
     #[test]
     fn a_dock_starts_empty_and_has_shipped_nothing() {
         let d = dock();
         assert!(d.is_empty());
         assert_eq!(d.shipped_total(), 0);
         assert_eq!(d.contents().count(), 0);
-        assert_eq!(d.capacity_per_item(), DOCK_CAPACITY);
+        assert_eq!(d.places(), DOCK_CAPACITY);
+        assert_eq!(d.used(), 0);
+        assert!(!d.at_capacity());
+        assert_eq!(d.last_paid_tick(), None);
     }
 
     /// Nothing on the belt, or nothing that has arrived yet, must never
@@ -425,9 +413,8 @@ mod tests {
     fn an_empty_belt_never_puts_anything_on_the_dock() {
         let mut d = dock();
         let mut b = belt();
-        let econ = economy();
         for _ in 0..500 {
-            assert!(!d.try_absorb(&mut b, &econ));
+            assert!(!d.try_absorb(&mut b));
             b.tick(Fx::from_num(BELT_SPEED), 0);
         }
         assert!(d.is_empty());
@@ -441,17 +428,16 @@ mod tests {
     fn an_item_still_travelling_is_not_absorbed_until_it_arrives() {
         let mut d = dock();
         let mut b = belt();
-        let econ = economy();
         assert!(b.try_spawn("boxed_ketchup".to_string()));
 
         assert!(
-            !d.try_absorb(&mut b, &econ),
+            !d.try_absorb(&mut b),
             "a box that just entered the belt has not reached the dock"
         );
         assert_eq!(b.len(), 1, "and it must still be on the belt");
 
         run_to_end(&mut b);
-        assert!(d.try_absorb(&mut b, &econ));
+        assert!(d.try_absorb(&mut b));
         assert!(b.is_empty());
         assert_eq!(
             d.contents().cloned().collect::<Vec<_>>(),
@@ -471,280 +457,145 @@ mod tests {
         assert!(b.try_spawn("boxed_ketchup".to_string()));
 
         run_to_end(&mut b);
-        assert!(d.try_absorb(&mut b, &economy()));
+        assert!(d.try_absorb(&mut b));
         assert_eq!(b.len(), 1, "exactly one box moved, not the whole belt");
-        assert_eq!(d.contents().map(|(_, n)| *n).sum::<u32>(), 1);
+        assert_eq!(d.used(), 1);
+    }
+
+    /// What arrives STAYS — the dock is a store now, not a pass-through —
+    /// and every arrival counts toward `shipped_total`, the counter
+    /// presentation diffs to pop a case on this dock alone.
+    #[test]
+    fn what_arrives_stays_on_the_dock_and_counts_as_shipped_to_it() {
+        let mut d = dock();
+        for _ in 0..5 {
+            assert!(deliver(&mut d, "boxed_ketchup"));
+        }
+        assert_eq!(
+            d.contents().cloned().collect::<Vec<_>>(),
+            vec![("boxed_ketchup".to_string(), 5)]
+        );
+        assert_eq!(d.used(), 5);
+        assert_eq!(d.shipped_total(), 5);
+    }
+
+    /// A dock accepts whatever the line hands it, unlike the hopper's single
+    /// fixed item, and keeps the kinds apart in arrival order.
+    #[test]
+    fn several_item_kinds_share_the_places() {
+        let mut d = dock();
+        for item in ["boxed_ketchup", "boxed_mayo", "boxed_ketchup"] {
+            assert!(deliver(&mut d, item));
+        }
+        assert_eq!(
+            d.contents().cloned().collect::<Vec<_>>(),
+            vec![
+                ("boxed_ketchup".to_string(), 2),
+                ("boxed_mayo".to_string(), 1)
+            ]
+        );
+        assert_eq!(d.used(), 3);
     }
 
     /// The gate that makes a full dock back the line up instead of eating
     /// the box, mirroring the hopper's `holds_its_contents_when_the_belt_has
-    /// _no_room`. A capacity-1 dock is used because the shipped
-    /// `DOCK_CAPACITY` is deliberately unreachable while the drain runs
-    /// every tick (see its doc) — the *rule* still has to be tested.
+    /// _no_room` — and the places are ONE total, so a dock full of one item
+    /// refuses a different one too.
     #[test]
-    fn a_full_dock_refuses_the_box_and_leaves_it_on_the_belt() {
-        let mut d = Dock::new(1);
+    fn a_full_dock_refuses_any_box_and_leaves_it_on_the_belt() {
+        let mut d = Dock::new(2);
+        assert!(deliver(&mut d, "boxed_ketchup"));
+        assert!(deliver(&mut d, "boxed_ketchup"));
+        assert!(d.at_capacity());
+
         let mut b = belt();
-        assert!(b.try_spawn("boxed_ketchup".to_string()));
-        for _ in 0..20 {
-            b.tick(Fx::from_num(BELT_SPEED), 0);
-        }
-        assert!(b.try_spawn("boxed_ketchup".to_string()));
-        run_to_end(&mut b);
-
-        let econ = economy();
-        assert!(d.try_absorb(&mut b, &econ));
-        for _ in 0..500 {
-            b.tick(Fx::from_num(BELT_SPEED), 0);
-            assert!(
-                !d.try_absorb(&mut b, &econ),
-                "a full dock must not accept a second box"
-            );
-        }
-        assert_eq!(b.len(), 1, "the refused box is still on the belt, not lost");
-        assert_eq!(d.contents().map(|(_, n)| *n).sum::<u32>(), 1);
-    }
-
-    /// The whole point of the building: what lands on it goes into the
-    /// shared delivery pool, completely, and the dock is empty again.
-    #[test]
-    fn shipping_moves_everything_into_the_delivery_pool_and_empties_the_dock() {
-        let mut d = dock();
-        let mut econ = economy();
-        let mut b = belt();
-
-        assert!(b.try_spawn("boxed_ketchup".to_string()));
-        run_to_end(&mut b);
-        assert!(d.try_absorb(&mut b, &econ));
-
-        assert_eq!(d.ship_into(&mut econ), 1);
-        assert!(d.is_empty(), "the dock is a pass-through, not a store");
-        assert_eq!(econ.delivery_buffer.count("boxed_ketchup"), 1);
-        assert_eq!(d.shipped_total(), 1);
-    }
-
-    #[test]
-    fn shipping_an_empty_dock_is_a_no_op() {
-        let mut d = dock();
-        let mut econ = economy();
-        assert_eq!(d.ship_into(&mut econ), 0);
-        assert_eq!(d.shipped_total(), 0);
-        assert!(econ.delivery_buffer.iter().next().is_none());
-    }
-
-    /// A dock accepts whatever the line hands it, unlike the hopper's single
-    /// fixed item — and ships all of it, not just the first kind.
-    #[test]
-    fn several_item_kinds_are_all_held_and_all_shipped() {
-        let mut d = dock();
-        let mut econ = economy();
-        let mut b = belt();
-
-        for item in ["boxed_ketchup", "boxed_mayo", "boxed_ketchup"] {
-            assert!(b.try_spawn(item.to_string()));
-            run_to_end(&mut b);
-            assert!(d.try_absorb(&mut b, &econ));
-        }
-        assert_eq!(d.contents().map(|(_, n)| *n).sum::<u32>(), 3);
-
-        assert_eq!(d.ship_into(&mut econ), 3);
-        assert_eq!(econ.delivery_buffer.count("boxed_ketchup"), 2);
-        assert_eq!(econ.delivery_buffer.count("boxed_mayo"), 1);
-        assert_eq!(d.shipped_total(), 3);
-        assert!(d.is_empty());
-    }
-
-    /// The dock-capacity change's central rule: once the shared pool is at
-    /// its per-item ceiling, the dock stops taking boxes off the belt. Not
-    /// "takes it and drops it" and not "takes it and holds it forever" —
-    /// the box stays on the belt, which is what backs the line up.
-    #[test]
-    fn a_full_delivery_pool_leaves_the_box_on_the_belt() {
-        let mut d = dock();
-        let mut econ = economy();
-        let mut b = belt();
-
-        econ.deposit("boxed_ketchup", DELIVERY_STOCK_CAPACITY);
-        assert!(econ.delivery_pool_full());
-
-        assert!(b.try_spawn("boxed_ketchup".to_string()));
+        assert!(b.try_spawn("boxed_bbq".to_string()));
         run_to_end(&mut b);
         for _ in 0..200 {
             assert!(
-                !d.try_absorb(&mut b, &econ),
-                "a dock with nowhere to ship must refuse the box"
+                !d.try_absorb(&mut b),
+                "a dock with every place taken must not accept another box"
             );
             b.tick(Fx::from_num(BELT_SPEED), 0);
         }
         assert_eq!(b.len(), 1, "the refused box is still on the belt, not lost");
-        assert!(d.is_empty());
-        assert_eq!(
-            econ.delivery_buffer.count("boxed_ketchup"),
-            DELIVERY_STOCK_CAPACITY,
-            "and nothing was added to a pool that had no room"
-        );
-    }
-
-    /// The ceiling is per item id, so a pool full of one product still takes
-    /// another — the property that keeps a contract's mix fillable and the
-    /// game out of a deadlock (`DELIVERY_STOCK_CAPACITY`'s doc).
-    #[test]
-    fn a_pool_full_of_one_item_still_accepts_another() {
-        let mut d = dock();
-        let econ = {
-            let mut e = economy();
-            e.deposit("boxed_ketchup", DELIVERY_STOCK_CAPACITY);
-            e
-        };
-        let mut b = belt();
-
-        assert!(b.try_spawn("boxed_mayo".to_string()));
-        run_to_end(&mut b);
-        assert!(d.try_absorb(&mut b, &econ));
-        assert_eq!(d.contents().map(|(_, n)| *n).sum::<u32>(), 1);
-    }
-
-    /// The second gate: a dock that absorbed a box before the pool filled
-    /// (another dock shipped first, in the same tick) KEEPS it rather than
-    /// shipping it into nothing. Mass conservation is the invariant here,
-    /// not the drain.
-    #[test]
-    fn shipping_into_a_full_pool_holds_the_box_instead_of_destroying_it() {
-        let mut d = dock();
-        let mut econ = economy();
-        let mut b = belt();
-
-        assert!(b.try_spawn("boxed_ketchup".to_string()));
-        run_to_end(&mut b);
-        assert!(d.try_absorb(&mut b, &econ));
-
-        // The pool fills between the absorb and the ship.
-        econ.deposit("boxed_ketchup", DELIVERY_STOCK_CAPACITY);
-
-        assert_eq!(d.ship_into(&mut econ), 0, "nothing could be shipped");
-        assert_eq!(
-            d.contents().map(|(_, n)| *n).sum::<u32>(),
-            1,
-            "so the box is still standing on the dock"
-        );
-        assert_eq!(d.shipped_total(), 0);
-        assert_eq!(
-            econ.delivery_buffer.count("boxed_ketchup"),
-            DELIVERY_STOCK_CAPACITY
-        );
-
-        // And it goes the moment room appears.
-        econ.delivery_buffer.remove("boxed_ketchup", 1);
-        assert_eq!(d.ship_into(&mut econ), 1);
-        assert!(d.is_empty());
+        assert_eq!(d.used(), 2);
+        assert_eq!(d.shipped_total(), 2);
     }
 
     /// `blocked` is raised by the refusal itself and says nothing until one
-    /// happens — a dock with an empty belt is not backing anything up, even
-    /// while the pool sits at its ceiling.
+    /// happens — a full dock with an empty belt behind it is at capacity but
+    /// is not backing anything up.
     #[test]
-    fn blocked_tracks_the_refusal_not_the_pool() {
-        let mut d = dock();
-        let mut econ = economy();
-        let mut b = belt();
-
-        econ.deposit("boxed_ketchup", DELIVERY_STOCK_CAPACITY);
-        assert!(econ.delivery_pool_full());
+    fn blocked_tracks_the_refusal_and_at_capacity_tracks_the_places() {
+        let mut d = Dock::new(1);
+        assert!(deliver(&mut d, "boxed_ketchup"));
+        assert!(d.at_capacity());
         assert!(
             !d.blocked(),
-            "a full pool alone is not this dock backing up — nothing has been refused"
+            "a full dock alone is not backing up — nothing has been refused"
         );
 
+        let mut b = belt();
         assert!(b.try_spawn("boxed_ketchup".to_string()));
         run_to_end(&mut b);
-        assert!(!d.try_absorb(&mut b, &econ));
+        assert!(!d.try_absorb(&mut b));
         assert!(
             d.blocked(),
             "the box was refused, so the line is backing up"
         );
 
-        // Room appears, and the same dock takes the box it was refusing.
-        econ.delivery_buffer.remove("boxed_ketchup", 1);
+        // A contract collects the case, and the same dock takes the box it
+        // was refusing.
+        let mut stock = d.take_stock();
+        stock.remove("boxed_ketchup", 1);
+        d.return_stock(stock, Some(40));
         d.clear_blocked();
-        assert!(d.try_absorb(&mut b, &econ));
+        assert!(!d.at_capacity());
+        assert!(d.try_absorb(&mut b));
         assert!(!d.blocked());
+        assert_eq!(d.last_paid_tick(), Some(40));
     }
 
-    /// The whole point of making this per dock: the pool's ceiling is per
-    /// ITEM, so a pool capped on ketchup must leave a dock taking BBQ
-    /// reporting itself perfectly clear. This is the assertion that fails
-    /// against `Economy::delivery_pool_full`, which was true for both.
+    /// Lending the stock out and back is lossless, and only a lend that paid
+    /// moves `last_paid_tick` — a settlement that took nothing from this
+    /// dock must not throw coins off it.
     #[test]
-    fn a_dock_on_another_product_is_not_blocked_by_a_capped_one() {
-        let mut ketchup_dock = dock();
-        let mut bbq_dock = dock();
-        let mut econ = economy();
-
-        econ.deposit("boxed_ketchup", DELIVERY_STOCK_CAPACITY);
-        assert!(
-            econ.delivery_pool_full(),
-            "the pool summary is true — one item is at the ceiling"
-        );
-
-        let mut ketchup_belt = belt();
-        assert!(ketchup_belt.try_spawn("boxed_ketchup".to_string()));
-        run_to_end(&mut ketchup_belt);
-        assert!(!ketchup_dock.try_absorb(&mut ketchup_belt, &econ));
-
-        let mut bbq_belt = belt();
-        assert!(bbq_belt.try_spawn("boxed_bbq".to_string()));
-        run_to_end(&mut bbq_belt);
-        assert!(
-            bbq_dock.try_absorb(&mut bbq_belt, &econ),
-            "the BBQ pool has room, so this dock takes its box"
-        );
-
-        assert!(ketchup_dock.blocked(), "this one really is backing up");
-        assert!(
-            !bbq_dock.blocked(),
-            "and this one is not — the lamp must be able to tell them apart"
-        );
-    }
-
-    /// A partial ship: the pool has room for some of what the dock holds,
-    /// so some goes and the rest stays. The one case where `ship_into`'s
-    /// return value and the buffer's contents have to agree unit for unit.
-    #[test]
-    fn a_partly_full_pool_takes_what_fits_and_leaves_the_rest() {
+    fn a_lend_that_took_nothing_leaves_last_paid_tick_alone() {
         let mut d = dock();
-        let mut econ = economy();
-        let mut b = belt();
-
-        for _ in 0..3 {
-            assert!(b.try_spawn("boxed_ketchup".to_string()));
-            run_to_end(&mut b);
-            assert!(d.try_absorb(&mut b, &econ));
-        }
-        assert_eq!(d.contents().map(|(_, n)| *n).sum::<u32>(), 3);
-
-        econ.deposit("boxed_ketchup", DELIVERY_STOCK_CAPACITY - 1);
-        assert_eq!(d.ship_into(&mut econ), 1);
-        assert_eq!(d.contents().map(|(_, n)| *n).sum::<u32>(), 2);
-        assert_eq!(d.shipped_total(), 1);
-        assert!(econ.delivery_pool_full());
+        assert!(deliver(&mut d, "boxed_ketchup"));
+        let stock = d.take_stock();
+        d.return_stock(stock, Some(10));
+        let stock = d.take_stock();
+        d.return_stock(stock, None);
+        assert_eq!(d.last_paid_tick(), Some(10));
+        assert_eq!(d.used(), 1);
     }
 
-    /// `shipped_total` is cumulative across ships, which is what makes it
-    /// the number a hover/HUD shows and the number a test can assert
-    /// automatic delivery against.
+    /// A restored dock is the saved one: same stock in the same order, same
+    /// counters, and the derived jam flag starts clear.
     #[test]
-    fn shipped_total_accumulates_across_ticks() {
-        let mut d = dock();
-        let mut econ = economy();
-        let mut b = belt();
-
-        for _ in 0..5 {
-            assert!(b.try_spawn("boxed_ketchup".to_string()));
-            run_to_end(&mut b);
-            assert!(d.try_absorb(&mut b, &econ));
-            d.ship_into(&mut econ);
-        }
-        assert_eq!(d.shipped_total(), 5);
-        assert_eq!(econ.delivery_buffer.count("boxed_ketchup"), 5);
+    fn restore_round_trips_the_stock_and_clears_the_derived_flag() {
+        let d = Dock::restore(
+            DOCK_CAPACITY,
+            vec![
+                ("boxed_bbq".to_string(), 3),
+                ("boxed_ketchup".to_string(), 0),
+            ],
+            17,
+            Some(40),
+            true,
+            false,
+        );
+        assert_eq!(d.used(), 3);
+        assert_eq!(d.shipped_total(), 17);
+        assert!(d.understaffed());
+        assert!(!d.blocked());
+        assert_eq!(d.last_paid_tick(), Some(40));
+        assert_eq!(
+            d.slots().len(),
+            2,
+            "empties survive, for Inventory::restore's reason"
+        );
     }
 }

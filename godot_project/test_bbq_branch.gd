@@ -40,7 +40,7 @@
 #     same kind on the same board and one makes `ketchup_mix` while the other
 #     makes `bbq_mix`, with no picker anywhere in the UI,
 #   * A BOX OF BBQ IS MADE AND SHIPPED: `boxed_bbq` appears in the production
-#     panel's own snapshot and in the dock's delivery pool,
+#     panel's own snapshot and on the branch's own dock,
 #   * THE SAUCE IS SPELLED THE WAY A PLAYER WOULD WRITE IT: every BBQ id
 #     the HUD shows a label for comes back "BBQ", not the title-cased
 #     "Bbq" the formatter alone produces (issue #60),
@@ -310,8 +310,8 @@ floor have to be tellable apart"
 		if _made(stage) == 0:
 			_fail("the branch never made '%s' in %d ticks" % [stage, RUN_TICKS])
 			return
-	# The dock is a pass-through into the shared delivery pool every tick, so
-	# this is the box actually leaving the factory — no contract needed, and
+	# A box the dock took off its belt is the box actually leaving the
+	# factory — no contract needed, and
 	# none signed: signing one costs money this fixture does not have.
 	if _delivered("boxed_bbq") == 0:
 		_fail("%d boxes of BBQ were made and none reached the dock" % _made("boxed_bbq"))

@@ -253,32 +253,31 @@ implementation history (epics, tickets, balancing passes) behind each one.
   contract (losing IS the penalty, no fine on top); a paid window resets the
   count. A signed contract takes its file-order position in the active
   list, which is also the deterministic tiebreak for scarcity.
-- **All active contracts draw from one shared pool of collected-but-
-  undelivered stock.** A contract is satisfied at its cadence boundary only
-  if the pool holds its full mix, and payout consumes that mix from the
-  pool — goods are never credited to two contracts at once.
-- **That pool has a ceiling, and it is per item id** (48,
-  `DELIVERY_STOCK_CAPACITY`, added 2026-09-16): production nobody has
-  ordered is a real loss (§5), and an unbounded sink made overproduction
-  cost nothing but a growing number. Per item rather than one total,
-  because one total can deadlock the game — an overproduced product would
-  crowd every other item out of the pool, a contract whose mix names a
-  crowded-out item could never be satisfied again, and nothing in the game
-  dumps excess stock (§11's spot-market question is still open). Per item,
-  every id always has its own room and a clog is always specific. The
-  number is a *relationship*, not a literal, like `STARTING_MONEY`: it must
-  comfortably exceed the largest single mix quantity on the board (20, so
-  48 is 2.4x it), and `tests/dock.rs` pins that against `contracts.ron`
-  rather than the figure.
-- **The delivery dock is a pass-through, not a store.** It ships everything
-  it receives the same tick into the shared delivery pool
-  (`EconomySnapshot::delivery_stock`); its own buffer reads empty between
-  ticks. It keeps a bounded per-item buffer (32) so intake can still refuse
-  and back up the belt rather than lose product — and since the pool it
-  drains into can be full, that refusal is now a state the player meets: a
-  dock with nowhere to put a box leaves it on the belt and the line backs
-  up behind it, exactly as a full machine buffer does. A full dock is not a
-  penalty on top; the backed-up line IS the consequence.
+- **Each dock holds its own stock, and contracts draw on the docks
+  together** (per dock since 2026-09-26; one shared pool before that). A
+  contract is satisfied at its cadence boundary only if the docks able to
+  ship this tick hold its full mix *between them*, and payout consumes each
+  line from those docks in topology order — the first dock gives what it
+  has, then the next — so goods are never credited to two contracts at once
+  and the split is deterministic. A dock that is mothballed or was refused
+  its logistics crew this tick is not drawn from. Every dock a payout took
+  from is the dock that paid: the coins rise over it and no other.
+- **A dock has a ceiling: `DOCK_CAPACITY` (32) places, one case each,
+  whatever the case holds.** Production nobody has ordered is a real loss
+  (§5), and an unbounded sink made overproduction cost nothing but a
+  growing number. A dock at its ceiling refuses the belt feeding it — the
+  box stays on the belt and the line backs up behind it, exactly as a full
+  machine buffer does. A full dock is not a penalty on top; the backed-up
+  line IS the consequence. One total per dock can clog a dock with a
+  product nobody orders; the valve is **removing the dock**, which
+  destroys what it holds (the ordinary `Remove` rule), and a clog is
+  always local to the dock that overproduced — the rest of the factory's
+  docks keep taking. (The 2026-09-16 shared pool was capped per item for
+  exactly that deadlock, since it had no valve.) The number is a
+  *relationship*, not a literal, like `STARTING_MONEY`: it must comfortably
+  exceed the largest single mix quantity on the board (20, so 32 is 1.6x
+  it), and `tests/dock.rs` pins that against `contracts.ron` rather than
+  the figure.
 - **The contract board is sized in a line's worth of demand**: a starter
   tier one kept-fed line can just serve, plus a growth tier of larger,
   slower orders sized so a second/third/fourth line always has an order to
@@ -308,8 +307,8 @@ implementation history (epics, tickets, balancing passes) behind each one.
   touching, not facing, since a pressure network is not a conveyor. Flow is
   derived from adjacency, recomputed only on placement changes. The hopper,
   fluid tank and delivery dock are ordinary placeable kinds — a world may
-  hold any number of each, all settling against the one shared delivery
-  pool.
+  hold any number of each, and contracts settle against every dock's stock
+  together.
 - **A raw ingredient is defined structurally**: an item or fluid some
   recipe consumes and none produces. Each is priced per unit in
   `data/ingredients.ron` (separate from `shop.ron` — a shop entry is a

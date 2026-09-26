@@ -548,9 +548,9 @@ fn hiring_the_head_back_resumes_the_paused_craft_with_no_lost_progress() {
 // The dock
 // ---------------------------------------------------------------------
 
-/// Without its logistics head the dock holds what arrives: the shared pool
-/// stops growing, the boxes pile on the dock (and then the belt), nothing
-/// vanishes, and it all ships once the head is back.
+/// Without its logistics head the dock holds what arrives: the boxes pile
+/// on the dock (and then the belt), no contract can draw on them, nothing
+/// vanishes, and they are on offer again the tick the head is back.
 #[test]
 fn firing_the_logistics_head_makes_the_dock_hold_and_loses_nothing() {
     let mut world = running_line(2_500);
@@ -558,8 +558,7 @@ fn firing_the_logistics_head_makes_the_dock_hold_and_loses_nothing() {
     assert!(dock.shipped_total > 0, "the line reaches the dock by now");
     assert!(!dock.understaffed);
 
-    let shipped_before = dock.shipped_total;
-    let stock_before = world.economy_snapshot().delivery_stock.clone();
+    let delivered_before = world.economy().lifetime_deliveries;
     fire(&mut world, "logistics");
     assert_eq!(headcount(&world, "logistics"), 0);
 
@@ -569,20 +568,20 @@ fn firing_the_logistics_head_makes_the_dock_hold_and_loses_nothing() {
     }
     let held = world.dock_snapshots()[0].clone();
     assert_eq!(
-        held.shipped_total, shipped_before,
-        "nothing shipped while understaffed"
+        world.economy().lifetime_deliveries,
+        delivered_before,
+        "nothing is delivered from an understaffed dock"
+    );
+    assert!(
+        world.economy_snapshot().delivery_stock.is_empty(),
+        "and nothing on it is on offer to a contract"
     );
     assert!(held.understaffed, "the dock says why");
-    let on_dock: u32 = held.contents.iter().map(|(_, q)| q).sum();
     assert!(
-        on_dock > 0,
+        held.used > 0,
         "arriving boxes wait on the dock rather than disappearing"
     );
-    assert!(on_dock <= held.capacity_per_item);
-    // The pool moves only downward (contracts consume it), never up.
-    let stock_now = world.economy_snapshot().delivery_stock;
-    let total = |stock: &[(String, u32)]| stock.iter().map(|(_, q)| q).sum::<u32>();
-    assert!(total(&stock_now) <= total(&stock_before));
+    assert!(held.used <= held.places);
     match world.query_tile(held.tile) {
         Some(TileSnapshot::Dock {
             crew, understaffed, ..
@@ -612,13 +611,16 @@ fn firing_the_logistics_head_makes_the_dock_hold_and_loses_nothing() {
     common::supply(&mut world);
     world.tick();
     let shipping = world.dock_snapshots()[0].clone();
-    assert_eq!(
-        shipping.shipped_total,
-        shipped_before + on_dock,
-        "everything that waited on the dock ships the tick the crew is back"
-    );
     assert!(!shipping.understaffed);
-    assert!(shipping.contents.iter().all(|(_, q)| *q == 0));
+    assert!(
+        shipping.used >= held.used,
+        "nothing was lost while it waited"
+    );
+    assert_eq!(
+        world.economy_snapshot().delivery_stock,
+        shipping.contents,
+        "everything that waited on the dock is on offer the tick the crew is back"
+    );
 }
 
 // ---------------------------------------------------------------------

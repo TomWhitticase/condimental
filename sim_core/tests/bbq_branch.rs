@@ -188,7 +188,7 @@ fn a_box_of_bbq_is_made_and_the_dock_ships_it() {
 #[test]
 fn the_two_sauces_split_one_vat_three_to_two() {
     let mut world = branch();
-    // Every BBQ contract, so the delivery pool keeps draining: a full pool
+    // Every BBQ contract, so the BBQ dock keeps draining: a full dock
     // back-pressures the packer, and a stalled packer would be what this
     // measured instead of the plumbing.
     for contract in ["smokehouse_trial", "grill_pub", "roadhouse_group"] {
@@ -342,42 +342,72 @@ fn a_bbq_machine_that_runs_dry_keeps_its_own_recipe() {
     assert_eq!(recipe_at(&world, (21, 0)), "boxed_ketchup");
 }
 
+const KETCHUP_DOCK: (i32, i32) = (26, 0);
+const BBQ_DOCK: (i32, i32) = (31, -3);
+
+/// The branch run until its ketchup dock holds a few boxes, then with the
+/// ketchup board signed: the Corner Shop's two a thousand ticks plus the
+/// Market Stall's one a fifteen hundred out-draw the 2.5 a thousand the
+/// shipped line keeps after the branch takes its share
+/// (`the_two_sauces_split_one_vat_three_to_two`), so the ketchup dock
+/// drains while nothing on the board asks for BBQ. Signed any earlier, the
+/// windows fall due while the pipes are still priming and strike the
+/// contracts off before a box arrives.
+fn ketchup_board() -> World {
+    let mut world = branch();
+    for _ in 0..30_000u32 {
+        supply(&mut world);
+        world.tick();
+        if dock_at(&world, KETCHUP_DOCK).used >= 4 {
+            break;
+        }
+    }
+    assert!(
+        dock_at(&world, KETCHUP_DOCK).used >= 4,
+        "the shipped line must reach its dock"
+    );
+    for contract in ["corner_shop", "market_stall"] {
+        world.issue_command(PlayerCommand::SignContract {
+            id: contract.to_string(),
+        });
+        assert!(
+            world.economy().contract(contract).is_some(),
+            "the fixture can sign '{contract}'"
+        );
+    }
+    world
+}
+
+fn dock_at(world: &World, tile: (i32, i32)) -> sim_core::sim::world::DockSnapshot {
+    world
+        .dock_snapshots()
+        .into_iter()
+        .find(|dock| dock.tile == tile)
+        .unwrap_or_else(|| panic!("the branch fixture has a dock at {tile:?}"))
+}
+
 /// The regression the per-dock lamp exists for: with two docks shipping two
-/// products into one pool, a pool capped on ONE of them must leave the other
-/// dock reporting itself clear.
+/// products, the one that fills must leave the other reporting itself clear.
 ///
-/// `DockSnapshot::full` used to be `Economy::delivery_pool_full` verbatim,
-/// which is `.any()` over the pool — so the moment either product capped,
-/// BOTH docks said "full" and both lamps pulsed, including one taking boxes
-/// off its belt perfectly happily. The two facts only ever agreed while
-/// there was one sauce to cap.
+/// Each dock holds its own stock, so the facts are per dock by construction:
+/// the BBQ dock filling its places is no box on the ketchup dock. Before
+/// that, both docks fed one shared pool, and a pool capped on either product
+/// once made BOTH lamps pulse.
 ///
-/// BBQ is the one that caps here, not ketchup, and that is the fixture
+/// BBQ is the one that fills here, not ketchup, and that is the fixture
 /// rather than a choice: the branch out-produces the Smokehouse Trial's
 /// appetite, while the shipped line is throttled to two fifths of the shared
 /// vat and runs its larder down long before its own ceiling.
 ///
-/// Note what is asserted in the middle: `delivery_full` is still true. The
-/// pool summary was never wrong; reading it as a per-building fact was.
+/// Note what is asserted in the middle: `delivery_full` is true. It is the
+/// board's summary — SOME dock is at capacity — and never a per-dock fact.
 #[test]
-fn a_pool_capped_on_one_sauce_leaves_the_other_dock_reporting_clear() {
-    const KETCHUP_DOCK: (i32, i32) = (26, 0);
-    const BBQ_DOCK: (i32, i32) = (31, -3);
+fn a_full_bbq_dock_leaves_the_ketchup_dock_reporting_clear() {
+    let mut world = ketchup_board();
 
-    let mut world = branch();
-    let dock_at = |world: &World, tile: (i32, i32)| -> sim_core::sim::world::DockSnapshot {
-        world
-            .dock_snapshots()
-            .into_iter()
-            .find(|dock| dock.tile == tile)
-            .unwrap_or_else(|| panic!("the branch fixture has a dock at {tile:?}"))
-    };
-
-    // Run the branch until the ketchup dock is backing up. Both lines feed
-    // the same pool, but only ketchup out-runs what the board asks for.
-    // Run the branch until its dock is backing up. ~33k ticks on this
-    // fixture; the budget is loose because the number is a consequence of
-    // every rate in `data/`, not something this test is pinning.
+    // Run the branch until its dock is backing up. The budget is loose
+    // because the number is a consequence of every rate in `data/`, not
+    // something this test is pinning.
     let mut jammed = false;
     for _ in 0..60_000u32 {
         supply(&mut world);
@@ -392,18 +422,63 @@ fn a_pool_capped_on_one_sauce_leaves_the_other_dock_reporting_clear() {
         "an under-demanded BBQ line must eventually back its dock up — it never did, so \
          either the line stopped or `full` is not being raised"
     );
+    let bbq = dock_at(&world, BBQ_DOCK);
+    assert!(
+        bbq.at_capacity,
+        "a jammed dock has every place taken: {bbq:?}"
+    );
 
     let economy = world.economy_snapshot();
     assert!(
         economy.delivery_full,
-        "the POOL summary is true here, and stays true — it is the per-dock reading of it \
-         that was wrong: {:?}",
+        "the board's summary says some dock is at capacity: {:?}",
         economy.delivery_stock
     );
     let ketchup = dock_at(&world, KETCHUP_DOCK);
     assert!(
-        !ketchup.full,
-        "the ketchup dock is not the one backing up: {ketchup:?} against a pool of {:?}",
-        economy.delivery_stock
+        !ketchup.full && !ketchup.at_capacity,
+        "the ketchup dock is not the one backing up: {ketchup:?}"
+    );
+    assert!(
+        ketchup.contents.iter().all(|(item, _)| item != "boxed_bbq"),
+        "and not one BBQ box stands on it: {ketchup:?}"
+    );
+}
+
+/// A payment names the docks it took from, and only those: a ketchup-only
+/// contract paid while BBQ sits on the other dock leaves the BBQ dock's
+/// `last_paid_tick` untouched — the fact the coin burst reads to throw its
+/// coins over the docks that paid and no other.
+#[test]
+fn a_ketchup_payment_is_paid_from_the_ketchup_dock_alone() {
+    let mut world = ketchup_board();
+    let made_before = |world: &World| {
+        world
+            .economy()
+            .contract("corner_shop")
+            .map_or(0, |c| c.deliveries_made)
+    };
+
+    let mut paid_on = None;
+    for _ in 0..30_000u32 {
+        supply(&mut world);
+        let before = made_before(&world);
+        world.tick();
+        if made_before(&world) > before && !dock_at(&world, BBQ_DOCK).contents.is_empty() {
+            paid_on = Some(world.current_tick());
+            break;
+        }
+    }
+    let paid_on = paid_on.expect("a corner-shop window must pay while BBQ stands on its dock");
+
+    assert_eq!(
+        dock_at(&world, KETCHUP_DOCK).last_paid_tick,
+        Some(paid_on),
+        "the ketchup dock paid, on that tick"
+    );
+    assert_eq!(
+        dock_at(&world, BBQ_DOCK).last_paid_tick,
+        None,
+        "the BBQ dock paid nothing: no contract on the board asks for BBQ"
     );
 }

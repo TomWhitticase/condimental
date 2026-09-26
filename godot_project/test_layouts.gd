@@ -546,9 +546,9 @@ const REFERENCE_LINE_PLACEMENTS := 37
 ##     further west its head would touch the ketchup run and the two
 ##     networks would merge — pipes join pipes, which is also why this run
 ##     crossing over the ketchup line's exit BELTS is harmless;
-##   * the branch gets its OWN DOCK. Every dock feeds the same shared
-##     delivery pool, so a second one is free and much clearer than merging
-##     two product streams onto one belt.
+##   * the branch gets its OWN DOCK. Contracts draw on every dock's stock
+##     summed, so a second one costs nothing and is much clearer than
+##     merging two product streams onto one belt.
 static func build_bbq_branch(sim) -> void:
 	build_reference_line(sim)
 
@@ -597,8 +597,8 @@ const BBQ_BRANCH_PLACEMENTS := 70
 ## 15 000 ticks is chosen between two walls, and it is counted from the
 ## moment the branch is PLACED rather than from tick zero. Below about 9 000
 ## the branch is still priming its two new pipe runs and the ketchup bottler
-## is starved, so the shot shows one sauce; past about 30 000 the delivery
-## pool hits its ceiling and the packers back up, so the shot shows a stalled
+## is starved, so the shot shows one sauce; past about 30 000 a dock
+## fills its places and the packers back up, so the shot shows a stalled
 ## factory. In between, both lines run at the 3:2 split
 ## `data/contracts.ron`'s mixed orders are written against and there are
 ## boxes of both sauces on the floor.
@@ -863,13 +863,13 @@ static func build_bbq_running_line(sim) -> void:
 ## is not, which is the whole subject of the per-dock lamp change.
 ##
 ## Built on `build_bbq_running_line` because it is the only fixture with two
-## docks shipping two products into the one shared pool. BBQ is the sauce
+## docks, each holding a different product. BBQ is the sauce
 ## that caps: the branch out-produces the orders on the board while the
 ## shipped line is throttled to its share of the vat (the same asymmetry
 ## `tests/bbq_branch.rs` relies on).
 ##
 ## The wait is long, and has to be: the board keeps BUYING. Ketchup sits
-## around 2 in the pool for the whole run because its contracts settle as
+## around 2 on its dock for the whole run because its contracts settle as
 ## fast as the line ships, and BBQ climbs only ~3 per 4 000 ticks against
 ## what the two BBQ orders take — so the ceiling arrives somewhere past tick
 ## 70 000. That gap is the point of the shot rather than an inconvenience:
@@ -895,7 +895,7 @@ static func build_split_dock_line(sim) -> void:
 
 ## Whether the docks currently DISAGREE about backing up — one jammed, one
 ## clear. The sim's own per-dock verdict (`DockSnapshot::full`), never a
-## pool level compared here, for `delivery_full`'s reason above.
+## stock level compared here.
 static func split_dock_lamps_found(sim) -> bool:
 	var docks = JSON.parse_string(sim.dock_snapshots_json())
 	if not (docks is Array) or docks.size() < 2:
@@ -1135,14 +1135,14 @@ static func build_underfunded_line(sim) -> void:
 
 ## THE FULL-DOCK LINE (the dock-capacity change, 2026-09-16) — the fixture
 ## `scripts/screenshot-scene.sh --full-dock` photographs: the reference line
-## on auto-fill, run until the shared delivery pool is at its ceiling and
-## the dock has to REFUSE the belt feeding it.
+## on auto-fill, run until its dock's places are all taken and it has to
+## REFUSE the belt feeding it.
 ##
-## Nothing here is broken. The pool holds `DELIVERY_STOCK_CAPACITY` (48) of
-## any one item, contracts are the only thing that drains it, and a line
-## making boxes faster than its contracts ask for them fills that pool up —
-## after which the dock stops taking, the belt behind it backs up, the
-## clipboard's ON THE DOCK line reads `48/48` in warning red with
+## Nothing here is broken. A dock holds `DOCK_CAPACITY` (32) cases in all,
+## contracts are the only thing that drains it, and a line making boxes
+## faster than its contracts ask for them fills it up — after which the
+## dock stops taking, the belt behind it backs up, the clipboard's ON THE
+## DOCK line reads `32/32` in warning red with
 ## `⚠ FULL — belt backing up` under it, and the dock's deck lamps switch
 ## from steady to PULSING (`main.gd`'s `_dock_lamp_lit`). Those are the two
 ## presentation states the dock-capacity work added and nothing could
@@ -1151,9 +1151,9 @@ static func build_underfunded_line(sim) -> void:
 ## Reaching it takes ~22 900 ticks against the starter contract's appetite —
 ## it asks for 2 boxes every 1 000 and the line makes rather more than that
 ## (`sim_core/tests/dock.rs`'s
-## `a_full_pool_backs_the_line_up_instead_of_losing_product` measures the
+## `a_full_dock_backs_the_line_up_instead_of_losing_product` measures the
 ## same climb) — so this waits for the STATE and caps the wait, the way
-## `build_understaffed_line` does: a sim change that stops the pool ever
+## `build_understaffed_line` does: a sim change that stops the dock ever
 ## filling should leave a note rather than hang the shot.
 ##
 ## The larder is stocked AFTER the balance is topped up — `stock` is
@@ -1191,7 +1191,7 @@ static func build_full_dock_line(sim) -> void:
 			return
 
 
-## Whether the shared delivery pool is at its ceiling — the sim's own
+## Whether some dock has every place taken — the sim's own
 ## verdict off `economy_snapshot_json`, never a count compared here against a
 ## capacity read separately.
 static func delivery_full(sim) -> bool:
