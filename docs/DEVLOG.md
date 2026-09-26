@@ -249,7 +249,7 @@ below is history and should only ever be appended to.)*
 
 The production screen (P) opens on a pay-cycle block: one row per product an
 active contract orders, with REQUIRED per payday period (each mix scaled by
-period over cadence), MADE THIS CYCLE and LAST CYCLE. A finished cycle that
+period over cadence), THIS CYCLE and LAST CYCLE. A finished cycle that
 fell short of the orders running now takes the staff panel's short border
 and prints `▲ short` in the warning colour. The cycle is the staff payday,
 not a new clock; `ProductionLedger` rolls this cycle into last on the payday

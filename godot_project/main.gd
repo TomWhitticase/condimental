@@ -1989,6 +1989,7 @@ var _production_polled_tick := -1
 ## straight off the wire's `cycle`. `_production_cycle_rows` is one entry
 ## per line, see `_build_production_cycle_row`.
 var _production_cycle_box: VBoxContainer
+var _production_cycle_scroll: ScrollContainer
 var _production_cycle_rows_box: VBoxContainer
 var _production_cycle_rows: Array = []
 var _production_cycle_caption: Label
@@ -9942,10 +9943,20 @@ func _build_production_cycle_block(body: VBoxContainer) -> void:
 		label.custom_minimum_size = Vector2(PRODUCTION_CYCLE_COLUMN_WIDTH, 0.0)
 		captions.add_child(label)
 
+	# The rows scroll on their own, so a third ordered product costs the
+	# panel no height: `_fit_production_scrolls` shares one budget between
+	# this and the list below.
+	_production_cycle_scroll = ScrollContainer.new()
+	_production_cycle_scroll.name = "CycleScroll"
+	_production_cycle_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_production_cycle_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_production_cycle_box.add_child(_production_cycle_scroll)
+
 	_production_cycle_rows_box = VBoxContainer.new()
 	_production_cycle_rows_box.name = "CycleRows"
 	_production_cycle_rows_box.add_theme_constant_override("separation", _ui_i(4))
-	_production_cycle_box.add_child(_production_cycle_rows_box)
+	_production_cycle_rows_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_production_cycle_scroll.add_child(_production_cycle_rows_box)
 
 	_production_cycle_empty_label = Label.new()
 	_production_cycle_empty_label.name = "CycleEmpty"
@@ -10091,7 +10102,8 @@ func _update_production_cycle_block() -> void:
 			row["last_cycle"].label_settings = row["warn"] if short else row["plain"]
 	_production_cycle_caption.text = _production_cycle_caption_text(_production_snapshot)
 	_production_cycle_empty_label.visible = rows.is_empty()
-	_production_cycle_rows_box.get_parent().get_node("CycleColumns").visible = not rows.is_empty()
+	_production_cycle_box.get_node("CycleColumns").visible = not rows.is_empty()
+	_production_cycle_scroll.visible = not rows.is_empty()
 
 
 ## One window button. The selected one wears the hotbar's selected-socket
@@ -10141,10 +10153,39 @@ func _position_production_panel() -> void:
 	# row showing past the cut is the thing that says "there is more, scroll".
 	# Asking for whole rows here bought a tidier edge and paid a readable row
 	# for it: at 1600x900 the panel ended 161px short of the column it had.
-	_fit_grid_scroll(_production_scroll, _production_rows_box, bounds.y - reserved - _ui_px(16.0))
+	_fit_production_scrolls(bounds.y - reserved - _ui_px(16.0))
 	var panel_size := _production_panel.get_combined_minimum_size()
 	_production_panel.position.x = maxf(0.0, (bounds.x - panel_size.x) * 0.5)
 	_production_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
+
+
+## The pay-cycle rows and the rolling list share ONE height budget: what
+## `available` leaves after the panel's own chrome (measured, as
+## `_fit_grid_scroll` measures it). Each scroll alone, the cycle block grew
+## the panel by a row per ordered product past the list's floor — at
+## 1280x720 two products put it on the hotbar and three put it off the
+## screen. The cycle rows go first, since they answer the question the
+## orders ask, but never past what leaves the list `_fit_grid_scroll`'s
+## floor or half the room, whichever is more; the list takes the rest. Each
+## keeps at least one row's stub so neither vanishes, and those stubs are
+## the only thing that can overrun `available`, on a window smaller than
+## 1280x720.
+func _fit_production_scrolls(available: float) -> void:
+	if _production_cycle_scroll == null or _production_scroll == null:
+		return
+	var cycle_natural: float = _production_cycle_rows_box.get_combined_minimum_size().y if _production_cycle_scroll.visible else 0.0
+	var list_natural: float = _production_rows_box.get_combined_minimum_size().y if _production_scroll.visible else 0.0
+	_production_cycle_scroll.custom_minimum_size.y = cycle_natural
+	_production_scroll.custom_minimum_size.y = list_natural
+	var chrome: float = _production_panel.get_combined_minimum_size().y - cycle_natural - list_natural
+	var room: float = maxf(0.0, available - chrome)
+	var cycle: float = minf(cycle_natural, maxf(room * 0.5, room - _ui_px(110.0)))
+	if _production_cycle_rows_box.get_child_count() > 0:
+		var first_row: float = (_production_cycle_rows_box.get_child(0) as Control).get_combined_minimum_size().y
+		cycle = maxf(cycle, minf(cycle_natural, first_row))
+	var list: float = minf(list_natural, maxf(room - cycle, _ui_px(40.0)))
+	_production_cycle_scroll.custom_minimum_size.y = cycle
+	_production_scroll.custom_minimum_size.y = list
 
 
 func _production_poll_due() -> bool:

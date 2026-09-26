@@ -267,8 +267,9 @@ impl ProductionLedger {
     /// One line per product the active contracts ask for, in the order
     /// `demand` gives (the economy's: active-list order, so contract
     /// priority): what one pay period requires, what was made this cycle
-    /// and last. `short` is last cycle's verdict — a finished period that
-    /// made less than it required — and is never set before the first
+    /// and last. `short` is last cycle's verdict — the finished period made
+    /// less than the contracts active NOW require per period, not what was
+    /// ordered while it ran (UI_UX.md §5) — and is never set before the first
     /// payday, when there is no finished period to judge. An empty
     /// `demand` (no active contract) is an empty list.
     pub fn cycle_lines(&self, demand: &[(ItemId, I48F16)]) -> Vec<CycleLineSnapshot> {

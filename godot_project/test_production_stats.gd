@@ -27,7 +27,9 @@
 #   * the pay-cycle block (ticket 7) prints the wire's `cycle` lines in its
 #     order as REQUIRED / THIS CYCLE / LAST CYCLE, a fraction to one place,
 #     `—` before the first payday, the short verdict in words and the warn
-#     colour, and a sentence in place of the rows with no contract running,
+#     colour, and a sentence in place of the rows and their captions with no
+#     contract running; with three ordered products at 1280x720 the whole
+#     panel still ends above the hotbar,
 #   * the ledger is polled on the tick only while open, the pause menu
 #     freezes it, opening re-reads at once, and a save loaded back reads
 #     its counts on the first frame.
@@ -328,8 +330,49 @@ func _run_checks() -> void:
 				_fail("a %s line's LAST CYCLE is coloured %s" % ["short" if short else "covered", str(colour)])
 			if row["panel"].get_theme_stylebox("panel") != main._staff_row_style(short):
 				_fail("a %s line's row does not wear the staff panel's %s border" % ["short" if short else "covered", "short" if short else "plain"])
+		# No contract running: the sentence stands in for the rows, and the
+		# REQUIRED / THIS / LAST captions go with them. The settled line always
+		# has an order, so this is the only place the empty side is driven.
+		var none: Dictionary = real_snapshot.duplicate(true)
+		none["cycle"]["lines"] = []
+		main._production_snapshot = none
+		main._update_production_cycle_block()
+		var columns: Control = main._production_cycle_box.get_node("CycleColumns")
+		if not main._production_cycle_empty_label.visible:
+			_fail("with no contract running the no-orders sentence shows")
+		if columns.visible:
+			_fail("with no contract running the REQUIRED / THIS / LAST captions hide")
 		main._production_snapshot = real_snapshot
 		main._update_production_cycle_block()
+		if main._production_cycle_empty_label.visible or not columns.visible:
+			_fail("a running contract shows its captions and rows, not the no-orders sentence")
+		# Three ordered products at 1280x720: the rows share the list's height
+		# budget, so the panel still ends above the hotbar. The block used to
+		# sit outside it and grew the panel a row per product — bottom at 646px
+		# with two and 724px, off the screen, with three.
+		var real_size: Vector2i = root.size
+		root.size = Vector2i(1280, 720)
+		var three: Dictionary = real_snapshot.duplicate(true)
+		var ordered: Array = []
+		for id in ["boxed_ketchup", "boxed_bbq", "boxed_mustard"]:
+			var line: Dictionary = lines[0].duplicate(true)
+			line["id"] = id
+			ordered.append(line)
+		three["cycle"]["lines"] = ordered
+		main._production_snapshot = three
+		main._update_production_panel()
+		var bottom: float = main._production_panel.position.y + main._production_panel.get_combined_minimum_size().y
+		var floor_y: float = 720.0 - main._hotbar_reserved_height()
+		if main._production_cycle_rows.size() != 3:
+			_fail("three ordered products draw three cycle rows, got %d" % main._production_cycle_rows.size())
+		if main._production_panel.position.y < 0.0 or bottom > floor_y:
+			_fail("at 1280x720 with three ordered products the panel spans y=%d..%d, past the hotbar at y=%d" % [main._production_panel.position.y, bottom, floor_y])
+		var first_row: float = main._production_cycle_rows[0]["panel"].get_combined_minimum_size().y
+		if main._production_cycle_scroll.custom_minimum_size.y < first_row or main._production_scroll.custom_minimum_size.y <= 0.0:
+			_fail("fitting the panel squeezed a stack away: cycle %d (a row is %d), list %d" % [main._production_cycle_scroll.custom_minimum_size.y, first_row, main._production_scroll.custom_minimum_size.y])
+		root.size = real_size
+		main._production_snapshot = real_snapshot
+		main._update_production_panel()
 	if main._production_cycle_empty_label.visible:
 		_fail("a running contract shows its rows, not the no-orders sentence")
 	if main._production_cycle_caption.text.find("PAY CYCLE") < 0 or main._production_cycle_caption.text.find("payday in") < 0:

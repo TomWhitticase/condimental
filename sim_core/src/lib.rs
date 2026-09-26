@@ -450,7 +450,8 @@ impl SimBridge {
     /// product an active contract orders, in priority order — what one
     /// period requires (a fraction when a cadence does not divide it), what
     /// was made since payday and in the period before, and whether that
-    /// finished period fell short. `lines` is empty with no contract.
+    /// finished period made less than the contracts active now require.
+    /// `lines` is empty with no contract.
     ///
     /// `windows` is in shortest-first order with how much of each has
     /// actually been observed (a rate divides by that, not by the window);
