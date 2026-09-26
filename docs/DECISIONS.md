@@ -25,6 +25,43 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-26: **A PR's reviewer must not share its author's context; it need
+  not be another session.** (Owner's rule, amending 2026-09-25.)
+
+  **What changed.** The 2026-09-25 rule required the `VERDICT: APPROVED` to
+  come from "a session that did not write it". The owner restated what that
+  was for: *"it doesnt require a different session to review it, but ... an
+  adversarial review should be done by a subagent or technique similar where
+  the reviewer doesnt have all the context of reasoning and decisions and
+  stuff from the author agent"*. Independence is a property of what the
+  reviewer knows, not of which session it runs in.
+
+  **Why context, not session.** A reviewer that has read the author's
+  reasoning reviews that reasoning: it inherits the same framing, the same
+  "this is known to be fine", and the same blind spots, and a flawed argument
+  it has already been walked through looks sound. A reviewer that starts from
+  the diff, the PR body (which the `review` skill already tells it to
+  distrust) and the repository has to rebuild every claim, which is the point
+  of an adversarial review. The other-session wording also left an author with
+  nobody to ask stuck with an open PR, although a fresh subagent is exactly as
+  isolated as a new session and is always available.
+
+  **The rule.** The author may launch the reviewer. It is a fresh subagent
+  whose entire prompt is the PR number and the instruction to follow the
+  `review` skill and post its verdict. Nothing else goes in: no description of
+  the change, no list of what was verified, no pointer to what to skip. A
+  separate session that did not write the branch still qualifies. The author
+  itself, or any reviewer briefed with the author's reasoning, does not. On
+  `CHANGES REQUESTED` the author fixes the branch and launches a fresh
+  reviewer with the same bare prompt. Everything else in the 2026-09-25 rule
+  stands: review before merge, no routine exemption, and green checks.
+
+  **What was rejected.** Letting the author review its own work "carefully"
+  was rejected for the same reason the routine-change exemption was: the
+  judgement being checked is the author's. Keeping the other-session
+  requirement was rejected because it added waiting without adding
+  independence.
+
 - 2026-09-26: **A new game starts with no contract.** (Owner's call;
   supersedes call (1)'s "at least one offer must be a `starter`" in the
   2026-09-10 contract-board record below.)

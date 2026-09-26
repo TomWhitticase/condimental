@@ -1,6 +1,6 @@
 ---
 name: open-pr
-description: Ship finished work through GitHub — branch, push, screenshot the change, open a pull request with gh, watch its checks, and merge it once another session has posted VERDICT: APPROVED. Use when a change is complete and needs to reach main, or when you are about to commit and find yourself on main, or when you catch yourself about to merge or push main locally.
+description: Ship finished work through GitHub — branch, push, screenshot the change, open a pull request with gh, watch its checks, and merge it once a context-free reviewer (a fresh subagent given only the PR number) has posted VERDICT: APPROVED. Use when a change is complete and needs to reach main, or when you are about to commit and find yourself on main, or when you catch yourself about to merge or push main locally.
 ---
 
 # Getting work onto `main`
@@ -91,13 +91,26 @@ just fixed it instead.
 
 **Every PR is reviewed before it merges** (the owner's rule, 2026-09-25).
 Green CI is not a review, and a review after the merge does not count. The
-verdict comes from a session that did not write the branch (the `review`
-skill), posted as a comment review (`gh pr review <N> --comment`) whose first
-line is `VERDICT: APPROVED`. `gh` returns that under `reviews`, not
+verdict comes from a reviewer that does not share your context. Launch a fresh
+subagent (Agent tool, `general-purpose`) whose entire prompt is:
+
+```
+Review PR #<N> adversarially, following .claude/skills/review/SKILL.md, and
+post the verdict with `gh pr review <N> --comment`.
+```
+
+Add nothing to it: no summary of the change, no account of what you verified
+or why it is right, no hint at what to skip. A reviewer given your reasoning
+checks your argument rather than the code (`docs/WORKFLOW.md`). A separate
+session that did not write the branch is equally fine. The verdict is a
+comment review (`gh pr review <N> --comment`) whose first line is
+`VERDICT: APPROVED`. `gh` returns that under `reviews`, not
 `comments`, so check both, and read the **latest** verdict: an approval
 followed by a later `CHANGES REQUESTED` is not an approval. Being told to
-"make a PR and merge it" does not change this. If no reviewer's verdict is
-there yet, give the URL, say the PR is waiting on review, and stop.
+"make a PR and merge it" means launch that reviewer, then merge on its
+verdict. On `CHANGES REQUESTED`, fix the branch and launch a fresh reviewer
+with the same bare prompt. If no reviewer can be launched, give the URL, say
+the PR is waiting on review, and stop.
 
 ```
 gh pr checks <N> --watch

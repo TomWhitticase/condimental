@@ -18,6 +18,20 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-26 **A PR's reviewer must not share its author's context; it need
+  not be another session.** The merge still gates on green checks plus a
+  `VERDICT: APPROVED` review, but the reviewer is now typically a fresh
+  subagent the author launches. Its whole prompt is the PR number and the
+  instruction to follow the `review` skill, with none of the author's
+  reasoning, summary, list of what was verified or hints at what is fine. A
+  separate session that did not write the branch also qualifies. The author
+  reviewing its own work, or a subagent briefed with the author's reasoning,
+  never does. "Make a PR and merge it" now means: launch that reviewer, then
+  merge on its verdict. This amends the 2026-09-25 rule below. Binds
+  `CLAUDE.md`, `CONTRIBUTING.md`, `docs/WORKFLOW.md`, `.githooks/pre-push` and
+  the `open-pr`, `review` and `wrap-it-up` skills. Full record in
+  `docs/DECISIONS.md`.
+
 - 2026-09-26 **The build menu is sectioned by category, has a search box,
   and may scroll at 1600x900.** The owner asked for categories plus a search
   box. Categories are content (`data/shop.ron` `categories`), three sections

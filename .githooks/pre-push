@@ -27,7 +27,8 @@ refusing to push directly to main.
     git push -u origin HEAD
     gh pr create --title "..." --body-file <body.md>   # the body embeds a screenshot
     gh pr checks --watch
-    # wait for a VERDICT: APPROVED review from a session that did not write it
+    # get a VERDICT: APPROVED review from a reviewer without the author's context
+    #   (a fresh subagent given only the PR number and the review skill)
     gh pr merge --squash --delete-branch
 
   Every PR is reviewed before it merges, hotfixes included; see
