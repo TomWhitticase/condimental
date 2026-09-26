@@ -31,7 +31,10 @@
 #   * the board is TWO columns — the running contracts' dockets on the left,
 #     the offers on the right — and a signature moves the contract into the
 #     left column on the same call, while an empty left column shows a paper
-#     card saying nothing is running.
+#     card saying nothing is running;
+#   * at 1280x720 the board shows at least two WHOLE offers, on a new game and
+#     with nothing running, and the empty card keeps the left column to its
+#     pinned width.
 extends SceneTree
 
 
@@ -78,6 +81,31 @@ func _left_column_ids(main) -> Array:
 	return out
 
 
+## The smallest window the game supports (UI_UX.md §5f), where the board's
+## two columns are tightest.
+const SMALL := Vector2i(1280, 720)
+
+
+## How many WHOLE offers the board's scroll shows, with the board positioned
+## at SMALL exactly as a live frame positions it. Summed off the rows' own
+## heights against the height `_position_contract_board` gave the scroll, so
+## a card half in view does not count — half an offer is half a decision.
+func _whole_offers_at_small(main) -> int:
+	root.size = SMALL
+	main._position_hotbar()
+	main._update_contract_board()
+	var room: float = main._board_scroll.custom_minimum_size.y
+	var sep: float = float(main._board_box.get_theme_constant("separation"))
+	var used := 0.0
+	var whole := 0
+	for row in main._board_rows:
+		used += row["panel"].get_combined_minimum_size().y + (sep if whole > 0 else 0.0)
+		if used > room + 0.5:
+			break
+		whole += 1
+	return whole
+
+
 func _row_for(main, id: String) -> Dictionary:
 	for row in main._board_rows:
 		if String(row["id"]) == id:
@@ -85,10 +113,26 @@ func _row_for(main, id: String) -> Dictionary:
 	return {}
 
 
+var _main
+var _ran := false
+
+
 func _initialize() -> void:
-	var main = load("res://main.tscn").instantiate()
-	root.add_child(main)
-	main._ready()
+	_main = load("res://main.tscn").instantiate()
+	root.add_child(_main)
+
+
+## The checks run on the first frame, not in `_initialize`: until then the
+## scene has no viewport, and `_position_contract_board` — which the 1280x720
+## checks below need — lays nothing out without one.
+func _process(_delta: float) -> bool:
+	if not _ran:
+		_ran = true
+		_run_checks(_main)
+	return false
+
+
+func _run_checks(main) -> void:
 
 	var hud: Node = main.get_node_or_null("HUD")
 	if hud == null:
@@ -120,7 +164,7 @@ func _initialize() -> void:
 			_fail("row '%s' shows the wrong name" % board[i]["id"])
 			return
 		var terms: String = String(main._board_rows[i]["terms_label"].text)
-		for fragment in ["every %d ticks" % int(board[i]["cadence_ticks"]), "+%d" % int(board[i]["payout"]), "%d missed in a row" % int(board[i]["strikes"])]:
+		for fragment in ["every %d ticks" % int(board[i]["cadence_ticks"]), "+%d" % int(board[i]["payout"]), "%d strike" % int(board[i]["strikes"])]:
 			if not terms.contains(fragment):
 				_fail("row '%s' terms '%s' do not state '%s'" % [board[i]["id"], terms, fragment])
 				return
@@ -191,6 +235,13 @@ func _initialize() -> void:
 		return
 	if main._board_active_empty.visible == not _active_ids(main).is_empty():
 		_fail("the left column's empty card should show only when nothing is running")
+		return
+	# At 1280x720 a new game's board must let two offers be COMPARED: beside
+	# the running dockets the offer card used to break to five lines, and the
+	# window showed one offer at a time (PR #195's review).
+	var fresh_whole := _whole_offers_at_small(main)
+	if fresh_whole < 2:
+		_fail("at 1280x720 a new game's board shows %d whole offer(s) — it must show at least 2 to compare" % fresh_whole)
 		return
 	_key(main, KEY_C)
 	if main._board_open or board_panel.visible:
@@ -435,6 +486,18 @@ func _initialize() -> void:
 	if not _left_column_ids(main).is_empty() or not main._board_active_empty.visible or main._board_active_scroll.visible:
 		_fail("with nothing running the board's left column should show its empty card and no dockets")
 		return
+	# The empty card is held to the column's pinned width: its sentence on one
+	# line widened the column ~90px, all of it taken from the offers, in the
+	# state a new game opens the board to. And the offers still show two whole.
+	var empty_whole := _whole_offers_at_small(main)
+	var active_col_width: float = main._board_panel.find_child("ActiveColumn", true, false).get_combined_minimum_size().x
+	if active_col_width > main.BOARD_ACTIVE_COLUMN_WIDTH + 0.5:
+		_fail("the empty left column is %.0fpx wide, past its pinned %.0fpx — the empty card's sentence must wrap inside the pin" % [
+			active_col_width, main.BOARD_ACTIVE_COLUMN_WIDTH])
+		return
+	if empty_whole < 2:
+		_fail("at 1280x720 with nothing running the board shows %d whole offer(s) — it must show at least 2 to compare" % empty_whole)
+		return
 	main._sign_contract_offer(main._board_row_ids.find(starters[0]))
 	if main._board_active_empty.visible or _left_column_ids(main) != [String(starters[0])]:
 		_fail("signing from an empty board should replace the empty card with that docket, left %s" % str(_left_column_ids(main)))
@@ -443,5 +506,5 @@ func _initialize() -> void:
 		_fail("signing the starter again should bring one docket back and hide the empty line")
 		return
 
-	print("CONTRACT_BOARD_OK: one starter docket on a new game, %d offers on the board in file order, C/E/ESC modal rules, SIGN debits once and refuses twice, ready/ok/risk/last-chance read four ways, a lost contract leaves the clipboard, is announced, and is re-signed at its price; an empty clipboard names the key; the board's left column holds the running dockets, gains a signature at once and has an empty card" % board.size())
+	print("CONTRACT_BOARD_OK: one starter docket on a new game, %d offers on the board in file order, C/E/ESC modal rules, SIGN debits once and refuses twice, ready/ok/risk/last-chance read four ways, a lost contract leaves the clipboard, is announced, and is re-signed at its price; an empty clipboard names the key; the board's left column holds the running dockets, gains a signature at once and has an empty card held to its pinned width; at 1280x720 the board shows %d whole offers on a new game and %d with nothing running" % [board.size(), fresh_whole, empty_whole])
 	quit(0)

@@ -117,7 +117,7 @@ Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
   and a height shaped at whatever width it was last *drawn* at, which is
   meaningless under `--headless`, so a panel measured around one is measured
   around nothing. Break such a sentence at a join it already has. It is used
-  legitimately 21 times in `main.gd` and twice in `menu.gd`, every one of them
+  legitimately 22 times in `main.gd` and twice in `menu.gd`, every one of them
   with the width pinned first — by a fixed-size ancestor (`SHOP_SLOT_SIZE`,
   `MARKET_SLOT_SIZE`, `CONFIG_PICKER_SLOT_SIZE`) or by the Label's own
   `custom_minimum_size.x` (`CONFIG_PANEL_WIDTH`, `CREW_TEXT_WIDTH`,

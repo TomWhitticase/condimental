@@ -8251,7 +8251,14 @@ func _build_contract_board(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	empty_body.add_child(empty_title)
 	var empty_text := Label.new()
 	empty_text.label_settings = _contract_ink_settings
-	empty_text.text = "nothing ships for money until you sign an order —\npick one under FOR SALE and SIGN it →"
+	empty_text.text = "nothing ships for money until you sign an order — pick one under FOR SALE and SIGN it →"
+	# Wrapped inside the column's PINNED width, as a running docket's status
+	# line is (the `autowrap_mode` rule under MODAL_EDGE_MARGIN). On one line,
+	# or broken once, this sentence widened the column ~90px past the pin, and
+	# every pixel of that came off the offers — in the state a new game opens
+	# the board to.
+	empty_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	empty_text.custom_minimum_size.x = BOARD_ACTIVE_COLUMN_WIDTH - _ui_px(12.0) - _ui_px(14.0)
 	empty_body.add_child(empty_text)
 
 	_board_active_scroll = ScrollContainer.new()
@@ -8343,12 +8350,12 @@ func _position_contract_board() -> void:
 ##
 ## MEASURED rather than assumed, the way `_fit_staff_width` measures and for
 ## the same reason: the break is what fits the board in a 1280x720 window
-## (`_build_contract_board_row`), and it is not free anywhere else. A broken
-## card is 157px tall against 120px whole, and the board asks `snap_rows` for
-## the last WHOLE card — so at 1600x900 three broken cards want 489px against
-## a 484px cap, miss by five pixels, and the player is shown two offers where
-## the window has room for three. The window that has the width should show
-## the sentence.
+## (`_build_contract_board_row`), and it is not free anywhere else. Every
+## break is a line of height on every card, and the board asks `snap_rows`
+## for the last WHOLE card — so one line too many cost 1600x900 its third
+## offer once, and 1280x720 its second (PR #195's review; the status line
+## moved under the SIGN button and the strike rule shortened to "N strikes"
+## to win it back). The window that has the width should show the sentence.
 func _fit_contract_board_split() -> bool:
 	if _board_panel == null or _board_rows.is_empty():
 		return false
@@ -8504,30 +8511,47 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 	terms_label.label_settings = _contract_ink_settings
 	# The two halves kept apart, so `_set_contract_board_split` can break at
 	# the join and put it back.
+	#
+	# The strike rule is "3 strikes", not "lost after 3 missed in a row": the
+	# long form is what broke the terms onto a second line beside the running
+	# dockets, and a fifth line on every card is what left a 1280x720 window
+	# one offer. The footer says what a strike is, and a signed docket spells
+	# the rule out in full beside its pips.
+	var strikes := int(offer.get("strikes", 1))
 	var halves := PackedStringArray([
 		"every %d ticks%spays +%d" % [
 			int(offer.get("cadence_ticks", 0)), BOARD_TERMS_JOIN, int(offer.get("payout", 0))],
-		"lost after %d missed in a row" % int(offer.get("strikes", 1)),
+		"%d strike%s" % [strikes, "" if strikes == 1 else "s"],
 	])
 	terms_label.set_meta("halves", halves)
 	terms_label.text = BOARD_TERMS_JOIN.join(halves)
 	mix_row.add_child(terms_label)
 
-	var status_label := Label.new()
-	status_label.name = "OfferStatus"
-	status_label.label_settings = _contract_meta_settings
-	text_col.add_child(status_label)
+	# The button and the word on where this offer stands share a column, the
+	# status UNDER the button: it is the button's own reason, and the space
+	# below a 44px button was dead anyway, while a line under the terms was a
+	# line of height on every card.
+	var sign_col := VBoxContainer.new()
+	sign_col.name = "SignColumn"
+	sign_col.add_theme_constant_override("separation", _ui_i(3))
+	sign_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(sign_col)
 
 	var sign_button := Button.new()
 	sign_button.name = "Sign_%s" % String(offer.get("id", "?"))
 	sign_button.focus_mode = Control.FOCUS_NONE
 	sign_button.custom_minimum_size = _ui_v(Vector2(128, 44))
-	sign_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	sign_button.add_theme_font_size_override("font_size", _ui_font(1))
 	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
 		sign_button.add_theme_stylebox_override(state, _shop_slot_style(state))
 	sign_button.pressed.connect(_sign_contract_offer.bind(index))
-	row.add_child(sign_button)
+	sign_col.add_child(sign_button)
+
+	var status_label := Label.new()
+	status_label.name = "OfferStatus"
+	status_label.label_settings = _contract_meta_settings
+	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sign_col.add_child(status_label)
 
 	return {
 		"id": String(offer.get("id", "")),
@@ -8573,29 +8597,30 @@ func _update_contract_board(econ: Dictionary = {}) -> void:
 		var lost: int = int(offer.get("times_lost", 0))
 		var button: Button = row["sign_button"]
 		var status: Label = row["status_label"]
+		# Short, and on lines of their own: they sit under the SIGN button, so
+		# the button column is as wide as their widest line — and the button
+		# already carries the price.
 		var lost_note := ""
 		if lost > 0:
-			# On a line of its own: beside the running dockets the offer column
-			# is as wide as its widest line, and this one would be it.
 			lost_note = "\nlost %d time%s before" % [lost, "" if lost == 1 else "s"]
 		if active:
 			button.text = "SIGNED"
 			button.disabled = true
-			status.text = "✔ signed — running, on the left" + lost_note
+			status.text = "✔ running, on the left" + lost_note
 			row["panel"].add_theme_stylebox_override("panel", _contract_card_style_ready)
 		elif not affordable:
 			button.text = "✗ SIGN · %d" % price
 			button.disabled = true
-			status.text = "✗ can't afford — the signature costs %d" % price + lost_note
+			status.text = "✗ can't afford it" + lost_note
 			row["panel"].add_theme_stylebox_override("panel", _contract_card_style)
 		else:
 			button.text = "SIGN · %d" % price
 			button.disabled = false
 			if lost > 0:
-				status.text = "✗ LOST — sign it again for %d" % price + lost_note
+				status.text = "✗ LOST — sign again" + lost_note
 				row["panel"].add_theme_stylebox_override("panel", _contract_card_style_last_chance)
 			else:
-				status.text = "available — %d to sign" % price
+				status.text = "available"
 				row["panel"].add_theme_stylebox_override("panel", _contract_card_style)
 	_position_contract_board()
 
