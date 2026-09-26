@@ -59,7 +59,9 @@ matches what code comments and data files cite.
   it is a sizing rule, not an activation rule. Fixtures that need a running
   order now sign one explicitly through the real `SignContract` command
   (`sim::reference_chain`, `test_layouts.gd`'s `build_reference_line`) and
-  assert loudly if the signature fails.
+  fail loudly if the signature does not take: the Rust fixture asserts the
+  contract is active, and the GDScript one prints `REFERENCE_FIXTURE_FAIL:`,
+  which `scripts/verify-core-loop.sh` treats as a failed script.
 
 - 2026-09-26: **CONDIMENTAL is GPL-3.0-only; the name and brand are
   reserved.** (Owner's call, from a release-readiness audit.)

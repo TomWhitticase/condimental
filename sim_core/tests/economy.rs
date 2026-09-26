@@ -56,7 +56,7 @@ fn contracts() -> ContractRegistry {
 /// `money`.
 fn single_contract_world() -> World {
     let board = contracts();
-    let c = board.get("corner_shop").expect("shipped starter contract");
+    let c = board.get("corner_shop").expect("shipped corner_shop offer");
     let mix: Vec<String> = c
         .mix
         .iter()
@@ -133,11 +133,11 @@ fn full_chain_delivers_against_a_contract_and_pays_out_exactly_that_contracts_pa
     let final_item = linear_prefix(&registry).last().unwrap().id.clone();
 
     let board = contracts();
-    let corner_shop = board.get("corner_shop").expect("shipped starter contract");
+    let corner_shop = board.get("corner_shop").expect("shipped corner_shop offer");
     let (want_item, want_qty) = corner_shop.mix.first().unwrap().clone();
     assert_eq!(
         want_item, final_item,
-        "this test assumes the starter contract targets the chain's final product"
+        "this test assumes the corner_shop offer targets the chain's final product"
     );
     let cadence = corner_shop.cadence_ticks;
     let payout = corner_shop.payout;
