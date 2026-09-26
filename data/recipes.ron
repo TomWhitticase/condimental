@@ -50,39 +50,62 @@
 // by what you plumb into it.
 //
 // **WHY THE ORDER BELOW IS SAFE.** The tiebreak only bites when one
-// machine's inputs satisfy two of its kind's recipes at once, and on the
-// shipped content that cannot happen — because **every recipe on a kind
-// needs at least one id that no other recipe on that kind needs**:
+// machine's current inputs satisfy two of its kind's recipes at once, and on
+// the shipped content that cannot happen: any pair of recipes sharing a
+// machine kind takes **completely disjoint input ids**, fluids included.
 //
-//   crusher      tomato  /  mustard_seed
+//   crusher      tomato  /  mustard_seed + vinegar
 //   mixer        tomato_paste + sugar + vinegar
 //                  /  spice_mix + molasses + ketchup
-//                  /  mustard_meal + turmeric + vinegar
+//                  /  turmeric + mustard_mash
 //   cooking_vat  ketchup_mix  /  bbq_mix + liquid_smoke  /  mustard_mix
 //   bottler      ketchup  /  bbq  /  mustard
 //   packer       bottled_ketchup  /  bottled_bbq  /  bottled_mustard
 //
 // A machine only ever holds what the player plumbed into it, so a mixer
-// plumbed for one of those three rows is missing something each of the other
-// two demands: fed paste and sugar it cannot satisfy `mustard_mix` (no meal,
-// no turmeric), and fed meal and turmeric it cannot satisfy `ketchup_mix`.
-// File order therefore still decides nothing, and reordering this file could
-// not change what any machine makes.
+// plumbed for one of those three rows is missing everything each of the
+// other two demands: fed paste and sugar it cannot satisfy `mustard_mix`
+// (no turmeric, no mash), and fed turmeric and mash it cannot satisfy
+// `ketchup_mix`. File order therefore still decides nothing, and reordering
+// this file could not change what any machine makes. `recipe.rs`'s
+// `recipes_on_a_kind_take_disjoint_inputs` pins exactly that, and the day
+// two recipes on one kind DO overlap, a player gets a machine whose output
+// depends on a file order they cannot see — the point at which this design
+// needs revisiting rather than a quiet tiebreak.
 //
-// **THAT USED TO BE THE STRONGER CLAIM "completely disjoint input ids", AND
-// MUSTARD IS WHY IT IS NOT.** The mustard mixer draws the same bought
-// `vinegar` the ketchup mixer does (that sharing is the point of the tier —
-// see the mustard note below), so one pair of recipes on one kind now
-// overlaps in one id. Disjointness was only ever a *proxy* for the property
-// above, and a conservative one: two recipes could always be satisfied at
-// once by a machine holding the union of their inputs, disjoint or not, so
-// what keeps "no picker" honest is that no plumbing for one recipe is also
-// plumbing for another. `recipe.rs`'s
-// `each_recipe_on_a_kind_needs_something_the_others_do_not` pins exactly
-// that. The day two recipes on one kind DO become mutually satisfiable —
-// one's inputs a subset of the other's — a player gets a machine whose
-// output depends on a file order they cannot see, and that is the point at
-// which this design needs revisiting rather than a quiet tiebreak.
+// **MUSTARD IS THE NEAREST MISS SO FAR**, and it is worth saying where it
+// nearly went. `vinegar` is the first raw two sauces buy (point 6 of
+// `data/ingredients.ron`'s note), and mustard's first draft drank it at the
+// MIXER, beside turmeric — which would have put the same input id on two
+// recipes of one kind and broken the rule above. It drinks at the CRUSHER
+// instead, which drank nothing, and the mustard mixer takes the derived
+// `mustard_mash` down a pipe the way the BBQ mixer takes derived `ketchup`.
+// Disjointness alone would have allowed other ways out — a second acid of
+// mustard's own, say — and the rule in the next paragraph is what ruled
+// those out and left this one.
+//
+// **AT MOST ONE RAW FLUID PER MACHINE KIND, DRUNK BY AT MOST ONE OF ITS
+// RECIPES.** This one is not a style preference, it is what
+// `World::resolve_network_fluids` can actually work out, and breaking it
+// breaks a line that already ships. That pass names a pipe run by narrowing
+// on FLUIDS ALONE — the solid side of a recipe is invisible to it — and the
+// only fact that pins a run from outside is "a run a tank feeds holds a raw
+// fluid". So:
+//
+//   * two recipes on one kind drinking the SAME raw fluid leaves that kind's
+//     OUTLET run ambiguous (both recipes stay feasible, so nothing narrows);
+//   * one kind whose recipes drink two DIFFERENT raw fluids leaves the TANK
+//     run feeding it ambiguous, and an ambiguous tank run cannot even be
+//     filled (`World::tank_fluid` has nothing to name it with).
+//
+// Both were measured while writing this tier, on the shipped ketchup line,
+// in a new game where mustard is still gated — a gate hides content from the
+// player, not from the resolver. Hence mustard's vinegar goes in at the
+// crusher, which drinks nothing else, and the mixer takes the derived
+// `mustard_mash` the way `bbq_mix` takes derived `ketchup`. The fence for
+// sauce four is `recipe.rs`'s `at_most_one_raw_fluid_enters_any_machine_kind`;
+// the principled fix — teaching the resolver about the solid side — is
+// issue #184, not something to work around in content.
 //
 // FLUIDS, BOTH WAYS (schema_version 3). Milestone 6 added the optional
 // `fluid_inputs` field — (fluid id, whole units) drawn per craft from the
@@ -403,50 +426,66 @@
         // it.
         //
         // **What is actually new is one shared id: `vinegar`.** The mustard
-        // mixer drinks the same bought fluid the ketchup mixer does, out of
+        // crusher drinks the same bought fluid the ketchup mixer does, out of
         // one ledger and one storage allowance, so this is the first time two
         // products compete for a raw rather than for floor space. A player
-        // who pipes one tank to both mixers starves whichever one is
+        // who pipes one tank to both machines starves whichever one is
         // downstream, and a player who buys for one line has not bought for
         // the other. `data/ingredients.ron`'s header note (point 6) is the
         // same claim seen from the shop's side.
         //
+        // The two lines share the raw and NOT the machine kind that drinks
+        // it, which is the header's one-raw-fluid-per-kind rule: the shop-side
+        // competition is the lesson, and it survives intact with the drum
+        // plumbed to the crusher instead of the mixer.
+        //
         // It is also why this is *nearly* a disconnected component of the
         // recipe graph and not quite one: nothing here consumes anything the
-        // ketchup entries produce, but `vinegar` ties the two mixers
+        // ketchup entries produce, but `vinegar` ties the two lines
         // together, so `validate_chain` still sees one graph. Mayonnaise
         // (GAMEPLAY.md §2) is the one that will finally be an island.
 
-        // Crush, the mustard side: seed in, meal out, 80 ticks — the same
-        // machine doing the same work as `tomato_paste`, so the same number.
-        // This is the second recipe on the crusher and the reason the kind
-        // needed more than one at all.
+        // Mill, the mustard side: seed and vinegar in, wet mash out, 80
+        // ticks — the same machine doing the same work as `tomato_paste`, so
+        // the same number. This is the second recipe on the crusher and the
+        // reason the kind needed more than one at all.
+        //
+        // **THE VINEGAR IS DRUNK HERE, AND WHICH MACHINE DRINKS IT IS NOT A
+        // FLAVOUR DECISION.** Mustard is milled wet in the real world, which
+        // is why this reads right — but the reason it is not on the mixer
+        // below is a hard constraint of the simulation, stated in the header
+        // note "AT MOST ONE RAW FLUID PER MACHINE KIND". `ketchup_mix`
+        // already drinks `vinegar` on the mixer; a second mixer recipe
+        // drinking any raw fluid leaves a pipe run the narrowing pass cannot
+        // name, and the SHIPPED KETCHUP LINE stalls on `AmbiguousPipe` in a
+        // new game. The crusher drinks nothing else, so it is where a raw
+        // fluid can still enter this content without colliding.
         Recipe(
-            id: "mustard_meal",
-            blurb: "Seed in, coarse meal out. The crusher does not care that it is not a tomato: it is the same mechanical work, and it is again the only machine on this line eating a raw solid with nothing upstream of it.",
-            icon: "item_meal_pail",
+            id: "mustard_mash",
+            blurb: "Mustard is milled wet: seed and vinegar go in together and a coarse yellow mash comes out down a pipe. The crusher does not care that it is not a tomato — it is the same mechanical work, with a drum plumbed to it.",
             inputs: [("mustard_seed", 4)],
-            outputs: [("mustard_meal", 1)],
+            fluid_inputs: [("vinegar", 2)],
+            outputs: [],
+            fluid_outputs: [("mustard_mash", 1)],
             machine: "crusher",
             time_ticks: 80,
         ),
-        // Mix, the mustard side: meal and turmeric on two belt lanes,
-        // vinegar down a pipe, liquid mix out of the outlet face. 90 ticks,
-        // like both other blends — same machine, same work, and a third
-        // blend time would be a number with no story.
+        // Mix, the mustard side: turmeric on a belt, mash down a pipe,
+        // liquid mix out of the outlet face. 90 ticks, like both other
+        // blends — same machine, same work, and a third blend time would be
+        // a number with no story.
         //
-        // This is the entry that costs this file its old "every pair of
-        // recipes on a kind takes completely disjoint inputs" claim, because
-        // `vinegar` appears here and in `ketchup_mix`. See the header note:
-        // the property that actually keeps a machine's output predictable is
-        // that each recipe on a kind needs something the others do not, and
-        // this one needs meal and turmeric, which no other mixer recipe
-        // touches.
+        // What this recipe drinks is `mustard_mash`, a **derived** fluid,
+        // for the reason spelled out above and in the header: every fluid
+        // entering a kind that already has a raw one has to be something the
+        // factory made. `bbq_mix` drinking finished `ketchup` is the same
+        // move; this is the second instance, and the rule is now a test
+        // (`recipe.rs`'s `at_most_one_raw_fluid_enters_any_machine_kind`).
         Recipe(
             id: "mustard_mix",
-            blurb: "Meal and turmeric arrive on two belt lanes and vinegar arrives down a pipe — the same three-way feed the ketchup mixer takes, off the same tank. The first raw two sauces fight over is this one, and the fight happens in the shop rather than on the floor.",
-            inputs: [("mustard_meal", 1), ("turmeric", 1)],
-            fluid_inputs: [("vinegar", 2)],
+            blurb: "Turmeric arrives on a belt and the milled mash arrives down a pipe, and what leaves the outlet face is mustard in everything but the cooking. The vinegar this sauce fights ketchup over is already in the mash.",
+            inputs: [("turmeric", 1)],
+            fluid_inputs: [("mustard_mash", 1)],
             outputs: [],
             fluid_outputs: [("mustard_mix", 1)],
             machine: "mixer",

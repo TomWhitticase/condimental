@@ -41,7 +41,7 @@ mod common;
 
 use sim_core::sim::{
     FLUID_TANK_CAPACITY, Fx, HOPPER_CAPACITY, PlayerCommand, RecipeRegistry, TileSnapshot, World,
-    command_from_json, reference_chain_with_budget,
+    command_from_json, linear_prefix, reference_chain_with_budget,
 };
 
 /// Enough money for the stock these tests buy, on top of the shop bill the
@@ -779,7 +779,14 @@ fn accounted(world: &World, raw: &str, recipes: &RecipeRegistry, final_item: &st
 #[test]
 fn mass_is_conserved_with_auto_fill_on_across_the_whole_chain() {
     let registry = recipes();
-    let final_item = registry.ordered().last().unwrap().outputs[0].0.clone();
+    // The item the *fixture* ships, which is the last stage of the ketchup
+    // line and not the last entry in the file — `recipes.ron` holds three
+    // lines now, and the mustard packer at the end of it embodies no tomato
+    // at all, so valuing the dock's `shipped_total` with it would read every
+    // shipped box as a leak.
+    let final_item = linear_prefix(&registry).last().unwrap().outputs[0]
+        .0
+        .clone();
     let mut world = reference_chain_with_budget(recipes(), 4000 + common::WAGE_RESERVE);
 
     buy(&mut world, "tomato", 600);

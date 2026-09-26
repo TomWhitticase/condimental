@@ -48,8 +48,8 @@ pub use machine::{
 pub use machines::{Footprint, MachineKind, MachineRegistry};
 pub use recipe::{Recipe, RecipeRegistry};
 pub use reference::{
-    bbq_branch, linear_prefix, reference_chain, reference_chain_with, reference_chain_with_budget,
-    reference_chain_with_content_and_budget,
+    bbq_branch, linear_prefix, mustard_line, reference_chain, reference_chain_with,
+    reference_chain_with_budget, reference_chain_with_content_and_budget,
 };
 pub use save::{SAVE_SCHEMA_VERSION, SaveData, SaveError, SavedItemStats, SavedProduction};
 pub use shop::{

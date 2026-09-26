@@ -25,7 +25,7 @@
 // `data/recipes.ron` *consumes* and no recipe *produces* — tomato, sugar,
 // spice mix, molasses, mustard seed and turmeric on the solid side, vinegar
 // and liquid smoke on the fluid side. Everything else in the chain (tomato
-// paste, mustard meal, the liquid mixes, the cooked sauces, bottles, boxes)
+// paste, mustard mash, the liquid mixes, the cooked sauces, bottles, boxes)
 // is made by the factory and therefore is never bought. **Finished ketchup is the clearest case**: the BBQ mixer
 // consumes it, so it looks like an input, but the cooking vat produces it,
 // so it is not raw and has no price here — a BBQ branch buys ketchup by
@@ -82,7 +82,7 @@
 //   6. **`vinegar` is the first raw two products drink**, and that is the
 //      one genuinely new thing on this shelf. Every other id here belongs
 //      to exactly one sauce, so a shipment of it was only ever a bet on how
-//      much of that sauce to make. Vinegar bought for the mustard mixer is
+//      much of that sauce to make. Vinegar bought for the mustard crusher is
 //      vinegar the ketchup mixer does not get — out of one ledger, one
 //      storage allowance (`data/storage.ron`) and one balance — so the
 //      market is where two lines first compete, before a single pipe is
@@ -123,7 +123,7 @@
         IngredientEntry(
             id: "vinegar",
             price: 2,
-            blurb: "The first raw that is a fluid rather than a solid: bought by the unit like everything else, but loaded into a fluid tank instead of a hopper, and delivered to the mixer down a pipe.",
+            blurb: "The first raw that is a fluid rather than a solid: bought by the unit like everything else, but loaded into a fluid tank instead of a hopper, and piped to whichever machine drinks it: the ketchup mixer, or the crusher that mills mustard seed wet.",
             icon: "item_vinegar",
         ),
 
@@ -167,7 +167,11 @@
         // There are two of these and not three: mustard's acid is the
         // `vinegar` priced above, bought out of the same ledger the ketchup
         // mixer drinks from, which is point 6 of the note at the top of this
-        // file and the whole reason this tier is here.
+        // file and the whole reason this tier is here. The two lines share
+        // the raw but not the machine that drinks it — mustard takes its
+        // vinegar a stage earlier, at the crusher, and for why that is not
+        // a flavour decision see the note above `mustard_mash` in
+        // `data/recipes.ron`.
 
         // Mustard's bulk produce, and the second thing the crusher eats.
         // Priced like tomatoes rather than like a spice — cheap by the unit,

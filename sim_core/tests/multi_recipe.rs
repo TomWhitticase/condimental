@@ -706,7 +706,7 @@ fn the_shipped_file_is_two_lines_and_every_recipe_in_it_starts_from_the_market()
         "mustard_seed",
         "turmeric",
         "vinegar",
-        "mustard_meal",
+        "mustard_mash",
         "mustard_mix",
         "mustard",
         "bottled_mustard",

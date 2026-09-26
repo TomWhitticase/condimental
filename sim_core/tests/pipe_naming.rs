@@ -30,7 +30,9 @@
 use sim_core::sim::fluid::PipeNaming;
 use sim_core::sim::types::Direction;
 use sim_core::sim::world::{FluidSnapshot, StallKind};
-use sim_core::sim::{PlayerCommand, RecipeRegistry, World, bbq_branch};
+use sim_core::sim::{
+    ContractRegistry, MachineRegistry, Money, PlayerCommand, RecipeRegistry, World, bbq_branch,
+};
 
 fn recipes() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
@@ -118,9 +120,14 @@ fn a_tank_turned_off_its_run_leaves_the_run_ambiguous() {
     assert_eq!(smoke.naming, PipeNaming::Ambiguous);
     assert!(smoke.naming.is_fault());
     assert_eq!(smoke.fluid, None);
-    // Both ends of the ambiguity are reported, because which two fluids
-    // have been confused is the whole of what the player needs to know.
-    assert_eq!(smoke.candidates, vec!["ketchup_mix", "liquid_smoke"]);
+    // Every end of the ambiguity is reported, because which fluids have been
+    // confused is the whole of what the player needs to know. There are three
+    // of them since mustard landed: the cooking vat now names three recipes,
+    // and an unpinned run touching one could be feeding any of them.
+    assert_eq!(
+        smoke.candidates,
+        vec!["ketchup_mix", "liquid_smoke", "mustard_mix"]
+    );
     // Every tile of the run carries the run's verdict, so a renderer
     // walking a chunk can mark it without rebuilding the networks.
     assert!(
@@ -204,7 +211,7 @@ fn the_naming_states_are_distinct_on_the_wire() {
         json.contains(r#""naming":"ambiguous""#),
         "ambiguous must reach the wire under that name: {json}"
     );
-    assert!(json.contains(r#""candidates":["ketchup_mix","liquid_smoke"]"#));
+    assert!(json.contains(r#""candidates":["ketchup_mix","liquid_smoke","mustard_mix"]"#));
 
     let mut world = branch();
     purchase_and_place(&mut world, "fluid_tank", (15, -2), Direction::South);
@@ -212,5 +219,109 @@ fn the_naming_states_are_distinct_on_the_wire() {
     assert!(
         json.contains(r#""naming":"unnameable""#),
         "unnameable must reach the wire under that name: {json}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// The crusher's new pipe ports
+// ---------------------------------------------------------------------
+
+/// A world with money and nothing in it, for the two cases below: they are
+/// about a crusher standing next to a pipe, which is not a shape any shipped
+/// fixture lays out.
+fn funded() -> World {
+    World::with_content_and_money(
+        recipes(),
+        MachineRegistry::bundled(),
+        ContractRegistry::bundled(),
+        Money::from_num(20_000),
+    )
+}
+
+fn build(world: &mut World, kind: &str, tile: (i32, i32), direction: Direction) {
+    purchase_and_place(world, kind, tile, direction);
+    assert!(
+        world.query_tile(tile).is_some(),
+        "{kind} must be standing at {tile:?} after being placed"
+    );
+}
+
+/// Since mustard is milled wet the crusher has a fluid recipe, and step 1 of
+/// `resolve_network_fluids` seeds a run from **every** recipe of a touching
+/// kind with no feasibility filter — so a dry tomato crusher whose outlet
+/// face happens to sit on somebody else's run claims `mustard_mash` on it.
+/// The narrowing is supposed to drop that claim, because a claim survives
+/// only when every feasible naming uses it and `tomato_paste` names no
+/// fluid at all. Pinned here rather than reasoned about: if it ever stopped
+/// holding, a crusher parked beside the ketchup line would stall the line.
+#[test]
+fn a_dry_crusher_touching_a_mix_run_does_not_make_it_ambiguous() {
+    let mut world = funded();
+    build(&mut world, "mixer", (5, 0), Direction::East); // covers (5,0) and (5,1)
+    build(&mut world, "fluid_tank", (4, 2), Direction::East);
+    build(&mut world, "pipe", (5, 2), Direction::East); // the vinegar tap
+    // The mixer's product run, laid east along the outlet face and then away.
+    build(&mut world, "pipe", (6, 0), Direction::East);
+    build(&mut world, "pipe", (6, 1), Direction::East);
+    build(&mut world, "pipe", (7, 1), Direction::East);
+    build(&mut world, "pipe", (8, 1), Direction::East);
+
+    let before = run_at(&world, (6, 0));
+    assert_eq!(before.fluid.as_deref(), Some("ketchup_mix"));
+
+    // A crusher discharging into the far end of that same run.
+    build(&mut world, "crusher", (8, 2), Direction::South);
+    let crusher = world
+        .world_layout()
+        .into_iter()
+        .find(|entry| entry.tile == (8, 2))
+        .expect("a crusher stands at (8, 2)");
+    assert_eq!(
+        crusher.recipe.as_deref(),
+        Some("tomato_paste"),
+        "the crusher this test parks there is the dry one"
+    );
+
+    let run = run_at(&world, (6, 0));
+    assert_eq!(
+        run.naming,
+        PipeNaming::Carries,
+        "a dry crusher's claim must not survive the narrowing: {:?}",
+        run.candidates
+    );
+    assert_eq!(run.fluid.as_deref(), Some("ketchup_mix"));
+    assert_ne!(
+        stall_at(&world, (5, 0)).map(|(kind, _)| kind),
+        Some(StallKind::AmbiguousPipe),
+        "the mixer must not be stalled by a crusher standing next to its outlet"
+    );
+}
+
+/// The tank side of the same worry: one vinegar run touching both a crusher
+/// and a mixer. Both kinds draw exactly one raw fluid and it is the same
+/// one, which is the rule the fence test in `sim::recipe` enforces — so the
+/// run has one candidate and the two machines share a tank the way the
+/// player would expect.
+#[test]
+fn one_vinegar_run_can_feed_both_a_crusher_and_a_mixer() {
+    let mut world = funded();
+    build(&mut world, "mixer", (5, 0), Direction::East); // covers (5,0) and (5,1)
+    build(&mut world, "crusher", (6, 3), Direction::East);
+    build(&mut world, "fluid_tank", (4, 2), Direction::East);
+    build(&mut world, "pipe", (5, 2), Direction::East); // touches the mixer
+    build(&mut world, "pipe", (6, 2), Direction::East); // touches the crusher
+
+    let run = run_at(&world, (5, 2));
+    assert_eq!(
+        run.naming,
+        PipeNaming::Carries,
+        "one raw drunk by both kinds is still one candidate: {:?}",
+        run.candidates
+    );
+    assert_eq!(run.fluid.as_deref(), Some("vinegar"));
+    assert_eq!(
+        run.taps.len(),
+        2,
+        "both machines tap the run they are standing on"
     );
 }

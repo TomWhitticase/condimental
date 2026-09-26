@@ -635,15 +635,10 @@ fn the_picker_wire_keeps_a_locked_choice_and_names_its_gate() {
         serde_json::from_str(&serde_json::to_string(&world.ingredients_snapshot()).unwrap())
             .unwrap();
 
-    let threshold = UnlockRegistry::bundled()
-        .get("bbq_sauce")
-        .expect("data/unlocks.ron must ship the bbq_sauce gate")
-        .after_deliveries;
-    let name = UnlockRegistry::bundled()
-        .get("bbq_sauce")
-        .unwrap()
-        .name
-        .clone();
+    // Read against EVERY gate in the file, not just BBQ's: mustard holds
+    // back two raws of its own behind a later threshold, so a choice's flag
+    // has to be checked against whichever unlock names that id.
+    let gates = UnlockRegistry::bundled();
 
     let mut seen_locked = 0;
     for list in ["hopper_items", "tank_fluids"] {
@@ -652,17 +647,18 @@ fn the_picker_wire_keeps_a_locked_choice_and_names_its_gate() {
         for choice in choices {
             let id = choice["id"].as_str().unwrap().to_string();
             let locked = choice["locked"].as_bool().unwrap();
+            let gate = gates.gate_for_ingredient(&id);
             assert_eq!(
                 locked,
-                ingredients.contains(&id),
+                gate.is_some(),
                 "'{id}' in {list} reports locked={locked}, which disagrees with the gate"
             );
-            if locked {
+            if let Some(gate) = gate {
                 seen_locked += 1;
-                assert_eq!(choice["unlock_name"].as_str().unwrap(), name);
+                assert_eq!(choice["unlock_name"].as_str().unwrap(), gate.name);
                 assert_eq!(
                     choice["after_deliveries"].as_u64().unwrap() as u32,
-                    threshold
+                    gate.after_deliveries
                 );
             } else {
                 assert_eq!(choice["unlock_name"].as_str().unwrap(), "");
