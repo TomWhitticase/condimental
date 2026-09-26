@@ -151,11 +151,34 @@
 //! and are not the same shape, which is the exact ambiguity the version
 //! number exists to prevent.
 //!
+//! # A field added at version 3 on purpose
+//!
+//! [`SaveData::lifetime_boxes_sold`] breaks that rule, with the owner's
+//! change of 2026-09-26 as the reason: the progression gates stopped keying
+//! off satisfied delivery windows and started keying off boxes of a named
+//! product sold. It is a one-line `#[serde(default)]` at version 3, not a
+//! bump to 4.
+//!
+//! The rule's argument is sound and is not being denied: a v3 file written
+//! before this change and one written after it are not the same shape, and
+//! nothing in the file says which. What makes it the better trade HERE is
+//! that the two shapes differ only in a field whose absence has a single
+//! meaning — nothing sold yet — and the consequence of reading an old file
+//! that way is the consequence the pre-gate case below already documents and
+//! argues for: the tiers re-lock, and they are re-earned with the
+//! announcement a silently-unlocked tier would have skipped. A bump would
+//! trade that for refusing to open the file at all. The bound the earlier
+//! window rested on still holds too: no release has ever written a save
+//! file, so every v3 file in existence is a development one.
+//!
+//! This is therefore a *narrow* exception and not the rule moving: a field
+//! whose default is a lie about the world still needs a bump.
+//!
 //! **What a pre-gate save loads as, and why that is right.**
-//! `lifetime_deliveries` defaults to zero, so a save written before
-//! progression gates existed loads as a factory that has delivered nothing
-//! and finds the BBQ tier locked again — however many deliveries it
-//! actually made. That is deliberate, and it is the *kinder* of the two
+//! `lifetime_deliveries` and `lifetime_boxes_sold` both default to empty, so
+//! a save written before progression gates existed — or before they counted
+//! boxes — loads as a factory that has sold nothing and finds the BBQ tier
+//! locked again, however many deliveries it actually made. That is deliberate, and it is the *kinder* of the two
 //! options: the alternative (assume an old save has earned every gate) hands
 //! a returning player an unlocked tier with no announcement, which is
 //! exactly the silent gate `data/unlocks.ron` exists to avoid. Re-earning it
@@ -275,6 +298,24 @@ pub struct SaveData {
     /// therefore loads as, and why that is the right call.
     #[serde(default)]
     pub lifetime_deliveries: u32,
+    /// **Lifetime boxes sold, per item id**
+    /// ([`super::economy::Economy::lifetime_boxes_sold`]) — what every
+    /// progression gate in `data/unlocks.ron` is keyed off since 2026-09-26.
+    ///
+    /// The ledger and not the gates, for `lifetime_deliveries`' reason: which
+    /// tiers are open is derived from this against the *current* data file
+    /// every time it is asked, so a balance pass on `unlocks.ron` — or a
+    /// change of which product a tier waits on — re-reads correctly for every
+    /// existing save.
+    ///
+    /// Sorted by item id, because it is a `BTreeMap` and the save text is
+    /// part of the determinism contract.
+    ///
+    /// `#[serde(default)]`, which is a deliberate exception to the rule two
+    /// paragraphs of this module doc set above — see "A field added at
+    /// version 3 on purpose".
+    #[serde(default)]
+    pub lifetime_boxes_sold: BTreeMap<String, u32>,
     /// The production ledger (`sim::stats::ProductionLedger`), rings
     /// verbatim, so a loaded factory's P screen reads exactly what the
     /// saved one did. `#[serde(default)]` for the same reason as
@@ -1041,6 +1082,7 @@ impl World {
                 .map(|(id, count)| (id.clone(), *count))
                 .collect(),
             lifetime_deliveries: self.economy().lifetime_deliveries,
+            lifetime_boxes_sold: self.economy().lifetime_boxes_sold.clone(),
             production: saved_production(self.production()),
             staff: Some(SavedStaff {
                 headcount: self.staff().headcounts().into_iter().collect(),
@@ -1829,6 +1871,7 @@ fn restore_ledgers(world: &mut World, data: &SaveData) {
     // that was written before this field existed — would quietly re-lock a
     // tier the player had earned. It is its own number for that reason.
     economy.lifetime_deliveries = data.lifetime_deliveries;
+    economy.lifetime_boxes_sold = data.lifetime_boxes_sold.clone();
 }
 
 #[cfg(test)]

@@ -104,7 +104,7 @@ pub enum GuideFact {
     /// included — the size of the file, not of the market.
     RawCount,
     /// How many of those raws the market will actually sell at the current
-    /// delivery count. Three of the six are behind the BBQ gate today, so
+    /// boxes sold. Three of the six are behind the BBQ gate today, so
     /// prose that called `raw_count` "on the market" was wrong by three.
     OpenRawCount,
     /// How many sauces the book has pages for.
@@ -112,8 +112,8 @@ pub enum GuideFact {
     /// How many orders `data/contracts.ron` holds in all, gated ones
     /// included.
     ContractCount,
-    /// How many of those the board is showing at the current delivery count
-    /// — the ones with no gate, or whose gate has opened.
+    /// How many of those the board is showing at the current boxes sold —
+    /// the ones with no gate, or whose gate has opened.
     OpenContractCount,
     /// How many of those are `starter: true`: active in a new game without
     /// being signed. Not "the ones a new player may sign", which is
@@ -130,14 +130,19 @@ pub enum GuideFact {
     PaydayTicks,
     /// The name of the earliest gate in `data/unlocks.ron`.
     FirstGateName,
-    /// The lifetime deliveries that gate wants.
-    FirstGateDeliveries,
+    /// How many boxes that gate wants.
+    FirstGateBoxes,
+    /// The product whose boxes it counts, as an item id. A
+    /// [`GuideFactKind::KindId`] rather than a new `ItemId` kind, because
+    /// Godot's `_item_display_name` is `_kind_display_name` — one map titles
+    /// both, so one kind describes both.
+    FirstGateProduct,
 }
 
 impl GuideFact {
     /// Every fact, in a stable order — the order the wire lists them in, so
     /// a diff of two snapshots reads consistently.
-    pub const ALL: [GuideFact; 16] = [
+    pub const ALL: [GuideFact; 17] = [
         GuideFact::StartingMoney,
         GuideFact::CheapestBuyable,
         GuideFact::CheapestBuyablePrice,
@@ -153,7 +158,8 @@ impl GuideFact {
         GuideFact::StartingWageBill,
         GuideFact::PaydayTicks,
         GuideFact::FirstGateName,
-        GuideFact::FirstGateDeliveries,
+        GuideFact::FirstGateBoxes,
+        GuideFact::FirstGateProduct,
     ];
 
     /// What this fact is written as in `data/guide.ron`, without the braces.
@@ -174,7 +180,8 @@ impl GuideFact {
             GuideFact::StartingWageBill => "starting_wage_bill",
             GuideFact::PaydayTicks => "payday_ticks",
             GuideFact::FirstGateName => "first_gate_name",
-            GuideFact::FirstGateDeliveries => "first_gate_deliveries",
+            GuideFact::FirstGateBoxes => "first_gate_boxes",
+            GuideFact::FirstGateProduct => "first_gate_product",
         }
     }
 
@@ -192,10 +199,10 @@ impl GuideFact {
             | GuideFact::StarterContracts
             | GuideFact::DockCapacity
             | GuideFact::StartingCrew
-            | GuideFact::FirstGateDeliveries => GuideFactKind::Count,
+            | GuideFact::FirstGateBoxes => GuideFactKind::Count,
             GuideFact::PaydayTicks => GuideFactKind::Ticks,
             GuideFact::FirstGateName => GuideFactKind::Text,
-            GuideFact::CheapestBuyable => GuideFactKind::KindId,
+            GuideFact::CheapestBuyable | GuideFact::FirstGateProduct => GuideFactKind::KindId,
         }
     }
 

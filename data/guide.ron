@@ -11,8 +11,9 @@
 // THE RULE THIS FILE IS BUILT AROUND: **prose here never states a number.**
 // Every quantity is a `{placeholder}` that `sim_core` fills from the
 // registries at read time — `{starting_money}` is whatever
-// `sim::STARTING_MONEY` says today, `{first_gate_deliveries}` is whatever
-// `data/unlocks.ron`'s earliest gate says today. That is the whole point: a
+// `sim::STARTING_MONEY` says today, `{first_gate_boxes}` and
+// `{first_gate_product}` are whatever `data/unlocks.ron`'s earliest gate says
+// today. That is the whole point: a
 // balance pass may not silently make this file lie. Write "you open with
 // {starting_money}", never "you open with 3000".
 //
@@ -113,7 +114,7 @@
             title: "Growing",
             tagline: "New sauces arrive when the line you already have proves itself.",
             body: [
-                "Content is gated on lifetime successful deliveries — proof that a whole line ran end to end and shipped something — never on money banked or time passed. The first gate is {first_gate_name}, at {first_gate_deliveries} deliveries.",
+                "Content is gated on boxes sold — a sauce is earned by selling the sauce before it, never by money banked or time passed. The first gate is {first_gate_name}, and it opens once you have sold {first_gate_boxes} boxes of {first_gate_product}.",
                 "A gate holds back raws and orders, never recipes. The machines have always known how to make everything in this book; what changes is whether you can buy the ingredients and whether anybody is asking for the result.",
                 "Once a gate is open it stays open, and it is worked out fresh from the current numbers every time you load — so a rebalance never leaves an old save stuck behind a gate it has already passed.",
             ],

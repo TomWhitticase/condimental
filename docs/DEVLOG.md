@@ -46,8 +46,9 @@ below is history and should only ever be appended to.)*
   BBQ cook against the vat's 240 splits it 3 ketchup to 2 BBQ. Two of the four
   new contracts name both sauces. **BBQ is gated now (2026-09-19):**
   `data/unlocks.ron` holds its three ingredients and four contracts back until
-  the tenth lifetime delivery, so a new game's market and board show only what
-  a one-sauce factory can use. See the log entries below.
+  **a hundred boxes of ketchup have been sold** (the trigger was ten lifetime
+  delivery windows until 2026-09-26), so a new game's market and board show
+  only what a one-sauce factory can use. See the log entries below.
 - **The game explains itself (2026-09-25).** **B** opens THE COOKBOOK: a
   sauce tree with a node per family in a column that says how far from raw it
   is, an arrow wherever one sauce is an ingredient in another, and a page
@@ -257,6 +258,48 @@ tick. **Save schema 4:** those counts cannot be re-derived, so a v3 save is
 refused by number rather than migrated (re-run `make-demo-saves.sh`). Review
 caught two Godot checks that could never fail and a test loop that hung
 instead of failing; both now go red under the mutation they guard (PR #193).
+### 2026-09-26 — A sauce is earned by selling the sauce before it
+
+The two progression gates count boxes now. `data/unlocks.ron` used to say
+`after_deliveries: 10`; it says `after_sold: (item: "boxed_ketchup",
+boxes: 100)`, and mustard says the same about `boxed_bbq`. "Sold" is a box
+delivered into a satisfied contract window — the dock being paid — tallied per
+item id in a saved ledger (`Economy::lifetime_boxes_sold`).
+
+The old trigger was lifetime satisfied delivery *windows*, and the reason to
+change it is that a window counted the same whether it carried one box or
+eight, of anything at all. It therefore did not measure output: it measured how
+many contract clocks happened to be ticking while the dock was stocked, so a
+player who signed three orders crossed the gate roughly three times faster than
+one with the starter order alone and the same factory — and mustard's gate could
+be satisfied entirely by ketchup. Counting boxes of a named product makes each
+tier depend on the line before it actually running, which is what the tier table
+in GAMEPLAY §2 always claimed.
+
+`lifetime_deliveries` still counts and is still shown; no gate reads it. The
+loader now refuses a zero threshold, an unknown item id and an item that no
+recipe produces, because a gate nobody can ever open is worse than a badly
+tuned one. Tier order is `unlocks.ron`'s file order, since 100 boxes of ketchup
+and 100 boxes of BBQ are not comparable numbers. The wire publishes the
+product, the requirement and the count, so the padlock and the cookbook read
+"34 of 100 boxes of Boxed Ketchup" with the name resolved by Godot's existing
+display-name map and nothing about the rule written in GDScript.
+
+**Saves load.** `SaveData` gains `lifetime_boxes_sold` with
+`#[serde(default)]` at version 3 rather than bumping the version — a
+documented exception to the usual rule, because a world that never counted has
+nothing to say and *nothing sold* is the honest reading of that silence.
+
+**The gates are much later, and that is a flag rather than a tuning
+decision.** The numbers are the owner's. Measured headless at 30 ticks/sec:
+the first gate arrives at tick 52 000 (~29 min, 50 delivery windows) with the
+starter order alone, tick 33 000 (~18 min, 44 windows) with all three signed —
+where ten windows used to be a couple of minutes. The second wants ~130 000
+further ticks (~72 min), because authored BBQ demand outruns one branch's
+output. The 2026-09-20 measurement behind issue #55 found its trap stopped
+biting around 40 windows, so at 44 it mostly does not fire any more — by side
+effect, not by design, and #92/#93 are still the right fixes. Full record:
+`docs/DECISIONS.md`, 2026-09-26.
 
 ### 2026-09-26 — Open-source licence and alpha-release groundwork
 

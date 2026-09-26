@@ -420,7 +420,11 @@ func _check_locked(book: Dictionary) -> void:
 		_fail("the silhouette for %s does not say LOCKED" % id)
 	var gate = entry.get("gate")
 	if gate is Dictionary:
-		var progress := "%d of %d" % [int(gate.get("deliveries", 0)), int(gate.get("after_deliveries", 0))]
+		var progress := "%d of %d boxes of %s" % [
+			int(gate.get("sold", 0)),
+			int(gate.get("required", 0)),
+			main._kind_display_name(String(gate.get("item", ""))),
+		]
 		if node_text.find(progress) < 0:
 			_fail("the silhouette for %s does not carry its gate (%s)" % [id, progress])
 

@@ -136,7 +136,7 @@ const LARDER_STOCK := 320
 ## How often a settling fixture tops its larder back up. A tick of the
 ## reference line consumes well under one unit of anything, so a hundred
 ## ticks cannot empty a larder — this is frequent enough to be invisible and
-## rare enough that the JSON does not dominate a 40 000-tick loop.
+## rare enough that the JSON does not dominate a 90 000-tick loop.
 const RESTOCK_EVERY := 100
 
 ## The row the fixtures' warehouse stands on, and the one north of it (a rack
@@ -259,10 +259,10 @@ static func storage_bays(sim) -> int:
 ## refuses for the same reason.
 ##
 ## ONLY THE UNGATED RAWS STAND HERE. `data/unlocks.ron` holds the three BBQ
-## ingredients back until ten deliveries are made, so a fresh world cannot
-## buy spice mix, molasses or liquid smoke at any price and this row shows
-## the three a new game has (see `build_bbq_running_line`, which pays 40 000
-## ticks for the other three). That every raw the game prices — gated ones
+## ingredients back until a hundred boxes of ketchup have been sold, so a
+## fresh world cannot buy spice mix, molasses or liquid smoke at any price and
+## this row shows the three a new game has (see `build_bbq_running_line`,
+## which pays some 55 000 ticks for the other three). That every raw the game prices — gated ones
 ## included — has a rack tint of its own, distinct from the floor, is proved
 ## headlessly by `test_warehouse_rack.gd` instead: it is a claim about a
 ## table, and it does not need a camera.
@@ -652,14 +652,16 @@ const BBQ_SETTLE_TICKS := 15000
 
 ## How long the ketchup line is allowed to run on its own before the fixture
 ## gives up waiting for `data/unlocks.ron`'s BBQ gate to open. The shipped
-## gate (ten deliveries) opens at about 12 000 ticks on one line serving the
-## corner_shop order alone; this ceiling is generous enough that a balance pass
-## on that file moves the shot's run length rather than breaking it, and
-## tight enough that a gate which can never open fails the fixture instead of
-## hanging it. Reaching this ceiling is a HARD FAILURE — the wait below
+## gate (a hundred boxes of ketchup sold) opens at about 52 000 ticks on one
+## line serving the starter order alone — it was 12 000 while the trigger was
+## ten delivery windows, which is why this number moved with that change.
+## This ceiling is generous enough that a balance pass on that file moves the
+## shot's run length rather than breaking it, and tight enough that a gate
+## which can never open fails the fixture instead of hanging it. Reaching this
+## ceiling is a HARD FAILURE — the wait below
 ## latches `BBQ_FIXTURE_FAIL:` and returns rather than building on, because a
 ## branch built behind a shut gate cannot buy its raws and never makes a box.
-const BBQ_GATE_TICK_CEILING := 40000
+const BBQ_GATE_TICK_CEILING := 90000
 
 ## How often the wait above checks the gate. A snapshot parse per tick would
 ## dominate the run; the gate is checked on the same 250-tick grid the
@@ -788,7 +790,7 @@ const MIXED_BELT := Vector2i(23, 0)
 ##
 ## **IT BUILDS IN THE ORDER THE GAME DICTATES** (issue #55), and that is the
 ## whole shape of this fixture. `data/unlocks.ron` holds the three BBQ raws
-## back until ten contract deliveries have been made, so a fixture that
+## back until a hundred boxes of ketchup have been sold, so a fixture that
 ## placed the branch at tick zero and stocked the larder in the same breath
 ## bought no spice mix, no molasses and no liquid smoke — `stock_larder`
 ## enumerates the ingredients the market is OFFERING, and a locked one is
@@ -834,8 +836,9 @@ static func build_bbq_running_line(sim) -> void:
 	hire_until_staffed(sim)
 
 	# 2. Run it until the game offers BBQ. The order `build_reference_line`
-	#    signed is the only one active, so the deliveries that open
-	#    the gate also bank the stock that pays for the transient below.
+	#    signed is the only one active, exactly as a new game reaches it, so
+	#    the boxes that open the gate also bank the stock that pays for the
+	#    transient below.
 	var waited := 0
 	while waited < BBQ_GATE_TICK_CEILING:
 		if any_unlock_open(sim):
@@ -846,7 +849,7 @@ static func build_bbq_running_line(sim) -> void:
 		if fixture_failure() != "":
 			return
 		# A poll is longer than RESTOCK_EVERY, so this is the top-up: the
-		# ketchup line runs for up to 40 000 ticks here and a single larder
+		# ketchup line runs for up to 90 000 ticks here and a single larder
 		# is 320 of each raw.
 		restock(sim)
 		for _i in range(BBQ_GATE_POLL_TICKS):
@@ -904,34 +907,62 @@ static func build_bbq_running_line(sim) -> void:
 		sim.tick()
 
 
-## OPENS EVERY GATE IN `data/unlocks.ron`, by patching the delivery counter
-## through the same save/load door [method deliver] uses.
+## OPENS EVERY GATE IN `data/unlocks.ron`, by patching the boxes-sold ledger
+## through the same save/load door [method sell] uses.
 ##
-## The threshold is read off the simulation's own `unlocks` rather than
-## written here: a gate is content (`data/unlocks.ron`), and a fixture that
-## restated "25" in GDScript would be the presentation layer holding an
-## opinion about progression — and would go quietly wrong the day a designer
-## moved the number, which is the class of staleness this whole file's
-## tables keep failing on.
+## What each gate counts is read off the simulation's own `unlocks` rather
+## than written here: a gate is content (`data/unlocks.ron`), and a fixture
+## that restated "100 boxes of boxed_bbq" in GDScript would be the
+## presentation layer holding an opinion about progression — and would go
+## quietly wrong the day a designer moved the number, which is the class of
+## staleness this whole file's tables keep failing on.
 ##
 ## **Callers with a scene must `_rebuild_world()` afterwards**, for the
 ## reason `fill_fluid_runs` gives: the world is reloaded, so it is a new
 ## world object and the 3D subtree is built from the old one until told.
 static func open_every_gate(sim) -> void:
+	cross_every_gate(sim, 0)
+
+
+## [method open_every_gate] with the LAST gate in the file left `offset` boxes
+## away from its threshold: 0 sits exactly on it, -1 one box short.
+##
+## One short of the last gate and on every earlier one is the only state that
+## announces exactly one tier when it is then crossed, which is what
+## `test_screenshot.gd --unlock-toast` photographs.
+##
+## The last gate in FILE ORDER, because that is the tier order since the
+## trigger became boxes of a product (`data/unlocks.ron`'s header) — two gates
+## counting different products have no comparable thresholds. `offset` lands on
+## that gate's product alone, so it would not hold back an earlier tier that
+## happened to count the same product; no shipped pair does.
+static func cross_every_gate(sim, offset: int) -> void:
 	var economy = JSON.parse_string(sim.economy_snapshot_json())
 	if not (economy is Dictionary):
 		fail_fixture("MUSTARD_FIXTURE_FAIL", "economy_snapshot_json did not parse as a Dictionary")
 		return
-	var threshold := 0
-	for unlock in economy.get("unlocks", []):
-		threshold = maxi(threshold, int(unlock.get("after_deliveries", 0)))
-	if threshold == 0:
+	var gates: Array = economy.get("unlocks", [])
+	if gates.is_empty():
 		fail_fixture(
 			"MUSTARD_FIXTURE_FAIL",
 			"data/unlocks.ron gates nothing — a fixture that crossed no gate would prove nothing"
 		)
 		return
-	deliver(sim, threshold)
+	var ledger := {}
+	for i in range(gates.size()):
+		var gate: Dictionary = gates[i]
+		var item := String(gate.get("item", ""))
+		var required := int(gate.get("required", 0))
+		if item == "" or required <= 0:
+			fail_fixture(
+				"MUSTARD_FIXTURE_FAIL",
+				"gate '%s' names no product to sell" % String(gate.get("id", "?"))
+			)
+			return
+		if i == gates.size() - 1:
+			required = maxi(0, required + offset)
+		ledger[item] = maxi(int(ledger.get(item, 0)), required)
+	sell(sim, ledger)
 
 
 ## True when the unlock with this id is open. Asked of the simulation, like
@@ -988,10 +1019,11 @@ static func unlock_open(sim, id: String) -> bool:
 ## It still calls `fund` before stocking, like every fixture that intends to
 ## RUN: a larder plus its racks costs far more than the line does.
 ##
-## **The gate is crossed by patching deliveries, not by earning them.**
-## `build_bbq_running_line` runs a ketchup line until BBQ's 10 deliveries
-## arrive, and that is right for a fixture whose subject IS the unlock.
-## Mustard sits at 25 and this fixture's subject is the line, so it uses
+## **The gate is crossed by patching the boxes-sold ledger, not by earning
+## it.** `build_bbq_running_line` runs a ketchup line until BBQ's hundredth
+## box of ketchup sells, and that is right for a fixture whose subject IS the
+## unlock. Mustard then wants a hundred boxes of BBQ on top, which is another
+## 130 000 ticks, and this fixture's subject is the line, so it uses
 ## `open_every_gate` — the same door `test_ingredient_models.gd` and
 ## `test_screenshot.gd` already cross gates through. What stays real is
 ## every placement: nothing here is conjured into the world, it is bought
@@ -1607,32 +1639,37 @@ static func fund(sim, amount: int) -> void:
 		push_error("fund(): load_ron refused the patched save: %s" % error)
 
 
-## Sets the lifetime delivery counter — the one number every progression
-## gate in `data/unlocks.ron` is resolved against — through the same
-## save/load door `fund` uses, and for the same reason: the counter is
-## simulation state with no command that sets it, and the alternative is
-## running a Godot fixture for the ten thousand ticks it takes to earn ten
-## deliveries honestly. `sim_core/tests/unlocks.rs` is what earns them
-## honestly; a fixture here only needs to be ON one side of the gate or the
-## other so a panel can be photographed in both states.
+## Sets the boxes-sold ledger — the state every progression gate in
+## `data/unlocks.ron` is resolved against — through the same save/load door
+## `fund` uses, and for the same reason: the ledger is simulation state with
+## no command that sets it, and the alternative is running a Godot fixture
+## for the fifty thousand ticks it takes to sell a hundred boxes honestly.
+## `sim_core/tests/unlocks.rs` is what earns them honestly; a fixture here
+## only needs to be ON one side of the gate or the other so a panel can be
+## photographed in both states.
 ##
-## `save_ron` writes it as a plain integer (`lifetime_deliveries: N`), and a
-## save from before the field existed simply has no such line — so this
-## inserts one rather than only substituting, and a world already past the
-## gate is left alone by the substitution path.
-static func deliver(sim, deliveries: int) -> void:
+## `ledger` is `{item_id: boxes}` and REPLACES what the save holds — an item
+## left out of it has sold nothing.
+##
+## `save_ron` writes it as a RON map on one line when it is empty
+## (`lifetime_boxes_sold: {}`) and over several when it is not, so the pattern
+## spans the braces.
+static func sell(sim, ledger: Dictionary) -> void:
 	var text: String = sim.save_ron()
 	var regex := RegEx.new()
-	regex.compile("lifetime_deliveries:\\s*\\d+")
-	var patched: String = text
-	if regex.search(text) != null:
-		patched = regex.sub(text, "lifetime_deliveries: %d" % deliveries)
-	else:
-		push_error("deliver(): this save has no lifetime_deliveries field")
+	regex.compile("lifetime_boxes_sold:\\s*\\{[^}]*\\}")
+	if regex.search(text) == null:
+		push_error("sell(): this save has no lifetime_boxes_sold field")
 		return
+	var entries := PackedStringArray()
+	for item in ledger:
+		entries.append('"%s": %d' % [String(item), int(ledger[item])])
+	var patched: String = regex.sub(
+		text, "lifetime_boxes_sold: {%s}" % ", ".join(entries)
+	)
 	var error: String = sim.load_ron(patched)
 	if error != "":
-		push_error("deliver(): load_ron refused the patched save: %s" % error)
+		push_error("sell(): load_ron refused the patched save: %s" % error)
 
 
 ## THE STRESS LINE (the pipes & conveyors overhaul, ticket 4) — the fixture

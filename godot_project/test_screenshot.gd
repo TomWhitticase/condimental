@@ -432,16 +432,16 @@ var _contents_refill := false
 ## --hover-*); a junction shot does not need it in frame.
 var _no_hud := false
 ## `--unlocked` puts the world on the far side of every progression gate in
-## `data/unlocks.ron` — the shipped one takes ten deliveries — so the market,
-## the larder and the board photograph with the BBQ tier released. Combine it
-## with `--market` or `--board` to shoot the "after" half of a before/after
-## pair; without it those panels show the "before" half, which is what a new
-## game actually looks like.
+## `data/unlocks.ron` — the shipped first one takes a hundred boxes of ketchup
+## sold — so the market, the larder and the board photograph with the BBQ tier
+## released. Combine it with `--market` or `--board` to shoot the "after" half
+## of a before/after pair; without it those panels show the "before" half,
+## which is what a new game actually looks like.
 ##
-## It sets the counter through `test_layouts.gd`'s `deliver`, i.e. the save
-## file, rather than running a chain for the ten thousand ticks it would take
-## to earn them: this is a camera, and `sim_core/tests/unlocks.rs` is what
-## earns the gate honestly.
+## It sets the boxes-sold ledger through `test_layouts.gd`'s `sell`, i.e. the
+## save file, rather than running a chain for the fifty thousand ticks it
+## would take to sell them: this is a camera, and
+## `sim_core/tests/unlocks.rs` is what earns the gate honestly.
 var _unlocked := false
 ## `--unlock-toast` crosses the gate WHILE the HUD is watching, one frame
 ## before the shutter, so the announcement line is up in the frame. The
@@ -940,23 +940,16 @@ func _string_arg(args: Array, flag: String) -> String:
 	return ""
 
 
-## Moves the lifetime delivery counter to `offset` away from the last gate
-## in `data/unlocks.ron` — 0 to sit exactly on the threshold, -1 to sit one
-## delivery short of it. The threshold is read off the wire, never written
-## out here, so a balance pass on that file cannot leave these shots
+## Sells enough boxes to cross every gate in `data/unlocks.ron`, leaving the
+## last one `offset` boxes away from its threshold — 0 to sit exactly on it,
+## -1 to sit one box short. What each gate counts is read off the wire, never
+## written out here, so a balance pass on that file cannot leave these shots
 ## photographing the wrong side of the gate.
 func _cross_gates(offset: int) -> void:
-	var econ: Dictionary = JSON.parse_string(_main.sim.economy_snapshot_json())
-	var threshold := 0
-	for unlock in econ.get("unlocks", []):
-		threshold = maxi(threshold, int(unlock.get("after_deliveries", 0)))
-	if threshold == 0:
-		push_error("_cross_gates(): data/unlocks.ron gates nothing")
-		return
-	Layouts.deliver(_main.sim, maxi(0, threshold + offset))
-	# `deliver` goes through save/load, so the rendered world is rebuilt from
-	# the reloaded one — identical by construction, but the scene has to be
-	# told, exactly as `_build_fixture` tells it.
+	Layouts.cross_every_gate(_main.sim, offset)
+	# `cross_every_gate` goes through save/load, so the rendered world is
+	# rebuilt from the reloaded one — identical by construction, but the scene
+	# has to be told, exactly as `_build_fixture` tells it.
 	_main._rebuild_world()
 	_main._refresh_owned_counts()
 

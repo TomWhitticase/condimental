@@ -251,7 +251,7 @@ func build(
 # --------------------------------------------------------------------------
 
 ## Hands over a fresh `cookbook_json()` and redraws whatever is showing. The
-## lock half of the snapshot moves with `lifetime_deliveries`, so the host
+## lock half of the snapshot moves with the boxes-sold ledger, so the host
 ## re-reads it on a cadence while the panel is up and a gate line counts up
 ## under the player's eyes.
 ##
@@ -777,13 +777,19 @@ func _stage_count(entry: Dictionary) -> String:
 	return "1 stage" if steps == 1 else "%d stages" % steps
 
 
-## `4 of 10 shipped`, or "" with no gate. The numbers are both the wire's —
-## the distance is deliberately not subtracted here, because two counts say
-## the same thing and neither is a number this file invented.
+## `34 of 100 boxes of Boxed Ketchup`, or "" with no gate. Both numbers and
+## the product are the wire's — the distance is deliberately not subtracted
+## here, because two counts say the same thing and neither is a number this
+## file invented. The product is named through `_name`, the host's one
+## display-name chain, so this file states no content literal.
 func _gate_progress(gate) -> String:
 	if not (gate is Dictionary):
 		return ""
-	return "%d of %d shipped" % [int(gate.get("deliveries", 0)), int(gate.get("after_deliveries", 0))]
+	return "%d of %d boxes of %s" % [
+		int(gate.get("sold", 0)),
+		int(gate.get("required", 0)),
+		_name(String(gate.get("item", ""))),
+	]
 
 
 # --------------------------------------------------------------------------
@@ -871,7 +877,10 @@ func _build_locked_page(entry: Dictionary) -> void:
 		_paragraph(
 			block,
 			"CookbookGate",
-			"This page writes itself at %d deliveries. Nothing needs buying and nothing needs choosing — keep shipping." % int(gate.get("after_deliveries", 0)),
+			"This page writes itself once you have sold %d boxes of %s. Nothing needs buying and nothing needs choosing — keep shipping." % [
+				int(gate.get("required", 0)),
+				_name(String(gate.get("item", ""))),
+			],
 			INK_DIM
 		)
 	else:

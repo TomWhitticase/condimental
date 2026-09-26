@@ -34,8 +34,8 @@
 # **It crosses the unlock gates first.** `ingredients_snapshot_json` is
 # filtered by what the player has unlocked, so on a fresh world it reports
 # only the ketchup raws and the three ids this test was written for would be
-# invisible to it. `Layouts.deliver` patches the delivery counter through the
-# save door the way `test_screenshot.gd`'s `_cross_gates` does.
+# invisible to it. `Layouts.open_every_gate` patches the boxes-sold ledger
+# through the save door the way `test_screenshot.gd`'s `_cross_gates` does.
 extends SceneTree
 
 const Layouts = preload("res://test_layouts.gd")
@@ -93,14 +93,7 @@ func _fail(msg: String) -> void:
 
 ## Every ingredient id, with the gates crossed so the late ones are in it.
 func _all_ingredient_ids() -> Array:
-	var econ: Dictionary = JSON.parse_string(_main.sim.economy_snapshot_json())
-	var threshold := 0
-	for unlock in econ.get("unlocks", []):
-		threshold = maxi(threshold, int(unlock.get("after_deliveries", 0)))
-	if threshold == 0:
-		_fail("data/unlocks.ron gates nothing — this test cannot tell locked from unlocked")
-		return []
-	Layouts.deliver(_main.sim, threshold)
+	Layouts.open_every_gate(_main.sim)
 
 	var snapshot: Dictionary = _main._ingredients_snapshot()
 	var ids := []

@@ -62,6 +62,109 @@ matches what code comments and data files cite.
   fail loudly if the signature does not take: the Rust fixture asserts the
   contract is active, and the GDScript one prints `REFERENCE_FIXTURE_FAIL:`,
   which `scripts/verify-core-loop.sh` treats as a failed script.
+- 2026-09-26: **A tier is earned by selling the tier below it: a gate counts
+  boxes of a named product SOLD, not delivery windows.** (Owner's request.)
+
+  **What was asked.** "In order to unlock bbq sauce you have to have sold 100
+  boxes of ketchup, in order to unlock mustard you have to have sold 100 boxes
+  of bbq sauce." The two numbers are the owner's and were not tuned.
+
+  **Why the owner's rule is better, not merely different.** The old trigger
+  was `Economy::lifetime_deliveries`: satisfied contract windows, counted
+  regardless of what was in them. A window carrying one box of ketchup and a
+  window carrying eight boxes across two products incremented it identically,
+  so **the gate did not measure output at all** — it measured how many times
+  a cadence came round while the dock happened to be stocked. Two consequences
+  followed. A player who signed three orders crossed the gate roughly three
+  times faster than one who signed the starter order alone, for the same
+  factory, because the counter scaled with *how many clocks were ticking*, not
+  with production; and the gate was blind to the product, so mustard's gate
+  could be satisfied entirely by ketchup. Boxes of a named product fix both:
+  the count rises only when the line actually makes and ships something, and
+  each sauce's gate now depends on **the line before it running**, which is the
+  shape §2's tier table always claimed and could not previously enforce.
+
+  **The field is one struct, not two loose keys.** `after_sold: (item: "...",
+  boxes: N)` deserialises into `SoldRequirement`, so a count without a product
+  (or a product without a count) is not expressible in the file. The
+  alternative — `after_sold_item` beside `after_sold_boxes`, both optional —
+  is the shape that lets a designer half-author a gate, and the loader would
+  then have to invent the missing half or reject a file that *looks* complete.
+
+  **Three refusals at load, because an unopenable gate is worse than a wrong
+  one.** `UnlockRegistry::from_ron` already rejected a `schema_version`
+  mismatch, a duplicate id, an empty id and an unknown ingredient; it now also
+  refuses `boxes: 0` (`ZeroBoxes` — a gate that is open in a new game is not a
+  gate), an `item` no `ingredients.ron`/`recipes.ron` id matches
+  (`UnknownSoldItem`), and an item that exists but **no recipe produces**
+  (`SoldItemNothingProduces` — the typo class that ships a tier nobody can
+  ever reach). All three are a startup panic, in the house style: content is
+  loaded once, and a game that boots into an impossible progression is worse
+  than one that refuses to boot.
+
+  **Tier order is file order now.** While every gate counted the same unit, the
+  deepest gate was `max_by_key(after_deliveries)`. Two gates counting
+  *different* products have no comparable thresholds — 100 boxes of ketchup is
+  not larger or smaller than 100 boxes of BBQ — so the ordering had to come
+  from somewhere else, and `data/unlocks.ron`'s header already declared file
+  order to be tier order. `gate_index_for_ingredient`, `at(i)` and
+  `ordered().first()` are the whole vocabulary; nothing compares two
+  thresholds anywhere in the tree.
+
+  **The ledger is a `BTreeMap<String, u32>`, saved, never decreasing.**
+  `Economy::lifetime_boxes_sold` is incremented in the same `Paid` arm that
+  moved `lifetime_deliveries`, by each mix entry's `qty` — so a window
+  carrying eight boxes counts eight. `BTreeMap` because it is serialised and
+  walked (ARCHITECTURE §3.9); `saturating_add` because a counter is not a
+  place to overflow. `lifetime_deliveries` stays: it is a real number about the
+  factory and several surfaces show it. It simply no longer gates anything.
+
+  **The save format gains a field at version 3, on purpose.** "A field
+  addition is a version bump" is the standing rule, and this is a documented
+  exception rather than a quiet one (`save.rs`, "# A field added at version 3
+  on purpose"). The reasoning: a save written before the ledger existed has
+  *no information* about what it sold, and `#[serde(default)]` reads that as
+  **nothing sold** — which is the honest answer, and the conservative one,
+  since it can only leave a gate shut that a replaying player will re-open in
+  one session of the line they already own. A version bump would instead
+  refuse every existing save to communicate the same zero. The alternative
+  considered and rejected was seeding the ledger from `lifetime_deliveries`
+  (say, two boxes a window): that invents production that never happened, and
+  bakes a guess about the starter order's width into the save loader.
+
+  **The wire carries the rule's inputs, not its verdict.** `UnlockSnapshot`,
+  the cookbook's `GateLine` and the picker's `ContentsChoice` each publish the
+  product id, the required count and the current count. Godot resolves the id
+  through the display-name map it already owns and builds the sentence — "34
+  of 100 boxes of Boxed Ketchup" — so a gate that counted bottles instead of
+  boxes, or a fourth sauce behind a fifth product, is a data edit with no
+  GDScript change and no new wire field.
+
+  **Balance: this moves both gates substantially later, and that is flagged
+  rather than absorbed.** Measured headless at 30 ticks/sec on the shipped
+  starter board: 100 `boxed_ketchup` arrives at **tick 52 000 (~29 min, 50
+  delivery windows)** with the starter order alone, and at **tick 33 000
+  (~18 min, 44 windows)** with all three starter-era orders signed. The old
+  gate was ten windows — minutes, not half an hour. The second gate is worse:
+  100 further `boxed_bbq` takes about **130 000 ticks (~72 min)** on the
+  reference BBQ branch with all four BBQ orders signed, because authored BBQ
+  demand (~4.5 boxes per 1 000 ticks) runs well ahead of what one branch
+  delivers (~0.8). **The numbers are the owner's and were not changed**, but
+  the consequence is recorded here: the 2026-09-20 measurement behind issue
+  #55 ("the bank at the moment of building decides whether the BBQ branch
+  costs you the board") found the trap stopped biting at about 40 windows, and
+  the new BBQ gate lands at 44. So #55's trap mostly does not fire at the
+  shipped numbers any more — **by side effect, not by design**. Its reasoning
+  is untouched and its fixes (#92, #93) are still the right ones: a balance
+  pass that moved this gate earlier would restore the trap without touching
+  anything that looks related.
+
+  **What this does not change.** The two lists and the deliberate absence of a
+  third (no recipe is ever locked, so progression stays off the tick path);
+  enforcement in the simulation rather than the panel; the named group and its
+  one announcement; the gate's state derived from saved state rather than
+  stored as a boolean. Those are the 2026-09-19 record, still standing — this
+  record supersedes its **trigger** and nothing else.
 
 - 2026-09-26: **CONDIMENTAL is GPL-3.0-only; the name and brand are
   reserved.** (Owner's call, from a release-readiness audit.)

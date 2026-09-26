@@ -4,7 +4,7 @@
 # Run with:
 #   godot --headless --path godot_project --script test_unlocks.gd
 #
-# `sim_core/tests/unlocks.rs` owns the rule itself — the counter, the
+# `sim_core/tests/unlocks.rs` owns the rule itself — the ledger, the
 # threshold, the refusals, the save round trip — earned by running the real
 # chain. This file owns the presentation half, and only that: given a
 # simulation on either side of the gate, does the HUD show what the wire
@@ -74,15 +74,19 @@ func _initialize() -> void:
 		_fail("economy_snapshot_json carried no `unlocks` — the HUD has nothing to announce")
 		return
 	_gate = unlocks[0]
-	for field in ["id", "name", "open", "deliveries", "after_deliveries", "ingredients", "contracts"]:
+	for field in ["id", "name", "open", "item", "sold", "required", "ingredients", "contracts"]:
 		if not _gate.has(field):
 			_fail("an unlock snapshot must carry '%s', got %s" % [field, str(_gate.keys())])
 			return
-	var threshold: int = int(_gate["after_deliveries"])
+	var threshold: int = int(_gate["required"])
+	var product := String(_gate["item"])
 	if threshold < 1:
-		_fail("a gate open in a new game is not a gate (after_deliveries = %d)" % threshold)
+		_fail("a gate open in a new game is not a gate (required = %d)" % threshold)
 		return
-	if bool(_gate["open"]) or int(_gate["deliveries"]) != 0:
+	if product == "":
+		_fail("a gate must name the product it counts")
+		return
+	if bool(_gate["open"]) or int(_gate["sold"]) != 0:
 		_fail("a new game must be on the closed side of the gate")
 		return
 
@@ -111,12 +115,14 @@ func _initialize() -> void:
 		return
 
 	# --- Cross it ---------------------------------------------------------
-	# The counter moves under a HUD that has already polled once, which is
-	# how a playing session reaches it: the gate opens on a delivery.
-	Layouts.deliver(main.sim, threshold)
+	# The ledger moves under a HUD that has already polled once, which is how
+	# a playing session reaches it: the gate opens on the delivery that sells
+	# the hundredth box. Only THIS gate's product is sold, so only this tier
+	# crosses and the counts below are its own.
+	Layouts.sell(main.sim, {product: threshold})
 	_repoll(main)
 	if not bool(_econ(main)["unlocks"][0]["open"]):
-		_fail("the gate must be open at %d deliveries" % threshold)
+		_fail("the gate must be open at %d boxes of %s" % [threshold, product])
 		return
 
 	var open_market := _market_ids(main)
@@ -193,7 +199,7 @@ func _initialize() -> void:
 		_fail("a save loaded past the gate must still have the tier on sale")
 		return
 
-	print("UNLOCKS_OK: '%s' gates %d ingredient(s) and %d contract(s) behind %d deliveries; a new game lists %d/%d market, %d/%d board, crossing grows market, larder and board in place and is announced once by name; a save already past it is not re-announced" % [
-		String(_gate["name"]), int(_gate["ingredients"]), int(_gate["contracts"]), threshold,
+	print("UNLOCKS_OK: '%s' gates %d ingredient(s) and %d contract(s) behind %d boxes of %s sold; a new game lists %d/%d market, %d/%d board, crossing grows market, larder and board in place and is announced once by name; a save already past it is not re-announced" % [
+		String(_gate["name"]), int(_gate["ingredients"]), int(_gate["contracts"]), threshold, product,
 		locked_market.size(), open_market.size(), locked_board.size(), open_board.size()])
 	quit(0)

@@ -6,19 +6,20 @@
 //! hand-written content. This file drives the real `World` through the real
 //! shipped chain, to prove the four things only the whole system can show:
 //!
-//! 1. **The counter means what the gate claims it means.** It is lifetime
-//!    *satisfied delivery windows*, so a factory that ships nothing never
-//!    advances it however long it runs, and a factory that ships advances it
-//!    exactly once per window it satisfies.
-//! 2. **The gate is shut the tick before it opens.** Nine deliveries is
-//!    still a locked market and a BBQ-free board; the tenth opens both, in
-//!    the same tick, with nothing else changed.
+//! 1. **The ledger means what the gate claims it means.** It is boxes of a
+//!    named product SOLD, so a factory that ships nothing never advances it
+//!    however long it runs, and a window that carries three boxes advances it
+//!    by three and not by one.
+//! 2. **The gate is shut the box before it opens.** Ninety-nine boxes of
+//!    ketchup is still a locked market and a BBQ-free board; the hundredth
+//!    opens both, in the same tick, with nothing else changed — and a hundred
+//!    boxes of anything ELSE opens nothing.
 //! 3. **A locked id is genuinely unavailable, not merely unlisted.** The
 //!    simulation refuses `BuyIngredient` and `SignContract` for one, so a
 //!    presentation layer that forgot to filter — or a player driving the
 //!    bridge directly — still cannot spend its way past the gate. This is
 //!    the assertion that makes the gate a rule rather than a decoration.
-//! 4. **It survives a save.** The counter round-trips byte-equal, and the
+//! 4. **It survives a save.** The ledger round-trips byte-equal, and the
 //!    loaded world derives the same open gates from it.
 
 mod common;
@@ -35,11 +36,23 @@ use sim_core::sim::{
 /// repeated here — a balance pass that moves an id between tiers must not
 /// need this file edited to keep passing.
 fn gated() -> (Vec<String>, Vec<String>) {
-    let unlock = UnlockRegistry::bundled()
+    let unlock = bbq_gate();
+    (unlock.ingredients, unlock.contracts)
+}
+
+/// The shipped BBQ gate, read from the content — the product it waits on and
+/// the count it wants are `data/unlocks.ron`'s to choose, so no test below
+/// writes either as a literal.
+fn bbq_gate() -> sim_core::sim::Unlock {
+    UnlockRegistry::bundled()
         .get("bbq_sauce")
         .expect("data/unlocks.ron must ship the bbq_sauce gate")
-        .clone();
-    (unlock.ingredients, unlock.contracts)
+        .clone()
+}
+
+/// Boxes of `item` this world has sold.
+fn sold(world: &World, item: &str) -> u32 {
+    world.boxes_sold().get(item).copied().unwrap_or(0)
 }
 
 fn recipes() -> RecipeRegistry {
@@ -60,8 +73,7 @@ fn stocked_chain() -> World {
 }
 
 /// Runs the shipped chain, kept fed, until its lifetime delivery counter
-/// reaches `target` — and stops on the *exact* tick it does, so a caller can
-/// ask what the world looked like at nine deliveries and then at ten.
+/// reaches `target` — and stops on the *exact* tick it does.
 ///
 /// Panics rather than returning short: every caller's assertions are
 /// meaningless against a world that never got there, and a silent shortfall
@@ -80,7 +92,35 @@ fn run_until_delivered(world: &mut World, target: u32) {
     );
 }
 
+/// Runs the shipped chain, kept fed and kept stocked, until it has SOLD
+/// `target` boxes of `item`, and returns the tick it happened on.
+///
+/// It restocks as it goes, which [`run_until_delivered`]'s callers do not need
+/// to: a hundred boxes is about 52 000 ticks on the starter board, which is
+/// more raw than one larder holds, and a fixture that ran out would stall,
+/// lose its contracts and look exactly like a gate that never opens.
+fn run_until_sold(world: &mut World, item: &str, target: u32) -> u32 {
+    for tick in 0..500_000u32 {
+        if sold(world, item) >= target {
+            return tick;
+        }
+        if tick % 500 == 0 {
+            common::restock(world);
+        }
+        common::supply(world);
+        world.tick();
+    }
+    panic!(
+        "the shipped chain must sell {target} boxes of {item} within 500k ticks, got {}",
+        sold(world, item)
+    );
+}
+
 /// The counter is satisfied windows, not ticks, not boxes and not money.
+///
+/// **Nothing gates off it since 2026-09-26** — the gates read the boxes-sold
+/// ledger, which is [`the_ledger_counts_every_box_of_a_satisfied_window`]'s
+/// subject. It is still saved and still displayed, so it is still pinned.
 #[test]
 fn the_counter_advances_once_per_satisfied_window_and_not_at_all_without_one() {
     // An unstocked world: the factory is fully built and running, and has
@@ -120,54 +160,125 @@ fn the_counter_advances_once_per_satisfied_window_and_not_at_all_without_one() {
     );
 }
 
-/// The gate itself: shut at nine, open at ten, and open for both lists at
-/// once.
+/// The ledger the gates actually read: **boxes**, one entry per product id,
+/// and every box of a satisfied window counted rather than one per window.
+///
+/// This is the whole point of the 2026-09-26 trigger change. A window counted
+/// the same whether it carried one box or eight, so the old number measured
+/// elapsed windows and not output; this test fails if the new one does the
+/// same, by checking the ledger against the boxes those windows actually
+/// asked for and by insisting the two numbers DIFFER.
 #[test]
-fn the_gate_is_shut_one_delivery_short_and_open_on_the_threshold() {
-    let threshold = UnlockRegistry::bundled()
-        .get("bbq_sauce")
-        .expect("the shipped gate")
-        .after_deliveries;
-    let (ingredients, contracts) = gated();
-    let mut world = stocked_chain();
+fn the_ledger_counts_every_box_of_a_satisfied_window() {
+    // Nothing shipped, nothing sold, however long the clock runs.
+    let mut starving = reference_chain_with_budget(recipes(), BUDGET);
+    assert!(
+        starving.boxes_sold().is_empty(),
+        "a new game has sold nothing, and an empty ledger is how it says so"
+    );
+    for _ in 0..5_000 {
+        starving.tick();
+    }
+    assert!(
+        starving.boxes_sold().is_empty(),
+        "a missed window sells nothing — a gate that advanced on the clock would \
+         open for a factory that never ran"
+    );
 
-    run_until_delivered(&mut world, threshold - 1);
-    assert_eq!(world.lifetime_deliveries(), threshold - 1);
+    // A fed chain with a MULTI-BOX order signed, so "every box" has something
+    // to be wrong about: `diner_supply` asks for three at a time.
+    let mut world = stocked_chain();
+    world.issue_command(PlayerCommand::SignContract {
+        id: "diner_supply".to_string(),
+    });
+    run_until_delivered(&mut world, 6);
+
+    // What the windows those contracts were paid for actually carried, read
+    // off the board rather than written here, so a `contracts.ron` balance
+    // pass cannot make this test wrong.
+    let board = ContractRegistry::bundled();
+    let mut expected: std::collections::BTreeMap<String, u32> = Default::default();
+    let mut windows = 0;
+    for active in &world.economy().contracts {
+        let contract = board
+            .get(&active.contract.id)
+            .expect("an active contract is one the board offers");
+        windows += active.deliveries_made;
+        for (item, quantity) in &contract.mix {
+            *expected.entry(item.clone()).or_insert(0) += quantity * active.deliveries_made;
+        }
+    }
+    assert_eq!(
+        world.boxes_sold(),
+        &expected,
+        "the ledger must be the sum of the MIX of every window that was paid for — \
+         per product id, box by box"
+    );
+    let total: u32 = expected.values().sum();
+    assert!(
+        total > windows,
+        "this fixture has to ship more boxes than windows for the assertion above to \
+         be able to tell them apart: {total} boxes in {windows} windows"
+    );
+    assert_eq!(
+        world.lifetime_deliveries(),
+        windows,
+        "and the old counter is still the window count, unchanged beside it"
+    );
+}
+
+/// The gate itself: shut one box short, open on the threshold box, and open
+/// for both lists at once.
+///
+/// The boundary is reached through a **save** rather than by playing, for the
+/// reason [`world_with_boxes_sold`] documents — and here for one more: the
+/// starter board sells ketchup two boxes to a window, so a played world goes
+/// 96, 98, 100 and never visits 99 at all.
+/// [`the_gate_opens_by_playing_and_is_shut_every_box_before_that`] is the
+/// played half.
+#[test]
+fn the_gate_is_shut_one_box_short_and_open_on_the_threshold() {
+    let gate = bbq_gate();
+    let item = gate.after_sold.item.clone();
+    let threshold = gate.after_sold.boxes;
+    let (ingredients, contracts) = gated();
+
+    let world = world_with_boxes_sold(&[(&item, threshold - 1)]);
     let market = world.ingredients_snapshot();
     let board = world.economy_snapshot();
     for id in &ingredients {
         assert!(
             !world.ingredient_unlocked(id),
-            "'{id}' must still be locked one delivery short of the threshold"
+            "'{id}' must still be locked one box short of the threshold"
         );
         assert!(
             !market.entries.iter().any(|e| &e.id == id),
-            "'{id}' must not be listed in the market one delivery short"
+            "'{id}' must not be listed in the market one box short"
         );
     }
     for id in &contracts {
         assert!(
             !world.contract_unlocked(id),
-            "'{id}' must still be locked one delivery short of the threshold"
+            "'{id}' must still be locked one box short of the threshold"
         );
         assert!(
             !board.board.iter().any(|o| &o.id == id),
-            "'{id}' must not be listed on the board one delivery short"
+            "'{id}' must not be listed on the board one box short"
         );
     }
 
-    run_until_delivered(&mut world, threshold);
-    assert_eq!(world.lifetime_deliveries(), threshold);
+    let world = world_with_boxes_sold(&[(&item, threshold)]);
+    assert_eq!(sold(&world, &item), threshold);
     for id in &ingredients {
         assert!(
             world.ingredient_unlocked(id),
-            "'{id}' must be on sale on the threshold delivery"
+            "'{id}' must be on sale on the threshold box"
         );
     }
     for id in &contracts {
         assert!(
             world.contract_unlocked(id),
-            "'{id}' must be on the board on the threshold delivery"
+            "'{id}' must be on the board on the threshold box"
         );
     }
 
@@ -188,7 +299,6 @@ fn the_gate_is_shut_one_delivery_short_and_open_on_the_threshold() {
             "'{id}' must be listed on the board the tick the gate opens"
         );
     }
-    assert_eq!(board.lifetime_deliveries, threshold);
     let bbq = board
         .unlocks
         .iter()
@@ -196,45 +306,145 @@ fn the_gate_is_shut_one_delivery_short_and_open_on_the_threshold() {
         .expect("the snapshot must carry the gate, so the HUD can announce it");
     assert!(bbq.open);
     assert_eq!(bbq.name, "BBQ Sauce");
+    assert_eq!(
+        (bbq.item.as_str(), bbq.sold, bbq.required),
+        (item.as_str(), threshold, threshold),
+        "and it carries what it counted, so the HUD can say so without reading \
+         data/unlocks.ron itself"
+    );
 }
 
-/// A world whose delivery counter reads `deliveries` and which has run for no
-/// ticks at all — the counter is saved state, so rewriting it in a save is a
-/// legitimate way to reach a threshold, and
-/// `the_counter_and_the_gates_it_opens_survive_a_save_round_trip` is what
-/// proves the gates a loaded counter derives are the same ones a *run* one
-/// does. The BBQ gate's ten deliveries are worth simulating; the mustard
-/// gate's twenty-five are half an hour of factory for a claim about a number
-/// in a content file.
-fn world_at_deliveries(deliveries: u32) -> World {
+/// The played half of the gate: a factory that runs the shipped chain and
+/// nothing else reaches the BBQ tier by SELLING, and is shut at every box
+/// before it.
+///
+/// The loop asserts the gate the whole way up rather than only at the end,
+/// which is what would catch an off-by-one the other direction — a gate that
+/// opened at the first box, or at half of them, passes an at-the-end check.
+/// It is the expensive test in this file (about 52 000 ticks on the starter
+/// board) and it is the only one that proves the number in
+/// `data/unlocks.ron` is reachable at all by playing.
+#[test]
+fn the_gate_opens_by_playing_and_is_shut_every_box_before_that() {
+    let gate = bbq_gate();
+    let item = gate.after_sold.item.clone();
+    let threshold = gate.after_sold.boxes;
+    let raw = gate
+        .ingredients
+        .first()
+        .expect("the BBQ gate holds back raws")
+        .clone();
+
+    let mut world = stocked_chain();
+    let mut highest = 0;
+    while sold(&world, &item) < threshold {
+        assert!(
+            !world.ingredient_unlocked(&raw),
+            "'{raw}' must stay locked at {} boxes of {item}, which is short of {threshold}",
+            sold(&world, &item)
+        );
+        highest = highest.max(sold(&world, &item));
+        run_until_sold(&mut world, &item, highest + 1);
+    }
+    assert!(
+        world.ingredient_unlocked(&raw),
+        "selling {threshold} boxes of {item} on the shipped board is what opens the tier — \
+         if this fails the number in data/unlocks.ron is not reachable by playing"
+    );
+    assert!(
+        highest >= threshold - 4,
+        "the loop has to get close before it stops, or 'shut every box before that' is \
+         a claim about the first few: highest shut reading was {highest}"
+    );
+}
+
+/// A hundred boxes of the WRONG product opens nothing. The gate names one
+/// item, and this is the assertion that says it reads that item and not the
+/// size of the ledger.
+#[test]
+fn boxes_of_another_product_never_open_a_gate() {
+    let gate = bbq_gate();
+    let raw = gate
+        .ingredients
+        .first()
+        .expect("the BBQ gate holds back raws")
+        .clone();
+    let elsewhere = "boxed_mustard";
+    assert_ne!(
+        gate.after_sold.item, elsewhere,
+        "this test needs a product the BBQ gate does NOT count"
+    );
+
+    let world = world_with_boxes_sold(&[(elsewhere, gate.after_sold.boxes * 10)]);
+    assert!(
+        !world.ingredient_unlocked(&raw),
+        "'{raw}' waits on {} and nothing else — ten times the threshold in {elsewhere} \
+         must leave it exactly as locked",
+        gate.after_sold.item
+    );
+    for id in &gate.contracts {
+        assert!(
+            !world.contract_unlocked(id),
+            "'{id}' waits on {} too",
+            gate.after_sold.item
+        );
+    }
+}
+
+/// A world that has sold exactly `ledger` and run for no ticks at all — the
+/// ledger is saved state, so writing it into a save is a legitimate way to
+/// reach a threshold, and
+/// [`the_ledger_and_the_gates_it_opens_survive_a_save_round_trip`] is what
+/// proves the gates a loaded ledger derives are the same ones a *played* one
+/// does ([`the_gate_opens_by_playing_and_is_shut_every_box_before_that`]).
+///
+/// Some thresholds have to be reached this way. The BBQ gate's hundred boxes
+/// of ketchup are 52 000 ticks and worth simulating once; the mustard gate's
+/// hundred boxes of BBQ are another 130 000 on top of a branch the player
+/// must first build, which is an hour and a half of factory for a claim about
+/// a number in a content file. A played world also never visits an odd
+/// ketchup count, the starter order being two boxes wide, so an exact
+/// "one short" is only reachable from here.
+fn world_with_boxes_sold(ledger: &[(&str, u32)]) -> World {
+    let entries: Vec<String> = ledger
+        .iter()
+        .map(|(item, boxes)| format!("\"{item}\": {boxes}"))
+        .collect();
+    let replacement = format!("  lifetime_boxes_sold: {{{}}},", entries.join(", "));
     let text = reference_chain_with_budget(recipes(), 1_000).to_save_ron();
+    let mut seen = 0;
     let rewritten: Vec<String> = text
         .lines()
-        .map(|line| match line.split_once("lifetime_deliveries:") {
-            Some((head, tail)) => {
-                let trailing: String = tail
-                    .chars()
-                    .skip_while(|c| c.is_ascii_digit() || c.is_whitespace())
-                    .collect();
-                format!("{head}lifetime_deliveries: {deliveries}{trailing}")
+        .map(|line| {
+            if line.trim_start().starts_with("lifetime_boxes_sold:") {
+                seen += 1;
+                replacement.clone()
+            } else {
+                line.to_string()
             }
-            None => line.to_string(),
         })
         .collect();
-    let world = World::from_save_ron(&rewritten.join("\n"), recipes())
-        .expect("a save with a rewritten counter must load");
     assert_eq!(
-        world.lifetime_deliveries(),
-        deliveries,
-        "the fixture has to actually be at the counter it claims"
+        seen, 1,
+        "a save must carry exactly one boxes-sold ledger for this fixture to write it"
     );
+    let world = World::from_save_ron(&rewritten.join("\n"), recipes())
+        .expect("a save with a rewritten ledger must load");
+    for (item, boxes) in ledger {
+        assert_eq!(
+            sold(&world, item),
+            *boxes,
+            "the fixture has to actually have sold what it claims"
+        );
+    }
     world
 }
 
 /// The third sauce's gate: it holds back every raw that feeds nothing but
 /// mustard and every order that asks for a case of it, it holds back nothing
-/// else, and it opens on its own threshold — which is a later one than the
-/// BBQ tier's, because a whole second line costs more than a branch does.
+/// else, and it opens on its own threshold — which counts the tier BELOW it,
+/// because since 2026-09-26 each sauce is earned by selling the sauce before
+/// it.
 ///
 /// **THE EXPECTED IDS COME FROM THE CONTENT, NOT FROM THE GATE.** The first
 /// draft of this test looped over `mustard_sauce`'s own two lists, so
@@ -283,7 +493,7 @@ fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
     // --- a new game can reach none of it -----------------------------------
     // These loops run over the DERIVED ids, so an id dropped from the gate
     // fails here by name rather than quietly shortening a list.
-    let shut = world_at_deliveries(0);
+    let shut = world_with_boxes_sold(&[]);
     let market = shut.ingredients_snapshot();
     let board = shut.economy_snapshot();
     for id in &mustard_raws {
@@ -315,6 +525,10 @@ fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
         shut.ingredient_unlocked("vinegar"),
         "the first line's own fluid is on sale from the first tick"
     );
+    assert!(
+        shut.boxes_sold().is_empty(),
+        "and 'a new game' here means a factory that has sold nothing at all"
+    );
 
     // --- and the gate's own lists are exactly that, no more ----------------
     let unlocks = UnlockRegistry::bundled();
@@ -323,11 +537,35 @@ fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
         .expect("data/unlocks.ron must ship the mustard_sauce gate")
         .clone();
     let bbq = unlocks.get("bbq_sauce").expect("the shipped gate").clone();
+    // Each tier waits on the tier below it — the chain the owner's rule
+    // describes. Read from the content in both directions: the product mustard
+    // waits on has to be what the BBQ tier's own contracts SELL, so moving a
+    // tier in this file cannot silently point a gate at a dead end.
+    assert_eq!(
+        bbq.after_sold.item, "boxed_ketchup",
+        "the second sauce is earned by selling the first one's case"
+    );
+    assert_eq!(
+        mustard.after_sold.item, "boxed_bbq",
+        "and the third by selling the second's: {} is not what the BBQ tier ships",
+        mustard.after_sold.item
+    );
     assert!(
-        mustard.after_deliveries > bbq.after_deliveries,
-        "the third sauce is held back longer than the second: {} vs {}",
-        mustard.after_deliveries,
-        bbq.after_deliveries
+        ContractRegistry::bundled()
+            .ordered()
+            .iter()
+            .filter(|c| bbq.contracts.contains(&c.id))
+            .any(|c| c
+                .mix
+                .iter()
+                .any(|(item, _)| item == &mustard.after_sold.item)),
+        "the mustard gate counts boxes of '{}', so some contract the BBQ tier releases \
+         has to BUY that — a gate waiting on a product nothing orders could never open",
+        mustard.after_sold.item
+    );
+    assert!(
+        mustard.after_sold.boxes > 0 && bbq.after_sold.boxes > 0,
+        "a gate at zero boxes is a gate that is open in a new game"
     );
     let listed_raws: BTreeSet<String> = mustard.ingredients.iter().cloned().collect();
     let listed_contracts: BTreeSet<String> = mustard.contracts.iter().cloned().collect();
@@ -364,17 +602,20 @@ fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
     // One short of the threshold the tier is still shut, while the tier
     // BELOW it is open — which is what makes this gate its own and not a
     // side effect of the BBQ one.
-    let nearly = world_at_deliveries(mustard.after_deliveries - 1);
+    let nearly = world_with_boxes_sold(&[
+        (&bbq.after_sold.item, bbq.after_sold.boxes),
+        (&mustard.after_sold.item, mustard.after_sold.boxes - 1),
+    ]);
     for id in &mustard_raws {
         assert!(
             !nearly.ingredient_unlocked(id),
-            "'{id}' must still be locked one delivery short of the mustard_sauce gate"
+            "'{id}' must still be locked one box short of the mustard_sauce gate"
         );
     }
     for id in &ordered_mustard {
         assert!(
             !nearly.contract_unlocked(id),
-            "'{id}' must still be locked one delivery short of the mustard_sauce gate"
+            "'{id}' must still be locked one box short of the mustard_sauce gate"
         );
     }
     for id in bbq.ingredients.iter().chain(bbq.contracts.iter()) {
@@ -385,13 +626,16 @@ fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
     }
 
     // And on the threshold, every id the content calls mustard's, at once.
-    let open = world_at_deliveries(mustard.after_deliveries);
+    let open = world_with_boxes_sold(&[
+        (&bbq.after_sold.item, bbq.after_sold.boxes),
+        (&mustard.after_sold.item, mustard.after_sold.boxes),
+    ]);
     let market = open.ingredients_snapshot();
     let board = open.economy_snapshot();
     for id in &mustard_raws {
         assert!(
             open.ingredient_unlocked(id),
-            "'{id}' must be on sale on the mustard_sauce gate's threshold delivery"
+            "'{id}' must be on sale on the mustard_sauce gate's threshold box"
         );
         assert!(
             market.entries.iter().any(|e| &e.id == id),
@@ -401,7 +645,7 @@ fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
     for id in &ordered_mustard {
         assert!(
             open.contract_unlocked(id),
-            "'{id}' must be on the board on the mustard_sauce gate's threshold delivery"
+            "'{id}' must be on the board on the mustard_sauce gate's threshold box"
         );
         assert!(
             board.board.iter().any(|o| &o.id == id),
@@ -475,27 +719,39 @@ fn a_locked_contract_cannot_be_signed_however_the_command_arrives() {
     );
 }
 
-/// Determinism: the counter is persisted state, so it round-trips exactly,
-/// and the loaded world derives the same gates from it.
+/// Determinism: the ledger is persisted state, so it round-trips exactly, and
+/// the loaded world derives the same gates from it.
 #[test]
-fn the_counter_and_the_gates_it_opens_survive_a_save_round_trip() {
-    let threshold = UnlockRegistry::bundled()
-        .get("bbq_sauce")
-        .expect("the shipped gate")
-        .after_deliveries;
+fn the_ledger_and_the_gates_it_opens_survive_a_save_round_trip() {
     let (ingredients, contracts) = gated();
 
+    // A PLAYED ledger rather than a written one: the round trip has to carry
+    // whatever a running factory actually accumulates, several products
+    // included, not the one tidy entry a fixture would write.
     let mut world = stocked_chain();
-    run_until_delivered(&mut world, threshold);
+    world.issue_command(PlayerCommand::SignContract {
+        id: "diner_supply".to_string(),
+    });
+    run_until_delivered(&mut world, 4);
+    sim_core::sim::reference::open_every_gate(&mut world);
+    assert!(
+        !world.boxes_sold().is_empty(),
+        "the fixture must have sold something for the round trip to be about anything"
+    );
 
     let text = world.to_save_ron();
     let loaded = World::from_save_ron(&text, recipes()).expect("the save must load");
 
     assert_eq!(
+        loaded.boxes_sold(),
+        world.boxes_sold(),
+        "the ledger is saved state, not something recomputed from the active \
+         contracts — a lost contract must not re-lock a tier"
+    );
+    assert_eq!(
         loaded.lifetime_deliveries(),
         world.lifetime_deliveries(),
-        "the counter is saved state, not something recomputed from the active \
-         contracts — a lost contract must not re-lock a tier"
+        "and the window counter still rides along beside it"
     );
     for id in ingredients.iter() {
         assert!(
@@ -512,33 +768,41 @@ fn the_counter_and_the_gates_it_opens_survive_a_save_round_trip() {
     assert_eq!(
         loaded.to_save_ron(),
         text,
-        "a save of a loaded save must be byte-identical, counter included"
+        "a save of a loaded save must be byte-identical, ledger included"
     );
 }
 
-/// A save written before the gate existed has no `lifetime_deliveries`
-/// field. It loads at zero and re-locks the tier, deliberately — see
-/// `save.rs`'s module doc for the argument. This pins the behaviour so the
-/// decision cannot be reversed by accident.
+/// A save written before the gate existed has no `lifetime_deliveries` field;
+/// one written before 2026-09-26 has no `lifetime_boxes_sold`. Both load at
+/// zero and re-lock the tier, deliberately — see `save.rs`'s module doc for
+/// the argument and for why the second one is a field addition rather than a
+/// schema bump. This pins the behaviour so the decision cannot be reversed by
+/// accident.
 #[test]
-fn a_save_written_before_the_gate_existed_loads_at_zero_deliveries() {
+fn a_save_written_before_either_field_existed_loads_as_nothing_sold() {
     let world = reference_chain_with_budget(recipes(), 1_000);
     let text = world.to_save_ron();
-    assert!(
-        text.contains("lifetime_deliveries"),
-        "a save written now records the counter"
-    );
+    for field in ["lifetime_deliveries", "lifetime_boxes_sold"] {
+        assert!(text.contains(field), "a save written now records `{field}`");
+    }
 
-    // Exactly what an older save is: the same RON with the field absent.
+    // Exactly what an older save is: the same RON with the fields absent.
     let older: String = text
         .lines()
-        .filter(|line| !line.trim_start().starts_with("lifetime_deliveries:"))
+        .filter(|line| {
+            let line = line.trim_start();
+            !line.starts_with("lifetime_deliveries:") && !line.starts_with("lifetime_boxes_sold:")
+        })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(!older.contains("lifetime_deliveries"));
+    assert!(!older.contains("lifetime_deliveries") && !older.contains("lifetime_boxes_sold"));
 
     let loaded = World::from_save_ron(&older, recipes()).expect("an older save must still load");
     assert_eq!(loaded.lifetime_deliveries(), 0);
+    assert!(
+        loaded.boxes_sold().is_empty(),
+        "a save with no ledger has sold nothing, which is what an empty one means"
+    );
     assert!(
         !loaded.ingredient_unlocked("spice_mix"),
         "the tier re-locks rather than being handed back unannounced"
@@ -738,12 +1002,25 @@ fn the_picker_wire_keeps_a_locked_choice_and_names_its_gate() {
                 seen_locked += 1;
                 assert_eq!(choice["unlock_name"].as_str().unwrap(), gate.name);
                 assert_eq!(
-                    choice["after_deliveries"].as_u64().unwrap() as u32,
-                    gate.after_deliveries
+                    choice["unlock_item"].as_str().unwrap(),
+                    gate.after_sold.item,
+                    "the picker has to name the PRODUCT the gate counts, as an id — the \
+                     panel titles it through the display-name map"
+                );
+                assert_eq!(
+                    choice["unlock_boxes"].as_u64().unwrap() as u32,
+                    gate.after_sold.boxes
+                );
+                assert_eq!(
+                    choice["unlock_sold"].as_u64().unwrap(),
+                    0,
+                    "this world has sold nothing, so the progress it reports is nought"
                 );
             } else {
                 assert_eq!(choice["unlock_name"].as_str().unwrap(), "");
-                assert_eq!(choice["after_deliveries"].as_u64().unwrap(), 0);
+                assert_eq!(choice["unlock_item"].as_str().unwrap(), "");
+                assert_eq!(choice["unlock_boxes"].as_u64().unwrap(), 0);
+                assert_eq!(choice["unlock_sold"].as_u64().unwrap(), 0);
             }
             assert!(
                 locked
@@ -759,11 +1036,6 @@ fn the_picker_wire_keeps_a_locked_choice_and_names_its_gate() {
     assert!(
         seen_locked > 0,
         "the shipped gate must hold back at least one raw, or this test proves nothing"
-    );
-    assert_eq!(
-        snapshot["deliveries"].as_u64().unwrap(),
-        0,
-        "and the count to read those thresholds against rides along"
     );
     for id in &ingredients {
         assert!(
@@ -792,7 +1064,9 @@ fn the_picker_wire_goes_quiet_once_the_gate_opens() {
             .chain(snapshot.tank_fluids.iter())
             .all(|choice| !choice.locked
                 && choice.unlock_name.is_empty()
-                && choice.after_deliveries == 0),
+                && choice.unlock_item.is_empty()
+                && choice.unlock_boxes == 0
+                && choice.unlock_sold == 0),
         "with every gate open no choice is locked, and an unlocked one carries no gate"
     );
 }

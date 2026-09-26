@@ -1259,17 +1259,10 @@ func _modal_keys() -> Array:
 
 ## Past every progression gate, so the market holds every crate the shop sells
 ## and the board every offer. Lifted from `test_screenshot.gd --unlocked`:
-## `deliver` goes through save/load, so the rendered world is rebuilt from the
-## reloaded one.
+## `open_every_gate` goes through save/load, so the rendered world is rebuilt
+## from the reloaded one.
 func _unlock_everything() -> void:
-	var econ: Dictionary = JSON.parse_string(main.sim.economy_snapshot_json())
-	var threshold := 0
-	for unlock in econ.get("unlocks", []):
-		threshold = maxi(threshold, int(unlock.get("after_deliveries", 0)))
-	if threshold == 0:
-		_fail("data/unlocks.ron gates nothing — the market case would prove nothing")
-		return
-	Layouts.deliver(main.sim, threshold)
+	Layouts.open_every_gate(main.sim)
 	main._rebuild_world()
 	main._refresh_owned_counts()
 

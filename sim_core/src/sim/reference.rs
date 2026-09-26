@@ -136,7 +136,7 @@ use super::machines::MachineRegistry;
 use super::recipe::{Recipe, RecipeRegistry};
 use super::shop::ShopCatalog;
 use super::types::{Direction, Money, TileCoord};
-use super::unlocks::UnlockRegistry;
+use super::unlocks::{BoxesSold, UnlockRegistry};
 use super::world::{BELT_KIND, PIPE_KIND, PlayerCommand, World};
 
 /// How many belt tiles feed a stage that has solid inputs, and how many run
@@ -513,9 +513,9 @@ fn plan(recipes: &RecipeRegistry, machines: &MachineRegistry) -> Vec<Order> {
 /// ketchup line long enough to be offered BBQ, and the counter is the only
 /// thing that says so. (The machines and belts are bought before it is set,
 /// which changes nothing: a gate holds back ingredients and contracts, not
-/// equipment.) The threshold is read from the shipped file rather than
-/// written as a literal, so a balance pass on `unlocks.ron` cannot leave
-/// this fixture one delivery short.
+/// equipment.) The thresholds are read from the shipped file rather than
+/// written as literals, so a balance pass on `unlocks.ron` cannot leave this
+/// fixture one box short.
 pub fn bbq_branch(recipes: RecipeRegistry, budget: u32) -> World {
     let mut world = build(
         recipes,
@@ -528,18 +528,20 @@ pub fn bbq_branch(recipes: RecipeRegistry, budget: u32) -> World {
     world
 }
 
-/// The lifetime delivery count at which **every** gate in
-/// `data/unlocks.ron` has opened — the highest threshold the file names.
+/// A boxes-sold ledger at which **every** gate in `data/unlocks.ron` has
+/// opened: each gate's product, at exactly the count that gate names.
 ///
-/// Read from the shipped file rather than written as a literal, so a
-/// balance pass on `unlocks.ron` cannot leave a fixture one delivery short.
-pub fn every_gate_open() -> u32 {
-    UnlockRegistry::bundled()
-        .ordered()
-        .iter()
-        .map(|unlock| unlock.after_deliveries)
-        .max()
-        .unwrap_or(0)
+/// A ledger rather than a single number, because since 2026-09-26 the gates
+/// count different products — there is no one count that opens them all.
+/// Read from the shipped file rather than written as literals, so a balance
+/// pass on `unlocks.ron` cannot leave a fixture one box short.
+pub fn every_gate_open() -> BoxesSold {
+    let mut sold = BoxesSold::new();
+    for unlock in UnlockRegistry::bundled().ordered() {
+        let entry = sold.entry(unlock.after_sold.item.clone()).or_insert(0);
+        *entry = (*entry).max(unlock.after_sold.boxes);
+    }
+    sold
 }
 
 /// Opens every progression gate in `world`, the way [`bbq_branch`] opens
@@ -553,13 +555,13 @@ pub fn every_gate_open() -> u32 {
 /// a factory holding liquid smoke belongs to a player who earned it, and
 /// this counter is the only thing that says so.
 ///
-/// **Not a back door into `restore_lifetime_deliveries`.** That stays
+/// **Not a back door into `restore_boxes_sold`.** That stays
 /// `pub(super)`. This is the fixture module, whose whole contract is that it
 /// can do nothing a player cannot — and a player does reach this state, by
 /// shipping. What they cannot do is reach it in one call, which is the same
 /// concession every other fixture here makes about money and stock.
 pub fn open_every_gate(world: &mut World) {
-    world.restore_lifetime_deliveries(every_gate_open());
+    world.restore_boxes_sold(every_gate_open());
 }
 
 /// The **mustard line**: the reference chain, plus the third sauce's own five
