@@ -55,6 +55,15 @@ Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
   decides, called from `main.gd`'s `_apply_backdrop_mode` at build and on
   every TAB. **Only `background_mode` changes** — the `Sky` stays the ambient
   and reflection source in both modes, or the factory's look shifts on TAB.
+- **A spend that would leave the next payday short is confirmed first, and
+  the SIM decides it.** Every spend goes through `_spend_with_confirm`, which
+  asks `spend_preview_json` about the exact dictionary it is about to issue and
+  obeys its `warn` — the panel prints that answer's figures and computes none
+  of them. One funnel for all five sites (build menu, market crate and its
+  SHIFT bulk buy, contract fee, hire, SHIFT's replacement purchase); the
+  confirmation does **not** pause the sim, which is why the command is issued
+  on YES rather than replayed, and the tail of an interrupted action
+  (`_finish_build`) runs on either answer. UI_UX §2b point 40.
 - **Never colour alone** (UI_UX §7): pair every status colour with a glyph,
   word, shape or position.
 - **One meter language**: `_build_meter`/`_set_meter` only. A bar exists

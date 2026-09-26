@@ -1850,6 +1850,72 @@ pub struct PlacementSnapshot {
     pub links: Option<Links>,
 }
 
+/// What a spend would do to the next payday — the answer
+/// [`World::spend_preview`] gives, and the whole of what the confirmation
+/// panel draws (`docs/UI_UX.md` §2b point 40).
+///
+/// Every money field is `f64` because this struct only ever crosses the
+/// wire; the arithmetic behind it is [`Money`] throughout (ARCHITECTURE.md
+/// §3.9 — floats at the presentation boundary, one-way). The bills and
+/// shortfalls stay `u32`, the units [`StaffPools`] already speaks.
+///
+/// It carries both sides of the comparison, not just the verdict, because
+/// the panel has to *say why* — "this £420 leaves you £1 180 against a
+/// £1 600 payday" — and a panel that had only `warn` would have to
+/// re-derive the rest, which is the one thing GDScript may not do.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct SpendPreview {
+    /// Whether this command moves money at all, now or at the next payday.
+    /// `false` for every command this feature does not gate (a `Place`, a
+    /// `Rotate`, a hopper setting), which are answered rather than refused
+    /// so a caller may preview anything it is about to issue.
+    pub spends: bool,
+    /// The wire id of what is being bought, hired or signed — a machine
+    /// kind, an ingredient id, a contract id, a staff category. Empty when
+    /// `spends` is false. **A wire id**: Godot turns it into a display name
+    /// (`godot_project/CLAUDE.md`).
+    pub subject: String,
+    /// What leaves the balance the moment the command is issued. Zero for a
+    /// [`PlayerCommand::Hire`], which costs nothing today, and zero for a
+    /// command that would be refused anyway (an unknown id, a zero
+    /// quantity, a total too large for [`Money`]).
+    pub cost: f64,
+    pub money_now: f64,
+    /// The balance the instant after this command — saturating at zero, as
+    /// the economy does.
+    pub money_after: f64,
+    /// What the next payday charges as things stand
+    /// ([`StaffPools::next_bill`]) — `u32`, the same field and the same units
+    /// the staff panel already reads off `StaffSnapshot`.
+    pub next_bill: u32,
+    /// What the next payday would charge with this command applied. Equal to
+    /// `next_bill` for everything but a hire, which is the one command that
+    /// moves the bill instead of the balance.
+    pub bill_after: u32,
+    /// The gap between the balance and the bill right now, in whole units
+    /// rounded up ([`StaffPools::shortfall`]); zero when payday is covered.
+    pub shortfall_now: u32,
+    /// The gap this command would leave. The feature's whole subject:
+    /// non-zero means the next payday cannot be met.
+    pub shortfall_after: u32,
+    /// Whether the balance covers `cost` at all. A spend it does not cover is
+    /// refused by the economy anyway ([`super::economy::Economy::try_spend`]
+    /// is all-or-nothing), so it has no consequence to confirm and `warn`
+    /// stays false — the click gets the plain refusal it always got instead of
+    /// a question about a payday the purchase was never going to reach.
+    /// Always `true` for a [`PlayerCommand::Hire`], which debits nothing.
+    pub affordable: bool,
+    /// Whether this command is what *causes* the shortfall — covered before,
+    /// short after. `false` when the balance was already short, so the panel
+    /// can word the two cases differently ("this takes you below" vs "you
+    /// are already below") without deciding anything itself.
+    pub crosses: bool,
+    /// **The verdict Godot obeys**: raise the confirmation. True when the
+    /// command spends and leaves the next payday short — see
+    /// [`World::spend_preview`] for the one rule.
+    pub warn: bool,
+}
+
 /// What kind of thing a placed entity is — the one component every
 /// placement carries besides [`Position`] and [`Placement`], so the
 /// topology pass can classify a tile's owner without probing for each
@@ -4167,6 +4233,128 @@ impl World {
         body.try_absorb(&mut segment, &self.economy)
     }
 
+    /// What a command would do to the **next payday**, before it is issued
+    /// (`docs/GAMEPLAY.md` §7). A read-only pass over `&self`: it never
+    /// mutates, never bumps [`Self::revision`], and is not a
+    /// mutate-then-rollback.
+    ///
+    /// This exists because every spend in the game is *valid* right up to
+    /// the moment it starves the wage bill, and the consequence arrives a
+    /// thousand ticks later at the payday, by which time the belt is laid.
+    /// Presentation asks this first and puts the answer in front of the
+    /// player; the rule lives here, so GDScript decides nothing — it reads
+    /// [`SpendPreview::warn`] (`godot_project/CLAUDE.md`'s one rule).
+    ///
+    /// **It prices by calling the very functions the command arms call** —
+    /// [`super::shop::Shop::cost_of`],
+    /// [`Self::stock_room_for`] then
+    /// [`super::ingredients::Ingredients::cost_of`], the board offer's own
+    /// `price`, and [`StaffPools::next_bill`] against the category's wage.
+    /// A second copy of a price rule here would drift from the arm that
+    /// takes the money, and the drift would be invisible: both numbers
+    /// would look plausible.
+    ///
+    /// A command that costs nothing answers `spends: false` and zeroes
+    /// rather than erroring, so a caller may preview anything. `None` — the
+    /// wire handed a string that did not parse — takes the same arm, because
+    /// "no command" and "a free command" have the same answer and a second
+    /// path for the first would be a second place to keep it correct.
+    ///
+    /// A command the balance **cannot cover** answers `affordable: false` and
+    /// does not warn: the economy would refuse it, so there is no consequence
+    /// to confirm (see [`SpendPreview::affordable`]). It still reports the
+    /// shortfall it finds, because that is true — it simply is not its cause.
+    pub fn spend_preview(&self, cmd: Option<&PlayerCommand>) -> SpendPreview {
+        let money = self.economy.money;
+        let next_bill = self.staff.next_bill();
+        let shortfall_now = self.staff.shortfall(money);
+        // Every arm answers two things: what leaves the balance now, and what
+        // the next bill becomes. Only `Hire` moves the second — a head costs
+        // nothing on the day it is hired and everything on payday.
+        let (subject, cost, bill_after) = match cmd {
+            Some(PlayerCommand::Purchase { kind, quantity }) => {
+                (kind.clone(), self.shop.cost_of(kind, *quantity), next_bill)
+            }
+            Some(PlayerCommand::BuyIngredient { item, quantity }) => {
+                // Clamped exactly as the arm clamps it, so the preview quotes
+                // the price of what would actually arrive rather than of what
+                // was asked for.
+                let quantity = (*quantity).min(self.stock_room_for(item));
+                (
+                    item.clone(),
+                    self.ingredients.cost_of(item, quantity),
+                    next_bill,
+                )
+            }
+            Some(PlayerCommand::SignContract { id }) => (
+                id.clone(),
+                // The board's own price, and only for an offer `try_sign`
+                // would take money for: an unknown id, one behind a
+                // progression gate, and one already signed are all refusals,
+                // so they cost nothing. Asked of the economy's own
+                // predicates rather than re-derived.
+                self.economy
+                    .board()
+                    .get(id)
+                    .filter(|_| self.economy.contract_unlocked(id) && !self.economy.is_active(id))
+                    .map(|offer| offer.price),
+                next_bill,
+            ),
+            Some(PlayerCommand::Hire { category }) => {
+                // A hire debits nothing today; it raises what payday takes.
+                // An unknown category is refused by `StaffPools::hire`, so it
+                // moves neither — `hires` below is that lookup, not a second
+                // opinion about it.
+                let wage = self.staff.catalog().get(category).map(|c| c.wage);
+                (
+                    category.clone(),
+                    None,
+                    next_bill.saturating_add(wage.unwrap_or(0)),
+                )
+            }
+            _ => (String::new(), None, next_bill),
+        };
+        // A hire into a KNOWN category spends even when its wage is zero (a
+        // volunteer): the bill it does not raise may already be beyond the
+        // balance, which is exactly what `warn` is for. An unknown one is
+        // refused outright and spends nothing, like every other refusal here.
+        let hires = matches!(cmd, Some(PlayerCommand::Hire { category })
+            if self.staff.catalog().get(category).is_some());
+        let spends = cost.is_some() || hires;
+        let cost = cost.unwrap_or(Money::ZERO);
+        // Floored at zero, not merely saturated: `Money` is signed, and
+        // GAMEPLAY.md §1 allows no negative balance — an unaffordable spend
+        // is refused by the economy rather than taking the balance under.
+        let money_after = money.saturating_sub(cost).max(Money::ZERO);
+        // One rule, one place: after this spend, would the balance cover what
+        // the next payday charges? `shortfall` is the sim's own arithmetic
+        // (it already answers this for the staff panel), asked about the
+        // balance and the bill this command would leave behind.
+        let shortfall_after = StaffPools::shortfall_of(bill_after, money_after);
+        // An unaffordable spend is a REFUSAL, not a dilemma. The economy would
+        // decline it (all-or-nothing), the balance would not move, and the
+        // payday would be exactly as short afterwards as it is now — so asking
+        // "are you sure?" about it would replace the one answer the player
+        // needs ("you cannot afford this") with a warning about a consequence
+        // that cannot follow. A hire is always affordable: it debits nothing
+        // today, which is why it is tested against the bill instead.
+        let affordable = hires || cost <= money;
+        SpendPreview {
+            spends,
+            subject,
+            cost: cost.to_num(),
+            money_now: money.to_num(),
+            money_after: money_after.to_num(),
+            next_bill,
+            bill_after,
+            shortfall_now,
+            shortfall_after,
+            affordable,
+            crosses: shortfall_now == 0 && shortfall_after > 0,
+            warn: spends && affordable && shortfall_after > 0,
+        }
+    }
+
     /// Applies a player-issued command (ARCHITECTURE.md §4). Invalid/no-op
     /// commands are silently ignored — see [`PlayerCommand`] for the full
     /// list of refusals, every one of which leaves the world byte-identical.
@@ -4289,12 +4477,13 @@ impl World {
                 self.try_set_mothballed(tile, enabled);
             }
             // Neither dirties a chunk: a head is not a tile. Both are silent
-            // about an unknown category, `Hire` about a balance that could
-            // not pay the next bill plus the new wage (the quality pass:
-            // you cannot hire someone you could not pay), and `Fire` about
-            // an empty pool — the `Purchase` convention.
+            // about an unknown category, and `Fire` about an empty pool —
+            // the `Purchase` convention. `Hire` no longer refuses a head the
+            // next payday could not pay: that bar is `spend_preview`'s
+            // warning, confirmed by the player, not a silent refusal here
+            // (`StaffPools::hire`, the 2026-09-26 record).
             PlayerCommand::Hire { category } => {
-                self.staff.hire(&category, self.economy.money);
+                self.staff.hire(&category);
             }
             PlayerCommand::Fire { category } => {
                 self.staff.fire(&category);

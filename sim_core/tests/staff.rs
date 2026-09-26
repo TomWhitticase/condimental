@@ -696,7 +696,7 @@ fn with_money(world: &World, money: u32) -> World {
         .iter_mut()
         .chain(actual.categories.iter_mut())
     {
-        c.can_hire = false;
+        c.hire_warns = false;
     }
     assert_eq!(actual, expected, "the pools survive the save unchanged");
     loaded
@@ -785,12 +785,21 @@ fn a_factory_that_cannot_pay_is_warned_then_idled_and_loses_its_crew_only_at_the
     assert_eq!(available(&world, "packaging"), 0);
     assert_eq!(available(&world, "logistics"), 0);
 
-    // A hire the balance could not pay is refused — free labour is not
-    // for hire — and the wire says so.
-    assert!(!world.staff_snapshot().categories[3].can_hire);
-    hire(&mut world, "logistics");
-    assert_eq!(headcount(&world, "logistics"), 1);
-    assert_eq!(world.money(), Money::from_num(1));
+    // A hire the next payday could not pay is WARNED about, not refused
+    // (2026-09-26): the wire says so and the hire still happens, costing
+    // nothing now — going into deeper arrears is what it costs. Tried on a
+    // COPY, because a hire cannot be undone for the branches below: firing
+    // the head back off leaves `owed` raised (notice pay), which is a
+    // different world from the one that never hired.
+    assert!(world.staff_snapshot().categories[3].hire_warns);
+    let mut warned = with_money(&world, 1);
+    hire(&mut warned, "logistics");
+    assert_eq!(
+        headcount(&warned, "logistics"),
+        2,
+        "the warned hire goes through"
+    );
+    assert_eq!(warned.money(), Money::from_num(1), "and costs nothing now");
 
     // Branch A — SECOND PAYDAY still broke: the heads in arrears leave, by
     // category, and the panel is told who; the two paid manufacturing heads
@@ -996,13 +1005,14 @@ fn hire_and_fire_round_trip_through_json_and_dirty_no_chunk() {
         command_from_json(r#"{"type": "hire"}"#).is_none(),
         "category is required"
     );
-    // Hiring is free — the wage comes at payday — but only for a balance
-    // that could pay it: a world with nothing in the bank is refused.
+    // Hiring is free — the wage comes at payday — and since 2026-09-26 a
+    // balance that could not pay it does not refuse the hire, it warns:
+    // a world with nothing in the bank hires and goes into arrears.
     let money = world.money();
     world.issue_command(PlayerCommand::Hire {
         category: "manufacturing".to_string(),
     });
-    assert_eq!(world.money(), money);
+    assert_eq!(world.money(), money, "a hire costs nothing today");
     let mut broke = reference_chain(recipes());
     assert_eq!(
         broke.money(),
@@ -1010,12 +1020,15 @@ fn hire_and_fire_round_trip_through_json_and_dirty_no_chunk() {
         "the plain reference chain spends its whole budget"
     );
     let before = headcount(&broke, "manufacturing");
-    assert!(!broke.staff_snapshot().categories[0].can_hire);
+    assert!(
+        broke.staff_snapshot().categories[0].hire_warns,
+        "an empty balance cannot pay the next bill plus one more wage"
+    );
     hire(&mut broke, "manufacturing");
     assert_eq!(
         headcount(&broke, "manufacturing"),
-        before,
-        "refused: it could not be paid"
+        before + 1,
+        "warned, not refused: the head is hired and goes unpaid at payday"
     );
 }
 
@@ -1137,9 +1150,9 @@ fn staff_snapshot_json_has_the_documented_shape_in_staff_ron_order() {
             keys,
             vec![
                 "assigned",
-                "can_hire",
                 "demand",
                 "headcount",
+                "hire_warns",
                 "id",
                 "left_last_payday",
                 "name",
@@ -1159,7 +1172,10 @@ fn staff_snapshot_json_has_the_documented_shape_in_staff_ron_order() {
         );
         assert_eq!(c["unpaid"], 0);
         assert_eq!(c["left_last_payday"], 0);
-        assert_eq!(c["can_hire"], true, "the fixture is funded for 300 periods");
+        assert_eq!(
+            c["hire_warns"], false,
+            "the fixture is funded for 300 periods"
+        );
         assert_eq!(
             c["short"].as_u64().unwrap(),
             c["demand"].as_u64().unwrap() - c["assigned"].as_u64().unwrap()

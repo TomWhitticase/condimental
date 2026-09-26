@@ -234,6 +234,47 @@ impl SimBridge {
         }
     }
 
+    /// What a command would do to the **next payday**, without issuing it —
+    /// `sim::SpendPreview` as JSON (ARCHITECTURE.md §4, §5's wire table).
+    /// It takes the **same JSON string** the caller is about to hand
+    /// [`Self::issue_command_json`], so there is no way to preview one thing
+    /// and buy another.
+    ///
+    /// ```json
+    /// {"spends": true, "subject": "crusher", "cost": 120.0,
+    ///  "money_now": 1300.0, "money_after": 1180.0,
+    ///  "next_bill": 1600, "bill_after": 1600,
+    ///  "shortfall_now": 0, "shortfall_after": 420,
+    ///  "crosses": true, "warn": true}
+    /// ```
+    ///
+    /// **`warn` is the decision, and it is the sim's** — presentation raises
+    /// its confirmation on `warn`, and never recomputes the test from the
+    /// other fields (`godot_project/CLAUDE.md`'s one rule). The rest of the
+    /// fields exist so the panel can say *why* in the sim's own numbers.
+    ///
+    /// **It mutates nothing**: no tick, no command, and `revision()` does
+    /// not move — so calling it on every hover or keypress cannot make the
+    /// renderer re-poll, and a preview can never change what the following
+    /// `issue_command_json` does. An unparseable command, or one that costs
+    /// nothing (a `place`, a `rotate`, a hopper setting), answers
+    /// `spends: false` with zeroed money rather than erroring: a caller may
+    /// preview anything it is about to issue.
+    ///
+    /// Four commands can warn — `purchase`, `buy_ingredient`,
+    /// `sign_contract` and `hire`. `hire` is the odd one: it spends nothing
+    /// today, so its `cost` is 0 and its `bill_after` is what rises.
+    #[func]
+    fn spend_preview_json(&self, command_json: GString) -> GString {
+        // An unparseable command spends nothing, for the same reason
+        // `issue_command_json` ignores it: the caller learns the answer by
+        // reading, not from an error it has no way to handle.
+        let cmd = sim::command_from_json(&command_json.to_string());
+        let preview = self.world.spend_preview(cmd.as_ref());
+        let json = serde_json::to_string(&preview).expect("SpendPreview must serialize");
+        GString::from(json.as_str())
+    }
+
     /// Everything currently placed in the world, JSON-serialized as an
     /// array of `sim::PlacementSnapshot` — kind, origin tile, facing,
     /// declared footprint, the tiles it actually occupies once rotated, and
@@ -678,16 +719,16 @@ impl SimBridge {
     ///  "categories": [
     ///    {"id": "manufacturing", "name": "Manufacturing", "headcount": 4,
     ///     "wage": 2, "owed": 4, "unpaid": 0, "left_last_payday": 0,
-    ///     "can_hire": true, "demand": 4, "assigned": 4, "short": 0},
+    ///     "hire_warns": false, "demand": 4, "assigned": 4, "short": 0},
     ///    {"id": "maintenance",   "name": "Maintenance",   "headcount": 0,
     ///     "wage": 2, "owed": 0, "unpaid": 0, "left_last_payday": 0,
-    ///     "can_hire": true, "demand": 0, "assigned": 0, "short": 0},
+    ///     "hire_warns": false, "demand": 0, "assigned": 0, "short": 0},
     ///    {"id": "packaging",     "name": "Packaging",     "headcount": 2,
     ///     "wage": 2, "owed": 2, "unpaid": 0, "left_last_payday": 0,
-    ///     "can_hire": true, "demand": 2, "assigned": 2, "short": 0},
+    ///     "hire_warns": false, "demand": 2, "assigned": 2, "short": 0},
     ///    {"id": "logistics",     "name": "Logistics",     "headcount": 1,
     ///     "wage": 2, "owed": 1, "unpaid": 0, "left_last_payday": 0,
-    ///     "can_hire": true, "demand": 1, "assigned": 1, "short": 0}]}
+    ///     "hire_warns": false, "demand": 1, "assigned": 1, "short": 0}]}
     /// ```
     ///
     /// `categories` is in `data/staff.ron` order (the panel order and the
@@ -711,10 +752,11 @@ impl SimBridge {
     /// (heads the next payday bills), `unpaid` (heads in arrears — still
     /// hired, NOT working, gone if unpaid again; the row should say so in
     /// words), `left_last_payday` (who left, for the announcement), and
-    /// `can_hire` (whether a `hire` would be accepted with this balance:
-    /// it must cover `next_bill` plus the category's wage — a refused
-    /// hire is a silent no-op like every other refusal, so read this to
-    /// mark the button). Read `next_bill` for the footer's bill: the
+    /// `hire_warns` (whether a hire would leave the next payday short:
+    /// the balance under `next_bill` plus the category's wage — read it to
+    /// WARN, not to disable, since 2026-09-26; the hire goes through if the
+    /// player confirms it, and [`Self::spend_preview_json`] is the same rule
+    /// asked per command). Read `next_bill` for the footer's bill: the
     /// `Σ headcount × wage` Godot used to compute is the run rate, not
     /// what the payday will take.
     ///

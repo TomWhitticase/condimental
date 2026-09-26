@@ -2120,6 +2120,30 @@ var _pause_cookbook_open := false
 ## in this panel with no undo — so it asks, where Save & Quit (which cannot
 ## lose anything) does not.
 var _pause_confirm_quit := false
+## THE PAYDAY CONFIRMATION (2026-09-26). Every spend the player makes is
+## checked against the next payday's wage bill first — `spend_preview_json` —
+## and one that would leave the bill unpayable stops here for a yes or a no.
+##
+## **The simulation keeps running while it is up**, unlike the pause menu:
+## only `_pause_open` stops `_advance_simulation`, and stopping the world for
+## a spending question would let a player freeze time to think, which is not
+## a thing the rest of this game offers. That is exactly why the command is
+## re-issued through `issue_command_json` on YES rather than being held and
+## replayed: money may have moved while the panel sat there, and the sim gets
+## the last word on what the click does.
+##
+## `_payday_on_yes` / `_payday_on_cancel` are the two halves of the answer,
+## parked here because the click that raised the panel has long since
+## returned. Both are cleared before either runs, so a handler that raises a
+## second confirmation cannot be handed the first one's callback.
+var _payday_confirm_panel: PanelContainer
+var _payday_confirm_open := false
+var _payday_confirm_heading: Label
+var _payday_confirm_subject: Label
+var _payday_confirm_figures: VBoxContainer
+var _payday_confirm_yes: Button
+var _payday_on_yes := Callable()
+var _payday_on_cancel := Callable()
 ## Latched by `_quit_to_menu` for the rest of this scene's life. The factory
 ## is on its way out, so nothing in it wants the mouse captured any more —
 ## `change_scene_to_file` hands the menu whatever mouse mode was left behind,
@@ -2130,6 +2154,18 @@ var _leaving_to_menu := false
 ## HUD (the pause menu was written alongside the 2026-09-09 UI-scale pass and
 ## reconciled with it at merge).
 const PAUSE_BUTTON_MIN_SIZE := Vector2(300.0, 44.0) * UI_SCALE
+
+## The payday confirmation's prose width, PINNED — every wrapping Label on
+## that panel takes it as `custom_minimum_size.x` before it is allowed to
+## wrap, which is the rule a wrapping Label has to obey here or the plate is
+## measured around a 1px minimum (godot_project/CLAUDE.md, issue #107).
+## Wider than the pause menu's column because the figures line up in two
+## columns inside it.
+const PAYDAY_CONFIRM_WIDTH := 380.0 * UI_SCALE
+
+## What being unpaid actually does, quoted from the simulation's rule rather
+## than dramatised: two strikes, and the first one is recoverable.
+const PAYDAY_CONFIRM_CONSEQUENCE := "Heads the payday cannot pay are idled for a period, and leave only if the payday after that misses too. Mothballing a line takes its crew off the payroll without losing them."
 
 ## Which slot this session is saving to by default: the one it was loaded
 ## from, or `DEFAULT_SLOT` for a new game. Kept in step with `GameSession`
@@ -5514,6 +5550,10 @@ func _build_ui() -> void:
 	# The way out (the save/main-menu epic's ticket 2). Last, so it draws over
 	# every other panel — it is the one modal that means the game has stopped.
 	_build_pause_menu(hud, settings)
+	# The payday warning (2026-09-26), after the pause menu so it draws over
+	# every panel that can spend — it interrupts a purchase, so it has to be on
+	# top of the menu the purchase was clicked in.
+	_build_payday_confirm(hud, settings)
 	# The development tool (F3), after the pause menu so it draws over it: it
 	# is the one panel that is allowed to be up while anything else is, and a
 	# cheat you cannot reach while the game is stopped is half a cheat.
@@ -7002,10 +7042,20 @@ func _place_from_slot(index: int) -> void:
 ## thing and the menu needs no quantity widget. An unaffordable or unknown
 ## purchase is a silent no-op in the simulation, so the only thing this has
 ## to do afterwards is re-read the snapshot either way.
+##
+## Through `_spend_with_confirm` since 2026-09-26: the same command, sent to
+## the sim to be priced against the next payday first, and issued either at
+## once or when the player answers the warning.
 func _buy_slot(index: int) -> void:
 	if index < 0 or index >= _shop_slots.size():
 		return
 	var kind: String = _shop_slots[index]["kind"]
+	_spend_with_confirm(
+		{"type": "purchase", "kind": kind}, _do_buy_slot.bind(kind)
+	)
+
+
+func _do_buy_slot(kind: String) -> void:
 	var owned_before := _owned_of(kind)
 	sim.issue_command_json(JSON.stringify({"type": "purchase", "kind": kind}))
 	_refresh_owned_counts()
@@ -7046,7 +7096,11 @@ func _fp_mouse_free() -> bool:
 	# `_debug_open` is here and NOT in `_modal_open`: the debug panel is covered
 	# in buttons, so it needs a cursor, but it is not one of the five panels and
 	# must not inherit their ESC-closes-it or pause-the-world behaviour.
-	return _leaving_to_menu or _modal_open() or _config_open or _pause_open or _debug_open
+	# `_payday_confirm_open` is here for the cursor (it has two buttons) and out
+	# of `_modal_open` for the opposite reason to the debug panel's: ESC *does*
+	# close it, but ahead of the modals rather than with them — it sits over one.
+	return (_leaving_to_menu or _modal_open() or _config_open or _pause_open or _debug_open
+			or _payday_confirm_open)
 
 
 ## Whether held movement keys belong to the world. Exactly the states that
@@ -7725,6 +7779,18 @@ func _buy_ingredient_slot(index: int, quantity: int = MARKET_CRATE) -> void:
 		# declined in silence.
 		_cue(FactoryAudio.REFUSED)
 		return
+	# The payday gate (2026-09-26), on the CLAMPED quantity, so the figure the
+	# warning quotes is the cost of the command that is actually about to go —
+	# a SHIFT+click for ten priced at ten while four is all the warehouse can
+	# take would warn about a spend twice the size of the real one. Both this
+	# slot's verbs come through here, so both are gated once.
+	_spend_with_confirm(
+		{"type": "buy_ingredient", "item": item_id, "quantity": wanted},
+		_do_buy_ingredient.bind(item_id, wanted)
+	)
+
+
+func _do_buy_ingredient(item_id: String, wanted: int) -> void:
 	var money_before := _current_money()
 	sim.issue_command_json(JSON.stringify({
 		"type": "buy_ingredient",
@@ -8162,10 +8228,15 @@ func _update_contract_board(econ: Dictionary = {}) -> void:
 func _sign_contract_offer(index: int) -> void:
 	if index < 0 or index >= _board_rows.size():
 		return
+	var id := String(_board_rows[index]["id"])
+	_spend_with_confirm({"type": "sign_contract", "id": id}, _do_sign_contract.bind(id))
+
+
+func _do_sign_contract(id: String) -> void:
 	var money_before := _current_money()
 	sim.issue_command_json(JSON.stringify({
 		"type": "sign_contract",
-		"id": String(_board_rows[index]["id"]),
+		"id": id,
 	}))
 	_update_contract_board()
 	_update_contract_panel()
@@ -8845,9 +8916,15 @@ func _staff_status_text(category: Dictionary) -> String:
 ##   note           the idle sentence when the category has nothing hired
 ##                  and nothing asking for it, else "" (the meter shows)
 ##   fire_enabled   headcount > 0
-##   hire_enabled   the wire's own `can_hire` (ticket 1's hire-refusal rule;
-##                  Godot never re-derives it — it needs the whole-factory
-##                  bill, not this row's own numbers)
+##   hire_enabled   `required > 0` — the establishment, and nothing else.
+##                  The payday used to gate this button too (ticket 1's
+##                  hire-refusal rule); since 2026-09-26 a hire the payday
+##                  cannot cover WARNS instead of being refused, so the
+##                  button stays live and `_staff_hire` puts the question
+##                  through `_spend_with_confirm`
+##   hire_blocked   the wire's own `hire_warns`, worded — Godot never
+##                  re-derives it, because it needs the whole-factory bill
+##                  rather than this row's own numbers
 ##   hire_text      what the HIRE button's click does AND costs
 ##   fire_text      what FIRE's click does
 ##   fire_tooltip   the notice-pay rule, on the button that springs it
@@ -8886,7 +8963,11 @@ func _staff_row_state(category: Dictionary) -> Dictionary:
 		# carrying heads they want to shed, and disabling the button there
 		# would bill them every payday with no way out.
 		"fire_enabled": headcount > 0,
-		"hire_enabled": bool(category.get("can_hire", true)) and required > 0,
+		# Live even when the payday cannot cover it: the warning is the
+		# confirmation panel, not a dead button (`_staff_hire`). `required > 0`
+		# remains, because a category the machinery does not ask for has nothing
+		# for a head to do.
+		"hire_enabled": required > 0,
 		"hire_text": _staff_hire_button_text(category),
 		"fire_text": "FIRE −1",
 		"fire_tooltip": STAFF_FIRE_NOTICE,
@@ -8943,19 +9024,26 @@ func _staff_hire_button_text(category: Dictionary) -> String:
 	return "HIRE +1 · %d/period" % wage
 
 
-## WHY a disabled HIRE is disabled, in words rather than in grey (ticket 1's
-## hire-refusal rule: `money >= next_bill + wage`, so nobody is hired who
-## cannot be paid). Every figure is the wire's — the balance, the bill it
-## reports as `next_bill`, and the row's own wage — so this sentence can
-## never quote a number the sim disagrees with. "" while `can_hire` is true,
-## which is the common case, so the row shows nothing extra.
+## WHAT a hire would cost the next payday, in words rather than in grey.
+##
+## This was the sentence explaining a DISABLED button (ticket 1's hire-refusal
+## rule, `money >= next_bill + wage`). Since 2026-09-26 the hire happens and
+## the confirmation panel asks first, so the sentence changed mood with it: it
+## warns while the balance would not cover the bill a new head makes, and the
+## button beside it still works.
+##
+## Every figure is the wire's — the balance, the bill it reports as
+## `next_bill`, and the row's own wage — so this can never quote a number the
+## sim disagrees with, and the glyph carries the warning, never the colour
+## alone (UI_UX.md §7). "" while `hire_warns` is false, which is the common
+## case, so the row shows nothing extra.
 func _staff_hire_blocked_text(category: Dictionary, snapshot: Dictionary) -> String:
-	if bool(category.get("can_hire", true)):
+	if not bool(category.get("hire_warns", false)):
 		return ""
 	var wage := int(category.get("wage", 0))
 	var bill := _staff_next_bill(snapshot)
 	var money := int(floor(float(snapshot.get("money", 0.0))))
-	return "✗ cannot hire — %d in hand, %d due, %d / period" % [money, bill, wage]
+	return "▲ next payday would go short — %d in hand, %d due, %d / period" % [money, bill, wage]
 
 
 ## What hiring this category's shortfall would actually unblock, named from
@@ -9422,8 +9510,19 @@ func _update_staff_panel() -> void:
 
 ## Hires one head of the row's category through the real command, then
 ## re-reads the wire at once so the row moves on the same frame.
+##
+## The one spend of the four that takes nothing out of the balance today: it
+## raises every payday from here on instead, which is why it is gated on the
+## bill and not on the price (`World::spend_preview`). Since 2026-09-26 the
+## simulation WARNS here rather than refusing — the button no longer goes
+## dead when the payday is tight, it asks.
 func _staff_hire(index: int) -> void:
-	_staff_move_head(index, "hire")
+	if index < 0 or index >= _staff_rows.size():
+		return
+	var id := String(_staff_rows[index]["id"])
+	_spend_with_confirm(
+		{"type": "hire", "category": id}, _staff_move_head.bind(index, "hire")
+	)
 
 
 ## Fires one head. At headcount 0 the button is disabled; the command is a
@@ -13330,9 +13429,12 @@ func _close_all_overlays() -> void:
 ## build/remove mode as "open": a ghost following the cursor is a state the
 ## player is in, and putting it down should be the first press, not the
 ## second.
+## The payday confirmation counts here as well, and `_unhandled_input` gives
+## it the press ahead of everything else: ESC while it is up cancels the
+## purchase, and must not reach the menu the purchase was clicked in.
 func _anything_open() -> bool:
 	return (_shop_open or _market_open or _board_open or _staff_open or _production_open
-			or _cookbook_open or _in_build_mode())
+			or _cookbook_open or _payday_confirm_open or _in_build_mode())
 
 
 func _in_build_mode() -> bool:
@@ -13427,13 +13529,44 @@ func _confirm_build() -> void:
 	# ...and with SHIFT held, a placement that landed buys its own
 	# replacement, so the mode can keep going. Only a placement that actually
 	# happened spends money: a refused click must cost nothing.
-	if placed and _auto_buy_held() and _buy_replacement(_build_kind):
+	#
+	# That purchase can now be INTERRUPTED (2026-09-26): a replacement that
+	# would leave the next payday short raises the confirmation, and everything
+	# this function does afterwards has to wait for an answer. So the tail moves
+	# into `_finish_build`, which runs on EITHER answer — a cancel that skipped
+	# it would leave build mode on with nothing owned and a ghost that can never
+	# be built, which is the dead end the tail exists to prevent.
+	#
+	# The placement itself is already done and is never undone by a cancel: the
+	# tile the player clicked is theirs, and only the rebuy was in question.
+	if placed and _auto_buy_held():
+		_spend_with_confirm(
+			{"type": "purchase", "kind": _build_kind},
+			_do_buy_replacement.bind(_build_kind),
+			_finish_build.bind(_build_kind)
+		)
+		return
+	_finish_build(_build_kind)
+
+
+## SHIFT's replacement purchase, once it is allowed to happen.
+func _do_buy_replacement(kind: String) -> void:
+	if _buy_replacement(kind):
 		_cue(FactoryAudio.BUY)
-	# Placing spends one owned unit. Running out ends the mode rather than
-	# leaving a ghost that can no longer be built — the prompt would read
-	# "✗ NONE OWNED" forever, which is a dead end rather than feedback.
+	_finish_build(kind)
+
+
+## `_confirm_build`'s tail. Placing spends one owned unit. Running out ends the
+## mode rather than leaving a ghost that can no longer be built — the prompt
+## would read "✗ NONE OWNED" forever, which is a dead end rather than feedback.
+##
+## `kind` is the kind that was PLACED, captured at the click, because a
+## confirmation may have sat in between: the count that decides whether the
+## mode is over is the one belonging to the tile that was just laid, not to
+## whatever is in hand by the time the player answers.
+func _finish_build(kind: String) -> void:
 	_refresh_owned_counts()
-	if _owned_of(_build_kind) <= 0:
+	if _build_kind == kind and _owned_of(kind) <= 0:
 		_exit_build_mode()
 
 
@@ -14074,6 +14207,295 @@ func _build_crosshair(hud: CanvasLayer) -> void:
 	v_bar.set_anchors_preset(Control.PRESET_CENTER)
 	v_bar.position = -v_bar.size / 2.0
 	_crosshair.add_child(v_bar)
+
+
+# --------------------------------------------------------------------------
+# The payday confirmation (2026-09-26)
+# --------------------------------------------------------------------------
+
+## `spend_preview_json` for one command, parsed. The whole decision comes
+## back in it, `warn` included — **nothing here recomputes the test**, which
+## needs the whole factory's wage bill and is the simulation's to make
+## (godot_project/CLAUDE.md's one rule; `World::spend_preview`).
+##
+## `{}` if the wire returned nothing parseable, which `_spend_with_confirm`
+## reads as "no warning" — a confirmation that failed to load must not stand
+## between the player and a purchase they asked for.
+func _spend_preview(command: Dictionary) -> Dictionary:
+	var parsed = JSON.parse_string(sim.spend_preview_json(JSON.stringify(command)))
+	return parsed if parsed is Dictionary else {}
+
+
+## **The one door every spend goes through.** It previews `command`, and
+## either runs `on_yes` at once or puts the payday confirmation up and runs it
+## when the player says yes; `on_cancel` runs on no.
+##
+## One funnel rather than a check at each of the five spend sites, because a
+## site that forgot the check would be the whole feature missing in exactly
+## the place a player was spending. A caller passes the SAME dictionary it is
+## about to issue — the sim prices that command, not a description of it.
+##
+## `on_yes` is what actually spends, and it still issues the command through
+## `issue_command_json`: the simulation is not paused while the panel is up,
+## so the balance may have moved, and the answer to "can this be afforded"
+## belongs to the tick that takes the money rather than to the frame that
+## asked the question.
+func _spend_with_confirm(command: Dictionary, on_yes: Callable, on_cancel := Callable()) -> void:
+	var preview := _spend_preview(command)
+	if not bool(preview.get("warn", false)):
+		on_yes.call()
+		return
+	# One confirmation at a time. A second spend cannot be clicked while this
+	# panel has the input (it swallows everything but its own buttons and ESC),
+	# so this is a guard against a caller, not against the player.
+	if _payday_confirm_open:
+		return
+	_payday_on_yes = on_yes
+	_payday_on_cancel = on_cancel
+	_fill_payday_confirm(preview)
+	_set_payday_confirm_open(true)
+
+
+## The panel's words, from the preview's own figures and no others.
+##
+## Three things it must say, and the reason each is here rather than left to
+## the player to work out: WHAT is being bought (by display name — a wire id
+## is not a thing the player has ever seen), what the payday needs and when,
+## and what the balance would be left at. The heading distinguishes the two
+## cases the sim reports — `crosses` means this spend is the cause, and
+## without it the player who is already behind gets a sentence that blames
+## the wrong click.
+func _fill_payday_confirm(preview: Dictionary) -> void:
+	if _payday_confirm_panel == null:
+		return
+	var crosses := bool(preview.get("crosses", false))
+	_payday_confirm_heading.text = (
+		"▲ THIS WILL LEAVE YOUR STAFF UNPAID" if crosses
+		else "▲ YOUR STAFF ARE ALREADY GOING UNPAID"
+	)
+	var subject := String(preview.get("subject", ""))
+	var cost := float(preview.get("cost", 0.0))
+	if cost > 0.0:
+		_payday_confirm_subject.text = "%s — %d" % [_spend_display_name(subject), roundi(cost)]
+	else:
+		# The hire: it takes nothing out of the balance and adds to every
+		# payday from here on, so quoting a cost of 0 would be a lie of
+		# omission about the one spend whose price is recurring.
+		_payday_confirm_subject.text = "%s — no cost today, %d every payday" % [
+			_spend_display_name(subject),
+			int(preview.get("bill_after", 0)) - int(preview.get("next_bill", 0)),
+		]
+	for child in _payday_confirm_figures.get_children():
+		child.queue_free()
+	# SECONDS, never ticks (godot_project/CLAUDE.md), and read from the staff
+	# snapshot's own payday clock rather than counted here.
+	var due_in := _payday_seconds_away()
+	for row in [
+		["balance after this", "%d" % roundi(float(preview.get("money_after", 0.0)))],
+		["next payday needs", "%d" % int(preview.get("bill_after", 0))],
+		["short by", "%d" % int(preview.get("shortfall_after", 0))],
+		["payday in", "%s" % ("%ds" % due_in if due_in >= 0 else "—")],
+	]:
+		_payday_confirm_figures.add_child(_payday_confirm_row(String(row[0]), String(row[1])))
+
+
+## A machine kind, an ingredient, a contract or a staff category, named the
+## way the panel that sells it names it — never a wire id
+## (godot_project/CLAUDE.md).
+##
+## The content's OWN name wins where it has one: a staff category and a
+## contract offer both carry a written name on the wire, and title-casing
+## their id instead would print "Bbq Diner" beside a board row that says
+## "BBQ Diner" (issue #60's lesson, one panel further on). Machine kinds and
+## ingredients have no name field, so they land on `_kind_display_name`,
+## which title-cases — the documented fallback, and the reason a subject this
+## never heard of still reads as words rather than as nothing.
+func _spend_display_name(subject: String) -> String:
+	if subject == "":
+		return "this purchase"
+	for category in _staff_snapshot.get("categories", []):
+		if String(category.get("id", "")) == subject:
+			return String(category.get("name", subject))
+	for offer in _read_economy().get("board", []):
+		if String(offer.get("id", "")) == subject:
+			return String(offer.get("name", subject))
+	return _kind_display_name(subject)
+
+
+## Whole seconds until the next payday, or -1 before the staff wire has been
+## polled. `TICK_HZ`, the same conversion every other clock on the HUD uses.
+func _payday_seconds_away() -> int:
+	var due := int(_staff_snapshot.get("next_payday_tick", 0))
+	if due <= 0:
+		return -1
+	return maxi(0, roundi(float(due - sim.current_tick()) / float(TICK_HZ)))
+
+
+func _payday_confirm_row(label: String, value: String) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", _ui_i(8))
+	var name_label := Label.new()
+	name_label.label_settings = _payday_confirm_body_settings()
+	name_label.text = label
+	# Pinned, not wrapped: this is the left column of a two-column readout and
+	# the value has to line up down the panel.
+	name_label.custom_minimum_size = Vector2(PAYDAY_CONFIRM_WIDTH * 0.55, 0.0)
+	row.add_child(name_label)
+	var value_label := Label.new()
+	value_label.label_settings = _payday_confirm_body_settings()
+	value_label.text = value
+	value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	value_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(value_label)
+	return row
+
+
+func _payday_confirm_body_settings() -> LabelSettings:
+	var settings := LabelSettings.new()
+	settings.font_size = _ui_font(5)
+	settings.font_color = Color(0.92, 0.92, 0.94)
+	settings.outline_size = _ui_i(3)
+	settings.outline_color = Color(0.0, 0.0, 0.0, 0.85)
+	return settings
+
+
+## The confirmation itself. The same plate as every other modal, one step
+## more opaque like the pause menu's, because it is the one panel that is
+## waiting on an answer.
+##
+## Built once and hidden, like every panel here. Two buttons and no third
+## option: there is no "don't ask again" — the owner's call on 2026-09-26 —
+## so a player who is deliberately running the payroll close keeps confirming,
+## and the day the panel stops appearing is the day the bill is covered.
+func _build_payday_confirm(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.07, 0.05, 0.05, 0.98)
+	# The warning ink of the meter language, on the border only: the words and
+	# the ▲ carry the message, never the colour alone (UI_UX.md §7).
+	style.border_color = METER_FILL_WARN
+	style.border_width_top = _ui_i(4)
+	style.border_width_left = _ui_i(2)
+	style.border_width_right = _ui_i(2)
+	style.border_width_bottom = _ui_i(2)
+	style.set_content_margin_all(_ui_px(20.0))
+
+	_payday_confirm_panel = PanelContainer.new()
+	_payday_confirm_panel.name = "PaydayConfirm"
+	_payday_confirm_panel.add_theme_stylebox_override("panel", style)
+	_payday_confirm_panel.visible = false
+	hud.add_child(_payday_confirm_panel)
+
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", _ui_i(10))
+	_payday_confirm_panel.add_child(body)
+
+	var heading_settings := LabelSettings.new()
+	heading_settings.font_size = _ui_font(7)
+	heading_settings.font_color = METER_FILL_WARN
+	heading_settings.outline_size = base_settings.outline_size
+	heading_settings.outline_color = base_settings.outline_color
+
+	_payday_confirm_heading = Label.new()
+	_payday_confirm_heading.name = "PaydayConfirmHeading"
+	_payday_confirm_heading.label_settings = heading_settings
+	_payday_confirm_heading.custom_minimum_size = Vector2(PAYDAY_CONFIRM_WIDTH, 0.0)
+	_payday_confirm_heading.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.add_child(_payday_confirm_heading)
+
+	_payday_confirm_subject = Label.new()
+	_payday_confirm_subject.name = "PaydayConfirmSubject"
+	_payday_confirm_subject.label_settings = base_settings
+	_payday_confirm_subject.custom_minimum_size = Vector2(PAYDAY_CONFIRM_WIDTH, 0.0)
+	_payday_confirm_subject.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.add_child(_payday_confirm_subject)
+
+	_payday_confirm_figures = VBoxContainer.new()
+	_payday_confirm_figures.name = "PaydayConfirmFigures"
+	_payday_confirm_figures.add_theme_constant_override("separation", _ui_i(4))
+	body.add_child(_payday_confirm_figures)
+
+	# The consequence, in the staff panel's own words — an unpaid head is
+	# idled and leaves only if it goes unpaid twice (`staff.rs`'s two-strike
+	# rule). Without it "unpaid" reads as a crew that vanishes, which is the
+	# harsher game this is not.
+	var consequence := Label.new()
+	consequence.name = "PaydayConfirmConsequence"
+	consequence.label_settings = base_settings
+	consequence.text = PAYDAY_CONFIRM_CONSEQUENCE
+	consequence.custom_minimum_size = Vector2(PAYDAY_CONFIRM_WIDTH, 0.0)
+	consequence.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.add_child(consequence)
+
+	_payday_confirm_yes = _pause_button("PaydayConfirmYesButton", "SPEND ANYWAY")
+	_payday_confirm_yes.pressed.connect(_on_payday_confirm_yes)
+	body.add_child(_payday_confirm_yes)
+
+	var no_button := _pause_button("PaydayConfirmNoButton", "CANCEL")
+	no_button.pressed.connect(_on_payday_confirm_no)
+	body.add_child(no_button)
+
+
+
+func _set_payday_confirm_open(open: bool) -> void:
+	if _payday_confirm_panel == null or open == _payday_confirm_open:
+		return
+	_payday_confirm_open = open
+	_payday_confirm_panel.visible = open
+	if open:
+		_position_payday_confirm()
+		_cue(FactoryAudio.MENU_OPEN)
+	# The panel takes the cursor in first person, like every other modal, and
+	# hands it back on close — `_fp_mouse_free` counts it.
+	_apply_fp_mouse_mode()
+	_update_crosshair_visibility()
+
+
+## Centred in the whole viewport, like the pause menu and for its reason: the
+## player has been interrupted and there is nothing underneath worth keeping
+## clear. Clamped on screen so no button lands where it cannot be clicked
+## (UI_UX.md §5c), and measured with `maxf(minimum, size)` because a headless
+## run reports a narrower minimum than a real window draws.
+func _position_payday_confirm() -> void:
+	if _payday_confirm_panel == null:
+		return
+	_payday_confirm_panel.set_anchors_and_offsets_preset(
+		Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE
+	)
+	var vp := get_viewport()
+	if vp == null:
+		return
+	var bounds := vp.get_visible_rect().size
+	var minimum := _payday_confirm_panel.get_combined_minimum_size()
+	var panel_size := Vector2(
+		maxf(minimum.x, _payday_confirm_panel.size.x),
+		maxf(minimum.y, _payday_confirm_panel.size.y)
+	)
+	_payday_confirm_panel.position.x = maxf(0.0, (bounds.x - panel_size.x) * 0.5)
+	_payday_confirm_panel.position.y = maxf(_ui_px(8.0), (bounds.y - panel_size.y) * 0.5)
+
+
+## YES. The parked callable runs — and it is cleared FIRST, so a handler that
+## itself raises a confirmation (nothing does today) cannot inherit this one.
+func _on_payday_confirm_yes() -> void:
+	var on_yes := _payday_on_yes
+	_payday_on_yes = Callable()
+	_payday_on_cancel = Callable()
+	_set_payday_confirm_open(false)
+	if on_yes.is_valid():
+		# No cue here: the handler that spends compares the balance before and
+		# after and sounds BUY or REFUSED itself (UI_UX.md §8) — a till rung
+		# from this button would ring for a purchase the sim then refused.
+		on_yes.call()
+
+
+func _on_payday_confirm_no() -> void:
+	var on_cancel := _payday_on_cancel
+	_payday_on_yes = Callable()
+	_payday_on_cancel = Callable()
+	_set_payday_confirm_open(false)
+	_cue(FactoryAudio.MENU_CLOSE)
+	if on_cancel.is_valid():
+		on_cancel.call()
 
 
 # --------------------------------------------------------------------------
@@ -14975,6 +15397,13 @@ func _process(delta: float) -> void:
 			# Only the plate's placement: the book itself is rebuilt by the poll
 			# below, and only when the snapshot it is drawn from has changed.
 			_position_cookbook_panel()
+		if _payday_confirm_open:
+			# Placement only, for the resize this branch also fires on. The words
+			# are deliberately FROZEN at the moment the question was asked: a
+			# shortfall that redrew itself while the player read it would be
+			# answering a question they had not been asked, and the figure that
+			# decides the purchase is the one the tick that spends computes.
+			_position_payday_confirm()
 	else:
 		_update_money_flyout()
 		_update_hotbar_flyout()
@@ -15106,7 +15535,7 @@ func _wire_changed() -> bool:
 		(1 if _shop_open else 0) | (2 if _market_open else 0) | (4 if _board_open else 0)
 		| (8 if _staff_open else 0) | (16 if _production_open else 0)
 		| (32 if _pause_open else 0) | (64 if _config_open else 0)
-		| (128 if _cookbook_open else 0)
+		| (128 if _cookbook_open else 0) | (256 if _payday_confirm_open else 0)
 	)
 	if revision == _polled_revision and viewport == _polled_viewport \
 			and selected == _polled_selected and modals == _polled_modals:
@@ -15152,6 +15581,23 @@ func _input(event: InputEvent) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# WITH THE PAYDAY CONFIRMATION UP, the world listens to ESC and nothing
+	# else, and it listens FIRST — ahead of the pause menu's branch and every
+	# modal's. The panel is always over a panel that can spend, so an ESC that
+	# fell through would close the shop underneath and leave a confirmation
+	# floating over the factory, still holding a purchase nobody could answer
+	# for. Cancelling is what ESC means here, the same as its NO button.
+	#
+	# The factory keeps RUNNING behind it (only `_pause_open` stops ticks), by
+	# the same argument F3 makes: the question the panel asks is about money
+	# that is still moving, and the answer is re-priced by the sim when the
+	# command is issued.
+	if _payday_confirm_open:
+		if event is InputEventKey and event.pressed and not event.echo \
+				and event.keycode == KEY_ESCAPE:
+			_on_payday_confirm_no()
+		return
+
 	# WITH THE PAUSE MENU UP, ESC is the only key the world still listens to.
 	# The game is stopped, so every other control — placing, rotating,
 	# removing, filling, panning, even TAB — would be acting on a factory the

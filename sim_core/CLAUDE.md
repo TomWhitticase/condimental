@@ -85,6 +85,19 @@ the plan is `docs/ARCHITECTURE.md` §3/§4/§6/§10.
   `tick_count` at load): Godot reads a placed tile once, and an idle tile
   dirties nothing afterwards, so a clock that starts at 0 is drawn at 0 for
   as long as the tile stays empty.
+- **A preview mutates nothing and does not move `revision()`.**
+  `World::spend_preview` answers what a spend would do to the next payday for
+  the command Godot is about to issue, by calling the same price functions the
+  command arms call (`Shop::cost_of`, `Ingredients::cost_of`, the offer's own
+  `price`, the category's `wage`) and mirroring each arm's own refusal
+  predicate — never a second copy of a price rule. **An unaffordable spend does
+  not warn** (`affordable: false`): the economy would refuse it, so there is no
+  consequence to confirm and the click keeps its ordinary refusal. It is a
+  question, so
+  `tests/spend_preview.rs` pins `revision()` and `to_save_ron()` byte-identical
+  across one. **The payday is a WARNING, not a gate** since 2026-09-26:
+  `StaffPools::hire` refuses only an unknown category, and `hire_warns` is
+  advice on the wire (it was `can_hire`, a refusal, from 2026-09-13).
 - **Fluid movement, tank drain, machine load, production stats and staff state
   deliberately dirty nothing** — all polled (`fluid_snapshots_json`,
   `fluid_tank_snapshots_json`, `machine_load_snapshots_json`,

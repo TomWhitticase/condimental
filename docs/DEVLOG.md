@@ -58,6 +58,16 @@ below is history and should only ever be appended to.)*
   `test_cookbook.gd` fails if anything ever does. A locked family is an
   unnamed silhouette carrying its gate. The same panel is a page on the pause
   menu, for reading with the factory stopped. See the log entry below.
+- **Spending past the payday asks first (2026-09-26).** Any spend that would
+  leave the balance below the next payday's bill — equipment, ingredient
+  stock, a contract fee, or a hire — raises a confirmation naming the cost,
+  the balance after, what payday needs, the gap and the seconds until it
+  lands. `World::spend_preview` decides, off the exact command about to be
+  issued and the same price functions that charge for it; Godot reads `warn`
+  and never recomputes. One funnel, `_spend_with_confirm`, gates every spend
+  site. It is advice, not a gate: the old hard refusal on hiring while short
+  became a warning too, and `can_hire` on the wire is `hire_warns`. There is
+  deliberately no "don't ask again". See the log entry below.
 - **Raw stock has a ceiling (2026-09-21).** `data/storage.ron` caps every
   ingredient at `base_cap` 20 plus 50 per **bay**, and a `warehouse_rack`
   (1×2, six bays, 75) is the only thing that supplies bays. `BuyIngredient`
@@ -230,6 +240,46 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-26 — a spend that starves the next payday asks first
+
+Money leaves a CONDIMENTAL factory three ways, and wages are the only
+recurring one with a cliff behind it: a head the payday cannot pay is idled,
+and unpaid twice running it walks out. Nothing stood on the spending side of
+that cliff. The shop took the money in silence, and the consequence arrived a
+thousand ticks later at the payday, with the belt already laid and the balance
+already gone. The staff panel's shortfall figure warned after the fact, on a
+screen the player has to be looking at.
+
+Now every spend that would leave the balance below the next payday's bill
+raises a confirmation first: what it costs, what the balance would be, what
+payday needs, the gap, how many seconds away it is, and what being unpaid
+actually does. Two buttons — SPEND ANYWAY or CANCEL, ESC cancels — and it
+covers all four ways to spend: equipment, ingredient stock, a contract fee and
+a hire. It is a warning, not a gate; the player is told and then decides.
+
+**The simulation is what decides.** `World::spend_preview` takes the exact
+command Godot is about to issue and prices it with the same functions the
+command arms charge with — `Shop::cost_of`, `Ingredients::cost_of` after the
+same warehouse clamp, the offer's own price behind the same already-signed
+filter, the category's wage against the payday bill — so there is no second
+copy of a price rule to drift. Godot reads one boolean. The panel is one funnel
+(`_spend_with_confirm`) rather than a check at each of the seven spend sites,
+because the version written per site is the feature missing wherever someone
+later forgets it.
+
+It does not pause the world: only the pause menu does that, so the command is
+*issued* on YES rather than replayed from the preview, and the tick that takes
+the money is still the one entitled to refuse it. The tail of the interrupted
+action runs on either answer — a CANCEL that skipped it used to leave build
+mode holding a ghost of something no longer owned.
+
+The hire's old hard refusal became a warning in the same pass, so all four
+spends behave alike; `hire_warns` replaces `can_hire` on the wire, since a
+field saying `can_hire: false` beside a hire that succeeds is a lie.
+GAMEPLAY §7/§11, UI_UX §2b point 40 and §5, and ARCHITECTURE §4 are amended;
+`docs/DECISIONS.md` carries the full record, including the four scope calls
+the owner made and the two I argued against.
 
 ### 2026-09-25 — THE COOKBOOK: the game explains itself, out of the data files
 

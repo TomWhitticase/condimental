@@ -18,6 +18,41 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-26 **A spend that would leave the next payday unpayable is
+  confirmed, not refused, and the simulation is what decides.** Every route
+  that spends money — the build menu's buy (and the number keys), a market
+  crate and its SHIFT bulk buy, a contract fee, a hire, and SHIFT's
+  replacement purchase during a placement run — passes through
+  `main.gd`'s `_spend_with_confirm`, which asks
+  `SimBridge::spend_preview_json` about the **exact command dictionary it is
+  about to issue** and obeys the `warn` it answers. `World::spend_preview` is
+  read-only, prices each spend by calling the same function the command arm
+  calls (`Shop::cost_of`, `Ingredients::cost_of`, the board offer's own
+  `price`, the category's `wage` against `StaffPools::next_bill`) and mirrors
+  each arm's own refusal predicate, so there is never a second copy of a price
+  rule; it moves neither `revision()` nor the save. The panel prints that
+  answer's figures — subject by display name, balance after, bill, gap, and
+  payday in seconds — and computes none of them. It warns in **both** cases
+  the preview distinguishes: the spend that crosses the line (`crosses`) and
+  any spend made while already short, with a different heading for each. There
+  is **no suppression** and no "don't ask again". The same decision turned
+  `StaffPools`'s hire refusal into a warning: `hire` now refuses only an
+  unknown category, the wire field `can_hire` became `hire_warns`, and the
+  staff row's HIRE button is gated on `required > 0` alone and says why in
+  words beside a live button. The confirmation does **not** pause the
+  simulation — only the pause menu does — which is why the command is issued
+  through `issue_command_json` when the player answers rather than replayed,
+  and why the tail of an interrupted action (`_confirm_build`'s
+  `_finish_build`) must run on either answer. **A spend the balance cannot
+  cover raises no panel** (`affordable: false`): the economy refuses it, so it
+  leaves the payday exactly as short as it already was and gets the ordinary
+  refusal cue instead. Binds
+  `sim_core/src/sim/world.rs`, `sim_core/src/sim/staff.rs`,
+  `sim_core/src/lib.rs`, `sim_core/tests/spend_preview.rs`,
+  `godot_project/main.gd`, `godot_project/test_payday_warning.gd`,
+  `docs/UI_UX.md` §2b point 40 and §5, `docs/GAMEPLAY.md` §7/§11 and
+  `docs/ARCHITECTURE.md` §4. Full record in `docs/DECISIONS.md`.
+
 - 2026-09-25 **THE COOKBOOK is derived from the content files, and nothing in
   it may be written in GDScript.** The in-game encyclopedia (B, and a page on
   the pause menu) draws `SimBridge::cookbook_json` and only that: the sauce

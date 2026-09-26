@@ -1133,6 +1133,30 @@ static func build_underfunded_line(sim) -> void:
 	fund(sim, 8)
 
 
+## THE LINE ONE BELT AWAY FROM AN UNPAYABLE PAYDAY (2026-09-26) — the fixture
+## `screenshot-scene.sh --payday-warning` photographs: the shipped line funded
+## to its next bill plus the price of a belt, less one. That balance is the
+## only interesting one for the confirmation panel, and it has to be worked out
+## from the wire rather than written down here: it must COVER the belt (an
+## unaffordable spend is refused outright and raises nothing) and still leave
+## the payday one unit short, so the panel shows the CROSSING case — the
+## purchase is what causes the shortfall — rather than the already-short one.
+##
+## Distinct from [`build_underfunded_line`], which is already short and is
+## about the staff panel's own warning after the fact.
+static func build_payday_warning_line(sim) -> void:
+	build_reference_line(sim)
+	var bill: int = int(JSON.parse_string(sim.staff_snapshot_json()).get("next_bill", 0))
+	var price := 0
+	for entry in JSON.parse_string(sim.shop_snapshot_json()).get("entries", []):
+		if String(entry.get("kind", "")) == "belt":
+			price = int(entry.get("price", 0))
+	if bill <= 0 or price <= 0:
+		push_error("build_payday_warning_line(): bill %d, belt price %d" % [bill, price])
+		return
+	fund(sim, bill + price - 1)
+
+
 ## THE FULL-DOCK LINE (the dock-capacity change, 2026-09-16) — the fixture
 ## `scripts/screenshot-scene.sh --full-dock` photographs: the reference line
 ## on auto-fill, run until the shared delivery pool is at its ceiling and

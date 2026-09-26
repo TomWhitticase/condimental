@@ -73,6 +73,6 @@ pub use world::{
     BELT_KIND, BeltSnapshot, ChunkSnapshot, ConveyorLinks, DockSnapshot, FluidSnapshot,
     FluidTankSnapshot, FluidTapSnapshot, HopperSnapshot, LinkInput, LinkKind, LinkOutput, Links,
     MachineLoadEntry, MachineLoadSnapshot, MachineSnapshot, PIPE_KIND, PipeConnection, PipeLinks,
-    PipeSnapshot, PlacementSnapshot, PlayerCommand, SplitterSnapshot, Stall, StallKind,
-    TileSnapshot, World, command_from_json,
+    PipeSnapshot, PlacementSnapshot, PlayerCommand, SpendPreview, SplitterSnapshot, Stall,
+    StallKind, TileSnapshot, World, command_from_json,
 };

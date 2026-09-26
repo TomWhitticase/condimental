@@ -25,6 +25,127 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-26: **A spend that would leave the next payday unpayable is
+  confirmed, not refused, and the simulation is what decides.** (Owner's
+  request; four scope calls theirs, two of them against my recommendation.)
+
+  **What was asked.** "Whenever we try to make a purchase that will bring our
+  money to less than what is required for the next staff payday a popup
+  interrupts us and asks us if we are sure we want to make the purchase because
+  it will mean we won't be able to pay our staff next payday."
+
+  **The problem it names.** Money leaves the factory three ways (GAMEPLAY §5)
+  and wages are the only recurring one with a cliff behind it: a head the
+  payday cannot pay is idled, and unpaid twice running it walks out. On the
+  spending side nothing stood between the player and that cliff. The shop took
+  the money in silence and the consequence landed a thousand ticks later, by
+  which time the belt was already down. The staff panel's `shortfall` did warn
+  — on a screen the player has to be looking at, after the fact.
+
+  **The four scope calls, all the owner's.** Gate all four spends, not just
+  equipment. Warn on **every tile** of a SHIFT placement run that crosses the
+  line. Warn on **every** purchase while already short. **No suppression** of
+  any kind. I recommended against the middle two — laying a twenty-tile belt
+  run from a balance under the bill now raises twenty panels, and the run is
+  unusable until the balance recovers — and was overruled, so that is what is
+  built. Recorded here because the alternative (warn once per run, or once
+  until the balance recovers) is a one-flag change and the next reader should
+  know it was considered and rejected rather than missed.
+
+  **Where the decision lives, and why there.** `World::spend_preview(cmd)`
+  answers it, in Rust, for the exact command Godot is about to issue. The test
+  it makes — would the balance after this spend cover the next payday's bill —
+  needs the whole factory's wage bill and the price rule of the particular
+  spend, and both of those are the simulation's (`godot_project/CLAUDE.md`'s
+  one rule). A GDScript-side version would have been a second copy of four
+  price rules, and it would disagree with the sim the first time one moved.
+  The bridge method takes the **command JSON**, not a description of it, so
+  there is no way to preview one thing and buy another.
+
+  **Every price comes from the function that charges it.** `Shop::cost_of` for
+  a purchase, `Ingredients::cost_of` for stock (after the same
+  `stock_room_for` clamp the command applies, or the warning would quote a
+  SHIFT bulk buy the warehouse cannot take), the board offer's own `price`
+  behind the same `contract_unlocked` / `!is_active` filter `try_sign`
+  applies, and the category's `wage` against `StaffPools::next_bill` for a
+  hire. Mirroring each arm's refusal predicate rather than re-deriving it is
+  what keeps a "free" spend (an already-signed contract, an unknown category)
+  from being warned about.
+
+  **The hire is the odd one, and it reshaped the rule.** A hire debits nothing
+  today; it raises every payday from here on. So it is tested against the
+  bill, not the balance: `money < next_bill + wage`. That was *already* a rule
+  — the quality pass made it a hard refusal (`can_hire`) on 2026-09-13 — and
+  keeping it a refusal beside three warnings would have left the one spend
+  with a recurring cost as the only one the player could not decide for
+  themselves. `StaffPools::hire` now refuses an unknown category and nothing
+  else, `can_hire` on the wire became `hire_warns`, and the staff row's HIRE
+  button is gated on `required > 0` alone. The field was renamed rather than
+  redocumented because `can_hire: false` beside a hire that succeeds is a lie
+  on the wire. GAMEPLAY §7 and §11 were amended in the same PR; the five tests
+  that pinned the refusal now pin the warning.
+
+  **Two headings, because there are two situations.** `crosses` (the payday is
+  covered now and would not be after) gets "THIS WILL LEAVE YOUR STAFF
+  UNPAID"; a spend made while already short gets "YOUR STAFF ARE ALREADY GOING
+  UNPAID". One sentence for both would have blamed the click for a shortfall
+  it did not cause, which is the cheapest way to make a warning untrustworthy.
+
+  **One funnel, not a check per site.** `_spend_with_confirm(cmd, on_yes,
+  on_cancel)` is the only door: the build menu's buy, the number keys, a
+  market crate, its SHIFT bulk buy, a contract fee, a hire, and SHIFT's
+  replacement purchase. A check written at each site would have been the whole
+  feature missing in whichever place someone later forgot.
+
+  **It does not pause the world, and that is deliberate.** Only `_pause_open`
+  stops ticks. So the balance can move while the panel is up, and the command
+  is therefore *issued* on YES rather than the purchase being replayed from
+  the preview: the tick that takes the money is the one entitled to refuse it.
+  The panel's own words are frozen at the moment the question was asked — a
+  shortfall figure that redrew itself while the player read it would be
+  answering a question they had not been asked.
+
+  **The trap that cost the most thought.** `_confirm_build`'s tail
+  (`_refresh_owned_counts`, then leave build mode if nothing is owned) used to
+  run straight after the rebuy. With the rebuy interruptible, a CANCEL that
+  skipped the tail leaves build mode on with zero owned and a ghost that can
+  never be placed, reading ✗ NONE OWNED forever. So the tail is
+  `_finish_build(kind)` and it runs on **either** answer, with the kind
+  captured at the click rather than read afterwards. The general rule, in
+  UI_UX §2b point 40: the tail of an interrupted action runs on both answers.
+
+  **A refusal is not a dilemma.** The first full run of the Godot gate caught
+  it: `test_audio.gd` expects a click with no money to sound the refusal cue,
+  and it got a payday panel instead. A spend the balance cannot cover is
+  declined by the economy all-or-nothing, so the balance does not move and the
+  payday is left exactly as short as it already was — there is no consequence
+  to confirm. `affordable` on the preview says so and `warn` folds it in, which
+  keeps the one answer that click needs (*you cannot afford this*) instead of a
+  question about a payday the purchase was never going to reach. A hire is
+  always affordable: it debits nothing today, which is why it is tested against
+  the bill instead.
+
+  **`Money` is signed.** `money.saturating_sub(cost)` floors at the type
+  minimum, not at zero, so the first `money_after` on the wire read -200.
+  Clamped with `.max(Money::ZERO)` against GAMEPLAY §1's one non-negative
+  counter.
+
+  **Not `preview_command`.** ARCHITECTURE §4's planned validation pass exists
+  on the unmerged `belt-pipe-crossings` branch as `PreviewResult { valid,
+  reason, result_kind }`. Building a second copy on `main` would collide with
+  it, and it answers a different question: *may this command happen* versus
+  *what would this valid spend do to the payday*. When that epic lands,
+  `SpendPreview` becomes `PreviewResult`'s `payday` field and the two calls
+  become one. ARCHITECTURE §4 records that merge path.
+
+  **Verified** by `sim_core/tests/spend_preview.rs` (one case per command
+  type, crossing vs already-short, the hire's bill arithmetic, the clamped
+  ingredient quantity, a no-cost command answering rather than erroring, the
+  wire shape pinned, and `revision()` plus `to_save_ron()` byte-identical
+  across a preview) and `godot_project/test_payday_warning.gd` (all five
+  sites, both answers, ESC, the modal flags, the sim still ticking, the
+  panel's figures checked against the wire's own, and the dead-ghost trap).
+
 - 2026-09-25: **THE COOKBOOK is derived from the content files, and nothing
   in it may be written in GDScript.** (Owner's request, after the Sauce Book
   Google Doc.)

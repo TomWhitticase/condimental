@@ -294,7 +294,7 @@ const POPULATE_TICKS_PER_SPAWN := 10
 const FIXTURE_NAMES: PackedStringArray = [
 	"demo", "machines", "fluids", "vat", "splitter", "chain", "stress",
 	"pipes", "gallery", "items", "fluid_gallery", "bottleneck", "bbq",
-	"stalled_run", "understaffed", "shortfall", "full_dock",
+	"stalled_run", "understaffed", "shortfall", "payday_warning", "full_dock",
 	"unclerked_dock", "warehouse", "split_docks",
 ]
 
@@ -456,6 +456,14 @@ var _understaffed := false
 ## fed reference line, so the footer's shortfall sentence is what the shot
 ## reviews rather than the meters `--staff` already covers.
 var _staff_shortfall := false
+## `--payday-warning` (2026-09-26) opens the build menu over a line funded to
+## one unit less than its bill plus a belt, then BUYS a belt through the real
+## funnel (`_buy_slot`), so the frame is the confirmation panel as a click
+## raises it: its heading, the figures the sim answered with, the consequence
+## sentence and both buttons, over the menu it interrupted. Driving the click
+## rather than showing the panel is the point — a widget made visible would
+## prove nothing about the path a player takes to it.
+var _payday_warning := false
 ## `--short-staffed` builds the same understaffed line as `--understaffed`
 ## but opens NOTHING and hovers nothing: the shot exists to prove the
 ## always-visible SHORT-STAFFED strip on the clipboard is unmissable with no
@@ -675,6 +683,9 @@ func _initialize() -> void:
 	_first_person = args.has("--first-person")
 	_hover_flags = HoverTargets.requested_flags(args)
 	_shop = args.has("--shop")
+	_payday_warning = args.has("--payday-warning")
+	if _payday_warning:
+		_pick_fixture("payday_warning", "--payday-warning")
 	var config_arg := _string_arg(args, "--config")
 	if config_arg != "":
 		var parts: PackedStringArray = config_arg.split(",")
@@ -1015,6 +1026,8 @@ func _build_fixture() -> void:
 			Layouts.build_understaffed_line(_main.sim)
 		"shortfall":
 			Layouts.build_underfunded_line(_main.sim)
+		"payday_warning":
+			Layouts.build_payday_warning_line(_main.sim)
 		"full_dock":
 			Layouts.build_full_dock_line(_main.sim)
 		"split_docks":
@@ -1770,6 +1783,31 @@ func _open_shop_menu() -> void:
 	_main._set_shop_menu_open(true)
 
 
+## `--payday-warning`: the build menu, then a real belt purchase through
+## `_buy_slot` — the same call the slot's button makes — so the confirmation in
+## the frame is one a click produced. It refuses rather than shooting a frame
+## with no panel in it: a fixture funded wrong, or a rule that stopped warning,
+## would otherwise ship a green screenshot of the build menu and nothing else
+## (issue #70's lesson, and `--config`'s guard above).
+func _raise_payday_warning() -> void:
+	_main._set_shop_menu_open(true)
+	var index := -1
+	for i in range(_main._shop_slots.size()):
+		if String(_main._shop_slots[i]["kind"]) == "belt":
+			index = i
+	if index < 0:
+		printerr("SCREENSHOT_FAIL: --payday-warning found no belt slot in the build menu to buy from.")
+		_refuse()
+		return
+	_main._buy_slot(index)
+	if not _main._payday_confirm_open:
+		printerr(
+			"SCREENSHOT_FAIL: --payday-warning bought a belt and no confirmation "
+			+ "opened — the balance covers the next payday, or the warning is gone."
+		)
+		_refuse()
+
+
 ## `--config TX,TY`: the click that opens a hopper's or tank's panel, driven
 ## through the same tile-resolved entry point a real click reaches
 ## (`_config_click_at_tile`), so the shot proves the panel a click actually
@@ -2288,6 +2326,10 @@ func _process(delta: float) -> bool:
 			return true
 	if _frames == 2 and _shop:
 		_open_shop_menu()
+	if _frames == 2 and _payday_warning:
+		_raise_payday_warning()
+		if _refused:
+			return true
 	if _frames == 2 and _no_hud:
 		var hud := _main.get_node_or_null("HUD")
 		if hud != null:
